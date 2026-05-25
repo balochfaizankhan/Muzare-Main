@@ -13,3 +13,15 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Web/API workspace
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+coverage/
+*.log
+
+# Vite PWA generated development files
+web/dev-dist/
