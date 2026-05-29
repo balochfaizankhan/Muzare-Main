@@ -144,11 +144,11 @@ button {
   border: 1px solid rgba(5, 35, 63, 0.1);
   border-radius: 8px;
   box-shadow: 0 22px 56px rgba(5, 35, 63, 0.11);
-  max-width: 372px;
+  max-width: 392px;
   overflow: hidden;
-  padding: 26px 28px 28px;
+  padding: 28px;
   position: relative;
-  width: min(100%, 372px);
+  width: min(100%, 392px);
 }
 
 .login-card::before {
@@ -160,11 +160,75 @@ button {
   top: 0;
 }
 
+.login-card__header {
+  align-items: center;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 76px minmax(0, 1fr);
+  margin-bottom: 16px;
+}
+
+.auth-logo {
+  background: #fff url("/pwa-192.png") center / contain no-repeat;
+  border: 1px solid rgba(5, 35, 63, 0.08);
+  border-radius: 8px;
+  display: block;
+  flex-shrink: 0;
+  height: 76px;
+  max-width: 76px;
+  padding: 4px;
+  width: 76px;
+}
+
+.auth-kicker {
+  color: var(--brand-secondary);
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+
+.login-card__header h1,
+.onboarding-story__copy h1 {
+  color: var(--text);
+  font-size: 1.35rem;
+  line-height: 1.12;
+  margin: 0;
+}
+
+.login-card__header p,
+.onboarding-story__copy p,
 .login-subtitle {
   color: var(--text-secondary);
   font-size: 0.9rem;
-  margin: 18px 0 18px;
-  text-align: center;
+  line-height: 1.45;
+  margin: 5px 0 0;
+}
+
+.auth-note,
+.password-hint {
+  align-items: center;
+  background: #f3f9ee;
+  border: 1px solid #d8e7cb;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  display: flex;
+  gap: 9px;
+  line-height: 1.4;
+}
+
+.auth-note {
+  font-size: 0.78rem;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+}
+
+.auth-note svg,
+.password-hint svg {
+  color: var(--brand-secondary);
+  flex-shrink: 0;
 }
 
 .login-form {
@@ -224,12 +288,16 @@ button {
 }
 
 .login-form button {
+  align-items: center;
   background: linear-gradient(135deg, var(--brand-primary), #073258 62%, var(--brand-secondary));
   border: 0;
   border-radius: 8px;
   color: #fff;
+  display: inline-flex;
+  gap: 8px;
   font-weight: 700;
   height: 48px;
+  justify-content: center;
   margin-top: 10px;
   box-shadow: 0 10px 22px rgba(5, 35, 63, 0.16);
 }
@@ -1109,9 +1177,9 @@ button {
 
 .onboarding-shell {
   display: grid;
-  gap: 22px;
-  grid-template-columns: minmax(270px, 0.86fr) minmax(330px, 1fr);
-  max-width: 980px;
+  gap: 18px;
+  grid-template-columns: minmax(0, 0.82fr) minmax(0, 1fr);
+  max-width: 1010px;
   width: 100%;
 }
 
@@ -1127,24 +1195,46 @@ button {
 
 .onboarding-story {
   display: grid;
-  align-content: center;
-  gap: 24px;
-  padding: 30px;
+  align-content: start;
+  gap: 18px;
+  padding: 28px;
+}
+
+.onboarding-story,
+.onboarding-panel {
+  min-width: 0;
+}
+
+.auth-logo--story {
+  max-width: 92px;
+  width: 92px;
+}
+
+.onboarding-story__copy {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.onboarding-story__copy h1,
+.onboarding-heading h1,
+.login-card__header h1 {
+  overflow-wrap: anywhere;
 }
 
 .journey-steps {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .journey-steps article {
   align-items: start;
-  background: var(--surface-tint);
+  background: #f7fbf2;
   border: 1px solid #d8e7cb;
   border-radius: 8px;
   display: flex;
   gap: 12px;
-  padding: 13px;
+  padding: 12px;
 }
 
 .journey-steps svg,
@@ -1171,14 +1261,14 @@ button {
 }
 
 .onboarding-panel {
-  padding: 28px;
+  padding: 26px;
 }
 
 .onboarding-heading {
   align-items: start;
   display: flex;
   gap: 12px;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
 
 .onboarding-heading svg {
@@ -1200,7 +1290,16 @@ button {
 }
 
 .onboarding-form {
-  gap: 13px;
+  gap: 12px;
+}
+
+.auth-note--signup {
+  margin-bottom: 14px;
+}
+
+.password-hint {
+  font-size: 0.76rem;
+  padding: 9px 11px;
 }
 
 .approval-state,
@@ -1292,6 +1391,13 @@ button {
   }
 }
 
+@media (max-width: 900px) {
+  .onboarding-shell {
+    grid-template-columns: 1fr;
+    max-width: 328px;
+  }
+}
+
 @media (max-width: 760px) {
   .dashboard--wide {
     padding-top: 18px;
@@ -1320,6 +1426,7 @@ button {
 
   .onboarding-shell {
     grid-template-columns: 1fr;
+    max-width: 328px;
   }
 
   .onboarding-story {
@@ -1340,12 +1447,22 @@ button {
   }
 
   .login-card {
-    max-width: 330px;
-    padding: 24px 24px 26px;
+    max-width: 340px;
+    padding: 26px 24px;
   }
 
-  .brand__logo {
-    max-width: 92px;
+  .login-card__header {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .auth-logo {
+    height: 64px;
+    max-width: 64px;
+    width: 64px;
+  }
+
+  .login-card__header h1 {
+    font-size: 1.18rem;
   }
 }
 
@@ -1360,12 +1477,33 @@ button {
 
   .login-card {
     max-width: calc(100vw - 32px);
-    padding: 24px 22px 26px;
+    padding: 24px 20px;
   }
 
-  .brand__logo {
-    max-width: calc(100vw - 250px);
-    width: 86px;
+  .login-card__header {
+    gap: 13px;
+    grid-template-columns: 58px minmax(0, 1fr);
+  }
+
+  .auth-logo {
+    height: 58px;
+    max-width: 58px;
+    width: 58px;
+  }
+
+  .auth-logo--story {
+    height: 82px;
+    max-width: 82px;
+    width: 82px;
+  }
+
+  .onboarding-story__copy h1,
+  .onboarding-heading h1 {
+    font-size: 1.16rem;
+  }
+
+  .auth-note {
+    align-items: flex-start;
   }
 
   .brand--compact .brand__logo {

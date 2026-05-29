@@ -9,6 +9,11 @@ import { sessionRoutes } from "./routes/session.js";
 export async function buildApp() {
   const app = Fastify({ logger: true });
 
+  app.setErrorHandler((error, _request, reply) => {
+    app.log.error(error);
+    return reply.code(500).send({ message: "Something went wrong. Please try again or contact support." });
+  });
+
   await app.register(cors, {
     origin: config.WEB_ORIGIN.split(",").map((origin) => origin.trim()),
   });

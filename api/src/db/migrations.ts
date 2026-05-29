@@ -1,0 +1,49 @@
+import { db } from "./client.js";
+
+export async function ensureWorkspaceSchema(): Promise<void> {
+  await db.execute(`
+    DO $$
+    BEGIN
+      CREATE TYPE user_status AS ENUM ('pending', 'approved', 'rejected', 'suspended');
+    EXCEPTION
+      WHEN duplicate_object THEN null;
+    END $$;
+
+    CREATE TABLE IF NOT EXISTS workspaces (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      name text NOT NULL,
+      slug text NOT NULL UNIQUE,
+      contact_email text NOT NULL,
+      contact_phone text,
+      status user_status NOT NULL DEFAULT 'pending',
+      approved_at timestamptz,
+      approved_by uuid,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS workspace_id uuid REFERENCES workspaces(id);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS status user_status NOT NULL DEFAULT 'approved';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS approved_at timestamptz;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS approved_by uuid;
+    ALTER TABLE farms ADD COLUMN IF NOT EXISTS workspace_id uuid REFERENCES workspaces(id);
+    ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS workspace_id uuid REFERENCES workspaces(id);
+
+    INSERT INTO workspaces (name, slug, contact_email, status, approved_at)
+    SELECT 'Default Workspace', 'default-workspace', COALESCE(min(email), 'admin@muzare.local'), 'approved', now()
+    FROM users
+    ON CONFLICT (slug) DO NOTHING;
+
+    UPDATE users
+    SET workspace_id = (SELECT id FROM workspaces WHERE slug = 'default-workspace'),
+        status = 'approved',
+        approved_at = COALESCE(approved_at, now())
+    WHERE workspace_id IS NULL;
+
+    UPDATE farms
+    SET workspace_id = (SELECT id FROM workspaces WHERE slug = 'default-workspace')
+    WHERE workspace_id IS NULL;
+
+    CREATE UNIQUE INDEX IF NOT EXISTS workspaces_slug_uidx ON workspaces(slug);
+  `);
+}

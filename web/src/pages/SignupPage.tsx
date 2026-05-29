@@ -1,10 +1,9 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Building2, CheckCircle2, ClipboardCheck, ShieldCheck, Sprout } from "lucide-react";
+import { Building2, CheckCircle2, ClipboardCheck, LockKeyhole, MailCheck, ShieldCheck, Sprout } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link } from "react-router-dom";
 import { z } from "zod";
-import { Brand } from "../components/Brand";
 import { LanguageSwitch } from "../components/LanguageSwitch";
 import { signup } from "../lib/api";
 
@@ -49,7 +48,11 @@ export function SignupPage() {
       </div>
       <section className="onboarding-shell">
         <div className="onboarding-story">
-          <Brand />
+          <div className="onboarding-story__copy">
+            <span className="auth-kicker">Workspace onboarding</span>
+            <h1>Start with a clean farm workspace</h1>
+            <p>Submit your operation details once. An administrator reviews the request, then your approved workspace opens with isolated data.</p>
+          </div>
           <div className="journey-steps" aria-label="Onboarding journey">
             <article>
               <Building2 size={18} />
@@ -89,8 +92,12 @@ export function SignupPage() {
                 <ClipboardCheck size={22} />
                 <div>
                   <h1>Request a workspace</h1>
-                  <p>No payment needed. Access starts after administrator approval.</p>
+                  <p>No payment needed. We will keep access pending until an administrator approves it.</p>
                 </div>
+              </div>
+              <div className="auth-note auth-note--signup">
+                <MailCheck size={16} />
+                <span>Use an email your administrator can recognize for faster approval.</span>
               </div>
               <form className="module-form onboarding-form" onSubmit={handleSubmit(submit)}>
                 <label>
@@ -117,6 +124,10 @@ export function SignupPage() {
                   <input type="password" autoComplete="new-password" {...register("password")} />
                   {errors.password && <small>{errors.password.message}</small>}
                 </label>
+                <div className="password-hint">
+                  <LockKeyhole size={15} />
+                  <span>Use at least 8 characters. You will sign in after approval.</span>
+                </div>
                 {error && <p className="error">{error}</p>}
                 <button type="submit" disabled={isSubmitting}>{isSubmitting ? "Submitting..." : "Submit for approval"}</button>
               </form>
