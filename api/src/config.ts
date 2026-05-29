@@ -5,7 +5,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(3001),
   HOST: z.string().default("0.0.0.0"),
-  WEB_ORIGIN: z.string().default("http://localhost:5173"),
+  ALLOWED_ORIGINS: z.string().default("http://localhost:5173"),
   DATABASE_URL: z.string().min(1).optional(),
   SESSION_DAYS: z.coerce.number().int().positive().default(30),
   BOOTSTRAP_ADMIN_EMAIL: z.string().email().optional(),
@@ -27,6 +27,6 @@ export const config = envSchema.parse(process.env);
 export const databaseConfigured = Boolean(config.DATABASE_URL);
 export const localDevelopmentMode = config.NODE_ENV !== "production" && !databaseConfigured;
 
-export const webOrigins = config.WEB_ORIGIN.split(",")
+export const allowedOrigins = config.ALLOWED_ORIGINS.split(",")
   .map((origin) => origin.trim().replace(/\/+$/, ""))
   .filter(Boolean);

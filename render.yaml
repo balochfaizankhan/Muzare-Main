@@ -17,7 +17,7 @@ services:
         fromDatabase:
           name: muzare-db
           property: connectionString
-      - key: WEB_ORIGIN
+      - key: ALLOWED_ORIGINS
         sync: false
       - key: SESSION_DAYS
         value: 30

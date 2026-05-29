@@ -66,7 +66,7 @@ Use the checked-in `render.yaml` Blueprint instead of creating Render resources 
 
 | Variable | Value |
 | --- | --- |
-| `WEB_ORIGIN` | Deployed Vercel URL, for example `https://muzare-web.vercel.app` |
+| `ALLOWED_ORIGINS` | Comma-separated allowed frontend origins, for example `https://muzare-main.onrender.com,https://muzare-main-web.vercel.app` |
 | `BOOTSTRAP_ADMIN_EMAIL` | Production administrator email |
 | `BOOTSTRAP_ADMIN_PASSWORD` | Strong production password |
 | `BOOTSTRAP_ADMIN_NAME` | `Administrator` |
@@ -115,4 +115,4 @@ Set the frontend environment variable:
 | --- | --- |
 | `VITE_API_URL` | Public Render API URL, for example `https://muzare-api.onrender.com` |
 
-After Vercel assigns the public frontend URL, return to the Render `muzare-api` environment variables and set `WEB_ORIGIN` to that exact URL, for example `https://muzare-web.vercel.app`. Redeploy `muzare-api` after changing it.
+After Vercel assigns the public frontend URL, return to the Render `muzare-api` environment variables and set `ALLOWED_ORIGINS` to every frontend origin that should call the API, for example `https://muzare-main.onrender.com,https://muzare-main-web.vercel.app`. Redeploy `muzare-api` after changing it.

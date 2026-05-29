@@ -1,7 +1,7 @@
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import Fastify from "fastify";
-import { webOrigins } from "./config.js";
+import { allowedOrigins } from "./config.js";
 import { bootstrapRoutes } from "./routes/bootstrap.js";
 import { healthRoutes } from "./routes/health.js";
 import { sessionRoutes } from "./routes/session.js";
@@ -15,7 +15,8 @@ export async function buildApp() {
   });
 
   await app.register(cors, {
-    origin: webOrigins,
+    origin: allowedOrigins,
+    credentials: true,
   });
   await app.register(rateLimit, { global: false });
 
