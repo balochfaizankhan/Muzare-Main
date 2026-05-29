@@ -2,17 +2,28 @@ import { useEffect, type PropsWithChildren } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./auth/AuthProvider";
+import { AdminApprovalsPage } from "./pages/AdminApprovalsPage";
 import { ContextPage } from "./pages/ContextPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { ModulePage, type ModuleKey } from "./pages/ModulePage";
 import { NotFoundPage } from "./pages/NotFoundPage";
+import { SignupPage } from "./pages/SignupPage";
 
 function RequireAuth({ children }: PropsWithChildren) {
   const { user, loading } = useAuth();
 
   if (loading) return <div className="page-loader" aria-label="Loading" />;
   if (!user) return <Navigate to="/login" replace />;
+  return children;
+}
+
+function RequireAdmin({ children }: PropsWithChildren) {
+  const { user, loading } = useAuth();
+
+  if (loading) return <div className="page-loader" aria-label="Loading" />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role !== "admin") return <Navigate to="/" replace />;
   return children;
 }
 
@@ -37,7 +48,9 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/signup" element={<SignupPage />} />
       <Route path="/" element={<RequireAuth><DashboardPage /></RequireAuth>} />
+      <Route path="/admin/approvals" element={<RequireAdmin><AdminApprovalsPage /></RequireAdmin>} />
       <Route path="/farms" element={<RequireAuth><ContextPage kind="farms" /></RequireAuth>} />
       <Route path="/seasons" element={<RequireAuth><ContextPage kind="seasons" /></RequireAuth>} />
       {moduleRoutes.map(({ path, module }) => (

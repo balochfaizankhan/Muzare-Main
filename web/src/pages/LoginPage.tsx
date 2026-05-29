@@ -2,7 +2,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import { Navigate } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { z } from "zod";
 import { Brand } from "../components/Brand";
 import { LanguageSwitch } from "../components/LanguageSwitch";
@@ -62,6 +62,7 @@ export function LoginPage() {
             {isSubmitting ? "..." : t("login")}
           </button>
         </form>
+        <p className="auth-switch">Need a workspace? <Link to="/signup">Request access</Link></p>
       </section>
     </main>
   );

@@ -67,20 +67,20 @@ button {
   align-items: center;
   justify-content: center;
   justify-items: center;
-  gap: 7px;
+  gap: 8px;
 }
 
 .brand__logo {
   display: block;
   height: auto;
-  max-width: min(150px, calc(100vw - 160px));
-  width: 132px;
+  max-width: min(108px, calc(100vw - 220px));
+  width: 96px;
 }
 
 .brand__tagline {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   font-weight: 650;
   text-align: center;
 }
@@ -118,7 +118,7 @@ button {
   align-items: center;
   display: flex;
   justify-content: center;
-  padding: 24px 20px;
+  padding: 64px 20px 34px;
   position: relative;
   overflow: hidden;
 }
@@ -140,15 +140,15 @@ button {
 }
 
 .login-card {
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.96);
   border: 1px solid rgba(5, 35, 63, 0.1);
   border-radius: 8px;
-  box-shadow: var(--shadow-soft);
-  max-width: 390px;
+  box-shadow: 0 22px 56px rgba(5, 35, 63, 0.11);
+  max-width: 372px;
   overflow: hidden;
-  padding: 28px 30px 30px;
+  padding: 26px 28px 28px;
   position: relative;
-  width: min(100%, 390px);
+  width: min(100%, 372px);
 }
 
 .login-card::before {
@@ -162,21 +162,22 @@ button {
 
 .login-subtitle {
   color: var(--text-secondary);
-  font-size: 0.96rem;
-  margin: 14px 0 20px;
+  font-size: 0.9rem;
+  margin: 18px 0 18px;
   text-align: center;
 }
 
 .login-form {
   display: grid;
-  gap: 14px;
+  gap: 13px;
 }
 
 .login-form label span {
   color: var(--text-secondary);
   display: block;
-  font-size: 0.82rem;
-  margin: 0 0 7px;
+  font-size: 0.76rem;
+  font-weight: 650;
+  margin: 0 0 6px;
 }
 
 .login-form input {
@@ -185,8 +186,8 @@ button {
   border-radius: 8px;
   color: var(--text);
   display: block;
-  height: 50px;
-  padding: 0 15px;
+  height: 46px;
+  padding: 0 13px;
   width: 100%;
 }
 
@@ -198,6 +199,19 @@ button {
 .login-form small,
 .error {
   color: var(--danger);
+}
+
+.auth-switch {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  margin: 16px 0 0;
+  text-align: center;
+}
+
+.auth-switch a {
+  color: var(--brand-secondary);
+  font-weight: 750;
+  text-decoration: none;
 }
 
 .notice,
@@ -215,7 +229,7 @@ button {
   border-radius: 8px;
   color: #fff;
   font-weight: 700;
-  height: 52px;
+  height: 48px;
   margin-top: 10px;
   box-shadow: 0 10px 22px rgba(5, 35, 63, 0.16);
 }
@@ -330,6 +344,12 @@ button {
   color: #d9e3e9;
   font-size: 0.9rem;
   margin: 0;
+}
+
+.dashboard-hero__intro .workspace-label {
+  color: #d8f0c6;
+  font-weight: 700;
+  margin-top: 8px;
 }
 
 .context-actions {
@@ -505,6 +525,11 @@ button {
 .operation-card:hover {
   border-color: #b9d7a8;
   background: #f5faef;
+}
+
+.quick-action--admin {
+  background: #fff8e6;
+  border-color: rgba(215, 167, 71, 0.5);
 }
 
 .operation-grid {
@@ -939,6 +964,20 @@ button {
   gap: 10px;
 }
 
+.module-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.module-form label span {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.module-form small {
+  color: var(--danger);
+}
+
 .module-form input,
 .module-form select {
   background: #fbfdf8;
@@ -1055,6 +1094,178 @@ button {
   font-size: 1.05rem;
 }
 
+.onboarding-page {
+  align-items: center;
+  background:
+    radial-gradient(circle at 12% 18%, rgba(45, 134, 47, 0.13), transparent 26%),
+    radial-gradient(circle at 86% 20%, rgba(215, 167, 71, 0.16), transparent 25%),
+    linear-gradient(180deg, #f8faf2, #ffffff);
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 78px 22px 32px;
+  position: relative;
+}
+
+.onboarding-shell {
+  display: grid;
+  gap: 22px;
+  grid-template-columns: minmax(270px, 0.86fr) minmax(330px, 1fr);
+  max-width: 980px;
+  width: 100%;
+}
+
+.onboarding-story,
+.onboarding-panel,
+.approval-empty,
+.approval-item {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(5, 35, 63, 0.1);
+  border-radius: 8px;
+  box-shadow: var(--shadow-soft);
+}
+
+.onboarding-story {
+  display: grid;
+  align-content: center;
+  gap: 24px;
+  padding: 30px;
+}
+
+.journey-steps {
+  display: grid;
+  gap: 12px;
+}
+
+.journey-steps article {
+  align-items: start;
+  background: var(--surface-tint);
+  border: 1px solid #d8e7cb;
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  padding: 13px;
+}
+
+.journey-steps svg,
+.approval-item__icon {
+  color: var(--brand-secondary);
+  flex-shrink: 0;
+}
+
+.journey-steps strong,
+.approval-item strong {
+  display: block;
+  font-size: 0.9rem;
+}
+
+.journey-steps span,
+.approval-item span,
+.approval-item small,
+.onboarding-heading p,
+.approval-state p,
+.approval-empty p {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.onboarding-panel {
+  padding: 28px;
+}
+
+.onboarding-heading {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.onboarding-heading svg {
+  color: var(--brand-secondary);
+  margin-top: 3px;
+}
+
+.onboarding-heading h1,
+.approval-state h1,
+.approval-empty h2 {
+  font-size: 1.35rem;
+  margin: 0 0 5px;
+}
+
+.onboarding-heading p,
+.approval-state p,
+.approval-empty p {
+  margin: 0;
+}
+
+.onboarding-form {
+  gap: 13px;
+}
+
+.approval-state,
+.approval-empty {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+}
+
+.approval-state svg,
+.approval-empty svg {
+  color: var(--brand-secondary);
+}
+
+.admin-workspace {
+  max-width: 920px;
+}
+
+.approval-list {
+  display: grid;
+  gap: 12px;
+}
+
+.approval-item {
+  align-items: center;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: auto 1fr auto;
+  padding: 16px;
+}
+
+.approval-item__body {
+  min-width: 0;
+}
+
+.approval-item span,
+.approval-item small {
+  display: block;
+  margin-top: 3px;
+}
+
+.approval-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.icon-action {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: inline-flex;
+  height: 40px;
+  justify-content: center;
+  width: 40px;
+}
+
+.icon-action--approve {
+  color: var(--brand-secondary);
+}
+
+.icon-action--reject {
+  color: var(--danger);
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -1106,6 +1317,14 @@ button {
   .dashboard-side {
     grid-template-columns: 1fr;
   }
+
+  .onboarding-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .onboarding-story {
+    padding: 24px;
+  }
 }
 
 @media (max-width: 700px) {
@@ -1121,12 +1340,12 @@ button {
   }
 
   .login-card {
-    max-width: 340px;
-    padding: 26px 26px 28px;
+    max-width: 330px;
+    padding: 24px 24px 26px;
   }
 
   .brand__logo {
-    max-width: 128px;
+    max-width: 92px;
   }
 }
 
@@ -1141,12 +1360,12 @@ button {
 
   .login-card {
     max-width: calc(100vw - 32px);
-    padding: 26px 24px 28px;
+    padding: 24px 22px 26px;
   }
 
   .brand__logo {
-    max-width: calc(100vw - 210px);
-    width: 118px;
+    max-width: calc(100vw - 250px);
+    width: 86px;
   }
 
   .brand--compact .brand__logo {
@@ -1178,6 +1397,25 @@ button {
 
   .panel {
     padding: 16px;
+  }
+
+  .onboarding-page {
+    padding-inline: 16px;
+  }
+
+  .onboarding-panel,
+  .onboarding-story {
+    padding: 22px;
+  }
+
+  .approval-item {
+    align-items: start;
+    grid-template-columns: auto 1fr;
+  }
+
+  .approval-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
   }
 
   .metric-card {

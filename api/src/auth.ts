@@ -4,22 +4,28 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import { and, eq, gt } from "drizzle-orm";
 import { config, localDevelopmentMode } from "./config.js";
 import { db } from "./db/client.js";
-import { userSessions, users } from "./db/schema.js";
+import { userSessions, users, workspaces } from "./db/schema.js";
 
 const scrypt = promisify(scryptCallback);
 const localUser: AuthenticatedUser = {
   id: "00000000-0000-0000-0000-000000000001",
+  workspaceId: "00000000-0000-0000-0000-000000000100",
+  workspaceName: "Local Workspace",
   email: config.LOCAL_ADMIN_EMAIL.toLowerCase(),
   displayName: "Local Administrator",
   role: "admin",
+  status: "approved",
 };
 const localSessions = new Map<string, Date>();
 
 export type AuthenticatedUser = {
   id: string;
+  workspaceId: string | null;
+  workspaceName: string | null;
   email: string;
   displayName: string | null;
   role: "admin" | "operator" | "viewer";
+  status: "pending" | "approved" | "rejected" | "suspended";
 };
 
 declare module "fastify" {
@@ -75,11 +81,134 @@ export async function ensureBootstrapAdmin(): Promise<void> {
   const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
   if (existing) return;
 
-  await db.insert(users).values({
+  const slug = "muzare-administration";
+  const [workspace] = await db
+    .insert(workspaces)
+    .values({
+      name: "Muzare Administration",
+      slug,
+      contactEmail: email,
+      status: "approved",
+      approvedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: workspaces.slug,
+      set: { status: "approved", approvedAt: new Date() },
+    })
+    .returning();
+  if (!workspace) throw new Error("Unable to create administration workspace.");
+
+  const [admin] = await db.insert(users).values({
+    workspaceId: workspace.id,
     email,
     passwordHash: await hashPassword(config.BOOTSTRAP_ADMIN_PASSWORD),
     displayName: config.BOOTSTRAP_ADMIN_NAME,
     role: "admin",
+    status: "approved",
+    approvedAt: new Date(),
+  }).returning({ id: users.id });
+  if (!admin) throw new Error("Unable to create bootstrap administrator.");
+
+  await db.update(workspaces).set({ approvedBy: admin.id }).where(eq(workspaces.id, workspace.id));
+}
+
+export async function requireAdmin(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  await requireUser(request, reply);
+  if (reply.sent) return;
+  if (request.appUser?.role !== "admin") {
+    await reply.code(403).send({ message: "Administrator access is required." });
+  }
+}
+
+export async function serializeUser(user: typeof users.$inferSelect, workspaceName: string | null): Promise<AuthenticatedUser> {
+  return {
+    id: user.id,
+    workspaceId: user.workspaceId,
+    workspaceName,
+    email: user.email,
+    displayName: user.displayName,
+    role: user.role,
+    status: user.status,
+  };
+}
+
+export function assertApproved(user: Pick<AuthenticatedUser, "status">): boolean {
+  return user.status === "approved";
+}
+
+export async function createApprovedSessionUser(userId: string): Promise<AuthenticatedUser | null> {
+  const [row] = await db
+    .select({ user: users, workspaceName: workspaces.name })
+    .from(users)
+    .leftJoin(workspaces, eq(workspaces.id, users.workspaceId))
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  if (!row || !row.user.active || row.user.status !== "approved") return null;
+  return serializeUser(row.user, row.workspaceName);
+}
+
+export async function createLocalSessionUser(): Promise<AuthenticatedUser> {
+  return localUser;
+}
+
+export async function createRejectedLoginMessage(email: string): Promise<string> {
+  const [user] = await db.select().from(users).where(eq(users.email, email.toLowerCase())).limit(1);
+  if (!user) return "Invalid email or password.";
+  if (user.status === "pending") return "Your account request is waiting for administrator approval.";
+  if (user.status === "rejected") return "This account request was not approved.";
+  if (user.status === "suspended") return "This account is suspended. Contact an administrator.";
+  if (!user.active) return "This account is inactive.";
+  return "Invalid email or password.";
+}
+
+export async function approveUserAndWorkspace(userId: string, approvedBy: string): Promise<void> {
+  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (!user) throw new Error("User not found.");
+  const now = new Date();
+  if (user.workspaceId) {
+    await db.update(workspaces).set({ status: "approved", approvedAt: now, approvedBy }).where(eq(workspaces.id, user.workspaceId));
+  }
+  await db.update(users).set({ status: "approved", active: true, approvedAt: now, approvedBy }).where(eq(users.id, userId));
+}
+
+export async function rejectUserAndWorkspace(userId: string, approvedBy: string): Promise<void> {
+  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (!user) throw new Error("User not found.");
+  const now = new Date();
+  if (user.workspaceId) {
+    await db.update(workspaces).set({ status: "rejected", approvedAt: now, approvedBy }).where(eq(workspaces.id, user.workspaceId));
+  }
+  await db.update(users).set({ status: "rejected", active: false, approvedAt: now, approvedBy }).where(eq(users.id, userId));
+}
+
+export async function createPendingWorkspaceOwner(input: {
+  workspaceName: string;
+  ownerName: string;
+  email: string;
+  password: string;
+  phone?: string;
+}): Promise<void> {
+  const email = input.email.toLowerCase();
+  const baseSlug = input.workspaceName.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "workspace";
+  const slug = `${baseSlug}-${randomBytes(3).toString("hex")}`;
+  const [workspace] = await db.insert(workspaces).values({
+    name: input.workspaceName.trim(),
+    slug,
+    contactEmail: email,
+    contactPhone: input.phone?.trim() || null,
+    status: "pending",
+  }).returning();
+  if (!workspace) throw new Error("Unable to create workspace request.");
+
+  await db.insert(users).values({
+    workspaceId: workspace.id,
+    email,
+    passwordHash: await hashPassword(input.password),
+    displayName: input.ownerName.trim(),
+    role: "admin",
+    status: "pending",
+    active: true,
   });
 }
 
@@ -88,14 +217,14 @@ export async function authenticateUser(email: string, password: string): Promise
     return email.toLowerCase() === localUser.email && password === config.LOCAL_ADMIN_PASSWORD ? localUser : null;
   }
 
-  const [user] = await db.select().from(users).where(eq(users.email, email.toLowerCase())).limit(1);
-  if (!user || !user.active || !(await verifyPassword(password, user.passwordHash))) return null;
-  return {
-    id: user.id,
-    email: user.email,
-    displayName: user.displayName,
-    role: user.role,
-  };
+  const [row] = await db
+    .select({ user: users, workspaceName: workspaces.name })
+    .from(users)
+    .leftJoin(workspaces, eq(workspaces.id, users.workspaceId))
+    .where(eq(users.email, email.toLowerCase()))
+    .limit(1);
+  if (!row || !row.user.active || row.user.status !== "approved" || !(await verifyPassword(password, row.user.passwordHash))) return null;
+  return serializeUser(row.user, row.workspaceName);
 }
 
 export async function requireUser(request: FastifyRequest, reply: FastifyReply): Promise<void> {
@@ -116,22 +245,18 @@ export async function requireUser(request: FastifyRequest, reply: FastifyReply):
   }
 
   const [row] = await db
-    .select({ sessionId: userSessions.id, user: users })
+    .select({ sessionId: userSessions.id, user: users, workspaceName: workspaces.name })
     .from(userSessions)
     .innerJoin(users, eq(users.id, userSessions.userId))
+    .leftJoin(workspaces, eq(workspaces.id, users.workspaceId))
     .where(and(eq(userSessions.tokenHash, hashToken(token)), gt(userSessions.expiresAt, new Date())))
     .limit(1);
 
-  if (!row || !row.user.active) {
+  if (!row || !row.user.active || row.user.status !== "approved") {
     await reply.code(401).send({ message: "Your session is invalid or expired." });
     return;
   }
 
   request.sessionId = row.sessionId;
-  request.appUser = {
-    id: row.user.id,
-    email: row.user.email,
-    displayName: row.user.displayName,
-    role: row.user.role,
-  };
+  request.appUser = await serializeUser(row.user, row.workspaceName);
 }

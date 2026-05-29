@@ -22,7 +22,16 @@ export async function bootstrapRoutes(app: FastifyInstance): Promise<void> {
       };
     }
 
-    const activeFarms = await db.select().from(farms).where(eq(farms.active, true)).orderBy(farms.name);
+    if (!request.appUser.workspaceId) {
+      return { user: request.appUser, farms: [], seasons: [] };
+    }
+
+    const activeFarms = await db
+      .select()
+      .from(farms)
+      .where(and(eq(farms.active, true), eq(farms.workspaceId, request.appUser.workspaceId)))
+      .orderBy(farms.name);
+    const farmIds = new Set(activeFarms.map((farm) => farm.id));
     const activeSeasons = await db
       .select()
       .from(seasons)
@@ -32,7 +41,7 @@ export async function bootstrapRoutes(app: FastifyInstance): Promise<void> {
     return {
       user: request.appUser,
       farms: activeFarms,
-      seasons: activeSeasons,
+      seasons: activeSeasons.filter((season) => farmIds.has(season.farmId)),
     };
   });
 }

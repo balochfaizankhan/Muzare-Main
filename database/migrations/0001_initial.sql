@@ -1,17 +1,35 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TYPE user_role AS ENUM ('admin', 'operator', 'viewer');
+CREATE TYPE user_status AS ENUM ('pending', 'approved', 'rejected', 'suspended');
 CREATE TYPE attendance_status AS ENUM ('P', 'H', 'A');
 CREATE TYPE transaction_type AS ENUM ('credit', 'debit');
 CREATE TYPE transaction_source AS ENUM ('opening', 'settlement', 'expense', 'advance', 'sale');
 
+CREATE TABLE workspaces (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  slug text NOT NULL UNIQUE,
+  contact_email text NOT NULL,
+  contact_phone text,
+  status user_status NOT NULL DEFAULT 'pending',
+  approved_at timestamptz,
+  approved_by uuid,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE users (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id uuid REFERENCES workspaces(id),
   email text NOT NULL UNIQUE,
   password_hash text NOT NULL,
   display_name text,
   role user_role NOT NULL DEFAULT 'viewer',
+  status user_status NOT NULL DEFAULT 'pending',
   active boolean NOT NULL DEFAULT true,
+  approved_at timestamptz,
+  approved_by uuid,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -26,6 +44,7 @@ CREATE TABLE user_sessions (
 
 CREATE TABLE farms (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id uuid REFERENCES workspaces(id),
   name text NOT NULL,
   location text,
   owner text,
@@ -231,6 +250,7 @@ CREATE TABLE notification_preferences (
 
 CREATE TABLE audit_logs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id uuid REFERENCES workspaces(id),
   user_id uuid REFERENCES users(id),
   farm_id uuid REFERENCES farms(id),
   action text NOT NULL,

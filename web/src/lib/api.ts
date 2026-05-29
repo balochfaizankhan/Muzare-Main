@@ -4,9 +4,12 @@ export type AppRole = "admin" | "operator" | "viewer";
 
 export type AppUser = {
   id: string;
+  workspaceId: string | null;
+  workspaceName: string | null;
   email: string;
   displayName: string | null;
   role: AppRole;
+  status: "pending" | "approved" | "rejected" | "suspended";
 };
 
 export type Session = {
@@ -20,6 +23,24 @@ export type Session = {
 export type LoginResult = {
   token: string;
   user: AppUser;
+};
+
+export type SignupRequest = {
+  workspaceName: string;
+  ownerName: string;
+  email: string;
+  phone?: string;
+  password: string;
+};
+
+export type PendingApproval = {
+  userId: string;
+  workspaceId: string;
+  workspaceName: string;
+  ownerName: string | null;
+  email: string;
+  phone: string | null;
+  createdAt: string;
 };
 
 export type BootstrapData = {
@@ -53,6 +74,18 @@ export const login = (email: string, password: string) =>
     body: JSON.stringify({ email, password }),
   });
 
+export const signup = (input: SignupRequest) =>
+  apiRequest<{ status: "pending"; message: string }>("/v1/auth/signup", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+
 export const logout = (token: string) => apiRequest<void>("/v1/auth/logout", { method: "POST" }, token);
 export const fetchSession = (token: string) => apiRequest<Session>("/v1/session", {}, token);
 export const fetchBootstrap = (token: string) => apiRequest<BootstrapData>("/v1/bootstrap", {}, token);
+export const fetchApprovals = (token: string) =>
+  apiRequest<{ requests: PendingApproval[] }>("/v1/admin/approvals", {}, token);
+export const approveSignup = (token: string, userId: string) =>
+  apiRequest<void>("/v1/admin/approvals/approve", { method: "POST", body: JSON.stringify({ userId }) }, token);
+export const rejectSignup = (token: string, userId: string) =>
+  apiRequest<void>("/v1/admin/approvals/reject", { method: "POST", body: JSON.stringify({ userId }) }, token);

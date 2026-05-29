@@ -6,6 +6,7 @@ import {
   CalendarRange,
   CircleDollarSign,
   CloudUpload,
+  ClipboardCheck,
   Leaf,
   LogOut,
   PackageOpen,
@@ -59,7 +60,7 @@ const modules: Array<{
   { key: "partnerLedger", path: "/partner-ledger", icon: Leaf, detail: "Capital and settlements" },
 ];
 
-const quickActions = [
+  const quickActions = [
   { label: "Mark attendance", path: "/workforce", icon: UsersRound },
   { label: "New expense", path: "/expenses", icon: BanknoteArrowDown },
   { label: "Record dispatch", path: "/dispatch", icon: PackageOpen },
@@ -191,6 +192,7 @@ export function DashboardPage() {
             <span className="eyebrow">Operations overview</span>
             <h1>Welcome, {displayName}</h1>
             <p>{formatDate()}</p>
+            {user?.workspaceName && <p className="workspace-label">{user.workspaceName}</p>}
           </div>
           <div className="context-actions">
             <Link className="context-chip" to="/farms">
@@ -226,6 +228,13 @@ export function DashboardPage() {
                 </div>
               </div>
               <div className="quick-grid">
+                {user?.role === "admin" && (
+                  <Link className="quick-action quick-action--admin" to="/admin/approvals">
+                    <ClipboardCheck size={19} />
+                    <span>Approvals</span>
+                    <ArrowRight size={16} />
+                  </Link>
+                )}
                 {quickActions.map(({ label, path, icon: Icon }) => (
                   <Link className="quick-action" to={path} key={label}>
                     <Icon size={19} />
