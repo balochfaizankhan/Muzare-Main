@@ -5,13 +5,8 @@ export function Brand({ compact = false }: { compact?: boolean }) {
 
   return (
     <div className={`brand ${compact ? "brand--compact" : ""}`}>
-      <img className="brand__mark" src="/muzare-mark.svg" alt="" />
-      <div>
-        <p className="brand__name">
-          <span lang="ar">مُزارع</span> Muzare
-        </p>
-        <p className="brand__tagline">{t("tagline")}</p>
-      </div>
+      <img className="brand__logo" src="/muzare-logo.png" alt="Muzare" />
+      {!compact && <p className="brand__tagline">{t("tagline")}</p>}
     </div>
   );
 }

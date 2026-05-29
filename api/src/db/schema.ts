@@ -19,6 +19,7 @@ const timestamps = {
 };
 
 export const userRole = pgEnum("user_role", ["admin", "operator", "viewer"]);
+export const userStatus = pgEnum("user_status", ["pending", "approved", "rejected", "suspended"]);
 export const attendanceStatus = pgEnum("attendance_status", ["P", "H", "A"]);
 export const transactionType = pgEnum("transaction_type", ["credit", "debit"]);
 export const transactionSource = pgEnum("transaction_source", [
@@ -29,13 +30,33 @@ export const transactionSource = pgEnum("transaction_source", [
   "sale",
 ]);
 
+export const workspaces = pgTable(
+  "workspaces",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    name: text("name").notNull(),
+    slug: text("slug").notNull().unique(),
+    contactEmail: text("contact_email").notNull(),
+    contactPhone: text("contact_phone"),
+    status: userStatus("status").default("pending").notNull(),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    approvedBy: uuid("approved_by"),
+    ...timestamps,
+  },
+  (table) => [uniqueIndex("workspaces_slug_uidx").on(table.slug)],
+);
+
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").references(() => workspaces.id),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   displayName: text("display_name"),
   role: userRole("role").default("viewer").notNull(),
+  status: userStatus("status").default("pending").notNull(),
   active: boolean("active").default(true).notNull(),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  approvedBy: uuid("approved_by"),
   ...timestamps,
 });
 
@@ -49,6 +70,7 @@ export const userSessions = pgTable("user_sessions", {
 
 export const farms = pgTable("farms", {
   id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").references(() => workspaces.id),
   name: text("name").notNull(),
   location: text("location"),
   owner: text("owner"),
@@ -276,6 +298,7 @@ export const notificationPreferences = pgTable("notification_preferences", {
 
 export const auditLogs = pgTable("audit_logs", {
   id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").references(() => workspaces.id),
   userId: uuid("user_id").references(() => users.id),
   farmId: uuid("farm_id").references(() => farms.id),
   action: text("action").notNull(),

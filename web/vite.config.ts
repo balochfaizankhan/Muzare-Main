@@ -18,21 +18,27 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["muzare-mark.svg"],
+      includeAssets: ["muzare-logo.png", "muzare-logo.jpg", "pwa-192.png", "pwa-512.png"],
       manifest: {
         name: "Muzare - Smart Farm Operations",
         short_name: "Muzare",
         description: "Workforce, crop dispatch and farm ledger management.",
-        theme_color: "#002B4E",
-        background_color: "#FFFFFF",
+        theme_color: "#05233F",
+        background_color: "#F8FAF2",
         display: "standalone",
         start_url: "/",
         scope: "/",
         icons: [
           {
-            src: "/muzare-mark.svg",
-            sizes: "any",
-            type: "image/svg+xml",
+            src: "/pwa-192.png",
+            sizes: "192x192",
+            type: "image/png",
+            purpose: "any",
+          },
+          {
+            src: "/pwa-512.png",
+            sizes: "512x512",
+            type: "image/png",
             purpose: "any maskable",
           },
         ],
