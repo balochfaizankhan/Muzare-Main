@@ -26,3 +26,7 @@ const envSchema = z.object({
 export const config = envSchema.parse(process.env);
 export const databaseConfigured = Boolean(config.DATABASE_URL);
 export const localDevelopmentMode = config.NODE_ENV !== "production" && !databaseConfigured;
+
+export const webOrigins = config.WEB_ORIGIN.split(",")
+  .map((origin) => origin.trim().replace(/\/+$/, ""))
+  .filter(Boolean);
