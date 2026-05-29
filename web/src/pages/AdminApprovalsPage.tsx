@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Clock3, ShieldCheck, X } from "lucide-react";
+import { Check, Clock3, Inbox, ShieldCheck, UserCheck, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { SubpageHeader } from "../components/SubpageHeader";
@@ -30,21 +30,46 @@ export function AdminApprovalsPage() {
     <div className="dashboard-page">
       <SubpageHeader title="Approvals" />
       <main className="subpage admin-workspace">
-        <section className="workspace-intro">
+        <section className="admin-hero">
           <div>
+            <span className="eyebrow eyebrow--dark">Access control</span>
             <h2>Workspace approvals</h2>
-            <p>Review new tenant requests before they can access Muzare.</p>
+            <p>Review signup requests, approve trusted workspace owners, and keep tenant access controlled.</p>
           </div>
-          <span className="local-pill">Admin only</span>
+          <span className="admin-hero__badge">Admin only</span>
+        </section>
+
+        <section className="approval-summary" aria-label="Approval summary">
+          <article>
+            <Inbox size={18} />
+            <div>
+              <span>Pending</span>
+              <strong>{approvals.data?.requests.length ?? 0}</strong>
+            </div>
+          </article>
+          <article>
+            <UserCheck size={18} />
+            <div>
+              <span>Review mode</span>
+              <strong>Manual</strong>
+            </div>
+          </article>
+          <article>
+            <ShieldCheck size={18} />
+            <div>
+              <span>Policy</span>
+              <strong>Approval required</strong>
+            </div>
+          </article>
         </section>
 
         {approvals.isLoading && <p className="context-message">Loading approval queue...</p>}
         {approvals.isError && <p className="error">{approvals.error.message}</p>}
         {approvals.data?.requests.length === 0 && (
           <section className="approval-empty">
-            <ShieldCheck size={34} />
+            <div className="approval-empty__icon"><ShieldCheck size={32} /></div>
             <h2>No pending requests</h2>
-            <p>New workspace signups will appear here for approval.</p>
+            <p>Everything is clear. New workspace signups will appear here with owner details and approval actions.</p>
             <Link className="primary-link" to="/">Dashboard</Link>
           </section>
         )}

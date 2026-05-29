@@ -60,7 +60,7 @@ const modules: Array<{
   { key: "partnerLedger", path: "/partner-ledger", icon: Leaf, detail: "Capital and settlements" },
 ];
 
-  const quickActions = [
+const quickActions = [
   { label: "Mark attendance", path: "/workforce", icon: UsersRound },
   { label: "New expense", path: "/expenses", icon: BanknoteArrowDown },
   { label: "Record dispatch", path: "/dispatch", icon: PackageOpen },
@@ -208,6 +208,12 @@ export function DashboardPage() {
           </div>
         </section>
 
+        <div className="section-title-row">
+          <div>
+            <h2>Today at a glance</h2>
+            <p>Live local figures from this device</p>
+          </div>
+        </div>
         <section className="summary-grid" aria-label="Operational summary">
           {summaryCards.map(({ label, value, path, icon: Icon, tone }) => (
             <Link className={`metric-card metric-card--${tone}`} to={path} key={label}>

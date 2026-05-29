@@ -55,13 +55,10 @@ function WorkforceModule() {
   const [name, setName] = useState("");
   const [group, setGroup] = useState("General");
   const [wage, setWage] = useState("");
-  const [labourerId, setLabourerId] = useState("");
   const [date, setDate] = useState(today());
-  const [status, setStatus] = useState<Attendance["status"]>("present");
-
-  useEffect(() => {
-    if (!labourerId && labourers[0]) setLabourerId(labourers[0].id);
-  }, [labourerId, labourers]);
+  const [attendanceSearch, setAttendanceSearch] = useState("");
+  const [attendanceFilter, setAttendanceFilter] = useState<Attendance["status"] | "all">("all");
+  const [selectedLabourer, setSelectedLabourer] = useState<Labourer | null>(null);
 
   const addLabourer = async (event: FormEvent) => {
     event.preventDefault();
@@ -73,17 +70,46 @@ function WorkforceModule() {
     await refreshLabourers();
   };
 
-  const markAttendance = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!labourerId) return;
-    const existing = await offlineDb.attendance.where("labourerId").equals(labourerId).filter((entry) => entry.date === date).first();
-    const record: Attendance = existing ? { ...existing, status } : { ...makeLocalRecord(), labourerId, date, status };
+  const markAttendance = async (targetLabourerId: string, status: Attendance["status"]) => {
+    const existing = await offlineDb.attendance
+      .where("labourerId")
+      .equals(targetLabourerId)
+      .filter((entry) => entry.date === date)
+      .first();
+    const record: Attendance = existing ? { ...existing, status } : { ...makeLocalRecord(), labourerId: targetLabourerId, date, status };
     await offlineDb.attendance.put(record);
     await queueMutation("attendance", record);
     await refreshAttendance();
   };
 
   const names = new Map(labourers.map((labourer) => [labourer.id, labourer.name]));
+  const attendanceByLabourer = new Map(
+    attendance.filter((entry) => entry.date === date).map((entry) => [entry.labourerId, entry.status]),
+  );
+  const yesterday = new Date(`${date}T00:00:00`);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayDate = yesterday.toISOString().slice(0, 10);
+  const yesterdayByLabourer = new Map(
+    attendance.filter((entry) => entry.date === yesterdayDate).map((entry) => [entry.labourerId, entry.status]),
+  );
+  const filteredLabourers = labourers.filter((labourer) => {
+    const status = attendanceByLabourer.get(labourer.id);
+    const matchesStatus = attendanceFilter === "all" || status === attendanceFilter;
+    const matchesSearch = labourer.name.toLowerCase().includes(attendanceSearch.trim().toLowerCase());
+    return matchesStatus && matchesSearch;
+  });
+  const presentToday = [...attendanceByLabourer.values()].filter((item) => item === "present").length;
+  const halfDayToday = [...attendanceByLabourer.values()].filter((item) => item === "half_day").length;
+  const absentToday = [...attendanceByLabourer.values()].filter((item) => item === "absent").length;
+  const selectedAttendance = selectedLabourer
+    ? attendance.filter((entry) => entry.labourerId === selectedLabourer.id)
+    : [];
+  const presentCount = selectedAttendance.filter((entry) => entry.status === "present").length;
+  const halfDayCount = selectedAttendance.filter((entry) => entry.status === "half_day").length;
+  const absentCount = selectedAttendance.filter((entry) => entry.status === "absent").length;
+  const totalEarnings = selectedLabourer ? (presentCount + halfDayCount * 0.5) * selectedLabourer.dailyWage : 0;
+  const advanceAmount = 0;
+  const netBalance = totalEarnings - advanceAmount;
 
   return (
     <>
@@ -96,27 +122,69 @@ function WorkforceModule() {
             <button type="submit">Add labourer</button>
           </form>
         </FormCard>
-        <FormCard title="Daily attendance">
-          <form className="module-form" onSubmit={(event) => void markAttendance(event)}>
-            <select required value={labourerId} onChange={(event) => setLabourerId(event.target.value)}>
-              <option value="">Select labourer</option>
-              {labourers.map((labourer) => <option key={labourer.id} value={labourer.id}>{labourer.name}</option>)}
-            </select>
-            <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-            <select value={status} onChange={(event) => setStatus(event.target.value as Attendance["status"])}>
+        <section className="record-panel daily-attendance-panel">
+          <div className="daily-attendance__heading">
+            <div>
+              <h2>Daily Attendance</h2>
+              <p>Streamline your daily workforce tracking with precision.</p>
+            </div>
+            <strong>Date: {new Date(`${date}T00:00:00`).toLocaleDateString("en-GB").replaceAll("/", "-")}</strong>
+          </div>
+          <div className="attendance-tools">
+            <select value={attendanceFilter} onChange={(event) => setAttendanceFilter(event.target.value as Attendance["status"] | "all")}>
+              <option value="all">All labour</option>
               <option value="present">Present</option>
-              <option value="half_day">Half day</option>
+              <option value="half_day">1/2 Day</option>
               <option value="absent">Absent</option>
             </select>
-            <button type="submit" disabled={!labourers.length}>Save attendance</button>
-          </form>
-        </FormCard>
+            <input placeholder="Search labour..." value={attendanceSearch} onChange={(event) => setAttendanceSearch(event.target.value)} />
+            <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+          </div>
+          <div className="attendance-actions">
+            <button type="button" onClick={() => setDate(today())}>Today</button>
+            <button type="button">View Report</button>
+          </div>
+          <div className="attendance-totals" aria-label="Attendance totals">
+            <strong className="attendance-total--present">P: {presentToday}</strong>
+            <strong className="attendance-total--half">1/2: {halfDayToday}</strong>
+            <strong className="attendance-total--absent">A: {absentToday}</strong>
+          </div>
+          <div className="attendance-board">
+            {!filteredLabourers.length ? <Empty>No labourers match this search.</Empty> : filteredLabourers.map((labourer, index) => {
+              const currentStatus = attendanceByLabourer.get(labourer.id);
+              const previousStatus = yesterdayByLabourer.get(labourer.id);
+              return (
+                <article className="attendance-card" key={labourer.id}>
+                  <span className="attendance-card__index">{index + 1}</span>
+                  <div className="attendance-card__body">
+                    <strong>{labourer.name}</strong>
+                    <span>Yesterday: {previousStatus ? previousStatus === "half_day" ? "1/2" : previousStatus === "present" ? "P" : "A" : "-"}</span>
+                  </div>
+                  <div className="attendance-status-buttons">
+                    <button className={currentStatus === "present" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "present")}>P</button>
+                    <button className={currentStatus === "half_day" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "half_day")}>1/2</button>
+                    <button className={currentStatus === "absent" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "absent")}>A</button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
       </div>
       <section className="record-panel">
         <h2>Labour register</h2>
         {!labourers.length ? <Empty>No labourers recorded yet.</Empty> : (
-          <div className="record-list">
-            {labourers.map((labourer) => <article key={labourer.id}><strong>{labourer.name}</strong><span>{labourer.group} | {money(labourer.dailyWage)} / day</span></article>)}
+          <div className="record-list workforce-list">
+            {labourers.map((labourer, index) => (
+              <button className="workforce-row" type="button" key={labourer.id} onClick={() => setSelectedLabourer(labourer)}>
+                <span className="workforce-row__index">{index + 1}</span>
+                <span className="workforce-row__body">
+                  <strong>{labourer.name}</strong>
+                  <span>{labourer.group} | Daily Wage | Active</span>
+                </span>
+                <span className="workforce-row__action">Details</span>
+              </button>
+            ))}
           </div>
         )}
       </section>
@@ -128,6 +196,46 @@ function WorkforceModule() {
           </div>
         )}
       </section>
+      {selectedLabourer && (
+        <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedLabourer(null)}>
+          <section
+            className="worker-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="worker-dialog-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="worker-dialog__header">
+              <h2 id="worker-dialog-title">{selectedLabourer.name}</h2>
+            </header>
+            <div className="worker-dialog__body">
+              <h3>Attendance Statistics</h3>
+              <dl className="worker-stats">
+                <div><dt>Status</dt><dd className="positive">Active</dd></div>
+                <div><dt>Labour Type</dt><dd>Daily Wage</dd></div>
+                <div><dt>Join Date</dt><dd>{selectedLabourer.createdAt.slice(0, 10)}</dd></div>
+                <div><dt>End Date</dt><dd>-</dd></div>
+                <div><dt>Present</dt><dd>{presentCount}</dd></div>
+                <div><dt>1/2 Day</dt><dd>{halfDayCount}</dd></div>
+                <div><dt>Absent</dt><dd>{absentCount}</dd></div>
+              </dl>
+
+              <h3>Financial Overview</h3>
+              <dl className="worker-stats">
+                <div><dt>Daily Wage (SAR)</dt><dd>{money(selectedLabourer.dailyWage)}</dd></div>
+                <div><dt>Total Earnings</dt><dd className="positive">{money(totalEarnings)}</dd></div>
+                <div><dt>Advance</dt><dd className={advanceAmount > 0 ? "negative" : ""}>{money(advanceAmount)}</dd></div>
+                <div><dt>Net Balance</dt><dd className={netBalance < 0 ? "negative" : "positive"}>{money(netBalance)}</dd></div>
+              </dl>
+            </div>
+            <footer className="worker-dialog__footer">
+              <button className="worker-dialog__link worker-dialog__link--danger" type="button">Update</button>
+              <button className="worker-dialog__link" type="button">Advance</button>
+              <button className="worker-dialog__close" type="button" onClick={() => setSelectedLabourer(null)}>Close</button>
+            </footer>
+          </section>
+        </div>
+      )}
     </>
   );
 }
