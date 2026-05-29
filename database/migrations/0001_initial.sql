@@ -1,12 +1,41 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
-CREATE TYPE user_role AS ENUM ('admin', 'operator', 'viewer');
-CREATE TYPE user_status AS ENUM ('pending', 'approved', 'rejected', 'suspended');
-CREATE TYPE attendance_status AS ENUM ('P', 'H', 'A');
-CREATE TYPE transaction_type AS ENUM ('credit', 'debit');
-CREATE TYPE transaction_source AS ENUM ('opening', 'settlement', 'expense', 'advance', 'sale');
+DO $$
+BEGIN
+  CREATE TYPE user_role AS ENUM ('admin', 'operator', 'viewer');
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
 
-CREATE TABLE workspaces (
+DO $$
+BEGIN
+  CREATE TYPE user_status AS ENUM ('pending', 'approved', 'rejected', 'suspended');
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
+
+DO $$
+BEGIN
+  CREATE TYPE attendance_status AS ENUM ('P', 'H', 'A');
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
+
+DO $$
+BEGIN
+  CREATE TYPE transaction_type AS ENUM ('credit', 'debit');
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
+
+DO $$
+BEGIN
+  CREATE TYPE transaction_source AS ENUM ('opening', 'settlement', 'expense', 'advance', 'sale');
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
+
+CREATE TABLE IF NOT EXISTS workspaces (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name text NOT NULL,
   slug text NOT NULL UNIQUE,
@@ -19,7 +48,7 @@ CREATE TABLE workspaces (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id uuid REFERENCES workspaces(id),
   email text NOT NULL UNIQUE,
@@ -34,7 +63,7 @@ CREATE TABLE users (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE user_sessions (
+CREATE TABLE IF NOT EXISTS user_sessions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   token_hash text NOT NULL UNIQUE,
@@ -42,7 +71,7 @@ CREATE TABLE user_sessions (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE farms (
+CREATE TABLE IF NOT EXISTS farms (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id uuid REFERENCES workspaces(id),
   name text NOT NULL,
@@ -55,7 +84,7 @@ CREATE TABLE farms (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE seasons (
+CREATE TABLE IF NOT EXISTS seasons (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   farm_id uuid NOT NULL REFERENCES farms(id),
   name text NOT NULL,
@@ -70,7 +99,7 @@ CREATE TABLE seasons (
   UNIQUE (farm_id, year, name)
 );
 
-CREATE TABLE labour_groups (
+CREATE TABLE IF NOT EXISTS labour_groups (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   farm_id uuid NOT NULL REFERENCES farms(id),
   name text NOT NULL,
@@ -78,7 +107,7 @@ CREATE TABLE labour_groups (
   UNIQUE (farm_id, name)
 );
 
-CREATE TABLE labourers (
+CREATE TABLE IF NOT EXISTS labourers (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   farm_id uuid NOT NULL REFERENCES farms(id),
   group_id uuid REFERENCES labour_groups(id),
@@ -94,7 +123,7 @@ CREATE TABLE labourers (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE attendance_entries (
+CREATE TABLE IF NOT EXISTS attendance_entries (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   farm_id uuid NOT NULL REFERENCES farms(id),
   season_id uuid NOT NULL REFERENCES seasons(id),
@@ -108,7 +137,7 @@ CREATE TABLE attendance_entries (
   UNIQUE (farm_id, season_id, labourer_id, attendance_date)
 );
 
-CREATE TABLE accounts (
+CREATE TABLE IF NOT EXISTS accounts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   farm_id uuid NOT NULL REFERENCES farms(id),
   name text NOT NULL,
@@ -120,7 +149,7 @@ CREATE TABLE accounts (
   UNIQUE (farm_id, name)
 );
 
-CREATE TABLE advance_records (
+CREATE TABLE IF NOT EXISTS advance_records (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   farm_id uuid NOT NULL REFERENCES farms(id),
   season_id uuid NOT NULL REFERENCES seasons(id),
@@ -135,7 +164,7 @@ CREATE TABLE advance_records (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE vehicles (
+CREATE TABLE IF NOT EXISTS vehicles (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   farm_id uuid NOT NULL REFERENCES farms(id),
   number text NOT NULL,
@@ -145,14 +174,14 @@ CREATE TABLE vehicles (
   UNIQUE (farm_id, number)
 );
 
-CREATE TABLE produce_types (
+CREATE TABLE IF NOT EXISTS produce_types (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   farm_id uuid NOT NULL REFERENCES farms(id),
   name text NOT NULL,
   UNIQUE (farm_id, name)
 );
 
-CREATE TABLE dispatches (
+CREATE TABLE IF NOT EXISTS dispatches (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   farm_id uuid NOT NULL REFERENCES farms(id),
   season_id uuid NOT NULL REFERENCES seasons(id),
@@ -164,14 +193,14 @@ CREATE TABLE dispatches (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE dispatch_items (
+CREATE TABLE IF NOT EXISTS dispatch_items (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   dispatch_id uuid NOT NULL REFERENCES dispatches(id) ON DELETE CASCADE,
   produce_type_id uuid NOT NULL REFERENCES produce_types(id),
   carton_count integer NOT NULL CHECK (carton_count > 0)
 );
 
-CREATE TABLE sales (
+CREATE TABLE IF NOT EXISTS sales (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   farm_id uuid NOT NULL REFERENCES farms(id),
   season_id uuid NOT NULL REFERENCES seasons(id),
@@ -185,7 +214,7 @@ CREATE TABLE sales (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE sale_items (
+CREATE TABLE IF NOT EXISTS sale_items (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   sale_id uuid NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
   dispatch_item_id uuid NOT NULL REFERENCES dispatch_items(id),
@@ -193,14 +222,14 @@ CREATE TABLE sale_items (
   unit_price numeric(14,2) NOT NULL CHECK (unit_price >= 0)
 );
 
-CREATE TABLE expense_categories (
+CREATE TABLE IF NOT EXISTS expense_categories (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   farm_id uuid NOT NULL REFERENCES farms(id),
   name text NOT NULL,
   UNIQUE (farm_id, name)
 );
 
-CREATE TABLE vouchers (
+CREATE TABLE IF NOT EXISTS vouchers (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   farm_id uuid NOT NULL REFERENCES farms(id),
   season_id uuid NOT NULL REFERENCES seasons(id),
@@ -215,7 +244,7 @@ CREATE TABLE vouchers (
   UNIQUE (farm_id, voucher_number)
 );
 
-CREATE TABLE voucher_items (
+CREATE TABLE IF NOT EXISTS voucher_items (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   voucher_id uuid NOT NULL REFERENCES vouchers(id) ON DELETE CASCADE,
   category_id uuid REFERENCES expense_categories(id),
@@ -223,7 +252,7 @@ CREATE TABLE voucher_items (
   amount numeric(14,2) NOT NULL CHECK (amount >= 0)
 );
 
-CREATE TABLE account_transactions (
+CREATE TABLE IF NOT EXISTS account_transactions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   farm_id uuid NOT NULL REFERENCES farms(id),
   season_id uuid NOT NULL REFERENCES seasons(id),
@@ -239,7 +268,7 @@ CREATE TABLE account_transactions (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE notification_preferences (
+CREATE TABLE IF NOT EXISTS notification_preferences (
   user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   enabled boolean NOT NULL DEFAULT false,
   local_time time NOT NULL DEFAULT '19:00',
@@ -248,7 +277,7 @@ CREATE TABLE notification_preferences (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE audit_logs (
+CREATE TABLE IF NOT EXISTS audit_logs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id uuid REFERENCES workspaces(id),
   user_id uuid REFERENCES users(id),
@@ -260,8 +289,8 @@ CREATE TABLE audit_logs (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX attendance_entries_period_idx ON attendance_entries (farm_id, season_id, attendance_date);
-CREATE INDEX dispatches_period_idx ON dispatches (farm_id, season_id, dispatched_at);
-CREATE INDEX account_transactions_period_idx ON account_transactions (farm_id, season_id, transaction_date);
-CREATE INDEX audit_logs_entity_idx ON audit_logs (entity_type, entity_id, created_at);
-CREATE INDEX user_sessions_lookup_idx ON user_sessions (token_hash, expires_at);
+CREATE INDEX IF NOT EXISTS attendance_entries_period_idx ON attendance_entries (farm_id, season_id, attendance_date);
+CREATE INDEX IF NOT EXISTS dispatches_period_idx ON dispatches (farm_id, season_id, dispatched_at);
+CREATE INDEX IF NOT EXISTS account_transactions_period_idx ON account_transactions (farm_id, season_id, transaction_date);
+CREATE INDEX IF NOT EXISTS audit_logs_entity_idx ON audit_logs (entity_type, entity_id, created_at);
+CREATE INDEX IF NOT EXISTS user_sessions_lookup_idx ON user_sessions (token_hash, expires_at);

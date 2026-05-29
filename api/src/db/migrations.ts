@@ -1,6 +1,26 @@
+import { readFile } from "node:fs/promises";
 import { db } from "./client.js";
 
+const initialMigrationUrl = new URL("../../../database/migrations/0001_initial.sql", import.meta.url);
+
+async function tableExists(tableName: string): Promise<boolean> {
+  const result = (await db.execute(
+    `SELECT to_regclass('public.${tableName}') IS NOT NULL AS exists`,
+  )) as { rows: Array<{ exists: boolean }> };
+
+  return Boolean(result.rows[0]?.exists);
+}
+
+async function ensureInitialSchema(): Promise<void> {
+  if (await tableExists("users")) return;
+
+  const initialMigration = await readFile(initialMigrationUrl, "utf8");
+  await db.execute(initialMigration);
+}
+
 export async function ensureWorkspaceSchema(): Promise<void> {
+  await ensureInitialSchema();
+
   await db.execute(`
     DO $$
     BEGIN
