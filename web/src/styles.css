@@ -2678,6 +2678,10 @@ button {
 .attendance-import-note { background: var(--blue-bg); border-radius: 8px; padding: 9px; }
 .attendance-import-progress { align-items: center; background: var(--blue-bg); border-radius: 8px; display: flex; gap: 8px; padding: 10px; }
 .attendance-import-spinner { animation: attendance-import-spin .8s linear infinite; border: 2px solid var(--border); border-radius: 50%; border-top-color: var(--brand-secondary); display: inline-block; height: 18px; width: 18px; }
+.attendance-inactive-toggle { align-items: center; display: flex; gap: 8px; width: fit-content; }
+.worker-action-warning { background: var(--danger-bg); border-radius: 8px; color: var(--text); padding: 10px; }
+.worker-action-dialog .danger-button { background: var(--danger); color: #fff; }
+.worker-action-dialog .danger-button:disabled { opacity: .55; }
 @keyframes attendance-import-spin { to { transform: rotate(360deg); } }
 .attendance-import-errors, .attendance-import-warnings, .attendance-import-error { border-radius: 8px; font-size: .78rem; padding: 9px; }
 .attendance-import-errors, .attendance-import-error { background: var(--danger-bg); color: var(--danger); }

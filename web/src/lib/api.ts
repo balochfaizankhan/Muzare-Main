@@ -216,6 +216,11 @@ export const saveOperationalRecord = (token: string, input: OperationalRecordEnv
   apiRequest<{ record: OperationalRecordEnvelope["record"]; conflict: boolean }>("/v1/workspace/operational-records", { method: "POST", body: JSON.stringify(input) }, token);
 export const fetchOperationalRecords = (token: string, workspaceId: string) =>
   apiRequest<{ records: OperationalRecordEnvelope[] }>(`/v1/workspace/${workspaceId}/operational-records`, {}, token);
+export type LabourDeletionPreview = { labourId: string; labourName: string; linkedRecordCount: number; action: "deactivate" | "delete" };
+export const fetchLabourDeletionPreview = (token: string, workspaceId: string, labourId: string) =>
+  apiRequest<LabourDeletionPreview>(`/api/workspaces/${workspaceId}/labour/${labourId}/deletion-preview`, {}, token);
+export const deleteOrDeactivateLabour = (token: string, workspaceId: string, labourId: string, input: { confirmation: "DELETE"; endDate?: string }) =>
+  apiRequest<{ action: "deleted" | "deactivated"; linkedRecordCount: number }>(`/api/workspaces/${workspaceId}/labour/${labourId}`, { method: "DELETE", body: JSON.stringify(input) }, token);
 export const fetchAttendanceReport = (token: string, workspaceId: string, filters: AttendanceReportFilters) => {
   const query = new URLSearchParams({
     farmId: filters.farmId, seasonId: filters.seasonId, from: filters.from, to: filters.to,

@@ -14,6 +14,7 @@ import { workspaceSeasonRoutes } from "./routes/workspace-seasons.js";
 import { attendanceReportRoutes } from "./routes/attendance-report.js";
 import { expenseCategoryRoutes } from "./routes/expense-categories.js";
 import { attendanceImportRoutes } from "./routes/attendance-imports.js";
+import { labourManagementRoutes } from "./routes/labour-management.js";
 
 export async function buildApp() {
   const app = Fastify({ logger: true });
@@ -41,6 +42,7 @@ export async function buildApp() {
   await app.register(attendanceReportRoutes);
   await app.register(expenseCategoryRoutes);
   await app.register(attendanceImportRoutes);
+  await app.register(labourManagementRoutes);
 
   return app;
 }

@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { SubpageHeader } from "../components/SubpageHeader";
 import { useAuth } from "../auth/AuthProvider";
 import { useSyncState } from "../hooks/useSyncState";
-import { confirmAttendanceImport, createExpenseSubcategory, fetchAttendanceReport, fetchExpenseCategories, previewAttendanceImport, updateExpenseSubcategory, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type AttendanceReportFilters, type AttendanceReportStatus } from "../lib/api";
+import { confirmAttendanceImport, createExpenseSubcategory, deleteOrDeactivateLabour, fetchAttendanceReport, fetchExpenseCategories, fetchLabourDeletionPreview, previewAttendanceImport, updateExpenseSubcategory, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type AttendanceReportFilters, type AttendanceReportStatus, type LabourDeletionPreview } from "../lib/api";
 import { hasPermission } from "../lib/permissions";
 import {
   ensureLocalAccounts,
@@ -73,11 +73,12 @@ function WorkforceModule() {
   const [date, setDate] = useState(today());
   const [attendanceSearch, setAttendanceSearch] = useState("");
   const [attendanceFilter, setAttendanceFilter] = useState<Attendance["status"] | "all">("all");
+  const [showInactiveLabour, setShowInactiveLabour] = useState(false);
   const [selectedLabourer, setSelectedLabourer] = useState<Labourer | null>(null);
   const [markingLabourers, setMarkingLabourers] = useState<Set<string>>(() => new Set());
   const [showReport, setShowReport] = useState(false);
   const [showImport, setShowImport] = useState(false);
-  const [labourAction, setLabourAction] = useState<"update" | "advance" | null>(null);
+  const [labourAction, setLabourAction] = useState<"update" | "advance" | "deactivate" | null>(null);
 
   const addLabourer = async (event: FormEvent) => {
     event.preventDefault();
@@ -122,9 +123,10 @@ function WorkforceModule() {
   );
   const filteredLabourers = labourers.filter((labourer) => {
     const status = attendanceByLabourer.get(labourer.id);
+    const matchesActive = showInactiveLabour || labourer.active !== false;
     const matchesStatus = attendanceFilter === "all" || status === attendanceFilter;
     const matchesSearch = labourer.name.toLowerCase().includes(attendanceSearch.trim().toLowerCase());
-    return matchesStatus && matchesSearch;
+    return matchesActive && matchesStatus && matchesSearch;
   });
   const presentToday = [...attendanceByLabourer.values()].filter((item) => item === "present").length;
   const halfDayToday = [...attendanceByLabourer.values()].filter((item) => item === "half_day").length;
@@ -191,6 +193,7 @@ function WorkforceModule() {
               else setShowImport(true);
             }}>Import CSV</button>}
           </div>
+          <label className="attendance-inactive-toggle"><input type="checkbox" checked={showInactiveLabour} onChange={(event) => setShowInactiveLabour(event.target.checked)} /> Show inactive labour</label>
           <div className="attendance-totals" aria-label="Attendance totals">
             <strong className="attendance-total--present">P: {presentToday}</strong>
             <strong className="attendance-total--half">1/2: {halfDayToday}</strong>
@@ -227,7 +230,7 @@ function WorkforceModule() {
                 <span className="workforce-row__index">{index + 1}</span>
                 <span className="workforce-row__body">
                   <strong>{labourer.name}</strong>
-                  <span>{labourer.group} | Daily Wage | Active</span>
+                  <span>{labourer.group} | Daily Wage | {labourer.active === false ? "Inactive" : "Active"}</span>
                 </span>
                 <span className="workforce-row__action">Details</span>
               </button>
@@ -276,8 +279,12 @@ function WorkforceModule() {
               </dl>
             </div>
             <footer className="worker-dialog__footer">
-              {canManageLabour && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => setLabourAction("update")}>Update</button>}
+              {canManageLabour && <button className="worker-dialog__link" type="button" onClick={() => setLabourAction("update")}>Update</button>}
               {canAddAdvance && <button className="worker-dialog__link" type="button" onClick={() => setLabourAction("advance")}>Advance</button>}
+              {canManageLabour && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => {
+                if (!navigator.onLine || sync.pendingCount > 0) showToast("Sync pending changes before deactivating or deleting labour.");
+                else setLabourAction("deactivate");
+              }}>{selectedLabourer.active === false ? "Delete" : "Deactivate / Delete"}</button>}
               <button className="worker-dialog__close" type="button" onClick={() => setSelectedLabourer(null)}>Close</button>
             </footer>
           </section>
@@ -285,6 +292,17 @@ function WorkforceModule() {
       )}
       {selectedLabourer && labourAction === "update" && <EditLabourPanel labourer={selectedLabourer} onClose={() => setLabourAction(null)} onSave={saveLabour} />}
       {selectedLabourer && labourAction === "advance" && <AddAdvancePanel labourer={selectedLabourer} onClose={() => setLabourAction(null)} onSave={saveAdvance} />}
+      {selectedLabourer && labourAction === "deactivate" && token && user?.workspaceId && (
+        <DeactivateLabourPanel
+          token={token} workspaceId={user.workspaceId} labourer={selectedLabourer}
+          onClose={() => setLabourAction(null)}
+          onComplete={async (action) => {
+            await refreshOperationalData(); await Promise.all([refreshLabourers(), refreshAttendance(), refreshAdvances()]);
+            setLabourAction(null); setSelectedLabourer(null);
+            showToast(action === "deleted" ? "Labour deleted successfully." : "Labour deactivated successfully.");
+          }}
+        />
+      )}
       {showReport && token && user?.workspaceId && sync.farmId && sync.seasonId && (
         <AttendanceReportPanel
           token={token}
@@ -367,6 +385,46 @@ function AddAdvancePanel({ labourer, onClose, onSave }: { labourer: Labourer; on
       <label><span>Notes</span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
       {error && <p className="worker-action-error">{error}</p>}
       <footer><button type="button" onClick={onClose}>Cancel</button><button disabled={busy} type="submit">{busy ? "Saving..." : "Add Advance"}</button></footer>
+    </form>
+  </ActionPanel>;
+}
+
+function DeactivateLabourPanel({ token, workspaceId, labourer, onClose, onComplete }: {
+  token: string; workspaceId: string; labourer: Labourer; onClose: () => void; onComplete: (action: "deleted" | "deactivated") => Promise<void>;
+}) {
+  const [preview, setPreview] = useState<LabourDeletionPreview | null>(null);
+  const [confirmation, setConfirmation] = useState("");
+  const [endDate, setEndDate] = useState(today());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    void fetchLabourDeletionPreview(token, workspaceId, labourer.id)
+      .then((result) => { if (active) setPreview(result); })
+      .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "Unable to inspect linked labour records."); });
+    return () => { active = false; };
+  }, [token, workspaceId, labourer.id]);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (confirmation !== "DELETE" || busy) return;
+    setBusy(true); setError("");
+    try {
+      const result = await deleteOrDeactivateLabour(token, workspaceId, labourer.id, { confirmation: "DELETE", endDate });
+      await onComplete(result.action);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to update labour status."); }
+    finally { setBusy(false); }
+  };
+  return <ActionPanel title="Deactivate or Delete Labour" onClose={onClose}>
+    <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
+      <p><strong>{labourer.name}</strong></p>
+      {!preview && !error && <p>Checking linked records...</p>}
+      {preview && <p>Existing linked records: <strong>{preview.linkedRecordCount}</strong></p>}
+      {preview?.action === "deactivate" && <p className="worker-action-warning">This labour has existing records. To preserve reports, the labour will be deactivated instead of deleted.</p>}
+      {preview?.action === "delete" && <p className="worker-action-warning">This labour has no linked records and will be permanently deleted.</p>}
+      {preview?.action === "deactivate" && <label><span>End date *</span><input required type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} /></label>}
+      <label><span>Type DELETE to confirm *</span><input required autoComplete="off" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
+      {error && <p className="worker-action-error">{error}</p>}
+      <footer><button type="button" onClick={onClose}>Cancel</button><button className="danger-button" disabled={!preview || confirmation !== "DELETE" || busy} type="submit">{busy ? "Processing..." : preview?.action === "delete" ? "Delete permanently" : "Deactivate Labour"}</button></footer>
     </form>
   </ActionPanel>;
 }

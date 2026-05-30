@@ -204,6 +204,35 @@ test("attendance reports calculate payable wages and reject foreign workspace or
   assert.equal((await request(alpha.token, "GET", `${path}&labourId=${foreignLabourerId}`)).statusCode, 403);
 });
 
+test("labour lifecycle hard deletes unused labour and deactivates linked labour without breaking reports", async () => {
+  const unusedLabourerId = randomUUID();
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", unusedLabourerId, {
+    name: "Unused Worker", group: "General", dailyWage: 80,
+  }))).statusCode, 200);
+  const unusedPreview = await request(alpha.token, "GET", `/api/workspaces/${alpha.workspaceId}/labour/${unusedLabourerId}/deletion-preview`);
+  assert.deepEqual(unusedPreview.json(), { labourId: unusedLabourerId, labourName: "Unused Worker", linkedRecordCount: 0, action: "delete" });
+  assert.equal((await request(alpha.token, "DELETE", `/api/workspaces/${alpha.workspaceId}/labour/${unusedLabourerId}`, {})).statusCode, 400);
+  const deleted = await request(alpha.token, "DELETE", `/api/workspaces/${alpha.workspaceId}/labour/${unusedLabourerId}`, { confirmation: "DELETE" });
+  assert.deepEqual(deleted.json(), { action: "deleted", linkedRecordCount: 0 });
+
+  const linkedLabourerId = randomUUID();
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", linkedLabourerId, {
+    name: "Historical Worker", group: "General", dailyWage: 95,
+  }))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "attendance", randomUUID(), {
+    labourerId: linkedLabourerId, date: "2026-08-01", status: "present",
+  }))).statusCode, 200);
+  assert.equal((await request(bravo.token, "GET", `/api/workspaces/${alpha.workspaceId}/labour/${linkedLabourerId}/deletion-preview`)).statusCode, 403);
+  const linkedPreview = await request(alpha.token, "GET", `/api/workspaces/${alpha.workspaceId}/labour/${linkedLabourerId}/deletion-preview`);
+  assert.deepEqual(linkedPreview.json(), { labourId: linkedLabourerId, labourName: "Historical Worker", linkedRecordCount: 1, action: "deactivate" });
+  const deactivated = await request(alpha.token, "DELETE", `/api/workspaces/${alpha.workspaceId}/labour/${linkedLabourerId}`, { confirmation: "DELETE", endDate: "2026-08-02" });
+  assert.deepEqual(deactivated.json(), { action: "deactivated", linkedRecordCount: 1, record: deactivated.json().record });
+  assert.equal(deactivated.json().record.active, false);
+  assert.equal(deactivated.json().record.endedOn, "2026-08-02");
+  const report = await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/attendance/report?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}&from=2026-08-01&to=2026-08-02`);
+  assert.equal(report.json().summaries.find((item: { id: string }) => item.id === linkedLabourerId).name, "Historical Worker");
+});
+
 test("attendance CSV imports preview safely, enforce owner access, and avoid duplicate attendance or advances", async () => {
   const labourerId = randomUUID();
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", labourerId, {

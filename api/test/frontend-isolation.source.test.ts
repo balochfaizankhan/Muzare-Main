@@ -159,3 +159,21 @@ test("attendance CSV advances carry provenance and refresh labour account totals
   assert.match(modulePage, /Total advance imported/);
   assert.match(modulePage, /await refreshOperationalData\(\); await onImported\(\);/);
 });
+
+test("labour lifecycle UI preserves history and hides inactive labour from daily marking by default", async () => {
+  const app = await source("api/src/app.ts");
+  const route = await source("api/src/routes/labour-management.ts");
+  const api = await source("web/src/lib/api.ts");
+  const modulePage = await source("web/src/pages/ModulePage.tsx");
+  assert.match(app, /labourManagementRoutes/);
+  assert.match(route, /linkedRecordCount \? "deactivate" : "delete"/);
+  assert.match(route, /active: false, endedOn: endDate/);
+  assert.match(route, /action: "labour_deleted"/);
+  assert.match(route, /action: "labour_deactivated"/);
+  assert.match(api, /fetchLabourDeletionPreview/);
+  assert.match(api, /deleteOrDeactivateLabour/);
+  assert.match(modulePage, /showInactiveLabour \|\| labourer\.active !== false/);
+  assert.match(modulePage, /Show inactive labour/);
+  assert.match(modulePage, /Type DELETE to confirm/);
+  assert.match(modulePage, /Sync pending changes before deactivating or deleting labour\./);
+});
