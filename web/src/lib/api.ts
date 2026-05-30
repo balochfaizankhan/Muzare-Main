@@ -93,6 +93,17 @@ export type OperationalRecordEnvelope = {
   workspaceId: string; farmId?: string | null; seasonId?: string | null; entity: OperationalEntity;
   record: { id: string; createdAt: string; updatedAt: string; [key: string]: unknown };
 };
+export type AttendanceReportStatus = "present" | "half_day" | "absent";
+export type AttendanceReportRecord = {
+  id: string; labourerId: string; labourName: string; dailyWage: number; date: string; status: AttendanceReportStatus;
+};
+export type AttendanceReportSummary = {
+  id: string; name: string; dailyWage: number; presentDays: number; halfDays: number; absentDays: number;
+  payableDays: number; totalWage: number; records: AttendanceReportRecord[];
+};
+export type AttendanceReportFilters = {
+  farmId: string; seasonId: string; from: string; to: string; labourId?: string; status?: AttendanceReportStatus;
+};
 
 async function apiRequest<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
   const headers = new Headers(options.headers);
@@ -168,3 +179,13 @@ export const saveOperationalRecord = (token: string, input: OperationalRecordEnv
   apiRequest<{ record: OperationalRecordEnvelope["record"]; conflict: boolean }>("/v1/workspace/operational-records", { method: "POST", body: JSON.stringify(input) }, token);
 export const fetchOperationalRecords = (token: string, workspaceId: string) =>
   apiRequest<{ records: OperationalRecordEnvelope[] }>(`/v1/workspace/${workspaceId}/operational-records`, {}, token);
+export const fetchAttendanceReport = (token: string, workspaceId: string, filters: AttendanceReportFilters) => {
+  const query = new URLSearchParams({
+    farmId: filters.farmId, seasonId: filters.seasonId, from: filters.from, to: filters.to,
+  });
+  if (filters.labourId) query.set("labourId", filters.labourId);
+  if (filters.status) query.set("status", filters.status);
+  return apiRequest<{ records: AttendanceReportRecord[]; summaries: AttendanceReportSummary[] }>(
+    `/v1/workspace/${workspaceId}/attendance/report?${query.toString()}`, {}, token,
+  );
+};

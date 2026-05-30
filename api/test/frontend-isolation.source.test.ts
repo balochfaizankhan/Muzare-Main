@@ -37,3 +37,8 @@ test("farm and season switching scope browser records to the selected context", 
   assert.match(sync, /item\.id === bootstrap\.activeFarmId/);
   assert.match(sync, /bootstrap\.activeSeasonId/);
 });
+
+test("attendance report query keys include tenant context and date range", async () => {
+  const modulePage = await source("web/src/pages/ModulePage.tsx");
+  assert.match(modulePage, /queryKey: \["attendance-report", workspaceId, farmId, seasonId, submitted\?\.from, submitted\?\.to, submitted\?\.labourId, submitted\?\.status\]/);
+});

@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import { SubpageHeader } from "../components/SubpageHeader";
+import { useAuth } from "../auth/AuthProvider";
+import { useSyncState } from "../hooks/useSyncState";
+import { fetchAttendanceReport, type AttendanceReportFilters, type AttendanceReportStatus } from "../lib/api";
 import {
   ensureLocalAccounts,
   getActiveWorkspaceId,
@@ -52,6 +56,8 @@ function FormCard({ title, children }: { title: string; children: ReactNode }) {
 }
 
 function WorkforceModule() {
+  const { token, user } = useAuth();
+  const sync = useSyncState();
   const loadLabourers = useCallback(async () => (await workspaceRecords(offlineDb.labourers)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadAttendance = useCallback(async () => (await workspaceRecords(offlineDb.attendance)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const [labourers, refreshLabourers] = useData(loadLabourers);
@@ -63,6 +69,7 @@ function WorkforceModule() {
   const [attendanceSearch, setAttendanceSearch] = useState("");
   const [attendanceFilter, setAttendanceFilter] = useState<Attendance["status"] | "all">("all");
   const [selectedLabourer, setSelectedLabourer] = useState<Labourer | null>(null);
+  const [showReport, setShowReport] = useState(false);
 
   const addLabourer = async (event: FormEvent) => {
     event.preventDefault();
@@ -144,7 +151,7 @@ function WorkforceModule() {
           </div>
           <div className="attendance-actions">
             <button type="button" onClick={() => setDate(today())}>Today</button>
-            <button type="button">View Report</button>
+            <button type="button" onClick={() => setShowReport(true)}>View Report</button>
           </div>
           <div className="attendance-totals" aria-label="Attendance totals">
             <strong className="attendance-total--present">P: {presentToday}</strong>
@@ -238,7 +245,85 @@ function WorkforceModule() {
           </section>
         </div>
       )}
+      {showReport && token && user?.workspaceId && sync.farmId && sync.seasonId && (
+        <AttendanceReportPanel
+          token={token}
+          workspaceId={user.workspaceId}
+          farmId={sync.farmId}
+          seasonId={sync.seasonId}
+          labourers={labourers}
+          onClose={() => setShowReport(false)}
+        />
+      )}
     </>
+  );
+}
+
+function AttendanceReportPanel({
+  token, workspaceId, farmId, seasonId, labourers, onClose,
+}: {
+  token: string; workspaceId: string; farmId: string; seasonId: string; labourers: Labourer[]; onClose: () => void;
+}) {
+  const [filters, setFilters] = useState<AttendanceReportFilters>({
+    farmId, seasonId, from: `${today().slice(0, 8)}01`, to: today(),
+  });
+  const [submitted, setSubmitted] = useState<AttendanceReportFilters | null>(null);
+  const report = useQuery({
+    queryKey: ["attendance-report", workspaceId, farmId, seasonId, submitted?.from, submitted?.to, submitted?.labourId, submitted?.status],
+    queryFn: () => fetchAttendanceReport(token, workspaceId, submitted!),
+    enabled: Boolean(submitted),
+  });
+  const exportCsv = () => {
+    if (!report.data) return;
+    const rows = [
+      ["Labour", "Present Days", "Half Days", "Absent Days", "Payable Days", "Daily Wage", "Total Wage"],
+      ...report.data.summaries.map((summary) => [
+        summary.name, summary.presentDays, summary.halfDays, summary.absentDays, summary.payableDays, summary.dailyWage, summary.totalWage,
+      ]),
+    ];
+    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll("\"", "\"\"")}"`).join(",")).join("\n");
+    const href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = href; link.download = `attendance-report-${filters.from}-${filters.to}.csv`; link.click();
+    URL.revokeObjectURL(href);
+  };
+  return (
+    <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}>
+      <section className="worker-dialog attendance-report-dialog" role="dialog" aria-modal="true" aria-labelledby="attendance-report-title" onClick={(event) => event.stopPropagation()}>
+        <header className="worker-dialog__header">
+          <h2 id="attendance-report-title">Attendance Report</h2>
+          <button className="worker-dialog__close" type="button" onClick={onClose}>Close</button>
+        </header>
+        <form className="attendance-report-filters" onSubmit={(event) => { event.preventDefault(); setSubmitted({ ...filters }); }}>
+          <label><span>Date From</span><input required type="date" value={filters.from} onChange={(event) => setFilters({ ...filters, from: event.target.value })} /></label>
+          <label><span>Date To</span><input required type="date" value={filters.to} onChange={(event) => setFilters({ ...filters, to: event.target.value })} /></label>
+          <label><span>Labour</span><select value={filters.labourId ?? ""} onChange={(event) => setFilters({ ...filters, labourId: event.target.value || undefined })}>
+            <option value="">All labour</option>{labourers.map((labourer) => <option key={labourer.id} value={labourer.id}>{labourer.name}</option>)}
+          </select></label>
+          <label><span>Status</span><select value={filters.status ?? ""} onChange={(event) => setFilters({ ...filters, status: (event.target.value || undefined) as AttendanceReportStatus | undefined })}>
+            <option value="">All</option><option value="present">Present</option><option value="half_day">Half Day</option><option value="absent">Absent</option>
+          </select></label>
+          <button type="submit">Generate Report</button>
+        </form>
+        <div className="worker-dialog__body attendance-report-output">
+          {report.isFetching && <p>Generating report...</p>}
+          {report.isError && <p className="error">{report.error.message}</p>}
+          {report.data && !report.data.summaries.length && <Empty>No attendance records found for this period.</Empty>}
+          {report.data && report.data.summaries.length > 0 && <>
+            <div className="attendance-report-actions"><button type="button" onClick={() => window.print()}>Print Report</button><button type="button" onClick={exportCsv}>Export CSV</button></div>
+            {report.data.summaries.map((summary) => <article className="attendance-report-card" key={summary.id}>
+              <h3>{summary.name}</h3>
+              <dl className="worker-stats">
+                <div><dt>Present</dt><dd>{summary.presentDays}</dd></div><div><dt>Half Days</dt><dd>{summary.halfDays}</dd></div>
+                <div><dt>Absent</dt><dd>{summary.absentDays}</dd></div><div><dt>Payable Days</dt><dd>{summary.payableDays}</dd></div>
+                <div><dt>Daily Wage</dt><dd>{money(summary.dailyWage)}</dd></div><div><dt>Total Wage</dt><dd>{money(summary.totalWage)}</dd></div>
+              </dl>
+              <div className="attendance-report-breakdown">{summary.records.map((record) => <span key={record.id}>{record.date}: {record.status.replace("_", " ")}</span>)}</div>
+            </article>)}
+          </>}
+        </div>
+      </section>
+    </div>
   );
 }
 

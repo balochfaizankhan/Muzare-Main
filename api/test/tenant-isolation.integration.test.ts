@@ -122,6 +122,40 @@ test("approval queues remain isolated", async () => {
   assert.equal((await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/approvals`)).json().approvals.length, 1);
 });
 
+test("attendance reports calculate payable wages and reject foreign workspace or farm labour", async () => {
+  const labourerId = randomUUID();
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", labourerId, {
+    name: "Alpha Worker", group: "General", dailyWage: 120,
+  }))).statusCode, 200);
+  for (const [date, status] of [["2026-05-01", "present"], ["2026-05-02", "half_day"], ["2026-05-03", "absent"]] as const) {
+    assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "attendance", randomUUID(), {
+      labourerId, date, status,
+    }))).statusCode, 200);
+  }
+  const path = `/v1/workspace/${alpha.workspaceId}/attendance/report?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}&from=2026-05-01&to=2026-05-03`;
+  const report = await request(alpha.token, "GET", path);
+  assert.equal(report.statusCode, 200);
+  assert.equal(report.json().records.length, 3);
+  assert.deepEqual(report.json().summaries[0], {
+    id: labourerId, name: "Alpha Worker", dailyWage: 120, presentDays: 1, halfDays: 1, absentDays: 1,
+    payableDays: 1.5, totalWage: 180, records: report.json().summaries[0].records,
+  });
+
+  assert.equal((await request(alpha.token, "GET",
+    `/v1/workspace/${bravo.workspaceId}/attendance/report?farmId=${bravo.farmId}&seasonId=${bravo.seasonId}&from=2026-05-01&to=2026-05-03`,
+  )).statusCode, 403);
+
+  const secondFarmId = randomUUID();
+  const foreignLabourerId = randomUUID();
+  await db.insert(farms).values({ id: secondFarmId, workspaceId: alpha.workspaceId, name: "Alpha Report Farm" });
+  await db.insert(operationalRecords).values({
+    workspaceId: alpha.workspaceId, farmId: secondFarmId, clientRecordId: foreignLabourerId,
+    entityType: "labourer", payload: { id: foreignLabourerId, name: "Foreign Farm Worker", dailyWage: 90, createdAt: now, updatedAt: now },
+    recordedBy: alpha.userId, clientUpdatedAt: new Date(now),
+  });
+  assert.equal((await request(alpha.token, "GET", `${path}&labourId=${foreignLabourerId}`)).statusCode, 403);
+});
+
 test("season lifecycle persists active selection and rejects cross-farm or archived references", async () => {
   const secondFarmId = randomUUID();
   const secondFarmSeasonId = randomUUID();

@@ -2419,3 +2419,11 @@ button {
     grid-template-columns: 1fr;
   }
 }
+.attendance-report-dialog { max-width: 960px; width: min(960px, calc(100vw - 2rem)); }
+.attendance-report-filters { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); padding: 1rem; }
+.attendance-report-filters label { display: grid; gap: .35rem; }
+.attendance-report-output { display: grid; gap: 1rem; max-height: 62vh; overflow: auto; }
+.attendance-report-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.attendance-report-card { border: 1px solid var(--border); border-radius: .75rem; padding: 1rem; }
+.attendance-report-breakdown { display: flex; flex-wrap: wrap; gap: .45rem; margin-top: .75rem; }
+.attendance-report-breakdown span { background: var(--surface-muted); border-radius: .45rem; padding: .35rem .5rem; }
