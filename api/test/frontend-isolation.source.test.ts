@@ -63,3 +63,14 @@ test("mobile styles contain page overflow and keep navigation scrollable", async
   assert.match(styles, /\.app-sidebar \{[\s\S]*overflow-x: auto;/);
   assert.match(styles, /\.shell-header \.toolbar__actions \{[\s\S]*flex-wrap: wrap;/);
 });
+
+test("report modal is compact responsive and dark-mode aware", async () => {
+  const modulePage = await source("web/src/pages/ModulePage.tsx");
+  const styles = await source("web/src/styles.css");
+  assert.match(modulePage, /aria-label="Close report"><X size=\{19\} \/><\/button>/);
+  assert.match(modulePage, /attendance-report-cancel" type="button" onClick=\{onClose\}>Cancel<\/button>/);
+  assert.match(modulePage, /attendance-report-generate" type="submit">Generate Report<\/button>/);
+  assert.match(styles, /\.attendance-report-dialog \{[\s\S]*max-width: 600px;[\s\S]*width: min\(600px, 95vw\);/);
+  assert.match(styles, /@media \(max-width: 767px\) \{[\s\S]*\.attendance-report-filters \{ grid-template-columns: minmax\(0, 1fr\); \}/);
+  assert.match(styles, /@media \(prefers-color-scheme: dark\) \{[\s\S]*\.attendance-report-dialog/);
+});

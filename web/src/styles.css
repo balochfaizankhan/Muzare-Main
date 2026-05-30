@@ -2517,15 +2517,33 @@ button {
     max-width: none;
   }
 
-  .attendance-report-dialog {
-    width: calc(100vw - 1rem);
-  }
 }
-.attendance-report-dialog { max-width: 960px; width: min(960px, calc(100vw - 2rem)); }
-.attendance-report-filters { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); padding: 1rem; }
-.attendance-report-filters label { display: grid; gap: .35rem; }
-.attendance-report-output { display: grid; gap: 1rem; max-height: 62vh; overflow: auto; }
+.attendance-report-dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-soft); max-height: min(760px, 92vh); max-width: 600px; overflow: hidden; width: min(600px, 95vw); }
+.attendance-report-header { align-items: center; background: var(--surface-soft); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; padding: 15px 18px; }
+.attendance-report-header span { color: var(--brand-secondary); display: block; font-size: .7rem; font-weight: 800; letter-spacing: .08em; margin-bottom: 3px; text-transform: uppercase; }
+.attendance-report-header h2 { color: var(--brand-primary); font-size: 1.15rem; margin: 0; }
+.attendance-report-close { align-items: center; background: transparent; border: 0; border-radius: 7px; color: var(--text-secondary); display: inline-flex; justify-content: center; padding: 7px; }
+.attendance-report-close:hover { background: var(--surface-tint); color: var(--brand-primary); }
+.attendance-report-filters { display: grid; gap: .75rem; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 16px 18px; }
+.attendance-report-filters label { display: grid; gap: .35rem; min-width: 0; }
+.attendance-report-filters label span { color: var(--text-secondary); font-size: .76rem; font-weight: 700; }
+.attendance-report-filters input, .attendance-report-filters select { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); height: 42px; min-width: 0; padding: 0 10px; width: 100%; }
+.attendance-report-form-actions { border-top: 1px solid var(--border); display: flex; gap: 8px; grid-column: 1 / -1; justify-content: flex-end; margin: 4px -18px -16px; padding: 12px 18px; }
+.attendance-report-form-actions button, .attendance-report-actions button { border: 1px solid var(--border); border-radius: 8px; font-size: .8rem; font-weight: 800; padding: 9px 12px; }
+.attendance-report-cancel, .attendance-report-actions button { background: var(--surface); color: var(--text-secondary); }
+.attendance-report-generate { background: var(--brand-primary); border-color: var(--brand-primary) !important; color: #fff; }
+.attendance-report-output { border-top: 1px solid var(--border); display: grid; gap: .8rem; max-height: 48vh; overflow: auto; padding: 14px 18px 18px; }
 .attendance-report-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
-.attendance-report-card { border: 1px solid var(--border); border-radius: .75rem; padding: 1rem; }
-.attendance-report-breakdown { display: flex; flex-wrap: wrap; gap: .45rem; margin-top: .75rem; }
-.attendance-report-breakdown span { background: var(--surface-muted); border-radius: .45rem; padding: .35rem .5rem; }
+.attendance-report-card { background: var(--surface); border: 1px solid var(--border); border-radius: 9px; padding: 12px; }
+.attendance-report-breakdown { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .65rem; }
+.attendance-report-breakdown span { background: var(--surface-soft); border-radius: 6px; color: var(--text-secondary); font-size: .78rem; padding: .3rem .45rem; }
+
+@media (max-width: 767px) {
+  .attendance-report-filters { grid-template-columns: minmax(0, 1fr); }
+  .attendance-report-dialog { width: 95vw; }
+}
+
+@media (prefers-color-scheme: dark) {
+  .attendance-report-dialog { --surface: #10283b; --surface-soft: #173449; --surface-tint: #21445a; --border: #34586b; --text: #eef6f8; --text-secondary: #c2d4dc; --brand-primary: #eef6f8; --brand-secondary: #9dce7e; }
+  .attendance-report-generate { background: #2d862f; border-color: #2d862f !important; }
+}

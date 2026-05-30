@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { SubpageHeader } from "../components/SubpageHeader";
@@ -301,10 +302,10 @@ function AttendanceReportPanel({
   };
   return (
     <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}>
-      <section className="worker-dialog attendance-report-dialog" role="dialog" aria-modal="true" aria-labelledby="attendance-report-title" onClick={(event) => event.stopPropagation()}>
-        <header className="worker-dialog__header">
-          <h2 id="attendance-report-title">Attendance Report</h2>
-          <button className="worker-dialog__close" type="button" onClick={onClose}>Close</button>
+      <section className="attendance-report-dialog" role="dialog" aria-modal="true" aria-labelledby="attendance-report-title" onClick={(event) => event.stopPropagation()}>
+        <header className="attendance-report-header">
+          <div><span>Workforce</span><h2 id="attendance-report-title">Attendance Report</h2></div>
+          <button className="attendance-report-close" type="button" onClick={onClose} aria-label="Close report"><X size={19} /></button>
         </header>
         <form className="attendance-report-filters" onSubmit={(event) => { event.preventDefault(); setSubmitted({ ...filters }); }}>
           <label><span>Date From</span><input required type="date" value={filters.from} onChange={(event) => setFilters({ ...filters, from: event.target.value })} /></label>
@@ -315,9 +316,12 @@ function AttendanceReportPanel({
           <label><span>Status</span><select value={filters.status ?? ""} onChange={(event) => setFilters({ ...filters, status: (event.target.value || undefined) as AttendanceReportStatus | undefined })}>
             <option value="">All</option><option value="present">Present</option><option value="half_day">Half Day</option><option value="absent">Absent</option>
           </select></label>
-          <button type="submit">Generate Report</button>
+          <footer className="attendance-report-form-actions">
+            <button className="attendance-report-cancel" type="button" onClick={onClose}>Cancel</button>
+            <button className="attendance-report-generate" type="submit">Generate Report</button>
+          </footer>
         </form>
-        <div className="worker-dialog__body attendance-report-output">
+        {submitted && <div className="attendance-report-output">
           {report.isFetching && <p>Generating report...</p>}
           {report.isError && <p className="error">{report.error.message}</p>}
           {report.data && !report.data.summaries.length && <Empty>No attendance records found for this period.</Empty>}
@@ -333,7 +337,7 @@ function AttendanceReportPanel({
               <div className="attendance-report-breakdown">{summary.records.map((record) => <span key={record.id}>{record.date}: {record.status.replace("_", " ")}</span>)}</div>
             </article>)}
           </>}
-        </div>
+        </div>}
       </section>
     </div>
   );
