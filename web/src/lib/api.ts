@@ -101,6 +101,11 @@ export type AttendanceReportSummary = {
   id: string; name: string; dailyWage: number; presentDays: number; halfDays: number; absentDays: number;
   payableDays: number; totalWage: number; records: AttendanceReportRecord[];
 };
+export type AttendanceReportAdvance = { id: string; labourerId: string; date: string; amount: number };
+export type AttendanceReportData = {
+  records: AttendanceReportRecord[]; summaries: AttendanceReportSummary[]; advances: AttendanceReportAdvance[]; dates: string[];
+  metadata: { farmName: string; seasonName: string; from: string; to: string; generatedAt: string; generatedBy: string } | null;
+};
 export type AttendanceReportFilters = {
   farmId: string; seasonId: string; from: string; to: string; labourId?: string; status?: AttendanceReportStatus;
 };
@@ -185,7 +190,7 @@ export const fetchAttendanceReport = (token: string, workspaceId: string, filter
   });
   if (filters.labourId) query.set("labourId", filters.labourId);
   if (filters.status) query.set("status", filters.status);
-  return apiRequest<{ records: AttendanceReportRecord[]; summaries: AttendanceReportSummary[] }>(
+  return apiRequest<AttendanceReportData>(
     `/v1/workspace/${workspaceId}/attendance/report?${query.toString()}`, {}, token,
   );
 };

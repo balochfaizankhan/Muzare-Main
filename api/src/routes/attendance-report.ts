@@ -4,7 +4,7 @@ import { z } from "zod";
 import { requireUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
-import { operationalRecords, userSessions } from "../db/schema.js";
+import { farms, operationalRecords, seasons, userSessions } from "../db/schema.js";
 import { hasPermission } from "../permissions.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
 
@@ -20,6 +20,18 @@ const querySchema = z.object({
 
 type LabourPayload = { name?: unknown; dailyWage?: unknown };
 type AttendancePayload = { labourerId?: unknown; date?: unknown; status?: unknown };
+type AdvancePayload = { labourerId?: unknown; date?: unknown; amount?: unknown };
+
+function reportDates(from: string, to: string) {
+  const dates: string[] = [];
+  const cursor = new Date(`${from}T00:00:00Z`);
+  const end = new Date(`${to}T00:00:00Z`);
+  while (cursor <= end) {
+    dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return dates;
+}
 
 export async function attendanceReportRoutes(app: FastifyInstance): Promise<void> {
   app.get("/v1/workspace/:workspaceId/attendance/report", { preHandler: requireUser }, async (request, reply) => {
@@ -34,7 +46,7 @@ export async function attendanceReportRoutes(app: FastifyInstance): Promise<void
     if (request.appUser.workspaceId !== workspaceId || !hasPermission(request.appUser, "VIEW_REPORTS", workspaceId)) {
       return reply.code(403).send({ message: "Workspace report permission is required." });
     }
-    if (localDevelopmentMode) return { records: [], summaries: [] };
+    if (localDevelopmentMode) return { records: [], summaries: [], advances: [], dates: reportDates(from, to), metadata: null };
 
     const [session] = await db.select({ activeFarmId: userSessions.activeFarmId, activeSeasonId: userSessions.activeSeasonId })
       .from(userSessions).where(eq(userSessions.id, request.sessionId)).limit(1);
@@ -43,6 +55,8 @@ export async function attendanceReportRoutes(app: FastifyInstance): Promise<void
     }
     const ownershipError = await validateTenantReferences(workspaceId, { farmId, seasonId });
     if (ownershipError) return reply.code(403).send({ message: ownershipError });
+    const [farm] = await db.select({ name: farms.name }).from(farms).where(and(eq(farms.id, farmId), eq(farms.workspaceId, workspaceId))).limit(1);
+    const [season] = await db.select({ name: seasons.name }).from(seasons).where(and(eq(seasons.id, seasonId), eq(seasons.farmId, farmId), eq(seasons.workspaceId, workspaceId))).limit(1);
 
     const labourRecords = await db.select().from(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, workspaceId),
@@ -81,6 +95,20 @@ export async function attendanceReportRoutes(app: FastifyInstance): Promise<void
         dailyWage: labourer.dailyWage, date: payload.date, status: payload.status as "present" | "half_day" | "absent",
       }];
     }).sort((a, b) => a.date.localeCompare(b.date) || a.labourName.localeCompare(b.labourName));
+    const advanceRecords = await db.select().from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, workspaceId),
+      eq(operationalRecords.farmId, farmId),
+      eq(operationalRecords.seasonId, seasonId),
+      eq(operationalRecords.entityType, "advance"),
+    ));
+    const advances = advanceRecords.flatMap((record) => {
+      const payload = record.payload as AdvancePayload;
+      if (typeof payload.labourerId !== "string" || typeof payload.date !== "string"
+        || payload.date < from || payload.date > to || (labourId && payload.labourerId !== labourId)) return [];
+      const labourer = labourById.get(payload.labourerId);
+      if (!labourer) return [];
+      return [{ id: record.clientRecordId, labourerId: labourer.id, date: payload.date, amount: Number(payload.amount) || 0 }];
+    });
 
     const summaries = [...labourById.values()]
       .filter((labourer) => !labourId || labourer.id === labourId)
@@ -93,6 +121,12 @@ export async function attendanceReportRoutes(app: FastifyInstance): Promise<void
         return { ...labourer, presentDays, halfDays, absentDays, payableDays, totalWage: payableDays * labourer.dailyWage, records: labourAttendance };
       })
       .filter((summary) => summary.records.length > 0);
-    return { records, summaries };
+    return {
+      records, summaries, advances, dates: reportDates(from, to),
+      metadata: {
+        farmName: farm?.name ?? "Farm", seasonName: season?.name ?? "Season", from, to,
+        generatedAt: new Date().toISOString(), generatedBy: request.appUser.displayName || request.appUser.email,
+      },
+    };
   });
 }

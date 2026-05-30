@@ -74,3 +74,15 @@ test("report modal is compact responsive and dark-mode aware", async () => {
   assert.match(styles, /@media \(max-width: 767px\) \{[\s\S]*\.attendance-report-filters \{ grid-template-columns: minmax\(0, 1fr\); \}/);
   assert.match(styles, /@media \(prefers-color-scheme: dark\) \{[\s\S]*\.attendance-report-dialog/);
 });
+
+test("attendance report preview renders a printable register and structured exports", async () => {
+  const modulePage = await source("web/src/pages/ModulePage.tsx");
+  const styles = await source("web/src/styles.css");
+  assert.match(modulePage, /Farm Labour Register/);
+  assert.match(modulePage, /Export PDF/);
+  assert.match(modulePage, /Daily payable total/);
+  assert.match(modulePage, /attendanceMark\(status\)/);
+  assert.match(styles, /@page \{ margin: 8mm; size: landscape; \}/);
+  assert.match(styles, /\.attendance-register-table thead \{ display: table-header-group; \}/);
+  assert.match(styles, /\.register-status--present \{ background: #dff2d7;/);
+});

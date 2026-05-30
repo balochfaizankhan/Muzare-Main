@@ -277,6 +277,7 @@ function AttendanceReportPanel({
 }: {
   token: string; workspaceId: string; farmId: string; seasonId: string; labourers: Labourer[]; onClose: () => void;
 }) {
+  const sync = useSyncState();
   const [filters, setFilters] = useState<AttendanceReportFilters>({
     farmId, seasonId, from: `${today().slice(0, 8)}01`, to: today(),
   });
@@ -287,12 +288,24 @@ function AttendanceReportPanel({
     enabled: Boolean(submitted),
   });
   const exportCsv = () => {
-    if (!report.data) return;
+    if (!report.data?.metadata) return;
+    const { metadata, dates, summaries, advances } = report.data;
+    const statusFor = (labourerId: string, date: string) => summaries.find((item) => item.id === labourerId)?.records.find((item) => item.date === date)?.status;
+    const advanceFor = (labourerId: string, date: string) => advances.filter((item) => item.labourerId === labourerId && item.date === date).reduce((sum, item) => sum + item.amount, 0);
     const rows = [
-      ["Labour", "Present Days", "Half Days", "Absent Days", "Payable Days", "Daily Wage", "Total Wage"],
-      ...report.data.summaries.map((summary) => [
-        summary.name, summary.presentDays, summary.halfDays, summary.absentDays, summary.payableDays, summary.dailyWage, summary.totalWage,
+      ["Farm Name", metadata.farmName], ["Season", metadata.seasonName], ["Date From", metadata.from], ["Date To", metadata.to],
+      [], ["Labour Name", "P Total", "Half Day Total", "Absent Total", "Advance Total", ...dates],
+      ...summaries.map((summary) => [
+        summary.name, summary.presentDays, summary.halfDays, summary.absentDays,
+        advances.filter((item) => item.labourerId === summary.id).reduce((sum, item) => sum + item.amount, 0),
+        ...dates.map((date) => {
+          const advance = advanceFor(summary.id, date);
+          return `${attendanceMark(statusFor(summary.id, date))}${advance ? ` | Advance: ${advance}` : ""}`;
+        }),
       ]),
+      ["Grand Total", summaries.reduce((sum, item) => sum + item.presentDays, 0), summaries.reduce((sum, item) => sum + item.halfDays, 0),
+        summaries.reduce((sum, item) => sum + item.absentDays, 0), advances.reduce((sum, item) => sum + item.amount, 0)],
+      ["Daily Payable Total", "", "", "", "", ...dates.map((date) => summaries.reduce((sum, item) => sum + payableValue(statusFor(item.id, date)), 0))],
     ];
     const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll("\"", "\"\"")}"`).join(",")).join("\n");
     const href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
@@ -300,9 +313,18 @@ function AttendanceReportPanel({
     link.href = href; link.download = `attendance-report-${filters.from}-${filters.to}.csv`; link.click();
     URL.revokeObjectURL(href);
   };
+  const data = report.data;
+  const totalPresent = data?.summaries.reduce((sum, item) => sum + item.presentDays, 0) ?? 0;
+  const totalHalf = data?.summaries.reduce((sum, item) => sum + item.halfDays, 0) ?? 0;
+  const totalAbsent = data?.summaries.reduce((sum, item) => sum + item.absentDays, 0) ?? 0;
+  const totalAdvance = data?.advances.reduce((sum, item) => sum + item.amount, 0) ?? 0;
+  const totalWage = data?.summaries.reduce((sum, item) => sum + item.totalWage, 0) ?? 0;
+  const workerAdvance = (labourerId: string) => data?.advances.filter((item) => item.labourerId === labourerId).reduce((sum, item) => sum + item.amount, 0) ?? 0;
+  const dailyAdvance = (labourerId: string, date: string) => data?.advances.filter((item) => item.labourerId === labourerId && item.date === date).reduce((sum, item) => sum + item.amount, 0) ?? 0;
+  const dailyStatus = (labourerId: string, date: string) => data?.records.find((item) => item.labourerId === labourerId && item.date === date)?.status;
   return (
     <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}>
-      <section className="attendance-report-dialog" role="dialog" aria-modal="true" aria-labelledby="attendance-report-title" onClick={(event) => event.stopPropagation()}>
+      <section className={`attendance-report-dialog ${data?.metadata ? "attendance-report-dialog--preview" : ""}`} role="dialog" aria-modal="true" aria-labelledby="attendance-report-title" onClick={(event) => event.stopPropagation()}>
         <header className="attendance-report-header">
           <div><span>Workforce</span><h2 id="attendance-report-title">Attendance Report</h2></div>
           <button className="attendance-report-close" type="button" onClick={onClose} aria-label="Close report"><X size={19} /></button>
@@ -325,22 +347,46 @@ function AttendanceReportPanel({
           {report.isFetching && <p>Generating report...</p>}
           {report.isError && <p className="error">{report.error.message}</p>}
           {report.data && !report.data.summaries.length && <Empty>No attendance records found for this period.</Empty>}
-          {report.data && report.data.summaries.length > 0 && <>
-            <div className="attendance-report-actions"><button type="button" onClick={() => window.print()}>Print Report</button><button type="button" onClick={exportCsv}>Export CSV</button></div>
-            {report.data.summaries.map((summary) => <article className="attendance-report-card" key={summary.id}>
-              <h3>{summary.name}</h3>
-              <dl className="worker-stats">
-                <div><dt>Present</dt><dd>{summary.presentDays}</dd></div><div><dt>Half Days</dt><dd>{summary.halfDays}</dd></div>
-                <div><dt>Absent</dt><dd>{summary.absentDays}</dd></div><div><dt>Payable Days</dt><dd>{summary.payableDays}</dd></div>
-                <div><dt>Daily Wage</dt><dd>{money(summary.dailyWage)}</dd></div><div><dt>Total Wage</dt><dd>{money(summary.totalWage)}</dd></div>
-              </dl>
-              <div className="attendance-report-breakdown">{summary.records.map((record) => <span key={record.id}>{record.date}: {record.status.replace("_", " ")}</span>)}</div>
-            </article>)}
-          </>}
+          {data?.metadata && data.summaries.length > 0 && <AttendanceRegister
+            data={data} syncStatus={sync.status} totalPresent={totalPresent} totalHalf={totalHalf} totalAbsent={totalAbsent}
+            totalAdvance={totalAdvance} totalWage={totalWage} workerAdvance={workerAdvance} dailyAdvance={dailyAdvance}
+            dailyStatus={dailyStatus} onClose={onClose} onCsv={exportCsv}
+          />}
         </div>}
       </section>
     </div>
   );
+}
+
+const payableValue = (status?: AttendanceReportStatus) => status === "present" ? 1 : status === "half_day" ? 0.5 : 0;
+const attendanceMark = (status?: AttendanceReportStatus) => status === "present" ? "P" : status === "half_day" ? "1/2" : status === "absent" ? "A" : "-";
+
+function AttendanceRegister({ data, syncStatus, totalPresent, totalHalf, totalAbsent, totalAdvance, totalWage, workerAdvance, dailyAdvance, dailyStatus, onClose, onCsv }: {
+  data: import("../lib/api").AttendanceReportData; syncStatus: string; totalPresent: number; totalHalf: number; totalAbsent: number;
+  totalAdvance: number; totalWage: number; workerAdvance: (id: string) => number; dailyAdvance: (id: string, date: string) => number;
+  dailyStatus: (id: string, date: string) => AttendanceReportStatus | undefined; onClose: () => void; onCsv: () => void;
+}) {
+  const metadata = data.metadata!;
+  return <section className="attendance-register-preview">
+    <div className="attendance-report-actions no-print"><button type="button" onClick={() => window.print()}>Print</button><button type="button" onClick={() => window.print()}>Export PDF</button><button type="button" onClick={onCsv}>Export CSV</button><button type="button" onClick={onClose}>Close</button></div>
+    <header className="register-header">
+      <div><span>Farm Labour Register</span><h2>Attendance Report</h2><strong>{metadata.farmName}</strong><p>Season: {metadata.seasonName}</p></div>
+      <dl><div><dt>Date range</dt><dd>{metadata.from} to {metadata.to}</dd></div><div><dt>Generated</dt><dd>{new Date(metadata.generatedAt).toLocaleString()}</dd></div><div><dt>Generated by</dt><dd>{metadata.generatedBy}</dd></div><div><dt>Sync status</dt><dd>{syncStatus}</dd></div></dl>
+    </header>
+    <div className="register-summary">
+      <span>Total labour<strong>{data.summaries.length}</strong></span><span>Total P<strong>{totalPresent}</strong></span><span>Total 1/2<strong>{totalHalf}</strong></span>
+      <span>Total A<strong>{totalAbsent}</strong></span><span>Total advance<strong>{money(totalAdvance)}</strong></span><span>Total wages<strong>{money(totalWage)}</strong></span>
+    </div>
+    <div className="register-table-wrap"><table className="attendance-register-table">
+      <thead><tr><th>#</th><th>Labour Name</th><th>P</th><th>1/2</th><th>A</th><th>Advance</th>{data.dates.map((date) => <th key={date}>{date.slice(5)}</th>)}</tr></thead>
+      <tbody>{data.summaries.map((summary, index) => <tr key={summary.id}><td>{index + 1}</td><th>{summary.name}</th><td>{summary.presentDays}</td><td>{summary.halfDays}</td><td>{summary.absentDays}</td><td>{money(workerAdvance(summary.id))}</td>
+        {data.dates.map((date) => { const status = dailyStatus(summary.id, date); const advance = dailyAdvance(summary.id, date); return <td className={`register-status register-status--${status ?? "empty"}`} key={date}><b>{attendanceMark(status)}</b>{advance > 0 && <small>Adv: {money(advance)}</small>}</td>; })}
+      </tr>)}</tbody>
+      <tfoot><tr><th colSpan={2}>Grand Total</th><th>{totalPresent}</th><th>{totalHalf}</th><th>{totalAbsent}</th><th>{money(totalAdvance)}</th><th colSpan={data.dates.length}></th></tr>
+      <tr><th colSpan={6}>Daily payable total</th>{data.dates.map((date) => <th key={date}>{data.summaries.reduce((sum, item) => sum + payableValue(dailyStatus(item.id, date)), 0)}</th>)}</tr></tfoot>
+    </table></div>
+    <footer className="register-footer"><span><b>P</b> = Present</span><span><b>1/2</b> = Half Day</span><span><b>A</b> = Absent</span><span><b>-</b> = No record</span></footer>
+  </section>;
 }
 
 function ExpensesModule() {

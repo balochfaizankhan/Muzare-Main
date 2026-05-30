@@ -132,10 +132,16 @@ test("attendance reports calculate payable wages and reject foreign workspace or
       labourerId, date, status,
     }))).statusCode, 200);
   }
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "advance", randomUUID(), {
+    labourerId, date: "2026-05-02", amount: 45, notes: "Midweek advance",
+  }))).statusCode, 200);
   const path = `/v1/workspace/${alpha.workspaceId}/attendance/report?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}&from=2026-05-01&to=2026-05-03`;
   const report = await request(alpha.token, "GET", path);
   assert.equal(report.statusCode, 200);
   assert.equal(report.json().records.length, 3);
+  assert.deepEqual(report.json().advances.map((item: { labourerId: string; date: string; amount: number }) => item), [
+    { id: report.json().advances[0].id, labourerId, date: "2026-05-02", amount: 45 },
+  ]);
   assert.deepEqual(report.json().summaries[0], {
     id: labourerId, name: "Alpha Worker", dailyWage: 120, presentDays: 1, halfDays: 1, absentDays: 1,
     payableDays: 1.5, totalWage: 180, records: report.json().summaries[0].records,
