@@ -284,6 +284,33 @@ test("attendance CSV imports detect Android metadata headers and parse parenthes
   ]);
 });
 
+test("attendance CSV import confirmation accepts nested payloads after warnings are acknowledged", async () => {
+  const labourerId = randomUUID();
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", labourerId, {
+    name: "Warning CSV Worker", group: "General", dailyWage: 75,
+  }))).statusCode, 200);
+  const preview = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/preview`, {
+    farmId: alpha.farmId, seasonId: alpha.seasonId, originalFilename: "warning-register.csv",
+    csvText: ["#,Labour Name,P,1/2,A,Adv (SAR),2026-07-01", "1,Warning CSV Worker,2,0,0,0,P"].join("\n"),
+  });
+  assert.equal(preview.statusCode, 201);
+  assert.equal(preview.json().preview.summary.warnings.length, 1);
+  const confirmation = {
+    importSessionId: preview.json().sessionId, farmId: alpha.farmId, seasonId: alpha.seasonId,
+    confirmation: { warningsAccepted: false, duplicateHandlingMode: "import_missing_only", labourMappings: [] },
+  };
+  assert.equal((await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/confirm`, confirmation)).statusCode, 400);
+  const confirmed = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/confirm`, {
+    ...confirmation, confirmation: { ...confirmation.confirmation, warningsAccepted: true },
+  });
+  assert.equal(confirmed.statusCode, 200);
+  assert.deepEqual(confirmed.json().result, { attendanceCreated: 1, attendanceUpdated: 0, attendanceSkipped: 0, advancesCreated: 0, labourersCreated: 0 });
+
+  const malformed = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/confirm`, {});
+  assert.equal(malformed.statusCode, 400);
+  assert.ok(malformed.json().fields.length > 0);
+});
+
 test("season lifecycle persists active selection and rejects cross-farm or archived references", async () => {
   const secondFarmId = randomUUID();
   const secondFarmSeasonId = randomUUID();

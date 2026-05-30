@@ -107,3 +107,11 @@ test("attendance CSV import is owner-gated, online-only, and keeps register over
   assert.match(styles, /\.attendance-import-table-wrap \{ max-width: 100%; overflow-x: auto; \}/);
   assert.match(styles, /\.attendance-import-dialog \{[\s\S]*max-width: min\(960px, 95vw\);/);
 });
+
+test("attendance CSV confirm sends nested confirmation and blocks unresolved labour rows", async () => {
+  const api = await source("web/src/lib/api.ts");
+  const modulePage = await source("web/src/pages/ModulePage.tsx");
+  assert.match(api, /confirmation: \{[\s\S]*warningsAccepted: input\.warningsAccepted,[\s\S]*duplicateHandlingMode: input\.duplicateHandlingMode,[\s\S]*labourMappings: input\.labourMappings/);
+  assert.match(modulePage, /unresolvedLabourRows\.length > 0 \|\| summary\.errors\.length > 0 \|\| \(summary\.warnings\.length > 0 && !warningsAccepted\)/);
+  assert.match(modulePage, /I understand these warnings and want to continue\./);
+});

@@ -292,11 +292,12 @@ function AttendanceImportPanel({ token, workspaceId, farmId, seasonId, onClose }
   const [preview, setPreview] = useState<AttendanceImportPreview | null>(null);
   const [mappings, setMappings] = useState<AttendanceImportMapping[]>([]);
   const [duplicateMode, setDuplicateMode] = useState<"missing_only" | "skip_existing" | "update_existing">("missing_only");
-  const [warningsConfirmed, setWarningsConfirmed] = useState(false);
+  const [warningsAccepted, setWarningsAccepted] = useState(false);
   const [result, setResult] = useState<AttendanceImportResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const mappingFor = (rowIndex: number) => mappings.find((mapping) => mapping.rowIndex === rowIndex);
+  const unresolvedLabourRows = preview?.rows.filter((row) => !row.matchedLabourerId && !mappingFor(row.rowIndex)) ?? [];
   const setMapping = (mapping: AttendanceImportMapping) => setMappings((current) => [...current.filter((item) => item.rowIndex !== mapping.rowIndex), mapping]);
   const upload = async () => {
     if (!file || !navigator.onLine) {
@@ -317,7 +318,9 @@ function AttendanceImportPanel({ token, workspaceId, farmId, seasonId, onClose }
     if (!preview || !navigator.onLine) { setError("CSV import requires internet connection."); return; }
     setBusy(true); setError("");
     try {
-      const response = await confirmAttendanceImport(token, workspaceId, { sessionId, duplicateMode, warningsConfirmed, mappings });
+      const response = await confirmAttendanceImport(token, workspaceId, {
+        importSessionId: sessionId, farmId, seasonId, duplicateHandlingMode: duplicateMode, warningsAccepted, labourMappings: mappings,
+      });
       setResult(response.result); setStep(5); await refreshOperationalData();
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to import attendance."); }
     finally { setBusy(false); }
@@ -354,17 +357,18 @@ function AttendanceImportPanel({ token, workspaceId, farmId, seasonId, onClose }
               <option value="create">Create new labour</option><option value="skip">Skip this row</option>
             </select></article>;
           })}</div>
-          <button type="button" onClick={() => setStep(4)}>Validate import</button>
+          {unresolvedLabourRows.length > 0 && <p className="attendance-import-error">Resolve each unknown labour row by matching, creating, or skipping it before validation.</p>}
+          <button disabled={unresolvedLabourRows.length > 0} type="button" onClick={() => setStep(4)}>Validate import</button>
         </section>}
         {step === 4 && preview && summary && <section className="attendance-import-card">
           <h3>Validation summary</h3>
           <div className="attendance-import-summary"><span>Labour rows<b>{summary.labourRows}</b></span><span>Date columns<b>{summary.dateColumns}</b></span><span>Attendance records<b>{summary.attendanceRecords}</b></span><span>Existing duplicates<b>{summary.duplicateRecords}</b></span><span>Daily advances<b>{summary.dailyAdvances}</b></span><span>Advance total<b>{money(summary.advanceTotal)}</b></span></div>
           {summary.errors.length > 0 && <div className="attendance-import-errors"><strong>Errors</strong>{summary.errors.map((message) => <p key={message}>{message}</p>)}</div>}
-          {summary.warnings.length > 0 && <div className="attendance-import-warnings"><strong>Warnings</strong>{summary.warnings.map((message) => <p key={message}>{message}</p>)}<label><input type="checkbox" checked={warningsConfirmed} onChange={(event) => setWarningsConfirmed(event.target.checked)} /> I reviewed and confirm these warnings.</label></div>}
+          {summary.warnings.length > 0 && <div className="attendance-import-warnings"><strong>Warnings</strong>{summary.warnings.map((message) => <p key={message}>{message}</p>)}<label><input type="checkbox" checked={warningsAccepted} onChange={(event) => setWarningsAccepted(event.target.checked)} /> I understand these warnings and want to continue.</label></div>}
           <label><span>Duplicate handling</span><select value={duplicateMode} onChange={(event) => setDuplicateMode(event.target.value as typeof duplicateMode)}><option value="missing_only">Import only missing records</option><option value="skip_existing">Skip existing records</option><option value="update_existing">Update existing records</option></select></label>
           <p className="attendance-import-note">Advance Total columns are reference-only. Daily advances found inside date cells will be imported as separate advance records.</p>
           <div className="attendance-import-table-wrap"><table><thead><tr><th>Labour</th>{preview.dateColumns.map((column) => <th key={column.column}>{column.column}</th>)}</tr></thead><tbody>{preview.rows.slice(0, 20).map((row) => <tr key={row.rowIndex}><th>{row.labourName}</th>{row.cells.map((cell) => <td key={cell.column}><b>{attendanceMark(cell.status ?? undefined)}</b>{cell.advanceAmount !== null && <small>{money(cell.advanceAmount)}</small>}</td>)}</tr>)}</tbody></table></div>
-          <button disabled={summary.errors.length > 0 || (summary.warnings.length > 0 && !warningsConfirmed)} type="button" onClick={() => void confirm()}>Confirm Import</button>
+          <button disabled={busy || unresolvedLabourRows.length > 0 || summary.errors.length > 0 || (summary.warnings.length > 0 && !warningsAccepted)} type="button" onClick={() => void confirm()}>{busy ? "Importing..." : "Confirm Import"}</button>
         </section>}
         {step === 5 && result && <section className="attendance-import-card"><h3>Import completed</h3><div className="attendance-import-summary"><span>Attendance created<b>{result.attendanceCreated}</b></span><span>Attendance updated<b>{result.attendanceUpdated}</b></span><span>Attendance skipped<b>{result.attendanceSkipped}</b></span><span>Advances created<b>{result.advancesCreated}</b></span><span>Labour created<b>{result.labourersCreated}</b></span></div><button type="button" onClick={onClose}>Close</button></section>}
         {error && <p className="attendance-import-error">{error}</p>}

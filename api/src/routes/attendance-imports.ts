@@ -23,13 +23,39 @@ const mappingSchema = z.object({
   labourerId: z.string().min(1).optional(),
   dailyWage: z.number().nonnegative().optional(),
   group: z.string().trim().max(100).optional(),
+}).superRefine((mapping, context) => {
+  if (mapping.action === "match" && !mapping.labourerId) {
+    context.addIssue({ code: "custom", path: ["labourerId"], message: "A labourer is required for match decisions." });
+  }
 });
-const confirmSchema = z.object({
-  sessionId: z.string().uuid(),
-  duplicateMode: z.enum(["missing_only", "skip_existing", "update_existing"]).default("missing_only"),
-  warningsConfirmed: z.boolean().default(false),
-  mappings: z.array(mappingSchema).default([]),
+const duplicateModeSchema = z.enum(["missing_only", "skip_existing", "update_existing", "import_missing_only"])
+  .transform((mode) => mode === "import_missing_only" ? "missing_only" as const : mode);
+const confirmationSchema = z.object({
+  warningsAccepted: z.boolean().default(false),
+  duplicateHandlingMode: duplicateModeSchema.default("missing_only"),
+  labourMappings: z.array(mappingSchema).default([]),
 });
+const confirmSchema = z.union([
+  z.object({
+    importSessionId: z.string().uuid(),
+    farmId: z.string().uuid(),
+    seasonId: z.string().uuid(),
+    confirmation: confirmationSchema,
+  }).transform((input) => ({
+    sessionId: input.importSessionId, farmId: input.farmId, seasonId: input.seasonId,
+    warningsConfirmed: input.confirmation.warningsAccepted,
+    duplicateMode: input.confirmation.duplicateHandlingMode,
+    mappings: input.confirmation.labourMappings,
+  })),
+  z.object({
+    sessionId: z.string().uuid(),
+    farmId: z.string().uuid().optional(),
+    seasonId: z.string().uuid().optional(),
+    duplicateMode: duplicateModeSchema.default("missing_only"),
+    warningsConfirmed: z.boolean().default(false),
+    mappings: z.array(mappingSchema).default([]),
+  }),
+]);
 
 type ImportStatus = "present" | "half_day" | "absent";
 type DateCell = { column: string; date: string; status: ImportStatus | null; advanceAmount: number | null; raw: string };
@@ -246,19 +272,31 @@ export async function attendanceImportRoutes(app: FastifyInstance): Promise<void
     if (!request.appUser) return reply;
     const params = paramsSchema.safeParse(request.params);
     const body = confirmSchema.safeParse(request.body);
-    if (!params.success || !body.success) return reply.code(400).send({ message: "A valid attendance import confirmation is required." });
+    if (!params.success) return reply.code(400).send({
+      message: "A valid attendance import confirmation is required.",
+      fields: params.error.issues.map((issue) => issue.path.join(".") || "workspaceId"),
+    });
+    if (!body.success) return reply.code(400).send({
+      message: "A valid attendance import confirmation is required.",
+      fields: body.error.issues.map((issue) => issue.path.join(".") || "confirmation"),
+    });
     const [session] = await db.select().from(attendanceImportSessions).where(and(
       eq(attendanceImportSessions.id, body.data.sessionId), eq(attendanceImportSessions.workspaceId, params.data.workspaceId),
       eq(attendanceImportSessions.uploadedBy, request.appUser.id),
     )).limit(1);
     if (!session) return reply.code(404).send({ message: "Attendance import session was not found." });
     if (session.status === "confirmed") return reply.code(409).send({ message: "Attendance import session has already been confirmed." });
+    if ((body.data.farmId && body.data.farmId !== session.farmId) || (body.data.seasonId && body.data.seasonId !== session.seasonId)) {
+      return reply.code(403).send({ message: "Import confirmation farm and season must match the preview session." });
+    }
     const accessError = await assertImportAccess(params.data.workspaceId, session.farmId, session.seasonId, request.appUser);
     if (accessError) return reply.code(403).send({ message: accessError });
     const parsed = session.parsedPayload as unknown as ImportPayload;
     if (parsed.errors.length) return reply.code(400).send({ message: "Resolve CSV validation errors before importing.", errors: parsed.errors });
     if (parsed.warnings.length && !body.data.warningsConfirmed) return reply.code(400).send({ message: "Confirm validation warnings before importing." });
     const decisions = new Map(body.data.mappings.map((mapping) => [mapping.rowIndex, mapping]));
+    const unresolvedRows = parsed.rows.filter((row) => !row.matchedLabourerId && !decisions.has(row.rowIndex)).map((row) => row.labourName);
+    if (unresolvedRows.length) return reply.code(400).send({ message: "Resolve all labour mappings before importing.", fields: unresolvedRows });
     const result = await db.transaction(async (tx) => {
       const labourers = await selectedLabourers(params.data.workspaceId, session.farmId);
       const validLabour = new Set(labourers.map((labourer) => labourer.id));

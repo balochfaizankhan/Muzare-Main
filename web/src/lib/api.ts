@@ -140,8 +140,9 @@ async function apiRequest<T>(path: string, options: RequestInit = {}, token?: st
   });
 
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { message?: string } | null;
-    throw new Error(body?.message ?? `Request failed with status ${response.status}.`);
+    const body = (await response.json().catch(() => null)) as { message?: string; fields?: string[] } | null;
+    const fields = body?.fields?.length ? ` Missing or invalid fields: ${body.fields.join(", ")}.` : "";
+    throw new Error(`${body?.message ?? `Request failed with status ${response.status}.`}${fields}`);
   }
 
   if (response.status === 204) return undefined as T;
@@ -225,7 +226,15 @@ export const previewAttendanceImport = (token: string, workspaceId: string, inpu
   `/api/workspaces/${workspaceId}/attendance-imports/preview`, { method: "POST", body: JSON.stringify(input) }, token,
 );
 export const confirmAttendanceImport = (token: string, workspaceId: string, input: {
-  sessionId: string; duplicateMode: "missing_only" | "skip_existing" | "update_existing"; warningsConfirmed: boolean; mappings: AttendanceImportMapping[];
+  importSessionId: string; farmId: string; seasonId: string; duplicateHandlingMode: "missing_only" | "skip_existing" | "update_existing";
+  warningsAccepted: boolean; labourMappings: AttendanceImportMapping[];
 }) => apiRequest<{ sessionId: string; result: AttendanceImportResult }>(
-  `/api/workspaces/${workspaceId}/attendance-imports/confirm`, { method: "POST", body: JSON.stringify(input) }, token,
+  `/api/workspaces/${workspaceId}/attendance-imports/confirm`, { method: "POST", body: JSON.stringify({
+    importSessionId: input.importSessionId, farmId: input.farmId, seasonId: input.seasonId,
+    confirmation: {
+      warningsAccepted: input.warningsAccepted,
+      duplicateHandlingMode: input.duplicateHandlingMode,
+      labourMappings: input.labourMappings,
+    },
+  }) }, token,
 );
