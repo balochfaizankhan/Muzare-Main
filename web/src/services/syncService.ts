@@ -36,11 +36,6 @@ async function cacheRecord(entity: OperationalEntity, record: OperationalRecordE
   await tableFor(entity).put({ ...record, workspaceId: context.workspaceId, farmId, seasonId, pendingSync } as LocalRecord);
 }
 
-function envelope(entity: OperationalEntity, record: LocalRecord): OperationalRecordEnvelope {
-  if (!context) throw new Error("Workspace synchronization is not initialized.");
-  return { ...context, entity, record };
-}
-
 export async function queueOfflineRecord(entity: OperationalEntity, record: LocalRecord): Promise<void> {
   if (!context) throw new Error("Workspace synchronization is not initialized.");
   await cacheRecord(entity, record, true);
@@ -52,25 +47,15 @@ export async function queueOfflineRecord(entity: OperationalEntity, record: Loca
   };
   await offlineDb.pendingMutations.put(mutation);
   emit({ status: navigator.onLine ? "pending" : "offline", pendingCount: await getPendingCount() });
-  notify("Saved locally. Will sync automatically when connection is restored.");
+  notify(navigator.onLine ? "Saved locally. Syncing..." : "Saved locally. Will sync automatically when connection is restored.");
+  window.dispatchEvent(new Event("muzare-local-data-change"));
 }
 
 export async function persistOperationalRecord<T extends LocalRecord>(entity: OperationalEntity, record: T): Promise<T> {
-  const nextRecord = { ...record, updatedAt: new Date().toISOString(), pendingSync: false };
-  try {
-    if (!navigator.onLine) throw new Error("Browser is offline.");
-    if (!context) throw new Error("Workspace synchronization is not initialized.");
-    const response = await saveOperationalRecord(context.token, envelope(entity, nextRecord));
-    const saved = { ...response.record, pendingSync: false } as T;
-    await cacheRecord(entity, saved, false);
-    await offlineDb.pendingMutations.delete(`${context.workspaceId}:${entity}:${record.id}`);
-    const pendingCount = await getPendingCount();
-    emit({ status: pendingCount ? "pending" : "online", pendingCount });
-    return saved;
-  } catch {
-    await queueOfflineRecord(entity, nextRecord);
-    return { ...nextRecord, pendingSync: true };
-  }
+  const nextRecord = { ...record, updatedAt: new Date().toISOString(), pendingSync: true };
+  await queueOfflineRecord(entity, nextRecord);
+  if (navigator.onLine) void syncPendingRecords();
+  return nextRecord;
 }
 
 export async function syncPendingRecords(): Promise<{ synced: number; pending: number }> {
@@ -90,6 +75,8 @@ export async function syncPendingRecords(): Promise<{ synced: number; pending: n
         workspaceId: context.workspaceId, farmId: mutation.farmId || context.farmId, seasonId: mutation.seasonId || context.seasonId,
         entity: mutation.entity, record: normalizeRecord(mutation.payload as OperationalRecordEnvelope["record"]),
       });
+      const latest = await offlineDb.pendingMutations.get(mutation.id);
+      if (latest?.updatedAt !== mutation.updatedAt) continue;
       await cacheRecord(mutation.entity, response.record, false, mutation.farmId, mutation.seasonId);
       await offlineDb.pendingMutations.delete(mutation.id);
       synced += 1;

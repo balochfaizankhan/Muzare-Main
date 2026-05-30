@@ -39,7 +39,7 @@ function useData<T>(load: () => Promise<T[]>, setup?: () => Promise<void>) {
     void refresh();
   }, [refresh]);
 
-  return [records, refresh] as const;
+  return [records, refresh, setRecords] as const;
 }
 
 function Empty({ children }: { children: ReactNode }) {
@@ -61,7 +61,7 @@ function WorkforceModule() {
   const loadLabourers = useCallback(async () => (await workspaceRecords(offlineDb.labourers)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadAttendance = useCallback(async () => (await workspaceRecords(offlineDb.attendance)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const [labourers, refreshLabourers] = useData(loadLabourers);
-  const [attendance, refreshAttendance] = useData(loadAttendance);
+  const [attendance, , setAttendance] = useData(loadAttendance);
   const [name, setName] = useState("");
   const [group, setGroup] = useState("General");
   const [wage, setWage] = useState("");
@@ -69,6 +69,7 @@ function WorkforceModule() {
   const [attendanceSearch, setAttendanceSearch] = useState("");
   const [attendanceFilter, setAttendanceFilter] = useState<Attendance["status"] | "all">("all");
   const [selectedLabourer, setSelectedLabourer] = useState<Labourer | null>(null);
+  const [markingLabourers, setMarkingLabourers] = useState<Set<string>>(() => new Set());
   const [showReport, setShowReport] = useState(false);
 
   const addLabourer = async (event: FormEvent) => {
@@ -81,14 +82,25 @@ function WorkforceModule() {
   };
 
   const markAttendance = async (targetLabourerId: string, status: Attendance["status"]) => {
-    const existing = await offlineDb.attendance
+    if (markingLabourers.has(targetLabourerId)) return;
+    setMarkingLabourers((current) => new Set(current).add(targetLabourerId));
+    const existing = attendance.find((entry) =>
+      entry.labourerId === targetLabourerId && entry.workspaceId === getActiveWorkspaceId()
+      && entry.farmId === getActiveFarmId() && entry.seasonId === getActiveSeasonId() && entry.date === date
+    ) ?? await offlineDb.attendance
       .where("labourerId")
       .equals(targetLabourerId)
       .filter((entry) => entry.workspaceId === getActiveWorkspaceId() && entry.farmId === getActiveFarmId() && entry.seasonId === getActiveSeasonId() && entry.date === date)
       .first();
     const record: Attendance = existing ? { ...existing, status, updatedAt: new Date().toISOString() } : { ...makeLocalRecord(), labourerId: targetLabourerId, date, status };
-    await persistOperationalRecord("attendance", record);
-    await refreshAttendance();
+    setAttendance((current) => [record, ...current.filter((entry) => entry.id !== record.id)]);
+    try {
+      await persistOperationalRecord("attendance", record);
+    } finally {
+      setMarkingLabourers((current) => {
+        const next = new Set(current); next.delete(targetLabourerId); return next;
+      });
+    }
   };
 
   const names = new Map(labourers.map((labourer) => [labourer.id, labourer.name]));
@@ -170,9 +182,9 @@ function WorkforceModule() {
                     <span>Yesterday: {previousStatus ? previousStatus === "half_day" ? "1/2" : previousStatus === "present" ? "P" : "A" : "-"}</span>
                   </div>
                   <div className="attendance-status-buttons">
-                    <button className={currentStatus === "present" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "present")}>P</button>
-                    <button className={currentStatus === "half_day" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "half_day")}>1/2</button>
-                    <button className={currentStatus === "absent" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "absent")}>A</button>
+                    <button disabled={markingLabourers.has(labourer.id)} className={currentStatus === "present" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "present")}>P</button>
+                    <button disabled={markingLabourers.has(labourer.id)} className={currentStatus === "half_day" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "half_day")}>1/2</button>
+                    <button disabled={markingLabourers.has(labourer.id)} className={currentStatus === "absent" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "absent")}>A</button>
                   </div>
                 </article>
               );

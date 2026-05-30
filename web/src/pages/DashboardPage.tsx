@@ -154,7 +154,11 @@ export function DashboardPage() {
   useEffect(() => {
     void loadLocalDashboard();
     window.addEventListener("muzare-data-refresh", loadLocalDashboard);
-    return () => window.removeEventListener("muzare-data-refresh", loadLocalDashboard);
+    window.addEventListener("muzare-local-data-change", loadLocalDashboard);
+    return () => {
+      window.removeEventListener("muzare-data-refresh", loadLocalDashboard);
+      window.removeEventListener("muzare-local-data-change", loadLocalDashboard);
+    };
   }, [loadLocalDashboard]);
 
   const farm = query.data?.farms.find((item) => item.id === query.data.activeFarmId);

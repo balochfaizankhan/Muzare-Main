@@ -42,3 +42,24 @@ test("attendance report query keys include tenant context and date range", async
   const modulePage = await source("web/src/pages/ModulePage.tsx");
   assert.match(modulePage, /queryKey: \["attendance-report", workspaceId, farmId, seasonId, submitted\?\.from, submitted\?\.to, submitted\?\.labourId, submitted\?\.status\]/);
 });
+
+test("operational writes queue locally before background sync", async () => {
+  const sync = await source("web/src/services/syncService.ts");
+  assert.match(sync, /await queueOfflineRecord\(entity, nextRecord\);\s+if \(navigator\.onLine\) void syncPendingRecords\(\);/);
+  assert.match(sync, /if \(latest\?\.updatedAt !== mutation\.updatedAt\) continue;/);
+});
+
+test("attendance marking updates local UI immediately and reuses an existing daily record", async () => {
+  const modulePage = await source("web/src/pages/ModulePage.tsx");
+  assert.match(modulePage, /attendance\.find\(\(entry\) =>[\s\S]*entry\.labourerId === targetLabourerId[\s\S]*entry\.date === date/);
+  assert.match(modulePage, /setAttendance\(\(current\) => \[record, \.\.\.current\.filter\(\(entry\) => entry\.id !== record\.id\)\]\);\s+try \{\s+await persistOperationalRecord/);
+  assert.match(modulePage, /disabled=\{markingLabourers\.has\(labourer\.id\)\}/);
+});
+
+test("mobile styles contain page overflow and keep navigation scrollable", async () => {
+  const styles = await source("web/src/styles.css");
+  assert.match(styles, /html,\s*body \{[\s\S]*overflow-x: hidden;/);
+  assert.match(styles, /#root \{[\s\S]*overflow-x: clip;/);
+  assert.match(styles, /\.app-sidebar \{[\s\S]*overflow-x: auto;/);
+  assert.match(styles, /\.shell-header \.toolbar__actions \{[\s\S]*flex-wrap: wrap;/);
+});
