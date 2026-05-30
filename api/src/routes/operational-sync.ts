@@ -21,6 +21,13 @@ const recordSchema = z.object({
     updatedAt: z.string().datetime(),
   }).passthrough(),
 });
+const deleteRecordSchema = z.object({
+  workspaceId: z.string().uuid(),
+  farmId: z.string().uuid(),
+  seasonId: z.string().uuid(),
+  entity: z.literal("attendance"),
+  recordId: z.string().min(1),
+});
 const localRecords = new Map<string, z.infer<typeof recordSchema>>();
 
 function requireWorkspaceWrite(user: AuthenticatedUser, workspaceId: string) {
@@ -138,5 +145,48 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       ? await db.update(operationalRecords).set(values).where(eq(operationalRecords.id, existing.id)).returning()
       : await db.insert(operationalRecords).values(values).returning();
     return { record: { ...saved!.payload, id: saved!.clientRecordId, updatedAt: saved!.clientUpdatedAt.toISOString() }, conflict: false };
+  });
+
+  app.delete("/v1/workspace/operational-records", { preHandler: requireUser }, async (request, reply) => {
+    if (!request.appUser) return reply;
+    const parsed = deleteRecordSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ message: "A valid attendance clear request is required." });
+    if (!requireWorkspaceWrite(request.appUser, parsed.data.workspaceId)) {
+      return reply.code(403).send({ message: "Workspace record submission permission is required." });
+    }
+    if (request.appUser.workspaceId !== parsed.data.workspaceId) {
+      return reply.code(403).send({ message: "Select this workspace before clearing attendance." });
+    }
+    if (localDevelopmentMode) {
+      localRecords.delete(`${parsed.data.workspaceId}:${parsed.data.entity}:${parsed.data.recordId}`);
+      return reply.code(204).send();
+    }
+    const selected = await sessionContext(request.sessionId);
+    if (!selected?.activeFarmId || parsed.data.farmId !== selected.activeFarmId) {
+      return reply.code(403).send({ message: "Select the active farm before clearing attendance." });
+    }
+    if (!selected.activeSeasonId || parsed.data.seasonId !== selected.activeSeasonId) {
+      return reply.code(403).send({ message: "Select an active season before clearing attendance." });
+    }
+    const ownershipError = await validateTenantReferences(parsed.data.workspaceId, {
+      farmId: parsed.data.farmId,
+      seasonId: parsed.data.seasonId,
+    });
+    if (ownershipError) return reply.code(403).send({ message: ownershipError });
+    const [deleted] = await db.delete(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, parsed.data.workspaceId),
+      eq(operationalRecords.farmId, parsed.data.farmId),
+      eq(operationalRecords.seasonId, parsed.data.seasonId),
+      eq(operationalRecords.entityType, parsed.data.entity),
+      eq(operationalRecords.clientRecordId, parsed.data.recordId),
+    )).returning({ id: operationalRecords.id });
+    if (deleted) {
+      await db.insert(auditLogs).values({
+        workspaceId: parsed.data.workspaceId, userId: request.appUser.id, farmId: parsed.data.farmId,
+        action: "attendance_unmarked", entityType: parsed.data.entity, entityId: deleted.id,
+        details: { clientRecordId: parsed.data.recordId },
+      });
+    }
+    return reply.code(204).send();
   });
 }

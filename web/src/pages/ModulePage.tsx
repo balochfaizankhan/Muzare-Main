@@ -24,7 +24,7 @@ import {
   type Sale,
   type Voucher,
 } from "../lib/offline-db";
-import { persistOperationalRecord, refreshOperationalData } from "../services/syncService";
+import { deleteOperationalRecord, persistOperationalRecord, refreshOperationalData } from "../services/syncService";
 
 export type ModuleKey = "workforce" | "expenses" | "sales" | "dispatch" | "accounts" | "partnerLedger";
 
@@ -100,9 +100,14 @@ function WorkforceModule() {
       .equals(targetLabourerId)
       .filter((entry) => entry.workspaceId === getActiveWorkspaceId() && entry.farmId === getActiveFarmId() && entry.seasonId === getActiveSeasonId() && entry.date === date)
       .first();
-    const record: Attendance = existing ? { ...existing, status, updatedAt: new Date().toISOString() } : { ...makeLocalRecord(), labourerId: targetLabourerId, date, status };
-    setAttendance((current) => [record, ...current.filter((entry) => entry.id !== record.id)]);
     try {
+      if (existing?.status === status) {
+        setAttendance((current) => current.filter((entry) => entry.id !== existing.id));
+        await deleteOperationalRecord("attendance", existing);
+        return;
+      }
+      const record: Attendance = existing ? { ...existing, status, updatedAt: new Date().toISOString() } : { ...makeLocalRecord(), labourerId: targetLabourerId, date, status };
+      setAttendance((current) => [record, ...current.filter((entry) => entry.id !== record.id)]);
       await persistOperationalRecord("attendance", record);
     } finally {
       setMarkingLabourers((current) => {

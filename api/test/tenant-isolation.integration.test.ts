@@ -97,6 +97,28 @@ test("Alpha and Bravo operational records remain isolated", async () => {
   assert.equal((await request(bravo.token, "GET", `/v1/workspace/${alpha.workspaceId}/operational-records`)).statusCode, 403);
 });
 
+test("attendance can be cleared idempotently only inside the active tenant context", async () => {
+  const labourerId = randomUUID();
+  const attendanceId = randomUUID();
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", labourerId, {
+    name: "Toggle Worker", group: "General", dailyWage: 90,
+  }))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "attendance", attendanceId, {
+    labourerId, date: "2026-05-30", status: "present",
+  }))).statusCode, 200);
+  const reportPath = `/v1/workspace/${alpha.workspaceId}/attendance/report?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}&from=2026-05-30&to=2026-05-30`;
+  assert.equal((await request(alpha.token, "GET", reportPath)).json().records.some((record: { id: string }) => record.id === attendanceId), true);
+  const clearPayload = {
+    workspaceId: alpha.workspaceId, farmId: alpha.farmId, seasonId: alpha.seasonId, entity: "attendance", recordId: attendanceId,
+  };
+  assert.equal((await request(bravo.token, "DELETE", "/v1/workspace/operational-records", clearPayload)).statusCode, 403);
+  assert.equal((await request(alpha.token, "DELETE", "/v1/workspace/operational-records", clearPayload)).statusCode, 204);
+  assert.equal((await request(alpha.token, "DELETE", "/v1/workspace/operational-records", clearPayload)).statusCode, 204);
+  const alphaRecords = (await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/operational-records`)).json().records;
+  assert.equal(alphaRecords.some((record: { record: { id: string } }) => record.record.id === attendanceId), false);
+  assert.equal((await request(alpha.token, "GET", reportPath)).json().records.some((record: { id: string }) => record.id === attendanceId), false);
+});
+
 test("foreign farm, season, account, ledger, and approval references are rejected", async () => {
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", {
     ...envelope(alpha, "sale"), farmId: bravo.farmId, seasonId: bravo.seasonId,

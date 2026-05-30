@@ -49,11 +49,18 @@ test("operational writes queue locally before background sync", async () => {
   assert.match(sync, /if \(latest\?\.updatedAt !== mutation\.updatedAt\) continue;/);
 });
 
-test("attendance marking updates local UI immediately and reuses an existing daily record", async () => {
+test("attendance marking updates local UI immediately, reuses a daily record, and toggles the active status off", async () => {
   const modulePage = await source("web/src/pages/ModulePage.tsx");
+  const sync = await source("web/src/services/syncService.ts");
+  const api = await source("web/src/lib/api.ts");
   assert.match(modulePage, /attendance\.find\(\(entry\) =>[\s\S]*entry\.labourerId === targetLabourerId[\s\S]*entry\.date === date/);
-  assert.match(modulePage, /setAttendance\(\(current\) => \[record, \.\.\.current\.filter\(\(entry\) => entry\.id !== record\.id\)\]\);\s+try \{\s+await persistOperationalRecord/);
+  assert.match(modulePage, /if \(existing\?\.status === status\) \{[\s\S]*setAttendance\(\(current\) => current\.filter\(\(entry\) => entry\.id !== existing\.id\)\);[\s\S]*await deleteOperationalRecord\("attendance", existing\);/);
+  assert.match(modulePage, /setAttendance\(\(current\) => \[record, \.\.\.current\.filter\(\(entry\) => entry\.id !== record\.id\)\]\);\s+await persistOperationalRecord/);
   assert.match(modulePage, /disabled=\{markingLabourers\.has\(labourer\.id\)\}/);
+  assert.match(sync, /operation: "delete"/);
+  assert.match(sync, /if \(mutation\.operation === "delete"\) \{[\s\S]*await deleteOperationalRecordFromApi/);
+  assert.match(sync, /pendingDeletes\.has\(`\$\{context\.workspaceId\}:\$\{item\.entity\}:\$\{item\.record\.id\}`\)/);
+  assert.match(api, /apiRequest<void>\("\/v1\/workspace\/operational-records", \{ method: "DELETE"/);
 });
 
 test("mobile styles contain page overflow and keep navigation scrollable", async () => {

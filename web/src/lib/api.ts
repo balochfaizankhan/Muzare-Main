@@ -214,6 +214,8 @@ export const rejectSignup = (token: string, userId: string) =>
   apiRequest<void>("/v1/admin/approvals/reject", { method: "POST", body: JSON.stringify({ userId }) }, token);
 export const saveOperationalRecord = (token: string, input: OperationalRecordEnvelope) =>
   apiRequest<{ record: OperationalRecordEnvelope["record"]; conflict: boolean }>("/v1/workspace/operational-records", { method: "POST", body: JSON.stringify(input) }, token);
+export const deleteOperationalRecord = (token: string, input: Omit<OperationalRecordEnvelope, "record"> & { recordId: string }) =>
+  apiRequest<void>("/v1/workspace/operational-records", { method: "DELETE", body: JSON.stringify(input) }, token);
 export const fetchOperationalRecords = (token: string, workspaceId: string) =>
   apiRequest<{ records: OperationalRecordEnvelope[] }>(`/v1/workspace/${workspaceId}/operational-records`, {}, token);
 export type LabourDeletionPreview = { labourId: string; labourName: string; linkedRecordCount: number; action: "deactivate" | "delete" };

@@ -1,4 +1,4 @@
-import { fetchBootstrap, fetchOperationalRecords, saveOperationalRecord, type OperationalEntity, type OperationalRecordEnvelope } from "../lib/api";
+import { deleteOperationalRecord as deleteOperationalRecordFromApi, fetchBootstrap, fetchOperationalRecords, saveOperationalRecord, type OperationalEntity, type OperationalRecordEnvelope } from "../lib/api";
 import { clearCachedData, offlineDb, setActiveFarmId, setActiveSeasonId, setActiveWorkspaceId, type LocalRecord, type PendingMutation } from "../lib/offline-db";
 import type { Table } from "dexie";
 
@@ -58,6 +58,22 @@ export async function persistOperationalRecord<T extends LocalRecord>(entity: Op
   return nextRecord;
 }
 
+export async function deleteOperationalRecord(entity: OperationalEntity, record: LocalRecord): Promise<void> {
+  if (!context) throw new Error("Workspace synchronization is not initialized.");
+  const queuedAt = new Date().toISOString();
+  await tableFor(entity).delete(record.id);
+  await offlineDb.pendingMutations.put({
+    id: `${context.workspaceId}:${entity}:${record.id}`, entity, operation: "delete",
+    payload: { ...record, updatedAt: queuedAt, pendingSync: true }, attempts: 0,
+    workspaceId: context.workspaceId, farmId: record.farmId ?? context.farmId, seasonId: record.seasonId ?? context.seasonId,
+    createdAt: queuedAt, updatedAt: queuedAt,
+  });
+  emit({ status: navigator.onLine ? "pending" : "offline", pendingCount: await getPendingCount() });
+  notify(navigator.onLine ? "Attendance cleared locally. Syncing..." : "Attendance cleared locally. Will sync automatically when connection is restored.");
+  window.dispatchEvent(new Event("muzare-local-data-change"));
+  if (navigator.onLine) void syncPendingRecords();
+}
+
 export async function syncPendingRecords(): Promise<{ synced: number; pending: number }> {
   if (syncing) return { synced: 0, pending: await getPendingCount() };
   if (!navigator.onLine || !context) {
@@ -71,6 +87,18 @@ export async function syncPendingRecords(): Promise<{ synced: number; pending: n
     .filter((mutation) => mutation.farmId === context!.farmId && mutation.seasonId === context!.seasonId);
   for (const mutation of pendingRecords) {
     try {
+      if (mutation.operation === "delete") {
+        await deleteOperationalRecordFromApi(context.token, {
+          workspaceId: context.workspaceId, farmId: mutation.farmId || context.farmId, seasonId: mutation.seasonId || context.seasonId,
+          entity: mutation.entity, recordId: (mutation.payload as LocalRecord).id,
+        });
+        const latest = await offlineDb.pendingMutations.get(mutation.id);
+        if (latest?.updatedAt !== mutation.updatedAt) continue;
+        await tableFor(mutation.entity).delete((mutation.payload as LocalRecord).id);
+        await offlineDb.pendingMutations.delete(mutation.id);
+        synced += 1;
+        continue;
+      }
       const response = await saveOperationalRecord(context.token, {
         workspaceId: context.workspaceId, farmId: mutation.farmId || context.farmId, seasonId: mutation.seasonId || context.seasonId,
         entity: mutation.entity, record: normalizeRecord(mutation.payload as OperationalRecordEnvelope["record"]),
@@ -119,7 +147,13 @@ export async function refreshOperationalData(): Promise<void> {
   try {
     const result = await fetchOperationalRecords(context.token, context.workspaceId);
     await pruneSynchronizedCache(result.records);
-    for (const item of result.records) await cacheRecord(item.entity, item.record, false, item.farmId ?? undefined, item.seasonId ?? undefined);
+    const pendingDeletes = new Set((await offlineDb.pendingMutations.where("workspaceId").equals(context.workspaceId).toArray())
+      .filter((item) => item.operation === "delete")
+      .map((item) => item.id));
+    for (const item of result.records) {
+      if (pendingDeletes.has(`${context.workspaceId}:${item.entity}:${item.record.id}`)) continue;
+      await cacheRecord(item.entity, item.record, false, item.farmId ?? undefined, item.seasonId ?? undefined);
+    }
     const lastSyncTime = new Date().toISOString();
     localStorage.setItem(lastSyncKey(context.workspaceId), lastSyncTime);
     emit({ status: (await getPendingCount()) ? "pending" : "online", lastSyncTime, pendingCount: await getPendingCount() });
