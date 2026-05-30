@@ -256,6 +256,34 @@ test("attendance CSV imports can create unknown labour and import advance-only d
   assert.deepEqual(confirmed.json().result, { attendanceCreated: 1, attendanceUpdated: 0, attendanceSkipped: 0, advancesCreated: 1, labourersCreated: 1 });
 });
 
+test("attendance CSV imports detect Android metadata headers and parse parenthesized daily advances", async () => {
+  const labourerId = randomUUID();
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", labourerId, {
+    name: "Android CSV Worker", group: "General", dailyWage: 90,
+  }))).statusCode, 200);
+  const csvText = [
+    "Labour Attendance Report",
+    "From:,2026-06-01,To:,2026-06-04",
+    "",
+    "#,Labour Name,P,1/2,A,Adv (SAR),2026-06-01,2026-06-02,2026-06-03,2026-06-04",
+    "1,Android CSV Worker,1,1,1,2700,P (Adv:1000),A (Adv:500),H (Adv:200),- (Adv:1000)",
+  ].join("\n");
+  const preview = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/preview`, {
+    farmId: alpha.farmId, seasonId: alpha.seasonId, originalFilename: "29-05 attendance.csv", csvText,
+  });
+  assert.equal(preview.statusCode, 201);
+  assert.deepEqual(preview.json().preview.summary, {
+    labourRows: 1, dateColumns: 4, attendanceRecords: 3, dailyAdvances: 4, advanceTotal: 2700,
+    duplicateRecords: 0, unknownLabourRows: 0, errors: [], warnings: [],
+  });
+  assert.deepEqual(preview.json().preview.rows[0].cells.map((cell: { status: string | null; advanceAmount: number | null }) => cell), [
+    { column: "2026-06-01", date: "2026-06-01", raw: "P (Adv:1000)", status: "present", advanceAmount: 1000 },
+    { column: "2026-06-02", date: "2026-06-02", raw: "A (Adv:500)", status: "absent", advanceAmount: 500 },
+    { column: "2026-06-03", date: "2026-06-03", raw: "H (Adv:200)", status: "half_day", advanceAmount: 200 },
+    { column: "2026-06-04", date: "2026-06-04", raw: "- (Adv:1000)", status: null, advanceAmount: 1000 },
+  ]);
+});
+
 test("season lifecycle persists active selection and rejects cross-farm or archived references", async () => {
   const secondFarmId = randomUUID();
   const secondFarmSeasonId = randomUUID();

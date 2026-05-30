@@ -95,12 +95,15 @@ function parseDateColumn(value: string, from?: string, to?: string) {
 function parseDateCell(value: string): { status: ImportStatus | null; advanceAmount: number | null; error?: string } {
   const raw = value.trim();
   if (!raw || /^n\/a$/i.test(raw)) return { status: null, advanceAmount: null };
-  const statusMatch = raw.match(/^(present|absent|half\s*day|half|1\/2|½|p|h|a|-)/i);
+  const parenthesizedAdvance = raw.match(/\(\s*adv\s*:\s*(?:sar\s*)?([\d,]+(?:\.\d+)?)\s*(?:sar)?\s*\)/i);
+  const valueWithoutParenthesizedAdvance = parenthesizedAdvance ? raw.replace(parenthesizedAdvance[0], "").trim() : raw;
+  const statusMatch = valueWithoutParenthesizedAdvance.match(/^(present|absent|half\s*day|half|1\/2|½|p|h|a|-)/i);
   const token = statusMatch?.[1]?.toLowerCase().replace(/\s+/g, " ") ?? "";
   const status = token === "p" || token === "present" ? "present"
     : token === "h" || token === "half" || token === "half day" || token === "1/2" || token === "½" ? "half_day"
       : token === "a" || token === "absent" ? "absent" : null;
-  const remainder = statusMatch ? raw.slice(statusMatch[0].length).replace(/^\s*\/\s*/, "").trim() : raw;
+  if (parenthesizedAdvance) return { status, advanceAmount: Number(parenthesizedAdvance[1]!.replaceAll(",", "")) };
+  const remainder = statusMatch ? valueWithoutParenthesizedAdvance.slice(statusMatch[0].length).replace(/^\s*\/\s*/, "").trim() : valueWithoutParenthesizedAdvance;
   if (!remainder || remainder === "-") return { status, advanceAmount: null };
   const amountText = remainder.replace(/\bSAR\b/gi, "").replaceAll(",", "").trim();
   const advanceAmount = Number(amountText);
@@ -133,18 +136,21 @@ async function selectedLabourers(workspaceId: string, farmId: string) {
 
 function buildPreview(csvText: string, labourers: Labour[], from?: string, to?: string): ImportPayload {
   const csv = parseCsv(csvText);
-  const headers = csv[0]?.map((header) => header.trim()) ?? [];
   const errors: string[] = [];
   const warnings: string[] = [];
+  const headerRowIndex = csv.slice(0, 20).findIndex((row) => row.some((header) => normalized(header) === "labour name"));
+  const headers = headerRowIndex >= 0 ? csv[headerRowIndex]!.map((header) => header.trim()) : [];
+  if (headerRowIndex < 0) errors.push("Attendance register header was not found in the first 20 rows.");
   const labourIndex = headers.findIndex((header) => normalized(header) === "labour name" || normalized(header) === "labour");
   if (labourIndex < 0) errors.push("Labour Name column was not found.");
   const summary = {
-    present: headers.findIndex((header) => normalized(header) === "p total"),
-    half: headers.findIndex((header) => ["1/2 total", "½ total", "half day total"].includes(normalized(header))),
-    absent: headers.findIndex((header) => normalized(header) === "a total"),
-    advance: headers.findIndex((header) => normalized(header) === "advance total"),
+    present: headers.findIndex((header) => ["p", "p total"].includes(normalized(header))),
+    half: headers.findIndex((header) => ["1/2", "½", "1/2 total", "½ total", "half day total"].includes(normalized(header))),
+    absent: headers.findIndex((header) => ["a", "a total"].includes(normalized(header))),
+    advance: headers.findIndex((header) => ["adv (sar)", "advance total"].includes(normalized(header))),
   };
-  const ignored = new Set([labourIndex, ...Object.values(summary)]);
+  const rowNumberIndex = headers.findIndex((header) => normalized(header) === "#");
+  const ignored = new Set([rowNumberIndex, labourIndex, ...Object.values(summary)]);
   const dateColumns = headers.flatMap((column, index) => {
     if (ignored.has(index)) return [];
     const date = parseDateColumn(column, from, to);
@@ -155,7 +161,7 @@ function buildPreview(csvText: string, labourers: Labour[], from?: string, to?: 
     return [{ column, index, date }];
   });
   if (!dateColumns.length) errors.push("No attendance date columns were detected.");
-  const rows = csv.slice(1).flatMap((values, rowIndex): ImportRow[] => {
+  const rows = csv.slice(headerRowIndex + 1).flatMap((values, rowIndex): ImportRow[] => {
     const labourName = values[labourIndex]?.trim() ?? "";
     if (!labourName) {
       warnings.push(`Row ${rowIndex + 2} has no labour name and will be skipped.`);
