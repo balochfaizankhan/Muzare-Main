@@ -2633,6 +2633,7 @@ button {
 .register-summary { display: grid; gap: 6px; grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .register-summary span { background: #f1f6ea; border: 1px solid #dde8d3; border-radius: 6px; color: #496071; display: grid; font-size: .66rem; gap: 2px; padding: 7px; }
 .register-summary strong { color: #05233f; font-size: .86rem; }
+.print-summary { display: none; }
 .register-table-wrap { max-width: 100%; overflow-x: auto; }
 .attendance-register-table { border-collapse: collapse; font-size: .68rem; min-width: max-content; width: 100%; }
 .attendance-register-table th, .attendance-register-table td { border: 1px solid #cbd7ce; min-width: 34px; padding: 4px 5px; text-align: center; }
@@ -2727,22 +2728,18 @@ button {
 }
 
 @media print {
-  @page { size: A4 landscape; margin: 6mm; }
+  @page { size: A4 landscape; margin: 5mm; }
   body * { visibility: hidden; }
   .attendance-register-preview, .attendance-register-preview * { visibility: visible; }
-  .attendance-register-preview { gap: 4px; inset: 0; position: absolute; width: 100%; }
-  .no-print { display: none !important; }
+  .attendance-register-preview { display: block; inset: 0; position: absolute; width: 100%; }
+  .no-print, .screen-only { display: none !important; }
+  .print-summary { border-bottom: 1px solid #2d862f; display: grid; font-size: 6px; gap: 1px; line-height: 1.05; margin-bottom: 2px; max-height: 20mm; overflow: hidden; padding-bottom: 2px; }
+  .print-summary b { color: #2d862f; font-size: 6px; letter-spacing: .08em; }
+  .print-summary strong { color: #05233f; font-size: 10px; }
   .register-table-wrap { overflow: visible; }
-  .register-header { gap: 6px; padding-bottom: 3px; }
-  .register-header span { font-size: 5pt; }
-  .register-header h2 { font-size: 11px; margin: 1px 0; }
-  .register-header p, .register-header strong, .register-header dt, .register-header dd { font-size: 7px; }
-  .register-summary { gap: 2px; }
-  .register-summary span { border-radius: 2px; font-size: 6px; gap: 0; padding: 2px 3px; }
-  .register-summary strong { font-size: 7px; }
   .attendance-register-table { border-collapse: collapse; font-size: 5px; min-width: 0; table-layout: fixed; width: 100%; }
   .attendance-register-table thead { display: table-header-group; }
-  .attendance-register-table tfoot { display: table-footer-group; }
+  .attendance-register-table tfoot { display: table-row-group; }
   .attendance-register-table tr { break-inside: avoid; page-break-inside: avoid; }
   .attendance-register-table th, .attendance-register-table td { font-size: 5px; line-height: 1.05; min-width: 0; overflow: hidden; padding: 1px; text-overflow: clip; word-break: break-word; }
   .attendance-register-table th:nth-child(1), .attendance-register-table td:nth-child(1) { width: 18px; }
@@ -2750,8 +2747,10 @@ button {
   .attendance-register-table th:nth-child(3), .attendance-register-table td:nth-child(3),
   .attendance-register-table th:nth-child(4), .attendance-register-table td:nth-child(4),
   .attendance-register-table th:nth-child(5), .attendance-register-table td:nth-child(5) { width: 20px; }
-  .attendance-register-table th:nth-child(6), .attendance-register-table td:nth-child(6) { width: 35px; }
-  .attendance-register-table th:nth-child(n+7), .attendance-register-table td:nth-child(n+7) { width: 18px; }
+  .attendance-register-table th:nth-child(6), .attendance-register-table td:nth-child(6),
+  .attendance-register-table th:nth-child(7), .attendance-register-table td:nth-child(7),
+  .attendance-register-table th:nth-child(8), .attendance-register-table td:nth-child(8) { width: 34px; }
+  .attendance-register-table th:nth-child(n+9), .attendance-register-table td:nth-child(n+9) { width: 18px; }
   .register-status small { font-size: 4px; margin-top: 1px; white-space: normal; }
   .register-footer { gap: 5px; }
   .register-footer span { font-size: 6px; }

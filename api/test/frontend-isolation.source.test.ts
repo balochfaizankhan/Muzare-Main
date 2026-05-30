@@ -83,14 +83,19 @@ test("attendance report preview renders a printable register and structured expo
   assert.match(modulePage, /Daily payable total/);
   assert.match(modulePage, /attendanceMark\(status\)/);
   assert.match(modulePage, /Adv \(SAR\)/);
+  assert.match(modulePage, /Wages \(SAR\)/);
+  assert.match(modulePage, /Net \(SAR\)/);
+  assert.match(modulePage, /className="print-summary"/);
   assert.match(modulePage, /compactDate\(date\)/);
   assert.match(modulePage, /compactAdvance\(advance\)/);
   assert.match(modulePage, /This date range may not fit on one page width\. For best print results, select up to 50 days\./);
-  assert.match(styles, /@page \{ size: A4 landscape; margin: 6mm; \}/);
+  assert.match(styles, /@page \{ size: A4 landscape; margin: 5mm; \}/);
+  assert.match(styles, /\.print-summary \{ border-bottom: 1px solid #2d862f; display: grid;[\s\S]*max-height: 20mm;/);
   assert.match(styles, /\.attendance-register-table \{ border-collapse: collapse; font-size: 5px; min-width: 0; table-layout: fixed; width: 100%; \}/);
   assert.match(styles, /\.attendance-register-table thead \{ display: table-header-group; \}/);
+  assert.match(styles, /\.attendance-register-table tfoot \{ display: table-row-group; \}/);
   assert.match(styles, /\.attendance-register-table tr \{ break-inside: avoid; page-break-inside: avoid; \}/);
-  assert.match(styles, /\.attendance-register-table th:nth-child\(n\+7\), \.attendance-register-table td:nth-child\(n\+7\) \{ width: 18px; \}/);
+  assert.match(styles, /\.attendance-register-table th:nth-child\(n\+9\), \.attendance-register-table td:nth-child\(n\+9\) \{ width: 18px; \}/);
   assert.match(styles, /\.register-status--present \{ background: #dff2d7;/);
 });
 
