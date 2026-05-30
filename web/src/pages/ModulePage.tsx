@@ -3,8 +3,12 @@ import { useTranslation } from "react-i18next";
 import { SubpageHeader } from "../components/SubpageHeader";
 import {
   ensureLocalAccounts,
+  getActiveWorkspaceId,
+  getActiveFarmId,
+  getActiveSeasonId,
   makeLocalRecord,
   offlineDb,
+  workspaceRecords,
   type Account,
   type Attendance,
   type Dispatch,
@@ -48,8 +52,8 @@ function FormCard({ title, children }: { title: string; children: ReactNode }) {
 }
 
 function WorkforceModule() {
-  const loadLabourers = useCallback(() => offlineDb.labourers.orderBy("createdAt").reverse().toArray(), []);
-  const loadAttendance = useCallback(() => offlineDb.attendance.orderBy("createdAt").reverse().toArray(), []);
+  const loadLabourers = useCallback(async () => (await workspaceRecords(offlineDb.labourers)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
+  const loadAttendance = useCallback(async () => (await workspaceRecords(offlineDb.attendance)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const [labourers, refreshLabourers] = useData(loadLabourers);
   const [attendance, refreshAttendance] = useData(loadAttendance);
   const [name, setName] = useState("");
@@ -73,7 +77,7 @@ function WorkforceModule() {
     const existing = await offlineDb.attendance
       .where("labourerId")
       .equals(targetLabourerId)
-      .filter((entry) => entry.date === date)
+      .filter((entry) => entry.workspaceId === getActiveWorkspaceId() && entry.farmId === getActiveFarmId() && entry.seasonId === getActiveSeasonId() && entry.date === date)
       .first();
     const record: Attendance = existing ? { ...existing, status, updatedAt: new Date().toISOString() } : { ...makeLocalRecord(), labourerId: targetLabourerId, date, status };
     await persistOperationalRecord("attendance", record);
@@ -239,21 +243,21 @@ function WorkforceModule() {
 }
 
 function ExpensesModule() {
-  const load = useCallback(() => offlineDb.vouchers.orderBy("createdAt").reverse().toArray(), []);
-  const loadAccounts = useCallback(() => offlineDb.accounts.toArray(), []);
+  const load = useCallback(async () => (await workspaceRecords(offlineDb.vouchers)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
+  const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts), []);
   const [vouchers, refresh] = useData(load);
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
   const [date, setDate] = useState(today());
   const [category, setCategory] = useState("Operations");
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
-  const [accountId, setAccountId] = useState("local-cash");
+  const [accountId, setAccountId] = useState("");
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const record: Voucher = {
       ...makeLocalRecord(), voucherNumber: `V-${Date.now().toString().slice(-6)}`, date, category,
-      description: description.trim(), amount: Number(amount), accountId,
+      description: description.trim(), amount: Number(amount), accountId: accountId || accounts[0]?.id || "",
     };
     await persistOperationalRecord("voucher", record);
     setDescription("");
@@ -270,7 +274,7 @@ function ExpensesModule() {
           <input required value={category} placeholder="Category" onChange={(event) => setCategory(event.target.value)} />
           <input required value={description} placeholder="Description" onChange={(event) => setDescription(event.target.value)} />
           <input required min="0.01" step="0.01" type="number" value={amount} placeholder="Amount" onChange={(event) => setAmount(event.target.value)} />
-          <select value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+          <select value={accountId || accounts[0]?.id || ""} onChange={(event) => setAccountId(event.target.value)}>
             {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
           </select>
           <button type="submit">Save voucher</button>
@@ -283,7 +287,7 @@ function ExpensesModule() {
 }
 
 function DispatchModule() {
-  const load = useCallback(() => offlineDb.dispatches.orderBy("createdAt").reverse().toArray(), []);
+  const load = useCallback(async () => (await workspaceRecords(offlineDb.dispatches)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const [records, refresh] = useData(load);
   const [date, setDate] = useState(today());
   const [vehicleNumber, setVehicleNumber] = useState("");
@@ -318,8 +322,8 @@ function DispatchModule() {
 }
 
 function SalesModule() {
-  const load = useCallback(() => offlineDb.sales.orderBy("createdAt").reverse().toArray(), []);
-  const loadAccounts = useCallback(() => offlineDb.accounts.toArray(), []);
+  const load = useCallback(async () => (await workspaceRecords(offlineDb.sales)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
+  const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts), []);
   const [sales, refresh] = useData(load);
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
   const [date, setDate] = useState(today());
@@ -327,11 +331,11 @@ function SalesModule() {
   const [produceType, setProduceType] = useState("");
   const [quantity, setQuantity] = useState("");
   const [unitPrice, setUnitPrice] = useState("");
-  const [accountId, setAccountId] = useState("local-cash");
+  const [accountId, setAccountId] = useState("");
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const record: Sale = { ...makeLocalRecord(), date, buyerName, produceType, quantity: Number(quantity), unitPrice: Number(unitPrice), amount: Number(quantity) * Number(unitPrice), accountId };
+    const record: Sale = { ...makeLocalRecord(), date, buyerName, produceType, quantity: Number(quantity), unitPrice: Number(unitPrice), amount: Number(quantity) * Number(unitPrice), accountId: accountId || accounts[0]?.id || "" };
     await persistOperationalRecord("sale", record);
     setBuyerName(""); setProduceType(""); setQuantity(""); setUnitPrice("");
     await refresh();
@@ -346,7 +350,7 @@ function SalesModule() {
           <input required placeholder="Produce type" value={produceType} onChange={(event) => setProduceType(event.target.value)} />
           <input required type="number" min="1" placeholder="Quantity" value={quantity} onChange={(event) => setQuantity(event.target.value)} />
           <input required type="number" min="0" step="0.01" placeholder="Unit price" value={unitPrice} onChange={(event) => setUnitPrice(event.target.value)} />
-          <select value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+          <select value={accountId || accounts[0]?.id || ""} onChange={(event) => setAccountId(event.target.value)}>
             {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
           </select>
           <button type="submit">Save sale</button>
@@ -359,8 +363,8 @@ function SalesModule() {
 }
 
 function PartnerLedgerModule() {
-  const load = useCallback(() => offlineDb.partnerEntries.orderBy("createdAt").reverse().toArray(), []);
-  const loadAccounts = useCallback(() => offlineDb.accounts.toArray(), []);
+  const load = useCallback(async () => (await workspaceRecords(offlineDb.partnerEntries)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
+  const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts), []);
   const [entries, refresh] = useData(load);
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
   const [date, setDate] = useState(today());
@@ -368,11 +372,11 @@ function PartnerLedgerModule() {
   const [type, setType] = useState<PartnerEntry["type"]>("contribution");
   const [amount, setAmount] = useState("");
   const [notes, setNotes] = useState("");
-  const [accountId, setAccountId] = useState("local-partner");
+  const [accountId, setAccountId] = useState("");
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const record: PartnerEntry = { ...makeLocalRecord(), date, partnerName, type, amount: Number(amount), notes, accountId };
+    const record: PartnerEntry = { ...makeLocalRecord(), date, partnerName, type, amount: Number(amount), notes, accountId: accountId || accounts[0]?.id || "" };
     await persistOperationalRecord("partnerEntry", record);
     setPartnerName(""); setAmount(""); setNotes("");
     await refresh();
@@ -391,7 +395,7 @@ function PartnerLedgerModule() {
           </select>
           <input required type="number" min="0.01" step="0.01" placeholder="Amount" value={amount} onChange={(event) => setAmount(event.target.value)} />
           <input placeholder="Notes" value={notes} onChange={(event) => setNotes(event.target.value)} />
-          <select value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+          <select value={accountId || accounts[0]?.id || ""} onChange={(event) => setAccountId(event.target.value)}>
             {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
           </select>
           <button type="submit">Save entry</button>
@@ -404,10 +408,10 @@ function PartnerLedgerModule() {
 }
 
 function AccountsModule() {
-  const loadAccounts = useCallback(() => offlineDb.accounts.orderBy("createdAt").toArray(), []);
-  const loadVouchers = useCallback(() => offlineDb.vouchers.toArray(), []);
-  const loadSales = useCallback(() => offlineDb.sales.toArray(), []);
-  const loadEntries = useCallback(() => offlineDb.partnerEntries.toArray(), []);
+  const loadAccounts = useCallback(async () => (await workspaceRecords(offlineDb.accounts)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)), []);
+  const loadVouchers = useCallback(() => workspaceRecords(offlineDb.vouchers), []);
+  const loadSales = useCallback(() => workspaceRecords(offlineDb.sales), []);
+  const loadEntries = useCallback(() => workspaceRecords(offlineDb.partnerEntries), []);
   const [accounts, refresh] = useData(loadAccounts, ensureLocalAccounts);
   const [vouchers] = useData(loadVouchers);
   const [sales] = useData(loadSales);

@@ -6,7 +6,6 @@ import { AdminLayout } from "./layouts/AdminLayout";
 import { WorkspaceLayout } from "./layouts/WorkspaceLayout";
 import { getHomePath, isPlatformUser } from "./lib/permissions";
 import { AdminApprovalsPage } from "./pages/AdminApprovalsPage";
-import { ContextPage } from "./pages/ContextPage";
 import { LoginPage } from "./pages/LoginPage";
 import { ModulePage } from "./pages/ModulePage";
 import { NotFoundPage } from "./pages/NotFoundPage";
@@ -25,6 +24,8 @@ import { Inventory } from "./pages/workspace/Inventory";
 import { Reports } from "./pages/workspace/Reports";
 import { Sales } from "./pages/workspace/Sales";
 import { WorkspaceDashboard } from "./pages/workspace/WorkspaceDashboard";
+import { Farms } from "./pages/workspace/Farms";
+import { Seasons } from "./pages/workspace/Seasons";
 
 function RequireAuth({ children }: PropsWithChildren) {
   const { user, loading } = useAuth();
@@ -86,9 +87,9 @@ export default function App() {
       <Route path="inventory" element={<Inventory />} />
       <Route path="reports" element={<Reports />} />
       <Route path="team" element={<ModulePage module="workforce" />} />
-      <Route path="settings" element={<ContextPage kind="farms" />} />
-      <Route path="farms" element={<ContextPage kind="farms" />} />
-      <Route path="seasons" element={<ContextPage kind="seasons" />} />
+      <Route path="settings" element={<Farms />} />
+      <Route path="farms" element={<Farms />} />
+      <Route path="seasons" element={<Seasons />} />
       <Route path="accounts" element={<ModulePage module="accounts" />} />
       <Route path="partner-ledger" element={<ModulePage module="partnerLedger" />} />
     </Route>

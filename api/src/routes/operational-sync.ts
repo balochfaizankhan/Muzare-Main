@@ -1,11 +1,12 @@
 import type { FastifyInstance } from "fastify";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { z } from "zod";
 import { requireUser, type AuthenticatedUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
-import { auditLogs, operationalRecords } from "../db/schema.js";
+import { auditLogs, operationalRecords, userSessions } from "../db/schema.js";
 import { hasPermission } from "../permissions.js";
+import { validateTenantReferences } from "../tenant-ownership.js";
 
 const entities = ["labourer", "attendance", "account", "advance", "dispatch", "sale", "voucher", "partnerEntry", "inventoryEntry"] as const;
 const recordSchema = z.object({
@@ -25,16 +26,38 @@ function requireWorkspaceWrite(user: AuthenticatedUser, workspaceId: string) {
   return hasPermission(user, "SUBMIT_RECORDS", workspaceId);
 }
 
+function requireEntityWrite(user: AuthenticatedUser, workspaceId: string, entity: typeof entities[number]) {
+  return !["labourer", "account"].includes(entity) || hasPermission(user, "MANAGE_RECORDS", workspaceId);
+}
+
+const seasonRequiredEntities = new Set<typeof entities[number]>(["attendance", "advance", "dispatch", "sale", "voucher", "partnerEntry", "inventoryEntry"]);
+
+async function sessionContext(sessionId?: string) {
+  if (!sessionId) return null;
+  const [session] = await db.select({ activeFarmId: userSessions.activeFarmId, activeSeasonId: userSessions.activeSeasonId })
+    .from(userSessions).where(eq(userSessions.id, sessionId)).limit(1);
+  return session ?? null;
+}
+
 export async function operationalSyncRoutes(app: FastifyInstance): Promise<void> {
   app.get("/v1/workspace/:workspaceId/operational-records", { preHandler: requireUser }, async (request, reply) => {
     if (!request.appUser) return reply;
     const parsed = z.object({ workspaceId: z.string().uuid() }).safeParse(request.params);
-    if (!parsed.success || !request.appUser.memberships.some((item) => item.active && item.workspaceId === parsed.data.workspaceId)) {
+    if (!parsed.success || request.appUser.workspaceId !== parsed.data.workspaceId
+      || !request.appUser.memberships.some((item) => item.active && item.workspaceId === parsed.data.workspaceId)) {
       return reply.code(403).send({ message: "Workspace membership is required." });
     }
     if (localDevelopmentMode) return { records: [...localRecords.values()].filter((item) => item.workspaceId === parsed.data.workspaceId) };
+    const selected = await sessionContext(request.sessionId);
+    if (!selected?.activeFarmId) return { records: [] };
     const records = await db.select().from(operationalRecords)
-      .where(eq(operationalRecords.workspaceId, parsed.data.workspaceId))
+      .where(and(
+        eq(operationalRecords.workspaceId, parsed.data.workspaceId),
+        eq(operationalRecords.farmId, selected.activeFarmId),
+        selected.activeSeasonId
+          ? or(eq(operationalRecords.seasonId, selected.activeSeasonId), isNull(operationalRecords.seasonId))
+          : isNull(operationalRecords.seasonId),
+      ))
       .orderBy(desc(operationalRecords.updatedAt));
     return {
       records: records.map((item) => ({
@@ -51,10 +74,35 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     if (!requireWorkspaceWrite(request.appUser, parsed.data.workspaceId)) {
       return reply.code(403).send({ message: "Workspace record submission permission is required." });
     }
+    if (!requireEntityWrite(request.appUser, parsed.data.workspaceId, parsed.data.entity)) {
+      return reply.code(403).send({ message: "Workspace record management permission is required." });
+    }
+    if (request.appUser.workspaceId !== parsed.data.workspaceId) {
+      return reply.code(403).send({ message: "Select this workspace before submitting records." });
+    }
     if (localDevelopmentMode) {
       localRecords.set(`${parsed.data.workspaceId}:${parsed.data.entity}:${parsed.data.record.id}`, parsed.data);
       return { record: parsed.data.record, conflict: false };
     }
+    const selected = await sessionContext(request.sessionId);
+    const generalFarmExpense = parsed.data.entity === "voucher" && parsed.data.record.generalFarmExpense === true;
+    const requiresSeason = seasonRequiredEntities.has(parsed.data.entity) && !generalFarmExpense;
+    if (!selected?.activeFarmId || parsed.data.farmId !== selected.activeFarmId) {
+      return reply.code(403).send({ message: "Select the active farm before submitting records." });
+    }
+    if (requiresSeason && (!selected.activeSeasonId || parsed.data.seasonId !== selected.activeSeasonId)) {
+      return reply.code(403).send({ message: "Select an active season before submitting operational records." });
+    }
+    if (generalFarmExpense && parsed.data.seasonId) {
+      return reply.code(400).send({ message: "General farm expenses must not specify a season." });
+    }
+    const ownershipError = await validateTenantReferences(parsed.data.workspaceId, {
+      farmId: parsed.data.farmId,
+      seasonId: parsed.data.seasonId,
+      accountId: parsed.data.record.accountId,
+      ledgerId: parsed.data.record.ledgerId,
+    });
+    if (ownershipError) return reply.code(403).send({ message: ownershipError });
     const [existing] = await db.select().from(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, parsed.data.workspaceId),
       eq(operationalRecords.entityType, parsed.data.entity),

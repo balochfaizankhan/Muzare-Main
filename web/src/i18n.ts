@@ -31,7 +31,6 @@ const resources = {
       seasonsDescription: "Active crop seasons available for this farm.",
       loadingData: "Loading data...",
       locationPending: "Location not recorded",
-      contextReadOnly: "Selection and editing will be enabled when the data migration endpoints are connected.",
       backToDashboard: "Back to dashboard",
       notFound: "Page not found",
       notFoundNotice: "This path does not exist in the PWA.",

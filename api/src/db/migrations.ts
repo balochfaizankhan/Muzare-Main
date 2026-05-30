@@ -4,6 +4,9 @@ import { db } from "./client.js";
 const initialMigrationUrl = new URL("../../../database/migrations/0001_initial.sql", import.meta.url);
 const roleArchitectureMigrationUrl = new URL("../../../database/migrations/0003_platform_workspace_roles.sql", import.meta.url);
 const operationalSyncMigrationUrl = new URL("../../../database/migrations/0004_operational_sync.sql", import.meta.url);
+const tenantHardeningMigrationUrl = new URL("../../../database/migrations/0005_tenant_hardening.sql", import.meta.url);
+const farmManagementMigrationUrl = new URL("../../../database/migrations/0006_workspace_farm_management.sql", import.meta.url);
+const seasonManagementMigrationUrl = new URL("../../../database/migrations/0007_workspace_season_management.sql", import.meta.url);
 
 async function tableExists(tableName: string): Promise<boolean> {
   const result = (await db.execute(
@@ -73,4 +76,10 @@ export async function ensureWorkspaceSchema(): Promise<void> {
   await db.execute(roleArchitectureMigration);
   const operationalSyncMigration = await readFile(operationalSyncMigrationUrl, "utf8");
   await db.execute(operationalSyncMigration);
+  const tenantHardeningMigration = await readFile(tenantHardeningMigrationUrl, "utf8");
+  await db.execute(tenantHardeningMigration);
+  const farmManagementMigration = await readFile(farmManagementMigrationUrl, "utf8");
+  await db.execute(farmManagementMigration);
+  const seasonManagementMigration = await readFile(seasonManagementMigrationUrl, "utf8");
+  await db.execute(seasonManagementMigration);
 }

@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type PropsWithChildren } from "react";
-import { fetchSession, login as loginRequest, logout as logoutRequest, type AppUser } from "../lib/api";
+import { fetchSession, login as loginRequest, logout as logoutRequest, selectWorkspace, type AppUser } from "../lib/api";
+import { queryClient } from "../lib/query-client";
+import { clearWorkspaceCache } from "../services/syncService";
 
 const tokenKey = "muzare-session-token";
 
@@ -9,6 +11,7 @@ type AuthState = {
   loading: boolean;
   login(email: string, password: string): Promise<void>;
   logout(): Promise<void>;
+  switchWorkspace(workspaceId: string): Promise<void>;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -34,6 +37,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
       .catch(() => {
         if (!active) return;
         window.localStorage.removeItem(tokenKey);
+        void clearWorkspaceCache();
+        queryClient.clear();
         setToken(null);
         setUser(null);
       })
@@ -58,11 +63,21 @@ export function AuthProvider({ children }: PropsWithChildren) {
       await logoutRequest(token).catch(() => undefined);
     }
     window.localStorage.removeItem(tokenKey);
+    await clearWorkspaceCache();
+    queryClient.clear();
     setToken(null);
     setUser(null);
   }, [token]);
 
-  const value = useMemo(() => ({ user, token, loading, login, logout }), [user, token, loading, login, logout]);
+  const switchWorkspace = useCallback(async (workspaceId: string) => {
+    if (!token || workspaceId === user?.workspaceId) return;
+    const session = await selectWorkspace(token, workspaceId);
+    await clearWorkspaceCache();
+    queryClient.clear();
+    setUser(session.user);
+  }, [token, user?.workspaceId]);
+
+  const value = useMemo(() => ({ user, token, loading, login, logout, switchWorkspace }), [user, token, loading, login, logout, switchWorkspace]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

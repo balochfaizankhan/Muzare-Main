@@ -66,14 +66,14 @@ export async function verifyPassword(password: string, storedHash: string): Prom
   return suppliedKey.length === storedKey.length && timingSafeEqual(suppliedKey, storedKey);
 }
 
-export async function createSession(userId: string): Promise<string> {
+export async function createSession(userId: string, workspaceId?: string | null): Promise<string> {
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + config.SESSION_DAYS * 24 * 60 * 60 * 1000);
   if (localDevelopmentMode) {
     localSessions.set(hashToken(token), expiresAt);
     return token;
   }
-  await db.insert(userSessions).values({ userId, tokenHash: hashToken(token), expiresAt });
+  await db.insert(userSessions).values({ userId, workspaceId, tokenHash: hashToken(token), expiresAt });
   return token;
 }
 
@@ -115,12 +115,14 @@ async function loadMemberships(userId: string): Promise<WorkspaceMembership[]> {
     })
     .from(workspaceMemberships)
     .innerJoin(workspaces, eq(workspaces.id, workspaceMemberships.workspaceId))
-    .where(eq(workspaceMemberships.userId, userId));
+    .where(and(eq(workspaceMemberships.userId, userId), eq(workspaces.status, "approved")));
 }
 
-export async function serializeUser(user: typeof users.$inferSelect): Promise<AuthenticatedUser> {
-  const memberships = await loadMemberships(user.id);
-  const currentMembership = memberships.find((membership) => membership.active) ?? null;
+export async function serializeUser(user: typeof users.$inferSelect, workspaceId?: string | null): Promise<AuthenticatedUser> {
+  const memberships = user.platformRole ? [] : await loadMemberships(user.id);
+  const currentMembership = memberships.find((membership) => membership.active && membership.workspaceId === workspaceId)
+    ?? memberships.find((membership) => membership.active)
+    ?? null;
   const role = user.platformRole ?? currentMembership?.role ?? "viewer";
   return {
     id: user.id,
@@ -151,7 +153,7 @@ export async function requireUser(request: FastifyRequest, reply: FastifyReply):
     return;
   }
   const [row] = await db
-    .select({ sessionId: userSessions.id, user: users })
+    .select({ sessionId: userSessions.id, workspaceId: userSessions.workspaceId, user: users })
     .from(userSessions)
     .innerJoin(users, eq(users.id, userSessions.userId))
     .where(and(eq(userSessions.tokenHash, hashToken(token)), gt(userSessions.expiresAt, new Date())))
@@ -161,7 +163,7 @@ export async function requireUser(request: FastifyRequest, reply: FastifyReply):
     return;
   }
   request.sessionId = row.sessionId;
-  request.appUser = await serializeUser(row.user);
+  request.appUser = await serializeUser(row.user, row.workspaceId);
 }
 
 export function requirePermission(permission: Permission, workspaceId?: (request: FastifyRequest) => string | undefined) {

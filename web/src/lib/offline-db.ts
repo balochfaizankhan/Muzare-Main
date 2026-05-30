@@ -2,6 +2,9 @@ import Dexie, { type EntityTable } from "dexie";
 
 export type LocalRecord = {
   id: string;
+  workspaceId: string;
+  farmId?: string | null;
+  seasonId?: string | null;
   createdAt: string;
   updatedAt: string;
   pendingSync?: boolean;
@@ -125,16 +128,118 @@ offlineDb.version(3).stores({
   inventoryEntries: "id, date, itemName, createdAt, updatedAt, pendingSync",
 });
 
+offlineDb.version(4).stores({
+  pendingMutations: "id, workspaceId, entity, operation, createdAt",
+  labourers: "id, workspaceId, name, createdAt, updatedAt, pendingSync",
+  attendance: "id, workspaceId, labourerId, date, status, createdAt, updatedAt, pendingSync",
+  accounts: "id, workspaceId, name, type, createdAt, updatedAt, pendingSync",
+  vouchers: "id, workspaceId, date, category, accountId, createdAt, updatedAt, pendingSync",
+  dispatches: "id, workspaceId, date, vehicleNumber, produceType, createdAt, updatedAt, pendingSync",
+  sales: "id, workspaceId, date, buyerName, accountId, createdAt, updatedAt, pendingSync",
+  partnerEntries: "id, workspaceId, date, partnerName, accountId, createdAt, updatedAt, pendingSync",
+  advances: "id, workspaceId, date, labourerId, createdAt, updatedAt, pendingSync",
+  inventoryEntries: "id, workspaceId, date, itemName, createdAt, updatedAt, pendingSync",
+}).upgrade(async (transaction) => {
+  for (const tableName of [
+    "pendingMutations", "labourers", "attendance", "accounts", "vouchers",
+    "dispatches", "sales", "partnerEntries", "advances", "inventoryEntries",
+  ]) {
+    await transaction.table(tableName).clear();
+  }
+});
+
+offlineDb.version(5).stores({
+  pendingMutations: "id, workspaceId, farmId, entity, operation, createdAt",
+  labourers: "id, workspaceId, farmId, name, createdAt, updatedAt, pendingSync",
+  attendance: "id, workspaceId, farmId, labourerId, date, status, createdAt, updatedAt, pendingSync",
+  accounts: "id, workspaceId, farmId, name, type, createdAt, updatedAt, pendingSync",
+  vouchers: "id, workspaceId, farmId, date, category, accountId, createdAt, updatedAt, pendingSync",
+  dispatches: "id, workspaceId, farmId, date, vehicleNumber, produceType, createdAt, updatedAt, pendingSync",
+  sales: "id, workspaceId, farmId, date, buyerName, accountId, createdAt, updatedAt, pendingSync",
+  partnerEntries: "id, workspaceId, farmId, date, partnerName, accountId, createdAt, updatedAt, pendingSync",
+  advances: "id, workspaceId, farmId, date, labourerId, createdAt, updatedAt, pendingSync",
+  inventoryEntries: "id, workspaceId, farmId, date, itemName, createdAt, updatedAt, pendingSync",
+}).upgrade(async (transaction) => {
+  for (const tableName of [
+    "pendingMutations", "labourers", "attendance", "accounts", "vouchers",
+    "dispatches", "sales", "partnerEntries", "advances", "inventoryEntries",
+  ]) {
+    await transaction.table(tableName).clear();
+  }
+});
+
+offlineDb.version(6).stores({
+  pendingMutations: "id, workspaceId, farmId, seasonId, entity, operation, createdAt",
+  labourers: "id, workspaceId, farmId, seasonId, name, createdAt, updatedAt, pendingSync",
+  attendance: "id, workspaceId, farmId, seasonId, labourerId, date, status, createdAt, updatedAt, pendingSync",
+  accounts: "id, workspaceId, farmId, seasonId, name, type, createdAt, updatedAt, pendingSync",
+  vouchers: "id, workspaceId, farmId, seasonId, date, category, accountId, createdAt, updatedAt, pendingSync",
+  dispatches: "id, workspaceId, farmId, seasonId, date, vehicleNumber, produceType, createdAt, updatedAt, pendingSync",
+  sales: "id, workspaceId, farmId, seasonId, date, buyerName, accountId, createdAt, updatedAt, pendingSync",
+  partnerEntries: "id, workspaceId, farmId, seasonId, date, partnerName, accountId, createdAt, updatedAt, pendingSync",
+  advances: "id, workspaceId, farmId, seasonId, date, labourerId, createdAt, updatedAt, pendingSync",
+  inventoryEntries: "id, workspaceId, farmId, seasonId, date, itemName, createdAt, updatedAt, pendingSync",
+}).upgrade(async (transaction) => {
+  for (const tableName of [
+    "pendingMutations", "labourers", "attendance", "accounts", "vouchers",
+    "dispatches", "sales", "partnerEntries", "advances", "inventoryEntries",
+  ]) {
+    await transaction.table(tableName).clear();
+  }
+});
+
+let activeWorkspaceId: string | null = null;
+let activeFarmId: string | null = null;
+let activeSeasonId: string | null = null;
+
+export function setActiveWorkspaceId(workspaceId: string | null) {
+  activeWorkspaceId = workspaceId;
+}
+
+export function getActiveWorkspaceId() {
+  if (!activeWorkspaceId) throw new Error("Select a workspace before accessing cached data.");
+  return activeWorkspaceId;
+}
+
+export function setActiveFarmId(farmId: string | null) {
+  activeFarmId = farmId;
+}
+
+export function getActiveFarmId() {
+  return activeFarmId;
+}
+
+export function setActiveSeasonId(seasonId: string | null) {
+  activeSeasonId = seasonId;
+}
+
+export function getActiveSeasonId() {
+  return activeSeasonId;
+}
+
+export async function workspaceRecords<T extends LocalRecord>(table: EntityTable<T, "id">) {
+  if (!activeFarmId || !activeSeasonId) return [];
+  return table.where("workspaceId").equals(getActiveWorkspaceId())
+    .filter((record) => record.farmId === activeFarmId && record.seasonId === activeSeasonId).toArray();
+}
+
+export async function clearCachedData() {
+  await Promise.all(offlineDb.tables.map((table) => table.clear()));
+}
+
 export function makeLocalRecord() {
   const now = new Date().toISOString();
-  return { id: crypto.randomUUID(), createdAt: now, updatedAt: now, pendingSync: false };
+  if (!activeFarmId || !activeSeasonId) throw new Error("Select an active farm and season before entering records.");
+  return { id: crypto.randomUUID(), workspaceId: getActiveWorkspaceId(), farmId: activeFarmId, seasonId: activeSeasonId, createdAt: now, updatedAt: now, pendingSync: false };
 }
 
 export async function ensureLocalAccounts() {
-  if ((await offlineDb.accounts.count()) > 0) return;
+  const workspaceId = getActiveWorkspaceId();
+  if (!activeFarmId || !activeSeasonId) return;
+  if ((await offlineDb.accounts.where("workspaceId").equals(workspaceId).filter((record) => record.farmId === activeFarmId && record.seasonId === activeSeasonId).count()) > 0) return;
   const createdAt = new Date().toISOString();
   await offlineDb.accounts.bulkPut([
-    { id: "local-cash", name: "Cash", type: "cash", createdAt, updatedAt: createdAt, pendingSync: false },
-    { id: "local-partner", name: "Partner Capital", type: "partner", createdAt, updatedAt: createdAt, pendingSync: false },
+    { id: `${activeSeasonId}:local-cash`, workspaceId, farmId: activeFarmId, seasonId: activeSeasonId, name: "Cash", type: "cash", createdAt, updatedAt: createdAt, pendingSync: false },
+    { id: `${activeSeasonId}:local-partner`, workspaceId, farmId: activeFarmId, seasonId: activeSeasonId, name: "Partner Capital", type: "partner", createdAt, updatedAt: createdAt, pendingSync: false },
   ]);
 }

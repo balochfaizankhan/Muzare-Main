@@ -1,16 +1,16 @@
 import { fetchBootstrap, fetchOperationalRecords, saveOperationalRecord, type OperationalEntity, type OperationalRecordEnvelope } from "../lib/api";
-import { offlineDb, type LocalRecord, type PendingMutation } from "../lib/offline-db";
+import { clearCachedData, offlineDb, setActiveFarmId, setActiveSeasonId, setActiveWorkspaceId, type LocalRecord, type PendingMutation } from "../lib/offline-db";
 import type { Table } from "dexie";
 
 export type SyncStatus = "online" | "offline" | "pending" | "syncing" | "error";
-export type SyncState = { status: SyncStatus; pendingCount: number; lastSyncTime: string | null; message?: string };
+export type SyncState = { status: SyncStatus; pendingCount: number; lastSyncTime: string | null; farmId?: string; seasonId?: string; message?: string };
 
-const lastSyncKey = "muzare-last-successful-sync";
+const lastSyncKey = (workspaceId?: string) => `muzare-last-successful-sync:${workspaceId ?? "none"}`;
 const listeners = new Set<(state: SyncState) => void>();
 let context: { token: string; workspaceId: string; farmId?: string; seasonId?: string } | null = null;
 let timer: number | null = null;
 let syncing = false;
-let state: SyncState = { status: navigator.onLine ? "online" : "offline", pendingCount: 0, lastSyncTime: localStorage.getItem(lastSyncKey) };
+let state: SyncState = { status: navigator.onLine ? "online" : "offline", pendingCount: 0, lastSyncTime: null };
 
 const tables = {
   labourer: offlineDb.labourers, attendance: offlineDb.attendance, account: offlineDb.accounts,
@@ -31,8 +31,9 @@ function tableFor(entity: OperationalEntity) {
   return tables[entity] as unknown as Table<LocalRecord, string>;
 }
 
-async function cacheRecord(entity: OperationalEntity, record: OperationalRecordEnvelope["record"], pendingSync: boolean) {
-  await tableFor(entity).put({ ...record, pendingSync } as LocalRecord);
+async function cacheRecord(entity: OperationalEntity, record: OperationalRecordEnvelope["record"], pendingSync: boolean, farmId: string | null | undefined = context?.farmId, seasonId: string | null | undefined = context?.seasonId) {
+  if (!context) throw new Error("Workspace synchronization is not initialized.");
+  await tableFor(entity).put({ ...record, workspaceId: context.workspaceId, farmId, seasonId, pendingSync } as LocalRecord);
 }
 
 function envelope(entity: OperationalEntity, record: LocalRecord): OperationalRecordEnvelope {
@@ -45,7 +46,7 @@ export async function queueOfflineRecord(entity: OperationalEntity, record: Loca
   await cacheRecord(entity, record, true);
   const queuedAt = new Date().toISOString();
   const mutation: PendingMutation = {
-    id: `${entity}:${record.id}`, entity, operation: "create", payload: record, attempts: 0,
+    id: `${context.workspaceId}:${entity}:${record.id}`, entity, operation: "create", payload: record, attempts: 0,
     workspaceId: context.workspaceId, farmId: context.farmId, seasonId: context.seasonId,
     createdAt: queuedAt, updatedAt: queuedAt,
   };
@@ -62,7 +63,7 @@ export async function persistOperationalRecord<T extends LocalRecord>(entity: Op
     const response = await saveOperationalRecord(context.token, envelope(entity, nextRecord));
     const saved = { ...response.record, pendingSync: false } as T;
     await cacheRecord(entity, saved, false);
-    await offlineDb.pendingMutations.delete(`${entity}:${record.id}`);
+    await offlineDb.pendingMutations.delete(`${context.workspaceId}:${entity}:${record.id}`);
     const pendingCount = await getPendingCount();
     emit({ status: pendingCount ? "pending" : "online", pendingCount });
     return saved;
@@ -81,14 +82,15 @@ export async function syncPendingRecords(): Promise<{ synced: number; pending: n
   syncing = true;
   emit({ status: "syncing" });
   let synced = 0;
-  const pendingRecords = await offlineDb.pendingMutations.orderBy("createdAt").toArray();
+  const pendingRecords = (await offlineDb.pendingMutations.where("workspaceId").equals(context.workspaceId).sortBy("createdAt"))
+    .filter((mutation) => mutation.farmId === context!.farmId && mutation.seasonId === context!.seasonId);
   for (const mutation of pendingRecords) {
     try {
       const response = await saveOperationalRecord(context.token, {
-        workspaceId: mutation.workspaceId || context.workspaceId, farmId: mutation.farmId || context.farmId, seasonId: mutation.seasonId || context.seasonId,
+        workspaceId: context.workspaceId, farmId: mutation.farmId || context.farmId, seasonId: mutation.seasonId || context.seasonId,
         entity: mutation.entity, record: normalizeRecord(mutation.payload as OperationalRecordEnvelope["record"]),
       });
-      await cacheRecord(mutation.entity, response.record, false);
+      await cacheRecord(mutation.entity, response.record, false, mutation.farmId, mutation.seasonId);
       await offlineDb.pendingMutations.delete(mutation.id);
       synced += 1;
     } catch {
@@ -99,7 +101,7 @@ export async function syncPendingRecords(): Promise<{ synced: number; pending: n
   const pending = await getPendingCount();
   if (pending === 0) {
     const lastSyncTime = new Date().toISOString();
-    localStorage.setItem(lastSyncKey, lastSyncTime);
+    localStorage.setItem(lastSyncKey(context.workspaceId), lastSyncTime);
     emit({ status: "online", pendingCount: 0, lastSyncTime, message: synced ? `${synced} records synced successfully` : undefined });
   } else {
     emit({ status: "error", pendingCount: pending, message: `${pending} records remain pending` });
@@ -130,9 +132,9 @@ export async function refreshOperationalData(): Promise<void> {
   try {
     const result = await fetchOperationalRecords(context.token, context.workspaceId);
     await pruneSynchronizedCache(result.records);
-    for (const item of result.records) await cacheRecord(item.entity, item.record, false);
+    for (const item of result.records) await cacheRecord(item.entity, item.record, false, item.farmId ?? undefined, item.seasonId ?? undefined);
     const lastSyncTime = new Date().toISOString();
-    localStorage.setItem(lastSyncKey, lastSyncTime);
+    localStorage.setItem(lastSyncKey(context.workspaceId), lastSyncTime);
     emit({ status: (await getPendingCount()) ? "pending" : "online", lastSyncTime, pendingCount: await getPendingCount() });
     window.dispatchEvent(new Event("muzare-data-refresh"));
     notify("Latest workspace data loaded from the database.");
@@ -144,7 +146,8 @@ export async function refreshOperationalData(): Promise<void> {
 
 async function pruneSynchronizedCache(records: OperationalRecordEnvelope[]) {
   const remoteIds = new Map<OperationalEntity, Set<string>>();
-  const queuedIds = new Set((await offlineDb.pendingMutations.toArray()).map((item) => item.id));
+  if (!context) return;
+  const queuedIds = new Set((await offlineDb.pendingMutations.where("workspaceId").equals(context.workspaceId).toArray()).map((item) => item.id));
   for (const item of records) {
     const ids = remoteIds.get(item.entity) ?? new Set<string>();
     ids.add(item.record.id);
@@ -152,20 +155,21 @@ async function pruneSynchronizedCache(records: OperationalRecordEnvelope[]) {
   }
   for (const entity of Object.keys(tables) as OperationalEntity[]) {
     const table = tableFor(entity);
-    const localRecords = await table.toArray();
+    const localRecords = await table.where("workspaceId").equals(context.workspaceId).toArray();
     const staleIds = localRecords
-      .filter((item) => !item.pendingSync && !queuedIds.has(`${entity}:${item.id}`) && !remoteIds.get(entity)?.has(item.id))
+      .filter((item) => !item.pendingSync && !queuedIds.has(`${context!.workspaceId}:${entity}:${item.id}`) && !remoteIds.get(entity)?.has(item.id))
       .map((item) => item.id);
     await table.bulkDelete(staleIds);
   }
 }
 
 export async function getPendingCount() {
-  return offlineDb.pendingMutations.count();
+  return context ? offlineDb.pendingMutations.where("workspaceId").equals(context.workspaceId)
+    .filter((mutation) => mutation.farmId === context!.farmId && mutation.seasonId === context!.seasonId).count() : 0;
 }
 
 export function getLastSyncTime() {
-  return localStorage.getItem(lastSyncKey);
+  return localStorage.getItem(lastSyncKey(context?.workspaceId));
 }
 
 export function subscribeSyncState(listener: (next: SyncState) => void) {
@@ -178,13 +182,18 @@ export function subscribeSyncState(listener: (next: SyncState) => void) {
 
 export async function startSyncService(token: string, workspaceId: string) {
   context = { token, workspaceId };
+  setActiveWorkspaceId(workspaceId);
+  emit({ lastSyncTime: getLastSyncTime(), pendingCount: await getPendingCount() });
   if (timer) window.clearInterval(timer);
   timer = window.setInterval(() => void syncPendingRecords(), 30_000);
   try {
     const bootstrap = await fetchBootstrap(token);
-    const farm = bootstrap.farms[0];
-    const season = farm ? bootstrap.seasons.find((item) => item.farmId === farm.id) : bootstrap.seasons[0];
+    const farm = bootstrap.farms.find((item) => item.id === bootstrap.activeFarmId);
+    const season = bootstrap.seasons.find((item) => item.id === bootstrap.activeSeasonId);
     context = { token, workspaceId, farmId: farm?.id, seasonId: season?.id };
+    setActiveFarmId(farm?.id ?? null);
+    setActiveSeasonId(season?.id ?? null);
+    emit({ farmId: farm?.id, seasonId: season?.id });
     await refreshOperationalData();
     await syncPendingRecords();
   } catch {
@@ -196,6 +205,14 @@ export function stopSyncService() {
   if (timer) window.clearInterval(timer);
   timer = null;
   context = null;
+  setActiveWorkspaceId(null);
+  setActiveFarmId(null);
+  setActiveSeasonId(null);
+}
+
+export async function clearWorkspaceCache() {
+  stopSyncService();
+  await clearCachedData();
 }
 
 window.addEventListener("online", () => {

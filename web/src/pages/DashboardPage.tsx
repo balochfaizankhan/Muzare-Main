@@ -21,7 +21,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { fetchBootstrap } from "../lib/api";
-import { ensureLocalAccounts, offlineDb } from "../lib/offline-db";
+import { ensureLocalAccounts, offlineDb, workspaceRecords } from "../lib/offline-db";
 import { useSyncState } from "../hooks/useSyncState";
 import { refreshOperationalData, syncNow } from "../services/syncService";
 
@@ -82,7 +82,7 @@ export function DashboardPage() {
   });
   const [activities, setActivities] = useState<Activity[]>([]);
   const query = useQuery({
-    queryKey: ["bootstrap", user?.id],
+    queryKey: ["bootstrap", user?.workspaceId, sync.farmId, sync.seasonId],
     queryFn: () => fetchBootstrap(token!),
     enabled: Boolean(user && token),
     retry: false,
@@ -91,11 +91,11 @@ export function DashboardPage() {
   const loadLocalDashboard = useCallback(async () => {
     await ensureLocalAccounts();
     const [attendance, dispatches, sales, vouchers, entries] = await Promise.all([
-      offlineDb.attendance.toArray(),
-      offlineDb.dispatches.toArray(),
-      offlineDb.sales.toArray(),
-      offlineDb.vouchers.toArray(),
-      offlineDb.partnerEntries.toArray(),
+      workspaceRecords(offlineDb.attendance),
+      workspaceRecords(offlineDb.dispatches),
+      workspaceRecords(offlineDb.sales),
+      workspaceRecords(offlineDb.vouchers),
+      workspaceRecords(offlineDb.partnerEntries),
     ]);
     const date = today();
     const totalSales = sales.reduce((sum, item) => sum + item.amount, 0);
@@ -157,8 +157,8 @@ export function DashboardPage() {
     return () => window.removeEventListener("muzare-data-refresh", loadLocalDashboard);
   }, [loadLocalDashboard]);
 
-  const farm = query.data?.farms[0];
-  const season = farm ? query.data?.seasons.find((item) => item.farmId === farm.id) : query.data?.seasons[0];
+  const farm = query.data?.farms.find((item) => item.id === query.data.activeFarmId);
+  const season = query.data?.seasons.find((item) => item.id === query.data.activeSeasonId);
   const StatusIcon = sync.status === "offline" ? WifiOff : Wifi;
   const displayName = user?.displayName || user?.email || "Administrator";
 
@@ -194,6 +194,7 @@ export function DashboardPage() {
             </Link>
           </div>
         </section>
+        {!season && <p className="context-message">No active season. Create or select a season to begin operations.</p>}
 
         <div className="section-title-row">
           <div>

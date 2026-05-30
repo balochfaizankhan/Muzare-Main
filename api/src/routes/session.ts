@@ -12,10 +12,11 @@ import {
   requirePlatformAdmin,
   requireUser,
   revokeSession,
+  serializeUser,
 } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
-import { users, workspaceMemberships, workspaces } from "../db/schema.js";
+import { users, userSessions, workspaceMemberships, workspaces } from "../db/schema.js";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -32,6 +33,10 @@ const signupSchema = z.object({
 
 const approvalSchema = z.object({
   userId: z.string().uuid(),
+});
+
+const workspaceSelectionSchema = z.object({
+  workspaceId: z.string().uuid(),
 });
 
 export async function sessionRoutes(app: FastifyInstance): Promise<void> {
@@ -61,7 +66,7 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(401).send({ message });
     }
 
-    const token = await createSession(user.id);
+    const token = await createSession(user.id, user.workspaceId);
     return {
       token,
       user: {
@@ -87,6 +92,22 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
         canAdminister: request.appUser.platformRole === "platform_admin",
       },
     };
+  });
+
+  app.post("/v1/session/workspace", { preHandler: requireUser }, async (request, reply) => {
+    if (!request.appUser || !request.sessionId) return reply.code(401).send({ message: "A database-backed session is required." });
+    const parsed = workspaceSelectionSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ message: "A valid workspace id is required." });
+    const membership = request.appUser.memberships.find((item) => item.active && item.workspaceId === parsed.data.workspaceId);
+    if (!membership) return reply.code(403).send({ message: "Workspace membership is required." });
+    await db.update(userSessions).set({
+      workspaceId: parsed.data.workspaceId,
+      activeFarmId: null,
+      activeSeasonId: null,
+    }).where(eq(userSessions.id, request.sessionId));
+    const [user] = await db.select().from(users).where(eq(users.id, request.appUser.id)).limit(1);
+    if (!user) return reply.code(404).send({ message: "User not found." });
+    return { user: await serializeUser(user, parsed.data.workspaceId) };
   });
 
   app.get("/v1/admin/approvals", { preHandler: requireAdmin }, async (_request, _reply) => {

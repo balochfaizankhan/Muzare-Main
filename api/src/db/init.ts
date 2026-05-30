@@ -8,9 +8,11 @@ if (!connectionString) {
 }
 
 const migrationsDir = new URL("../../../database/migrations/", import.meta.url);
+const databaseHost = new URL(connectionString).hostname;
+const localDatabase = databaseHost === "localhost" || databaseHost === "127.0.0.1" || databaseHost === "::1";
 const pool = new Pool({
   connectionString,
-  ssl: { rejectUnauthorized: false },
+  ssl: localDatabase ? undefined : { rejectUnauthorized: false },
 });
 
 try {

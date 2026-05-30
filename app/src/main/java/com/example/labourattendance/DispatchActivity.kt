@@ -18,6 +18,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.example.labourattendance.databinding.ActivityDispatchBinding
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import java.text.SimpleDateFormat
 import java.util.*
@@ -27,12 +28,16 @@ class DispatchActivity : AppCompatActivity() {
     private lateinit var binding: ActivityDispatchBinding
     private lateinit var databaseHelper: DatabaseHelper
     private val db = FirebaseFirestore.getInstance()
+    private val auth = FirebaseAuth.getInstance()
     private val calendar = Calendar.getInstance()
     private val dbDateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
     private val dbDateTimeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
     
     private var allDispatches: List<DatabaseHelper.DispatchRecord> = emptyList()
     private var currentSearchQuery: String = ""
+    private fun tenantDispatches() = db.collection("workspaces")
+        .document(requireNotNull(auth.currentUser?.uid) { "Authenticated tenant is required." })
+        .collection("dispatches")
 
     private fun getUiDateTimeFormat(): SimpleDateFormat {
         val lang = getSharedPreferences("Settings", MODE_PRIVATE).getString("My_Lang", "en")
@@ -107,7 +112,7 @@ class DispatchActivity : AppCompatActivity() {
     }
 
     private fun observeCloudDispatches() {
-        db.collection("dispatches")
+        tenantDispatches()
             .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
             .limit(50)
             .addSnapshotListener { snapshots, e ->
@@ -236,7 +241,7 @@ class DispatchActivity : AppCompatActivity() {
                                 .setPositiveButton("Delete") { _, _ ->
                                     databaseHelper.deleteDispatch(dispatch.id)
                                     dispatch.cloudId?.let { cid ->
-                                        db.collection("dispatches").document(cid).delete()
+                                        tenantDispatches().document(cid).delete()
                                     }
                                 }
                                 .setNegativeButton("Cancel", null)
@@ -339,7 +344,7 @@ class DispatchActivity : AppCompatActivity() {
                     val newId = databaseHelper.addDispatch(vehicle.id, dispatchDate, items)
                     
                     // Cloud update
-                    record.cloudId?.let { cid -> db.collection("dispatches").document(cid).delete() }
+                    record.cloudId?.let { cid -> tenantDispatches().document(cid).delete() }
                     uploadDispatchToCloud(newId, vehicle, dispatchDate, items)
                     
                     Toast.makeText(this, R.string.toast_update_success, Toast.LENGTH_SHORT).show()
@@ -592,7 +597,7 @@ class DispatchActivity : AppCompatActivity() {
             "timestamp" to com.google.firebase.Timestamp.now()
         )
 
-        db.collection("dispatches").add(dispatchData)
+        tenantDispatches().add(dispatchData)
     }
 
     private fun createEditText(hintRes: Int): EditText {

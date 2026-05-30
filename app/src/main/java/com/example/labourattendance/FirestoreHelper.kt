@@ -7,6 +7,9 @@ import com.google.firebase.firestore.SetOptions
 class FirestoreHelper {
     private val db = FirebaseFirestore.getInstance()
     private val auth = FirebaseAuth.getInstance()
+    private fun tenantCollection(name: String) = db.collection("workspaces")
+        .document(requireNotNull(auth.currentUser?.uid) { "Authenticated tenant is required." })
+        .collection(name)
 
     fun syncLabour(labour: DatabaseHelper.Labour) {
         val data = hashMapOf(
@@ -22,11 +25,11 @@ class FirestoreHelper {
             "labourType" to labour.labourType,
             "remarks" to (labour.remarks ?: "")
         )
-        db.collection("labours").document(labour.id.toString()).set(data, SetOptions.merge())
+        tenantCollection("labours").document(labour.id.toString()).set(data, SetOptions.merge())
     }
 
     fun deleteLabour(labourId: Int) {
-        db.collection("labours").document(labourId.toString()).delete()
+        tenantCollection("labours").document(labourId.toString()).delete()
     }
 
     fun syncAttendance(entry: DatabaseHelper.AttendanceEntry) {
@@ -37,12 +40,12 @@ class FirestoreHelper {
             "status" to entry.status,
             "farmId" to entry.farmId
         )
-        db.collection("attendance").document(docId).set(data, SetOptions.merge())
+        tenantCollection("attendance").document(docId).set(data, SetOptions.merge())
     }
 
     fun deleteAttendance(labourId: Int, date: String) {
         val docId = "${labourId}_${date}"
-        db.collection("attendance").document(docId).delete()
+        tenantCollection("attendance").document(docId).delete()
     }
 
     fun syncAdvance(record: DatabaseHelper.AdvanceRecord) {
@@ -56,11 +59,11 @@ class FirestoreHelper {
             "sourceId" to record.sourceId,
             "farmId" to record.farmId
         )
-        db.collection("advances").document(record.id.toString()).set(data, SetOptions.merge())
+        tenantCollection("advances").document(record.id.toString()).set(data, SetOptions.merge())
     }
 
     fun deleteAdvance(advanceId: Int) {
-        db.collection("advances").document(advanceId.toString()).delete()
+        tenantCollection("advances").document(advanceId.toString()).delete()
     }
 
     fun syncGroup(group: DatabaseHelper.Group) {
@@ -69,11 +72,11 @@ class FirestoreHelper {
             "name" to group.name,
             "farmId" to group.farmId
         )
-        db.collection("groups").document(group.id.toString()).set(data, SetOptions.merge())
+        tenantCollection("groups").document(group.id.toString()).set(data, SetOptions.merge())
     }
 
     fun deleteGroup(groupId: Int) {
-        db.collection("groups").document(groupId.toString()).delete()
+        tenantCollection("groups").document(groupId.toString()).delete()
     }
 
     fun syncVoucher(voucher: DatabaseHelper.Voucher) {
@@ -95,11 +98,11 @@ class FirestoreHelper {
             "items" to items,
             "farmId" to voucher.farmId
         )
-        db.collection("expenditure").document(voucher.id.toString()).set(data, SetOptions.merge())
+        tenantCollection("expenditure").document(voucher.id.toString()).set(data, SetOptions.merge())
     }
 
     fun deleteVoucher(voucherId: Int) {
-        db.collection("expenditure").document(voucherId.toString()).delete()
+        tenantCollection("expenditure").document(voucherId.toString()).delete()
     }
 
     fun syncFundSource(source: DatabaseHelper.FundSource) {
@@ -109,7 +112,7 @@ class FirestoreHelper {
             "description" to (source.description ?: ""),
             "farmId" to source.farmId
         )
-        db.collection("fund_sources").document(source.id.toString()).set(data, SetOptions.merge())
+        tenantCollection("fund_sources").document(source.id.toString()).set(data, SetOptions.merge())
     }
 
     fun syncFundEntry(entry: DatabaseHelper.FundEntry) {
@@ -122,27 +125,27 @@ class FirestoreHelper {
             "description" to (entry.description ?: ""),
             "farmId" to entry.farmId
         )
-        db.collection("fund_entries").document(entry.id.toString()).set(data, SetOptions.merge())
+        tenantCollection("fund_entries").document(entry.id.toString()).set(data, SetOptions.merge())
     }
 
     fun deleteFundEntry(id: Int) {
-        db.collection("fund_entries").document(id.toString()).delete()
+        tenantCollection("fund_entries").document(id.toString()).delete()
     }
 
     fun deleteVehicle(id: Int) {
-        db.collection("vehicles").document(id.toString()).delete()
+        tenantCollection("vehicles").document(id.toString()).delete()
     }
 
     fun deleteDateType(id: Int) {
-        db.collection("dateTypes").document(id.toString()).delete()
+        tenantCollection("dateTypes").document(id.toString()).delete()
     }
 
     fun deleteDispatch(id: Int) {
-        db.collection("dispatches").document(id.toString()).delete()
+        tenantCollection("dispatches").document(id.toString()).delete()
     }
 
     fun deleteExpCategory(id: Int) {
-        db.collection("exp_categories").document(id.toString()).delete()
+        tenantCollection("exp_categories").document(id.toString()).delete()
     }
 
     fun syncExpCategory(cat: DatabaseHelper.ExpCategory) {
@@ -151,7 +154,7 @@ class FirestoreHelper {
             "name" to cat.name,
             "farmId" to cat.farmId
         )
-        db.collection("exp_categories").document(cat.id.toString()).set(data, SetOptions.merge())
+        tenantCollection("exp_categories").document(cat.id.toString()).set(data, SetOptions.merge())
     }
 
     fun syncVehicle(vehicle: DatabaseHelper.Vehicle) {
@@ -162,7 +165,7 @@ class FirestoreHelper {
             "driverPhone" to vehicle.driverPhone,
             "farmId" to vehicle.farmId
         )
-        db.collection("vehicles").document(vehicle.id.toString()).set(data, SetOptions.merge())
+        tenantCollection("vehicles").document(vehicle.id.toString()).set(data, SetOptions.merge())
     }
 
     fun syncDateType(type: DatabaseHelper.DateType) {
@@ -171,7 +174,7 @@ class FirestoreHelper {
             "name" to type.name,
             "farmId" to type.farmId
         )
-        db.collection("dateTypes").document(type.id.toString()).set(data, SetOptions.merge())
+        tenantCollection("dateTypes").document(type.id.toString()).set(data, SetOptions.merge())
     }
 
     fun syncDispatch(dispatch: DatabaseHelper.DispatchRecord) {
@@ -191,7 +194,7 @@ class FirestoreHelper {
             "items" to items,
             "farmId" to dispatch.farmId
         )
-        db.collection("dispatches").document(dispatch.id.toString()).set(data, SetOptions.merge())
+        tenantCollection("dispatches").document(dispatch.id.toString()).set(data, SetOptions.merge())
     }
 
     fun syncFarm(farm: DatabaseHelper.Farm) {
@@ -205,75 +208,75 @@ class FirestoreHelper {
             "createdBy" to (farm.createdBy ?: ""),
             "timestamp" to farm.timestamp
         )
-        db.collection("farms").document(farm.id.toString()).set(data, SetOptions.merge())
+        tenantCollection("farms").document(farm.id.toString()).set(data, SetOptions.merge())
     }
 
     fun deleteFarm(farmId: Int) {
-        db.collection("farms").document(farmId.toString()).delete()
+        tenantCollection("farms").document(farmId.toString()).delete()
     }
 
     fun fetchAllFarms(onSuccess: (List<Map<String, Any>>) -> Unit) {
-        db.collection("farms").get().addOnSuccessListener { result ->
+        tenantCollection("farms").get().addOnSuccessListener { result ->
             onSuccess(result.map { it.data })
         }
     }
 
     fun fetchAllGroups(onSuccess: (List<Map<String, Any>>) -> Unit) {
-        db.collection("groups").get().addOnSuccessListener { result ->
+        tenantCollection("groups").get().addOnSuccessListener { result ->
             onSuccess(result.map { it.data })
         }
     }
 
     fun fetchAllLabours(onSuccess: (List<Map<String, Any>>) -> Unit) {
-        db.collection("labours").get().addOnSuccessListener { result ->
+        tenantCollection("labours").get().addOnSuccessListener { result ->
             onSuccess(result.map { it.data })
         }
     }
 
     fun fetchAllAdvances(onSuccess: (List<Map<String, Any>>) -> Unit) {
-        db.collection("advances").get().addOnSuccessListener { result ->
+        tenantCollection("advances").get().addOnSuccessListener { result ->
             onSuccess(result.map { it.data })
         }
     }
 
     fun fetchAllAttendance(onSuccess: (List<Map<String, Any>>) -> Unit) {
-        db.collection("attendance").get().addOnSuccessListener { result ->
+        tenantCollection("attendance").get().addOnSuccessListener { result ->
             onSuccess(result.map { it.data })
         }
     }
 
     fun fetchAllExpenditure(onSuccess: (List<Map<String, Any>>) -> Unit) {
-        db.collection("expenditure").get().addOnSuccessListener { result ->
+        tenantCollection("expenditure").get().addOnSuccessListener { result ->
             onSuccess(result.map { it.data })
         }
     }
 
     fun fetchAllFundSources(onSuccess: (List<Map<String, Any>>) -> Unit) {
-        db.collection("fund_sources").get().addOnSuccessListener { result ->
+        tenantCollection("fund_sources").get().addOnSuccessListener { result ->
             onSuccess(result.map { it.data })
         }
     }
 
     fun fetchAllFundEntries(onSuccess: (List<Map<String, Any>>) -> Unit) {
-        db.collection("fund_entries").get().addOnSuccessListener { result ->
+        tenantCollection("fund_entries").get().addOnSuccessListener { result ->
             onSuccess(result.map { it.data })
         }
     }
 
     fun fetchAllVehicles(onSuccess: (List<Map<String, Any>>) -> Unit) {
-        db.collection("vehicles").get().addOnSuccessListener { result ->
+        tenantCollection("vehicles").get().addOnSuccessListener { result ->
             onSuccess(result.map { it.data })
         }
     }
 
     fun fetchAllDateTypes(onSuccess: (List<Map<String, Any>>) -> Unit) {
-        db.collection("dateTypes").get().addOnSuccessListener { result ->
+        tenantCollection("dateTypes").get().addOnSuccessListener { result ->
             onSuccess(result.map { it.data })
         }
     }
 
     fun fetchAllDispatches(onSuccess: (List<Map<String, Any>>) -> Unit) {
-        db.collection("dispatches").get().addOnSuccessListener { result ->
+        tenantCollection("dispatches").get().addOnSuccessListener { result ->
             onSuccess(result.map { it.data })
         }
     }

@@ -7,7 +7,7 @@ export type Permission =
   | "CREATE_WORKSPACE" | "DELETE_WORKSPACE" | "VIEW_WORKSPACES" | "VIEW_USERS" | "MANAGE_SUBSCRIPTIONS"
   | "MANAGE_BILLING" | "MANAGE_PLATFORM_SETTINGS" | "VIEW_AUDIT_LOGS" | "VIEW_SYSTEM_HEALTH"
   | "APPROVE_EXPENSE" | "APPROVE_ATTENDANCE" | "APPROVE_SALE" | "APPROVE_DISPATCH"
-  | "MANAGE_TEAM" | "MANAGE_RECORDS" | "SUBMIT_RECORDS" | "VIEW_REPORTS";
+  | "MANAGE_TEAM" | "MANAGE_FARMS" | "MANAGE_SEASONS" | "MANAGE_RECORDS" | "SUBMIT_RECORDS" | "VIEW_REPORTS";
 
 export type AppUser = {
   id: string;
@@ -54,8 +54,30 @@ export type PendingApproval = {
 
 export type BootstrapData = {
   user: AppUser;
-  farms: Array<{ id: string; name: string; location: string | null; owner: string | null }>;
-  seasons: Array<{ id: string; farmId: string; name: string; year: number }>;
+  activeFarmId: string | null;
+  activeSeasonId: string | null;
+  farms: Farm[];
+  seasons: Season[];
+};
+
+export type Farm = {
+  id: string; workspaceId: string; name: string; location: string | null; owner: string | null; remarks: string | null;
+  contactName: string | null; contactEmail: string | null; contactPhone: string | null; active: boolean;
+};
+
+export type FarmInput = {
+  name: string; location?: string; owner?: string; remarks?: string;
+  contactName?: string; contactEmail?: string; contactPhone?: string;
+};
+
+export type SeasonStatus = "planned" | "active" | "closed" | "archived";
+export type Season = {
+  id: string; workspaceId: string; farmId: string; name: string; cropType: string | null; year: number;
+  startsOn: string; expectedEndsOn: string | null; actualEndsOn: string | null; status: SeasonStatus; notes: string | null;
+};
+export type SeasonInput = {
+  name: string; cropType?: string; startsOn: string; expectedEndsOn?: string; actualEndsOn?: string;
+  status: SeasonStatus; notes?: string;
 };
 
 export type AdminDashboardData = {
@@ -105,7 +127,29 @@ export const signup = (input: SignupRequest) =>
 
 export const logout = (token: string) => apiRequest<void>("/v1/auth/logout", { method: "POST" }, token);
 export const fetchSession = (token: string) => apiRequest<Session>("/v1/session", {}, token);
+export const selectWorkspace = (token: string, workspaceId: string) =>
+  apiRequest<{ user: AppUser }>("/v1/session/workspace", { method: "POST", body: JSON.stringify({ workspaceId }) }, token);
 export const fetchBootstrap = (token: string) => apiRequest<BootstrapData>("/v1/bootstrap", {}, token);
+export const fetchWorkspaceFarms = (token: string, workspaceId: string) =>
+  apiRequest<{ farms: Farm[]; activeFarmId: string | null }>(`/v1/workspace/${workspaceId}/farms`, {}, token);
+export const createWorkspaceFarm = (token: string, workspaceId: string, input: FarmInput) =>
+  apiRequest<{ farm: Farm }>(`/v1/workspace/${workspaceId}/farms`, { method: "POST", body: JSON.stringify(input) }, token);
+export const updateWorkspaceFarm = (token: string, workspaceId: string, farmId: string, input: FarmInput) =>
+  apiRequest<{ farm: Farm }>(`/v1/workspace/${workspaceId}/farms/${farmId}`, { method: "PATCH", body: JSON.stringify(input) }, token);
+export const archiveWorkspaceFarm = (token: string, workspaceId: string, farmId: string) =>
+  apiRequest<void>(`/v1/workspace/${workspaceId}/farms/${farmId}/archive`, { method: "POST" }, token);
+export const selectActiveFarm = (token: string, workspaceId: string, farmId: string) =>
+  apiRequest<void>(`/v1/workspace/${workspaceId}/farms/${farmId}/select`, { method: "POST" }, token);
+export const fetchFarmSeasons = (token: string, workspaceId: string, farmId: string) =>
+  apiRequest<{ seasons: Season[]; activeSeasonId: string | null }>(`/v1/workspace/${workspaceId}/farms/${farmId}/seasons`, {}, token);
+export const createFarmSeason = (token: string, workspaceId: string, farmId: string, input: SeasonInput) =>
+  apiRequest<{ season: Season }>(`/v1/workspace/${workspaceId}/farms/${farmId}/seasons`, { method: "POST", body: JSON.stringify(input) }, token);
+export const updateFarmSeason = (token: string, workspaceId: string, farmId: string, seasonId: string, input: SeasonInput) =>
+  apiRequest<{ season: Season }>(`/v1/workspace/${workspaceId}/farms/${farmId}/seasons/${seasonId}`, { method: "PATCH", body: JSON.stringify(input) }, token);
+export const selectActiveSeason = (token: string, workspaceId: string, farmId: string, seasonId: string) =>
+  apiRequest<void>(`/v1/workspace/${workspaceId}/farms/${farmId}/seasons/${seasonId}/select`, { method: "POST" }, token);
+export const archiveFarmSeason = (token: string, workspaceId: string, farmId: string, seasonId: string) =>
+  apiRequest<void>(`/v1/workspace/${workspaceId}/farms/${farmId}/seasons/${seasonId}/archive`, { method: "POST" }, token);
 export const fetchAdminDashboard = (token: string) => apiRequest<AdminDashboardData>("/v1/admin/dashboard", {}, token);
 export const fetchAdminWorkspaces = (token: string) => apiRequest<{ workspaces: AdminWorkspace[] }>("/v1/admin/workspaces", {}, token);
 export const createAdminWorkspace = (token: string, input: { name: string; contactEmail: string }) =>

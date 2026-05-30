@@ -6,6 +6,7 @@ import { Brand } from "../components/Brand";
 import { LanguageSwitch } from "../components/LanguageSwitch";
 import { useSyncState } from "../hooks/useSyncState";
 import { refreshOperationalData, startSyncService, stopSyncService, syncNow } from "../services/syncService";
+import { setActiveWorkspaceId } from "../lib/offline-db";
 
 const nav = [
   ["/workspace/dashboard", "Dashboard", LayoutDashboard],
@@ -20,12 +21,27 @@ const nav = [
 ] as const;
 
 export function WorkspaceLayout() {
-  const { user, token, logout } = useAuth();
+  const { user, token, logout, switchWorkspace } = useAuth();
   const sync = useSyncState();
   const [toast, setToast] = useState<string | null>(null);
+  setActiveWorkspaceId(user?.workspaceId ?? null);
   useEffect(() => {
     if (token && user?.workspaceId) void startSyncService(token, user.workspaceId);
     return stopSyncService;
+  }, [token, user?.workspaceId]);
+  useEffect(() => {
+    const reloadSeason = () => {
+      if (token && user?.workspaceId) void startSyncService(token, user.workspaceId);
+    };
+    window.addEventListener("muzare-season-changed", reloadSeason);
+    return () => window.removeEventListener("muzare-season-changed", reloadSeason);
+  }, [token, user?.workspaceId]);
+  useEffect(() => {
+    const reloadFarm = () => {
+      if (token && user?.workspaceId) void startSyncService(token, user.workspaceId);
+    };
+    window.addEventListener("muzare-farm-changed", reloadFarm);
+    return () => window.removeEventListener("muzare-farm-changed", reloadFarm);
   }, [token, user?.workspaceId]);
   useEffect(() => {
     const showToast = (event: Event) => {
@@ -47,6 +63,13 @@ export function WorkspaceLayout() {
         <header className="shell-header">
           <strong>Farm Operations</strong>
           <div className="toolbar__actions">
+            {user && user.memberships.length > 1 && (
+              <select className="workspace-switcher" aria-label="Current workspace" value={user.workspaceId ?? ""} onChange={(event) => void switchWorkspace(event.target.value)}>
+                {user.memberships.filter((membership) => membership.active).map((membership) => (
+                  <option key={membership.workspaceId} value={membership.workspaceId}>{membership.workspaceName}</option>
+                ))}
+              </select>
+            )}
             <span className={`sync-badge sync-badge--${sync.status}`}>{statusText}</span>
             <button className="shell-action" type="button" onClick={() => void refreshOperationalData()}><RefreshCw size={16} />Refresh</button>
             <button className="shell-action" type="button" onClick={() => void syncNow()}><CloudUpload size={16} />Sync Now</button>

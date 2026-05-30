@@ -1,6 +1,7 @@
 import {
   boolean,
   date,
+  foreignKey,
   integer,
   jsonb,
   numeric,
@@ -24,6 +25,7 @@ export const userStatus = pgEnum("user_status", ["pending", "approved", "rejecte
 export const approvalEntityType = pgEnum("approval_entity_type", ["expense", "attendance", "sale", "dispatch"]);
 export const approvalStatus = pgEnum("approval_status", ["pending", "approved", "rejected"]);
 export const subscriptionStatus = pgEnum("subscription_status", ["trial", "active", "past_due", "suspended", "cancelled"]);
+export const seasonStatus = pgEnum("season_status", ["planned", "active", "closed", "archived"]);
 export const attendanceStatus = pgEnum("attendance_status", ["P", "H", "A"]);
 export const transactionType = pgEnum("transaction_type", ["credit", "debit"]);
 export const transactionSource = pgEnum("transaction_source", [
@@ -79,38 +81,62 @@ export const workspaceMemberships = pgTable(
 export const userSessions = pgTable("user_sessions", {
   id: uuid("id").defaultRandom().primaryKey(),
   userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "set null" }),
+  activeFarmId: uuid("active_farm_id"),
+  activeSeasonId: uuid("active_season_id"),
   tokenHash: text("token_hash").notNull().unique(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const farms = pgTable("farms", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  workspaceId: uuid("workspace_id").references(() => workspaces.id),
-  name: text("name").notNull(),
-  location: text("location"),
-  owner: text("owner"),
-  remarks: text("remarks"),
-  active: boolean("active").default(true).notNull(),
-  createdBy: uuid("created_by").references(() => users.id),
-  ...timestamps,
-});
+export const farms = pgTable(
+  "farms",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id).notNull(),
+    name: text("name").notNull(),
+    location: text("location"),
+    owner: text("owner"),
+    contactName: text("contact_name"),
+    contactEmail: text("contact_email"),
+    contactPhone: text("contact_phone"),
+    remarks: text("remarks"),
+    active: boolean("active").default(true).notNull(),
+    createdBy: uuid("created_by").references(() => users.id),
+    ...timestamps,
+  },
+  (table) => [uniqueIndex("farms_workspace_id_id_uidx").on(table.workspaceId, table.id)],
+);
 
 export const seasons = pgTable(
   "seasons",
   {
     id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id).notNull(),
     farmId: uuid("farm_id").references(() => farms.id).notNull(),
     name: text("name").notNull(),
+    cropType: text("crop_type"),
     year: integer("year").notNull(),
     startsOn: date("starts_on").notNull(),
     endsOn: date("ends_on"),
+    expectedEndsOn: date("expected_ends_on"),
+    actualEndsOn: date("actual_ends_on"),
+    status: seasonStatus("status").default("planned").notNull(),
+    notes: text("notes"),
     active: boolean("active").default(true).notNull(),
     closed: boolean("closed").default(false).notNull(),
     createdBy: uuid("created_by").references(() => users.id),
     ...timestamps,
   },
-  (table) => [uniqueIndex("seasons_farm_year_name_uidx").on(table.farmId, table.year, table.name)],
+  (table) => [
+    uniqueIndex("seasons_farm_year_name_uidx").on(table.farmId, table.year, table.name),
+    uniqueIndex("seasons_workspace_farm_id_uidx").on(table.workspaceId, table.farmId, table.id),
+    foreignKey({
+      columns: [table.workspaceId, table.farmId],
+      foreignColumns: [farms.workspaceId, farms.id],
+      name: "seasons_workspace_farm_fk",
+    }),
+  ],
 );
 
 export const labourGroups = pgTable(
@@ -392,5 +418,17 @@ export const operationalRecords = pgTable(
     clientUpdatedAt: timestamp("client_updated_at", { withTimezone: true }).notNull(),
     ...timestamps,
   },
-  (table) => [uniqueIndex("operational_records_workspace_entity_client_uidx").on(table.workspaceId, table.entityType, table.clientRecordId)],
+  (table) => [
+    uniqueIndex("operational_records_workspace_entity_client_uidx").on(table.workspaceId, table.entityType, table.clientRecordId),
+    foreignKey({
+      columns: [table.workspaceId, table.farmId],
+      foreignColumns: [farms.workspaceId, farms.id],
+      name: "operational_records_workspace_farm_fk",
+    }),
+    foreignKey({
+      columns: [table.workspaceId, table.farmId, table.seasonId],
+      foreignColumns: [seasons.workspaceId, seasons.farmId, seasons.id],
+      name: "operational_records_workspace_farm_season_fk",
+    }),
+  ],
 );

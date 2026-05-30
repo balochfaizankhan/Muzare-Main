@@ -22,6 +22,8 @@ export type WorkspacePermission =
   | "APPROVE_SALE"
   | "APPROVE_DISPATCH"
   | "MANAGE_TEAM"
+  | "MANAGE_FARMS"
+  | "MANAGE_SEASONS"
   | "MANAGE_RECORDS"
   | "SUBMIT_RECORDS"
   | "VIEW_REPORTS";
@@ -44,11 +46,11 @@ const platformPermissions: Record<PlatformRole, readonly PlatformPermission[]> =
 const workspacePermissions: Record<WorkspaceRole, readonly WorkspacePermission[]> = {
   workspace_owner: [
     "APPROVE_EXPENSE", "APPROVE_ATTENDANCE", "APPROVE_SALE", "APPROVE_DISPATCH", "MANAGE_TEAM",
-    "MANAGE_RECORDS", "SUBMIT_RECORDS", "VIEW_REPORTS",
+    "MANAGE_RECORDS", "MANAGE_FARMS", "MANAGE_SEASONS", "SUBMIT_RECORDS", "VIEW_REPORTS",
   ],
   workspace_manager: [
     "APPROVE_EXPENSE", "APPROVE_ATTENDANCE", "APPROVE_SALE", "APPROVE_DISPATCH", "MANAGE_TEAM",
-    "MANAGE_RECORDS", "SUBMIT_RECORDS", "VIEW_REPORTS",
+    "MANAGE_RECORDS", "MANAGE_FARMS", "MANAGE_SEASONS", "SUBMIT_RECORDS", "VIEW_REPORTS",
   ],
   supervisor: ["APPROVE_EXPENSE", "APPROVE_ATTENDANCE", "APPROVE_SALE", "APPROVE_DISPATCH", "MANAGE_RECORDS", "SUBMIT_RECORDS", "VIEW_REPORTS"],
   operator: ["SUBMIT_RECORDS"],

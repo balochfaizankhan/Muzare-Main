@@ -6,6 +6,7 @@ import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { workspaceApprovalConfigurations, workspaceApprovals } from "../db/schema.js";
 import { hasPermission, type WorkspacePermission, type WorkspaceRole } from "../permissions.js";
+import { approvalEntityBelongsToWorkspace } from "../tenant-ownership.js";
 
 const entityPermission: Record<"expense" | "attendance" | "sale" | "dispatch", WorkspacePermission> = {
   expense: "APPROVE_EXPENSE",
@@ -30,8 +31,10 @@ export async function workspaceApprovalRoutes(app: FastifyInstance): Promise<voi
   app.get("/v1/workspace/:workspaceId/approvals", { preHandler: requireUser }, async (request, reply) => {
     if (!request.appUser) return reply;
     const parsed = z.object({ workspaceId: z.string().uuid() }).safeParse(request.params);
-    if (!parsed.success || !request.appUser.memberships.some((item) => item.active && item.workspaceId === parsed.data.workspaceId)) {
-      return reply.code(403).send({ message: "Workspace membership is required." });
+    const workspaceId = parsed.success ? parsed.data.workspaceId : undefined;
+    const canApprove = workspaceId && Object.values(entityPermission).some((permission) => hasPermission(request.appUser!, permission, workspaceId));
+    if (!parsed.success || request.appUser.workspaceId !== workspaceId || !canApprove) {
+      return reply.code(403).send({ message: "Workspace approval permission is required." });
     }
     if (localDevelopmentMode) return { approvals: [] };
     const approvals = await db.select().from(workspaceApprovals)
@@ -42,10 +45,14 @@ export async function workspaceApprovalRoutes(app: FastifyInstance): Promise<voi
   app.post("/v1/workspace/approvals", { preHandler: requireUser }, async (request, reply) => {
     if (!request.appUser) return reply;
     const parsed = submitSchema.safeParse(request.body);
-    if (!parsed.success || !hasPermission(request.appUser, "SUBMIT_RECORDS", parsed.success ? parsed.data.workspaceId : undefined)) {
+    if (!parsed.success || request.appUser.workspaceId !== parsed.data.workspaceId
+      || !hasPermission(request.appUser, "SUBMIT_RECORDS", parsed.data.workspaceId)) {
       return reply.code(403).send({ message: "Workspace record submission permission is required." });
     }
     if (localDevelopmentMode) return reply.code(201).send();
+    if (!(await approvalEntityBelongsToWorkspace(parsed.data.workspaceId, parsed.data.entityType, parsed.data.entityId))) {
+      return reply.code(403).send({ message: "Approval entity does not belong to the selected workspace." });
+    }
     await db.insert(workspaceApprovals).values({ ...parsed.data, submittedBy: request.appUser.id });
     return reply.code(201).send();
   });
@@ -54,6 +61,7 @@ export async function workspaceApprovalRoutes(app: FastifyInstance): Promise<voi
     if (!request.appUser) return reply;
     const parsed = decisionSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ message: "A valid workspace approval decision is required." });
+    if (request.appUser.workspaceId !== parsed.data.workspaceId) return reply.code(403).send({ message: "Select this workspace before deciding approvals." });
     if (localDevelopmentMode) return reply.code(204).send();
     const [approval] = await db.select().from(workspaceApprovals)
       .where(and(eq(workspaceApprovals.id, parsed.data.approvalId), eq(workspaceApprovals.workspaceId, parsed.data.workspaceId)))
@@ -79,7 +87,7 @@ export async function workspaceApprovalRoutes(app: FastifyInstance): Promise<voi
     } : {
       currentStep: approval.currentStep + 1,
       updatedAt: new Date(),
-    }).where(eq(workspaceApprovals.id, approval.id));
+    }).where(and(eq(workspaceApprovals.id, approval.id), eq(workspaceApprovals.workspaceId, parsed.data.workspaceId)));
     return reply.code(204).send();
   });
 }
