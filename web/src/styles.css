@@ -2727,15 +2727,33 @@ button {
 }
 
 @media print {
-  @page { margin: 8mm; size: landscape; }
+  @page { size: A4 landscape; margin: 6mm; }
   body * { visibility: hidden; }
   .attendance-register-preview, .attendance-register-preview * { visibility: visible; }
-  .attendance-register-preview { inset: 0; position: absolute; width: 100%; }
+  .attendance-register-preview { gap: 4px; inset: 0; position: absolute; width: 100%; }
   .no-print { display: none !important; }
   .register-table-wrap { overflow: visible; }
-  .attendance-register-table { font-size: 7pt; min-width: 100%; }
+  .register-header { gap: 6px; padding-bottom: 3px; }
+  .register-header span { font-size: 5pt; }
+  .register-header h2 { font-size: 11px; margin: 1px 0; }
+  .register-header p, .register-header strong, .register-header dt, .register-header dd { font-size: 7px; }
+  .register-summary { gap: 2px; }
+  .register-summary span { border-radius: 2px; font-size: 6px; gap: 0; padding: 2px 3px; }
+  .register-summary strong { font-size: 7px; }
+  .attendance-register-table { border-collapse: collapse; font-size: 5px; min-width: 0; table-layout: fixed; width: 100%; }
   .attendance-register-table thead { display: table-header-group; }
   .attendance-register-table tfoot { display: table-footer-group; }
-  .attendance-register-table th, .attendance-register-table td { padding: 3px 4px; }
+  .attendance-register-table tr { break-inside: avoid; page-break-inside: avoid; }
+  .attendance-register-table th, .attendance-register-table td { font-size: 5px; line-height: 1.05; min-width: 0; overflow: hidden; padding: 1px; text-overflow: clip; word-break: break-word; }
+  .attendance-register-table th:nth-child(1), .attendance-register-table td:nth-child(1) { width: 18px; }
+  .attendance-register-table th:nth-child(2), .attendance-register-table td:nth-child(2) { width: 100px; }
+  .attendance-register-table th:nth-child(3), .attendance-register-table td:nth-child(3),
+  .attendance-register-table th:nth-child(4), .attendance-register-table td:nth-child(4),
+  .attendance-register-table th:nth-child(5), .attendance-register-table td:nth-child(5) { width: 20px; }
+  .attendance-register-table th:nth-child(6), .attendance-register-table td:nth-child(6) { width: 35px; }
+  .attendance-register-table th:nth-child(n+7), .attendance-register-table td:nth-child(n+7) { width: 18px; }
+  .register-status small { font-size: 4px; margin-top: 1px; white-space: normal; }
+  .register-footer { gap: 5px; }
+  .register-footer span { font-size: 6px; }
   .register-status--present, .register-status--half_day, .register-status--absent, .register-status--empty, .attendance-register-table thead th, .attendance-register-table tfoot th { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 }
