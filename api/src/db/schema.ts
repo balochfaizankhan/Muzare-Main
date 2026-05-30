@@ -448,3 +448,18 @@ export const operationalRecords = pgTable(
     }),
   ],
 );
+
+export const attendanceImportSessions = pgTable("attendance_import_sessions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+  farmId: uuid("farm_id").references(() => farms.id).notNull(),
+  seasonId: uuid("season_id").references(() => seasons.id).notNull(),
+  uploadedBy: uuid("uploaded_by").references(() => users.id).notNull(),
+  originalFilename: text("original_filename").notNull(),
+  fileHash: text("file_hash").notNull(),
+  status: text("status").default("previewed").notNull(),
+  parsedPayload: jsonb("parsed_payload").$type<Record<string, unknown>>().notNull(),
+  validationSummary: jsonb("validation_summary").$type<Record<string, unknown>>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+});

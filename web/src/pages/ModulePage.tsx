@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { SubpageHeader } from "../components/SubpageHeader";
 import { useAuth } from "../auth/AuthProvider";
 import { useSyncState } from "../hooks/useSyncState";
-import { createExpenseSubcategory, fetchAttendanceReport, fetchExpenseCategories, updateExpenseSubcategory, type AttendanceReportFilters, type AttendanceReportStatus } from "../lib/api";
+import { confirmAttendanceImport, createExpenseSubcategory, fetchAttendanceReport, fetchExpenseCategories, previewAttendanceImport, updateExpenseSubcategory, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type AttendanceReportFilters, type AttendanceReportStatus } from "../lib/api";
 import { hasPermission } from "../lib/permissions";
 import {
   ensureLocalAccounts,
@@ -23,7 +23,7 @@ import {
   type Sale,
   type Voucher,
 } from "../lib/offline-db";
-import { persistOperationalRecord } from "../services/syncService";
+import { persistOperationalRecord, refreshOperationalData } from "../services/syncService";
 
 export type ModuleKey = "workforce" | "expenses" | "sales" | "dispatch" | "accounts" | "partnerLedger";
 
@@ -73,6 +73,7 @@ function WorkforceModule() {
   const [selectedLabourer, setSelectedLabourer] = useState<Labourer | null>(null);
   const [markingLabourers, setMarkingLabourers] = useState<Set<string>>(() => new Set());
   const [showReport, setShowReport] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
   const addLabourer = async (event: FormEvent) => {
     event.preventDefault();
@@ -166,6 +167,10 @@ function WorkforceModule() {
           <div className="attendance-actions">
             <button type="button" onClick={() => setDate(today())}>Today</button>
             <button type="button" onClick={() => setShowReport(true)}>View Report</button>
+            {user?.workspaceId && hasPermission(user, "IMPORT_ATTENDANCE", user.workspaceId) && <button type="button" onClick={() => {
+              if (!navigator.onLine) window.dispatchEvent(new CustomEvent("muzare-toast", { detail: "CSV import requires internet connection." }));
+              else setShowImport(true);
+            }}>Import CSV</button>}
           </div>
           <div className="attendance-totals" aria-label="Attendance totals">
             <strong className="attendance-total--present">P: {presentToday}</strong>
@@ -269,8 +274,104 @@ function WorkforceModule() {
           onClose={() => setShowReport(false)}
         />
       )}
+      {showImport && token && user?.workspaceId && sync.farmId && sync.seasonId && (
+        <AttendanceImportPanel token={token} workspaceId={user.workspaceId} farmId={sync.farmId} seasonId={sync.seasonId} onClose={() => setShowImport(false)} />
+      )}
     </>
   );
+}
+
+function AttendanceImportPanel({ token, workspaceId, farmId, seasonId, onClose }: {
+  token: string; workspaceId: string; farmId: string; seasonId: string; onClose: () => void;
+}) {
+  const [step, setStep] = useState(1);
+  const [file, setFile] = useState<File | null>(null);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [sessionId, setSessionId] = useState("");
+  const [preview, setPreview] = useState<AttendanceImportPreview | null>(null);
+  const [mappings, setMappings] = useState<AttendanceImportMapping[]>([]);
+  const [duplicateMode, setDuplicateMode] = useState<"missing_only" | "skip_existing" | "update_existing">("missing_only");
+  const [warningsConfirmed, setWarningsConfirmed] = useState(false);
+  const [result, setResult] = useState<AttendanceImportResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const mappingFor = (rowIndex: number) => mappings.find((mapping) => mapping.rowIndex === rowIndex);
+  const setMapping = (mapping: AttendanceImportMapping) => setMappings((current) => [...current.filter((item) => item.rowIndex !== mapping.rowIndex), mapping]);
+  const upload = async () => {
+    if (!file || !navigator.onLine) {
+      setError("CSV import requires internet connection."); return;
+    }
+    setBusy(true); setError("");
+    try {
+      const response = await previewAttendanceImport(token, workspaceId, {
+        farmId, seasonId, originalFilename: file.name, csvText: await file.text(), from: from || undefined, to: to || undefined,
+      });
+      setSessionId(response.sessionId); setPreview(response.preview);
+      setMappings(response.preview.rows.filter((row) => row.matchedLabourerId).map((row) => ({ rowIndex: row.rowIndex, action: "match", labourerId: row.matchedLabourerId! })));
+      setStep(2);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to preview CSV."); }
+    finally { setBusy(false); }
+  };
+  const confirm = async () => {
+    if (!preview || !navigator.onLine) { setError("CSV import requires internet connection."); return; }
+    setBusy(true); setError("");
+    try {
+      const response = await confirmAttendanceImport(token, workspaceId, { sessionId, duplicateMode, warningsConfirmed, mappings });
+      setResult(response.result); setStep(5); await refreshOperationalData();
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to import attendance."); }
+    finally { setBusy(false); }
+  };
+  const summary = preview?.summary;
+  return <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}>
+    <section className="attendance-import-dialog" role="dialog" aria-modal="true" aria-labelledby="attendance-import-title" onClick={(event) => event.stopPropagation()}>
+      <header className="attendance-report-header"><div><span>Workforce</span><h2 id="attendance-import-title">Attendance Register CSV Import</h2></div><button className="attendance-report-close" type="button" onClick={onClose} aria-label="Close import"><X size={19} /></button></header>
+      <ol className="attendance-import-steps">{["Upload CSV", "Map Columns", "Match Labour", "Validate", "Confirm Import"].map((label, index) => <li className={step >= index + 1 ? "is-active" : ""} key={label}><b>{index + 1}</b><span>{label}</span></li>)}</ol>
+      <div className="attendance-import-body">
+        {step === 1 && <section className="attendance-import-card">
+          <h3>Upload old Android attendance register</h3>
+          <p>Import is online-only. Workspace, farm, and season are locked to your active selection.</p>
+          <dl className="attendance-import-context"><div><dt>Workspace</dt><dd>{workspaceId}</dd></div><div><dt>Farm</dt><dd>{farmId}</dd></div><div><dt>Season</dt><dd>{seasonId}</dd></div></dl>
+          <label><span>CSV file *</span><input accept=".csv,text/csv" required type="file" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label>
+          <div className="attendance-import-range"><label><span>Date From <small>(optional)</small></span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label><label><span>Date To <small>(optional)</small></span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label></div>
+          <p className="attendance-import-note">Use a date range when CSV date headings omit the year.</p>
+        </section>}
+        {step === 2 && preview && <section className="attendance-import-card">
+          <h3>Detected columns</h3><p>Labour Name and daily date columns were detected automatically. Summary columns are validation-only.</p>
+          <div className="attendance-import-tags">{preview.dateColumns.map((column) => <span key={column.column}>{column.column} → {column.date}</span>)}</div>
+          <button type="button" onClick={() => setStep(3)}>Continue to labour matching</button>
+        </section>}
+        {step === 3 && preview && <section className="attendance-import-card">
+          <h3>Match labour</h3><p>Exact matches are selected automatically. Confirm suggestions or choose how to handle unknown names.</p>
+          <div className="attendance-import-match-list">{preview.rows.map((row) => {
+            const mapping = mappingFor(row.rowIndex);
+            return <article key={row.rowIndex}><strong>{row.labourName}</strong><select aria-label={`Match ${row.labourName}`} value={mapping?.action === "match" ? `match:${mapping.labourerId}` : mapping?.action ?? ""} onChange={(event) => {
+              const [action, labourerId] = event.target.value.split(":");
+              setMapping({ rowIndex: row.rowIndex, action: action as AttendanceImportMapping["action"], labourerId });
+            }}>
+              <option value="">Choose action</option>
+              {preview.labourers.map((labourer) => <option key={labourer.id} value={`match:${labourer.id}`}>{row.suggestedLabourerId === labourer.id ? "Suggested: " : ""}{labourer.name}</option>)}
+              <option value="create">Create new labour</option><option value="skip">Skip this row</option>
+            </select></article>;
+          })}</div>
+          <button type="button" onClick={() => setStep(4)}>Validate import</button>
+        </section>}
+        {step === 4 && preview && summary && <section className="attendance-import-card">
+          <h3>Validation summary</h3>
+          <div className="attendance-import-summary"><span>Labour rows<b>{summary.labourRows}</b></span><span>Date columns<b>{summary.dateColumns}</b></span><span>Attendance records<b>{summary.attendanceRecords}</b></span><span>Existing duplicates<b>{summary.duplicateRecords}</b></span><span>Daily advances<b>{summary.dailyAdvances}</b></span><span>Advance total<b>{money(summary.advanceTotal)}</b></span></div>
+          {summary.errors.length > 0 && <div className="attendance-import-errors"><strong>Errors</strong>{summary.errors.map((message) => <p key={message}>{message}</p>)}</div>}
+          {summary.warnings.length > 0 && <div className="attendance-import-warnings"><strong>Warnings</strong>{summary.warnings.map((message) => <p key={message}>{message}</p>)}<label><input type="checkbox" checked={warningsConfirmed} onChange={(event) => setWarningsConfirmed(event.target.checked)} /> I reviewed and confirm these warnings.</label></div>}
+          <label><span>Duplicate handling</span><select value={duplicateMode} onChange={(event) => setDuplicateMode(event.target.value as typeof duplicateMode)}><option value="missing_only">Import only missing records</option><option value="skip_existing">Skip existing records</option><option value="update_existing">Update existing records</option></select></label>
+          <p className="attendance-import-note">Advance Total columns are reference-only. Daily advances found inside date cells will be imported as separate advance records.</p>
+          <div className="attendance-import-table-wrap"><table><thead><tr><th>Labour</th>{preview.dateColumns.map((column) => <th key={column.column}>{column.column}</th>)}</tr></thead><tbody>{preview.rows.slice(0, 20).map((row) => <tr key={row.rowIndex}><th>{row.labourName}</th>{row.cells.map((cell) => <td key={cell.column}><b>{attendanceMark(cell.status ?? undefined)}</b>{cell.advanceAmount !== null && <small>{money(cell.advanceAmount)}</small>}</td>)}</tr>)}</tbody></table></div>
+          <button disabled={summary.errors.length > 0 || (summary.warnings.length > 0 && !warningsConfirmed)} type="button" onClick={() => void confirm()}>Confirm Import</button>
+        </section>}
+        {step === 5 && result && <section className="attendance-import-card"><h3>Import completed</h3><div className="attendance-import-summary"><span>Attendance created<b>{result.attendanceCreated}</b></span><span>Attendance updated<b>{result.attendanceUpdated}</b></span><span>Attendance skipped<b>{result.attendanceSkipped}</b></span><span>Advances created<b>{result.advancesCreated}</b></span><span>Labour created<b>{result.labourersCreated}</b></span></div><button type="button" onClick={onClose}>Close</button></section>}
+        {error && <p className="attendance-import-error">{error}</p>}
+      </div>
+      <footer className="attendance-import-footer"><button type="button" onClick={onClose}>Cancel</button>{step === 1 && <button disabled={!file || busy} type="button" onClick={() => void upload()}>{busy ? "Parsing..." : "Preview CSV"}</button>}</footer>
+    </section>
+  </div>;
 }
 
 function AttendanceReportPanel({

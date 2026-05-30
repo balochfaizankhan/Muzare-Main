@@ -95,3 +95,15 @@ test("expense entry uses dependent searchable category selectors and grouped tot
   assert.match(modulePage, /Expenses by category/);
   assert.match(modulePage, /MANAGE_EXPENSE_CATEGORIES/);
 });
+
+test("attendance CSV import is owner-gated, online-only, and keeps register overflow inside its preview", async () => {
+  const modulePage = await source("web/src/pages/ModulePage.tsx");
+  const styles = await source("web/src/styles.css");
+  assert.match(modulePage, /hasPermission\(user, "IMPORT_ATTENDANCE", user\.workspaceId\)/);
+  assert.match(modulePage, /CSV import requires internet connection\./);
+  assert.match(modulePage, /Attendance Register CSV Import/);
+  assert.match(modulePage, /Import only missing records/);
+  assert.match(modulePage, /Daily advances found inside date cells will be imported as separate advance records\./);
+  assert.match(styles, /\.attendance-import-table-wrap \{ max-width: 100%; overflow-x: auto; \}/);
+  assert.match(styles, /\.attendance-import-dialog \{[\s\S]*max-width: min\(960px, 95vw\);/);
+});

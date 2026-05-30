@@ -6,6 +6,8 @@ import { buildApp } from "../src/app.js";
 import { closeDatabaseConnection, db } from "../src/db/client.js";
 import {
   farms,
+  attendanceImportSessions,
+  auditLogs,
   operationalRecords,
   seasons,
   userSessions,
@@ -18,6 +20,7 @@ import {
 const now = new Date().toISOString();
 const alpha = { workspaceId: randomUUID(), farmId: randomUUID(), seasonId: randomUUID(), userId: randomUUID(), token: `alpha-${randomUUID()}` };
 const bravo = { workspaceId: randomUUID(), farmId: randomUUID(), seasonId: randomUUID(), userId: randomUUID(), token: `bravo-${randomUUID()}` };
+const supervisor = { userId: randomUUID(), token: `supervisor-${randomUUID()}` };
 const ids = [alpha.workspaceId, bravo.workspaceId];
 let app: Awaited<ReturnType<typeof buildApp>>;
 
@@ -41,10 +44,12 @@ before(async () => {
   await db.insert(users).values([
     { id: alpha.userId, email: `alpha-${alpha.userId}@example.test`, passwordHash: "test", status: "approved" },
     { id: bravo.userId, email: `bravo-${bravo.userId}@example.test`, passwordHash: "test", status: "approved" },
+    { id: supervisor.userId, email: `supervisor-${supervisor.userId}@example.test`, passwordHash: "test", status: "approved" },
   ]);
   await db.insert(workspaceMemberships).values([
     { workspaceId: alpha.workspaceId, userId: alpha.userId, role: "workspace_owner" },
     { workspaceId: bravo.workspaceId, userId: bravo.userId, role: "workspace_owner" },
+    { workspaceId: alpha.workspaceId, userId: supervisor.userId, role: "supervisor" },
   ]);
   await db.insert(farms).values([
     { id: alpha.farmId, workspaceId: alpha.workspaceId, name: "Alpha Farm" },
@@ -57,19 +62,22 @@ before(async () => {
   await db.insert(userSessions).values([
     { userId: alpha.userId, workspaceId: alpha.workspaceId, activeFarmId: alpha.farmId, activeSeasonId: alpha.seasonId, tokenHash: hash(alpha.token), expiresAt: new Date(Date.now() + 60_000) },
     { userId: bravo.userId, workspaceId: bravo.workspaceId, activeFarmId: bravo.farmId, activeSeasonId: bravo.seasonId, tokenHash: hash(bravo.token), expiresAt: new Date(Date.now() + 60_000) },
+    { userId: supervisor.userId, workspaceId: alpha.workspaceId, activeFarmId: alpha.farmId, activeSeasonId: alpha.seasonId, tokenHash: hash(supervisor.token), expiresAt: new Date(Date.now() + 60_000) },
   ]);
   app = await buildApp();
 });
 
 after(async () => {
   if (app) await app.close();
+  await db.delete(attendanceImportSessions).where(inArray(attendanceImportSessions.workspaceId, ids));
+  await db.delete(auditLogs).where(inArray(auditLogs.workspaceId, ids));
   await db.delete(workspaceApprovals).where(inArray(workspaceApprovals.workspaceId, ids));
   await db.delete(operationalRecords).where(inArray(operationalRecords.workspaceId, ids));
-  await db.delete(userSessions).where(inArray(userSessions.userId, [alpha.userId, bravo.userId]));
+  await db.delete(userSessions).where(inArray(userSessions.userId, [alpha.userId, bravo.userId, supervisor.userId]));
   await db.delete(seasons).where(inArray(seasons.workspaceId, ids));
   await db.delete(farms).where(inArray(farms.workspaceId, ids));
   await db.delete(workspaceMemberships).where(inArray(workspaceMemberships.workspaceId, ids));
-  await db.delete(users).where(inArray(users.id, [alpha.userId, bravo.userId]));
+  await db.delete(users).where(inArray(users.id, [alpha.userId, bravo.userId, supervisor.userId]));
   await db.delete(workspaces).where(inArray(workspaces.id, ids));
   await closeDatabaseConnection();
 });
@@ -194,6 +202,58 @@ test("attendance reports calculate payable wages and reject foreign workspace or
     recordedBy: alpha.userId, clientUpdatedAt: new Date(now),
   });
   assert.equal((await request(alpha.token, "GET", `${path}&labourId=${foreignLabourerId}`)).statusCode, 403);
+});
+
+test("attendance CSV imports preview safely, enforce owner access, and avoid duplicate attendance or advances", async () => {
+  const labourerId = randomUUID();
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", labourerId, {
+    name: "CSV Known Worker", group: "General", dailyWage: 100,
+  }))).statusCode, 200);
+  const csvText = [
+    "Labour Name,P Total,1/2 Total,A Total,Advance Total,01/05,02/05/2026,2026-05-03,04-05-2026",
+    'CSV Known Worker,1,1,1,700,"P / 500","½ 200",A,-',
+  ].join("\n");
+  const input = { farmId: alpha.farmId, seasonId: alpha.seasonId, originalFilename: "old-register.csv", csvText, from: "2026-05-01", to: "2026-05-04" };
+  assert.equal((await request(supervisor.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/preview`, input)).statusCode, 403);
+  assert.equal((await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/preview`, { ...input, farmId: bravo.farmId, seasonId: bravo.seasonId })).statusCode, 403);
+
+  const preview = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/preview`, input);
+  assert.equal(preview.statusCode, 201);
+  assert.deepEqual(preview.json().preview.summary, {
+    labourRows: 1, dateColumns: 4, attendanceRecords: 3, dailyAdvances: 2, advanceTotal: 700,
+    duplicateRecords: 0, unknownLabourRows: 0, errors: [], warnings: [],
+  });
+  const sessionId = preview.json().sessionId as string;
+  const confirmed = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/confirm`, {
+    sessionId, duplicateMode: "missing_only", warningsConfirmed: false, mappings: [],
+  });
+  assert.equal(confirmed.statusCode, 200);
+  assert.deepEqual(confirmed.json().result, { attendanceCreated: 3, attendanceUpdated: 0, attendanceSkipped: 0, advancesCreated: 2, labourersCreated: 0 });
+  assert.equal((await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/confirm`, {
+    sessionId, duplicateMode: "missing_only", warningsConfirmed: false, mappings: [],
+  })).statusCode, 409);
+
+  const repeatPreview = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/preview`, input);
+  assert.equal(repeatPreview.json().preview.summary.duplicateRecords, 3);
+  const repeat = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/confirm`, {
+    sessionId: repeatPreview.json().sessionId, duplicateMode: "missing_only", warningsConfirmed: false, mappings: [],
+  });
+  assert.deepEqual(repeat.json().result, { attendanceCreated: 0, attendanceUpdated: 0, attendanceSkipped: 3, advancesCreated: 0, labourersCreated: 0 });
+});
+
+test("attendance CSV imports can create unknown labour and import advance-only daily cells", async () => {
+  const csvText = ["Labour Name,Advance Total,01/05,02/05", "New CSV Worker,1000,1000,P"].join("\n");
+  const preview = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/preview`, {
+    farmId: alpha.farmId, seasonId: alpha.seasonId, originalFilename: "new-worker.csv", csvText, from: "2026-05-01", to: "2026-05-02",
+  });
+  assert.equal(preview.statusCode, 201);
+  assert.equal(preview.json().preview.summary.unknownLabourRows, 1);
+  assert.equal(preview.json().preview.summary.dailyAdvances, 1);
+  const confirmed = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/confirm`, {
+    sessionId: preview.json().sessionId, duplicateMode: "missing_only", warningsConfirmed: false,
+    mappings: [{ rowIndex: 0, action: "create", dailyWage: 80, group: "Imported" }],
+  });
+  assert.deepEqual(confirmed.json().result, { attendanceCreated: 1, attendanceUpdated: 0, attendanceSkipped: 0, advancesCreated: 1, labourersCreated: 1 });
 });
 
 test("season lifecycle persists active selection and rejects cross-farm or archived references", async () => {

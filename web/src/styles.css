@@ -2630,12 +2630,54 @@ button {
 .register-status--empty { background: #f5f6f7; color: #75838c; }
 .register-footer { display: flex; flex-wrap: wrap; gap: 10px; }
 .register-footer span { color: #496071; font-size: .68rem; }
+.attendance-import-dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-soft); max-height: 94vh; max-width: min(960px, 95vw); overflow: hidden; width: 95vw; }
+.attendance-import-steps { background: var(--surface-soft); border-bottom: 1px solid var(--border); display: flex; gap: 6px; list-style: none; margin: 0; overflow-x: auto; padding: 10px 14px; }
+.attendance-import-steps li { align-items: center; color: var(--text-muted); display: flex; flex: 0 0 auto; font-size: .72rem; gap: 5px; white-space: nowrap; }
+.attendance-import-steps b { align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 50%; display: inline-flex; height: 22px; justify-content: center; width: 22px; }
+.attendance-import-steps .is-active { color: var(--brand-primary); font-weight: 800; }
+.attendance-import-steps .is-active b { background: var(--brand-secondary); border-color: var(--brand-secondary); color: #fff; }
+.attendance-import-body { display: grid; gap: 10px; max-height: 70vh; overflow: auto; padding: 14px; }
+.attendance-import-card { display: grid; gap: 12px; min-width: 0; }
+.attendance-import-card h3, .attendance-import-card p { margin: 0; }
+.attendance-import-card p { color: var(--text-secondary); font-size: .82rem; }
+.attendance-import-card label { display: grid; gap: 5px; min-width: 0; }
+.attendance-import-card label span { color: var(--text-secondary); font-size: .78rem; font-weight: 750; }
+.attendance-import-card input, .attendance-import-card select { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); min-height: 44px; min-width: 0; padding: 7px 9px; width: 100%; }
+.attendance-import-card button, .attendance-import-footer button { background: var(--brand-primary); border: 1px solid var(--brand-primary); border-radius: 8px; color: #fff; font-size: .82rem; font-weight: 800; min-height: 42px; padding: 8px 12px; }
+.attendance-import-card button:disabled, .attendance-import-footer button:disabled { cursor: not-allowed; opacity: .55; }
+.attendance-import-range, .attendance-import-summary { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.attendance-import-context { display: grid; gap: 4px; margin: 0; }
+.attendance-import-context div { display: grid; gap: 2px; grid-template-columns: 80px minmax(0, 1fr); }
+.attendance-import-context dt { color: var(--text-muted); font-size: .72rem; }
+.attendance-import-context dd { font-size: .72rem; font-weight: 750; margin: 0; overflow-wrap: anywhere; }
+.attendance-import-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.attendance-import-tags span { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 20px; color: var(--text-secondary); font-size: .72rem; padding: 6px 9px; }
+.attendance-import-match-list { display: grid; gap: 7px; }
+.attendance-import-match-list article { align-items: center; background: var(--surface-soft); border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 8px; grid-template-columns: minmax(120px, 1fr) minmax(180px, 1fr); padding: 8px; }
+.attendance-import-match-list strong { font-size: .8rem; overflow-wrap: anywhere; }
+.attendance-import-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.attendance-import-summary span { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 8px; color: var(--text-secondary); display: grid; font-size: .7rem; gap: 3px; padding: 8px; }
+.attendance-import-summary b { color: var(--brand-primary); font-size: .9rem; }
+.attendance-import-note { background: var(--blue-bg); border-radius: 8px; padding: 9px; }
+.attendance-import-errors, .attendance-import-warnings, .attendance-import-error { border-radius: 8px; font-size: .78rem; padding: 9px; }
+.attendance-import-errors, .attendance-import-error { background: var(--danger-bg); color: var(--danger); }
+.attendance-import-warnings { background: #fff8df; color: #805800; }
+.attendance-import-errors p, .attendance-import-warnings p { color: inherit; margin-top: 5px; }
+.attendance-import-table-wrap { max-width: 100%; overflow-x: auto; }
+.attendance-import-table-wrap table { border-collapse: collapse; font-size: .72rem; min-width: max-content; width: 100%; }
+.attendance-import-table-wrap th, .attendance-import-table-wrap td { border: 1px solid var(--border); padding: 6px; text-align: center; }
+.attendance-import-table-wrap td small { display: block; font-size: .62rem; margin-top: 3px; white-space: nowrap; }
+.attendance-import-footer { border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; padding: 11px 14px; }
+.attendance-import-footer button:first-child { background: var(--surface); border-color: var(--border); color: var(--text-secondary); }
 
 @media (max-width: 767px) {
   .attendance-report-filters { grid-template-columns: minmax(0, 1fr); }
   .attendance-report-dialog { width: 95vw; }
   .register-header { display: grid; }
   .register-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .attendance-import-dialog { width: 95vw; }
+  .attendance-import-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .attendance-import-match-list article { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (prefers-color-scheme: dark) {
@@ -2651,6 +2693,9 @@ button {
 @media (prefers-color-scheme: dark) {
   .attendance-report-dialog { --surface: #10283b; --surface-soft: #173449; --surface-tint: #21445a; --border: #34586b; --text: #eef6f8; --text-secondary: #c2d4dc; --brand-primary: #eef6f8; --brand-secondary: #9dce7e; }
   .attendance-report-generate { background: #2d862f; border-color: #2d862f !important; }
+  .attendance-import-dialog { --surface: #10283b; --surface-soft: #173449; --border: #34586b; --text: #eef6f8; --text-secondary: #c2d4dc; --text-muted: #9fb6c0; --brand-primary: #eef6f8; --brand-secondary: #6aae52; --blue-bg: #173449; --danger-bg: #482b2b; }
+  .attendance-import-card button, .attendance-import-footer button:not(:first-child) { background: #2d862f; border-color: #2d862f; }
+  .attendance-import-warnings { background: #493d20; color: #ffe4a3; }
 }
 
 @media print {

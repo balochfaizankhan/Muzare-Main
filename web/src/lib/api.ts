@@ -7,7 +7,7 @@ export type Permission =
   | "CREATE_WORKSPACE" | "DELETE_WORKSPACE" | "VIEW_WORKSPACES" | "VIEW_USERS" | "MANAGE_SUBSCRIPTIONS"
   | "MANAGE_BILLING" | "MANAGE_PLATFORM_SETTINGS" | "VIEW_AUDIT_LOGS" | "VIEW_SYSTEM_HEALTH"
   | "APPROVE_EXPENSE" | "APPROVE_ATTENDANCE" | "APPROVE_SALE" | "APPROVE_DISPATCH"
-  | "MANAGE_TEAM" | "MANAGE_FARMS" | "MANAGE_SEASONS" | "MANAGE_EXPENSE_CATEGORIES" | "MANAGE_RECORDS" | "SUBMIT_RECORDS" | "VIEW_REPORTS";
+  | "MANAGE_TEAM" | "MANAGE_FARMS" | "MANAGE_SEASONS" | "MANAGE_EXPENSE_CATEGORIES" | "IMPORT_ATTENDANCE" | "MANAGE_RECORDS" | "SUBMIT_RECORDS" | "VIEW_REPORTS";
 
 export type AppUser = {
   id: string;
@@ -109,6 +109,23 @@ export type AttendanceReportData = {
 export type AttendanceReportFilters = {
   farmId: string; seasonId: string; from: string; to: string; labourId?: string; status?: AttendanceReportStatus;
 };
+export type AttendanceImportCell = { column: string; date: string; status: AttendanceReportStatus | null; advanceAmount: number | null; raw: string };
+export type AttendanceImportRow = {
+  rowIndex: number; labourName: string; cells: AttendanceImportCell[]; matchedLabourerId: string | null; suggestedLabourerId: string | null;
+  csvAdvance: number | null; calculatedAdvance: number;
+};
+export type AttendanceImportPreview = {
+  rows: AttendanceImportRow[]; dateColumns: Array<{ column: string; date: string }>; errors: string[]; warnings: string[];
+  labourers: Array<{ id: string; name: string; dailyWage: number }>;
+  summary: {
+    labourRows: number; dateColumns: number; attendanceRecords: number; dailyAdvances: number; advanceTotal: number;
+    duplicateRecords: number; unknownLabourRows: number; errors: string[]; warnings: string[];
+  };
+};
+export type AttendanceImportMapping = { rowIndex: number; action: "match" | "create" | "skip"; labourerId?: string; dailyWage?: number; group?: string };
+export type AttendanceImportResult = {
+  attendanceCreated: number; attendanceUpdated: number; attendanceSkipped: number; advancesCreated: number; labourersCreated: number;
+};
 export type ExpenseSubcategory = { id: string; categoryId: string; name: string; sortOrder: number; isSystem: boolean; active: boolean };
 export type ExpenseCategory = { id: string; name: string; sortOrder: number; isSystem: boolean; subcategories: ExpenseSubcategory[] };
 
@@ -202,3 +219,13 @@ export const createExpenseSubcategory = (token: string, workspaceId: string, inp
   apiRequest<{ subcategory: ExpenseSubcategory }>(`/v1/workspace/${workspaceId}/expense-subcategories`, { method: "POST", body: JSON.stringify(input) }, token);
 export const updateExpenseSubcategory = (token: string, workspaceId: string, subcategoryId: string, input: { name?: string; active?: boolean }) =>
   apiRequest<{ subcategory: ExpenseSubcategory }>(`/v1/workspace/${workspaceId}/expense-subcategories/${subcategoryId}`, { method: "PATCH", body: JSON.stringify(input) }, token);
+export const previewAttendanceImport = (token: string, workspaceId: string, input: {
+  farmId: string; seasonId: string; originalFilename: string; csvText: string; from?: string; to?: string;
+}) => apiRequest<{ sessionId: string; preview: AttendanceImportPreview }>(
+  `/api/workspaces/${workspaceId}/attendance-imports/preview`, { method: "POST", body: JSON.stringify(input) }, token,
+);
+export const confirmAttendanceImport = (token: string, workspaceId: string, input: {
+  sessionId: string; duplicateMode: "missing_only" | "skip_existing" | "update_existing"; warningsConfirmed: boolean; mappings: AttendanceImportMapping[];
+}) => apiRequest<{ sessionId: string; result: AttendanceImportResult }>(
+  `/api/workspaces/${workspaceId}/attendance-imports/confirm`, { method: "POST", body: JSON.stringify(input) }, token,
+);
