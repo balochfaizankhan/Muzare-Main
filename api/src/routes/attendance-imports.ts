@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireUser, type AuthenticatedUser } from "../auth.js";
 import { db } from "../db/client.js";
@@ -69,6 +69,8 @@ type Labour = { id: string; name: string; dailyWage: number };
 
 const normalized = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
 const stableId = (...values: Array<string | number>) => createHash("sha256").update(values.join("|")).digest("hex");
+const batchSize = 500;
+const chunks = <T>(values: T[]) => Array.from({ length: Math.ceil(values.length / batchSize) }, (_, index) => values.slice(index * batchSize, (index + 1) * batchSize));
 const numeric = (value: string | undefined) => {
   if (!value?.trim()) return null;
   const parsed = Number(value.replaceAll(",", "").trim());
@@ -270,6 +272,7 @@ export async function attendanceImportRoutes(app: FastifyInstance): Promise<void
 
   app.post("/api/workspaces/:workspaceId/attendance-imports/confirm", { preHandler: requireUser }, async (request, reply) => {
     if (!request.appUser) return reply;
+    request.log.info("attendance import confirm request received");
     const params = paramsSchema.safeParse(request.params);
     const body = confirmSchema.safeParse(request.body);
     if (!params.success) return reply.code(400).send({
@@ -285,6 +288,7 @@ export async function attendanceImportRoutes(app: FastifyInstance): Promise<void
       eq(attendanceImportSessions.uploadedBy, request.appUser.id),
     )).limit(1);
     if (!session) return reply.code(404).send({ message: "Attendance import session was not found." });
+    request.log.info({ importSessionId: session.id }, "attendance import session loaded");
     if (session.status === "confirmed") return reply.code(409).send({ message: "Attendance import session has already been confirmed." });
     if ((body.data.farmId && body.data.farmId !== session.farmId) || (body.data.seasonId && body.data.seasonId !== session.seasonId)) {
       return reply.code(403).send({ message: "Import confirmation farm and season must match the preview session." });
@@ -297,7 +301,9 @@ export async function attendanceImportRoutes(app: FastifyInstance): Promise<void
     const decisions = new Map(body.data.mappings.map((mapping) => [mapping.rowIndex, mapping]));
     const unresolvedRows = parsed.rows.filter((row) => !row.matchedLabourerId && !decisions.has(row.rowIndex)).map((row) => row.labourName);
     if (unresolvedRows.length) return reply.code(400).send({ message: "Resolve all labour mappings before importing.", fields: unresolvedRows });
+    request.log.info({ importSessionId: session.id, mappings: decisions.size }, "attendance import labour mappings resolved");
     const result = await db.transaction(async (tx) => {
+      request.log.info({ importSessionId: session.id }, "attendance import database transaction started");
       const labourers = await selectedLabourers(params.data.workspaceId, session.farmId);
       const validLabour = new Set(labourers.map((labourer) => labourer.id));
       const attendance = await tx.select().from(operationalRecords).where(and(
@@ -305,7 +311,15 @@ export async function attendanceImportRoutes(app: FastifyInstance): Promise<void
         eq(operationalRecords.seasonId, session.seasonId), eq(operationalRecords.entityType, "attendance"),
       ));
       const attendanceByIdentity = new Map(attendance.map((record) => [`${String(record.payload.labourerId)}:${String(record.payload.date)}`, record]));
-      let created = 0; let updated = 0; let skipped = 0; let advancesCreated = 0; let labourersCreated = 0;
+      const existingAdvances = await tx.select({ clientRecordId: operationalRecords.clientRecordId }).from(operationalRecords).where(and(
+        eq(operationalRecords.workspaceId, params.data.workspaceId), eq(operationalRecords.farmId, session.farmId),
+        eq(operationalRecords.seasonId, session.seasonId), eq(operationalRecords.entityType, "advance"),
+      ));
+      const existingAdvanceIds = new Set(existingAdvances.map((record) => record.clientRecordId));
+      const labourerWrites: Array<typeof operationalRecords.$inferInsert> = [];
+      const attendanceWrites = new Map<string, typeof operationalRecords.$inferInsert>();
+      const advanceWrites = new Map<string, typeof operationalRecords.$inferInsert>();
+      let created = 0; let updated = 0; let skipped = 0; let duplicateAdvancesSkipped = 0;
       for (const row of parsed.rows) {
         const decision = decisions.get(row.rowIndex);
         let labourerId = row.matchedLabourerId;
@@ -316,12 +330,12 @@ export async function attendanceImportRoutes(app: FastifyInstance): Promise<void
         if (decision?.action === "create") {
           labourerId = randomUUID();
           const timestamp = new Date();
-          await tx.insert(operationalRecords).values({
+          labourerWrites.push({
             workspaceId: params.data.workspaceId, farmId: session.farmId, clientRecordId: labourerId, entityType: "labourer",
             payload: { id: labourerId, name: row.labourName, group: decision.group || "Imported", dailyWage: decision.dailyWage ?? 0, createdAt: timestamp.toISOString(), updatedAt: timestamp.toISOString(), source: "old_android_csv" },
             recordedBy: request.appUser!.id, clientUpdatedAt: timestamp,
           });
-          validLabour.add(labourerId); labourersCreated += 1;
+          validLabour.add(labourerId);
         }
         if (!labourerId || !validLabour.has(labourerId)) throw new Error(`Invalid labour mapping for ${row.labourName}.`);
         for (const cell of row.cells) {
@@ -333,25 +347,18 @@ export async function attendanceImportRoutes(app: FastifyInstance): Promise<void
             else {
               const clientRecordId = existing?.clientRecordId ?? `csv-attendance-${stableId(params.data.workspaceId, session.farmId, session.seasonId, labourerId, cell.date)}`;
               const payload = { id: clientRecordId, labourerId, date: cell.date, status: cell.status, source: "old_android_csv", sourceImportSessionId: session.id, createdAt: timestamp.toISOString(), updatedAt: timestamp.toISOString() };
-              if (existing) {
-                await tx.update(operationalRecords).set({ payload, clientUpdatedAt: timestamp, updatedAt: timestamp }).where(eq(operationalRecords.id, existing.id));
-                updated += 1;
-              } else {
-                const [inserted] = await tx.insert(operationalRecords).values({
-                  workspaceId: params.data.workspaceId, farmId: session.farmId, seasonId: session.seasonId,
-                  clientRecordId, entityType: "attendance", payload, recordedBy: request.appUser!.id, clientUpdatedAt: timestamp,
-                }).returning();
-                attendanceByIdentity.set(identity, inserted!); created += 1;
-              }
+              attendanceWrites.set(identity, {
+                workspaceId: params.data.workspaceId, farmId: session.farmId, seasonId: session.seasonId,
+                clientRecordId, entityType: "attendance", payload, recordedBy: request.appUser!.id, clientUpdatedAt: timestamp, updatedAt: timestamp,
+              });
+              if (existing) updated += 1; else created += 1;
             }
           }
           if (cell.advanceAmount !== null) {
             const clientRecordId = `csv-advance-${stableId(params.data.workspaceId, session.farmId, session.seasonId, session.fileHash, row.rowIndex, cell.column)}`;
-            const [existing] = await tx.select({ id: operationalRecords.id }).from(operationalRecords).where(and(
-              eq(operationalRecords.workspaceId, params.data.workspaceId), eq(operationalRecords.entityType, "advance"), eq(operationalRecords.clientRecordId, clientRecordId),
-            )).limit(1);
-            if (!existing) {
-              await tx.insert(operationalRecords).values({
+            if (existingAdvanceIds.has(clientRecordId) || advanceWrites.has(clientRecordId)) duplicateAdvancesSkipped += 1;
+            else {
+              advanceWrites.set(clientRecordId, {
                 workspaceId: params.data.workspaceId, farmId: session.farmId, seasonId: session.seasonId,
                 clientRecordId, entityType: "advance", payload: {
                   id: clientRecordId, labourerId, date: cell.date, amount: cell.advanceAmount, source: "old_android_csv",
@@ -359,19 +366,30 @@ export async function attendanceImportRoutes(app: FastifyInstance): Promise<void
                   createdAt: timestamp.toISOString(), updatedAt: timestamp.toISOString(),
                 }, recordedBy: request.appUser!.id, clientUpdatedAt: timestamp,
               });
-              advancesCreated += 1;
             }
           }
         }
       }
+      request.log.info({ importSessionId: session.id, records: attendanceWrites.size }, "attendance import attendance records prepared");
+      request.log.info({ importSessionId: session.id, records: advanceWrites.size }, "attendance import advance records prepared");
+      for (const batch of chunks(labourerWrites)) if (batch.length) await tx.insert(operationalRecords).values(batch);
+      for (const batch of chunks([...attendanceWrites.values()])) if (batch.length) await tx.insert(operationalRecords).values(batch).onConflictDoUpdate({
+        target: [operationalRecords.workspaceId, operationalRecords.entityType, operationalRecords.clientRecordId],
+        set: { payload: sql`excluded.payload`, clientUpdatedAt: sql`excluded.client_updated_at`, updatedAt: new Date() },
+      });
+      for (const batch of chunks([...advanceWrites.values()])) if (batch.length) await tx.insert(operationalRecords).values(batch).onConflictDoNothing({
+        target: [operationalRecords.workspaceId, operationalRecords.entityType, operationalRecords.clientRecordId],
+      });
       await tx.update(attendanceImportSessions).set({ status: "confirmed", confirmedAt: new Date() }).where(eq(attendanceImportSessions.id, session.id));
       await tx.insert(auditLogs).values({
         workspaceId: params.data.workspaceId, farmId: session.farmId, userId: request.appUser!.id,
         action: "attendance_csv_import_confirmed", entityType: "attendance_import", entityId: session.id,
-        details: { source: "old_android_csv", originalFilename: session.originalFilename, totalRecordsCreated: created, totalRecordsUpdated: updated, totalRecordsSkipped: skipped, advancesCreated, labourersCreated },
+        details: { source: "old_android_csv", originalFilename: session.originalFilename, totalRecordsCreated: created, totalRecordsUpdated: updated, totalRecordsSkipped: skipped, advancesCreated: advanceWrites.size, duplicateAdvancesSkipped, labourersCreated: labourerWrites.length },
       });
-      return { attendanceCreated: created, attendanceUpdated: updated, attendanceSkipped: skipped, advancesCreated, labourersCreated };
+      return { attendanceCreated: created, attendanceUpdated: updated, attendanceSkipped: skipped, advancesCreated: advanceWrites.size, duplicateAdvancesSkipped, labourersCreated: labourerWrites.length, errors: [] as string[] };
     });
+    request.log.info({ importSessionId: session.id }, "attendance import database transaction completed");
+    request.log.info({ importSessionId: session.id, result }, "attendance import response sent");
     return { sessionId: session.id, result };
   });
 }

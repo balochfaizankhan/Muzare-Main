@@ -228,7 +228,7 @@ test("attendance CSV imports preview safely, enforce owner access, and avoid dup
     sessionId, duplicateMode: "missing_only", warningsConfirmed: false, mappings: [],
   });
   assert.equal(confirmed.statusCode, 200);
-  assert.deepEqual(confirmed.json().result, { attendanceCreated: 3, attendanceUpdated: 0, attendanceSkipped: 0, advancesCreated: 2, labourersCreated: 0 });
+  assert.deepEqual(confirmed.json().result, { attendanceCreated: 3, attendanceUpdated: 0, attendanceSkipped: 0, advancesCreated: 2, duplicateAdvancesSkipped: 0, labourersCreated: 0, errors: [] });
   assert.equal((await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/confirm`, {
     sessionId, duplicateMode: "missing_only", warningsConfirmed: false, mappings: [],
   })).statusCode, 409);
@@ -238,7 +238,7 @@ test("attendance CSV imports preview safely, enforce owner access, and avoid dup
   const repeat = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/confirm`, {
     sessionId: repeatPreview.json().sessionId, duplicateMode: "missing_only", warningsConfirmed: false, mappings: [],
   });
-  assert.deepEqual(repeat.json().result, { attendanceCreated: 0, attendanceUpdated: 0, attendanceSkipped: 3, advancesCreated: 0, labourersCreated: 0 });
+  assert.deepEqual(repeat.json().result, { attendanceCreated: 0, attendanceUpdated: 0, attendanceSkipped: 3, advancesCreated: 0, duplicateAdvancesSkipped: 2, labourersCreated: 0, errors: [] });
 });
 
 test("attendance CSV imports can create unknown labour and import advance-only daily cells", async () => {
@@ -253,7 +253,7 @@ test("attendance CSV imports can create unknown labour and import advance-only d
     sessionId: preview.json().sessionId, duplicateMode: "missing_only", warningsConfirmed: false,
     mappings: [{ rowIndex: 0, action: "create", dailyWage: 80, group: "Imported" }],
   });
-  assert.deepEqual(confirmed.json().result, { attendanceCreated: 1, attendanceUpdated: 0, attendanceSkipped: 0, advancesCreated: 1, labourersCreated: 1 });
+  assert.deepEqual(confirmed.json().result, { attendanceCreated: 1, attendanceUpdated: 0, attendanceSkipped: 0, advancesCreated: 1, duplicateAdvancesSkipped: 0, labourersCreated: 1, errors: [] });
 });
 
 test("attendance CSV imports detect Android metadata headers and parse parenthesized daily advances", async () => {
@@ -304,7 +304,7 @@ test("attendance CSV import confirmation accepts nested payloads after warnings 
     ...confirmation, confirmation: { ...confirmation.confirmation, warningsAccepted: true },
   });
   assert.equal(confirmed.statusCode, 200);
-  assert.deepEqual(confirmed.json().result, { attendanceCreated: 1, attendanceUpdated: 0, attendanceSkipped: 0, advancesCreated: 0, labourersCreated: 0 });
+  assert.deepEqual(confirmed.json().result, { attendanceCreated: 1, attendanceUpdated: 0, attendanceSkipped: 0, advancesCreated: 0, duplicateAdvancesSkipped: 0, labourersCreated: 0, errors: [] });
 
   const malformed = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/confirm`, {});
   assert.equal(malformed.statusCode, 400);

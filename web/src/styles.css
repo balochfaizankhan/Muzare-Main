@@ -2676,6 +2676,9 @@ button {
 .attendance-import-summary span { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 8px; color: var(--text-secondary); display: grid; font-size: .7rem; gap: 3px; padding: 8px; }
 .attendance-import-summary b { color: var(--brand-primary); font-size: .9rem; }
 .attendance-import-note { background: var(--blue-bg); border-radius: 8px; padding: 9px; }
+.attendance-import-progress { align-items: center; background: var(--blue-bg); border-radius: 8px; display: flex; gap: 8px; padding: 10px; }
+.attendance-import-spinner { animation: attendance-import-spin .8s linear infinite; border: 2px solid var(--border); border-radius: 50%; border-top-color: var(--brand-secondary); display: inline-block; height: 18px; width: 18px; }
+@keyframes attendance-import-spin { to { transform: rotate(360deg); } }
 .attendance-import-errors, .attendance-import-warnings, .attendance-import-error { border-radius: 8px; font-size: .78rem; padding: 9px; }
 .attendance-import-errors, .attendance-import-error { background: var(--danger-bg); color: var(--danger); }
 .attendance-import-warnings { background: #fff8df; color: #805800; }

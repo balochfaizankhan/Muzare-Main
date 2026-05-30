@@ -131,3 +131,18 @@ test("labour details actions edit labour and add separate optimistic advances", 
   assert.match(offlineDb, /paymentMethod\?: string;/);
   assert.match(styles, /@media \(max-width: 767px\) \{[\s\S]*\.worker-action-backdrop \{ align-items: flex-end; padding: 0; \}/);
 });
+
+test("attendance import confirmation batches writes and shows bounded progress feedback", async () => {
+  const route = await source("api/src/routes/attendance-imports.ts");
+  const api = await source("web/src/lib/api.ts");
+  const modulePage = await source("web/src/pages/ModulePage.tsx");
+  assert.match(route, /const batchSize = 500;/);
+  assert.match(route, /values\(batch\)\.onConflictDoUpdate/);
+  assert.match(route, /values\(batch\)\.onConflictDoNothing/);
+  assert.match(route, /attendance import confirm request received/);
+  assert.match(route, /attendance import database transaction completed/);
+  assert.match(api, /timeoutMs: 60_000, debugLabel: "attendance-import-confirm"/);
+  assert.match(api, /Import is taking longer than expected\. Please check import history or try again\./);
+  assert.match(modulePage, /Importing attendance records and advances\. Please wait\.\.\./);
+  assert.match(modulePage, /Duplicate advances skipped/);
+});

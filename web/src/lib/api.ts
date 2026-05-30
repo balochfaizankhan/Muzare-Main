@@ -124,29 +124,40 @@ export type AttendanceImportPreview = {
 };
 export type AttendanceImportMapping = { rowIndex: number; action: "match" | "create" | "skip"; labourerId?: string; dailyWage?: number; group?: string };
 export type AttendanceImportResult = {
-  attendanceCreated: number; attendanceUpdated: number; attendanceSkipped: number; advancesCreated: number; labourersCreated: number;
+  attendanceCreated: number; attendanceUpdated: number; attendanceSkipped: number; advancesCreated: number; duplicateAdvancesSkipped: number;
+  labourersCreated: number; errors: string[];
 };
 export type ExpenseSubcategory = { id: string; categoryId: string; name: string; sortOrder: number; isSystem: boolean; active: boolean };
 export type ExpenseCategory = { id: string; name: string; sortOrder: number; isSystem: boolean; subcategories: ExpenseSubcategory[] };
 
-async function apiRequest<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
+async function apiRequest<T>(path: string, options: RequestInit = {}, token?: string, requestOptions: { timeoutMs?: number; debugLabel?: string } = {}): Promise<T> {
   const headers = new Headers(options.headers);
   if (options.body) headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
-
-  const response = await fetch(`${config.apiUrl}${path}`, {
-    ...options,
-    headers,
-  });
+  const controller = new AbortController();
+  const timeout = requestOptions.timeoutMs ? window.setTimeout(() => controller.abort(), requestOptions.timeoutMs) : null;
+  if (import.meta.env.DEV && requestOptions.debugLabel) console.info(`[${requestOptions.debugLabel}] request`, options.body ? JSON.parse(String(options.body)) : undefined);
+  let response: Response;
+  try {
+    response = await fetch(`${config.apiUrl}${path}`, { ...options, headers, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error("Import is taking longer than expected. Please check import history or try again.");
+    throw error;
+  } finally {
+    if (timeout) window.clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { message?: string; fields?: string[] } | null;
+    if (import.meta.env.DEV && requestOptions.debugLabel) console.error(`[${requestOptions.debugLabel}] response`, response.status, body);
     const fields = body?.fields?.length ? ` Missing or invalid fields: ${body.fields.join(", ")}.` : "";
     throw new Error(`${body?.message ?? `Request failed with status ${response.status}.`}${fields}`);
   }
 
   if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
+  const body = (await response.json()) as T;
+  if (import.meta.env.DEV && requestOptions.debugLabel) console.info(`[${requestOptions.debugLabel}] response`, response.status, body);
+  return body;
 }
 
 export const login = (email: string, password: string) =>
@@ -236,5 +247,5 @@ export const confirmAttendanceImport = (token: string, workspaceId: string, inpu
       duplicateHandlingMode: input.duplicateHandlingMode,
       labourMappings: input.labourMappings,
     },
-  }) }, token,
+  }) }, token, { timeoutMs: 60_000, debugLabel: "attendance-import-confirm" },
 );
