@@ -146,3 +146,16 @@ test("attendance import confirmation batches writes and shows bounded progress f
   assert.match(modulePage, /Importing attendance records and advances\. Please wait\.\.\./);
   assert.match(modulePage, /Duplicate advances skipped/);
 });
+
+test("attendance CSV advances carry provenance and refresh labour account totals after import", async () => {
+  const route = await source("api/src/routes/attendance-imports.ts");
+  const modulePage = await source("web/src/pages/ModulePage.tsx");
+  assert.match(route, /source: "attendance_csv_import"/);
+  assert.match(route, /importSessionId: session\.id/);
+  assert.match(route, /originalFilename: session\.originalFilename/);
+  assert.match(route, /sourceCellReference/);
+  assert.match(route, /existingImportedAdvanceIdentities\.has\(likelyDuplicateIdentity\)/);
+  assert.match(modulePage, /Advances to create/);
+  assert.match(modulePage, /Total advance imported/);
+  assert.match(modulePage, /await refreshOperationalData\(\); await onImported\(\);/);
+});

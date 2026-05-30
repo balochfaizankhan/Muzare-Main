@@ -65,8 +65,8 @@ function WorkforceModule() {
   const loadAttendance = useCallback(async () => (await workspaceRecords(offlineDb.attendance)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadAdvances = useCallback(async () => (await workspaceRecords(offlineDb.advances)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const [labourers, refreshLabourers] = useData(loadLabourers);
-  const [attendance, , setAttendance] = useData(loadAttendance);
-  const [advances, , setAdvances] = useData(loadAdvances);
+  const [attendance, refreshAttendance, setAttendance] = useData(loadAttendance);
+  const [advances, refreshAdvances, setAdvances] = useData(loadAdvances);
   const [name, setName] = useState("");
   const [group, setGroup] = useState("General");
   const [wage, setWage] = useState("");
@@ -296,7 +296,11 @@ function WorkforceModule() {
         />
       )}
       {showImport && token && user?.workspaceId && sync.farmId && sync.seasonId && (
-        <AttendanceImportPanel token={token} workspaceId={user.workspaceId} farmId={sync.farmId} seasonId={sync.seasonId} onClose={() => setShowImport(false)} />
+        <AttendanceImportPanel
+          token={token} workspaceId={user.workspaceId} farmId={sync.farmId} seasonId={sync.seasonId}
+          onClose={() => setShowImport(false)}
+          onImported={() => Promise.all([refreshLabourers(), refreshAttendance(), refreshAdvances()]).then(() => undefined)}
+        />
       )}
     </>
   );
@@ -376,8 +380,8 @@ function ActionPanel({ title, onClose, children }: { title: string; onClose: () 
   </div>;
 }
 
-function AttendanceImportPanel({ token, workspaceId, farmId, seasonId, onClose }: {
-  token: string; workspaceId: string; farmId: string; seasonId: string; onClose: () => void;
+function AttendanceImportPanel({ token, workspaceId, farmId, seasonId, onClose, onImported }: {
+  token: string; workspaceId: string; farmId: string; seasonId: string; onClose: () => void; onImported: () => Promise<void>;
 }) {
   const [step, setStep] = useState(1);
   const [file, setFile] = useState<File | null>(null);
@@ -416,7 +420,7 @@ function AttendanceImportPanel({ token, workspaceId, farmId, seasonId, onClose }
       const response = await confirmAttendanceImport(token, workspaceId, {
         importSessionId: sessionId, farmId, seasonId, duplicateHandlingMode: duplicateMode, warningsAccepted, labourMappings: mappings,
       });
-      setResult(response.result); setStep(5); await refreshOperationalData();
+      setResult(response.result); setStep(5); await refreshOperationalData(); await onImported();
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to import attendance."); }
     finally { setBusy(false); }
   };
@@ -457,16 +461,17 @@ function AttendanceImportPanel({ token, workspaceId, farmId, seasonId, onClose }
         </section>}
         {step === 4 && preview && summary && <section className="attendance-import-card">
           <h3>Validation summary</h3>
-          <div className="attendance-import-summary"><span>Labour rows<b>{summary.labourRows}</b></span><span>Date columns<b>{summary.dateColumns}</b></span><span>Attendance records<b>{summary.attendanceRecords}</b></span><span>Existing duplicates<b>{summary.duplicateRecords}</b></span><span>Daily advances<b>{summary.dailyAdvances}</b></span><span>Advance total<b>{money(summary.advanceTotal)}</b></span></div>
+          <div className="attendance-import-summary"><span>Labour rows<b>{summary.labourRows}</b></span><span>Date columns<b>{summary.dateColumns}</b></span><span>Attendance records<b>{summary.attendanceRecords}</b></span><span>Existing attendance<b>{summary.duplicateRecords}</b></span><span>Daily advances<b>{summary.dailyAdvances}</b></span><span>Advance total<b>{money(summary.advanceTotal)}</b></span><span>Advances to create<b>{summary.advanceRecordsToCreate}</b></span><span>Duplicate advances<b>{summary.duplicateAdvances}</b></span></div>
           {summary.errors.length > 0 && <div className="attendance-import-errors"><strong>Errors</strong>{summary.errors.map((message) => <p key={message}>{message}</p>)}</div>}
           {summary.warnings.length > 0 && <div className="attendance-import-warnings"><strong>Warnings</strong>{summary.warnings.map((message) => <p key={message}>{message}</p>)}<label><input type="checkbox" checked={warningsAccepted} onChange={(event) => setWarningsAccepted(event.target.checked)} /> I understand these warnings and want to continue.</label></div>}
           <label><span>Duplicate handling</span><select value={duplicateMode} onChange={(event) => setDuplicateMode(event.target.value as typeof duplicateMode)}><option value="missing_only">Import only missing records</option><option value="skip_existing">Skip existing records</option><option value="update_existing">Update existing records</option></select></label>
           <p className="attendance-import-note">Advance Total columns are reference-only. Daily advances found inside date cells will be imported as separate advance records.</p>
+          <div className="attendance-import-table-wrap"><table><thead><tr><th>Labour</th><th>CSV Advance Total</th><th>Daily Cell Advance Total</th></tr></thead><tbody>{preview.rows.map((row) => <tr key={row.rowIndex}><th>{row.labourName}</th><td>{row.csvAdvance === null ? "-" : money(row.csvAdvance)}</td><td>{money(row.calculatedAdvance)}</td></tr>)}</tbody></table></div>
           <div className="attendance-import-table-wrap"><table><thead><tr><th>Labour</th>{preview.dateColumns.map((column) => <th key={column.column}>{column.column}</th>)}</tr></thead><tbody>{preview.rows.slice(0, 20).map((row) => <tr key={row.rowIndex}><th>{row.labourName}</th>{row.cells.map((cell) => <td key={cell.column}><b>{attendanceMark(cell.status ?? undefined)}</b>{cell.advanceAmount !== null && <small>{money(cell.advanceAmount)}</small>}</td>)}</tr>)}</tbody></table></div>
           {busy && <p className="attendance-import-progress"><span className="attendance-import-spinner" />Importing attendance records and advances. Please wait...</p>}
           <button disabled={busy || unresolvedLabourRows.length > 0 || summary.errors.length > 0 || (summary.warnings.length > 0 && !warningsAccepted)} type="button" onClick={() => void confirm()}>{busy ? "Importing..." : "Confirm Import"}</button>
         </section>}
-        {step === 5 && result && <section className="attendance-import-card"><h3>Import completed</h3><div className="attendance-import-summary"><span>Labour created<b>{result.labourersCreated}</b></span><span>Attendance created<b>{result.attendanceCreated}</b></span><span>Attendance skipped<b>{result.attendanceSkipped}</b></span><span>Attendance updated<b>{result.attendanceUpdated}</b></span><span>Advances created<b>{result.advancesCreated}</b></span><span>Duplicate advances skipped<b>{result.duplicateAdvancesSkipped}</b></span><span>Errors<b>{result.errors.length}</b></span></div>{result.errors.map((message) => <p className="attendance-import-error" key={message}>{message}</p>)}<button type="button" onClick={onClose}>Close</button></section>}
+        {step === 5 && result && <section className="attendance-import-card"><h3>Import completed</h3><div className="attendance-import-summary"><span>Labour created<b>{result.labourersCreated}</b></span><span>Attendance created<b>{result.attendanceCreated}</b></span><span>Attendance skipped<b>{result.attendanceSkipped}</b></span><span>Attendance updated<b>{result.attendanceUpdated}</b></span><span>Advances created<b>{result.advancesCreated}</b></span><span>Duplicate advances skipped<b>{result.duplicateAdvancesSkipped}</b></span><span>Total advance imported<b>{money(result.totalAdvanceImported)}</b></span><span>Errors<b>{result.errors.length}</b></span></div>{result.errors.map((message) => <p className="attendance-import-error" key={message}>{message}</p>)}<button type="button" onClick={onClose}>Close</button></section>}
         {error && <p className="attendance-import-error">{error}</p>}
       </div>
       <footer className="attendance-import-footer"><button type="button" onClick={onClose}>Cancel</button>{step === 1 && <button disabled={!file || busy} type="button" onClick={() => void upload()}>{busy ? "Parsing..." : "Preview CSV"}</button>}</footer>

@@ -226,13 +226,35 @@ function buildPreview(csvText: string, labourers: Labour[], from?: string, to?: 
   return { rows, dateColumns: dateColumns.map(({ column, date }) => ({ column, date })), errors, warnings };
 }
 
-function previewSummary(payload: ImportPayload, duplicateRecords: number) {
+type ExistingImportedAdvance = { labourerId: string; date: string; amount: number };
+const importedAdvanceSource = (source: unknown) => source === "attendance_csv_import" || source === "old_android_csv";
+const advanceIdentity = (labourerId: string, date: string, amount: number) => `${labourerId}:${date}:${amount}`;
+function importedAdvance(record: typeof operationalRecords.$inferSelect): ExistingImportedAdvance | null {
+  const payload = record.payload;
+  if (!importedAdvanceSource(payload.source) || typeof payload.labourerId !== "string" || typeof payload.date !== "string") return null;
+  const amount = Number(payload.amount);
+  return Number.isFinite(amount) ? { labourerId: payload.labourerId, date: payload.date, amount } : null;
+}
+
+function previewSummary(payload: ImportPayload, duplicateRecords: number, existingImportedAdvances: Set<string>) {
+  const seenAdvances = new Set(existingImportedAdvances);
+  let duplicateAdvances = 0;
+  for (const row of payload.rows) {
+    if (!row.matchedLabourerId) continue;
+    for (const cell of row.cells) {
+      if (cell.advanceAmount === null) continue;
+      const identity = advanceIdentity(row.matchedLabourerId, cell.date, cell.advanceAmount);
+      if (seenAdvances.has(identity)) duplicateAdvances += 1;
+      else seenAdvances.add(identity);
+    }
+  }
+  const dailyAdvances = payload.rows.flatMap((row) => row.cells).filter((cell) => cell.advanceAmount !== null).length;
   return {
     labourRows: payload.rows.length, dateColumns: payload.dateColumns.length,
     attendanceRecords: payload.rows.flatMap((row) => row.cells).filter((cell) => cell.status).length,
-    dailyAdvances: payload.rows.flatMap((row) => row.cells).filter((cell) => cell.advanceAmount !== null).length,
+    dailyAdvances,
     advanceTotal: payload.rows.reduce((total, row) => total + row.calculatedAdvance, 0),
-    duplicateRecords,
+    duplicateRecords, duplicateAdvances, advanceRecordsToCreate: dailyAdvances - duplicateAdvances,
     unknownLabourRows: payload.rows.filter((row) => !row.matchedLabourerId).length,
     errors: payload.errors, warnings: payload.warnings,
   };
@@ -261,7 +283,15 @@ export async function attendanceImportRoutes(app: FastifyInstance): Promise<void
       const payload = record.payload; return `${String(payload.labourerId)}:${String(payload.date)}`;
     }));
     const duplicateRecords = parsedPayload.rows.reduce((count, row) => count + row.cells.filter((cell) => cell.status && row.matchedLabourerId && existing.has(`${row.matchedLabourerId}:${cell.date}`)).length, 0);
-    const validationSummary = previewSummary(parsedPayload, duplicateRecords);
+    const advanceRecords = await db.select().from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, params.data.workspaceId), eq(operationalRecords.farmId, body.data.farmId),
+      eq(operationalRecords.seasonId, body.data.seasonId), eq(operationalRecords.entityType, "advance"),
+    ));
+    const existingImportedAdvances = new Set(advanceRecords.flatMap((record) => {
+      const advance = importedAdvance(record);
+      return advance ? [advanceIdentity(advance.labourerId, advance.date, advance.amount)] : [];
+    }));
+    const validationSummary = previewSummary(parsedPayload, duplicateRecords, existingImportedAdvances);
     const [session] = await db.insert(attendanceImportSessions).values({
       workspaceId: params.data.workspaceId, farmId: body.data.farmId, seasonId: body.data.seasonId,
       uploadedBy: request.appUser.id, originalFilename: body.data.originalFilename,
@@ -311,11 +341,15 @@ export async function attendanceImportRoutes(app: FastifyInstance): Promise<void
         eq(operationalRecords.seasonId, session.seasonId), eq(operationalRecords.entityType, "attendance"),
       ));
       const attendanceByIdentity = new Map(attendance.map((record) => [`${String(record.payload.labourerId)}:${String(record.payload.date)}`, record]));
-      const existingAdvances = await tx.select({ clientRecordId: operationalRecords.clientRecordId }).from(operationalRecords).where(and(
+      const existingAdvances = await tx.select().from(operationalRecords).where(and(
         eq(operationalRecords.workspaceId, params.data.workspaceId), eq(operationalRecords.farmId, session.farmId),
         eq(operationalRecords.seasonId, session.seasonId), eq(operationalRecords.entityType, "advance"),
       ));
       const existingAdvanceIds = new Set(existingAdvances.map((record) => record.clientRecordId));
+      const existingImportedAdvanceIdentities = new Set(existingAdvances.flatMap((record) => {
+        const advance = importedAdvance(record);
+        return advance ? [advanceIdentity(advance.labourerId, advance.date, advance.amount)] : [];
+      }));
       const labourerWrites: Array<typeof operationalRecords.$inferInsert> = [];
       const attendanceWrites = new Map<string, typeof operationalRecords.$inferInsert>();
       const advanceWrites = new Map<string, typeof operationalRecords.$inferInsert>();
@@ -355,14 +389,18 @@ export async function attendanceImportRoutes(app: FastifyInstance): Promise<void
             }
           }
           if (cell.advanceAmount !== null) {
-            const clientRecordId = `csv-advance-${stableId(params.data.workspaceId, session.farmId, session.seasonId, session.fileHash, row.rowIndex, cell.column)}`;
-            if (existingAdvanceIds.has(clientRecordId) || advanceWrites.has(clientRecordId)) duplicateAdvancesSkipped += 1;
+            const sourceCellReference = `${session.fileHash}:${row.rowIndex}:${cell.column}`;
+            const clientRecordId = `csv-advance-${stableId(params.data.workspaceId, session.farmId, session.seasonId, labourerId, cell.date, session.id, sourceCellReference)}`;
+            const likelyDuplicateIdentity = advanceIdentity(labourerId, cell.date, cell.advanceAmount);
+            if (existingAdvanceIds.has(clientRecordId) || existingImportedAdvanceIdentities.has(likelyDuplicateIdentity) || advanceWrites.has(clientRecordId)) duplicateAdvancesSkipped += 1;
             else {
+              existingImportedAdvanceIdentities.add(likelyDuplicateIdentity);
               advanceWrites.set(clientRecordId, {
                 workspaceId: params.data.workspaceId, farmId: session.farmId, seasonId: session.seasonId,
                 clientRecordId, entityType: "advance", payload: {
-                  id: clientRecordId, labourerId, date: cell.date, amount: cell.advanceAmount, source: "old_android_csv",
-                  sourceImportSessionId: session.id, originalRow: row.rowIndex, originalDateColumn: cell.column,
+                  id: clientRecordId, labourerId, date: cell.date, advanceDate: cell.date, amount: cell.advanceAmount, source: "attendance_csv_import",
+                  importSessionId: session.id, sourceImportSessionId: session.id, originalFilename: session.originalFilename,
+                  sourceCellReference, originalRow: row.rowIndex, originalDateColumn: cell.column,
                   createdAt: timestamp.toISOString(), updatedAt: timestamp.toISOString(),
                 }, recordedBy: request.appUser!.id, clientUpdatedAt: timestamp,
               });
@@ -381,12 +419,13 @@ export async function attendanceImportRoutes(app: FastifyInstance): Promise<void
         target: [operationalRecords.workspaceId, operationalRecords.entityType, operationalRecords.clientRecordId],
       });
       await tx.update(attendanceImportSessions).set({ status: "confirmed", confirmedAt: new Date() }).where(eq(attendanceImportSessions.id, session.id));
+      const totalAdvanceImported = [...advanceWrites.values()].reduce((total, record) => total + Number(record.payload.amount), 0);
       await tx.insert(auditLogs).values({
         workspaceId: params.data.workspaceId, farmId: session.farmId, userId: request.appUser!.id,
         action: "attendance_csv_import_confirmed", entityType: "attendance_import", entityId: session.id,
-        details: { source: "old_android_csv", originalFilename: session.originalFilename, totalRecordsCreated: created, totalRecordsUpdated: updated, totalRecordsSkipped: skipped, advancesCreated: advanceWrites.size, duplicateAdvancesSkipped, labourersCreated: labourerWrites.length },
+        details: { source: "attendance_csv_import", originalFilename: session.originalFilename, totalRecordsCreated: created, totalRecordsUpdated: updated, totalRecordsSkipped: skipped, advancesCreated: advanceWrites.size, duplicateAdvancesSkipped, totalAdvanceImported, labourersCreated: labourerWrites.length },
       });
-      return { attendanceCreated: created, attendanceUpdated: updated, attendanceSkipped: skipped, advancesCreated: advanceWrites.size, duplicateAdvancesSkipped, labourersCreated: labourerWrites.length, errors: [] as string[] };
+      return { attendanceCreated: created, attendanceUpdated: updated, attendanceSkipped: skipped, advancesCreated: advanceWrites.size, duplicateAdvancesSkipped, totalAdvanceImported, labourersCreated: labourerWrites.length, errors: [] as string[] };
     });
     request.log.info({ importSessionId: session.id }, "attendance import database transaction completed");
     request.log.info({ importSessionId: session.id, result }, "attendance import response sent");

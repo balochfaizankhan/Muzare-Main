@@ -119,13 +119,14 @@ export type AttendanceImportPreview = {
   labourers: Array<{ id: string; name: string; dailyWage: number }>;
   summary: {
     labourRows: number; dateColumns: number; attendanceRecords: number; dailyAdvances: number; advanceTotal: number;
-    duplicateRecords: number; unknownLabourRows: number; errors: string[]; warnings: string[];
+    duplicateRecords: number; duplicateAdvances: number; advanceRecordsToCreate: number;
+    unknownLabourRows: number; errors: string[]; warnings: string[];
   };
 };
 export type AttendanceImportMapping = { rowIndex: number; action: "match" | "create" | "skip"; labourerId?: string; dailyWage?: number; group?: string };
 export type AttendanceImportResult = {
   attendanceCreated: number; attendanceUpdated: number; attendanceSkipped: number; advancesCreated: number; duplicateAdvancesSkipped: number;
-  labourersCreated: number; errors: string[];
+  totalAdvanceImported: number; labourersCreated: number; errors: string[];
 };
 export type ExpenseSubcategory = { id: string; categoryId: string; name: string; sortOrder: number; isSystem: boolean; active: boolean };
 export type ExpenseCategory = { id: string; name: string; sortOrder: number; isSystem: boolean; subcategories: ExpenseSubcategory[] };
