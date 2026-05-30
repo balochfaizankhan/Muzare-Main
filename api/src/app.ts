@@ -8,6 +8,7 @@ import { sessionRoutes } from "./routes/session.js";
 import { workspaceApprovalRoutes } from "./routes/workspace-approvals.js";
 import { adminDashboardRoutes } from "./routes/admin-dashboard.js";
 import { adminWorkspaceRoutes } from "./routes/admin-workspaces.js";
+import { operationalSyncRoutes } from "./routes/operational-sync.js";
 
 export async function buildApp() {
   const app = Fastify({ logger: true });
@@ -29,6 +30,7 @@ export async function buildApp() {
   await app.register(workspaceApprovalRoutes);
   await app.register(adminDashboardRoutes);
   await app.register(adminWorkspaceRoutes);
+  await app.register(operationalSyncRoutes);
 
   return app;
 }

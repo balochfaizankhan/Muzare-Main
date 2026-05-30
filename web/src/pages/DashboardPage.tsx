@@ -22,6 +22,8 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { fetchBootstrap } from "../lib/api";
 import { ensureLocalAccounts, offlineDb } from "../lib/offline-db";
+import { useSyncState } from "../hooks/useSyncState";
+import { refreshOperationalData, syncNow } from "../services/syncService";
 
 type DashboardTotals = {
   presentToday: number;
@@ -30,7 +32,6 @@ type DashboardTotals = {
   totalExpenses: number;
   netPosition: number;
   partnerBalance: number;
-  pendingSync: number;
 };
 
 type Activity = {
@@ -70,6 +71,7 @@ const formatDate = () => new Intl.DateTimeFormat("en", { weekday: "long", day: "
 export function DashboardPage() {
   const { t } = useTranslation();
   const { user, token } = useAuth();
+  const sync = useSyncState();
   const [totals, setTotals] = useState<DashboardTotals>({
     presentToday: 0,
     cartonsToday: 0,
@@ -77,7 +79,6 @@ export function DashboardPage() {
     totalExpenses: 0,
     netPosition: 0,
     partnerBalance: 0,
-    pendingSync: 0,
   });
   const [activities, setActivities] = useState<Activity[]>([]);
   const query = useQuery({
@@ -89,13 +90,12 @@ export function DashboardPage() {
 
   const loadLocalDashboard = useCallback(async () => {
     await ensureLocalAccounts();
-    const [attendance, dispatches, sales, vouchers, entries, pending] = await Promise.all([
+    const [attendance, dispatches, sales, vouchers, entries] = await Promise.all([
       offlineDb.attendance.toArray(),
       offlineDb.dispatches.toArray(),
       offlineDb.sales.toArray(),
       offlineDb.vouchers.toArray(),
       offlineDb.partnerEntries.toArray(),
-      offlineDb.pendingMutations.toArray(),
     ]);
     const date = today();
     const totalSales = sales.reduce((sum, item) => sum + item.amount, 0);
@@ -111,7 +111,6 @@ export function DashboardPage() {
       totalExpenses,
       netPosition: totalSales - totalExpenses + partnerBalance,
       partnerBalance,
-      pendingSync: pending.length,
     });
 
     const recent: Activity[] = [
@@ -154,11 +153,13 @@ export function DashboardPage() {
 
   useEffect(() => {
     void loadLocalDashboard();
+    window.addEventListener("muzare-data-refresh", loadLocalDashboard);
+    return () => window.removeEventListener("muzare-data-refresh", loadLocalDashboard);
   }, [loadLocalDashboard]);
 
   const farm = query.data?.farms[0];
   const season = farm ? query.data?.seasons.find((item) => item.farmId === farm.id) : query.data?.seasons[0];
-  const StatusIcon = query.data ? Wifi : WifiOff;
+  const StatusIcon = sync.status === "offline" ? WifiOff : Wifi;
   const displayName = user?.displayName || user?.email || "Administrator";
 
   const summaryCards = [
@@ -257,15 +258,17 @@ export function DashboardPage() {
               <div className="status-line">
                 <StatusIcon size={19} />
                 <div>
-                  <strong>{query.isLoading ? "Connecting..." : query.data ? "API connected" : "Connection unavailable"}</strong>
-                  <p>{query.isLoading ? "Loading farm context." : query.isError ? query.error.message : query.data ? "Farm context loaded from Render." : t("connectionPending")}</p>
+                  <strong>{sync.status === "offline" ? "Working Offline" : sync.status === "syncing" ? "Syncing..." : sync.status === "error" ? "Sync Failed" : "API Connected"}</strong>
+                  <p>{sync.status === "offline" ? "Changes will be saved locally until connectivity returns." : "PostgreSQL is the primary workspace database."}</p>
                 </div>
               </div>
               <div className="sync-line">
                 <CloudUpload size={18} />
                 <div>
-                  <strong>{totals.pendingSync} local changes pending sync</strong>
-                  <p>Operational entries remain securely on this device until sync endpoints are enabled.</p>
+                  <strong>Database {sync.pendingCount ? "Sync Pending" : "Synced"}</strong>
+                  <p>Pending Changes: {sync.pendingCount}</p>
+                  <p>Last Successful Sync: {sync.lastSyncTime ? new Date(sync.lastSyncTime).toLocaleString() : "Not yet synchronized"}</p>
+                  <div className="sync-buttons"><button type="button" onClick={() => void refreshOperationalData()}>Refresh Data</button><button type="button" onClick={() => void syncNow()}>Sync Now</button></div>
                 </div>
               </div>
             </section>

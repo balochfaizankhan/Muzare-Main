@@ -30,7 +30,7 @@ admin@muzare.local
 ChangeMe123!
 ```
 
-Open the local PWA at `http://localhost:5173`. Local login sessions reset when the API restarts. Operational module records are currently stored in the browser's IndexedDB pending their Render API synchronization endpoints.
+Open the local PWA at `http://localhost:5173`. Local login sessions reset when the API restarts. Operational module records are saved to PostgreSQL through the Render API first. Browser IndexedDB is used only as a cached resilience layer and temporary retry queue while the API or network is unavailable.
 
 ## Local PostgreSQL Development
 

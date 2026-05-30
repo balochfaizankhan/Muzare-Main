@@ -377,3 +377,20 @@ export const billingInvoices = pgTable("billing_invoices", {
   paidAt: timestamp("paid_at", { withTimezone: true }),
   ...timestamps,
 });
+
+export const operationalRecords = pgTable(
+  "operational_records",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+    farmId: uuid("farm_id").references(() => farms.id),
+    seasonId: uuid("season_id").references(() => seasons.id),
+    clientRecordId: text("client_record_id").notNull(),
+    entityType: text("entity_type").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    recordedBy: uuid("recorded_by").references(() => users.id).notNull(),
+    clientUpdatedAt: timestamp("client_updated_at", { withTimezone: true }).notNull(),
+    ...timestamps,
+  },
+  (table) => [uniqueIndex("operational_records_workspace_entity_client_uidx").on(table.workspaceId, table.entityType, table.clientRecordId)],
+);

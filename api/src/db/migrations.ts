@@ -3,6 +3,7 @@ import { db } from "./client.js";
 
 const initialMigrationUrl = new URL("../../../database/migrations/0001_initial.sql", import.meta.url);
 const roleArchitectureMigrationUrl = new URL("../../../database/migrations/0003_platform_workspace_roles.sql", import.meta.url);
+const operationalSyncMigrationUrl = new URL("../../../database/migrations/0004_operational_sync.sql", import.meta.url);
 
 async function tableExists(tableName: string): Promise<boolean> {
   const result = (await db.execute(
@@ -70,4 +71,6 @@ export async function ensureWorkspaceSchema(): Promise<void> {
 
   const roleArchitectureMigration = await readFile(roleArchitectureMigrationUrl, "utf8");
   await db.execute(roleArchitectureMigration);
+  const operationalSyncMigration = await readFile(operationalSyncMigrationUrl, "utf8");
+  await db.execute(operationalSyncMigration);
 }

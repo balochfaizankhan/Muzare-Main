@@ -62,6 +62,13 @@ WHERE users.id IN (
   WHERE workspaces.slug = 'muzare-administration' AND users.role::text = 'admin'
 );
 
+DELETE FROM workspace_memberships
+WHERE user_id IN (SELECT id FROM users WHERE platform_role IS NOT NULL);
+
+UPDATE users
+SET workspace_id = NULL
+WHERE platform_role IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS workspace_approval_configurations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,

@@ -66,6 +66,11 @@ export type AdminWorkspace = {
   id: string; name: string; slug: string; contactEmail: string; contactPhone: string | null;
   status: "pending" | "approved" | "rejected" | "suspended"; createdAt: string;
 };
+export type OperationalEntity = "labourer" | "attendance" | "account" | "advance" | "dispatch" | "sale" | "voucher" | "partnerEntry" | "inventoryEntry";
+export type OperationalRecordEnvelope = {
+  workspaceId: string; farmId?: string | null; seasonId?: string | null; entity: OperationalEntity;
+  record: { id: string; createdAt: string; updatedAt: string; [key: string]: unknown };
+};
 
 async function apiRequest<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
   const headers = new Headers(options.headers);
@@ -115,3 +120,7 @@ export const approveSignup = (token: string, userId: string) =>
   apiRequest<void>("/v1/admin/approvals/approve", { method: "POST", body: JSON.stringify({ userId }) }, token);
 export const rejectSignup = (token: string, userId: string) =>
   apiRequest<void>("/v1/admin/approvals/reject", { method: "POST", body: JSON.stringify({ userId }) }, token);
+export const saveOperationalRecord = (token: string, input: OperationalRecordEnvelope) =>
+  apiRequest<{ record: OperationalRecordEnvelope["record"]; conflict: boolean }>("/v1/workspace/operational-records", { method: "POST", body: JSON.stringify(input) }, token);
+export const fetchOperationalRecords = (token: string, workspaceId: string) =>
+  apiRequest<{ records: OperationalRecordEnvelope[] }>(`/v1/workspace/${workspaceId}/operational-records`, {}, token);

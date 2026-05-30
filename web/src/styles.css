@@ -2179,6 +2179,62 @@ button {
   padding: 10px 22px;
 }
 
+.shell-action,
+.sync-buttons button {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text-secondary);
+  display: inline-flex;
+  font-size: 0.78rem;
+  font-weight: 750;
+  gap: 6px;
+  padding: 9px 10px;
+}
+
+.sync-badge {
+  align-items: center;
+  color: var(--text-secondary);
+  display: inline-flex;
+  font-size: 0.75rem;
+  font-weight: 800;
+  gap: 6px;
+}
+
+.sync-badge::before {
+  background: #22c55e;
+  border-radius: 999px;
+  content: "";
+  height: 9px;
+  width: 9px;
+}
+
+.sync-badge--offline::before,
+.sync-badge--pending::before { background: #eab308; }
+.sync-badge--syncing::before { background: #3b82f6; }
+.sync-badge--error::before { background: #ef4444; }
+
+.sync-buttons {
+  display: flex;
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.saas-toast {
+  background: var(--brand-primary);
+  border-radius: 8px;
+  bottom: 22px;
+  box-shadow: 0 14px 32px rgba(5, 35, 63, 0.22);
+  color: #fff;
+  font-size: 0.84rem;
+  inset-inline-end: 22px;
+  max-width: 360px;
+  padding: 13px 16px;
+  position: fixed;
+  z-index: 120;
+}
+
 .shell-page {
   margin: 0 auto;
   max-width: 1180px;

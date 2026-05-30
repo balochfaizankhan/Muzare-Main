@@ -5,7 +5,6 @@ import {
   ensureLocalAccounts,
   makeLocalRecord,
   offlineDb,
-  queueMutation,
   type Account,
   type Attendance,
   type Dispatch,
@@ -14,6 +13,7 @@ import {
   type Sale,
   type Voucher,
 } from "../lib/offline-db";
+import { persistOperationalRecord } from "../services/syncService";
 
 export type ModuleKey = "workforce" | "expenses" | "sales" | "dispatch" | "accounts" | "partnerLedger";
 
@@ -63,8 +63,7 @@ function WorkforceModule() {
   const addLabourer = async (event: FormEvent) => {
     event.preventDefault();
     const record: Labourer = { ...makeLocalRecord(), name: name.trim(), group: group.trim() || "General", dailyWage: Number(wage) };
-    await offlineDb.labourers.add(record);
-    await queueMutation("labourer", record);
+    await persistOperationalRecord("labourer", record);
     setName("");
     setWage("");
     await refreshLabourers();
@@ -76,9 +75,8 @@ function WorkforceModule() {
       .equals(targetLabourerId)
       .filter((entry) => entry.date === date)
       .first();
-    const record: Attendance = existing ? { ...existing, status } : { ...makeLocalRecord(), labourerId: targetLabourerId, date, status };
-    await offlineDb.attendance.put(record);
-    await queueMutation("attendance", record);
+    const record: Attendance = existing ? { ...existing, status, updatedAt: new Date().toISOString() } : { ...makeLocalRecord(), labourerId: targetLabourerId, date, status };
+    await persistOperationalRecord("attendance", record);
     await refreshAttendance();
   };
 
@@ -257,8 +255,7 @@ function ExpensesModule() {
       ...makeLocalRecord(), voucherNumber: `V-${Date.now().toString().slice(-6)}`, date, category,
       description: description.trim(), amount: Number(amount), accountId,
     };
-    await offlineDb.vouchers.add(record);
-    await queueMutation("voucher", record);
+    await persistOperationalRecord("voucher", record);
     setDescription("");
     setAmount("");
     await refresh();
@@ -297,8 +294,7 @@ function DispatchModule() {
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const record: Dispatch = { ...makeLocalRecord(), date, vehicleNumber, driverName, produceType, cartons: Number(cartons) };
-    await offlineDb.dispatches.add(record);
-    await queueMutation("dispatch", record);
+    await persistOperationalRecord("dispatch", record);
     setVehicleNumber(""); setDriverName(""); setProduceType(""); setCartons("");
     await refresh();
   };
@@ -336,8 +332,7 @@ function SalesModule() {
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const record: Sale = { ...makeLocalRecord(), date, buyerName, produceType, quantity: Number(quantity), unitPrice: Number(unitPrice), amount: Number(quantity) * Number(unitPrice), accountId };
-    await offlineDb.sales.add(record);
-    await queueMutation("sale", record);
+    await persistOperationalRecord("sale", record);
     setBuyerName(""); setProduceType(""); setQuantity(""); setUnitPrice("");
     await refresh();
   };
@@ -378,8 +373,7 @@ function PartnerLedgerModule() {
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const record: PartnerEntry = { ...makeLocalRecord(), date, partnerName, type, amount: Number(amount), notes, accountId };
-    await offlineDb.partnerEntries.add(record);
-    await queueMutation("partnerEntry", record);
+    await persistOperationalRecord("partnerEntry", record);
     setPartnerName(""); setAmount(""); setNotes("");
     await refresh();
   };
@@ -424,8 +418,7 @@ function AccountsModule() {
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const record: Account = { ...makeLocalRecord(), name, type };
-    await offlineDb.accounts.add(record);
-    await queueMutation("account", record);
+    await persistOperationalRecord("account", record);
     setName("");
     await refresh();
   };
@@ -487,7 +480,7 @@ const descriptions: Record<ModuleKey, string> = {
   expenses: "Vouchers, invoices, categories, and expense reporting.",
   sales: "Market revenue and sales collection.",
   dispatch: "Vehicle movement and produce carton dispatch.",
-  accounts: "Balances calculated from your local transactions.",
+  accounts: "Balances calculated from synchronized operational transactions.",
   partnerLedger: "Partner contributions, withdrawals, and running balances.",
 };
 
@@ -503,7 +496,7 @@ export function ModulePage({ module }: { module: ModuleKey }) {
             <h2>{t(module)}</h2>
             <p>{descriptions[module]}</p>
           </div>
-          <span className="local-pill">Local data</span>
+          <span className="local-pill">Database synchronized</span>
         </section>
         {module === "workforce" && <WorkforceModule />}
         {module === "expenses" && <ExpensesModule />}
