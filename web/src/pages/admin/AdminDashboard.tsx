@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "../../auth/AuthProvider";
 import { fetchAdminDashboard } from "../../lib/api";
+import { formatMoney } from "../../lib/format";
 
 const actions = [
   ["/admin/workspaces", "Create Workspace", Plus], ["/admin/workspaces", "Manage Workspaces", Building2],
@@ -18,7 +19,7 @@ export function AdminDashboard() {
     ["Total Workspaces", data?.totalWorkspaces ?? "-", Building2], ["Active Workspaces", data?.activeWorkspaces ?? "-", ShieldCheck],
     ["Suspended Workspaces", data?.suspendedWorkspaces ?? "-", Clock3], ["Pending Workspace Requests", data?.pendingWorkspaceRequests ?? "-", UserRoundPlus],
     ["Total Users", data?.totalUsers ?? "-", Users], ["Total Active Users", data?.totalActiveUsers ?? "-", Users],
-    ["Subscription Revenue", data ? `SAR ${data.subscriptionRevenue}` : "-", CircleDollarSign],
+    ["Subscription Revenue", data ? formatMoney(data.subscriptionRevenue) : "-", CircleDollarSign],
     ["Expiring Subscriptions", data?.expiringSubscriptions ?? "-", Clock3], ["System Health", data?.systemHealth ?? "-", HeartPulse],
   ] as const;
   return <main className="shell-page">

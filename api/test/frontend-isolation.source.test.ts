@@ -129,6 +129,20 @@ test("expense entry uses dependent searchable category selectors and grouped tot
   assert.match(modulePage, /MANAGE_EXPENSE_CATEGORIES/);
 });
 
+test("financial cards and expense category totals use readable tokenized surfaces and compact money", async () => {
+  const modulePage = await source("web/src/pages/ModulePage.tsx");
+  const format = await source("web/src/lib/format.ts");
+  const styles = await source("web/src/styles.css");
+  assert.match(format, /minimumFractionDigits: 0,[\s\S]*maximumFractionDigits: 2/);
+  assert.match(modulePage, /<header><h3>\{category\}<\/h3><strong>\{money\(categoryTotal\)\}<\/strong><\/header>/);
+  assert.match(modulePage, /<b>Category total <span>\{money\(categoryTotal\)\}<\/span><\/b>/);
+  assert.match(styles, /--text-primary: var\(--text\);[\s\S]*--surface-muted: var\(--surface-soft\);[\s\S]*--accent: var\(--brand-secondary\);/);
+  assert.match(styles, /\.summary-card \{[\s\S]*background: var\(--surface\);[\s\S]*border: 1px solid var\(--border\);[\s\S]*color: var\(--text-primary\);/);
+  assert.match(styles, /\.expense-category-report header strong,[\s\S]*\.expense-category-report p strong \{[\s\S]*color: var\(--text-primary\);/);
+  assert.match(styles, /\.attendance-import-table-wrap thead th \{ background: var\(--surface-soft\); color: var\(--text-primary\);/);
+  assert.match(styles, /@media \(prefers-color-scheme: dark\) \{[\s\S]*--background: #071b2b;[\s\S]*\.farm-card,[\s\S]*\.admin-hero,/);
+});
+
 test("attendance CSV import is owner-gated, online-only, and keeps register overflow inside its preview", async () => {
   const modulePage = await source("web/src/pages/ModulePage.tsx");
   const styles = await source("web/src/styles.css");

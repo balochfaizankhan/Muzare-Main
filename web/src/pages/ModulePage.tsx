@@ -7,6 +7,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { useSyncState } from "../hooks/useSyncState";
 import { confirmAttendanceImport, createExpenseSubcategory, deleteOrDeactivateLabour, fetchAttendanceReport, fetchExpenseCategories, fetchLabourDeletionPreview, previewAttendanceImport, updateExpenseSubcategory, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type AttendanceReportFilters, type AttendanceReportStatus, type LabourDeletionPreview } from "../lib/api";
 import { hasPermission } from "../lib/permissions";
+import { formatMoney } from "../lib/format";
 import {
   ensureLocalAccounts,
   getActiveWorkspaceId,
@@ -29,7 +30,7 @@ import { deleteOperationalRecord, persistOperationalRecord, refreshOperationalDa
 export type ModuleKey = "workforce" | "expenses" | "sales" | "dispatch" | "accounts" | "partnerLedger";
 
 const today = () => new Date().toISOString().slice(0, 10);
-const money = (amount: number) => new Intl.NumberFormat("en", { style: "currency", currency: "SAR" }).format(amount);
+const money = formatMoney;
 
 function useData<T>(load: () => Promise<T[]>, setup?: () => Promise<void>) {
   const [records, setRecords] = useState<T[]>([]);
@@ -740,7 +741,7 @@ function ExpensesModule() {
         </form>
       </FormCard>
       <Summary value={money(total)} label="Total expenses" />
-      <section className="record-panel"><h2>Expenses by category</h2>{!grouped.length ? <Empty>No expense totals yet.</Empty> : <div className="expense-category-report">{grouped.map(([category, items]) => <article key={category}><h3>{category}</h3>{[...items].map(([subcategory, amount]) => <p key={subcategory}><span>{subcategory}</span><strong>{money(amount)}</strong></p>)}<b>Total {money([...items.values()].reduce((sum, amount) => sum + amount, 0))}</b></article>)}</div>}</section>
+      <section className="record-panel"><h2>Expenses by category</h2>{!grouped.length ? <Empty>No expense totals yet.</Empty> : <div className="expense-category-report">{grouped.map(([category, items]) => { const categoryTotal = [...items.values()].reduce((sum, amount) => sum + amount, 0); return <article key={category}><header><h3>{category}</h3><strong>{money(categoryTotal)}</strong></header>{[...items].map(([subcategory, amount]) => <p key={subcategory}><span>{subcategory}</span><strong>{money(amount)}</strong></p>)}<b>Category total <span>{money(categoryTotal)}</span></b></article>; })}</div>}</section>
       {canManage && <section className="record-panel"><h2>Custom subcategories</h2><form className="module-form compact-form" onSubmit={(event) => void addCustom(event)}><select required value={categoryId} onChange={(event) => { setCategoryId(event.target.value); setCategorySearch(categories.data?.categories.find((item) => item.id === event.target.value)?.name ?? ""); }}><option value="">Select category</option>{categories.data?.categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><input required placeholder="New subcategory" value={customName} onChange={(event) => setCustomName(event.target.value)} /><button type="submit">Add subcategory</button></form><div className="custom-subcategory-list">{categories.data?.categories.flatMap((item) => item.subcategories.filter((subcategory) => !subcategory.isSystem).map((subcategory) => <span key={subcategory.id}>{item.name} / {subcategory.name}<button type="button" onClick={() => { const name = window.prompt("Rename custom subcategory", subcategory.name); if (token && name?.trim()) void updateExpenseSubcategory(token, workspaceId, subcategory.id, { name: name.trim() }).then(() => categories.refetch()); }}>Rename</button><button type="button" onClick={() => token && void updateExpenseSubcategory(token, workspaceId, subcategory.id, { active: false }).then(() => categories.refetch())}>Disable</button></span>))}</div></section>}
       <RecordTable empty="No vouchers recorded yet." rows={vouchers.map((item) => [item.voucherNumber, item.date, `${item.category} / ${item.subcategory || "Miscellaneous"}`, item.description, money(item.amount)])} />
     </>

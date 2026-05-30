@@ -15,6 +15,11 @@
   --success-bg: #e8f6df;
   --danger-bg: #fff4f2;
   --blue-bg: #eaf4f8;
+  --text-primary: var(--text);
+  --surface-muted: var(--surface-soft);
+  --accent: var(--brand-secondary);
+  --success: #237a34;
+  --warning: #946200;
   --shadow-soft: 0 18px 42px rgba(5, 35, 63, 0.1);
   color: var(--text);
   background: var(--background);
@@ -1212,15 +1217,15 @@ button {
 }
 
 .attendance-total--present {
-  color: #3f8d32;
+  color: #237a34;
 }
 
 .attendance-total--half {
-  color: #d9a72b;
+  color: #946200;
 }
 
 .attendance-total--absent {
-  color: #dc3f3f;
+  color: #b42318;
 }
 
 .attendance-board {
@@ -1287,15 +1292,15 @@ button {
 }
 
 .attendance-status-buttons button:nth-child(1) {
-  color: #51b989;
+  color: #237a34;
 }
 
 .attendance-status-buttons button:nth-child(2) {
-  color: #e0b348;
+  color: #946200;
 }
 
 .attendance-status-buttons button:nth-child(3) {
-  color: #d97c7c;
+  color: #b42318;
 }
 
 .attendance-status-buttons button.is-active {
@@ -1383,33 +1388,64 @@ button {
 }
 
 .expense-category-report article {
-  background: var(--surface-soft);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 9px;
   padding: 12px;
 }
 
+.expense-category-report header,
 .expense-category-report h3,
 .expense-category-report p {
   margin: 0;
 }
 
+.expense-category-report header,
 .expense-category-report p {
-  color: var(--text-secondary);
   display: flex;
+  gap: 12px;
   font-size: .82rem;
   justify-content: space-between;
+}
+
+.expense-category-report header {
+  align-items: baseline;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+  padding-bottom: 8px;
+}
+
+.expense-category-report h3 {
+  color: var(--text-primary);
+  font-size: .9rem;
+}
+
+.expense-category-report header strong,
+.expense-category-report p strong {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+  white-space: nowrap;
+}
+
+.expense-category-report p {
+  color: var(--text-secondary);
   padding: 5px 0;
 }
 
 .expense-category-report b {
   border-top: 1px solid var(--border);
-  color: var(--brand-primary);
-  display: block;
+  color: var(--text-secondary);
+  display: flex;
   font-size: .84rem;
+  justify-content: space-between;
   margin-top: 5px;
   padding-top: 8px;
-  text-align: end;
+}
+
+.expense-category-report b span {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
 }
 
 .custom-subcategory-list {
@@ -1443,21 +1479,24 @@ button {
 
 .summary-card {
   align-items: center;
-  background: var(--brand-primary);
-  border-radius: 15px;
-  color: #fff;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-primary);
   display: flex;
   justify-content: space-between;
-  padding: 17px 20px;
+  padding: 14px 16px;
 }
 
 .summary-card span {
+  color: var(--text-secondary);
   font-size: 0.86rem;
-  opacity: 0.86;
 }
 
 .summary-card strong {
-  font-size: 1.3rem;
+  color: var(--text-primary);
+  font-size: 1.18rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .record-list {
@@ -1547,6 +1586,12 @@ button {
   font-size: 0.85rem;
 }
 
+.record-list article span:last-child {
+  color: var(--text-primary);
+  font-weight: 750;
+  margin-inline-start: auto;
+}
+
 .worker-dialog-backdrop {
   align-items: center;
   background: rgba(2, 16, 30, 0.42);
@@ -1559,7 +1604,8 @@ button {
 }
 
 .worker-dialog {
-  background: #fff;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 28px 70px rgba(2, 16, 30, 0.28);
   max-height: min(720px, calc(100vh - 34px));
@@ -1569,7 +1615,8 @@ button {
 }
 
 .worker-dialog__header {
-  background: #eef2f6;
+  background: var(--surface-soft);
+  border-bottom: 1px solid var(--border);
   padding: 22px 28px;
 }
 
@@ -1587,7 +1634,7 @@ button {
 }
 
 .worker-dialog__body h3 {
-  color: #111827;
+  color: var(--text-primary);
   font-size: 1.02rem;
   margin: 0 0 16px;
 }
@@ -1615,7 +1662,7 @@ button {
 }
 
 .worker-stats dd {
-  color: #111827;
+  color: var(--text-primary);
   font-size: 0.98rem;
   font-weight: 650;
   margin: 0;
@@ -1632,7 +1679,8 @@ button {
 
 .worker-dialog__footer {
   align-items: center;
-  background: #eef2f6;
+  background: var(--surface-soft);
+  border-top: 1px solid var(--border);
   display: grid;
   gap: 10px;
   grid-template-columns: 1fr 1fr auto;
@@ -1690,8 +1738,9 @@ button {
 }
 
 .account-grid b {
-  color: var(--brand-secondary);
+  color: var(--text-primary);
   font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .onboarding-page {
@@ -2690,7 +2739,9 @@ button {
 .attendance-import-errors p, .attendance-import-warnings p { color: inherit; margin-top: 5px; }
 .attendance-import-table-wrap { max-width: 100%; overflow-x: auto; }
 .attendance-import-table-wrap table { border-collapse: collapse; font-size: .72rem; min-width: max-content; width: 100%; }
-.attendance-import-table-wrap th, .attendance-import-table-wrap td { border: 1px solid var(--border); padding: 6px; text-align: center; }
+.attendance-import-table-wrap th, .attendance-import-table-wrap td { border: 1px solid var(--border); color: var(--text-primary); padding: 6px; text-align: center; }
+.attendance-import-table-wrap thead th { background: var(--surface-soft); color: var(--text-primary); font-weight: 850; }
+.attendance-import-table-wrap tbody th { background: var(--surface-muted); text-align: start; }
 .attendance-import-table-wrap td small { display: block; font-size: .62rem; margin-top: 3px; white-space: nowrap; }
 .attendance-import-footer { border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; padding: 11px 14px; }
 .attendance-import-footer button:first-child { background: var(--surface); border-color: var(--border); color: var(--text-secondary); }
@@ -2708,13 +2759,87 @@ button {
 }
 
 @media (prefers-color-scheme: dark) {
+  :root {
+    --background: #071b2b;
+    --surface: #10283b;
+    --surface-soft: #173449;
+    --surface-tint: #173f37;
+    --border: #34586b;
+    --text: #eef6f8;
+    --text-secondary: #c2d4dc;
+    --text-muted: #a9bec7;
+    --success-bg: #173f37;
+    --danger-bg: #482b2b;
+    --blue-bg: #173449;
+  }
+  body,
+  .professional-dashboard,
+  .app-shell,
+  .app-shell--admin {
+    background: var(--background);
+  }
+  .dashboard-toolbar,
+  .shell-header,
+  .panel,
+  .metric-card,
+  .module-card,
+  .module-hero,
+  .record-panel,
+  .workspace-intro,
+  .attendance-tools input,
+  .attendance-tools select,
+  .attendance-totals,
+  .attendance-card,
+  .module-form input,
+  .module-form select,
+  .workforce-row,
+  .shell-action,
+  .sync-buttons button,
+  .shell-page__intro,
+  .admin-metric-grid article,
+  .account-grid article,
+  .farm-card,
+  .farm-card footer button,
+  .secondary-button,
+  .admin-hero,
+  .approval-summary article,
+  .approval-item,
+  .icon-action {
+    background: var(--surface);
+  }
+  .workspace-intro,
+  .module-hero,
+  .admin-hero,
+  .professional-dashboard {
+    background-image: none;
+  }
+  .attendance-card__body strong,
+  .workforce-row__body strong,
+  .daily-attendance__heading h2,
+  .daily-attendance__heading strong,
+  .shell-page__intro h1,
+  .admin-metric-grid strong,
+  .account-grid b {
+    color: var(--text-primary);
+  }
+  .worker-dialog__header h2,
+  .approval-empty h2,
+  .admin-hero h2,
+  .approval-summary strong,
+  .farm-card footer button,
+  .secondary-button {
+    color: var(--text-primary);
+  }
   .expense-category-report article,
   .custom-subcategory-list span,
   .custom-subcategory-list button {
-    background: #173449;
-    border-color: #34586b;
-    color: #c2d4dc;
+    background: var(--surface);
+    border-color: var(--border);
+    color: var(--text-secondary);
   }
+  .attendance-status-buttons button { background: var(--surface-soft); border-color: var(--border); }
+  .local-pill { background: var(--success-bg); color: #b7e89d; }
+  .summary-card { box-shadow: 0 8px 20px rgba(0, 0, 0, .16); }
 }
 
 @media (prefers-color-scheme: dark) {

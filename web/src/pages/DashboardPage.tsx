@@ -21,6 +21,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { fetchBootstrap } from "../lib/api";
+import { formatMoney } from "../lib/format";
 import { ensureLocalAccounts, offlineDb, workspaceRecords } from "../lib/offline-db";
 import { useSyncState } from "../hooks/useSyncState";
 import { refreshOperationalData, syncNow } from "../services/syncService";
@@ -65,7 +66,7 @@ const quickActions = [
 ] as const;
 
 const today = () => new Date().toISOString().slice(0, 10);
-const money = (amount: number) => new Intl.NumberFormat("en", { style: "currency", currency: "SAR", maximumFractionDigits: 0 }).format(amount);
+const money = formatMoney;
 const formatDate = () => new Intl.DateTimeFormat("en", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date());
 
 export function DashboardPage() {
