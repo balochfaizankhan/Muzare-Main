@@ -15,6 +15,7 @@ export type PendingMutation = LocalRecord & {
   operation: "create" | "update" | "delete";
   payload: unknown;
   attempts: number;
+  nextAttemptAt?: string;
   workspaceId: string;
   farmId?: string | null;
   seasonId?: string | null;

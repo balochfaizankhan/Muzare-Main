@@ -49,6 +49,20 @@ test("operational writes queue locally before background sync", async () => {
   assert.match(sync, /if \(latest\?\.updatedAt !== mutation\.updatedAt\) continue;/);
 });
 
+test("CORS uses ALLOWED_ORIGINS and Sync Now backs off without uploading an empty queue", async () => {
+  const config = await source("api/src/config.ts");
+  const app = await source("api/src/app.ts");
+  const sync = await source("web/src/services/syncService.ts");
+  assert.match(config, /ALLOWED_ORIGINS: z\.string\(\)\.default\("http:\/\/localhost:5173"\)/);
+  assert.doesNotMatch(config, /FRONTEND_ORIGINS/);
+  assert.match(app, /app\.log\.info\(\{ allowedOrigins \}, "CORS allowed origins"\)/);
+  assert.match(app, /app\.log\.info\(\{ origin: origin \?\? null, allowed \}, "CORS origin check"\)/);
+  assert.match(app, /methods: corsMethods,[\s\S]*allowedHeaders: corsHeaders,[\s\S]*credentials: false/);
+  assert.match(sync, /const maxAutomaticAttempts = 3;/);
+  assert.match(sync, /nextAttemptAt: new Date\(Date\.now\(\) \+ 1_000 \* 2 \*\* \(attempts - 1\)\)\.toISOString\(\)/);
+  assert.match(sync, /if \(\(await getPendingCount\(\)\) === 0\) \{[\s\S]*await refreshOperationalData\(\{ notifySuccess: false \}\);[\s\S]*notify\("Database synchronized\."\)/);
+});
+
 test("attendance marking updates local UI immediately, reuses a daily record, and toggles the active status off", async () => {
   const modulePage = await source("web/src/pages/ModulePage.tsx");
   const sync = await source("web/src/services/syncService.ts");

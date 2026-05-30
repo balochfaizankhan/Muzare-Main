@@ -18,15 +18,26 @@ import { labourManagementRoutes } from "./routes/labour-management.js";
 
 export async function buildApp() {
   const app = Fastify({ logger: true });
+  const corsMethods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
+  const corsHeaders = ["Content-Type", "Authorization", "X-Workspace-Id", "X-Farm-Id", "X-Season-Id", "X-Requested-With"];
 
   app.setErrorHandler((error, _request, reply) => {
     app.log.error(error);
     return reply.code(500).send({ message: "Something went wrong. Please try again or contact support." });
   });
 
+  app.log.info({ allowedOrigins }, "CORS allowed origins");
   await app.register(cors, {
-    origin: allowedOrigins,
-    credentials: true,
+    origin(origin, callback) {
+      const normalizedOrigin = origin?.replace(/\/+$/, "");
+      const allowed = !normalizedOrigin || allowedOrigins.includes(normalizedOrigin);
+      app.log.info({ origin: origin ?? null, allowed }, "CORS origin check");
+      callback(null, allowed);
+    },
+    methods: corsMethods,
+    allowedHeaders: corsHeaders,
+    credentials: false,
+    optionsSuccessStatus: 204,
   });
   await app.register(rateLimit, { global: false });
 

@@ -97,6 +97,32 @@ test("Alpha and Bravo operational records remain isolated", async () => {
   assert.equal((await request(bravo.token, "GET", `/v1/workspace/${alpha.workspaceId}/operational-records`)).statusCode, 403);
 });
 
+test("CORS preflight and operational error responses allow the configured frontend origin", async () => {
+  const origin = "http://localhost:5173";
+  const preflight = await app.inject({
+    method: "OPTIONS",
+    url: "/v1/workspace/operational-records",
+    headers: {
+      origin,
+      "access-control-request-method": "POST",
+      "access-control-request-headers": "content-type,authorization,x-workspace-id,x-farm-id,x-season-id,x-requested-with",
+    },
+  });
+  assert.equal(preflight.statusCode, 204);
+  assert.equal(preflight.headers["access-control-allow-origin"], origin);
+  assert.match(String(preflight.headers["access-control-allow-methods"]), /GET, POST, PUT, PATCH, DELETE, OPTIONS/);
+  assert.match(String(preflight.headers["access-control-allow-headers"]), /Content-Type, Authorization, X-Workspace-Id, X-Farm-Id, X-Season-Id, X-Requested-With/i);
+
+  const invalidPost = await app.inject({
+    method: "POST",
+    url: "/v1/workspace/operational-records",
+    headers: { origin, authorization: `Bearer ${alpha.token}` },
+    payload: {},
+  });
+  assert.equal(invalidPost.statusCode, 400);
+  assert.equal(invalidPost.headers["access-control-allow-origin"], origin);
+});
+
 test("attendance can be cleared idempotently only inside the active tenant context", async () => {
   const labourerId = randomUUID();
   const attendanceId = randomUUID();

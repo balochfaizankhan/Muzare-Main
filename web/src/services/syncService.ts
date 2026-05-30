@@ -11,6 +11,7 @@ let context: { token: string; workspaceId: string; farmId?: string; seasonId?: s
 let timer: number | null = null;
 let syncing = false;
 let state: SyncState = { status: navigator.onLine ? "online" : "offline", pendingCount: 0, lastSyncTime: null };
+const maxAutomaticAttempts = 3;
 
 const tables = {
   labourer: offlineDb.labourers, attendance: offlineDb.attendance, account: offlineDb.accounts,
@@ -74,7 +75,7 @@ export async function deleteOperationalRecord(entity: OperationalEntity, record:
   if (navigator.onLine) void syncPendingRecords();
 }
 
-export async function syncPendingRecords(): Promise<{ synced: number; pending: number }> {
+export async function syncPendingRecords(options: { force?: boolean } = {}): Promise<{ synced: number; pending: number }> {
   if (syncing) return { synced: 0, pending: await getPendingCount() };
   if (!navigator.onLine || !context) {
     emit({ status: "offline", pendingCount: await getPendingCount() });
@@ -86,6 +87,7 @@ export async function syncPendingRecords(): Promise<{ synced: number; pending: n
   const pendingRecords = (await offlineDb.pendingMutations.where("workspaceId").equals(context.workspaceId).sortBy("createdAt"))
     .filter((mutation) => mutation.farmId === context!.farmId && mutation.seasonId === context!.seasonId);
   for (const mutation of pendingRecords) {
+    if (!options.force && (mutation.attempts >= maxAutomaticAttempts || (mutation.nextAttemptAt && mutation.nextAttemptAt > new Date().toISOString()))) continue;
     try {
       if (mutation.operation === "delete") {
         await deleteOperationalRecordFromApi(context.token, {
@@ -108,8 +110,20 @@ export async function syncPendingRecords(): Promise<{ synced: number; pending: n
       await cacheRecord(mutation.entity, response.record, false, mutation.farmId, mutation.seasonId);
       await offlineDb.pendingMutations.delete(mutation.id);
       synced += 1;
-    } catch {
-      await offlineDb.pendingMutations.update(mutation.id, { attempts: mutation.attempts + 1 });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("PostgreSQL is the primary workspace database")) {
+        if (mutation.operation === "delete") await tableFor(mutation.entity).delete((mutation.payload as LocalRecord).id);
+        else await tableFor(mutation.entity).update((mutation.payload as LocalRecord).id, { pendingSync: false });
+        await offlineDb.pendingMutations.delete(mutation.id);
+        synced += 1;
+        continue;
+      }
+      const attempts = Math.min(mutation.attempts + 1, maxAutomaticAttempts);
+      await offlineDb.pendingMutations.update(mutation.id, {
+        attempts,
+        nextAttemptAt: new Date(Date.now() + 1_000 * 2 ** (attempts - 1)).toISOString(),
+      });
+      break;
     }
   }
   syncing = false;
@@ -133,12 +147,17 @@ export async function syncNow() {
     notify("Working offline. Pending changes will sync when connectivity returns.");
     return { synced: 0, pending: await getPendingCount() };
   }
-  const result = await syncPendingRecords();
+  if ((await getPendingCount()) === 0) {
+    await refreshOperationalData({ notifySuccess: false });
+    notify("Database synchronized.");
+    return { synced: 0, pending: 0 };
+  }
+  const result = await syncPendingRecords({ force: true });
   notify(result.pending ? `${result.pending} records remain pending` : `${result.synced} records synced successfully`);
   return result;
 }
 
-export async function refreshOperationalData(): Promise<void> {
+export async function refreshOperationalData(options: { notifySuccess?: boolean } = {}): Promise<void> {
   if (!context || !navigator.onLine) {
     emit({ status: "offline" });
     notify("Working offline. Refresh will retry when connectivity returns.");
@@ -158,7 +177,7 @@ export async function refreshOperationalData(): Promise<void> {
     localStorage.setItem(lastSyncKey(context.workspaceId), lastSyncTime);
     emit({ status: (await getPendingCount()) ? "pending" : "online", lastSyncTime, pendingCount: await getPendingCount() });
     window.dispatchEvent(new Event("muzare-data-refresh"));
-    notify("Latest workspace data loaded from the database.");
+    if (options.notifySuccess !== false) notify("Latest workspace data loaded from the database.");
   } catch {
     emit({ status: "error", pendingCount: await getPendingCount() });
     notify("Unable to refresh from the database. Cached workspace data is still available.");
