@@ -9,12 +9,13 @@ import {
   createSession,
   rejectUserAndWorkspace,
   requireAdmin,
+  requirePlatformAdmin,
   requireUser,
   revokeSession,
 } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
-import { users, workspaces } from "../db/schema.js";
+import { users, workspaceMemberships, workspaces } from "../db/schema.js";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -82,8 +83,8 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
     return {
       user: request.appUser,
       permissions: {
-        canWrite: request.appUser.role !== "viewer",
-        canAdminister: request.appUser.role === "admin",
+        canWrite: !request.appUser.platformRole && request.appUser.role !== "viewer",
+        canAdminister: request.appUser.platformRole === "platform_admin",
       },
     };
   });
@@ -114,14 +115,15 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
         createdAt: users.createdAt,
       })
       .from(users)
-      .innerJoin(workspaces, eq(workspaces.id, users.workspaceId))
+      .innerJoin(workspaceMemberships, eq(workspaceMemberships.userId, users.id))
+      .innerJoin(workspaces, eq(workspaces.id, workspaceMemberships.workspaceId))
       .where(eq(users.status, "pending"))
       .orderBy(desc(users.createdAt));
 
     return { requests };
   });
 
-  app.post("/v1/admin/approvals/approve", { preHandler: requireAdmin }, async (request, reply) => {
+  app.post("/v1/admin/approvals/approve", { preHandler: requirePlatformAdmin }, async (request, reply) => {
     const parsed = approvalSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ message: "A valid user id is required." });
     if (!request.appUser) return reply;
@@ -129,7 +131,7 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
     return reply.code(204).send();
   });
 
-  app.post("/v1/admin/approvals/reject", { preHandler: requireAdmin }, async (request, reply) => {
+  app.post("/v1/admin/approvals/reject", { preHandler: requirePlatformAdmin }, async (request, reply) => {
     const parsed = approvalSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ message: "A valid user id is required." });
     if (!request.appUser) return reply;

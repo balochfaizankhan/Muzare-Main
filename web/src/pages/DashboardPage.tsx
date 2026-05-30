@@ -6,9 +6,7 @@ import {
   CalendarRange,
   CircleDollarSign,
   CloudUpload,
-  ClipboardCheck,
   Leaf,
-  LogOut,
   PackageOpen,
   ShoppingBasket,
   TrendingUp,
@@ -22,8 +20,6 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
-import { Brand } from "../components/Brand";
-import { LanguageSwitch } from "../components/LanguageSwitch";
 import { fetchBootstrap } from "../lib/api";
 import { ensureLocalAccounts, offlineDb } from "../lib/offline-db";
 
@@ -52,19 +48,19 @@ const modules: Array<{
   icon: LucideIcon;
   detail: string;
 }> = [
-  { key: "workforce", path: "/workforce", icon: UsersRound, detail: "Attendance and labour register" },
-  { key: "expenses", path: "/expenses", icon: BanknoteArrowDown, detail: "Vouchers and farm costs" },
-  { key: "sales", path: "/sales", icon: ShoppingBasket, detail: "Revenue and buyers" },
-  { key: "dispatch", path: "/dispatch", icon: PackageOpen, detail: "Vehicles and cartons" },
-  { key: "accounts", path: "/accounts", icon: BookOpenText, detail: "Cash and bank balances" },
-  { key: "partnerLedger", path: "/partner-ledger", icon: Leaf, detail: "Capital and settlements" },
+  { key: "workforce", path: "/workspace/attendance", icon: UsersRound, detail: "Attendance and labour register" },
+  { key: "expenses", path: "/workspace/expenses", icon: BanknoteArrowDown, detail: "Vouchers and farm costs" },
+  { key: "sales", path: "/workspace/sales", icon: ShoppingBasket, detail: "Revenue and buyers" },
+  { key: "dispatch", path: "/workspace/dispatch", icon: PackageOpen, detail: "Vehicles and cartons" },
+  { key: "accounts", path: "/workspace/accounts", icon: BookOpenText, detail: "Cash and bank balances" },
+  { key: "partnerLedger", path: "/workspace/partner-ledger", icon: Leaf, detail: "Capital and settlements" },
 ];
 
 const quickActions = [
-  { label: "Mark attendance", path: "/workforce", icon: UsersRound },
-  { label: "New expense", path: "/expenses", icon: BanknoteArrowDown },
-  { label: "Record dispatch", path: "/dispatch", icon: PackageOpen },
-  { label: "Record sale", path: "/sales", icon: ShoppingBasket },
+  { label: "Mark attendance", path: "/workspace/attendance", icon: UsersRound },
+  { label: "New expense", path: "/workspace/expenses", icon: BanknoteArrowDown },
+  { label: "Record dispatch", path: "/workspace/dispatch", icon: PackageOpen },
+  { label: "Record sale", path: "/workspace/sales", icon: ShoppingBasket },
 ] as const;
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -73,7 +69,7 @@ const formatDate = () => new Intl.DateTimeFormat("en", { weekday: "long", day: "
 
 export function DashboardPage() {
   const { t } = useTranslation();
-  const { user, token, logout } = useAuth();
+  const { user, token } = useAuth();
   const [totals, setTotals] = useState<DashboardTotals>({
     presentToday: 0,
     cartonsToday: 0,
@@ -121,7 +117,7 @@ export function DashboardPage() {
     const recent: Activity[] = [
       ...sales.map((item) => ({
         id: item.id,
-        path: "/sales",
+        path: "/workspace/sales",
         title: "Sale recorded",
         detail: item.buyerName,
         value: money(item.amount),
@@ -129,7 +125,7 @@ export function DashboardPage() {
       })),
       ...vouchers.map((item) => ({
         id: item.id,
-        path: "/expenses",
+        path: "/workspace/expenses",
         title: "Expense voucher",
         detail: item.category,
         value: `-${money(item.amount)}`,
@@ -137,7 +133,7 @@ export function DashboardPage() {
       })),
       ...dispatches.map((item) => ({
         id: item.id,
-        path: "/dispatch",
+        path: "/workspace/dispatch",
         title: "Dispatch recorded",
         detail: item.vehicleNumber,
         value: `${item.cartons} cartons`,
@@ -145,7 +141,7 @@ export function DashboardPage() {
       })),
       ...entries.map((item) => ({
         id: item.id,
-        path: "/partner-ledger",
+        path: "/workspace/partner-ledger",
         title: item.type === "contribution" ? "Partner contribution" : "Partner withdrawal",
         detail: item.partnerName,
         value: `${item.type === "withdrawal" ? "-" : ""}${money(item.amount)}`,
@@ -166,26 +162,16 @@ export function DashboardPage() {
   const displayName = user?.displayName || user?.email || "Administrator";
 
   const summaryCards = [
-    { label: "Present today", value: String(totals.presentToday), icon: UsersRound, path: "/workforce", tone: "green" },
-    { label: "Cartons today", value: String(totals.cartonsToday), icon: PackageOpen, path: "/dispatch", tone: "navy" },
-    { label: "Total sales", value: money(totals.totalSales), icon: TrendingUp, path: "/sales", tone: "green" },
-    { label: "Total expenses", value: money(totals.totalExpenses), icon: BanknoteArrowDown, path: "/expenses", tone: "red" },
-    { label: "Available balance", value: money(totals.netPosition), icon: Wallet, path: "/accounts", tone: "navy" },
-    { label: "Partner balance", value: money(totals.partnerBalance), icon: CircleDollarSign, path: "/partner-ledger", tone: "blue" },
+    { label: "Present today", value: String(totals.presentToday), icon: UsersRound, path: "/workspace/attendance", tone: "green" },
+    { label: "Cartons today", value: String(totals.cartonsToday), icon: PackageOpen, path: "/workspace/dispatch", tone: "navy" },
+    { label: "Total sales", value: money(totals.totalSales), icon: TrendingUp, path: "/workspace/sales", tone: "green" },
+    { label: "Total expenses", value: money(totals.totalExpenses), icon: BanknoteArrowDown, path: "/workspace/expenses", tone: "red" },
+    { label: "Available balance", value: money(totals.netPosition), icon: Wallet, path: "/workspace/accounts", tone: "navy" },
+    { label: "Partner balance", value: money(totals.partnerBalance), icon: CircleDollarSign, path: "/workspace/partner-ledger", tone: "blue" },
   ];
 
   return (
     <div className="dashboard-page professional-dashboard">
-      <header className="toolbar dashboard-toolbar">
-        <Brand compact />
-        <div className="toolbar__actions">
-          <LanguageSwitch />
-          <button className="ghost-icon" onClick={() => void logout()} title={t("logout")} aria-label={t("logout")}>
-            <LogOut size={19} />
-          </button>
-        </div>
-      </header>
-
       <main className="dashboard dashboard--wide">
         <section className="dashboard-hero">
           <div className="dashboard-hero__intro">
@@ -195,12 +181,12 @@ export function DashboardPage() {
             {user?.workspaceName && <p className="workspace-label">{user.workspaceName}</p>}
           </div>
           <div className="context-actions">
-            <Link className="context-chip" to="/farms">
+            <Link className="context-chip" to="/workspace/farms">
               <Leaf size={18} />
               <span>{t("currentFarm")}</span>
               <strong>{farm?.name ?? t("noFarm")}</strong>
             </Link>
-            <Link className="context-chip" to="/seasons">
+            <Link className="context-chip" to="/workspace/seasons">
               <CalendarRange size={18} />
               <span>{t("currentSeason")}</span>
               <strong>{season?.name ?? t("noSeason")}</strong>
@@ -234,13 +220,6 @@ export function DashboardPage() {
                 </div>
               </div>
               <div className="quick-grid">
-                {user?.role === "admin" && (
-                  <Link className="quick-action quick-action--admin" to="/admin/approvals">
-                    <ClipboardCheck size={19} />
-                    <span>Approvals</span>
-                    <ArrowRight size={16} />
-                  </Link>
-                )}
                 {quickActions.map(({ label, path, icon: Icon }) => (
                   <Link className="quick-action" to={path} key={label}>
                     <Icon size={19} />

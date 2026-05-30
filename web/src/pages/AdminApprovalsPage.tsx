@@ -70,7 +70,7 @@ export function AdminApprovalsPage() {
             <div className="approval-empty__icon"><ShieldCheck size={32} /></div>
             <h2>No pending requests</h2>
             <p>Everything is clear. New workspace signups will appear here with owner details and approval actions.</p>
-            <Link className="primary-link" to="/">Dashboard</Link>
+            <Link className="primary-link" to="/admin/dashboard">Dashboard</Link>
           </section>
         )}
 

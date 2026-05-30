@@ -10,6 +10,7 @@ export async function bootstrapRoutes(app: FastifyInstance): Promise<void> {
     if (!request.appUser) return reply;
 
     if (localDevelopmentMode) {
+      if (request.appUser.platformRole) return { user: request.appUser, farms: [], seasons: [] };
       return {
         user: request.appUser,
         farms: [{ id: "00000000-0000-0000-0000-000000000010", name: "Main Farm", location: null, owner: null }],
@@ -22,7 +23,7 @@ export async function bootstrapRoutes(app: FastifyInstance): Promise<void> {
       };
     }
 
-    if (!request.appUser.workspaceId) {
+    if (request.appUser.platformRole || !request.appUser.workspaceId) {
       return { user: request.appUser, farms: [], seasons: [] };
     }
 

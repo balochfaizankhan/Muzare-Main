@@ -18,8 +18,12 @@ const timestamps = {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 };
 
-export const userRole = pgEnum("user_role", ["admin", "operator", "viewer"]);
+export const platformRole = pgEnum("platform_role", ["platform_admin", "platform_support"]);
+export const workspaceRole = pgEnum("workspace_role", ["workspace_owner", "workspace_manager", "supervisor", "operator", "viewer"]);
 export const userStatus = pgEnum("user_status", ["pending", "approved", "rejected", "suspended"]);
+export const approvalEntityType = pgEnum("approval_entity_type", ["expense", "attendance", "sale", "dispatch"]);
+export const approvalStatus = pgEnum("approval_status", ["pending", "approved", "rejected"]);
+export const subscriptionStatus = pgEnum("subscription_status", ["trial", "active", "past_due", "suspended", "cancelled"]);
 export const attendanceStatus = pgEnum("attendance_status", ["P", "H", "A"]);
 export const transactionType = pgEnum("transaction_type", ["credit", "debit"]);
 export const transactionSource = pgEnum("transaction_source", [
@@ -48,17 +52,29 @@ export const workspaces = pgTable(
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
-  workspaceId: uuid("workspace_id").references(() => workspaces.id),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   displayName: text("display_name"),
-  role: userRole("role").default("viewer").notNull(),
+  platformRole: platformRole("platform_role"),
   status: userStatus("status").default("pending").notNull(),
   active: boolean("active").default(true).notNull(),
   approvedAt: timestamp("approved_at", { withTimezone: true }),
   approvedBy: uuid("approved_by"),
   ...timestamps,
 });
+
+export const workspaceMemberships = pgTable(
+  "workspace_memberships",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+    role: workspaceRole("role").default("viewer").notNull(),
+    active: boolean("active").default(true).notNull(),
+    ...timestamps,
+  },
+  (table) => [uniqueIndex("workspace_memberships_workspace_user_uidx").on(table.workspaceId, table.userId)],
+);
 
 export const userSessions = pgTable("user_sessions", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -306,4 +322,58 @@ export const auditLogs = pgTable("audit_logs", {
   entityId: uuid("entity_id"),
   details: jsonb("details"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const workspaceApprovalConfigurations = pgTable(
+  "workspace_approval_configurations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+    entityType: approvalEntityType("entity_type").notNull(),
+    requiredRoles: jsonb("required_roles").$type<Array<"supervisor" | "workspace_manager" | "workspace_owner">>().notNull(),
+    ...timestamps,
+  },
+  (table) => [uniqueIndex("workspace_approval_configurations_scope_uidx").on(table.workspaceId, table.entityType)],
+);
+
+export const workspaceApprovals = pgTable("workspace_approvals", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+  entityType: approvalEntityType("entity_type").notNull(),
+  entityId: uuid("entity_id").notNull(),
+  submittedBy: uuid("submitted_by").references(() => users.id).notNull(),
+  currentStep: integer("current_step").default(0).notNull(),
+  status: approvalStatus("status").default("pending").notNull(),
+  decidedBy: uuid("decided_by").references(() => users.id),
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
+  ...timestamps,
+});
+
+export const subscriptionPlans = pgTable("subscription_plans", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: text("name").notNull().unique(),
+  monthlyPrice: numeric("monthly_price", { precision: 14, scale: 2 }).notNull(),
+  active: boolean("active").default(true).notNull(),
+  ...timestamps,
+});
+
+export const workspaceSubscriptions = pgTable("workspace_subscriptions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+  planId: uuid("plan_id").references(() => subscriptionPlans.id).notNull(),
+  status: subscriptionStatus("status").default("trial").notNull(),
+  startsAt: timestamp("starts_at", { withTimezone: true }).defaultNow().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  ...timestamps,
+});
+
+export const billingInvoices = pgTable("billing_invoices", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+  subscriptionId: uuid("subscription_id").references(() => workspaceSubscriptions.id),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  status: text("status").default("open").notNull(),
+  dueAt: timestamp("due_at", { withTimezone: true }),
+  paidAt: timestamp("paid_at", { withTimezone: true }),
+  ...timestamps,
 });

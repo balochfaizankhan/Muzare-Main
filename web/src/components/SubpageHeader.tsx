@@ -3,14 +3,15 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { LanguageSwitch } from "./LanguageSwitch";
+import { getHomePath } from "../lib/permissions";
 
 export function SubpageHeader({ title }: { title: string }) {
   const { t } = useTranslation();
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
 
   return (
     <header className="toolbar subpage-toolbar">
-      <Link className="back-link" to="/" aria-label={t("backToDashboard")}>
+      <Link className="back-link" to={user ? getHomePath(user) : "/login"} aria-label={t("backToDashboard")}>
         <ArrowLeft size={18} />
         <span>{t("dashboard")}</span>
       </Link>

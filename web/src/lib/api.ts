@@ -1,6 +1,13 @@
 import { config } from "../config";
 
-export type AppRole = "admin" | "operator" | "viewer";
+export type PlatformRole = "platform_admin" | "platform_support";
+export type WorkspaceRole = "workspace_owner" | "workspace_manager" | "supervisor" | "operator" | "viewer";
+export type AppRole = PlatformRole | WorkspaceRole;
+export type Permission =
+  | "CREATE_WORKSPACE" | "DELETE_WORKSPACE" | "VIEW_WORKSPACES" | "VIEW_USERS" | "MANAGE_SUBSCRIPTIONS"
+  | "MANAGE_BILLING" | "MANAGE_PLATFORM_SETTINGS" | "VIEW_AUDIT_LOGS" | "VIEW_SYSTEM_HEALTH"
+  | "APPROVE_EXPENSE" | "APPROVE_ATTENDANCE" | "APPROVE_SALE" | "APPROVE_DISPATCH"
+  | "MANAGE_TEAM" | "MANAGE_RECORDS" | "SUBMIT_RECORDS" | "VIEW_REPORTS";
 
 export type AppUser = {
   id: string;
@@ -9,6 +16,8 @@ export type AppUser = {
   email: string;
   displayName: string | null;
   role: AppRole;
+  platformRole: PlatformRole | null;
+  memberships: Array<{ workspaceId: string; workspaceName: string; role: WorkspaceRole; active: boolean }>;
   status: "pending" | "approved" | "rejected" | "suspended";
 };
 
@@ -49,6 +58,15 @@ export type BootstrapData = {
   seasons: Array<{ id: string; farmId: string; name: string; year: number }>;
 };
 
+export type AdminDashboardData = {
+  totalWorkspaces: number; activeWorkspaces: number; suspendedWorkspaces: number; pendingWorkspaceRequests: number;
+  totalUsers: number; totalActiveUsers: number; subscriptionRevenue: number; expiringSubscriptions: number; systemHealth: string;
+};
+export type AdminWorkspace = {
+  id: string; name: string; slug: string; contactEmail: string; contactPhone: string | null;
+  status: "pending" | "approved" | "rejected" | "suspended"; createdAt: string;
+};
+
 async function apiRequest<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
   const headers = new Headers(options.headers);
   if (options.body) headers.set("Content-Type", "application/json");
@@ -83,6 +101,14 @@ export const signup = (input: SignupRequest) =>
 export const logout = (token: string) => apiRequest<void>("/v1/auth/logout", { method: "POST" }, token);
 export const fetchSession = (token: string) => apiRequest<Session>("/v1/session", {}, token);
 export const fetchBootstrap = (token: string) => apiRequest<BootstrapData>("/v1/bootstrap", {}, token);
+export const fetchAdminDashboard = (token: string) => apiRequest<AdminDashboardData>("/v1/admin/dashboard", {}, token);
+export const fetchAdminWorkspaces = (token: string) => apiRequest<{ workspaces: AdminWorkspace[] }>("/v1/admin/workspaces", {}, token);
+export const createAdminWorkspace = (token: string, input: { name: string; contactEmail: string }) =>
+  apiRequest<void>("/v1/admin/workspaces", { method: "POST", body: JSON.stringify(input) }, token);
+export const suspendAdminWorkspace = (token: string, workspaceId: string) =>
+  apiRequest<void>(`/v1/admin/workspaces/${workspaceId}/suspend`, { method: "POST" }, token);
+export const deleteAdminWorkspace = (token: string, workspaceId: string) =>
+  apiRequest<void>(`/v1/admin/workspaces/${workspaceId}`, { method: "DELETE" }, token);
 export const fetchApprovals = (token: string) =>
   apiRequest<{ requests: PendingApproval[] }>("/v1/admin/approvals", {}, token);
 export const approveSignup = (token: string, userId: string) =>

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { db } from "./client.js";
 
 const initialMigrationUrl = new URL("../../../database/migrations/0001_initial.sql", import.meta.url);
+const roleArchitectureMigrationUrl = new URL("../../../database/migrations/0003_platform_workspace_roles.sql", import.meta.url);
 
 async function tableExists(tableName: string): Promise<boolean> {
   const result = (await db.execute(
@@ -66,4 +67,7 @@ export async function ensureWorkspaceSchema(): Promise<void> {
 
     CREATE UNIQUE INDEX IF NOT EXISTS workspaces_slug_uidx ON workspaces(slug);
   `);
+
+  const roleArchitectureMigration = await readFile(roleArchitectureMigrationUrl, "utf8");
+  await db.execute(roleArchitectureMigration);
 }

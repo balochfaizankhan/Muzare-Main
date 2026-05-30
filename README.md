@@ -42,7 +42,7 @@ Use these instructions only when testing the API with your own local PostgreSQL 
 4. Apply `database/migrations/0001_initial.sql` to your PostgreSQL database.
 5. Start the API and PWA.
 
-When `DATABASE_URL`, `BOOTSTRAP_ADMIN_EMAIL`, and `BOOTSTRAP_ADMIN_PASSWORD` are set, the API creates the first administrator on startup if one does not already exist.
+When `DATABASE_URL`, `BOOTSTRAP_ADMIN_EMAIL`, and `BOOTSTRAP_ADMIN_PASSWORD` are set, the API creates the first platform administrator on startup if one does not already exist. Platform administrators do not belong to a farm workspace.
 
 ## Production Deployment
 

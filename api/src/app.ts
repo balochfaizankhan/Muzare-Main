@@ -5,6 +5,9 @@ import { allowedOrigins } from "./config.js";
 import { bootstrapRoutes } from "./routes/bootstrap.js";
 import { healthRoutes } from "./routes/health.js";
 import { sessionRoutes } from "./routes/session.js";
+import { workspaceApprovalRoutes } from "./routes/workspace-approvals.js";
+import { adminDashboardRoutes } from "./routes/admin-dashboard.js";
+import { adminWorkspaceRoutes } from "./routes/admin-workspaces.js";
 
 export async function buildApp() {
   const app = Fastify({ logger: true });
@@ -23,6 +26,9 @@ export async function buildApp() {
   await app.register(healthRoutes);
   await app.register(sessionRoutes);
   await app.register(bootstrapRoutes);
+  await app.register(workspaceApprovalRoutes);
+  await app.register(adminDashboardRoutes);
+  await app.register(adminWorkspaceRoutes);
 
   return app;
 }

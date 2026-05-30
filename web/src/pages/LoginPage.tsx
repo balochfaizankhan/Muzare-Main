@@ -7,6 +7,7 @@ import { Link, Navigate } from "react-router-dom";
 import { z } from "zod";
 import { LanguageSwitch } from "../components/LanguageSwitch";
 import { useAuth } from "../auth/AuthProvider";
+import { getHomePath } from "../lib/permissions";
 
 const schema = z.object({
   email: z.email(),
@@ -28,7 +29,7 @@ export function LoginPage() {
     defaultValues: { email: "", password: "" },
   });
 
-  if (user) return <Navigate to="/" replace />;
+  if (user) return <Navigate to={getHomePath(user)} replace />;
 
   const login = async (fields: LoginFields) => {
     setAuthError(null);
