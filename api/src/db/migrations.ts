@@ -9,6 +9,7 @@ const farmManagementMigrationUrl = new URL("../../../database/migrations/0006_wo
 const seasonManagementMigrationUrl = new URL("../../../database/migrations/0007_workspace_season_management.sql", import.meta.url);
 const expenseCategoryMigrationUrl = new URL("../../../database/migrations/0008_expense_category_system.sql", import.meta.url);
 const attendanceCsvImportMigrationUrl = new URL("../../../database/migrations/0009_attendance_csv_import.sql", import.meta.url);
+const defaultLabourWageMigrationUrl = new URL("../../../database/migrations/0010_default_labour_wage.sql", import.meta.url);
 
 async function tableExists(tableName: string): Promise<boolean> {
   const result = (await db.execute(
@@ -88,4 +89,6 @@ export async function ensureWorkspaceSchema(): Promise<void> {
   await db.execute(expenseCategoryMigration);
   const attendanceCsvImportMigration = await readFile(attendanceCsvImportMigrationUrl, "utf8");
   await db.execute(attendanceCsvImportMigration);
+  const defaultLabourWageMigration = await readFile(defaultLabourWageMigrationUrl, "utf8");
+  await db.execute(defaultLabourWageMigration);
 }
