@@ -171,7 +171,9 @@ export function getLastSyncTime() {
 export function subscribeSyncState(listener: (next: SyncState) => void) {
   listeners.add(listener);
   listener(state);
-  return () => listeners.delete(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
 export async function startSyncService(token: string, workspaceId: string) {
