@@ -5,7 +5,8 @@ import { useQuery } from "@tanstack/react-query";
 import { SubpageHeader } from "../components/SubpageHeader";
 import { useAuth } from "../auth/AuthProvider";
 import { useSyncState } from "../hooks/useSyncState";
-import { fetchAttendanceReport, type AttendanceReportFilters, type AttendanceReportStatus } from "../lib/api";
+import { createExpenseSubcategory, fetchAttendanceReport, fetchExpenseCategories, updateExpenseSubcategory, type AttendanceReportFilters, type AttendanceReportStatus } from "../lib/api";
+import { hasPermission } from "../lib/permissions";
 import {
   ensureLocalAccounts,
   getActiveWorkspaceId,
@@ -390,20 +391,31 @@ function AttendanceRegister({ data, syncStatus, totalPresent, totalHalf, totalAb
 }
 
 function ExpensesModule() {
+  const { token, user } = useAuth();
   const load = useCallback(async () => (await workspaceRecords(offlineDb.vouchers)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts), []);
   const [vouchers, refresh] = useData(load);
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
   const [date, setDate] = useState(today());
-  const [category, setCategory] = useState("Operations");
+  const workspaceId = user?.workspaceId ?? "";
+  const categories = useQuery({ queryKey: ["expense-categories", workspaceId], queryFn: () => fetchExpenseCategories(token!, workspaceId), enabled: Boolean(token && workspaceId) });
+  const [categoryId, setCategoryId] = useState("");
+  const [categorySearch, setCategorySearch] = useState("");
+  const [subcategoryId, setSubcategoryId] = useState("");
+  const [subcategorySearch, setSubcategorySearch] = useState("");
+  const [customName, setCustomName] = useState("");
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
   const [accountId, setAccountId] = useState("");
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    const category = categories.data?.categories.find((item) => item.id === categoryId);
+    const subcategory = category?.subcategories.find((item) => item.id === subcategoryId);
+    if (!category || !subcategory) return;
     const record: Voucher = {
-      ...makeLocalRecord(), voucherNumber: `V-${Date.now().toString().slice(-6)}`, date, category,
+      ...makeLocalRecord(), voucherNumber: `V-${Date.now().toString().slice(-6)}`, date,
+      categoryId: category.id, category: category.name, subcategoryId: subcategory.id, subcategory: subcategory.name,
       description: description.trim(), amount: Number(amount), accountId: accountId || accounts[0]?.id || "",
     };
     await persistOperationalRecord("voucher", record);
@@ -412,13 +424,31 @@ function ExpensesModule() {
     await refresh();
   };
   const total = vouchers.reduce((sum, item) => sum + item.amount, 0);
+  const selectedCategory = categories.data?.categories.find((item) => item.id === categoryId);
+  const canManage = Boolean(user && workspaceId && hasPermission(user, "MANAGE_EXPENSE_CATEGORIES", workspaceId));
+  const grouped = [...vouchers.reduce((map, item) => {
+    const category = map.get(item.category) ?? new Map<string, number>();
+    category.set(item.subcategory || "Miscellaneous", (category.get(item.subcategory || "Miscellaneous") ?? 0) + item.amount);
+    map.set(item.category, category); return map;
+  }, new Map<string, Map<string, number>>())];
+  const addCustom = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!token || !workspaceId || !categoryId || !customName.trim()) return;
+    await createExpenseSubcategory(token, workspaceId, { categoryId, name: customName.trim() });
+    setCustomName(""); await categories.refetch();
+  };
 
   return (
     <>
       <FormCard title="New expense voucher">
         <form className="module-form inline-form" onSubmit={(event) => void submit(event)}>
           <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-          <input required value={category} placeholder="Category" onChange={(event) => setCategory(event.target.value)} />
+          <label><span>Category *</span><input required list="expense-category-options" placeholder="Select category" value={categorySearch} onChange={(event) => {
+            const next = categories.data?.categories.find((item) => item.name === event.target.value); setCategorySearch(event.target.value); setCategoryId(next?.id ?? ""); setSubcategoryId(""); setSubcategorySearch("");
+          }} /><datalist id="expense-category-options">{categories.data?.categories.map((item) => <option key={item.id} value={item.name} />)}</datalist></label>
+          <label><span>Subcategory *</span><input required disabled={!categoryId} list="expense-subcategory-options" placeholder="Select subcategory" value={subcategorySearch} onChange={(event) => {
+            const next = selectedCategory?.subcategories.find((item) => item.name === event.target.value); setSubcategorySearch(event.target.value); setSubcategoryId(next?.id ?? "");
+          }} /><datalist id="expense-subcategory-options">{selectedCategory?.subcategories.map((item) => <option key={item.id} value={item.name} />)}</datalist></label>
           <input required value={description} placeholder="Description" onChange={(event) => setDescription(event.target.value)} />
           <input required min="0.01" step="0.01" type="number" value={amount} placeholder="Amount" onChange={(event) => setAmount(event.target.value)} />
           <select value={accountId || accounts[0]?.id || ""} onChange={(event) => setAccountId(event.target.value)}>
@@ -428,7 +458,9 @@ function ExpensesModule() {
         </form>
       </FormCard>
       <Summary value={money(total)} label="Total expenses" />
-      <RecordTable empty="No vouchers recorded yet." rows={vouchers.map((item) => [item.voucherNumber, item.date, item.category, item.description, money(item.amount)])} />
+      <section className="record-panel"><h2>Expenses by category</h2>{!grouped.length ? <Empty>No expense totals yet.</Empty> : <div className="expense-category-report">{grouped.map(([category, items]) => <article key={category}><h3>{category}</h3>{[...items].map(([subcategory, amount]) => <p key={subcategory}><span>{subcategory}</span><strong>{money(amount)}</strong></p>)}<b>Total {money([...items.values()].reduce((sum, amount) => sum + amount, 0))}</b></article>)}</div>}</section>
+      {canManage && <section className="record-panel"><h2>Custom subcategories</h2><form className="module-form compact-form" onSubmit={(event) => void addCustom(event)}><select required value={categoryId} onChange={(event) => { setCategoryId(event.target.value); setCategorySearch(categories.data?.categories.find((item) => item.id === event.target.value)?.name ?? ""); }}><option value="">Select category</option>{categories.data?.categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><input required placeholder="New subcategory" value={customName} onChange={(event) => setCustomName(event.target.value)} /><button type="submit">Add subcategory</button></form><div className="custom-subcategory-list">{categories.data?.categories.flatMap((item) => item.subcategories.filter((subcategory) => !subcategory.isSystem).map((subcategory) => <span key={subcategory.id}>{item.name} / {subcategory.name}<button type="button" onClick={() => { const name = window.prompt("Rename custom subcategory", subcategory.name); if (token && name?.trim()) void updateExpenseSubcategory(token, workspaceId, subcategory.id, { name: name.trim() }).then(() => categories.refetch()); }}>Rename</button><button type="button" onClick={() => token && void updateExpenseSubcategory(token, workspaceId, subcategory.id, { active: false }).then(() => categories.refetch())}>Disable</button></span>))}</div></section>}
+      <RecordTable empty="No vouchers recorded yet." rows={vouchers.map((item) => [item.voucherNumber, item.date, `${item.category} / ${item.subcategory || "Miscellaneous"}`, item.description, money(item.amount)])} />
     </>
   );
 }

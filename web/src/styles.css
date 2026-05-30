@@ -1376,6 +1376,71 @@ button {
   grid-template-columns: minmax(180px, 2fr) minmax(130px, 1fr) auto;
 }
 
+.expense-category-report {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.expense-category-report article {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 12px;
+}
+
+.expense-category-report h3,
+.expense-category-report p {
+  margin: 0;
+}
+
+.expense-category-report p {
+  color: var(--text-secondary);
+  display: flex;
+  font-size: .82rem;
+  justify-content: space-between;
+  padding: 5px 0;
+}
+
+.expense-category-report b {
+  border-top: 1px solid var(--border);
+  color: var(--brand-primary);
+  display: block;
+  font-size: .84rem;
+  margin-top: 5px;
+  padding-top: 8px;
+  text-align: end;
+}
+
+.custom-subcategory-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.custom-subcategory-list span {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: .8rem;
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+.custom-subcategory-list button {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  min-height: 36px;
+  padding: 6px 8px;
+}
+
 .summary-card {
   align-items: center;
   background: var(--brand-primary);
@@ -2571,6 +2636,16 @@ button {
   .attendance-report-dialog { width: 95vw; }
   .register-header { display: grid; }
   .register-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (prefers-color-scheme: dark) {
+  .expense-category-report article,
+  .custom-subcategory-list span,
+  .custom-subcategory-list button {
+    background: #173449;
+    border-color: #34586b;
+    color: #c2d4dc;
+  }
 }
 
 @media (prefers-color-scheme: dark) {

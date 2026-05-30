@@ -7,6 +7,7 @@ const operationalSyncMigrationUrl = new URL("../../../database/migrations/0004_o
 const tenantHardeningMigrationUrl = new URL("../../../database/migrations/0005_tenant_hardening.sql", import.meta.url);
 const farmManagementMigrationUrl = new URL("../../../database/migrations/0006_workspace_farm_management.sql", import.meta.url);
 const seasonManagementMigrationUrl = new URL("../../../database/migrations/0007_workspace_season_management.sql", import.meta.url);
+const expenseCategoryMigrationUrl = new URL("../../../database/migrations/0008_expense_category_system.sql", import.meta.url);
 
 async function tableExists(tableName: string): Promise<boolean> {
   const result = (await db.execute(
@@ -82,4 +83,6 @@ export async function ensureWorkspaceSchema(): Promise<void> {
   await db.execute(farmManagementMigration);
   const seasonManagementMigration = await readFile(seasonManagementMigrationUrl, "utf8");
   await db.execute(seasonManagementMigration);
+  const expenseCategoryMigration = await readFile(expenseCategoryMigrationUrl, "utf8");
+  await db.execute(expenseCategoryMigration);
 }

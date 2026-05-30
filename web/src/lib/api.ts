@@ -7,7 +7,7 @@ export type Permission =
   | "CREATE_WORKSPACE" | "DELETE_WORKSPACE" | "VIEW_WORKSPACES" | "VIEW_USERS" | "MANAGE_SUBSCRIPTIONS"
   | "MANAGE_BILLING" | "MANAGE_PLATFORM_SETTINGS" | "VIEW_AUDIT_LOGS" | "VIEW_SYSTEM_HEALTH"
   | "APPROVE_EXPENSE" | "APPROVE_ATTENDANCE" | "APPROVE_SALE" | "APPROVE_DISPATCH"
-  | "MANAGE_TEAM" | "MANAGE_FARMS" | "MANAGE_SEASONS" | "MANAGE_RECORDS" | "SUBMIT_RECORDS" | "VIEW_REPORTS";
+  | "MANAGE_TEAM" | "MANAGE_FARMS" | "MANAGE_SEASONS" | "MANAGE_EXPENSE_CATEGORIES" | "MANAGE_RECORDS" | "SUBMIT_RECORDS" | "VIEW_REPORTS";
 
 export type AppUser = {
   id: string;
@@ -109,6 +109,8 @@ export type AttendanceReportData = {
 export type AttendanceReportFilters = {
   farmId: string; seasonId: string; from: string; to: string; labourId?: string; status?: AttendanceReportStatus;
 };
+export type ExpenseSubcategory = { id: string; categoryId: string; name: string; sortOrder: number; isSystem: boolean; active: boolean };
+export type ExpenseCategory = { id: string; name: string; sortOrder: number; isSystem: boolean; subcategories: ExpenseSubcategory[] };
 
 async function apiRequest<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
   const headers = new Headers(options.headers);
@@ -194,3 +196,9 @@ export const fetchAttendanceReport = (token: string, workspaceId: string, filter
     `/v1/workspace/${workspaceId}/attendance/report?${query.toString()}`, {}, token,
   );
 };
+export const fetchExpenseCategories = (token: string, workspaceId: string) =>
+  apiRequest<{ categories: ExpenseCategory[] }>(`/v1/workspace/${workspaceId}/expense-categories`, {}, token);
+export const createExpenseSubcategory = (token: string, workspaceId: string, input: { categoryId: string; name: string }) =>
+  apiRequest<{ subcategory: ExpenseSubcategory }>(`/v1/workspace/${workspaceId}/expense-subcategories`, { method: "POST", body: JSON.stringify(input) }, token);
+export const updateExpenseSubcategory = (token: string, workspaceId: string, subcategoryId: string, input: { name?: string; active?: boolean }) =>
+  apiRequest<{ subcategory: ExpenseSubcategory }>(`/v1/workspace/${workspaceId}/expense-subcategories/${subcategoryId}`, { method: "PATCH", body: JSON.stringify(input) }, token);

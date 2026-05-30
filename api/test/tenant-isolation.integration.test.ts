@@ -122,6 +122,40 @@ test("approval queues remain isolated", async () => {
   assert.equal((await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/approvals`)).json().approvals.length, 1);
 });
 
+test("expense categories seed defaults, protect system values, and isolate workspace custom subcategories", async () => {
+  const alphaList = await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/expense-categories`);
+  assert.equal(alphaList.statusCode, 200);
+  assert.equal(alphaList.json().categories.length, 10);
+  const other = alphaList.json().categories.find((category: { name: string }) => category.name === "Other");
+  assert.ok(other.subcategories.some((subcategory: { name: string }) => subcategory.name === "Miscellaneous"));
+  const fuel = alphaList.json().categories.find((category: { name: string }) => category.name === "Fuel & POL");
+  const diesel = fuel.subcategories.find((subcategory: { name: string }) => subcategory.name === "Diesel");
+
+  const fallbackVoucher = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher"));
+  assert.equal(fallbackVoucher.statusCode, 200);
+  assert.equal(fallbackVoucher.json().record.category, "Other");
+  assert.equal(fallbackVoucher.json().record.subcategory, "Miscellaneous");
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", randomUUID(), {
+    categoryId: randomUUID(), subcategoryId: randomUUID(),
+  }))).statusCode, 403);
+
+  const created = await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/expense-subcategories`, {
+    categoryId: fuel.id, name: "Generator Fuel",
+  });
+  assert.equal(created.statusCode, 201);
+  const customId = created.json().subcategory.id as string;
+  assert.equal((await request(alpha.token, "PATCH", `/v1/workspace/${alpha.workspaceId}/expense-subcategories/${customId}`, { name: "Generator Diesel" })).statusCode, 200);
+  assert.equal((await request(alpha.token, "PATCH", `/v1/workspace/${alpha.workspaceId}/expense-subcategories/${diesel.id}`, { active: false })).statusCode, 403);
+  assert.equal((await request(bravo.token, "PATCH", `/v1/workspace/${alpha.workspaceId}/expense-subcategories/${customId}`, { active: false })).statusCode, 403);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", randomUUID(), {
+    categoryId: fuel.id, subcategoryId: customId,
+  }))).statusCode, 200);
+  assert.equal((await request(alpha.token, "PATCH", `/v1/workspace/${alpha.workspaceId}/expense-subcategories/${customId}`, { active: false })).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", randomUUID(), {
+    categoryId: fuel.id, subcategoryId: customId,
+  }))).statusCode, 403);
+});
+
 test("attendance reports calculate payable wages and reject foreign workspace or farm labour", async () => {
   const labourerId = randomUUID();
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", labourerId, {

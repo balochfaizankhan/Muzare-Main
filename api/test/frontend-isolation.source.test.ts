@@ -86,3 +86,12 @@ test("attendance report preview renders a printable register and structured expo
   assert.match(styles, /\.attendance-register-table thead \{ display: table-header-group; \}/);
   assert.match(styles, /\.register-status--present \{ background: #dff2d7;/);
 });
+
+test("expense entry uses dependent searchable category selectors and grouped totals", async () => {
+  const modulePage = await source("web/src/pages/ModulePage.tsx");
+  assert.match(modulePage, /list="expense-category-options"/);
+  assert.match(modulePage, /list="expense-subcategory-options"/);
+  assert.match(modulePage, /disabled=\{!categoryId\}/);
+  assert.match(modulePage, /Expenses by category/);
+  assert.match(modulePage, /MANAGE_EXPENSE_CATEGORIES/);
+});

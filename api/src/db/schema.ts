@@ -282,11 +282,27 @@ export const expenseCategories = pgTable(
   "expense_categories",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    farmId: uuid("farm_id").references(() => farms.id).notNull(),
+    farmId: uuid("farm_id").references(() => farms.id),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    isSystem: boolean("is_system").default(false).notNull(),
+    active: boolean("active").default(true).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [uniqueIndex("expense_categories_farm_name_uidx").on(table.farmId, table.name)],
 );
+
+export const expenseSubcategories = pgTable("expense_subcategories", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  categoryId: uuid("category_id").references(() => expenseCategories.id, { onDelete: "cascade" }).notNull(),
+  workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  sortOrder: integer("sort_order").default(0).notNull(),
+  isSystem: boolean("is_system").default(false).notNull(),
+  active: boolean("active").default(true).notNull(),
+  ...timestamps,
+});
 
 export const vouchers = pgTable(
   "vouchers",

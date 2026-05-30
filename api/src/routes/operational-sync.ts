@@ -7,6 +7,7 @@ import { db } from "../db/client.js";
 import { auditLogs, operationalRecords, userSessions } from "../db/schema.js";
 import { hasPermission } from "../permissions.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
+import { resolveExpenseCategory } from "./expense-categories.js";
 
 const entities = ["labourer", "attendance", "account", "advance", "dispatch", "sale", "voucher", "partnerEntry", "inventoryEntry"] as const;
 const recordSchema = z.object({
@@ -103,6 +104,10 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       ledgerId: parsed.data.record.ledgerId,
     });
     if (ownershipError) return reply.code(403).send({ message: ownershipError });
+    const expenseCategory = parsed.data.entity === "voucher"
+      ? await resolveExpenseCategory(parsed.data.workspaceId, parsed.data.record.categoryId, parsed.data.record.subcategoryId)
+      : null;
+    if (parsed.data.entity === "voucher" && !expenseCategory) return reply.code(403).send({ message: "Expense category does not belong to the selected workspace." });
     const [existing] = await db.select().from(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, parsed.data.workspaceId),
       eq(operationalRecords.entityType, parsed.data.entity),
@@ -126,7 +131,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     }
     const values = {
       workspaceId: parsed.data.workspaceId, farmId: parsed.data.farmId, seasonId: parsed.data.seasonId,
-      clientRecordId: parsed.data.record.id, entityType: parsed.data.entity, payload: parsed.data.record,
+      clientRecordId: parsed.data.record.id, entityType: parsed.data.entity, payload: expenseCategory ? { ...parsed.data.record, ...expenseCategory } : parsed.data.record,
       recordedBy: request.appUser.id, clientUpdatedAt, updatedAt: new Date(),
     };
     const [saved] = existing

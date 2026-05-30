@@ -41,6 +41,9 @@ export type Voucher = LocalRecord & {
   voucherNumber: string;
   date: string;
   category: string;
+  categoryId: string;
+  subcategory: string;
+  subcategoryId: string;
   description: string;
   amount: number;
   accountId: string;
