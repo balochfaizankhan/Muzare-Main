@@ -24,6 +24,12 @@ export type Labourer = LocalRecord & {
   name: string;
   group: string;
   dailyWage: number;
+  labourType?: string;
+  active?: boolean;
+  joinedOn?: string;
+  endedOn?: string;
+  phone?: string;
+  notes?: string;
 };
 
 export type Attendance = LocalRecord & {
@@ -80,6 +86,7 @@ export type Advance = LocalRecord & {
   labourerId: string;
   date: string;
   amount: number;
+  paymentMethod?: string;
   notes: string;
 };
 

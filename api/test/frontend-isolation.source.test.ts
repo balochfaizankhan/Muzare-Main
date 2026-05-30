@@ -115,3 +115,19 @@ test("attendance CSV confirm sends nested confirmation and blocks unresolved lab
   assert.match(modulePage, /unresolvedLabourRows\.length > 0 \|\| summary\.errors\.length > 0 \|\| \(summary\.warnings\.length > 0 && !warningsAccepted\)/);
   assert.match(modulePage, /I understand these warnings and want to continue\./);
 });
+
+test("labour details actions edit labour and add separate optimistic advances", async () => {
+  const modulePage = await source("web/src/pages/ModulePage.tsx");
+  const offlineDb = await source("web/src/lib/offline-db.ts");
+  const styles = await source("web/src/styles.css");
+  assert.match(modulePage, /hasPermission\(user, "MANAGE_TEAM", user\.workspaceId\)/);
+  assert.match(modulePage, /hasPermission\(user, "MANAGE_RECORDS", user\.workspaceId\)/);
+  assert.match(modulePage, /advances\.filter\(\(entry\) => entry\.labourerId === selectedLabourer\.id\)\.reduce\(\(sum, entry\) => sum \+ entry\.amount, 0\)/);
+  assert.match(modulePage, /setAdvances\(\(current\) => \[record, \.\.\.current\.filter\(\(entry\) => entry\.id !== record\.id\)\]\);\s+await persistOperationalRecord\("advance", record\)/);
+  assert.match(modulePage, /await persistOperationalRecord\("labourer", record\)/);
+  assert.match(modulePage, /if \(busy\) return;/);
+  assert.match(modulePage, /Labour updated successfully\./);
+  assert.match(modulePage, /Advance added successfully\./);
+  assert.match(offlineDb, /paymentMethod\?: string;/);
+  assert.match(styles, /@media \(max-width: 767px\) \{[\s\S]*\.worker-action-backdrop \{ align-items: flex-end; padding: 0; \}/);
+});
