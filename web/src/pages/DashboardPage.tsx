@@ -51,7 +51,7 @@ const modules: Array<{
   icon: LucideIcon;
   detail: string;
 }> = [
-  { key: "workforce", path: "/workspace/attendance", icon: UsersRound, detail: "Attendance and labour register" },
+  { key: "workforce", path: "/workspace/team", icon: UsersRound, detail: "Attendance and labour register" },
   { key: "expenses", path: "/workspace/expenses", icon: BanknoteArrowDown, detail: "Vouchers and farm costs" },
   { key: "sales", path: "/workspace/sales", icon: ShoppingBasket, detail: "Revenue and buyers" },
   { key: "dispatch", path: "/workspace/dispatch", icon: PackageOpen, detail: "Vehicles and cartons" },

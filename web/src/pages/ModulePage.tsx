@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { MoreVertical, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
@@ -189,6 +189,8 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
   const [showAttendanceEntry, setShowAttendanceEntry] = useState(false);
   const [showRegisterFilters, setShowRegisterFilters] = useState(false);
   const [labourAction, setLabourAction] = useState<"update" | "advance" | "production" | "payment" | "deactivate" | null>(null);
+  const [newAttendanceLabourId, setNewAttendanceLabourId] = useState<string | null>(null);
+  const attendanceRowRefs = useRef<Record<string, HTMLElement | null>>({});
 
   const markAttendance = async (targetLabourerId: string, status: Attendance["status"]) => {
     const labourer = labourers.find((item) => item.id === targetLabourerId);
@@ -236,6 +238,7 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
     const matchesGroup = groupFilterId === "all" || labourer.groupId === groupFilterId;
     return matchesActive && matchesStatus && matchesSearch && matchesGroup;
   });
+  const filteredLabourerIds = useMemo(() => filteredLabourers.map((item) => item.id), [filteredLabourers]);
   const presentToday = [...attendanceByLabourer.values()].filter((item) => item === "present").length;
   const halfDayToday = [...attendanceByLabourer.values()].filter((item) => item === "half_day").length;
   const absentToday = [...attendanceByLabourer.values()].filter((item) => item === "absent").length;
@@ -308,6 +311,20 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
   useEffect(() => {
     if (openAttendanceOnLoad) setShowAttendanceEntry(true);
   }, [openAttendanceOnLoad]);
+  useEffect(() => {
+    if (!showAttendanceEntry || !newAttendanceLabourId) return;
+    if (!filteredLabourerIds.includes(newAttendanceLabourId)) return;
+    const handle = window.setTimeout(() => {
+      const node = attendanceRowRefs.current[newAttendanceLabourId];
+      node?.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (node) {
+        node.classList.add("attendance-card--new");
+        window.setTimeout(() => node.classList.remove("attendance-card--new"), 2200);
+      }
+      setNewAttendanceLabourId(null);
+    }, 80);
+    return () => window.clearTimeout(handle);
+  }, [showAttendanceEntry, newAttendanceLabourId, filteredLabourerIds]);
 
   return (
     <>
@@ -419,10 +436,7 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
             </div>
             <div className="attendance-actions">
               <button type="button" onClick={() => setDate(today())}>{t("common.today")}</button>
-              <button type="button" onClick={() => {
-                if (onAttendanceClose) onAttendanceClose();
-                else setShowAttendanceEntry(false);
-              }}>{t("common.close")}</button>
+              {canManageLabour && <button type="button" onClick={() => setShowAddLabour(true)}>{t("workforcePage.addLabour")}</button>}
               <button type="button" onClick={() => void saveAttendanceView()}>Save Attendance</button>
             </div>
             <label className="attendance-inactive-toggle"><input type="checkbox" checked={showInactiveLabour} onChange={(event) => setShowInactiveLabour(event.target.checked)} /> {t("workforcePage.showInactive")}</label>
@@ -437,7 +451,7 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
                 const previousStatus = yesterdayByLabourer.get(labourer.id);
                 const markable = canMarkAttendanceOn(labourer, date);
                 return (
-                  <article className="attendance-card" key={labourer.id}>
+                  <article className="attendance-card" key={labourer.id} ref={(node) => { attendanceRowRefs.current[labourer.id] = node; }}>
                     <span className="attendance-card__index">{index + 1}</span>
                     <div className="attendance-card__body">
                       <strong>{labourer.name}</strong>
@@ -539,6 +553,13 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
         await persistOperationalRecord("labourer", record);
         await refreshLabourers();
         await refreshGroups();
+        if (showAttendanceEntry) {
+          setAttendanceSearch("");
+          setAttendanceFilter("all");
+          setGroupFilterId("all");
+          setShowInactiveLabour(true);
+          setNewAttendanceLabourId(record.id);
+        }
         setShowAddLabour(false);
         showToast(t("workforcePage.labourAdded"));
       }} />}

@@ -1264,6 +1264,11 @@ button {
   padding: 13px 14px;
 }
 
+.attendance-card--new {
+  border-color: #2e7d32 !important;
+  box-shadow: 0 0 0 2px rgba(46, 125, 50, 0.22), 0 5px 16px rgba(5, 35, 63, 0.05);
+}
+
 .attendance-card__index {
   align-items: center;
   background: var(--brand-primary);
@@ -1649,6 +1654,7 @@ button {
   gap: 12px;
   grid-template-columns: auto 1fr auto;
   min-height: 78px;
+  opacity: 1;
   padding: 12px 14px;
   text-align: start;
   width: 100%;
@@ -1662,14 +1668,16 @@ button {
 .workforce-row__index {
   align-items: center;
   background: #2e7d32;
+  border: 2px solid #2e7d32;
   border-radius: 999px;
   color: #fff;
   display: inline-flex;
-  font-size: 1rem;
-  font-weight: 900;
+  font-size: 14px;
+  font-weight: 700;
   height: 42px;
   justify-content: center;
   line-height: 1;
+  opacity: 1;
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
   width: 42px;
 }
