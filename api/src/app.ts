@@ -12,6 +12,7 @@ import { operationalSyncRoutes } from "./routes/operational-sync.js";
 import { workspaceFarmRoutes } from "./routes/workspace-farms.js";
 import { workspaceSeasonRoutes } from "./routes/workspace-seasons.js";
 import { attendanceReportRoutes } from "./routes/attendance-report.js";
+import { advanceReportRoutes } from "./routes/advance-report.js";
 import { expenseCategoryRoutes } from "./routes/expense-categories.js";
 import { attendanceImportRoutes } from "./routes/attendance-imports.js";
 import { labourManagementRoutes } from "./routes/labour-management.js";
@@ -51,6 +52,7 @@ export async function buildApp() {
   await app.register(workspaceFarmRoutes);
   await app.register(workspaceSeasonRoutes);
   await app.register(attendanceReportRoutes);
+  await app.register(advanceReportRoutes);
   await app.register(expenseCategoryRoutes);
   await app.register(attendanceImportRoutes);
   await app.register(labourManagementRoutes);

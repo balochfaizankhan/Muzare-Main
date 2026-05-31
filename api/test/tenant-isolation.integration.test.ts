@@ -252,6 +252,35 @@ test("attendance reports calculate payable wages and reject foreign workspace or
   assert.equal((await request(alpha.token, "GET", `${path}&labourId=${foreignLabourerId}`)).statusCode, 403);
 });
 
+test("advance reports return labour-grouped totals and enforce tenant-scoped labour filters", async () => {
+  const labourerId = randomUUID();
+  const foreignLabourerId = randomUUID();
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", labourerId, {
+    name: "Advance Worker", group: "General", dailyWage: 100,
+  }))).statusCode, 200);
+  assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "labourer", foreignLabourerId, {
+    name: "Bravo Advance Worker", group: "General", dailyWage: 100,
+  }))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "advance", randomUUID(), {
+    labourerId, date: "2026-05-04", amount: 120, notes: "Seed cash",
+  }))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "advance", randomUUID(), {
+    labourerId, date: "2026-05-05", amount: 80, notes: "Food",
+  }))).statusCode, 200);
+  const path = `/v1/workspace/${alpha.workspaceId}/advance/report?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}&from=2026-05-04&to=2026-05-05`;
+  const report = await request(alpha.token, "GET", path);
+  assert.equal(report.statusCode, 200);
+  assert.equal(report.json().records.length, 2);
+  assert.equal(report.json().summaries.length, 1);
+  assert.equal(report.json().summaries[0].labourerId, labourerId);
+  assert.equal(report.json().summaries[0].total, 200);
+  assert.equal(report.json().grandTotal, 200);
+  assert.equal((await request(alpha.token, "GET", `${path}&labourIds=${foreignLabourerId}`)).statusCode, 403);
+  assert.equal((await request(alpha.token, "GET",
+    `/v1/workspace/${bravo.workspaceId}/advance/report?farmId=${bravo.farmId}&seasonId=${bravo.seasonId}&from=2026-05-04&to=2026-05-05`,
+  )).statusCode, 403);
+});
+
 test("labour lifecycle hard deletes unused labour and deactivates linked labour without breaking reports", async () => {
   const unusedLabourerId = randomUUID();
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", unusedLabourerId, {

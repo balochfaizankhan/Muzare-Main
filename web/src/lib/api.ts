@@ -106,6 +106,22 @@ export type AttendanceReportData = {
   records: AttendanceReportRecord[]; summaries: AttendanceReportSummary[]; advances: AttendanceReportAdvance[]; dates: string[];
   metadata: { farmName: string; seasonName: string; from: string; to: string; generatedAt: string; generatedBy: string } | null;
 };
+export type AdvanceReportFilters = { farmId: string; seasonId: string; from: string; to: string; labourIds?: string[] };
+export type AdvanceReportRecord = { id: string; labourerId: string; labourName: string; date: string; amount: number; notes: string };
+export type AdvanceReportSummary = { labourerId: string; labourName: string; total: number; count: number };
+export type AdvanceReportData = {
+  records: AdvanceReportRecord[];
+  summaries: AdvanceReportSummary[];
+  grandTotal: number;
+  metadata: {
+    farmName: string;
+    seasonName: string;
+    from: string;
+    to: string;
+    generatedAt: string;
+    generatedBy: string;
+  } | null;
+};
 export type AttendanceReportFilters = {
   farmId: string; seasonId: string; from: string; to: string; labourId?: string; status?: AttendanceReportStatus;
 };
@@ -232,6 +248,13 @@ export const fetchAttendanceReport = (token: string, workspaceId: string, filter
   return apiRequest<AttendanceReportData>(
     `/v1/workspace/${workspaceId}/attendance/report?${query.toString()}`, {}, token,
   );
+};
+export const fetchAdvanceReport = (token: string, workspaceId: string, filters: AdvanceReportFilters) => {
+  const query = new URLSearchParams({
+    farmId: filters.farmId, seasonId: filters.seasonId, from: filters.from, to: filters.to,
+  });
+  if (filters.labourIds?.length) query.set("labourIds", filters.labourIds.join(","));
+  return apiRequest<AdvanceReportData>(`/v1/workspace/${workspaceId}/advance/report?${query.toString()}`, {}, token);
 };
 export const fetchExpenseCategories = (token: string, workspaceId: string) =>
   apiRequest<{ categories: ExpenseCategory[] }>(`/v1/workspace/${workspaceId}/expense-categories`, {}, token);

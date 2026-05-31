@@ -30,6 +30,7 @@ type DashboardTotals = {
   presentToday: number;
   cartonsToday: number;
   totalSales: number;
+  labourAdvances: number;
   totalExpenses: number;
   netPosition: number;
   partnerBalance: number;
@@ -77,6 +78,7 @@ export function DashboardPage() {
     presentToday: 0,
     cartonsToday: 0,
     totalSales: 0,
+    labourAdvances: 0,
     totalExpenses: 0,
     netPosition: 0,
     partnerBalance: 0,
@@ -91,16 +93,18 @@ export function DashboardPage() {
 
   const loadLocalDashboard = useCallback(async () => {
     await ensureLocalAccounts();
-    const [attendance, dispatches, sales, vouchers, entries] = await Promise.all([
+    const [attendance, dispatches, sales, vouchers, entries, advances] = await Promise.all([
       workspaceRecords(offlineDb.attendance),
       workspaceRecords(offlineDb.dispatches),
       workspaceRecords(offlineDb.sales),
       workspaceRecords(offlineDb.vouchers),
       workspaceRecords(offlineDb.partnerEntries),
+      workspaceRecords(offlineDb.advances),
     ]);
     const date = today();
     const totalSales = sales.reduce((sum, item) => sum + item.amount, 0);
-    const totalExpenses = vouchers.reduce((sum, item) => sum + item.amount, 0);
+    const labourAdvances = advances.reduce((sum, item) => sum + item.amount, 0);
+    const totalExpenses = vouchers.reduce((sum, item) => sum + item.amount, 0) + labourAdvances;
     const partnerBalance = entries.reduce(
       (sum, item) => sum + (item.type === "contribution" ? item.amount : -item.amount),
       0,
@@ -109,6 +113,7 @@ export function DashboardPage() {
       presentToday: attendance.filter((item) => item.date === date && item.status === "present").length,
       cartonsToday: dispatches.filter((item) => item.date === date).reduce((sum, item) => sum + item.cartons, 0),
       totalSales,
+      labourAdvances,
       totalExpenses,
       netPosition: totalSales - totalExpenses + partnerBalance,
       partnerBalance,
@@ -147,6 +152,14 @@ export function DashboardPage() {
         value: `${item.type === "withdrawal" ? "-" : ""}${money(item.amount)}`,
         createdAt: item.createdAt,
       })),
+      ...advances.map((item) => ({
+        id: item.id,
+        path: "/workspace/attendance",
+        title: "Labour advance paid",
+        detail: "Cash outflow",
+        value: `-${money(item.amount)}`,
+        createdAt: item.createdAt,
+      })),
     ];
     recent.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
     setActivities(recent.slice(0, 5));
@@ -172,6 +185,7 @@ export function DashboardPage() {
     { label: "Cartons today", value: String(totals.cartonsToday), icon: PackageOpen, path: "/workspace/dispatch", tone: "navy" },
     { label: "Total sales", value: money(totals.totalSales), icon: TrendingUp, path: "/workspace/sales", tone: "green" },
     { label: "Total expenses", value: money(totals.totalExpenses), icon: BanknoteArrowDown, path: "/workspace/expenses", tone: "red" },
+    { label: "Labour advances", value: money(totals.labourAdvances), icon: UsersRound, path: "/workspace/attendance", tone: "red" },
     { label: "Available balance", value: money(totals.netPosition), icon: Wallet, path: "/workspace/accounts", tone: "navy" },
     { label: "Partner balance", value: money(totals.partnerBalance), icon: CircleDollarSign, path: "/workspace/partner-ledger", tone: "blue" },
   ];

@@ -179,6 +179,19 @@ test("labour details actions edit labour and add separate optimistic advances", 
   assert.match(styles, /@media \(max-width: 767px\) \{[\s\S]*\.worker-action-backdrop \{ align-items: flex-end; padding: 0; \}/);
 });
 
+test("workforce screen provides add-labour modal, independent advance report, and instant labour-register search", async () => {
+  const modulePage = await source("web/src/pages/ModulePage.tsx");
+  assert.match(modulePage, /const \[labourSearch, setLabourSearch\] = useState\(""\);/);
+  assert.match(modulePage, /const filteredRegister = labourers\.filter\(\(labourer\) =>/);
+  assert.match(modulePage, /placeholder="Search by name, phone, role, or status"/);
+  assert.match(modulePage, /No labour found\./);
+  assert.match(modulePage, /setShowAdvanceReport\(true\)/);
+  assert.match(modulePage, /setShowAddLabour\(true\)/);
+  assert.match(modulePage, /function AddLabourPanel\(/);
+  assert.match(modulePage, /function AdvanceReportPanel\(/);
+  assert.match(modulePage, /queryKey: \["advance-report", workspaceId, farmId, seasonId/);
+});
+
 test("attendance import confirmation batches writes and shows bounded progress feedback", async () => {
   const route = await source("api/src/routes/attendance-imports.ts");
   const api = await source("web/src/lib/api.ts");

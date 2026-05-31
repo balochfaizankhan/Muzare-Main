@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { SubpageHeader } from "../components/SubpageHeader";
 import { useAuth } from "../auth/AuthProvider";
 import { useSyncState } from "../hooks/useSyncState";
-import { confirmAttendanceImport, createExpenseSubcategory, deleteOrDeactivateLabour, fetchAttendanceReport, fetchExpenseCategories, fetchLabourDeletionPreview, previewAttendanceImport, updateExpenseSubcategory, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type AttendanceReportFilters, type AttendanceReportStatus, type LabourDeletionPreview } from "../lib/api";
+import { confirmAttendanceImport, createExpenseSubcategory, deleteOrDeactivateLabour, fetchAdvanceReport, fetchAttendanceReport, fetchExpenseCategories, fetchLabourDeletionPreview, previewAttendanceImport, updateExpenseSubcategory, type AdvanceReportData, type AdvanceReportFilters, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type AttendanceReportFilters, type AttendanceReportStatus, type LabourDeletionPreview } from "../lib/api";
 import { hasPermission } from "../lib/permissions";
 import { formatMoney } from "../lib/format";
 import {
@@ -68,27 +68,18 @@ function WorkforceModule() {
   const [labourers, refreshLabourers] = useData(loadLabourers);
   const [attendance, refreshAttendance, setAttendance] = useData(loadAttendance);
   const [advances, refreshAdvances, setAdvances] = useData(loadAdvances);
-  const [name, setName] = useState("");
-  const [group, setGroup] = useState("General");
-  const [wage, setWage] = useState("");
   const [date, setDate] = useState(today());
   const [attendanceSearch, setAttendanceSearch] = useState("");
+  const [labourSearch, setLabourSearch] = useState("");
   const [attendanceFilter, setAttendanceFilter] = useState<Attendance["status"] | "all">("all");
   const [showInactiveLabour, setShowInactiveLabour] = useState(false);
   const [selectedLabourer, setSelectedLabourer] = useState<Labourer | null>(null);
   const [markingLabourers, setMarkingLabourers] = useState<Set<string>>(() => new Set());
   const [showReport, setShowReport] = useState(false);
+  const [showAdvanceReport, setShowAdvanceReport] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showAddLabour, setShowAddLabour] = useState(false);
   const [labourAction, setLabourAction] = useState<"update" | "advance" | "deactivate" | null>(null);
-
-  const addLabourer = async (event: FormEvent) => {
-    event.preventDefault();
-    const record: Labourer = { ...makeLocalRecord(), name: name.trim(), group: group.trim() || "General", dailyWage: Number(wage) };
-    await persistOperationalRecord("labourer", record);
-    setName("");
-    setWage("");
-    await refreshLabourers();
-  };
 
   const markAttendance = async (targetLabourerId: string, status: Attendance["status"]) => {
     if (markingLabourers.has(targetLabourerId)) return;
@@ -137,6 +128,15 @@ function WorkforceModule() {
   const presentToday = [...attendanceByLabourer.values()].filter((item) => item === "present").length;
   const halfDayToday = [...attendanceByLabourer.values()].filter((item) => item === "half_day").length;
   const absentToday = [...attendanceByLabourer.values()].filter((item) => item === "absent").length;
+  const filteredRegister = labourers.filter((labourer) => {
+    const term = labourSearch.trim().toLowerCase();
+    if (!term) return true;
+    const status = labourer.active === false ? "inactive" : "active";
+    return labourer.name.toLowerCase().includes(term)
+      || (labourer.phone ?? "").toLowerCase().includes(term)
+      || (labourer.labourType ?? "").toLowerCase().includes(term)
+      || status.includes(term);
+  });
   const selectedAttendance = selectedLabourer
     ? attendance.filter((entry) => entry.labourerId === selectedLabourer.id)
     : [];
@@ -165,14 +165,6 @@ function WorkforceModule() {
   return (
     <>
       <div className="form-grid">
-        <FormCard title="Add labourer">
-          <form className="module-form" onSubmit={(event) => void addLabourer(event)}>
-            <input required placeholder="Name" value={name} onChange={(event) => setName(event.target.value)} />
-            <input required placeholder="Group" value={group} onChange={(event) => setGroup(event.target.value)} />
-            <input required min="0" step="0.01" type="number" placeholder="Daily wage" value={wage} onChange={(event) => setWage(event.target.value)} />
-            <button type="submit">Add labourer</button>
-          </form>
-        </FormCard>
         <section className="record-panel daily-attendance-panel">
           <div className="daily-attendance__heading">
             <div>
@@ -194,6 +186,8 @@ function WorkforceModule() {
           <div className="attendance-actions">
             <button type="button" onClick={() => setDate(today())}>Today</button>
             <button type="button" onClick={() => setShowReport(true)}>View Report</button>
+            <button type="button" onClick={() => setShowAdvanceReport(true)}>Advance Report</button>
+            {canManageLabour && <button type="button" onClick={() => setShowAddLabour(true)}>Add Labour</button>}
             {user?.workspaceId && hasPermission(user, "IMPORT_ATTENDANCE", user.workspaceId) && <button type="button" onClick={() => {
               if (!navigator.onLine) window.dispatchEvent(new CustomEvent("muzare-toast", { detail: "CSV import requires internet connection." }));
               else setShowImport(true);
@@ -229,14 +223,18 @@ function WorkforceModule() {
       </div>
       <section className="record-panel">
         <h2>Labour register</h2>
-        {!labourers.length ? <Empty>No labourers recorded yet.</Empty> : (
+        <div className="attendance-tools">
+          <input placeholder="Search by name, phone, role, or status" value={labourSearch} onChange={(event) => setLabourSearch(event.target.value)} />
+          <button type="button" onClick={() => setLabourSearch("")}>Clear</button>
+        </div>
+        {!labourers.length ? <Empty>No labourers recorded yet.</Empty> : !filteredRegister.length ? <Empty>No labour found.</Empty> : (
           <div className="record-list workforce-list">
-            {labourers.map((labourer, index) => (
+            {filteredRegister.map((labourer, index) => (
               <button className="workforce-row" type="button" key={labourer.id} onClick={() => setSelectedLabourer(labourer)}>
                 <span className="workforce-row__index">{index + 1}</span>
                 <span className="workforce-row__body">
                   <strong>{labourer.name}</strong>
-                  <span>{labourer.group} | Daily Wage | {labourer.active === false ? "Inactive" : "Active"}</span>
+                  <span>{labourer.group} | {labourer.phone || "No phone"} | {labourer.labourType ?? "Daily Wage"} | {labourer.active === false ? "Inactive" : "Active"}</span>
                 </span>
                 <span className="workforce-row__action">Details</span>
               </button>
@@ -298,6 +296,12 @@ function WorkforceModule() {
       )}
       {selectedLabourer && labourAction === "update" && <EditLabourPanel labourer={selectedLabourer} onClose={() => setLabourAction(null)} onSave={saveLabour} />}
       {selectedLabourer && labourAction === "advance" && <AddAdvancePanel labourer={selectedLabourer} onClose={() => setLabourAction(null)} onSave={saveAdvance} />}
+      {showAddLabour && <AddLabourPanel onClose={() => setShowAddLabour(false)} onSave={async (record) => {
+        await persistOperationalRecord("labourer", record);
+        await refreshLabourers();
+        setShowAddLabour(false);
+        showToast("Labour added successfully.");
+      }} />}
       {selectedLabourer && labourAction === "deactivate" && token && user?.workspaceId && (
         <DeactivateLabourPanel
           token={token} workspaceId={user.workspaceId} labourer={selectedLabourer}
@@ -317,6 +321,16 @@ function WorkforceModule() {
           seasonId={sync.seasonId}
           labourers={labourers}
           onClose={() => setShowReport(false)}
+        />
+      )}
+      {showAdvanceReport && token && user?.workspaceId && sync.farmId && sync.seasonId && (
+        <AdvanceReportPanel
+          token={token}
+          workspaceId={user.workspaceId}
+          farmId={sync.farmId}
+          seasonId={sync.seasonId}
+          labourers={labourers}
+          onClose={() => setShowAdvanceReport(false)}
         />
       )}
       {showImport && token && user?.workspaceId && sync.farmId && sync.seasonId && (
@@ -366,6 +380,59 @@ function EditLabourPanel({ labourer, onClose, onSave }: { labourer: Labourer; on
   </ActionPanel>;
 }
 
+function AddLabourPanel({ onClose, onSave }: { onClose: () => void; onSave: (record: Labourer) => Promise<void> }) {
+  const [form, setForm] = useState({
+    name: "",
+    group: "General",
+    joinedOn: today(),
+    dailyWage: "90",
+    phone: "",
+    labourType: "Daily Wage",
+    active: true,
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    const dailyWage = Number(form.dailyWage);
+    if (!form.name.trim() || !Number.isFinite(dailyWage) || dailyWage < 0) {
+      setError("Labour name and a valid daily wage are required.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await onSave({
+        ...makeLocalRecord(),
+        name: form.name.trim(),
+        group: form.group.trim() || "General",
+        joinedOn: form.joinedOn,
+        dailyWage,
+        phone: form.phone.trim() || undefined,
+        labourType: form.labourType.trim() || undefined,
+        active: form.active,
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to add labour.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <ActionPanel title="Add Labour" onClose={onClose}>
+    <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
+      <label><span>Labour name *</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+      <label><span>Date of joining *</span><input required type="date" value={form.joinedOn} onChange={(event) => setForm({ ...form, joinedOn: event.target.value })} /></label>
+      <label><span>Daily wage (SAR) *</span><input required type="number" min="0" step="0.01" value={form.dailyWage} onChange={(event) => setForm({ ...form, dailyWage: event.target.value })} /></label>
+      <label><span>Phone / contact</span><input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
+      <label><span>Role / type</span><input value={form.labourType} onChange={(event) => setForm({ ...form, labourType: event.target.value })} /></label>
+      <label><span>Group</span><input value={form.group} onChange={(event) => setForm({ ...form, group: event.target.value })} /></label>
+      <label><span>Status</span><select value={form.active ? "active" : "inactive"} onChange={(event) => setForm({ ...form, active: event.target.value === "active" })}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
+      {error && <p className="worker-action-error">{error}</p>}
+      <footer><button type="button" onClick={onClose}>Cancel</button><button disabled={busy} type="submit">{busy ? "Saving..." : "Save Labour"}</button></footer>
+    </form>
+  </ActionPanel>;
+}
+
 function AddAdvancePanel({ labourer, onClose, onSave }: { labourer: Labourer; onClose: () => void; onSave: (record: Advance) => Promise<void> }) {
   const [form, setForm] = useState({ date: today(), amount: "", paymentMethod: "Cash", notes: "" });
   const [busy, setBusy] = useState(false);
@@ -393,6 +460,103 @@ function AddAdvancePanel({ labourer, onClose, onSave }: { labourer: Labourer; on
       <footer><button type="button" onClick={onClose}>Cancel</button><button disabled={busy} type="submit">{busy ? "Saving..." : "Add Advance"}</button></footer>
     </form>
   </ActionPanel>;
+}
+
+function AdvanceReportPanel({
+  token, workspaceId, farmId, seasonId, labourers, onClose,
+}: {
+  token: string; workspaceId: string; farmId: string; seasonId: string; labourers: Labourer[]; onClose: () => void;
+}) {
+  const [filters, setFilters] = useState<AdvanceReportFilters>({ farmId, seasonId, from: `${today().slice(0, 8)}01`, to: today(), labourIds: [] });
+  const [submitted, setSubmitted] = useState<AdvanceReportFilters | null>(null);
+  const report = useQuery({
+    queryKey: ["advance-report", workspaceId, farmId, seasonId, submitted?.from, submitted?.to, submitted?.labourIds?.join(",")],
+    queryFn: () => fetchAdvanceReport(token, workspaceId, submitted!),
+    enabled: Boolean(submitted),
+  });
+  const toggleLabour = (labourerId: string) => setFilters((current) => ({
+    ...current,
+    labourIds: current.labourIds?.includes(labourerId)
+      ? current.labourIds.filter((item) => item !== labourerId)
+      : [...(current.labourIds ?? []), labourerId],
+  }));
+  const exportCsv = (data: AdvanceReportData) => {
+    if (!data.metadata) return;
+    const rows = [
+      ["Farm Name", data.metadata.farmName],
+      ["Season", data.metadata.seasonName],
+      ["Date From", data.metadata.from],
+      ["Date To", data.metadata.to],
+      [],
+      ["Labour Name", "Date", "Advance Amount", "Notes"],
+      ...data.records.map((item) => [item.labourName, item.date, item.amount, item.notes || "-"]),
+      [],
+      ["Labour", "Records", "Total"],
+      ...data.summaries.map((item) => [item.labourName, item.count, item.total]),
+      ["Grand Total", "", data.grandTotal],
+    ];
+    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll("\"", "\"\"")}"`).join(",")).join("\n");
+    const href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = href;
+    link.download = `labour-advance-report-${filters.from}-${filters.to}.csv`;
+    link.click();
+    URL.revokeObjectURL(href);
+  };
+
+  return <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}>
+    <section className="attendance-report-dialog" role="dialog" aria-modal="true" aria-labelledby="advance-report-title" onClick={(event) => event.stopPropagation()}>
+      <header className="attendance-report-header">
+        <div><span>Workforce</span><h2 id="advance-report-title">Labour Advance Report</h2></div>
+        <button className="attendance-report-close" type="button" onClick={onClose} aria-label="Close advance report"><X size={19} /></button>
+      </header>
+      <form className="attendance-report-filters" onSubmit={(event) => { event.preventDefault(); setSubmitted({ ...filters }); }}>
+        <label><span>Date From</span><input required type="date" value={filters.from} onChange={(event) => setFilters({ ...filters, from: event.target.value })} /></label>
+        <label><span>Date To</span><input required type="date" value={filters.to} onChange={(event) => setFilters({ ...filters, to: event.target.value })} /></label>
+        <label><span>Labour filter</span><select value={filters.labourIds?.length ? "selected" : "all"} onChange={(event) => {
+          if (event.target.value === "all") setFilters({ ...filters, labourIds: [] });
+        }}>
+          <option value="all">All labour</option>
+          <option value="selected">Selected labour ({filters.labourIds?.length ?? 0})</option>
+        </select></label>
+        <div className="attendance-report-breakdown">{labourers.map((labourer) => <label key={labourer.id}><input checked={filters.labourIds?.includes(labourer.id) ?? false} disabled={!filters.labourIds || filters.labourIds.length === 0 && false} type="checkbox" onChange={() => toggleLabour(labourer.id)} /> {labourer.name}</label>)}</div>
+        <footer className="attendance-report-form-actions">
+          <button className="attendance-report-cancel" type="button" onClick={onClose}>Cancel</button>
+          <button className="attendance-report-generate" type="submit">Generate Report</button>
+        </footer>
+      </form>
+      {submitted && <div className="attendance-report-output">
+        {report.isFetching && <p>Generating report...</p>}
+        {report.isError && <p className="error">{report.error.message}</p>}
+        {report.data && !report.data.records.length && <Empty>No advances found for this period.</Empty>}
+        {report.data && report.data.records.length > 0 && <>
+          <div className="attendance-report-actions">
+            <button type="button" onClick={() => window.print()}>Print</button>
+            <button type="button" onClick={() => exportCsv(report.data!)}>Export CSV</button>
+          </div>
+          <section className="attendance-report-card">
+            <strong>Grand Total</strong>
+            <p>{money(report.data.grandTotal)}</p>
+            <div className="attendance-import-table-wrap">
+              <table>
+                <thead><tr><th>Labour</th><th>Date</th><th>Advance (SAR)</th><th>Notes</th></tr></thead>
+                <tbody>{report.data.records.map((item) => <tr key={item.id}><td>{item.labourName}</td><td>{item.date}</td><td>{money(item.amount)}</td><td>{item.notes || "-"}</td></tr>)}</tbody>
+              </table>
+            </div>
+          </section>
+          <section className="attendance-report-card">
+            <strong>Totals by labour</strong>
+            <div className="attendance-import-table-wrap">
+              <table>
+                <thead><tr><th>Labour</th><th>Transactions</th><th>Total</th></tr></thead>
+                <tbody>{report.data.summaries.map((item) => <tr key={item.labourerId}><td>{item.labourName}</td><td>{item.count}</td><td>{money(item.total)}</td></tr>)}</tbody>
+              </table>
+            </div>
+          </section>
+        </>}
+      </div>}
+    </section>
+  </div>;
 }
 
 function DeactivateLabourPanel({ token, workspaceId, labourer, onClose, onComplete }: {
@@ -827,8 +991,10 @@ function SalesModule() {
 function PartnerLedgerModule() {
   const load = useCallback(async () => (await workspaceRecords(offlineDb.partnerEntries)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts), []);
+  const loadAdvances = useCallback(() => workspaceRecords(offlineDb.advances), []);
   const [entries, refresh] = useData(load);
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
+  const [advances] = useData(loadAdvances);
   const [date, setDate] = useState(today());
   const [partnerName, setPartnerName] = useState("");
   const [type, setType] = useState<PartnerEntry["type"]>("contribution");
@@ -844,6 +1010,7 @@ function PartnerLedgerModule() {
     await refresh();
   };
   const balance = entries.reduce((sum, item) => sum + (item.type === "contribution" ? item.amount : -item.amount), 0);
+  const labourAdvances = advances.reduce((sum, item) => sum + item.amount, 0);
 
   return (
     <>
@@ -864,6 +1031,7 @@ function PartnerLedgerModule() {
         </form>
       </FormCard>
       <Summary label="Partner balance" value={money(balance)} />
+      <Summary label="Labour advances (cash outflow)" value={money(labourAdvances)} />
       <RecordTable empty="No partner entries recorded yet." rows={entries.map((item) => [item.date, item.partnerName, item.type, item.notes || "-", money(item.type === "withdrawal" ? -item.amount : item.amount)])} />
     </>
   );
@@ -874,10 +1042,12 @@ function AccountsModule() {
   const loadVouchers = useCallback(() => workspaceRecords(offlineDb.vouchers), []);
   const loadSales = useCallback(() => workspaceRecords(offlineDb.sales), []);
   const loadEntries = useCallback(() => workspaceRecords(offlineDb.partnerEntries), []);
+  const loadAdvances = useCallback(() => workspaceRecords(offlineDb.advances), []);
   const [accounts, refresh] = useData(loadAccounts, ensureLocalAccounts);
   const [vouchers] = useData(loadVouchers);
   const [sales] = useData(loadSales);
   const [entries] = useData(loadEntries);
+  const [advances] = useData(loadAdvances);
   const [name, setName] = useState("");
   const [type, setType] = useState<Account["type"]>("bank");
 
@@ -892,6 +1062,8 @@ function AccountsModule() {
     sales.filter((record) => record.accountId === id).reduce((sum, record) => sum + record.amount, 0)
     - vouchers.filter((record) => record.accountId === id).reduce((sum, record) => sum + record.amount, 0)
     + entries.filter((record) => record.accountId === id).reduce((sum, record) => sum + (record.type === "contribution" ? record.amount : -record.amount), 0);
+  const totalAdvances = advances.reduce((sum, item) => sum + item.amount, 0);
+  const totalVoucherExpenses = vouchers.reduce((sum, item) => sum + item.amount, 0);
 
   return (
     <>
@@ -916,9 +1088,17 @@ function AccountsModule() {
           ))}
         </div>
       </section>
+      <section className="record-panel">
+        <h2>Expense visibility</h2>
+        <div className="record-list">
+          <article><strong>Voucher expenses</strong><span>{money(totalVoucherExpenses)}</span></article>
+          <article><strong>Labour advances</strong><span>{money(totalAdvances)}</span></article>
+          <article><strong>Total business expenses</strong><span>{money(totalVoucherExpenses + totalAdvances)}</span></article>
+        </div>
+      </section>
       <Summary
         label="Net operating position"
-        value={money(sales.reduce((sum, item) => sum + item.amount, 0) - vouchers.reduce((sum, item) => sum + item.amount, 0))}
+        value={money(sales.reduce((sum, item) => sum + item.amount, 0) - totalVoucherExpenses - totalAdvances)}
       />
     </>
   );
