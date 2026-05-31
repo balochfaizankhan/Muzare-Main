@@ -1246,6 +1246,39 @@ button {
   height: 50px;
 }
 
+.attendance-auto-save {
+  align-items: center;
+  background: var(--success-bg);
+  border: 1px solid #bbdfc0;
+  border-radius: 8px;
+  color: #166534;
+  display: inline-flex;
+  font-size: .84rem;
+  font-weight: 800;
+  justify-content: center;
+  min-height: 50px;
+  padding: 0 12px;
+}
+
+.attendance-auto-save--offline,
+.attendance-auto-save--pending {
+  background: #fff8df;
+  border-color: #f1d78b;
+  color: #805800;
+}
+
+.attendance-auto-save--syncing {
+  background: var(--blue-bg);
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+.attendance-auto-save--error {
+  background: var(--danger-bg);
+  border-color: #fecaca;
+  color: var(--danger);
+}
+
 .attendance-entry-modal-body {
   display: grid;
   flex: 1;

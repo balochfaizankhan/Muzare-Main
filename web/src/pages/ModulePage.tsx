@@ -199,12 +199,14 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
   const [showRegisterFilters, setShowRegisterFilters] = useState(false);
   const [labourAction, setLabourAction] = useState<"update" | "advance" | "production" | "payment" | "deactivate" | null>(null);
   const [newAttendanceLabourId, setNewAttendanceLabourId] = useState<string | null>(null);
+  const [attendanceSaveState, setAttendanceSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const attendanceRowRefs = useRef<Record<string, HTMLElement | null>>({});
 
   const markAttendance = async (targetLabourerId: string, status: Attendance["status"]) => {
     const labourer = labourers.find((item) => item.id === targetLabourerId);
     if (!labourer || !canMarkAttendanceOn(labourer, date)) return;
     if (markingLabourers.has(targetLabourerId)) return;
+    setAttendanceSaveState("saving");
     setMarkingLabourers((current) => new Set(current).add(targetLabourerId));
     const existing = attendance.find((entry) =>
       entry.labourerId === targetLabourerId && entry.workspaceId === getActiveWorkspaceId()
@@ -218,11 +220,16 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
       if (existing?.status === status) {
         setAttendance((current) => current.filter((entry) => entry.id !== existing.id));
         await deleteOperationalRecord("attendance", existing);
+        setAttendanceSaveState("saved");
         return;
       }
       const record: Attendance = existing ? { ...existing, status, updatedAt: new Date().toISOString() } : { ...makeLocalRecord(), labourerId: targetLabourerId, date, status };
       setAttendance((current) => [record, ...current.filter((entry) => entry.id !== record.id)]);
       await persistOperationalRecord("attendance", record);
+      setAttendanceSaveState("saved");
+    } catch {
+      setAttendanceSaveState("error");
+      showToast("Unable to save attendance locally. Please try again.");
     } finally {
       setMarkingLabourers((current) => {
         const next = new Set(current); next.delete(targetLabourerId); return next;
@@ -311,15 +318,25 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
     setPayments((current) => [record, ...current.filter((entry) => entry.id !== record.id)]);
     await persistOperationalRecord("labourPayment", record);
   };
-  const saveAttendanceView = async () => {
-    await refreshAttendance();
-    showToast("Attendance saved.");
-    if (onAttendanceClose) onAttendanceClose();
-    else setShowAttendanceEntry(false);
-  };
+  const attendanceSaveLabel = attendanceSaveState === "saving" || markingLabourers.size > 0
+    ? "Saving..."
+    : attendanceSaveState === "error"
+      ? "Save failed"
+      : sync.status === "syncing"
+        ? "Syncing..."
+        : sync.status === "offline"
+          ? sync.pendingCount > 0 ? "Saved locally" : "Offline"
+          : sync.pendingCount > 0
+            ? "Saved locally. Syncing..."
+            : attendanceSaveState === "saved" ? "Saved" : "Synced";
   useEffect(() => {
     if (openAttendanceOnLoad) setShowAttendanceEntry(true);
   }, [openAttendanceOnLoad]);
+  useEffect(() => {
+    if (attendanceSaveState !== "saved" || sync.pendingCount > 0 || sync.status === "syncing") return;
+    const handle = window.setTimeout(() => setAttendanceSaveState("idle"), 1400);
+    return () => window.clearTimeout(handle);
+  }, [attendanceSaveState, sync.pendingCount, sync.status]);
   useEffect(() => {
     if (!showAttendanceEntry || !newAttendanceLabourId) return;
     if (!filteredLabourerIds.includes(newAttendanceLabourId)) return;
@@ -440,7 +457,7 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
             <div className="attendance-actions">
               <button type="button" onClick={() => setDate(today())}>{t("common.today")}</button>
               {canManageLabour && <button type="button" onClick={() => setShowAddLabour(true)}>{t("workforcePage.addLabour")}</button>}
-              <button type="button" onClick={() => void saveAttendanceView()}>Save Attendance</button>
+              <span className={`attendance-auto-save attendance-auto-save--${sync.status}`} role="status" aria-live="polite">{attendanceSaveLabel}</span>
             </div>
             <label className="attendance-inactive-toggle"><input type="checkbox" checked={showInactiveLabour} onChange={(event) => setShowInactiveLabour(event.target.checked)} /> {t("workforcePage.showInactive")}</label>
             <div className="attendance-totals" aria-label={t("workforcePage.attendanceTotals")}>
