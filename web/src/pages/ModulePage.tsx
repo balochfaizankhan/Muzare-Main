@@ -36,6 +36,9 @@ const today = () => new Date().toISOString().slice(0, 10);
 const money = formatMoney;
 const paymentTypes = ["daily_wage", "production_based", "contract_lump_sum", "monthly_salary", "other"] as const;
 type PaymentType = typeof paymentTypes[number];
+const hasEndedBefore = (labourer: Labourer, date: string) => Boolean(labourer.endedOn && labourer.endedOn < date);
+const isInactiveOn = (labourer: Labourer, date: string) => labourer.active === false || hasEndedBefore(labourer, date);
+const canMarkAttendanceOn = (labourer: Labourer, date: string) => !isInactiveOn(labourer, date);
 
 const labourPaymentSummary = (labourer: Labourer) => {
   const type = labourer.paymentType ?? "daily_wage";
@@ -144,11 +147,18 @@ function LabourMultiSelect({
   );
 }
 
-function WorkforceModule() {
+function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { openAttendanceOnLoad?: boolean; onAttendanceClose?: () => void }) {
   const { t, i18n } = useTranslation();
   const { token, user } = useAuth();
   const sync = useSyncState();
-  const loadLabourers = useCallback(async () => (await workspaceRecords(offlineDb.labourers)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
+  const loadLabourers = useCallback(async () => (await workspaceRecords(offlineDb.labourers)).sort((a, b) => {
+    const dateA = a.joinedOn || a.createdAt;
+    const dateB = b.joinedOn || b.createdAt;
+    if (dateA !== dateB) return dateA.localeCompare(dateB);
+    const nameCompare = a.name.localeCompare(b.name);
+    if (nameCompare !== 0) return nameCompare;
+    return a.id.localeCompare(b.id);
+  }), []);
   const loadGroups = useCallback(async () => (await workspaceRecords(offlineDb.labourGroups)).sort((a, b) => a.name.localeCompare(b.name)), []);
   const loadAttendance = useCallback(async () => (await workspaceRecords(offlineDb.attendance)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadAdvances = useCallback(async () => (await workspaceRecords(offlineDb.advances)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
@@ -181,6 +191,8 @@ function WorkforceModule() {
   const [labourAction, setLabourAction] = useState<"update" | "advance" | "production" | "payment" | "deactivate" | null>(null);
 
   const markAttendance = async (targetLabourerId: string, status: Attendance["status"]) => {
+    const labourer = labourers.find((item) => item.id === targetLabourerId);
+    if (!labourer || !canMarkAttendanceOn(labourer, date)) return;
     if (markingLabourers.has(targetLabourerId)) return;
     setMarkingLabourers((current) => new Set(current).add(targetLabourerId));
     const existing = attendance.find((entry) =>
@@ -218,7 +230,7 @@ function WorkforceModule() {
   );
   const filteredLabourers = labourers.filter((labourer) => {
     const status = attendanceByLabourer.get(labourer.id);
-    const matchesActive = showInactiveLabour || labourer.active !== false;
+    const matchesActive = showInactiveLabour || canMarkAttendanceOn(labourer, date);
     const matchesStatus = attendanceFilter === "all" || status === attendanceFilter;
     const matchesSearch = labourer.name.toLowerCase().includes(attendanceSearch.trim().toLowerCase());
     const matchesGroup = groupFilterId === "all" || labourer.groupId === groupFilterId;
@@ -290,20 +302,19 @@ function WorkforceModule() {
   const saveAttendanceView = async () => {
     await refreshAttendance();
     showToast("Attendance saved.");
-    setShowAttendanceEntry(false);
+    if (onAttendanceClose) onAttendanceClose();
+    else setShowAttendanceEntry(false);
   };
+  useEffect(() => {
+    if (openAttendanceOnLoad) setShowAttendanceEntry(true);
+  }, [openAttendanceOnLoad]);
 
   return (
     <>
       <section className="record-panel">
         <header className="workforce-page-header">
-          <div className="workforce-brand">
-            <img src="/muzare-logo.png" alt="Muzare" />
-            <div>
-              <strong>Muzare</strong>
-              <span>Daily Workforce Attendance & Ledger</span>
-            </div>
-          </div>
+          <h2>Workforce</h2>
+          <p>Manage labour, attendance, advances, and groups.</p>
         </header>
         <div className="workforce-top-actions">
           <button className="workforce-mark-attendance" type="button" onClick={() => setShowAttendanceEntry(true)}>Mark Attendance</button>
@@ -356,7 +367,8 @@ function WorkforceModule() {
                 <span className="workforce-row__body">
                   <strong>{labourer.name}</strong>
                   <span>{labourer.group} • {(labourer.paymentType ?? "daily_wage").replaceAll("_", " ")} • {labourPaymentSummary(labourer)}</span>
-                  <em className={labourer.active === false ? "status-inactive" : "status-active"}>{labourer.active === false ? "Inactive" : "Active"}</em>
+                  <em className={isInactiveOn(labourer, today()) ? "status-inactive" : "status-active"}>{isInactiveOn(labourer, today()) ? "Inactive" : "Active"}</em>
+                  {labourer.endedOn && <small>End date: {labourer.endedOn}</small>}
                 </span>
                 <button className="workforce-row__action" type="button" onClick={(event) => {
                   event.stopPropagation();
@@ -368,16 +380,22 @@ function WorkforceModule() {
           </div>
         )}
       </section>
-      {showAttendanceEntry && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setShowAttendanceEntry(false)}>
+      {showAttendanceEntry && <div className="worker-dialog-backdrop" role="presentation" onClick={() => {
+        if (onAttendanceClose) onAttendanceClose();
+        else setShowAttendanceEntry(false);
+      }}>
         <section className="attendance-report-dialog attendance-report-dialog--preview" role="dialog" aria-modal="true" aria-labelledby="mark-attendance-title" onClick={(event) => event.stopPropagation()}>
           <header className="attendance-report-header">
             <div>
               <span>{t("workforcePage.dailyAttendance")}</span>
               <h2 id="mark-attendance-title">Mark Attendance</h2>
             </div>
-            <button className="attendance-report-close" type="button" onClick={() => setShowAttendanceEntry(false)} aria-label="Close mark attendance"><X size={19} /></button>
+            <button className="attendance-report-close" type="button" onClick={() => {
+              if (onAttendanceClose) onAttendanceClose();
+              else setShowAttendanceEntry(false);
+            }} aria-label="Close mark attendance"><X size={19} /></button>
           </header>
-          <section className="record-panel daily-attendance-panel">
+          <section className="record-panel daily-attendance-panel attendance-entry-modal-body">
             <div className="daily-attendance__heading">
               <div>
                 <h2>{t("workforcePage.dailyAttendance")}</h2>
@@ -401,7 +419,10 @@ function WorkforceModule() {
             </div>
             <div className="attendance-actions">
               <button type="button" onClick={() => setDate(today())}>{t("common.today")}</button>
-              <button type="button" onClick={() => setShowAttendanceEntry(false)}>{t("common.close")}</button>
+              <button type="button" onClick={() => {
+                if (onAttendanceClose) onAttendanceClose();
+                else setShowAttendanceEntry(false);
+              }}>{t("common.close")}</button>
               <button type="button" onClick={() => void saveAttendanceView()}>Save Attendance</button>
             </div>
             <label className="attendance-inactive-toggle"><input type="checkbox" checked={showInactiveLabour} onChange={(event) => setShowInactiveLabour(event.target.checked)} /> {t("workforcePage.showInactive")}</label>
@@ -414,17 +435,19 @@ function WorkforceModule() {
               {!filteredLabourers.length ? <Empty>{t("workforcePage.noLabourSearch")}</Empty> : filteredLabourers.map((labourer, index) => {
                 const currentStatus = attendanceByLabourer.get(labourer.id);
                 const previousStatus = yesterdayByLabourer.get(labourer.id);
+                const markable = canMarkAttendanceOn(labourer, date);
                 return (
                   <article className="attendance-card" key={labourer.id}>
                     <span className="attendance-card__index">{index + 1}</span>
                     <div className="attendance-card__body">
                       <strong>{labourer.name}</strong>
                       <span>{t("workforcePage.yesterday")}: {previousStatus ? previousStatus === "half_day" ? "1/2" : previousStatus === "present" ? "P" : "A" : "-"}</span>
+                      {!markable && <span className="status-inactive">Not available for attendance</span>}
                     </div>
                     <div className="attendance-status-buttons">
-                      <button disabled={markingLabourers.has(labourer.id)} className={currentStatus === "present" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "present")}>P</button>
-                      <button disabled={markingLabourers.has(labourer.id)} className={currentStatus === "half_day" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "half_day")}>1/2</button>
-                      <button disabled={markingLabourers.has(labourer.id)} className={currentStatus === "absent" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "absent")}>A</button>
+                      <button disabled={!markable || markingLabourers.has(labourer.id)} className={currentStatus === "present" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "present")}>P</button>
+                      <button disabled={!markable || markingLabourers.has(labourer.id)} className={currentStatus === "half_day" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "half_day")}>1/2</button>
+                      <button disabled={!markable || markingLabourers.has(labourer.id)} className={currentStatus === "absent" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "absent")}>A</button>
                     </div>
                   </article>
                 );
@@ -1736,7 +1759,15 @@ const descriptions: Record<ModuleKey, string> = {
   partnerLedger: "Partner contributions, withdrawals, and running balances.",
 };
 
-export function ModulePage({ module }: { module: ModuleKey }) {
+export function ModulePage({
+  module,
+  workforceMode = "register",
+  onAttendanceClose,
+}: {
+  module: ModuleKey;
+  workforceMode?: "register" | "attendance";
+  onAttendanceClose?: () => void;
+}) {
   const { t } = useTranslation();
 
   return (
@@ -1750,7 +1781,7 @@ export function ModulePage({ module }: { module: ModuleKey }) {
           </div>
           <span className="local-pill">Database synchronized</span>
         </section>
-        {module === "workforce" && <WorkforceModule />}
+        {module === "workforce" && <WorkforceModule openAttendanceOnLoad={workforceMode === "attendance"} onAttendanceClose={onAttendanceClose} />}
         {module === "expenses" && <ExpensesModule />}
         {module === "dispatch" && <DispatchModule />}
         {module === "sales" && <SalesModule />}

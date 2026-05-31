@@ -1201,6 +1201,24 @@ button {
   height: 50px;
 }
 
+.attendance-entry-modal-body {
+  display: grid;
+  flex: 1;
+  gap: 18px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+}
+
+.attendance-entry-modal-body .attendance-actions {
+  background: var(--surface);
+  bottom: 0;
+  margin: 0;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  position: sticky;
+  z-index: 2;
+}
+
 .attendance-totals {
   align-items: center;
   background: #fff;
@@ -1510,32 +1528,19 @@ button {
 }
 
 .workforce-page-header {
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
-.workforce-brand {
-  align-items: center;
-  display: flex;
-  gap: 10px;
-}
-
-.workforce-brand img {
-  height: 34px;
-  width: 34px;
-}
-
-.workforce-brand strong {
+.workforce-page-header h2 {
   color: var(--brand-primary);
-  display: block;
-  font-size: 1.8rem;
-  line-height: 1;
+  font-size: 1.4rem;
+  margin: 0 0 4px;
 }
 
-.workforce-brand span {
+.workforce-page-header p {
   color: var(--text-secondary);
-  display: block;
-  font-size: 1rem;
-  margin-top: 4px;
+  font-size: .9rem;
+  margin: 0;
 }
 
 .workforce-top-actions {
@@ -1656,13 +1661,16 @@ button {
 
 .workforce-row__index {
   align-items: center;
-  background: var(--brand-primary);
+  background: #2e7d32;
   border-radius: 999px;
   color: #fff;
   display: inline-flex;
-  font-weight: 800;
+  font-size: 1rem;
+  font-weight: 900;
   height: 42px;
   justify-content: center;
+  line-height: 1;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
   width: 42px;
 }
 
@@ -1689,6 +1697,13 @@ button {
   font-size: .9rem;
   font-style: normal;
   font-weight: 800;
+  margin-top: 2px;
+}
+
+.workforce-row__body small {
+  color: var(--text-secondary);
+  display: block;
+  font-size: .76rem;
   margin-top: 2px;
 }
 
