@@ -722,9 +722,33 @@ function AdvanceReportPanel({
 }) {
   const { t } = useTranslation();
   const [filters, setFilters] = useState<AdvanceReportFilters>({ farmId, seasonId, from: `${today().slice(0, 8)}01`, to: today(), labourIds: [] });
+  const [groupFilterId, setGroupFilterId] = useState("all");
+  const [paymentTypeFilter, setPaymentTypeFilter] = useState<PaymentType | "all">("all");
+  const [labourSearch, setLabourSearch] = useState("");
+  const [showLabourPicker, setShowLabourPicker] = useState(false);
+  const [visibleLabourCount, setVisibleLabourCount] = useState(80);
   const [submitted, setSubmitted] = useState<AdvanceReportFilters | null>(null);
+  const activeGroups = labourers.reduce<Map<string, string>>((map, labourer) => {
+    if (labourer.groupId && labourer.group) map.set(labourer.groupId, labourer.group);
+    return map;
+  }, new Map());
+  const labourOptions = labourers
+    .filter((labourer) => groupFilterId === "all" || labourer.groupId === groupFilterId)
+    .filter((labourer) => paymentTypeFilter === "all" || (labourer.paymentType ?? "daily_wage") === paymentTypeFilter)
+    .filter((labourer) => labourer.name.toLowerCase().includes(labourSearch.trim().toLowerCase()))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const visibleLabourOptions = labourOptions.slice(0, visibleLabourCount);
   const report = useQuery({
-    queryKey: ["advance-report", workspaceId, farmId, seasonId, submitted?.from, submitted?.to, submitted?.labourIds?.join(",")],
+    queryKey: [
+      "advance-report",
+      workspaceId,
+      farmId,
+      seasonId,
+      submitted?.from,
+      submitted?.to,
+      submitted?.labourIds?.join(","),
+      submitted?.labourIds?.length ?? 0,
+    ],
     queryFn: () => fetchAdvanceReport(token, workspaceId, submitted!),
     enabled: Boolean(submitted),
   });
@@ -734,6 +758,15 @@ function AdvanceReportPanel({
       ? current.labourIds.filter((item) => item !== labourerId)
       : [...(current.labourIds ?? []), labourerId],
   }));
+  const selectAllFilteredLabour = () => {
+    setFilters((current) => ({ ...current, labourIds: labourOptions.map((labourer) => labourer.id) }));
+  };
+  const clearLabourSelection = () => {
+    setFilters((current) => ({ ...current, labourIds: [] }));
+  };
+  const labourSelectionLabel = !filters.labourIds || filters.labourIds.length === 0 || filters.labourIds.length === labourOptions.length
+    ? "All Labour"
+    : `${filters.labourIds.length} Labour Selected`;
   const exportCsv = (data: AdvanceReportData) => {
     if (!data.metadata) return;
     const rows = [
@@ -764,16 +797,71 @@ function AdvanceReportPanel({
         <div><span>{t("workforcePage.labourRegister")}</span><h2 id="advance-report-title">{t("reports.advanceReportTitle")}</h2></div>
         <button className="attendance-report-close" type="button" onClick={onClose} aria-label={t("reports.closeAdvanceReport")}><X size={19} /></button>
       </header>
-      <form className="attendance-report-filters" onSubmit={(event) => { event.preventDefault(); setSubmitted({ ...filters }); }}>
+      <form className="attendance-report-filters" onSubmit={(event) => {
+        event.preventDefault();
+        const effectiveLabourIds = filters.labourIds && filters.labourIds.length > 0 ? filters.labourIds : labourOptions.map((labourer) => labourer.id);
+        setSubmitted({ ...filters, labourIds: effectiveLabourIds });
+      }}>
         <label><span>{t("reports.dateFrom")}</span><input required type="date" value={filters.from} onChange={(event) => setFilters({ ...filters, from: event.target.value })} /></label>
         <label><span>{t("reports.dateTo")}</span><input required type="date" value={filters.to} onChange={(event) => setFilters({ ...filters, to: event.target.value })} /></label>
-        <label><span>{t("reports.labourFilter")}</span><select value={filters.labourIds?.length ? "selected" : "all"} onChange={(event) => {
-          if (event.target.value === "all") setFilters({ ...filters, labourIds: [] });
+        <label><span>Group</span><select value={groupFilterId} onChange={(event) => {
+          setGroupFilterId(event.target.value);
+          setVisibleLabourCount(80);
         }}>
-          <option value="all">{t("workforcePage.allLabour")}</option>
-          <option value="selected">{t("reports.selectedLabour", { count: filters.labourIds?.length ?? 0 })}</option>
+          <option value="all">All Groups</option>
+          {[...activeGroups.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([id, name]) => (
+            <option key={id} value={id}>{name}</option>
+          ))}
         </select></label>
-        <div className="attendance-report-breakdown">{labourers.map((labourer) => <label key={labourer.id}><input checked={filters.labourIds?.includes(labourer.id) ?? false} disabled={!filters.labourIds || filters.labourIds.length === 0 && false} type="checkbox" onChange={() => toggleLabour(labourer.id)} /> {labourer.name}</label>)}</div>
+        <label><span>Payment Type</span><select value={paymentTypeFilter} onChange={(event) => {
+          setPaymentTypeFilter(event.target.value as PaymentType | "all");
+          setVisibleLabourCount(80);
+        }}>
+          <option value="all">All Types</option>
+          <option value="daily_wage">Daily Wage</option>
+          <option value="production_based">Production Based</option>
+          <option value="contract_lump_sum">Contract</option>
+          <option value="monthly_salary">Monthly Salary</option>
+          <option value="other">Other</option>
+        </select></label>
+        <div className="report-labour-filter">
+          <span>{t("reports.labourFilter")}</span>
+          <button className="report-labour-filter__toggle" type="button" onClick={() => setShowLabourPicker((current) => !current)}>
+            {labourSelectionLabel}
+          </button>
+          {showLabourPicker && <div className="report-labour-filter__picker">
+            <input
+              placeholder={t("workforcePage.searchLabour")}
+              value={labourSearch}
+              onChange={(event) => {
+                setLabourSearch(event.target.value);
+                setVisibleLabourCount(80);
+              }}
+            />
+            <div className="report-labour-filter__actions">
+              <button type="button" onClick={clearLabourSelection}>All Labour</button>
+              <button type="button" onClick={selectAllFilteredLabour}>Select All</button>
+            </div>
+            <div className="report-labour-filter__list">
+              {!labourOptions.length && <p className="empty-records">No labour found.</p>}
+              {visibleLabourOptions.map((labourer) => (
+                <label key={labourer.id}>
+                  <input
+                    checked={filters.labourIds?.includes(labourer.id) ?? false}
+                    type="checkbox"
+                    onChange={() => toggleLabour(labourer.id)}
+                  />
+                  <span>{labourer.name}</span>
+                </label>
+              ))}
+              {labourOptions.length > visibleLabourCount && (
+                <button type="button" onClick={() => setVisibleLabourCount((current) => current + 80)}>
+                  Show more ({labourOptions.length - visibleLabourCount} remaining)
+                </button>
+              )}
+            </div>
+          </div>}
+        </div>
         <footer className="attendance-report-form-actions">
           <button className="attendance-report-cancel" type="button" onClick={onClose}>{t("common.close")}</button>
           <button className="attendance-report-generate" type="submit">{t("reports.generateReport")}</button>
