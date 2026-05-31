@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { X } from "lucide-react";
+import { MoreVertical, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { SubpageHeader } from "../components/SubpageHeader";
@@ -174,6 +174,8 @@ function WorkforceModule() {
   const [showImport, setShowImport] = useState(false);
   const [showAddLabour, setShowAddLabour] = useState(false);
   const [showAddGroup, setShowAddGroup] = useState(false);
+  const [showAttendanceEntry, setShowAttendanceEntry] = useState(false);
+  const [showRegisterFilters, setShowRegisterFilters] = useState(false);
   const [labourAction, setLabourAction] = useState<"update" | "advance" | "production" | "payment" | "deactivate" | null>(null);
 
   const markAttendance = async (targetLabourerId: string, status: Attendance["status"]) => {
@@ -203,7 +205,6 @@ function WorkforceModule() {
     }
   };
 
-  const names = new Map(labourers.map((labourer) => [labourer.id, labourer.name]));
   const attendanceByLabourer = new Map(
     attendance.filter((entry) => entry.date === date).map((entry) => [entry.labourerId, entry.status]),
   );
@@ -284,74 +285,51 @@ function WorkforceModule() {
     setPayments((current) => [record, ...current.filter((entry) => entry.id !== record.id)]);
     await persistOperationalRecord("labourPayment", record);
   };
+  const saveAttendanceView = async () => {
+    await refreshAttendance();
+    showToast("Attendance saved.");
+    setShowAttendanceEntry(false);
+  };
 
   return (
     <>
-      <div className="form-grid">
-        <section className="record-panel daily-attendance-panel">
-          <div className="daily-attendance__heading">
-            <div>
-              <h2>{t("workforcePage.dailyAttendance")}</h2>
-              <p>{t("workforcePage.attendanceIntro")}</p>
-            </div>
-            <strong>{t("workforcePage.date")}: {new Date(`${date}T00:00:00`).toLocaleDateString(i18n.resolvedLanguage ?? "en-GB").replaceAll("/", "-")}</strong>
-          </div>
-          <div className="attendance-tools">
-            <select value={attendanceFilter} onChange={(event) => setAttendanceFilter(event.target.value as Attendance["status"] | "all")}>
-              <option value="all">{t("workforcePage.allLabour")}</option>
-              <option value="present">{t("workforcePage.present")}</option>
-              <option value="half_day">{t("workforcePage.halfDay")}</option>
-              <option value="absent">{t("workforcePage.absent")}</option>
-            </select>
-            <input placeholder={t("workforcePage.searchLabour")} value={attendanceSearch} onChange={(event) => setAttendanceSearch(event.target.value)} />
-            <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-            <select value={groupFilterId} onChange={(event) => setGroupFilterId(event.target.value)}>
-              <option value="all">All groups</option>
-              {groups.filter((group) => group.active !== false).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
-            </select>
-          </div>
-          <div className="attendance-actions">
-            <button type="button" onClick={() => setDate(today())}>{t("common.today")}</button>
-            <button type="button" onClick={() => setShowReport(true)}>{t("workforcePage.viewReport")}</button>
-            <button type="button" onClick={() => setShowAdvanceReport(true)}>{t("workforcePage.advanceReport")}</button>
-            {canManageLabour && <button type="button" onClick={() => setShowAddLabour(true)}>{t("workforcePage.addLabour")}</button>}
-            {user?.workspaceId && hasPermission(user, "IMPORT_ATTENDANCE", user.workspaceId) && <button type="button" onClick={() => {
-              if (!navigator.onLine) window.dispatchEvent(new CustomEvent("muzare-toast", { detail: t("errors.csvImportOnlineOnly") }));
-              else setShowImport(true);
-            }}>{t("workforcePage.importCsv")}</button>}
-          </div>
-          <label className="attendance-inactive-toggle"><input type="checkbox" checked={showInactiveLabour} onChange={(event) => setShowInactiveLabour(event.target.checked)} /> {t("workforcePage.showInactive")}</label>
-          <div className="attendance-totals" aria-label={t("workforcePage.attendanceTotals")}>
-            <strong className="attendance-total--present">P: {presentToday}</strong>
-            <strong className="attendance-total--half">1/2: {halfDayToday}</strong>
-            <strong className="attendance-total--absent">A: {absentToday}</strong>
-          </div>
-          <div className="attendance-board">
-            {!filteredLabourers.length ? <Empty>{t("workforcePage.noLabourSearch")}</Empty> : filteredLabourers.map((labourer, index) => {
-              const currentStatus = attendanceByLabourer.get(labourer.id);
-              const previousStatus = yesterdayByLabourer.get(labourer.id);
-              return (
-                <article className="attendance-card" key={labourer.id}>
-                  <span className="attendance-card__index">{index + 1}</span>
-                  <div className="attendance-card__body">
-                    <strong>{labourer.name}</strong>
-                    <span>{t("workforcePage.yesterday")}: {previousStatus ? previousStatus === "half_day" ? "1/2" : previousStatus === "present" ? "P" : "A" : "-"}</span>
-                  </div>
-                  <div className="attendance-status-buttons">
-                    <button disabled={markingLabourers.has(labourer.id)} className={currentStatus === "present" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "present")}>P</button>
-                    <button disabled={markingLabourers.has(labourer.id)} className={currentStatus === "half_day" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "half_day")}>1/2</button>
-                    <button disabled={markingLabourers.has(labourer.id)} className={currentStatus === "absent" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "absent")}>A</button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        </section>
-      </div>
       <section className="record-panel">
-        <h2>{t("workforcePage.labourRegister")}</h2>
-        <div className="attendance-tools">
-          <input placeholder={t("workforcePage.searchRegister")} value={labourSearch} onChange={(event) => setLabourSearch(event.target.value)} />
+        <header className="workforce-page-header">
+          <div className="workforce-brand">
+            <img src="/muzare-logo.png" alt="Muzare" />
+            <div>
+              <strong>Muzare</strong>
+              <span>Daily Workforce Attendance & Ledger</span>
+            </div>
+          </div>
+        </header>
+        <div className="workforce-top-actions">
+          <button className="workforce-mark-attendance" type="button" onClick={() => setShowAttendanceEntry(true)}>Mark Attendance</button>
+          <div className="workforce-quick-grid">
+            {canManageLabour && <button type="button" onClick={() => setShowAddLabour(true)}>{t("workforcePage.addLabour")}</button>}
+            <button type="button" onClick={() => setShowAdvanceReport(true)}>{t("workforcePage.advanceReport")}</button>
+            <button type="button" onClick={() => setShowReport(true)}>{t("workforcePage.viewReport")}</button>
+            {canManageLabour && <button type="button" onClick={() => setShowAddGroup(true)}>Groups</button>}
+          </div>
+          {user?.workspaceId && hasPermission(user, "IMPORT_ATTENDANCE", user.workspaceId) && <button className="workforce-inline-link" type="button" onClick={() => {
+            if (!navigator.onLine) window.dispatchEvent(new CustomEvent("muzare-toast", { detail: t("errors.csvImportOnlineOnly") }));
+            else setShowImport(true);
+          }}>{t("workforcePage.importCsv")}</button>}
+        </div>
+        <div className="workforce-list-header">
+          <h2>Labour List</h2>
+          <div className="workforce-list-header__controls">
+            <input placeholder={t("workforcePage.searchRegister")} value={labourSearch} onChange={(event) => setLabourSearch(event.target.value)} />
+            <button type="button" aria-label="More workforce filters" onClick={() => setShowRegisterFilters((current) => !current)}>
+              <MoreVertical size={18} />
+            </button>
+          </div>
+        </div>
+        {showRegisterFilters && <div className="attendance-tools workforce-filters">
+          <select value={groupFilterId} onChange={(event) => setGroupFilterId(event.target.value)}>
+            <option value="all">All groups</option>
+            {groups.filter((group) => group.active !== false).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+          </select>
           <select value={paymentTypeFilter} onChange={(event) => setPaymentTypeFilter(event.target.value as PaymentType | "all")}>
             <option value="all">All payment types</option>
             <option value="daily_wage">Daily Wage</option>
@@ -360,40 +338,96 @@ function WorkforceModule() {
             <option value="monthly_salary">Monthly Salary</option>
             <option value="other">Other</option>
           </select>
-          <button type="button" onClick={() => setLabourSearch("")}>{t("common.clear")}</button>
-          {canManageLabour && <button type="button" onClick={() => setShowAddGroup(true)}>Add Group</button>}
-        </div>
+          <button type="button" onClick={() => {
+            setLabourSearch("");
+            setGroupFilterId("all");
+            setPaymentTypeFilter("all");
+          }}>{t("common.clear")}</button>
+        </div>}
         {!labourers.length ? <Empty>{t("workforcePage.noLabourRecorded")}</Empty> : !filteredRegister.length ? <Empty>{t("workforcePage.noLabourFound")}</Empty> : (
           <div className="record-list workforce-list">
             {filteredRegister.map((labourer, index) => (
-              <button className="workforce-row" type="button" key={labourer.id} onClick={() => setSelectedLabourer(labourer)}>
+              <article className="workforce-row" key={labourer.id}>
                 <span className="workforce-row__index">{index + 1}</span>
                 <span className="workforce-row__body">
                   <strong>{labourer.name}</strong>
-                  <span>{labourer.group} | {labourPaymentSummary(labourer)} | {labourer.phone || t("workforcePage.noPhone")} | {labourer.labourType ?? t("workforcePage.dailyWage")} | {labourer.active === false ? t("common.inactive") : t("common.active")}</span>
+                  <span>{labourer.group} • {(labourer.paymentType ?? "daily_wage").replaceAll("_", " ")} • {labourPaymentSummary(labourer)}</span>
+                  <em className={labourer.active === false ? "status-inactive" : "status-active"}>{labourer.active === false ? "Inactive" : "Active"}</em>
                 </span>
-                <span className="workforce-row__action">{t("common.details")}</span>
-              </button>
+                <button className="workforce-row__action" type="button" onClick={() => {
+                  setSelectedLabourer(labourer);
+                  setLabourAction("update");
+                }}>Update</button>
+              </article>
             ))}
           </div>
         )}
       </section>
-      <section className="record-panel">
-        <h2>{t("workforcePage.recentAttendance")}</h2>
-        {!attendance.length ? <Empty>{t("workforcePage.noAttendance")}</Empty> : (
-          <div className="record-list">
-            {attendance.map((entry) => <article key={entry.id}><strong>{names.get(entry.labourerId) ?? t("workforcePage.labourFallback")}</strong><span>{entry.date} | {entry.status.replace("_", " ")}</span></article>)}
-          </div>
-        )}
-      </section>
-      <section className="record-panel">
-        <h2>Recent production entries</h2>
-        {!productionEntries.length ? <Empty>No production entries recorded yet.</Empty> : (
-          <div className="record-list">
-            {productionEntries.map((entry) => <article key={entry.id}><strong>{names.get(entry.labourerId) ?? t("workforcePage.labourFallback")}</strong><span>{entry.date} | {entry.units} {entry.productionUnit} x {money(entry.unitRate)} = {money(entry.amount)}</span></article>)}
-          </div>
-        )}
-      </section>
+      {showAttendanceEntry && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setShowAttendanceEntry(false)}>
+        <section className="attendance-report-dialog attendance-report-dialog--preview" role="dialog" aria-modal="true" aria-labelledby="mark-attendance-title" onClick={(event) => event.stopPropagation()}>
+          <header className="attendance-report-header">
+            <div>
+              <span>{t("workforcePage.dailyAttendance")}</span>
+              <h2 id="mark-attendance-title">Mark Attendance</h2>
+            </div>
+            <button className="attendance-report-close" type="button" onClick={() => setShowAttendanceEntry(false)} aria-label="Close mark attendance"><X size={19} /></button>
+          </header>
+          <section className="record-panel daily-attendance-panel">
+            <div className="daily-attendance__heading">
+              <div>
+                <h2>{t("workforcePage.dailyAttendance")}</h2>
+                <p>{t("workforcePage.attendanceIntro")}</p>
+              </div>
+              <strong>{t("workforcePage.date")}: {new Date(`${date}T00:00:00`).toLocaleDateString(i18n.resolvedLanguage ?? "en-GB").replaceAll("/", "-")}</strong>
+            </div>
+            <div className="attendance-tools">
+              <select value={attendanceFilter} onChange={(event) => setAttendanceFilter(event.target.value as Attendance["status"] | "all")}>
+                <option value="all">{t("workforcePage.allLabour")}</option>
+                <option value="present">{t("workforcePage.present")}</option>
+                <option value="half_day">{t("workforcePage.halfDay")}</option>
+                <option value="absent">{t("workforcePage.absent")}</option>
+              </select>
+              <input placeholder={t("workforcePage.searchLabour")} value={attendanceSearch} onChange={(event) => setAttendanceSearch(event.target.value)} />
+              <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+              <select value={groupFilterId} onChange={(event) => setGroupFilterId(event.target.value)}>
+                <option value="all">All groups</option>
+                {groups.filter((group) => group.active !== false).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+              </select>
+            </div>
+            <div className="attendance-actions">
+              <button type="button" onClick={() => setDate(today())}>{t("common.today")}</button>
+              <button type="button" onClick={() => setShowAttendanceEntry(false)}>{t("common.close")}</button>
+              <button type="button" onClick={() => void saveAttendanceView()}>Save Attendance</button>
+            </div>
+            <label className="attendance-inactive-toggle"><input type="checkbox" checked={showInactiveLabour} onChange={(event) => setShowInactiveLabour(event.target.checked)} /> {t("workforcePage.showInactive")}</label>
+            <div className="attendance-totals" aria-label={t("workforcePage.attendanceTotals")}>
+              <strong className="attendance-total--present">P: {presentToday}</strong>
+              <strong className="attendance-total--half">1/2: {halfDayToday}</strong>
+              <strong className="attendance-total--absent">A: {absentToday}</strong>
+            </div>
+            <div className="attendance-board">
+              {!filteredLabourers.length ? <Empty>{t("workforcePage.noLabourSearch")}</Empty> : filteredLabourers.map((labourer, index) => {
+                const currentStatus = attendanceByLabourer.get(labourer.id);
+                const previousStatus = yesterdayByLabourer.get(labourer.id);
+                return (
+                  <article className="attendance-card" key={labourer.id}>
+                    <span className="attendance-card__index">{index + 1}</span>
+                    <div className="attendance-card__body">
+                      <strong>{labourer.name}</strong>
+                      <span>{t("workforcePage.yesterday")}: {previousStatus ? previousStatus === "half_day" ? "1/2" : previousStatus === "present" ? "P" : "A" : "-"}</span>
+                    </div>
+                    <div className="attendance-status-buttons">
+                      <button disabled={markingLabourers.has(labourer.id)} className={currentStatus === "present" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "present")}>P</button>
+                      <button disabled={markingLabourers.has(labourer.id)} className={currentStatus === "half_day" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "half_day")}>1/2</button>
+                      <button disabled={markingLabourers.has(labourer.id)} className={currentStatus === "absent" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "absent")}>A</button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+        </section>
+      </div>}
       {selectedLabourer && (
         <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedLabourer(null)}>
           <section

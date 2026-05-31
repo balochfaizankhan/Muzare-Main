@@ -1509,6 +1509,128 @@ button {
   gap: 10px;
 }
 
+.workforce-page-header {
+  margin-bottom: 12px;
+}
+
+.workforce-brand {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.workforce-brand img {
+  height: 34px;
+  width: 34px;
+}
+
+.workforce-brand strong {
+  color: var(--brand-primary);
+  display: block;
+  font-size: 1.8rem;
+  line-height: 1;
+}
+
+.workforce-brand span {
+  color: var(--text-secondary);
+  display: block;
+  font-size: 1rem;
+  margin-top: 4px;
+}
+
+.workforce-top-actions {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.workforce-mark-attendance {
+  background: var(--brand-primary);
+  border: 0;
+  border-radius: 12px;
+  color: #fff;
+  font-size: 1.2rem;
+  font-weight: 800;
+  height: 56px;
+  width: 100%;
+}
+
+.workforce-quick-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.workforce-quick-grid button {
+  background: var(--brand-primary);
+  border: 0;
+  border-radius: 12px;
+  color: #fff;
+  font-size: 1.05rem;
+  font-weight: 750;
+  height: 52px;
+}
+
+.workforce-inline-link {
+  background: transparent;
+  border: 0;
+  color: var(--brand-primary);
+  font-size: .82rem;
+  font-weight: 700;
+  justify-self: end;
+}
+
+.workforce-list-header {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.workforce-list-header h2 {
+  color: var(--brand-primary);
+  font-size: 1.6rem;
+  margin: 0;
+}
+
+.workforce-list-header__controls {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.workforce-list-header__controls input {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  height: 46px;
+  max-width: 280px;
+  min-width: 0;
+  padding: 0 12px;
+  width: 100%;
+}
+
+.workforce-list-header__controls button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--brand-primary);
+  display: inline-flex;
+  height: 44px;
+  justify-content: center;
+  width: 44px;
+}
+
+.workforce-filters {
+  margin-bottom: 10px;
+}
+
 .workforce-row {
   align-items: center;
   background: #fff;
@@ -1559,12 +1681,30 @@ button {
   font-size: 0.84rem;
 }
 
+.workforce-row__body em {
+  display: block;
+  font-size: .9rem;
+  font-style: normal;
+  font-weight: 800;
+  margin-top: 2px;
+}
+
+.status-active {
+  color: #16a34a;
+}
+
+.status-inactive {
+  color: #dc2626;
+}
+
 .workforce-row__action {
   background: var(--brand-primary);
+  border: 0;
   border-radius: 8px;
   color: #fff;
   font-size: 0.82rem;
   font-weight: 800;
+  height: 44px;
   padding: 10px 14px;
 }
 
@@ -1609,7 +1749,9 @@ button {
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 28px 70px rgba(2, 16, 30, 0.28);
-  max-height: min(720px, calc(100vh - 34px));
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
   max-width: 520px;
   overflow: hidden;
   width: min(100%, 520px);
@@ -1618,6 +1760,9 @@ button {
 .worker-dialog__header {
   background: var(--surface-soft);
   border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 1;
   padding: 22px 28px;
 }
 
@@ -1629,7 +1774,8 @@ button {
 }
 
 .worker-dialog__body {
-  max-height: calc(100vh - 190px);
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 26px 28px 22px;
 }
@@ -1685,7 +1831,10 @@ button {
   display: grid;
   gap: 10px;
   grid-template-columns: 1fr 1fr auto;
-  padding: 14px 20px;
+  padding: 14px 20px calc(14px + env(safe-area-inset-bottom, 0px));
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
 }
 
 .worker-dialog__footer button {
@@ -2376,16 +2525,16 @@ button {
 }
 
 .worker-action-backdrop { z-index: 115; }
-.worker-action-dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-soft); max-height: min(760px, calc(100vh - 32px)); max-width: 560px; overflow: hidden; width: min(100%, 560px); }
-.worker-action-dialog > header { align-items: center; background: var(--surface-soft); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; padding: 15px 18px; }
+.worker-action-dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-soft); display: flex; flex-direction: column; max-height: 90vh; max-width: 560px; overflow: hidden; width: min(100%, 560px); }
+.worker-action-dialog > header { align-items: center; background: var(--surface-soft); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; padding: 15px 18px; position: sticky; top: 0; z-index: 1; }
 .worker-action-dialog h2 { color: var(--brand-primary); font-size: 1.15rem; margin: 0; }
 .worker-action-dialog > header button { align-items: center; background: transparent; border: 0; color: var(--text-secondary); display: inline-flex; justify-content: center; padding: 6px; }
-.worker-action-form { display: grid; gap: 10px; max-height: calc(100vh - 110px); overflow-y: auto; padding: 16px 18px; }
+.worker-action-form { display: grid; flex: 1; gap: 10px; min-height: 0; overflow-y: auto; padding: 16px 18px; }
 .worker-action-form label { display: grid; gap: 5px; min-width: 0; }
 .worker-action-form label span { color: var(--text-secondary); font-size: .78rem; font-weight: 750; }
 .worker-action-form input, .worker-action-form select, .worker-action-form textarea { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font: inherit; min-height: 42px; min-width: 0; padding: 8px 10px; width: 100%; }
 .worker-action-form textarea { min-height: 76px; resize: vertical; }
-.worker-action-form footer { display: flex; gap: 8px; justify-content: flex-end; padding-top: 4px; }
+.worker-action-form footer { background: var(--surface); border-top: 1px solid var(--border); bottom: 0; display: flex; gap: 8px; justify-content: flex-end; margin: 4px -18px -16px; padding: 10px 18px calc(10px + env(safe-area-inset-bottom, 0px)); position: sticky; z-index: 1; }
 .worker-action-form footer button { border: 1px solid var(--border); border-radius: 8px; font-size: .82rem; font-weight: 800; min-height: 42px; padding: 8px 12px; }
 .worker-action-form footer button[type="button"] { background: var(--surface); color: var(--text-secondary); }
 .worker-action-form footer button[type="submit"] { background: var(--brand-primary); border-color: var(--brand-primary); color: #fff; }
@@ -2646,9 +2795,9 @@ button {
   }
 
 }
-.attendance-report-dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-soft); max-height: min(760px, 92vh); max-width: 600px; overflow: hidden; width: min(600px, 95vw); }
+.attendance-report-dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-soft); display: flex; flex-direction: column; max-height: 90vh; max-width: 600px; overflow: hidden; width: min(600px, 95vw); }
 .attendance-report-dialog--preview { max-width: min(1400px, 96vw); width: 96vw; }
-.attendance-report-header { align-items: center; background: var(--surface-soft); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; padding: 15px 18px; }
+.attendance-report-header { align-items: center; background: var(--surface-soft); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; padding: 15px 18px; position: sticky; top: 0; z-index: 2; }
 .attendance-report-header span { color: var(--brand-secondary); display: block; font-size: .7rem; font-weight: 800; letter-spacing: .08em; margin-bottom: 3px; text-transform: uppercase; }
 .attendance-report-header h2 { color: var(--brand-primary); font-size: 1.15rem; margin: 0; }
 .attendance-report-close { align-items: center; background: transparent; border: 0; border-radius: 7px; color: var(--text-secondary); display: inline-flex; justify-content: center; padding: 7px; }
@@ -2661,7 +2810,7 @@ button {
 .attendance-report-form-actions button, .attendance-report-actions button { border: 1px solid var(--border); border-radius: 8px; font-size: .8rem; font-weight: 800; padding: 9px 12px; }
 .attendance-report-cancel, .attendance-report-actions button { background: var(--surface); color: var(--text-secondary); }
 .attendance-report-generate { background: var(--brand-primary); border-color: var(--brand-primary) !important; color: #fff; }
-.attendance-report-output { border-top: 1px solid var(--border); display: grid; gap: .8rem; max-height: 48vh; overflow: auto; padding: 14px 18px 18px; }
+.attendance-report-output { border-top: 1px solid var(--border); display: grid; flex: 1; gap: .8rem; min-height: 0; overflow: auto; padding: 14px 18px calc(18px + env(safe-area-inset-bottom, 0px)); }
 .attendance-report-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 .attendance-report-card { background: var(--surface); border: 1px solid var(--border); border-radius: 9px; padding: 12px; }
 .attendance-report-breakdown { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .65rem; }
@@ -2766,13 +2915,13 @@ button {
 .register-status--empty { background: #f5f6f7; color: #75838c; }
 .register-footer { display: flex; flex-wrap: wrap; gap: 10px; }
 .register-footer span { color: #496071; font-size: .68rem; }
-.attendance-import-dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-soft); max-height: 94vh; max-width: min(960px, 95vw); overflow: hidden; width: 95vw; }
+.attendance-import-dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-soft); display: flex; flex-direction: column; max-height: 94vh; max-width: min(960px, 95vw); overflow: hidden; width: 95vw; }
 .attendance-import-steps { background: var(--surface-soft); border-bottom: 1px solid var(--border); display: flex; gap: 6px; list-style: none; margin: 0; overflow-x: auto; padding: 10px 14px; }
 .attendance-import-steps li { align-items: center; color: var(--text-muted); display: flex; flex: 0 0 auto; font-size: .72rem; gap: 5px; white-space: nowrap; }
 .attendance-import-steps b { align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 50%; display: inline-flex; height: 22px; justify-content: center; width: 22px; }
 .attendance-import-steps .is-active { color: var(--brand-primary); font-weight: 800; }
 .attendance-import-steps .is-active b { background: var(--brand-secondary); border-color: var(--brand-secondary); color: #fff; }
-.attendance-import-body { display: grid; gap: 10px; max-height: 70vh; overflow: auto; padding: 14px; }
+.attendance-import-body { display: grid; flex: 1; gap: 10px; min-height: 0; overflow: auto; padding: 14px; }
 .attendance-import-card { display: grid; gap: 12px; min-width: 0; }
 .attendance-import-card h3, .attendance-import-card p { margin: 0; }
 .attendance-import-card p { color: var(--text-secondary); font-size: .82rem; }
@@ -2812,12 +2961,12 @@ button {
 .attendance-import-table-wrap thead th { background: var(--surface-soft); color: var(--text-primary); font-weight: 850; }
 .attendance-import-table-wrap tbody th { background: var(--surface-muted); text-align: start; }
 .attendance-import-table-wrap td small { display: block; font-size: .62rem; margin-top: 3px; white-space: nowrap; }
-.attendance-import-footer { border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; padding: 11px 14px; }
+.attendance-import-footer { background: var(--surface); border-top: 1px solid var(--border); bottom: 0; display: flex; gap: 8px; justify-content: flex-end; padding: 11px 14px calc(11px + env(safe-area-inset-bottom, 0px)); position: sticky; z-index: 2; }
 .attendance-import-footer button:first-child { background: var(--surface); border-color: var(--border); color: var(--text-secondary); }
 
 @media (max-width: 767px) {
   .attendance-report-filters { grid-template-columns: minmax(0, 1fr); }
-  .attendance-report-dialog { width: 95vw; }
+  .attendance-report-dialog { max-height: 94vh; width: 95vw; }
   .report-labour-filter__picker { max-height: 56vh; }
   .register-header { display: grid; }
   .register-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -2825,7 +2974,8 @@ button {
   .attendance-import-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .attendance-import-match-list article { grid-template-columns: minmax(0, 1fr); }
   .worker-action-backdrop { align-items: flex-end; padding: 0; }
-  .worker-action-dialog { border-bottom-left-radius: 0; border-bottom-right-radius: 0; max-height: 94vh; max-width: none; width: 100%; }
+  .worker-action-dialog { border-bottom-left-radius: 0; border-bottom-right-radius: 0; max-height: 96vh; max-width: none; width: 100%; }
+  .worker-dialog { border-bottom-left-radius: 0; border-bottom-right-radius: 0; max-height: 96vh; max-width: none; width: 100%; }
 }
 
 @media (prefers-color-scheme: dark) {
