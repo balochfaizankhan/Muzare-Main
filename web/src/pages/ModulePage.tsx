@@ -468,6 +468,7 @@ function AdvanceReportPanel({
 }: {
   token: string; workspaceId: string; farmId: string; seasonId: string; labourers: Labourer[]; onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [filters, setFilters] = useState<AdvanceReportFilters>({ farmId, seasonId, from: `${today().slice(0, 8)}01`, to: today(), labourIds: [] });
   const [submitted, setSubmitted] = useState<AdvanceReportFilters | null>(null);
   const report = useQuery({
@@ -508,48 +509,48 @@ function AdvanceReportPanel({
   return <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}>
     <section className="attendance-report-dialog" role="dialog" aria-modal="true" aria-labelledby="advance-report-title" onClick={(event) => event.stopPropagation()}>
       <header className="attendance-report-header">
-        <div><span>Workforce</span><h2 id="advance-report-title">Labour Advance Report</h2></div>
-        <button className="attendance-report-close" type="button" onClick={onClose} aria-label="Close advance report"><X size={19} /></button>
+        <div><span>{t("workforcePage.labourRegister")}</span><h2 id="advance-report-title">{t("reports.advanceReportTitle")}</h2></div>
+        <button className="attendance-report-close" type="button" onClick={onClose} aria-label={t("reports.closeAdvanceReport")}><X size={19} /></button>
       </header>
       <form className="attendance-report-filters" onSubmit={(event) => { event.preventDefault(); setSubmitted({ ...filters }); }}>
-        <label><span>Date From</span><input required type="date" value={filters.from} onChange={(event) => setFilters({ ...filters, from: event.target.value })} /></label>
-        <label><span>Date To</span><input required type="date" value={filters.to} onChange={(event) => setFilters({ ...filters, to: event.target.value })} /></label>
-        <label><span>Labour filter</span><select value={filters.labourIds?.length ? "selected" : "all"} onChange={(event) => {
+        <label><span>{t("reports.dateFrom")}</span><input required type="date" value={filters.from} onChange={(event) => setFilters({ ...filters, from: event.target.value })} /></label>
+        <label><span>{t("reports.dateTo")}</span><input required type="date" value={filters.to} onChange={(event) => setFilters({ ...filters, to: event.target.value })} /></label>
+        <label><span>{t("reports.labourFilter")}</span><select value={filters.labourIds?.length ? "selected" : "all"} onChange={(event) => {
           if (event.target.value === "all") setFilters({ ...filters, labourIds: [] });
         }}>
-          <option value="all">All labour</option>
-          <option value="selected">Selected labour ({filters.labourIds?.length ?? 0})</option>
+          <option value="all">{t("workforcePage.allLabour")}</option>
+          <option value="selected">{t("reports.selectedLabour", { count: filters.labourIds?.length ?? 0 })}</option>
         </select></label>
         <div className="attendance-report-breakdown">{labourers.map((labourer) => <label key={labourer.id}><input checked={filters.labourIds?.includes(labourer.id) ?? false} disabled={!filters.labourIds || filters.labourIds.length === 0 && false} type="checkbox" onChange={() => toggleLabour(labourer.id)} /> {labourer.name}</label>)}</div>
         <footer className="attendance-report-form-actions">
-          <button className="attendance-report-cancel" type="button" onClick={onClose}>Cancel</button>
-          <button className="attendance-report-generate" type="submit">Generate Report</button>
+          <button className="attendance-report-cancel" type="button" onClick={onClose}>{t("common.close")}</button>
+          <button className="attendance-report-generate" type="submit">{t("reports.generateReport")}</button>
         </footer>
       </form>
       {submitted && <div className="attendance-report-output">
-        {report.isFetching && <p>Generating report...</p>}
+        {report.isFetching && <p>{t("reports.generatingReport")}</p>}
         {report.isError && <p className="error">{report.error.message}</p>}
-        {report.data && !report.data.records.length && <Empty>No advances found for this period.</Empty>}
+        {report.data && !report.data.records.length && <Empty>{t("reports.noAdvancesForPeriod")}</Empty>}
         {report.data && report.data.records.length > 0 && <>
           <div className="attendance-report-actions">
-            <button type="button" onClick={() => window.print()}>Print</button>
-            <button type="button" onClick={() => exportCsv(report.data!)}>Export CSV</button>
+            <button type="button" onClick={() => window.print()}>{t("reports.print")}</button>
+            <button type="button" onClick={() => exportCsv(report.data!)}>{t("reports.exportCsv")}</button>
           </div>
           <section className="attendance-report-card">
-            <strong>Grand Total</strong>
+            <strong>{t("reports.grandTotal")}</strong>
             <p>{money(report.data.grandTotal)}</p>
             <div className="attendance-import-table-wrap">
               <table>
-                <thead><tr><th>Labour</th><th>Date</th><th>Advance (SAR)</th><th>Notes</th></tr></thead>
+                <thead><tr><th>{t("reports.labour")}</th><th>{t("workforcePage.date")}</th><th>{t("reports.advanceSar")}</th><th>{t("reports.notes")}</th></tr></thead>
                 <tbody>{report.data.records.map((item) => <tr key={item.id}><td>{item.labourName}</td><td>{item.date}</td><td>{money(item.amount)}</td><td>{item.notes || "-"}</td></tr>)}</tbody>
               </table>
             </div>
           </section>
           <section className="attendance-report-card">
-            <strong>Totals by labour</strong>
+            <strong>{t("reports.totalsByLabour")}</strong>
             <div className="attendance-import-table-wrap">
               <table>
-                <thead><tr><th>Labour</th><th>Transactions</th><th>Total</th></tr></thead>
+                <thead><tr><th>{t("reports.labour")}</th><th>{t("reports.transactions")}</th><th>{t("reports.total")}</th></tr></thead>
                 <tbody>{report.data.summaries.map((item) => <tr key={item.labourerId}><td>{item.labourName}</td><td>{item.count}</td><td>{money(item.total)}</td></tr>)}</tbody>
               </table>
             </div>
@@ -563,6 +564,7 @@ function AdvanceReportPanel({
 function DeactivateLabourPanel({ token, workspaceId, labourer, onClose, onComplete }: {
   token: string; workspaceId: string; labourer: Labourer; onClose: () => void; onComplete: (action: "deleted" | "deactivated") => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [preview, setPreview] = useState<LabourDeletionPreview | null>(null);
   const [confirmation, setConfirmation] = useState("");
   const [endDate, setEndDate] = useState(today());
@@ -572,7 +574,7 @@ function DeactivateLabourPanel({ token, workspaceId, labourer, onClose, onComple
     let active = true;
     void fetchLabourDeletionPreview(token, workspaceId, labourer.id)
       .then((result) => { if (active) setPreview(result); })
-      .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "Unable to inspect linked labour records."); });
+      .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : t("reports.unableInspectLinkedRecords")); });
     return () => { active = false; };
   }, [token, workspaceId, labourer.id]);
   const submit = async (event: FormEvent) => {
@@ -582,20 +584,20 @@ function DeactivateLabourPanel({ token, workspaceId, labourer, onClose, onComple
     try {
       const result = await deleteOrDeactivateLabour(token, workspaceId, labourer.id, { confirmation: "DELETE", endDate });
       await onComplete(result.action);
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to update labour status."); }
+    } catch (caught) { setError(caught instanceof Error ? caught.message : t("reports.unableUpdateLabourStatus")); }
     finally { setBusy(false); }
   };
-  return <ActionPanel title="Deactivate or Delete Labour" onClose={onClose}>
+  return <ActionPanel title={t("reports.deactivateOrDeleteLabour")} onClose={onClose}>
     <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
       <p><strong>{labourer.name}</strong></p>
-      {!preview && !error && <p>Checking linked records...</p>}
-      {preview && <p>Existing linked records: <strong>{preview.linkedRecordCount}</strong></p>}
-      {preview?.action === "deactivate" && <p className="worker-action-warning">This labour has existing records. To preserve reports, the labour will be deactivated instead of deleted.</p>}
-      {preview?.action === "delete" && <p className="worker-action-warning">This labour has no linked records and will be permanently deleted.</p>}
-      {preview?.action === "deactivate" && <label><span>End date *</span><input required type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} /></label>}
-      <label><span>Type DELETE to confirm *</span><input required autoComplete="off" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
+      {!preview && !error && <p>{t("reports.checkingLinkedRecords")}</p>}
+      {preview && <p>{t("reports.existingLinkedRecords")}: <strong>{preview.linkedRecordCount}</strong></p>}
+      {preview?.action === "deactivate" && <p className="worker-action-warning">{t("reports.deactivatePreserveRecords")}</p>}
+      {preview?.action === "delete" && <p className="worker-action-warning">{t("reports.deleteNoLinkedRecords")}</p>}
+      {preview?.action === "deactivate" && <label><span>{t("reports.endDateRequired")}</span><input required type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} /></label>}
+      <label><span>{t("reports.typeDeleteConfirm")}</span><input required autoComplete="off" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
       {error && <p className="worker-action-error">{error}</p>}
-      <footer><button type="button" onClick={onClose}>Cancel</button><button className="danger-button" disabled={!preview || confirmation !== "DELETE" || busy} type="submit">{busy ? "Processing..." : preview?.action === "delete" ? "Delete permanently" : "Deactivate Labour"}</button></footer>
+      <footer><button type="button" onClick={onClose}>{t("common.close")}</button><button className="danger-button" disabled={!preview || confirmation !== "DELETE" || busy} type="submit">{busy ? t("reports.processing") : preview?.action === "delete" ? t("reports.deletePermanently") : t("reports.deactivateLabour")}</button></footer>
     </form>
   </ActionPanel>;
 }
@@ -713,6 +715,7 @@ function AttendanceReportPanel({
 }: {
   token: string; workspaceId: string; farmId: string; seasonId: string; labourers: Labourer[]; onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const sync = useSyncState();
   const [filters, setFilters] = useState<AttendanceReportFilters>({
     farmId, seasonId, from: `${today().slice(0, 8)}01`, to: today(),
@@ -762,27 +765,27 @@ function AttendanceReportPanel({
     <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}>
       <section className={`attendance-report-dialog ${data?.metadata ? "attendance-report-dialog--preview" : ""}`} role="dialog" aria-modal="true" aria-labelledby="attendance-report-title" onClick={(event) => event.stopPropagation()}>
         <header className="attendance-report-header">
-          <div><span>Workforce</span><h2 id="attendance-report-title">Attendance Report</h2></div>
-          <button className="attendance-report-close" type="button" onClick={onClose} aria-label="Close report"><X size={19} /></button>
+          <div><span>{t("workforcePage.labourRegister")}</span><h2 id="attendance-report-title">{t("reports.attendanceReportTitle")}</h2></div>
+          <button className="attendance-report-close" type="button" onClick={onClose} aria-label={t("reports.closeReport")}><X size={19} /></button>
         </header>
         <form className="attendance-report-filters" onSubmit={(event) => { event.preventDefault(); setSubmitted({ ...filters }); }}>
-          <label><span>Date From</span><input required type="date" value={filters.from} onChange={(event) => setFilters({ ...filters, from: event.target.value })} /></label>
-          <label><span>Date To</span><input required type="date" value={filters.to} onChange={(event) => setFilters({ ...filters, to: event.target.value })} /></label>
-          <label><span>Labour</span><select value={filters.labourId ?? ""} onChange={(event) => setFilters({ ...filters, labourId: event.target.value || undefined })}>
-            <option value="">All labour</option>{labourers.map((labourer) => <option key={labourer.id} value={labourer.id}>{labourer.name}</option>)}
+          <label><span>{t("reports.dateFrom")}</span><input required type="date" value={filters.from} onChange={(event) => setFilters({ ...filters, from: event.target.value })} /></label>
+          <label><span>{t("reports.dateTo")}</span><input required type="date" value={filters.to} onChange={(event) => setFilters({ ...filters, to: event.target.value })} /></label>
+          <label><span>{t("reports.labour")}</span><select value={filters.labourId ?? ""} onChange={(event) => setFilters({ ...filters, labourId: event.target.value || undefined })}>
+            <option value="">{t("workforcePage.allLabour")}</option>{labourers.map((labourer) => <option key={labourer.id} value={labourer.id}>{labourer.name}</option>)}
           </select></label>
-          <label><span>Status</span><select value={filters.status ?? ""} onChange={(event) => setFilters({ ...filters, status: (event.target.value || undefined) as AttendanceReportStatus | undefined })}>
-            <option value="">All</option><option value="present">Present</option><option value="half_day">Half Day</option><option value="absent">Absent</option>
+          <label><span>{t("reports.status")}</span><select value={filters.status ?? ""} onChange={(event) => setFilters({ ...filters, status: (event.target.value || undefined) as AttendanceReportStatus | undefined })}>
+            <option value="">{t("workforcePage.allLabour")}</option><option value="present">{t("workforcePage.present")}</option><option value="half_day">{t("workforcePage.halfDay")}</option><option value="absent">{t("workforcePage.absent")}</option>
           </select></label>
           <footer className="attendance-report-form-actions">
-            <button className="attendance-report-cancel" type="button" onClick={onClose}>Cancel</button>
-            <button className="attendance-report-generate" type="submit">Generate Report</button>
+            <button className="attendance-report-cancel" type="button" onClick={onClose}>{t("common.close")}</button>
+            <button className="attendance-report-generate" type="submit">{t("reports.generateReport")}</button>
           </footer>
         </form>
         {submitted && <div className="attendance-report-output">
-          {report.isFetching && <p>Generating report...</p>}
+          {report.isFetching && <p>{t("reports.generatingReport")}</p>}
           {report.isError && <p className="error">{report.error.message}</p>}
-          {report.data && !report.data.summaries.length && <Empty>No attendance records found for this period.</Empty>}
+          {report.data && !report.data.summaries.length && <Empty>{t("reports.noAttendanceForPeriod")}</Empty>}
           {data?.metadata && data.summaries.length > 0 && <AttendanceRegister
             data={data} syncStatus={sync.status} totalPresent={totalPresent} totalHalf={totalHalf} totalAbsent={totalAbsent}
             totalAdvance={totalAdvance} totalWage={totalWage} workerAdvance={workerAdvance} dailyAdvance={dailyAdvance}
@@ -805,16 +808,17 @@ function AttendanceRegister({ data, syncStatus, totalPresent, totalHalf, totalAb
   totalAdvance: number; totalWage: number; workerAdvance: (id: string) => number; dailyAdvance: (id: string, date: string) => number;
   dailyStatus: (id: string, date: string) => AttendanceReportStatus | undefined; onClose: () => void; onCsv: () => void;
 }) {
+  const { t } = useTranslation();
   const metadata = data.metadata!;
   const print = () => {
-    if (data.dates.length > 50 && !window.confirm("This date range may not fit on one page width. For best print results, select up to 50 days.")) return;
+    if (data.dates.length > 50 && !window.confirm(t("reports.printRangeWarning"))) return;
     window.print();
   };
   return <section className="attendance-register-preview">
-    <div className="attendance-report-actions no-print"><button type="button" onClick={print}>Print</button><button type="button" onClick={print}>Export PDF</button><button type="button" onClick={onCsv}>Export CSV</button><button type="button" onClick={onClose}>Close</button></div>
+    <div className="attendance-report-actions no-print"><button type="button" onClick={print}>{t("reports.print")}</button><button type="button" onClick={print}>{t("reports.exportPdf")}</button><button type="button" onClick={onCsv}>{t("reports.exportCsv")}</button><button type="button" onClick={onClose}>{t("common.close")}</button></div>
     <header className="register-header screen-only">
-      <div><span>Farm Labour Register</span><h2>Attendance Report</h2><strong>{metadata.farmName}</strong><p>Season: {metadata.seasonName}</p></div>
-      <dl><div><dt>Date range</dt><dd>{metadata.from} to {metadata.to}</dd></div><div><dt>Generated</dt><dd>{new Date(metadata.generatedAt).toLocaleString()}</dd></div><div><dt>Generated by</dt><dd>{metadata.generatedBy}</dd></div><div><dt>Sync status</dt><dd>{syncStatus}</dd></div></dl>
+      <div><span>{t("reports.farmLabourRegister")}</span><h2>{t("reports.attendanceReportTitle")}</h2><strong>{metadata.farmName}</strong><p>{t("currentSeason")}: {metadata.seasonName}</p></div>
+      <dl><div><dt>{t("reports.dateRange")}</dt><dd>{metadata.from} {t("reports.to")} {metadata.to}</dd></div><div><dt>{t("reports.generated")}</dt><dd>{new Date(metadata.generatedAt).toLocaleString()}</dd></div><div><dt>{t("reports.generatedBy")}</dt><dd>{metadata.generatedBy}</dd></div><div><dt>{t("reports.syncStatus")}</dt><dd>{syncStatus}</dd></div></dl>
     </header>
     <div className="register-summary screen-only">
       <span>Total labour<strong>{data.summaries.length}</strong></span><span>Total P<strong>{totalPresent}</strong></span><span>Total 1/2<strong>{totalHalf}</strong></span>
@@ -834,7 +838,7 @@ function AttendanceRegister({ data, syncStatus, totalPresent, totalHalf, totalAb
       <tfoot><tr><th colSpan={2}>Grand Total</th><th>{totalPresent}</th><th>{totalHalf}</th><th>{totalAbsent}</th><th>{compactAdvance(totalWage)}</th><th>{compactAdvance(totalAdvance)}</th><th>{compactAdvance(totalWage - totalAdvance)}</th><th colSpan={data.dates.length}></th></tr>
       <tr><th colSpan={8}>Daily payable total</th>{data.dates.map((date) => <th key={date}>{data.summaries.reduce((sum, item) => sum + payableValue(dailyStatus(item.id, date)), 0)}</th>)}</tr></tfoot>
     </table></div>
-    <footer className="register-footer"><span><b>P</b> = Present</span><span><b>1/2</b> = Half Day</span><span><b>A</b> = Absent</span><span><b>-</b> = No record</span></footer>
+    <footer className="register-footer"><span><b>P</b> = {t("workforcePage.present")}</span><span><b>1/2</b> = {t("workforcePage.halfDay")}</span><span><b>A</b> = {t("workforcePage.absent")}</span><span><b>-</b> = {t("reports.noRecord")}</span></footer>
   </section>;
 }
 
