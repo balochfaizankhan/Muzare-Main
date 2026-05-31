@@ -36,7 +36,7 @@ export function LoginPage() {
     try {
       await signIn(fields.email, fields.password);
     } catch (error) {
-      setAuthError(error instanceof Error ? error.message : "Authentication failed.");
+      setAuthError(error instanceof Error ? error.message : t("errors.authFailed"));
     }
   };
 
@@ -49,32 +49,32 @@ export function LoginPage() {
         <div className="login-card__header">
           <span className="auth-logo" role="img" aria-label="Muzare" />
           <div>
-            <span className="auth-kicker">Approved workspace access</span>
-            <h1>Welcome back</h1>
+            <span className="auth-kicker">{t("auth.approvedAccess")}</span>
+            <h1>{t("auth.welcomeBack")}</h1>
             <p>{t("signIn")}</p>
           </div>
         </div>
         <div className="auth-note">
           <ShieldCheck size={16} />
-          <span>Only administrator-approved accounts can enter a workspace.</span>
+          <span>{t("auth.approvedAccountsOnly")}</span>
         </div>
         <form className="login-form" onSubmit={handleSubmit(login)}>
           <label>
             <span>{t("email")}</span>
-            <input type="email" autoComplete="email" placeholder="you@farm.com" {...register("email")} />
-            {errors.email && <small>Please provide a valid email.</small>}
+            <input type="email" autoComplete="email" placeholder={t("auth.emailPlaceholder")} {...register("email")} />
+            {errors.email && <small>{t("validation.validEmail")}</small>}
           </label>
           <label>
             <span>{t("password")}</span>
-            <input type="password" autoComplete="current-password" placeholder="Enter your password" {...register("password")} />
+            <input type="password" autoComplete="current-password" placeholder={t("auth.passwordPlaceholder")} {...register("password")} />
           </label>
           {authError && <p className="error">{authError}</p>}
           <button type="submit" disabled={isSubmitting}>
             <LockKeyhole size={17} />
-            <span>{isSubmitting ? "Signing in..." : t("login")}</span>
+            <span>{isSubmitting ? t("auth.signingIn") : t("login")}</span>
           </button>
         </form>
-        <p className="auth-switch">Need a workspace? <Link to="/signup">Request access</Link></p>
+        <p className="auth-switch">{t("auth.needWorkspace")} <Link to="/signup">{t("auth.requestAccess")}</Link></p>
       </section>
     </main>
   );

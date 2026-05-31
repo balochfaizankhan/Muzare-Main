@@ -21,7 +21,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { fetchBootstrap } from "../lib/api";
-import { formatMoney } from "../lib/format";
+import { formatDate, formatMoney } from "../lib/format";
 import { ensureLocalAccounts, offlineDb, workspaceRecords } from "../lib/offline-db";
 import { useSyncState } from "../hooks/useSyncState";
 import { refreshOperationalData, syncNow } from "../services/syncService";
@@ -68,8 +68,6 @@ const quickActions = [
 
 const today = () => new Date().toISOString().slice(0, 10);
 const money = formatMoney;
-const formatDate = () => new Intl.DateTimeFormat("en", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date());
-
 export function DashboardPage() {
   const { t } = useTranslation();
   const { user, token } = useAuth();
@@ -178,7 +176,7 @@ export function DashboardPage() {
   const farm = query.data?.farms.find((item) => item.id === query.data.activeFarmId);
   const season = query.data?.seasons.find((item) => item.id === query.data.activeSeasonId);
   const StatusIcon = sync.status === "offline" ? WifiOff : Wifi;
-  const displayName = user?.displayName || user?.email || "Administrator";
+  const displayName = user?.displayName || user?.email || t("common.dashboard");
 
   const summaryCards = [
     { label: "Present today", value: String(totals.presentToday), icon: UsersRound, path: "/workspace/attendance", tone: "green" },
@@ -195,9 +193,9 @@ export function DashboardPage() {
       <main className="dashboard dashboard--wide">
         <section className="dashboard-hero">
           <div className="dashboard-hero__intro">
-            <span className="eyebrow">Operations overview</span>
-            <h1>Welcome, {displayName}</h1>
-            <p>{formatDate()}</p>
+            <span className="eyebrow">{t("dashboardPage.operationsOverview")}</span>
+            <h1>{t("dashboardPage.welcome", { name: displayName })}</h1>
+            <p>{formatDate(new Date(), { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
             {user?.workspaceName && <p className="workspace-label">{user.workspaceName}</p>}
           </div>
           <div className="context-actions">
@@ -213,12 +211,12 @@ export function DashboardPage() {
             </Link>
           </div>
         </section>
-        {!season && <p className="context-message">No active season. Create or select a season to begin operations.</p>}
+        {!season && <p className="context-message">{t("dashboardPage.noActiveSeason")}</p>}
 
         <div className="section-title-row">
           <div>
-            <h2>Today at a glance</h2>
-            <p>Live local figures from this device</p>
+            <h2>{t("dashboardPage.todayAtGlance")}</h2>
+            <p>{t("dashboardPage.localFigures")}</p>
           </div>
         </div>
         <section className="summary-grid" aria-label="Operational summary">
@@ -236,8 +234,8 @@ export function DashboardPage() {
             <section className="panel quick-panel">
               <div className="panel-heading">
                 <div>
-                  <h2>Quick actions</h2>
-                  <p>Common daily entries</p>
+                  <h2>{t("dashboardPage.quickActions")}</h2>
+                  <p>{t("dashboardPage.dailyEntries")}</p>
                 </div>
               </div>
               <div className="quick-grid">

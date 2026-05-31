@@ -60,6 +60,7 @@ function FormCard({ title, children }: { title: string; children: ReactNode }) {
 }
 
 function WorkforceModule() {
+  const { t, i18n } = useTranslation();
   const { token, user } = useAuth();
   const sync = useSyncState();
   const loadLabourers = useCallback(async () => (await workspaceRecords(offlineDb.labourers)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
@@ -154,12 +155,12 @@ function WorkforceModule() {
     await persistOperationalRecord("labourer", record);
     await refreshLabourers();
     setSelectedLabourer(record);
-    showToast("Labour updated successfully.");
+    showToast(t("workforcePage.labourUpdated"));
   };
   const saveAdvance = async (record: Advance) => {
     setAdvances((current) => [record, ...current.filter((entry) => entry.id !== record.id)]);
     await persistOperationalRecord("advance", record);
-    showToast("Advance added successfully.");
+    showToast(t("workforcePage.advanceAdded"));
   };
 
   return (
@@ -168,39 +169,39 @@ function WorkforceModule() {
         <section className="record-panel daily-attendance-panel">
           <div className="daily-attendance__heading">
             <div>
-              <h2>Daily Attendance</h2>
-              <p>Streamline your daily workforce tracking with precision.</p>
+              <h2>{t("workforcePage.dailyAttendance")}</h2>
+              <p>{t("workforcePage.attendanceIntro")}</p>
             </div>
-            <strong>Date: {new Date(`${date}T00:00:00`).toLocaleDateString("en-GB").replaceAll("/", "-")}</strong>
+            <strong>{t("workforcePage.date")}: {new Date(`${date}T00:00:00`).toLocaleDateString(i18n.resolvedLanguage ?? "en-GB").replaceAll("/", "-")}</strong>
           </div>
           <div className="attendance-tools">
             <select value={attendanceFilter} onChange={(event) => setAttendanceFilter(event.target.value as Attendance["status"] | "all")}>
-              <option value="all">All labour</option>
-              <option value="present">Present</option>
-              <option value="half_day">1/2 Day</option>
-              <option value="absent">Absent</option>
+              <option value="all">{t("workforcePage.allLabour")}</option>
+              <option value="present">{t("workforcePage.present")}</option>
+              <option value="half_day">{t("workforcePage.halfDay")}</option>
+              <option value="absent">{t("workforcePage.absent")}</option>
             </select>
-            <input placeholder="Search labour..." value={attendanceSearch} onChange={(event) => setAttendanceSearch(event.target.value)} />
+            <input placeholder={t("workforcePage.searchLabour")} value={attendanceSearch} onChange={(event) => setAttendanceSearch(event.target.value)} />
             <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
           </div>
           <div className="attendance-actions">
-            <button type="button" onClick={() => setDate(today())}>Today</button>
-            <button type="button" onClick={() => setShowReport(true)}>View Report</button>
-            <button type="button" onClick={() => setShowAdvanceReport(true)}>Advance Report</button>
-            {canManageLabour && <button type="button" onClick={() => setShowAddLabour(true)}>Add Labour</button>}
+            <button type="button" onClick={() => setDate(today())}>{t("common.today")}</button>
+            <button type="button" onClick={() => setShowReport(true)}>{t("workforcePage.viewReport")}</button>
+            <button type="button" onClick={() => setShowAdvanceReport(true)}>{t("workforcePage.advanceReport")}</button>
+            {canManageLabour && <button type="button" onClick={() => setShowAddLabour(true)}>{t("workforcePage.addLabour")}</button>}
             {user?.workspaceId && hasPermission(user, "IMPORT_ATTENDANCE", user.workspaceId) && <button type="button" onClick={() => {
-              if (!navigator.onLine) window.dispatchEvent(new CustomEvent("muzare-toast", { detail: "CSV import requires internet connection." }));
+              if (!navigator.onLine) window.dispatchEvent(new CustomEvent("muzare-toast", { detail: t("errors.csvImportOnlineOnly") }));
               else setShowImport(true);
-            }}>Import CSV</button>}
+            }}>{t("workforcePage.importCsv")}</button>}
           </div>
-          <label className="attendance-inactive-toggle"><input type="checkbox" checked={showInactiveLabour} onChange={(event) => setShowInactiveLabour(event.target.checked)} /> Show inactive labour</label>
-          <div className="attendance-totals" aria-label="Attendance totals">
+          <label className="attendance-inactive-toggle"><input type="checkbox" checked={showInactiveLabour} onChange={(event) => setShowInactiveLabour(event.target.checked)} /> {t("workforcePage.showInactive")}</label>
+          <div className="attendance-totals" aria-label={t("workforcePage.attendanceTotals")}>
             <strong className="attendance-total--present">P: {presentToday}</strong>
             <strong className="attendance-total--half">1/2: {halfDayToday}</strong>
             <strong className="attendance-total--absent">A: {absentToday}</strong>
           </div>
           <div className="attendance-board">
-            {!filteredLabourers.length ? <Empty>No labourers match this search.</Empty> : filteredLabourers.map((labourer, index) => {
+            {!filteredLabourers.length ? <Empty>{t("workforcePage.noLabourSearch")}</Empty> : filteredLabourers.map((labourer, index) => {
               const currentStatus = attendanceByLabourer.get(labourer.id);
               const previousStatus = yesterdayByLabourer.get(labourer.id);
               return (
@@ -208,7 +209,7 @@ function WorkforceModule() {
                   <span className="attendance-card__index">{index + 1}</span>
                   <div className="attendance-card__body">
                     <strong>{labourer.name}</strong>
-                    <span>Yesterday: {previousStatus ? previousStatus === "half_day" ? "1/2" : previousStatus === "present" ? "P" : "A" : "-"}</span>
+                    <span>{t("workforcePage.yesterday")}: {previousStatus ? previousStatus === "half_day" ? "1/2" : previousStatus === "present" ? "P" : "A" : "-"}</span>
                   </div>
                   <div className="attendance-status-buttons">
                     <button disabled={markingLabourers.has(labourer.id)} className={currentStatus === "present" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "present")}>P</button>
@@ -222,31 +223,31 @@ function WorkforceModule() {
         </section>
       </div>
       <section className="record-panel">
-        <h2>Labour register</h2>
+        <h2>{t("workforcePage.labourRegister")}</h2>
         <div className="attendance-tools">
-          <input placeholder="Search by name, phone, role, or status" value={labourSearch} onChange={(event) => setLabourSearch(event.target.value)} />
-          <button type="button" onClick={() => setLabourSearch("")}>Clear</button>
+          <input placeholder={t("workforcePage.searchRegister")} value={labourSearch} onChange={(event) => setLabourSearch(event.target.value)} />
+          <button type="button" onClick={() => setLabourSearch("")}>{t("common.clear")}</button>
         </div>
-        {!labourers.length ? <Empty>No labourers recorded yet.</Empty> : !filteredRegister.length ? <Empty>No labour found.</Empty> : (
+        {!labourers.length ? <Empty>{t("workforcePage.noLabourRecorded")}</Empty> : !filteredRegister.length ? <Empty>{t("workforcePage.noLabourFound")}</Empty> : (
           <div className="record-list workforce-list">
             {filteredRegister.map((labourer, index) => (
               <button className="workforce-row" type="button" key={labourer.id} onClick={() => setSelectedLabourer(labourer)}>
                 <span className="workforce-row__index">{index + 1}</span>
                 <span className="workforce-row__body">
                   <strong>{labourer.name}</strong>
-                  <span>{labourer.group} | {labourer.phone || "No phone"} | {labourer.labourType ?? "Daily Wage"} | {labourer.active === false ? "Inactive" : "Active"}</span>
+                  <span>{labourer.group} | {labourer.phone || t("workforcePage.noPhone")} | {labourer.labourType ?? t("workforcePage.dailyWage")} | {labourer.active === false ? t("common.inactive") : t("common.active")}</span>
                 </span>
-                <span className="workforce-row__action">Details</span>
+                <span className="workforce-row__action">{t("common.details")}</span>
               </button>
             ))}
           </div>
         )}
       </section>
       <section className="record-panel">
-        <h2>Recent attendance</h2>
-        {!attendance.length ? <Empty>No attendance marked yet.</Empty> : (
+        <h2>{t("workforcePage.recentAttendance")}</h2>
+        {!attendance.length ? <Empty>{t("workforcePage.noAttendance")}</Empty> : (
           <div className="record-list">
-            {attendance.map((entry) => <article key={entry.id}><strong>{names.get(entry.labourerId) ?? "Labourer"}</strong><span>{entry.date} | {entry.status.replace("_", " ")}</span></article>)}
+            {attendance.map((entry) => <article key={entry.id}><strong>{names.get(entry.labourerId) ?? t("workforcePage.labourFallback")}</strong><span>{entry.date} | {entry.status.replace("_", " ")}</span></article>)}
           </div>
         )}
       </section>
@@ -286,7 +287,7 @@ function WorkforceModule() {
               {canManageLabour && <button className="worker-dialog__link" type="button" onClick={() => setLabourAction("update")}>Update</button>}
               {canAddAdvance && <button className="worker-dialog__link" type="button" onClick={() => setLabourAction("advance")}>Advance</button>}
               {canManageLabour && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => {
-                if (!navigator.onLine || sync.pendingCount > 0) showToast("Sync pending changes before deactivating or deleting labour.");
+                if (!navigator.onLine || sync.pendingCount > 0) showToast(t("errors.syncPendingBeforeDeactivate"));
                 else setLabourAction("deactivate");
               }}>{selectedLabourer.active === false ? "Delete" : "Deactivate / Delete"}</button>}
               <button className="worker-dialog__close" type="button" onClick={() => setSelectedLabourer(null)}>Close</button>
@@ -300,7 +301,7 @@ function WorkforceModule() {
         await persistOperationalRecord("labourer", record);
         await refreshLabourers();
         setShowAddLabour(false);
-        showToast("Labour added successfully.");
+        showToast(t("workforcePage.labourAdded"));
       }} />}
       {selectedLabourer && labourAction === "deactivate" && token && user?.workspaceId && (
         <DeactivateLabourPanel
@@ -309,7 +310,7 @@ function WorkforceModule() {
           onComplete={async (action) => {
             await refreshOperationalData(); await Promise.all([refreshLabourers(), refreshAttendance(), refreshAdvances()]);
             setLabourAction(null); setSelectedLabourer(null);
-            showToast(action === "deleted" ? "Labour deleted successfully." : "Labour deactivated successfully.");
+            showToast(action === "deleted" ? t("workforcePage.labourDeleted") : t("workforcePage.labourDeactivated"));
           }}
         />
       )}
