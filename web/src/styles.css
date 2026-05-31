@@ -1232,9 +1232,8 @@ button {
 }
 
 .attendance-actions {
-  display: grid;
+  display: flex;
   gap: 8px;
-  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
 }
 
 .attendance-actions button {
@@ -1282,12 +1281,7 @@ button {
 }
 
 .attendance-entry-modal-body .attendance-actions {
-  background: var(--surface);
-  bottom: 0;
   margin: 0;
-  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
-  position: sticky;
-  z-index: 2;
 }
 
 .attendance-entry-controls {
@@ -1335,24 +1329,8 @@ button {
   grid-column: 1 / -1;
 }
 
-.attendance-filter-toggle {
-  align-items: center;
-  background: #fff !important;
-  border: 1px solid var(--border) !important;
-  color: var(--brand-primary) !important;
-  display: inline-flex;
-  justify-content: center;
-  min-width: 44px;
-  padding: 0 !important;
-}
-
-.attendance-filter-toggle.is-active {
-  background: var(--surface-soft) !important;
-  border-color: #b9d7a8 !important;
-}
-
 .attendance-entry-meta {
-  min-height: 22px;
+  min-height: 18px;
 }
 
 .attendance-totals {
@@ -1923,6 +1901,24 @@ button {
   color: var(--text-primary);
   font-weight: 750;
   margin-inline-start: auto;
+}
+
+.record-list__actions {
+  display: flex;
+  gap: 7px;
+  margin-inline-start: auto;
+}
+
+.record-list__actions button {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--brand-primary);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 750;
+  min-height: 34px;
+  padding: 6px 10px;
 }
 
 .advances-summary {
@@ -2546,9 +2542,12 @@ button {
     padding: 24px;
   }
 
-  .attendance-tools,
-  .attendance-actions {
+  .attendance-tools {
     grid-template-columns: 1fr;
+  }
+
+  .attendance-actions button {
+    width: 100%;
   }
 
   .workforce-mark-attendance {
@@ -3084,6 +3083,8 @@ button {
 .attendance-report-header { align-items: center; background: var(--surface-soft); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; padding: 15px 18px; position: sticky; top: 0; z-index: 2; }
 .attendance-report-header span { color: var(--brand-secondary); display: block; font-size: .7rem; font-weight: 800; letter-spacing: .08em; margin-bottom: 3px; text-transform: uppercase; }
 .attendance-report-header h2 { color: var(--brand-primary); font-size: 1.15rem; margin: 0; }
+.attendance-header-actions { align-items: center; display: flex; gap: 8px; }
+.attendance-header-actions .attendance-auto-save { background: var(--surface); border: 1px solid var(--border); border-radius: 999px; font-size: .7rem; justify-content: center; min-height: 26px; padding: 0 8px; white-space: nowrap; }
 .attendance-report-close { align-items: center; background: transparent; border: 0; border-radius: 7px; color: var(--text-secondary); display: inline-flex; justify-content: center; padding: 7px; }
 .attendance-report-close:hover { background: var(--surface-tint); color: var(--brand-primary); }
 .attendance-report-filters { display: grid; gap: .75rem; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; padding: 16px 18px; }
@@ -3230,7 +3231,8 @@ button {
 .attendance-import-note { background: var(--blue-bg); border-radius: 8px; padding: 9px; }
 .attendance-import-progress { align-items: center; background: var(--blue-bg); border-radius: 8px; display: flex; gap: 8px; padding: 10px; }
 .attendance-import-spinner { animation: attendance-import-spin .8s linear infinite; border: 2px solid var(--border); border-radius: 50%; border-top-color: var(--brand-secondary); display: inline-block; height: 18px; width: 18px; }
-.attendance-inactive-toggle { align-items: center; display: flex; gap: 8px; width: fit-content; }
+.attendance-inactive-toggle { align-items: center; color: var(--text-secondary); display: flex; font-size: .72rem; gap: 5px; width: fit-content; }
+.attendance-inactive-toggle input { height: 14px; margin: 0; width: 14px; }
 .worker-action-warning { background: var(--danger-bg); border-radius: 8px; color: var(--text); padding: 10px; }
 .worker-action-dialog .danger-button { background: var(--danger); color: #fff; }
 .worker-action-dialog .danger-button:disabled { opacity: .55; }

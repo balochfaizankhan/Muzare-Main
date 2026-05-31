@@ -69,6 +69,12 @@ function useData<T>(load: () => Promise<T[]>, setup?: () => Promise<void>) {
 
   useEffect(() => {
     void refresh();
+    window.addEventListener("muzare-data-refresh", refresh);
+    window.addEventListener("muzare-local-data-change", refresh);
+    return () => {
+      window.removeEventListener("muzare-data-refresh", refresh);
+      window.removeEventListener("muzare-local-data-change", refresh);
+    };
   }, [refresh]);
 
   return [records, refresh, setRecords] as const;
@@ -196,7 +202,6 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
   const [showAddLabour, setShowAddLabour] = useState(false);
   const [showAddGroup, setShowAddGroup] = useState(false);
   const [showAttendanceEntry, setShowAttendanceEntry] = useState(false);
-  const [showAttendanceFilters, setShowAttendanceFilters] = useState(false);
   const [showRegisterFilters, setShowRegisterFilters] = useState(false);
   const [labourAction, setLabourAction] = useState<"update" | "advance" | "production" | "payment" | "deactivate" | null>(null);
   const [newAttendanceLabourId, setNewAttendanceLabourId] = useState<string | null>(null);
@@ -434,10 +439,13 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
               <span>{t("workforcePage.dailyAttendance")}</span>
               <h2 id="mark-attendance-title">Mark Attendance</h2>
             </div>
-            <button className="attendance-report-close" type="button" onClick={() => {
-              if (onAttendanceClose) onAttendanceClose();
-              else setShowAttendanceEntry(false);
-            }} aria-label="Close mark attendance"><X size={19} /></button>
+            <div className="attendance-header-actions">
+              <span className={`attendance-auto-save attendance-auto-save--${sync.status}`} role="status" aria-live="polite">{attendanceSaveLabel}</span>
+              <button className="attendance-report-close" type="button" onClick={() => {
+                if (onAttendanceClose) onAttendanceClose();
+                else setShowAttendanceEntry(false);
+              }} aria-label="Close mark attendance"><X size={19} /></button>
+            </div>
           </header>
           <section className="record-panel daily-attendance-panel attendance-entry-modal-body">
             <div className="attendance-entry-controls">
@@ -452,15 +460,10 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
               <SearchInput className="attendance-entry-search" placeholder={t("workforcePage.searchLabour")} value={attendanceSearch} onChange={setAttendanceSearch} />
             </div>
             <div className="attendance-actions">
-              <button type="button" onClick={() => setDate(today())}>{t("common.today")}</button>
               {canManageLabour && <button type="button" onClick={() => setShowAddLabour(true)}>{t("workforcePage.addLabour")}</button>}
-              <button className={`attendance-filter-toggle ${showAttendanceFilters ? "is-active" : ""}`} type="button" aria-label="More attendance filters" onClick={() => setShowAttendanceFilters((current) => !current)}>
-                <MoreVertical size={18} />
-              </button>
             </div>
             <div className="attendance-entry-meta">
-              <span className={`attendance-auto-save attendance-auto-save--${sync.status}`} role="status" aria-live="polite">{attendanceSaveLabel}</span>
-              {showAttendanceFilters && <label className="attendance-inactive-toggle"><input type="checkbox" checked={showInactiveLabour} onChange={(event) => setShowInactiveLabour(event.target.checked)} /> {t("workforcePage.showInactive")}</label>}
+              <label className="attendance-inactive-toggle"><input type="checkbox" checked={showInactiveLabour} onChange={(event) => setShowInactiveLabour(event.target.checked)} /> {t("workforcePage.showInactive")}</label>
             </div>
             <div className="attendance-totals" aria-label={t("workforcePage.attendanceTotals")}>
               <button
@@ -1544,6 +1547,29 @@ function ExpensesModule() {
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
   const [accountId, setAccountId] = useState("");
+  const [vendor, setVendor] = useState("");
+  const [notes, setNotes] = useState("");
+  const [selectedVoucher, setSelectedVoucher] = useState<Voucher | null>(null);
+  const [editingVoucher, setEditingVoucher] = useState<Voucher | null>(null);
+  const showToast = (message: string) => window.dispatchEvent(new CustomEvent("muzare-toast", { detail: message }));
+  const resetForm = () => {
+    setDate(today()); setCategoryId(""); setCategorySearch(""); setSubcategoryId(""); setSubcategorySearch("");
+    setDescription(""); setAmount(""); setAccountId(""); setVendor(""); setNotes("");
+  };
+  const openEdit = (voucher: Voucher) => {
+    setSelectedVoucher(null); setEditingVoucher(voucher); setDate(voucher.date); setCategoryId(voucher.categoryId);
+    setCategorySearch(voucher.category); setSubcategoryId(voucher.subcategoryId); setSubcategorySearch(voucher.subcategory);
+    setDescription(voucher.description); setAmount(String(voucher.amount)); setAccountId(voucher.accountId);
+    setVendor(voucher.vendor ?? ""); setNotes(voucher.notes ?? "");
+  };
+  const nextLocalVoucherNumber = () => {
+    const year = date.slice(0, 4);
+    const highest = vouchers.reduce((max, item) => {
+      const match = /^EXP-\d{4}-(\d+)$/.exec(item.voucherNumber);
+      return match ? Math.max(max, Number(match[1])) : max;
+    }, 0);
+    return `EXP-${year}-${String(highest + 1).padStart(4, "0")}`;
+  };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -1551,18 +1577,21 @@ function ExpensesModule() {
     const subcategory = category?.subcategories.find((item) => item.id === subcategoryId);
     if (!category || !subcategory) return;
     const record: Voucher = {
-      ...makeLocalRecord(), voucherNumber: `V-${Date.now().toString().slice(-6)}`, date,
+      ...(editingVoucher ?? makeLocalRecord()), voucherNumber: editingVoucher?.voucherNumber ?? nextLocalVoucherNumber(), date,
       categoryId: category.id, category: category.name, subcategoryId: subcategory.id, subcategory: subcategory.name,
       description: description.trim(), amount: Number(amount), accountId: accountId || accounts[0]?.id || "",
+      vendor: vendor.trim() || undefined, notes: notes.trim() || undefined,
     };
     await persistOperationalRecord("voucher", record);
-    setDescription("");
-    setAmount("");
+    showToast(editingVoucher ? "Expense voucher updated successfully." : "Expense voucher saved successfully.");
+    setEditingVoucher(null);
+    resetForm();
     await refresh();
   };
   const total = vouchers.reduce((sum, item) => sum + item.amount, 0);
   const selectedCategory = categories.data?.categories.find((item) => item.id === categoryId);
   const canManage = Boolean(user && workspaceId && hasPermission(user, "MANAGE_EXPENSE_CATEGORIES", workspaceId));
+  const canEditVouchers = Boolean(user && workspaceId && hasPermission(user, "MANAGE_RECORDS", workspaceId));
   const grouped = [...vouchers.reduce((map, item) => {
     const category = map.get(item.category) ?? new Map<string, number>();
     category.set(item.subcategory || "Miscellaneous", (category.get(item.subcategory || "Miscellaneous") ?? 0) + item.amount);
@@ -1577,7 +1606,7 @@ function ExpensesModule() {
 
   return (
     <>
-      <FormCard title="New expense voucher">
+      <FormCard title={editingVoucher ? `Edit voucher ${editingVoucher.voucherNumber}` : "New expense voucher"}>
         <form className="module-form inline-form" onSubmit={(event) => void submit(event)}>
           <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
           <label><span>Category *</span><input required list="expense-category-options" placeholder="Select category" value={categorySearch} onChange={(event) => {
@@ -1591,13 +1620,33 @@ function ExpensesModule() {
           <select value={accountId || accounts[0]?.id || ""} onChange={(event) => setAccountId(event.target.value)}>
             {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
           </select>
-          <button type="submit">Save voucher</button>
+          <input value={vendor} placeholder="Vendor / person (optional)" onChange={(event) => setVendor(event.target.value)} />
+          <input value={notes} placeholder="Notes / reference (optional)" onChange={(event) => setNotes(event.target.value)} />
+          <button type="submit">{editingVoucher ? "Update voucher" : "Save voucher"}</button>
+          {editingVoucher && <button type="button" onClick={() => { setEditingVoucher(null); resetForm(); }}>Cancel edit</button>}
         </form>
       </FormCard>
       <Summary value={money(total)} label="Total expenses" />
       <section className="record-panel"><h2>Expenses by category</h2>{!grouped.length ? <Empty>No expense totals yet.</Empty> : <div className="expense-category-report">{grouped.map(([category, items]) => { const categoryTotal = [...items.values()].reduce((sum, amount) => sum + amount, 0); return <article key={category}><header><h3>{category}</h3><strong>{money(categoryTotal)}</strong></header>{[...items].map(([subcategory, amount]) => <p key={subcategory}><span>{subcategory}</span><strong>{money(amount)}</strong></p>)}<b>Category total <span>{money(categoryTotal)}</span></b></article>; })}</div>}</section>
       {canManage && <section className="record-panel"><h2>Custom subcategories</h2><form className="module-form compact-form" onSubmit={(event) => void addCustom(event)}><select required value={categoryId} onChange={(event) => { setCategoryId(event.target.value); setCategorySearch(categories.data?.categories.find((item) => item.id === event.target.value)?.name ?? ""); }}><option value="">Select category</option>{categories.data?.categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><input required placeholder="New subcategory" value={customName} onChange={(event) => setCustomName(event.target.value)} /><button type="submit">Add subcategory</button></form><div className="custom-subcategory-list">{categories.data?.categories.flatMap((item) => item.subcategories.filter((subcategory) => !subcategory.isSystem).map((subcategory) => <span key={subcategory.id}>{item.name} / {subcategory.name}<button type="button" onClick={() => { const name = window.prompt("Rename custom subcategory", subcategory.name); if (token && name?.trim()) void updateExpenseSubcategory(token, workspaceId, subcategory.id, { name: name.trim() }).then(() => categories.refetch()); }}>Rename</button><button type="button" onClick={() => token && void updateExpenseSubcategory(token, workspaceId, subcategory.id, { active: false }).then(() => categories.refetch())}>Disable</button></span>))}</div></section>}
-      <RecordTable empty="No vouchers recorded yet." rows={vouchers.map((item) => [item.voucherNumber, item.date, `${item.category} / ${item.subcategory || "Miscellaneous"}`, item.description, money(item.amount)])} />
+      <RecordTable
+        empty="No vouchers recorded yet."
+        rows={vouchers.map((item) => [item.voucherNumber, item.date, `${item.category} / ${item.subcategory || "Miscellaneous"}`, item.description, money(item.amount)])}
+        actions={vouchers.map((item) => <div className="record-list__actions" key={item.id}><button type="button" onClick={() => setSelectedVoucher(item)}>View details</button>{canEditVouchers && <button type="button" onClick={() => openEdit(item)}>Edit</button>}</div>)}
+      />
+      {selectedVoucher && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedVoucher(null)}>
+        <section className="worker-dialog" role="dialog" aria-modal="true" aria-label="Expense voucher details" onClick={(event) => event.stopPropagation()}>
+          <header className="worker-dialog__header"><h2>Voucher {selectedVoucher.voucherNumber}</h2><button type="button" onClick={() => setSelectedVoucher(null)}><X size={18} /></button></header>
+          <div className="worker-dialog__body"><dl className="worker-stats">
+            <div><dt>Date</dt><dd>{selectedVoucher.date}</dd></div><div><dt>Category</dt><dd>{selectedVoucher.category} / {selectedVoucher.subcategory}</dd></div>
+            <div><dt>Description</dt><dd>{selectedVoucher.description}</dd></div><div><dt>Amount</dt><dd>{money(selectedVoucher.amount)}</dd></div>
+            <div><dt>Payment source</dt><dd>{accounts.find((item) => item.id === selectedVoucher.accountId)?.name ?? "Unknown account"}</dd></div>
+            {selectedVoucher.vendor && <div><dt>Vendor / person</dt><dd>{selectedVoucher.vendor}</dd></div>}
+            {selectedVoucher.notes && <div><dt>Notes / reference</dt><dd>{selectedVoucher.notes}</dd></div>}
+          </dl></div>
+          <footer className="worker-dialog__footer">{canEditVouchers && <button className="worker-dialog__link" type="button" onClick={() => openEdit(selectedVoucher)}>Edit voucher</button>}<button className="worker-dialog__close" type="button" onClick={() => setSelectedVoucher(null)}>Close</button></footer>
+        </section>
+      </div>}
     </>
   );
 }
@@ -1798,13 +1847,13 @@ function Summary({ label, value }: { label: string; value: string }) {
   return <section className="summary-card"><span>{label}</span><strong>{value}</strong></section>;
 }
 
-function RecordTable({ empty, rows }: { empty: string; rows: string[][] }) {
+function RecordTable({ empty, rows, actions }: { empty: string; rows: string[][]; actions?: ReactNode[] }) {
   return (
     <section className="record-panel">
       <h2>Recent records</h2>
       {!rows.length ? <Empty>{empty}</Empty> : (
         <div className="record-list">
-          {rows.map((row, index) => <article key={`${row[0]}-${index}`}>{row.map((cell, item) => item === 0 ? <strong key={cell}>{cell}</strong> : <span key={`${cell}-${item}`}>{cell}</span>)}</article>)}
+          {rows.map((row, index) => <article key={`${row[0]}-${index}`}>{row.map((cell, item) => item === 0 ? <strong key={cell}>{cell}</strong> : <span key={`${cell}-${item}`}>{cell}</span>)}{actions?.[index]}</article>)}
         </div>
       )}
     </section>

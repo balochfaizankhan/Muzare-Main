@@ -40,7 +40,7 @@ test("farm and season switching scope browser records to the selected context", 
 
 test("attendance report query keys include tenant context and date range", async () => {
   const modulePage = await source("web/src/pages/ModulePage.tsx");
-  assert.match(modulePage, /queryKey: \["attendance-report", workspaceId, farmId, seasonId, submitted\?\.from, submitted\?\.to, submitted\?\.labourId, submitted\?\.status\]/);
+  assert.match(modulePage, /queryKey: \["attendance-report", workspaceId, farmId, seasonId, submitted\?\.from, submitted\?\.to, submitted\?\.labourIds\?\.join\(","\), submitted\?\.status\]/);
 });
 
 test("operational writes queue locally before background sync", async () => {
@@ -70,7 +70,7 @@ test("attendance marking updates local UI immediately, reuses a daily record, an
   assert.match(modulePage, /attendance\.find\(\(entry\) =>[\s\S]*entry\.labourerId === targetLabourerId[\s\S]*entry\.date === date/);
   assert.match(modulePage, /if \(existing\?\.status === status\) \{[\s\S]*setAttendance\(\(current\) => current\.filter\(\(entry\) => entry\.id !== existing\.id\)\);[\s\S]*await deleteOperationalRecord\("attendance", existing\);/);
   assert.match(modulePage, /setAttendance\(\(current\) => \[record, \.\.\.current\.filter\(\(entry\) => entry\.id !== record\.id\)\]\);\s+await persistOperationalRecord/);
-  assert.match(modulePage, /disabled=\{markingLabourers\.has\(labourer\.id\)\}/);
+  assert.match(modulePage, /disabled=\{!markable \|\| markingLabourers\.has\(labourer\.id\)\}/);
   assert.match(sync, /operation: "delete"/);
   assert.match(sync, /if \(mutation\.operation === "delete"\) \{[\s\S]*await deleteOperationalRecordFromApi/);
   assert.match(sync, /pendingDeletes\.has\(`\$\{context\.workspaceId\}:\$\{item\.entity\}:\$\{item\.record\.id\}`\)/);
@@ -189,7 +189,7 @@ test("workforce screen provides add-labour modal, independent advance report, an
   assert.match(modulePage, /setShowAddLabour\(true\)/);
   assert.match(modulePage, /function AddLabourPanel\(/);
   assert.match(modulePage, /function AdvanceReportPanel\(/);
-  assert.match(modulePage, /queryKey: \["advance-report", workspaceId, farmId, seasonId/);
+  assert.match(modulePage, /queryKey: \[[\s\S]*"advance-report",[\s\S]*workspaceId,[\s\S]*farmId,[\s\S]*seasonId/);
 });
 
 test("attendance import confirmation batches writes and shows bounded progress feedback", async () => {
@@ -232,7 +232,7 @@ test("labour lifecycle UI preserves history and hides inactive labour from daily
   assert.match(route, /action: "labour_deactivated"/);
   assert.match(api, /fetchLabourDeletionPreview/);
   assert.match(api, /deleteOrDeactivateLabour/);
-  assert.match(modulePage, /showInactiveLabour \|\| labourer\.active !== false/);
+  assert.match(modulePage, /showInactiveLabour \|\| canMarkAttendanceOn\(labourer, date\)/);
   assert.match(modulePage, /workforcePage\.showInactive/);
   assert.match(modulePage, /reports\.typeDeleteConfirm/);
   assert.match(modulePage, /errors\.syncPendingBeforeDeactivate/);

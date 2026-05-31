@@ -109,6 +109,7 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
       if (latest?.updatedAt !== mutation.updatedAt) continue;
       await cacheRecord(mutation.entity, response.record, false, mutation.farmId, mutation.seasonId);
       await offlineDb.pendingMutations.delete(mutation.id);
+      window.dispatchEvent(new Event("muzare-local-data-change"));
       synced += 1;
     } catch (error) {
       if (error instanceof Error && error.message.includes("PostgreSQL is the primary workspace database")) {

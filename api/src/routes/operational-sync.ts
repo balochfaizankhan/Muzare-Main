@@ -1,10 +1,10 @@
 import type { FastifyInstance } from "fastify";
-import { and, desc, eq, isNull, or } from "drizzle-orm";
+import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireUser, type AuthenticatedUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
-import { auditLogs, operationalRecords, userSessions } from "../db/schema.js";
+import { auditLogs, expenseVoucherSequences, operationalRecords, userSessions } from "../db/schema.js";
 import { hasPermission } from "../permissions.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
 import { resolveExpenseCategory } from "./expense-categories.js";
@@ -68,6 +68,36 @@ async function sessionContext(sessionId?: string) {
   const [session] = await db.select({ activeFarmId: userSessions.activeFarmId, activeSeasonId: userSessions.activeSeasonId })
     .from(userSessions).where(eq(userSessions.id, sessionId)).limit(1);
   return session ?? null;
+}
+
+function voucherScopeKey(farmId: string, seasonId?: string | null) {
+  return seasonId ? `season:${seasonId}` : `farm:${farmId}:general`;
+}
+
+function voucherYear(record: Record<string, unknown>) {
+  const date = typeof record.date === "string" ? record.date : "";
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date.slice(0, 4) : String(new Date().getUTCFullYear());
+}
+
+async function allocateVoucherNumber(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  workspaceId: string,
+  farmId: string,
+  seasonId: string | null | undefined,
+  record: Record<string, unknown>,
+) {
+  const [sequence] = await tx.insert(expenseVoucherSequences).values({
+    workspaceId,
+    scopeKey: voucherScopeKey(farmId, seasonId),
+    lastNumber: 1,
+  }).onConflictDoUpdate({
+    target: [expenseVoucherSequences.workspaceId, expenseVoucherSequences.scopeKey],
+    set: {
+      lastNumber: sql`${expenseVoucherSequences.lastNumber} + 1`,
+      updatedAt: new Date(),
+    },
+  }).returning({ lastNumber: expenseVoucherSequences.lastNumber });
+  return `EXP-${voucherYear(record)}-${String(sequence!.lastNumber).padStart(4, "0")}`;
 }
 
 export async function operationalSyncRoutes(app: FastifyInstance): Promise<void> {
@@ -145,6 +175,12 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       eq(operationalRecords.entityType, parsed.data.entity),
       eq(operationalRecords.clientRecordId, parsed.data.record.id),
     )).limit(1);
+    if (existing && (existing.farmId !== (parsed.data.farmId ?? null) || existing.seasonId !== (parsed.data.seasonId ?? null))) {
+      return reply.code(403).send({ message: "Operational record does not belong to the selected farm and season." });
+    }
+    if (existing && parsed.data.entity === "voucher" && !hasPermission(request.appUser, "MANAGE_RECORDS", parsed.data.workspaceId)) {
+      return reply.code(403).send({ message: "Workspace record management permission is required to update expense vouchers." });
+    }
     const clientUpdatedAt = new Date(parsed.data.record.updatedAt);
     if (existing && existing.clientUpdatedAt > clientUpdatedAt) {
       await db.insert(auditLogs).values({
@@ -161,14 +197,37 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         details: { clientRecordId: parsed.data.record.id, clientUpdatedAt: parsed.data.record.updatedAt, databaseUpdatedAt: existing.clientUpdatedAt.toISOString() },
       });
     }
+    const payload = expenseCategory ? { ...parsed.data.record, ...expenseCategory } : parsed.data.record;
     const values = {
       workspaceId: parsed.data.workspaceId, farmId: parsed.data.farmId, seasonId: parsed.data.seasonId,
-      clientRecordId: parsed.data.record.id, entityType: parsed.data.entity, payload: expenseCategory ? { ...parsed.data.record, ...expenseCategory } : parsed.data.record,
+      clientRecordId: parsed.data.record.id, entityType: parsed.data.entity, payload,
       recordedBy: request.appUser.id, clientUpdatedAt, updatedAt: new Date(),
     };
     const [saved] = existing
-      ? await db.update(operationalRecords).set(values).where(eq(operationalRecords.id, existing.id)).returning()
-      : await db.insert(operationalRecords).values(values).returning();
+      ? await db.update(operationalRecords).set({
+          ...values,
+          payload: parsed.data.entity === "voucher"
+            ? { ...payload, voucherNumber: existing.payload.voucherNumber, createdBy: existing.payload.createdBy, updatedBy: request.appUser.id }
+            : payload,
+        }).where(eq(operationalRecords.id, existing.id)).returning()
+      : await db.transaction(async (tx) => {
+          const createdPayload = parsed.data.entity === "voucher"
+            ? {
+                ...payload,
+                voucherNumber: await allocateVoucherNumber(tx, parsed.data.workspaceId, parsed.data.farmId!, parsed.data.seasonId, payload),
+                createdBy: request.appUser!.id,
+                updatedBy: request.appUser!.id,
+              }
+            : payload;
+          return tx.insert(operationalRecords).values({ ...values, payload: createdPayload }).returning();
+        });
+    if (existing && parsed.data.entity === "voucher") {
+      await db.insert(auditLogs).values({
+        workspaceId: parsed.data.workspaceId, userId: request.appUser.id, farmId: parsed.data.farmId,
+        action: "expense_voucher_updated", entityType: parsed.data.entity, entityId: existing.id,
+        details: { clientRecordId: parsed.data.record.id, before: existing.payload, after: saved!.payload },
+      });
+    }
     return { record: { ...saved!.payload, id: saved!.clientRecordId, updatedAt: saved!.clientUpdatedAt.toISOString() }, conflict: false };
   });
 

@@ -212,6 +212,44 @@ test("expense categories seed defaults, protect system values, and isolate works
   }))).statusCode, 403);
 });
 
+test("expense vouchers receive scoped readable numbers and keep them when edited", async () => {
+  const firstId = randomUUID();
+  const first = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", firstId, {
+    date: "2026-05-20", description: "Original expense", amount: 100,
+  }));
+  assert.equal(first.statusCode, 200);
+  assert.match(first.json().record.voucherNumber, /^EXP-2026-\d{4}$/);
+
+  const [second, third] = await Promise.all([
+    request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", randomUUID(), {
+      date: "2026-05-21", description: "Concurrent expense A", amount: 120,
+    })),
+    request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", randomUUID(), {
+      date: "2026-05-21", description: "Concurrent expense B", amount: 140,
+    })),
+  ]);
+  assert.equal(second.statusCode, 200);
+  assert.equal(third.statusCode, 200);
+  assert.notEqual(second.json().record.voucherNumber, third.json().record.voucherNumber);
+
+  const edited = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", firstId, {
+    createdAt: first.json().record.createdAt,
+    updatedAt: new Date(Date.now() + 1_000).toISOString(),
+    voucherNumber: "EXP-2099-9999",
+    date: "2026-05-22",
+    description: "Corrected expense",
+    amount: 175,
+  }));
+  assert.equal(edited.statusCode, 200);
+  assert.equal(edited.json().record.voucherNumber, first.json().record.voucherNumber);
+  assert.equal(edited.json().record.description, "Corrected expense");
+  assert.equal(edited.json().record.amount, 175);
+  assert.equal((await db.select().from(auditLogs).where(and(
+    eq(auditLogs.workspaceId, alpha.workspaceId),
+    eq(auditLogs.action, "expense_voucher_updated"),
+  ))).some((item) => item.details && (item.details as { clientRecordId?: string }).clientRecordId === firstId), true);
+});
+
 test("attendance reports calculate payable wages and reject foreign workspace or farm labour", async () => {
   const labourerId = randomUUID();
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", labourerId, {

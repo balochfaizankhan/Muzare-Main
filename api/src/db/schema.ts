@@ -449,6 +449,17 @@ export const operationalRecords = pgTable(
   ],
 );
 
+export const expenseVoucherSequences = pgTable(
+  "expense_voucher_sequences",
+  {
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+    scopeKey: text("scope_key").notNull(),
+    lastNumber: integer("last_number").default(0).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [uniqueIndex("expense_voucher_sequences_scope_uidx").on(table.workspaceId, table.scopeKey)],
+);
+
 export const attendanceImportSessions = pgTable("attendance_import_sessions", {
   id: uuid("id").defaultRandom().primaryKey(),
   workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
