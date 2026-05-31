@@ -9,7 +9,20 @@ import { hasPermission } from "../permissions.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
 import { resolveExpenseCategory } from "./expense-categories.js";
 
-const entities = ["labourer", "attendance", "account", "advance", "dispatch", "sale", "voucher", "partnerEntry", "inventoryEntry"] as const;
+const entities = [
+  "labourer",
+  "labourGroup",
+  "attendance",
+  "account",
+  "advance",
+  "labourPayment",
+  "productionEntry",
+  "dispatch",
+  "sale",
+  "voucher",
+  "partnerEntry",
+  "inventoryEntry",
+] as const;
 const recordSchema = z.object({
   workspaceId: z.string().uuid(),
   farmId: z.string().uuid().nullable().optional(),
@@ -38,7 +51,17 @@ function requireEntityWrite(user: AuthenticatedUser, workspaceId: string, entity
   return !["labourer", "account"].includes(entity) || hasPermission(user, "MANAGE_RECORDS", workspaceId);
 }
 
-const seasonRequiredEntities = new Set<typeof entities[number]>(["attendance", "advance", "dispatch", "sale", "voucher", "partnerEntry", "inventoryEntry"]);
+const seasonRequiredEntities = new Set<typeof entities[number]>([
+  "attendance",
+  "advance",
+  "labourPayment",
+  "productionEntry",
+  "dispatch",
+  "sale",
+  "voucher",
+  "partnerEntry",
+  "inventoryEntry",
+]);
 
 async function sessionContext(sessionId?: string) {
   if (!sessionId) return null;
@@ -109,6 +132,8 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       seasonId: parsed.data.seasonId,
       accountId: parsed.data.record.accountId,
       ledgerId: parsed.data.record.ledgerId,
+      labourerId: parsed.data.record.labourerId,
+      groupId: parsed.data.record.groupId,
     });
     if (ownershipError) return reply.code(403).send({ message: ownershipError });
     const expenseCategory = parsed.data.entity === "voucher"

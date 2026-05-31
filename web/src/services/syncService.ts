@@ -14,9 +14,9 @@ let state: SyncState = { status: navigator.onLine ? "online" : "offline", pendin
 const maxAutomaticAttempts = 3;
 
 const tables = {
-  labourer: offlineDb.labourers, attendance: offlineDb.attendance, account: offlineDb.accounts,
+  labourer: offlineDb.labourers, labourGroup: offlineDb.labourGroups, attendance: offlineDb.attendance, account: offlineDb.accounts,
   dispatch: offlineDb.dispatches, sale: offlineDb.sales, voucher: offlineDb.vouchers, partnerEntry: offlineDb.partnerEntries,
-  advance: offlineDb.advances, inventoryEntry: offlineDb.inventoryEntries,
+  advance: offlineDb.advances, labourPayment: offlineDb.labourPayments, productionEntry: offlineDb.productionEntries, inventoryEntry: offlineDb.inventoryEntries,
 } as const;
 
 function emit(next: Partial<SyncState> = {}) {

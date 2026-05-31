@@ -21,7 +21,10 @@ import {
   type Attendance,
   type Dispatch,
   type Labourer,
+  type LabourGroup,
+  type LabourPayment,
   type PartnerEntry,
+  type ProductionEntry,
   type Sale,
   type Voucher,
 } from "../lib/offline-db";
@@ -31,6 +34,20 @@ export type ModuleKey = "workforce" | "expenses" | "sales" | "dispatch" | "accou
 
 const today = () => new Date().toISOString().slice(0, 10);
 const money = formatMoney;
+const paymentTypes = ["daily_wage", "production_based", "contract_lump_sum", "monthly_salary", "other"] as const;
+type PaymentType = typeof paymentTypes[number];
+
+const labourPaymentSummary = (labourer: Labourer) => {
+  const type = labourer.paymentType ?? "daily_wage";
+  if (type === "production_based") {
+    const unit = labourer.productionUnit === "custom" ? labourer.customProductionUnit || "unit" : labourer.productionUnit || "unit";
+    return `${money(labourer.productionUnitRate ?? 0)}/${unit}`;
+  }
+  if (type === "contract_lump_sum") return `${money(labourer.contractAmount ?? 0)} contract`;
+  if (type === "monthly_salary") return `${money(labourer.monthlySalary ?? 0)}/month`;
+  if (type === "other") return labourer.otherPaymentRate ? money(labourer.otherPaymentRate) : (labourer.otherPaymentDescription || "Other");
+  return `${money(labourer.dailyWage)}/day`;
+};
 
 function useData<T>(load: () => Promise<T[]>, setup?: () => Promise<void>) {
   const [records, setRecords] = useState<T[]>([]);
@@ -64,14 +81,22 @@ function WorkforceModule() {
   const { token, user } = useAuth();
   const sync = useSyncState();
   const loadLabourers = useCallback(async () => (await workspaceRecords(offlineDb.labourers)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
+  const loadGroups = useCallback(async () => (await workspaceRecords(offlineDb.labourGroups)).sort((a, b) => a.name.localeCompare(b.name)), []);
   const loadAttendance = useCallback(async () => (await workspaceRecords(offlineDb.attendance)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadAdvances = useCallback(async () => (await workspaceRecords(offlineDb.advances)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
+  const loadProductionEntries = useCallback(async () => (await workspaceRecords(offlineDb.productionEntries)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
+  const loadPayments = useCallback(async () => (await workspaceRecords(offlineDb.labourPayments)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const [labourers, refreshLabourers] = useData(loadLabourers);
+  const [groups, refreshGroups] = useData(loadGroups);
   const [attendance, refreshAttendance, setAttendance] = useData(loadAttendance);
   const [advances, refreshAdvances, setAdvances] = useData(loadAdvances);
+  const [productionEntries, refreshProductionEntries, setProductionEntries] = useData(loadProductionEntries);
+  const [payments, refreshPayments, setPayments] = useData(loadPayments);
   const [date, setDate] = useState(today());
   const [attendanceSearch, setAttendanceSearch] = useState("");
   const [labourSearch, setLabourSearch] = useState("");
+  const [groupFilterId, setGroupFilterId] = useState<string>("all");
+  const [paymentTypeFilter, setPaymentTypeFilter] = useState<PaymentType | "all">("all");
   const [attendanceFilter, setAttendanceFilter] = useState<Attendance["status"] | "all">("all");
   const [showInactiveLabour, setShowInactiveLabour] = useState(false);
   const [selectedLabourer, setSelectedLabourer] = useState<Labourer | null>(null);
@@ -80,7 +105,8 @@ function WorkforceModule() {
   const [showAdvanceReport, setShowAdvanceReport] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showAddLabour, setShowAddLabour] = useState(false);
-  const [labourAction, setLabourAction] = useState<"update" | "advance" | "deactivate" | null>(null);
+  const [showAddGroup, setShowAddGroup] = useState(false);
+  const [labourAction, setLabourAction] = useState<"update" | "advance" | "production" | "payment" | "deactivate" | null>(null);
 
   const markAttendance = async (targetLabourerId: string, status: Attendance["status"]) => {
     if (markingLabourers.has(targetLabourerId)) return;
@@ -124,7 +150,8 @@ function WorkforceModule() {
     const matchesActive = showInactiveLabour || labourer.active !== false;
     const matchesStatus = attendanceFilter === "all" || status === attendanceFilter;
     const matchesSearch = labourer.name.toLowerCase().includes(attendanceSearch.trim().toLowerCase());
-    return matchesActive && matchesStatus && matchesSearch;
+    const matchesGroup = groupFilterId === "all" || labourer.groupId === groupFilterId;
+    return matchesActive && matchesStatus && matchesSearch && matchesGroup;
   });
   const presentToday = [...attendanceByLabourer.values()].filter((item) => item === "present").length;
   const halfDayToday = [...attendanceByLabourer.values()].filter((item) => item === "half_day").length;
@@ -136,17 +163,32 @@ function WorkforceModule() {
     return labourer.name.toLowerCase().includes(term)
       || (labourer.phone ?? "").toLowerCase().includes(term)
       || (labourer.labourType ?? "").toLowerCase().includes(term)
+      || (labourer.group ?? "").toLowerCase().includes(term)
       || status.includes(term);
-  });
+  }).filter((labourer) => (groupFilterId === "all" || labourer.groupId === groupFilterId)
+    && (paymentTypeFilter === "all" || (labourer.paymentType ?? "daily_wage") === paymentTypeFilter));
   const selectedAttendance = selectedLabourer
     ? attendance.filter((entry) => entry.labourerId === selectedLabourer.id)
     : [];
   const presentCount = selectedAttendance.filter((entry) => entry.status === "present").length;
   const halfDayCount = selectedAttendance.filter((entry) => entry.status === "half_day").length;
   const absentCount = selectedAttendance.filter((entry) => entry.status === "absent").length;
-  const totalEarnings = selectedLabourer ? (presentCount + halfDayCount * 0.5) * selectedLabourer.dailyWage : 0;
+  const productionEarnings = selectedLabourer
+    ? productionEntries.filter((entry) => entry.labourerId === selectedLabourer.id).reduce((sum, entry) => sum + entry.amount, 0)
+    : 0;
+  const monthlyEarnings = selectedLabourer?.paymentType === "monthly_salary" ? (selectedLabourer.monthlySalary ?? 0) : 0;
+  const contractEarnings = selectedLabourer?.paymentType === "contract_lump_sum" ? (selectedLabourer.contractAmount ?? 0) : 0;
+  const attendanceEarnings = selectedLabourer ? (presentCount + halfDayCount * 0.5) * selectedLabourer.dailyWage : 0;
+  const totalEarnings = selectedLabourer?.paymentType === "production_based"
+    ? productionEarnings
+    : selectedLabourer?.paymentType === "monthly_salary"
+      ? monthlyEarnings
+      : selectedLabourer?.paymentType === "contract_lump_sum"
+        ? contractEarnings
+        : attendanceEarnings;
   const advanceAmount = selectedLabourer ? advances.filter((entry) => entry.labourerId === selectedLabourer.id).reduce((sum, entry) => sum + entry.amount, 0) : 0;
-  const netBalance = totalEarnings - advanceAmount;
+  const paidAmount = selectedLabourer ? payments.filter((entry) => entry.labourerId === selectedLabourer.id).reduce((sum, entry) => sum + entry.amount, 0) : 0;
+  const netBalance = totalEarnings - advanceAmount - paidAmount;
   const canManageLabour = Boolean(user?.workspaceId && hasPermission(user, "MANAGE_TEAM", user.workspaceId));
   const canAddAdvance = Boolean(user?.workspaceId && hasPermission(user, "MANAGE_RECORDS", user.workspaceId));
   const showToast = (message: string) => window.dispatchEvent(new CustomEvent("muzare-toast", { detail: message }));
@@ -161,6 +203,18 @@ function WorkforceModule() {
     setAdvances((current) => [record, ...current.filter((entry) => entry.id !== record.id)]);
     await persistOperationalRecord("advance", record);
     showToast(t("workforcePage.advanceAdded"));
+  };
+  const saveGroup = async (record: LabourGroup) => {
+    await persistOperationalRecord("labourGroup", record);
+    await refreshGroups();
+  };
+  const saveProduction = async (record: ProductionEntry) => {
+    setProductionEntries((current) => [record, ...current.filter((entry) => entry.id !== record.id)]);
+    await persistOperationalRecord("productionEntry", record);
+  };
+  const savePayment = async (record: LabourPayment) => {
+    setPayments((current) => [record, ...current.filter((entry) => entry.id !== record.id)]);
+    await persistOperationalRecord("labourPayment", record);
   };
 
   return (
@@ -183,6 +237,10 @@ function WorkforceModule() {
             </select>
             <input placeholder={t("workforcePage.searchLabour")} value={attendanceSearch} onChange={(event) => setAttendanceSearch(event.target.value)} />
             <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+            <select value={groupFilterId} onChange={(event) => setGroupFilterId(event.target.value)}>
+              <option value="all">All groups</option>
+              {groups.filter((group) => group.active !== false).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+            </select>
           </div>
           <div className="attendance-actions">
             <button type="button" onClick={() => setDate(today())}>{t("common.today")}</button>
@@ -226,7 +284,16 @@ function WorkforceModule() {
         <h2>{t("workforcePage.labourRegister")}</h2>
         <div className="attendance-tools">
           <input placeholder={t("workforcePage.searchRegister")} value={labourSearch} onChange={(event) => setLabourSearch(event.target.value)} />
+          <select value={paymentTypeFilter} onChange={(event) => setPaymentTypeFilter(event.target.value as PaymentType | "all")}>
+            <option value="all">All payment types</option>
+            <option value="daily_wage">Daily Wage</option>
+            <option value="production_based">Production Based</option>
+            <option value="contract_lump_sum">Contract / Lump Sum</option>
+            <option value="monthly_salary">Monthly Salary</option>
+            <option value="other">Other</option>
+          </select>
           <button type="button" onClick={() => setLabourSearch("")}>{t("common.clear")}</button>
+          {canManageLabour && <button type="button" onClick={() => setShowAddGroup(true)}>Add Group</button>}
         </div>
         {!labourers.length ? <Empty>{t("workforcePage.noLabourRecorded")}</Empty> : !filteredRegister.length ? <Empty>{t("workforcePage.noLabourFound")}</Empty> : (
           <div className="record-list workforce-list">
@@ -235,7 +302,7 @@ function WorkforceModule() {
                 <span className="workforce-row__index">{index + 1}</span>
                 <span className="workforce-row__body">
                   <strong>{labourer.name}</strong>
-                  <span>{labourer.group} | {labourer.phone || t("workforcePage.noPhone")} | {labourer.labourType ?? t("workforcePage.dailyWage")} | {labourer.active === false ? t("common.inactive") : t("common.active")}</span>
+                  <span>{labourer.group} | {labourPaymentSummary(labourer)} | {labourer.phone || t("workforcePage.noPhone")} | {labourer.labourType ?? t("workforcePage.dailyWage")} | {labourer.active === false ? t("common.inactive") : t("common.active")}</span>
                 </span>
                 <span className="workforce-row__action">{t("common.details")}</span>
               </button>
@@ -248,6 +315,14 @@ function WorkforceModule() {
         {!attendance.length ? <Empty>{t("workforcePage.noAttendance")}</Empty> : (
           <div className="record-list">
             {attendance.map((entry) => <article key={entry.id}><strong>{names.get(entry.labourerId) ?? t("workforcePage.labourFallback")}</strong><span>{entry.date} | {entry.status.replace("_", " ")}</span></article>)}
+          </div>
+        )}
+      </section>
+      <section className="record-panel">
+        <h2>Recent production entries</h2>
+        {!productionEntries.length ? <Empty>No production entries recorded yet.</Empty> : (
+          <div className="record-list">
+            {productionEntries.map((entry) => <article key={entry.id}><strong>{names.get(entry.labourerId) ?? t("workforcePage.labourFallback")}</strong><span>{entry.date} | {entry.units} {entry.productionUnit} x {money(entry.unitRate)} = {money(entry.amount)}</span></article>)}
           </div>
         )}
       </section>
@@ -267,6 +342,9 @@ function WorkforceModule() {
               <h3>Attendance Statistics</h3>
               <dl className="worker-stats">
                 <div><dt>Status</dt><dd className={selectedLabourer.active === false ? "negative" : "positive"}>{selectedLabourer.active === false ? "Inactive" : "Active"}</dd></div>
+                <div><dt>Payment Type</dt><dd>{(selectedLabourer.paymentType ?? "daily_wage").replaceAll("_", " ")}</dd></div>
+                <div><dt>Payment Summary</dt><dd>{labourPaymentSummary(selectedLabourer)}</dd></div>
+                <div><dt>Group</dt><dd>{selectedLabourer.group}</dd></div>
                 <div><dt>Labour Type</dt><dd>{selectedLabourer.labourType ?? "Daily Wage"}</dd></div>
                 <div><dt>Join Date</dt><dd>{selectedLabourer.joinedOn ?? selectedLabourer.createdAt.slice(0, 10)}</dd></div>
                 <div><dt>End Date</dt><dd>{selectedLabourer.endedOn || "-"}</dd></div>
@@ -280,12 +358,15 @@ function WorkforceModule() {
                 <div><dt>Daily Wage (SAR)</dt><dd>{money(selectedLabourer.dailyWage)}</dd></div>
                 <div><dt>Total Earnings</dt><dd className="positive">{money(totalEarnings)}</dd></div>
                 <div><dt>Advance</dt><dd className={advanceAmount > 0 ? "negative" : ""}>{money(advanceAmount)}</dd></div>
+                <div><dt>Payments</dt><dd className={paidAmount > 0 ? "negative" : ""}>{money(paidAmount)}</dd></div>
                 <div><dt>Net Balance</dt><dd className={netBalance < 0 ? "negative" : "positive"}>{money(netBalance)}</dd></div>
               </dl>
             </div>
             <footer className="worker-dialog__footer">
               {canManageLabour && <button className="worker-dialog__link" type="button" onClick={() => setLabourAction("update")}>Update</button>}
               {canAddAdvance && <button className="worker-dialog__link" type="button" onClick={() => setLabourAction("advance")}>Advance</button>}
+              {canAddAdvance && selectedLabourer.paymentType === "production_based" && <button className="worker-dialog__link" type="button" onClick={() => setLabourAction("production")}>Production</button>}
+              {canAddAdvance && <button className="worker-dialog__link" type="button" onClick={() => setLabourAction("payment")}>Payment</button>}
               {canManageLabour && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => {
                 if (!navigator.onLine || sync.pendingCount > 0) showToast(t("errors.syncPendingBeforeDeactivate"));
                 else setLabourAction("deactivate");
@@ -297,9 +378,16 @@ function WorkforceModule() {
       )}
       {selectedLabourer && labourAction === "update" && <EditLabourPanel labourer={selectedLabourer} onClose={() => setLabourAction(null)} onSave={saveLabour} />}
       {selectedLabourer && labourAction === "advance" && <AddAdvancePanel labourer={selectedLabourer} onClose={() => setLabourAction(null)} onSave={saveAdvance} />}
-      {showAddLabour && <AddLabourPanel onClose={() => setShowAddLabour(false)} onSave={async (record) => {
+      {selectedLabourer && labourAction === "production" && <AddProductionPanel labourer={selectedLabourer} onClose={() => setLabourAction(null)} onSave={saveProduction} />}
+      {selectedLabourer && labourAction === "payment" && <AddPaymentPanel labourer={selectedLabourer} onClose={() => setLabourAction(null)} onSave={savePayment} />}
+      {showAddGroup && <AddGroupPanel onClose={() => setShowAddGroup(false)} onSave={async (record) => {
+        await saveGroup(record);
+        setShowAddGroup(false);
+      }} />}
+      {showAddLabour && <AddLabourPanel groups={groups} onCreateGroup={saveGroup} onClose={() => setShowAddLabour(false)} onSave={async (record) => {
         await persistOperationalRecord("labourer", record);
         await refreshLabourers();
+        await refreshGroups();
         setShowAddLabour(false);
         showToast(t("workforcePage.labourAdded"));
       }} />}
@@ -308,7 +396,7 @@ function WorkforceModule() {
           token={token} workspaceId={user.workspaceId} labourer={selectedLabourer}
           onClose={() => setLabourAction(null)}
           onComplete={async (action) => {
-            await refreshOperationalData(); await Promise.all([refreshLabourers(), refreshAttendance(), refreshAdvances()]);
+            await refreshOperationalData(); await Promise.all([refreshLabourers(), refreshAttendance(), refreshAdvances(), refreshPayments(), refreshProductionEntries()]);
             setLabourAction(null); setSelectedLabourer(null);
             showToast(action === "deleted" ? t("workforcePage.labourDeleted") : t("workforcePage.labourDeactivated"));
           }}
@@ -338,29 +426,139 @@ function WorkforceModule() {
         <AttendanceImportPanel
           token={token} workspaceId={user.workspaceId} farmId={sync.farmId} seasonId={sync.seasonId}
           onClose={() => setShowImport(false)}
-          onImported={() => Promise.all([refreshLabourers(), refreshAttendance(), refreshAdvances()]).then(() => undefined)}
+          onImported={() => Promise.all([refreshLabourers(), refreshAttendance(), refreshAdvances(), refreshPayments(), refreshProductionEntries()]).then(() => undefined)}
         />
       )}
     </>
   );
 }
 
+type LabourEditorForm = {
+  name: string;
+  labourType: string;
+  paymentType: PaymentType;
+  group: string;
+  groupId: string;
+  dailyWage: string;
+  productionUnit: string;
+  customProductionUnit: string;
+  productionUnitRate: string;
+  minimumGuarantee: string;
+  contractTitle: string;
+  contractAmount: string;
+  contractStartDate: string;
+  contractExpectedEndDate: string;
+  contractTerms: string;
+  monthlySalary: string;
+  paymentDay: string;
+  otherPaymentDescription: string;
+  otherPaymentRate: string;
+  active: boolean;
+  joinedOn: string;
+  endedOn: string;
+  phone: string;
+  notes: string;
+};
+
+function LabourPaymentFields({ form, setForm }: { form: LabourEditorForm; setForm: (next: LabourEditorForm) => void }) {
+  return <>
+    <label><span>Payment type *</span><select required value={form.paymentType} onChange={(event) => setForm({ ...form, paymentType: event.target.value as PaymentType })}>
+      <option value="daily_wage">Daily Wage</option>
+      <option value="production_based">Production Based</option>
+      <option value="contract_lump_sum">Contract / Lump Sum</option>
+      <option value="monthly_salary">Monthly Salary</option>
+      <option value="other">Other</option>
+    </select></label>
+    {form.paymentType === "daily_wage" && <label><span>Daily wage rate *</span><input required min="0" step="0.01" type="number" value={form.dailyWage} onChange={(event) => setForm({ ...form, dailyWage: event.target.value })} /></label>}
+    {form.paymentType === "production_based" && <>
+      <label><span>Production unit *</span><select value={form.productionUnit} onChange={(event) => setForm({ ...form, productionUnit: event.target.value })}>
+        <option value="carton">Carton</option><option value="crate">Crate</option><option value="tree">Tree</option><option value="task">Task</option><option value="custom">Custom</option>
+      </select></label>
+      {form.productionUnit === "custom" && <label><span>Custom unit name *</span><input required value={form.customProductionUnit} onChange={(event) => setForm({ ...form, customProductionUnit: event.target.value })} /></label>}
+      <label><span>Unit rate *</span><input required min="0" step="0.01" type="number" value={form.productionUnitRate} onChange={(event) => setForm({ ...form, productionUnitRate: event.target.value })} /></label>
+      <label><span>Minimum guarantee</span><input min="0" step="0.01" type="number" value={form.minimumGuarantee} onChange={(event) => setForm({ ...form, minimumGuarantee: event.target.value })} /></label>
+    </>}
+    {form.paymentType === "contract_lump_sum" && <>
+      <label><span>Contract title/name</span><input value={form.contractTitle} onChange={(event) => setForm({ ...form, contractTitle: event.target.value })} /></label>
+      <label><span>Total contract amount *</span><input required min="0" step="0.01" type="number" value={form.contractAmount} onChange={(event) => setForm({ ...form, contractAmount: event.target.value })} /></label>
+      <label><span>Contract start date</span><input type="date" value={form.contractStartDate} onChange={(event) => setForm({ ...form, contractStartDate: event.target.value })} /></label>
+      <label><span>Expected end date</span><input type="date" value={form.contractExpectedEndDate} onChange={(event) => setForm({ ...form, contractExpectedEndDate: event.target.value })} /></label>
+      <label><span>Payment terms/notes</span><textarea value={form.contractTerms} onChange={(event) => setForm({ ...form, contractTerms: event.target.value })} /></label>
+    </>}
+    {form.paymentType === "monthly_salary" && <>
+      <label><span>Monthly salary amount *</span><input required min="0" step="0.01" type="number" value={form.monthlySalary} onChange={(event) => setForm({ ...form, monthlySalary: event.target.value })} /></label>
+      <label><span>Payment day</span><input min="1" max="31" step="1" type="number" value={form.paymentDay} onChange={(event) => setForm({ ...form, paymentDay: event.target.value })} /></label>
+    </>}
+    {form.paymentType === "other" && <>
+      <label><span>Description</span><input value={form.otherPaymentDescription} onChange={(event) => setForm({ ...form, otherPaymentDescription: event.target.value })} /></label>
+      <label><span>Amount/rate</span><input min="0" step="0.01" type="number" value={form.otherPaymentRate} onChange={(event) => setForm({ ...form, otherPaymentRate: event.target.value })} /></label>
+    </>}
+  </>;
+}
+
 function EditLabourPanel({ labourer, onClose, onSave }: { labourer: Labourer; onClose: () => void; onSave: (record: Labourer) => Promise<void> }) {
-  const [form, setForm] = useState({
-    name: labourer.name, labourType: labourer.labourType ?? "Daily Wage", dailyWage: String(labourer.dailyWage),
-    active: labourer.active !== false, joinedOn: labourer.joinedOn ?? labourer.createdAt.slice(0, 10),
-    endedOn: labourer.endedOn ?? "", phone: labourer.phone ?? "", notes: labourer.notes ?? "",
+  const [form, setForm] = useState<LabourEditorForm>({
+    name: labourer.name,
+    labourType: labourer.labourType ?? "Daily Wage",
+    paymentType: labourer.paymentType ?? "daily_wage",
+    group: labourer.group,
+    groupId: labourer.groupId ?? "",
+    dailyWage: String(labourer.dailyWage),
+    productionUnit: labourer.productionUnit ?? "carton",
+    customProductionUnit: labourer.customProductionUnit ?? "",
+    productionUnitRate: String(labourer.productionUnitRate ?? ""),
+    minimumGuarantee: String(labourer.minimumGuarantee ?? ""),
+    contractTitle: labourer.contractTitle ?? "",
+    contractAmount: String(labourer.contractAmount ?? ""),
+    contractStartDate: labourer.contractStartDate ?? "",
+    contractExpectedEndDate: labourer.contractExpectedEndDate ?? "",
+    contractTerms: labourer.contractTerms ?? "",
+    monthlySalary: String(labourer.monthlySalary ?? ""),
+    paymentDay: String(labourer.paymentDay ?? ""),
+    otherPaymentDescription: labourer.otherPaymentDescription ?? "",
+    otherPaymentRate: String(labourer.otherPaymentRate ?? ""),
+    active: labourer.active !== false,
+    joinedOn: labourer.joinedOn ?? labourer.createdAt.slice(0, 10),
+    endedOn: labourer.endedOn ?? "",
+    phone: labourer.phone ?? "",
+    notes: labourer.notes ?? "",
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const dailyWage = Number(form.dailyWage);
-    if (!form.name.trim() || !Number.isFinite(dailyWage) || dailyWage < 0) { setError("Labour name and a valid daily wage are required."); return; }
+    if (!form.name.trim()) { setError("Labour name is required."); return; }
     if (busy) return;
     setBusy(true); setError("");
     try {
-      await onSave({ ...labourer, name: form.name.trim(), labourType: form.labourType.trim() || "Daily Wage", dailyWage, active: form.active, joinedOn: form.joinedOn, endedOn: form.endedOn || undefined, phone: form.phone.trim() || undefined, notes: form.notes.trim() || undefined, updatedAt: new Date().toISOString() });
+      await onSave({
+        ...labourer,
+        name: form.name.trim(),
+        labourType: form.labourType.trim() || "Daily Wage",
+        paymentType: form.paymentType,
+        group: form.group.trim() || "General",
+        groupId: form.groupId || undefined,
+        dailyWage: Number(form.dailyWage || 0),
+        productionUnit: form.paymentType === "production_based" ? form.productionUnit as Labourer["productionUnit"] : undefined,
+        customProductionUnit: form.paymentType === "production_based" && form.productionUnit === "custom" ? form.customProductionUnit.trim() || undefined : undefined,
+        productionUnitRate: form.paymentType === "production_based" ? Number(form.productionUnitRate || 0) : undefined,
+        minimumGuarantee: form.paymentType === "production_based" ? Number(form.minimumGuarantee || 0) : undefined,
+        contractTitle: form.paymentType === "contract_lump_sum" ? form.contractTitle.trim() || undefined : undefined,
+        contractAmount: form.paymentType === "contract_lump_sum" ? Number(form.contractAmount || 0) : undefined,
+        contractStartDate: form.paymentType === "contract_lump_sum" ? form.contractStartDate || undefined : undefined,
+        contractExpectedEndDate: form.paymentType === "contract_lump_sum" ? form.contractExpectedEndDate || undefined : undefined,
+        contractTerms: form.paymentType === "contract_lump_sum" ? form.contractTerms.trim() || undefined : undefined,
+        monthlySalary: form.paymentType === "monthly_salary" ? Number(form.monthlySalary || 0) : undefined,
+        paymentDay: form.paymentType === "monthly_salary" ? Number(form.paymentDay || 1) : undefined,
+        otherPaymentDescription: form.paymentType === "other" ? form.otherPaymentDescription.trim() || undefined : undefined,
+        otherPaymentRate: form.paymentType === "other" ? Number(form.otherPaymentRate || 0) : undefined,
+        active: form.active,
+        joinedOn: form.joinedOn,
+        endedOn: form.endedOn || undefined,
+        phone: form.phone.trim() || undefined,
+        notes: form.notes.trim() || undefined,
+        updatedAt: new Date().toISOString(),
+      });
       onClose();
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to update labour."); }
     finally { setBusy(false); }
@@ -369,7 +567,8 @@ function EditLabourPanel({ labourer, onClose, onSave }: { labourer: Labourer; on
     <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
       <label><span>Labour name *</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
       <label><span>Labour type *</span><input required value={form.labourType} onChange={(event) => setForm({ ...form, labourType: event.target.value })} /></label>
-      <label><span>Daily wage *</span><input required min="0" step="0.01" type="number" value={form.dailyWage} onChange={(event) => setForm({ ...form, dailyWage: event.target.value })} /></label>
+      <label><span>Group</span><input value={form.group} onChange={(event) => setForm({ ...form, group: event.target.value })} /></label>
+      <LabourPaymentFields form={form} setForm={setForm} />
       <label><span>Status</span><select value={form.active ? "active" : "inactive"} onChange={(event) => setForm({ ...form, active: event.target.value === "active" })}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
       <label><span>Join date</span><input type="date" value={form.joinedOn} onChange={(event) => setForm({ ...form, joinedOn: event.target.value })} /></label>
       <label><span>End date</span><input type="date" value={form.endedOn} onChange={(event) => setForm({ ...form, endedOn: event.target.value })} /></label>
@@ -381,36 +580,80 @@ function EditLabourPanel({ labourer, onClose, onSave }: { labourer: Labourer; on
   </ActionPanel>;
 }
 
-function AddLabourPanel({ onClose, onSave }: { onClose: () => void; onSave: (record: Labourer) => Promise<void> }) {
-  const [form, setForm] = useState({
+function AddLabourPanel({
+  groups,
+  onCreateGroup,
+  onClose,
+  onSave,
+}: {
+  groups: LabourGroup[];
+  onCreateGroup: (record: LabourGroup) => Promise<void>;
+  onClose: () => void;
+  onSave: (record: Labourer) => Promise<void>;
+}) {
+  const [form, setForm] = useState<LabourEditorForm>({
     name: "",
-    group: "General",
-    joinedOn: today(),
-    dailyWage: "90",
-    phone: "",
     labourType: "Daily Wage",
+    paymentType: "daily_wage",
+    group: "General",
+    groupId: "",
+    dailyWage: "90",
+    productionUnit: "carton",
+    customProductionUnit: "",
+    productionUnitRate: "",
+    minimumGuarantee: "",
+    contractTitle: "",
+    contractAmount: "",
+    contractStartDate: "",
+    contractExpectedEndDate: "",
+    contractTerms: "",
+    monthlySalary: "",
+    paymentDay: "",
+    otherPaymentDescription: "",
+    otherPaymentRate: "",
     active: true,
+    joinedOn: today(),
+    endedOn: "",
+    phone: "",
+    notes: "",
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const dailyWage = Number(form.dailyWage);
-    if (!form.name.trim() || !Number.isFinite(dailyWage) || dailyWage < 0) {
-      setError("Labour name and a valid daily wage are required.");
-      return;
-    }
+    if (!form.name.trim()) { setError("Labour name is required."); return; }
     setBusy(true);
     setError("");
     try {
+      let nextGroupId = form.groupId;
+      if (form.groupId === "__new_group__" && form.group.trim()) {
+        const record: LabourGroup = { ...makeLocalRecord(), name: form.group.trim(), active: true };
+        await onCreateGroup(record);
+        nextGroupId = record.id;
+      }
       await onSave({
         ...makeLocalRecord(),
         name: form.name.trim(),
         group: form.group.trim() || "General",
-        joinedOn: form.joinedOn,
-        dailyWage,
-        phone: form.phone.trim() || undefined,
+        groupId: nextGroupId || undefined,
         labourType: form.labourType.trim() || undefined,
+        paymentType: form.paymentType,
+        dailyWage: Number(form.dailyWage || 0),
+        productionUnit: form.paymentType === "production_based" ? form.productionUnit as Labourer["productionUnit"] : undefined,
+        customProductionUnit: form.paymentType === "production_based" && form.productionUnit === "custom" ? form.customProductionUnit.trim() || undefined : undefined,
+        productionUnitRate: form.paymentType === "production_based" ? Number(form.productionUnitRate || 0) : undefined,
+        minimumGuarantee: form.paymentType === "production_based" ? Number(form.minimumGuarantee || 0) : undefined,
+        contractTitle: form.paymentType === "contract_lump_sum" ? form.contractTitle.trim() || undefined : undefined,
+        contractAmount: form.paymentType === "contract_lump_sum" ? Number(form.contractAmount || 0) : undefined,
+        contractStartDate: form.paymentType === "contract_lump_sum" ? form.contractStartDate || undefined : undefined,
+        contractExpectedEndDate: form.paymentType === "contract_lump_sum" ? form.contractExpectedEndDate || undefined : undefined,
+        contractTerms: form.paymentType === "contract_lump_sum" ? form.contractTerms.trim() || undefined : undefined,
+        monthlySalary: form.paymentType === "monthly_salary" ? Number(form.monthlySalary || 0) : undefined,
+        paymentDay: form.paymentType === "monthly_salary" ? Number(form.paymentDay || 1) : undefined,
+        otherPaymentDescription: form.paymentType === "other" ? form.otherPaymentDescription.trim() || undefined : undefined,
+        otherPaymentRate: form.paymentType === "other" ? Number(form.otherPaymentRate || 0) : undefined,
+        joinedOn: form.joinedOn,
+        phone: form.phone.trim() || undefined,
         active: form.active,
       });
     } catch (caught) {
@@ -423,10 +666,19 @@ function AddLabourPanel({ onClose, onSave }: { onClose: () => void; onSave: (rec
     <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
       <label><span>Labour name *</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
       <label><span>Date of joining *</span><input required type="date" value={form.joinedOn} onChange={(event) => setForm({ ...form, joinedOn: event.target.value })} /></label>
-      <label><span>Daily wage (SAR) *</span><input required type="number" min="0" step="0.01" value={form.dailyWage} onChange={(event) => setForm({ ...form, dailyWage: event.target.value })} /></label>
+      <label><span>Group</span><select value={form.groupId} onChange={(event) => {
+        const next = event.target.value;
+        const group = groups.find((item) => item.id === next);
+        setForm({ ...form, groupId: next, group: group?.name ?? form.group });
+      }}>
+        <option value="">None</option>
+        {groups.filter((group) => group.active !== false).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+        <option value="__new_group__">Create new group</option>
+      </select></label>
+      {form.groupId === "__new_group__" && <label><span>New group name *</span><input required value={form.group} onChange={(event) => setForm({ ...form, group: event.target.value })} /></label>}
+      <LabourPaymentFields form={form} setForm={setForm} />
       <label><span>Phone / contact</span><input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
       <label><span>Role / type</span><input value={form.labourType} onChange={(event) => setForm({ ...form, labourType: event.target.value })} /></label>
-      <label><span>Group</span><input value={form.group} onChange={(event) => setForm({ ...form, group: event.target.value })} /></label>
       <label><span>Status</span><select value={form.active ? "active" : "inactive"} onChange={(event) => setForm({ ...form, active: event.target.value === "active" })}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
       {error && <p className="worker-action-error">{error}</p>}
       <footer><button type="button" onClick={onClose}>Cancel</button><button disabled={busy} type="submit">{busy ? "Saving..." : "Save Labour"}</button></footer>
@@ -598,6 +850,118 @@ function DeactivateLabourPanel({ token, workspaceId, labourer, onClose, onComple
       <label><span>{t("reports.typeDeleteConfirm")}</span><input required autoComplete="off" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
       {error && <p className="worker-action-error">{error}</p>}
       <footer><button type="button" onClick={onClose}>{t("common.close")}</button><button className="danger-button" disabled={!preview || confirmation !== "DELETE" || busy} type="submit">{busy ? t("reports.processing") : preview?.action === "delete" ? t("reports.deletePermanently") : t("reports.deactivateLabour")}</button></footer>
+    </form>
+  </ActionPanel>;
+}
+
+function AddGroupPanel({ onClose, onSave }: { onClose: () => void; onSave: (record: LabourGroup) => Promise<void> }) {
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!name.trim() || busy) return;
+    setBusy(true); setError("");
+    try {
+      await onSave({ ...makeLocalRecord(), name: name.trim(), active: true });
+      onClose();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to save group.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <ActionPanel title="Add Labour Group" onClose={onClose}>
+    <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
+      <label><span>Group name *</span><input required value={name} onChange={(event) => setName(event.target.value)} /></label>
+      {error && <p className="worker-action-error">{error}</p>}
+      <footer><button type="button" onClick={onClose}>Cancel</button><button disabled={busy} type="submit">{busy ? "Saving..." : "Save Group"}</button></footer>
+    </form>
+  </ActionPanel>;
+}
+
+function AddProductionPanel({ labourer, onClose, onSave }: { labourer: Labourer; onClose: () => void; onSave: (record: ProductionEntry) => Promise<void> }) {
+  const [form, setForm] = useState({
+    date: today(),
+    units: "",
+    productionUnit: labourer.productionUnit === "custom" ? (labourer.customProductionUnit || "Custom") : (labourer.productionUnit || "carton"),
+    unitRate: String(labourer.productionUnitRate ?? 0),
+    notes: "",
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    const units = Number(form.units);
+    const unitRate = Number(form.unitRate);
+    if (!Number.isFinite(units) || units <= 0 || !Number.isFinite(unitRate) || unitRate < 0 || busy) {
+      setError("Valid units and rate are required.");
+      return;
+    }
+    setBusy(true); setError("");
+    try {
+      await onSave({
+        ...makeLocalRecord(),
+        labourerId: labourer.id,
+        date: form.date,
+        units,
+        productionUnit: form.productionUnit,
+        unitRate,
+        amount: units * unitRate,
+        notes: form.notes.trim() || undefined,
+      });
+      onClose();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to add production entry.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <ActionPanel title="Record Production" onClose={onClose}>
+    <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
+      <label><span>Labour</span><input readOnly value={labourer.name} /></label>
+      <label><span>Date</span><input required type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
+      <label><span>Units produced *</span><input required min="0" step="0.01" type="number" value={form.units} onChange={(event) => setForm({ ...form, units: event.target.value })} /></label>
+      <label><span>Production unit</span><input readOnly value={form.productionUnit} /></label>
+      <label><span>Unit rate</span><input required min="0" step="0.01" type="number" value={form.unitRate} onChange={(event) => setForm({ ...form, unitRate: event.target.value })} /></label>
+      <label><span>Notes</span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
+      <p>Earnings: {money((Number(form.units) || 0) * (Number(form.unitRate) || 0))}</p>
+      {error && <p className="worker-action-error">{error}</p>}
+      <footer><button type="button" onClick={onClose}>Cancel</button><button disabled={busy} type="submit">{busy ? "Saving..." : "Save Production"}</button></footer>
+    </form>
+  </ActionPanel>;
+}
+
+function AddPaymentPanel({ labourer, onClose, onSave }: { labourer: Labourer; onClose: () => void; onSave: (record: LabourPayment) => Promise<void> }) {
+  const [form, setForm] = useState({ date: today(), amount: "", paymentMethod: "Cash", notes: "" });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    const amount = Number(form.amount);
+    if (!Number.isFinite(amount) || amount <= 0 || busy) {
+      setError("Payment amount must be greater than zero.");
+      return;
+    }
+    setBusy(true); setError("");
+    try {
+      await onSave({ ...makeLocalRecord(), labourerId: labourer.id, date: form.date, amount, paymentMethod: form.paymentMethod, notes: form.notes.trim() || undefined });
+      onClose();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to save payment.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <ActionPanel title="Add Labour Payment" onClose={onClose}>
+    <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
+      <label><span>Labour</span><input readOnly value={labourer.name} /></label>
+      <label><span>Date</span><input required type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
+      <label><span>Amount *</span><input required min="0.01" step="0.01" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
+      <label><span>Payment method</span><select value={form.paymentMethod} onChange={(event) => setForm({ ...form, paymentMethod: event.target.value })}><option>Cash</option><option>Bank Transfer</option><option>Other</option></select></label>
+      <label><span>Notes</span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
+      {error && <p className="worker-action-error">{error}</p>}
+      <footer><button type="button" onClick={onClose}>Cancel</button><button disabled={busy} type="submit">{busy ? "Saving..." : "Save Payment"}</button></footer>
     </form>
   </ActionPanel>;
 }

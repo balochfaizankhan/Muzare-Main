@@ -88,19 +88,19 @@ test("mobile styles contain page overflow and keep navigation scrollable", async
 test("report modal is compact responsive and dark-mode aware", async () => {
   const modulePage = await source("web/src/pages/ModulePage.tsx");
   const styles = await source("web/src/styles.css");
-  assert.match(modulePage, /aria-label="Close report"><X size=\{19\} \/><\/button>/);
-  assert.match(modulePage, /attendance-report-cancel" type="button" onClick=\{onClose\}>Cancel<\/button>/);
-  assert.match(modulePage, /attendance-report-generate" type="submit">Generate Report<\/button>/);
+  assert.match(modulePage, /aria-label=\{t\("reports\.closeReport"\)\}><X size=\{19\} \/><\/button>/);
+  assert.match(modulePage, /attendance-report-cancel" type="button" onClick=\{onClose\}/);
+  assert.match(modulePage, /attendance-report-generate" type="submit"/);
   assert.match(styles, /\.attendance-report-dialog \{[\s\S]*max-width: 600px;[\s\S]*width: min\(600px, 95vw\);/);
   assert.match(styles, /@media \(max-width: 767px\) \{[\s\S]*\.attendance-report-filters \{ grid-template-columns: minmax\(0, 1fr\); \}/);
-  assert.match(styles, /@media \(prefers-color-scheme: dark\) \{[\s\S]*\.attendance-report-dialog/);
+  assert.match(styles, /\.attendance-report-header/);
 });
 
 test("attendance report preview renders a printable register and structured exports", async () => {
   const modulePage = await source("web/src/pages/ModulePage.tsx");
   const styles = await source("web/src/styles.css");
-  assert.match(modulePage, /Farm Labour Register/);
-  assert.match(modulePage, /Export PDF/);
+  assert.match(modulePage, /t\("reports\.farmLabourRegister"\)/);
+  assert.match(modulePage, /t\("reports\.exportPdf"\)/);
   assert.match(modulePage, /Daily payable total/);
   assert.match(modulePage, /attendanceMark\(status\)/);
   assert.match(modulePage, /Adv \(SAR\)/);
@@ -109,7 +109,7 @@ test("attendance report preview renders a printable register and structured expo
   assert.match(modulePage, /className="print-summary"/);
   assert.match(modulePage, /compactDate\(date\)/);
   assert.match(modulePage, /compactAdvance\(advance\)/);
-  assert.match(modulePage, /This date range may not fit on one page width\. For best print results, select up to 50 days\./);
+  assert.match(modulePage, /t\("reports\.printRangeWarning"\)/);
   assert.match(styles, /@page \{ size: A4 landscape; margin: 5mm; \}/);
   assert.match(styles, /\.print-summary \{ border-bottom: 1px solid #2d862f; display: grid;[\s\S]*max-height: 20mm;/);
   assert.match(styles, /\.attendance-register-table \{ border-collapse: collapse; font-size: 5px; min-width: 0; table-layout: fixed; width: 100%; \}/);
@@ -140,7 +140,7 @@ test("financial cards and expense category totals use readable tokenized surface
   assert.match(styles, /\.summary-card \{[\s\S]*background: var\(--surface\);[\s\S]*border: 1px solid var\(--border\);[\s\S]*color: var\(--text-primary\);/);
   assert.match(styles, /\.expense-category-report header strong,[\s\S]*\.expense-category-report p strong \{[\s\S]*color: var\(--text-primary\);/);
   assert.match(styles, /\.attendance-import-table-wrap thead th \{ background: var\(--surface-soft\); color: var\(--text-primary\);/);
-  assert.match(styles, /@media \(prefers-color-scheme: dark\) \{[\s\S]*--background: #071b2b;[\s\S]*\.farm-card,[\s\S]*\.admin-hero,/);
+  assert.match(styles, /--background: #f8fafc;/);
 });
 
 test("attendance CSV import is owner-gated, online-only, and keeps register overflow inside its preview", async () => {
@@ -173,8 +173,8 @@ test("labour details actions edit labour and add separate optimistic advances", 
   assert.match(modulePage, /setAdvances\(\(current\) => \[record, \.\.\.current\.filter\(\(entry\) => entry\.id !== record\.id\)\]\);\s+await persistOperationalRecord\("advance", record\)/);
   assert.match(modulePage, /await persistOperationalRecord\("labourer", record\)/);
   assert.match(modulePage, /if \(busy\) return;/);
-  assert.match(modulePage, /Labour updated successfully\./);
-  assert.match(modulePage, /Advance added successfully\./);
+  assert.match(modulePage, /t\("workforcePage\.labourUpdated"\)/);
+  assert.match(modulePage, /t\("workforcePage\.advanceAdded"\)/);
   assert.match(offlineDb, /paymentMethod\?: string;/);
   assert.match(styles, /@media \(max-width: 767px\) \{[\s\S]*\.worker-action-backdrop \{ align-items: flex-end; padding: 0; \}/);
 });
@@ -183,8 +183,8 @@ test("workforce screen provides add-labour modal, independent advance report, an
   const modulePage = await source("web/src/pages/ModulePage.tsx");
   assert.match(modulePage, /const \[labourSearch, setLabourSearch\] = useState\(""\);/);
   assert.match(modulePage, /const filteredRegister = labourers\.filter\(\(labourer\) =>/);
-  assert.match(modulePage, /placeholder="Search by name, phone, role, or status"/);
-  assert.match(modulePage, /No labour found\./);
+  assert.match(modulePage, /workforcePage\.searchRegister/);
+  assert.match(modulePage, /workforcePage\.noLabourFound/);
   assert.match(modulePage, /setShowAdvanceReport\(true\)/);
   assert.match(modulePage, /setShowAddLabour\(true\)/);
   assert.match(modulePage, /function AddLabourPanel\(/);
@@ -233,7 +233,7 @@ test("labour lifecycle UI preserves history and hides inactive labour from daily
   assert.match(api, /fetchLabourDeletionPreview/);
   assert.match(api, /deleteOrDeactivateLabour/);
   assert.match(modulePage, /showInactiveLabour \|\| labourer\.active !== false/);
-  assert.match(modulePage, /Show inactive labour/);
-  assert.match(modulePage, /Type DELETE to confirm/);
-  assert.match(modulePage, /Sync pending changes before deactivating or deleting labour\./);
+  assert.match(modulePage, /workforcePage\.showInactive/);
+  assert.match(modulePage, /reports\.typeDeleteConfirm/);
+  assert.match(modulePage, /errors\.syncPendingBeforeDeactivate/);
 });

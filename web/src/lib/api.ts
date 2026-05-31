@@ -88,7 +88,19 @@ export type AdminWorkspace = {
   id: string; name: string; slug: string; contactEmail: string; contactPhone: string | null;
   status: "pending" | "approved" | "rejected" | "suspended"; createdAt: string;
 };
-export type OperationalEntity = "labourer" | "attendance" | "account" | "advance" | "dispatch" | "sale" | "voucher" | "partnerEntry" | "inventoryEntry";
+export type OperationalEntity =
+  | "labourer"
+  | "labourGroup"
+  | "attendance"
+  | "account"
+  | "advance"
+  | "labourPayment"
+  | "productionEntry"
+  | "dispatch"
+  | "sale"
+  | "voucher"
+  | "partnerEntry"
+  | "inventoryEntry";
 export type OperationalRecordEnvelope = {
   workspaceId: string; farmId?: string | null; seasonId?: string | null; entity: OperationalEntity;
   record: { id: string; createdAt: string; updatedAt: string; [key: string]: unknown };

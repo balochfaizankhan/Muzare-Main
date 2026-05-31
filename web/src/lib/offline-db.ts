@@ -11,7 +11,19 @@ export type LocalRecord = {
 };
 
 export type PendingMutation = LocalRecord & {
-  entity: "labourer" | "attendance" | "account" | "advance" | "dispatch" | "sale" | "voucher" | "partnerEntry" | "inventoryEntry";
+  entity:
+    | "labourer"
+    | "labourGroup"
+    | "attendance"
+    | "account"
+    | "advance"
+    | "labourPayment"
+    | "productionEntry"
+    | "dispatch"
+    | "sale"
+    | "voucher"
+    | "partnerEntry"
+    | "inventoryEntry";
   operation: "create" | "update" | "delete";
   payload: unknown;
   attempts: number;
@@ -24,8 +36,23 @@ export type PendingMutation = LocalRecord & {
 export type Labourer = LocalRecord & {
   name: string;
   group: string;
+  groupId?: string;
   dailyWage: number;
   labourType?: string;
+  paymentType?: "daily_wage" | "production_based" | "contract_lump_sum" | "monthly_salary" | "other";
+  productionUnit?: "carton" | "crate" | "tree" | "task" | "custom";
+  customProductionUnit?: string;
+  productionUnitRate?: number;
+  minimumGuarantee?: number;
+  contractTitle?: string;
+  contractAmount?: number;
+  contractStartDate?: string;
+  contractExpectedEndDate?: string;
+  contractTerms?: string;
+  monthlySalary?: number;
+  paymentDay?: number;
+  otherPaymentDescription?: string;
+  otherPaymentRate?: number;
   active?: boolean;
   joinedOn?: string;
   endedOn?: string;
@@ -91,6 +118,29 @@ export type Advance = LocalRecord & {
   notes: string;
 };
 
+export type LabourGroup = LocalRecord & {
+  name: string;
+  active?: boolean;
+};
+
+export type ProductionEntry = LocalRecord & {
+  labourerId: string;
+  date: string;
+  units: number;
+  productionUnit: string;
+  unitRate: number;
+  amount: number;
+  notes?: string;
+};
+
+export type LabourPayment = LocalRecord & {
+  labourerId: string;
+  date: string;
+  amount: number;
+  paymentMethod?: string;
+  notes?: string;
+};
+
 export type InventoryEntry = LocalRecord & {
   date: string;
   itemName: string;
@@ -102,12 +152,15 @@ export const offlineDb = new Dexie("muzare-offline") as Dexie & {
   pendingMutations: EntityTable<PendingMutation, "id">;
   labourers: EntityTable<Labourer, "id">;
   attendance: EntityTable<Attendance, "id">;
+  labourGroups: EntityTable<LabourGroup, "id">;
   accounts: EntityTable<Account, "id">;
   vouchers: EntityTable<Voucher, "id">;
   dispatches: EntityTable<Dispatch, "id">;
   sales: EntityTable<Sale, "id">;
   partnerEntries: EntityTable<PartnerEntry, "id">;
   advances: EntityTable<Advance, "id">;
+  productionEntries: EntityTable<ProductionEntry, "id">;
+  labourPayments: EntityTable<LabourPayment, "id">;
   inventoryEntries: EntityTable<InventoryEntry, "id">;
 };
 
@@ -194,6 +247,29 @@ offlineDb.version(6).stores({
   for (const tableName of [
     "pendingMutations", "labourers", "attendance", "accounts", "vouchers",
     "dispatches", "sales", "partnerEntries", "advances", "inventoryEntries",
+  ]) {
+    await transaction.table(tableName).clear();
+  }
+});
+
+offlineDb.version(7).stores({
+  pendingMutations: "id, workspaceId, farmId, seasonId, entity, operation, createdAt",
+  labourers: "id, workspaceId, farmId, seasonId, name, groupId, createdAt, updatedAt, pendingSync",
+  labourGroups: "id, workspaceId, farmId, seasonId, name, active, createdAt, updatedAt, pendingSync",
+  attendance: "id, workspaceId, farmId, seasonId, labourerId, date, status, createdAt, updatedAt, pendingSync",
+  accounts: "id, workspaceId, farmId, seasonId, name, type, createdAt, updatedAt, pendingSync",
+  vouchers: "id, workspaceId, farmId, seasonId, date, category, accountId, createdAt, updatedAt, pendingSync",
+  dispatches: "id, workspaceId, farmId, seasonId, date, vehicleNumber, produceType, createdAt, updatedAt, pendingSync",
+  sales: "id, workspaceId, farmId, seasonId, date, buyerName, accountId, createdAt, updatedAt, pendingSync",
+  partnerEntries: "id, workspaceId, farmId, seasonId, date, partnerName, accountId, createdAt, updatedAt, pendingSync",
+  advances: "id, workspaceId, farmId, seasonId, date, labourerId, createdAt, updatedAt, pendingSync",
+  productionEntries: "id, workspaceId, farmId, seasonId, labourerId, date, productionUnit, createdAt, updatedAt, pendingSync",
+  labourPayments: "id, workspaceId, farmId, seasonId, labourerId, date, createdAt, updatedAt, pendingSync",
+  inventoryEntries: "id, workspaceId, farmId, seasonId, date, itemName, createdAt, updatedAt, pendingSync",
+}).upgrade(async (transaction) => {
+  for (const tableName of [
+    "pendingMutations", "labourers", "labourGroups", "attendance", "accounts", "vouchers",
+    "dispatches", "sales", "partnerEntries", "advances", "productionEntries", "labourPayments", "inventoryEntries",
   ]) {
     await transaction.table(tableName).clear();
   }

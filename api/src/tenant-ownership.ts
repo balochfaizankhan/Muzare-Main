@@ -9,6 +9,8 @@ export type TenantReferences = {
   seasonId?: string | null;
   accountId?: unknown;
   ledgerId?: unknown;
+  labourerId?: unknown;
+  groupId?: unknown;
 };
 
 async function hasOperationalReference(workspaceId: string, entityTypes: string[], clientRecordId: string) {
@@ -44,6 +46,14 @@ export async function validateTenantReferences(workspaceId: string, references: 
   if (typeof references.ledgerId === "string"
     && !(await hasOperationalReference(workspaceId, ["partnerEntry"], references.ledgerId))) {
     return "Ledger entry does not belong to the selected workspace.";
+  }
+  if (typeof references.labourerId === "string"
+    && !(await hasOperationalReference(workspaceId, ["labourer"], references.labourerId))) {
+    return "Labour does not belong to the selected workspace.";
+  }
+  if (typeof references.groupId === "string"
+    && !(await hasOperationalReference(workspaceId, ["labourGroup"], references.groupId))) {
+    return "Labour group does not belong to the selected workspace.";
   }
   return null;
 }
