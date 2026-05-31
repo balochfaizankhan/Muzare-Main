@@ -135,7 +135,7 @@ export type AdvanceReportData = {
   } | null;
 };
 export type AttendanceReportFilters = {
-  farmId: string; seasonId: string; from: string; to: string; labourId?: string; status?: AttendanceReportStatus;
+  farmId: string; seasonId: string; from: string; to: string; labourId?: string; labourIds?: string[]; status?: AttendanceReportStatus;
 };
 export type AttendanceImportCell = { column: string; date: string; status: AttendanceReportStatus | null; advanceAmount: number | null; raw: string };
 export type AttendanceImportRow = {
@@ -256,6 +256,7 @@ export const fetchAttendanceReport = (token: string, workspaceId: string, filter
     farmId: filters.farmId, seasonId: filters.seasonId, from: filters.from, to: filters.to,
   });
   if (filters.labourId) query.set("labourId", filters.labourId);
+  if (filters.labourIds?.length) query.set("labourIds", filters.labourIds.join(","));
   if (filters.status) query.set("status", filters.status);
   return apiRequest<AttendanceReportData>(
     `/v1/workspace/${workspaceId}/attendance/report?${query.toString()}`, {}, token,

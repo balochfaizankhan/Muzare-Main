@@ -15,6 +15,7 @@ const querySchema = z.object({
   from: z.string().date(),
   to: z.string().date(),
   labourId: z.string().min(1).optional(),
+  labourIds: z.string().optional(),
   status: z.enum(["present", "half_day", "absent"]).optional(),
 });
 
@@ -42,7 +43,9 @@ export async function attendanceReportRoutes(app: FastifyInstance): Promise<void
       return reply.code(400).send({ message: "A valid attendance report date range is required." });
     }
     const { workspaceId } = params.data;
-    const { farmId, seasonId, from, to, labourId, status } = query.data;
+    const { farmId, seasonId, from, to, labourId, labourIds, status } = query.data;
+    const selectedLabourIds = new Set((labourIds ?? "").split(",").map((item) => item.trim()).filter(Boolean));
+    if (labourId) selectedLabourIds.add(labourId);
     if (request.appUser.workspaceId !== workspaceId || !hasPermission(request.appUser, "VIEW_REPORTS", workspaceId)) {
       return reply.code(403).send({ message: "Workspace report permission is required." });
     }
@@ -71,8 +74,8 @@ export async function attendanceReportRoutes(app: FastifyInstance): Promise<void
         dailyWage: typeof payload.dailyWage === "number" ? payload.dailyWage : Number(payload.dailyWage) || 0,
       }] as const;
     }));
-    if (labourId && !labourById.has(labourId)) {
-      return reply.code(403).send({ message: "Labourer does not belong to the selected workspace farm." });
+    if ([...selectedLabourIds].some((id) => !labourById.has(id))) {
+      return reply.code(403).send({ message: "One or more labour filters do not belong to the selected workspace farm." });
     }
 
     const attendanceRecords = await db.select().from(operationalRecords).where(and(
@@ -86,7 +89,7 @@ export async function attendanceReportRoutes(app: FastifyInstance): Promise<void
       if (typeof payload.labourerId !== "string" || typeof payload.date !== "string"
         || !["present", "half_day", "absent"].includes(String(payload.status))
         || payload.date < from || payload.date > to
-        || (labourId && payload.labourerId !== labourId)
+        || (selectedLabourIds.size > 0 && !selectedLabourIds.has(payload.labourerId))
         || (status && payload.status !== status)) return [];
       const labourer = labourById.get(payload.labourerId);
       if (!labourer) return [];
@@ -104,14 +107,14 @@ export async function attendanceReportRoutes(app: FastifyInstance): Promise<void
     const advances = advanceRecords.flatMap((record) => {
       const payload = record.payload as AdvancePayload;
       if (typeof payload.labourerId !== "string" || typeof payload.date !== "string"
-        || payload.date < from || payload.date > to || (labourId && payload.labourerId !== labourId)) return [];
+        || payload.date < from || payload.date > to || (selectedLabourIds.size > 0 && !selectedLabourIds.has(payload.labourerId))) return [];
       const labourer = labourById.get(payload.labourerId);
       if (!labourer) return [];
       return [{ id: record.clientRecordId, labourerId: labourer.id, date: payload.date, amount: Number(payload.amount) || 0 }];
     });
 
     const summaries = [...labourById.values()]
-      .filter((labourer) => !labourId || labourer.id === labourId)
+      .filter((labourer) => selectedLabourIds.size === 0 || selectedLabourIds.has(labourer.id))
       .map((labourer) => {
         const labourAttendance = records.filter((record) => record.labourerId === labourer.id);
         const presentDays = labourAttendance.filter((record) => record.status === "present").length;
