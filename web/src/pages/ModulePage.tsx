@@ -171,6 +171,8 @@ function WorkforceModule() {
   const [markingLabourers, setMarkingLabourers] = useState<Set<string>>(() => new Set());
   const [showReport, setShowReport] = useState(false);
   const [showAdvanceReport, setShowAdvanceReport] = useState(false);
+  const [showReportsMenu, setShowReportsMenu] = useState(false);
+  const [showAdvanceEntry, setShowAdvanceEntry] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showAddLabour, setShowAddLabour] = useState(false);
   const [showAddGroup, setShowAddGroup] = useState(false);
@@ -305,11 +307,11 @@ function WorkforceModule() {
         </header>
         <div className="workforce-top-actions">
           <button className="workforce-mark-attendance" type="button" onClick={() => setShowAttendanceEntry(true)}>Mark Attendance</button>
-          <div className="workforce-quick-grid">
+          <div className="workforce-toolbar">
             {canManageLabour && <button type="button" onClick={() => setShowAddLabour(true)}>{t("workforcePage.addLabour")}</button>}
-            <button type="button" onClick={() => setShowAdvanceReport(true)}>{t("workforcePage.advanceReport")}</button>
-            <button type="button" onClick={() => setShowReport(true)}>{t("workforcePage.viewReport")}</button>
+            {canAddAdvance && <button type="button" onClick={() => setShowAdvanceEntry(true)}>Advance</button>}
             {canManageLabour && <button type="button" onClick={() => setShowAddGroup(true)}>Groups</button>}
+            <button type="button" onClick={() => setShowReportsMenu(true)}>Reports</button>
           </div>
           {user?.workspaceId && hasPermission(user, "IMPORT_ATTENDANCE", user.workspaceId) && <button className="workforce-inline-link" type="button" onClick={() => {
             if (!navigator.onLine) window.dispatchEvent(new CustomEvent("muzare-toast", { detail: t("errors.csvImportOnlineOnly") }));
@@ -347,14 +349,17 @@ function WorkforceModule() {
         {!labourers.length ? <Empty>{t("workforcePage.noLabourRecorded")}</Empty> : !filteredRegister.length ? <Empty>{t("workforcePage.noLabourFound")}</Empty> : (
           <div className="record-list workforce-list">
             {filteredRegister.map((labourer, index) => (
-              <article className="workforce-row" key={labourer.id}>
+              <article className="workforce-row" key={labourer.id} role="button" tabIndex={0} onClick={() => setSelectedLabourer(labourer)} onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") setSelectedLabourer(labourer);
+              }}>
                 <span className="workforce-row__index">{index + 1}</span>
                 <span className="workforce-row__body">
                   <strong>{labourer.name}</strong>
                   <span>{labourer.group} • {(labourer.paymentType ?? "daily_wage").replaceAll("_", " ")} • {labourPaymentSummary(labourer)}</span>
                   <em className={labourer.active === false ? "status-inactive" : "status-active"}>{labourer.active === false ? "Inactive" : "Active"}</em>
                 </span>
-                <button className="workforce-row__action" type="button" onClick={() => {
+                <button className="workforce-row__action" type="button" onClick={(event) => {
+                  event.stopPropagation();
                   setSelectedLabourer(labourer);
                   setLabourAction("update");
                 }}>Update</button>
@@ -480,6 +485,27 @@ function WorkforceModule() {
       )}
       {selectedLabourer && labourAction === "update" && <EditLabourPanel labourer={selectedLabourer} onClose={() => setLabourAction(null)} onSave={saveLabour} />}
       {selectedLabourer && labourAction === "advance" && <AddAdvancePanel labourer={selectedLabourer} onClose={() => setLabourAction(null)} onSave={saveAdvance} />}
+      {showAdvanceEntry && <AdvanceEntryPanel
+        labourers={labourers}
+        groups={groups}
+        onClose={() => setShowAdvanceEntry(false)}
+        onSave={async (record) => {
+          await saveAdvance(record);
+          await refreshAdvances();
+          setShowAdvanceEntry(false);
+        }}
+      />}
+      {showReportsMenu && <ReportsMenuPanel
+        onClose={() => setShowReportsMenu(false)}
+        onAttendanceReport={() => {
+          setShowReportsMenu(false);
+          setShowReport(true);
+        }}
+        onAdvanceReport={() => {
+          setShowReportsMenu(false);
+          setShowAdvanceReport(true);
+        }}
+      />}
       {selectedLabourer && labourAction === "production" && <AddProductionPanel labourer={selectedLabourer} onClose={() => setLabourAction(null)} onSave={saveProduction} />}
       {selectedLabourer && labourAction === "payment" && <AddPaymentPanel labourer={selectedLabourer} onClose={() => setLabourAction(null)} onSave={savePayment} />}
       {showAddGroup && <AddGroupPanel onClose={() => setShowAddGroup(false)} onSave={async (record) => {
@@ -989,6 +1015,76 @@ function DeactivateLabourPanel({ token, workspaceId, labourer, onClose, onComple
       {error && <p className="worker-action-error">{error}</p>}
       <footer><button type="button" onClick={onClose}>{t("common.close")}</button><button className="danger-button" disabled={!preview || confirmation !== "DELETE" || busy} type="submit">{busy ? t("reports.processing") : preview?.action === "delete" ? t("reports.deletePermanently") : t("reports.deactivateLabour")}</button></footer>
     </form>
+  </ActionPanel>;
+}
+
+function AdvanceEntryPanel({
+  labourers,
+  groups,
+  onClose,
+  onSave,
+}: {
+  labourers: Labourer[];
+  groups: LabourGroup[];
+  onClose: () => void;
+  onSave: (record: Advance) => Promise<void>;
+}) {
+  const [groupId, setGroupId] = useState("all");
+  const [labourerId, setLabourerId] = useState("");
+  const [form, setForm] = useState({ date: today(), amount: "", notes: "" });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const filteredLabourers = labourers.filter((labourer) => labourer.active !== false && (groupId === "all" || labourer.groupId === groupId));
+  const selectedLabourer = filteredLabourers.find((labourer) => labourer.id === labourerId);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    const amount = Number(form.amount);
+    if (!selectedLabourer) { setError("Select labour."); return; }
+    if (!Number.isFinite(amount) || amount <= 0 || busy) { setError("Advance amount must be greater than zero."); return; }
+    setBusy(true); setError("");
+    try {
+      await onSave({ ...makeLocalRecord(), labourerId: selectedLabourer.id, date: form.date, amount, notes: form.notes.trim() });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to add advance.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <ActionPanel title="Record Advance" onClose={onClose}>
+    <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
+      <label><span>Date *</span><input required type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
+      <label><span>Group (optional)</span><select value={groupId} onChange={(event) => {
+        setGroupId(event.target.value);
+        setLabourerId("");
+      }}><option value="all">All groups</option>{groups.filter((group) => group.active !== false).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
+      <label><span>Labour *</span><select required value={labourerId} onChange={(event) => setLabourerId(event.target.value)}><option value="">Select labour</option>{filteredLabourers.map((labourer) => <option key={labourer.id} value={labourer.id}>{labourer.name}</option>)}</select></label>
+      <label><span>Advance amount *</span><input required min="0.01" step="0.01" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
+      <label><span>Notes / reference</span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
+      {error && <p className="worker-action-error">{error}</p>}
+      <footer><button type="button" onClick={onClose}>Cancel</button><button disabled={busy} type="submit">{busy ? "Saving..." : "Save"}</button></footer>
+    </form>
+  </ActionPanel>;
+}
+
+function ReportsMenuPanel({
+  onClose,
+  onAttendanceReport,
+  onAdvanceReport,
+}: {
+  onClose: () => void;
+  onAttendanceReport: () => void;
+  onAdvanceReport: () => void;
+}) {
+  const showToast = (message: string) => window.dispatchEvent(new CustomEvent("muzare-toast", { detail: message }));
+  return <ActionPanel title="Reports" onClose={onClose}>
+    <div className="worker-action-form workforce-reports-menu">
+      <button type="button" onClick={onAttendanceReport}>Attendance Report</button>
+      <button type="button" onClick={onAdvanceReport}>Advance Report</button>
+      <button type="button" onClick={() => showToast("Production report will be available in Reports shortly.")}>Production Report</button>
+      <button type="button" onClick={() => showToast("Labour ledger report will be available in Reports shortly.")}>Labour Ledger</button>
+      <button type="button" onClick={() => showToast("Settlement report will be available in Reports shortly.")}>Settlement Report</button>
+      <footer><button type="button" onClick={onClose}>Close</button></footer>
+    </div>
   </ActionPanel>;
 }
 

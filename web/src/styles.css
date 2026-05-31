@@ -1547,28 +1547,30 @@ button {
 .workforce-mark-attendance {
   background: var(--brand-primary);
   border: 0;
-  border-radius: 12px;
+  border-radius: 10px;
   color: #fff;
-  font-size: 1.2rem;
+  font-size: 1rem;
   font-weight: 800;
-  height: 56px;
-  width: 100%;
+  height: 44px;
+  min-width: 160px;
+  width: auto;
 }
 
-.workforce-quick-grid {
-  display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.workforce-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.workforce-quick-grid button {
-  background: var(--brand-primary);
-  border: 0;
-  border-radius: 12px;
-  color: #fff;
-  font-size: 1.05rem;
+.workforce-toolbar button {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--brand-primary);
+  font-size: .86rem;
   font-weight: 750;
-  height: 52px;
+  height: 40px;
+  padding: 0 12px;
 }
 
 .workforce-inline-link {
@@ -1637,6 +1639,7 @@ button {
   border: 1px solid var(--border);
   border-radius: 10px;
   color: var(--text);
+  cursor: pointer;
   display: grid;
   gap: 12px;
   grid-template-columns: auto 1fr auto;
@@ -1706,6 +1709,16 @@ button {
   font-weight: 800;
   height: 44px;
   padding: 10px 14px;
+}
+
+.workforce-reports-menu button {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-weight: 700;
+  min-height: 42px;
+  text-align: start;
 }
 
 .record-list article {
@@ -2265,6 +2278,15 @@ button {
   .attendance-tools,
   .attendance-actions {
     grid-template-columns: 1fr;
+  }
+
+  .workforce-mark-attendance {
+    width: 100%;
+  }
+
+  .workforce-toolbar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .admin-hero,
