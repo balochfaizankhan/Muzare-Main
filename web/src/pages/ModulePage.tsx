@@ -157,7 +157,7 @@ function LabourMultiSelect({
 }
 
 function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { openAttendanceOnLoad?: boolean; onAttendanceClose?: () => void }) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { token, user } = useAuth();
   const sync = useSyncState();
   const loadLabourers = useCallback(async () => (await workspaceRecords(offlineDb.labourers)).sort((a, b) => {
@@ -196,6 +196,7 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
   const [showAddLabour, setShowAddLabour] = useState(false);
   const [showAddGroup, setShowAddGroup] = useState(false);
   const [showAttendanceEntry, setShowAttendanceEntry] = useState(false);
+  const [showAttendanceFilters, setShowAttendanceFilters] = useState(false);
   const [showRegisterFilters, setShowRegisterFilters] = useState(false);
   const [labourAction, setLabourAction] = useState<"update" | "advance" | "production" | "payment" | "deactivate" | null>(null);
   const [newAttendanceLabourId, setNewAttendanceLabourId] = useState<string | null>(null);
@@ -439,27 +440,28 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
             }} aria-label="Close mark attendance"><X size={19} /></button>
           </header>
           <section className="record-panel daily-attendance-panel attendance-entry-modal-body">
-            <div className="daily-attendance__heading">
-              <div>
-                <h2>{t("workforcePage.dailyAttendance")}</h2>
-                <p>{t("workforcePage.attendanceIntro")}</p>
-              </div>
-              <strong>{t("workforcePage.date")}: {new Date(`${date}T00:00:00`).toLocaleDateString(i18n.resolvedLanguage ?? "en-GB").replaceAll("/", "-")}</strong>
-            </div>
-            <div className="attendance-tools">
+            <div className="attendance-entry-controls">
               <select value={groupFilterId} onChange={(event) => setGroupFilterId(event.target.value)}>
                 <option value="all">All groups</option>
                 {groups.filter((group) => group.active !== false).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
               </select>
-              <SearchInput placeholder={t("workforcePage.searchLabour")} value={attendanceSearch} onChange={setAttendanceSearch} />
-              <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+              <label className="attendance-date-control">
+                <span>Date</span>
+                <input aria-label="Attendance date" type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+              </label>
+              <SearchInput className="attendance-entry-search" placeholder={t("workforcePage.searchLabour")} value={attendanceSearch} onChange={setAttendanceSearch} />
             </div>
             <div className="attendance-actions">
               <button type="button" onClick={() => setDate(today())}>{t("common.today")}</button>
               {canManageLabour && <button type="button" onClick={() => setShowAddLabour(true)}>{t("workforcePage.addLabour")}</button>}
-              <span className={`attendance-auto-save attendance-auto-save--${sync.status}`} role="status" aria-live="polite">{attendanceSaveLabel}</span>
+              <button className={`attendance-filter-toggle ${showAttendanceFilters ? "is-active" : ""}`} type="button" aria-label="More attendance filters" onClick={() => setShowAttendanceFilters((current) => !current)}>
+                <MoreVertical size={18} />
+              </button>
             </div>
-            <label className="attendance-inactive-toggle"><input type="checkbox" checked={showInactiveLabour} onChange={(event) => setShowInactiveLabour(event.target.checked)} /> {t("workforcePage.showInactive")}</label>
+            <div className="attendance-entry-meta">
+              <span className={`attendance-auto-save attendance-auto-save--${sync.status}`} role="status" aria-live="polite">{attendanceSaveLabel}</span>
+              {showAttendanceFilters && <label className="attendance-inactive-toggle"><input type="checkbox" checked={showInactiveLabour} onChange={(event) => setShowInactiveLabour(event.target.checked)} /> {t("workforcePage.showInactive")}</label>}
+            </div>
             <div className="attendance-totals" aria-label={t("workforcePage.attendanceTotals")}>
               <button
                 type="button"

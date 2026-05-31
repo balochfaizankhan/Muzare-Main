@@ -1176,7 +1176,7 @@ button {
 
 .daily-attendance-panel {
   display: grid;
-  gap: 18px;
+  gap: 12px;
 }
 
 .daily-attendance__heading {
@@ -1233,8 +1233,8 @@ button {
 
 .attendance-actions {
   display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
 }
 
 .attendance-actions button {
@@ -1243,46 +1243,39 @@ button {
   border-radius: 8px;
   color: #fff;
   font-weight: 800;
-  height: 50px;
+  height: 44px;
 }
 
 .attendance-auto-save {
   align-items: center;
-  background: var(--success-bg);
-  border: 1px solid #bbdfc0;
-  border-radius: 8px;
+  background: transparent;
+  border: 0;
   color: #166534;
   display: inline-flex;
-  font-size: .84rem;
+  font-size: .76rem;
   font-weight: 800;
-  justify-content: center;
-  min-height: 50px;
-  padding: 0 12px;
+  justify-content: flex-start;
+  min-height: 22px;
+  padding: 0;
 }
 
 .attendance-auto-save--offline,
 .attendance-auto-save--pending {
-  background: #fff8df;
-  border-color: #f1d78b;
   color: #805800;
 }
 
 .attendance-auto-save--syncing {
-  background: var(--blue-bg);
-  border-color: #bfdbfe;
   color: #1d4ed8;
 }
 
 .attendance-auto-save--error {
-  background: var(--danger-bg);
-  border-color: #fecaca;
   color: var(--danger);
 }
 
 .attendance-entry-modal-body {
   display: grid;
   flex: 1;
-  gap: 18px;
+  gap: 10px;
   min-height: 0;
   overflow-y: auto;
   padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
@@ -1297,6 +1290,71 @@ button {
   z-index: 2;
 }
 
+.attendance-entry-controls {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.attendance-entry-controls input,
+.attendance-entry-controls select {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  height: 44px;
+  min-width: 0;
+  padding: 0 10px;
+  width: 100%;
+}
+
+.attendance-date-control {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  min-width: 0;
+  padding-inline-start: 9px;
+}
+
+.attendance-date-control span {
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+  font-size: .72rem;
+  font-weight: 750;
+}
+
+.attendance-date-control input {
+  border: 0;
+  height: 42px;
+  padding-inline: 6px;
+}
+
+.attendance-entry-search {
+  grid-column: 1 / -1;
+}
+
+.attendance-filter-toggle {
+  align-items: center;
+  background: #fff !important;
+  border: 1px solid var(--border) !important;
+  color: var(--brand-primary) !important;
+  display: inline-flex;
+  justify-content: center;
+  min-width: 44px;
+  padding: 0 !important;
+}
+
+.attendance-filter-toggle.is-active {
+  background: var(--surface-soft) !important;
+  border-color: #b9d7a8 !important;
+}
+
+.attendance-entry-meta {
+  min-height: 22px;
+}
+
 .attendance-totals {
   align-items: center;
   background: #fff;
@@ -1305,7 +1363,7 @@ button {
   box-shadow: 0 5px 16px rgba(5, 35, 63, 0.05);
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  min-height: 58px;
+  min-height: 44px;
   text-align: center;
 }
 
@@ -1341,7 +1399,7 @@ button {
 
 .attendance-board {
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
 
 .attendance-card {
@@ -1353,7 +1411,7 @@ button {
   display: grid;
   gap: 13px;
   grid-template-columns: auto 1fr auto;
-  padding: 13px 14px;
+  padding: 10px 11px;
 }
 
 .attendance-card--new {
