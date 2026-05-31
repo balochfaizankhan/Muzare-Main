@@ -152,7 +152,7 @@ export function DashboardPage() {
       })),
       ...advances.map((item) => ({
         id: item.id,
-        path: "/workspace/attendance",
+        path: "/workspace/labour-advances",
         title: "Labour advance paid",
         detail: "Cash outflow",
         value: `-${money(item.amount)}`,
@@ -183,7 +183,7 @@ export function DashboardPage() {
     { label: "Cartons today", value: String(totals.cartonsToday), icon: PackageOpen, path: "/workspace/dispatch", tone: "navy" },
     { label: "Total sales", value: money(totals.totalSales), icon: TrendingUp, path: "/workspace/sales", tone: "green" },
     { label: "Total expenses", value: money(totals.totalExpenses), icon: BanknoteArrowDown, path: "/workspace/expenses", tone: "red" },
-    { label: "Labour advances", value: money(totals.labourAdvances), icon: UsersRound, path: "/workspace/attendance", tone: "red" },
+    { label: "Labour advances", value: money(totals.labourAdvances), icon: UsersRound, path: "/workspace/labour-advances", tone: "red" },
     { label: "Available balance", value: money(totals.netPosition), icon: Wallet, path: "/workspace/accounts", tone: "navy" },
     { label: "Partner balance", value: money(totals.partnerBalance), icon: CircleDollarSign, path: "/workspace/partner-ledger", tone: "blue" },
   ];

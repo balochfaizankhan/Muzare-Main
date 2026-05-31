@@ -21,6 +21,7 @@ import { Attendance } from "./pages/workspace/Attendance";
 import { Dispatch } from "./pages/workspace/Dispatch";
 import { Expenses } from "./pages/workspace/Expenses";
 import { Inventory } from "./pages/workspace/Inventory";
+import { LabourAdvances } from "./pages/workspace/LabourAdvances";
 import { Reports } from "./pages/workspace/Reports";
 import { Sales } from "./pages/workspace/Sales";
 import { WorkspaceDashboard } from "./pages/workspace/WorkspaceDashboard";
@@ -85,6 +86,7 @@ export default function App() {
       <Route path="expenses" element={<Expenses />} />
       <Route path="dispatch" element={<Dispatch />} />
       <Route path="inventory" element={<Inventory />} />
+      <Route path="labour-advances" element={<LabourAdvances />} />
       <Route path="reports" element={<Reports />} />
       <Route path="team" element={<ModulePage module="workforce" />} />
       <Route path="settings" element={<Farms />} />
