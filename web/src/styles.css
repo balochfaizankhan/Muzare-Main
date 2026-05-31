@@ -66,6 +66,51 @@ button {
   cursor: pointer;
 }
 
+.search-input {
+  position: relative;
+  width: 100%;
+}
+
+.search-input input {
+  width: 100%;
+}
+
+.search-input__icon {
+  color: var(--text-secondary);
+  left: 12px;
+  pointer-events: none;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.search-input input {
+  padding-inline-end: 38px !important;
+  padding-inline-start: 34px !important;
+}
+
+.search-input__clear {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+}
+
+.search-input__clear:hover {
+  background: var(--surface-soft);
+  color: var(--text-primary);
+}
+
 .sr-only {
   clip: rect(0, 0, 0, 0);
   clip-path: inset(50%);
@@ -1235,6 +1280,20 @@ button {
   font-size: 1rem;
 }
 
+.attendance-totals button {
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 800;
+  height: 100%;
+  padding: 0;
+}
+
+.attendance-totals button.is-active {
+  background: rgba(46, 125, 50, 0.12);
+}
+
 .attendance-total--present {
   color: #237a34;
 }
@@ -1615,15 +1674,19 @@ button {
   min-width: 0;
 }
 
+.workforce-list-header__controls .search-input {
+  max-width: 280px;
+  min-width: 0;
+  width: 100%;
+}
+
 .workforce-list-header__controls input {
   background: #fff;
   border: 1px solid var(--border);
   border-radius: 12px;
   color: var(--text);
   height: 46px;
-  max-width: 280px;
   min-width: 0;
-  padding: 0 12px;
   width: 100%;
 }
 
@@ -1650,12 +1713,11 @@ button {
   border-radius: 10px;
   color: var(--text);
   cursor: pointer;
-  display: grid;
+  display: flex;
   gap: 12px;
-  grid-template-columns: auto 1fr auto;
-  min-height: 78px;
+  min-height: 68px;
   opacity: 1;
-  padding: 12px 14px;
+  padding: 9px 11px;
   text-align: start;
   width: 100%;
 }
@@ -1670,19 +1732,21 @@ button {
   background: #2e7d32;
   border: 2px solid #2e7d32;
   border-radius: 999px;
-  color: #fff;
-  display: inline-flex;
+  color: #fff !important;
+  display: flex;
+  flex: 0 0 36px;
   font-size: 14px;
   font-weight: 700;
-  height: 42px;
+  height: 36px;
   justify-content: center;
   line-height: 1;
   opacity: 1;
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
-  width: 42px;
+  width: 36px;
 }
 
 .workforce-row__body {
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -1728,10 +1792,11 @@ button {
   border: 0;
   border-radius: 8px;
   color: #fff;
+  flex: 0 0 auto;
   font-size: 0.82rem;
   font-weight: 800;
-  height: 44px;
-  padding: 10px 14px;
+  height: 40px;
+  padding: 8px 12px;
 }
 
 .workforce-reports-menu button {
@@ -2454,15 +2519,6 @@ button {
 
   .metric-card strong {
     font-size: 0.94rem;
-  }
-
-  .workforce-row {
-    grid-template-columns: auto 1fr;
-  }
-
-  .workforce-row__action {
-    grid-column: 1 / -1;
-    text-align: center;
   }
 
   .attendance-card {

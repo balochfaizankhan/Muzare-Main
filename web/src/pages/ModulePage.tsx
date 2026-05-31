@@ -3,6 +3,7 @@ import { MoreVertical, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { SubpageHeader } from "../components/SubpageHeader";
+import { SearchInput } from "../components/SearchInput";
 import { useAuth } from "../auth/AuthProvider";
 import { useSyncState } from "../hooks/useSyncState";
 import { confirmAttendanceImport, createExpenseSubcategory, deleteOrDeactivateLabour, fetchAdvanceReport, fetchAttendanceReport, fetchExpenseCategories, fetchLabourDeletionPreview, previewAttendanceImport, updateExpenseSubcategory, type AdvanceReportData, type AdvanceReportFilters, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type AttendanceReportFilters, type AttendanceReportStatus, type LabourDeletionPreview } from "../lib/api";
@@ -39,6 +40,13 @@ type PaymentType = typeof paymentTypes[number];
 const hasEndedBefore = (labourer: Labourer, date: string) => Boolean(labourer.endedOn && labourer.endedOn < date);
 const isInactiveOn = (labourer: Labourer, date: string) => labourer.active === false || hasEndedBefore(labourer, date);
 const canMarkAttendanceOn = (labourer: Labourer, date: string) => !isInactiveOn(labourer, date);
+const paymentTypeLabel = (paymentType: PaymentType | undefined) => ({
+  daily_wage: "Daily Wage",
+  production_based: "Production Based",
+  contract_lump_sum: "Contract",
+  monthly_salary: "Monthly Salary",
+  other: "Other",
+}[paymentType ?? "daily_wage"]);
 
 const labourPaymentSummary = (labourer: Labourer) => {
   const type = labourer.paymentType ?? "daily_wage";
@@ -109,13 +117,14 @@ function LabourMultiSelect({
         {summary}
       </button>
       {open && <div className="report-labour-filter__picker">
-        <input
+        <SearchInput
           placeholder={t("workforcePage.searchLabour")}
           value={search}
-          onChange={(event) => {
-            setSearch(event.target.value);
+          onChange={(value) => {
+            setSearch(value);
             setVisibleCount(100);
           }}
+          onClear={() => setVisibleCount(100)}
         />
         <div className="report-labour-filter__actions">
           <button type="button" onClick={() => onChange(filtered.map((labourer) => labourer.id))}>Select All</button>
@@ -349,7 +358,7 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
         <div className="workforce-list-header">
           <h2>Labour List</h2>
           <div className="workforce-list-header__controls">
-            <input placeholder={t("workforcePage.searchRegister")} value={labourSearch} onChange={(event) => setLabourSearch(event.target.value)} />
+            <SearchInput placeholder={t("workforcePage.searchRegister")} value={labourSearch} onChange={setLabourSearch} />
             <button type="button" aria-label="More workforce filters" onClick={() => setShowRegisterFilters((current) => !current)}>
               <MoreVertical size={18} />
             </button>
@@ -383,7 +392,7 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
                 <span className="workforce-row__index">{index + 1}</span>
                 <span className="workforce-row__body">
                   <strong>{labourer.name}</strong>
-                  <span>{labourer.group} • {(labourer.paymentType ?? "daily_wage").replaceAll("_", " ")} • {labourPaymentSummary(labourer)}</span>
+                  <span>{labourer.group} • {paymentTypeLabel(labourer.paymentType)}</span>
                   <em className={isInactiveOn(labourer, today()) ? "status-inactive" : "status-active"}>{isInactiveOn(labourer, today()) ? "Inactive" : "Active"}</em>
                   {labourer.endedOn && <small>End date: {labourer.endedOn}</small>}
                 </span>
@@ -421,18 +430,12 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
               <strong>{t("workforcePage.date")}: {new Date(`${date}T00:00:00`).toLocaleDateString(i18n.resolvedLanguage ?? "en-GB").replaceAll("/", "-")}</strong>
             </div>
             <div className="attendance-tools">
-              <select value={attendanceFilter} onChange={(event) => setAttendanceFilter(event.target.value as Attendance["status"] | "all")}>
-                <option value="all">{t("workforcePage.allLabour")}</option>
-                <option value="present">{t("workforcePage.present")}</option>
-                <option value="half_day">{t("workforcePage.halfDay")}</option>
-                <option value="absent">{t("workforcePage.absent")}</option>
-              </select>
-              <input placeholder={t("workforcePage.searchLabour")} value={attendanceSearch} onChange={(event) => setAttendanceSearch(event.target.value)} />
-              <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
               <select value={groupFilterId} onChange={(event) => setGroupFilterId(event.target.value)}>
                 <option value="all">All groups</option>
                 {groups.filter((group) => group.active !== false).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
               </select>
+              <SearchInput placeholder={t("workforcePage.searchLabour")} value={attendanceSearch} onChange={setAttendanceSearch} />
+              <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
             </div>
             <div className="attendance-actions">
               <button type="button" onClick={() => setDate(today())}>{t("common.today")}</button>
@@ -441,9 +444,27 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
             </div>
             <label className="attendance-inactive-toggle"><input type="checkbox" checked={showInactiveLabour} onChange={(event) => setShowInactiveLabour(event.target.checked)} /> {t("workforcePage.showInactive")}</label>
             <div className="attendance-totals" aria-label={t("workforcePage.attendanceTotals")}>
-              <strong className="attendance-total--present">P: {presentToday}</strong>
-              <strong className="attendance-total--half">1/2: {halfDayToday}</strong>
-              <strong className="attendance-total--absent">A: {absentToday}</strong>
+              <button
+                type="button"
+                className={`attendance-total--present ${attendanceFilter === "present" ? "is-active" : ""}`}
+                onClick={() => setAttendanceFilter((current) => (current === "present" ? "all" : "present"))}
+              >
+                P: {presentToday}
+              </button>
+              <button
+                type="button"
+                className={`attendance-total--half ${attendanceFilter === "half_day" ? "is-active" : ""}`}
+                onClick={() => setAttendanceFilter((current) => (current === "half_day" ? "all" : "half_day"))}
+              >
+                1/2: {halfDayToday}
+              </button>
+              <button
+                type="button"
+                className={`attendance-total--absent ${attendanceFilter === "absent" ? "is-active" : ""}`}
+                onClick={() => setAttendanceFilter((current) => (current === "absent" ? "all" : "absent"))}
+              >
+                A: {absentToday}
+              </button>
             </div>
             <div className="attendance-board">
               {!filteredLabourers.length ? <Empty>{t("workforcePage.noLabourSearch")}</Empty> : filteredLabourers.map((labourer, index) => {
