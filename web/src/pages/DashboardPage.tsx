@@ -20,6 +20,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
+import { calculateAvailableBalance } from "../lib/accounting";
 import { fetchBootstrap } from "../lib/api";
 import { formatDate, formatMoney } from "../lib/format";
 import { ensureLocalAccounts, offlineDb, workspaceRecords } from "../lib/offline-db";
@@ -91,13 +92,14 @@ export function DashboardPage() {
 
   const loadLocalDashboard = useCallback(async () => {
     await ensureLocalAccounts();
-    const [attendance, dispatches, sales, vouchers, entries, advances] = await Promise.all([
+    const [attendance, dispatches, sales, vouchers, entries, advances, accounts] = await Promise.all([
       workspaceRecords(offlineDb.attendance),
       workspaceRecords(offlineDb.dispatches),
       workspaceRecords(offlineDb.sales),
       workspaceRecords(offlineDb.vouchers),
       workspaceRecords(offlineDb.partnerEntries),
       workspaceRecords(offlineDb.advances),
+      workspaceRecords(offlineDb.accounts),
     ]);
     const date = today();
     const totalSales = sales.reduce((sum, item) => sum + item.amount, 0);
@@ -113,7 +115,7 @@ export function DashboardPage() {
       totalSales,
       labourAdvances,
       totalExpenses,
-      netPosition: totalSales - totalExpenses + partnerBalance,
+      netPosition: calculateAvailableBalance(accounts, sales, vouchers, advances, entries),
       partnerBalance,
     });
 

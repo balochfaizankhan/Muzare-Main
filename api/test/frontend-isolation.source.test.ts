@@ -93,20 +93,26 @@ test("partner ledger supports audited edits and offline soft deletes without dup
   assert.match(modulePage, /actions=\{visibleEntries\.map/);
 });
 
-test("partner settlements stay outside business cash while moving payer and receiver positions", async () => {
+test("partner settlements transfer matching account and partner positions without changing business totals", async () => {
   const route = await source("api/src/routes/operational-sync.ts");
   const modulePage = await source("web/src/pages/ModulePage.tsx");
   const dashboard = await source("web/src/pages/DashboardPage.tsx");
   const offlineDb = await source("web/src/lib/offline-db.ts");
+  const accounting = await source("web/src/lib/accounting.ts");
   assert.match(route, /type: z\.literal\("settlement"\)/);
   assert.match(route, /record\.fromPartner\.toLowerCase\(\) !== record\.toPartner\.toLowerCase\(\)/);
   assert.match(offlineDb, /type: "contribution" \| "withdrawal" \| "settlement"/);
-  assert.match(modulePage, /const partnerEntryAccountEffect = \(entry: PartnerEntry\) => entry\.type === "settlement" \? 0/);
+  assert.match(accounting, /export function partnerSettlementEffect\(entry: PartnerEntry, partnerName: string\): number/);
+  assert.match(accounting, /normalizedName\(entry\.toPartner\) === accountName \? entry\.amount : 0/);
+  assert.match(accounting, /normalizedName\(entry\.fromPartner\) === accountName \? entry\.amount : 0/);
+  assert.match(accounting, /accounts\.reduce\(\(sum, account\) => sum \+ calculateAccountBalance\(account, sales, vouchers, advances, entries\), 0\)/);
+  assert.match(modulePage, /const balance = \(account: Account\) => calculateAccountBalance\(account, sales, vouchers, advances, entries\)/);
   assert.match(modulePage, /position\(entry\.fromPartner!\)\.settlementsSent \+= entry\.amount/);
   assert.match(modulePage, /position\(entry\.toPartner!\)\.settlementsReceived \+= entry\.amount/);
   assert.match(modulePage, /<option value="settlement">Partner Settlement<\/option>/);
   assert.match(modulePage, /<option value="settlement">Settlements<\/option>/);
   assert.match(dashboard, /item\.type === "withdrawal" \? -item\.amount : 0/);
+  assert.match(dashboard, /netPosition: calculateAvailableBalance\(accounts, sales, vouchers, advances, entries\)/);
 });
 
 test("attendance labour directory loads cache-first and keeps cached data during API outages", async () => {
@@ -270,6 +276,7 @@ test("labour advance account correction is tenant-scoped, audited, and reflected
   const migrations = await source("api/src/db/migrations.ts");
   const migration = await source("database/migrations/0014_labour_advance_younis_account_backfill.sql");
   const modulePage = await source("web/src/pages/ModulePage.tsx");
+  const accounting = await source("web/src/lib/accounting.ts");
   const advances = await source("web/src/pages/workspace/LabourAdvances.tsx");
   assert.match(migrations, /0014_labour_advance_younis_account_backfill\.sql/);
   assert.match(migration, /account\.workspace_id = advance\.workspace_id/);
@@ -278,7 +285,7 @@ test("labour advance account correction is tenant-scoped, audited, and reflected
   assert.match(migration, /RAISE WARNING 'Skipping labour advance account correction/);
   assert.match(migration, /muzare_data_migrations WHERE key = '0014_historical_labour_advance_younis_account'/);
   assert.match(migration, /Labour advance account corrected to Younis Khan/);
-  assert.match(modulePage, /- advances\.filter\(\(record\) => record\.accountId === id\)\.reduce\(\(sum, record\) => sum \+ record\.amount, 0\)/);
+  assert.match(accounting, /- advances\.filter\(\(record\) => record\.accountId === account\.id\)\.reduce\(\(sum, record\) => sum \+ record\.amount, 0\)/);
   assert.match(modulePage, /Payment account \*<\/span><select required value=\{form\.accountId\}/);
   assert.match(advances, /accountById\.get\(advance\.accountId \?\? ""\) \?\? advance\.sourceAccountName \?\? "-"/);
 });

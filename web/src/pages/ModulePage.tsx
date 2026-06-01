@@ -6,6 +6,7 @@ import { SubpageHeader } from "../components/SubpageHeader";
 import { SearchInput } from "../components/SearchInput";
 import { useAuth } from "../auth/AuthProvider";
 import { useSyncState } from "../hooks/useSyncState";
+import { calculateAccountBalance, partnerSettlementEffect } from "../lib/accounting";
 import { confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteOrDeactivateLabour, fetchAdvanceReport, fetchAttendanceReport, fetchExpenseCategories, fetchLabourDeletionPreview, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, type AdvanceReportData, type AdvanceReportFilters, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type AttendanceReportFilters, type AttendanceReportStatus, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type LabourDeletionPreview } from "../lib/api";
 import { hasPermission } from "../lib/permissions";
 import { formatMoney } from "../lib/format";
@@ -1894,7 +1895,6 @@ function SalesModule() {
 const partnerEntryLabel = (entry: PartnerEntry) => entry.type === "contribution" ? "Capital Contribution" : entry.type === "withdrawal" ? "Partner Withdrawal" : "Partner Settlement";
 const partnerEntryName = (entry: PartnerEntry) => entry.type === "settlement" ? `${entry.fromPartner} to ${entry.toPartner}` : entry.partnerName ?? "-";
 const partnerEntryBalanceEffect = (entry: PartnerEntry) => entry.type === "contribution" ? entry.amount : entry.type === "withdrawal" ? -entry.amount : 0;
-const partnerEntryAccountEffect = (entry: PartnerEntry) => entry.type === "settlement" ? 0 : partnerEntryBalanceEffect(entry);
 
 function PartnerLedgerModule() {
   const { user } = useAuth();
@@ -1999,7 +1999,8 @@ function PartnerLedgerModule() {
     }
     return [...positions.values()].map((item) => ({
       ...item,
-      netPosition: item.contributions - item.withdrawals - item.expensesPaid - item.settlementsSent + item.settlementsReceived,
+      netPosition: item.contributions - item.withdrawals - item.expensesPaid
+        + activeEntries.reduce((sum, entry) => sum + partnerSettlementEffect(entry, item.name), 0),
     })).sort((a, b) => a.name.localeCompare(b.name));
   })();
   const runningBalances = (() => {
@@ -2126,11 +2127,7 @@ function AccountsModule() {
     setName("");
     await refresh();
   };
-  const balance = (id: string) =>
-    sales.filter((record) => record.accountId === id).reduce((sum, record) => sum + record.amount, 0)
-    - vouchers.filter((record) => record.accountId === id).reduce((sum, record) => sum + record.amount, 0)
-    - advances.filter((record) => record.accountId === id).reduce((sum, record) => sum + record.amount, 0)
-    + entries.filter((record) => record.accountId === id).reduce((sum, record) => sum + partnerEntryAccountEffect(record), 0);
+  const balance = (account: Account) => calculateAccountBalance(account, sales, vouchers, advances, entries);
   const totalAdvances = advances.reduce((sum, item) => sum + item.amount, 0);
   const totalVoucherExpenses = vouchers.reduce((sum, item) => sum + item.amount, 0);
 
@@ -2152,7 +2149,7 @@ function AccountsModule() {
             <article key={account.id}>
               <span>{account.type}</span>
               <strong>{account.name}</strong>
-              <b>{money(balance(account.id))}</b>
+              <b>{money(balance(account))}</b>
             </article>
           ))}
         </div>

@@ -365,6 +365,8 @@ test("partner ledger edits and soft deletes recalculate balances, remain tenant 
 
 test("partner settlements move only partner positions and remain idempotent, editable, reversible, and tenant scoped", async () => {
   const settlementId = randomUUID();
+  const younisAccountId = randomUUID(); const sajidAccountId = randomUUID();
+  const younisName = "Settlement Younis Khan"; const sajidName = "Settlement Sajid Khan";
   const timestamp = (offset: number) => new Date(Date.now() + offset).toISOString();
   const settlementPayload = (id: string, fromPartner: string, toPartner: string, amount: number, offset: number) => ({
     ...envelope(alpha, "partnerEntry", id, {
@@ -394,20 +396,43 @@ test("partner settlements move only partner positions and remain idempotent, edi
       return result;
     }, {} as Record<string, number>);
   };
+  const accountPositions = async () => {
+    const accounts = (await db.select().from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, alpha.workspaceId),
+      eq(operationalRecords.entityType, "account"),
+    ))).filter((record) => [younisAccountId, sajidAccountId].includes(record.clientRecordId));
+    const settlements = (await db.select().from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, alpha.workspaceId),
+      eq(operationalRecords.entityType, "partnerEntry"),
+      eq(operationalRecords.clientRecordId, settlementId),
+    ))).filter((record) => !record.payload.deletedAt);
+    return Object.fromEntries(accounts.map((account) => {
+      const name = String(account.payload.name);
+      const amount = settlements.reduce((sum, entry) => sum
+        + (String(entry.payload.toPartner).toLowerCase() === name.toLowerCase() ? Number(entry.payload.amount) : 0)
+        - (String(entry.payload.fromPartner).toLowerCase() === name.toLowerCase() ? Number(entry.payload.amount) : 0), 0);
+      return [name, amount];
+    }));
+  };
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "account", younisAccountId, { name: younisName, type: "partner" }))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "account", sajidAccountId, { name: sajidName, type: "partner" }))).statusCode, 200);
   const totalsBefore = await operationalTotals();
 
-  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", settlementPayload(settlementId, "Younis Khan", "Sajid Khan", 101_140, 1_000))).statusCode, 200);
-  assert.deepEqual(await positions(), { "Younis Khan": -101_140, "Sajid Khan": 101_140 });
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", settlementPayload(settlementId, younisName, sajidName, 101_140, 1_000))).statusCode, 200);
+  assert.deepEqual(await positions(), { [younisName]: -101_140, [sajidName]: 101_140 });
+  assert.deepEqual(await accountPositions(), { [younisName]: -101_140, [sajidName]: 101_140 });
   assert.deepEqual(await operationalTotals(), totalsBefore);
 
-  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", settlementPayload(settlementId, "Younis Khan", "Sajid Khan", 101_140, 2_000))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", settlementPayload(settlementId, younisName, sajidName, 101_140, 2_000))).statusCode, 200);
   assert.equal((await db.select().from(operationalRecords).where(and(
     eq(operationalRecords.workspaceId, alpha.workspaceId), eq(operationalRecords.entityType, "partnerEntry"), eq(operationalRecords.clientRecordId, settlementId),
   ))).length, 1);
-  assert.deepEqual(await positions(), { "Younis Khan": -101_140, "Sajid Khan": 101_140 });
+  assert.deepEqual(await positions(), { [younisName]: -101_140, [sajidName]: 101_140 });
+  assert.deepEqual(await accountPositions(), await positions());
 
-  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", settlementPayload(settlementId, "Younis Khan", "Sajid Khan", 90_000, 3_000))).statusCode, 200);
-  assert.deepEqual(await positions(), { "Younis Khan": -90_000, "Sajid Khan": 90_000 });
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", settlementPayload(settlementId, younisName, sajidName, 90_000, 3_000))).statusCode, 200);
+  assert.deepEqual(await positions(), { [younisName]: -90_000, [sajidName]: 90_000 });
+  assert.deepEqual(await accountPositions(), await positions());
   assert.deepEqual(await operationalTotals(), totalsBefore);
 
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", settlementPayload(randomUUID(), "Sajid Khan", "sajid khan", 100, 4_000))).statusCode, 400);
@@ -419,6 +444,7 @@ test("partner settlements move only partner positions and remain idempotent, edi
     workspaceId: alpha.workspaceId, farmId: alpha.farmId, seasonId: alpha.seasonId, entity: "partnerEntry", recordId: settlementId, reason: "Settlement corrected",
   })).statusCode, 204);
   assert.deepEqual(await positions(), {});
+  assert.deepEqual(await accountPositions(), { [younisName]: 0, [sajidName]: 0 });
   assert.deepEqual(await operationalTotals(), totalsBefore);
 });
 
