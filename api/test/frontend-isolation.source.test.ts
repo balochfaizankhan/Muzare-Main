@@ -83,11 +83,11 @@ test("partner ledger supports audited edits and offline soft deletes without dup
   const offlineDb = await source("web/src/lib/offline-db.ts");
   const sync = await source("web/src/services/syncService.ts");
   assert.match(route, /action: "partner_ledger_updated"/);
-  assert.match(route, /action: "partner_ledger_deleted"/);
+  assert.match(route, /parsed\.data\.entity === "partnerEntry" \? "partner_ledger_deleted"/);
   assert.match(route, /deletedAt: deletedAt\.toISOString\(\), deletedBy: request\.appUser\.id, deletionReason/);
   assert.match(route, /hasPermission\(request\.appUser, "MANAGE_RECORDS", parsed\.data\.workspaceId\)/);
-  assert.match(offlineDb, /options\.includeDeleted \|\| !record\.deletedAt/);
-  assert.match(sync, /entity === "partnerEntry" \? \{ \.\.\.record, deletedAt: queuedAt, pendingSync: true \}/);
+  assert.match(offlineDb, /Boolean\(options\.includeDeleted\) \|\| !record\.deletedAt/);
+  assert.match(sync, /entity === "partnerEntry" \|\| entity === "advance" \|\| entity === "voucher"/);
   assert.match(modulePage, /Show deleted/);
   assert.match(modulePage, /Partner ledger entry deleted successfully\./);
   assert.match(modulePage, /actions=\{visibleEntries\.map/);
@@ -100,19 +100,19 @@ test("partner settlements transfer matching account and partner positions withou
   const offlineDb = await source("web/src/lib/offline-db.ts");
   const accounting = await source("web/src/lib/accounting.ts");
   assert.match(route, /type: z\.literal\("settlement"\)/);
-  assert.match(route, /record\.fromPartner\.toLowerCase\(\) !== record\.toPartner\.toLowerCase\(\)/);
+  assert.match(route, /record\.fromAccountId !== record\.toAccountId/);
   assert.match(offlineDb, /type: "contribution" \| "withdrawal" \| "settlement"/);
-  assert.match(accounting, /export function partnerSettlementEffect\(entry: PartnerEntry, partnerName: string\): number/);
-  assert.match(accounting, /normalizedName\(entry\.toPartner\) === accountName \? entry\.amount : 0/);
-  assert.match(accounting, /normalizedName\(entry\.fromPartner\) === accountName \? entry\.amount : 0/);
+  assert.match(accounting, /export function partnerSettlementEffect\(entry: PartnerEntry, accountId: string\): number/);
+  assert.match(accounting, /entry\.toAccountId === accountId \? entry\.amount : 0/);
+  assert.match(accounting, /entry\.fromAccountId === accountId \? entry\.amount : 0/);
   assert.match(accounting, /accounts\.reduce\(\(sum, account\) => sum \+ calculateAccountBalance\(account, sales, vouchers, advances, entries\), 0\)/);
   assert.match(modulePage, /const balance = \(account: Account\) => calculateAccountBalance\(account, sales, vouchers, advances, entries\)/);
-  assert.match(modulePage, /position\(entry\.fromPartner!\)\.settlementsSent \+= entry\.amount/);
-  assert.match(modulePage, /position\(entry\.toPartner!\)\.settlementsReceived \+= entry\.amount/);
+  assert.match(modulePage, /position\(fromName\)\.settlementsSent \+= entry\.amount/);
+  assert.match(modulePage, /position\(toName\)\.settlementsReceived \+= entry\.amount/);
   assert.match(modulePage, /for \(const advance of advances\)/);
   assert.match(modulePage, /position\(accountName\)\.labourAdvancesPaid \+= advance\.amount/);
   assert.match(modulePage, /totalPaid: item\.voucherExpensesPaid \+ item\.labourAdvancesPaid/);
-  assert.match(modulePage, /- item\.voucherExpensesPaid[\s\S]*- item\.labourAdvancesPaid[\s\S]*\+ item\.contributions[\s\S]*- item\.withdrawals[\s\S]*- item\.settlementsSent[\s\S]*\+ item\.settlementsReceived/);
+  assert.match(modulePage, /-\s*item\.voucherExpensesPaid[\s\S]*-\s*item\.labourAdvancesPaid[\s\S]*\+\s*item\.contributions[\s\S]*-\s*item\.withdrawals[\s\S]*-\s*item\.settlementsSent[\s\S]*\+\s*item\.settlementsReceived/);
   assert.match(modulePage, /<option value="settlement">Partner Settlement<\/option>/);
   assert.match(modulePage, /<option value="settlement">Settlements<\/option>/);
   assert.match(dashboard, /item\.type === "withdrawal" \? -item\.amount : 0/);
@@ -215,7 +215,7 @@ test("attendance CSV confirm sends nested confirmation and blocks unresolved lab
   const api = await source("web/src/lib/api.ts");
   const modulePage = await source("web/src/pages/ModulePage.tsx");
   assert.match(api, /confirmation: \{[\s\S]*warningsAccepted: input\.warningsAccepted,[\s\S]*duplicateHandlingMode: input\.duplicateHandlingMode,[\s\S]*labourMappings: input\.labourMappings/);
-  assert.match(modulePage, /unresolvedLabourRows\.length > 0 \|\| summary\.errors\.length > 0 \|\| \(summary\.warnings\.length > 0 && !warningsAccepted\)/);
+  assert.match(modulePage, /unresolvedLabourRows\.length > 0 \|\| summary\.errors\.length > 0 \|\| \(summary\.dailyAdvances > 0 && !accountId\) \|\| \(summary\.warnings\.length > 0 && !warningsAccepted\)/);
   assert.match(modulePage, /I understand these warnings and want to continue\./);
 });
 
@@ -354,5 +354,23 @@ test("accounts drill-down exposes live ledger totals and source links", async ()
   assert.match(modulePage, /source === "expenses"/);
   assert.match(modulePage, /source === "labour_advances"/);
   assert.match(modulePage, /source === "partner_ledger"/);
+  assert.match(modulePage, /source === "sales"/);
+  assert.match(modulePage, /type: "sale"/);
+  assert.match(modulePage, /salesReceived/);
+  assert.match(modulePage, /for \(const row of filteredLedgerRows\)/);
   assert.match(accounting, /calculateAccountBalance\(account, sales, vouchers, advances, entries\)/);
+});
+
+test("financial sync hardening validates money records and preserves soft-deleted sources", async () => {
+  const route = await source("api/src/routes/operational-sync.ts");
+  const imports = await source("api/src/routes/attendance-imports.ts");
+  const sync = await source("web/src/services/syncService.ts");
+  assert.match(route, /financialPayloadSchemas/);
+  assert.match(route, /positiveAmountSchema/);
+  assert.match(route, /entity: z\.enum\(\["partnerEntry", "advance", "voucher"\]\)/);
+  assert.match(route, /expense_voucher_deleted/);
+  assert.match(route, /labour_advance_deleted/);
+  assert.match(imports, /Payment account is required for imported advances\./);
+  assert.match(imports, /accountId: body\.data\.accountId/);
+  assert.match(sync, /entity === "partnerEntry" \|\| entity === "advance" \|\| entity === "voucher"/);
 });

@@ -91,8 +91,10 @@ after(async () => {
 
 test("Alpha and Bravo operational records remain isolated", async () => {
   for (const entity of ["voucher", "attendance", "sale", "dispatch"]) {
-    assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, entity))).statusCode, 200);
-    assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, entity))).statusCode, 200);
+    const alphaRecord = entity === "voucher" || entity === "sale" ? financialRecord(alpha, entity) : {};
+    const bravoRecord = entity === "voucher" || entity === "sale" ? financialRecord(bravo, entity) : {};
+    assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, entity, randomUUID(), alphaRecord))).statusCode, 200);
+    assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, entity, randomUUID(), bravoRecord))).statusCode, 200);
   }
   const alphaAccountId = randomUUID(); const bravoAccountId = randomUUID();
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "account", alphaAccountId, { name: "Alpha Primary", type: "cash" }))).statusCode, 200);
@@ -157,6 +159,90 @@ test("attendance can be cleared idempotently only inside the active tenant conte
   assert.equal((await request(alpha.token, "GET", reportPath)).json().records.some((record: { id: string }) => record.id === attendanceId), false);
 });
 
+test("financial sync rejects accountless or invalid advances and soft deletes advances idempotently", async () => {
+  const labourerId = randomUUID();
+  const accountId = await createAccount(alpha, "Advance Deletion Cash");
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", labourerId, {
+    name: "Deletion Worker", group: "General", dailyWage: 90,
+  }))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "advance", randomUUID(), {
+    labourerId, date: "2026-06-01", amount: 50,
+  }))).statusCode, 400);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "advance", randomUUID(), {
+    labourerId, accountId, date: "2026-06-01", amount: -50,
+  }))).statusCode, 400);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "sale", randomUUID(), {
+    date: "2026-06-01", amount: 50, buyerName: "Accountless Buyer", produceType: "Produce",
+  }))).statusCode, 400);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", randomUUID(), {
+    date: "31/02/2026", amount: 50, accountId, description: "Malformed expense date",
+  }))).statusCode, 400);
+  const advanceId = randomUUID();
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "advance", advanceId, {
+    labourerId, accountId, date: "2026-06-01", amount: 50, source: "manual",
+  }))).statusCode, 200);
+  const deletion = { workspaceId: alpha.workspaceId, farmId: alpha.farmId, seasonId: alpha.seasonId, entity: "advance", recordId: advanceId };
+  assert.equal((await request(alpha.token, "DELETE", "/v1/workspace/operational-records", deletion)).statusCode, 204);
+  assert.equal((await request(alpha.token, "DELETE", "/v1/workspace/operational-records", deletion)).statusCode, 204);
+  const [stored] = await db.select().from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, alpha.workspaceId), eq(operationalRecords.entityType, "advance"), eq(operationalRecords.clientRecordId, advanceId),
+  ));
+  assert.ok(stored?.payload.deletedAt);
+  assert.equal((await db.select().from(auditLogs).where(and(
+    eq(auditLogs.workspaceId, alpha.workspaceId), eq(auditLogs.action, "labour_advance_deleted"),
+  ))).filter((audit) => audit.entityId === stored?.id).length, 1);
+});
+
+test("expense voucher deletion is scoped, permission checked, soft, audited, and hidden from search", async () => {
+  const accountId = await createAccount(alpha, "Voucher Deletion Cash");
+  const voucherId = randomUUID();
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", voucherId, {
+    date: "2026-06-02", amount: 125, accountId, description: "Delete this voucher",
+  }))).statusCode, 200);
+  const deletion = { workspaceId: alpha.workspaceId, farmId: alpha.farmId, seasonId: alpha.seasonId, entity: "voucher", recordId: voucherId };
+  assert.equal((await request(operator.token, "DELETE", "/v1/workspace/operational-records", deletion)).statusCode, 403);
+  assert.equal((await request(bravo.token, "DELETE", "/v1/workspace/operational-records", deletion)).statusCode, 403);
+  assert.equal((await request(alpha.token, "DELETE", "/v1/workspace/operational-records", deletion)).statusCode, 204);
+  assert.equal((await request(alpha.token, "DELETE", "/v1/workspace/operational-records", deletion)).statusCode, 204);
+  const [stored] = await db.select().from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, alpha.workspaceId), eq(operationalRecords.entityType, "voucher"), eq(operationalRecords.clientRecordId, voucherId),
+  ));
+  assert.ok(stored?.payload.deletedAt);
+  const result = await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/expenses/search?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}&search=delete`);
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.json().records.some((record: { id: string }) => record.id === voucherId), false);
+  assert.equal((await db.select().from(auditLogs).where(and(
+    eq(auditLogs.workspaceId, alpha.workspaceId), eq(auditLogs.action, "expense_voucher_deleted"),
+  ))).filter((audit) => audit.entityId === stored?.id).length, 1);
+});
+
+test("attendance CSV advances require a tenant-owned payment account", async () => {
+  const labourerId = randomUUID();
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", labourerId, {
+    name: "Account Required CSV Worker", group: "General", dailyWage: 90,
+  }))).statusCode, 200);
+  const preview = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/preview`, {
+    farmId: alpha.farmId, seasonId: alpha.seasonId, originalFilename: "account-required.csv",
+    csvText: ["Labour Name,2026-06-01", "Account Required CSV Worker,P (Adv:500)"].join("\n"),
+  });
+  assert.equal(preview.statusCode, 201);
+  const blocked = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/confirm`, {
+    sessionId: preview.json().sessionId, duplicateMode: "missing_only", warningsConfirmed: false, mappings: [],
+  });
+  assert.equal(blocked.statusCode, 400);
+  assert.equal(blocked.json().message, "Payment account is required for imported advances.");
+});
+const createAccount = async (tenant: typeof alpha, name: string) => {
+  const id = randomUUID();
+  assert.equal((await request(tenant.token, "POST", "/v1/workspace/operational-records", envelope(tenant, "account", id, { name, type: "cash" }))).statusCode, 200);
+  return id;
+};
+const financialRecord = (tenant: typeof alpha, entity: "sale" | "voucher", record: Record<string, unknown> = {}) => ({
+  date: "2026-06-01", amount: 100, accountId: `${tenant.seasonId}:local-cash`,
+  ...(entity === "sale" ? { buyerName: "Buyer", produceType: "Produce" } : { description: "Expense" }),
+  ...record,
+});
+
 test("attendance sync reconciles different offline UUIDs into one tenant-scoped daily record", async () => {
   const labourerId = randomUUID();
   const firstAttendanceId = randomUUID();
@@ -184,22 +270,22 @@ test("attendance sync reconciles different offline UUIDs into one tenant-scoped 
 
 test("foreign farm, season, account, ledger, and approval references are rejected", async () => {
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", {
-    ...envelope(alpha, "sale"), farmId: bravo.farmId, seasonId: bravo.seasonId,
+    ...envelope(alpha, "sale", randomUUID(), financialRecord(alpha, "sale")), farmId: bravo.farmId, seasonId: bravo.seasonId,
   })).statusCode, 403);
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", {
-    ...envelope(alpha, "sale"), seasonId: bravo.seasonId,
+    ...envelope(alpha, "sale", randomUUID(), financialRecord(alpha, "sale")), seasonId: bravo.seasonId,
   })).statusCode, 403);
 
   const bravoAccount = randomUUID();
   assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "account", bravoAccount))).statusCode, 200);
-  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "sale", randomUUID(), { accountId: bravoAccount }))).statusCode, 403);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "sale", randomUUID(), financialRecord(alpha, "sale", { accountId: bravoAccount })))).statusCode, 403);
 
   const bravoLedger = randomUUID();
   assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "partnerEntry", bravoLedger, { date: "2026-06-01", partnerName: "Bravo Partner", type: "contribution", amount: 100, accountId: bravoAccount }))).statusCode, 200);
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "partnerEntry", randomUUID(), { date: "2026-06-01", partnerName: "Alpha Partner", type: "contribution", amount: 100, accountId: `${alpha.seasonId}:local-cash`, ledgerId: bravoLedger }))).statusCode, 403);
 
   const bravoExpense = randomUUID();
-  assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "voucher", bravoExpense))).statusCode, 200);
+  assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "voucher", bravoExpense, financialRecord(bravo, "voucher")))).statusCode, 200);
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/approvals", {
     workspaceId: alpha.workspaceId, entityType: "expense", entityId: bravoExpense,
   })).statusCode, 403);
@@ -207,7 +293,7 @@ test("foreign farm, season, account, ledger, and approval references are rejecte
 
 test("approval queues remain isolated", async () => {
   const alphaExpense = randomUUID();
-  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", alphaExpense))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", alphaExpense, financialRecord(alpha, "voucher")))).statusCode, 200);
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/approvals", {
     workspaceId: alpha.workspaceId, entityType: "expense", entityId: alphaExpense,
   })).statusCode, 201);
@@ -224,12 +310,12 @@ test("expense categories seed defaults, protect system values, and isolate works
   const fuel = alphaList.json().categories.find((category: { name: string }) => category.name === "Fuel & POL");
   const diesel = fuel.subcategories.find((subcategory: { name: string }) => subcategory.name === "Diesel");
 
-  const fallbackVoucher = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher"));
+  const fallbackVoucher = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", randomUUID(), financialRecord(alpha, "voucher")));
   assert.equal(fallbackVoucher.statusCode, 200);
   assert.equal(fallbackVoucher.json().record.category, "Other");
   assert.equal(fallbackVoucher.json().record.subcategory, "Miscellaneous");
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", randomUUID(), {
-    categoryId: randomUUID(), subcategoryId: randomUUID(),
+    ...financialRecord(alpha, "voucher"), categoryId: randomUUID(), subcategoryId: randomUUID(),
   }))).statusCode, 403);
 
   const created = await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/expense-subcategories`, {
@@ -241,11 +327,11 @@ test("expense categories seed defaults, protect system values, and isolate works
   assert.equal((await request(alpha.token, "PATCH", `/v1/workspace/${alpha.workspaceId}/expense-subcategories/${diesel.id}`, { active: false })).statusCode, 403);
   assert.equal((await request(bravo.token, "PATCH", `/v1/workspace/${alpha.workspaceId}/expense-subcategories/${customId}`, { active: false })).statusCode, 403);
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", randomUUID(), {
-    categoryId: fuel.id, subcategoryId: customId,
+    ...financialRecord(alpha, "voucher"), categoryId: fuel.id, subcategoryId: customId,
   }))).statusCode, 200);
   assert.equal((await request(alpha.token, "PATCH", `/v1/workspace/${alpha.workspaceId}/expense-subcategories/${customId}`, { active: false })).statusCode, 200);
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", randomUUID(), {
-    categoryId: fuel.id, subcategoryId: customId,
+    ...financialRecord(alpha, "voucher"), categoryId: fuel.id, subcategoryId: customId,
   }))).statusCode, 403);
 });
 
@@ -368,13 +454,13 @@ test("partner settlements move only partner positions and remain idempotent, edi
   const younisAccountId = randomUUID(); const sajidAccountId = randomUUID();
   const younisName = "Settlement Younis Khan"; const sajidName = "Settlement Sajid Khan";
   const timestamp = (offset: number) => new Date(Date.now() + offset).toISOString();
-  const settlementPayload = (id: string, fromPartner: string, toPartner: string, amount: number, offset: number) => ({
+  const settlementPayload = (id: string, fromAccountId: string, toAccountId: string, fromPartner: string, toPartner: string, amount: number, offset: number) => ({
     ...envelope(alpha, "partnerEntry", id, {
-      date: "2026-06-01", type: "settlement", fromPartner, toPartner, amount, notes: "Share of farm expenses",
+      date: "2026-06-01", type: "settlement", fromAccountId, toAccountId, fromPartner, toPartner, amount, notes: "Share of farm expenses",
     }),
     record: {
       ...envelope(alpha, "partnerEntry", id, {}).record,
-      date: "2026-06-01", type: "settlement", fromPartner, toPartner, amount, notes: "Share of farm expenses", updatedAt: timestamp(offset),
+      date: "2026-06-01", type: "settlement", fromAccountId, toAccountId, fromPartner, toPartner, amount, notes: "Share of farm expenses", updatedAt: timestamp(offset),
     },
   });
   const operationalTotals = async () => {
@@ -409,8 +495,8 @@ test("partner settlements move only partner positions and remain idempotent, edi
     return Object.fromEntries(accounts.map((account) => {
       const name = String(account.payload.name);
       const amount = settlements.reduce((sum, entry) => sum
-        + (String(entry.payload.toPartner).toLowerCase() === name.toLowerCase() ? Number(entry.payload.amount) : 0)
-        - (String(entry.payload.fromPartner).toLowerCase() === name.toLowerCase() ? Number(entry.payload.amount) : 0), 0);
+        + (String(entry.payload.toAccountId) === account.clientRecordId ? Number(entry.payload.amount) : 0)
+        - (String(entry.payload.fromAccountId) === account.clientRecordId ? Number(entry.payload.amount) : 0), 0);
       return [name, amount];
     }));
   };
@@ -418,26 +504,26 @@ test("partner settlements move only partner positions and remain idempotent, edi
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "account", sajidAccountId, { name: sajidName, type: "partner" }))).statusCode, 200);
   const totalsBefore = await operationalTotals();
 
-  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", settlementPayload(settlementId, younisName, sajidName, 101_140, 1_000))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", settlementPayload(settlementId, younisAccountId, sajidAccountId, younisName, sajidName, 101_140, 1_000))).statusCode, 200);
   assert.deepEqual(await positions(), { [younisName]: -101_140, [sajidName]: 101_140 });
   assert.deepEqual(await accountPositions(), { [younisName]: -101_140, [sajidName]: 101_140 });
   assert.deepEqual(await operationalTotals(), totalsBefore);
 
-  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", settlementPayload(settlementId, younisName, sajidName, 101_140, 2_000))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", settlementPayload(settlementId, younisAccountId, sajidAccountId, younisName, sajidName, 101_140, 2_000))).statusCode, 200);
   assert.equal((await db.select().from(operationalRecords).where(and(
     eq(operationalRecords.workspaceId, alpha.workspaceId), eq(operationalRecords.entityType, "partnerEntry"), eq(operationalRecords.clientRecordId, settlementId),
   ))).length, 1);
   assert.deepEqual(await positions(), { [younisName]: -101_140, [sajidName]: 101_140 });
   assert.deepEqual(await accountPositions(), await positions());
 
-  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", settlementPayload(settlementId, younisName, sajidName, 90_000, 3_000))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", settlementPayload(settlementId, younisAccountId, sajidAccountId, younisName, sajidName, 90_000, 3_000))).statusCode, 200);
   assert.deepEqual(await positions(), { [younisName]: -90_000, [sajidName]: 90_000 });
   assert.deepEqual(await accountPositions(), await positions());
   assert.deepEqual(await operationalTotals(), totalsBefore);
 
-  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", settlementPayload(randomUUID(), "Sajid Khan", "sajid khan", 100, 4_000))).statusCode, 400);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", settlementPayload(randomUUID(), sajidAccountId, sajidAccountId, "Sajid Khan", "sajid khan", 100, 4_000))).statusCode, 400);
   assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", {
-    ...settlementPayload(randomUUID(), "Bravo Payer", "Bravo Receiver", 100, 5_000), workspaceId: alpha.workspaceId,
+    ...settlementPayload(randomUUID(), younisAccountId, sajidAccountId, "Bravo Payer", "Bravo Receiver", 100, 5_000), workspaceId: alpha.workspaceId,
   })).statusCode, 403);
 
   assert.equal((await request(alpha.token, "DELETE", "/v1/workspace/operational-records", {
@@ -534,7 +620,7 @@ test("expense CSV import normalizes mixed legacy date formats and rejects imposs
 test("expense vouchers receive scoped readable numbers and keep them when edited", async () => {
   const firstId = randomUUID();
   const first = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", firstId, {
-    date: "2026-05-20", description: "Original expense", amount: 100,
+    ...financialRecord(alpha, "voucher"), date: "2026-05-20", description: "Original expense", amount: 100,
   }));
   assert.equal(first.statusCode, 200);
   assert.match(first.json().record.voucherNumber, /^V-\d{4}$/);
@@ -542,10 +628,10 @@ test("expense vouchers receive scoped readable numbers and keep them when edited
 
   const [second, third] = await Promise.all([
     request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", randomUUID(), {
-      date: "2026-05-21", description: "Concurrent expense A", amount: 120,
+      ...financialRecord(alpha, "voucher"), date: "2026-05-21", description: "Concurrent expense A", amount: 120,
     })),
     request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", randomUUID(), {
-      date: "2026-05-21", description: "Concurrent expense B", amount: 140,
+      ...financialRecord(alpha, "voucher"), date: "2026-05-21", description: "Concurrent expense B", amount: 140,
     })),
   ]);
   assert.equal(second.statusCode, 200);
@@ -556,6 +642,7 @@ test("expense vouchers receive scoped readable numbers and keep them when edited
     createdAt: first.json().record.createdAt,
     updatedAt: new Date(Date.now() + 1_000).toISOString(),
     voucherNumber: "V-9999",
+    accountId: `${alpha.seasonId}:local-cash`,
     date: "2026-05-22",
     description: "Corrected expense",
     amount: 175,
@@ -614,7 +701,7 @@ test("attendance reports calculate payable wages and reject foreign workspace or
     }))).statusCode, 200);
   }
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "advance", randomUUID(), {
-    labourerId, date: "2026-05-02", amount: 45, notes: "Midweek advance",
+    labourerId, accountId: `${alpha.seasonId}:local-cash`, date: "2026-05-02", amount: 45, notes: "Midweek advance",
   }))).statusCode, 200);
   const path = `/v1/workspace/${alpha.workspaceId}/attendance/report?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}&from=2026-05-01&to=2026-05-03`;
   const report = await request(alpha.token, "GET", path);
@@ -653,10 +740,10 @@ test("advance reports return labour-grouped totals and enforce tenant-scoped lab
     name: "Bravo Advance Worker", group: "General", dailyWage: 100,
   }))).statusCode, 200);
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "advance", randomUUID(), {
-    labourerId, date: "2026-05-04", amount: 120, notes: "Seed cash",
+    labourerId, accountId: `${alpha.seasonId}:local-cash`, date: "2026-05-04", amount: 120, notes: "Seed cash",
   }))).statusCode, 200);
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "advance", randomUUID(), {
-    labourerId, date: "2026-05-05", amount: 80, notes: "Food",
+    labourerId, accountId: `${alpha.seasonId}:local-cash`, date: "2026-05-05", amount: 80, notes: "Food",
   }))).statusCode, 200);
   const path = `/v1/workspace/${alpha.workspaceId}/advance/report?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}&from=2026-05-04&to=2026-05-05`;
   const report = await request(alpha.token, "GET", path);
@@ -696,9 +783,11 @@ test("labour advance account backfill maps Younis Khan per workspace, skips miss
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "advance", alphaAdvanceId, {
     labourerId: alphaLabourerId, accountId: alphaCashId, date: "2026-05-06", amount: 300, notes: "Correct this account only",
   }))).statusCode, 200);
-  assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "advance", bravoAdvanceId, {
-    labourerId: bravoLabourerId, date: "2026-05-06", amount: 200, notes: "Bravo scoped account",
-  }))).statusCode, 200);
+  await db.insert(operationalRecords).values({
+    workspaceId: bravo.workspaceId, farmId: bravo.farmId, seasonId: bravo.seasonId, clientRecordId: bravoAdvanceId,
+    entityType: "advance", payload: { id: bravoAdvanceId, labourerId: bravoLabourerId, date: "2026-05-06", amount: 200, notes: "Historical Bravo scoped account" },
+    recordedBy: bravo.userId, clientUpdatedAt: new Date(now),
+  });
 
   const missingFarmId = randomUUID();
   const missingSeasonId = randomUUID();
@@ -786,6 +875,7 @@ test("labour lifecycle hard deletes unused labour and deactivates linked labour 
 });
 
 test("attendance CSV imports preview safely, enforce owner access, and avoid duplicate attendance or advances", async () => {
+  const paymentAccountId = await createAccount(alpha, "Attendance CSV Cash");
   const labourerId = randomUUID();
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", labourerId, {
     name: "CSV Known Worker", group: "General", dailyWage: 100,
@@ -806,12 +896,12 @@ test("attendance CSV imports preview safely, enforce owner access, and avoid dup
   });
   const sessionId = preview.json().sessionId as string;
   const confirmed = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/confirm`, {
-    sessionId, duplicateMode: "missing_only", warningsConfirmed: false, mappings: [],
+    sessionId, duplicateMode: "missing_only", warningsConfirmed: false, mappings: [], accountId: paymentAccountId,
   });
   assert.equal(confirmed.statusCode, 200);
   assert.deepEqual(confirmed.json().result, { attendanceCreated: 3, attendanceUpdated: 0, attendanceSkipped: 0, advancesCreated: 2, duplicateAdvancesSkipped: 0, totalAdvanceImported: 700, labourersCreated: 0, errors: [] });
   assert.equal((await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/confirm`, {
-    sessionId, duplicateMode: "missing_only", warningsConfirmed: false, mappings: [],
+    sessionId, duplicateMode: "missing_only", warningsConfirmed: false, mappings: [], accountId: paymentAccountId,
   })).statusCode, 409);
 
   const repeatPreview = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/preview`, input);
@@ -819,12 +909,13 @@ test("attendance CSV imports preview safely, enforce owner access, and avoid dup
   assert.equal(repeatPreview.json().preview.summary.duplicateAdvances, 2);
   assert.equal(repeatPreview.json().preview.summary.advanceRecordsToCreate, 0);
   const repeat = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/confirm`, {
-    sessionId: repeatPreview.json().sessionId, duplicateMode: "missing_only", warningsConfirmed: false, mappings: [],
+    sessionId: repeatPreview.json().sessionId, duplicateMode: "missing_only", warningsConfirmed: false, mappings: [], accountId: paymentAccountId,
   });
   assert.deepEqual(repeat.json().result, { attendanceCreated: 0, attendanceUpdated: 0, attendanceSkipped: 3, advancesCreated: 0, duplicateAdvancesSkipped: 2, totalAdvanceImported: 0, labourersCreated: 0, errors: [] });
 });
 
 test("attendance CSV imports can create unknown labour and import advance-only daily cells", async () => {
+  const paymentAccountId = await createAccount(alpha, "Unknown Labour CSV Cash");
   const csvText = ["Labour Name,Advance Total,01/05,02/05", "New CSV Worker,1000,1000,P"].join("\n");
   const preview = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/preview`, {
     farmId: alpha.farmId, seasonId: alpha.seasonId, originalFilename: "new-worker.csv", csvText, from: "2026-05-01", to: "2026-05-02",
@@ -833,13 +924,14 @@ test("attendance CSV imports can create unknown labour and import advance-only d
   assert.equal(preview.json().preview.summary.unknownLabourRows, 1);
   assert.equal(preview.json().preview.summary.dailyAdvances, 1);
   const confirmed = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/confirm`, {
-    sessionId: preview.json().sessionId, duplicateMode: "missing_only", warningsConfirmed: false,
+    sessionId: preview.json().sessionId, duplicateMode: "missing_only", warningsConfirmed: false, accountId: paymentAccountId,
     mappings: [{ rowIndex: 0, action: "create", dailyWage: 80, group: "Imported" }],
   });
   assert.deepEqual(confirmed.json().result, { attendanceCreated: 1, attendanceUpdated: 0, attendanceSkipped: 0, advancesCreated: 1, duplicateAdvancesSkipped: 0, totalAdvanceImported: 1000, labourersCreated: 1, errors: [] });
 });
 
 test("attendance CSV imports detect Android metadata headers and parse parenthesized daily advances", async () => {
+  const paymentAccountId = await createAccount(alpha, "Android CSV Cash");
   const labourerId = randomUUID();
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", labourerId, {
     name: "Android CSV Worker", group: "General", dailyWage: 90,
@@ -866,7 +958,7 @@ test("attendance CSV imports detect Android metadata headers and parse parenthes
     { column: "2026-06-04", date: "2026-06-04", raw: "- (Adv:1000)", status: null, advanceAmount: 1000 },
   ]);
   const confirmed = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/attendance-imports/confirm`, {
-    sessionId: preview.json().sessionId, duplicateMode: "missing_only", warningsConfirmed: false, mappings: [],
+    sessionId: preview.json().sessionId, duplicateMode: "missing_only", warningsConfirmed: false, mappings: [], accountId: paymentAccountId,
   });
   assert.deepEqual(confirmed.json().result, { attendanceCreated: 3, attendanceUpdated: 0, attendanceSkipped: 0, advancesCreated: 4, duplicateAdvancesSkipped: 0, totalAdvanceImported: 2700, labourersCreated: 0, errors: [] });
   const importedAdvances = (await db.select().from(operationalRecords).where(and(
@@ -914,7 +1006,7 @@ test("season lifecycle persists active selection and rejects cross-farm or archi
     name: "Second Farm Season", year: 2026, startsOn: "2026-01-01", status: "active",
   });
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", {
-    ...envelope(alpha, "sale"), seasonId: secondFarmSeasonId,
+    ...envelope(alpha, "sale", randomUUID(), financialRecord(alpha, "sale")), seasonId: secondFarmSeasonId,
   })).statusCode, 403);
 
   const created = await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/farms/${alpha.farmId}/seasons`, {
@@ -932,7 +1024,7 @@ test("season lifecycle persists active selection and rejects cross-farm or archi
 
   assert.equal((await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/farms/${alpha.farmId}/seasons/${seasonId}/archive`)).statusCode, 204);
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", {
-    ...envelope(alpha, "sale"), seasonId,
+    ...envelope(alpha, "sale", randomUUID(), financialRecord(alpha, "sale")), seasonId,
   })).statusCode, 403);
 
   assert.equal((await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/farms/${alpha.farmId}/seasons/${alpha.seasonId}/select`)).statusCode, 204);

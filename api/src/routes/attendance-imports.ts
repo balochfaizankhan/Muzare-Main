@@ -14,6 +14,7 @@ const previewSchema = z.object({
   seasonId: z.string().uuid(),
   originalFilename: z.string().trim().min(1).max(255),
   csvText: z.string().min(1).max(5_000_000),
+  accountId: z.string().min(1).optional(),
   from: z.string().date().optional(),
   to: z.string().date().optional(),
 });
@@ -40,17 +41,19 @@ const confirmSchema = z.union([
     importSessionId: z.string().uuid(),
     farmId: z.string().uuid(),
     seasonId: z.string().uuid(),
+    accountId: z.string().min(1).optional(),
     confirmation: confirmationSchema,
   }).transform((input) => ({
     sessionId: input.importSessionId, farmId: input.farmId, seasonId: input.seasonId,
     warningsConfirmed: input.confirmation.warningsAccepted,
     duplicateMode: input.confirmation.duplicateHandlingMode,
-    mappings: input.confirmation.labourMappings,
+    mappings: input.confirmation.labourMappings, accountId: input.accountId,
   })),
   z.object({
     sessionId: z.string().uuid(),
     farmId: z.string().uuid().optional(),
     seasonId: z.string().uuid().optional(),
+    accountId: z.string().min(1).optional(),
     duplicateMode: duplicateModeSchema.default("missing_only"),
     warningsConfirmed: z.boolean().default(false),
     mappings: z.array(mappingSchema).default([]),
@@ -231,7 +234,7 @@ const importedAdvanceSource = (source: unknown) => source === "attendance_csv_im
 const advanceIdentity = (labourerId: string, date: string, amount: number) => `${labourerId}:${date}:${amount}`;
 function importedAdvance(record: typeof operationalRecords.$inferSelect): ExistingImportedAdvance | null {
   const payload = record.payload;
-  if (!importedAdvanceSource(payload.source) || typeof payload.labourerId !== "string" || typeof payload.date !== "string") return null;
+  if (payload.deletedAt || !importedAdvanceSource(payload.source) || typeof payload.labourerId !== "string" || typeof payload.date !== "string") return null;
   const amount = Number(payload.amount);
   return Number.isFinite(amount) ? { labourerId: payload.labourerId, date: payload.date, amount } : null;
 }
@@ -273,6 +276,12 @@ export async function attendanceImportRoutes(app: FastifyInstance): Promise<void
     if (!params.success || !body.success) return reply.code(400).send({ message: "A valid attendance CSV import is required." });
     const accessError = await assertImportAccess(params.data.workspaceId, body.data.farmId, body.data.seasonId, request.appUser);
     if (accessError) return reply.code(403).send({ message: accessError });
+    if (body.data.accountId) {
+      const accountError = await validateTenantReferences(params.data.workspaceId, {
+        farmId: body.data.farmId, seasonId: body.data.seasonId, accountId: body.data.accountId,
+      });
+      if (accountError) return reply.code(403).send({ message: accountError });
+    }
     const labourers = await selectedLabourers(params.data.workspaceId, body.data.farmId);
     const parsedPayload = buildPreview(body.data.csvText, labourers, body.data.from, body.data.to);
     const attendance = await db.select().from(operationalRecords).where(and(
@@ -297,7 +306,11 @@ export async function attendanceImportRoutes(app: FastifyInstance): Promise<void
       uploadedBy: request.appUser.id, originalFilename: body.data.originalFilename,
       fileHash: stableId(body.data.csvText), parsedPayload, validationSummary,
     }).returning();
-    return reply.code(201).send({ sessionId: session!.id, preview: { ...parsedPayload, summary: validationSummary, labourers } });
+    const accounts = (await db.select().from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, params.data.workspaceId), eq(operationalRecords.farmId, body.data.farmId),
+      eq(operationalRecords.seasonId, body.data.seasonId), eq(operationalRecords.entityType, "account"),
+    ))).map((record) => ({ id: record.clientRecordId, name: String(record.payload.name ?? "Account") }));
+    return reply.code(201).send({ sessionId: session!.id, preview: { ...parsedPayload, summary: validationSummary, labourers, accounts } });
   });
 
   app.post("/api/workspaces/:workspaceId/attendance-imports/confirm", { preHandler: requireUser }, async (request, reply) => {
@@ -328,6 +341,16 @@ export async function attendanceImportRoutes(app: FastifyInstance): Promise<void
     const parsed = session.parsedPayload as unknown as ImportPayload;
     if (parsed.errors.length) return reply.code(400).send({ message: "Resolve CSV validation errors before importing.", errors: parsed.errors });
     if (parsed.warnings.length && !body.data.warningsConfirmed) return reply.code(400).send({ message: "Confirm validation warnings before importing." });
+    const hasDailyAdvances = parsed.rows.some((row) => row.cells.some((cell) => cell.advanceAmount !== null));
+    if (hasDailyAdvances && !body.data.accountId) {
+      return reply.code(400).send({ message: "Payment account is required for imported advances.", fields: ["accountId"] });
+    }
+    if (body.data.accountId) {
+      const accountError = await validateTenantReferences(params.data.workspaceId, {
+        farmId: session.farmId, seasonId: session.seasonId, accountId: body.data.accountId,
+      });
+      if (accountError) return reply.code(403).send({ message: accountError });
+    }
     const decisions = new Map(body.data.mappings.map((mapping) => [mapping.rowIndex, mapping]));
     const unresolvedRows = parsed.rows.filter((row) => !row.matchedLabourerId && !decisions.has(row.rowIndex)).map((row) => row.labourName);
     if (unresolvedRows.length) return reply.code(400).send({ message: "Resolve all labour mappings before importing.", fields: unresolvedRows });
@@ -398,7 +421,7 @@ export async function attendanceImportRoutes(app: FastifyInstance): Promise<void
               advanceWrites.set(clientRecordId, {
                 workspaceId: params.data.workspaceId, farmId: session.farmId, seasonId: session.seasonId,
                 clientRecordId, entityType: "advance", payload: {
-                  id: clientRecordId, labourerId, date: cell.date, advanceDate: cell.date, amount: cell.advanceAmount, source: "attendance_csv_import",
+                  id: clientRecordId, labourerId, date: cell.date, advanceDate: cell.date, amount: cell.advanceAmount, accountId: body.data.accountId, source: "attendance_csv_import",
                   importSessionId: session.id, sourceImportSessionId: session.id, originalFilename: session.originalFilename,
                   sourceCellReference, originalRow: row.rowIndex, originalDateColumn: cell.column,
                   createdAt: timestamp.toISOString(), updatedAt: timestamp.toISOString(),

@@ -89,8 +89,9 @@ export async function persistOperationalRecord<T extends LocalRecord>(entity: Op
 export async function deleteOperationalRecord(entity: OperationalEntity, record: LocalRecord & { deletionReason?: string }): Promise<void> {
   if (!context) throw new Error("Workspace synchronization is not initialized.");
   const queuedAt = new Date().toISOString();
-  const payload = entity === "partnerEntry" ? { ...record, deletedAt: queuedAt, pendingSync: true } : { ...record, updatedAt: queuedAt, pendingSync: true };
-  if (entity === "partnerEntry") await tableFor(entity).put(payload);
+  const softDelete = entity === "partnerEntry" || entity === "advance" || entity === "voucher";
+  const payload = softDelete ? { ...record, deletedAt: queuedAt, updatedAt: queuedAt, pendingSync: true } : { ...record, updatedAt: queuedAt, pendingSync: true };
+  if (softDelete) await tableFor(entity).put(payload);
   else await tableFor(entity).delete(record.id);
   await offlineDb.pendingMutations.put({
     id: `${context.workspaceId}:${entity}:${record.id}`, entity, operation: "delete",
@@ -99,7 +100,9 @@ export async function deleteOperationalRecord(entity: OperationalEntity, record:
     createdAt: queuedAt, updatedAt: queuedAt,
   });
   emit({ status: navigator.onLine ? "pending" : "offline", pendingCount: await getPendingCount() });
-  const label = entity === "partnerEntry" ? "Partner ledger entry deleted" : "Attendance cleared";
+  const label = entity === "partnerEntry" ? "Partner ledger entry deleted"
+    : entity === "advance" ? "Labour advance deleted"
+      : entity === "voucher" ? "Expense voucher deleted" : "Attendance cleared";
   notify(navigator.onLine ? `${label} locally. Syncing...` : `${label} locally. Will sync automatically when connection is restored.`);
   window.dispatchEvent(new Event("muzare-local-data-change"));
   if (navigator.onLine) void syncPendingRecords();

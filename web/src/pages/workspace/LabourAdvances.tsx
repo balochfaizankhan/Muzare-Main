@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { X } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
 import { LabourSelectCombobox } from "../../components/LabourSelectCombobox";
 import { SearchInput } from "../../components/SearchInput";
@@ -17,6 +18,7 @@ type Sort = "date_desc" | "date_asc" | "amount_desc" | "amount_asc";
 
 export function LabourAdvances() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const [advances, setAdvances] = useState<Advance[]>([]);
   const [labourers, setLabourers] = useState<Labourer[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -51,6 +53,10 @@ export function LabourAdvances() {
       window.removeEventListener("muzare-local-data-change", refresh);
     };
   }, [refresh]);
+  useEffect(() => {
+    const recordId = searchParams.get("recordId");
+    if (recordId) setSelected(advances.find((advance) => advance.id === recordId) ?? null);
+  }, [advances, searchParams]);
 
   const labourById = useMemo(() => new Map(labourers.map((labourer) => [labourer.id, labourer])), [labourers]);
   const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account.name])), [accounts]);
@@ -147,7 +153,7 @@ export function LabourAdvances() {
           </div>}
         </section>
         {selected && <AdvanceDetails advance={selected} labourer={labourById.get(selected.labourerId)} accountName={accountById.get(selected.accountId ?? "") ?? selected.sourceAccountName} canManage={canManage} onClose={() => setSelected(null)} onEdit={() => setEditing(true)} onDelete={() => void remove(selected)} />}
-        {selected && editing && <EditAdvance advance={selected} onClose={() => setEditing(false)} onSave={async (record) => {
+        {selected && editing && <EditAdvance advance={selected} accounts={accounts} onClose={() => setEditing(false)} onSave={async (record) => {
           await persistOperationalRecord("advance", record);
           setSelected(record); setEditing(false); await refresh();
         }} />}
@@ -170,19 +176,21 @@ function AdvanceDetails({ advance, labourer, accountName, canManage, onClose, on
   </section></div>;
 }
 
-function EditAdvance({ advance, onClose, onSave }: { advance: Advance; onClose: () => void; onSave: (record: Advance) => Promise<void> }) {
+function EditAdvance({ advance, accounts, onClose, onSave }: { advance: Advance; accounts: Account[]; onClose: () => void; onSave: (record: Advance) => Promise<void> }) {
   const [date, setDate] = useState(advance.date); const [amount, setAmount] = useState(String(advance.amount)); const [notes, setNotes] = useState(advance.notes);
+  const [accountId, setAccountId] = useState(advance.accountId ?? "");
   const [busy, setBusy] = useState(false); const [error, setError] = useState("");
   const submit = async (event: FormEvent) => {
     event.preventDefault(); const nextAmount = Number(amount);
-    if (!Number.isFinite(nextAmount) || nextAmount <= 0 || busy) { setError("Advance amount must be greater than zero."); return; }
+    if (!Number.isFinite(nextAmount) || nextAmount <= 0 || !accountId || busy) { setError("Advance amount and payment account are required."); return; }
     setBusy(true); setError("");
-    try { await onSave({ ...advance, date, amount: nextAmount, notes, updatedAt: new Date().toISOString() }); } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to update advance."); } finally { setBusy(false); }
+    try { await onSave({ ...advance, date, amount: nextAmount, accountId, notes, updatedAt: new Date().toISOString() }); } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to update advance."); } finally { setBusy(false); }
   };
   return <div className="worker-dialog-backdrop worker-action-backdrop" role="presentation" onClick={onClose}><section className="worker-action-dialog" role="dialog" aria-modal="true" aria-label="Edit advance" onClick={(event) => event.stopPropagation()}>
     <header><h2>Edit Advance</h2><button type="button" onClick={onClose} aria-label="Close edit advance"><X size={18} /></button></header>
     <form className="worker-action-form" onSubmit={(event) => void submit(event)}><label><span>Date *</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
       <label><span>Amount *</span><input required min="0.01" step="0.01" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
+      <label><span>Payment account *</span><select required value={accountId} onChange={(event) => setAccountId(event.target.value)}><option value="">Select account</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
       <label><span>Notes / reference</span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} /></label>{error && <p className="worker-action-error">{error}</p>}
       <footer><button type="button" onClick={onClose}>Cancel</button><button disabled={busy} type="submit">{busy ? "Saving..." : "Save changes"}</button></footer>
     </form></section></div>;

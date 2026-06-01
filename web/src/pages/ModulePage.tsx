@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import { MoreVertical, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { SubpageHeader } from "../components/SubpageHeader";
 import { SearchInput } from "../components/SearchInput";
 import { LabourSelectCombobox } from "../components/LabourSelectCombobox";
@@ -1330,6 +1330,7 @@ function AttendanceImportPanel({ token, workspaceId, farmId, seasonId, onClose, 
   const [mappings, setMappings] = useState<AttendanceImportMapping[]>([]);
   const [duplicateMode, setDuplicateMode] = useState<"missing_only" | "skip_existing" | "update_existing">("missing_only");
   const [warningsAccepted, setWarningsAccepted] = useState(false);
+  const [accountId, setAccountId] = useState("");
   const [result, setResult] = useState<AttendanceImportResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -1356,7 +1357,7 @@ function AttendanceImportPanel({ token, workspaceId, farmId, seasonId, onClose, 
     setBusy(true); setError("");
     try {
       const response = await confirmAttendanceImport(token, workspaceId, {
-        importSessionId: sessionId, farmId, seasonId, duplicateHandlingMode: duplicateMode, warningsAccepted, labourMappings: mappings,
+        importSessionId: sessionId, farmId, seasonId, duplicateHandlingMode: duplicateMode, warningsAccepted, labourMappings: mappings, accountId: accountId || undefined,
       });
       setResult(response.result); setStep(5); await refreshOperationalData(); await onImported();
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to import attendance."); }
@@ -1403,11 +1404,13 @@ function AttendanceImportPanel({ token, workspaceId, farmId, seasonId, onClose, 
           {summary.errors.length > 0 && <div className="attendance-import-errors"><strong>Errors</strong>{summary.errors.map((message) => <p key={message}>{message}</p>)}</div>}
           {summary.warnings.length > 0 && <div className="attendance-import-warnings"><strong>Warnings</strong>{summary.warnings.map((message) => <p key={message}>{message}</p>)}<label><input type="checkbox" checked={warningsAccepted} onChange={(event) => setWarningsAccepted(event.target.checked)} /> I understand these warnings and want to continue.</label></div>}
           <label><span>Duplicate handling</span><select value={duplicateMode} onChange={(event) => setDuplicateMode(event.target.value as typeof duplicateMode)}><option value="missing_only">Import only missing records</option><option value="skip_existing">Skip existing records</option><option value="update_existing">Update existing records</option></select></label>
+          {summary.dailyAdvances > 0 && <label><span>Payment account for imported advances *</span><select required value={accountId} onChange={(event) => setAccountId(event.target.value)}><option value="">Select payment account</option>{preview.accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>}
+          {summary.dailyAdvances > 0 && !accountId && <p className="attendance-import-error">Payment account is required for imported advances.</p>}
           <p className="attendance-import-note">Advance Total columns are reference-only. Daily advances found inside date cells will be imported as separate advance records.</p>
           <div className="attendance-import-table-wrap"><table><thead><tr><th>Labour</th><th>CSV Advance Total</th><th>Daily Cell Advance Total</th></tr></thead><tbody>{preview.rows.map((row) => <tr key={row.rowIndex}><th>{row.labourName}</th><td>{row.csvAdvance === null ? "-" : money(row.csvAdvance)}</td><td>{money(row.calculatedAdvance)}</td></tr>)}</tbody></table></div>
           <div className="attendance-import-table-wrap"><table><thead><tr><th>Labour</th>{preview.dateColumns.map((column) => <th key={column.column}>{column.column}</th>)}</tr></thead><tbody>{preview.rows.slice(0, 20).map((row) => <tr key={row.rowIndex}><th>{row.labourName}</th>{row.cells.map((cell) => <td key={cell.column}><b>{attendanceMark(cell.status ?? undefined)}</b>{cell.advanceAmount !== null && <small>{money(cell.advanceAmount)}</small>}</td>)}</tr>)}</tbody></table></div>
           {busy && <p className="attendance-import-progress"><span className="attendance-import-spinner" />Importing attendance records and advances. Please wait...</p>}
-          <button disabled={busy || unresolvedLabourRows.length > 0 || summary.errors.length > 0 || (summary.warnings.length > 0 && !warningsAccepted)} type="button" onClick={() => void confirm()}>{busy ? "Importing..." : "Confirm Import"}</button>
+          <button disabled={busy || unresolvedLabourRows.length > 0 || summary.errors.length > 0 || (summary.dailyAdvances > 0 && !accountId) || (summary.warnings.length > 0 && !warningsAccepted)} type="button" onClick={() => void confirm()}>{busy ? "Importing..." : "Confirm Import"}</button>
         </section>}
         {step === 5 && result && <section className="attendance-import-card"><h3>Import completed</h3><div className="attendance-import-summary"><span>Labour created<b>{result.labourersCreated}</b></span><span>Attendance created<b>{result.attendanceCreated}</b></span><span>Attendance skipped<b>{result.attendanceSkipped}</b></span><span>Attendance updated<b>{result.attendanceUpdated}</b></span><span>Advances created<b>{result.advancesCreated}</b></span><span>Duplicate advances skipped<b>{result.duplicateAdvancesSkipped}</b></span><span>Total advance imported<b>{money(result.totalAdvanceImported)}</b></span><span>Errors<b>{result.errors.length}</b></span></div>{result.errors.map((message) => <p className="attendance-import-error" key={message}>{message}</p>)}<button type="button" onClick={onClose}>Close</button></section>}
         {error && <p className="attendance-import-error">{error}</p>}
@@ -1627,7 +1630,8 @@ function ExpenseImportPanel({ token, workspaceId, farmId, seasonId, onClose, onI
 
 function ExpensesModule() {
   const { token, user } = useAuth();
-  const load = useCallback(async () => (await workspaceRecords(offlineDb.vouchers)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const load = useCallback(async () => (await workspaceRecords(offlineDb.vouchers, { includeGeneralFarmRecords: true })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts), []);
   const [vouchers, refresh] = useData(load);
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
@@ -1760,6 +1764,20 @@ function ExpensesModule() {
     setVoucherAccountId("");
     setVoucherVendor("");
   };
+  useEffect(() => {
+    const recordId = searchParams.get("recordId");
+    if (!recordId) return;
+    const voucher = vouchers.find((item) => item.id === recordId);
+    if (voucher) setSelectedVoucher(voucher);
+  }, [searchParams, vouchers]);
+  const removeVoucher = async (voucher: Voucher) => {
+    if (!canEditVouchers || !window.confirm(`Delete voucher ${voucher.voucherNumber}? This preserves an audit record and reverses its accounting effect.`)) return;
+    await deleteOperationalRecord("voucher", voucher);
+    setSelectedVoucher(null);
+    setSearchParams((current) => { current.delete("recordId"); return current; });
+    showToast("Expense voucher deleted successfully.");
+    await refresh();
+  };
   const addCustom = async (event: FormEvent) => {
     event.preventDefault();
     if (!token || !workspaceId || !categoryId || !customName.trim()) return;
@@ -1833,7 +1851,7 @@ function ExpensesModule() {
             {selectedVoucher.vendor && <div><dt>Vendor / person</dt><dd>{selectedVoucher.vendor}</dd></div>}
             {selectedVoucher.notes && <div><dt>Notes / reference</dt><dd>{selectedVoucher.notes}</dd></div>}
           </dl></div>
-          <footer className="worker-dialog__footer">{canEditVouchers && <button className="worker-dialog__link" type="button" onClick={() => openEdit(selectedVoucher)}>Edit voucher</button>}<button className="worker-dialog__close" type="button" onClick={() => setSelectedVoucher(null)}>Close</button></footer>
+          <footer className="worker-dialog__footer">{canEditVouchers && <button className="worker-dialog__link" type="button" onClick={() => openEdit(selectedVoucher)}>Edit voucher</button>}{canEditVouchers && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => void removeVoucher(selectedVoucher)}>Delete voucher</button>}<button className="worker-dialog__close" type="button" onClick={() => setSelectedVoucher(null)}>Close</button></footer>
         </section>
       </div>}
       {showExpenseImport && token && farmId && seasonId && <ExpenseImportPanel token={token} workspaceId={workspaceId} farmId={farmId} seasonId={seasonId} onClose={() => setShowExpenseImport(false)} onImported={async () => { await refresh(); await categories.refetch(); }} />}
@@ -1877,6 +1895,7 @@ function DispatchModule() {
 }
 
 function SalesModule() {
+  const [searchParams] = useSearchParams();
   const load = useCallback(async () => (await workspaceRecords(offlineDb.sales)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts), []);
   const [sales, refresh] = useData(load);
@@ -1887,6 +1906,11 @@ function SalesModule() {
   const [quantity, setQuantity] = useState("");
   const [unitPrice, setUnitPrice] = useState("");
   const [accountId, setAccountId] = useState("");
+  const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
+  useEffect(() => {
+    const recordId = searchParams.get("recordId");
+    if (recordId) setSelectedSale(sales.find((sale) => sale.id === recordId) ?? null);
+  }, [sales, searchParams]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -1912,7 +1936,8 @@ function SalesModule() {
         </form>
       </FormCard>
       <Summary label="Total sales" value={money(sales.reduce((sum, item) => sum + item.amount, 0))} />
-      <RecordTable empty="No sales recorded yet." rows={sales.map((item) => [item.date, item.buyerName, item.produceType, `${item.quantity} x ${money(item.unitPrice)}`, money(item.amount)])} />
+      <RecordTable empty="No sales recorded yet." rows={sales.map((item) => [item.date, item.buyerName, item.produceType, `${item.quantity} x ${money(item.unitPrice)}`, money(item.amount)])} actions={sales.map((item) => <button key={item.id} type="button" onClick={() => setSelectedSale(item)}>View</button>)} />
+      {selectedSale && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedSale(null)}><section className="worker-dialog" role="dialog" aria-modal="true" aria-label="Sale details" onClick={(event) => event.stopPropagation()}><header className="worker-dialog__header"><h2>Sale Details</h2><button type="button" onClick={() => setSelectedSale(null)}><X size={18} /></button></header><div className="worker-dialog__body"><dl className="worker-stats"><div><dt>Date</dt><dd>{selectedSale.date}</dd></div><div><dt>Buyer</dt><dd>{selectedSale.buyerName}</dd></div><div><dt>Produce</dt><dd>{selectedSale.produceType}</dd></div><div><dt>Amount</dt><dd>{money(selectedSale.amount)}</dd></div></dl></div></section></div>}
     </>
   );
 }
@@ -1923,12 +1948,13 @@ const partnerEntryBalanceEffect = (entry: PartnerEntry) => entry.type === "contr
 
 function PartnerLedgerModule() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const canManage = Boolean(user?.workspaceId && hasPermission(user, "MANAGE_RECORDS", user.workspaceId));
   const [showDeleted, setShowDeleted] = useState(false);
   const load = useCallback(async () => (await workspaceRecords(offlineDb.partnerEntries, { includeDeleted: showDeleted })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [showDeleted]);
   const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts), []);
   const loadAdvances = useCallback(() => workspaceRecords(offlineDb.advances), []);
-  const loadVouchers = useCallback(() => workspaceRecords(offlineDb.vouchers), []);
+  const loadVouchers = useCallback(() => workspaceRecords(offlineDb.vouchers, { includeGeneralFarmRecords: true }), []);
   const [entries, refresh] = useData(load);
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
   const [advances] = useData(loadAdvances);
@@ -1937,6 +1963,8 @@ function PartnerLedgerModule() {
   const [partnerName, setPartnerName] = useState("");
   const [fromPartner, setFromPartner] = useState("");
   const [toPartner, setToPartner] = useState("");
+  const [fromAccountId, setFromAccountId] = useState("");
+  const [toAccountId, setToAccountId] = useState("");
   const [type, setType] = useState<PartnerEntry["type"]>("contribution");
   const [amount, setAmount] = useState("");
   const [notes, setNotes] = useState("");
@@ -1948,14 +1976,19 @@ function PartnerLedgerModule() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [entryFilter, setEntryFilter] = useState<"all" | PartnerEntry["type"]>("all");
+  useEffect(() => {
+    const recordId = searchParams.get("recordId");
+    if (recordId) setViewing(entries.find((entry) => entry.id === recordId) ?? null);
+  }, [entries, searchParams]);
 
   const resetForm = () => {
-    setEditing(null); setDate(today()); setPartnerName(""); setFromPartner(""); setToPartner(""); setType("contribution"); setAmount(""); setNotes(""); setAccountId(""); setError("");
+    setEditing(null); setDate(today()); setPartnerName(""); setFromPartner(""); setToPartner(""); setFromAccountId(""); setToAccountId(""); setType("contribution"); setAmount(""); setNotes(""); setAccountId(""); setError("");
   };
 
   const edit = (entry: PartnerEntry) => {
     setEditing(entry); setDate(entry.date); setPartnerName(entry.partnerName ?? ""); setType(entry.type);
     setFromPartner(entry.fromPartner ?? ""); setToPartner(entry.toPartner ?? "");
+    setFromAccountId(entry.fromAccountId ?? ""); setToAccountId(entry.toAccountId ?? "");
     setAmount(String(entry.amount)); setNotes(entry.notes); setAccountId(entry.accountId ?? ""); setError("");
   };
 
@@ -1963,13 +1996,18 @@ function PartnerLedgerModule() {
     event.preventDefault();
     const settlement = type === "settlement";
     if (!date || Number(amount) <= 0 || (!settlement && (!accountId || !partnerName.trim()))
-      || (settlement && (!fromPartner.trim() || !toPartner.trim() || fromPartner.trim().toLowerCase() === toPartner.trim().toLowerCase()))) {
-      return setError(settlement ? "Date, different payer and receiver partners, and a positive amount are required." : "Date, partner, type, positive amount, and account are required.");
+      || (settlement && (!fromAccountId || !toAccountId || fromAccountId === toAccountId))) {
+      return setError(settlement ? "Date, different payer and receiver accounts, and a positive amount are required." : "Date, partner, type, positive amount, and account are required.");
     }
     setSaving(true); setError("");
     try {
       const fields = settlement
-        ? { date, type, amount: Number(amount), notes, fromPartner: fromPartner.trim(), toPartner: toPartner.trim(), partnerName: undefined, accountId: undefined }
+        ? {
+            date, type, amount: Number(amount), notes, fromAccountId, toAccountId,
+            fromPartner: accounts.find((account) => account.id === fromAccountId)?.name ?? fromPartner.trim(),
+            toPartner: accounts.find((account) => account.id === toAccountId)?.name ?? toPartner.trim(),
+            partnerName: undefined, accountId: undefined,
+          }
         : { date, type, amount: Number(amount), notes, partnerName: partnerName.trim(), accountId, fromPartner: undefined, toPartner: undefined };
       const record: PartnerEntry = editing
         ? { ...editing, ...fields }
@@ -2028,8 +2066,11 @@ function PartnerLedgerModule() {
     };
     for (const entry of activeEntries) {
       if (entry.type === "settlement") {
-        position(entry.fromPartner!).settlementsSent += entry.amount;
-        position(entry.toPartner!).settlementsReceived += entry.amount;
+        if (!entry.fromAccountId || !entry.toAccountId) continue;
+        const fromName = accounts.find((account) => account.id === entry.fromAccountId)?.name ?? entry.fromPartner!;
+        const toName = accounts.find((account) => account.id === entry.toAccountId)?.name ?? entry.toPartner!;
+        position(fromName).settlementsSent += entry.amount;
+        position(toName).settlementsReceived += entry.amount;
       } else if (entry.type === "contribution") position(entry.partnerName!).contributions += entry.amount;
       else position(entry.partnerName!).withdrawals += entry.amount;
     }
@@ -2062,6 +2103,9 @@ function PartnerLedgerModule() {
     };
     for (const entry of [...activeEntries].sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt))) {
       if (entry.type === "settlement") {
+        if (!entry.fromAccountId || !entry.toAccountId) {
+          labels.set(entry.id, "Unresolved settlement account mapping"); continue;
+        }
         adjust(entry.fromPartner!, -entry.amount); adjust(entry.toPartner!, entry.amount);
         labels.set(entry.id, `${entry.fromPartner}: ${money(balances.get(entry.fromPartner!.trim().toLowerCase())!.amount)} | ${entry.toPartner}: ${money(balances.get(entry.toPartner!.trim().toLowerCase())!.amount)}`);
       } else {
@@ -2083,8 +2127,8 @@ function PartnerLedgerModule() {
             <option value="settlement">Partner Settlement</option>
           </select>
           {type === "settlement" ? <>
-            <input required placeholder="From partner (payer)" value={fromPartner} onChange={(event) => setFromPartner(event.target.value)} />
-            <input required placeholder="To partner (receiver)" value={toPartner} onChange={(event) => setToPartner(event.target.value)} />
+            <select required value={fromAccountId} onChange={(event) => setFromAccountId(event.target.value)}><option value="">From partner account</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select>
+            <select required value={toAccountId} onChange={(event) => setToAccountId(event.target.value)}><option value="">To partner account</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select>
           </> : <input required placeholder="Partner name" value={partnerName} onChange={(event) => setPartnerName(event.target.value)} />}
           <input required type="number" min="0.01" step="0.01" placeholder="Amount" value={amount} onChange={(event) => setAmount(event.target.value)} />
           <input placeholder="Notes" value={notes} onChange={(event) => setNotes(event.target.value)} />
@@ -2098,6 +2142,7 @@ function PartnerLedgerModule() {
         {error && <p className="worker-action-error">{error}</p>}
       </FormCard>
       <Summary label="Partner balance" value={money(balance)} />
+      {activeEntries.some((entry) => entry.type === "settlement" && (!entry.fromAccountId || !entry.toAccountId)) && <p className="worker-action-error">Some historical settlements need account mapping repair. Edit each unresolved settlement and select its payer and receiver accounts.</p>}
       <section className="record-panel">
         <h2>Partner Position</h2>
         {!partnerPositions.length ? <Empty>No partner positions recorded yet.</Empty> : <div className="partner-position-table">
@@ -2157,7 +2202,7 @@ function PartnerLedgerModule() {
 function AccountsModule() {
   const navigate = useNavigate();
   const loadAccounts = useCallback(async () => (await workspaceRecords(offlineDb.accounts)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)), []);
-  const loadVouchers = useCallback(() => workspaceRecords(offlineDb.vouchers), []);
+  const loadVouchers = useCallback(() => workspaceRecords(offlineDb.vouchers, { includeGeneralFarmRecords: true }), []);
   const loadSales = useCallback(() => workspaceRecords(offlineDb.sales), []);
   const loadEntries = useCallback(() => workspaceRecords(offlineDb.partnerEntries), []);
   const loadAdvances = useCallback(() => workspaceRecords(offlineDb.advances), []);
@@ -2168,7 +2213,7 @@ function AccountsModule() {
   const [advances] = useData(loadAdvances);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [ledgerSearch, setLedgerSearch] = useState("");
-  const [ledgerType, setLedgerType] = useState<"all" | "voucher" | "advance" | "settlement_sent" | "settlement_received" | "contribution" | "withdrawal">("all");
+  const [ledgerType, setLedgerType] = useState<"all" | "sale" | "voucher" | "advance" | "settlement_sent" | "settlement_received" | "contribution" | "withdrawal">("all");
   const [ledgerFrom, setLedgerFrom] = useState("");
   const [ledgerTo, setLedgerTo] = useState("");
   const [name, setName] = useState("");
@@ -2187,21 +2232,33 @@ function AccountsModule() {
   const selectedAccount = selectedAccountId ? accounts.find((item) => item.id === selectedAccountId) ?? null : null;
   const ledgerRows = useMemo(() => {
     if (!selectedAccount) return [];
-    const lowerName = selectedAccount.name.trim().toLowerCase();
     type LedgerRow = {
       id: string;
       date: string;
-      type: "voucher" | "advance" | "settlement_sent" | "settlement_received" | "contribution" | "withdrawal";
+      type: "sale" | "voucher" | "advance" | "settlement_sent" | "settlement_received" | "contribution" | "withdrawal";
       reference: string;
       description: string;
       debit: number;
       credit: number;
-      source: "expenses" | "labour_advances" | "partner_ledger";
+      source: "sales" | "expenses" | "labour_advances" | "partner_ledger";
       sourceId: string;
       counterparty?: string;
       runningBalance?: number;
     };
     const rows: LedgerRow[] = [];
+    for (const sale of sales.filter((item) => item.accountId === selectedAccount.id)) {
+      rows.push({
+        id: `sale:${sale.id}`,
+        date: sale.date,
+        type: "sale",
+        reference: sale.id.slice(0, 8),
+        description: `${sale.buyerName} - ${sale.produceType}`,
+        debit: 0,
+        credit: sale.amount,
+        source: "sales",
+        sourceId: sale.id,
+      });
+    }
     for (const voucher of vouchers.filter((item) => item.accountId === selectedAccount.id)) {
       rows.push({
         id: `voucher:${voucher.id}`,
@@ -2258,7 +2315,7 @@ function AccountsModule() {
         });
       }
       if (entry.type === "settlement") {
-        if (entry.fromPartner?.trim().toLowerCase() === lowerName) {
+        if (entry.fromAccountId === selectedAccount.id) {
           rows.push({
             id: `partner:${entry.id}:sent`,
             date: entry.date,
@@ -2272,7 +2329,7 @@ function AccountsModule() {
             counterparty: entry.toPartner,
           });
         }
-        if (entry.toPartner?.trim().toLowerCase() === lowerName) {
+        if (entry.toAccountId === selectedAccount.id) {
           rows.push({
             id: `partner:${entry.id}:received`,
             date: entry.date,
@@ -2294,29 +2351,7 @@ function AccountsModule() {
       running += row.credit - row.debit;
       return { ...row, runningBalance: running };
     });
-  }, [advances, entries, selectedAccount, vouchers]);
-  const ledgerBreakdown = useMemo(() => {
-    const byType = {
-      voucherExpensesPaid: 0,
-      labourAdvancesPaid: 0,
-      settlementsSent: 0,
-      settlementsReceived: 0,
-      contributions: 0,
-      withdrawals: 0,
-    };
-    for (const row of ledgerRows) {
-      if (row.type === "voucher") byType.voucherExpensesPaid += row.debit;
-      if (row.type === "advance") byType.labourAdvancesPaid += row.debit;
-      if (row.type === "settlement_sent") byType.settlementsSent += row.debit;
-      if (row.type === "settlement_received") byType.settlementsReceived += row.credit;
-      if (row.type === "contribution") byType.contributions += row.credit;
-      if (row.type === "withdrawal") byType.withdrawals += row.debit;
-    }
-    return {
-      ...byType,
-      netBalance: -byType.voucherExpensesPaid - byType.labourAdvancesPaid + byType.contributions - byType.withdrawals - byType.settlementsSent + byType.settlementsReceived,
-    };
-  }, [ledgerRows]);
+  }, [advances, entries, sales, selectedAccount, vouchers]);
   const filteredLedgerRows = useMemo(() => {
     const term = ledgerSearch.trim().toLowerCase();
     return ledgerRows.filter((row) => (ledgerType === "all" || row.type === ledgerType)
@@ -2331,6 +2366,25 @@ function AccountsModule() {
         String(row.credit),
       ].some((value) => value.toLowerCase().includes(term))));
   }, [ledgerFrom, ledgerRows, ledgerSearch, ledgerTo, ledgerType]);
+  const ledgerBreakdown = useMemo(() => {
+    const byType = {
+      salesReceived: 0, voucherExpensesPaid: 0, labourAdvancesPaid: 0,
+      settlementsSent: 0, settlementsReceived: 0, contributions: 0, withdrawals: 0,
+    };
+    for (const row of filteredLedgerRows) {
+      if (row.type === "sale") byType.salesReceived += row.credit;
+      if (row.type === "voucher") byType.voucherExpensesPaid += row.debit;
+      if (row.type === "advance") byType.labourAdvancesPaid += row.debit;
+      if (row.type === "settlement_sent") byType.settlementsSent += row.debit;
+      if (row.type === "settlement_received") byType.settlementsReceived += row.credit;
+      if (row.type === "contribution") byType.contributions += row.credit;
+      if (row.type === "withdrawal") byType.withdrawals += row.debit;
+    }
+    return {
+      ...byType,
+      netBalance: byType.salesReceived - byType.voucherExpensesPaid - byType.labourAdvancesPaid + byType.contributions - byType.withdrawals - byType.settlementsSent + byType.settlementsReceived,
+    };
+  }, [filteredLedgerRows]);
   const openSource = (row: (typeof filteredLedgerRows)[number]) => {
     const farmId = getActiveFarmId();
     const seasonId = getActiveSeasonId();
@@ -2339,6 +2393,7 @@ function AccountsModule() {
     if (seasonId) query.set("seasonId", seasonId);
     if (row.sourceId) query.set("recordId", row.sourceId);
     if (row.source === "expenses") navigate(`/workspace/expenses?${query.toString()}`);
+    if (row.source === "sales") navigate(`/workspace/sales?${query.toString()}`);
     if (row.source === "labour_advances") navigate(`/workspace/labour-advances?${query.toString()}`);
     if (row.source === "partner_ledger") navigate(`/workspace/partner-ledger?${query.toString()}`);
   };
@@ -2409,6 +2464,7 @@ function AccountsModule() {
           <div className="worker-action-form">
             <div className="account-ledger-breakdown">
               <article><strong>Voucher expenses paid</strong><span>{money(ledgerBreakdown.voucherExpensesPaid)}</span></article>
+              <article><strong>Sales received</strong><span>{money(ledgerBreakdown.salesReceived)}</span></article>
               <article><strong>Labour advances paid</strong><span>{money(ledgerBreakdown.labourAdvancesPaid)}</span></article>
               <article><strong>Partner settlements sent</strong><span>{money(ledgerBreakdown.settlementsSent)}</span></article>
               <article><strong>Partner settlements received</strong><span>{money(ledgerBreakdown.settlementsReceived)}</span></article>
@@ -2420,6 +2476,7 @@ function AccountsModule() {
               <SearchInput placeholder="Search voucher/reference, description, amount, or counterparty" value={ledgerSearch} onChange={setLedgerSearch} />
               <select value={ledgerType} onChange={(event) => setLedgerType(event.target.value as typeof ledgerType)}>
                 <option value="all">All types</option>
+                <option value="sale">Sale credit</option>
                 <option value="voucher">Voucher expense</option>
                 <option value="advance">Labour advance</option>
                 <option value="settlement_sent">Settlement sent</option>

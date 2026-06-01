@@ -1,16 +1,13 @@
 import type { Account, Advance, PartnerEntry, Sale, Voucher } from "./offline-db";
 
-const normalizedName = (value?: string) => value?.trim().toLowerCase() ?? "";
-
-export function partnerSettlementEffect(entry: PartnerEntry, partnerName: string): number {
+export function partnerSettlementEffect(entry: PartnerEntry, accountId: string): number {
   if (entry.type !== "settlement") return 0;
-  const accountName = normalizedName(partnerName);
-  return (normalizedName(entry.toPartner) === accountName ? entry.amount : 0)
-    - (normalizedName(entry.fromPartner) === accountName ? entry.amount : 0);
+  return (entry.toAccountId === accountId ? entry.amount : 0)
+    - (entry.fromAccountId === accountId ? entry.amount : 0);
 }
 
 export function partnerEntryAccountEffect(entry: PartnerEntry, account: Account): number {
-  if (entry.type === "settlement") return partnerSettlementEffect(entry, account.name);
+  if (entry.type === "settlement") return partnerSettlementEffect(entry, account.id);
   if (entry.accountId !== account.id) return 0;
   return entry.type === "contribution" ? entry.amount : -entry.amount;
 }

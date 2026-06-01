@@ -168,6 +168,7 @@ export type AttendanceImportRow = {
 export type AttendanceImportPreview = {
   rows: AttendanceImportRow[]; dateColumns: Array<{ column: string; date: string }>; errors: string[]; warnings: string[];
   labourers: Array<{ id: string; name: string; dailyWage: number }>;
+  accounts: Array<{ id: string; name: string }>;
   summary: {
     labourRows: number; dateColumns: number; attendanceRecords: number; dailyAdvances: number; advanceTotal: number;
     duplicateRecords: number; duplicateAdvances: number; advanceRecordsToCreate: number;
@@ -331,10 +332,10 @@ export const previewAttendanceImport = (token: string, workspaceId: string, inpu
 );
 export const confirmAttendanceImport = (token: string, workspaceId: string, input: {
   importSessionId: string; farmId: string; seasonId: string; duplicateHandlingMode: "missing_only" | "skip_existing" | "update_existing";
-  warningsAccepted: boolean; labourMappings: AttendanceImportMapping[];
+  warningsAccepted: boolean; labourMappings: AttendanceImportMapping[]; accountId?: string;
 }) => apiRequest<{ sessionId: string; result: AttendanceImportResult }>(
   `/api/workspaces/${workspaceId}/attendance-imports/confirm`, { method: "POST", body: JSON.stringify({
-    importSessionId: input.importSessionId, farmId: input.farmId, seasonId: input.seasonId,
+    importSessionId: input.importSessionId, farmId: input.farmId, seasonId: input.seasonId, accountId: input.accountId,
     confirmation: {
       warningsAccepted: input.warningsAccepted,
       duplicateHandlingMode: input.duplicateHandlingMode,

@@ -117,6 +117,9 @@ export type PartnerEntry = LocalRecord & {
   accountId?: string;
   fromPartner?: string;
   toPartner?: string;
+  fromAccountId?: string;
+  toAccountId?: string;
+  unresolvedSettlement?: boolean;
   deletionReason?: string;
 };
 
@@ -316,10 +319,12 @@ export function getActiveSeasonId() {
   return activeSeasonId;
 }
 
-export async function workspaceRecords<T extends LocalRecord>(table: EntityTable<T, "id">, options: { includeDeleted?: boolean } = {}) {
+export async function workspaceRecords<T extends LocalRecord>(table: EntityTable<T, "id">, options: { includeDeleted?: boolean; includeGeneralFarmRecords?: boolean } = {}) {
   if (!activeFarmId || !activeSeasonId) return [];
   return table.where("workspaceId").equals(getActiveWorkspaceId())
-    .filter((record) => record.farmId === activeFarmId && record.seasonId === activeSeasonId && (options.includeDeleted || !record.deletedAt)).toArray();
+    .filter((record) => record.farmId === activeFarmId
+      && (record.seasonId === activeSeasonId || (Boolean(options.includeGeneralFarmRecords) && record.seasonId === null))
+      && (Boolean(options.includeDeleted) || !record.deletedAt)).toArray();
 }
 
 export async function clearCachedData() {

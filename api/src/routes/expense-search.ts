@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { and, eq, gte, lte, sql } from "drizzle-orm";
+import { and, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
@@ -56,8 +56,9 @@ export async function expenseSearchRoutes(app: FastifyInstance): Promise<void> {
     const records = await db.select().from(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, params.data.workspaceId),
       eq(operationalRecords.farmId, query.data.farmId),
-      eq(operationalRecords.seasonId, query.data.seasonId),
+      or(eq(operationalRecords.seasonId, query.data.seasonId), isNull(operationalRecords.seasonId)),
       eq(operationalRecords.entityType, "voucher"),
+      sql`${operationalRecords.payload}->>'deletedAt' is null`,
       query.data.from ? gte(sql`${operationalRecords.payload}->>'date'`, query.data.from) : undefined,
       query.data.to ? lte(sql`${operationalRecords.payload}->>'date'`, query.data.to) : undefined,
       query.data.category ? sql`lower(coalesce(${operationalRecords.payload}->>'category', '')) = ${query.data.category.toLowerCase()}` : undefined,

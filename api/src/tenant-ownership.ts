@@ -8,6 +8,8 @@ export type TenantReferences = {
   farmId?: string | null;
   seasonId?: string | null;
   accountId?: unknown;
+  fromAccountId?: unknown;
+  toAccountId?: unknown;
   ledgerId?: unknown;
   labourerId?: unknown;
   groupId?: unknown;
@@ -39,11 +41,13 @@ export async function validateTenantReferences(workspaceId: string, references: 
       .limit(1);
     if (!season) return "Season is not active in the selected workspace farm.";
   }
-  if (typeof references.accountId === "string" && !virtualAccountIds.has(references.accountId)
-    && ![...virtualAccountIds].some((id) => references.farmId && references.accountId === `${references.farmId}:${id}`)
-    && ![...virtualAccountIds].some((id) => references.seasonId && references.accountId === `${references.seasonId}:${id}`)
-    && !(await hasOperationalReference(workspaceId, ["account"], references.accountId, references.farmId, references.seasonId))) {
-    return "Account does not belong to the selected workspace.";
+  for (const accountId of [references.accountId, references.fromAccountId, references.toAccountId]) {
+    if (typeof accountId === "string" && !virtualAccountIds.has(accountId)
+      && ![...virtualAccountIds].some((id) => references.farmId && accountId === `${references.farmId}:${id}`)
+      && ![...virtualAccountIds].some((id) => references.seasonId && accountId === `${references.seasonId}:${id}`)
+      && !(await hasOperationalReference(workspaceId, ["account"], accountId, references.farmId, references.seasonId))) {
+      return "Account does not belong to the selected workspace.";
+    }
   }
   if (typeof references.ledgerId === "string"
     && !(await hasOperationalReference(workspaceId, ["partnerEntry"], references.ledgerId, references.farmId, references.seasonId))) {

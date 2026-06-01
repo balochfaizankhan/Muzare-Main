@@ -19,7 +19,7 @@ const querySchema = z.object({
 
 type LabourPayload = { name?: unknown };
 type AccountPayload = { name?: unknown };
-type AdvancePayload = { labourerId?: unknown; date?: unknown; amount?: unknown; notes?: unknown; accountId?: unknown; sourceAccountName?: unknown };
+type AdvancePayload = { labourerId?: unknown; date?: unknown; amount?: unknown; notes?: unknown; accountId?: unknown; sourceAccountName?: unknown; deletedAt?: unknown };
 
 export async function advanceReportRoutes(app: FastifyInstance): Promise<void> {
   app.get("/v1/workspace/:workspaceId/advance/report", { preHandler: requireUser }, async (request, reply) => {
@@ -87,6 +87,7 @@ export async function advanceReportRoutes(app: FastifyInstance): Promise<void> {
     ));
     const records = advanceRecords.flatMap((record) => {
       const payload = record.payload as AdvancePayload;
+      if (payload.deletedAt) return [];
       if (typeof payload.labourerId !== "string" || typeof payload.date !== "string") return [];
       if (payload.date < from || payload.date > to) return [];
       if (selectedLabourIds.size > 0 && !selectedLabourIds.has(payload.labourerId)) return [];
