@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { X } from "lucide-react";
 import { useAuth } from "../../auth/AuthProvider";
+import { LabourSelectCombobox } from "../../components/LabourSelectCombobox";
 import { SearchInput } from "../../components/SearchInput";
 import { SubpageHeader } from "../../components/SubpageHeader";
 import { formatMoney } from "../../lib/format";
@@ -112,10 +113,15 @@ export function LabourAdvances() {
             <SearchInput placeholder="Search labour, amount, notes, or group" value={search} onChange={setSearch} />
             <input aria-label="Date from" type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
             <input aria-label="Date to" type="date" value={to} onChange={(event) => setTo(event.target.value)} />
-            <select aria-label="Labour" value={labourerId} onChange={(event) => setLabourerId(event.target.value)}>
-              <option value="all">All labour</option>
-              {labourers.slice().sort((a, b) => a.name.localeCompare(b.name)).map((labourer) => <option key={labourer.id} value={labourer.id}>{labourer.name}</option>)}
-            </select>
+            <LabourSelectCombobox
+              ariaLabel="Labour"
+              options={labourers.slice().sort((a, b) => a.name.localeCompare(b.name))}
+              value={labourerId}
+              onChange={setLabourerId}
+              includeAllOption
+              allOptionLabel="All labour"
+              placeholder="Search labour"
+            />
             <select aria-label="Group" value={group} onChange={(event) => setGroup(event.target.value)}>
               <option value="all">All groups</option>
               {groups.map((name) => <option key={name}>{name}</option>)}

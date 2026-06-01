@@ -4,9 +4,10 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { SubpageHeader } from "../components/SubpageHeader";
 import { SearchInput } from "../components/SearchInput";
+import { LabourSelectCombobox } from "../components/LabourSelectCombobox";
 import { useAuth } from "../auth/AuthProvider";
 import { useSyncState } from "../hooks/useSyncState";
-import { calculateAccountBalance, partnerSettlementEffect } from "../lib/accounting";
+import { calculateAccountBalance } from "../lib/accounting";
 import { confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteOrDeactivateLabour, fetchAdvanceReport, fetchAttendanceReport, fetchExpenseCategories, fetchLabourDeletionPreview, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, type AdvanceReportData, type AdvanceReportFilters, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type AttendanceReportFilters, type AttendanceReportStatus, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type LabourDeletionPreview } from "../lib/api";
 import { hasPermission } from "../lib/permissions";
 import { formatMoney } from "../lib/format";
@@ -1163,7 +1164,16 @@ function AdvanceEntryPanel({
         setGroupId(event.target.value);
         setLabourerId("");
       }}><option value="all">All groups</option>{groups.filter((group) => group.active !== false).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
-      <label><span>Labour *</span><select required value={labourerId} onChange={(event) => setLabourerId(event.target.value)}><option value="">Select labour</option>{filteredLabourers.map((labourer) => <option key={labourer.id} value={labourer.id}>{labourer.name}</option>)}</select></label>
+      <label>
+        <span>Labour *</span>
+        <LabourSelectCombobox
+          ariaLabel="Labour"
+          options={filteredLabourers}
+          placeholder="Search labour"
+          value={labourerId}
+          onChange={setLabourerId}
+        />
+      </label>
       <label><span>Advance amount *</span><input required min="0.01" step="0.01" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
       <label><span>Payment account *</span><select required value={form.accountId} onChange={(event) => setForm({ ...form, accountId: event.target.value })}><option value="">Select account</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
       <label><span>Notes / reference</span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
@@ -1979,10 +1989,26 @@ function PartnerLedgerModule() {
   const labourAdvances = advances.reduce((sum, item) => sum + item.amount, 0);
   const accountName = (id?: string) => id ? accounts.find((account) => account.id === id)?.name ?? "Unknown account" : "-";
   const partnerPositions = (() => {
-    const positions = new Map<string, { name: string; expensesPaid: number; contributions: number; withdrawals: number; settlementsSent: number; settlementsReceived: number }>();
+    const positions = new Map<string, {
+      name: string;
+      voucherExpensesPaid: number;
+      labourAdvancesPaid: number;
+      contributions: number;
+      withdrawals: number;
+      settlementsSent: number;
+      settlementsReceived: number;
+    }>();
     const position = (name: string) => {
       const key = name.trim().toLowerCase();
-      const current = positions.get(key) ?? { name: name.trim(), expensesPaid: 0, contributions: 0, withdrawals: 0, settlementsSent: 0, settlementsReceived: 0 };
+      const current = positions.get(key) ?? {
+        name: name.trim(),
+        voucherExpensesPaid: 0,
+        labourAdvancesPaid: 0,
+        contributions: 0,
+        withdrawals: 0,
+        settlementsSent: 0,
+        settlementsReceived: 0,
+      };
       positions.set(key, current);
       return current;
     };
@@ -1995,12 +2021,21 @@ function PartnerLedgerModule() {
     }
     for (const voucher of vouchers) {
       const account = accounts.find((item) => item.id === voucher.accountId);
-      if (account?.name) position(account.name).expensesPaid += voucher.amount;
+      if (account?.name) position(account.name).voucherExpensesPaid += voucher.amount;
+    }
+    for (const advance of advances) {
+      const accountName = accounts.find((item) => item.id === advance.accountId)?.name ?? advance.sourceAccountName;
+      if (accountName?.trim()) position(accountName).labourAdvancesPaid += advance.amount;
     }
     return [...positions.values()].map((item) => ({
       ...item,
-      netPosition: item.contributions - item.withdrawals - item.expensesPaid
-        + activeEntries.reduce((sum, entry) => sum + partnerSettlementEffect(entry, item.name), 0),
+      totalPaid: item.voucherExpensesPaid + item.labourAdvancesPaid,
+      netPosition: -item.voucherExpensesPaid
+        - item.labourAdvancesPaid
+        + item.contributions
+        - item.withdrawals
+        - item.settlementsSent
+        + item.settlementsReceived,
     })).sort((a, b) => a.name.localeCompare(b.name));
   })();
   const runningBalances = (() => {
@@ -2053,9 +2088,9 @@ function PartnerLedgerModule() {
       <section className="record-panel">
         <h2>Partner Position</h2>
         {!partnerPositions.length ? <Empty>No partner positions recorded yet.</Empty> : <div className="partner-position-table">
-          <div className="partner-position-row partner-position-row--header"><span>Partner</span><span>Expenses paid</span><span>Contributions</span><span>Withdrawals</span><span>Sent</span><span>Received</span><span>Net position</span></div>
+          <div className="partner-position-row partner-position-row--header"><span>Partner</span><span>Voucher expenses paid</span><span>Labour advances paid</span><span>Total paid</span><span>Contributions</span><span>Withdrawals</span><span>Sent</span><span>Received</span><span>Net position</span></div>
           {partnerPositions.map((item) => <div className="partner-position-row" key={item.name}>
-            <strong>{item.name}</strong><span>{money(item.expensesPaid)}</span><span>{money(item.contributions)}</span><span>{money(item.withdrawals)}</span><span>{money(item.settlementsSent)}</span><span>{money(item.settlementsReceived)}</span><b>{money(item.netPosition)}</b>
+            <strong>{item.name}</strong><span>{money(item.voucherExpensesPaid)}</span><span>{money(item.labourAdvancesPaid)}</span><span>{money(item.totalPaid)}</span><span>{money(item.contributions)}</span><span>{money(item.withdrawals)}</span><span>{money(item.settlementsSent)}</span><span>{money(item.settlementsReceived)}</span><b>{money(item.netPosition)}</b>
           </div>)}
         </div>}
       </section>

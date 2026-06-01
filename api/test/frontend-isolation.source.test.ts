@@ -109,6 +109,10 @@ test("partner settlements transfer matching account and partner positions withou
   assert.match(modulePage, /const balance = \(account: Account\) => calculateAccountBalance\(account, sales, vouchers, advances, entries\)/);
   assert.match(modulePage, /position\(entry\.fromPartner!\)\.settlementsSent \+= entry\.amount/);
   assert.match(modulePage, /position\(entry\.toPartner!\)\.settlementsReceived \+= entry\.amount/);
+  assert.match(modulePage, /for \(const advance of advances\)/);
+  assert.match(modulePage, /position\(accountName\)\.labourAdvancesPaid \+= advance\.amount/);
+  assert.match(modulePage, /totalPaid: item\.voucherExpensesPaid \+ item\.labourAdvancesPaid/);
+  assert.match(modulePage, /- item\.voucherExpensesPaid[\s\S]*- item\.labourAdvancesPaid[\s\S]*\+ item\.contributions[\s\S]*- item\.withdrawals[\s\S]*- item\.settlementsSent[\s\S]*\+ item\.settlementsReceived/);
   assert.match(modulePage, /<option value="settlement">Partner Settlement<\/option>/);
   assert.match(modulePage, /<option value="settlement">Settlements<\/option>/);
   assert.match(dashboard, /item\.type === "withdrawal" \? -item\.amount : 0/);
