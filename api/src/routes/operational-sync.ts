@@ -50,14 +50,25 @@ const partnerEntryDeleteSchema = z.object({
   reason: z.string().trim().max(500).optional(),
 });
 const deleteRecordSchema = z.discriminatedUnion("entity", [attendanceDeleteSchema, partnerEntryDeleteSchema]);
-const partnerEntryPayloadSchema = z.object({
+const partnerEntryBaseSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  partnerName: z.string().trim().min(1),
-  type: z.enum(["contribution", "withdrawal"]),
   amount: z.coerce.number().positive(),
-  accountId: z.string().min(1),
   notes: z.string().optional(),
-}).passthrough();
+});
+const partnerEntryPayloadSchema = z.discriminatedUnion("type", [
+  partnerEntryBaseSchema.extend({
+    type: z.enum(["contribution", "withdrawal"]),
+    partnerName: z.string().trim().min(1),
+    accountId: z.string().min(1),
+  }).passthrough(),
+  partnerEntryBaseSchema.extend({
+    type: z.literal("settlement"),
+    fromPartner: z.string().trim().min(1),
+    toPartner: z.string().trim().min(1),
+  }).refine((record) => record.fromPartner.toLowerCase() !== record.toPartner.toLowerCase(), {
+    message: "Settlement partners must be different.",
+  }).passthrough(),
+]);
 const localRecords = new Map<string, z.infer<typeof recordSchema>>();
 
 function requireWorkspaceWrite(user: AuthenticatedUser, workspaceId: string) {
@@ -161,7 +172,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       return reply.code(403).send({ message: "Select this workspace before submitting records." });
     }
     if (parsed.data.entity === "partnerEntry" && !partnerEntryPayloadSchema.safeParse(parsed.data.record).success) {
-      return reply.code(400).send({ message: "Partner ledger date, partner, type, positive amount, and account are required." });
+      return reply.code(400).send({ message: "Partner ledger details are invalid. Settlements require different payer and receiver partners." });
     }
     if (localDevelopmentMode) {
       localRecords.set(`${parsed.data.workspaceId}:${parsed.data.entity}:${parsed.data.record.id}`, parsed.data);

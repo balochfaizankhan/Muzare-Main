@@ -1891,6 +1891,11 @@ function SalesModule() {
   );
 }
 
+const partnerEntryLabel = (entry: PartnerEntry) => entry.type === "contribution" ? "Capital Contribution" : entry.type === "withdrawal" ? "Partner Withdrawal" : "Partner Settlement";
+const partnerEntryName = (entry: PartnerEntry) => entry.type === "settlement" ? `${entry.fromPartner} to ${entry.toPartner}` : entry.partnerName ?? "-";
+const partnerEntryBalanceEffect = (entry: PartnerEntry) => entry.type === "contribution" ? entry.amount : entry.type === "withdrawal" ? -entry.amount : 0;
+const partnerEntryAccountEffect = (entry: PartnerEntry) => entry.type === "settlement" ? 0 : partnerEntryBalanceEffect(entry);
+
 function PartnerLedgerModule() {
   const { user } = useAuth();
   const canManage = Boolean(user?.workspaceId && hasPermission(user, "MANAGE_RECORDS", user.workspaceId));
@@ -1898,11 +1903,15 @@ function PartnerLedgerModule() {
   const load = useCallback(async () => (await workspaceRecords(offlineDb.partnerEntries, { includeDeleted: showDeleted })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [showDeleted]);
   const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts), []);
   const loadAdvances = useCallback(() => workspaceRecords(offlineDb.advances), []);
+  const loadVouchers = useCallback(() => workspaceRecords(offlineDb.vouchers), []);
   const [entries, refresh] = useData(load);
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
   const [advances] = useData(loadAdvances);
+  const [vouchers] = useData(loadVouchers);
   const [date, setDate] = useState(today());
   const [partnerName, setPartnerName] = useState("");
+  const [fromPartner, setFromPartner] = useState("");
+  const [toPartner, setToPartner] = useState("");
   const [type, setType] = useState<PartnerEntry["type"]>("contribution");
   const [amount, setAmount] = useState("");
   const [notes, setNotes] = useState("");
@@ -1913,24 +1922,33 @@ function PartnerLedgerModule() {
   const [deletionReason, setDeletionReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [entryFilter, setEntryFilter] = useState<"all" | PartnerEntry["type"]>("all");
 
   const resetForm = () => {
-    setEditing(null); setDate(today()); setPartnerName(""); setType("contribution"); setAmount(""); setNotes(""); setAccountId(""); setError("");
+    setEditing(null); setDate(today()); setPartnerName(""); setFromPartner(""); setToPartner(""); setType("contribution"); setAmount(""); setNotes(""); setAccountId(""); setError("");
   };
 
   const edit = (entry: PartnerEntry) => {
-    setEditing(entry); setDate(entry.date); setPartnerName(entry.partnerName); setType(entry.type);
-    setAmount(String(entry.amount)); setNotes(entry.notes); setAccountId(entry.accountId); setError("");
+    setEditing(entry); setDate(entry.date); setPartnerName(entry.partnerName ?? ""); setType(entry.type);
+    setFromPartner(entry.fromPartner ?? ""); setToPartner(entry.toPartner ?? "");
+    setAmount(String(entry.amount)); setNotes(entry.notes); setAccountId(entry.accountId ?? ""); setError("");
   };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!accountId || !partnerName.trim() || Number(amount) <= 0) return setError("Date, partner, type, positive amount, and account are required.");
+    const settlement = type === "settlement";
+    if (!date || Number(amount) <= 0 || (!settlement && (!accountId || !partnerName.trim()))
+      || (settlement && (!fromPartner.trim() || !toPartner.trim() || fromPartner.trim().toLowerCase() === toPartner.trim().toLowerCase()))) {
+      return setError(settlement ? "Date, different payer and receiver partners, and a positive amount are required." : "Date, partner, type, positive amount, and account are required.");
+    }
     setSaving(true); setError("");
     try {
+      const fields = settlement
+        ? { date, type, amount: Number(amount), notes, fromPartner: fromPartner.trim(), toPartner: toPartner.trim(), partnerName: undefined, accountId: undefined }
+        : { date, type, amount: Number(amount), notes, partnerName: partnerName.trim(), accountId, fromPartner: undefined, toPartner: undefined };
       const record: PartnerEntry = editing
-        ? { ...editing, date, partnerName: partnerName.trim(), type, amount: Number(amount), notes, accountId }
-        : { ...makeLocalRecord(), date, partnerName: partnerName.trim(), type, amount: Number(amount), notes, accountId };
+        ? { ...editing, ...fields }
+        : { ...makeLocalRecord(), ...fields };
       await persistOperationalRecord("partnerEntry", record);
       resetForm();
       window.dispatchEvent(new CustomEvent("muzare-toast", { detail: editing ? "Partner ledger entry updated successfully." : "Partner ledger entry saved successfully." }));
@@ -1955,27 +1973,75 @@ function PartnerLedgerModule() {
       setSaving(false);
     }
   };
-  const visibleEntries = entries.filter((item) => showDeleted || !item.deletedAt);
-  const balance = visibleEntries.filter((item) => !item.deletedAt).reduce((sum, item) => sum + (item.type === "contribution" ? item.amount : -item.amount), 0);
+  const visibleEntries = entries.filter((item) => (showDeleted || !item.deletedAt) && (entryFilter === "all" || item.type === entryFilter));
+  const activeEntries = entries.filter((item) => !item.deletedAt);
+  const balance = activeEntries.reduce((sum, item) => sum + partnerEntryBalanceEffect(item), 0);
   const labourAdvances = advances.reduce((sum, item) => sum + item.amount, 0);
-  const accountName = (id: string) => accounts.find((account) => account.id === id)?.name ?? "Unknown account";
+  const accountName = (id?: string) => id ? accounts.find((account) => account.id === id)?.name ?? "Unknown account" : "-";
+  const partnerPositions = (() => {
+    const positions = new Map<string, { name: string; expensesPaid: number; contributions: number; withdrawals: number; settlementsSent: number; settlementsReceived: number }>();
+    const position = (name: string) => {
+      const key = name.trim().toLowerCase();
+      const current = positions.get(key) ?? { name: name.trim(), expensesPaid: 0, contributions: 0, withdrawals: 0, settlementsSent: 0, settlementsReceived: 0 };
+      positions.set(key, current);
+      return current;
+    };
+    for (const entry of activeEntries) {
+      if (entry.type === "settlement") {
+        position(entry.fromPartner!).settlementsSent += entry.amount;
+        position(entry.toPartner!).settlementsReceived += entry.amount;
+      } else if (entry.type === "contribution") position(entry.partnerName!).contributions += entry.amount;
+      else position(entry.partnerName!).withdrawals += entry.amount;
+    }
+    for (const voucher of vouchers) {
+      const account = accounts.find((item) => item.id === voucher.accountId);
+      if (account?.name) position(account.name).expensesPaid += voucher.amount;
+    }
+    return [...positions.values()].map((item) => ({
+      ...item,
+      netPosition: item.contributions - item.withdrawals - item.expensesPaid - item.settlementsSent + item.settlementsReceived,
+    })).sort((a, b) => a.name.localeCompare(b.name));
+  })();
+  const runningBalances = (() => {
+    const balances = new Map<string, { name: string; amount: number }>();
+    const labels = new Map<string, string>();
+    const adjust = (name: string, amount: number) => {
+      const key = name.trim().toLowerCase();
+      const current = balances.get(key) ?? { name: name.trim(), amount: 0 };
+      balances.set(key, { ...current, amount: current.amount + amount });
+    };
+    for (const entry of [...activeEntries].sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt))) {
+      if (entry.type === "settlement") {
+        adjust(entry.fromPartner!, -entry.amount); adjust(entry.toPartner!, entry.amount);
+        labels.set(entry.id, `${entry.fromPartner}: ${money(balances.get(entry.fromPartner!.trim().toLowerCase())!.amount)} | ${entry.toPartner}: ${money(balances.get(entry.toPartner!.trim().toLowerCase())!.amount)}`);
+      } else {
+        adjust(entry.partnerName!, partnerEntryBalanceEffect(entry));
+        labels.set(entry.id, `${entry.partnerName}: ${money(balances.get(entry.partnerName!.trim().toLowerCase())!.amount)}`);
+      }
+    }
+    return labels;
+  })();
 
   return (
     <>
       <FormCard title={editing ? "Edit partner entry" : "Record partner entry"}>
         <form className="module-form inline-form" onSubmit={(event) => void submit(event)}>
           <input required type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-          <input required placeholder="Partner name" value={partnerName} onChange={(event) => setPartnerName(event.target.value)} />
           <select value={type} onChange={(event) => setType(event.target.value as PartnerEntry["type"])}>
-            <option value="contribution">Contribution</option>
-            <option value="withdrawal">Withdrawal</option>
+            <option value="contribution">Capital Contribution</option>
+            <option value="withdrawal">Partner Withdrawal</option>
+            <option value="settlement">Partner Settlement</option>
           </select>
+          {type === "settlement" ? <>
+            <input required placeholder="From partner (payer)" value={fromPartner} onChange={(event) => setFromPartner(event.target.value)} />
+            <input required placeholder="To partner (receiver)" value={toPartner} onChange={(event) => setToPartner(event.target.value)} />
+          </> : <input required placeholder="Partner name" value={partnerName} onChange={(event) => setPartnerName(event.target.value)} />}
           <input required type="number" min="0.01" step="0.01" placeholder="Amount" value={amount} onChange={(event) => setAmount(event.target.value)} />
           <input placeholder="Notes" value={notes} onChange={(event) => setNotes(event.target.value)} />
-          <select required value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+          {type !== "settlement" && <select required value={accountId} onChange={(event) => setAccountId(event.target.value)}>
             <option value="">Select cash/bank account</option>
             {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-          </select>
+          </select>}
           <button disabled={saving} type="submit">{saving ? "Saving..." : editing ? "Update entry" : "Save entry"}</button>
           {editing && <button className="secondary-button" disabled={saving} type="button" onClick={resetForm}>Cancel edit</button>}
         </form>
@@ -1983,10 +2049,22 @@ function PartnerLedgerModule() {
       </FormCard>
       <Summary label="Partner balance" value={money(balance)} />
       <Summary label="Labour advances (cash outflow)" value={money(labourAdvances)} />
+      <section className="record-panel">
+        <h2>Partner Position</h2>
+        {!partnerPositions.length ? <Empty>No partner positions recorded yet.</Empty> : <div className="partner-position-table">
+          <div className="partner-position-row partner-position-row--header"><span>Partner</span><span>Expenses paid</span><span>Contributions</span><span>Withdrawals</span><span>Sent</span><span>Received</span><span>Net position</span></div>
+          {partnerPositions.map((item) => <div className="partner-position-row" key={item.name}>
+            <strong>{item.name}</strong><span>{money(item.expensesPaid)}</span><span>{money(item.contributions)}</span><span>{money(item.withdrawals)}</span><span>{money(item.settlementsSent)}</span><span>{money(item.settlementsReceived)}</span><b>{money(item.netPosition)}</b>
+          </div>)}
+        </div>}
+      </section>
+      <label className="partner-ledger-filter"><span>Ledger filter</span><select value={entryFilter} onChange={(event) => setEntryFilter(event.target.value as typeof entryFilter)}>
+        <option value="all">All</option><option value="contribution">Contributions</option><option value="withdrawal">Withdrawals</option><option value="settlement">Settlements</option>
+      </select></label>
       {canManage && <label className="partner-ledger-show-deleted"><input checked={showDeleted} type="checkbox" onChange={(event) => setShowDeleted(event.target.checked)} /> Show deleted</label>}
       <RecordTable
         empty="No partner entries recorded yet."
-        rows={visibleEntries.map((item) => [item.date, item.partnerName, item.type, accountName(item.accountId), item.notes || "-", money(item.type === "withdrawal" ? -item.amount : item.amount), item.deletedAt ? "Deleted" : ""])}
+        rows={visibleEntries.map((item) => [item.date, partnerEntryName(item), partnerEntryLabel(item), accountName(item.accountId), item.notes || "-", money(item.type === "withdrawal" ? -item.amount : item.amount), item.deletedAt ? "Deleted" : runningBalances.get(item.id) ?? "-"])}
         actions={visibleEntries.map((item) => (
           <div className="record-list__actions" key={`actions-${item.id}`}>
             <button type="button" onClick={() => setViewing(item)}>View</button>
@@ -2000,8 +2078,8 @@ function PartnerLedgerModule() {
           <section className="worker-action-dialog">
             <header><h2>Partner ledger entry</h2><button aria-label="Close" type="button" onClick={() => setViewing(null)}><X size={19} /></button></header>
             <div className="worker-action-form partner-ledger-details">
-              <p><strong>Date</strong><span>{viewing.date}</span></p><p><strong>Partner</strong><span>{viewing.partnerName}</span></p>
-              <p><strong>Type</strong><span>{viewing.type}</span></p><p><strong>Account</strong><span>{accountName(viewing.accountId)}</span></p>
+              <p><strong>Date</strong><span>{viewing.date}</span></p><p><strong>Partner</strong><span>{partnerEntryName(viewing)}</span></p>
+              <p><strong>Type</strong><span>{partnerEntryLabel(viewing)}</span></p>{viewing.type !== "settlement" && <p><strong>Account</strong><span>{accountName(viewing.accountId)}</span></p>}
               <p><strong>Amount</strong><span>{money(viewing.amount)}</span></p><p><strong>Notes</strong><span>{viewing.notes || "-"}</span></p>
               {viewing.deletedAt && <p><strong>Deleted</strong><span>{new Date(viewing.deletedAt).toLocaleString()}</span></p>}
               <footer><button type="button" onClick={() => setViewing(null)}>Close</button></footer>
@@ -2015,7 +2093,7 @@ function PartnerLedgerModule() {
             <header><h2>Delete partner ledger entry</h2><button aria-label="Close" type="button" onClick={() => setDeleting(null)}><X size={19} /></button></header>
             <div className="worker-action-form">
               <p className="worker-action-warning">This soft delete reverses the ledger effect while preserving the audit history.</p>
-              <p>{deleting.date} | {deleting.partnerName} | {deleting.type} | {accountName(deleting.accountId)} | {money(deleting.amount)}</p>
+              <p>{deleting.date} | {partnerEntryName(deleting)} | {partnerEntryLabel(deleting)} | {accountName(deleting.accountId)} | {money(deleting.amount)}</p>
               <label><span>Deletion reason</span><textarea value={deletionReason} onChange={(event) => setDeletionReason(event.target.value)} /></label>
               {error && <p className="worker-action-error">{error}</p>}
               <footer><button disabled={saving} type="button" onClick={() => setDeleting(null)}>Cancel</button><button className="danger-button" disabled={saving} type="button" onClick={() => void confirmDelete()}>{saving ? "Deleting..." : "Delete entry"}</button></footer>
@@ -2052,7 +2130,7 @@ function AccountsModule() {
     sales.filter((record) => record.accountId === id).reduce((sum, record) => sum + record.amount, 0)
     - vouchers.filter((record) => record.accountId === id).reduce((sum, record) => sum + record.amount, 0)
     - advances.filter((record) => record.accountId === id).reduce((sum, record) => sum + record.amount, 0)
-    + entries.filter((record) => record.accountId === id).reduce((sum, record) => sum + (record.type === "contribution" ? record.amount : -record.amount), 0);
+    + entries.filter((record) => record.accountId === id).reduce((sum, record) => sum + partnerEntryAccountEffect(record), 0);
   const totalAdvances = advances.reduce((sum, item) => sum + item.amount, 0);
   const totalVoucherExpenses = vouchers.reduce((sum, item) => sum + item.amount, 0);
 
@@ -2118,7 +2196,7 @@ const descriptions: Record<ModuleKey, string> = {
   sales: "Market revenue and sales collection.",
   dispatch: "Vehicle movement and produce carton dispatch.",
   accounts: "Balances calculated from synchronized operational transactions.",
-  partnerLedger: "Partner contributions, withdrawals, and running balances.",
+  partnerLedger: "Partner contributions, withdrawals, settlements, and running balances.",
 };
 
 export function ModulePage({

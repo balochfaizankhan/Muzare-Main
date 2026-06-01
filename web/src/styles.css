@@ -1979,8 +1979,14 @@ button {
 }
 .record-list__actions .danger-button { color: var(--danger); }
 .partner-ledger-show-deleted { align-items: center; color: var(--text-secondary); display: flex; font-size: .82rem; gap: 7px; margin: 10px 0; }
+.partner-ledger-filter { align-items: center; display: flex; gap: 8px; margin: 10px 0; }
+.partner-ledger-filter span { color: var(--text-secondary); font-size: .82rem; font-weight: 750; }
+.partner-ledger-filter select { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); min-height: 38px; padding: 6px 9px; }
 .partner-ledger-details p { align-items: center; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; margin: 0; padding: 8px 0; }
 .partner-ledger-details p span { color: var(--text-secondary); text-align: right; }
+.partner-position-table { overflow-x: auto; }
+.partner-position-row { align-items: center; border-bottom: 1px solid var(--border); display: grid; font-size: .78rem; gap: 8px; grid-template-columns: minmax(120px, 1.4fr) repeat(6, minmax(82px, 1fr)); min-width: 720px; padding: 8px 0; }
+.partner-position-row--header { color: var(--text-secondary); font-size: .7rem; font-weight: 800; text-transform: uppercase; }
 
 .advances-summary {
   display: grid;

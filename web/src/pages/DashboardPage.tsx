@@ -104,7 +104,7 @@ export function DashboardPage() {
     const labourAdvances = advances.reduce((sum, item) => sum + item.amount, 0);
     const totalExpenses = vouchers.reduce((sum, item) => sum + item.amount, 0) + labourAdvances;
     const partnerBalance = entries.reduce(
-      (sum, item) => sum + (item.type === "contribution" ? item.amount : -item.amount),
+      (sum, item) => sum + (item.type === "contribution" ? item.amount : item.type === "withdrawal" ? -item.amount : 0),
       0,
     );
     setTotals({
@@ -145,8 +145,8 @@ export function DashboardPage() {
       ...entries.map((item) => ({
         id: item.id,
         path: "/workspace/partner-ledger",
-        title: item.type === "contribution" ? "Partner contribution" : "Partner withdrawal",
-        detail: item.partnerName,
+        title: item.type === "contribution" ? "Partner contribution" : item.type === "withdrawal" ? "Partner withdrawal" : "Partner settlement",
+        detail: item.type === "settlement" ? `${item.fromPartner} to ${item.toPartner}` : item.partnerName ?? "-",
         value: `${item.type === "withdrawal" ? "-" : ""}${money(item.amount)}`,
         createdAt: item.createdAt,
       })),

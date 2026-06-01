@@ -93,6 +93,22 @@ test("partner ledger supports audited edits and offline soft deletes without dup
   assert.match(modulePage, /actions=\{visibleEntries\.map/);
 });
 
+test("partner settlements stay outside business cash while moving payer and receiver positions", async () => {
+  const route = await source("api/src/routes/operational-sync.ts");
+  const modulePage = await source("web/src/pages/ModulePage.tsx");
+  const dashboard = await source("web/src/pages/DashboardPage.tsx");
+  const offlineDb = await source("web/src/lib/offline-db.ts");
+  assert.match(route, /type: z\.literal\("settlement"\)/);
+  assert.match(route, /record\.fromPartner\.toLowerCase\(\) !== record\.toPartner\.toLowerCase\(\)/);
+  assert.match(offlineDb, /type: "contribution" \| "withdrawal" \| "settlement"/);
+  assert.match(modulePage, /const partnerEntryAccountEffect = \(entry: PartnerEntry\) => entry\.type === "settlement" \? 0/);
+  assert.match(modulePage, /position\(entry\.fromPartner!\)\.settlementsSent \+= entry\.amount/);
+  assert.match(modulePage, /position\(entry\.toPartner!\)\.settlementsReceived \+= entry\.amount/);
+  assert.match(modulePage, /<option value="settlement">Partner Settlement<\/option>/);
+  assert.match(modulePage, /<option value="settlement">Settlements<\/option>/);
+  assert.match(dashboard, /item\.type === "withdrawal" \? -item\.amount : 0/);
+});
+
 test("attendance labour directory loads cache-first and keeps cached data during API outages", async () => {
   const auth = await source("web/src/auth/AuthProvider.tsx");
   const sync = await source("web/src/services/syncService.ts");

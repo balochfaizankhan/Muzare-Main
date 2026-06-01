@@ -110,11 +110,13 @@ export type Sale = LocalRecord & {
 
 export type PartnerEntry = LocalRecord & {
   date: string;
-  partnerName: string;
-  type: "contribution" | "withdrawal";
+  partnerName?: string;
+  type: "contribution" | "withdrawal" | "settlement";
   amount: number;
   notes: string;
-  accountId: string;
+  accountId?: string;
+  fromPartner?: string;
+  toPartner?: string;
   deletionReason?: string;
 };
 
