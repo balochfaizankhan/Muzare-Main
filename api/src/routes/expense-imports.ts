@@ -81,17 +81,39 @@ function parseCsv(csv: string) {
   return rows;
 }
 
-function parseDate(value: string) {
-  const input = value.trim();
-  const isoMatch = input.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  const match = isoMatch
-    ? [input, isoMatch[3]!, isoMatch[2]!, isoMatch[1]!]
-    : input.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
-  if (!match) return null;
-  const day = Number(match[1]); const month = Number(match[2]); const year = Number(match[3]);
+type LegacyDateOrder = "day_first" | "month_first";
+const supportedDateFormats = "YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY";
+
+function normalizedDate(year: number, month: number, day: number) {
   const date = new Date(Date.UTC(year, month - 1, day));
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
     ? date.toISOString().slice(0, 10) : null;
+}
+
+function parseDate(value: string, preferredOrder: LegacyDateOrder = "day_first") {
+  const input = value.trim();
+  const isoMatch = input.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) return normalizedDate(Number(isoMatch[1]), Number(isoMatch[2]), Number(isoMatch[3]));
+  const match = input.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (!match) return null;
+  const first = Number(match[1]); const second = Number(match[2]); const year = Number(match[3]);
+  const dayFirst = normalizedDate(year, second, first);
+  const monthFirst = normalizedDate(year, first, second);
+  if (dayFirst && !monthFirst) return dayFirst;
+  if (monthFirst && !dayFirst) return monthFirst;
+  return preferredOrder === "month_first" ? monthFirst : dayFirst;
+}
+
+function inferDateOrder(values: string[]): LegacyDateOrder {
+  let dayFirst = 0; let monthFirst = 0;
+  for (const value of values) {
+    const match = value.trim().match(/^(\d{1,2})[/-](\d{1,2})[/-]\d{4}$/);
+    if (!match) continue;
+    const first = Number(match[1]); const second = Number(match[2]);
+    if (first > 12 && second <= 12) dayFirst += 1;
+    if (second > 12 && first <= 12) monthFirst += 1;
+  }
+  return monthFirst > dayFirst ? "month_first" : "day_first";
 }
 
 function parseAmount(value: string) {
@@ -127,6 +149,7 @@ function buildPreview(csvText: string, categories: CategoryOption[], accounts: A
   };
   for (const [field, index] of Object.entries(columns)) if (index < 0) errors.push(`${field} column was not found.`);
   if (errors.length) return { rows: [], errors };
+  const preferredDateOrder = inferDateOrder(csv.slice(headerRowIndex + 1).map((values) => values[columns.date] ?? ""));
   const accountByName = new Map(accounts.map((account) => [normalize(account.name), account.id]));
   const rows = csv.slice(headerRowIndex + 1).flatMap((values, rowIndex): ExpenseRow[] => {
     if (!values.some((value) => value.trim())) return [];
@@ -136,12 +159,12 @@ function buildPreview(csvText: string, categories: CategoryOption[], accounts: A
     const categoryName = csvCategory || "Other";
     const description = values[columns.description]!.trim() || csvCategory || "Imported expense";
     const rawDate = values[columns.date]!.trim();
-    const date = parseDate(rawDate) ?? "";
+    const date = parseDate(rawDate, preferredDateOrder) ?? "";
     const rawAmount = values[columns.amount]!.trim();
     const amount = parseAmount(rawAmount);
     const issue = !voucherNumber ? "Voucher number is required."
       : !rawDate ? "Expense date is required."
-        : !date ? `Expense date "${rawDate}" is invalid.`
+        : !date ? `Unable to parse date '${rawDate}'. Supported formats: ${supportedDateFormats}.`
         : !accountName ? "Deduction account is required."
           : !rawAmount ? "Amount is required."
             : amount === null ? `Amount "${rawAmount}" must be greater than zero.` : null;

@@ -332,6 +332,38 @@ test("expense CSV import accepts blank legacy descriptions and reports row-speci
   assert.ok(invalid.json().preview.summary.errors.includes("Row 7: Deduction account is required."));
 });
 
+test("expense CSV import normalizes mixed legacy date formats and rejects impossible dates", async () => {
+  const accountId = randomUUID();
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "account", accountId, {
+    name: "Mixed Date Cash", type: "cash",
+  }))).statusCode, 200);
+  const preview = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/expense-imports/preview`, {
+    farmId: alpha.farmId, seasonId: alpha.seasonId, originalFilename: "mixed-expense-dates.csv",
+    csvText: [
+      "Historical expenditure register",
+      "Voucher,Date,Deduction Account,Category,Description,Amount",
+      "V-0400,3/31/2026,Mixed Date Cash,Other,US short date,10",
+      "V-0401,4/13/2026,Mixed Date Cash,Other,US date,11",
+      "V-0402,13/04/2026,Mixed Date Cash,Other,Day first date,12",
+      "V-0403,2026-04-16,Mixed Date Cash,Other,ISO date,13",
+      "V-0404,2/29/2024,Mixed Date Cash,Other,Leap day,14",
+      "V-0405,31-03-2026,Mixed Date Cash,Other,Day first hyphen,15",
+      "V-0406,04-30-2026,Mixed Date Cash,Other,US hyphen,16",
+      "V-0407,4/5/2026,Mixed Date Cash,Other,Inferred US ambiguous date,17",
+      "V-0408,31/02/2026,Mixed Date Cash,Other,Impossible date,18",
+    ].join("\n"),
+  });
+  assert.equal(preview.statusCode, 201);
+  assert.deepEqual(preview.json().preview.rows.map((row: { date: string }) => row.date), [
+    "2026-03-31", "2026-04-13", "2026-04-13", "2026-04-16", "2024-02-29",
+    "2026-03-31", "2026-04-30", "2026-04-05", "",
+  ]);
+  assert.equal(preview.json().preview.summary.readyRows, 8);
+  assert.ok(preview.json().preview.summary.errors.includes(
+    "Row 11: Unable to parse date '31/02/2026'. Supported formats: YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY.",
+  ));
+});
+
 test("expense vouchers receive scoped readable numbers and keep them when edited", async () => {
   const firstId = randomUUID();
   const first = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", firstId, {
