@@ -309,6 +309,10 @@ test("expense voucher search is debounced online, cache-first offline, and tenan
   assert.match(modulePage, /window\.setTimeout\(\(\) => setDebouncedVoucherSearch\(voucherSearch\.trim\(\)\), 275\)/);
   assert.match(modulePage, /enabled: Boolean\(token && workspaceId && farmId && seasonId && navigator\.onLine\)/);
   assert.match(modulePage, /const filteredVouchers = useMemo/);
+  assert.match(modulePage, /const total = filteredVouchers\.reduce\(\(sum, item\) => sum \+ item\.amount, 0\)/);
+  assert.match(modulePage, /const grouped = \[\.\.\.filteredVouchers\.reduce/);
+  assert.match(modulePage, /Showing totals for current filters/);
+  assert.match(modulePage, /Clear filters/);
   assert.match(modulePage, /No expenses found for this search\./);
 });
 
@@ -328,4 +332,26 @@ test("labour lifecycle UI preserves history and hides inactive labour from daily
   assert.match(modulePage, /workforcePage\.showInactive/);
   assert.match(modulePage, /reports\.typeDeleteConfirm/);
   assert.match(modulePage, /errors\.syncPendingBeforeDeactivate/);
+});
+
+test("accounts drill-down exposes live ledger totals and source links", async () => {
+  const modulePage = await source("web/src/pages/ModulePage.tsx");
+  const accounting = await source("web/src/lib/accounting.ts");
+  assert.match(modulePage, /className="account-card-clickable"/);
+  assert.match(modulePage, /setSelectedAccountId\(account\.id\)/);
+  assert.match(modulePage, /openExpenseVisibility\("voucher"\)/);
+  assert.match(modulePage, /openExpenseVisibility\("advance"\)/);
+  assert.match(modulePage, /openExpenseVisibility\("combined"\)/);
+  assert.match(modulePage, /voucherExpensesPaid/);
+  assert.match(modulePage, /labourAdvancesPaid/);
+  assert.match(modulePage, /settlementsSent/);
+  assert.match(modulePage, /settlementsReceived/);
+  assert.match(modulePage, /contributions/);
+  assert.match(modulePage, /withdrawals/);
+  assert.match(modulePage, /Search voucher\/reference, description, amount, or counterparty/);
+  assert.match(modulePage, /openSource\(row\)/);
+  assert.match(modulePage, /source === "expenses"/);
+  assert.match(modulePage, /source === "labour_advances"/);
+  assert.match(modulePage, /source === "partner_ledger"/);
+  assert.match(accounting, /calculateAccountBalance\(account, sales, vouchers, advances, entries\)/);
 });

@@ -2092,6 +2092,92 @@ button {
 .partner-position-row { align-items: center; border-bottom: 1px solid var(--border); display: grid; font-size: .78rem; gap: 8px; grid-template-columns: minmax(120px, 1.4fr) repeat(8, minmax(82px, 1fr)); min-width: 980px; padding: 8px 0; }
 .partner-position-row--header { color: var(--text-secondary); font-size: .7rem; font-weight: 800; text-transform: uppercase; }
 
+.account-card-clickable {
+  cursor: pointer;
+  transition: box-shadow .18s ease, transform .18s ease;
+}
+
+.account-card-clickable:hover {
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.1);
+  transform: translateY(-1px);
+}
+
+.account-card-clickable small {
+  color: var(--text-secondary);
+  font-size: .72rem;
+  font-weight: 700;
+}
+
+.account-ledger-dialog {
+  max-width: min(1080px, 96vw);
+  width: min(1080px, 96vw);
+}
+
+.account-ledger-breakdown {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.account-ledger-breakdown article {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+}
+
+.account-ledger-breakdown article strong {
+  color: var(--text-secondary);
+  font-size: .74rem;
+}
+
+.account-ledger-breakdown article span,
+.account-ledger-breakdown article b {
+  color: var(--text);
+  font-size: .86rem;
+}
+
+.account-ledger-filters {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.account-ledger-filters .search-input {
+  grid-column: 1 / -1;
+}
+
+.expense-search-meta {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+.expense-search-meta button {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: .75rem;
+  font-weight: 700;
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+@media (max-width: 767px) {
+  .account-ledger-breakdown {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .account-ledger-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .advances-summary {
   display: grid;
   gap: 10px;

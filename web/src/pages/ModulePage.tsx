@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import { MoreVertical, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { SubpageHeader } from "../components/SubpageHeader";
 import { SearchInput } from "../components/SearchInput";
 import { LabourSelectCombobox } from "../components/LabourSelectCombobox";
@@ -1699,7 +1700,6 @@ function ExpensesModule() {
     resetForm();
     await refresh();
   };
-  const total = vouchers.reduce((sum, item) => sum + item.amount, 0);
   const selectedCategory = categories.data?.categories.find((item) => item.id === categoryId);
   const canManage = Boolean(user && workspaceId && hasPermission(user, "MANAGE_EXPENSE_CATEGORIES", workspaceId));
   const canEditVouchers = Boolean(user && workspaceId && hasPermission(user, "MANAGE_RECORDS", workspaceId));
@@ -1744,11 +1744,31 @@ function ExpensesModule() {
       : vouchers;
     return merged.filter((item) => matchesVoucher(item as Voucher)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) as Voucher[];
   }, [matchesVoucher, voucherSearchQuery.data, vouchers]);
-  const grouped = [...vouchers.reduce((map, item) => {
+  const total = filteredVouchers.reduce((sum, item) => sum + item.amount, 0);
+  const grouped = [...filteredVouchers.reduce((map, item) => {
     const category = map.get(item.category) ?? new Map<string, number>();
     category.set(item.subcategory || "Miscellaneous", (category.get(item.subcategory || "Miscellaneous") ?? 0) + item.amount);
     map.set(item.category, category); return map;
   }, new Map<string, Map<string, number>>())];
+  const hasActiveFilters = Boolean(
+    voucherSearch.trim()
+    || voucherFrom
+    || voucherTo
+    || voucherCategory
+    || voucherSubcategory
+    || voucherAccountId
+    || voucherVendor.trim(),
+  );
+  const clearFilters = () => {
+    setVoucherSearch("");
+    setDebouncedVoucherSearch("");
+    setVoucherFrom("");
+    setVoucherTo("");
+    setVoucherCategory("");
+    setVoucherSubcategory("");
+    setVoucherAccountId("");
+    setVoucherVendor("");
+  };
   const addCustom = async (event: FormEvent) => {
     event.preventDefault();
     if (!token || !workspaceId || !categoryId || !customName.trim()) return;
@@ -1796,6 +1816,10 @@ function ExpensesModule() {
             <option value="">All accounts</option>{accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select>
           <input aria-label="Expense vendor or person" placeholder="Vendor / person" value={voucherVendor} onChange={(event) => setVoucherVendor(event.target.value)} />
+        </div>
+        <div className="expense-search-meta">
+          <small>{hasActiveFilters ? "Showing totals for current filters" : "Showing totals for current season scope"}</small>
+          {hasActiveFilters && <button type="button" onClick={clearFilters}>Clear filters</button>}
         </div>
         {voucherSearchQuery.isFetching && <small>Refreshing matching expenses...</small>}
         {!navigator.onLine && <small>Offline mode: showing cached expenses.</small>}
@@ -2142,6 +2166,7 @@ function PartnerLedgerModule() {
 }
 
 function AccountsModule() {
+  const navigate = useNavigate();
   const loadAccounts = useCallback(async () => (await workspaceRecords(offlineDb.accounts)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)), []);
   const loadVouchers = useCallback(() => workspaceRecords(offlineDb.vouchers), []);
   const loadSales = useCallback(() => workspaceRecords(offlineDb.sales), []);
@@ -2152,6 +2177,11 @@ function AccountsModule() {
   const [sales] = useData(loadSales);
   const [entries] = useData(loadEntries);
   const [advances] = useData(loadAdvances);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const [ledgerSearch, setLedgerSearch] = useState("");
+  const [ledgerType, setLedgerType] = useState<"all" | "voucher" | "advance" | "settlement_sent" | "settlement_received" | "contribution" | "withdrawal">("all");
+  const [ledgerFrom, setLedgerFrom] = useState("");
+  const [ledgerTo, setLedgerTo] = useState("");
   const [name, setName] = useState("");
   const [type, setType] = useState<Account["type"]>("bank");
 
@@ -2165,6 +2195,183 @@ function AccountsModule() {
   const balance = (account: Account) => calculateAccountBalance(account, sales, vouchers, advances, entries);
   const totalAdvances = advances.reduce((sum, item) => sum + item.amount, 0);
   const totalVoucherExpenses = vouchers.reduce((sum, item) => sum + item.amount, 0);
+  const selectedAccount = selectedAccountId ? accounts.find((item) => item.id === selectedAccountId) ?? null : null;
+  const ledgerRows = useMemo(() => {
+    if (!selectedAccount) return [];
+    const lowerName = selectedAccount.name.trim().toLowerCase();
+    type LedgerRow = {
+      id: string;
+      date: string;
+      type: "voucher" | "advance" | "settlement_sent" | "settlement_received" | "contribution" | "withdrawal";
+      reference: string;
+      description: string;
+      debit: number;
+      credit: number;
+      source: "expenses" | "labour_advances" | "partner_ledger";
+      sourceId: string;
+      counterparty?: string;
+      runningBalance?: number;
+    };
+    const rows: LedgerRow[] = [];
+    for (const voucher of vouchers.filter((item) => item.accountId === selectedAccount.id)) {
+      rows.push({
+        id: `voucher:${voucher.id}`,
+        date: voucher.date,
+        type: "voucher",
+        reference: voucher.voucherNumber,
+        description: `${voucher.category} / ${voucher.subcategory} - ${voucher.description}`,
+        debit: voucher.amount,
+        credit: 0,
+        source: "expenses",
+        sourceId: voucher.id,
+      });
+    }
+    for (const advance of advances.filter((item) => item.accountId === selectedAccount.id)) {
+      rows.push({
+        id: `advance:${advance.id}`,
+        date: advance.date,
+        type: "advance",
+        reference: advance.id.slice(0, 8),
+        description: `Labour advance${advance.notes ? ` - ${advance.notes}` : ""}`,
+        debit: advance.amount,
+        credit: 0,
+        source: "labour_advances",
+        sourceId: advance.id,
+      });
+    }
+    for (const entry of entries.filter((item) => !item.deletedAt)) {
+      if (entry.type === "contribution" && entry.accountId === selectedAccount.id) {
+        rows.push({
+          id: `partner:${entry.id}`,
+          date: entry.date,
+          type: "contribution",
+          reference: entry.id.slice(0, 8),
+          description: entry.notes || "Capital contribution",
+          debit: 0,
+          credit: entry.amount,
+          source: "partner_ledger",
+          sourceId: entry.id,
+          counterparty: entry.partnerName,
+        });
+      }
+      if (entry.type === "withdrawal" && entry.accountId === selectedAccount.id) {
+        rows.push({
+          id: `partner:${entry.id}`,
+          date: entry.date,
+          type: "withdrawal",
+          reference: entry.id.slice(0, 8),
+          description: entry.notes || "Partner withdrawal",
+          debit: entry.amount,
+          credit: 0,
+          source: "partner_ledger",
+          sourceId: entry.id,
+          counterparty: entry.partnerName,
+        });
+      }
+      if (entry.type === "settlement") {
+        if (entry.fromPartner?.trim().toLowerCase() === lowerName) {
+          rows.push({
+            id: `partner:${entry.id}:sent`,
+            date: entry.date,
+            type: "settlement_sent",
+            reference: entry.id.slice(0, 8),
+            description: entry.notes || "Partner settlement sent",
+            debit: entry.amount,
+            credit: 0,
+            source: "partner_ledger",
+            sourceId: entry.id,
+            counterparty: entry.toPartner,
+          });
+        }
+        if (entry.toPartner?.trim().toLowerCase() === lowerName) {
+          rows.push({
+            id: `partner:${entry.id}:received`,
+            date: entry.date,
+            type: "settlement_received",
+            reference: entry.id.slice(0, 8),
+            description: entry.notes || "Partner settlement received",
+            debit: 0,
+            credit: entry.amount,
+            source: "partner_ledger",
+            sourceId: entry.id,
+            counterparty: entry.fromPartner,
+          });
+        }
+      }
+    }
+    rows.sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+    let running = 0;
+    return rows.map((row) => {
+      running += row.credit - row.debit;
+      return { ...row, runningBalance: running };
+    });
+  }, [advances, entries, selectedAccount, vouchers]);
+  const ledgerBreakdown = useMemo(() => {
+    const byType = {
+      voucherExpensesPaid: 0,
+      labourAdvancesPaid: 0,
+      settlementsSent: 0,
+      settlementsReceived: 0,
+      contributions: 0,
+      withdrawals: 0,
+    };
+    for (const row of ledgerRows) {
+      if (row.type === "voucher") byType.voucherExpensesPaid += row.debit;
+      if (row.type === "advance") byType.labourAdvancesPaid += row.debit;
+      if (row.type === "settlement_sent") byType.settlementsSent += row.debit;
+      if (row.type === "settlement_received") byType.settlementsReceived += row.credit;
+      if (row.type === "contribution") byType.contributions += row.credit;
+      if (row.type === "withdrawal") byType.withdrawals += row.debit;
+    }
+    return {
+      ...byType,
+      netBalance: -byType.voucherExpensesPaid - byType.labourAdvancesPaid + byType.contributions - byType.withdrawals - byType.settlementsSent + byType.settlementsReceived,
+    };
+  }, [ledgerRows]);
+  const filteredLedgerRows = useMemo(() => {
+    const term = ledgerSearch.trim().toLowerCase();
+    return ledgerRows.filter((row) => (ledgerType === "all" || row.type === ledgerType)
+      && (!ledgerFrom || row.date >= ledgerFrom)
+      && (!ledgerTo || row.date <= ledgerTo)
+      && (!term || [
+        row.reference,
+        row.description,
+        row.counterparty ?? "",
+        row.date,
+        String(row.debit),
+        String(row.credit),
+      ].some((value) => value.toLowerCase().includes(term))));
+  }, [ledgerFrom, ledgerRows, ledgerSearch, ledgerTo, ledgerType]);
+  const openSource = (row: (typeof filteredLedgerRows)[number]) => {
+    const farmId = getActiveFarmId();
+    const seasonId = getActiveSeasonId();
+    const query = new URLSearchParams();
+    if (farmId) query.set("farmId", farmId);
+    if (seasonId) query.set("seasonId", seasonId);
+    if (row.sourceId) query.set("recordId", row.sourceId);
+    if (row.source === "expenses") navigate(`/workspace/expenses?${query.toString()}`);
+    if (row.source === "labour_advances") navigate(`/workspace/labour-advances?${query.toString()}`);
+    if (row.source === "partner_ledger") navigate(`/workspace/partner-ledger?${query.toString()}`);
+  };
+  const openExpenseVisibility = (scope: "voucher" | "advance" | "combined") => {
+    const farmId = getActiveFarmId();
+    const seasonId = getActiveSeasonId();
+    const query = new URLSearchParams();
+    if (farmId) query.set("farmId", farmId);
+    if (seasonId) query.set("seasonId", seasonId);
+    if (scope === "voucher") {
+      query.set("expenseScope", "vouchers");
+      navigate(`/workspace/expenses?${query.toString()}`);
+      return;
+    }
+    if (scope === "advance") {
+      query.set("expenseScope", "advances");
+      navigate(`/workspace/labour-advances?${query.toString()}`);
+      return;
+    }
+    query.set("report", "combined-expenses");
+    navigate(`/workspace/reports?${query.toString()}`);
+  };
 
   return (
     <>
@@ -2181,10 +2388,16 @@ function AccountsModule() {
         <h2>Your accounts</h2>
         <div className="account-grid">
           {accounts.map((account) => (
-            <article key={account.id}>
+            <article key={account.id} className="account-card-clickable" role="button" tabIndex={0} onClick={() => setSelectedAccountId(account.id)} onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                setSelectedAccountId(account.id);
+              }
+            }}>
               <span>{account.type}</span>
               <strong>{account.name}</strong>
               <b>{money(balance(account))}</b>
+              <small>View details</small>
             </article>
           ))}
         </div>
@@ -2192,15 +2405,63 @@ function AccountsModule() {
       <section className="record-panel">
         <h2>Expense visibility</h2>
         <div className="record-list">
-          <article><strong>Voucher expenses</strong><span>{money(totalVoucherExpenses)}</span></article>
-          <article><strong>Labour advances</strong><span>{money(totalAdvances)}</span></article>
-          <article><strong>Total business expenses</strong><span>{money(totalVoucherExpenses + totalAdvances)}</span></article>
+          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("voucher")}><strong>Voucher expenses</strong><span>{money(totalVoucherExpenses)}</span><small>View details</small></article>
+          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("advance")}><strong>Labour advances</strong><span>{money(totalAdvances)}</span><small>View details</small></article>
+          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("combined")}><strong>Total business expenses</strong><span>{money(totalVoucherExpenses + totalAdvances)}</span><small>View details</small></article>
         </div>
       </section>
       <Summary
         label="Net operating position"
         value={money(sales.reduce((sum, item) => sum + item.amount, 0) - totalVoucherExpenses - totalAdvances)}
       />
+      {selectedAccount && <div className="worker-dialog-backdrop worker-action-backdrop" role="presentation" onClick={() => setSelectedAccountId(null)}>
+        <section className="worker-action-dialog account-ledger-dialog" role="dialog" aria-modal="true" aria-label="Account ledger details" onClick={(event) => event.stopPropagation()}>
+          <header><h2>{selectedAccount.name} Ledger</h2><button aria-label="Close" type="button" onClick={() => setSelectedAccountId(null)}><X size={19} /></button></header>
+          <div className="worker-action-form">
+            <div className="account-ledger-breakdown">
+              <article><strong>Voucher expenses paid</strong><span>{money(ledgerBreakdown.voucherExpensesPaid)}</span></article>
+              <article><strong>Labour advances paid</strong><span>{money(ledgerBreakdown.labourAdvancesPaid)}</span></article>
+              <article><strong>Partner settlements sent</strong><span>{money(ledgerBreakdown.settlementsSent)}</span></article>
+              <article><strong>Partner settlements received</strong><span>{money(ledgerBreakdown.settlementsReceived)}</span></article>
+              <article><strong>Contributions</strong><span>{money(ledgerBreakdown.contributions)}</span></article>
+              <article><strong>Withdrawals</strong><span>{money(ledgerBreakdown.withdrawals)}</span></article>
+              <article><strong>Net balance</strong><b>{money(ledgerBreakdown.netBalance)}</b></article>
+            </div>
+            <div className="account-ledger-filters">
+              <SearchInput placeholder="Search voucher/reference, description, amount, or counterparty" value={ledgerSearch} onChange={setLedgerSearch} />
+              <select value={ledgerType} onChange={(event) => setLedgerType(event.target.value as typeof ledgerType)}>
+                <option value="all">All types</option>
+                <option value="voucher">Voucher expense</option>
+                <option value="advance">Labour advance</option>
+                <option value="settlement_sent">Settlement sent</option>
+                <option value="settlement_received">Settlement received</option>
+                <option value="contribution">Contribution</option>
+                <option value="withdrawal">Withdrawal</option>
+              </select>
+              <input aria-label="Ledger from date" type="date" value={ledgerFrom} onChange={(event) => setLedgerFrom(event.target.value)} />
+              <input aria-label="Ledger to date" type="date" value={ledgerTo} onChange={(event) => setLedgerTo(event.target.value)} />
+            </div>
+            <div className="attendance-import-table-wrap">
+              <table>
+                <thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Description</th><th>Debit</th><th>Credit</th><th>Running Balance</th><th>Source</th></tr></thead>
+                <tbody>
+                  {filteredLedgerRows.map((row) => <tr key={row.id}>
+                    <td>{row.date}</td>
+                    <td>{row.type.replace("_", " ")}</td>
+                    <td>{row.reference}</td>
+                    <td>{row.description}{row.counterparty ? ` (${row.counterparty})` : ""}</td>
+                    <td>{row.debit ? money(row.debit) : "-"}</td>
+                    <td>{row.credit ? money(row.credit) : "-"}</td>
+                    <td>{money(row.runningBalance ?? 0)}</td>
+                    <td><button type="button" onClick={() => openSource(row)}>Open</button></td>
+                  </tr>)}
+                </tbody>
+              </table>
+            </div>
+            <footer><button type="button" onClick={() => setSelectedAccountId(null)}>Back</button></footer>
+          </div>
+        </section>
+      </div>}
     </>
   );
 }
