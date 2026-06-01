@@ -1892,7 +1892,10 @@ function SalesModule() {
 }
 
 function PartnerLedgerModule() {
-  const load = useCallback(async () => (await workspaceRecords(offlineDb.partnerEntries)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
+  const { user } = useAuth();
+  const canManage = Boolean(user?.workspaceId && hasPermission(user, "MANAGE_RECORDS", user.workspaceId));
+  const [showDeleted, setShowDeleted] = useState(false);
+  const load = useCallback(async () => (await workspaceRecords(offlineDb.partnerEntries, { includeDeleted: showDeleted })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [showDeleted]);
   const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts), []);
   const loadAdvances = useCallback(() => workspaceRecords(offlineDb.advances), []);
   const [entries, refresh] = useData(load);
@@ -1904,22 +1907,64 @@ function PartnerLedgerModule() {
   const [amount, setAmount] = useState("");
   const [notes, setNotes] = useState("");
   const [accountId, setAccountId] = useState("");
+  const [editing, setEditing] = useState<PartnerEntry | null>(null);
+  const [viewing, setViewing] = useState<PartnerEntry | null>(null);
+  const [deleting, setDeleting] = useState<PartnerEntry | null>(null);
+  const [deletionReason, setDeletionReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const resetForm = () => {
+    setEditing(null); setDate(today()); setPartnerName(""); setType("contribution"); setAmount(""); setNotes(""); setAccountId(""); setError("");
+  };
+
+  const edit = (entry: PartnerEntry) => {
+    setEditing(entry); setDate(entry.date); setPartnerName(entry.partnerName); setType(entry.type);
+    setAmount(String(entry.amount)); setNotes(entry.notes); setAccountId(entry.accountId); setError("");
+  };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const record: PartnerEntry = { ...makeLocalRecord(), date, partnerName, type, amount: Number(amount), notes, accountId: accountId || accounts[0]?.id || "" };
-    await persistOperationalRecord("partnerEntry", record);
-    setPartnerName(""); setAmount(""); setNotes("");
-    await refresh();
+    if (!accountId || !partnerName.trim() || Number(amount) <= 0) return setError("Date, partner, type, positive amount, and account are required.");
+    setSaving(true); setError("");
+    try {
+      const record: PartnerEntry = editing
+        ? { ...editing, date, partnerName: partnerName.trim(), type, amount: Number(amount), notes, accountId }
+        : { ...makeLocalRecord(), date, partnerName: partnerName.trim(), type, amount: Number(amount), notes, accountId };
+      await persistOperationalRecord("partnerEntry", record);
+      resetForm();
+      window.dispatchEvent(new CustomEvent("muzare-toast", { detail: editing ? "Partner ledger entry updated successfully." : "Partner ledger entry saved successfully." }));
+      await refresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to save partner ledger entry.");
+    } finally {
+      setSaving(false);
+    }
   };
-  const balance = entries.reduce((sum, item) => sum + (item.type === "contribution" ? item.amount : -item.amount), 0);
+  const confirmDelete = async () => {
+    if (!deleting) return;
+    setSaving(true); setError("");
+    try {
+      await deleteOperationalRecord("partnerEntry", { ...deleting, deletionReason });
+      window.dispatchEvent(new CustomEvent("muzare-toast", { detail: "Partner ledger entry deleted successfully." }));
+      setDeleting(null); setDeletionReason("");
+      await refresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to delete partner ledger entry.");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const visibleEntries = entries.filter((item) => showDeleted || !item.deletedAt);
+  const balance = visibleEntries.filter((item) => !item.deletedAt).reduce((sum, item) => sum + (item.type === "contribution" ? item.amount : -item.amount), 0);
   const labourAdvances = advances.reduce((sum, item) => sum + item.amount, 0);
+  const accountName = (id: string) => accounts.find((account) => account.id === id)?.name ?? "Unknown account";
 
   return (
     <>
-      <FormCard title="Record partner entry">
+      <FormCard title={editing ? "Edit partner entry" : "Record partner entry"}>
         <form className="module-form inline-form" onSubmit={(event) => void submit(event)}>
-          <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+          <input required type="date" value={date} onChange={(event) => setDate(event.target.value)} />
           <input required placeholder="Partner name" value={partnerName} onChange={(event) => setPartnerName(event.target.value)} />
           <select value={type} onChange={(event) => setType(event.target.value as PartnerEntry["type"])}>
             <option value="contribution">Contribution</option>
@@ -1927,15 +1972,57 @@ function PartnerLedgerModule() {
           </select>
           <input required type="number" min="0.01" step="0.01" placeholder="Amount" value={amount} onChange={(event) => setAmount(event.target.value)} />
           <input placeholder="Notes" value={notes} onChange={(event) => setNotes(event.target.value)} />
-          <select value={accountId || accounts[0]?.id || ""} onChange={(event) => setAccountId(event.target.value)}>
+          <select required value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+            <option value="">Select cash/bank account</option>
             {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
           </select>
-          <button type="submit">Save entry</button>
+          <button disabled={saving} type="submit">{saving ? "Saving..." : editing ? "Update entry" : "Save entry"}</button>
+          {editing && <button className="secondary-button" disabled={saving} type="button" onClick={resetForm}>Cancel edit</button>}
         </form>
+        {error && <p className="worker-action-error">{error}</p>}
       </FormCard>
       <Summary label="Partner balance" value={money(balance)} />
       <Summary label="Labour advances (cash outflow)" value={money(labourAdvances)} />
-      <RecordTable empty="No partner entries recorded yet." rows={entries.map((item) => [item.date, item.partnerName, item.type, item.notes || "-", money(item.type === "withdrawal" ? -item.amount : item.amount)])} />
+      {canManage && <label className="partner-ledger-show-deleted"><input checked={showDeleted} type="checkbox" onChange={(event) => setShowDeleted(event.target.checked)} /> Show deleted</label>}
+      <RecordTable
+        empty="No partner entries recorded yet."
+        rows={visibleEntries.map((item) => [item.date, item.partnerName, item.type, accountName(item.accountId), item.notes || "-", money(item.type === "withdrawal" ? -item.amount : item.amount), item.deletedAt ? "Deleted" : ""])}
+        actions={visibleEntries.map((item) => (
+          <div className="record-list__actions" key={`actions-${item.id}`}>
+            <button type="button" onClick={() => setViewing(item)}>View</button>
+            {canManage && !item.deletedAt && <button type="button" onClick={() => edit(item)}>Edit</button>}
+            {canManage && !item.deletedAt && <button className="danger-button" type="button" onClick={() => { setDeleting(item); setDeletionReason(""); }}>Delete</button>}
+          </div>
+        ))}
+      />
+      {viewing && (
+        <div className="worker-dialog-backdrop worker-action-backdrop">
+          <section className="worker-action-dialog">
+            <header><h2>Partner ledger entry</h2><button aria-label="Close" type="button" onClick={() => setViewing(null)}><X size={19} /></button></header>
+            <div className="worker-action-form partner-ledger-details">
+              <p><strong>Date</strong><span>{viewing.date}</span></p><p><strong>Partner</strong><span>{viewing.partnerName}</span></p>
+              <p><strong>Type</strong><span>{viewing.type}</span></p><p><strong>Account</strong><span>{accountName(viewing.accountId)}</span></p>
+              <p><strong>Amount</strong><span>{money(viewing.amount)}</span></p><p><strong>Notes</strong><span>{viewing.notes || "-"}</span></p>
+              {viewing.deletedAt && <p><strong>Deleted</strong><span>{new Date(viewing.deletedAt).toLocaleString()}</span></p>}
+              <footer><button type="button" onClick={() => setViewing(null)}>Close</button></footer>
+            </div>
+          </section>
+        </div>
+      )}
+      {deleting && (
+        <div className="worker-dialog-backdrop worker-action-backdrop">
+          <section className="worker-action-dialog">
+            <header><h2>Delete partner ledger entry</h2><button aria-label="Close" type="button" onClick={() => setDeleting(null)}><X size={19} /></button></header>
+            <div className="worker-action-form">
+              <p className="worker-action-warning">This soft delete reverses the ledger effect while preserving the audit history.</p>
+              <p>{deleting.date} | {deleting.partnerName} | {deleting.type} | {accountName(deleting.accountId)} | {money(deleting.amount)}</p>
+              <label><span>Deletion reason</span><textarea value={deletionReason} onChange={(event) => setDeletionReason(event.target.value)} /></label>
+              {error && <p className="worker-action-error">{error}</p>}
+              <footer><button disabled={saving} type="button" onClick={() => setDeleting(null)}>Cancel</button><button className="danger-button" disabled={saving} type="button" onClick={() => void confirmDelete()}>{saving ? "Deleting..." : "Delete entry"}</button></footer>
+            </div>
+          </section>
+        </div>
+      )}
     </>
   );
 }

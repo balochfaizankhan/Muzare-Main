@@ -86,18 +86,21 @@ export async function persistOperationalRecord<T extends LocalRecord>(entity: Op
   return nextRecord;
 }
 
-export async function deleteOperationalRecord(entity: OperationalEntity, record: LocalRecord): Promise<void> {
+export async function deleteOperationalRecord(entity: OperationalEntity, record: LocalRecord & { deletionReason?: string }): Promise<void> {
   if (!context) throw new Error("Workspace synchronization is not initialized.");
   const queuedAt = new Date().toISOString();
-  await tableFor(entity).delete(record.id);
+  const payload = entity === "partnerEntry" ? { ...record, deletedAt: queuedAt, pendingSync: true } : { ...record, updatedAt: queuedAt, pendingSync: true };
+  if (entity === "partnerEntry") await tableFor(entity).put(payload);
+  else await tableFor(entity).delete(record.id);
   await offlineDb.pendingMutations.put({
     id: `${context.workspaceId}:${entity}:${record.id}`, entity, operation: "delete",
-    payload: { ...record, updatedAt: queuedAt, pendingSync: true }, attempts: 0,
+    payload, attempts: 0,
     workspaceId: context.workspaceId, farmId: record.farmId ?? context.farmId, seasonId: record.seasonId ?? context.seasonId,
     createdAt: queuedAt, updatedAt: queuedAt,
   });
   emit({ status: navigator.onLine ? "pending" : "offline", pendingCount: await getPendingCount() });
-  notify(navigator.onLine ? "Attendance cleared locally. Syncing..." : "Attendance cleared locally. Will sync automatically when connection is restored.");
+  const label = entity === "partnerEntry" ? "Partner ledger entry deleted" : "Attendance cleared";
+  notify(navigator.onLine ? `${label} locally. Syncing...` : `${label} locally. Will sync automatically when connection is restored.`);
   window.dispatchEvent(new Event("muzare-local-data-change"));
   if (navigator.onLine) void syncPendingRecords();
 }
@@ -120,6 +123,7 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
         await deleteOperationalRecordFromApi(context.token, {
           workspaceId: context.workspaceId, farmId: mutation.farmId || context.farmId, seasonId: mutation.seasonId || context.seasonId,
           entity: mutation.entity, recordId: (mutation.payload as LocalRecord).id,
+          reason: (mutation.payload as { deletionReason?: string }).deletionReason,
         });
         const latest = await offlineDb.pendingMutations.get(mutation.id);
         if (latest?.updatedAt !== mutation.updatedAt) continue;
@@ -136,7 +140,8 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
       const latest = await offlineDb.pendingMutations.get(mutation.id);
       if (latest?.updatedAt !== mutation.updatedAt) continue;
       if (response.record.id !== (mutation.payload as LocalRecord).id) {
-        await tableFor(mutation.entity).delete((mutation.payload as LocalRecord).id);
+        if (mutation.entity === "partnerEntry") await tableFor(mutation.entity).put({ ...(mutation.payload as LocalRecord), pendingSync: false });
+        else await tableFor(mutation.entity).delete((mutation.payload as LocalRecord).id);
       }
       await cacheRecord(mutation.entity, response.record, false, mutation.farmId, mutation.seasonId);
       await offlineDb.pendingMutations.delete(mutation.id);

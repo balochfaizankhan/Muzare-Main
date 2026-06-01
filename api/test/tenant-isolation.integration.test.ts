@@ -23,6 +23,7 @@ const now = new Date().toISOString();
 const alpha = { workspaceId: randomUUID(), farmId: randomUUID(), seasonId: randomUUID(), userId: randomUUID(), token: `alpha-${randomUUID()}` };
 const bravo = { workspaceId: randomUUID(), farmId: randomUUID(), seasonId: randomUUID(), userId: randomUUID(), token: `bravo-${randomUUID()}` };
 const supervisor = { userId: randomUUID(), token: `supervisor-${randomUUID()}` };
+const operator = { userId: randomUUID(), token: `operator-${randomUUID()}` };
 const ids = [alpha.workspaceId, bravo.workspaceId];
 let app: Awaited<ReturnType<typeof buildApp>>;
 
@@ -47,11 +48,13 @@ before(async () => {
     { id: alpha.userId, email: `alpha-${alpha.userId}@example.test`, passwordHash: "test", status: "approved" },
     { id: bravo.userId, email: `bravo-${bravo.userId}@example.test`, passwordHash: "test", status: "approved" },
     { id: supervisor.userId, email: `supervisor-${supervisor.userId}@example.test`, passwordHash: "test", status: "approved" },
+    { id: operator.userId, email: `operator-${operator.userId}@example.test`, passwordHash: "test", status: "approved" },
   ]);
   await db.insert(workspaceMemberships).values([
     { workspaceId: alpha.workspaceId, userId: alpha.userId, role: "workspace_owner" },
     { workspaceId: bravo.workspaceId, userId: bravo.userId, role: "workspace_owner" },
     { workspaceId: alpha.workspaceId, userId: supervisor.userId, role: "supervisor" },
+    { workspaceId: alpha.workspaceId, userId: operator.userId, role: "operator" },
   ]);
   await db.insert(farms).values([
     { id: alpha.farmId, workspaceId: alpha.workspaceId, name: "Alpha Farm" },
@@ -65,6 +68,7 @@ before(async () => {
     { userId: alpha.userId, workspaceId: alpha.workspaceId, activeFarmId: alpha.farmId, activeSeasonId: alpha.seasonId, tokenHash: hash(alpha.token), expiresAt: new Date(Date.now() + 60_000) },
     { userId: bravo.userId, workspaceId: bravo.workspaceId, activeFarmId: bravo.farmId, activeSeasonId: bravo.seasonId, tokenHash: hash(bravo.token), expiresAt: new Date(Date.now() + 60_000) },
     { userId: supervisor.userId, workspaceId: alpha.workspaceId, activeFarmId: alpha.farmId, activeSeasonId: alpha.seasonId, tokenHash: hash(supervisor.token), expiresAt: new Date(Date.now() + 60_000) },
+    { userId: operator.userId, workspaceId: alpha.workspaceId, activeFarmId: alpha.farmId, activeSeasonId: alpha.seasonId, tokenHash: hash(operator.token), expiresAt: new Date(Date.now() + 60_000) },
   ]);
   app = await buildApp();
 });
@@ -76,24 +80,29 @@ after(async () => {
   await db.delete(auditLogs).where(inArray(auditLogs.workspaceId, ids));
   await db.delete(workspaceApprovals).where(inArray(workspaceApprovals.workspaceId, ids));
   await db.delete(operationalRecords).where(inArray(operationalRecords.workspaceId, ids));
-  await db.delete(userSessions).where(inArray(userSessions.userId, [alpha.userId, bravo.userId, supervisor.userId]));
+  await db.delete(userSessions).where(inArray(userSessions.userId, [alpha.userId, bravo.userId, supervisor.userId, operator.userId]));
   await db.delete(seasons).where(inArray(seasons.workspaceId, ids));
   await db.delete(farms).where(inArray(farms.workspaceId, ids));
   await db.delete(workspaceMemberships).where(inArray(workspaceMemberships.workspaceId, ids));
-  await db.delete(users).where(inArray(users.id, [alpha.userId, bravo.userId, supervisor.userId]));
+  await db.delete(users).where(inArray(users.id, [alpha.userId, bravo.userId, supervisor.userId, operator.userId]));
   await db.delete(workspaces).where(inArray(workspaces.id, ids));
   await closeDatabaseConnection();
 });
 
 test("Alpha and Bravo operational records remain isolated", async () => {
-  for (const entity of ["voucher", "attendance", "sale", "dispatch", "partnerEntry"]) {
+  for (const entity of ["voucher", "attendance", "sale", "dispatch"]) {
     assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, entity))).statusCode, 200);
     assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, entity))).statusCode, 200);
   }
+  const alphaAccountId = randomUUID(); const bravoAccountId = randomUUID();
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "account", alphaAccountId, { name: "Alpha Primary", type: "cash" }))).statusCode, 200);
+  assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "account", bravoAccountId, { name: "Bravo Primary", type: "cash" }))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "partnerEntry", randomUUID(), { date: "2026-06-01", partnerName: "Alpha Partner", type: "contribution", amount: 100, accountId: alphaAccountId }))).statusCode, 200);
+  assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "partnerEntry", randomUUID(), { date: "2026-06-01", partnerName: "Bravo Partner", type: "contribution", amount: 100, accountId: bravoAccountId }))).statusCode, 200);
   const alphaRecords = (await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/operational-records`)).json().records;
   const bravoRecords = (await request(bravo.token, "GET", `/v1/workspace/${bravo.workspaceId}/operational-records`)).json().records;
-  assert.equal(alphaRecords.length, 5);
-  assert.equal(bravoRecords.length, 5);
+  assert.equal(alphaRecords.length, 6);
+  assert.equal(bravoRecords.length, 6);
   assert.ok(alphaRecords.every((record: { workspaceId: string }) => record.workspaceId === alpha.workspaceId));
   assert.ok(bravoRecords.every((record: { workspaceId: string }) => record.workspaceId === bravo.workspaceId));
   assert.equal((await request(alpha.token, "GET", `/v1/workspace/${bravo.workspaceId}/operational-records`)).statusCode, 403);
@@ -186,8 +195,8 @@ test("foreign farm, season, account, ledger, and approval references are rejecte
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "sale", randomUUID(), { accountId: bravoAccount }))).statusCode, 403);
 
   const bravoLedger = randomUUID();
-  assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "partnerEntry", bravoLedger))).statusCode, 200);
-  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "partnerEntry", randomUUID(), { ledgerId: bravoLedger }))).statusCode, 403);
+  assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "partnerEntry", bravoLedger, { date: "2026-06-01", partnerName: "Bravo Partner", type: "contribution", amount: 100, accountId: bravoAccount }))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "partnerEntry", randomUUID(), { date: "2026-06-01", partnerName: "Alpha Partner", type: "contribution", amount: 100, accountId: `${alpha.seasonId}:local-cash`, ledgerId: bravoLedger }))).statusCode, 403);
 
   const bravoExpense = randomUUID();
   assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "voucher", bravoExpense))).statusCode, 200);
@@ -280,6 +289,78 @@ test("expense CSV import resolves unique names once, preserves repeated voucher 
   });
   assert.equal(repeat.statusCode, 200);
   assert.deepEqual(repeat.json().result, { recordsCreated: 0, duplicatesSkipped: 52, grandTotal: 0 });
+});
+
+test("partner ledger edits and soft deletes recalculate balances, remain tenant safe, and create audits", async () => {
+  const accountA = randomUUID(); const accountB = randomUUID();
+  const contributionId = randomUUID(); const withdrawalId = randomUUID();
+  const accountPayload = (name: string) => ({ name, type: "cash" });
+  const timestamp = (offset: number) => new Date(Date.now() + offset).toISOString();
+  const partnerPayload = (id: string, entry: Record<string, unknown>, offset = 0) => ({
+    ...envelope(alpha, "partnerEntry", id, entry),
+    record: { ...envelope(alpha, "partnerEntry", id, entry).record, updatedAt: timestamp(offset) },
+  });
+  const readBalances = async () => {
+    const records = (await db.select().from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, alpha.workspaceId),
+      eq(operationalRecords.entityType, "partnerEntry"),
+    ))).filter((record) => [contributionId, withdrawalId].includes(record.clientRecordId) && !record.payload.deletedAt);
+    return records.reduce((totals, record) => {
+      const amount = Number(record.payload.amount);
+      const effect = record.payload.type === "contribution" ? amount : -amount;
+      totals.partner += effect;
+      totals.accounts[String(record.payload.accountId)] = (totals.accounts[String(record.payload.accountId)] ?? 0) + effect;
+      return totals;
+    }, { partner: 0, accounts: {} as Record<string, number> });
+  };
+
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "account", accountA, accountPayload("Partner Cash A")))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "account", accountB, accountPayload("Partner Cash B")))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", partnerPayload(contributionId, {
+    date: "2026-06-01", partnerName: "Partner A", type: "contribution", amount: 100, accountId: accountA, notes: "Initial capital",
+  }, 1_000))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", partnerPayload(contributionId, {
+    date: "2026-06-02", partnerName: "Partner A", type: "contribution", amount: 175, accountId: accountB, notes: "Moved account",
+  }, 2_000))).statusCode, 200);
+  assert.deepEqual(await readBalances(), { partner: 175, accounts: { [accountB]: 175 } });
+
+  assert.equal((await request(operator.token, "POST", "/v1/workspace/operational-records", partnerPayload(contributionId, {
+    date: "2026-06-02", partnerName: "Partner A", type: "contribution", amount: 999, accountId: accountB,
+  }, 3_000))).statusCode, 403);
+  assert.equal((await request(operator.token, "DELETE", "/v1/workspace/operational-records", {
+    workspaceId: alpha.workspaceId, farmId: alpha.farmId, seasonId: alpha.seasonId, entity: "partnerEntry", recordId: contributionId,
+  })).statusCode, 403);
+
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", partnerPayload(withdrawalId, {
+    date: "2026-06-03", partnerName: "Partner B", type: "withdrawal", amount: 80, accountId: accountA,
+  }, 4_000))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", partnerPayload(withdrawalId, {
+    date: "2026-06-04", partnerName: "Partner B", type: "withdrawal", amount: 30, accountId: accountB,
+  }, 5_000))).statusCode, 200);
+  assert.deepEqual(await readBalances(), { partner: 145, accounts: { [accountB]: 145 } });
+
+  assert.equal((await request(bravo.token, "DELETE", "/v1/workspace/operational-records", {
+    workspaceId: alpha.workspaceId, farmId: alpha.farmId, seasonId: alpha.seasonId, entity: "partnerEntry", recordId: contributionId,
+  })).statusCode, 403);
+  assert.equal((await request(alpha.token, "DELETE", "/v1/workspace/operational-records", {
+    workspaceId: alpha.workspaceId, farmId: alpha.farmId, seasonId: alpha.seasonId, entity: "partnerEntry", recordId: contributionId, reason: "Correction",
+  })).statusCode, 204);
+  assert.deepEqual(await readBalances(), { partner: -30, accounts: { [accountB]: -30 } });
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", partnerPayload(contributionId, {
+    date: "2026-06-05", partnerName: "Partner A", type: "contribution", amount: 999, accountId: accountA,
+  }, 6_000))).statusCode, 409);
+  assert.equal((await request(alpha.token, "DELETE", "/v1/workspace/operational-records", {
+    workspaceId: alpha.workspaceId, farmId: alpha.farmId, seasonId: alpha.seasonId, entity: "partnerEntry", recordId: withdrawalId, reason: "Correction",
+  })).statusCode, 204);
+  assert.deepEqual(await readBalances(), { partner: 0, accounts: {} });
+
+  const audits = await db.select().from(auditLogs).where(and(
+    eq(auditLogs.workspaceId, alpha.workspaceId),
+    inArray(auditLogs.action, ["partner_ledger_updated", "partner_ledger_deleted"]),
+  ));
+  assert.equal(audits.filter((audit) => audit.action === "partner_ledger_updated").length, 2);
+  assert.equal(audits.filter((audit) => audit.action === "partner_ledger_deleted").length, 2);
+  assert.equal(audits.find((audit) => audit.action === "partner_ledger_deleted")?.details.reason, "Correction");
 });
 
 test("expense CSV import accepts blank legacy descriptions and reports row-specific mandatory field issues", async () => {

@@ -1977,6 +1977,10 @@ button {
   min-height: 34px;
   padding: 6px 10px;
 }
+.record-list__actions .danger-button { color: var(--danger); }
+.partner-ledger-show-deleted { align-items: center; color: var(--text-secondary); display: flex; font-size: .82rem; gap: 7px; margin: 10px 0; }
+.partner-ledger-details p { align-items: center; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; margin: 0; padding: 8px 0; }
+.partner-ledger-details p span { color: var(--text-secondary); text-align: right; }
 
 .advances-summary {
   display: grid;

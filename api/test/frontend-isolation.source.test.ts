@@ -77,6 +77,22 @@ test("attendance marking updates local UI immediately, reuses a daily record, an
   assert.match(api, /apiRequest<void>\("\/v1\/workspace\/operational-records", \{ method: "DELETE"/);
 });
 
+test("partner ledger supports audited edits and offline soft deletes without duplicate balance effects", async () => {
+  const route = await source("api/src/routes/operational-sync.ts");
+  const modulePage = await source("web/src/pages/ModulePage.tsx");
+  const offlineDb = await source("web/src/lib/offline-db.ts");
+  const sync = await source("web/src/services/syncService.ts");
+  assert.match(route, /action: "partner_ledger_updated"/);
+  assert.match(route, /action: "partner_ledger_deleted"/);
+  assert.match(route, /deletedAt: deletedAt\.toISOString\(\), deletedBy: request\.appUser\.id, deletionReason/);
+  assert.match(route, /hasPermission\(request\.appUser, "MANAGE_RECORDS", parsed\.data\.workspaceId\)/);
+  assert.match(offlineDb, /options\.includeDeleted \|\| !record\.deletedAt/);
+  assert.match(sync, /entity === "partnerEntry" \? \{ \.\.\.record, deletedAt: queuedAt, pendingSync: true \}/);
+  assert.match(modulePage, /Show deleted/);
+  assert.match(modulePage, /Partner ledger entry deleted successfully\./);
+  assert.match(modulePage, /actions=\{visibleEntries\.map/);
+});
+
 test("attendance labour directory loads cache-first and keeps cached data during API outages", async () => {
   const auth = await source("web/src/auth/AuthProvider.tsx");
   const sync = await source("web/src/services/syncService.ts");

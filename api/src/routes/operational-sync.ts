@@ -34,13 +34,30 @@ const recordSchema = z.object({
     updatedAt: z.string().datetime(),
   }).passthrough(),
 });
-const deleteRecordSchema = z.object({
+const attendanceDeleteSchema = z.object({
   workspaceId: z.string().uuid(),
   farmId: z.string().uuid(),
   seasonId: z.string().uuid(),
   entity: z.literal("attendance"),
   recordId: z.string().min(1),
 });
+const partnerEntryDeleteSchema = z.object({
+  workspaceId: z.string().uuid(),
+  farmId: z.string().uuid(),
+  seasonId: z.string().uuid(),
+  entity: z.literal("partnerEntry"),
+  recordId: z.string().min(1),
+  reason: z.string().trim().max(500).optional(),
+});
+const deleteRecordSchema = z.discriminatedUnion("entity", [attendanceDeleteSchema, partnerEntryDeleteSchema]);
+const partnerEntryPayloadSchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  partnerName: z.string().trim().min(1),
+  type: z.enum(["contribution", "withdrawal"]),
+  amount: z.coerce.number().positive(),
+  accountId: z.string().min(1),
+  notes: z.string().optional(),
+}).passthrough();
 const localRecords = new Map<string, z.infer<typeof recordSchema>>();
 
 function requireWorkspaceWrite(user: AuthenticatedUser, workspaceId: string) {
@@ -143,6 +160,9 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     if (request.appUser.workspaceId !== parsed.data.workspaceId) {
       return reply.code(403).send({ message: "Select this workspace before submitting records." });
     }
+    if (parsed.data.entity === "partnerEntry" && !partnerEntryPayloadSchema.safeParse(parsed.data.record).success) {
+      return reply.code(400).send({ message: "Partner ledger date, partner, type, positive amount, and account are required." });
+    }
     if (localDevelopmentMode) {
       localRecords.set(`${parsed.data.workspaceId}:${parsed.data.entity}:${parsed.data.record.id}`, parsed.data);
       return { record: parsed.data.record, conflict: false };
@@ -194,6 +214,12 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     if (existing && parsed.data.entity === "voucher" && !hasPermission(request.appUser, "MANAGE_RECORDS", parsed.data.workspaceId)) {
       return reply.code(403).send({ message: "Workspace record management permission is required to update expense vouchers." });
     }
+    if (existing && parsed.data.entity === "partnerEntry" && !hasPermission(request.appUser, "MANAGE_RECORDS", parsed.data.workspaceId)) {
+      return reply.code(403).send({ message: "Workspace record management permission is required to update partner ledger entries." });
+    }
+    if (existing && parsed.data.entity === "partnerEntry" && existing.payload.deletedAt) {
+      return reply.code(409).send({ message: "Deleted partner ledger entries cannot be edited." });
+    }
     const clientUpdatedAt = new Date(parsed.data.record.updatedAt);
     if (existing && existing.clientUpdatedAt > clientUpdatedAt) {
       await db.insert(auditLogs).values({
@@ -216,13 +242,25 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       clientRecordId: existing?.clientRecordId ?? parsed.data.record.id, entityType: parsed.data.entity, payload,
       recordedBy: request.appUser.id, clientUpdatedAt, updatedAt: new Date(),
     };
+    const updatedPayload = existing && parsed.data.entity === "voucher"
+      ? { ...payload, voucherNumber: existing.payload.voucherNumber, createdBy: existing.payload.createdBy, updatedBy: request.appUser.id }
+      : existing && parsed.data.entity === "partnerEntry"
+        ? { ...payload, createdBy: existing.payload.createdBy, updatedBy: request.appUser.id, deletedAt: null, deletedBy: null, deletionReason: null }
+        : payload;
     const [saved] = existing
-      ? await db.update(operationalRecords).set({
-          ...values,
-          payload: parsed.data.entity === "voucher"
-            ? { ...payload, voucherNumber: existing.payload.voucherNumber, createdBy: existing.payload.createdBy, updatedBy: request.appUser.id }
-            : payload,
-        }).where(eq(operationalRecords.id, existing.id)).returning()
+      ? parsed.data.entity === "partnerEntry"
+        ? await db.transaction(async (tx) => {
+            const updated = await tx.update(operationalRecords).set({ ...values, payload: updatedPayload })
+              .where(eq(operationalRecords.id, existing.id)).returning();
+            await tx.insert(auditLogs).values({
+              workspaceId: parsed.data.workspaceId, userId: request.appUser!.id, farmId: parsed.data.farmId,
+              action: "partner_ledger_updated", entityType: parsed.data.entity, entityId: existing.id,
+              details: { clientRecordId: parsed.data.record.id, before: existing.payload, after: updated[0]!.payload },
+            });
+            return updated;
+          })
+        : await db.update(operationalRecords).set({ ...values, payload: updatedPayload })
+          .where(eq(operationalRecords.id, existing.id)).returning()
       : await db.transaction(async (tx) => {
           const createdPayload = parsed.data.entity === "voucher"
             ? {
@@ -231,6 +269,8 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
                 createdBy: request.appUser!.id,
                 updatedBy: request.appUser!.id,
               }
+            : parsed.data.entity === "partnerEntry"
+              ? { ...payload, createdBy: request.appUser!.id, updatedBy: request.appUser!.id }
             : payload;
           return tx.insert(operationalRecords).values({ ...values, payload: createdPayload }).returning();
         });
@@ -247,29 +287,61 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
   app.delete("/v1/workspace/operational-records", { preHandler: requireUser }, async (request, reply) => {
     if (!request.appUser) return reply;
     const parsed = deleteRecordSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ message: "A valid attendance clear request is required." });
+    if (!parsed.success) return reply.code(400).send({ message: "A valid operational record deletion request is required." });
     if (!requireWorkspaceWrite(request.appUser, parsed.data.workspaceId)) {
       return reply.code(403).send({ message: "Workspace record submission permission is required." });
     }
     if (request.appUser.workspaceId !== parsed.data.workspaceId) {
-      return reply.code(403).send({ message: "Select this workspace before clearing attendance." });
+      return reply.code(403).send({ message: "Select this workspace before deleting records." });
     }
     if (localDevelopmentMode) {
-      localRecords.delete(`${parsed.data.workspaceId}:${parsed.data.entity}:${parsed.data.recordId}`);
+      const key = `${parsed.data.workspaceId}:${parsed.data.entity}:${parsed.data.recordId}`;
+      const existing = localRecords.get(key);
+      if (parsed.data.entity === "partnerEntry" && existing) {
+        localRecords.set(key, { ...existing, record: { ...existing.record, deletedAt: new Date().toISOString(), deletionReason: parsed.data.reason } });
+      } else {
+        localRecords.delete(key);
+      }
       return reply.code(204).send();
     }
     const selected = await sessionContext(request.sessionId);
     if (!selected?.activeFarmId || parsed.data.farmId !== selected.activeFarmId) {
-      return reply.code(403).send({ message: "Select the active farm before clearing attendance." });
+      return reply.code(403).send({ message: "Select the active farm before deleting records." });
     }
     if (!selected.activeSeasonId || parsed.data.seasonId !== selected.activeSeasonId) {
-      return reply.code(403).send({ message: "Select an active season before clearing attendance." });
+      return reply.code(403).send({ message: "Select an active season before deleting records." });
     }
     const ownershipError = await validateTenantReferences(parsed.data.workspaceId, {
       farmId: parsed.data.farmId,
       seasonId: parsed.data.seasonId,
     });
     if (ownershipError) return reply.code(403).send({ message: ownershipError });
+    if (parsed.data.entity === "partnerEntry") {
+      if (!hasPermission(request.appUser, "MANAGE_RECORDS", parsed.data.workspaceId)) {
+        return reply.code(403).send({ message: "Workspace record management permission is required to delete partner ledger entries." });
+      }
+      const [entry] = await db.select().from(operationalRecords).where(and(
+        eq(operationalRecords.workspaceId, parsed.data.workspaceId),
+        eq(operationalRecords.farmId, parsed.data.farmId),
+        eq(operationalRecords.seasonId, parsed.data.seasonId),
+        eq(operationalRecords.entityType, parsed.data.entity),
+        eq(operationalRecords.clientRecordId, parsed.data.recordId),
+      )).limit(1);
+      if (!entry) return reply.code(204).send();
+      if (entry.payload.deletedAt) return reply.code(204).send();
+      const deletedAt = new Date();
+      const deletionReason = parsed.data.reason ?? "";
+      const payload = { ...entry.payload, deletedAt: deletedAt.toISOString(), deletedBy: request.appUser.id, deletionReason };
+      await db.transaction(async (tx) => {
+        await tx.update(operationalRecords).set({ payload, clientUpdatedAt: deletedAt, updatedAt: deletedAt }).where(eq(operationalRecords.id, entry.id));
+        await tx.insert(auditLogs).values({
+          workspaceId: parsed.data.workspaceId, userId: request.appUser!.id, farmId: parsed.data.farmId,
+          action: "partner_ledger_deleted", entityType: parsed.data.entity, entityId: entry.id,
+          details: { clientRecordId: parsed.data.recordId, before: entry.payload, after: payload, reason: deletionReason },
+        });
+      });
+      return reply.code(204).send();
+    }
     const [deleted] = await db.delete(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, parsed.data.workspaceId),
       eq(operationalRecords.farmId, parsed.data.farmId),

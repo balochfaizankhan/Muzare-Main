@@ -115,6 +115,7 @@ export type PartnerEntry = LocalRecord & {
   amount: number;
   notes: string;
   accountId: string;
+  deletionReason?: string;
 };
 
 export type Advance = LocalRecord & {
@@ -313,10 +314,10 @@ export function getActiveSeasonId() {
   return activeSeasonId;
 }
 
-export async function workspaceRecords<T extends LocalRecord>(table: EntityTable<T, "id">) {
+export async function workspaceRecords<T extends LocalRecord>(table: EntityTable<T, "id">, options: { includeDeleted?: boolean } = {}) {
   if (!activeFarmId || !activeSeasonId) return [];
   return table.where("workspaceId").equals(getActiveWorkspaceId())
-    .filter((record) => record.farmId === activeFarmId && record.seasonId === activeSeasonId).toArray();
+    .filter((record) => record.farmId === activeFarmId && record.seasonId === activeSeasonId && (options.includeDeleted || !record.deletedAt)).toArray();
 }
 
 export async function clearCachedData() {
