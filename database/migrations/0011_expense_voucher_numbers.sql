@@ -19,6 +19,7 @@ WITH readable AS (
     ), 0) AS last_number
   FROM operational_records
   WHERE entity_type = 'voucher'
+    AND COALESCE(payload->>'source', '') <> 'expense_csv_import'
   GROUP BY workspace_id, COALESCE('season:' || season_id::text, 'farm:' || farm_id::text || ':general')
 ),
 numbered AS (
@@ -35,6 +36,7 @@ numbered AS (
   LEFT JOIN readable ON readable.workspace_id = record.workspace_id
     AND readable.scope_key = COALESCE('season:' || record.season_id::text, 'farm:' || record.farm_id::text || ':general')
   WHERE record.entity_type = 'voucher'
+    AND COALESCE(record.payload->>'source', '') <> 'expense_csv_import'
     AND COALESCE(record.payload->>'voucherNumber', '') !~ '^EXP-[0-9]{4}-[0-9]+$'
 )
 UPDATE operational_records record
@@ -52,6 +54,7 @@ SELECT
   max(split_part(payload->>'voucherNumber', '-', 3)::integer)
 FROM operational_records
 WHERE entity_type = 'voucher'
+  AND COALESCE(payload->>'source', '') <> 'expense_csv_import'
   AND payload->>'voucherNumber' ~ '^EXP-[0-9]{4}-[0-9]+$'
 GROUP BY workspace_id, COALESCE('season:' || season_id::text, 'farm:' || farm_id::text || ':general')
 ON CONFLICT (workspace_id, scope_key)
@@ -65,4 +68,5 @@ CREATE UNIQUE INDEX IF NOT EXISTS operational_records_voucher_number_uidx
     COALESCE(season_id::text, 'farm:' || farm_id::text || ':general'),
     (payload->>'voucherNumber')
   )
-  WHERE entity_type = 'voucher';
+  WHERE entity_type = 'voucher'
+    AND COALESCE(payload->>'source', '') <> 'expense_csv_import';

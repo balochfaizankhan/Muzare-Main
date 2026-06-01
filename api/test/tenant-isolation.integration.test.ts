@@ -8,6 +8,7 @@ import {
   farms,
   attendanceImportSessions,
   auditLogs,
+  expenseImportSessions,
   operationalRecords,
   seasons,
   userSessions,
@@ -70,6 +71,7 @@ before(async () => {
 after(async () => {
   if (app) await app.close();
   await db.delete(attendanceImportSessions).where(inArray(attendanceImportSessions.workspaceId, ids));
+  await db.delete(expenseImportSessions).where(inArray(expenseImportSessions.workspaceId, ids));
   await db.delete(auditLogs).where(inArray(auditLogs.workspaceId, ids));
   await db.delete(workspaceApprovals).where(inArray(workspaceApprovals.workspaceId, ids));
   await db.delete(operationalRecords).where(inArray(operationalRecords.workspaceId, ids));
@@ -212,13 +214,56 @@ test("expense categories seed defaults, protect system values, and isolate works
   }))).statusCode, 403);
 });
 
+test("expense CSV import resolves unique names once, preserves repeated voucher numbers, and skips duplicate re-imports", async () => {
+  const csvText = [
+    "Legacy report metadata",
+    "Voucher No,Date,Paid From,Expense Category,Details,Value",
+    ...Array.from({ length: 52 }, (_, index) =>
+      `V-0042,${String(index % 28 + 1).padStart(2, "0")}/05/2026,Historical Cash,Legacy Field Cost,Imported line ${index + 1},${index + 1}`,
+    ),
+  ].join("\n");
+  const input = { farmId: alpha.farmId, seasonId: alpha.seasonId, originalFilename: "historical-expenses.csv", csvText };
+  const preview = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/expense-imports/preview`, input);
+  assert.equal(preview.statusCode, 201);
+  assert.equal(preview.json().preview.summary.totalRows, 52);
+  assert.deepEqual(preview.json().preview.summary.missingAccounts, ["Historical Cash"]);
+  assert.deepEqual(preview.json().preview.summary.missingCategories, ["Legacy Field Cost"]);
+  assert.equal(preview.json().preview.summary.grandTotal, 1378);
+  assert.equal((await request(bravo.token, "POST", `/api/workspaces/${alpha.workspaceId}/expense-imports/preview`, input)).statusCode, 403);
+
+  const confirmInput = {
+    importSessionId: preview.json().sessionId, farmId: alpha.farmId, seasonId: alpha.seasonId, skipDuplicates: true,
+    accountMappings: [{ sourceName: "Historical Cash", action: "create" }],
+    categoryMappings: [{ sourceName: "Legacy Field Cost", action: "create" }],
+  };
+  const confirmed = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/expense-imports/confirm`, confirmInput);
+  assert.equal(confirmed.statusCode, 200);
+  assert.deepEqual(confirmed.json().result, { recordsCreated: 52, duplicatesSkipped: 0, grandTotal: 1378 });
+  const imported = (await db.select().from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, alpha.workspaceId), eq(operationalRecords.entityType, "voucher"),
+  ))).filter((record) => record.payload.source === "expense_csv_import" && record.payload.originalFilename === "historical-expenses.csv");
+  assert.equal(imported.length, 52);
+  assert.ok(imported.every((record) => record.payload.voucherNumber === "V-0042"));
+
+  const repeatPreview = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/expense-imports/preview`, input);
+  assert.equal(repeatPreview.statusCode, 201);
+  assert.equal(repeatPreview.json().preview.summary.duplicateRows, 52);
+  const repeat = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/expense-imports/confirm`, {
+    importSessionId: repeatPreview.json().sessionId, farmId: alpha.farmId, seasonId: alpha.seasonId, skipDuplicates: true,
+    accountMappings: [], categoryMappings: [],
+  });
+  assert.equal(repeat.statusCode, 200);
+  assert.deepEqual(repeat.json().result, { recordsCreated: 0, duplicatesSkipped: 52, grandTotal: 0 });
+});
+
 test("expense vouchers receive scoped readable numbers and keep them when edited", async () => {
   const firstId = randomUUID();
   const first = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", firstId, {
     date: "2026-05-20", description: "Original expense", amount: 100,
   }));
   assert.equal(first.statusCode, 200);
-  assert.match(first.json().record.voucherNumber, /^EXP-2026-\d{4}$/);
+  assert.match(first.json().record.voucherNumber, /^V-\d{4}$/);
+  assert.ok(Number(first.json().record.voucherNumber.slice(2)) > 42);
 
   const [second, third] = await Promise.all([
     request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", randomUUID(), {
@@ -235,7 +280,7 @@ test("expense vouchers receive scoped readable numbers and keep them when edited
   const edited = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", firstId, {
     createdAt: first.json().record.createdAt,
     updatedAt: new Date(Date.now() + 1_000).toISOString(),
-    voucherNumber: "EXP-2099-9999",
+    voucherNumber: "V-9999",
     date: "2026-05-22",
     description: "Corrected expense",
     amount: 175,

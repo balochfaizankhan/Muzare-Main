@@ -74,17 +74,11 @@ function voucherScopeKey(farmId: string, seasonId?: string | null) {
   return seasonId ? `season:${seasonId}` : `farm:${farmId}:general`;
 }
 
-function voucherYear(record: Record<string, unknown>) {
-  const date = typeof record.date === "string" ? record.date : "";
-  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date.slice(0, 4) : String(new Date().getUTCFullYear());
-}
-
 async function allocateVoucherNumber(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   workspaceId: string,
   farmId: string,
   seasonId: string | null | undefined,
-  record: Record<string, unknown>,
 ) {
   const [sequence] = await tx.insert(expenseVoucherSequences).values({
     workspaceId,
@@ -97,7 +91,7 @@ async function allocateVoucherNumber(
       updatedAt: new Date(),
     },
   }).returning({ lastNumber: expenseVoucherSequences.lastNumber });
-  return `EXP-${voucherYear(record)}-${String(sequence!.lastNumber).padStart(4, "0")}`;
+  return `V-${String(sequence!.lastNumber).padStart(4, "0")}`;
 }
 
 export async function operationalSyncRoutes(app: FastifyInstance): Promise<void> {
@@ -214,7 +208,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
           const createdPayload = parsed.data.entity === "voucher"
             ? {
                 ...payload,
-                voucherNumber: await allocateVoucherNumber(tx, parsed.data.workspaceId, parsed.data.farmId!, parsed.data.seasonId, payload),
+                voucherNumber: await allocateVoucherNumber(tx, parsed.data.workspaceId, parsed.data.farmId!, parsed.data.seasonId),
                 createdBy: request.appUser!.id,
                 updatedBy: request.appUser!.id,
               }

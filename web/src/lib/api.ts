@@ -158,6 +158,21 @@ export type AttendanceImportResult = {
 };
 export type ExpenseSubcategory = { id: string; categoryId: string; name: string; sortOrder: number; isSystem: boolean; active: boolean };
 export type ExpenseCategory = { id: string; name: string; sortOrder: number; isSystem: boolean; subcategories: ExpenseSubcategory[] };
+export type ExpenseImportResolution = { sourceName: string; action: "map" | "create"; targetId?: string };
+export type ExpenseImportPreview = {
+  rows: Array<{
+    rowIndex: number; voucherNumber: string; date: string; accountName: string; categoryName: string;
+    description: string; amount: number; accountId: string | null; subcategoryId: string | null; error: string | null;
+  }>;
+  errors: string[];
+  categories: Array<{ id: string; categoryId: string; category: string; subcategory: string; label: string }>;
+  accounts: Array<{ id: string; name: string }>;
+  summary: {
+    totalRows: number; readyRows: number; duplicateRows: number; missingAccounts: string[]; missingCategories: string[];
+    errors: string[]; totalsByAccount: Array<{ name: string; total: number }>; totalsByCategory: Array<{ name: string; total: number }>; grandTotal: number;
+  };
+};
+export type ExpenseImportResult = { recordsCreated: number; duplicatesSkipped: number; grandTotal: number };
 
 async function apiRequest<T>(path: string, options: RequestInit = {}, token?: string, requestOptions: { timeoutMs?: number; debugLabel?: string } = {}): Promise<T> {
   const headers = new Headers(options.headers);
@@ -292,4 +307,16 @@ export const confirmAttendanceImport = (token: string, workspaceId: string, inpu
       labourMappings: input.labourMappings,
     },
   }) }, token, { timeoutMs: 60_000, debugLabel: "attendance-import-confirm" },
+);
+export const previewExpenseImport = (token: string, workspaceId: string, input: {
+  farmId: string; seasonId: string; originalFilename: string; csvText: string;
+}) => apiRequest<{ sessionId: string; preview: ExpenseImportPreview }>(
+  `/api/workspaces/${workspaceId}/expense-imports/preview`, { method: "POST", body: JSON.stringify(input) }, token,
+);
+export const confirmExpenseImport = (token: string, workspaceId: string, input: {
+  importSessionId: string; farmId: string; seasonId: string; skipDuplicates: boolean;
+  categoryMappings: ExpenseImportResolution[]; accountMappings: ExpenseImportResolution[];
+}) => apiRequest<{ sessionId: string; result: ExpenseImportResult }>(
+  `/api/workspaces/${workspaceId}/expense-imports/confirm`, { method: "POST", body: JSON.stringify(input) }, token,
+  { timeoutMs: 60_000, debugLabel: "expense-import-confirm" },
 );

@@ -6,7 +6,7 @@ import { SubpageHeader } from "../components/SubpageHeader";
 import { SearchInput } from "../components/SearchInput";
 import { useAuth } from "../auth/AuthProvider";
 import { useSyncState } from "../hooks/useSyncState";
-import { confirmAttendanceImport, createExpenseSubcategory, deleteOrDeactivateLabour, fetchAdvanceReport, fetchAttendanceReport, fetchExpenseCategories, fetchLabourDeletionPreview, previewAttendanceImport, updateExpenseSubcategory, type AdvanceReportData, type AdvanceReportFilters, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type AttendanceReportFilters, type AttendanceReportStatus, type LabourDeletionPreview } from "../lib/api";
+import { confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteOrDeactivateLabour, fetchAdvanceReport, fetchAttendanceReport, fetchExpenseCategories, fetchLabourDeletionPreview, previewAttendanceImport, previewExpenseImport, updateExpenseSubcategory, type AdvanceReportData, type AdvanceReportFilters, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type AttendanceReportFilters, type AttendanceReportStatus, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type LabourDeletionPreview } from "../lib/api";
 import { hasPermission } from "../lib/permissions";
 import { formatMoney } from "../lib/format";
 import {
@@ -1530,6 +1530,71 @@ function AttendanceRegister({ data, syncStatus, totalPresent, totalHalf, totalAb
   </section>;
 }
 
+function ExpenseImportPanel({ token, workspaceId, farmId, seasonId, onClose, onImported }: {
+  token: string; workspaceId: string; farmId: string; seasonId: string; onClose: () => void; onImported: () => Promise<void>;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [sessionId, setSessionId] = useState("");
+  const [preview, setPreview] = useState<ExpenseImportPreview | null>(null);
+  const [categoryMappings, setCategoryMappings] = useState<Record<string, ExpenseImportResolution>>({});
+  const [accountMappings, setAccountMappings] = useState<Record<string, ExpenseImportResolution>>({});
+  const [skipDuplicates, setSkipDuplicates] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState<ExpenseImportResult | null>(null);
+  const setResolution = (type: "category" | "account", sourceName: string, value: string) => {
+    const resolution: ExpenseImportResolution = value === "create" ? { sourceName, action: "create" } : { sourceName, action: "map", targetId: value };
+    if (type === "category") setCategoryMappings((current) => ({ ...current, [sourceName]: resolution }));
+    else setAccountMappings((current) => ({ ...current, [sourceName]: resolution }));
+  };
+  const previewFile = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!file || !navigator.onLine) { setError("Expense CSV import requires internet connection."); return; }
+    setBusy(true); setError("");
+    try {
+      const response = await previewExpenseImport(token, workspaceId, { farmId, seasonId, originalFilename: file.name, csvText: await file.text() });
+      setSessionId(response.sessionId); setPreview(response.preview);
+      setCategoryMappings({});
+      setAccountMappings({});
+    } catch (nextError) { setError(nextError instanceof Error ? nextError.message : "Unable to preview expense CSV."); }
+    finally { setBusy(false); }
+  };
+  const confirm = async () => {
+    if (!preview || !sessionId) return;
+    setBusy(true); setError("");
+    try {
+      const response = await confirmExpenseImport(token, workspaceId, {
+        importSessionId: sessionId, farmId, seasonId, skipDuplicates,
+        categoryMappings: Object.values(categoryMappings), accountMappings: Object.values(accountMappings),
+      });
+      setResult(response.result); await refreshOperationalData(); await onImported();
+    } catch (nextError) { setError(nextError instanceof Error ? nextError.message : "Unable to import expenses."); }
+    finally { setBusy(false); }
+  };
+  const unresolved = !preview || preview.summary.missingCategories.some((name) => !categoryMappings[name]) || preview.summary.missingAccounts.some((name) => !accountMappings[name]);
+  const readyRows = preview ? Math.max(0, preview.rows.filter((row) => !row.error
+    && (row.accountId || accountMappings[row.accountName])
+    && (row.subcategoryId || categoryMappings[row.categoryName])).length - preview.summary.duplicateRows) : 0;
+  return <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}><section className="attendance-import-dialog expense-import-dialog" role="dialog" aria-modal="true" aria-label="Expense CSV Import" onClick={(event) => event.stopPropagation()}>
+    <header className="attendance-report-header"><div><h2>Expense CSV Import</h2><p>Recommended: CSV import. PDF import is best-effort for legacy reports.</p></div><button type="button" onClick={onClose}><X size={19} /></button></header>
+    <div className="attendance-import-body">
+      {!preview && <form className="worker-action-form" onSubmit={(event) => void previewFile(event)}><label><span>CSV expense report *</span><input accept=".csv,text/csv" required type="file" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label><small>Expected: Voucher, Date, Deduction Account, Category, Description, Amount.</small><p className="expense-import-note">PDF extraction can be unreliable. Upload CSV to receive a validated preview before import.</p><footer><button type="button" onClick={onClose}>Cancel</button><button disabled={busy || !file} type="submit">{busy ? "Reading CSV..." : "Preview Import"}</button></footer></form>}
+      {preview && !result && <>
+        <div className="expense-import-summary"><span>Total rows <b>{preview.summary.totalRows}</b></span><span>Ready <b>{readyRows}</b></span><span>Duplicates <b>{preview.summary.duplicateRows}</b></span><span>Grand total <b>{money(preview.summary.grandTotal)}</b></span></div>
+        {!!preview.summary.errors.length && <div className="worker-action-error">{preview.summary.errors.map((item) => <p key={item}>{item}</p>)}</div>}
+        {!!preview.summary.missingCategories.length && <section className="expense-import-resolution"><header><h3>Missing Categories</h3><button type="button" onClick={() => setCategoryMappings(Object.fromEntries(preview.summary.missingCategories.map((sourceName) => [sourceName, { sourceName, action: "create" as const }])))}>Create all</button></header>{preview.summary.missingCategories.map((name) => <label key={name}><span>{name}</span><select value={categoryMappings[name]?.action === "create" ? "create" : categoryMappings[name]?.targetId ?? ""} onChange={(event) => setResolution("category", name, event.target.value)}><option value="">Resolve category</option><option value="create">Create category</option>{preview.categories.map((item) => <option key={item.id} value={item.id}>Map to {item.label}</option>)}</select></label>)}</section>}
+        {!!preview.summary.missingAccounts.length && <section className="expense-import-resolution"><header><h3>Missing Accounts</h3><button type="button" onClick={() => setAccountMappings(Object.fromEntries(preview.summary.missingAccounts.map((sourceName) => [sourceName, { sourceName, action: "create" as const }])))}>Create all</button></header>{preview.summary.missingAccounts.map((name) => <label key={name}><span>{name}</span><select value={accountMappings[name]?.action === "create" ? "create" : accountMappings[name]?.targetId ?? ""} onChange={(event) => setResolution("account", name, event.target.value)}><option value="">Resolve account</option><option value="create">Create account</option>{preview.accounts.map((item) => <option key={item.id} value={item.id}>Map to {item.name}</option>)}</select></label>)}</section>}
+        <label className="attendance-import-warning-confirm"><input checked={skipDuplicates} type="checkbox" onChange={(event) => setSkipDuplicates(event.target.checked)} /> Skip duplicate rows</label>
+        <div className="attendance-import-table-wrap"><table><thead><tr><th>Voucher</th><th>Date</th><th>Deduction Account</th><th>Category</th><th>Description</th><th>Amount</th><th>Status</th></tr></thead><tbody>{preview.rows.slice(0, 50).map((row) => <tr key={row.rowIndex}><td>{row.voucherNumber}</td><td>{row.date}</td><td>{row.accountName}</td><td>{row.categoryName}</td><td>{row.description}</td><td>{money(row.amount)}</td><td>{row.error ? "Error" : !(row.accountId || accountMappings[row.accountName]) || !(row.subcategoryId || categoryMappings[row.categoryName]) ? "Resolve mapping" : "Ready"}</td></tr>)}</tbody></table></div>
+        <div className="expense-import-totals"><section><h3>Totals by account</h3>{preview.summary.totalsByAccount.map((item) => <p key={item.name}><span>{item.name}</span><b>{money(item.total)}</b></p>)}</section><section><h3>Totals by category</h3>{preview.summary.totalsByCategory.map((item) => <p key={item.name}><span>{item.name}</span><b>{money(item.total)}</b></p>)}</section></div>
+        <footer className="attendance-import-footer"><button type="button" onClick={onClose}>Cancel</button><button disabled={busy || unresolved || preview.summary.errors.length > 0} type="button" onClick={() => void confirm()}>{busy ? "Importing..." : "Import Expenses"}</button></footer>
+      </>}
+      {result && <section className="expense-import-result"><h3>Expense import completed</h3><p>Expenses imported: <b>{result.recordsCreated}</b></p><p>Duplicates skipped: <b>{result.duplicatesSkipped}</b></p><p>Imported total: <b>{money(result.grandTotal)}</b></p><button type="button" onClick={onClose}>Close</button></section>}
+      {error && <p className="worker-action-error">{error}</p>}
+    </div>
+  </section></div>;
+}
+
 function ExpensesModule() {
   const { token, user } = useAuth();
   const load = useCallback(async () => (await workspaceRecords(offlineDb.vouchers)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
@@ -1551,6 +1616,7 @@ function ExpensesModule() {
   const [notes, setNotes] = useState("");
   const [selectedVoucher, setSelectedVoucher] = useState<Voucher | null>(null);
   const [editingVoucher, setEditingVoucher] = useState<Voucher | null>(null);
+  const [showExpenseImport, setShowExpenseImport] = useState(false);
   const showToast = (message: string) => window.dispatchEvent(new CustomEvent("muzare-toast", { detail: message }));
   const resetForm = () => {
     setDate(today()); setCategoryId(""); setCategorySearch(""); setSubcategoryId(""); setSubcategorySearch("");
@@ -1563,12 +1629,11 @@ function ExpensesModule() {
     setVendor(voucher.vendor ?? ""); setNotes(voucher.notes ?? "");
   };
   const nextLocalVoucherNumber = () => {
-    const year = date.slice(0, 4);
     const highest = vouchers.reduce((max, item) => {
-      const match = /^EXP-\d{4}-(\d+)$/.exec(item.voucherNumber);
+      const match = /^V-(\d+)$/.exec(item.voucherNumber);
       return match ? Math.max(max, Number(match[1])) : max;
     }, 0);
-    return `EXP-${year}-${String(highest + 1).padStart(4, "0")}`;
+    return `V-${String(highest + 1).padStart(4, "0")}`;
   };
 
   const submit = async (event: FormEvent) => {
@@ -1592,6 +1657,8 @@ function ExpensesModule() {
   const selectedCategory = categories.data?.categories.find((item) => item.id === categoryId);
   const canManage = Boolean(user && workspaceId && hasPermission(user, "MANAGE_EXPENSE_CATEGORIES", workspaceId));
   const canEditVouchers = Boolean(user && workspaceId && hasPermission(user, "MANAGE_RECORDS", workspaceId));
+  const farmId = getActiveFarmId();
+  const seasonId = getActiveSeasonId();
   const grouped = [...vouchers.reduce((map, item) => {
     const category = map.get(item.category) ?? new Map<string, number>();
     category.set(item.subcategory || "Miscellaneous", (category.get(item.subcategory || "Miscellaneous") ?? 0) + item.amount);
@@ -1626,6 +1693,7 @@ function ExpensesModule() {
           {editingVoucher && <button type="button" onClick={() => { setEditingVoucher(null); resetForm(); }}>Cancel edit</button>}
         </form>
       </FormCard>
+      {canEditVouchers && <section className="record-panel expense-import-card"><div><h2>Historical expense import</h2><p>Import validated CSV reports with account and category mapping.</p></div><button type="button" onClick={() => navigator.onLine ? setShowExpenseImport(true) : showToast("Expense CSV import requires internet connection.")}>Import expenses CSV</button></section>}
       <Summary value={money(total)} label="Total expenses" />
       <section className="record-panel"><h2>Expenses by category</h2>{!grouped.length ? <Empty>No expense totals yet.</Empty> : <div className="expense-category-report">{grouped.map(([category, items]) => { const categoryTotal = [...items.values()].reduce((sum, amount) => sum + amount, 0); return <article key={category}><header><h3>{category}</h3><strong>{money(categoryTotal)}</strong></header>{[...items].map(([subcategory, amount]) => <p key={subcategory}><span>{subcategory}</span><strong>{money(amount)}</strong></p>)}<b>Category total <span>{money(categoryTotal)}</span></b></article>; })}</div>}</section>
       {canManage && <section className="record-panel"><h2>Custom subcategories</h2><form className="module-form compact-form" onSubmit={(event) => void addCustom(event)}><select required value={categoryId} onChange={(event) => { setCategoryId(event.target.value); setCategorySearch(categories.data?.categories.find((item) => item.id === event.target.value)?.name ?? ""); }}><option value="">Select category</option>{categories.data?.categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><input required placeholder="New subcategory" value={customName} onChange={(event) => setCustomName(event.target.value)} /><button type="submit">Add subcategory</button></form><div className="custom-subcategory-list">{categories.data?.categories.flatMap((item) => item.subcategories.filter((subcategory) => !subcategory.isSystem).map((subcategory) => <span key={subcategory.id}>{item.name} / {subcategory.name}<button type="button" onClick={() => { const name = window.prompt("Rename custom subcategory", subcategory.name); if (token && name?.trim()) void updateExpenseSubcategory(token, workspaceId, subcategory.id, { name: name.trim() }).then(() => categories.refetch()); }}>Rename</button><button type="button" onClick={() => token && void updateExpenseSubcategory(token, workspaceId, subcategory.id, { active: false }).then(() => categories.refetch())}>Disable</button></span>))}</div></section>}
@@ -1647,6 +1715,7 @@ function ExpensesModule() {
           <footer className="worker-dialog__footer">{canEditVouchers && <button className="worker-dialog__link" type="button" onClick={() => openEdit(selectedVoucher)}>Edit voucher</button>}<button className="worker-dialog__close" type="button" onClick={() => setSelectedVoucher(null)}>Close</button></footer>
         </section>
       </div>}
+      {showExpenseImport && token && farmId && seasonId && <ExpenseImportPanel token={token} workspaceId={workspaceId} farmId={farmId} seasonId={seasonId} onClose={() => setShowExpenseImport(false)} onImported={async () => { await refresh(); await categories.refetch(); }} />}
     </>
   );
 }

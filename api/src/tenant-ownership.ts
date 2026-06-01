@@ -13,11 +13,13 @@ export type TenantReferences = {
   groupId?: unknown;
 };
 
-async function hasOperationalReference(workspaceId: string, entityTypes: string[], clientRecordId: string) {
+async function hasOperationalReference(workspaceId: string, entityTypes: string[], clientRecordId: string, farmId?: string | null, seasonId?: string | null) {
   const [record] = await db.select({ id: operationalRecords.id }).from(operationalRecords).where(and(
     eq(operationalRecords.workspaceId, workspaceId),
     inArray(operationalRecords.entityType, entityTypes),
     eq(operationalRecords.clientRecordId, clientRecordId),
+    farmId ? eq(operationalRecords.farmId, farmId) : undefined,
+    seasonId ? eq(operationalRecords.seasonId, seasonId) : undefined,
   )).limit(1);
   return Boolean(record);
 }
@@ -40,19 +42,19 @@ export async function validateTenantReferences(workspaceId: string, references: 
   if (typeof references.accountId === "string" && !virtualAccountIds.has(references.accountId)
     && ![...virtualAccountIds].some((id) => references.farmId && references.accountId === `${references.farmId}:${id}`)
     && ![...virtualAccountIds].some((id) => references.seasonId && references.accountId === `${references.seasonId}:${id}`)
-    && !(await hasOperationalReference(workspaceId, ["account"], references.accountId))) {
+    && !(await hasOperationalReference(workspaceId, ["account"], references.accountId, references.farmId, references.seasonId))) {
     return "Account does not belong to the selected workspace.";
   }
   if (typeof references.ledgerId === "string"
-    && !(await hasOperationalReference(workspaceId, ["partnerEntry"], references.ledgerId))) {
+    && !(await hasOperationalReference(workspaceId, ["partnerEntry"], references.ledgerId, references.farmId, references.seasonId))) {
     return "Ledger entry does not belong to the selected workspace.";
   }
   if (typeof references.labourerId === "string"
-    && !(await hasOperationalReference(workspaceId, ["labourer"], references.labourerId))) {
+    && !(await hasOperationalReference(workspaceId, ["labourer"], references.labourerId, references.farmId))) {
     return "Labour does not belong to the selected workspace.";
   }
   if (typeof references.groupId === "string"
-    && !(await hasOperationalReference(workspaceId, ["labourGroup"], references.groupId))) {
+    && !(await hasOperationalReference(workspaceId, ["labourGroup"], references.groupId, references.farmId))) {
     return "Labour group does not belong to the selected workspace.";
   }
   return null;

@@ -16,6 +16,7 @@ import { advanceReportRoutes } from "./routes/advance-report.js";
 import { expenseCategoryRoutes } from "./routes/expense-categories.js";
 import { attendanceImportRoutes } from "./routes/attendance-imports.js";
 import { labourManagementRoutes } from "./routes/labour-management.js";
+import { expenseImportRoutes } from "./routes/expense-imports.js";
 
 export async function buildApp() {
   const app = Fastify({ logger: true });
@@ -56,6 +57,7 @@ export async function buildApp() {
   await app.register(expenseCategoryRoutes);
   await app.register(attendanceImportRoutes);
   await app.register(labourManagementRoutes);
+  await app.register(expenseImportRoutes);
 
   return app;
 }
