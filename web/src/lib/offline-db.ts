@@ -121,6 +121,8 @@ export type Advance = LocalRecord & {
   labourerId: string;
   date: string;
   amount: number;
+  accountId?: string;
+  sourceAccountName?: string;
   paymentMethod?: string;
   notes: string;
 };

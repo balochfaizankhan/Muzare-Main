@@ -18,7 +18,8 @@ const querySchema = z.object({
 });
 
 type LabourPayload = { name?: unknown };
-type AdvancePayload = { labourerId?: unknown; date?: unknown; amount?: unknown; notes?: unknown };
+type AccountPayload = { name?: unknown };
+type AdvancePayload = { labourerId?: unknown; date?: unknown; amount?: unknown; notes?: unknown; accountId?: unknown; sourceAccountName?: unknown };
 
 export async function advanceReportRoutes(app: FastifyInstance): Promise<void> {
   app.get("/v1/workspace/:workspaceId/advance/report", { preHandler: requireUser }, async (request, reply) => {
@@ -67,6 +68,17 @@ export async function advanceReportRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(403).send({ message: "One or more labour filters do not belong to the selected workspace farm." });
     }
 
+    const accountRecords = await db.select().from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, workspaceId),
+      eq(operationalRecords.farmId, farmId),
+      eq(operationalRecords.seasonId, seasonId),
+      eq(operationalRecords.entityType, "account"),
+    ));
+    const accountById = new Map(accountRecords.map((record) => {
+      const payload = record.payload as AccountPayload;
+      return [record.clientRecordId, typeof payload.name === "string" ? payload.name : "Account"] as const;
+    }));
+
     const advanceRecords = await db.select().from(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, workspaceId),
       eq(operationalRecords.farmId, farmId),
@@ -80,6 +92,7 @@ export async function advanceReportRoutes(app: FastifyInstance): Promise<void> {
       if (selectedLabourIds.size > 0 && !selectedLabourIds.has(payload.labourerId)) return [];
       const labourName = labourById.get(payload.labourerId);
       if (!labourName) return [];
+      const accountId = typeof payload.accountId === "string" ? payload.accountId : "";
       return [{
         id: record.clientRecordId,
         labourerId: payload.labourerId,
@@ -87,6 +100,8 @@ export async function advanceReportRoutes(app: FastifyInstance): Promise<void> {
         date: payload.date,
         amount: Number(payload.amount) || 0,
         notes: typeof payload.notes === "string" ? payload.notes : "",
+        accountId,
+        accountName: accountById.get(accountId) ?? (typeof payload.sourceAccountName === "string" ? payload.sourceAccountName : ""),
       }];
     }).sort((a, b) => a.labourName.localeCompare(b.labourName) || a.date.localeCompare(b.date));
 

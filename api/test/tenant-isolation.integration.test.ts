@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { after, before, test } from "node:test";
 import { and, eq, inArray } from "drizzle-orm";
 import { buildApp } from "../src/app.js";
@@ -403,6 +404,39 @@ test("expense vouchers receive scoped readable numbers and keep them when edited
   ))).some((item) => item.details && (item.details as { clientRecordId?: string }).clientRecordId === firstId), true);
 });
 
+test("expense voucher search matches common fields, composes filters, and stays tenant scoped", async () => {
+  const alphaAccountId = randomUUID();
+  const bravoAccountId = randomUUID();
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "account", alphaAccountId, {
+    name: "Younis Khan Search Account", type: "cash",
+  }))).statusCode, 200);
+  assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "account", bravoAccountId, {
+    name: "Younis Khan Search Account", type: "cash",
+  }))).statusCode, 200);
+  const alphaVoucherId = randomUUID();
+  const bravoVoucherId = randomUUID();
+  const alphaVoucher = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", alphaVoucherId, {
+    date: "2026-05-30", description: "Labour field supplies", notes: "Weekly labour items", amount: 1683,
+    vendor: "Camp Vendor", accountId: alphaAccountId,
+  }));
+  assert.equal(alphaVoucher.statusCode, 200);
+  assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "voucher", bravoVoucherId, {
+    date: "2026-05-30", description: "Labour field supplies", amount: 1683, vendor: "Camp Vendor", accountId: bravoAccountId,
+  }))).statusCode, 200);
+  const path = `/v1/workspace/${alpha.workspaceId}/expenses/search?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}`;
+  for (const search of [alphaVoucher.json().record.voucherNumber, "younis", "labour", "1683", "05/30"]) {
+    const result = await request(alpha.token, "GET", `${path}&search=${encodeURIComponent(search)}`);
+    assert.equal(result.statusCode, 200);
+    assert.ok(result.json().records.some((record: { id: string }) => record.id === alphaVoucherId));
+    assert.ok(result.json().records.every((record: { id: string }) => record.id !== bravoVoucherId));
+  }
+  const combined = await request(alpha.token, "GET", `${path}&from=2026-05-30&to=2026-05-30&category=Other&subcategory=Miscellaneous&accountId=${alphaAccountId}&vendor=camp`);
+  assert.equal(combined.statusCode, 200);
+  assert.ok(combined.json().records.some((record: { id: string }) => record.id === alphaVoucherId));
+  assert.equal((await request(alpha.token, "GET", `${path}&accountId=${bravoAccountId}`)).statusCode, 403);
+  assert.equal((await request(bravo.token, "GET", path)).statusCode, 403);
+});
+
 test("attendance reports calculate payable wages and reject foreign workspace or farm labour", async () => {
   const labourerId = randomUUID();
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", labourerId, {
@@ -470,6 +504,90 @@ test("advance reports return labour-grouped totals and enforce tenant-scoped lab
   assert.equal((await request(alpha.token, "GET",
     `/v1/workspace/${bravo.workspaceId}/advance/report?farmId=${bravo.farmId}&seasonId=${bravo.seasonId}&from=2026-05-04&to=2026-05-05`,
   )).statusCode, 403);
+});
+
+test("labour advance account backfill maps Younis Khan per workspace, skips missing scopes, and is idempotent", async () => {
+  const alphaYounisId = randomUUID();
+  const bravoYounisId = randomUUID();
+  const alphaCashId = randomUUID();
+  const alphaLabourerId = randomUUID();
+  const bravoLabourerId = randomUUID();
+  const alphaAdvanceId = randomUUID();
+  const bravoAdvanceId = randomUUID();
+  for (const [tenant, accountId, name] of [
+    [alpha, alphaYounisId, "Younis Khan"],
+    [alpha, alphaCashId, "Cash"],
+    [bravo, bravoYounisId, "  younis KHAN  "],
+  ] as const) {
+    assert.equal((await request(tenant.token, "POST", "/v1/workspace/operational-records", envelope(tenant, "account", accountId, { name, type: "cash" }))).statusCode, 200);
+  }
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", alphaLabourerId, {
+    name: "Alpha Backfill Worker", group: "General", dailyWage: 90,
+  }))).statusCode, 200);
+  assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "labourer", bravoLabourerId, {
+    name: "Bravo Backfill Worker", group: "General", dailyWage: 90,
+  }))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "advance", alphaAdvanceId, {
+    labourerId: alphaLabourerId, accountId: alphaCashId, date: "2026-05-06", amount: 300, notes: "Correct this account only",
+  }))).statusCode, 200);
+  assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "advance", bravoAdvanceId, {
+    labourerId: bravoLabourerId, date: "2026-05-06", amount: 200, notes: "Bravo scoped account",
+  }))).statusCode, 200);
+
+  const missingFarmId = randomUUID();
+  const missingSeasonId = randomUUID();
+  const missingAdvanceId = randomUUID();
+  await db.insert(farms).values({ id: missingFarmId, workspaceId: alpha.workspaceId, name: "Alpha Missing Account Farm" });
+  await db.insert(seasons).values({
+    id: missingSeasonId, workspaceId: alpha.workspaceId, farmId: missingFarmId,
+    name: "Missing Account Season", year: 2026, startsOn: "2026-01-01", status: "planned",
+  });
+  await db.insert(operationalRecords).values({
+    workspaceId: alpha.workspaceId, farmId: missingFarmId, seasonId: missingSeasonId, clientRecordId: missingAdvanceId,
+    entityType: "advance", payload: { id: missingAdvanceId, labourerId: randomUUID(), date: "2026-05-06", amount: 100, notes: "Must remain unmapped" },
+    recordedBy: alpha.userId, clientUpdatedAt: new Date(now),
+  });
+  const nonLabourAdvanceId = randomUUID();
+  await db.insert(operationalRecords).values({
+    workspaceId: alpha.workspaceId, farmId: alpha.farmId, seasonId: alpha.seasonId, clientRecordId: nonLabourAdvanceId,
+    entityType: "advance", payload: { id: nonLabourAdvanceId, date: "2026-05-06", amount: 999, notes: "Not a labour advance" },
+    recordedBy: alpha.userId, clientUpdatedAt: new Date(now),
+  });
+
+  const migration = await readFile(new URL("../../database/migrations/0014_labour_advance_younis_account_backfill.sql", import.meta.url), "utf8");
+  await db.execute("DELETE FROM muzare_data_migrations WHERE key = '0014_historical_labour_advance_younis_account'");
+  await db.execute(migration);
+  const corrected = await db.select().from(operationalRecords).where(inArray(operationalRecords.clientRecordId, [
+    alphaAdvanceId, bravoAdvanceId, missingAdvanceId, nonLabourAdvanceId,
+  ]));
+  const byId = new Map(corrected.map((record) => [record.clientRecordId, record.payload]));
+  assert.equal(byId.get(alphaAdvanceId)?.accountId, alphaYounisId);
+  assert.equal(byId.get(bravoAdvanceId)?.accountId, bravoYounisId);
+  assert.equal(byId.get(alphaAdvanceId)?.sourceAccountName, "Younis Khan");
+  assert.equal(byId.get(missingAdvanceId)?.accountId, undefined);
+  assert.equal(byId.get(nonLabourAdvanceId)?.accountId, undefined);
+
+  const audits = await db.select().from(auditLogs).where(and(
+    eq(auditLogs.workspaceId, alpha.workspaceId),
+    eq(auditLogs.action, "labour_advance_account_corrected"),
+  ));
+  assert.ok(audits.some((entry) => entry.entityId === corrected.find((record) => record.clientRecordId === alphaAdvanceId)?.id
+    && entry.details?.message === "Labour advance account corrected to Younis Khan"));
+  const auditCount = (await db.select().from(auditLogs).where(eq(auditLogs.action, "labour_advance_account_corrected"))).length;
+  const futureAdvanceId = randomUUID();
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "advance", futureAdvanceId, {
+    labourerId: alphaLabourerId, accountId: alphaCashId, date: "2026-05-07", amount: 125, notes: "Future selected account must remain unchanged",
+  }))).statusCode, 200);
+  await db.execute(migration);
+  assert.equal((await db.select().from(auditLogs).where(eq(auditLogs.action, "labour_advance_account_corrected"))).length, auditCount);
+  const [futureAdvance] = await db.select().from(operationalRecords).where(eq(operationalRecords.clientRecordId, futureAdvanceId)).limit(1);
+  assert.equal(futureAdvance?.payload.accountId, alphaCashId);
+
+  const report = await request(alpha.token, "GET",
+    `/v1/workspace/${alpha.workspaceId}/advance/report?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}&from=2026-05-06&to=2026-05-06`,
+  );
+  assert.equal(report.statusCode, 200);
+  assert.equal(report.json().records.find((record: { id: string }) => record.id === alphaAdvanceId).accountName, "Younis Khan");
 });
 
 test("labour lifecycle hard deletes unused labour and deactivates linked labour without breaking reports", async () => {

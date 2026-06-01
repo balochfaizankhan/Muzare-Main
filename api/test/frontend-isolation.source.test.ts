@@ -234,6 +234,41 @@ test("attendance CSV advances carry provenance and refresh labour account totals
   assert.match(modulePage, /await refreshOperationalData\(\); await onImported\(\);/);
 });
 
+test("labour advance account correction is tenant-scoped, audited, and reflected in account views", async () => {
+  const migrations = await source("api/src/db/migrations.ts");
+  const migration = await source("database/migrations/0014_labour_advance_younis_account_backfill.sql");
+  const modulePage = await source("web/src/pages/ModulePage.tsx");
+  const advances = await source("web/src/pages/workspace/LabourAdvances.tsx");
+  assert.match(migrations, /0014_labour_advance_younis_account_backfill\.sql/);
+  assert.match(migration, /account\.workspace_id = advance\.workspace_id/);
+  assert.match(migration, /advance\.entity_type = 'advance'/);
+  assert.match(migration, /advance\.payload->>'labourerId'/);
+  assert.match(migration, /RAISE WARNING 'Skipping labour advance account correction/);
+  assert.match(migration, /muzare_data_migrations WHERE key = '0014_historical_labour_advance_younis_account'/);
+  assert.match(migration, /Labour advance account corrected to Younis Khan/);
+  assert.match(modulePage, /- advances\.filter\(\(record\) => record\.accountId === id\)\.reduce\(\(sum, record\) => sum \+ record\.amount, 0\)/);
+  assert.match(modulePage, /Payment account \*<\/span><select required value=\{form\.accountId\}/);
+  assert.match(advances, /accountById\.get\(advance\.accountId \?\? ""\) \?\? advance\.sourceAccountName \?\? "-"/);
+});
+
+test("expense voucher search is debounced online, cache-first offline, and tenant scoped", async () => {
+  const app = await source("api/src/app.ts");
+  const route = await source("api/src/routes/expense-search.ts");
+  const api = await source("web/src/lib/api.ts");
+  const modulePage = await source("web/src/pages/ModulePage.tsx");
+  assert.match(app, /expenseSearchRoutes/);
+  assert.match(route, /eq\(operationalRecords\.workspaceId, params\.data\.workspaceId\)/);
+  assert.match(route, /eq\(operationalRecords\.farmId, query\.data\.farmId\)/);
+  assert.match(route, /eq\(operationalRecords\.seasonId, query\.data\.seasonId\)/);
+  assert.match(route, /lower\(coalesce\(\$\{operationalRecords\.payload\}->>'voucherNumber', ''\)\) like \$\{term\}/);
+  assert.match(route, /account\.workspace_id = \$\{operationalRecords\.workspaceId\}/);
+  assert.match(api, /export const searchExpenses/);
+  assert.match(modulePage, /window\.setTimeout\(\(\) => setDebouncedVoucherSearch\(voucherSearch\.trim\(\)\), 275\)/);
+  assert.match(modulePage, /enabled: Boolean\(token && workspaceId && farmId && seasonId && navigator\.onLine\)/);
+  assert.match(modulePage, /const filteredVouchers = useMemo/);
+  assert.match(modulePage, /No expenses found for this search\./);
+});
+
 test("labour lifecycle UI preserves history and hides inactive labour from daily marking by default", async () => {
   const app = await source("api/src/app.ts");
   const route = await source("api/src/routes/labour-management.ts");

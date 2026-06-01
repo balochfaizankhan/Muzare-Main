@@ -131,7 +131,9 @@ export type AttendanceReportData = {
   metadata: { farmName: string; seasonName: string; from: string; to: string; generatedAt: string; generatedBy: string } | null;
 };
 export type AdvanceReportFilters = { farmId: string; seasonId: string; from: string; to: string; labourIds?: string[] };
-export type AdvanceReportRecord = { id: string; labourerId: string; labourName: string; date: string; amount: number; notes: string };
+export type AdvanceReportRecord = {
+  id: string; labourerId: string; labourName: string; date: string; amount: number; notes: string; accountId: string; accountName: string;
+};
 export type AdvanceReportSummary = { labourerId: string; labourName: string; total: number; count: number };
 export type AdvanceReportData = {
   records: AdvanceReportRecord[];
@@ -145,6 +147,15 @@ export type AdvanceReportData = {
     generatedAt: string;
     generatedBy: string;
   } | null;
+};
+export type ExpenseSearchFilters = {
+  farmId: string; seasonId: string; search?: string; from?: string; to?: string;
+  category?: string; subcategory?: string; accountId?: string; vendor?: string;
+};
+export type ExpenseSearchRecord = {
+  id: string; workspaceId: string; farmId: string; seasonId: string; voucherNumber: string; date: string;
+  category: string; categoryId: string; subcategory: string; subcategoryId: string; description: string; amount: number;
+  accountId: string; accountName: string; vendor?: string; notes?: string; createdAt: string; updatedAt: string;
 };
 export type AttendanceReportFilters = {
   farmId: string; seasonId: string; from: string; to: string; labourId?: string; labourIds?: string[]; status?: AttendanceReportStatus;
@@ -298,6 +309,17 @@ export const fetchAdvanceReport = (token: string, workspaceId: string, filters: 
 };
 export const fetchExpenseCategories = (token: string, workspaceId: string) =>
   apiRequest<{ categories: ExpenseCategory[] }>(`/v1/workspace/${workspaceId}/expense-categories`, {}, token);
+export const searchExpenses = (token: string, workspaceId: string, filters: ExpenseSearchFilters) => {
+  const query = new URLSearchParams({ farmId: filters.farmId, seasonId: filters.seasonId });
+  if (filters.search) query.set("search", filters.search);
+  if (filters.from) query.set("from", filters.from);
+  if (filters.to) query.set("to", filters.to);
+  if (filters.category) query.set("category", filters.category);
+  if (filters.subcategory) query.set("subcategory", filters.subcategory);
+  if (filters.accountId) query.set("accountId", filters.accountId);
+  if (filters.vendor) query.set("vendor", filters.vendor);
+  return apiRequest<{ records: ExpenseSearchRecord[] }>(`/v1/workspace/${workspaceId}/expenses/search?${query.toString()}`, {}, token);
+};
 export const createExpenseSubcategory = (token: string, workspaceId: string, input: { categoryId: string; name: string }) =>
   apiRequest<{ subcategory: ExpenseSubcategory }>(`/v1/workspace/${workspaceId}/expense-subcategories`, { method: "POST", body: JSON.stringify(input) }, token);
 export const updateExpenseSubcategory = (token: string, workspaceId: string, subcategoryId: string, input: { name?: string; active?: boolean }) =>

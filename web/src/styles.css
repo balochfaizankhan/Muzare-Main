@@ -1494,6 +1494,42 @@ button {
   margin: 0 0 15px;
 }
 
+.expense-search-filters {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(220px, 2fr) repeat(6, minmax(130px, 1fr));
+  margin-top: 12px;
+}
+
+.expense-search-filters .search-input {
+  min-width: 0;
+}
+
+.expense-search-filters input,
+.expense-search-filters select {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  min-width: 0;
+  padding: 0 10px;
+}
+
+.expense-search-filters input,
+.expense-search-filters select,
+.expense-search-filters .search-input {
+  height: 42px;
+}
+
+@media (max-width: 767px) {
+  .expense-search-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .expense-search-filters .search-input,
+  .expense-search-filters input[aria-label="Expense vendor or person"] {
+    grid-column: 1 / -1;
+  }
+}
+
 .module-form {
   display: grid;
   gap: 10px;

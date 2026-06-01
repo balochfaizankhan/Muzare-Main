@@ -6,7 +6,7 @@ import { SubpageHeader } from "../components/SubpageHeader";
 import { SearchInput } from "../components/SearchInput";
 import { useAuth } from "../auth/AuthProvider";
 import { useSyncState } from "../hooks/useSyncState";
-import { confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteOrDeactivateLabour, fetchAdvanceReport, fetchAttendanceReport, fetchExpenseCategories, fetchLabourDeletionPreview, previewAttendanceImport, previewExpenseImport, updateExpenseSubcategory, type AdvanceReportData, type AdvanceReportFilters, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type AttendanceReportFilters, type AttendanceReportStatus, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type LabourDeletionPreview } from "../lib/api";
+import { confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteOrDeactivateLabour, fetchAdvanceReport, fetchAttendanceReport, fetchExpenseCategories, fetchLabourDeletionPreview, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, type AdvanceReportData, type AdvanceReportFilters, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type AttendanceReportFilters, type AttendanceReportStatus, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type LabourDeletionPreview } from "../lib/api";
 import { hasPermission } from "../lib/permissions";
 import { formatMoney } from "../lib/format";
 import {
@@ -178,12 +178,14 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
   const loadGroups = useCallback(async () => (await workspaceRecords(offlineDb.labourGroups)).sort((a, b) => a.name.localeCompare(b.name)), []);
   const loadAttendance = useCallback(async () => (await workspaceRecords(offlineDb.attendance)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadAdvances = useCallback(async () => (await workspaceRecords(offlineDb.advances)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
+  const loadAccounts = useCallback(async () => (await workspaceRecords(offlineDb.accounts)).sort((a, b) => a.name.localeCompare(b.name)), []);
   const loadProductionEntries = useCallback(async () => (await workspaceRecords(offlineDb.productionEntries)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadPayments = useCallback(async () => (await workspaceRecords(offlineDb.labourPayments)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const [labourers, refreshLabourers] = useData(loadLabourers);
   const [groups, refreshGroups] = useData(loadGroups);
   const [attendance, refreshAttendance, setAttendance] = useData(loadAttendance);
   const [advances, refreshAdvances, setAdvances] = useData(loadAdvances);
+  const [accounts] = useData(loadAccounts, ensureLocalAccounts);
   const [productionEntries, refreshProductionEntries, setProductionEntries] = useData(loadProductionEntries);
   const [payments, refreshPayments, setPayments] = useData(loadPayments);
   const [date, setDate] = useState(today());
@@ -574,10 +576,11 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
         </div>
       )}
       {selectedLabourer && labourAction === "update" && <EditLabourPanel labourer={selectedLabourer} onClose={() => setLabourAction(null)} onSave={saveLabour} />}
-      {selectedLabourer && labourAction === "advance" && <AddAdvancePanel labourer={selectedLabourer} onClose={() => setLabourAction(null)} onSave={saveAdvance} />}
+      {selectedLabourer && labourAction === "advance" && <AddAdvancePanel labourer={selectedLabourer} accounts={accounts} onClose={() => setLabourAction(null)} onSave={saveAdvance} />}
       {showAdvanceEntry && <AdvanceEntryPanel
         labourers={labourers}
         groups={groups}
+        accounts={accounts}
         onClose={() => setShowAdvanceEntry(false)}
         onSave={async (record) => {
           await saveAdvance(record);
@@ -911,18 +914,19 @@ function AddLabourPanel({
   </ActionPanel>;
 }
 
-function AddAdvancePanel({ labourer, onClose, onSave }: { labourer: Labourer; onClose: () => void; onSave: (record: Advance) => Promise<void> }) {
-  const [form, setForm] = useState({ date: today(), amount: "", paymentMethod: "Cash", notes: "" });
+function AddAdvancePanel({ labourer, accounts, onClose, onSave }: { labourer: Labourer; accounts: Account[]; onClose: () => void; onSave: (record: Advance) => Promise<void> }) {
+  const [form, setForm] = useState({ date: today(), amount: "", accountId: "", paymentMethod: "Cash", notes: "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const amount = Number(form.amount);
     if (!Number.isFinite(amount) || amount <= 0) { setError("Advance amount must be greater than zero."); return; }
+    if (!form.accountId) { setError("Select the payment account."); return; }
     if (busy) return;
     setBusy(true); setError("");
     try {
-      await onSave({ ...makeLocalRecord(), labourerId: labourer.id, date: form.date, amount, paymentMethod: form.paymentMethod, notes: form.notes.trim() });
+      await onSave({ ...makeLocalRecord(), labourerId: labourer.id, date: form.date, amount, accountId: form.accountId, paymentMethod: form.paymentMethod, notes: form.notes.trim() });
       onClose();
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to add advance."); }
     finally { setBusy(false); }
@@ -932,6 +936,7 @@ function AddAdvancePanel({ labourer, onClose, onSave }: { labourer: Labourer; on
       <label><span>Labour name</span><input readOnly value={labourer.name} /></label>
       <label><span>Advance date *</span><input required type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
       <label><span>Amount *</span><input required min="0.01" step="0.01" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
+      <label><span>Payment account *</span><select required value={form.accountId} onChange={(event) => setForm({ ...form, accountId: event.target.value })}><option value="">Select account</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
       <label><span>Payment method</span><select value={form.paymentMethod} onChange={(event) => setForm({ ...form, paymentMethod: event.target.value })}><option>Cash</option><option>Bank Transfer</option><option>Other</option></select></label>
       <label><span>Notes</span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
       {error && <p className="worker-action-error">{error}</p>}
@@ -980,8 +985,8 @@ function AdvanceReportPanel({
       ["Date From", data.metadata.from],
       ["Date To", data.metadata.to],
       [],
-      ["Labour Name", "Date", "Advance Amount", "Notes"],
-      ...data.records.map((item) => [item.labourName, item.date, item.amount, item.notes || "-"]),
+      ["Labour Name", "Date", "Advance Amount", "Paid From", "Notes"],
+      ...data.records.map((item) => [item.labourName, item.date, item.amount, item.accountName || "-", item.notes || "-"]),
       [],
       ["Labour", "Records", "Total"],
       ...data.summaries.map((item) => [item.labourName, item.count, item.total]),
@@ -1054,8 +1059,8 @@ function AdvanceReportPanel({
             <p>{money(report.data.grandTotal)}</p>
             <div className="attendance-import-table-wrap">
               <table>
-                <thead><tr><th>{t("reports.labour")}</th><th>{t("workforcePage.date")}</th><th>{t("reports.advanceSar")}</th><th>{t("reports.notes")}</th></tr></thead>
-                <tbody>{report.data.records.map((item) => <tr key={item.id}><td>{item.labourName}</td><td>{item.date}</td><td>{money(item.amount)}</td><td>{item.notes || "-"}</td></tr>)}</tbody>
+                <thead><tr><th>{t("reports.labour")}</th><th>{t("workforcePage.date")}</th><th>{t("reports.advanceSar")}</th><th>Paid From</th><th>{t("reports.notes")}</th></tr></thead>
+                <tbody>{report.data.records.map((item) => <tr key={item.id}><td>{item.labourName}</td><td>{item.date}</td><td>{money(item.amount)}</td><td>{item.accountName || "-"}</td><td>{item.notes || "-"}</td></tr>)}</tbody>
               </table>
             </div>
           </section>
@@ -1118,17 +1123,19 @@ function DeactivateLabourPanel({ token, workspaceId, labourer, onClose, onComple
 function AdvanceEntryPanel({
   labourers,
   groups,
+  accounts,
   onClose,
   onSave,
 }: {
   labourers: Labourer[];
   groups: LabourGroup[];
+  accounts: Account[];
   onClose: () => void;
   onSave: (record: Advance) => Promise<void>;
 }) {
   const [groupId, setGroupId] = useState("all");
   const [labourerId, setLabourerId] = useState("");
-  const [form, setForm] = useState({ date: today(), amount: "", notes: "" });
+  const [form, setForm] = useState({ date: today(), amount: "", accountId: "", notes: "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const filteredLabourers = labourers.filter((labourer) => labourer.active !== false && (groupId === "all" || labourer.groupId === groupId));
@@ -1138,9 +1145,10 @@ function AdvanceEntryPanel({
     const amount = Number(form.amount);
     if (!selectedLabourer) { setError("Select labour."); return; }
     if (!Number.isFinite(amount) || amount <= 0 || busy) { setError("Advance amount must be greater than zero."); return; }
+    if (!form.accountId) { setError("Select the payment account."); return; }
     setBusy(true); setError("");
     try {
-      await onSave({ ...makeLocalRecord(), labourerId: selectedLabourer.id, date: form.date, amount, notes: form.notes.trim() });
+      await onSave({ ...makeLocalRecord(), labourerId: selectedLabourer.id, date: form.date, amount, accountId: form.accountId, notes: form.notes.trim() });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to add advance.");
     } finally {
@@ -1156,6 +1164,7 @@ function AdvanceEntryPanel({
       }}><option value="all">All groups</option>{groups.filter((group) => group.active !== false).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
       <label><span>Labour *</span><select required value={labourerId} onChange={(event) => setLabourerId(event.target.value)}><option value="">Select labour</option>{filteredLabourers.map((labourer) => <option key={labourer.id} value={labourer.id}>{labourer.name}</option>)}</select></label>
       <label><span>Advance amount *</span><input required min="0.01" step="0.01" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
+      <label><span>Payment account *</span><select required value={form.accountId} onChange={(event) => setForm({ ...form, accountId: event.target.value })}><option value="">Select account</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
       <label><span>Notes / reference</span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
       {error && <p className="worker-action-error">{error}</p>}
       <footer><button type="button" onClick={onClose}>Cancel</button><button disabled={busy} type="submit">{busy ? "Saving..." : "Save"}</button></footer>
@@ -1635,6 +1644,14 @@ function ExpensesModule() {
   const [selectedVoucher, setSelectedVoucher] = useState<Voucher | null>(null);
   const [editingVoucher, setEditingVoucher] = useState<Voucher | null>(null);
   const [showExpenseImport, setShowExpenseImport] = useState(false);
+  const [voucherSearch, setVoucherSearch] = useState("");
+  const [debouncedVoucherSearch, setDebouncedVoucherSearch] = useState("");
+  const [voucherFrom, setVoucherFrom] = useState("");
+  const [voucherTo, setVoucherTo] = useState("");
+  const [voucherCategory, setVoucherCategory] = useState("");
+  const [voucherSubcategory, setVoucherSubcategory] = useState("");
+  const [voucherAccountId, setVoucherAccountId] = useState("");
+  const [voucherVendor, setVoucherVendor] = useState("");
   const showToast = (message: string) => window.dispatchEvent(new CustomEvent("muzare-toast", { detail: message }));
   const resetForm = () => {
     setDate(today()); setCategoryId(""); setCategorySearch(""); setSubcategoryId(""); setSubcategorySearch("");
@@ -1677,6 +1694,45 @@ function ExpensesModule() {
   const canEditVouchers = Boolean(user && workspaceId && hasPermission(user, "MANAGE_RECORDS", workspaceId));
   const farmId = getActiveFarmId();
   const seasonId = getActiveSeasonId();
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedVoucherSearch(voucherSearch.trim()), 275);
+    return () => window.clearTimeout(timer);
+  }, [voucherSearch]);
+  const voucherSearchQuery = useQuery({
+    queryKey: ["expense-search", workspaceId, farmId, seasonId, debouncedVoucherSearch, voucherFrom, voucherTo, voucherCategory, voucherSubcategory, voucherAccountId, voucherVendor],
+    queryFn: () => searchExpenses(token!, workspaceId, {
+      farmId: farmId!, seasonId: seasonId!, search: debouncedVoucherSearch || undefined, from: voucherFrom || undefined, to: voucherTo || undefined,
+      category: voucherCategory || undefined, subcategory: voucherSubcategory || undefined, accountId: voucherAccountId || undefined, vendor: voucherVendor.trim() || undefined,
+    }),
+    enabled: Boolean(token && workspaceId && farmId && seasonId && navigator.onLine),
+  });
+  const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account.name])), [accounts]);
+  const voucherSubcategories = useMemo(() => categories.data?.categories
+    .filter((category) => !voucherCategory || category.name === voucherCategory)
+    .flatMap((category) => category.subcategories.map((subcategory) => subcategory.name)) ?? [], [categories.data, voucherCategory]);
+  const matchesVoucher = useCallback((item: Voucher) => {
+    const accountName = accountById.get(item.accountId)
+      ?? ("accountName" in item && typeof item.accountName === "string" ? item.accountName : "");
+    const normalizedSearch = voucherSearch.trim().toLowerCase();
+    const shortDate = item.date.length >= 10 ? `${item.date.slice(5, 7)}/${item.date.slice(8, 10)}` : item.date;
+    return (!voucherFrom || item.date >= voucherFrom)
+      && (!voucherTo || item.date <= voucherTo)
+      && (!voucherCategory || item.category === voucherCategory)
+      && (!voucherSubcategory || item.subcategory === voucherSubcategory)
+      && (!voucherAccountId || item.accountId === voucherAccountId)
+      && (!voucherVendor.trim() || (item.vendor ?? "").toLowerCase().includes(voucherVendor.trim().toLowerCase()))
+      && (!normalizedSearch || [
+        item.voucherNumber, item.description, item.notes ?? "", item.category, item.subcategory, accountName,
+        item.vendor ?? "", String(item.amount), item.date, shortDate,
+      ].some((value) => value.toLowerCase().includes(normalizedSearch)));
+  }, [accountById, voucherAccountId, voucherCategory, voucherFrom, voucherSearch, voucherSubcategory, voucherTo, voucherVendor]);
+  const filteredVouchers = useMemo(() => {
+    const serverRecords = voucherSearchQuery.data?.records ?? [];
+    const merged = navigator.onLine && voucherSearchQuery.data
+      ? [...serverRecords, ...vouchers.filter((item) => item.pendingSync && !serverRecords.some((server) => server.id === item.id))]
+      : vouchers;
+    return merged.filter((item) => matchesVoucher(item as Voucher)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) as Voucher[];
+  }, [matchesVoucher, voucherSearchQuery.data, vouchers]);
   const grouped = [...vouchers.reduce((map, item) => {
     const category = map.get(item.category) ?? new Map<string, number>();
     category.set(item.subcategory || "Miscellaneous", (category.get(item.subcategory || "Miscellaneous") ?? 0) + item.amount);
@@ -1713,12 +1769,33 @@ function ExpensesModule() {
       </FormCard>
       {canEditVouchers && <section className="record-panel expense-import-card"><div><h2>Historical expense import</h2><p>Import validated CSV reports with account and category mapping.</p></div><button type="button" onClick={() => navigator.onLine ? setShowExpenseImport(true) : showToast("Expense CSV import requires internet connection.")}>Import expenses CSV</button></section>}
       <Summary value={money(total)} label="Total expenses" />
+      <section className="record-panel expense-search-panel">
+        <h2>Search vouchers</h2>
+        <div className="expense-search-filters">
+          <SearchInput placeholder="Search voucher, account, category, amount, or date" value={voucherSearch} onChange={setVoucherSearch} />
+          <input aria-label="Expense date from" type="date" value={voucherFrom} onChange={(event) => setVoucherFrom(event.target.value)} />
+          <input aria-label="Expense date to" type="date" value={voucherTo} onChange={(event) => setVoucherTo(event.target.value)} />
+          <select aria-label="Expense category" value={voucherCategory} onChange={(event) => { setVoucherCategory(event.target.value); setVoucherSubcategory(""); }}>
+            <option value="">All categories</option>{categories.data?.categories.map((item) => <option key={item.id}>{item.name}</option>)}
+          </select>
+          <select aria-label="Expense subcategory" value={voucherSubcategory} onChange={(event) => setVoucherSubcategory(event.target.value)}>
+            <option value="">All subcategories</option>{[...new Set(voucherSubcategories)].map((name) => <option key={name}>{name}</option>)}
+          </select>
+          <select aria-label="Expense payment account" value={voucherAccountId} onChange={(event) => setVoucherAccountId(event.target.value)}>
+            <option value="">All accounts</option>{accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>
+          <input aria-label="Expense vendor or person" placeholder="Vendor / person" value={voucherVendor} onChange={(event) => setVoucherVendor(event.target.value)} />
+        </div>
+        {voucherSearchQuery.isFetching && <small>Refreshing matching expenses...</small>}
+        {!navigator.onLine && <small>Offline mode: showing cached expenses.</small>}
+        {voucherSearchQuery.isError && <small>Unable to refresh expenses from the API. Showing cached expenses.</small>}
+      </section>
       <section className="record-panel"><h2>Expenses by category</h2>{!grouped.length ? <Empty>No expense totals yet.</Empty> : <div className="expense-category-report">{grouped.map(([category, items]) => { const categoryTotal = [...items.values()].reduce((sum, amount) => sum + amount, 0); return <article key={category}><header><h3>{category}</h3><strong>{money(categoryTotal)}</strong></header>{[...items].map(([subcategory, amount]) => <p key={subcategory}><span>{subcategory}</span><strong>{money(amount)}</strong></p>)}<b>Category total <span>{money(categoryTotal)}</span></b></article>; })}</div>}</section>
       {canManage && <section className="record-panel"><h2>Custom subcategories</h2><form className="module-form compact-form" onSubmit={(event) => void addCustom(event)}><select required value={categoryId} onChange={(event) => { setCategoryId(event.target.value); setCategorySearch(categories.data?.categories.find((item) => item.id === event.target.value)?.name ?? ""); }}><option value="">Select category</option>{categories.data?.categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><input required placeholder="New subcategory" value={customName} onChange={(event) => setCustomName(event.target.value)} /><button type="submit">Add subcategory</button></form><div className="custom-subcategory-list">{categories.data?.categories.flatMap((item) => item.subcategories.filter((subcategory) => !subcategory.isSystem).map((subcategory) => <span key={subcategory.id}>{item.name} / {subcategory.name}<button type="button" onClick={() => { const name = window.prompt("Rename custom subcategory", subcategory.name); if (token && name?.trim()) void updateExpenseSubcategory(token, workspaceId, subcategory.id, { name: name.trim() }).then(() => categories.refetch()); }}>Rename</button><button type="button" onClick={() => token && void updateExpenseSubcategory(token, workspaceId, subcategory.id, { active: false }).then(() => categories.refetch())}>Disable</button></span>))}</div></section>}
       <RecordTable
-        empty="No vouchers recorded yet."
-        rows={vouchers.map((item) => [item.voucherNumber, item.date, `${item.category} / ${item.subcategory || "Miscellaneous"}`, item.description, money(item.amount)])}
-        actions={vouchers.map((item) => <div className="record-list__actions" key={item.id}><button type="button" onClick={() => setSelectedVoucher(item)}>View details</button>{canEditVouchers && <button type="button" onClick={() => openEdit(item)}>Edit</button>}</div>)}
+        empty="No expenses found for this search."
+        rows={filteredVouchers.map((item) => [item.voucherNumber, item.date, `${item.category} / ${item.subcategory || "Miscellaneous"}`, item.description, accountById.get(item.accountId) ?? "Unknown account", money(item.amount)])}
+        actions={filteredVouchers.map((item) => <div className="record-list__actions" key={item.id}><button type="button" onClick={() => setSelectedVoucher(item)}>View details</button>{canEditVouchers && <button type="button" onClick={() => openEdit(item)}>Edit</button>}</div>)}
       />
       {selectedVoucher && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedVoucher(null)}>
         <section className="worker-dialog" role="dialog" aria-modal="true" aria-label="Expense voucher details" onClick={(event) => event.stopPropagation()}>
@@ -1887,6 +1964,7 @@ function AccountsModule() {
   const balance = (id: string) =>
     sales.filter((record) => record.accountId === id).reduce((sum, record) => sum + record.amount, 0)
     - vouchers.filter((record) => record.accountId === id).reduce((sum, record) => sum + record.amount, 0)
+    - advances.filter((record) => record.accountId === id).reduce((sum, record) => sum + record.amount, 0)
     + entries.filter((record) => record.accountId === id).reduce((sum, record) => sum + (record.type === "contribution" ? record.amount : -record.amount), 0);
   const totalAdvances = advances.reduce((sum, item) => sum + item.amount, 0);
   const totalVoucherExpenses = vouchers.reduce((sum, item) => sum + item.amount, 0);

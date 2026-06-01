@@ -5,7 +5,7 @@ import { SearchInput } from "../../components/SearchInput";
 import { SubpageHeader } from "../../components/SubpageHeader";
 import { formatMoney } from "../../lib/format";
 import { hasPermission } from "../../lib/permissions";
-import { offlineDb, workspaceRecords, type Advance, type Labourer } from "../../lib/offline-db";
+import { offlineDb, workspaceRecords, type Account, type Advance, type Labourer } from "../../lib/offline-db";
 import { deleteOperationalRecord, persistOperationalRecord } from "../../services/syncService";
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -18,6 +18,7 @@ export function LabourAdvances() {
   const { user } = useAuth();
   const [advances, setAdvances] = useState<Advance[]>([]);
   const [labourers, setLabourers] = useState<Labourer[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [search, setSearch] = useState("");
   const [from, setFrom] = useState(monthStart());
   const [to, setTo] = useState(today());
@@ -30,12 +31,14 @@ export function LabourAdvances() {
   const canManage = Boolean(user?.workspaceId && hasPermission(user, "MANAGE_RECORDS", user.workspaceId));
 
   const refresh = useCallback(async () => {
-    const [nextAdvances, nextLabourers] = await Promise.all([
+    const [nextAdvances, nextLabourers, nextAccounts] = await Promise.all([
       workspaceRecords(offlineDb.advances),
       workspaceRecords(offlineDb.labourers),
+      workspaceRecords(offlineDb.accounts),
     ]);
     setAdvances(nextAdvances);
     setLabourers(nextLabourers);
+    setAccounts(nextAccounts);
   }, []);
 
   useEffect(() => {
@@ -49,6 +52,7 @@ export function LabourAdvances() {
   }, [refresh]);
 
   const labourById = useMemo(() => new Map(labourers.map((labourer) => [labourer.id, labourer])), [labourers]);
+  const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account.name])), [accounts]);
   const groups = useMemo(() => [...new Set(labourers.map((labourer) => labourer.group).filter(Boolean))].sort(), [labourers]);
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -69,7 +73,8 @@ export function LabourAdvances() {
         return labourer?.name.toLowerCase().includes(term)
           || labourer?.group.toLowerCase().includes(term)
           || String(advance.amount).includes(term)
-          || advance.notes.toLowerCase().includes(term);
+          || advance.notes.toLowerCase().includes(term)
+          || (accountById.get(advance.accountId ?? "") ?? advance.sourceAccountName ?? "").toLowerCase().includes(term);
       })
       .sort((left, right) => {
         if (sort === "date_asc") return left.date.localeCompare(right.date) || left.id.localeCompare(right.id);
@@ -77,7 +82,7 @@ export function LabourAdvances() {
         if (sort === "amount_asc") return left.amount - right.amount || right.date.localeCompare(left.date);
         return right.date.localeCompare(left.date) || right.createdAt.localeCompare(left.createdAt);
       });
-  }, [advances, labourById, from, group, labourerId, paymentType, search, sort, to]);
+  }, [accountById, advances, labourById, from, group, labourerId, paymentType, search, sort, to]);
 
   const total = filtered.reduce((sum, advance) => sum + advance.amount, 0);
   const labourCount = new Set(filtered.map((advance) => advance.labourerId)).size;
@@ -130,12 +135,12 @@ export function LabourAdvances() {
               const labourer = labourById.get(advance.labourerId);
               return <button type="button" className="advance-row" key={advance.id} onClick={() => setSelected(advance)}>
                 <span>{advance.date}</span><strong>{labourer?.name ?? "Labour"}</strong><span>{labourer?.group ?? "-"}</span>
-                <b>{money(advance.amount)}</b><span>{advance.notes || "-"}</span><span>-</span>
+                <b>{money(advance.amount)}</b><span>{advance.notes || "-"}</span><span>{accountById.get(advance.accountId ?? "") ?? advance.sourceAccountName ?? "-"}</span>
               </button>;
             })}
           </div>}
         </section>
-        {selected && <AdvanceDetails advance={selected} labourer={labourById.get(selected.labourerId)} canManage={canManage} onClose={() => setSelected(null)} onEdit={() => setEditing(true)} onDelete={() => void remove(selected)} />}
+        {selected && <AdvanceDetails advance={selected} labourer={labourById.get(selected.labourerId)} accountName={accountById.get(selected.accountId ?? "") ?? selected.sourceAccountName} canManage={canManage} onClose={() => setSelected(null)} onEdit={() => setEditing(true)} onDelete={() => void remove(selected)} />}
         {selected && editing && <EditAdvance advance={selected} onClose={() => setEditing(false)} onSave={async (record) => {
           await persistOperationalRecord("advance", record);
           setSelected(record); setEditing(false); await refresh();
@@ -145,15 +150,15 @@ export function LabourAdvances() {
   );
 }
 
-function AdvanceDetails({ advance, labourer, canManage, onClose, onEdit, onDelete }: {
-  advance: Advance; labourer?: Labourer; canManage: boolean; onClose: () => void; onEdit: () => void; onDelete: () => void;
+function AdvanceDetails({ advance, labourer, accountName, canManage, onClose, onEdit, onDelete }: {
+  advance: Advance; labourer?: Labourer; accountName?: string; canManage: boolean; onClose: () => void; onEdit: () => void; onDelete: () => void;
 }) {
   return <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}><section className="worker-dialog" role="dialog" aria-modal="true" aria-label="Advance details" onClick={(event) => event.stopPropagation()}>
     <header className="worker-dialog__header"><h2>Advance Details</h2></header>
     <div className="worker-dialog__body"><dl className="worker-stats">
       <div><dt>Date</dt><dd>{advance.date}</dd></div><div><dt>Labour</dt><dd>{labourer?.name ?? "Labour"}</dd></div>
       <div><dt>Group</dt><dd>{labourer?.group ?? "-"}</dd></div><div><dt>Amount</dt><dd>{money(advance.amount)}</dd></div>
-      <div><dt>Notes / reference</dt><dd>{advance.notes || "-"}</dd></div><div><dt>Created by</dt><dd>-</dd></div>
+      <div><dt>Paid from</dt><dd>{accountName ?? "-"}</dd></div><div><dt>Notes / reference</dt><dd>{advance.notes || "-"}</dd></div><div><dt>Created by</dt><dd>-</dd></div>
     </dl></div>
     <footer className="worker-dialog__footer">{canManage && <button className="worker-dialog__link" type="button" onClick={onEdit}>Edit</button>}{canManage && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={onDelete}>Delete</button>}<button className="worker-dialog__close" type="button" onClick={onClose}>Close</button></footer>
   </section></div>;
