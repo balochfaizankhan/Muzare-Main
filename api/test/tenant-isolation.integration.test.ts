@@ -147,6 +147,31 @@ test("attendance can be cleared idempotently only inside the active tenant conte
   assert.equal((await request(alpha.token, "GET", reportPath)).json().records.some((record: { id: string }) => record.id === attendanceId), false);
 });
 
+test("attendance sync reconciles different offline UUIDs into one tenant-scoped daily record", async () => {
+  const labourerId = randomUUID();
+  const firstAttendanceId = randomUUID();
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", labourerId, {
+    name: "Offline Reconciliation Worker", group: "General", dailyWage: 90,
+  }))).statusCode, 200);
+  const first = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "attendance", firstAttendanceId, {
+    labourerId, date: "2026-06-01", status: "present",
+  }));
+  assert.equal(first.statusCode, 200);
+  const second = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "attendance", randomUUID(), {
+    labourerId, date: "2026-06-01", status: "absent", updatedAt: new Date(Date.now() + 1_000).toISOString(),
+  }));
+  assert.equal(second.statusCode, 200);
+  assert.equal(second.json().record.id, firstAttendanceId);
+  assert.equal(second.json().record.status, "absent");
+  const records = await db.select().from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, alpha.workspaceId),
+    eq(operationalRecords.farmId, alpha.farmId),
+    eq(operationalRecords.seasonId, alpha.seasonId),
+    eq(operationalRecords.entityType, "attendance"),
+  ));
+  assert.equal(records.filter((record) => record.payload.labourerId === labourerId && record.payload.date === "2026-06-01").length, 1);
+});
+
 test("foreign farm, season, account, ledger, and approval references are rejected", async () => {
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", {
     ...envelope(alpha, "sale"), farmId: bravo.farmId, seasonId: bravo.seasonId,

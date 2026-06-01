@@ -3,9 +3,14 @@ import { clearCachedData, offlineDb, setActiveFarmId, setActiveSeasonId, setActi
 import type { Table } from "dexie";
 
 export type SyncStatus = "online" | "offline" | "pending" | "syncing" | "error";
-export type SyncState = { status: SyncStatus; pendingCount: number; lastSyncTime: string | null; farmId?: string; seasonId?: string; message?: string };
+export type SyncState = {
+  status: SyncStatus; pendingCount: number; lastSyncTime: string | null; farmId?: string; seasonId?: string;
+  dataSource?: "cache" | "server"; message?: string;
+};
 
 const lastSyncKey = (workspaceId?: string) => `muzare-last-successful-sync:${workspaceId ?? "none"}`;
+const operationalContextPrefix = "muzare-operational-context:";
+const operationalContextKey = (workspaceId: string) => `${operationalContextPrefix}${workspaceId}`;
 const listeners = new Set<(state: SyncState) => void>();
 let context: { token: string; workspaceId: string; farmId?: string; seasonId?: string } | null = null;
 let timer: number | null = null;
@@ -30,6 +35,28 @@ function notify(message: string) {
 
 function tableFor(entity: OperationalEntity) {
   return tables[entity] as unknown as Table<LocalRecord, string>;
+}
+
+function rememberOperationalContext(workspaceId: string, farmId?: string, seasonId?: string) {
+  if (!farmId || !seasonId) return;
+  localStorage.setItem(operationalContextKey(workspaceId), JSON.stringify({ farmId, seasonId }));
+}
+
+function restoreOperationalContext(workspaceId: string) {
+  try {
+    return JSON.parse(localStorage.getItem(operationalContextKey(workspaceId)) ?? "null") as { farmId?: string; seasonId?: string } | null;
+  } catch {
+    return null;
+  }
+}
+
+function applyOperationalContext(token: string, workspaceId: string, farmId?: string, seasonId?: string) {
+  context = { token, workspaceId, farmId, seasonId };
+  setActiveWorkspaceId(workspaceId);
+  setActiveFarmId(farmId ?? null);
+  setActiveSeasonId(seasonId ?? null);
+  emit({ farmId, seasonId });
+  window.dispatchEvent(new Event("muzare-local-data-change"));
 }
 
 async function cacheRecord(entity: OperationalEntity, record: OperationalRecordEnvelope["record"], pendingSync: boolean, farmId: string | null | undefined = context?.farmId, seasonId: string | null | undefined = context?.seasonId) {
@@ -105,8 +132,12 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
         workspaceId: context.workspaceId, farmId: mutation.farmId || context.farmId, seasonId: mutation.seasonId || context.seasonId,
         entity: mutation.entity, record: normalizeRecord(mutation.payload as OperationalRecordEnvelope["record"]),
       });
+      if (response.conflict) notify("A newer database change was found. The server version was kept.");
       const latest = await offlineDb.pendingMutations.get(mutation.id);
       if (latest?.updatedAt !== mutation.updatedAt) continue;
+      if (response.record.id !== (mutation.payload as LocalRecord).id) {
+        await tableFor(mutation.entity).delete((mutation.payload as LocalRecord).id);
+      }
       await cacheRecord(mutation.entity, response.record, false, mutation.farmId, mutation.seasonId);
       await offlineDb.pendingMutations.delete(mutation.id);
       window.dispatchEvent(new Event("muzare-local-data-change"));
@@ -166,7 +197,6 @@ export async function refreshOperationalData(options: { notifySuccess?: boolean 
   }
   try {
     const result = await fetchOperationalRecords(context.token, context.workspaceId);
-    await pruneSynchronizedCache(result.records);
     const pendingDeletes = new Set((await offlineDb.pendingMutations.where("workspaceId").equals(context.workspaceId).toArray())
       .filter((item) => item.operation === "delete")
       .map((item) => item.id));
@@ -174,13 +204,16 @@ export async function refreshOperationalData(options: { notifySuccess?: boolean 
       if (pendingDeletes.has(`${context.workspaceId}:${item.entity}:${item.record.id}`)) continue;
       await cacheRecord(item.entity, item.record, false, item.farmId ?? undefined, item.seasonId ?? undefined);
     }
+    if (result.snapshotConfirmed && result.farmId === context.farmId && result.seasonId === context.seasonId) {
+      await pruneSynchronizedCache(result.records);
+    }
     const lastSyncTime = new Date().toISOString();
     localStorage.setItem(lastSyncKey(context.workspaceId), lastSyncTime);
-    emit({ status: (await getPendingCount()) ? "pending" : "online", lastSyncTime, pendingCount: await getPendingCount() });
+    emit({ status: (await getPendingCount()) ? "pending" : "online", dataSource: "server", lastSyncTime, pendingCount: await getPendingCount() });
     window.dispatchEvent(new Event("muzare-data-refresh"));
     if (options.notifySuccess !== false) notify("Latest workspace data loaded from the database.");
   } catch {
-    emit({ status: "error", pendingCount: await getPendingCount() });
+    emit({ status: navigator.onLine ? "error" : "offline", dataSource: "cache", pendingCount: await getPendingCount(), message: "Showing cached labour" });
     notify("Unable to refresh from the database. Cached workspace data is still available.");
   }
 }
@@ -198,6 +231,7 @@ async function pruneSynchronizedCache(records: OperationalRecordEnvelope[]) {
     const table = tableFor(entity);
     const localRecords = await table.where("workspaceId").equals(context.workspaceId).toArray();
     const staleIds = localRecords
+      .filter((item) => item.farmId === context!.farmId && (item.seasonId === context!.seasonId || item.seasonId == null))
       .filter((item) => !item.pendingSync && !queuedIds.has(`${context!.workspaceId}:${entity}:${item.id}`) && !remoteIds.get(entity)?.has(item.id))
       .map((item) => item.id);
     await table.bulkDelete(staleIds);
@@ -222,23 +256,21 @@ export function subscribeSyncState(listener: (next: SyncState) => void) {
 }
 
 export async function startSyncService(token: string, workspaceId: string) {
-  context = { token, workspaceId };
-  setActiveWorkspaceId(workspaceId);
-  emit({ lastSyncTime: getLastSyncTime(), pendingCount: await getPendingCount() });
+  const cached = restoreOperationalContext(workspaceId);
+  applyOperationalContext(token, workspaceId, cached?.farmId, cached?.seasonId);
+  emit({ dataSource: "cache", lastSyncTime: getLastSyncTime(), pendingCount: await getPendingCount() });
   if (timer) window.clearInterval(timer);
   timer = window.setInterval(() => void syncPendingRecords(), 30_000);
   try {
     const bootstrap = await fetchBootstrap(token);
     const farm = bootstrap.farms.find((item) => item.id === bootstrap.activeFarmId);
     const season = bootstrap.seasons.find((item) => item.id === bootstrap.activeSeasonId);
-    context = { token, workspaceId, farmId: farm?.id, seasonId: season?.id };
-    setActiveFarmId(farm?.id ?? null);
-    setActiveSeasonId(season?.id ?? null);
-    emit({ farmId: farm?.id, seasonId: season?.id });
+    applyOperationalContext(token, workspaceId, farm?.id, season?.id);
+    rememberOperationalContext(workspaceId, farm?.id, season?.id);
     await refreshOperationalData();
     await syncPendingRecords();
   } catch {
-    emit({ status: navigator.onLine ? "error" : "offline", pendingCount: await getPendingCount() });
+    emit({ status: navigator.onLine ? "error" : "offline", dataSource: "cache", pendingCount: await getPendingCount(), message: "Showing cached labour" });
   }
 }
 
@@ -254,6 +286,7 @@ export function stopSyncService() {
 export async function clearWorkspaceCache() {
   stopSyncService();
   await clearCachedData();
+  Object.keys(localStorage).filter((key) => key.startsWith(operationalContextPrefix)).forEach((key) => localStorage.removeItem(key));
 }
 
 window.addEventListener("online", () => {

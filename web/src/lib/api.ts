@@ -1,5 +1,11 @@
 import { config } from "../config";
 
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
 export type PlatformRole = "platform_admin" | "platform_support";
 export type WorkspaceRole = "workspace_owner" | "workspace_manager" | "supervisor" | "operator" | "viewer";
 export type AppRole = PlatformRole | WorkspaceRole;
@@ -105,6 +111,12 @@ export type OperationalRecordEnvelope = {
   workspaceId: string; farmId?: string | null; seasonId?: string | null; entity: OperationalEntity;
   record: { id: string; createdAt: string; updatedAt: string; [key: string]: unknown };
 };
+export type OperationalSnapshot = {
+  records: OperationalRecordEnvelope[];
+  snapshotConfirmed: boolean;
+  farmId: string | null;
+  seasonId: string | null;
+};
 export type AttendanceReportStatus = "present" | "half_day" | "absent";
 export type AttendanceReportRecord = {
   id: string; labourerId: string; labourName: string; dailyWage: number; date: string; status: AttendanceReportStatus;
@@ -195,7 +207,7 @@ async function apiRequest<T>(path: string, options: RequestInit = {}, token?: st
     const body = (await response.json().catch(() => null)) as { message?: string; fields?: string[] } | null;
     if (import.meta.env.DEV && requestOptions.debugLabel) console.error(`[${requestOptions.debugLabel}] response`, response.status, body);
     const fields = body?.fields?.length ? ` Missing or invalid fields: ${body.fields.join(", ")}.` : "";
-    throw new Error(`${body?.message ?? `Request failed with status ${response.status}.`}${fields}`);
+    throw new ApiError(`${body?.message ?? `Request failed with status ${response.status}.`}${fields}`, response.status);
   }
 
   if (response.status === 204) return undefined as T;
@@ -260,7 +272,7 @@ export const saveOperationalRecord = (token: string, input: OperationalRecordEnv
 export const deleteOperationalRecord = (token: string, input: Omit<OperationalRecordEnvelope, "record"> & { recordId: string }) =>
   apiRequest<void>("/v1/workspace/operational-records", { method: "DELETE", body: JSON.stringify(input) }, token);
 export const fetchOperationalRecords = (token: string, workspaceId: string) =>
-  apiRequest<{ records: OperationalRecordEnvelope[] }>(`/v1/workspace/${workspaceId}/operational-records`, {}, token);
+  apiRequest<OperationalSnapshot>(`/v1/workspace/${workspaceId}/operational-records`, {}, token);
 export type LabourDeletionPreview = { labourId: string; labourName: string; linkedRecordCount: number; action: "deactivate" | "delete" };
 export const fetchLabourDeletionPreview = (token: string, workspaceId: string, labourId: string) =>
   apiRequest<LabourDeletionPreview>(`/api/workspaces/${workspaceId}/labour/${labourId}/deletion-preview`, {}, token);

@@ -12,6 +12,7 @@ const attendanceCsvImportMigrationUrl = new URL("../../../database/migrations/00
 const defaultLabourWageMigrationUrl = new URL("../../../database/migrations/0010_default_labour_wage.sql", import.meta.url);
 const expenseVoucherNumberMigrationUrl = new URL("../../../database/migrations/0011_expense_voucher_numbers.sql", import.meta.url);
 const expenseImportMigrationUrl = new URL("../../../database/migrations/0012_expense_csv_import.sql", import.meta.url);
+const attendanceOfflineIdentityMigrationUrl = new URL("../../../database/migrations/0013_attendance_offline_identity.sql", import.meta.url);
 
 async function tableExists(tableName: string): Promise<boolean> {
   const result = (await db.execute(
@@ -97,4 +98,6 @@ export async function ensureWorkspaceSchema(): Promise<void> {
   await db.execute(expenseVoucherNumberMigration);
   const expenseImportMigration = await readFile(expenseImportMigrationUrl, "utf8");
   await db.execute(expenseImportMigration);
+  const attendanceOfflineIdentityMigration = await readFile(attendanceOfflineIdentityMigrationUrl, "utf8");
+  await db.execute(attendanceOfflineIdentityMigration);
 }

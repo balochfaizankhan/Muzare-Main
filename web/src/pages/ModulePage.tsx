@@ -35,6 +35,7 @@ export type ModuleKey = "workforce" | "expenses" | "sales" | "dispatch" | "accou
 
 const today = () => new Date().toISOString().slice(0, 10);
 const money = formatMoney;
+const readableSyncTime = (value: string | null) => value ? new Date(value).toLocaleString() : "Not synced yet";
 const paymentTypes = ["daily_wage", "production_based", "contract_lump_sum", "monthly_salary", "other"] as const;
 type PaymentType = typeof paymentTypes[number];
 const hasEndedBefore = (labourer: Labourer, date: string) => Boolean(labourer.endedOn && labourer.endedOn < date);
@@ -448,6 +449,13 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
             </div>
           </header>
           <section className="record-panel daily-attendance-panel attendance-entry-modal-body">
+            {(sync.status === "offline" || sync.dataSource === "cache") && <div className="attendance-cache-banner" role="status">
+              <strong>{sync.status === "offline" ? "Offline mode: showing cached labour. Attendance will sync later." : "Showing cached labour while the latest records load."}</strong>
+              <small>Last synced: {readableSyncTime(sync.lastSyncTime)}</small>
+            </div>}
+            {sync.pendingCount > 0 && <div className="attendance-cache-banner attendance-cache-banner--pending" role="status">
+              <strong>Pending sync: {sync.pendingCount} change{sync.pendingCount === 1 ? "" : "s"} waiting.</strong>
+            </div>}
             <div className="attendance-entry-controls">
               <select value={groupFilterId} onChange={(event) => setGroupFilterId(event.target.value)}>
                 <option value="all">All groups</option>
@@ -489,7 +497,9 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
               </button>
             </div>
             <div className="attendance-board">
-              {!filteredLabourers.length ? <Empty>{t("workforcePage.noLabourSearch")}</Empty> : filteredLabourers.map((labourer, index) => {
+              {!labourers.length && sync.dataSource === "cache"
+                ? <Empty>No labour list is saved on this device. Connect once to sync labour.</Empty>
+                : !filteredLabourers.length ? <Empty>{t("workforcePage.noLabourSearch")}</Empty> : filteredLabourers.map((labourer, index) => {
                 const currentStatus = attendanceByLabourer.get(labourer.id);
                 const previousStatus = yesterdayByLabourer.get(labourer.id);
                 const markable = canMarkAttendanceOn(labourer, date);

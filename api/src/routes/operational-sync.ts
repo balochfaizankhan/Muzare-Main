@@ -102,9 +102,14 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       || !request.appUser.memberships.some((item) => item.active && item.workspaceId === parsed.data.workspaceId)) {
       return reply.code(403).send({ message: "Workspace membership is required." });
     }
-    if (localDevelopmentMode) return { records: [...localRecords.values()].filter((item) => item.workspaceId === parsed.data.workspaceId) };
+    if (localDevelopmentMode) return {
+      records: [...localRecords.values()].filter((item) => item.workspaceId === parsed.data.workspaceId),
+      snapshotConfirmed: true,
+      farmId: null,
+      seasonId: null,
+    };
     const selected = await sessionContext(request.sessionId);
-    if (!selected?.activeFarmId) return { records: [] };
+    if (!selected?.activeFarmId) return { records: [], snapshotConfirmed: true, farmId: null, seasonId: null };
     const records = await db.select().from(operationalRecords)
       .where(and(
         eq(operationalRecords.workspaceId, parsed.data.workspaceId),
@@ -115,6 +120,9 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       ))
       .orderBy(desc(operationalRecords.updatedAt));
     return {
+      snapshotConfirmed: true,
+      farmId: selected.activeFarmId,
+      seasonId: selected.activeSeasonId,
       records: records.map((item) => ({
         workspaceId: item.workspaceId, farmId: item.farmId, seasonId: item.seasonId, entity: item.entityType,
         record: { ...item.payload, id: item.clientRecordId, updatedAt: item.clientUpdatedAt.toISOString() },
@@ -164,11 +172,22 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       ? await resolveExpenseCategory(parsed.data.workspaceId, parsed.data.record.categoryId, parsed.data.record.subcategoryId)
       : null;
     if (parsed.data.entity === "voucher" && !expenseCategory) return reply.code(403).send({ message: "Expense category does not belong to the selected workspace." });
-    const [existing] = await db.select().from(operationalRecords).where(and(
+    let [existing] = await db.select().from(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, parsed.data.workspaceId),
       eq(operationalRecords.entityType, parsed.data.entity),
       eq(operationalRecords.clientRecordId, parsed.data.record.id),
     )).limit(1);
+    if (!existing && parsed.data.entity === "attendance"
+      && typeof parsed.data.record.labourerId === "string" && typeof parsed.data.record.date === "string") {
+      [existing] = await db.select().from(operationalRecords).where(and(
+        eq(operationalRecords.workspaceId, parsed.data.workspaceId),
+        eq(operationalRecords.farmId, parsed.data.farmId!),
+        eq(operationalRecords.seasonId, parsed.data.seasonId!),
+        eq(operationalRecords.entityType, "attendance"),
+        sql`${operationalRecords.payload}->>'labourerId' = ${parsed.data.record.labourerId}`,
+        sql`${operationalRecords.payload}->>'date' = ${parsed.data.record.date}`,
+      )).limit(1);
+    }
     if (existing && (existing.farmId !== (parsed.data.farmId ?? null) || existing.seasonId !== (parsed.data.seasonId ?? null))) {
       return reply.code(403).send({ message: "Operational record does not belong to the selected farm and season." });
     }
@@ -194,7 +213,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     const payload = expenseCategory ? { ...parsed.data.record, ...expenseCategory } : parsed.data.record;
     const values = {
       workspaceId: parsed.data.workspaceId, farmId: parsed.data.farmId, seasonId: parsed.data.seasonId,
-      clientRecordId: parsed.data.record.id, entityType: parsed.data.entity, payload,
+      clientRecordId: existing?.clientRecordId ?? parsed.data.record.id, entityType: parsed.data.entity, payload,
       recordedBy: request.appUser.id, clientUpdatedAt, updatedAt: new Date(),
     };
     const [saved] = existing

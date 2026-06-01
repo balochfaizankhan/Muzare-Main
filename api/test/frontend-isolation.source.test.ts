@@ -77,6 +77,20 @@ test("attendance marking updates local UI immediately, reuses a daily record, an
   assert.match(api, /apiRequest<void>\("\/v1\/workspace\/operational-records", \{ method: "DELETE"/);
 });
 
+test("attendance labour directory loads cache-first and keeps cached data during API outages", async () => {
+  const auth = await source("web/src/auth/AuthProvider.tsx");
+  const sync = await source("web/src/services/syncService.ts");
+  const modulePage = await source("web/src/pages/ModulePage.tsx");
+  assert.match(auth, /if \(!\(error instanceof ApiError && \[401, 403\]\.includes\(error\.status\)\) && cachedUser\(\)\) \{[\s\S]*setUser\(cachedUser\(\)\);[\s\S]*return;/);
+  assert.match(sync, /const cached = restoreOperationalContext\(workspaceId\);\s+applyOperationalContext\(token, workspaceId, cached\?\.farmId, cached\?\.seasonId\);/);
+  assert.match(sync, /dataSource: "cache"/);
+  assert.match(sync, /await cacheRecord\(item\.entity, item\.record, false,[\s\S]*if \(result\.snapshotConfirmed && result\.farmId === context\.farmId && result\.seasonId === context\.seasonId\) \{\s+await pruneSynchronizedCache\(result\.records\);/);
+  assert.match(sync, /item\.farmId === context!\.farmId && \(item\.seasonId === context!\.seasonId \|\| item\.seasonId == null\)/);
+  assert.match(modulePage, /Offline mode: showing cached labour\. Attendance will sync later\./);
+  assert.match(modulePage, /No labour list is saved on this device\. Connect once to sync labour\./);
+  assert.match(modulePage, /Last synced: \{readableSyncTime\(sync\.lastSyncTime\)\}/);
+});
+
 test("mobile styles contain page overflow and keep navigation scrollable", async () => {
   const styles = await source("web/src/styles.css");
   assert.match(styles, /html,\s*body \{[\s\S]*overflow-x: hidden;/);

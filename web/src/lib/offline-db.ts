@@ -7,6 +7,7 @@ export type LocalRecord = {
   seasonId?: string | null;
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string | null;
   pendingSync?: boolean;
 };
 
@@ -38,6 +39,7 @@ export type Labourer = LocalRecord & {
   group: string;
   groupId?: string;
   dailyWage: number;
+  dailyRate?: number;
   labourType?: string;
   paymentType?: "daily_wage" | "production_based" | "contract_lump_sum" | "monthly_salary" | "other";
   productionUnit?: "carton" | "crate" | "tree" | "task" | "custom";
@@ -57,6 +59,7 @@ export type Labourer = LocalRecord & {
   joinedOn?: string;
   endedOn?: string;
   phone?: string;
+  mobile?: string;
   notes?: string;
 };
 

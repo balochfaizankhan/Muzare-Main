@@ -1333,6 +1333,27 @@ button {
   min-height: 18px;
 }
 
+.attendance-cache-banner {
+  background: var(--blue-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  display: grid;
+  font-size: .72rem;
+  gap: 2px;
+  padding: 7px 9px;
+}
+
+.attendance-cache-banner--pending {
+  background: #fff8df;
+  color: #805800;
+}
+
+.attendance-cache-banner small {
+  color: inherit;
+  font-size: .68rem;
+}
+
 .attendance-totals {
   align-items: center;
   background: #fff;

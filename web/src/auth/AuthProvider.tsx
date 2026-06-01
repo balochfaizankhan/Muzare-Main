@@ -1,9 +1,17 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type PropsWithChildren } from "react";
-import { fetchSession, login as loginRequest, logout as logoutRequest, selectWorkspace, type AppUser } from "../lib/api";
+import { ApiError, fetchSession, login as loginRequest, logout as logoutRequest, selectWorkspace, type AppUser } from "../lib/api";
 import { queryClient } from "../lib/query-client";
 import { clearWorkspaceCache } from "../services/syncService";
 
 const tokenKey = "muzare-session-token";
+const cachedUserKey = "muzare-cached-user";
+const cachedUser = () => {
+  try {
+    return JSON.parse(window.localStorage.getItem(cachedUserKey) ?? "null") as AppUser | null;
+  } catch {
+    return null;
+  }
+};
 
 type AuthState = {
   user: AppUser | null;
@@ -17,7 +25,7 @@ type AuthState = {
 const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: PropsWithChildren) {
-  const [user, setUser] = useState<AppUser | null>(null);
+  const [user, setUser] = useState<AppUser | null>(() => cachedUser());
   const [token, setToken] = useState<string | null>(() => window.localStorage.getItem(tokenKey));
   const [loading, setLoading] = useState(true);
 
@@ -32,11 +40,19 @@ export function AuthProvider({ children }: PropsWithChildren) {
     setLoading(true);
     void fetchSession(token)
       .then((session) => {
-        if (active) setUser(session.user);
+        if (active) {
+          window.localStorage.setItem(cachedUserKey, JSON.stringify(session.user));
+          setUser(session.user);
+        }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!active) return;
+        if (!(error instanceof ApiError && [401, 403].includes(error.status)) && cachedUser()) {
+          setUser(cachedUser());
+          return;
+        }
         window.localStorage.removeItem(tokenKey);
+        window.localStorage.removeItem(cachedUserKey);
         void clearWorkspaceCache();
         queryClient.clear();
         setToken(null);
@@ -54,6 +70,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const login = useCallback(async (email: string, password: string) => {
     const session = await loginRequest(email, password);
     window.localStorage.setItem(tokenKey, session.token);
+    window.localStorage.setItem(cachedUserKey, JSON.stringify(session.user));
     setToken(session.token);
     setUser(session.user);
   }, []);
@@ -63,6 +80,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       await logoutRequest(token).catch(() => undefined);
     }
     window.localStorage.removeItem(tokenKey);
+    window.localStorage.removeItem(cachedUserKey);
     await clearWorkspaceCache();
     queryClient.clear();
     setToken(null);
@@ -74,6 +92,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     const session = await selectWorkspace(token, workspaceId);
     await clearWorkspaceCache();
     queryClient.clear();
+    window.localStorage.setItem(cachedUserKey, JSON.stringify(session.user));
     setUser(session.user);
   }, [token, user?.workspaceId]);
 
