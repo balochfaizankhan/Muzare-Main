@@ -313,6 +313,7 @@ test("expense voucher search is debounced online, cache-first offline, and tenan
   assert.match(modulePage, /const grouped = \[\.\.\.filteredVouchers\.reduce/);
   assert.match(modulePage, /Showing totals for current filters/);
   assert.match(modulePage, /Clear filters/);
+  assert.match(modulePage, /<h2>Search vouchers<\/h2>[\s\S]*Summary value=\{money\(total\)\} label=\{hasActiveFilters \? "Total expenses - current filters" : "Total expenses - current season"\}/);
   assert.match(modulePage, /No expenses found for this search\./);
 });
 

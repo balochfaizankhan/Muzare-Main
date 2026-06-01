@@ -276,7 +276,6 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
     const status = labourer.active === false ? "inactive" : "active";
     return labourer.name.toLowerCase().includes(term)
       || (labourer.phone ?? "").toLowerCase().includes(term)
-      || (labourer.labourType ?? "").toLowerCase().includes(term)
       || (labourer.group ?? "").toLowerCase().includes(term)
       || status.includes(term);
   }).filter((labourer) => (groupFilterId === "all" || labourer.groupId === groupFilterId)
@@ -547,7 +546,6 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
                 <div><dt>Payment Type</dt><dd>{(selectedLabourer.paymentType ?? "daily_wage").replaceAll("_", " ")}</dd></div>
                 <div><dt>Payment Summary</dt><dd>{labourPaymentSummary(selectedLabourer)}</dd></div>
                 <div><dt>Group</dt><dd>{selectedLabourer.group}</dd></div>
-                <div><dt>Labour Type</dt><dd>{selectedLabourer.labourType ?? "Daily Wage"}</dd></div>
                 <div><dt>Join Date</dt><dd>{selectedLabourer.joinedOn ?? selectedLabourer.createdAt.slice(0, 10)}</dd></div>
                 <div><dt>End Date</dt><dd>{selectedLabourer.endedOn || "-"}</dd></div>
                 <div><dt>Present</dt><dd>{presentCount}</dd></div>
@@ -666,7 +664,6 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
 
 type LabourEditorForm = {
   name: string;
-  labourType: string;
   paymentType: PaymentType;
   group: string;
   groupId: string;
@@ -730,7 +727,6 @@ function LabourPaymentFields({ form, setForm }: { form: LabourEditorForm; setFor
 function EditLabourPanel({ labourer, onClose, onSave }: { labourer: Labourer; onClose: () => void; onSave: (record: Labourer) => Promise<void> }) {
   const [form, setForm] = useState<LabourEditorForm>({
     name: labourer.name,
-    labourType: labourer.labourType ?? "Daily Wage",
     paymentType: labourer.paymentType ?? "daily_wage",
     group: labourer.group,
     groupId: labourer.groupId ?? "",
@@ -765,7 +761,6 @@ function EditLabourPanel({ labourer, onClose, onSave }: { labourer: Labourer; on
       await onSave({
         ...labourer,
         name: form.name.trim(),
-        labourType: form.labourType.trim() || "Daily Wage",
         paymentType: form.paymentType,
         group: form.group.trim() || "General",
         groupId: form.groupId || undefined,
@@ -797,7 +792,6 @@ function EditLabourPanel({ labourer, onClose, onSave }: { labourer: Labourer; on
   return <ActionPanel title="Update Labour" onClose={onClose}>
     <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
       <label><span>Labour name *</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
-      <label><span>Labour type *</span><input required value={form.labourType} onChange={(event) => setForm({ ...form, labourType: event.target.value })} /></label>
       <label><span>Group</span><input value={form.group} onChange={(event) => setForm({ ...form, group: event.target.value })} /></label>
       <LabourPaymentFields form={form} setForm={setForm} />
       <label><span>Status</span><select value={form.active ? "active" : "inactive"} onChange={(event) => setForm({ ...form, active: event.target.value === "active" })}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
@@ -824,7 +818,6 @@ function AddLabourPanel({
 }) {
   const [form, setForm] = useState<LabourEditorForm>({
     name: "",
-    labourType: "Daily Wage",
     paymentType: "daily_wage",
     group: "General",
     groupId: "",
@@ -867,7 +860,6 @@ function AddLabourPanel({
         name: form.name.trim(),
         group: form.group.trim() || "General",
         groupId: nextGroupId || undefined,
-        labourType: form.labourType.trim() || undefined,
         paymentType: form.paymentType,
         dailyWage: Number(form.dailyWage || 0),
         productionUnit: form.paymentType === "production_based" ? form.productionUnit as Labourer["productionUnit"] : undefined,
@@ -909,7 +901,6 @@ function AddLabourPanel({
       {form.groupId === "__new_group__" && <label><span>New group name *</span><input required value={form.group} onChange={(event) => setForm({ ...form, group: event.target.value })} /></label>}
       <LabourPaymentFields form={form} setForm={setForm} />
       <label><span>Phone / contact</span><input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
-      <label><span>Role / type</span><input value={form.labourType} onChange={(event) => setForm({ ...form, labourType: event.target.value })} /></label>
       <label><span>Status</span><select value={form.active ? "active" : "inactive"} onChange={(event) => setForm({ ...form, active: event.target.value === "active" })}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
       {error && <p className="worker-action-error">{error}</p>}
       <footer><button type="button" onClick={onClose}>Cancel</button><button disabled={busy} type="submit">{busy ? "Saving..." : "Save Labour"}</button></footer>
@@ -1799,7 +1790,6 @@ function ExpensesModule() {
         </form>
       </FormCard>
       {canEditVouchers && <section className="record-panel expense-import-card"><div><h2>Historical expense import</h2><p>Import validated CSV reports with account and category mapping.</p></div><button type="button" onClick={() => navigator.onLine ? setShowExpenseImport(true) : showToast("Expense CSV import requires internet connection.")}>Import expenses CSV</button></section>}
-      <Summary value={money(total)} label="Total expenses" />
       <section className="record-panel expense-search-panel">
         <h2>Search vouchers</h2>
         <div className="expense-search-filters">
@@ -1825,6 +1815,7 @@ function ExpensesModule() {
         {!navigator.onLine && <small>Offline mode: showing cached expenses.</small>}
         {voucherSearchQuery.isError && <small>Unable to refresh expenses from the API. Showing cached expenses.</small>}
       </section>
+      <Summary value={money(total)} label={hasActiveFilters ? "Total expenses - current filters" : "Total expenses - current season"} />
       <section className="record-panel"><h2>Expenses by category</h2>{!grouped.length ? <Empty>No expense totals yet.</Empty> : <div className="expense-category-report">{grouped.map(([category, items]) => { const categoryTotal = [...items.values()].reduce((sum, amount) => sum + amount, 0); return <article key={category}><header><h3>{category}</h3><strong>{money(categoryTotal)}</strong></header>{[...items].map(([subcategory, amount]) => <p key={subcategory}><span>{subcategory}</span><strong>{money(amount)}</strong></p>)}<b>Category total <span>{money(categoryTotal)}</span></b></article>; })}</div>}</section>
       {canManage && <section className="record-panel"><h2>Custom subcategories</h2><form className="module-form compact-form" onSubmit={(event) => void addCustom(event)}><select required value={categoryId} onChange={(event) => { setCategoryId(event.target.value); setCategorySearch(categories.data?.categories.find((item) => item.id === event.target.value)?.name ?? ""); }}><option value="">Select category</option>{categories.data?.categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><input required placeholder="New subcategory" value={customName} onChange={(event) => setCustomName(event.target.value)} /><button type="submit">Add subcategory</button></form><div className="custom-subcategory-list">{categories.data?.categories.flatMap((item) => item.subcategories.filter((subcategory) => !subcategory.isSystem).map((subcategory) => <span key={subcategory.id}>{item.name} / {subcategory.name}<button type="button" onClick={() => { const name = window.prompt("Rename custom subcategory", subcategory.name); if (token && name?.trim()) void updateExpenseSubcategory(token, workspaceId, subcategory.id, { name: name.trim() }).then(() => categories.refetch()); }}>Rename</button><button type="button" onClick={() => token && void updateExpenseSubcategory(token, workspaceId, subcategory.id, { active: false }).then(() => categories.refetch())}>Disable</button></span>))}</div></section>}
       <RecordTable
@@ -2010,7 +2001,6 @@ function PartnerLedgerModule() {
   const visibleEntries = entries.filter((item) => (showDeleted || !item.deletedAt) && (entryFilter === "all" || item.type === entryFilter));
   const activeEntries = entries.filter((item) => !item.deletedAt);
   const balance = activeEntries.reduce((sum, item) => sum + partnerEntryBalanceEffect(item), 0);
-  const labourAdvances = advances.reduce((sum, item) => sum + item.amount, 0);
   const accountName = (id?: string) => id ? accounts.find((account) => account.id === id)?.name ?? "Unknown account" : "-";
   const partnerPositions = (() => {
     const positions = new Map<string, {
@@ -2108,7 +2098,6 @@ function PartnerLedgerModule() {
         {error && <p className="worker-action-error">{error}</p>}
       </FormCard>
       <Summary label="Partner balance" value={money(balance)} />
-      <Summary label="Labour advances (cash outflow)" value={money(labourAdvances)} />
       <section className="record-panel">
         <h2>Partner Position</h2>
         {!partnerPositions.length ? <Empty>No partner positions recorded yet.</Empty> : <div className="partner-position-table">
