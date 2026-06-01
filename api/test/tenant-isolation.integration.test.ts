@@ -256,6 +256,57 @@ test("expense CSV import resolves unique names once, preserves repeated voucher 
   assert.deepEqual(repeat.json().result, { recordsCreated: 0, duplicatesSkipped: 52, grandTotal: 0 });
 });
 
+test("expense CSV import accepts blank legacy descriptions and reports row-specific mandatory field issues", async () => {
+  const accountId = randomUUID();
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "account", accountId, {
+    name: "Legacy Validation Cash", type: "cash",
+  }))).statusCode, 200);
+  const csvText = [
+    "Legacy expenditure report",
+    "Generated for archive migration",
+    "Voucher,Date,Deduction Account,Category,Description,Amount",
+    "V-0200,2026-05-01,Legacy Validation Cash,Other,,10",
+    "V-0201,2026-05-02,Legacy Validation Cash,,,20",
+  ].join("\n");
+  const input = { farmId: alpha.farmId, seasonId: alpha.seasonId, originalFilename: "blank-descriptions.csv", csvText };
+  const preview = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/expense-imports/preview`, input);
+  assert.equal(preview.statusCode, 201);
+  assert.equal(preview.json().preview.summary.readyRows, 2);
+  assert.deepEqual(preview.json().preview.summary.errors, []);
+  assert.equal(preview.json().preview.rows[0].description, "Other");
+  assert.equal(preview.json().preview.rows[1].description, "Imported expense");
+  const confirmed = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/expense-imports/confirm`, {
+    importSessionId: preview.json().sessionId, farmId: alpha.farmId, seasonId: alpha.seasonId, skipDuplicates: true,
+    accountMappings: [], categoryMappings: [],
+  });
+  assert.equal(confirmed.statusCode, 200);
+  assert.equal(confirmed.json().result.recordsCreated, 2);
+  const imported = (await db.select().from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, alpha.workspaceId), eq(operationalRecords.entityType, "voucher"),
+  ))).filter((record) => record.payload.originalFilename === "blank-descriptions.csv");
+  assert.deepEqual(imported.map((record) => record.payload.description).sort(), ["Imported expense", "Other"]);
+
+  const invalid = await request(alpha.token, "POST", `/api/workspaces/${alpha.workspaceId}/expense-imports/preview`, {
+    farmId: alpha.farmId, seasonId: alpha.seasonId, originalFilename: "invalid-legacy-expenses.csv",
+    csvText: [
+      "Legacy expenditure report",
+      "Voucher,Date,Deduction Account,Category,Description,Amount",
+      ",2026-05-01,Legacy Validation Cash,Other,No voucher,10",
+      "V-0301,,Legacy Validation Cash,Other,No date,11",
+      "V-0302,2026-05-03,Legacy Validation Cash,Other,No amount,",
+      "V-0303,2026-05-04,Missing Cash,Other,Missing mapped account,12",
+      "V-0304,2026-05-05,,Other,Missing deduction account,13",
+    ].join("\n"),
+  });
+  assert.equal(invalid.statusCode, 201);
+  assert.deepEqual(invalid.json().preview.summary.missingAccounts, ["Missing Cash"]);
+  assert.ok(invalid.json().preview.summary.mappingIssues.includes('Row 6: Deduction account "Missing Cash" was not found. Map it or create it before import.'));
+  assert.ok(invalid.json().preview.summary.errors.includes("Row 3: Voucher number is required."));
+  assert.ok(invalid.json().preview.summary.errors.includes("Row 4: Expense date is required."));
+  assert.ok(invalid.json().preview.summary.errors.includes("Row 5: Amount is required."));
+  assert.ok(invalid.json().preview.summary.errors.includes("Row 7: Deduction account is required."));
+});
+
 test("expense vouchers receive scoped readable numbers and keep them when edited", async () => {
   const firstId = randomUUID();
   const first = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", firstId, {

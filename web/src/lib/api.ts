@@ -162,14 +162,14 @@ export type ExpenseImportResolution = { sourceName: string; action: "map" | "cre
 export type ExpenseImportPreview = {
   rows: Array<{
     rowIndex: number; voucherNumber: string; date: string; accountName: string; categoryName: string;
-    description: string; amount: number; accountId: string | null; subcategoryId: string | null; error: string | null;
+    description: string; amount: number; accountId: string | null; subcategoryId: string | null; error: string | null; mappingIssue: string | null;
   }>;
   errors: string[];
   categories: Array<{ id: string; categoryId: string; category: string; subcategory: string; label: string }>;
   accounts: Array<{ id: string; name: string }>;
   summary: {
     totalRows: number; readyRows: number; duplicateRows: number; missingAccounts: string[]; missingCategories: string[];
-    errors: string[]; totalsByAccount: Array<{ name: string; total: number }>; totalsByCategory: Array<{ name: string; total: number }>; grandTotal: number;
+    errors: string[]; mappingIssues: string[]; totalsByAccount: Array<{ name: string; total: number }>; totalsByCategory: Array<{ name: string; total: number }>; grandTotal: number;
   };
 };
 export type ExpenseImportResult = { recordsCreated: number; duplicatesSkipped: number; grandTotal: number };

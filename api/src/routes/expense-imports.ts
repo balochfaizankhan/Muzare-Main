@@ -45,6 +45,7 @@ type AccountOption = { id: string; name: string };
 type ExpenseRow = {
   rowIndex: number; voucherNumber: string; date: string; accountName: string; categoryName: string;
   description: string; amount: number; accountId: string | null; subcategoryId: string | null; error: string | null;
+  mappingIssue: string | null;
 };
 type ExpensePayload = { rows: ExpenseRow[]; errors: string[] };
 
@@ -82,11 +83,15 @@ function parseCsv(csv: string) {
 
 function parseDate(value: string) {
   const input = value.trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
-  const match = input.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  const isoMatch = input.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const match = isoMatch
+    ? [input, isoMatch[3]!, isoMatch[2]!, isoMatch[1]!]
+    : input.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
   if (!match) return null;
-  const date = new Date(Date.UTC(Number(match[3]), Number(match[2]) - 1, Number(match[1])));
-  return Number.isNaN(date.valueOf()) ? null : date.toISOString().slice(0, 10);
+  const day = Number(match[1]); const month = Number(match[2]); const year = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+    ? date.toISOString().slice(0, 10) : null;
 }
 
 function parseAmount(value: string) {
@@ -110,7 +115,9 @@ function matchCategory(name: string, options: CategoryOption[]) {
 function buildPreview(csvText: string, categories: CategoryOption[], accounts: AccountOption[]): ExpensePayload {
   const csv = parseCsv(csvText);
   const errors: string[] = [];
-  const headerRowIndex = csv.slice(0, 20).findIndex((row) => row.some((header) => aliases.voucher.includes(normalize(header))));
+  const headerRowIndex = csv.slice(0, 20).findIndex((row) =>
+    Object.values(aliases).every((names) => findColumn(row, names) >= 0),
+  );
   if (headerRowIndex < 0) return { rows: [], errors: ["Expense CSV header was not found in the first 20 rows."] };
   const headers = csv[headerRowIndex]!;
   const columns = {
@@ -125,21 +132,26 @@ function buildPreview(csvText: string, categories: CategoryOption[], accounts: A
     if (!values.some((value) => value.trim())) return [];
     const voucherNumber = values[columns.voucher]!.trim();
     const accountName = values[columns.account]!.trim();
-    const categoryName = values[columns.category]!.trim();
-    const description = values[columns.description]!.trim();
-    const date = parseDate(values[columns.date]!) ?? "";
-    const amount = parseAmount(values[columns.amount]!);
+    const csvCategory = values[columns.category]!.trim();
+    const categoryName = csvCategory || "Other";
+    const description = values[columns.description]!.trim() || csvCategory || "Imported expense";
+    const rawDate = values[columns.date]!.trim();
+    const date = parseDate(rawDate) ?? "";
+    const rawAmount = values[columns.amount]!.trim();
+    const amount = parseAmount(rawAmount);
     const issue = !voucherNumber ? "Voucher number is required."
-      : !date ? "Expense date is invalid."
+      : !rawDate ? "Expense date is required."
+        : !date ? `Expense date "${rawDate}" is invalid.`
         : !accountName ? "Deduction account is required."
-          : !categoryName ? "Category is required."
-            : !description ? "Description is required."
-              : amount === null ? "Amount must be greater than zero." : null;
+          : !rawAmount ? "Amount is required."
+            : amount === null ? `Amount "${rawAmount}" must be greater than zero.` : null;
+    const accountId = accountByName.get(normalize(accountName)) ?? null;
+    const subcategoryId = matchCategory(categoryName, categories);
     return [{
-      rowIndex, voucherNumber, date, accountName, categoryName, description, amount: amount ?? 0,
-      accountId: accountByName.get(normalize(accountName)) ?? null,
-      subcategoryId: matchCategory(categoryName, categories),
-      error: issue,
+      rowIndex: headerRowIndex + rowIndex + 2, voucherNumber, date, accountName, categoryName, description, amount: amount ?? 0,
+      accountId, subcategoryId, error: issue,
+      mappingIssue: !accountId && accountName ? `Deduction account "${accountName}" was not found. Map it or create it before import.`
+        : !subcategoryId ? `Category "${categoryName}" was not found. Map it or create it before import.` : null,
     }];
   });
   return { rows, errors };
@@ -164,9 +176,10 @@ function previewSummary(payload: ExpensePayload, existingKeys: Set<string>) {
     totalRows: payload.rows.length,
     readyRows: payload.rows.filter((row) => !row.error && row.accountId && row.subcategoryId).length - duplicates,
     duplicateRows: duplicates,
-    missingAccounts: unique(payload.rows.filter((row) => !row.accountId).map((row) => row.accountName)),
-    missingCategories: unique(payload.rows.filter((row) => !row.subcategoryId).map((row) => row.categoryName)),
-    errors: [...payload.errors, ...payload.rows.flatMap((row) => row.error ? [`Row ${row.rowIndex + 2}: ${row.error}`] : [])],
+    missingAccounts: unique(payload.rows.filter((row) => !row.error && !row.accountId && row.accountName).map((row) => row.accountName)),
+    missingCategories: unique(payload.rows.filter((row) => !row.error && !row.subcategoryId && row.categoryName).map((row) => row.categoryName)),
+    errors: [...payload.errors, ...payload.rows.flatMap((row) => row.error ? [`Row ${row.rowIndex}: ${row.error}`] : [])],
+    mappingIssues: payload.rows.flatMap((row) => row.mappingIssue ? [`Row ${row.rowIndex}: ${row.mappingIssue}`] : []),
     totalsByAccount: totals("accountName"), totalsByCategory: totals("categoryName"),
     grandTotal: payload.rows.reduce((total, row) => total + row.amount, 0),
   };
@@ -203,7 +216,7 @@ async function existingDuplicateKeys(workspaceId: string, farmId: string, season
     return duplicateKey({
       rowIndex: 0, voucherNumber: String(payload.voucherNumber ?? ""), date: String(payload.date ?? ""),
       accountName: "", categoryName: "", description: String(payload.description ?? ""), amount: Number(payload.amount) || 0,
-      accountId: null, subcategoryId: null, error: null,
+      accountId: null, subcategoryId: null, error: null, mappingIssue: null,
     }, String(payload.accountId ?? ""), String(payload.subcategoryId ?? ""));
   }));
 }
@@ -244,7 +257,7 @@ export async function expenseImportRoutes(app: FastifyInstance): Promise<void> {
     const categories = await selectedCategories(params.data.workspaceId); const accounts = await selectedAccounts(params.data.workspaceId, session.farmId, session.seasonId);
     const categoryMappings = new Map(body.data.categoryMappings.map((item) => [normalize(item.sourceName), item]));
     const accountMappings = new Map(body.data.accountMappings.map((item) => [normalize(item.sourceName), item]));
-    const inputErrors = [...parsed.errors, ...parsed.rows.flatMap((row) => row.error ? [`Row ${row.rowIndex + 2}: ${row.error}`] : [])];
+    const inputErrors = [...parsed.errors, ...parsed.rows.flatMap((row) => row.error ? [`Row ${row.rowIndex}: ${row.error}`] : [])];
     if (inputErrors.length) return reply.code(400).send({ message: "Resolve CSV validation errors before importing.", errors: inputErrors });
     const categoryIds = new Set(categories.map((item) => item.id)); const accountIds = new Set(accounts.map((item) => item.id));
     const missingCategories = [...new Set(parsed.rows.filter((row) => !row.subcategoryId).map((row) => row.categoryName))];
@@ -300,10 +313,10 @@ export async function expenseImportRoutes(app: FastifyInstance): Promise<void> {
       const seen = await existingDuplicateKeys(params.data.workspaceId, session.farmId, session.seasonId);
       const writes: Array<typeof operationalRecords.$inferInsert> = []; let duplicatesSkipped = 0; let grandTotal = 0; let maxImportedNumber = 0;
       for (const row of parsed.rows) {
-        if (row.error) throw new Error(`Row ${row.rowIndex + 2}: ${row.error}`);
+        if (row.error) throw new Error(`Row ${row.rowIndex}: ${row.error}`);
         const category = row.subcategoryId ? categoryById.get(row.subcategoryId) : categoryByName.get(normalize(row.categoryName));
         const account = row.accountId ? accountById.get(row.accountId) : accountByName.get(normalize(row.accountName));
-        if (!category || !account) throw new Error(`Resolve mappings for row ${row.rowIndex + 2}.`);
+        if (!category || !account) throw new Error(`Resolve mappings for row ${row.rowIndex}.`);
         const key = duplicateKey(row, account.id, category.id);
         if (seen.has(key)) {
           if (!body.data.skipDuplicates) throw new Error(`Duplicate expense row detected for voucher ${row.voucherNumber}.`);
