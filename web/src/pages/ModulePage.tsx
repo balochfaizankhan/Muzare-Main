@@ -2783,14 +2783,15 @@ export function ModulePage({
   onAttendanceClose?: () => void;
 }) {
   const { t } = useTranslation();
+  const moduleTitle = t(`moduleTitles.${module}`);
 
   return (
     <div className="dashboard-page">
-      <SubpageHeader title={t(module)} />
+      <SubpageHeader title={moduleTitle} />
       <main className="subpage module-workspace">
         <section className="workspace-intro">
           <div>
-            <h2>{t(module)}</h2>
+            <h2>{moduleTitle}</h2>
             <p>{t(`moduleDescriptions.${module}`)}</p>
           </div>
           <span className="local-pill">{t("layout.databaseSynced")}</span>

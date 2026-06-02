@@ -774,6 +774,14 @@ const extraResources = {
         accounts: "Balances calculated from synchronized operational transactions.",
         partnerLedger: "Partner contributions, withdrawals, settlements, and running balances.",
       },
+      moduleTitles: {
+        workforce: "Workforce",
+        expenses: "Expenses",
+        sales: "Sales",
+        dispatch: "Dispatch",
+        accounts: "Accounts",
+        partnerLedger: "Partner Ledger",
+      },
       expensesPage: {
         editVoucher: "Edit voucher {{number}}",
         newVoucher: "New expense voucher",
@@ -1216,6 +1224,14 @@ const extraResources = {
         accounts: "أرصدة محسوبة من المعاملات التشغيلية المتزامنة.",
         partnerLedger: "مساهمات الشركاء والسحوبات والتسويات والأرصدة الجارية.",
       },
+      moduleTitles: {
+        workforce: "العمال",
+        expenses: "المصروفات",
+        sales: "المبيعات",
+        dispatch: "الإرسال",
+        accounts: "الحسابات",
+        partnerLedger: "دفتر الشركاء",
+      },
       expensesPage: {
         editVoucher: "تعديل السند {{number}}",
         newVoucher: "سند مصروف جديد",
@@ -1657,6 +1673,14 @@ const extraResources = {
         dispatch: "گاڑیوں کی نقل و حرکت اور کارٹن ڈسپیچ۔",
         accounts: "سنک شدہ آپریشنل ٹرانزیکشنز سے حساب شدہ بیلنس۔",
         partnerLedger: "پارٹنر کنٹریبیوشنز، وِڈڈرالز، سیٹلمنٹس اور رننگ بیلنس۔",
+      },
+      moduleTitles: {
+        workforce: "ورک فورس",
+        expenses: "اخراجات",
+        sales: "فروخت",
+        dispatch: "ڈسپیچ",
+        accounts: "اکاؤنٹس",
+        partnerLedger: "پارٹنر لیجر",
       },
       expensesPage: {
         editVoucher: "واؤچر {{number}} میں ترمیم",
