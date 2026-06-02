@@ -3284,25 +3284,25 @@ button {
   }
 
   .workforce-row {
-    gap: 9px;
-    grid-template-columns: 42px minmax(0, 1fr) 80px;
+    gap: 7px;
+    grid-template-columns: 38px minmax(0, 1fr) 72px;
     height: 92px;
     min-height: 92px;
-    padding: 12px 12px;
+    padding: 12px 10px;
   }
 
   .workforce-row__index {
-    flex-basis: 42px;
-    font-size: 13px;
-    height: 42px;
-    width: 42px;
+    flex-basis: 38px;
+    font-size: 12px;
+    height: 38px;
+    width: 38px;
   }
 
   .workforce-row__action {
     height: 38px;
     min-width: 0;
-    padding: 0 7px;
-    width: 80px;
+    padding: 0 5px;
+    width: 72px;
   }
 
   .dispatch-master-dialog {
@@ -3323,26 +3323,26 @@ button {
 
 @media (max-width: 340px) {
   .workforce-row {
-    gap: 8px;
-    grid-template-columns: 40px minmax(0, 1fr) 76px;
+    gap: 6px;
+    grid-template-columns: 36px minmax(0, 1fr) 68px;
     height: 92px;
     min-height: 92px;
-    padding: 11px 10px;
+    padding: 11px 8px;
   }
 
   .workforce-row__index {
-    flex-basis: 40px;
+    flex-basis: 36px;
     font-size: 12px;
-    height: 40px;
-    width: 40px;
+    height: 36px;
+    width: 36px;
   }
 
   .workforce-row__action {
     font-size: .72rem;
     height: 36px;
     min-width: 0;
-    padding: 0 5px;
-    width: 76px;
+    padding: 0 4px;
+    width: 68px;
   }
 }
 
