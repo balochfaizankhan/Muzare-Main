@@ -309,11 +309,11 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
             {canManageLabour && <button type="button" onClick={() => setShowAddLabour(true)}>{t("workforcePage.addLabour")}</button>}
             {canAddAdvance && <button type="button" onClick={() => setShowAdvanceEntry(true)}>Advance</button>}
             {canManageLabour && <button type="button" onClick={() => setShowAddGroup(true)}>Groups</button>}
+            {user?.workspaceId && hasPermission(user, "IMPORT_ATTENDANCE", user.workspaceId) && <button className="workforce-toolbar__import" type="button" onClick={() => {
+              if (!navigator.onLine) window.dispatchEvent(new CustomEvent("muzare-toast", { detail: t("errors.csvImportOnlineOnly") }));
+              else setShowImport(true);
+            }}>{t("workforcePage.importCsv")}</button>}
           </div>
-          {user?.workspaceId && hasPermission(user, "IMPORT_ATTENDANCE", user.workspaceId) && <button className="workforce-inline-link" type="button" onClick={() => {
-            if (!navigator.onLine) window.dispatchEvent(new CustomEvent("muzare-toast", { detail: t("errors.csvImportOnlineOnly") }));
-            else setShowImport(true);
-          }}>{t("workforcePage.importCsv")}</button>}
         </div>
         <div className="workforce-list-header">
           <h2>Labour List</h2>
