@@ -165,6 +165,7 @@ export function Reports() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [accountId, setAccountId] = useState("");
+  const [groupFilter, setGroupFilter] = useState("");
   const [category, setCategory] = useState("");
   const [status, setStatus] = useState("");
   const [amountMin, setAmountMin] = useState("");
@@ -215,10 +216,17 @@ export function Reports() {
   const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
   const accountName = (id?: string) => accountById.get(id ?? "")?.name ?? t("reportsPage.unknownAccount");
   const labourName = (id: string) => labourById.get(id)?.name ?? t("reportsPage.unknownLabour");
+  const labourGroups = useMemo(() => [...new Set(labourers.map((labourer) => labourer.group?.trim()).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b)), [labourers]);
   const term = search.trim().toLowerCase();
   const min = amountMin ? Number(amountMin) : null;
   const max = amountMax ? Number(amountMax) : null;
   const rangeLabel = formatRangeLabel(from, to);
+  const ungroupedValue = "__ungrouped__";
+  const matchesGroup = (labourer?: Labourer) => {
+    if (!groupFilter) return true;
+    if (groupFilter === ungroupedValue) return !(labourer?.group ?? "").trim();
+    return (labourer?.group ?? "") === groupFilter;
+  };
 
   const matches = (date: string, values: unknown[], amount?: number) => inRange(date, from, to)
     && (min === null || amount === undefined || amount >= min)
@@ -230,13 +238,14 @@ export function Reports() {
     setFrom("");
     setTo("");
     setAccountId("");
+    setGroupFilter("");
     setCategory("");
     setStatus("");
     setAmountMin("");
     setAmountMax("");
   };
 
-  const filtered = Boolean(search || from || to || accountId || category || status || amountMin || amountMax);
+  const filtered = Boolean(search || from || to || accountId || groupFilter || category || status || amountMin || amountMax);
   const switchReport = (next: Report) => {
     setReport(next);
     setSearchParams((current) => {
@@ -256,9 +265,15 @@ export function Reports() {
   };
 
   const attendanceRows = attendance
-    .filter((item) => (!status || item.status === status) && matches(item.date, [labourName(item.labourerId), item.status]))
+    .filter((item) => {
+      const labourer = labourById.get(item.labourerId);
+      return matchesGroup(labourer)
+        && (!status || item.status === status)
+        && matches(item.date, [labourName(item.labourerId), labourer?.group, item.status]);
+    })
     .sort((a, b) => a.date.localeCompare(b.date) || labourName(a.labourerId).localeCompare(labourName(b.labourerId)));
   const attendanceSummary = useMemo(() => labourers
+    .filter((labourer) => matchesGroup(labourer))
     .map((labourer) => {
       const records = attendanceRows.filter((item) => item.labourerId === labourer.id);
       const present = records.filter((item) => item.status === "present").length;
@@ -271,10 +286,15 @@ export function Reports() {
   const attendanceDates = useMemo(() => buildDateColumns(from, to, attendanceRows), [attendanceRows, from, to]);
 
   const advanceRows = useMemo(() => advances
-    .filter((item) => (!accountId || item.accountId === accountId)
-      && matches(item.date, [labourName(item.labourerId), accountName(item.accountId), item.notes, item.sourceAccountName], item.amount))
-    .sort((a, b) => advanceSort === "desc" ? b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt) : a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt)), [accountId, accountName, advanceSort, advances, labourName, matches]);
+    .filter((item) => {
+      const labourer = labourById.get(item.labourerId);
+      return matchesGroup(labourer)
+        && (!accountId || item.accountId === accountId)
+        && matches(item.date, [labourName(item.labourerId), labourer?.group, accountName(item.accountId), item.notes, item.sourceAccountName], item.amount);
+    })
+    .sort((a, b) => advanceSort === "desc" ? b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt) : a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt)), [accountId, accountName, advanceSort, advances, labourById, labourName, matches]);
   const advanceSummary = useMemo(() => labourers
+    .filter((labourer) => matchesGroup(labourer))
     .map((labourer) => {
       const records = advanceRows.filter((item) => item.labourerId === labourer.id);
       const total = records.reduce((sum, item) => sum + item.amount, 0);
@@ -419,15 +439,83 @@ export function Reports() {
           {filtered && <button type="button" onClick={clearFilters}>{t("reportsPage.clearFilters")}</button>}
         </div>
         <div className="reports-filters">
-          <SearchInput value={search} onChange={setSearch} placeholder={t("reportsPage.searchPlaceholder")} />
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder={
+              report === "attendance"
+                ? `${t("reportsPage.labour")} / ${t("reportsPage.group")}`
+                : report === "advances"
+                  ? `${t("reportsPage.labour")} / ${t("reportsPage.group")} / ${t("reportsPage.notes")}`
+                  : t("reportsPage.searchPlaceholder")
+            }
+          />
           <input aria-label={t("reportsPage.fromDate")} type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
           <input aria-label={t("reportsPage.toDate")} type="date" value={to} onChange={(event) => setTo(event.target.value)} />
-          <select aria-label={t("reportsPage.account")} value={accountId} onChange={(event) => setAccountId(event.target.value)}><option value="">{t("reportsPage.allAccounts")}</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select>
-          {report === "expenditures" && <select aria-label={t("reportsPage.category")} value={category} onChange={(event) => setCategory(event.target.value)}><option value="">{t("reportsPage.allCategories")}</option>{voucherCategories.map((item) => <option key={item}>{item}</option>)}</select>}
-          {report === "attendance" && views.attendance === "summary" && <select aria-label={t("reportsPage.status")} value={status} onChange={(event) => setStatus(event.target.value)}><option value="">{t("reportsPage.allStatuses")}</option><option value="present">{t("reportsPage.present")}</option><option value="half_day">{t("reportsPage.halfDay")}</option><option value="absent">{t("reportsPage.absent")}</option></select>}
-          {(report === "advances" && views.advances === "log") && <select aria-label="Advance sort" value={advanceSort} onChange={(event) => setAdvanceSort(event.target.value as SortOrder)}><option value="desc">{t("advancesPage.newestFirst")}</option><option value="asc">{t("advancesPage.oldestFirst")}</option></select>}
-          {(report === "expenditures" && views.expenditures === "log") && <select aria-label="Expense sort" value={expenseSort} onChange={(event) => setExpenseSort(event.target.value as SortOrder)}><option value="desc">{t("advancesPage.newestFirst")}</option><option value="asc">{t("advancesPage.oldestFirst")}</option></select>}
-          {(report === "advances" || report === "expenditures" || report === "partner-position" || report === "account-ledger") && <>
+
+          {report === "attendance" && <>
+            <select aria-label={t("reportsPage.group")} value={groupFilter} onChange={(event) => setGroupFilter(event.target.value)}>
+              <option value="">{t("reportsPage.allGroups")}</option>
+              {labourGroups.map((group) => <option key={group} value={group}>{group}</option>)}
+              <option value={ungroupedValue}>{t("reportsPage.ungrouped")}</option>
+            </select>
+            {views.attendance === "summary" && <select aria-label={t("reportsPage.status")} value={status} onChange={(event) => setStatus(event.target.value)}>
+              <option value="">{t("reportsPage.allStatuses")}</option>
+              <option value="present">{t("reportsPage.present")}</option>
+              <option value="half_day">{t("reportsPage.halfDay")}</option>
+              <option value="absent">{t("reportsPage.absent")}</option>
+            </select>}
+          </>}
+
+          {report === "advances" && <>
+            <select aria-label={t("reportsPage.group")} value={groupFilter} onChange={(event) => setGroupFilter(event.target.value)}>
+              <option value="">{t("reportsPage.allGroups")}</option>
+              {labourGroups.map((group) => <option key={group} value={group}>{group}</option>)}
+              <option value={ungroupedValue}>{t("reportsPage.ungrouped")}</option>
+            </select>
+            <select aria-label={t("reportsPage.account")} value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+              <option value="">{t("reportsPage.allAccounts")}</option>
+              {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+            </select>
+            {views.advances === "log" && <select aria-label="Advance sort" value={advanceSort} onChange={(event) => setAdvanceSort(event.target.value as SortOrder)}>
+              <option value="desc">{t("advancesPage.newestFirst")}</option>
+              <option value="asc">{t("advancesPage.oldestFirst")}</option>
+            </select>}
+            <input aria-label={t("reportsPage.minimumAmount")} inputMode="decimal" placeholder={t("reportsPage.minimumAmount")} value={amountMin} onChange={(event) => setAmountMin(event.target.value)} />
+            <input aria-label={t("reportsPage.maximumAmount")} inputMode="decimal" placeholder={t("reportsPage.maximumAmount")} value={amountMax} onChange={(event) => setAmountMax(event.target.value)} />
+          </>}
+
+          {report === "expenditures" && <>
+            <select aria-label={t("reportsPage.account")} value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+              <option value="">{t("reportsPage.allAccounts")}</option>
+              {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+            </select>
+            <select aria-label={t("reportsPage.category")} value={category} onChange={(event) => setCategory(event.target.value)}>
+              <option value="">{t("reportsPage.allCategories")}</option>
+              {voucherCategories.map((item) => <option key={item}>{item}</option>)}
+            </select>
+            {views.expenditures === "log" && <select aria-label="Expense sort" value={expenseSort} onChange={(event) => setExpenseSort(event.target.value as SortOrder)}>
+              <option value="desc">{t("advancesPage.newestFirst")}</option>
+              <option value="asc">{t("advancesPage.oldestFirst")}</option>
+            </select>}
+            <input aria-label={t("reportsPage.minimumAmount")} inputMode="decimal" placeholder={t("reportsPage.minimumAmount")} value={amountMin} onChange={(event) => setAmountMin(event.target.value)} />
+            <input aria-label={t("reportsPage.maximumAmount")} inputMode="decimal" placeholder={t("reportsPage.maximumAmount")} value={amountMax} onChange={(event) => setAmountMax(event.target.value)} />
+          </>}
+
+          {report === "partner-position" && <>
+            <select aria-label={t("reportsPage.partner")} value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+              <option value="">{t("reportsPage.allAccounts")}</option>
+              {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+            </select>
+            <input aria-label={t("reportsPage.minimumAmount")} inputMode="decimal" placeholder={t("reportsPage.minimumAmount")} value={amountMin} onChange={(event) => setAmountMin(event.target.value)} />
+            <input aria-label={t("reportsPage.maximumAmount")} inputMode="decimal" placeholder={t("reportsPage.maximumAmount")} value={amountMax} onChange={(event) => setAmountMax(event.target.value)} />
+          </>}
+
+          {report === "account-ledger" && <>
+            <select aria-label={t("reportsPage.account")} value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+              <option value="">{t("reportsPage.allAccounts")}</option>
+              {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+            </select>
             <input aria-label={t("reportsPage.minimumAmount")} inputMode="decimal" placeholder={t("reportsPage.minimumAmount")} value={amountMin} onChange={(event) => setAmountMin(event.target.value)} />
             <input aria-label={t("reportsPage.maximumAmount")} inputMode="decimal" placeholder={t("reportsPage.maximumAmount")} value={amountMax} onChange={(event) => setAmountMax(event.target.value)} />
           </>}
@@ -439,9 +527,25 @@ export function Reports() {
           <button className={views.attendance === "register" ? "is-active" : ""} type="button" onClick={() => switchView("attendance", "register")}>Register</button>
           <button className={views.attendance === "summary" ? "is-active" : ""} type="button" onClick={() => switchView("attendance", "summary")}>Summary</button>
         </section>
-        {views.attendance === "register" && <ReportShell title="Attendance Register" rangeLabel={rangeLabel} sectionId="attendance-register" onPrint={() => printSection("attendance-register")} onExport={exportAttendanceRegister}>
+        {views.attendance === "register" && <ReportShell title="Attendance Register" rangeLabel={rangeLabel} sectionId="attendance-register" onPrint={() => printSection("attendance-register-print")} onExport={exportAttendanceRegister}>
           <Kpis values={[[t("reportsPage.labour"), attendanceSummary.length], [t("reportsPage.present"), attendanceRows.filter((item) => item.status === "present").length], [t("reportsPage.halfDay"), attendanceRows.filter((item) => item.status === "half_day").length], [t("reportsPage.absent"), attendanceRows.filter((item) => item.status === "absent").length], [t("reportsPage.totalWages"), money(attendanceSummary.reduce((sum, item) => sum + item.wage, 0))]]} />
-          <div className="attendance-import-table-wrap report-wide-table report-wide-table--mobile">
+          <div className="reports-register-shell">
+            <p>{t("reportsPage.registerOnlyPrint")}</p>
+            <ul>
+              <li>{t("reportsPage.rangeShown", { range: rangeLabel })}</li>
+              <li>{t("reportsPage.groupShown", { group: groupFilter === ungroupedValue ? t("reportsPage.ungrouped") : groupFilter || t("reportsPage.allGroups") })}</li>
+              <li>{t("reportsPage.labourCountShown", { count: attendanceSummary.length })}</li>
+            </ul>
+          </div>
+        </ReportShell>}
+        <section className="record-panel reports-print-section reports-print-only" data-print-section="attendance-register-print" aria-hidden="true">
+          <header className="reports-view-header">
+            <div>
+              <h2>Attendance Register</h2>
+              <p>{rangeLabel}</p>
+            </div>
+          </header>
+          <div className="attendance-import-table-wrap report-wide-table">
             <table className="report-data-table attendance-register-report">
               <thead>
                 <tr>
@@ -463,7 +567,7 @@ export function Reports() {
               </tbody>
             </table>
           </div>
-        </ReportShell>}
+        </section>
         {views.attendance === "summary" && <ReportShell title={t("reportsPage.attendanceSummary")} rangeLabel={rangeLabel} sectionId="attendance-summary" onPrint={() => printSection("attendance-summary")} onExport={exportAttendanceSummary}>
           <Kpis values={[[t("reportsPage.labour"), attendanceSummary.length], [t("reportsPage.present"), attendanceRows.filter((item) => item.status === "present").length], [t("reportsPage.halfDay"), attendanceRows.filter((item) => item.status === "half_day").length], [t("reportsPage.absent"), attendanceRows.filter((item) => item.status === "absent").length], [t("reportsPage.totalWages"), money(attendanceSummary.reduce((sum, item) => sum + item.wage, 0))]]} />
           <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.labour"), t("reportsPage.present"), t("reportsPage.halfDay"), t("reportsPage.absent"), t("reportsPage.payableDays"), t("reportsPage.totalWages")]} rows={attendanceSummary.map((item) => ({ id: item.labourer.id, title: item.labourer.name, value: money(item.wage), meta: `${t("reportsPage.payableDays")}: ${formatNumber(item.payable)}`, cells: [item.labourer.name, item.present, item.halfDay, item.absent, formatNumber(item.payable), money(item.wage)], details: [[t("reportsPage.present"), item.present], [t("reportsPage.halfDay"), item.halfDay], [t("reportsPage.absent"), item.absent]] }))} />

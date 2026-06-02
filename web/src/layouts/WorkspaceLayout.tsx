@@ -1,4 +1,4 @@
-import { BarChart3, Boxes, CalendarCheck, CloudUpload, LayoutDashboard, LogOut, PackageOpen, ReceiptText, RefreshCw, Settings, ShoppingBasket, Users } from "lucide-react";
+import { BarChart3, BookOpenText, Boxes, CalendarCheck, CloudUpload, LayoutDashboard, LogOut, PackageOpen, ReceiptText, RefreshCw, Settings, ShoppingBasket, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink, Outlet } from "react-router-dom";
@@ -17,7 +17,8 @@ const nav = [
   ["/workspace/dispatch", "layout.dispatch", PackageOpen],
   ["/workspace/inventory", "layout.inventory", Boxes],
   ["/workspace/reports", "layout.reports", BarChart3],
-  ["/workspace/team", "layout.team", Users],
+  ["/workspace/team", "layout.workforce", Users],
+  ["/workspace/accounts", "layout.accounts", BookOpenText],
   ["/workspace/settings", "layout.settings", Settings],
 ] as const;
 
