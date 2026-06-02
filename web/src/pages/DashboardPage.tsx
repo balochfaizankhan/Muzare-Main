@@ -215,42 +215,8 @@ export function DashboardPage() {
         </section>
         {!season && <p className="context-message">{t("dashboardPage.noActiveSeason")}</p>}
 
-        <div className="section-title-row">
-          <div>
-            <h2>{t("dashboardPage.todayAtGlance")}</h2>
-            <p>{t("dashboardPage.localFigures")}</p>
-          </div>
-        </div>
-        <section className="summary-grid" aria-label={t("dashboard.operationalSummary")}>
-          {summaryCards.map(({ label, value, path, icon: Icon, tone }) => (
-            <Link className={`metric-card metric-card--${tone}`} to={path} key={label}>
-              <div className="metric-card__icon"><Icon size={20} /></div>
-              <span>{label}</span>
-              <strong>{value}</strong>
-            </Link>
-          ))}
-        </section>
-
         <section className="dashboard-columns">
           <div className="dashboard-main">
-            <section className="panel quick-panel">
-              <div className="panel-heading">
-                <div>
-                  <h2>{t("dashboardPage.quickActions")}</h2>
-                  <p>{t("dashboardPage.dailyEntries")}</p>
-                </div>
-              </div>
-              <div className="quick-grid">
-                {quickActions.map(({ labelKey, path, icon: Icon }) => (
-                  <Link className="quick-action" to={path} key={labelKey}>
-                    <Icon size={19} />
-                    <span>{t(labelKey)}</span>
-                    <ArrowRight size={16} />
-                  </Link>
-                ))}
-              </div>
-            </section>
-
             <section className="panel">
               <div className="panel-heading">
                 <div>
@@ -270,6 +236,42 @@ export function DashboardPage() {
                   </Link>
                 ))}
               </div>
+            </section>
+
+            <section className="panel quick-panel">
+              <div className="panel-heading">
+                <div>
+                  <h2>{t("dashboardPage.quickActions")}</h2>
+                  <p>{t("dashboardPage.dailyEntries")}</p>
+                </div>
+              </div>
+              <div className="quick-grid">
+                {quickActions.map(({ labelKey, path, icon: Icon }) => (
+                  <Link className="quick-action" to={path} key={labelKey}>
+                    <Icon size={19} />
+                    <span>{t(labelKey)}</span>
+                    <ArrowRight size={16} />
+                  </Link>
+                ))}
+              </div>
+            </section>
+
+            <section>
+              <div className="section-title-row">
+                <div>
+                  <h2>{t("dashboardPage.todayAtGlance")}</h2>
+                  <p>{t("dashboardPage.localFigures")}</p>
+                </div>
+              </div>
+              <section className="summary-grid" aria-label={t("dashboard.operationalSummary")}>
+                {summaryCards.map(({ label, value, path, icon: Icon, tone }) => (
+                  <Link className={`metric-card metric-card--${tone}`} to={path} key={label}>
+                    <div className="metric-card__icon"><Icon size={20} /></div>
+                    <span>{label}</span>
+                    <strong>{value}</strong>
+                  </Link>
+                ))}
+              </section>
             </section>
           </div>
 
