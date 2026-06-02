@@ -2069,11 +2069,12 @@ button {
   border-radius: 10px;
   color: var(--text);
   cursor: pointer;
-  display: flex;
-  gap: 12px;
-  min-height: 68px;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  min-height: 78px;
   opacity: 1;
-  padding: 9px 11px;
+  padding: 16px 15px;
   text-align: start;
   width: 100%;
 }
@@ -2090,15 +2091,15 @@ button {
   border-radius: 999px;
   color: #fff !important;
   display: flex;
-  flex: 0 0 36px;
-  font-size: 14px;
+  flex: 0 0 44px;
+  font-size: 15px;
   font-weight: 700;
-  height: 36px;
+  height: 44px;
   justify-content: center;
   line-height: 1;
   opacity: 1;
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
-  width: 36px;
+  width: 44px;
 }
 
 .workforce-row__body {
@@ -2112,6 +2113,7 @@ button {
   font-size: 1rem;
   line-height: 1.15;
   margin-bottom: 4px;
+  overflow-wrap: anywhere;
 }
 
 .workforce-row__body span {
@@ -2151,8 +2153,10 @@ button {
   flex: 0 0 auto;
   font-size: 0.82rem;
   font-weight: 800;
-  height: 40px;
-  padding: 8px 12px;
+  height: 48px;
+  min-width: 96px;
+  padding: 0 14px;
+  white-space: nowrap;
 }
 
 .workforce-reports-menu button {
@@ -3170,6 +3174,16 @@ button {
     width: 100%;
   }
 
+  .workforce-row {
+    gap: 12px;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    padding: 15px 14px;
+  }
+
+  .workforce-row__action {
+    min-width: 88px;
+  }
+
   .dispatch-master-dialog {
     max-width: none;
     width: 100%;
@@ -3183,6 +3197,24 @@ button {
   .dispatch-master-dialog .master-list article > div:last-child {
     justify-content: flex-start;
     width: 100%;
+  }
+}
+
+@media (max-width: 340px) {
+  .workforce-row {
+    grid-template-columns: 38px minmax(0, 1fr);
+    row-gap: 10px;
+  }
+
+  .workforce-row__index {
+    height: 38px;
+    width: 38px;
+  }
+
+  .workforce-row__action {
+    grid-column: 2;
+    justify-self: start;
+    min-width: 92px;
   }
 }
 
