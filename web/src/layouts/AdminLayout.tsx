@@ -29,7 +29,7 @@ export function AdminLayout() {
       <div className="app-shell__body">
         <header className="shell-header">
           <strong>{t("layout.platformAdministration")}</strong>
-          <div className="toolbar__actions"><LanguageSwitch /><button className="ghost-icon" onClick={() => void logout()}><LogOut size={18} /></button></div>
+          <div className="toolbar__actions"><LanguageSwitch /><button className="ghost-icon shell-logout" aria-label={t("common.logout")} onClick={() => void logout()}><LogOut size={18} /></button></div>
         </header>
         <Outlet />
       </div>

@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Leaf, MapPin, Pencil, Plus, UserRound, XCircle } from "lucide-react";
+import { CheckCircle2, Leaf, LogOut, MapPin, Pencil, Plus, UserRound, XCircle } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { useLocation } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
 import { SubpageHeader } from "../../components/SubpageHeader";
 import {
@@ -19,7 +20,8 @@ const emptyForm: FarmInput = { name: "", location: "", owner: "", remarks: "", c
 
 export function Farms() {
   const { t } = useTranslation();
-  const { user, token } = useAuth();
+  const { user, token, logout } = useAuth();
+  const location = useLocation();
   const client = useQueryClient();
   const workspaceId = user?.workspaceId ?? "";
   const canManage = Boolean(user && workspaceId && hasPermission(user, "MANAGE_FARMS", workspaceId));
@@ -74,6 +76,9 @@ export function Farms() {
     <div className="dashboard-page">
       <SubpageHeader title={t("farmsPage.title")} />
       <main className="subpage module-workspace">
+        {location.pathname.endsWith("/settings") && <section className="mobile-settings-menu">
+          <button type="button" onClick={() => void logout()}><LogOut size={17} />{t("common.logout")}</button>
+        </section>}
         <section className="workspace-intro">
           <div><h2>{t("farmsPage.managementTitle")}</h2><p>{t("farmsPage.managementDescription")}</p></div>
           {canManage && <button className="shell-action" type="button" onClick={() => { setEditing(null); setForm(emptyForm); setShowForm(true); }}><Plus size={16} />{t("farmsPage.createFarm")}</button>}

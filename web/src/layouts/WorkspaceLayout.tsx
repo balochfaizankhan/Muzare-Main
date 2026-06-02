@@ -82,9 +82,9 @@ export function WorkspaceLayout() {
               </select>
             )}
             <span className={`sync-badge sync-badge--${sync.status}`}>{statusText}</span>
-            <button className="shell-action" type="button" onClick={() => void refreshOperationalData()}><RefreshCw size={16} />{t("layout.refresh")}</button>
-            <button className="shell-action" type="button" onClick={() => void syncNow()}><CloudUpload size={16} />{t("layout.syncNow")}</button>
-            <LanguageSwitch /><button className="ghost-icon" onClick={() => void logout()}><LogOut size={18} /></button>
+            <button className="shell-action shell-action--refresh" type="button" aria-label={t("layout.refresh")} onClick={() => void refreshOperationalData()}><RefreshCw size={16} /><span className="shell-action__desktop">{t("layout.refresh")}</span></button>
+            <button className="shell-action shell-action--sync" type="button" aria-label={t("layout.syncNow")} onClick={() => void syncNow()}><CloudUpload size={16} /><span className="shell-action__desktop">{t("layout.syncNow")}</span><span className="shell-action__mobile">{t("layout.sync")}</span></button>
+            <LanguageSwitch /><button className="ghost-icon shell-logout" aria-label={t("common.logout")} onClick={() => void logout()}><LogOut size={18} /></button>
           </div>
         </header>
         <Outlet />
