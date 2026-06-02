@@ -671,7 +671,7 @@ button {
 .summary-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   margin-bottom: 20px;
 }
 
@@ -704,12 +704,17 @@ button {
 .metric-card span {
   color: var(--text-secondary);
   font-size: 0.75rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .metric-card strong {
   color: var(--text);
   font-size: 1.04rem;
   letter-spacing: 0;
+  line-height: 1.2;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .metric-card--green .metric-card__icon {
@@ -2956,7 +2961,7 @@ button {
 
 @media (max-width: 1050px) {
   .summary-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   }
 
   .dashboard-columns {
@@ -3891,6 +3896,12 @@ button {
     max-width: none;
   }
 
+}
+
+@media (max-width: 359px) {
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
 }
 .attendance-report-dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-soft); display: flex; flex-direction: column; max-height: 90vh; max-width: 600px; overflow: hidden; width: min(600px, 95vw); }
 .attendance-report-dialog--preview { max-width: min(1400px, 96vw); width: 96vw; }
