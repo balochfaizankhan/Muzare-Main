@@ -2004,9 +2004,52 @@ function DispatchVehicleManager({ vehicles, dispatches, onClose, onRefresh }: { 
   };
   const remove = async (item: Vehicle) => {
     if (dispatches.some((dispatch) => dispatch.vehicleId === item.id)) return setError(t("dispatchPage.vehicleDeleteBlocked"));
-    if (window.confirm(`Delete vehicle ${item.number}?`)) { await deleteOperationalRecord("vehicle", item); await onRefresh(); }
+    if (window.confirm(t("dispatchPage.deleteVehicleConfirm", { number: item.number }))) { await deleteOperationalRecord("vehicle", item); await onRefresh(); }
   };
-  return <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}><section className="worker-dialog dispatch-master-dialog" role="dialog" aria-modal="true" aria-label={t("dispatchPage.manageVehicles")} onClick={(event) => event.stopPropagation()}><header className="worker-dialog__header"><h2>{t("dispatchPage.manageVehicles")}</h2><button type="button" onClick={onClose}><X size={18} /></button></header><div className="worker-dialog__body"><form className="module-form" onSubmit={(event) => void submit(event)}><label><span>{t("dispatchPage.vehicleNameNumber")}</span><input required value={number} onChange={(event) => setNumber(event.target.value)} /></label><label><span>{t("dispatchPage.driverName")}</span><input value={driverName} onChange={(event) => setDriverName(event.target.value)} /></label><label><span>{t("dispatchPage.driverPhone")}</span><input value={driverPhone} onChange={(event) => setDriverPhone(event.target.value)} /></label><label><span>{t("dispatchPage.notes")}</span><input value={notes} onChange={(event) => setNotes(event.target.value)} /></label><label className="checkbox-row"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} /> {t("dispatchPage.activeVehicle")}</label>{error && <p className="form-error">{error}</p>}<div className="dispatch-form-actions"><button type="submit">{editing ? t("dispatchPage.updateVehicle") : t("dispatchPage.addVehicle")}</button>{editing && <button className="secondary-action" type="button" onClick={reset}>{t("farmsPage.cancel")}</button>}</div></form><div className="master-list">{vehicles.map((item) => <article key={item.id}><div><strong>{item.number}</strong><p>{item.driverName || t("dispatchPage.noDriver")}{item.driverPhone ? ` | ${item.driverPhone}` : ""}</p><small>{item.active ? t("dispatchPage.activeStatus") : t("dispatchPage.inactiveStatus")}</small></div><div><button type="button" onClick={() => edit(item)}>{t("dispatchPage.update")}</button><button className="danger-link" type="button" onClick={() => void remove(item)}>{t("dispatchPage.delete")}</button></div></article>)}</div></div><footer className="worker-dialog__footer"><button className="worker-dialog__close" type="button" onClick={onClose}>{t("common.close")}</button></footer></section></div>;
+  const toggleActive = async (item: Vehicle) => {
+    await persistOperationalRecord("vehicle", { ...item, active: !item.active });
+    await onRefresh();
+  };
+  return (
+    <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}>
+      <section className="worker-dialog dispatch-master-dialog" role="dialog" aria-modal="true" aria-label={t("dispatchPage.manageVehicles")} onClick={(event) => event.stopPropagation()}>
+        <header className="worker-dialog__header">
+          <h2>{t("dispatchPage.manageVehicles")}</h2>
+          <button type="button" onClick={onClose} aria-label={t("common.close")}><X size={18} /></button>
+        </header>
+        <div className="worker-dialog__body">
+          <form id="dispatch-vehicle-form" className="module-form dispatch-master-form" onSubmit={(event) => void submit(event)}>
+            <label><span>{t("dispatchPage.vehicleNameNumber")}</span><input required value={number} onChange={(event) => setNumber(event.target.value)} /></label>
+            <label><span>{t("dispatchPage.driverName")}</span><input value={driverName} onChange={(event) => setDriverName(event.target.value)} /></label>
+            <label><span>{t("dispatchPage.driverPhone")}</span><input value={driverPhone} onChange={(event) => setDriverPhone(event.target.value)} /></label>
+            <label><span>{t("dispatchPage.notes")}</span><input value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
+            <label className="checkbox-row"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} /> {t("dispatchPage.activeVehicle")}</label>
+            {error && <p className="form-error">{error}</p>}
+          </form>
+          <div className="master-list">
+            {vehicles.map((item) => (
+              <article key={item.id}>
+                <div>
+                  <strong>{item.number}</strong>
+                  <p>{item.driverName || t("dispatchPage.noDriver")}{item.driverPhone ? ` | ${item.driverPhone}` : ""}</p>
+                  <small>{item.active ? t("common.active") : t("common.inactive")}</small>
+                </div>
+                <div>
+                  <button type="button" onClick={() => edit(item)}>{t("dispatchPage.update")}</button>
+                  <button type="button" onClick={() => void toggleActive(item)}>{item.active ? t("common.inactive") : t("common.active")}</button>
+                  <button className="danger-link" type="button" onClick={() => void remove(item)}>{t("dispatchPage.delete")}</button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+        <footer className="worker-dialog__footer">
+          <button className="secondary-action" type="button" onClick={reset}>{t("dispatchPage.cancel")}</button>
+          <button type="submit" form="dispatch-vehicle-form">{editing ? t("dispatchPage.updateVehicle") : t("dispatchPage.saveVehicle")}</button>
+        </footer>
+      </section>
+    </div>
+  );
 }
 
 function DispatchDateTypeManager({ dateTypes, dispatches, onClose, onRefresh }: { dateTypes: DateType[]; dispatches: Dispatch[]; onClose: () => void; onRefresh: () => Promise<void> }) {
@@ -2026,9 +2069,50 @@ function DispatchDateTypeManager({ dateTypes, dispatches, onClose, onRefresh }: 
   };
   const remove = async (item: DateType) => {
     if (dispatches.some((dispatch) => dispatch.items?.some((entry) => entry.dateTypeId === item.id))) return setError(t("dispatchPage.dateTypeDeleteBlocked"));
-    if (window.confirm(`Delete date type ${item.name}?`)) { await deleteOperationalRecord("dateType", item); await onRefresh(); }
+    if (window.confirm(t("dispatchPage.deleteDateTypeConfirm", { name: item.name }))) { await deleteOperationalRecord("dateType", item); await onRefresh(); }
   };
-  return <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}><section className="worker-dialog dispatch-master-dialog" role="dialog" aria-modal="true" aria-label={t("dispatchPage.manageTypes")} onClick={(event) => event.stopPropagation()}><header className="worker-dialog__header"><h2>{t("dispatchPage.manageTypes")}</h2><button type="button" onClick={onClose}><X size={18} /></button></header><div className="worker-dialog__body"><form className="module-form" onSubmit={(event) => void submit(event)}><label><span>{t("dispatchPage.dateTypeName")}</span><input required value={name} onChange={(event) => setName(event.target.value)} /></label><label><span>{t("dispatchPage.notesDescription")}</span><input value={notes} onChange={(event) => setNotes(event.target.value)} /></label><label className="checkbox-row"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} /> {t("dispatchPage.activeType")}</label>{error && <p className="form-error">{error}</p>}<div className="dispatch-form-actions"><button type="submit">{editing ? t("dispatchPage.updateType") : t("dispatchPage.addType")}</button>{editing && <button className="secondary-action" type="button" onClick={reset}>{t("farmsPage.cancel")}</button>}</div></form><div className="master-list">{dateTypes.map((item) => <article key={item.id}><div><strong>{item.name}</strong>{item.notes && <p>{item.notes}</p>}<small>{item.active ? t("dispatchPage.activeStatus") : t("dispatchPage.inactiveStatus")}</small></div><div><button type="button" onClick={() => edit(item)}>{t("dispatchPage.update")}</button><button className="danger-link" type="button" onClick={() => void remove(item)}>{t("dispatchPage.delete")}</button></div></article>)}</div></div><footer className="worker-dialog__footer"><button className="worker-dialog__close" type="button" onClick={onClose}>{t("common.close")}</button></footer></section></div>;
+  const toggleActive = async (item: DateType) => {
+    await persistOperationalRecord("dateType", { ...item, active: !item.active });
+    await onRefresh();
+  };
+  return (
+    <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}>
+      <section className="worker-dialog dispatch-master-dialog" role="dialog" aria-modal="true" aria-label={t("dispatchPage.manageTypes")} onClick={(event) => event.stopPropagation()}>
+        <header className="worker-dialog__header">
+          <h2>{t("dispatchPage.manageTypes")}</h2>
+          <button type="button" onClick={onClose} aria-label={t("common.close")}><X size={18} /></button>
+        </header>
+        <div className="worker-dialog__body">
+          <form id="dispatch-date-type-form" className="module-form dispatch-master-form" onSubmit={(event) => void submit(event)}>
+            <label><span>{t("dispatchPage.dateTypeName")}</span><input required value={name} onChange={(event) => setName(event.target.value)} /></label>
+            <label><span>{t("dispatchPage.notesDescription")}</span><input value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
+            <label className="checkbox-row"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} /> {t("dispatchPage.activeType")}</label>
+            {error && <p className="form-error">{error}</p>}
+          </form>
+          <div className="master-list">
+            {dateTypes.map((item) => (
+              <article key={item.id}>
+                <div>
+                  <strong>{item.name}</strong>
+                  {item.notes && <p>{item.notes}</p>}
+                  <small>{item.active ? t("common.active") : t("common.inactive")}</small>
+                </div>
+                <div>
+                  <button type="button" onClick={() => edit(item)}>{t("dispatchPage.update")}</button>
+                  <button type="button" onClick={() => void toggleActive(item)}>{item.active ? t("common.inactive") : t("dispatchPage.enable")}</button>
+                  <button className="danger-link" type="button" onClick={() => void remove(item)}>{t("dispatchPage.delete")}</button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+        <footer className="worker-dialog__footer">
+          <button className="secondary-action" type="button" onClick={reset}>{t("dispatchPage.cancel")}</button>
+          <button type="submit" form="dispatch-date-type-form">{editing ? t("dispatchPage.updateType") : t("dispatchPage.saveDateType")}</button>
+        </footer>
+      </section>
+    </div>
+  );
 }
 
 function SalesModule() {

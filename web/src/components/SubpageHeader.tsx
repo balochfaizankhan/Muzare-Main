@@ -2,7 +2,6 @@ import { ArrowLeft, LogOut } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
-import { LanguageSwitch } from "./LanguageSwitch";
 import { getHomePath } from "../lib/permissions";
 
 export function SubpageHeader({ title }: { title: string }) {
@@ -17,7 +16,6 @@ export function SubpageHeader({ title }: { title: string }) {
       </Link>
       <h1>{title}</h1>
       <div className="toolbar__actions">
-        <LanguageSwitch />
         <button className="ghost-icon" onClick={() => void logout()} title={t("logout")}>
           <LogOut size={18} />
         </button>
