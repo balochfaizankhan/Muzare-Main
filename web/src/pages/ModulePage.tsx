@@ -372,7 +372,7 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
       }}>
         <section className="attendance-report-dialog attendance-report-dialog--preview" role="dialog" aria-modal="true" aria-labelledby="mark-attendance-title" onClick={(event) => event.stopPropagation()}>
           <header className="attendance-report-header">
-            <div>
+            <div className="attendance-report-header__copy">
               <span>{t("workforcePage.dailyAttendance")}</span>
               <h2 id="mark-attendance-title">Mark Attendance</h2>
             </div>
