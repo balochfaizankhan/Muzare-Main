@@ -1944,7 +1944,7 @@ button {
 }
 
 .workforce-list {
-  gap: 10px;
+  gap: 7px;
 }
 
 .workforce-page-header {
@@ -2070,11 +2070,11 @@ button {
   color: var(--text);
   cursor: pointer;
   display: grid;
-  gap: 14px;
+  gap: 11px;
   grid-template-columns: 44px minmax(0, 1fr) auto;
-  min-height: 78px;
+  min-height: 88px;
   opacity: 1;
-  padding: 16px 15px;
+  padding: 11px 12px;
   text-align: start;
   width: 100%;
 }
@@ -2112,14 +2112,19 @@ button {
   display: block;
   font-size: 1rem;
   line-height: 1.15;
-  margin-bottom: 4px;
-  overflow-wrap: anywhere;
+  margin-bottom: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .workforce-row__body span {
   color: var(--text-secondary);
   display: block;
   font-size: 0.84rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .workforce-row__body em {
@@ -2132,7 +2137,7 @@ button {
 
 .workforce-row__body small {
   color: var(--text-secondary);
-  display: block;
+  display: none;
   font-size: .76rem;
   margin-top: 2px;
 }
@@ -2153,9 +2158,9 @@ button {
   flex: 0 0 auto;
   font-size: 0.82rem;
   font-weight: 800;
-  height: 48px;
-  min-width: 96px;
-  padding: 0 14px;
+  height: 42px;
+  min-width: 82px;
+  padding: 0 11px;
   white-space: nowrap;
 }
 
@@ -3175,13 +3180,26 @@ button {
   }
 
   .workforce-row {
-    gap: 12px;
-    grid-template-columns: 44px minmax(0, 1fr) auto;
-    padding: 15px 14px;
+    gap: 10px;
+    grid-template-columns: 42px minmax(0, 1fr) 78px;
+    height: 92px;
+    min-height: 92px;
+    overflow: hidden;
+    padding: 10px;
+  }
+
+  .workforce-row__index {
+    flex-basis: 42px;
+    font-size: 14px;
+    height: 42px;
+    width: 42px;
   }
 
   .workforce-row__action {
-    min-width: 88px;
+    height: 40px;
+    min-width: 0;
+    padding: 0 8px;
+    width: 78px;
   }
 
   .dispatch-master-dialog {
@@ -3202,19 +3220,26 @@ button {
 
 @media (max-width: 340px) {
   .workforce-row {
-    grid-template-columns: 38px minmax(0, 1fr);
-    row-gap: 10px;
+    gap: 8px;
+    grid-template-columns: 42px minmax(0, 1fr) 70px;
+    height: 92px;
+    min-height: 92px;
+    padding: 9px 8px;
   }
 
   .workforce-row__index {
-    height: 38px;
-    width: 38px;
+    flex-basis: 42px;
+    font-size: 13px;
+    height: 42px;
+    width: 42px;
   }
 
   .workforce-row__action {
-    grid-column: 2;
-    justify-self: start;
-    min-width: 92px;
+    font-size: .75rem;
+    height: 38px;
+    min-width: 0;
+    padding: 0 6px;
+    width: 70px;
   }
 }
 

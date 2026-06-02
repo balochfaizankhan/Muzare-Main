@@ -9,7 +9,7 @@ import { LabourSelectCombobox } from "../components/LabourSelectCombobox";
 import { useAuth } from "../auth/AuthProvider";
 import { useSyncState } from "../hooks/useSyncState";
 import { calculateAccountBalance } from "../lib/accounting";
-import { confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteOrDeactivateLabour, fetchAdvanceReport, fetchAttendanceReport, fetchExpenseCategories, fetchLabourDeletionPreview, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, type AdvanceReportData, type AdvanceReportFilters, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type AttendanceReportFilters, type AttendanceReportStatus, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type LabourDeletionPreview } from "../lib/api";
+import { confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteOrDeactivateLabour, fetchExpenseCategories, fetchLabourDeletionPreview, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type LabourDeletionPreview } from "../lib/api";
 import { hasPermission } from "../lib/permissions";
 import { formatMoney } from "../lib/format";
 import {
@@ -100,74 +100,7 @@ function FormCard({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function LabourMultiSelect({
-  options,
-  selectedIds,
-  onChange,
-  label = "Labour",
-}: {
-  options: Labourer[];
-  selectedIds: string[];
-  onChange: (nextIds: string[]) => void;
-  label?: string;
-}) {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const [visibleCount, setVisibleCount] = useState(100);
-  const filtered = options
-    .filter((labourer) => labourer.name.toLowerCase().includes(search.trim().toLowerCase()))
-    .sort((a, b) => a.name.localeCompare(b.name));
-  const visible = filtered.slice(0, visibleCount);
-  const selectedCount = selectedIds.length;
-  const summary = selectedCount === 0 || selectedCount === options.length
-    ? "All Labour"
-    : `${selectedCount} Labour Selected`;
-  return (
-    <div className="report-labour-filter">
-      <span>{label}</span>
-      <button className="report-labour-filter__toggle" type="button" onClick={() => setOpen((current) => !current)}>
-        {summary}
-      </button>
-      {open && <div className="report-labour-filter__picker">
-        <SearchInput
-          placeholder={t("workforcePage.searchLabour")}
-          value={search}
-          onChange={(value) => {
-            setSearch(value);
-            setVisibleCount(100);
-          }}
-          onClear={() => setVisibleCount(100)}
-        />
-        <div className="report-labour-filter__actions">
-          <button type="button" onClick={() => onChange(filtered.map((labourer) => labourer.id))}>Select All</button>
-          <button type="button" onClick={() => onChange([])}>Clear Selection</button>
-        </div>
-        <div className="report-labour-filter__list">
-          {!filtered.length && <p className="empty-records">No labour found.</p>}
-          {visible.map((labourer) => (
-            <label key={labourer.id}>
-              <input
-                checked={selectedIds.includes(labourer.id)}
-                type="checkbox"
-                onChange={() => {
-                  if (selectedIds.includes(labourer.id)) onChange(selectedIds.filter((id) => id !== labourer.id));
-                  else onChange([...selectedIds, labourer.id]);
-                }}
-              />
-              <span>{labourer.name}</span>
-            </label>
-          ))}
-          {filtered.length > visibleCount && (
-            <button type="button" onClick={() => setVisibleCount((count) => count + 100)}>
-              Show more ({filtered.length - visibleCount} remaining)
-            </button>
-          )}
-        </div>
-      </div>}
-    </div>
-  );
-}
+const attendanceMark = (status?: "present" | "half_day" | "absent" | null) => status === "present" ? "P" : status === "half_day" ? "1/2" : status === "absent" ? "A" : "-";
 
 function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { openAttendanceOnLoad?: boolean; onAttendanceClose?: () => void }) {
   const { t } = useTranslation();
@@ -203,9 +136,6 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
   const [showInactiveLabour, setShowInactiveLabour] = useState(false);
   const [selectedLabourer, setSelectedLabourer] = useState<Labourer | null>(null);
   const [markingLabourers, setMarkingLabourers] = useState<Set<string>>(() => new Set());
-  const [showReport, setShowReport] = useState(false);
-  const [showAdvanceReport, setShowAdvanceReport] = useState(false);
-  const [showReportsMenu, setShowReportsMenu] = useState(false);
   const [showAdvanceEntry, setShowAdvanceEntry] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showAddLabour, setShowAddLabour] = useState(false);
@@ -379,7 +309,6 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
             {canManageLabour && <button type="button" onClick={() => setShowAddLabour(true)}>{t("workforcePage.addLabour")}</button>}
             {canAddAdvance && <button type="button" onClick={() => setShowAdvanceEntry(true)}>Advance</button>}
             {canManageLabour && <button type="button" onClick={() => setShowAddGroup(true)}>Groups</button>}
-            <button type="button" onClick={() => setShowReportsMenu(true)}>Reports</button>
           </div>
           {user?.workspaceId && hasPermission(user, "IMPORT_ATTENDANCE", user.workspaceId) && <button className="workforce-inline-link" type="button" onClick={() => {
             if (!navigator.onLine) window.dispatchEvent(new CustomEvent("muzare-toast", { detail: t("errors.csvImportOnlineOnly") }));
@@ -592,17 +521,6 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
           setShowAdvanceEntry(false);
         }}
       />}
-      {showReportsMenu && <ReportsMenuPanel
-        onClose={() => setShowReportsMenu(false)}
-        onAttendanceReport={() => {
-          setShowReportsMenu(false);
-          setShowReport(true);
-        }}
-        onAdvanceReport={() => {
-          setShowReportsMenu(false);
-          setShowAdvanceReport(true);
-        }}
-      />}
       {selectedLabourer && labourAction === "production" && <AddProductionPanel labourer={selectedLabourer} onClose={() => setLabourAction(null)} onSave={saveProduction} />}
       {selectedLabourer && labourAction === "payment" && <AddPaymentPanel labourer={selectedLabourer} onClose={() => setLabourAction(null)} onSave={savePayment} />}
       {showAddGroup && <AddGroupPanel onClose={() => setShowAddGroup(false)} onSave={async (record) => {
@@ -632,26 +550,6 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
             setLabourAction(null); setSelectedLabourer(null);
             showToast(action === "deleted" ? t("workforcePage.labourDeleted") : t("workforcePage.labourDeactivated"));
           }}
-        />
-      )}
-      {showReport && token && user?.workspaceId && sync.farmId && sync.seasonId && (
-        <AttendanceReportPanel
-          token={token}
-          workspaceId={user.workspaceId}
-          farmId={sync.farmId}
-          seasonId={sync.seasonId}
-          labourers={labourers}
-          onClose={() => setShowReport(false)}
-        />
-      )}
-      {showAdvanceReport && token && user?.workspaceId && sync.farmId && sync.seasonId && (
-        <AdvanceReportPanel
-          token={token}
-          workspaceId={user.workspaceId}
-          farmId={sync.farmId}
-          seasonId={sync.seasonId}
-          labourers={labourers}
-          onClose={() => setShowAdvanceReport(false)}
         />
       )}
       {showImport && token && user?.workspaceId && sync.farmId && sync.seasonId && (
@@ -942,160 +840,6 @@ function AddAdvancePanel({ labourer, accounts, onClose, onSave }: { labourer: La
   </ActionPanel>;
 }
 
-function AdvanceReportPanel({
-  token, workspaceId, farmId, seasonId, labourers, onClose,
-}: {
-  token: string; workspaceId: string; farmId: string; seasonId: string; labourers: Labourer[]; onClose: () => void;
-}) {
-  const { t } = useTranslation();
-  const [filters, setFilters] = useState<AdvanceReportFilters>({ farmId, seasonId, from: `${today().slice(0, 8)}01`, to: today(), labourIds: [] });
-  const [groupFilterId, setGroupFilterId] = useState("all");
-  const [paymentTypeFilter, setPaymentTypeFilter] = useState<PaymentType | "all">("all");
-  const [submitted, setSubmitted] = useState<AdvanceReportFilters | null>(null);
-  const activeGroups = labourers.reduce<Map<string, string>>((map, labourer) => {
-    if (labourer.groupId && labourer.group) map.set(labourer.groupId, labourer.group);
-    return map;
-  }, new Map());
-  const labourOptions = labourers
-    .filter((labourer) => groupFilterId === "all" || labourer.groupId === groupFilterId)
-    .filter((labourer) => paymentTypeFilter === "all" || (labourer.paymentType ?? "daily_wage") === paymentTypeFilter)
-    .sort((a, b) => a.name.localeCompare(b.name));
-  const report = useQuery({
-    queryKey: [
-      "advance-report",
-      workspaceId,
-      farmId,
-      seasonId,
-      submitted?.from,
-      submitted?.to,
-      submitted?.labourIds?.join(","),
-      submitted?.labourIds?.length ?? 0,
-    ],
-    queryFn: () => fetchAdvanceReport(token, workspaceId, submitted!),
-    enabled: Boolean(submitted),
-  });
-  const exportCsv = (data: AdvanceReportData) => {
-    if (!data.metadata) return;
-    const rows = [
-      ["Farm Name", data.metadata.farmName],
-      ["Season", data.metadata.seasonName],
-      ["Date From", data.metadata.from],
-      ["Date To", data.metadata.to],
-      [],
-      ["Labour Name", "Date", "Advance Amount", "Paid From", "Notes"],
-      ...data.records.map((item) => [item.labourName, item.date, item.amount, item.accountName || "-", item.notes || "-"]),
-      [],
-      ["Labour", "Records", "Total"],
-      ...data.summaries.map((item) => [item.labourName, item.count, item.total]),
-      ["Grand Total", "", data.grandTotal],
-    ];
-    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll("\"", "\"\"")}"`).join(",")).join("\n");
-    const href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    const link = document.createElement("a");
-    link.href = href;
-    link.download = `labour-advance-report-${filters.from}-${filters.to}.csv`;
-    link.click();
-    URL.revokeObjectURL(href);
-  };
-
-  return <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}>
-    <section className="attendance-report-dialog" role="dialog" aria-modal="true" aria-labelledby="advance-report-title" onClick={(event) => event.stopPropagation()}>
-      <header className="attendance-report-header">
-        <div><span>{t("workforcePage.labourRegister")}</span><h2 id="advance-report-title">{t("reports.advanceReportTitle")}</h2></div>
-        <button className="attendance-report-close" type="button" onClick={onClose} aria-label={t("reports.closeAdvanceReport")}><X size={19} /></button>
-      </header>
-      <form className="attendance-report-filters" onSubmit={(event) => {
-        event.preventDefault();
-        const effectiveLabourIds = filters.labourIds && filters.labourIds.length > 0 ? filters.labourIds : labourOptions.map((labourer) => labourer.id);
-        setSubmitted({ ...filters, labourIds: effectiveLabourIds });
-      }}>
-        <label><span>{t("reports.dateFrom")}</span><input required type="date" value={filters.from} onChange={(event) => setFilters({ ...filters, from: event.target.value })} /></label>
-        <label><span>{t("reports.dateTo")}</span><input required type="date" value={filters.to} onChange={(event) => setFilters({ ...filters, to: event.target.value })} /></label>
-        <label><span>Group</span><select value={groupFilterId} onChange={(event) => {
-          setGroupFilterId(event.target.value);
-          setFilters((current) => ({ ...current, labourIds: [] }));
-        }}>
-          <option value="all">All Groups</option>
-          {[...activeGroups.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([id, name]) => (
-            <option key={id} value={id}>{name}</option>
-          ))}
-        </select></label>
-        <label><span>Payment Type</span><select value={paymentTypeFilter} onChange={(event) => {
-          setPaymentTypeFilter(event.target.value as PaymentType | "all");
-          setFilters((current) => ({ ...current, labourIds: [] }));
-        }}>
-          <option value="all">All Types</option>
-          <option value="daily_wage">Daily Wage</option>
-          <option value="production_based">Production Based</option>
-          <option value="contract_lump_sum">Contract</option>
-          <option value="monthly_salary">Monthly Salary</option>
-          <option value="other">Other</option>
-        </select></label>
-        <LabourMultiSelect
-          label={t("reports.labourFilter")}
-          options={labourOptions}
-          selectedIds={filters.labourIds ?? []}
-          onChange={(nextIds) => setFilters((current) => ({ ...current, labourIds: nextIds }))}
-        />
-        <footer className="attendance-report-form-actions">
-          <button className="attendance-report-cancel" type="button" onClick={onClose}>{t("common.close")}</button>
-          <button className="attendance-report-generate" type="submit">{t("reports.generateReport")}</button>
-        </footer>
-      </form>
-      {submitted && <div className="attendance-report-output">
-        {report.isFetching && <p>{t("reports.generatingReport")}</p>}
-        {report.isError && <p className="error">{report.error.message}</p>}
-        {report.data && !report.data.records.length && <Empty>{t("reports.noAdvancesForPeriod")}</Empty>}
-        {report.data && report.data.records.length > 0 && <>
-          <div className="attendance-report-actions">
-            <button type="button" onClick={() => window.print()}>{t("reports.print")}</button>
-            <button type="button" onClick={() => exportCsv(report.data!)}>{t("reports.exportCsv")}</button>
-          </div>
-          <section className="attendance-report-card">
-            <strong>{t("reports.grandTotal")}</strong>
-            <p>{money(report.data.grandTotal)}</p>
-            <strong>{t("reports.totalsByLabour")}</strong>
-            <div className="attendance-import-table-wrap report-wide-table">
-              <table>
-                <thead><tr><th>{t("reports.labour")}</th><th>{t("reports.transactions")}</th><th>{t("reports.total")}</th></tr></thead>
-                <tbody>{report.data.summaries.map((item) => <tr key={item.labourerId}><td>{item.labourName}</td><td>{item.count}</td><td>{money(item.total)}</td></tr>)}</tbody>
-              </table>
-            </div>
-            <div className="report-mobile-cards">
-              {report.data.summaries.map((item) => <article className="report-mobile-card" key={`mobile-${item.labourerId}`}>
-                <header><strong>{item.labourName}</strong><b>{money(item.total)}</b></header>
-                <span>{t("reports.transactions")}: {item.count}</span>
-              </article>)}
-            </div>
-          </section>
-          <section className="attendance-report-card">
-            <strong>{t("advancesPage.advanceHistory")}</strong>
-            <div className="attendance-import-table-wrap report-wide-table">
-              <table>
-                <thead><tr><th>{t("reports.labour")}</th><th>{t("workforcePage.date")}</th><th>{t("reports.advanceSar")}</th><th>{t("advancesPage.paidFrom")}</th><th>{t("reports.notes")}</th></tr></thead>
-                <tbody>{report.data.records.map((item) => <tr key={item.id}><td>{item.labourName}</td><td>{item.date}</td><td>{money(item.amount)}</td><td>{item.accountName || "-"}</td><td>{item.notes || "-"}</td></tr>)}</tbody>
-              </table>
-            </div>
-            <div className="report-mobile-cards">
-              {report.data.records.map((item) => <article className="report-mobile-card" key={`mobile-${item.id}`}>
-                <header><strong>{item.labourName}</strong><b>{money(item.amount)}</b></header>
-                <span>{item.date}</span>
-                <details>
-                  <summary>{t("accountsPage.viewDetails")}</summary>
-                  <dl>
-                    <div><dt>{t("advancesPage.paidFrom")}</dt><dd>{item.accountName || "-"}</dd></div>
-                    <div><dt>{t("reports.notes")}</dt><dd>{item.notes || "-"}</dd></div>
-                  </dl>
-                </details>
-              </article>)}
-            </div>
-          </section>
-        </>}
-      </div>}
-    </section>
-  </div>;
-}
-
 function DeactivateLabourPanel({ token, workspaceId, labourer, onClose, onComplete }: {
   token: string; workspaceId: string; labourer: Labourer; onClose: () => void; onComplete: (action: "deleted" | "deactivated") => Promise<void>;
 }) {
@@ -1195,28 +939,6 @@ function AdvanceEntryPanel({
       {error && <p className="worker-action-error">{error}</p>}
       <footer><button type="button" onClick={onClose}>Cancel</button><button disabled={busy} type="submit">{busy ? "Saving..." : "Save"}</button></footer>
     </form>
-  </ActionPanel>;
-}
-
-function ReportsMenuPanel({
-  onClose,
-  onAttendanceReport,
-  onAdvanceReport,
-}: {
-  onClose: () => void;
-  onAttendanceReport: () => void;
-  onAdvanceReport: () => void;
-}) {
-  const showToast = (message: string) => window.dispatchEvent(new CustomEvent("muzare-toast", { detail: message }));
-  return <ActionPanel title="Reports" onClose={onClose}>
-    <div className="worker-action-form workforce-reports-menu">
-      <button type="button" onClick={onAttendanceReport}>Attendance Report</button>
-      <button type="button" onClick={onAdvanceReport}>Advance Report</button>
-      <button type="button" onClick={() => showToast("Production report will be available in Reports shortly.")}>Production Report</button>
-      <button type="button" onClick={() => showToast("Labour ledger report will be available in Reports shortly.")}>Labour Ledger</button>
-      <button type="button" onClick={() => showToast("Settlement report will be available in Reports shortly.")}>Settlement Report</button>
-      <footer><button type="button" onClick={onClose}>Close</button></footer>
-    </div>
   </ActionPanel>;
 }
 
@@ -1443,159 +1165,6 @@ function AttendanceImportPanel({ token, workspaceId, farmId, seasonId, onClose, 
   </div>;
 }
 
-function AttendanceReportPanel({
-  token, workspaceId, farmId, seasonId, labourers, onClose,
-}: {
-  token: string; workspaceId: string; farmId: string; seasonId: string; labourers: Labourer[]; onClose: () => void;
-}) {
-  const { t } = useTranslation();
-  const sync = useSyncState();
-  const [filters, setFilters] = useState<AttendanceReportFilters>({
-    farmId, seasonId, from: `${today().slice(0, 8)}01`, to: today(), labourIds: [],
-  });
-  const [submitted, setSubmitted] = useState<AttendanceReportFilters | null>(null);
-  const report = useQuery({
-    queryKey: ["attendance-report", workspaceId, farmId, seasonId, submitted?.from, submitted?.to, submitted?.labourIds?.join(","), submitted?.status],
-    queryFn: () => fetchAttendanceReport(token, workspaceId, submitted!),
-    enabled: Boolean(submitted),
-  });
-  const exportCsv = () => {
-    if (!report.data?.metadata) return;
-    const { metadata, dates, summaries, advances } = report.data;
-    const statusFor = (labourerId: string, date: string) => summaries.find((item) => item.id === labourerId)?.records.find((item) => item.date === date)?.status;
-    const advanceFor = (labourerId: string, date: string) => advances.filter((item) => item.labourerId === labourerId && item.date === date).reduce((sum, item) => sum + item.amount, 0);
-    const rows = [
-      ["Farm Name", metadata.farmName], ["Season", metadata.seasonName], ["Date From", metadata.from], ["Date To", metadata.to],
-      [], ["Labour Name", "P Total", "Half Day Total", "Absent Total", "Advance Total", ...dates],
-      ...summaries.map((summary) => [
-        summary.name, summary.presentDays, summary.halfDays, summary.absentDays,
-        advances.filter((item) => item.labourerId === summary.id).reduce((sum, item) => sum + item.amount, 0),
-        ...dates.map((date) => {
-          const advance = advanceFor(summary.id, date);
-          return `${attendanceMark(statusFor(summary.id, date))}${advance ? ` | Advance: ${advance}` : ""}`;
-        }),
-      ]),
-      ["Grand Total", summaries.reduce((sum, item) => sum + item.presentDays, 0), summaries.reduce((sum, item) => sum + item.halfDays, 0),
-        summaries.reduce((sum, item) => sum + item.absentDays, 0), advances.reduce((sum, item) => sum + item.amount, 0)],
-      ["Daily Payable Total", "", "", "", "", ...dates.map((date) => summaries.reduce((sum, item) => sum + payableValue(statusFor(item.id, date)), 0))],
-    ];
-    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll("\"", "\"\"")}"`).join(",")).join("\n");
-    const href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    const link = document.createElement("a");
-    link.href = href; link.download = `attendance-report-${filters.from}-${filters.to}.csv`; link.click();
-    URL.revokeObjectURL(href);
-  };
-  const data = report.data;
-  const totalPresent = data?.summaries.reduce((sum, item) => sum + item.presentDays, 0) ?? 0;
-  const totalHalf = data?.summaries.reduce((sum, item) => sum + item.halfDays, 0) ?? 0;
-  const totalAbsent = data?.summaries.reduce((sum, item) => sum + item.absentDays, 0) ?? 0;
-  const totalAdvance = data?.advances.reduce((sum, item) => sum + item.amount, 0) ?? 0;
-  const totalWage = data?.summaries.reduce((sum, item) => sum + item.totalWage, 0) ?? 0;
-  const workerAdvance = (labourerId: string) => data?.advances.filter((item) => item.labourerId === labourerId).reduce((sum, item) => sum + item.amount, 0) ?? 0;
-  const dailyAdvance = (labourerId: string, date: string) => data?.advances.filter((item) => item.labourerId === labourerId && item.date === date).reduce((sum, item) => sum + item.amount, 0) ?? 0;
-  const dailyStatus = (labourerId: string, date: string) => data?.records.find((item) => item.labourerId === labourerId && item.date === date)?.status;
-  return (
-    <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}>
-      <section className={`attendance-report-dialog ${data?.metadata ? "attendance-report-dialog--preview" : ""}`} role="dialog" aria-modal="true" aria-labelledby="attendance-report-title" onClick={(event) => event.stopPropagation()}>
-        <header className="attendance-report-header">
-          <div><span>{t("workforcePage.labourRegister")}</span><h2 id="attendance-report-title">{t("reports.attendanceReportTitle")}</h2></div>
-          <button className="attendance-report-close" type="button" onClick={onClose} aria-label={t("reports.closeReport")}><X size={19} /></button>
-        </header>
-        <form className="attendance-report-filters" onSubmit={(event) => { event.preventDefault(); setSubmitted({ ...filters }); }}>
-          <label><span>{t("reports.dateFrom")}</span><input required type="date" value={filters.from} onChange={(event) => setFilters({ ...filters, from: event.target.value })} /></label>
-          <label><span>{t("reports.dateTo")}</span><input required type="date" value={filters.to} onChange={(event) => setFilters({ ...filters, to: event.target.value })} /></label>
-          <LabourMultiSelect
-            label={t("reports.labour")}
-            options={labourers}
-            selectedIds={filters.labourIds ?? []}
-            onChange={(nextIds) => setFilters({ ...filters, labourIds: nextIds, labourId: undefined })}
-          />
-          <label><span>{t("reports.status")}</span><select value={filters.status ?? ""} onChange={(event) => setFilters({ ...filters, status: (event.target.value || undefined) as AttendanceReportStatus | undefined })}>
-            <option value="">{t("workforcePage.allLabour")}</option><option value="present">{t("workforcePage.present")}</option><option value="half_day">{t("workforcePage.halfDay")}</option><option value="absent">{t("workforcePage.absent")}</option>
-          </select></label>
-          <footer className="attendance-report-form-actions">
-            <button className="attendance-report-cancel" type="button" onClick={onClose}>{t("common.close")}</button>
-            <button className="attendance-report-generate" type="submit">{t("reports.generateReport")}</button>
-          </footer>
-        </form>
-        {submitted && <div className="attendance-report-output">
-          {report.isFetching && <p>{t("reports.generatingReport")}</p>}
-          {report.isError && <p className="error">{report.error.message}</p>}
-          {report.data && !report.data.summaries.length && <Empty>{t("reports.noAttendanceForPeriod")}</Empty>}
-          {data?.metadata && data.summaries.length > 0 && <AttendanceRegister
-            data={data} syncStatus={sync.status} totalPresent={totalPresent} totalHalf={totalHalf} totalAbsent={totalAbsent}
-            totalAdvance={totalAdvance} totalWage={totalWage} workerAdvance={workerAdvance} dailyAdvance={dailyAdvance}
-            dailyStatus={dailyStatus} onClose={onClose} onCsv={exportCsv}
-          />}
-        </div>}
-      </section>
-    </div>
-  );
-}
-
-const payableValue = (status?: AttendanceReportStatus) => status === "present" ? 1 : status === "half_day" ? 0.5 : 0;
-const attendanceMark = (status?: AttendanceReportStatus) => status === "present" ? "P" : status === "half_day" ? "1/2" : status === "absent" ? "A" : "-";
-const compactAdvance = (amount: number) => new Intl.NumberFormat("en", { maximumFractionDigits: 2 }).format(amount);
-const compactDate = (date: string) => `${date.slice(8, 10)}/${date.slice(5, 7)}`;
-const compactFullDate = (date: string) => `${date.slice(8, 10)}/${date.slice(5, 7)}/${date.slice(0, 4)}`;
-
-function AttendanceRegister({ data, syncStatus, totalPresent, totalHalf, totalAbsent, totalAdvance, totalWage, workerAdvance, dailyAdvance, dailyStatus, onClose, onCsv }: {
-  data: import("../lib/api").AttendanceReportData; syncStatus: string; totalPresent: number; totalHalf: number; totalAbsent: number;
-  totalAdvance: number; totalWage: number; workerAdvance: (id: string) => number; dailyAdvance: (id: string, date: string) => number;
-  dailyStatus: (id: string, date: string) => AttendanceReportStatus | undefined; onClose: () => void; onCsv: () => void;
-}) {
-  const { t } = useTranslation();
-  const metadata = data.metadata!;
-  const print = () => {
-    if (data.dates.length > 50 && !window.confirm(t("reports.printRangeWarning"))) return;
-    window.print();
-  };
-  return <section className="attendance-register-preview">
-    <div className="attendance-report-actions no-print"><button type="button" onClick={print}>{t("reports.print")}</button><button type="button" onClick={print}>{t("reports.exportPdf")}</button><button type="button" onClick={onCsv}>{t("reports.exportCsv")}</button><button type="button" onClick={onClose}>{t("common.close")}</button></div>
-    <header className="register-header screen-only">
-      <div><span>{t("reports.farmLabourRegister")}</span><h2>{t("reports.attendanceReportTitle")}</h2><strong>{metadata.farmName}</strong><p>{t("currentSeason")}: {metadata.seasonName}</p></div>
-      <dl><div><dt>{t("reports.dateRange")}</dt><dd>{metadata.from} {t("reports.to")} {metadata.to}</dd></div><div><dt>{t("reports.generated")}</dt><dd>{new Date(metadata.generatedAt).toLocaleString()}</dd></div><div><dt>{t("reports.generatedBy")}</dt><dd>{metadata.generatedBy}</dd></div><div><dt>{t("reports.syncStatus")}</dt><dd>{syncStatus}</dd></div></dl>
-    </header>
-    <div className="register-summary screen-only">
-      <span>Total labour<strong>{data.summaries.length}</strong></span><span>Total P<strong>{totalPresent}</strong></span><span>Total 1/2<strong>{totalHalf}</strong></span>
-      <span>Total A<strong>{totalAbsent}</strong></span><span>Total advance<strong>{money(totalAdvance)}</strong></span><span>Total wages<strong>{money(totalWage)}</strong></span>
-    </div>
-    <header className="print-summary">
-      <b>FARM LABOUR REGISTER</b><strong>Attendance Report</strong>
-      <span>Farm: {metadata.farmName} | Season: {metadata.seasonName}</span>
-      <span>Period: {compactFullDate(metadata.from)} - {compactFullDate(metadata.to)} | Generated: {compactFullDate(metadata.generatedAt.slice(0, 10))}</span>
-      <span>Total Labour: {data.summaries.length} | P: {totalPresent} | 1/2: {totalHalf} | A: {totalAbsent} | Wages (SAR): {compactAdvance(totalWage)} | Advances (SAR): {compactAdvance(totalAdvance)} | Net (SAR): {compactAdvance(totalWage - totalAdvance)}</span>
-    </header>
-    <div className="register-table-wrap report-wide-table"><table className="attendance-register-table">
-      <thead><tr><th>#</th><th>Labour Name</th><th>P</th><th>1/2</th><th>A</th><th>Wages (SAR)</th><th>Adv (SAR)</th><th>Net (SAR)</th>{data.dates.map((date) => <th key={date}>{compactDate(date)}</th>)}</tr></thead>
-      <tbody>{data.summaries.map((summary, index) => { const advance = workerAdvance(summary.id); return <tr key={summary.id}><td>{index + 1}</td><th>{summary.name}</th><td>{summary.presentDays}</td><td>{summary.halfDays}</td><td>{summary.absentDays}</td><td>{compactAdvance(summary.totalWage)}</td><td>{compactAdvance(advance)}</td><td>{compactAdvance(summary.totalWage - advance)}</td>
-        {data.dates.map((date) => { const status = dailyStatus(summary.id, date); const advance = dailyAdvance(summary.id, date); return <td className={`register-status register-status--${status ?? "empty"}`} key={date}><b>{attendanceMark(status)}</b>{advance > 0 && <small>{compactAdvance(advance)}</small>}</td>; })}
-      </tr>; })}</tbody>
-      <tfoot><tr><th colSpan={2}>Grand Total</th><th>{totalPresent}</th><th>{totalHalf}</th><th>{totalAbsent}</th><th>{compactAdvance(totalWage)}</th><th>{compactAdvance(totalAdvance)}</th><th>{compactAdvance(totalWage - totalAdvance)}</th><th colSpan={data.dates.length}></th></tr>
-      <tr><th colSpan={8}>Daily payable total</th>{data.dates.map((date) => <th key={date}>{data.summaries.reduce((sum, item) => sum + payableValue(dailyStatus(item.id, date)), 0)}</th>)}</tr></tfoot>
-    </table></div>
-    <div className="report-mobile-cards screen-only">
-      {data.summaries.map((summary) => { const advance = workerAdvance(summary.id); return <article className="report-mobile-card" key={`mobile-${summary.id}`}>
-        <header><strong>{summary.name}</strong><b>{money(summary.totalWage - advance)}</b></header>
-        <div className="report-mobile-card__metrics">
-          <span>P: <b>{summary.presentDays}</b></span><span>1/2: <b>{summary.halfDays}</b></span><span>A: <b>{summary.absentDays}</b></span>
-        </div>
-        <details>
-          <summary>{t("accountsPage.viewDetails")}</summary>
-          <dl>
-            <div><dt>Wages (SAR)</dt><dd>{compactAdvance(summary.totalWage)}</dd></div>
-            <div><dt>Adv (SAR)</dt><dd>{compactAdvance(advance)}</dd></div>
-          </dl>
-          <div className="report-mobile-card__days">
-            {data.dates.map((date) => { const status = dailyStatus(summary.id, date); const dailyAmount = dailyAdvance(summary.id, date); return <span className={`register-status register-status--${status ?? "empty"}`} key={date}><small>{compactDate(date)}</small><b>{attendanceMark(status)}</b>{dailyAmount > 0 && <small>{compactAdvance(dailyAmount)}</small>}</span>; })}
-          </div>
-        </details>
-      </article>; })}
-    </div>
-    <footer className="register-footer"><span><b>P</b> = {t("workforcePage.present")}</span><span><b>1/2</b> = {t("workforcePage.halfDay")}</span><span><b>A</b> = {t("workforcePage.absent")}</span><span><b>-</b> = {t("reports.noRecord")}</span></footer>
-  </section>;
-}
-
 function ExpenseImportPanel({ token, workspaceId, farmId, seasonId, onClose, onImported }: {
   token: string; workspaceId: string; farmId: string; seasonId: string; onClose: () => void; onImported: () => Promise<void>;
 }) {
@@ -1688,7 +1257,6 @@ function ExpensesModule() {
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
   const [accountId, setAccountId] = useState("");
-  const [vendor, setVendor] = useState("");
   const [notes, setNotes] = useState("");
   const [selectedVoucher, setSelectedVoucher] = useState<Voucher | null>(null);
   const [editingVoucher, setEditingVoucher] = useState<Voucher | null>(null);
@@ -1700,17 +1268,16 @@ function ExpensesModule() {
   const [voucherCategory, setVoucherCategory] = useState("");
   const [voucherSubcategory, setVoucherSubcategory] = useState("");
   const [voucherAccountId, setVoucherAccountId] = useState("");
-  const [voucherVendor, setVoucherVendor] = useState("");
   const showToast = (message: string) => window.dispatchEvent(new CustomEvent("muzare-toast", { detail: message }));
   const resetForm = () => {
     setDate(today()); setCategoryId(""); setCategorySearch(""); setSubcategoryId(""); setSubcategorySearch("");
-    setDescription(""); setAmount(""); setAccountId(""); setVendor(""); setNotes("");
+    setDescription(""); setAmount(""); setAccountId(""); setNotes("");
   };
   const openEdit = (voucher: Voucher) => {
     setSelectedVoucher(null); setEditingVoucher(voucher); setDate(voucher.date); setCategoryId(voucher.categoryId);
     setCategorySearch(voucher.category); setSubcategoryId(voucher.subcategoryId); setSubcategorySearch(voucher.subcategory);
     setDescription(voucher.description); setAmount(String(voucher.amount)); setAccountId(voucher.accountId);
-    setVendor(voucher.vendor ?? ""); setNotes(voucher.notes ?? "");
+    setNotes(voucher.notes ?? "");
   };
   const nextLocalVoucherNumber = () => {
     const highest = vouchers.reduce((max, item) => {
@@ -1729,7 +1296,7 @@ function ExpensesModule() {
       ...(editingVoucher ?? makeLocalRecord()), voucherNumber: editingVoucher?.voucherNumber ?? nextLocalVoucherNumber(), date,
       categoryId: category.id, category: category.name, subcategoryId: subcategory.id, subcategory: subcategory.name,
       description: description.trim(), amount: Number(amount), accountId: accountId || accounts[0]?.id || "",
-      vendor: vendor.trim() || undefined, notes: notes.trim() || undefined,
+      notes: notes.trim() || undefined,
     };
     await persistOperationalRecord("voucher", record);
     showToast(editingVoucher ? "Expense voucher updated successfully." : "Expense voucher saved successfully.");
@@ -1747,10 +1314,10 @@ function ExpensesModule() {
     return () => window.clearTimeout(timer);
   }, [voucherSearch]);
   const voucherSearchQuery = useQuery({
-    queryKey: ["expense-search", workspaceId, farmId, seasonId, debouncedVoucherSearch, voucherFrom, voucherTo, voucherCategory, voucherSubcategory, voucherAccountId, voucherVendor],
+    queryKey: ["expense-search", workspaceId, farmId, seasonId, debouncedVoucherSearch, voucherFrom, voucherTo, voucherCategory, voucherSubcategory, voucherAccountId],
     queryFn: () => searchExpenses(token!, workspaceId, {
       farmId: farmId!, seasonId: seasonId!, search: debouncedVoucherSearch || undefined, from: voucherFrom || undefined, to: voucherTo || undefined,
-      category: voucherCategory || undefined, subcategory: voucherSubcategory || undefined, accountId: voucherAccountId || undefined, vendor: voucherVendor.trim() || undefined,
+      category: voucherCategory || undefined, subcategory: voucherSubcategory || undefined, accountId: voucherAccountId || undefined,
     }),
     enabled: Boolean(token && workspaceId && farmId && seasonId && navigator.onLine),
   });
@@ -1768,12 +1335,11 @@ function ExpensesModule() {
       && (!voucherCategory || item.category === voucherCategory)
       && (!voucherSubcategory || item.subcategory === voucherSubcategory)
       && (!voucherAccountId || item.accountId === voucherAccountId)
-      && (!voucherVendor.trim() || (item.vendor ?? "").toLowerCase().includes(voucherVendor.trim().toLowerCase()))
       && (!normalizedSearch || [
         item.voucherNumber, item.description, item.notes ?? "", item.category, item.subcategory, accountName,
-        item.vendor ?? "", String(item.amount), item.date, shortDate,
+        String(item.amount), item.date, shortDate,
       ].some((value) => value.toLowerCase().includes(normalizedSearch)));
-  }, [accountById, voucherAccountId, voucherCategory, voucherFrom, voucherSearch, voucherSubcategory, voucherTo, voucherVendor]);
+  }, [accountById, voucherAccountId, voucherCategory, voucherFrom, voucherSearch, voucherSubcategory, voucherTo]);
   const filteredVouchers = useMemo(() => {
     const serverRecords = voucherSearchQuery.data?.records ?? [];
     const merged = navigator.onLine && voucherSearchQuery.data
@@ -1794,7 +1360,6 @@ function ExpensesModule() {
     || voucherCategory
     || voucherSubcategory
     || voucherAccountId
-    || voucherVendor.trim(),
   );
   const clearFilters = () => {
     setVoucherSearch("");
@@ -1804,7 +1369,6 @@ function ExpensesModule() {
     setVoucherCategory("");
     setVoucherSubcategory("");
     setVoucherAccountId("");
-    setVoucherVendor("");
   };
   useEffect(() => {
     const recordId = searchParams.get("recordId");
@@ -1843,7 +1407,6 @@ function ExpensesModule() {
           <select value={accountId || accounts[0]?.id || ""} onChange={(event) => setAccountId(event.target.value)}>
             {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
           </select>
-          <input value={vendor} placeholder={t("expensesPage.vendorOptional")} onChange={(event) => setVendor(event.target.value)} />
           <input value={notes} placeholder={t("expensesPage.notesOptional")} onChange={(event) => setNotes(event.target.value)} />
           <button type="submit">{editingVoucher ? t("expensesPage.updateVoucher") : t("expensesPage.saveVoucher")}</button>
           {editingVoucher && <button type="button" onClick={() => { setEditingVoucher(null); resetForm(); }}>{t("expensesPage.cancelEdit")}</button>}
@@ -1869,7 +1432,6 @@ function ExpensesModule() {
             <label className="expense-filter-field"><span>{t("expensesPage.paymentAccount")}</span><select aria-label={t("expensesPage.paymentAccount")} value={voucherAccountId} onChange={(event) => setVoucherAccountId(event.target.value)}>
               <option value="">{t("expensesPage.allAccounts")}</option>{accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select></label>
-            <label className="expense-filter-field"><span>{t("expensesPage.vendorPerson")}</span><input aria-label={t("expensesPage.vendorPerson")} placeholder={t("expensesPage.allVendors")} value={voucherVendor} onChange={(event) => setVoucherVendor(event.target.value)} /></label>
           </div>
         </div>
         <div className="expense-search-meta">
@@ -1895,7 +1457,6 @@ function ExpensesModule() {
             <div><dt>{t("expensesPage.date")}</dt><dd>{selectedVoucher.date}</dd></div><div><dt>{t("expensesPage.category")}</dt><dd>{selectedVoucher.category} / {selectedVoucher.subcategory}</dd></div>
             <div><dt>{t("expensesPage.description")}</dt><dd>{selectedVoucher.description}</dd></div><div><dt>{t("expensesPage.amount")}</dt><dd>{money(selectedVoucher.amount)}</dd></div>
             <div><dt>{t("expensesPage.paymentSource")}</dt><dd>{accounts.find((item) => item.id === selectedVoucher.accountId)?.name ?? t("expensesPage.unknownAccount")}</dd></div>
-            {selectedVoucher.vendor && <div><dt>{t("expensesPage.vendorPerson")}</dt><dd>{selectedVoucher.vendor}</dd></div>}
             {selectedVoucher.notes && <div><dt>{t("expensesPage.notesOptional")}</dt><dd>{selectedVoucher.notes}</dd></div>}
           </dl></div>
           <footer className="worker-dialog__footer">{canEditVouchers && <button className="worker-dialog__link" type="button" onClick={() => openEdit(selectedVoucher)}>{t("expensesPage.editVoucherAction")}</button>}{canEditVouchers && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => void removeVoucher(selectedVoucher)}>{t("expensesPage.deleteVoucher")}</button>}<button className="worker-dialog__close" type="button" onClick={() => setSelectedVoucher(null)}>{t("expensesPage.close")}</button></footer>

@@ -17,7 +17,6 @@ const querySchema = z.object({
   category: z.string().trim().max(100).optional(),
   subcategory: z.string().trim().max(100).optional(),
   accountId: z.string().min(1).max(255).optional(),
-  vendor: z.string().trim().max(200).optional(),
 });
 
 type AccountPayload = { name?: unknown };
@@ -52,7 +51,6 @@ export async function expenseSearchRoutes(app: FastifyInstance): Promise<void> {
     if (ownershipError) return reply.code(403).send({ message: ownershipError });
 
     const term = query.data.search ? `%${query.data.search.toLowerCase()}%` : null;
-    const vendor = query.data.vendor ? `%${query.data.vendor.toLowerCase()}%` : null;
     const records = await db.select().from(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, params.data.workspaceId),
       eq(operationalRecords.farmId, query.data.farmId),
@@ -64,14 +62,12 @@ export async function expenseSearchRoutes(app: FastifyInstance): Promise<void> {
       query.data.category ? sql`lower(coalesce(${operationalRecords.payload}->>'category', '')) = ${query.data.category.toLowerCase()}` : undefined,
       query.data.subcategory ? sql`lower(coalesce(${operationalRecords.payload}->>'subcategory', '')) = ${query.data.subcategory.toLowerCase()}` : undefined,
       query.data.accountId ? sql`${operationalRecords.payload}->>'accountId' = ${query.data.accountId}` : undefined,
-      vendor ? sql`lower(coalesce(${operationalRecords.payload}->>'vendor', '')) like ${vendor}` : undefined,
       term ? sql`(
         lower(coalesce(${operationalRecords.payload}->>'voucherNumber', '')) like ${term}
         or lower(coalesce(${operationalRecords.payload}->>'description', '')) like ${term}
         or lower(coalesce(${operationalRecords.payload}->>'notes', '')) like ${term}
         or lower(coalesce(${operationalRecords.payload}->>'category', '')) like ${term}
         or lower(coalesce(${operationalRecords.payload}->>'subcategory', '')) like ${term}
-        or lower(coalesce(${operationalRecords.payload}->>'vendor', '')) like ${term}
         or lower(coalesce(${operationalRecords.payload}->>'amount', '')) like ${term}
         or lower(coalesce(${operationalRecords.payload}->>'date', '')) like ${term}
         or replace(substring(coalesce(${operationalRecords.payload}->>'date', '') from 6 for 5), '-', '/') like ${term}

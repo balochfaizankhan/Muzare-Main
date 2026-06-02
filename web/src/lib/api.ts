@@ -152,12 +152,12 @@ export type AdvanceReportData = {
 };
 export type ExpenseSearchFilters = {
   farmId: string; seasonId: string; search?: string; from?: string; to?: string;
-  category?: string; subcategory?: string; accountId?: string; vendor?: string;
+  category?: string; subcategory?: string; accountId?: string;
 };
 export type ExpenseSearchRecord = {
   id: string; workspaceId: string; farmId: string; seasonId: string; voucherNumber: string; date: string;
   category: string; categoryId: string; subcategory: string; subcategoryId: string; description: string; amount: number;
-  accountId: string; accountName: string; vendor?: string; notes?: string; createdAt: string; updatedAt: string;
+  accountId: string; accountName: string; notes?: string; createdAt: string; updatedAt: string;
 };
 export type AttendanceReportFilters = {
   farmId: string; seasonId: string; from: string; to: string; labourId?: string; labourIds?: string[]; status?: AttendanceReportStatus;
@@ -320,7 +320,6 @@ export const searchExpenses = (token: string, workspaceId: string, filters: Expe
   if (filters.category) query.set("category", filters.category);
   if (filters.subcategory) query.set("subcategory", filters.subcategory);
   if (filters.accountId) query.set("accountId", filters.accountId);
-  if (filters.vendor) query.set("vendor", filters.vendor);
   return apiRequest<{ records: ExpenseSearchRecord[] }>(`/v1/workspace/${workspaceId}/expenses/search?${query.toString()}`, {}, token);
 };
 export const createExpenseSubcategory = (token: string, workspaceId: string, input: { categoryId: string; name: string }) =>
