@@ -134,11 +134,17 @@ test("attendance labour directory loads cache-first and keeps cached data during
 });
 
 test("mobile styles contain page overflow and keep navigation scrollable", async () => {
+  const modulePage = await source("web/src/pages/ModulePage.tsx");
   const styles = await source("web/src/styles.css");
   assert.match(styles, /html,\s*body \{[\s\S]*overflow-x: hidden;/);
   assert.match(styles, /#root \{[\s\S]*overflow-x: clip;/);
   assert.match(styles, /\.app-sidebar \{[\s\S]*overflow-x: auto;/);
   assert.match(styles, /\.shell-header \.toolbar__actions \{[\s\S]*flex-wrap: wrap;/);
+  assert.match(modulePage, /className="partner-position-cards"/);
+  assert.match(styles, /\.partner-position-cards \{ display: none; \}/);
+  assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*\.partner-position-table \{\s*display: none;[\s\S]*\.partner-position-cards \{\s*display: grid;/);
+  assert.match(styles, /\.record-list article span \{[\s\S]*overflow-wrap: anywhere;/);
+  assert.match(styles, /\.partner-ledger-submit \{[\s\S]*color: #fff !important;/);
 });
 
 test("report modal is compact responsive and dark-mode aware", async () => {
