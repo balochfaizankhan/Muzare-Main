@@ -111,7 +111,7 @@ export function DashboardPage() {
     );
     setTotals({
       presentToday: attendance.filter((item) => item.date === date && item.status === "present").length,
-      cartonsToday: dispatches.filter((item) => item.date === date).reduce((sum, item) => sum + item.cartons, 0),
+      cartonsToday: dispatches.filter((item) => item.date === date).reduce((sum, item) => sum + (item.items?.reduce((itemSum, entry) => itemSum + entry.cartons, 0) ?? item.cartons ?? 0), 0),
       totalSales,
       labourAdvances,
       totalExpenses,
@@ -140,8 +140,8 @@ export function DashboardPage() {
         id: item.id,
         path: "/workspace/dispatch",
         title: "Dispatch recorded",
-        detail: item.vehicleNumber,
-        value: `${item.cartons} cartons`,
+        detail: item.vehicleNumber ?? "Saved vehicle",
+        value: `${item.items?.reduce((sum, entry) => sum + entry.cartons, 0) ?? item.cartons ?? 0} cartons`,
         createdAt: item.createdAt,
       })),
       ...entries.map((item) => ({

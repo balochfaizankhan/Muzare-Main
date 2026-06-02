@@ -102,6 +102,8 @@ export type OperationalEntity =
   | "advance"
   | "labourPayment"
   | "productionEntry"
+  | "vehicle"
+  | "dateType"
   | "dispatch"
   | "sale"
   | "voucher"

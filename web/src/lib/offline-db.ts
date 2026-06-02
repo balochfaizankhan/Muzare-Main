@@ -20,6 +20,8 @@ export type PendingMutation = LocalRecord & {
     | "advance"
     | "labourPayment"
     | "productionEntry"
+    | "vehicle"
+    | "dateType"
     | "dispatch"
     | "sale"
     | "voucher"
@@ -92,10 +94,35 @@ export type Voucher = LocalRecord & {
 
 export type Dispatch = LocalRecord & {
   date: string;
-  vehicleNumber: string;
-  driverName: string;
-  produceType: string;
+  vehicleId?: string;
+  destination?: string;
+  notes?: string;
+  items?: DispatchItem[];
+  vehicleNumber?: string;
+  driverName?: string;
+  produceType?: string;
+  cartons?: number;
+};
+
+export type DispatchItem = {
+  id: string;
+  dateTypeId: string;
+  dateTypeName?: string;
   cartons: number;
+};
+
+export type Vehicle = LocalRecord & {
+  number: string;
+  driverName?: string;
+  driverPhone?: string;
+  notes?: string;
+  active: boolean;
+};
+
+export type DateType = LocalRecord & {
+  name: string;
+  notes?: string;
+  active: boolean;
 };
 
 export type Sale = LocalRecord & {
@@ -170,6 +197,8 @@ export const offlineDb = new Dexie("muzare-offline") as Dexie & {
   labourGroups: EntityTable<LabourGroup, "id">;
   accounts: EntityTable<Account, "id">;
   vouchers: EntityTable<Voucher, "id">;
+  vehicles: EntityTable<Vehicle, "id">;
+  dateTypes: EntityTable<DateType, "id">;
   dispatches: EntityTable<Dispatch, "id">;
   sales: EntityTable<Sale, "id">;
   partnerEntries: EntityTable<PartnerEntry, "id">;
@@ -288,6 +317,24 @@ offlineDb.version(7).stores({
   ]) {
     await transaction.table(tableName).clear();
   }
+});
+
+offlineDb.version(8).stores({
+  pendingMutations: "id, workspaceId, farmId, seasonId, entity, operation, createdAt",
+  labourers: "id, workspaceId, farmId, seasonId, name, groupId, createdAt, updatedAt, pendingSync",
+  labourGroups: "id, workspaceId, farmId, seasonId, name, active, createdAt, updatedAt, pendingSync",
+  attendance: "id, workspaceId, farmId, seasonId, labourerId, date, status, createdAt, updatedAt, pendingSync",
+  accounts: "id, workspaceId, farmId, seasonId, name, type, createdAt, updatedAt, pendingSync",
+  vouchers: "id, workspaceId, farmId, seasonId, date, category, accountId, createdAt, updatedAt, pendingSync",
+  vehicles: "id, workspaceId, farmId, seasonId, number, active, createdAt, updatedAt, pendingSync",
+  dateTypes: "id, workspaceId, farmId, seasonId, name, active, createdAt, updatedAt, pendingSync",
+  dispatches: "id, workspaceId, farmId, seasonId, date, vehicleId, createdAt, updatedAt, pendingSync",
+  sales: "id, workspaceId, farmId, seasonId, date, buyerName, accountId, createdAt, updatedAt, pendingSync",
+  partnerEntries: "id, workspaceId, farmId, seasonId, date, partnerName, accountId, createdAt, updatedAt, pendingSync",
+  advances: "id, workspaceId, farmId, seasonId, date, labourerId, createdAt, updatedAt, pendingSync",
+  productionEntries: "id, workspaceId, farmId, seasonId, labourerId, date, productionUnit, createdAt, updatedAt, pendingSync",
+  labourPayments: "id, workspaceId, farmId, seasonId, labourerId, date, createdAt, updatedAt, pendingSync",
+  inventoryEntries: "id, workspaceId, farmId, seasonId, date, itemName, createdAt, updatedAt, pendingSync",
 });
 
 let activeWorkspaceId: string | null = null;

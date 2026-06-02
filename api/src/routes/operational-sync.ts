@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireUser, type AuthenticatedUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
@@ -17,6 +17,8 @@ const entities = [
   "advance",
   "labourPayment",
   "productionEntry",
+  "vehicle",
+  "dateType",
   "dispatch",
   "sale",
   "voucher",
@@ -49,7 +51,15 @@ const financialDeleteSchema = z.object({
   recordId: z.string().min(1),
   reason: z.string().trim().max(500).optional(),
 });
-const deleteRecordSchema = z.union([attendanceDeleteSchema, financialDeleteSchema]);
+const operationalDeleteSchema = z.object({
+  workspaceId: z.string().uuid(),
+  farmId: z.string().uuid(),
+  seasonId: z.string().uuid(),
+  entity: z.enum(["dispatch", "vehicle", "dateType"]),
+  recordId: z.string().min(1),
+  reason: z.string().trim().max(500).optional(),
+});
+const deleteRecordSchema = z.union([attendanceDeleteSchema, financialDeleteSchema, operationalDeleteSchema]);
 const dateSchema = z.string().date();
 const positiveAmountSchema = z.coerce.number().positive();
 const partnerEntryBaseSchema = z.object({
@@ -84,6 +94,35 @@ const financialPayloadSchemas = {
     date: dateSchema, amount: positiveAmountSchema, units: positiveAmountSchema, unitRate: positiveAmountSchema,
   }).passthrough(),
 } as const;
+const masterPayloadSchemas = {
+  vehicle: z.object({
+    number: z.string().trim().min(1),
+    driverName: z.string().optional(),
+    driverPhone: z.string().optional(),
+    notes: z.string().optional(),
+    active: z.boolean(),
+  }).passthrough(),
+  dateType: z.object({
+    name: z.string().trim().min(1),
+    notes: z.string().optional(),
+    active: z.boolean(),
+  }).passthrough(),
+} as const;
+const dispatchPayloadSchema = z.object({
+  date: dateSchema,
+  vehicleId: z.string().min(1),
+  destination: z.string().trim().optional(),
+  notes: z.string().trim().optional(),
+  items: z.array(z.object({
+    id: z.string().min(1),
+    dateTypeId: z.string().min(1),
+    cartons: z.coerce.number().int().positive(),
+  })).min(1),
+}).superRefine((record, context) => {
+  if (new Set(record.items.map((item) => item.dateTypeId)).size !== record.items.length) {
+    context.addIssue({ code: "custom", message: "A date type can only appear once in a dispatch.", path: ["items"] });
+  }
+}).passthrough();
 const localRecords = new Map<string, z.infer<typeof recordSchema>>();
 
 function requireWorkspaceWrite(user: AuthenticatedUser, workspaceId: string) {
@@ -91,7 +130,7 @@ function requireWorkspaceWrite(user: AuthenticatedUser, workspaceId: string) {
 }
 
 function requireEntityWrite(user: AuthenticatedUser, workspaceId: string, entity: typeof entities[number]) {
-  return !["labourer", "account"].includes(entity) || hasPermission(user, "MANAGE_RECORDS", workspaceId);
+  return !["labourer", "account", "vehicle", "dateType"].includes(entity) || hasPermission(user, "MANAGE_RECORDS", workspaceId);
 }
 
 const seasonRequiredEntities = new Set<typeof entities[number]>([
@@ -99,6 +138,8 @@ const seasonRequiredEntities = new Set<typeof entities[number]>([
   "advance",
   "labourPayment",
   "productionEntry",
+  "vehicle",
+  "dateType",
   "dispatch",
   "sale",
   "voucher",
@@ -135,6 +176,43 @@ async function allocateVoucherNumber(
     },
   }).returning({ lastNumber: expenseVoucherSequences.lastNumber });
   return `V-${String(sequence!.lastNumber).padStart(4, "0")}`;
+}
+
+async function inactiveDispatchReference(
+  workspaceId: string,
+  farmId: string,
+  seasonId: string,
+  entityType: "vehicle" | "dateType",
+  ids: string[],
+) {
+  if (!ids.length) return false;
+  const records = await db.select({ clientRecordId: operationalRecords.clientRecordId, payload: operationalRecords.payload })
+    .from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, workspaceId),
+      eq(operationalRecords.farmId, farmId),
+      eq(operationalRecords.seasonId, seasonId),
+      eq(operationalRecords.entityType, entityType),
+      inArray(operationalRecords.clientRecordId, ids),
+    ));
+  return records.length !== ids.length || records.some((record) => record.payload.active === false || record.payload.deletedAt);
+}
+
+async function dispatchMasterIsUsed(
+  workspaceId: string,
+  farmId: string,
+  seasonId: string,
+  entity: "vehicle" | "dateType",
+  recordId: string,
+) {
+  const dispatches = await db.select({ payload: operationalRecords.payload }).from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, workspaceId),
+    eq(operationalRecords.farmId, farmId),
+    eq(operationalRecords.seasonId, seasonId),
+    eq(operationalRecords.entityType, "dispatch"),
+  ));
+  return dispatches.some(({ payload }) => !payload.deletedAt && (entity === "vehicle"
+    ? payload.vehicleId === recordId
+    : Array.isArray(payload.items) && payload.items.some((item: { dateTypeId?: unknown }) => item.dateTypeId === recordId)));
 }
 
 export async function operationalSyncRoutes(app: FastifyInstance): Promise<void> {
@@ -194,6 +272,21 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         fields: financialPayload.error.issues.map((issue) => `record.${issue.path.join(".")}`),
       });
     }
+    const masterPayloadSchema = masterPayloadSchemas[parsed.data.entity as keyof typeof masterPayloadSchemas];
+    const masterPayload = masterPayloadSchema?.safeParse(parsed.data.record);
+    if (masterPayload && !masterPayload.success) {
+      return reply.code(400).send({
+        message: `Invalid ${parsed.data.entity} master record.`,
+        fields: masterPayload.error.issues.map((issue) => `record.${issue.path.join(".")}`),
+      });
+    }
+    const dispatchPayload = parsed.data.entity === "dispatch" ? dispatchPayloadSchema.safeParse(parsed.data.record) : null;
+    if (dispatchPayload && !dispatchPayload.success) {
+      return reply.code(400).send({
+        message: "Dispatch details are invalid.",
+        fields: dispatchPayload.error.issues.map((issue) => `record.${issue.path.join(".")}`),
+      });
+    }
     const partnerEntry = parsed.data.entity === "partnerEntry" ? partnerEntryPayloadSchema.safeParse(parsed.data.record) : null;
     if (partnerEntry && !partnerEntry.success) {
       return reply.code(400).send({
@@ -226,8 +319,21 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       ledgerId: parsed.data.record.ledgerId,
       labourerId: parsed.data.record.labourerId,
       groupId: parsed.data.record.groupId,
+      vehicleId: parsed.data.record.vehicleId,
+      dateTypeIds: Array.isArray(parsed.data.record.items)
+        ? parsed.data.record.items.map((item: { dateTypeId?: unknown }) => item.dateTypeId)
+        : undefined,
     });
     if (ownershipError) return reply.code(403).send({ message: ownershipError });
+    if (dispatchPayload?.success) {
+      const dateTypeIds = dispatchPayload.data.items.map((item) => item.dateTypeId);
+      if (await inactiveDispatchReference(parsed.data.workspaceId, parsed.data.farmId!, parsed.data.seasonId!, "vehicle", [dispatchPayload.data.vehicleId])) {
+        return reply.code(403).send({ message: "Select an active vehicle from this workspace farm and season." });
+      }
+      if (await inactiveDispatchReference(parsed.data.workspaceId, parsed.data.farmId!, parsed.data.seasonId!, "dateType", dateTypeIds)) {
+        return reply.code(403).send({ message: "Select active date types from this workspace farm and season." });
+      }
+    }
     const expenseCategory = parsed.data.entity === "voucher"
       ? await resolveExpenseCategory(parsed.data.workspaceId, parsed.data.record.categoryId, parsed.data.record.subcategoryId)
       : null;
@@ -337,8 +443,9 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     if (localDevelopmentMode) {
       const key = `${parsed.data.workspaceId}:${parsed.data.entity}:${parsed.data.recordId}`;
       const existing = localRecords.get(key);
-      if (parsed.data.entity !== "attendance" && existing) {
-        localRecords.set(key, { ...existing, record: { ...existing.record, deletedAt: new Date().toISOString(), deletionReason: parsed.data.reason } });
+      const softDelete = ["partnerEntry", "advance", "voucher"].includes(parsed.data.entity);
+      if (softDelete && existing) {
+        localRecords.set(key, { ...existing, record: { ...existing.record, deletedAt: new Date().toISOString(), deletionReason: "reason" in parsed.data ? parsed.data.reason : undefined } });
       } else {
         localRecords.delete(key);
       }
@@ -369,6 +476,21 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         eq(operationalRecords.clientRecordId, parsed.data.recordId),
       )).limit(1);
       if (!entry) return reply.code(204).send();
+      if ((parsed.data.entity === "vehicle" || parsed.data.entity === "dateType")
+        && await dispatchMasterIsUsed(parsed.data.workspaceId, parsed.data.farmId, parsed.data.seasonId, parsed.data.entity, parsed.data.recordId)) {
+        return reply.code(409).send({ message: `${parsed.data.entity === "vehicle" ? "Vehicle" : "Date type"} cannot be deleted because it is used by a dispatch.` });
+      }
+      if (parsed.data.entity === "dispatch" || parsed.data.entity === "vehicle" || parsed.data.entity === "dateType") {
+        const [deleted] = await db.delete(operationalRecords).where(eq(operationalRecords.id, entry.id)).returning({ id: operationalRecords.id });
+        if (deleted) {
+          await db.insert(auditLogs).values({
+            workspaceId: parsed.data.workspaceId, userId: request.appUser.id, farmId: parsed.data.farmId,
+            action: `${parsed.data.entity}_deleted`, entityType: parsed.data.entity, entityId: deleted.id,
+            details: { clientRecordId: parsed.data.recordId },
+          });
+        }
+        return reply.code(204).send();
+      }
       if (entry.payload.deletedAt) return reply.code(204).send();
       const deletedAt = new Date();
       const deletionReason = parsed.data.reason ?? "";

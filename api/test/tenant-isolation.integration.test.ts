@@ -90,7 +90,7 @@ after(async () => {
 });
 
 test("Alpha and Bravo operational records remain isolated", async () => {
-  for (const entity of ["voucher", "attendance", "sale", "dispatch"]) {
+  for (const entity of ["voucher", "attendance", "sale"]) {
     const alphaRecord = entity === "voucher" || entity === "sale" ? financialRecord(alpha, entity) : {};
     const bravoRecord = entity === "voucher" || entity === "sale" ? financialRecord(bravo, entity) : {};
     assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, entity, randomUUID(), alphaRecord))).statusCode, 200);
@@ -103,8 +103,8 @@ test("Alpha and Bravo operational records remain isolated", async () => {
   assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "partnerEntry", randomUUID(), { date: "2026-06-01", partnerName: "Bravo Partner", type: "contribution", amount: 100, accountId: bravoAccountId }))).statusCode, 200);
   const alphaRecords = (await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/operational-records`)).json().records;
   const bravoRecords = (await request(bravo.token, "GET", `/v1/workspace/${bravo.workspaceId}/operational-records`)).json().records;
-  assert.equal(alphaRecords.length, 6);
-  assert.equal(bravoRecords.length, 6);
+  assert.equal(alphaRecords.length, 5);
+  assert.equal(bravoRecords.length, 5);
   assert.ok(alphaRecords.every((record: { workspaceId: string }) => record.workspaceId === alpha.workspaceId));
   assert.ok(bravoRecords.every((record: { workspaceId: string }) => record.workspaceId === bravo.workspaceId));
   assert.equal((await request(alpha.token, "GET", `/v1/workspace/${bravo.workspaceId}/operational-records`)).statusCode, 403);
@@ -157,6 +157,41 @@ test("attendance can be cleared idempotently only inside the active tenant conte
   const alphaRecords = (await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/operational-records`)).json().records;
   assert.equal(alphaRecords.some((record: { record: { id: string } }) => record.record.id === attendanceId), false);
   assert.equal((await request(alpha.token, "GET", reportPath)).json().records.some((record: { id: string }) => record.id === attendanceId), false);
+});
+
+test("dispatch masters are tenant scoped and used masters remain protected", async () => {
+  const alphaVehicleId = randomUUID();
+  const bravoVehicleId = randomUUID();
+  const alphaTypeOneId = randomUUID();
+  const alphaTypeTwoId = randomUUID();
+  const bravoTypeId = randomUUID();
+  const dispatchId = randomUUID();
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "vehicle", alphaVehicleId, { number: "ABC-123", active: true }))).statusCode, 200);
+  assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "vehicle", bravoVehicleId, { number: "BRV-456", active: true }))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "dateType", alphaTypeOneId, { name: "Mabroom", active: true }))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "dateType", alphaTypeTwoId, { name: "Ajwa", active: true }))).statusCode, 200);
+  assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "dateType", bravoTypeId, { name: "Safawi", active: true }))).statusCode, 200);
+  const items = [{ id: randomUUID(), dateTypeId: alphaTypeOneId, cartons: 50 }, { id: randomUUID(), dateTypeId: alphaTypeTwoId, cartons: 30 }];
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "dispatch", dispatchId, { date: "2026-06-02", vehicleId: alphaVehicleId, items }))).statusCode, 200);
+  assert.equal(items.reduce((sum, item) => sum + item.cartons, 0), 80);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "dispatch", randomUUID(), {
+    date: "2026-06-02", vehicleId: alphaVehicleId, items: [{ id: randomUUID(), dateTypeId: bravoTypeId, cartons: 10 }],
+  }))).statusCode, 403);
+  assert.equal((await request(alpha.token, "DELETE", "/v1/workspace/operational-records", {
+    workspaceId: alpha.workspaceId, farmId: alpha.farmId, seasonId: alpha.seasonId, entity: "dateType", recordId: alphaTypeOneId,
+  })).statusCode, 409);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "vehicle", alphaVehicleId, {
+    number: "ABC-123", active: false, updatedAt: new Date(Date.now() + 1000).toISOString(),
+  }))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "dispatch", randomUUID(), {
+    date: "2026-06-02", vehicleId: alphaVehicleId, items: [{ id: randomUUID(), dateTypeId: alphaTypeTwoId, cartons: 10 }],
+  }))).statusCode, 403);
+  assert.equal((await request(alpha.token, "DELETE", "/v1/workspace/operational-records", {
+    workspaceId: alpha.workspaceId, farmId: alpha.farmId, seasonId: alpha.seasonId, entity: "dispatch", recordId: dispatchId,
+  })).statusCode, 204);
+  assert.equal((await request(alpha.token, "DELETE", "/v1/workspace/operational-records", {
+    workspaceId: alpha.workspaceId, farmId: alpha.farmId, seasonId: alpha.seasonId, entity: "dateType", recordId: alphaTypeOneId,
+  })).statusCode, 204);
 });
 
 test("financial sync rejects accountless or invalid advances and soft deletes advances idempotently", async () => {

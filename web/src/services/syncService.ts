@@ -20,7 +20,7 @@ const maxAutomaticAttempts = 3;
 
 const tables = {
   labourer: offlineDb.labourers, labourGroup: offlineDb.labourGroups, attendance: offlineDb.attendance, account: offlineDb.accounts,
-  dispatch: offlineDb.dispatches, sale: offlineDb.sales, voucher: offlineDb.vouchers, partnerEntry: offlineDb.partnerEntries,
+  vehicle: offlineDb.vehicles, dateType: offlineDb.dateTypes, dispatch: offlineDb.dispatches, sale: offlineDb.sales, voucher: offlineDb.vouchers, partnerEntry: offlineDb.partnerEntries,
   advance: offlineDb.advances, labourPayment: offlineDb.labourPayments, productionEntry: offlineDb.productionEntries, inventoryEntry: offlineDb.inventoryEntries,
 } as const;
 
@@ -102,7 +102,10 @@ export async function deleteOperationalRecord(entity: OperationalEntity, record:
   emit({ status: navigator.onLine ? "pending" : "offline", pendingCount: await getPendingCount() });
   const label = entity === "partnerEntry" ? "Partner ledger entry deleted"
     : entity === "advance" ? "Labour advance deleted"
-      : entity === "voucher" ? "Expense voucher deleted" : "Attendance cleared";
+      : entity === "voucher" ? "Expense voucher deleted"
+        : entity === "dispatch" ? "Dispatch deleted"
+          : entity === "vehicle" ? "Vehicle deleted"
+            : entity === "dateType" ? "Date type deleted" : "Attendance cleared";
   notify(navigator.onLine ? `${label} locally. Syncing...` : `${label} locally. Will sync automatically when connection is restored.`);
   window.dispatchEvent(new Event("muzare-local-data-change"));
   if (navigator.onLine) void syncPendingRecords();

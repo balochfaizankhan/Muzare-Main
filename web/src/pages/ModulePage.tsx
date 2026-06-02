@@ -23,13 +23,16 @@ import {
   type Account,
   type Advance,
   type Attendance,
+  type DateType,
   type Dispatch,
+  type DispatchItem,
   type Labourer,
   type LabourGroup,
   type LabourPayment,
   type PartnerEntry,
   type ProductionEntry,
   type Sale,
+  type Vehicle,
   type Voucher,
 } from "../lib/offline-db";
 import { deleteOperationalRecord, persistOperationalRecord, refreshOperationalData } from "../services/syncService";
@@ -1864,39 +1867,164 @@ function ExpensesModule() {
   );
 }
 
-function DispatchModule() {
-  const load = useCallback(async () => (await workspaceRecords(offlineDb.dispatches)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
-  const [records, refresh] = useData(load);
-  const [date, setDate] = useState(today());
-  const [vehicleNumber, setVehicleNumber] = useState("");
-  const [driverName, setDriverName] = useState("");
-  const [produceType, setProduceType] = useState("");
-  const [cartons, setCartons] = useState("");
+type DispatchItemDraft = Omit<DispatchItem, "cartons"> & { cartons: string };
+const newDispatchItem = (): DispatchItemDraft => ({ id: crypto.randomUUID(), dateTypeId: "", cartons: "" });
+const dispatchCartons = (dispatch: Dispatch) => dispatch.items?.reduce((sum, item) => sum + item.cartons, 0) ?? dispatch.cartons ?? 0;
 
+function DispatchModule() {
+  const { user } = useAuth();
+  const canManage = Boolean(user?.workspaceId && hasPermission(user, "MANAGE_RECORDS", user.workspaceId));
+  const load = useCallback(async () => (await workspaceRecords(offlineDb.dispatches)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
+  const loadVehicles = useCallback(() => workspaceRecords(offlineDb.vehicles), []);
+  const loadDateTypes = useCallback(() => workspaceRecords(offlineDb.dateTypes), []);
+  const [records, refresh] = useData(load);
+  const [vehicles, refreshVehicles] = useData(loadVehicles);
+  const [dateTypes, refreshDateTypes] = useData(loadDateTypes);
+  const [date, setDate] = useState(today());
+  const [vehicleId, setVehicleId] = useState("");
+  const [destination, setDestination] = useState("");
+  const [notes, setNotes] = useState("");
+  const [items, setItems] = useState<DispatchItemDraft[]>([newDispatchItem()]);
+  const [editing, setEditing] = useState<Dispatch | null>(null);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [showVehicles, setShowVehicles] = useState(false);
+  const [showDateTypes, setShowDateTypes] = useState(false);
+  const [reportFrom, setReportFrom] = useState("");
+  const [reportTo, setReportTo] = useState("");
+  const activeVehicles = vehicles.filter((item) => item.active);
+  const activeDateTypes = dateTypes.filter((item) => item.active);
+  const vehicleName = (id?: string, fallback?: string) => vehicles.find((item) => item.id === id)?.number ?? fallback ?? "Unknown vehicle";
+  const dateTypeName = (id: string, fallback?: string) => dateTypes.find((item) => item.id === id)?.name ?? fallback ?? "Unknown type";
+  const filteredRecords = records.filter((item) => (!reportFrom || item.date >= reportFrom) && (!reportTo || item.date <= reportTo));
+
+  const reset = () => {
+    setEditing(null); setDate(today()); setVehicleId(""); setDestination(""); setNotes(""); setItems([newDispatchItem()]); setError("");
+  };
+  const edit = (record: Dispatch) => {
+    setEditing(record); setDate(record.date); setVehicleId(record.vehicleId ?? ""); setDestination(record.destination ?? ""); setNotes(record.notes ?? "");
+    setItems(record.items?.map((item) => ({ ...item, cartons: String(item.cartons) })) ?? [newDispatchItem()]);
+    setError("");
+  };
+  const updateItem = (id: string, field: "dateTypeId" | "cartons", value: string) => {
+    setItems((current) => current.map((item) => item.id === id ? { ...item, [field]: value } : item));
+  };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const record: Dispatch = { ...makeLocalRecord(), date, vehicleNumber, driverName, produceType, cartons: Number(cartons) };
-    await persistOperationalRecord("dispatch", record);
-    setVehicleNumber(""); setDriverName(""); setProduceType(""); setCartons("");
-    await refresh();
+    const selectedVehicle = activeVehicles.find((item) => item.id === vehicleId);
+    const validItems = items.map((item) => ({ ...item, cartons: Number(item.cartons) }));
+    if (!selectedVehicle) return setError("Select an active vehicle.");
+    if (!validItems.length || validItems.some((item) => !item.dateTypeId || !Number.isInteger(item.cartons) || item.cartons <= 0)) return setError("Add at least one date type with a positive whole number of cartons.");
+    if (new Set(validItems.map((item) => item.dateTypeId)).size !== validItems.length) return setError("A date type can only appear once in a dispatch.");
+    setSaving(true); setError("");
+    try {
+      const record: Dispatch = {
+        ...(editing ?? makeLocalRecord()), date, vehicleId, destination: destination.trim(), notes: notes.trim(),
+        vehicleNumber: selectedVehicle.number, driverName: selectedVehicle.driverName,
+        items: validItems.map((item) => ({ ...item, dateTypeName: dateTypeName(item.dateTypeId) })),
+      };
+      await persistOperationalRecord("dispatch", record);
+      reset(); await refresh();
+      window.dispatchEvent(new CustomEvent("muzare-toast", { detail: editing ? "Dispatch updated successfully." : "Dispatch saved successfully." }));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to save dispatch.");
+    } finally {
+      setSaving(false);
+    }
   };
+  const remove = async (record: Dispatch) => {
+    if (!window.confirm("Delete this dispatch?")) return;
+    await deleteOperationalRecord("dispatch", record); await refresh();
+  };
+  const vehicleTotals = new Map<string, number>();
+  const typeTotals = new Map<string, number>();
+  for (const record of filteredRecords) {
+    vehicleTotals.set(vehicleName(record.vehicleId, record.vehicleNumber), (vehicleTotals.get(vehicleName(record.vehicleId, record.vehicleNumber)) ?? 0) + dispatchCartons(record));
+    for (const item of record.items ?? []) typeTotals.set(dateTypeName(item.dateTypeId, item.dateTypeName), (typeTotals.get(dateTypeName(item.dateTypeId, item.dateTypeName)) ?? 0) + item.cartons);
+    if (!record.items?.length && record.produceType) typeTotals.set(record.produceType, (typeTotals.get(record.produceType) ?? 0) + (record.cartons ?? 0));
+  }
 
   return (
     <>
-      <FormCard title="New dispatch">
-        <form className="module-form inline-form" onSubmit={(event) => void submit(event)}>
-          <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-          <input required placeholder="Vehicle number" value={vehicleNumber} onChange={(event) => setVehicleNumber(event.target.value)} />
-          <input required placeholder="Driver name" value={driverName} onChange={(event) => setDriverName(event.target.value)} />
-          <input required placeholder="Produce type" value={produceType} onChange={(event) => setProduceType(event.target.value)} />
-          <input required type="number" min="1" placeholder="Cartons" value={cartons} onChange={(event) => setCartons(event.target.value)} />
-          <button type="submit">Save dispatch</button>
+      <div className="dispatch-toolbar">
+        <div><h2>Dispatch</h2><p>Select saved vehicles and add one or more date types per load.</p></div>
+        {canManage && <div><button type="button" onClick={() => setShowVehicles(true)}>Manage Vehicles</button><button type="button" onClick={() => setShowDateTypes(true)}>Manage Types</button></div>}
+      </div>
+      <FormCard title={editing ? "Update dispatch" : "New dispatch"}>
+        <form className="module-form dispatch-form" onSubmit={(event) => void submit(event)}>
+          <label><span>Dispatch date</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
+          <label><span>Vehicle</span><select required value={vehicleId} onChange={(event) => setVehicleId(event.target.value)}><option value="">Select active vehicle</option>{activeVehicles.map((item) => <option key={item.id} value={item.id}>{item.number}{item.driverName ? ` - ${item.driverName}` : ""}</option>)}</select></label>
+          <label><span>Destination / buyer</span><input placeholder="Optional" value={destination} onChange={(event) => setDestination(event.target.value)} /></label>
+          <label><span>Notes</span><input placeholder="Optional" value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
+          <div className="dispatch-items">
+            <h3>Date types and cartons</h3>
+            {items.map((item, index) => <div className="dispatch-item-row" key={item.id}>
+              <label><span>Date type {index + 1}</span><select required value={item.dateTypeId} onChange={(event) => updateItem(item.id, "dateTypeId", event.target.value)}><option value="">Select type</option>{activeDateTypes.filter((type) => type.id === item.dateTypeId || !items.some((current) => current.id !== item.id && current.dateTypeId === type.id)).map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}</select></label>
+              <label><span>Cartons</span><input required type="number" min="1" step="1" value={item.cartons} onChange={(event) => updateItem(item.id, "cartons", event.target.value)} /></label>
+              {items.length > 1 && <button className="danger-link" type="button" onClick={() => setItems((current) => current.filter((currentItem) => currentItem.id !== item.id))}>Remove</button>}
+            </div>)}
+            <button className="secondary-action" type="button" onClick={() => setItems((current) => [...current, newDispatchItem()])}>Add item</button>
+            <strong>Total cartons: {items.reduce((sum, item) => sum + (Number(item.cartons) || 0), 0)}</strong>
+          </div>
+          {error && <p className="form-error">{error}</p>}
+          <div className="dispatch-form-actions"><button disabled={saving} type="submit">{saving ? "Saving..." : editing ? "Update dispatch" : "Save dispatch"}</button>{editing && <button className="secondary-action" type="button" onClick={reset}>Cancel</button>}</div>
         </form>
       </FormCard>
-      <Summary label="Total dispatched cartons" value={String(records.reduce((sum, item) => sum + item.cartons, 0))} />
-      <RecordTable empty="No dispatches recorded yet." rows={records.map((item) => [item.date, item.vehicleNumber, item.driverName, item.produceType, `${item.cartons} cartons`])} />
+      <Summary label="Total dispatched cartons" value={String(filteredRecords.reduce((sum, item) => sum + dispatchCartons(item), 0))} />
+      <section className="record-panel dispatch-summary">
+        <h2>Dispatch summary</h2>
+        <div className="dispatch-summary__filters"><label><span>From date</span><input type="date" value={reportFrom} onChange={(event) => setReportFrom(event.target.value)} /></label><label><span>To date</span><input type="date" value={reportTo} onChange={(event) => setReportTo(event.target.value)} /></label></div>
+        <div className="dispatch-summary__groups"><div><h3>By vehicle</h3>{[...vehicleTotals].map(([name, total]) => <p key={name}><span>{name}</span><strong>{total} cartons</strong></p>)}</div><div><h3>By type</h3>{[...typeTotals].map(([name, total]) => <p key={name}><span>{name}</span><strong>{total} cartons</strong></p>)}</div></div>
+      </section>
+      <section className="record-panel"><h2>Dispatch records</h2>{!filteredRecords.length ? <Empty>No dispatches recorded yet.</Empty> : <div className="dispatch-list">{filteredRecords.map((record) => <article key={record.id}><header><div><strong>{record.date}</strong><h3>{record.vehicleNumber ?? vehicleName(record.vehicleId)}</h3>{record.destination && <p>{record.destination}</p>}</div><b>{dispatchCartons(record)} cartons</b></header><div className="dispatch-breakdown">{record.items?.map((item) => <span key={item.id}>{dateTypeName(item.dateTypeId, item.dateTypeName)}: {item.cartons}</span>) ?? <span>{record.produceType}: {record.cartons}</span>}</div><footer><button type="button" onClick={() => edit(record)}>Edit</button>{canManage && <button className="danger-link" type="button" onClick={() => void remove(record)}>Delete</button>}</footer></article>)}</div>}</section>
+      {showVehicles && <DispatchVehicleManager vehicles={vehicles} dispatches={records} onClose={() => setShowVehicles(false)} onRefresh={refreshVehicles} />}
+      {showDateTypes && <DispatchDateTypeManager dateTypes={dateTypes} dispatches={records} onClose={() => setShowDateTypes(false)} onRefresh={refreshDateTypes} />}
     </>
   );
+}
+
+function DispatchVehicleManager({ vehicles, dispatches, onClose, onRefresh }: { vehicles: Vehicle[]; dispatches: Dispatch[]; onClose: () => void; onRefresh: () => Promise<void> }) {
+  const [editing, setEditing] = useState<Vehicle | null>(null);
+  const [number, setNumber] = useState("");
+  const [driverName, setDriverName] = useState("");
+  const [driverPhone, setDriverPhone] = useState("");
+  const [notes, setNotes] = useState("");
+  const [active, setActive] = useState(true);
+  const [error, setError] = useState("");
+  const reset = () => { setEditing(null); setNumber(""); setDriverName(""); setDriverPhone(""); setNotes(""); setActive(true); setError(""); };
+  const edit = (item: Vehicle) => { setEditing(item); setNumber(item.number); setDriverName(item.driverName ?? ""); setDriverPhone(item.driverPhone ?? ""); setNotes(item.notes ?? ""); setActive(item.active); setError(""); };
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (vehicles.some((item) => item.id !== editing?.id && item.number.trim().toLowerCase() === number.trim().toLowerCase())) return setError("Vehicle number already exists.");
+    await persistOperationalRecord("vehicle", { ...(editing ?? makeLocalRecord()), number: number.trim(), driverName: driverName.trim(), driverPhone: driverPhone.trim(), notes: notes.trim(), active });
+    reset(); await onRefresh();
+  };
+  const remove = async (item: Vehicle) => {
+    if (dispatches.some((dispatch) => dispatch.vehicleId === item.id)) return setError("Vehicle cannot be deleted because it is used by a dispatch. Mark it inactive instead.");
+    if (window.confirm(`Delete vehicle ${item.number}?`)) { await deleteOperationalRecord("vehicle", item); await onRefresh(); }
+  };
+  return <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}><section className="worker-dialog dispatch-master-dialog" role="dialog" aria-modal="true" aria-label="Manage vehicles" onClick={(event) => event.stopPropagation()}><header className="worker-dialog__header"><h2>Manage Vehicles</h2><button type="button" onClick={onClose}><X size={18} /></button></header><div className="worker-dialog__body"><form className="module-form" onSubmit={(event) => void submit(event)}><label><span>Vehicle name / number</span><input required value={number} onChange={(event) => setNumber(event.target.value)} /></label><label><span>Driver name</span><input value={driverName} onChange={(event) => setDriverName(event.target.value)} /></label><label><span>Driver phone</span><input value={driverPhone} onChange={(event) => setDriverPhone(event.target.value)} /></label><label><span>Notes</span><input value={notes} onChange={(event) => setNotes(event.target.value)} /></label><label className="checkbox-row"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} /> Active vehicle</label>{error && <p className="form-error">{error}</p>}<div className="dispatch-form-actions"><button type="submit">{editing ? "Update vehicle" : "Add vehicle"}</button>{editing && <button className="secondary-action" type="button" onClick={reset}>Cancel</button>}</div></form><div className="master-list">{vehicles.map((item) => <article key={item.id}><div><strong>{item.number}</strong><p>{item.driverName || "No driver"}{item.driverPhone ? ` | ${item.driverPhone}` : ""}</p><small>{item.active ? "Active" : "Inactive"}</small></div><div><button type="button" onClick={() => edit(item)}>Edit</button><button className="danger-link" type="button" onClick={() => void remove(item)}>Delete</button></div></article>)}</div></div><footer className="worker-dialog__footer"><button className="worker-dialog__close" type="button" onClick={onClose}>Close</button></footer></section></div>;
+}
+
+function DispatchDateTypeManager({ dateTypes, dispatches, onClose, onRefresh }: { dateTypes: DateType[]; dispatches: Dispatch[]; onClose: () => void; onRefresh: () => Promise<void> }) {
+  const [editing, setEditing] = useState<DateType | null>(null);
+  const [name, setName] = useState("");
+  const [notes, setNotes] = useState("");
+  const [active, setActive] = useState(true);
+  const [error, setError] = useState("");
+  const reset = () => { setEditing(null); setName(""); setNotes(""); setActive(true); setError(""); };
+  const edit = (item: DateType) => { setEditing(item); setName(item.name); setNotes(item.notes ?? ""); setActive(item.active); setError(""); };
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (dateTypes.some((item) => item.id !== editing?.id && item.name.trim().toLowerCase() === name.trim().toLowerCase())) return setError("Date type already exists.");
+    await persistOperationalRecord("dateType", { ...(editing ?? makeLocalRecord()), name: name.trim(), notes: notes.trim(), active });
+    reset(); await onRefresh();
+  };
+  const remove = async (item: DateType) => {
+    if (dispatches.some((dispatch) => dispatch.items?.some((entry) => entry.dateTypeId === item.id))) return setError("Date type cannot be deleted because it is used by a dispatch. Mark it inactive instead.");
+    if (window.confirm(`Delete date type ${item.name}?`)) { await deleteOperationalRecord("dateType", item); await onRefresh(); }
+  };
+  return <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}><section className="worker-dialog dispatch-master-dialog" role="dialog" aria-modal="true" aria-label="Manage date types" onClick={(event) => event.stopPropagation()}><header className="worker-dialog__header"><h2>Manage Types</h2><button type="button" onClick={onClose}><X size={18} /></button></header><div className="worker-dialog__body"><form className="module-form" onSubmit={(event) => void submit(event)}><label><span>Date type name</span><input required value={name} onChange={(event) => setName(event.target.value)} /></label><label><span>Notes / description</span><input value={notes} onChange={(event) => setNotes(event.target.value)} /></label><label className="checkbox-row"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} /> Active date type</label>{error && <p className="form-error">{error}</p>}<div className="dispatch-form-actions"><button type="submit">{editing ? "Update type" : "Add type"}</button>{editing && <button className="secondary-action" type="button" onClick={reset}>Cancel</button>}</div></form><div className="master-list">{dateTypes.map((item) => <article key={item.id}><div><strong>{item.name}</strong>{item.notes && <p>{item.notes}</p>}<small>{item.active ? "Active" : "Inactive"}</small></div><div><button type="button" onClick={() => edit(item)}>Edit</button><button className="danger-link" type="button" onClick={() => void remove(item)}>Delete</button></div></article>)}</div></div><footer className="worker-dialog__footer"><button className="worker-dialog__close" type="button" onClick={onClose}>Close</button></footer></section></div>;
 }
 
 function SalesModule() {

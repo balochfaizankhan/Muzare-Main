@@ -13,6 +13,8 @@ export type TenantReferences = {
   ledgerId?: unknown;
   labourerId?: unknown;
   groupId?: unknown;
+  vehicleId?: unknown;
+  dateTypeIds?: unknown;
 };
 
 async function hasOperationalReference(workspaceId: string, entityTypes: string[], clientRecordId: string, farmId?: string | null, seasonId?: string | null) {
@@ -60,6 +62,18 @@ export async function validateTenantReferences(workspaceId: string, references: 
   if (typeof references.groupId === "string"
     && !(await hasOperationalReference(workspaceId, ["labourGroup"], references.groupId, references.farmId))) {
     return "Labour group does not belong to the selected workspace.";
+  }
+  if (typeof references.vehicleId === "string"
+    && !(await hasOperationalReference(workspaceId, ["vehicle"], references.vehicleId, references.farmId, references.seasonId))) {
+    return "Vehicle does not belong to the selected workspace farm and season.";
+  }
+  if (Array.isArray(references.dateTypeIds)) {
+    for (const dateTypeId of references.dateTypeIds) {
+      if (typeof dateTypeId !== "string"
+        || !(await hasOperationalReference(workspaceId, ["dateType"], dateTypeId, references.farmId, references.seasonId))) {
+        return "Date type does not belong to the selected workspace farm and season.";
+      }
+    }
   }
   return null;
 }
