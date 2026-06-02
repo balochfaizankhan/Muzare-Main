@@ -8,7 +8,6 @@ import {
   CloudUpload,
   Leaf,
   PackageOpen,
-  ShoppingBasket,
   TrendingUp,
   UsersRound,
   Wallet,
@@ -46,25 +45,25 @@ type Activity = {
   createdAt: string;
 };
 
-const modules: Array<{
-  key: string;
+const manageOperations: Array<{
+  labelKey: string;
   path: string;
   icon: LucideIcon;
   detailKey: string;
 }> = [
-  { key: "workforce", path: "/workspace/team", icon: UsersRound, detailKey: "dashboard.workforceDetail" },
-  { key: "expenses", path: "/workspace/expenses", icon: BanknoteArrowDown, detailKey: "dashboard.expensesDetail" },
-  { key: "sales", path: "/workspace/sales", icon: ShoppingBasket, detailKey: "dashboard.salesDetail" },
-  { key: "dispatch", path: "/workspace/dispatch", icon: PackageOpen, detailKey: "dashboard.dispatchDetail" },
-  { key: "accounts", path: "/workspace/accounts", icon: BookOpenText, detailKey: "dashboard.accountsDetail" },
-  { key: "partnerLedger", path: "/workspace/partner-ledger", icon: Leaf, detailKey: "dashboard.partnerLedgerDetail" },
+  { labelKey: "layout.attendance", path: "/workspace/attendance", icon: CalendarRange, detailKey: "dashboard.attendanceDetail" },
+  { labelKey: "layout.expenses", path: "/workspace/expenses", icon: BanknoteArrowDown, detailKey: "dashboard.expensesDetail" },
+  { labelKey: "dashboard.labourAdvances", path: "/workspace/labour-advances", icon: UsersRound, detailKey: "dashboard.advancesDetail" },
+  { labelKey: "layout.reports", path: "/workspace/reports", icon: BookOpenText, detailKey: "dashboard.reportsDetail" },
+  { labelKey: "dashboard.operationalRecords", path: "/workspace/dispatch", icon: PackageOpen, detailKey: "dashboard.operationalRecordsDetail" },
 ];
 
 const quickActions = [
   { labelKey: "dashboard.markAttendance", path: "/workspace/attendance", icon: UsersRound },
   { labelKey: "dashboard.newExpense", path: "/workspace/expenses", icon: BanknoteArrowDown },
-  { labelKey: "dashboard.recordDispatch", path: "/workspace/dispatch", icon: PackageOpen },
-  { labelKey: "dashboard.recordSale", path: "/workspace/sales", icon: ShoppingBasket },
+  { labelKey: "dashboard.giveAdvance", path: "/workspace/labour-advances", icon: Wallet },
+  { labelKey: "dashboard.addLabour", path: "/workspace/team", icon: UsersRound },
+  { labelKey: "dashboard.viewReports", path: "/workspace/reports", icon: BookOpenText },
 ] as const;
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -215,6 +214,45 @@ export function DashboardPage() {
         </section>
         {!season && <p className="context-message">{t("dashboardPage.noActiveSeason")}</p>}
 
+        <section className="panel dashboard-priority-panel">
+          <div className="panel-heading">
+            <div>
+              <h2>{t("dashboardPage.manageOperations")}</h2>
+              <p>{t("dashboardPage.coreWorkflows")}</p>
+            </div>
+          </div>
+          <div className="operation-grid">
+            {manageOperations.map(({ labelKey, path, detailKey, icon: Icon }) => (
+              <Link className="operation-card" key={labelKey} to={path}>
+                <Icon size={22} />
+                <div>
+                  <strong>{t(labelKey)}</strong>
+                  <span>{t(detailKey)}</span>
+                </div>
+                <ArrowRight size={16} />
+              </Link>
+            ))}
+          </div>
+        </section>
+
+        <section className="panel quick-panel dashboard-priority-panel">
+          <div className="panel-heading">
+            <div>
+              <h2>{t("dashboardPage.quickActions")}</h2>
+              <p>{t("dashboardPage.dailyEntries")}</p>
+            </div>
+          </div>
+          <div className="quick-grid">
+            {quickActions.map(({ labelKey, path, icon: Icon }) => (
+              <Link className="quick-action" to={path} key={labelKey}>
+                <Icon size={19} />
+                <span>{t(labelKey)}</span>
+                <ArrowRight size={16} />
+              </Link>
+            ))}
+          </div>
+        </section>
+
         <div className="section-title-row">
           <div>
             <h2>{t("dashboardPage.todayAtGlance")}</h2>
@@ -231,49 +269,7 @@ export function DashboardPage() {
           ))}
         </section>
 
-        <section className="dashboard-columns">
-          <div className="dashboard-main">
-            <section className="panel quick-panel">
-              <div className="panel-heading">
-                <div>
-                  <h2>{t("dashboardPage.quickActions")}</h2>
-                  <p>{t("dashboardPage.dailyEntries")}</p>
-                </div>
-              </div>
-              <div className="quick-grid">
-                {quickActions.map(({ labelKey, path, icon: Icon }) => (
-                  <Link className="quick-action" to={path} key={labelKey}>
-                    <Icon size={19} />
-                    <span>{t(labelKey)}</span>
-                    <ArrowRight size={16} />
-                  </Link>
-                ))}
-              </div>
-            </section>
-
-            <section className="panel">
-              <div className="panel-heading">
-                <div>
-                  <h2>{t("operations")}</h2>
-                  <p>{t("dashboard.openModule")}</p>
-                </div>
-              </div>
-              <div className="operation-grid">
-                {modules.map(({ key, path, detailKey, icon: Icon }) => (
-                  <Link className="operation-card" key={key} to={path}>
-                    <Icon size={22} />
-                    <div>
-                      <strong>{t(key)}</strong>
-                      <span>{t(detailKey)}</span>
-                    </div>
-                    <ArrowRight size={16} />
-                  </Link>
-                ))}
-              </div>
-            </section>
-          </div>
-
-          <aside className="dashboard-side">
+        <aside className="dashboard-side dashboard-side--wide">
             <section className="panel status-panel">
               <div className="status-line">
                 <StatusIcon size={19} />
@@ -316,8 +312,7 @@ export function DashboardPage() {
                 </div>
               )}
             </section>
-          </aside>
-        </section>
+        </aside>
       </main>
     </div>
   );

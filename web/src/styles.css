@@ -745,6 +745,14 @@ button {
   gap: 18px;
 }
 
+.dashboard-priority-panel {
+  margin-bottom: 16px;
+}
+
+.dashboard-side--wide {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .panel {
   background: rgba(255, 255, 255, 0.94);
   border: 1px solid var(--border);
@@ -3028,9 +3036,48 @@ button {
   }
 
   .quick-grid,
-  .operation-grid,
+  .operation-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .dashboard-side {
     grid-template-columns: 1fr;
+  }
+
+  .quick-action {
+    gap: 6px;
+    min-height: 48px;
+    padding: 9px;
+  }
+
+  .quick-action span {
+    font-size: .74rem;
+  }
+
+  .quick-action svg:last-child {
+    display: none;
+  }
+
+  .operation-card {
+    gap: 8px;
+    min-height: 50px;
+    padding: 10px;
+  }
+
+  .operation-card strong {
+    font-size: .8rem;
+  }
+
+  .operation-card span {
+    display: none;
+  }
+
+  .dashboard-priority-panel {
+    padding: 14px;
+  }
+
+  .dashboard-priority-panel .panel-heading {
+    margin-bottom: 12px;
   }
 
   .onboarding-shell {
