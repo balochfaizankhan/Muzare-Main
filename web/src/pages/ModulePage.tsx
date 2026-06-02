@@ -1054,20 +1054,40 @@ function AdvanceReportPanel({
           <section className="attendance-report-card">
             <strong>{t("reports.grandTotal")}</strong>
             <p>{money(report.data.grandTotal)}</p>
-            <div className="attendance-import-table-wrap">
-              <table>
-                <thead><tr><th>{t("reports.labour")}</th><th>{t("workforcePage.date")}</th><th>{t("reports.advanceSar")}</th><th>Paid From</th><th>{t("reports.notes")}</th></tr></thead>
-                <tbody>{report.data.records.map((item) => <tr key={item.id}><td>{item.labourName}</td><td>{item.date}</td><td>{money(item.amount)}</td><td>{item.accountName || "-"}</td><td>{item.notes || "-"}</td></tr>)}</tbody>
-              </table>
-            </div>
-          </section>
-          <section className="attendance-report-card">
             <strong>{t("reports.totalsByLabour")}</strong>
-            <div className="attendance-import-table-wrap">
+            <div className="attendance-import-table-wrap report-wide-table">
               <table>
                 <thead><tr><th>{t("reports.labour")}</th><th>{t("reports.transactions")}</th><th>{t("reports.total")}</th></tr></thead>
                 <tbody>{report.data.summaries.map((item) => <tr key={item.labourerId}><td>{item.labourName}</td><td>{item.count}</td><td>{money(item.total)}</td></tr>)}</tbody>
               </table>
+            </div>
+            <div className="report-mobile-cards">
+              {report.data.summaries.map((item) => <article className="report-mobile-card" key={`mobile-${item.labourerId}`}>
+                <header><strong>{item.labourName}</strong><b>{money(item.total)}</b></header>
+                <span>{t("reports.transactions")}: {item.count}</span>
+              </article>)}
+            </div>
+          </section>
+          <section className="attendance-report-card">
+            <strong>{t("advancesPage.advanceHistory")}</strong>
+            <div className="attendance-import-table-wrap report-wide-table">
+              <table>
+                <thead><tr><th>{t("reports.labour")}</th><th>{t("workforcePage.date")}</th><th>{t("reports.advanceSar")}</th><th>{t("advancesPage.paidFrom")}</th><th>{t("reports.notes")}</th></tr></thead>
+                <tbody>{report.data.records.map((item) => <tr key={item.id}><td>{item.labourName}</td><td>{item.date}</td><td>{money(item.amount)}</td><td>{item.accountName || "-"}</td><td>{item.notes || "-"}</td></tr>)}</tbody>
+              </table>
+            </div>
+            <div className="report-mobile-cards">
+              {report.data.records.map((item) => <article className="report-mobile-card" key={`mobile-${item.id}`}>
+                <header><strong>{item.labourName}</strong><b>{money(item.amount)}</b></header>
+                <span>{item.date}</span>
+                <details>
+                  <summary>{t("accountsPage.viewDetails")}</summary>
+                  <dl>
+                    <div><dt>{t("advancesPage.paidFrom")}</dt><dd>{item.accountName || "-"}</dd></div>
+                    <div><dt>{t("reports.notes")}</dt><dd>{item.notes || "-"}</dd></div>
+                  </dl>
+                </details>
+              </article>)}
             </div>
           </section>
         </>}
@@ -1546,7 +1566,7 @@ function AttendanceRegister({ data, syncStatus, totalPresent, totalHalf, totalAb
       <span>Period: {compactFullDate(metadata.from)} - {compactFullDate(metadata.to)} | Generated: {compactFullDate(metadata.generatedAt.slice(0, 10))}</span>
       <span>Total Labour: {data.summaries.length} | P: {totalPresent} | 1/2: {totalHalf} | A: {totalAbsent} | Wages (SAR): {compactAdvance(totalWage)} | Advances (SAR): {compactAdvance(totalAdvance)} | Net (SAR): {compactAdvance(totalWage - totalAdvance)}</span>
     </header>
-    <div className="register-table-wrap"><table className="attendance-register-table">
+    <div className="register-table-wrap report-wide-table"><table className="attendance-register-table">
       <thead><tr><th>#</th><th>Labour Name</th><th>P</th><th>1/2</th><th>A</th><th>Wages (SAR)</th><th>Adv (SAR)</th><th>Net (SAR)</th>{data.dates.map((date) => <th key={date}>{compactDate(date)}</th>)}</tr></thead>
       <tbody>{data.summaries.map((summary, index) => { const advance = workerAdvance(summary.id); return <tr key={summary.id}><td>{index + 1}</td><th>{summary.name}</th><td>{summary.presentDays}</td><td>{summary.halfDays}</td><td>{summary.absentDays}</td><td>{compactAdvance(summary.totalWage)}</td><td>{compactAdvance(advance)}</td><td>{compactAdvance(summary.totalWage - advance)}</td>
         {data.dates.map((date) => { const status = dailyStatus(summary.id, date); const advance = dailyAdvance(summary.id, date); return <td className={`register-status register-status--${status ?? "empty"}`} key={date}><b>{attendanceMark(status)}</b>{advance > 0 && <small>{compactAdvance(advance)}</small>}</td>; })}
@@ -1554,6 +1574,24 @@ function AttendanceRegister({ data, syncStatus, totalPresent, totalHalf, totalAb
       <tfoot><tr><th colSpan={2}>Grand Total</th><th>{totalPresent}</th><th>{totalHalf}</th><th>{totalAbsent}</th><th>{compactAdvance(totalWage)}</th><th>{compactAdvance(totalAdvance)}</th><th>{compactAdvance(totalWage - totalAdvance)}</th><th colSpan={data.dates.length}></th></tr>
       <tr><th colSpan={8}>Daily payable total</th>{data.dates.map((date) => <th key={date}>{data.summaries.reduce((sum, item) => sum + payableValue(dailyStatus(item.id, date)), 0)}</th>)}</tr></tfoot>
     </table></div>
+    <div className="report-mobile-cards screen-only">
+      {data.summaries.map((summary) => { const advance = workerAdvance(summary.id); return <article className="report-mobile-card" key={`mobile-${summary.id}`}>
+        <header><strong>{summary.name}</strong><b>{money(summary.totalWage - advance)}</b></header>
+        <div className="report-mobile-card__metrics">
+          <span>P: <b>{summary.presentDays}</b></span><span>1/2: <b>{summary.halfDays}</b></span><span>A: <b>{summary.absentDays}</b></span>
+        </div>
+        <details>
+          <summary>{t("accountsPage.viewDetails")}</summary>
+          <dl>
+            <div><dt>Wages (SAR)</dt><dd>{compactAdvance(summary.totalWage)}</dd></div>
+            <div><dt>Adv (SAR)</dt><dd>{compactAdvance(advance)}</dd></div>
+          </dl>
+          <div className="report-mobile-card__days">
+            {data.dates.map((date) => { const status = dailyStatus(summary.id, date); const dailyAmount = dailyAdvance(summary.id, date); return <span className={`register-status register-status--${status ?? "empty"}`} key={date}><small>{compactDate(date)}</small><b>{attendanceMark(status)}</b>{dailyAmount > 0 && <small>{compactAdvance(dailyAmount)}</small>}</span>; })}
+          </div>
+        </details>
+      </article>; })}
+    </div>
     <footer className="register-footer"><span><b>P</b> = {t("workforcePage.present")}</span><span><b>1/2</b> = {t("workforcePage.halfDay")}</span><span><b>A</b> = {t("workforcePage.absent")}</span><span><b>-</b> = {t("reports.noRecord")}</span></footer>
   </section>;
 }
@@ -2730,7 +2768,7 @@ function AccountsModule() {
               <input aria-label={t("accountsPage.ledgerFromDate")} type="date" value={ledgerFrom} onChange={(event) => setLedgerFrom(event.target.value)} />
               <input aria-label={t("accountsPage.ledgerToDate")} type="date" value={ledgerTo} onChange={(event) => setLedgerTo(event.target.value)} />
             </div>
-            <div className="attendance-import-table-wrap">
+            <div className="attendance-import-table-wrap report-wide-table">
               <table>
                 <thead><tr><th>{t("expensesPage.date")}</th><th>{t("partnerLedgerPage.type")}</th><th>{t("accountsPage.reference")}</th><th>{t("expensesPage.description")}</th><th>{t("accountsPage.debit")}</th><th>{t("accountsPage.credit")}</th><th>{t("accountsPage.runningBalance")}</th><th>{t("accountsPage.source")}</th></tr></thead>
                 <tbody>
@@ -2746,6 +2784,22 @@ function AccountsModule() {
                   </tr>)}
                 </tbody>
               </table>
+            </div>
+            <div className="report-mobile-cards">
+              {filteredLedgerRows.map((row) => <article className="report-mobile-card" key={`mobile-${row.id}`}>
+                <header><strong>{row.reference}</strong><b>{row.credit ? `+${money(row.credit)}` : `-${money(row.debit)}`}</b></header>
+                <span>{row.date} | {row.type === "sale" ? t("accountsPage.saleCredit") : row.type === "voucher" ? t("accountsPage.voucherExpense") : row.type === "advance" ? t("accountsPage.labourAdvance") : row.type === "settlement_sent" ? t("accountsPage.settlementSent") : row.type === "settlement_received" ? t("accountsPage.settlementReceived") : row.type === "contribution" ? t("accountsPage.contribution") : t("accountsPage.withdrawal")}</span>
+                <p>{row.description}{row.counterparty ? ` (${row.counterparty})` : ""}</p>
+                <div className="report-mobile-card__balance"><span>{t("accountsPage.runningBalance")}</span><strong>{money(row.runningBalance ?? 0)}</strong></div>
+                <details>
+                  <summary>{t("accountsPage.viewDetails")}</summary>
+                  <dl>
+                    <div><dt>{t("accountsPage.debit")}</dt><dd>{row.debit ? money(row.debit) : "-"}</dd></div>
+                    <div><dt>{t("accountsPage.credit")}</dt><dd>{row.credit ? money(row.credit) : "-"}</dd></div>
+                  </dl>
+                  <button type="button" onClick={() => openSource(row)}>{t("accountsPage.open")}</button>
+                </details>
+              </article>)}
             </div>
             <footer><button type="button" onClick={() => setSelectedAccountId(null)}>{t("accountsPage.back")}</button></footer>
           </div>
