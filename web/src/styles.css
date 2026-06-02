@@ -1600,8 +1600,7 @@ button {
 
 .expense-search-filters {
   display: grid;
-  gap: 10px;
-  grid-template-columns: minmax(220px, 2fr) repeat(6, minmax(130px, 1fr));
+  gap: 12px;
   margin-top: 12px;
 }
 
@@ -1609,28 +1608,88 @@ button {
   min-width: 0;
 }
 
-.expense-search-filters input,
-.expense-search-filters select {
-  border: 1px solid var(--border);
-  border-radius: 9px;
+.expense-date-range {
+  border: 0;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
   min-width: 0;
-  padding: 0 10px;
+  padding: 0;
+}
+
+.expense-date-range legend,
+.expense-filter-field span {
+  color: var(--text-secondary);
+  font-size: .74rem;
+  font-weight: 750;
+}
+
+.expense-date-range legend {
+  margin-bottom: 7px;
+  padding: 0;
+}
+
+.expense-filter-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.expense-filter-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.expense-date-field span {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+}
+
+.expense-date-field svg {
+  color: var(--brand-primary);
+  flex: 0 0 auto;
 }
 
 .expense-search-filters input,
-.expense-search-filters select,
-.expense-search-filters .search-input {
-  height: 42px;
+.expense-search-filters select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text);
+  font-size: .84rem;
+  height: 44px;
+  min-width: 0;
+  padding: 0 10px;
+  width: 100%;
+}
+
+.expense-search-filters input[type="date"] {
+  color: var(--text);
+  color-scheme: light;
+  line-height: normal;
+  min-height: 44px;
+  -webkit-text-fill-color: var(--text);
+}
+
+.expense-search-filters input:focus,
+.expense-search-filters select:focus {
+  border-color: var(--brand-secondary);
+  outline: 2px solid rgba(45, 134, 47, 0.17);
+  outline-offset: 1px;
 }
 
 @media (max-width: 767px) {
-  .expense-search-filters {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .expense-date-range,
+  .expense-filter-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .expense-search-filters .search-input,
-  .expense-search-filters input[aria-label="Expense vendor or person"] {
-    grid-column: 1 / -1;
+  .expense-search-filters input,
+  .expense-search-filters select {
+    font-size: 1rem;
   }
 }
 

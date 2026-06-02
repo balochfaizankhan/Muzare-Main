@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { MoreVertical, X } from "lucide-react";
+import { CalendarDays, MoreVertical, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -1812,18 +1812,23 @@ function ExpensesModule() {
         <h2>Search vouchers</h2>
         <div className="expense-search-filters">
           <SearchInput placeholder="Search voucher, account, category, amount, or date" value={voucherSearch} onChange={setVoucherSearch} />
-          <input aria-label="Expense date from" type="date" value={voucherFrom} onChange={(event) => setVoucherFrom(event.target.value)} />
-          <input aria-label="Expense date to" type="date" value={voucherTo} onChange={(event) => setVoucherTo(event.target.value)} />
-          <select aria-label="Expense category" value={voucherCategory} onChange={(event) => { setVoucherCategory(event.target.value); setVoucherSubcategory(""); }}>
-            <option value="">All categories</option>{categories.data?.categories.map((item) => <option key={item.id}>{item.name}</option>)}
-          </select>
-          <select aria-label="Expense subcategory" value={voucherSubcategory} onChange={(event) => setVoucherSubcategory(event.target.value)}>
-            <option value="">All subcategories</option>{[...new Set(voucherSubcategories)].map((name) => <option key={name}>{name}</option>)}
-          </select>
-          <select aria-label="Expense payment account" value={voucherAccountId} onChange={(event) => setVoucherAccountId(event.target.value)}>
-            <option value="">All accounts</option>{accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-          </select>
-          <input aria-label="Expense vendor or person" placeholder="Vendor / person" value={voucherVendor} onChange={(event) => setVoucherVendor(event.target.value)} />
+          <fieldset className="expense-date-range">
+            <legend>Date range</legend>
+            <label className="expense-filter-field expense-date-field"><span><CalendarDays size={15} />From date</span><input aria-label="Expense date from" type="date" value={voucherFrom} onChange={(event) => setVoucherFrom(event.target.value)} /></label>
+            <label className="expense-filter-field expense-date-field"><span><CalendarDays size={15} />To date</span><input aria-label="Expense date to" type="date" value={voucherTo} onChange={(event) => setVoucherTo(event.target.value)} /></label>
+          </fieldset>
+          <div className="expense-filter-grid">
+            <label className="expense-filter-field"><span>Category</span><select aria-label="Expense category" value={voucherCategory} onChange={(event) => { setVoucherCategory(event.target.value); setVoucherSubcategory(""); }}>
+              <option value="">All categories</option>{categories.data?.categories.map((item) => <option key={item.id}>{item.name}</option>)}
+            </select></label>
+            <label className="expense-filter-field"><span>Subcategory</span><select aria-label="Expense subcategory" value={voucherSubcategory} onChange={(event) => setVoucherSubcategory(event.target.value)}>
+              <option value="">All subcategories</option>{[...new Set(voucherSubcategories)].map((name) => <option key={name}>{name}</option>)}
+            </select></label>
+            <label className="expense-filter-field"><span>Payment account</span><select aria-label="Expense payment account" value={voucherAccountId} onChange={(event) => setVoucherAccountId(event.target.value)}>
+              <option value="">All accounts</option>{accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select></label>
+            <label className="expense-filter-field"><span>Vendor / person</span><input aria-label="Expense vendor or person" placeholder="All vendors / people" value={voucherVendor} onChange={(event) => setVoucherVendor(event.target.value)} /></label>
+          </div>
         </div>
         <div className="expense-search-meta">
           <small>{hasActiveFilters ? "Showing totals for current filters" : "Showing totals for current season scope"}</small>

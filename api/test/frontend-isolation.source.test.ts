@@ -305,6 +305,7 @@ test("expense voucher search is debounced online, cache-first offline, and tenan
   const route = await source("api/src/routes/expense-search.ts");
   const api = await source("web/src/lib/api.ts");
   const modulePage = await source("web/src/pages/ModulePage.tsx");
+  const styles = await source("web/src/styles.css");
   assert.match(app, /expenseSearchRoutes/);
   assert.match(route, /eq\(operationalRecords\.workspaceId, params\.data\.workspaceId\)/);
   assert.match(route, /eq\(operationalRecords\.farmId, query\.data\.farmId\)/);
@@ -319,6 +320,12 @@ test("expense voucher search is debounced online, cache-first offline, and tenan
   assert.match(modulePage, /const grouped = \[\.\.\.filteredVouchers\.reduce/);
   assert.match(modulePage, /Showing totals for current filters/);
   assert.match(modulePage, /Clear filters/);
+  assert.match(modulePage, /<legend>Date range<\/legend>/);
+  assert.match(modulePage, /<CalendarDays size=\{15\} \/>From date/);
+  assert.match(modulePage, /<CalendarDays size=\{15\} \/>To date/);
+  assert.match(modulePage, /<span>Payment account<\/span>/);
+  assert.match(styles, /\.expense-search-filters input\[type="date"\] \{[\s\S]*-webkit-text-fill-color: var\(--text\);/);
+  assert.match(styles, /@media \(max-width: 767px\) \{[\s\S]*\.expense-date-range,[\s\S]*\.expense-filter-grid \{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/);
   assert.match(modulePage, /<h2>Search vouchers<\/h2>[\s\S]*Summary value=\{money\(total\)\} label=\{hasActiveFilters \? "Total expenses - current filters" : "Total expenses - current season"\}/);
   assert.match(modulePage, /No expenses found for this search\./);
 });
