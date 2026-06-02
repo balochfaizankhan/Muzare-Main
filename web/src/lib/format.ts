@@ -1,6 +1,12 @@
 import i18n from "../i18n";
 
-const currentLocale = () => i18n.resolvedLanguage ?? i18n.language ?? "en";
+const localeMap: Record<string, string> = {
+  en: "en",
+  ur: "ur-PK",
+  ar: "ar-SA",
+};
+
+const currentLocale = () => localeMap[i18n.resolvedLanguage?.slice(0, 2) ?? i18n.language?.slice(0, 2) ?? "en"] ?? "en";
 
 export const formatMoney = (amount: number) =>
   new Intl.NumberFormat(currentLocale(), {

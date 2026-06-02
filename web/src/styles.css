@@ -1,4 +1,7 @@
 :root {
+  --font-default: Inter, system-ui, Arial, sans-serif;
+  --font-arabic: "Noto Naskh Arabic", "Geeza Pro", "Tahoma", sans-serif;
+  --font-urdu: "Noto Nastaliq Urdu", "Noto Naskh Arabic", "Geeza Pro", "Tahoma", serif;
   --brand-primary: #2e7d32;
   --brand-secondary: #2e7d32;
   --brand-accent: #4caf50;
@@ -23,7 +26,7 @@
   --shadow-soft: 0 8px 22px rgba(15, 23, 42, 0.08);
   color: var(--text);
   background: var(--background);
-  font-family: Inter, "Noto Sans Arabic", "Noto Nastaliq Urdu", system-ui, Arial, sans-serif;
+  font-family: var(--font-default);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -52,6 +55,22 @@ body {
   background: var(--background);
 }
 
+html[lang="ar"] body,
+html[lang="ar"] button,
+html[lang="ar"] input,
+html[lang="ar"] select,
+html[lang="ar"] textarea {
+  font-family: var(--font-arabic);
+}
+
+html[lang="ur"] body,
+html[lang="ur"] button,
+html[lang="ur"] input,
+html[lang="ur"] select,
+html[lang="ur"] textarea {
+  font-family: var(--font-urdu);
+}
+
 button,
 input,
 select {
@@ -77,7 +96,7 @@ button {
 
 .search-input__icon {
   color: var(--text-secondary);
-  left: 12px;
+  inset-inline-start: 12px;
   pointer-events: none;
   position: absolute;
   top: 50%;
@@ -100,7 +119,7 @@ button {
   justify-content: center;
   padding: 0;
   position: absolute;
-  right: 6px;
+  inset-inline-end: 6px;
   top: 50%;
   transform: translateY(-50%);
   width: 28px;
@@ -274,6 +293,7 @@ button {
   color: var(--text-secondary);
   background: transparent;
   outline: none;
+  text-align: start;
 }
 
 .login-page {
@@ -1073,6 +1093,53 @@ button {
 
 [dir="rtl"] .back-link svg {
   transform: scaleX(-1);
+}
+
+[dir="rtl"] .brand--compact {
+  justify-items: end;
+}
+
+[dir="rtl"] .app-sidebar nav a,
+[dir="rtl"] .context-chip,
+[dir="rtl"] .quick-action,
+[dir="rtl"] .status-line,
+[dir="rtl"] .sync-line,
+[dir="rtl"] .activity-item,
+[dir="rtl"] .language-switch {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] .operation-card {
+  direction: rtl;
+}
+
+[dir="rtl"] .shell-header,
+[dir="rtl"] .panel-heading,
+[dir="rtl"] .shell-page__intro,
+[dir="rtl"] .dashboard-page,
+[dir="rtl"] .subpage,
+[dir="rtl"] .record-panel,
+[dir="rtl"] .worker-dialog,
+[dir="rtl"] .worker-action-dialog,
+[dir="rtl"] .attendance-import-dialog {
+  text-align: right;
+}
+
+[dir="rtl"] .shell-header .toolbar__actions {
+  justify-content: flex-start;
+}
+
+[dir="rtl"] .quick-action svg:last-child,
+[dir="rtl"] .operation-card svg:last-child {
+  transform: rotate(180deg);
+}
+
+[dir="rtl"] input,
+[dir="rtl"] select,
+[dir="rtl"] textarea,
+[dir="rtl"] th,
+[dir="rtl"] td {
+  text-align: right;
 }
 
 .subpage {

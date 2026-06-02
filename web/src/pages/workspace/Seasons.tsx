@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarCheck, CheckCircle2, Leaf, Pencil, Plus, XCircle } from "lucide-react";
 import { useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../../auth/AuthProvider";
 import { SubpageHeader } from "../../components/SubpageHeader";
 import { useSyncState } from "../../hooks/useSyncState";
@@ -19,6 +20,7 @@ import { hasPermission } from "../../lib/permissions";
 const emptyForm: SeasonInput = { name: "", cropType: "", startsOn: "", expectedEndsOn: "", actualEndsOn: "", status: "planned", notes: "" };
 
 export function Seasons() {
+  const { t } = useTranslation();
   const { user, token } = useAuth();
   const sync = useSyncState();
   const client = useQueryClient();
@@ -73,38 +75,38 @@ export function Seasons() {
 
   return (
     <div className="dashboard-page">
-      <SubpageHeader title="Seasons" />
+      <SubpageHeader title={t("seasonsPage.title")} />
       <main className="subpage module-workspace">
         <section className="workspace-intro">
-          <div><h2>Seasons and Crop Cycles</h2><p>Choose the active operating season before recording farm activity.</p></div>
-          {canManage && farmId && <button className="shell-action" type="button" onClick={() => { setEditing(null); setForm(emptyForm); setShowForm(true); }}><Plus size={16} />Create Season</button>}
+          <div><h2>{t("seasonsPage.managementTitle")}</h2><p>{t("seasonsPage.managementDescription")}</p></div>
+          {canManage && farmId && <button className="shell-action" type="button" onClick={() => { setEditing(null); setForm(emptyForm); setShowForm(true); }}><Plus size={16} />{t("seasonsPage.createSeason")}</button>}
         </section>
-        {!farmId && <p className="context-message">Create or select an active farm before managing seasons.</p>}
-        {farmId && seasons.data && !seasons.data.activeSeasonId && <p className="context-message">No active season. Create or select a season to begin operations.</p>}
+        {!farmId && <p className="context-message">{t("seasonsPage.createOrSelectFarm")}</p>}
+        {farmId && seasons.data && !seasons.data.activeSeasonId && <p className="context-message">{t("seasonsPage.noActiveSeason")}</p>}
 
         {showForm && canManage && (
           <section className="record-panel">
-            <h2>{editing ? "Edit Season" : "Create Season"}</h2>
+            <h2>{editing ? t("seasonsPage.editSeason") : t("seasonsPage.createSeason")}</h2>
             <form className="module-form farm-form" onSubmit={submit}>
-              <input required placeholder="Season name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
-              <input placeholder="Crop type" value={form.cropType} onChange={(event) => setForm({ ...form, cropType: event.target.value })} />
-              <label><span>Start date</span><input required type="date" value={form.startsOn} onChange={(event) => setForm({ ...form, startsOn: event.target.value })} /></label>
-              <label><span>Expected end date</span><input type="date" value={form.expectedEndsOn} onChange={(event) => setForm({ ...form, expectedEndsOn: event.target.value })} /></label>
-              <label><span>Actual end date</span><input type="date" value={form.actualEndsOn} onChange={(event) => setForm({ ...form, actualEndsOn: event.target.value })} /></label>
+              <input required placeholder={t("seasonsPage.seasonName")} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
+              <input placeholder={t("seasonsPage.cropType")} value={form.cropType} onChange={(event) => setForm({ ...form, cropType: event.target.value })} />
+              <label><span>{t("seasonsPage.startDate")}</span><input required type="date" value={form.startsOn} onChange={(event) => setForm({ ...form, startsOn: event.target.value })} /></label>
+              <label><span>{t("seasonsPage.expectedEndDate")}</span><input type="date" value={form.expectedEndsOn} onChange={(event) => setForm({ ...form, expectedEndsOn: event.target.value })} /></label>
+              <label><span>{t("seasonsPage.actualEndDate")}</span><input type="date" value={form.actualEndsOn} onChange={(event) => setForm({ ...form, actualEndsOn: event.target.value })} /></label>
               <select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as SeasonInput["status"] })}>
-                <option value="planned">Planned</option><option value="active">Active</option><option value="closed">Closed</option><option value="archived">Archived</option>
+                <option value="planned">{t("seasonsPage.planned")}</option><option value="active">{t("seasonsPage.active")}</option><option value="closed">{t("seasonsPage.closed")}</option><option value="archived">{t("seasonsPage.archived")}</option>
               </select>
-              <input placeholder="Notes" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} />
+              <input placeholder={t("seasonsPage.notes")} value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} />
               <div className="farm-actions">
-                <button disabled={save.isPending} type="submit">{editing ? "Save Changes" : "Create Season"}</button>
-                <button className="secondary-button" type="button" onClick={() => setShowForm(false)}>Cancel</button>
+                <button disabled={save.isPending} type="submit">{editing ? t("seasonsPage.saveChanges") : t("seasonsPage.createSeason")}</button>
+                <button className="secondary-button" type="button" onClick={() => setShowForm(false)}>{t("seasonsPage.cancel")}</button>
               </div>
             </form>
             {save.isError && <p className="error">{save.error.message}</p>}
           </section>
         )}
 
-        {seasons.isLoading && <p className="context-message">Loading crop cycles...</p>}
+        {seasons.isLoading && <p className="context-message">{t("seasonsPage.loadingCycles")}</p>}
         {seasons.isError && <p className="error">{seasons.error.message}</p>}
         {seasons.data && (
           <section className="farm-grid">
@@ -112,15 +114,15 @@ export function Seasons() {
               const current = season.id === seasons.data.activeSeasonId;
               return (
                 <article className={`farm-card ${current ? "farm-card--active" : ""}`} key={season.id}>
-                  <header><div><strong>{season.name}</strong><span>{season.status}</span></div>{current && <b><CheckCircle2 size={15} />Current Season</b>}</header>
-                  <p><Leaf size={15} />{season.cropType || "Crop type not recorded"}</p>
-                  <p><CalendarCheck size={15} />{season.startsOn} to {season.expectedEndsOn || "open-ended"}</p>
-                  {season.actualEndsOn && <small>Actual end: {season.actualEndsOn}</small>}
+                  <header><div><strong>{season.name}</strong><span>{t(`seasonsPage.${season.status}`)}</span></div>{current && <b><CheckCircle2 size={15} />{t("seasonsPage.currentSeason")}</b>}</header>
+                  <p><Leaf size={15} />{season.cropType || t("seasonsPage.cropTypeNotRecorded")}</p>
+                  <p><CalendarCheck size={15} />{season.startsOn} {t("reports.to")} {season.expectedEndsOn || t("seasonsPage.openEnded")}</p>
+                  {season.actualEndsOn && <small>{t("seasonsPage.actualEnd")}: {season.actualEndsOn}</small>}
                   {season.notes && <small>{season.notes}</small>}
                   <footer>
-                    {season.status !== "archived" && !current && <button type="button" onClick={() => select.mutate(season.id)}><CheckCircle2 size={15} />Set Active</button>}
-                    {canManage && <button type="button" onClick={() => edit(season)}><Pencil size={15} />Edit</button>}
-                    {canManage && season.status !== "archived" && <button className="danger-button" type="button" onClick={() => archive.mutate(season.id)}><XCircle size={15} />Archive</button>}
+                    {season.status !== "archived" && !current && <button type="button" onClick={() => select.mutate(season.id)}><CheckCircle2 size={15} />{t("seasonsPage.setActive")}</button>}
+                    {canManage && <button type="button" onClick={() => edit(season)}><Pencil size={15} />{t("seasonsPage.edit")}</button>}
+                    {canManage && season.status !== "archived" && <button className="danger-button" type="button" onClick={() => archive.mutate(season.id)}><XCircle size={15} />{t("seasonsPage.archive")}</button>}
                   </footer>
                 </article>
               );

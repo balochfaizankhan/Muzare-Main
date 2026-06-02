@@ -1,5 +1,6 @@
 import { BarChart3, Boxes, CalendarCheck, CloudUpload, LayoutDashboard, LogOut, PackageOpen, ReceiptText, RefreshCw, Settings, ShoppingBasket, Users } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { Brand } from "../components/Brand";
@@ -9,18 +10,19 @@ import { refreshOperationalData, startSyncService, stopSyncService, syncNow } fr
 import { setActiveWorkspaceId } from "../lib/offline-db";
 
 const nav = [
-  ["/workspace/dashboard", "Dashboard", LayoutDashboard],
-  ["/workspace/attendance", "Attendance", CalendarCheck],
-  ["/workspace/sales", "Sales", ShoppingBasket],
-  ["/workspace/expenses", "Expenses", ReceiptText],
-  ["/workspace/dispatch", "Dispatch", PackageOpen],
-  ["/workspace/inventory", "Inventory", Boxes],
-  ["/workspace/reports", "Reports", BarChart3],
-  ["/workspace/team", "Team", Users],
-  ["/workspace/settings", "Settings", Settings],
+  ["/workspace/dashboard", "layout.dashboard", LayoutDashboard],
+  ["/workspace/attendance", "layout.attendance", CalendarCheck],
+  ["/workspace/sales", "layout.sales", ShoppingBasket],
+  ["/workspace/expenses", "layout.expenses", ReceiptText],
+  ["/workspace/dispatch", "layout.dispatch", PackageOpen],
+  ["/workspace/inventory", "layout.inventory", Boxes],
+  ["/workspace/reports", "layout.reports", BarChart3],
+  ["/workspace/team", "layout.team", Users],
+  ["/workspace/settings", "layout.settings", Settings],
 ] as const;
 
 export function WorkspaceLayout() {
+  const { t } = useTranslation();
   const { user, token, logout, switchWorkspace } = useAuth();
   const sync = useSyncState();
   const [toast, setToast] = useState<string | null>(null);
@@ -51,28 +53,36 @@ export function WorkspaceLayout() {
     window.addEventListener("muzare-toast", showToast);
     return () => window.removeEventListener("muzare-toast", showToast);
   }, []);
-  const statusText = sync.status === "offline" ? "Working Offline" : sync.status === "syncing" ? "Syncing..." : sync.status === "error" ? "Sync Failed" : sync.pendingCount ? `${sync.pendingCount} Changes Waiting` : "Synced";
+  const statusText = sync.status === "offline"
+    ? t("layout.workingOffline")
+    : sync.status === "syncing"
+      ? t("layout.syncing")
+      : sync.status === "error"
+        ? t("layout.syncFailed")
+        : sync.pendingCount
+          ? t("layout.changesWaiting", { count: sync.pendingCount })
+          : t("layout.synced");
   return (
     <div className="app-shell">
       <aside className="app-sidebar">
         <Brand compact />
-        <span className="shell-label">{user?.workspaceName ?? "Workspace"}</span>
-        <nav>{nav.map(([to, label, Icon]) => <NavLink to={to} key={to}><Icon size={17} />{label}</NavLink>)}</nav>
+        <span className="shell-label">{user?.workspaceName ?? t("layout.workspace")}</span>
+        <nav>{nav.map(([to, label, Icon]) => <NavLink to={to} key={to}><Icon size={17} />{t(label)}</NavLink>)}</nav>
       </aside>
       <div className="app-shell__body">
         <header className="shell-header">
-          <strong>Farm Operations</strong>
+          <strong>{t("layout.farmOperations")}</strong>
           <div className="toolbar__actions">
             {user && user.memberships.length > 1 && (
-              <select className="workspace-switcher" aria-label="Current workspace" value={user.workspaceId ?? ""} onChange={(event) => void switchWorkspace(event.target.value)}>
+              <select className="workspace-switcher" aria-label={t("layout.currentWorkspace")} value={user.workspaceId ?? ""} onChange={(event) => void switchWorkspace(event.target.value)}>
                 {user.memberships.filter((membership) => membership.active).map((membership) => (
                   <option key={membership.workspaceId} value={membership.workspaceId}>{membership.workspaceName}</option>
                 ))}
               </select>
             )}
             <span className={`sync-badge sync-badge--${sync.status}`}>{statusText}</span>
-            <button className="shell-action" type="button" onClick={() => void refreshOperationalData()}><RefreshCw size={16} />Refresh</button>
-            <button className="shell-action" type="button" onClick={() => void syncNow()}><CloudUpload size={16} />Sync Now</button>
+            <button className="shell-action" type="button" onClick={() => void refreshOperationalData()}><RefreshCw size={16} />{t("layout.refresh")}</button>
+            <button className="shell-action" type="button" onClick={() => void syncNow()}><CloudUpload size={16} />{t("layout.syncNow")}</button>
             <LanguageSwitch /><button className="ghost-icon" onClick={() => void logout()}><LogOut size={18} /></button>
           </div>
         </header>

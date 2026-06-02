@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { SubpageHeader } from "../../components/SubpageHeader";
 import { SearchInput } from "../../components/SearchInput";
@@ -9,6 +10,7 @@ type Report = "combined-expenses" | "account-ledger" | "partner-position";
 const money = formatMoney;
 
 export function Reports() {
+  const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const [report, setReport] = useState<Report>((searchParams.get("report") as Report) || "combined-expenses");
   const [search, setSearch] = useState("");
@@ -31,7 +33,7 @@ export function Reports() {
       setVouchers(nextVouchers); setAdvances(nextAdvances); setAccounts(nextAccounts); setEntries(nextEntries); setSales(nextSales);
     });
   }, []);
-  const accountName = (id?: string) => accounts.find((account) => account.id === id)?.name ?? "Unknown account";
+  const accountName = (id?: string) => accounts.find((account) => account.id === id)?.name ?? t("reportsPage.unknownAccount");
   const term = search.trim().toLowerCase();
   const match = (date: string, values: string[]) => (!from || date >= from) && (!to || date <= to)
     && (!term || values.some((value) => value.toLowerCase().includes(term)));
@@ -56,16 +58,16 @@ export function Reports() {
   }), [accountId, accounts, advanceRows, filteredEntries, filteredSales, voucherRows]);
   const grandTotal = voucherRows.reduce((sum, item) => sum + item.amount, 0) + advanceRows.reduce((sum, item) => sum + item.amount, 0);
 
-  return <div className="dashboard-page"><SubpageHeader title="Reports" /><main className="subpage module-workspace">
-    <section className="record-panel"><h2>Accounting reports</h2><div className="account-ledger-filters">
-      <select value={report} onChange={(event) => setReport(event.target.value as Report)}><option value="combined-expenses">Combined Business Expense</option><option value="partner-position">Partner Position</option><option value="account-ledger">Account Ledger</option></select>
-      <SearchInput value={search} onChange={setSearch} placeholder="Search reference, account, description, or amount" />
-      <input aria-label="Report from date" type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
-      <input aria-label="Report to date" type="date" value={to} onChange={(event) => setTo(event.target.value)} />
-      <select value={accountId} onChange={(event) => setAccountId(event.target.value)}><option value="">All accounts</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select>
+  return <div className="dashboard-page"><SubpageHeader title={t("reportsPage.title")} /><main className="subpage module-workspace">
+    <section className="record-panel"><h2>{t("reportsPage.accountingReports")}</h2><div className="account-ledger-filters">
+      <select value={report} onChange={(event) => setReport(event.target.value as Report)}><option value="combined-expenses">{t("reportsPage.combinedExpenses")}</option><option value="partner-position">{t("reportsPage.partnerPosition")}</option><option value="account-ledger">{t("reportsPage.accountLedger")}</option></select>
+      <SearchInput value={search} onChange={setSearch} placeholder={t("reportsPage.searchPlaceholder")} />
+      <input aria-label={t("reportsPage.fromDate")} type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
+      <input aria-label={t("reportsPage.toDate")} type="date" value={to} onChange={(event) => setTo(event.target.value)} />
+      <select value={accountId} onChange={(event) => setAccountId(event.target.value)}><option value="">{t("reportsPage.allAccounts")}</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select>
     </div></section>
-    {report === "combined-expenses" && <section className="record-panel"><h2>Combined Business Expense Report</h2><p>Voucher expenses and labour advances are shown once each.</p><strong>{money(grandTotal)}</strong><div className="record-list">{voucherRows.map((item) => <article key={`voucher:${item.id}`}><strong>{item.date} | {item.voucherNumber}</strong><span>Voucher expense | {accountName(item.accountId)}</span><span>{item.description}</span><b>{money(item.amount)}</b></article>)}{advanceRows.map((item) => <article key={`advance:${item.id}`}><strong>{item.date}</strong><span>Labour advance | {accountName(item.accountId)}</span><span>{item.notes || "-"}</span><b>{money(item.amount)}</b></article>)}</div></section>}
-    {report === "partner-position" && <section className="record-panel"><h2>Partner Position Report</h2><div className="record-list">{positions.map((item) => <article key={item.account.id}><strong>{item.account.name}</strong><span>Voucher expenses: {money(item.voucherExpenses)}</span><span>Labour advances: {money(item.labourAdvances)}</span><span>Contributions: {money(item.contributions)} | Withdrawals: {money(item.withdrawals)}</span><span>Settlements sent: {money(item.settlementsSent)} | received: {money(item.settlementsReceived)}</span><b>Net position: {money(item.net)}</b></article>)}</div></section>}
-    {report === "account-ledger" && <section className="record-panel"><h2>Account Ledger Report</h2><div className="record-list">{positions.filter((item) => !accountId || item.account.id === accountId).map((item) => <article key={item.account.id}><strong>{item.account.name}</strong><span>Sales received: {money(item.salesReceived)}</span><span>Voucher expenses: {money(item.voucherExpenses)}</span><span>Labour advances: {money(item.labourAdvances)}</span><span>Settlements sent: {money(item.settlementsSent)} | received: {money(item.settlementsReceived)}</span><b>Net balance: {money(item.net)}</b></article>)}</div></section>}
+    {report === "combined-expenses" && <section className="record-panel"><h2>{t("reportsPage.combinedExpensesTitle")}</h2><p>{t("reportsPage.combinedExpensesDescription")}</p><strong>{money(grandTotal)}</strong><div className="record-list">{voucherRows.map((item) => <article key={`voucher:${item.id}`}><strong>{item.date} | {item.voucherNumber}</strong><span>{t("reportsPage.voucherExpense")} | {accountName(item.accountId)}</span><span>{item.description}</span><b>{money(item.amount)}</b></article>)}{advanceRows.map((item) => <article key={`advance:${item.id}`}><strong>{item.date}</strong><span>{t("reportsPage.labourAdvance")} | {accountName(item.accountId)}</span><span>{item.notes || "-"}</span><b>{money(item.amount)}</b></article>)}</div></section>}
+    {report === "partner-position" && <section className="record-panel"><h2>{t("reportsPage.partnerPositionTitle")}</h2><div className="record-list">{positions.map((item) => <article key={item.account.id}><strong>{item.account.name}</strong><span>{t("reportsPage.voucherExpenses")}: {money(item.voucherExpenses)}</span><span>{t("dashboard.labourAdvances")}: {money(item.labourAdvances)}</span><span>{t("reportsPage.contributions")}: {money(item.contributions)} | {t("reportsPage.withdrawals")}: {money(item.withdrawals)}</span><span>{t("reportsPage.settlementsSent")}: {money(item.settlementsSent)} | {t("reportsPage.settlementsReceived")}: {money(item.settlementsReceived)}</span><b>{t("reportsPage.netPosition")}: {money(item.net)}</b></article>)}</div></section>}
+    {report === "account-ledger" && <section className="record-panel"><h2>{t("reportsPage.accountLedgerTitle")}</h2><div className="record-list">{positions.filter((item) => !accountId || item.account.id === accountId).map((item) => <article key={item.account.id}><strong>{item.account.name}</strong><span>{t("reportsPage.salesReceived")}: {money(item.salesReceived)}</span><span>{t("reportsPage.voucherExpenses")}: {money(item.voucherExpenses)}</span><span>{t("dashboard.labourAdvances")}: {money(item.labourAdvances)}</span><span>{t("reportsPage.settlementsSent")}: {money(item.settlementsSent)} | {t("reportsPage.settlementsReceived")}: {money(item.settlementsReceived)}</span><b>{t("reportsPage.netBalance")}: {money(item.net)}</b></article>)}</div></section>}
   </main></div>;
 }

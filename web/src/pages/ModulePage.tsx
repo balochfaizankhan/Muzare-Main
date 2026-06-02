@@ -1632,6 +1632,7 @@ function ExpenseImportPanel({ token, workspaceId, farmId, seasonId, onClose, onI
 }
 
 function ExpensesModule() {
+  const { t } = useTranslation();
   const { token, user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const load = useCallback(async () => (await workspaceRecords(offlineDb.vouchers, { includeGeneralFarmRecords: true })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
@@ -1774,11 +1775,11 @@ function ExpensesModule() {
     if (voucher) setSelectedVoucher(voucher);
   }, [searchParams, vouchers]);
   const removeVoucher = async (voucher: Voucher) => {
-    if (!canEditVouchers || !window.confirm(`Delete voucher ${voucher.voucherNumber}? This preserves an audit record and reverses its accounting effect.`)) return;
+    if (!canEditVouchers || !window.confirm(t("expensesPage.deleteVoucherConfirm", { number: voucher.voucherNumber }))) return;
     await deleteOperationalRecord("voucher", voucher);
     setSelectedVoucher(null);
     setSearchParams((current) => { current.delete("recordId"); return current; });
-    showToast("Expense voucher deleted successfully.");
+    showToast(t("expensesPage.deleteVoucherSuccess"));
     await refresh();
   };
   const addCustom = async (event: FormEvent) => {
@@ -1790,76 +1791,76 @@ function ExpensesModule() {
 
   return (
     <>
-      <FormCard title={editingVoucher ? `Edit voucher ${editingVoucher.voucherNumber}` : "New expense voucher"}>
+      <FormCard title={editingVoucher ? t("expensesPage.editVoucher", { number: editingVoucher.voucherNumber }) : t("expensesPage.newVoucher")}>
         <form className="module-form inline-form" onSubmit={(event) => void submit(event)}>
           <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-          <label><span>Category *</span><input required list="expense-category-options" placeholder="Select category" value={categorySearch} onChange={(event) => {
+          <label><span>{t("expensesPage.categoryRequired")}</span><input required list="expense-category-options" placeholder={t("expensesPage.selectCategory")} value={categorySearch} onChange={(event) => {
             const next = categories.data?.categories.find((item) => item.name === event.target.value); setCategorySearch(event.target.value); setCategoryId(next?.id ?? ""); setSubcategoryId(""); setSubcategorySearch("");
           }} /><datalist id="expense-category-options">{categories.data?.categories.map((item) => <option key={item.id} value={item.name} />)}</datalist></label>
-          <label><span>Subcategory *</span><input required disabled={!categoryId} list="expense-subcategory-options" placeholder="Select subcategory" value={subcategorySearch} onChange={(event) => {
+          <label><span>{t("expensesPage.subcategoryRequired")}</span><input required disabled={!categoryId} list="expense-subcategory-options" placeholder={t("expensesPage.selectSubcategory")} value={subcategorySearch} onChange={(event) => {
             const next = selectedCategory?.subcategories.find((item) => item.name === event.target.value); setSubcategorySearch(event.target.value); setSubcategoryId(next?.id ?? "");
           }} /><datalist id="expense-subcategory-options">{selectedCategory?.subcategories.map((item) => <option key={item.id} value={item.name} />)}</datalist></label>
-          <input required value={description} placeholder="Description" onChange={(event) => setDescription(event.target.value)} />
-          <input required min="0.01" step="0.01" type="number" value={amount} placeholder="Amount" onChange={(event) => setAmount(event.target.value)} />
+          <input required value={description} placeholder={t("expensesPage.description")} onChange={(event) => setDescription(event.target.value)} />
+          <input required min="0.01" step="0.01" type="number" value={amount} placeholder={t("expensesPage.amount")} onChange={(event) => setAmount(event.target.value)} />
           <select value={accountId || accounts[0]?.id || ""} onChange={(event) => setAccountId(event.target.value)}>
             {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
           </select>
-          <input value={vendor} placeholder="Vendor / person (optional)" onChange={(event) => setVendor(event.target.value)} />
-          <input value={notes} placeholder="Notes / reference (optional)" onChange={(event) => setNotes(event.target.value)} />
-          <button type="submit">{editingVoucher ? "Update voucher" : "Save voucher"}</button>
-          {editingVoucher && <button type="button" onClick={() => { setEditingVoucher(null); resetForm(); }}>Cancel edit</button>}
+          <input value={vendor} placeholder={t("expensesPage.vendorOptional")} onChange={(event) => setVendor(event.target.value)} />
+          <input value={notes} placeholder={t("expensesPage.notesOptional")} onChange={(event) => setNotes(event.target.value)} />
+          <button type="submit">{editingVoucher ? t("expensesPage.updateVoucher") : t("expensesPage.saveVoucher")}</button>
+          {editingVoucher && <button type="button" onClick={() => { setEditingVoucher(null); resetForm(); }}>{t("expensesPage.cancelEdit")}</button>}
         </form>
       </FormCard>
-      {canEditVouchers && <section className="record-panel expense-import-card"><div><h2>Historical expense import</h2><p>Import validated CSV reports with account and category mapping.</p></div><button type="button" onClick={() => navigator.onLine ? setShowExpenseImport(true) : showToast("Expense CSV import requires internet connection.")}>Import expenses CSV</button></section>}
+      {canEditVouchers && <section className="record-panel expense-import-card"><div><h2>{t("expensesPage.historicalImport")}</h2><p>{t("expensesPage.historicalImportDescription")}</p></div><button type="button" onClick={() => navigator.onLine ? setShowExpenseImport(true) : showToast(t("expensesPage.importRequiresInternet"))}>{t("expensesPage.importExpensesCsv")}</button></section>}
       <section className="record-panel expense-search-panel">
-        <h2>Search vouchers</h2>
+        <h2>{t("expensesPage.searchVouchers")}</h2>
         <div className="expense-search-filters">
-          <SearchInput placeholder="Search voucher, account, category, amount, or date" value={voucherSearch} onChange={setVoucherSearch} />
+          <SearchInput placeholder={t("expensesPage.searchPlaceholder")} value={voucherSearch} onChange={setVoucherSearch} />
           <fieldset className="expense-date-range">
-            <legend>Date range</legend>
-            <label className="expense-filter-field expense-date-field"><span><CalendarDays size={15} />From date</span><input aria-label="Expense date from" type="date" value={voucherFrom} onChange={(event) => setVoucherFrom(event.target.value)} /></label>
-            <label className="expense-filter-field expense-date-field"><span><CalendarDays size={15} />To date</span><input aria-label="Expense date to" type="date" value={voucherTo} onChange={(event) => setVoucherTo(event.target.value)} /></label>
+            <legend>{t("expensesPage.dateRange")}</legend>
+            <label className="expense-filter-field expense-date-field"><span><CalendarDays size={15} />{t("expensesPage.fromDate")}</span><input aria-label={t("expensesPage.fromDate")} type="date" value={voucherFrom} onChange={(event) => setVoucherFrom(event.target.value)} /></label>
+            <label className="expense-filter-field expense-date-field"><span><CalendarDays size={15} />{t("expensesPage.toDate")}</span><input aria-label={t("expensesPage.toDate")} type="date" value={voucherTo} onChange={(event) => setVoucherTo(event.target.value)} /></label>
           </fieldset>
           <div className="expense-filter-grid">
-            <label className="expense-filter-field"><span>Category</span><select aria-label="Expense category" value={voucherCategory} onChange={(event) => { setVoucherCategory(event.target.value); setVoucherSubcategory(""); }}>
-              <option value="">All categories</option>{categories.data?.categories.map((item) => <option key={item.id}>{item.name}</option>)}
+            <label className="expense-filter-field"><span>{t("expensesPage.category")}</span><select aria-label={t("expensesPage.category")} value={voucherCategory} onChange={(event) => { setVoucherCategory(event.target.value); setVoucherSubcategory(""); }}>
+              <option value="">{t("expensesPage.allCategories")}</option>{categories.data?.categories.map((item) => <option key={item.id}>{item.name}</option>)}
             </select></label>
-            <label className="expense-filter-field"><span>Subcategory</span><select aria-label="Expense subcategory" value={voucherSubcategory} onChange={(event) => setVoucherSubcategory(event.target.value)}>
-              <option value="">All subcategories</option>{[...new Set(voucherSubcategories)].map((name) => <option key={name}>{name}</option>)}
+            <label className="expense-filter-field"><span>{t("expensesPage.subcategory")}</span><select aria-label={t("expensesPage.subcategory")} value={voucherSubcategory} onChange={(event) => setVoucherSubcategory(event.target.value)}>
+              <option value="">{t("expensesPage.allSubcategories")}</option>{[...new Set(voucherSubcategories)].map((name) => <option key={name}>{name}</option>)}
             </select></label>
-            <label className="expense-filter-field"><span>Payment account</span><select aria-label="Expense payment account" value={voucherAccountId} onChange={(event) => setVoucherAccountId(event.target.value)}>
-              <option value="">All accounts</option>{accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            <label className="expense-filter-field"><span>{t("expensesPage.paymentAccount")}</span><select aria-label={t("expensesPage.paymentAccount")} value={voucherAccountId} onChange={(event) => setVoucherAccountId(event.target.value)}>
+              <option value="">{t("expensesPage.allAccounts")}</option>{accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select></label>
-            <label className="expense-filter-field"><span>Vendor / person</span><input aria-label="Expense vendor or person" placeholder="All vendors / people" value={voucherVendor} onChange={(event) => setVoucherVendor(event.target.value)} /></label>
+            <label className="expense-filter-field"><span>{t("expensesPage.vendorPerson")}</span><input aria-label={t("expensesPage.vendorPerson")} placeholder={t("expensesPage.allVendors")} value={voucherVendor} onChange={(event) => setVoucherVendor(event.target.value)} /></label>
           </div>
         </div>
         <div className="expense-search-meta">
-          <small>{hasActiveFilters ? "Showing totals for current filters" : "Showing totals for current season scope"}</small>
-          {hasActiveFilters && <button type="button" onClick={clearFilters}>Clear filters</button>}
+          <small>{hasActiveFilters ? t("expensesPage.showingCurrentFilters") : t("expensesPage.showingSeasonScope")}</small>
+          {hasActiveFilters && <button type="button" onClick={clearFilters}>{t("expensesPage.clearFilters")}</button>}
         </div>
-        {voucherSearchQuery.isFetching && <small>Refreshing matching expenses...</small>}
-        {!navigator.onLine && <small>Offline mode: showing cached expenses.</small>}
-        {voucherSearchQuery.isError && <small>Unable to refresh expenses from the API. Showing cached expenses.</small>}
+        {voucherSearchQuery.isFetching && <small>{t("expensesPage.refreshingMatches")}</small>}
+        {!navigator.onLine && <small>{t("expensesPage.offlineShowingCached")}</small>}
+        {voucherSearchQuery.isError && <small>{t("expensesPage.apiRefreshFailed")}</small>}
       </section>
-      <Summary value={money(total)} label={hasActiveFilters ? "Total expenses - current filters" : "Total expenses - current season"} />
-      <section className="record-panel"><h2>Expenses by category</h2>{!grouped.length ? <Empty>No expense totals yet.</Empty> : <div className="expense-category-report">{grouped.map(([category, items]) => { const categoryTotal = [...items.values()].reduce((sum, amount) => sum + amount, 0); return <article key={category}><header><h3>{category}</h3><strong>{money(categoryTotal)}</strong></header>{[...items].map(([subcategory, amount]) => <p key={subcategory}><span>{subcategory}</span><strong>{money(amount)}</strong></p>)}<b>Category total <span>{money(categoryTotal)}</span></b></article>; })}</div>}</section>
-      {canManage && <section className="record-panel"><h2>Custom subcategories</h2><form className="module-form compact-form" onSubmit={(event) => void addCustom(event)}><select required value={categoryId} onChange={(event) => { setCategoryId(event.target.value); setCategorySearch(categories.data?.categories.find((item) => item.id === event.target.value)?.name ?? ""); }}><option value="">Select category</option>{categories.data?.categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><input required placeholder="New subcategory" value={customName} onChange={(event) => setCustomName(event.target.value)} /><button type="submit">Add subcategory</button></form><div className="custom-subcategory-list">{categories.data?.categories.flatMap((item) => item.subcategories.filter((subcategory) => !subcategory.isSystem).map((subcategory) => <span key={subcategory.id}>{item.name} / {subcategory.name}<button type="button" onClick={() => { const name = window.prompt("Rename custom subcategory", subcategory.name); if (token && name?.trim()) void updateExpenseSubcategory(token, workspaceId, subcategory.id, { name: name.trim() }).then(() => categories.refetch()); }}>Rename</button><button type="button" onClick={() => token && void updateExpenseSubcategory(token, workspaceId, subcategory.id, { active: false }).then(() => categories.refetch())}>Disable</button></span>))}</div></section>}
+      <Summary value={money(total)} label={hasActiveFilters ? t("expensesPage.totalCurrentFilters") : t("expensesPage.totalCurrentSeason")} />
+      <section className="record-panel"><h2>{t("expensesPage.expensesByCategory")}</h2>{!grouped.length ? <Empty>{t("expensesPage.noExpenseTotals")}</Empty> : <div className="expense-category-report">{grouped.map(([category, items]) => { const categoryTotal = [...items.values()].reduce((sum, amount) => sum + amount, 0); return <article key={category}><header><h3>{category}</h3><strong>{money(categoryTotal)}</strong></header>{[...items].map(([subcategory, amount]) => <p key={subcategory}><span>{subcategory}</span><strong>{money(amount)}</strong></p>)}<b>{t("expensesPage.categoryTotal")} <span>{money(categoryTotal)}</span></b></article>; })}</div>}</section>
+      {canManage && <section className="record-panel"><h2>{t("expensesPage.customSubcategories")}</h2><form className="module-form compact-form" onSubmit={(event) => void addCustom(event)}><select required value={categoryId} onChange={(event) => { setCategoryId(event.target.value); setCategorySearch(categories.data?.categories.find((item) => item.id === event.target.value)?.name ?? ""); }}><option value="">{t("expensesPage.selectCategory")}</option>{categories.data?.categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><input required placeholder={t("expensesPage.newSubcategory")} value={customName} onChange={(event) => setCustomName(event.target.value)} /><button type="submit">{t("expensesPage.addSubcategory")}</button></form><div className="custom-subcategory-list">{categories.data?.categories.flatMap((item) => item.subcategories.filter((subcategory) => !subcategory.isSystem).map((subcategory) => <span key={subcategory.id}>{item.name} / {subcategory.name}<button type="button" onClick={() => { const name = window.prompt(t("expensesPage.renameCustomSubcategory"), subcategory.name); if (token && name?.trim()) void updateExpenseSubcategory(token, workspaceId, subcategory.id, { name: name.trim() }).then(() => categories.refetch()); }}>{t("expensesPage.edit")}</button><button type="button" onClick={() => token && void updateExpenseSubcategory(token, workspaceId, subcategory.id, { active: false }).then(() => categories.refetch())}>{t("expensesPage.disable")}</button></span>))}</div></section>}
       <RecordTable
-        empty="No expenses found for this search."
-        rows={filteredVouchers.map((item) => [item.voucherNumber, item.date, `${item.category} / ${item.subcategory || "Miscellaneous"}`, item.description, accountById.get(item.accountId) ?? "Unknown account", money(item.amount)])}
-        actions={filteredVouchers.map((item) => <div className="record-list__actions" key={item.id}><button type="button" onClick={() => setSelectedVoucher(item)}>View details</button>{canEditVouchers && <button type="button" onClick={() => openEdit(item)}>Edit</button>}</div>)}
+        empty={t("expensesPage.noExpensesFound")}
+        rows={filteredVouchers.map((item) => [item.voucherNumber, item.date, `${item.category} / ${item.subcategory || t("expensesPage.miscellaneous")}`, item.description, accountById.get(item.accountId) ?? t("expensesPage.unknownAccount"), money(item.amount)])}
+        actions={filteredVouchers.map((item) => <div className="record-list__actions" key={item.id}><button type="button" onClick={() => setSelectedVoucher(item)}>{t("expensesPage.viewDetails")}</button>{canEditVouchers && <button type="button" onClick={() => openEdit(item)}>{t("expensesPage.edit")}</button>}</div>)}
       />
       {selectedVoucher && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedVoucher(null)}>
-        <section className="worker-dialog" role="dialog" aria-modal="true" aria-label="Expense voucher details" onClick={(event) => event.stopPropagation()}>
-          <header className="worker-dialog__header"><h2>Voucher {selectedVoucher.voucherNumber}</h2><button type="button" onClick={() => setSelectedVoucher(null)}><X size={18} /></button></header>
+        <section className="worker-dialog" role="dialog" aria-modal="true" aria-label={t("expensesPage.voucherDetails")} onClick={(event) => event.stopPropagation()}>
+          <header className="worker-dialog__header"><h2>{t("expensesPage.voucherTitle", { number: selectedVoucher.voucherNumber })}</h2><button type="button" onClick={() => setSelectedVoucher(null)}><X size={18} /></button></header>
           <div className="worker-dialog__body"><dl className="worker-stats">
-            <div><dt>Date</dt><dd>{selectedVoucher.date}</dd></div><div><dt>Category</dt><dd>{selectedVoucher.category} / {selectedVoucher.subcategory}</dd></div>
-            <div><dt>Description</dt><dd>{selectedVoucher.description}</dd></div><div><dt>Amount</dt><dd>{money(selectedVoucher.amount)}</dd></div>
-            <div><dt>Payment source</dt><dd>{accounts.find((item) => item.id === selectedVoucher.accountId)?.name ?? "Unknown account"}</dd></div>
-            {selectedVoucher.vendor && <div><dt>Vendor / person</dt><dd>{selectedVoucher.vendor}</dd></div>}
-            {selectedVoucher.notes && <div><dt>Notes / reference</dt><dd>{selectedVoucher.notes}</dd></div>}
+            <div><dt>{t("expensesPage.date")}</dt><dd>{selectedVoucher.date}</dd></div><div><dt>{t("expensesPage.category")}</dt><dd>{selectedVoucher.category} / {selectedVoucher.subcategory}</dd></div>
+            <div><dt>{t("expensesPage.description")}</dt><dd>{selectedVoucher.description}</dd></div><div><dt>{t("expensesPage.amount")}</dt><dd>{money(selectedVoucher.amount)}</dd></div>
+            <div><dt>{t("expensesPage.paymentSource")}</dt><dd>{accounts.find((item) => item.id === selectedVoucher.accountId)?.name ?? t("expensesPage.unknownAccount")}</dd></div>
+            {selectedVoucher.vendor && <div><dt>{t("expensesPage.vendorPerson")}</dt><dd>{selectedVoucher.vendor}</dd></div>}
+            {selectedVoucher.notes && <div><dt>{t("expensesPage.notesOptional")}</dt><dd>{selectedVoucher.notes}</dd></div>}
           </dl></div>
-          <footer className="worker-dialog__footer">{canEditVouchers && <button className="worker-dialog__link" type="button" onClick={() => openEdit(selectedVoucher)}>Edit voucher</button>}{canEditVouchers && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => void removeVoucher(selectedVoucher)}>Delete voucher</button>}<button className="worker-dialog__close" type="button" onClick={() => setSelectedVoucher(null)}>Close</button></footer>
+          <footer className="worker-dialog__footer">{canEditVouchers && <button className="worker-dialog__link" type="button" onClick={() => openEdit(selectedVoucher)}>{t("expensesPage.editVoucherAction")}</button>}{canEditVouchers && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => void removeVoucher(selectedVoucher)}>{t("expensesPage.deleteVoucher")}</button>}<button className="worker-dialog__close" type="button" onClick={() => setSelectedVoucher(null)}>{t("expensesPage.close")}</button></footer>
         </section>
       </div>}
       {showExpenseImport && token && farmId && seasonId && <ExpenseImportPanel token={token} workspaceId={workspaceId} farmId={farmId} seasonId={seasonId} onClose={() => setShowExpenseImport(false)} onImported={async () => { await refresh(); await categories.refetch(); }} />}
@@ -1872,6 +1873,7 @@ const newDispatchItem = (): DispatchItemDraft => ({ id: crypto.randomUUID(), dat
 const dispatchCartons = (dispatch: Dispatch) => dispatch.items?.reduce((sum, item) => sum + item.cartons, 0) ?? dispatch.cartons ?? 0;
 
 function DispatchModule() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const canManage = Boolean(user?.workspaceId && hasPermission(user, "MANAGE_RECORDS", user.workspaceId));
   const load = useCallback(async () => (await workspaceRecords(offlineDb.dispatches)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
@@ -1913,9 +1915,9 @@ function DispatchModule() {
     event.preventDefault();
     const selectedVehicle = activeVehicles.find((item) => item.id === vehicleId);
     const validItems = items.map((item) => ({ ...item, cartons: Number(item.cartons) }));
-    if (!selectedVehicle) return setError("Select an active vehicle.");
-    if (!validItems.length || validItems.some((item) => !item.dateTypeId || !Number.isInteger(item.cartons) || item.cartons <= 0)) return setError("Add at least one date type with a positive whole number of cartons.");
-    if (new Set(validItems.map((item) => item.dateTypeId)).size !== validItems.length) return setError("A date type can only appear once in a dispatch.");
+    if (!selectedVehicle) return setError(t("dispatchPage.activeVehicleRequired"));
+    if (!validItems.length || validItems.some((item) => !item.dateTypeId || !Number.isInteger(item.cartons) || item.cartons <= 0)) return setError(t("dispatchPage.validItemsRequired"));
+    if (new Set(validItems.map((item) => item.dateTypeId)).size !== validItems.length) return setError(t("dispatchPage.uniqueTypeRequired"));
     setSaving(true); setError("");
     try {
       const record: Dispatch = {
@@ -1925,7 +1927,7 @@ function DispatchModule() {
       };
       await persistOperationalRecord("dispatch", record);
       reset(); await refresh();
-      window.dispatchEvent(new CustomEvent("muzare-toast", { detail: editing ? "Dispatch updated successfully." : "Dispatch saved successfully." }));
+      window.dispatchEvent(new CustomEvent("muzare-toast", { detail: editing ? t("dispatchPage.dispatchUpdated") : t("dispatchPage.dispatchSaved") }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to save dispatch.");
     } finally {
@@ -1933,7 +1935,7 @@ function DispatchModule() {
     }
   };
   const remove = async (record: Dispatch) => {
-    if (!window.confirm("Delete this dispatch?")) return;
+    if (!window.confirm(t("dispatchPage.dispatchDeleteConfirm"))) return;
     await deleteOperationalRecord("dispatch", record); await refresh();
   };
   const vehicleTotals = new Map<string, number>();
@@ -1947,36 +1949,36 @@ function DispatchModule() {
   return (
     <>
       <div className="dispatch-toolbar">
-        <div><h2>Dispatch</h2><p>Select saved vehicles and add one or more date types per load.</p></div>
-        {canManage && <div><button type="button" onClick={() => setShowVehicles(true)}>Manage Vehicles</button><button type="button" onClick={() => setShowDateTypes(true)}>Manage Types</button></div>}
+        <div><h2>{t("dispatchPage.title")}</h2><p>{t("dispatchPage.description")}</p></div>
+        {canManage && <div><button type="button" onClick={() => setShowVehicles(true)}>{t("dispatchPage.manageVehicles")}</button><button type="button" onClick={() => setShowDateTypes(true)}>{t("dispatchPage.manageTypes")}</button></div>}
       </div>
-      <FormCard title={editing ? "Update dispatch" : "New dispatch"}>
+      <FormCard title={editing ? t("dispatchPage.updateDispatch") : t("dispatchPage.newDispatch")}>
         <form className="module-form dispatch-form" onSubmit={(event) => void submit(event)}>
-          <label><span>Dispatch date</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
-          <label><span>Vehicle</span><select required value={vehicleId} onChange={(event) => setVehicleId(event.target.value)}><option value="">Select active vehicle</option>{activeVehicles.map((item) => <option key={item.id} value={item.id}>{item.number}{item.driverName ? ` - ${item.driverName}` : ""}</option>)}</select></label>
-          <label><span>Destination / buyer</span><input placeholder="Optional" value={destination} onChange={(event) => setDestination(event.target.value)} /></label>
-          <label><span>Notes</span><input placeholder="Optional" value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
+          <label><span>{t("dispatchPage.dispatchDate")}</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
+          <label><span>{t("dispatchPage.vehicle")}</span><select required value={vehicleId} onChange={(event) => setVehicleId(event.target.value)}><option value="">{t("dispatchPage.selectActiveVehicle")}</option>{activeVehicles.map((item) => <option key={item.id} value={item.id}>{item.number}{item.driverName ? ` - ${item.driverName}` : ""}</option>)}</select></label>
+          <label><span>{t("dispatchPage.destinationBuyer")}</span><input placeholder={t("dispatchPage.optional")} value={destination} onChange={(event) => setDestination(event.target.value)} /></label>
+          <label><span>{t("dispatchPage.notes")}</span><input placeholder={t("dispatchPage.optional")} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
           <div className="dispatch-items">
-            <h3>Date types and cartons</h3>
+            <h3>{t("dispatchPage.dateTypesAndCartons")}</h3>
             {items.map((item, index) => <div className="dispatch-item-row" key={item.id}>
-              <label><span>Date type {index + 1}</span><select required value={item.dateTypeId} onChange={(event) => updateItem(item.id, "dateTypeId", event.target.value)}><option value="">Select type</option>{activeDateTypes.filter((type) => type.id === item.dateTypeId || !items.some((current) => current.id !== item.id && current.dateTypeId === type.id)).map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}</select></label>
-              <label><span>Cartons</span><input required type="number" min="1" step="1" value={item.cartons} onChange={(event) => updateItem(item.id, "cartons", event.target.value)} /></label>
-              {items.length > 1 && <button className="danger-link" type="button" onClick={() => setItems((current) => current.filter((currentItem) => currentItem.id !== item.id))}>Remove</button>}
+              <label><span>{t("dispatchPage.dateType", { index: index + 1 })}</span><select required value={item.dateTypeId} onChange={(event) => updateItem(item.id, "dateTypeId", event.target.value)}><option value="">{t("dispatchPage.selectType")}</option>{activeDateTypes.filter((type) => type.id === item.dateTypeId || !items.some((current) => current.id !== item.id && current.dateTypeId === type.id)).map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}</select></label>
+              <label><span>{t("dispatchPage.cartons")}</span><input required type="number" min="1" step="1" value={item.cartons} onChange={(event) => updateItem(item.id, "cartons", event.target.value)} /></label>
+              {items.length > 1 && <button className="danger-link" type="button" onClick={() => setItems((current) => current.filter((currentItem) => currentItem.id !== item.id))}>{t("dispatchPage.remove")}</button>}
             </div>)}
-            <button className="secondary-action" type="button" onClick={() => setItems((current) => [...current, newDispatchItem()])}>Add item</button>
-            <strong>Total cartons: {items.reduce((sum, item) => sum + (Number(item.cartons) || 0), 0)}</strong>
+            <button className="secondary-action" type="button" onClick={() => setItems((current) => [...current, newDispatchItem()])}>{t("dispatchPage.addItem")}</button>
+            <strong>{t("dispatchPage.totalCartons", { count: items.reduce((sum, item) => sum + (Number(item.cartons) || 0), 0) })}</strong>
           </div>
           {error && <p className="form-error">{error}</p>}
-          <div className="dispatch-form-actions"><button disabled={saving} type="submit">{saving ? "Saving..." : editing ? "Update dispatch" : "Save dispatch"}</button>{editing && <button className="secondary-action" type="button" onClick={reset}>Cancel</button>}</div>
+          <div className="dispatch-form-actions"><button disabled={saving} type="submit">{saving ? t("advancesPage.saving") : editing ? t("dispatchPage.updateDispatch") : t("dispatchPage.newDispatch")}</button>{editing && <button className="secondary-action" type="button" onClick={reset}>{t("common.close")}</button>}</div>
         </form>
       </FormCard>
-      <Summary label="Total dispatched cartons" value={String(filteredRecords.reduce((sum, item) => sum + dispatchCartons(item), 0))} />
+      <Summary label={t("dispatchPage.totalDispatchedCartons")} value={String(filteredRecords.reduce((sum, item) => sum + dispatchCartons(item), 0))} />
       <section className="record-panel dispatch-summary">
-        <h2>Dispatch summary</h2>
-        <div className="dispatch-summary__filters"><label><span>From date</span><input type="date" value={reportFrom} onChange={(event) => setReportFrom(event.target.value)} /></label><label><span>To date</span><input type="date" value={reportTo} onChange={(event) => setReportTo(event.target.value)} /></label></div>
-        <div className="dispatch-summary__groups"><div><h3>By vehicle</h3>{[...vehicleTotals].map(([name, total]) => <p key={name}><span>{name}</span><strong>{total} cartons</strong></p>)}</div><div><h3>By type</h3>{[...typeTotals].map(([name, total]) => <p key={name}><span>{name}</span><strong>{total} cartons</strong></p>)}</div></div>
+        <h2>{t("dispatchPage.dispatchSummary")}</h2>
+        <div className="dispatch-summary__filters"><label><span>{t("reports.dateFrom")}</span><input type="date" value={reportFrom} onChange={(event) => setReportFrom(event.target.value)} /></label><label><span>{t("reports.dateTo")}</span><input type="date" value={reportTo} onChange={(event) => setReportTo(event.target.value)} /></label></div>
+        <div className="dispatch-summary__groups"><div><h3>{t("dispatchPage.byVehicle")}</h3>{[...vehicleTotals].map(([name, total]) => <p key={name}><span>{name}</span><strong>{total} {t("dispatchPage.cartons")}</strong></p>)}</div><div><h3>{t("dispatchPage.byType")}</h3>{[...typeTotals].map(([name, total]) => <p key={name}><span>{name}</span><strong>{total} {t("dispatchPage.cartons")}</strong></p>)}</div></div>
       </section>
-      <section className="record-panel"><h2>Dispatch records</h2>{!filteredRecords.length ? <Empty>No dispatches recorded yet.</Empty> : <div className="dispatch-list">{filteredRecords.map((record) => <article key={record.id}><header><div><strong>{record.date}</strong><h3>{record.vehicleNumber ?? vehicleName(record.vehicleId)}</h3>{record.destination && <p>{record.destination}</p>}</div><b>{dispatchCartons(record)} cartons</b></header><div className="dispatch-breakdown">{record.items?.map((item) => <span key={item.id}>{dateTypeName(item.dateTypeId, item.dateTypeName)}: {item.cartons}</span>) ?? <span>{record.produceType}: {record.cartons}</span>}</div><footer><button type="button" onClick={() => edit(record)}>Edit</button>{canManage && <button className="danger-link" type="button" onClick={() => void remove(record)}>Delete</button>}</footer></article>)}</div>}</section>
+      <section className="record-panel"><h2>{t("dispatchPage.dispatchRecords")}</h2>{!filteredRecords.length ? <Empty>{t("dispatchPage.noDispatches")}</Empty> : <div className="dispatch-list">{filteredRecords.map((record) => <article key={record.id}><header><div><strong>{record.date}</strong><h3>{record.vehicleNumber ?? vehicleName(record.vehicleId)}</h3>{record.destination && <p>{record.destination}</p>}</div><b>{dispatchCartons(record)} {t("dispatchPage.cartons")}</b></header><div className="dispatch-breakdown">{record.items?.map((item) => <span key={item.id}>{dateTypeName(item.dateTypeId, item.dateTypeName)}: {item.cartons}</span>) ?? <span>{record.produceType}: {record.cartons}</span>}</div><footer><button type="button" onClick={() => edit(record)}>{t("dispatchPage.update")}</button>{canManage && <button className="danger-link" type="button" onClick={() => void remove(record)}>{t("dispatchPage.delete")}</button>}</footer></article>)}</div>}</section>
       {showVehicles && <DispatchVehicleManager vehicles={vehicles} dispatches={records} onClose={() => setShowVehicles(false)} onRefresh={refreshVehicles} />}
       {showDateTypes && <DispatchDateTypeManager dateTypes={dateTypes} dispatches={records} onClose={() => setShowDateTypes(false)} onRefresh={refreshDateTypes} />}
     </>
@@ -1984,6 +1986,7 @@ function DispatchModule() {
 }
 
 function DispatchVehicleManager({ vehicles, dispatches, onClose, onRefresh }: { vehicles: Vehicle[]; dispatches: Dispatch[]; onClose: () => void; onRefresh: () => Promise<void> }) {
+  const { t } = useTranslation();
   const [editing, setEditing] = useState<Vehicle | null>(null);
   const [number, setNumber] = useState("");
   const [driverName, setDriverName] = useState("");
@@ -1995,18 +1998,19 @@ function DispatchVehicleManager({ vehicles, dispatches, onClose, onRefresh }: { 
   const edit = (item: Vehicle) => { setEditing(item); setNumber(item.number); setDriverName(item.driverName ?? ""); setDriverPhone(item.driverPhone ?? ""); setNotes(item.notes ?? ""); setActive(item.active); setError(""); };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (vehicles.some((item) => item.id !== editing?.id && item.number.trim().toLowerCase() === number.trim().toLowerCase())) return setError("Vehicle number already exists.");
+    if (vehicles.some((item) => item.id !== editing?.id && item.number.trim().toLowerCase() === number.trim().toLowerCase())) return setError(t("dispatchPage.vehicleExists"));
     await persistOperationalRecord("vehicle", { ...(editing ?? makeLocalRecord()), number: number.trim(), driverName: driverName.trim(), driverPhone: driverPhone.trim(), notes: notes.trim(), active });
     reset(); await onRefresh();
   };
   const remove = async (item: Vehicle) => {
-    if (dispatches.some((dispatch) => dispatch.vehicleId === item.id)) return setError("Vehicle cannot be deleted because it is used by a dispatch. Mark it inactive instead.");
+    if (dispatches.some((dispatch) => dispatch.vehicleId === item.id)) return setError(t("dispatchPage.vehicleDeleteBlocked"));
     if (window.confirm(`Delete vehicle ${item.number}?`)) { await deleteOperationalRecord("vehicle", item); await onRefresh(); }
   };
-  return <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}><section className="worker-dialog dispatch-master-dialog" role="dialog" aria-modal="true" aria-label="Manage vehicles" onClick={(event) => event.stopPropagation()}><header className="worker-dialog__header"><h2>Manage Vehicles</h2><button type="button" onClick={onClose}><X size={18} /></button></header><div className="worker-dialog__body"><form className="module-form" onSubmit={(event) => void submit(event)}><label><span>Vehicle name / number</span><input required value={number} onChange={(event) => setNumber(event.target.value)} /></label><label><span>Driver name</span><input value={driverName} onChange={(event) => setDriverName(event.target.value)} /></label><label><span>Driver phone</span><input value={driverPhone} onChange={(event) => setDriverPhone(event.target.value)} /></label><label><span>Notes</span><input value={notes} onChange={(event) => setNotes(event.target.value)} /></label><label className="checkbox-row"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} /> Active vehicle</label>{error && <p className="form-error">{error}</p>}<div className="dispatch-form-actions"><button type="submit">{editing ? "Update vehicle" : "Add vehicle"}</button>{editing && <button className="secondary-action" type="button" onClick={reset}>Cancel</button>}</div></form><div className="master-list">{vehicles.map((item) => <article key={item.id}><div><strong>{item.number}</strong><p>{item.driverName || "No driver"}{item.driverPhone ? ` | ${item.driverPhone}` : ""}</p><small>{item.active ? "Active" : "Inactive"}</small></div><div><button type="button" onClick={() => edit(item)}>Edit</button><button className="danger-link" type="button" onClick={() => void remove(item)}>Delete</button></div></article>)}</div></div><footer className="worker-dialog__footer"><button className="worker-dialog__close" type="button" onClick={onClose}>Close</button></footer></section></div>;
+  return <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}><section className="worker-dialog dispatch-master-dialog" role="dialog" aria-modal="true" aria-label={t("dispatchPage.manageVehicles")} onClick={(event) => event.stopPropagation()}><header className="worker-dialog__header"><h2>{t("dispatchPage.manageVehicles")}</h2><button type="button" onClick={onClose}><X size={18} /></button></header><div className="worker-dialog__body"><form className="module-form" onSubmit={(event) => void submit(event)}><label><span>{t("dispatchPage.vehicleNameNumber")}</span><input required value={number} onChange={(event) => setNumber(event.target.value)} /></label><label><span>{t("dispatchPage.driverName")}</span><input value={driverName} onChange={(event) => setDriverName(event.target.value)} /></label><label><span>{t("dispatchPage.driverPhone")}</span><input value={driverPhone} onChange={(event) => setDriverPhone(event.target.value)} /></label><label><span>{t("dispatchPage.notes")}</span><input value={notes} onChange={(event) => setNotes(event.target.value)} /></label><label className="checkbox-row"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} /> {t("dispatchPage.activeVehicle")}</label>{error && <p className="form-error">{error}</p>}<div className="dispatch-form-actions"><button type="submit">{editing ? t("dispatchPage.updateVehicle") : t("dispatchPage.addVehicle")}</button>{editing && <button className="secondary-action" type="button" onClick={reset}>{t("farmsPage.cancel")}</button>}</div></form><div className="master-list">{vehicles.map((item) => <article key={item.id}><div><strong>{item.number}</strong><p>{item.driverName || t("dispatchPage.noDriver")}{item.driverPhone ? ` | ${item.driverPhone}` : ""}</p><small>{item.active ? t("dispatchPage.activeStatus") : t("dispatchPage.inactiveStatus")}</small></div><div><button type="button" onClick={() => edit(item)}>{t("dispatchPage.update")}</button><button className="danger-link" type="button" onClick={() => void remove(item)}>{t("dispatchPage.delete")}</button></div></article>)}</div></div><footer className="worker-dialog__footer"><button className="worker-dialog__close" type="button" onClick={onClose}>{t("common.close")}</button></footer></section></div>;
 }
 
 function DispatchDateTypeManager({ dateTypes, dispatches, onClose, onRefresh }: { dateTypes: DateType[]; dispatches: Dispatch[]; onClose: () => void; onRefresh: () => Promise<void> }) {
+  const { t } = useTranslation();
   const [editing, setEditing] = useState<DateType | null>(null);
   const [name, setName] = useState("");
   const [notes, setNotes] = useState("");
@@ -2016,15 +2020,15 @@ function DispatchDateTypeManager({ dateTypes, dispatches, onClose, onRefresh }: 
   const edit = (item: DateType) => { setEditing(item); setName(item.name); setNotes(item.notes ?? ""); setActive(item.active); setError(""); };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (dateTypes.some((item) => item.id !== editing?.id && item.name.trim().toLowerCase() === name.trim().toLowerCase())) return setError("Date type already exists.");
+    if (dateTypes.some((item) => item.id !== editing?.id && item.name.trim().toLowerCase() === name.trim().toLowerCase())) return setError(t("dispatchPage.dateTypeExists"));
     await persistOperationalRecord("dateType", { ...(editing ?? makeLocalRecord()), name: name.trim(), notes: notes.trim(), active });
     reset(); await onRefresh();
   };
   const remove = async (item: DateType) => {
-    if (dispatches.some((dispatch) => dispatch.items?.some((entry) => entry.dateTypeId === item.id))) return setError("Date type cannot be deleted because it is used by a dispatch. Mark it inactive instead.");
+    if (dispatches.some((dispatch) => dispatch.items?.some((entry) => entry.dateTypeId === item.id))) return setError(t("dispatchPage.dateTypeDeleteBlocked"));
     if (window.confirm(`Delete date type ${item.name}?`)) { await deleteOperationalRecord("dateType", item); await onRefresh(); }
   };
-  return <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}><section className="worker-dialog dispatch-master-dialog" role="dialog" aria-modal="true" aria-label="Manage date types" onClick={(event) => event.stopPropagation()}><header className="worker-dialog__header"><h2>Manage Types</h2><button type="button" onClick={onClose}><X size={18} /></button></header><div className="worker-dialog__body"><form className="module-form" onSubmit={(event) => void submit(event)}><label><span>Date type name</span><input required value={name} onChange={(event) => setName(event.target.value)} /></label><label><span>Notes / description</span><input value={notes} onChange={(event) => setNotes(event.target.value)} /></label><label className="checkbox-row"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} /> Active date type</label>{error && <p className="form-error">{error}</p>}<div className="dispatch-form-actions"><button type="submit">{editing ? "Update type" : "Add type"}</button>{editing && <button className="secondary-action" type="button" onClick={reset}>Cancel</button>}</div></form><div className="master-list">{dateTypes.map((item) => <article key={item.id}><div><strong>{item.name}</strong>{item.notes && <p>{item.notes}</p>}<small>{item.active ? "Active" : "Inactive"}</small></div><div><button type="button" onClick={() => edit(item)}>Edit</button><button className="danger-link" type="button" onClick={() => void remove(item)}>Delete</button></div></article>)}</div></div><footer className="worker-dialog__footer"><button className="worker-dialog__close" type="button" onClick={onClose}>Close</button></footer></section></div>;
+  return <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}><section className="worker-dialog dispatch-master-dialog" role="dialog" aria-modal="true" aria-label={t("dispatchPage.manageTypes")} onClick={(event) => event.stopPropagation()}><header className="worker-dialog__header"><h2>{t("dispatchPage.manageTypes")}</h2><button type="button" onClick={onClose}><X size={18} /></button></header><div className="worker-dialog__body"><form className="module-form" onSubmit={(event) => void submit(event)}><label><span>{t("dispatchPage.dateTypeName")}</span><input required value={name} onChange={(event) => setName(event.target.value)} /></label><label><span>{t("dispatchPage.notesDescription")}</span><input value={notes} onChange={(event) => setNotes(event.target.value)} /></label><label className="checkbox-row"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} /> {t("dispatchPage.activeType")}</label>{error && <p className="form-error">{error}</p>}<div className="dispatch-form-actions"><button type="submit">{editing ? t("dispatchPage.updateType") : t("dispatchPage.addType")}</button>{editing && <button className="secondary-action" type="button" onClick={reset}>{t("farmsPage.cancel")}</button>}</div></form><div className="master-list">{dateTypes.map((item) => <article key={item.id}><div><strong>{item.name}</strong>{item.notes && <p>{item.notes}</p>}<small>{item.active ? t("dispatchPage.activeStatus") : t("dispatchPage.inactiveStatus")}</small></div><div><button type="button" onClick={() => edit(item)}>{t("dispatchPage.update")}</button><button className="danger-link" type="button" onClick={() => void remove(item)}>{t("dispatchPage.delete")}</button></div></article>)}</div></div><footer className="worker-dialog__footer"><button className="worker-dialog__close" type="button" onClick={onClose}>{t("common.close")}</button></footer></section></div>;
 }
 
 function SalesModule() {
@@ -2075,11 +2079,14 @@ function SalesModule() {
   );
 }
 
-const partnerEntryLabel = (entry: PartnerEntry) => entry.type === "contribution" ? "Capital Contribution" : entry.type === "withdrawal" ? "Partner Withdrawal" : "Partner Settlement";
-const partnerEntryName = (entry: PartnerEntry) => entry.type === "settlement" ? `${entry.fromPartner} to ${entry.toPartner}` : entry.partnerName ?? "-";
+const partnerEntryName = (entry: PartnerEntry, settlementTemplate?: (from: string, to: string) => string) =>
+  entry.type === "settlement"
+    ? settlementTemplate?.(entry.fromPartner ?? "-", entry.toPartner ?? "-") ?? `${entry.fromPartner} to ${entry.toPartner}`
+    : entry.partnerName ?? "-";
 const partnerEntryBalanceEffect = (entry: PartnerEntry) => entry.type === "contribution" ? entry.amount : entry.type === "withdrawal" ? -entry.amount : 0;
 
 function PartnerLedgerModule() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const canManage = Boolean(user?.workspaceId && hasPermission(user, "MANAGE_RECORDS", user.workspaceId));
@@ -2109,6 +2116,12 @@ function PartnerLedgerModule() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [entryFilter, setEntryFilter] = useState<"all" | PartnerEntry["type"]>("all");
+  const partnerEntryLabel = (entry: PartnerEntry) => entry.type === "contribution"
+    ? t("partnerLedgerPage.capitalContribution")
+    : entry.type === "withdrawal"
+      ? t("partnerLedgerPage.partnerWithdrawal")
+      : t("partnerLedgerPage.partnerSettlement");
+  const partnerSettlementRoute = (from: string, to: string) => t("partnerLedgerPage.partnerSettlementRoute", { from, to });
   useEffect(() => {
     const recordId = searchParams.get("recordId");
     if (recordId) setViewing(entries.find((entry) => entry.id === recordId) ?? null);
@@ -2130,7 +2143,7 @@ function PartnerLedgerModule() {
     const settlement = type === "settlement";
     if (!date || Number(amount) <= 0 || (!settlement && (!accountId || !partnerName.trim()))
       || (settlement && (!fromAccountId || !toAccountId || fromAccountId === toAccountId))) {
-      return setError(settlement ? "Date, different payer and receiver accounts, and a positive amount are required." : "Date, partner, type, positive amount, and account are required.");
+      return setError(settlement ? t("partnerLedgerPage.settlementValidation") : t("partnerLedgerPage.standardValidation"));
     }
     setSaving(true); setError("");
     try {
@@ -2147,10 +2160,10 @@ function PartnerLedgerModule() {
         : { ...makeLocalRecord(), ...fields };
       await persistOperationalRecord("partnerEntry", record);
       resetForm();
-      window.dispatchEvent(new CustomEvent("muzare-toast", { detail: editing ? "Partner ledger entry updated successfully." : "Partner ledger entry saved successfully." }));
+      window.dispatchEvent(new CustomEvent("muzare-toast", { detail: editing ? t("partnerLedgerPage.entryUpdated") : t("partnerLedgerPage.entrySaved") }));
       await refresh();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to save partner ledger entry.");
+      setError(reason instanceof Error ? reason.message : t("partnerLedgerPage.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -2160,11 +2173,11 @@ function PartnerLedgerModule() {
     setSaving(true); setError("");
     try {
       await deleteOperationalRecord("partnerEntry", { ...deleting, deletionReason });
-      window.dispatchEvent(new CustomEvent("muzare-toast", { detail: "Partner ledger entry deleted successfully." }));
+      window.dispatchEvent(new CustomEvent("muzare-toast", { detail: t("partnerLedgerPage.entryDeleted") }));
       setDeleting(null); setDeletionReason("");
       await refresh();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to delete partner ledger entry.");
+      setError(reason instanceof Error ? reason.message : t("partnerLedgerPage.deleteFailed"));
     } finally {
       setSaving(false);
     }
@@ -2172,7 +2185,7 @@ function PartnerLedgerModule() {
   const visibleEntries = entries.filter((item) => (showDeleted || !item.deletedAt) && (entryFilter === "all" || item.type === entryFilter));
   const activeEntries = entries.filter((item) => !item.deletedAt);
   const balance = activeEntries.reduce((sum, item) => sum + partnerEntryBalanceEffect(item), 0);
-  const accountName = (id?: string) => id ? accounts.find((account) => account.id === id)?.name ?? "Unknown account" : "-";
+  const accountName = (id?: string) => id ? accounts.find((account) => account.id === id)?.name ?? t("expensesPage.unknownAccount") : "-";
   const partnerPositions = (() => {
     const positions = new Map<string, {
       name: string;
@@ -2237,7 +2250,7 @@ function PartnerLedgerModule() {
     for (const entry of [...activeEntries].sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt))) {
       if (entry.type === "settlement") {
         if (!entry.fromAccountId || !entry.toAccountId) {
-          labels.set(entry.id, "Unresolved settlement account mapping"); continue;
+          labels.set(entry.id, t("partnerLedgerPage.unresolvedSettlementAccountMapping")); continue;
         }
         adjust(entry.fromPartner!, -entry.amount); adjust(entry.toPartner!, entry.amount);
         labels.set(entry.id, `${entry.fromPartner}: ${money(balances.get(entry.fromPartner!.trim().toLowerCase())!.amount)} | ${entry.toPartner}: ${money(balances.get(entry.toPartner!.trim().toLowerCase())!.amount)}`);
@@ -2251,35 +2264,35 @@ function PartnerLedgerModule() {
 
   return (
     <>
-      <FormCard title={editing ? "Edit partner entry" : "Record partner entry"}>
+      <FormCard title={editing ? t("partnerLedgerPage.editPartnerEntry") : t("partnerLedgerPage.recordPartnerEntry")}>
         <form className="module-form inline-form" onSubmit={(event) => void submit(event)}>
           <input required type="date" value={date} onChange={(event) => setDate(event.target.value)} />
           <select value={type} onChange={(event) => setType(event.target.value as PartnerEntry["type"])}>
-            <option value="contribution">Capital Contribution</option>
-            <option value="withdrawal">Partner Withdrawal</option>
-            <option value="settlement">Partner Settlement</option>
+            <option value="contribution">{t("partnerLedgerPage.capitalContribution")}</option>
+            <option value="withdrawal">{t("partnerLedgerPage.partnerWithdrawal")}</option>
+            <option value="settlement">{t("partnerLedgerPage.partnerSettlement")}</option>
           </select>
           {type === "settlement" ? <>
-            <select required value={fromAccountId} onChange={(event) => setFromAccountId(event.target.value)}><option value="">From partner account</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select>
-            <select required value={toAccountId} onChange={(event) => setToAccountId(event.target.value)}><option value="">To partner account</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select>
-          </> : <input required placeholder="Partner name" value={partnerName} onChange={(event) => setPartnerName(event.target.value)} />}
-          <input required type="number" min="0.01" step="0.01" placeholder="Amount" value={amount} onChange={(event) => setAmount(event.target.value)} />
-          <input placeholder="Notes" value={notes} onChange={(event) => setNotes(event.target.value)} />
+            <select required value={fromAccountId} onChange={(event) => setFromAccountId(event.target.value)}><option value="">{t("partnerLedgerPage.fromPartnerAccount")}</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select>
+            <select required value={toAccountId} onChange={(event) => setToAccountId(event.target.value)}><option value="">{t("partnerLedgerPage.toPartnerAccount")}</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select>
+          </> : <input required placeholder={t("partnerLedgerPage.partnerName")} value={partnerName} onChange={(event) => setPartnerName(event.target.value)} />}
+          <input required type="number" min="0.01" step="0.01" placeholder={t("partnerLedgerPage.amount")} value={amount} onChange={(event) => setAmount(event.target.value)} />
+          <input placeholder={t("partnerLedgerPage.notes")} value={notes} onChange={(event) => setNotes(event.target.value)} />
           {type !== "settlement" && <select required value={accountId} onChange={(event) => setAccountId(event.target.value)}>
-            <option value="">Select cash/bank account</option>
+            <option value="">{t("partnerLedgerPage.selectCashBankAccount")}</option>
             {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
           </select>}
-          <button className="partner-ledger-submit" disabled={saving} type="submit">{saving ? "Saving..." : editing ? "Update entry" : "Save entry"}</button>
-          {editing && <button className="secondary-button" disabled={saving} type="button" onClick={resetForm}>Cancel edit</button>}
+          <button className="partner-ledger-submit" disabled={saving} type="submit">{saving ? t("partnerLedgerPage.saving") : editing ? t("partnerLedgerPage.updateEntry") : t("partnerLedgerPage.saveEntry")}</button>
+          {editing && <button className="secondary-button" disabled={saving} type="button" onClick={resetForm}>{t("partnerLedgerPage.cancelEdit")}</button>}
         </form>
         {error && <p className="worker-action-error">{error}</p>}
       </FormCard>
-      <Summary label="Partner balance" value={money(balance)} />
-      {activeEntries.some((entry) => entry.type === "settlement" && (!entry.fromAccountId || !entry.toAccountId)) && <p className="worker-action-error">Some historical settlements need account mapping repair. Edit each unresolved settlement and select its payer and receiver accounts.</p>}
+      <Summary label={t("partnerLedgerPage.partnerBalance")} value={money(balance)} />
+      {activeEntries.some((entry) => entry.type === "settlement" && (!entry.fromAccountId || !entry.toAccountId)) && <p className="worker-action-error">{t("partnerLedgerPage.unresolvedSettlementRepair")}</p>}
       <section className="record-panel">
-        <h2>Partner Position</h2>
-        {!partnerPositions.length ? <Empty>No partner positions recorded yet.</Empty> : <div className="partner-position-table">
-          <div className="partner-position-row partner-position-row--header"><span>Partner</span><span>Voucher expenses paid</span><span>Labour advances paid</span><span>Total paid</span><span>Contributions</span><span>Withdrawals</span><span>Sent</span><span>Received</span><span>Net position</span></div>
+        <h2>{t("partnerLedgerPage.partnerPosition")}</h2>
+        {!partnerPositions.length ? <Empty>{t("partnerLedgerPage.noPartnerPositions")}</Empty> : <div className="partner-position-table">
+          <div className="partner-position-row partner-position-row--header"><span>{t("partnerLedgerPage.partner")}</span><span>{t("partnerLedgerPage.voucherExpensesPaid")}</span><span>{t("partnerLedgerPage.labourAdvancesPaid")}</span><span>{t("partnerLedgerPage.totalPaid")}</span><span>{t("partnerLedgerPage.contributions")}</span><span>{t("partnerLedgerPage.withdrawals")}</span><span>{t("partnerLedgerPage.settlementsSent")}</span><span>{t("partnerLedgerPage.settlementsReceived")}</span><span>{t("partnerLedgerPage.netPosition")}</span></div>
           {partnerPositions.map((item) => <div className="partner-position-row" key={item.name}>
             <strong>{item.name}</strong><span>{money(item.voucherExpensesPaid)}</span><span>{money(item.labourAdvancesPaid)}</span><span>{money(item.totalPaid)}</span><span>{money(item.contributions)}</span><span>{money(item.withdrawals)}</span><span>{money(item.settlementsSent)}</span><span>{money(item.settlementsReceived)}</span><b>{money(item.netPosition)}</b>
           </div>)}
@@ -2287,41 +2300,41 @@ function PartnerLedgerModule() {
         {!!partnerPositions.length && <div className="partner-position-cards">
           {partnerPositions.map((item) => <article key={`mobile-${item.name}`}>
             <header><strong>{item.name}</strong><b>{money(item.netPosition)}</b></header>
-            <div><span>Voucher expenses</span><strong>{money(item.voucherExpensesPaid)}</strong></div>
-            <div><span>Labour advances</span><strong>{money(item.labourAdvancesPaid)}</strong></div>
-            <div><span>Total paid</span><strong>{money(item.totalPaid)}</strong></div>
-            <div><span>Contributions</span><strong>{money(item.contributions)}</strong></div>
-            <div><span>Withdrawals</span><strong>{money(item.withdrawals)}</strong></div>
-            <div><span>Settlements sent</span><strong>{money(item.settlementsSent)}</strong></div>
-            <div><span>Settlements received</span><strong>{money(item.settlementsReceived)}</strong></div>
+            <div><span>{t("partnerLedgerPage.voucherExpensesPaid")}</span><strong>{money(item.voucherExpensesPaid)}</strong></div>
+            <div><span>{t("partnerLedgerPage.labourAdvancesPaid")}</span><strong>{money(item.labourAdvancesPaid)}</strong></div>
+            <div><span>{t("partnerLedgerPage.totalPaid")}</span><strong>{money(item.totalPaid)}</strong></div>
+            <div><span>{t("partnerLedgerPage.contributions")}</span><strong>{money(item.contributions)}</strong></div>
+            <div><span>{t("partnerLedgerPage.withdrawals")}</span><strong>{money(item.withdrawals)}</strong></div>
+            <div><span>{t("partnerLedgerPage.settlementsSent")}</span><strong>{money(item.settlementsSent)}</strong></div>
+            <div><span>{t("partnerLedgerPage.settlementsReceived")}</span><strong>{money(item.settlementsReceived)}</strong></div>
           </article>)}
         </div>}
       </section>
-      <label className="partner-ledger-filter"><span>Ledger filter</span><select value={entryFilter} onChange={(event) => setEntryFilter(event.target.value as typeof entryFilter)}>
-        <option value="all">All</option><option value="contribution">Contributions</option><option value="withdrawal">Withdrawals</option><option value="settlement">Settlements</option>
+      <label className="partner-ledger-filter"><span>{t("partnerLedgerPage.ledgerFilter")}</span><select value={entryFilter} onChange={(event) => setEntryFilter(event.target.value as typeof entryFilter)}>
+        <option value="all">{t("partnerLedgerPage.all")}</option><option value="contribution">{t("partnerLedgerPage.contributions")}</option><option value="withdrawal">{t("partnerLedgerPage.withdrawals")}</option><option value="settlement">{t("partnerLedgerPage.partnerSettlement")}</option>
       </select></label>
-      {canManage && <label className="partner-ledger-show-deleted"><input checked={showDeleted} type="checkbox" onChange={(event) => setShowDeleted(event.target.checked)} /> Show deleted</label>}
+      {canManage && <label className="partner-ledger-show-deleted"><input checked={showDeleted} type="checkbox" onChange={(event) => setShowDeleted(event.target.checked)} /> {t("partnerLedgerPage.showDeleted")}</label>}
       <RecordTable
-        empty="No partner entries recorded yet."
-        rows={visibleEntries.map((item) => [item.date, partnerEntryName(item), partnerEntryLabel(item), accountName(item.accountId), item.notes || "-", money(item.type === "withdrawal" ? -item.amount : item.amount), item.deletedAt ? "Deleted" : runningBalances.get(item.id) ?? "-"])}
+        empty={t("partnerLedgerPage.noPartnerEntries")}
+        rows={visibleEntries.map((item) => [item.date, partnerEntryName(item, partnerSettlementRoute), partnerEntryLabel(item), accountName(item.accountId), item.notes || "-", money(item.type === "withdrawal" ? -item.amount : item.amount), item.deletedAt ? t("partnerLedgerPage.deleted") : runningBalances.get(item.id) ?? "-"])}
         actions={visibleEntries.map((item) => (
           <div className="record-list__actions" key={`actions-${item.id}`}>
-            <button type="button" onClick={() => setViewing(item)}>View</button>
-            {canManage && !item.deletedAt && <button type="button" onClick={() => edit(item)}>Edit</button>}
-            {canManage && !item.deletedAt && <button className="danger-button" type="button" onClick={() => { setDeleting(item); setDeletionReason(""); }}>Delete</button>}
+            <button type="button" onClick={() => setViewing(item)}>{t("partnerLedgerPage.view")}</button>
+            {canManage && !item.deletedAt && <button type="button" onClick={() => edit(item)}>{t("partnerLedgerPage.edit")}</button>}
+            {canManage && !item.deletedAt && <button className="danger-button" type="button" onClick={() => { setDeleting(item); setDeletionReason(""); }}>{t("partnerLedgerPage.delete")}</button>}
           </div>
         ))}
       />
       {viewing && (
         <div className="worker-dialog-backdrop worker-action-backdrop">
           <section className="worker-action-dialog">
-            <header><h2>Partner ledger entry</h2><button aria-label="Close" type="button" onClick={() => setViewing(null)}><X size={19} /></button></header>
+            <header><h2>{t("partnerLedgerPage.detailsTitle")}</h2><button aria-label={t("common.close")} type="button" onClick={() => setViewing(null)}><X size={19} /></button></header>
             <div className="worker-action-form partner-ledger-details">
-              <p><strong>Date</strong><span>{viewing.date}</span></p><p><strong>Partner</strong><span>{partnerEntryName(viewing)}</span></p>
-              <p><strong>Type</strong><span>{partnerEntryLabel(viewing)}</span></p>{viewing.type !== "settlement" && <p><strong>Account</strong><span>{accountName(viewing.accountId)}</span></p>}
-              <p><strong>Amount</strong><span>{money(viewing.amount)}</span></p><p><strong>Notes</strong><span>{viewing.notes || "-"}</span></p>
-              {viewing.deletedAt && <p><strong>Deleted</strong><span>{new Date(viewing.deletedAt).toLocaleString()}</span></p>}
-              <footer><button type="button" onClick={() => setViewing(null)}>Close</button></footer>
+              <p><strong>{t("partnerLedgerPage.date")}</strong><span>{viewing.date}</span></p><p><strong>{t("partnerLedgerPage.partner")}</strong><span>{partnerEntryName(viewing, partnerSettlementRoute)}</span></p>
+              <p><strong>{t("partnerLedgerPage.type")}</strong><span>{partnerEntryLabel(viewing)}</span></p>{viewing.type !== "settlement" && <p><strong>{t("partnerLedgerPage.account")}</strong><span>{accountName(viewing.accountId)}</span></p>}
+              <p><strong>{t("partnerLedgerPage.amount")}</strong><span>{money(viewing.amount)}</span></p><p><strong>{t("partnerLedgerPage.notes")}</strong><span>{viewing.notes || "-"}</span></p>
+              {viewing.deletedAt && <p><strong>{t("partnerLedgerPage.deleted")}</strong><span>{new Date(viewing.deletedAt).toLocaleString()}</span></p>}
+              <footer><button type="button" onClick={() => setViewing(null)}>{t("partnerLedgerPage.close")}</button></footer>
             </div>
           </section>
         </div>
@@ -2329,13 +2342,13 @@ function PartnerLedgerModule() {
       {deleting && (
         <div className="worker-dialog-backdrop worker-action-backdrop">
           <section className="worker-action-dialog">
-            <header><h2>Delete partner ledger entry</h2><button aria-label="Close" type="button" onClick={() => setDeleting(null)}><X size={19} /></button></header>
+            <header><h2>{t("partnerLedgerPage.deleteTitle")}</h2><button aria-label={t("common.close")} type="button" onClick={() => setDeleting(null)}><X size={19} /></button></header>
             <div className="worker-action-form">
-              <p className="worker-action-warning">This soft delete reverses the ledger effect while preserving the audit history.</p>
-              <p>{deleting.date} | {partnerEntryName(deleting)} | {partnerEntryLabel(deleting)} | {accountName(deleting.accountId)} | {money(deleting.amount)}</p>
-              <label><span>Deletion reason</span><textarea value={deletionReason} onChange={(event) => setDeletionReason(event.target.value)} /></label>
+              <p className="worker-action-warning">{t("partnerLedgerPage.deleteWarning")}</p>
+              <p>{deleting.date} | {partnerEntryName(deleting, partnerSettlementRoute)} | {partnerEntryLabel(deleting)} | {accountName(deleting.accountId)} | {money(deleting.amount)}</p>
+              <label><span>{t("partnerLedgerPage.deletionReason")}</span><textarea value={deletionReason} onChange={(event) => setDeletionReason(event.target.value)} /></label>
               {error && <p className="worker-action-error">{error}</p>}
-              <footer><button disabled={saving} type="button" onClick={() => setDeleting(null)}>Cancel</button><button className="danger-button" disabled={saving} type="button" onClick={() => void confirmDelete()}>{saving ? "Deleting..." : "Delete entry"}</button></footer>
+              <footer><button disabled={saving} type="button" onClick={() => setDeleting(null)}>{t("partnerLedgerPage.cancel")}</button><button className="danger-button" disabled={saving} type="button" onClick={() => void confirmDelete()}>{saving ? t("partnerLedgerPage.deleting") : t("partnerLedgerPage.deleteEntry")}</button></footer>
             </div>
           </section>
         </div>
@@ -2345,6 +2358,7 @@ function PartnerLedgerModule() {
 }
 
 function AccountsModule() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const loadAccounts = useCallback(async () => (await workspaceRecords(offlineDb.accounts)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)), []);
   const loadVouchers = useCallback(() => workspaceRecords(offlineDb.vouchers, { includeGeneralFarmRecords: true }), []);
@@ -2423,7 +2437,7 @@ function AccountsModule() {
         date: advance.date,
         type: "advance",
         reference: advance.id.slice(0, 8),
-        description: `Labour advance${advance.notes ? ` - ${advance.notes}` : ""}`,
+        description: `${t("accountsPage.labourAdvance")}${advance.notes ? ` - ${advance.notes}` : ""}`,
         debit: advance.amount,
         credit: 0,
         source: "labour_advances",
@@ -2437,7 +2451,7 @@ function AccountsModule() {
           date: entry.date,
           type: "contribution",
           reference: entry.id.slice(0, 8),
-          description: entry.notes || "Capital contribution",
+          description: entry.notes || t("partnerLedgerPage.capitalContribution"),
           debit: 0,
           credit: entry.amount,
           source: "partner_ledger",
@@ -2451,7 +2465,7 @@ function AccountsModule() {
           date: entry.date,
           type: "withdrawal",
           reference: entry.id.slice(0, 8),
-          description: entry.notes || "Partner withdrawal",
+          description: entry.notes || t("partnerLedgerPage.partnerWithdrawal"),
           debit: entry.amount,
           credit: 0,
           source: "partner_ledger",
@@ -2466,7 +2480,7 @@ function AccountsModule() {
             date: entry.date,
             type: "settlement_sent",
             reference: entry.id.slice(0, 8),
-            description: entry.notes || "Partner settlement sent",
+            description: entry.notes || t("accountsPage.settlementSent"),
             debit: entry.amount,
             credit: 0,
             source: "partner_ledger",
@@ -2480,7 +2494,7 @@ function AccountsModule() {
             date: entry.date,
             type: "settlement_received",
             reference: entry.id.slice(0, 8),
-            description: entry.notes || "Partner settlement received",
+            description: entry.notes || t("accountsPage.settlementReceived"),
             debit: 0,
             credit: entry.amount,
             source: "partner_ledger",
@@ -2496,7 +2510,7 @@ function AccountsModule() {
       running += row.credit - row.debit;
       return { ...row, runningBalance: running };
     });
-  }, [advances, entries, sales, selectedAccount, vouchers]);
+  }, [advances, entries, sales, selectedAccount, t, vouchers]);
   const filteredLedgerRows = useMemo(() => {
     const term = ledgerSearch.trim().toLowerCase();
     return ledgerRows.filter((row) => (ledgerType === "all" || row.type === ledgerType)
@@ -2564,17 +2578,17 @@ function AccountsModule() {
 
   return (
     <>
-      <FormCard title="Create account">
+      <FormCard title={t("accountsPage.createAccount")}>
         <form className="module-form compact-form" onSubmit={(event) => void submit(event)}>
-          <input required placeholder="Account name" value={name} onChange={(event) => setName(event.target.value)} />
+          <input required placeholder={t("accountsPage.accountName")} value={name} onChange={(event) => setName(event.target.value)} />
           <select value={type} onChange={(event) => setType(event.target.value as Account["type"])}>
-            <option value="cash">Cash</option><option value="bank">Bank</option><option value="partner">Partner</option>
+            <option value="cash">{t("accountsPage.cash")}</option><option value="bank">{t("accountsPage.bank")}</option><option value="partner">{t("accountsPage.partner")}</option>
           </select>
-          <button type="submit">Create account</button>
+          <button type="submit">{t("accountsPage.createAccount")}</button>
         </form>
       </FormCard>
       <section className="record-panel">
-        <h2>Your accounts</h2>
+        <h2>{t("accountsPage.yourAccounts")}</h2>
         <div className="account-grid">
           {accounts.map((account) => (
             <article key={account.id} className="account-card-clickable" role="button" tabIndex={0} onClick={() => setSelectedAccountId(account.id)} onKeyDown={(event) => {
@@ -2586,70 +2600,70 @@ function AccountsModule() {
               <span>{account.type}</span>
               <strong>{account.name}</strong>
               <b>{money(balance(account))}</b>
-              <small>View details</small>
+              <small>{t("accountsPage.viewDetails")}</small>
             </article>
           ))}
         </div>
       </section>
       <section className="record-panel">
-        <h2>Expense visibility</h2>
+        <h2>{t("accountsPage.expenseVisibility")}</h2>
         <div className="record-list">
-          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("voucher")}><strong>Voucher expenses</strong><span>{money(totalVoucherExpenses)}</span><small>View details</small></article>
-          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("advance")}><strong>Labour advances</strong><span>{money(totalAdvances)}</span><small>View details</small></article>
-          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("combined")}><strong>Total business expenses</strong><span>{money(totalVoucherExpenses + totalAdvances)}</span><small>View details</small></article>
+          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("voucher")}><strong>{t("accountsPage.voucherExpenses")}</strong><span>{money(totalVoucherExpenses)}</span><small>{t("accountsPage.viewDetails")}</small></article>
+          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("advance")}><strong>{t("accountsPage.labourAdvances")}</strong><span>{money(totalAdvances)}</span><small>{t("accountsPage.viewDetails")}</small></article>
+          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("combined")}><strong>{t("accountsPage.totalBusinessExpenses")}</strong><span>{money(totalVoucherExpenses + totalAdvances)}</span><small>{t("accountsPage.viewDetails")}</small></article>
         </div>
       </section>
       <Summary
-        label="Net operating position"
+        label={t("accountsPage.netOperatingPosition")}
         value={money(sales.reduce((sum, item) => sum + item.amount, 0) - totalVoucherExpenses - totalAdvances)}
       />
       {selectedAccount && <div className="worker-dialog-backdrop worker-action-backdrop" role="presentation" onClick={() => setSelectedAccountId(null)}>
-        <section className="worker-action-dialog account-ledger-dialog" role="dialog" aria-modal="true" aria-label="Account ledger details" onClick={(event) => event.stopPropagation()}>
-          <header><h2>{selectedAccount.name} Ledger</h2><button aria-label="Close" type="button" onClick={() => setSelectedAccountId(null)}><X size={19} /></button></header>
+        <section className="worker-action-dialog account-ledger-dialog" role="dialog" aria-modal="true" aria-label={t("accountsPage.accountLedgerDetails")} onClick={(event) => event.stopPropagation()}>
+          <header><h2>{t("accountsPage.ledgerTitle", { name: selectedAccount.name })}</h2><button aria-label={t("common.close")} type="button" onClick={() => setSelectedAccountId(null)}><X size={19} /></button></header>
           <div className="worker-action-form">
             <div className="account-ledger-breakdown">
-              <article><strong>Voucher expenses paid</strong><span>{money(ledgerBreakdown.voucherExpensesPaid)}</span></article>
-              <article><strong>Sales received</strong><span>{money(ledgerBreakdown.salesReceived)}</span></article>
-              <article><strong>Labour advances paid</strong><span>{money(ledgerBreakdown.labourAdvancesPaid)}</span></article>
-              <article><strong>Partner settlements sent</strong><span>{money(ledgerBreakdown.settlementsSent)}</span></article>
-              <article><strong>Partner settlements received</strong><span>{money(ledgerBreakdown.settlementsReceived)}</span></article>
-              <article><strong>Contributions</strong><span>{money(ledgerBreakdown.contributions)}</span></article>
-              <article><strong>Withdrawals</strong><span>{money(ledgerBreakdown.withdrawals)}</span></article>
-              <article><strong>Net balance</strong><b>{money(ledgerBreakdown.netBalance)}</b></article>
+              <article><strong>{t("accountsPage.voucherExpensesPaid")}</strong><span>{money(ledgerBreakdown.voucherExpensesPaid)}</span></article>
+              <article><strong>{t("accountsPage.salesReceived")}</strong><span>{money(ledgerBreakdown.salesReceived)}</span></article>
+              <article><strong>{t("accountsPage.labourAdvancesPaid")}</strong><span>{money(ledgerBreakdown.labourAdvancesPaid)}</span></article>
+              <article><strong>{t("accountsPage.partnerSettlementsSent")}</strong><span>{money(ledgerBreakdown.settlementsSent)}</span></article>
+              <article><strong>{t("accountsPage.partnerSettlementsReceived")}</strong><span>{money(ledgerBreakdown.settlementsReceived)}</span></article>
+              <article><strong>{t("accountsPage.contributions")}</strong><span>{money(ledgerBreakdown.contributions)}</span></article>
+              <article><strong>{t("accountsPage.withdrawals")}</strong><span>{money(ledgerBreakdown.withdrawals)}</span></article>
+              <article><strong>{t("accountsPage.netBalance")}</strong><b>{money(ledgerBreakdown.netBalance)}</b></article>
             </div>
             <div className="account-ledger-filters">
-              <SearchInput placeholder="Search voucher/reference, description, amount, or counterparty" value={ledgerSearch} onChange={setLedgerSearch} />
+              <SearchInput placeholder={t("accountsPage.ledgerSearchPlaceholder")} value={ledgerSearch} onChange={setLedgerSearch} />
               <select value={ledgerType} onChange={(event) => setLedgerType(event.target.value as typeof ledgerType)}>
-                <option value="all">All types</option>
-                <option value="sale">Sale credit</option>
-                <option value="voucher">Voucher expense</option>
-                <option value="advance">Labour advance</option>
-                <option value="settlement_sent">Settlement sent</option>
-                <option value="settlement_received">Settlement received</option>
-                <option value="contribution">Contribution</option>
-                <option value="withdrawal">Withdrawal</option>
+                <option value="all">{t("accountsPage.allTypes")}</option>
+                <option value="sale">{t("accountsPage.saleCredit")}</option>
+                <option value="voucher">{t("accountsPage.voucherExpense")}</option>
+                <option value="advance">{t("accountsPage.labourAdvance")}</option>
+                <option value="settlement_sent">{t("accountsPage.settlementSent")}</option>
+                <option value="settlement_received">{t("accountsPage.settlementReceived")}</option>
+                <option value="contribution">{t("accountsPage.contribution")}</option>
+                <option value="withdrawal">{t("accountsPage.withdrawal")}</option>
               </select>
-              <input aria-label="Ledger from date" type="date" value={ledgerFrom} onChange={(event) => setLedgerFrom(event.target.value)} />
-              <input aria-label="Ledger to date" type="date" value={ledgerTo} onChange={(event) => setLedgerTo(event.target.value)} />
+              <input aria-label={t("accountsPage.ledgerFromDate")} type="date" value={ledgerFrom} onChange={(event) => setLedgerFrom(event.target.value)} />
+              <input aria-label={t("accountsPage.ledgerToDate")} type="date" value={ledgerTo} onChange={(event) => setLedgerTo(event.target.value)} />
             </div>
             <div className="attendance-import-table-wrap">
               <table>
-                <thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Description</th><th>Debit</th><th>Credit</th><th>Running Balance</th><th>Source</th></tr></thead>
+                <thead><tr><th>{t("expensesPage.date")}</th><th>{t("partnerLedgerPage.type")}</th><th>{t("accountsPage.reference")}</th><th>{t("expensesPage.description")}</th><th>{t("accountsPage.debit")}</th><th>{t("accountsPage.credit")}</th><th>{t("accountsPage.runningBalance")}</th><th>{t("accountsPage.source")}</th></tr></thead>
                 <tbody>
                   {filteredLedgerRows.map((row) => <tr key={row.id}>
                     <td>{row.date}</td>
-                    <td>{row.type.replace("_", " ")}</td>
+                    <td>{row.type === "sale" ? t("accountsPage.saleCredit") : row.type === "voucher" ? t("accountsPage.voucherExpense") : row.type === "advance" ? t("accountsPage.labourAdvance") : row.type === "settlement_sent" ? t("accountsPage.settlementSent") : row.type === "settlement_received" ? t("accountsPage.settlementReceived") : row.type === "contribution" ? t("accountsPage.contribution") : t("accountsPage.withdrawal")}</td>
                     <td>{row.reference}</td>
                     <td>{row.description}{row.counterparty ? ` (${row.counterparty})` : ""}</td>
                     <td>{row.debit ? money(row.debit) : "-"}</td>
                     <td>{row.credit ? money(row.credit) : "-"}</td>
                     <td>{money(row.runningBalance ?? 0)}</td>
-                    <td><button type="button" onClick={() => openSource(row)}>Open</button></td>
+                    <td><button type="button" onClick={() => openSource(row)}>{t("accountsPage.open")}</button></td>
                   </tr>)}
                 </tbody>
               </table>
             </div>
-            <footer><button type="button" onClick={() => setSelectedAccountId(null)}>Back</button></footer>
+            <footer><button type="button" onClick={() => setSelectedAccountId(null)}>{t("accountsPage.back")}</button></footer>
           </div>
         </section>
       </div>}
@@ -2662,9 +2676,10 @@ function Summary({ label, value }: { label: string; value: string }) {
 }
 
 function RecordTable({ empty, rows, actions }: { empty: string; rows: string[][]; actions?: ReactNode[] }) {
+  const { t } = useTranslation();
   return (
     <section className="record-panel">
-      <h2>Recent records</h2>
+      <h2>{t("accountsPage.recentRecords")}</h2>
       {!rows.length ? <Empty>{empty}</Empty> : (
         <div className="record-list">
           {rows.map((row, index) => <article key={`${row[0]}-${index}`}>{row.map((cell, item) => item === 0 ? <strong key={cell}>{cell}</strong> : <span key={`${cell}-${item}`}>{cell}</span>)}{actions?.[index]}</article>)}
@@ -2673,15 +2688,6 @@ function RecordTable({ empty, rows, actions }: { empty: string; rows: string[][]
     </section>
   );
 }
-
-const descriptions: Record<ModuleKey, string> = {
-  workforce: "Attendance, wages, advances, and labour registers.",
-  expenses: "Vouchers, invoices, categories, and expense reporting.",
-  sales: "Market revenue and sales collection.",
-  dispatch: "Vehicle movement and produce carton dispatch.",
-  accounts: "Balances calculated from synchronized operational transactions.",
-  partnerLedger: "Partner contributions, withdrawals, settlements, and running balances.",
-};
 
 export function ModulePage({
   module,
@@ -2701,9 +2707,9 @@ export function ModulePage({
         <section className="workspace-intro">
           <div>
             <h2>{t(module)}</h2>
-            <p>{descriptions[module]}</p>
+            <p>{t(`moduleDescriptions.${module}`)}</p>
           </div>
-          <span className="local-pill">Database synchronized</span>
+          <span className="local-pill">{t("layout.databaseSynced")}</span>
         </section>
         {module === "workforce" && <WorkforceModule openAttendanceOnLoad={workforceMode === "attendance"} onAttendanceClose={onAttendanceClose} />}
         {module === "expenses" && <ExpensesModule />}

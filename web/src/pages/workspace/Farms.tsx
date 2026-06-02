@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Leaf, MapPin, Pencil, Plus, UserRound, XCircle } from "lucide-react";
 import { useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../../auth/AuthProvider";
 import { SubpageHeader } from "../../components/SubpageHeader";
 import {
@@ -17,6 +18,7 @@ import { hasPermission } from "../../lib/permissions";
 const emptyForm: FarmInput = { name: "", location: "", owner: "", remarks: "", contactName: "", contactEmail: "", contactPhone: "" };
 
 export function Farms() {
+  const { t } = useTranslation();
   const { user, token } = useAuth();
   const client = useQueryClient();
   const workspaceId = user?.workspaceId ?? "";
@@ -70,34 +72,34 @@ export function Farms() {
 
   return (
     <div className="dashboard-page">
-      <SubpageHeader title="Farms" />
+      <SubpageHeader title={t("farmsPage.title")} />
       <main className="subpage module-workspace">
         <section className="workspace-intro">
-          <div><h2>Farm Management</h2><p>Create farms, maintain contact details, and choose the active operating context.</p></div>
-          {canManage && <button className="shell-action" type="button" onClick={() => { setEditing(null); setForm(emptyForm); setShowForm(true); }}><Plus size={16} />Create Farm</button>}
+          <div><h2>{t("farmsPage.managementTitle")}</h2><p>{t("farmsPage.managementDescription")}</p></div>
+          {canManage && <button className="shell-action" type="button" onClick={() => { setEditing(null); setForm(emptyForm); setShowForm(true); }}><Plus size={16} />{t("farmsPage.createFarm")}</button>}
         </section>
 
         {showForm && canManage && (
           <section className="record-panel">
-            <h2>{editing ? "Edit Farm" : "Create Farm"}</h2>
+            <h2>{editing ? t("farmsPage.editFarm") : t("farmsPage.createFarm")}</h2>
             <form className="module-form farm-form" onSubmit={submit}>
-              <input required placeholder="Farm name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
-              <input placeholder="Location" value={form.location} onChange={(event) => setForm({ ...form, location: event.target.value })} />
-              <input placeholder="Owner or operator" value={form.owner} onChange={(event) => setForm({ ...form, owner: event.target.value })} />
-              <input placeholder="Contact name" value={form.contactName} onChange={(event) => setForm({ ...form, contactName: event.target.value })} />
-              <input type="email" placeholder="Contact email" value={form.contactEmail} onChange={(event) => setForm({ ...form, contactEmail: event.target.value })} />
-              <input placeholder="Contact phone" value={form.contactPhone} onChange={(event) => setForm({ ...form, contactPhone: event.target.value })} />
-              <input placeholder="Notes" value={form.remarks} onChange={(event) => setForm({ ...form, remarks: event.target.value })} />
+              <input required placeholder={t("farmsPage.farmName")} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
+              <input placeholder={t("farmsPage.location")} value={form.location} onChange={(event) => setForm({ ...form, location: event.target.value })} />
+              <input placeholder={t("farmsPage.ownerOrOperator")} value={form.owner} onChange={(event) => setForm({ ...form, owner: event.target.value })} />
+              <input placeholder={t("farmsPage.contactName")} value={form.contactName} onChange={(event) => setForm({ ...form, contactName: event.target.value })} />
+              <input type="email" placeholder={t("farmsPage.contactEmail")} value={form.contactEmail} onChange={(event) => setForm({ ...form, contactEmail: event.target.value })} />
+              <input placeholder={t("farmsPage.contactPhone")} value={form.contactPhone} onChange={(event) => setForm({ ...form, contactPhone: event.target.value })} />
+              <input placeholder={t("farmsPage.notes")} value={form.remarks} onChange={(event) => setForm({ ...form, remarks: event.target.value })} />
               <div className="farm-actions">
-                <button disabled={save.isPending} type="submit">{editing ? "Save Changes" : "Create Farm"}</button>
-                <button className="secondary-button" type="button" onClick={() => setShowForm(false)}>Cancel</button>
+                <button disabled={save.isPending} type="submit">{editing ? t("farmsPage.saveChanges") : t("farmsPage.createFarm")}</button>
+                <button className="secondary-button" type="button" onClick={() => setShowForm(false)}>{t("farmsPage.cancel")}</button>
               </div>
             </form>
             {save.isError && <p className="error">{save.error.message}</p>}
           </section>
         )}
 
-        {farms.isLoading && <p className="context-message">Loading farms...</p>}
+        {farms.isLoading && <p className="context-message">{t("farmsPage.loadingFarms")}</p>}
         {farms.isError && <p className="error">{farms.error.message}</p>}
         {farms.data && (
           <section className="farm-grid">
@@ -105,21 +107,21 @@ export function Farms() {
               const isCurrent = farms.data.activeFarmId === farm.id;
               return (
                 <article className={`farm-card ${isCurrent ? "farm-card--active" : ""}`} key={farm.id}>
-                  <header><div><strong>{farm.name}</strong><span>{farm.active ? "Active" : "Archived"}</span></div>{isCurrent && <b><CheckCircle2 size={15} />Current Farm</b>}</header>
-                  <p><MapPin size={15} />{farm.location || "Location not recorded"}</p>
-                  <p><UserRound size={15} />{farm.owner || farm.contactName || "Contact not recorded"}</p>
+                  <header><div><strong>{farm.name}</strong><span>{farm.active ? t("common.active") : t("seasonsPage.archived")}</span></div>{isCurrent && <b><CheckCircle2 size={15} />{t("farmsPage.currentFarm")}</b>}</header>
+                  <p><MapPin size={15} />{farm.location || t("farmsPage.locationNotRecorded")}</p>
+                  <p><UserRound size={15} />{farm.owner || farm.contactName || t("farmsPage.contactNotRecorded")}</p>
                   {farm.contactEmail && <small>{farm.contactEmail}</small>}
                   {farm.contactPhone && <small>{farm.contactPhone}</small>}
                   {farm.remarks && <small>{farm.remarks}</small>}
                   <footer>
-                    {farm.active && !isCurrent && <button type="button" onClick={() => select.mutate(farm.id)}><Leaf size={15} />Set Active</button>}
-                    {canManage && <button type="button" onClick={() => edit(farm)}><Pencil size={15} />Edit</button>}
-                    {canManage && farm.active && <button className="danger-button" type="button" onClick={() => archive.mutate(farm.id)}><XCircle size={15} />Archive</button>}
+                    {farm.active && !isCurrent && <button type="button" onClick={() => select.mutate(farm.id)}><Leaf size={15} />{t("farmsPage.setActive")}</button>}
+                    {canManage && <button type="button" onClick={() => edit(farm)}><Pencil size={15} />{t("farmsPage.edit")}</button>}
+                    {canManage && farm.active && <button className="danger-button" type="button" onClick={() => archive.mutate(farm.id)}><XCircle size={15} />{t("farmsPage.archive")}</button>}
                   </footer>
                 </article>
               );
             })}
-            {!farms.data.farms.length && <p className="context-message">No farms exist yet. Create the first farm to begin operations.</p>}
+            {!farms.data.farms.length && <p className="context-message">{t("farmsPage.noFarms")}</p>}
           </section>
         )}
       </main>

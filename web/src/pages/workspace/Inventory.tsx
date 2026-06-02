@@ -1,2 +1,7 @@
 import { AdminSection } from "../admin/AdminSection";
-export function Inventory() { return <AdminSection title="Inventory" description="Track workspace stock and produce inventory." />; }
+import { useTranslation } from "react-i18next";
+
+export function Inventory() {
+  const { t } = useTranslation();
+  return <AdminSection title={t("inventoryPage.title")} description={t("inventoryPage.description")} />;
+}

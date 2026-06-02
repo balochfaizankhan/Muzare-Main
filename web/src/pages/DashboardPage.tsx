@@ -50,21 +50,21 @@ const modules: Array<{
   key: string;
   path: string;
   icon: LucideIcon;
-  detail: string;
+  detailKey: string;
 }> = [
-  { key: "workforce", path: "/workspace/team", icon: UsersRound, detail: "Attendance and labour register" },
-  { key: "expenses", path: "/workspace/expenses", icon: BanknoteArrowDown, detail: "Vouchers and farm costs" },
-  { key: "sales", path: "/workspace/sales", icon: ShoppingBasket, detail: "Revenue and buyers" },
-  { key: "dispatch", path: "/workspace/dispatch", icon: PackageOpen, detail: "Vehicles and cartons" },
-  { key: "accounts", path: "/workspace/accounts", icon: BookOpenText, detail: "Cash and bank balances" },
-  { key: "partnerLedger", path: "/workspace/partner-ledger", icon: Leaf, detail: "Capital and settlements" },
+  { key: "workforce", path: "/workspace/team", icon: UsersRound, detailKey: "dashboard.workforceDetail" },
+  { key: "expenses", path: "/workspace/expenses", icon: BanknoteArrowDown, detailKey: "dashboard.expensesDetail" },
+  { key: "sales", path: "/workspace/sales", icon: ShoppingBasket, detailKey: "dashboard.salesDetail" },
+  { key: "dispatch", path: "/workspace/dispatch", icon: PackageOpen, detailKey: "dashboard.dispatchDetail" },
+  { key: "accounts", path: "/workspace/accounts", icon: BookOpenText, detailKey: "dashboard.accountsDetail" },
+  { key: "partnerLedger", path: "/workspace/partner-ledger", icon: Leaf, detailKey: "dashboard.partnerLedgerDetail" },
 ];
 
 const quickActions = [
-  { label: "Mark attendance", path: "/workspace/attendance", icon: UsersRound },
-  { label: "New expense", path: "/workspace/expenses", icon: BanknoteArrowDown },
-  { label: "Record dispatch", path: "/workspace/dispatch", icon: PackageOpen },
-  { label: "Record sale", path: "/workspace/sales", icon: ShoppingBasket },
+  { labelKey: "dashboard.markAttendance", path: "/workspace/attendance", icon: UsersRound },
+  { labelKey: "dashboard.newExpense", path: "/workspace/expenses", icon: BanknoteArrowDown },
+  { labelKey: "dashboard.recordDispatch", path: "/workspace/dispatch", icon: PackageOpen },
+  { labelKey: "dashboard.recordSale", path: "/workspace/sales", icon: ShoppingBasket },
 ] as const;
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -123,7 +123,7 @@ export function DashboardPage() {
       ...sales.map((item) => ({
         id: item.id,
         path: "/workspace/sales",
-        title: "Sale recorded",
+        title: t("dashboard.saleRecorded"),
         detail: item.buyerName,
         value: money(item.amount),
         createdAt: item.createdAt,
@@ -131,7 +131,7 @@ export function DashboardPage() {
       ...vouchers.map((item) => ({
         id: item.id,
         path: "/workspace/expenses",
-        title: "Expense voucher",
+        title: t("dashboard.expenseVoucher"),
         detail: item.category,
         value: `-${money(item.amount)}`,
         createdAt: item.createdAt,
@@ -139,15 +139,15 @@ export function DashboardPage() {
       ...dispatches.map((item) => ({
         id: item.id,
         path: "/workspace/dispatch",
-        title: "Dispatch recorded",
-        detail: item.vehicleNumber ?? "Saved vehicle",
+        title: t("dashboard.dispatchRecorded"),
+        detail: item.vehicleNumber ?? t("dashboard.savedVehicle"),
         value: `${item.items?.reduce((sum, entry) => sum + entry.cartons, 0) ?? item.cartons ?? 0} cartons`,
         createdAt: item.createdAt,
       })),
       ...entries.map((item) => ({
         id: item.id,
         path: "/workspace/partner-ledger",
-        title: item.type === "contribution" ? "Partner contribution" : item.type === "withdrawal" ? "Partner withdrawal" : "Partner settlement",
+        title: item.type === "contribution" ? t("dashboard.partnerContribution") : item.type === "withdrawal" ? t("dashboard.partnerWithdrawal") : t("dashboard.partnerSettlement"),
         detail: item.type === "settlement" ? `${item.fromPartner} to ${item.toPartner}` : item.partnerName ?? "-",
         value: `${item.type === "withdrawal" ? "-" : ""}${money(item.amount)}`,
         createdAt: item.createdAt,
@@ -155,8 +155,8 @@ export function DashboardPage() {
       ...advances.map((item) => ({
         id: item.id,
         path: "/workspace/labour-advances",
-        title: "Labour advance paid",
-        detail: "Cash outflow",
+        title: t("dashboard.labourAdvancePaid"),
+        detail: t("dashboard.cashOutflow"),
         value: `-${money(item.amount)}`,
         createdAt: item.createdAt,
       })),
@@ -181,13 +181,13 @@ export function DashboardPage() {
   const displayName = user?.displayName || user?.email || t("common.dashboard");
 
   const summaryCards = [
-    { label: "Present today", value: String(totals.presentToday), icon: UsersRound, path: "/workspace/attendance", tone: "green" },
-    { label: "Cartons today", value: String(totals.cartonsToday), icon: PackageOpen, path: "/workspace/dispatch", tone: "navy" },
-    { label: "Total sales", value: money(totals.totalSales), icon: TrendingUp, path: "/workspace/sales", tone: "green" },
-    { label: "Total expenses", value: money(totals.totalExpenses), icon: BanknoteArrowDown, path: "/workspace/reports?report=combined-expenses", tone: "red" },
-    { label: "Labour advances", value: money(totals.labourAdvances), icon: UsersRound, path: "/workspace/labour-advances", tone: "red" },
-    { label: "Available balance", value: money(totals.netPosition), icon: Wallet, path: "/workspace/accounts", tone: "navy" },
-    { label: "Partner balance", value: money(totals.partnerBalance), icon: CircleDollarSign, path: "/workspace/partner-ledger", tone: "blue" },
+    { label: t("dashboard.presentToday"), value: String(totals.presentToday), icon: UsersRound, path: "/workspace/attendance", tone: "green" },
+    { label: t("dashboard.cartonsToday"), value: String(totals.cartonsToday), icon: PackageOpen, path: "/workspace/dispatch", tone: "navy" },
+    { label: t("dashboard.totalSales"), value: money(totals.totalSales), icon: TrendingUp, path: "/workspace/sales", tone: "green" },
+    { label: t("dashboard.totalExpenses"), value: money(totals.totalExpenses), icon: BanknoteArrowDown, path: "/workspace/reports?report=combined-expenses", tone: "red" },
+    { label: t("dashboard.labourAdvances"), value: money(totals.labourAdvances), icon: UsersRound, path: "/workspace/labour-advances", tone: "red" },
+    { label: t("dashboard.availableBalance"), value: money(totals.netPosition), icon: Wallet, path: "/workspace/accounts", tone: "navy" },
+    { label: t("dashboard.partnerBalance"), value: money(totals.partnerBalance), icon: CircleDollarSign, path: "/workspace/partner-ledger", tone: "blue" },
   ];
 
   return (
@@ -221,7 +221,7 @@ export function DashboardPage() {
             <p>{t("dashboardPage.localFigures")}</p>
           </div>
         </div>
-        <section className="summary-grid" aria-label="Operational summary">
+        <section className="summary-grid" aria-label={t("dashboard.operationalSummary")}>
           {summaryCards.map(({ label, value, path, icon: Icon, tone }) => (
             <Link className={`metric-card metric-card--${tone}`} to={path} key={label}>
               <div className="metric-card__icon"><Icon size={20} /></div>
@@ -241,10 +241,10 @@ export function DashboardPage() {
                 </div>
               </div>
               <div className="quick-grid">
-                {quickActions.map(({ label, path, icon: Icon }) => (
-                  <Link className="quick-action" to={path} key={label}>
+                {quickActions.map(({ labelKey, path, icon: Icon }) => (
+                  <Link className="quick-action" to={path} key={labelKey}>
                     <Icon size={19} />
-                    <span>{label}</span>
+                    <span>{t(labelKey)}</span>
                     <ArrowRight size={16} />
                   </Link>
                 ))}
@@ -255,16 +255,16 @@ export function DashboardPage() {
               <div className="panel-heading">
                 <div>
                   <h2>{t("operations")}</h2>
-                  <p>Open a management module</p>
+                  <p>{t("dashboard.openModule")}</p>
                 </div>
               </div>
               <div className="operation-grid">
-                {modules.map(({ key, path, detail, icon: Icon }) => (
+                {modules.map(({ key, path, detailKey, icon: Icon }) => (
                   <Link className="operation-card" key={key} to={path}>
                     <Icon size={22} />
                     <div>
                       <strong>{t(key)}</strong>
-                      <span>{detail}</span>
+                      <span>{t(detailKey)}</span>
                     </div>
                     <ArrowRight size={16} />
                   </Link>
@@ -278,17 +278,17 @@ export function DashboardPage() {
               <div className="status-line">
                 <StatusIcon size={19} />
                 <div>
-                  <strong>{sync.status === "offline" ? "Working Offline" : sync.status === "syncing" ? "Syncing..." : sync.status === "error" ? "Sync Failed" : "API Connected"}</strong>
-                  <p>{sync.status === "offline" ? "Changes will be saved locally until connectivity returns." : "PostgreSQL is the primary workspace database."}</p>
+                  <strong>{sync.status === "offline" ? t("layout.workingOffline") : sync.status === "syncing" ? t("layout.syncing") : sync.status === "error" ? t("layout.syncFailed") : t("layout.apiConnected")}</strong>
+                  <p>{sync.status === "offline" ? t("layout.offlineNotice") : t("layout.postgresPrimary")}</p>
                 </div>
               </div>
               <div className="sync-line">
                 <CloudUpload size={18} />
                 <div>
-                  <strong>Database {sync.pendingCount ? "Sync Pending" : "Synced"}</strong>
-                  <p>Pending Changes: {sync.pendingCount}</p>
-                  <p>Last Successful Sync: {sync.lastSyncTime ? new Date(sync.lastSyncTime).toLocaleString() : "Not yet synchronized"}</p>
-                  <div className="sync-buttons"><button type="button" onClick={() => void refreshOperationalData()}>Refresh Data</button><button type="button" onClick={() => void syncNow()}>Sync Now</button></div>
+                  <strong>{sync.pendingCount ? t("layout.databaseSyncPending") : t("layout.databaseSynced")}</strong>
+                  <p>{t("layout.pendingChanges", { count: sync.pendingCount })}</p>
+                  <p>{t("layout.lastSuccessfulSync", { value: sync.lastSyncTime ? new Date(sync.lastSyncTime).toLocaleString() : t("layout.notYetSynchronized") })}</p>
+                  <div className="sync-buttons"><button type="button" onClick={() => void refreshOperationalData()}>{t("layout.refreshData")}</button><button type="button" onClick={() => void syncNow()}>{t("layout.syncNow")}</button></div>
                 </div>
               </div>
             </section>
@@ -296,12 +296,12 @@ export function DashboardPage() {
             <section className="panel activity-panel">
               <div className="panel-heading">
                 <div>
-                  <h2>Recent activity</h2>
-                  <p>Entries made on this device</p>
+                  <h2>{t("dashboard.recentActivity")}</h2>
+                  <p>{t("dashboard.entriesMade")}</p>
                 </div>
               </div>
               {activities.length === 0 ? (
-                <p className="activity-empty">No activity yet. Use a quick action to enter your first operational record.</p>
+                <p className="activity-empty">{t("dashboard.noActivity")}</p>
               ) : (
                 <div className="activity-list">
                   {activities.map((activity) => (

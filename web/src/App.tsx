@@ -57,7 +57,7 @@ function HomeRedirect() {
 }
 
 export default function App() {
-  const { i18n } = useTranslation();
+  const { i18n, t } = useTranslation();
   useEffect(() => {
     const language = i18n.resolvedLanguage?.slice(0, 2) ?? "en";
     document.documentElement.lang = language;
@@ -72,10 +72,10 @@ export default function App() {
       <Route path="dashboard" element={<AdminDashboard />} />
       <Route path="workspaces" element={<Workspaces />} />
       <Route path="users" element={<Users />} />
-      <Route path="subscriptions" element={<AdminSection title="Subscriptions" description="Manage plans, renewals, and upcoming expirations." />} />
+      <Route path="subscriptions" element={<AdminSection title={t("layout.subscriptions")} description={t("adminSections.subscriptionsDescription")} />} />
       <Route path="billing" element={<Billing />} />
       <Route path="audit-logs" element={<AuditLogs />} />
-      <Route path="reports" element={<AdminSection title="Reports" description="Review platform analytics across workspaces." />} />
+      <Route path="reports" element={<AdminSection title={t("layout.reports")} description={t("adminSections.reportsDescription")} />} />
       <Route path="settings" element={<Settings />} />
       <Route path="approvals" element={<AdminApprovalsPage />} />
     </Route>
