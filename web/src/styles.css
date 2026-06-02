@@ -3961,7 +3961,9 @@ button {
 .report-mobile-card__days small { font-size: .6rem; white-space: nowrap; }
 .reports-page { display: grid; gap: 12px; }
 .reports-tabs { display: flex; flex-wrap: wrap; gap: 7px; }
+.reports-subtabs { display: flex; flex-wrap: wrap; gap: 7px; }
 .reports-tabs button,
+.reports-subtabs button,
 .reports-actions button {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -3974,9 +3976,13 @@ button {
   padding: 7px 11px;
 }
 .reports-tabs button.is-active,
+.reports-subtabs button.is-active,
 .reports-actions button:first-child { background: var(--brand-primary); border-color: var(--brand-primary); color: #fff; }
 .reports-filter-heading,
 .reports-actions { align-items: center; display: flex; gap: 8px; justify-content: space-between; }
+.reports-view-header { align-items: flex-start; display: flex; gap: 12px; justify-content: space-between; margin-bottom: 10px; }
+.reports-view-header h2 { margin: 0 0 4px; }
+.reports-view-header p { color: var(--text-secondary); font-size: .82rem; margin: 0; }
 .reports-filter-heading h2 { margin: 0; }
 .reports-filter-heading button {
   background: var(--surface);
@@ -4027,11 +4033,19 @@ button {
   min-height: 30px;
   padding: 4px 7px;
 }
+.attendance-register-report { min-width: 100%; table-layout: fixed; width: max-content; }
+.attendance-register-report th,
+.attendance-register-report td { padding: 6px; text-align: center; white-space: nowrap; }
+.attendance-register-report th:first-child,
+.attendance-register-report td:first-child { left: 0; position: sticky; text-align: start; z-index: 1; }
+.attendance-register-report thead th:first-child,
+.attendance-register-report tbody th:first-child { background: var(--surface); }
 .attendance-import-footer { background: var(--surface); border-top: 1px solid var(--border); bottom: 0; display: flex; gap: 8px; justify-content: flex-end; padding: 11px 14px calc(11px + env(safe-area-inset-bottom, 0px)); position: sticky; z-index: 2; }
 .attendance-import-footer button:first-child { background: var(--surface); border-color: var(--border); color: var(--text-secondary); }
 
 @media (max-width: 767px) {
   .report-wide-table { display: none; }
+  .report-wide-table--mobile { display: block; }
   .report-mobile-cards { display: grid; gap: 8px; }
   .partner-position-table { display: none; }
   .partner-position-cards { display: grid; gap: 10px; }
@@ -4039,8 +4053,12 @@ button {
   .reports-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .reports-summary-list { grid-template-columns: minmax(0, 1fr); }
   .reports-breakdowns { grid-template-columns: minmax(0, 1fr); }
-  .reports-tabs { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
-  .reports-tabs button { flex: 0 0 auto; }
+  .reports-tabs,
+  .reports-subtabs { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
+  .reports-tabs button,
+  .reports-subtabs button { flex: 0 0 auto; }
+  .reports-view-header { align-items: stretch; flex-direction: column; }
+  .reports-actions { justify-content: flex-start; }
   .attendance-report-filters { grid-template-columns: minmax(0, 1fr); }
   .attendance-report-dialog { max-height: 94vh; width: 95vw; }
   .report-labour-filter__picker { max-height: 56vh; }
@@ -4092,35 +4110,22 @@ button {
 @media print {
   @page { size: A4 landscape; margin: 5mm; }
   body * { visibility: hidden; }
-  .attendance-register-preview, .attendance-register-preview * { visibility: visible; }
-  .reports-page, .reports-page * { visibility: visible; }
-  .attendance-register-preview { display: block; inset: 0; position: absolute; width: 100%; }
   .reports-page { display: block; }
   .reports-page .reports-tabs,
+  .reports-page .reports-subtabs,
   .reports-page .reports-filter-panel { display: none !important; }
+  .reports-print-section { display: none !important; }
+  .reports-print-section.is-print-target,
+  .reports-print-section.is-print-target * { visibility: visible; }
+  .reports-print-section.is-print-target { display: block !important; inset: 0; left: 0; position: absolute; top: 0; width: 100%; }
   .no-print, .screen-only { display: none !important; }
   .report-mobile-cards { display: none !important; }
   .report-wide-table { display: block !important; }
-  .print-summary { border-bottom: 1px solid #2d862f; display: grid; font-size: 6px; gap: 1px; line-height: 1.05; margin-bottom: 2px; max-height: 20mm; overflow: hidden; padding-bottom: 2px; }
-  .print-summary b { color: #2d862f; font-size: 6px; letter-spacing: .08em; }
-  .print-summary strong { color: #05233f; font-size: 10px; }
-  .register-table-wrap { overflow: visible; }
-  .attendance-register-table { border-collapse: collapse; font-size: 5px; min-width: 0; table-layout: fixed; width: 100%; }
-  .attendance-register-table thead { display: table-header-group; }
-  .attendance-register-table tfoot { display: table-row-group; }
-  .attendance-register-table tr { break-inside: avoid; page-break-inside: avoid; }
-  .attendance-register-table th, .attendance-register-table td { font-size: 5px; line-height: 1.05; min-width: 0; overflow: hidden; padding: 1px; text-overflow: clip; word-break: break-word; }
-  .attendance-register-table th:nth-child(1), .attendance-register-table td:nth-child(1) { width: 18px; }
-  .attendance-register-table th:nth-child(2), .attendance-register-table td:nth-child(2) { width: 100px; }
-  .attendance-register-table th:nth-child(3), .attendance-register-table td:nth-child(3),
-  .attendance-register-table th:nth-child(4), .attendance-register-table td:nth-child(4),
-  .attendance-register-table th:nth-child(5), .attendance-register-table td:nth-child(5) { width: 20px; }
-  .attendance-register-table th:nth-child(6), .attendance-register-table td:nth-child(6),
-  .attendance-register-table th:nth-child(7), .attendance-register-table td:nth-child(7),
-  .attendance-register-table th:nth-child(8), .attendance-register-table td:nth-child(8) { width: 34px; }
-  .attendance-register-table th:nth-child(n+9), .attendance-register-table td:nth-child(n+9) { width: 18px; }
-  .register-status small { font-size: 4px; margin-top: 1px; white-space: normal; }
-  .register-footer { gap: 5px; }
-  .register-footer span { font-size: 6px; }
-  .register-status--present, .register-status--half_day, .register-status--absent, .register-status--empty, .attendance-register-table thead th, .attendance-register-table tfoot th { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .attendance-register-report { border-collapse: collapse; font-size: 5.5px; table-layout: fixed; width: 100%; }
+  .attendance-register-report thead { display: table-header-group; }
+  .attendance-register-report tr { break-inside: avoid; page-break-inside: avoid; }
+  .attendance-register-report th,
+  .attendance-register-report td { font-size: 5.5px; line-height: 1.08; padding: 2px; word-break: break-word; }
+  .attendance-register-report th:first-child,
+  .attendance-register-report td:first-child { position: static; width: 96px; }
 }

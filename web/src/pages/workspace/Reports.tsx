@@ -17,6 +17,14 @@ import {
 } from "../../lib/offline-db";
 
 type Report = "attendance" | "advances" | "expenditures" | "partner-position" | "account-ledger";
+type SortOrder = "desc" | "asc";
+type ReportViewState = {
+  attendance: "register" | "summary";
+  advances: "summary" | "log";
+  expenditures: "summary" | "log";
+  "partner-position": "position" | "ledger";
+  "account-ledger": "balances" | "ledger";
+};
 type ReportRow = {
   id: string;
   cells: ReactNode[];
@@ -27,10 +35,21 @@ type ReportRow = {
   onOpen?: () => void;
 };
 
-const money = formatMoney;
 const reportOptions: Report[] = ["attendance", "advances", "expenditures", "partner-position", "account-ledger"];
+const defaultViews: ReportViewState = {
+  attendance: "register",
+  advances: "summary",
+  expenditures: "summary",
+  "partner-position": "position",
+  "account-ledger": "balances",
+};
+
 const csvCell = (value: unknown) => `"${String(value ?? "").replaceAll("\"", "\"\"")}"`;
+const money = formatMoney;
 const inRange = (date: string, from: string, to: string) => (!from || date >= from) && (!to || date <= to);
+const attendanceMark = (status?: Attendance["status"]) => status === "present" ? "P" : status === "half_day" ? "H" : status === "absent" ? "A" : "-";
+const formatShortDate = (date: string) => date.length >= 10 ? `${date.slice(8, 10)}/${date.slice(5, 7)}` : date;
+const formatRangeLabel = (from: string, to: string) => from && to ? `${from} - ${to}` : from ? `From ${from}` : to ? `To ${to}` : "All dates";
 
 function downloadCsv(filename: string, rows: unknown[][]) {
   const href = URL.createObjectURL(new Blob([rows.map((row) => row.map(csvCell).join(",")).join("\n")], { type: "text/csv;charset=utf-8" }));
@@ -41,17 +60,51 @@ function downloadCsv(filename: string, rows: unknown[][]) {
   URL.revokeObjectURL(href);
 }
 
-function ReportTable({ columns, empty, rows }: { columns: string[]; empty: string; rows: ReportRow[] }) {
+function buildDateColumns(from: string, to: string, rows: Attendance[]) {
+  if (from && to && from <= to) {
+    const dates: string[] = [];
+    const cursor = new Date(`${from}T00:00:00`);
+    const end = new Date(`${to}T00:00:00`);
+    while (cursor <= end) {
+      dates.push(cursor.toISOString().slice(0, 10));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return dates;
+  }
+  return [...new Set(rows.map((row) => row.date))].sort();
+}
+
+function ReportTable({
+  columns,
+  empty,
+  rows,
+  mobileCards = true,
+}: {
+  columns: string[];
+  empty: string;
+  rows: ReportRow[];
+  mobileCards?: boolean;
+}) {
   const { t } = useTranslation();
   if (!rows.length) return <p className="empty-records">{empty}</p>;
   return <>
     <div className="attendance-import-table-wrap report-wide-table">
       <table className="report-data-table">
-        <thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}<th>{t("reportsPage.actions")}</th></tr></thead>
-        <tbody>{rows.map((row) => <tr key={row.id}>{row.cells.map((cell, index) => <td key={`${row.id}:${index}`}>{cell}</td>)}<td>{row.onOpen && <button type="button" onClick={row.onOpen}>{t("reportsPage.open")}</button>}</td></tr>)}</tbody>
+        <thead>
+          <tr>
+            {columns.map((column) => <th key={column}>{column}</th>)}
+            <th>{t("reportsPage.actions")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => <tr key={row.id}>
+            {row.cells.map((cell, index) => <td key={`${row.id}:${index}`}>{cell}</td>)}
+            <td>{row.onOpen && <button type="button" onClick={row.onOpen}>{t("reportsPage.open")}</button>}</td>
+          </tr>)}
+        </tbody>
       </table>
     </div>
-    <div className="report-mobile-cards">
+    {mobileCards && <div className="report-mobile-cards">
       {rows.map((row) => <article className="report-mobile-card" key={`mobile:${row.id}`}>
         <header><strong>{row.title}</strong>{row.value && <b>{row.value}</b>}</header>
         {row.meta && <span>{row.meta}</span>}
@@ -61,12 +114,43 @@ function ReportTable({ columns, empty, rows }: { columns: string[]; empty: strin
           {row.onOpen && <button type="button" onClick={row.onOpen}>{t("reportsPage.openSource")}</button>}
         </details>
       </article>)}
-    </div>
+    </div>}
   </>;
 }
 
 function Kpis({ values }: { values: Array<[string, ReactNode]> }) {
   return <div className="reports-kpis">{values.map(([label, value]) => <article key={label}><span>{label}</span><strong>{value}</strong></article>)}</div>;
+}
+
+function ReportShell({
+  title,
+  rangeLabel,
+  sectionId,
+  onPrint,
+  onExport,
+  children,
+}: {
+  title: string;
+  rangeLabel: string;
+  sectionId: string;
+  onPrint: () => void;
+  onExport: () => void;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation();
+  return <section className="record-panel reports-print-section" data-print-section={sectionId}>
+    <header className="reports-view-header">
+      <div>
+        <h2>{title}</h2>
+        <p>{rangeLabel}</p>
+      </div>
+      <div className="reports-actions">
+        <button type="button" onClick={onExport}>{t("reportsPage.exportCsv")}</button>
+        <button type="button" onClick={onPrint}>{t("reportsPage.print")}</button>
+      </div>
+    </header>
+    {children}
+  </section>;
 }
 
 export function Reports() {
@@ -76,6 +160,7 @@ export function Reports() {
   const requestedReport = searchParams.get("report");
   const normalizedRequestedReport = requestedReport === "combined-expenses" ? "expenditures" : requestedReport as Report | null;
   const [report, setReport] = useState<Report>(normalizedRequestedReport && reportOptions.includes(normalizedRequestedReport) ? normalizedRequestedReport : "attendance");
+  const [views, setViews] = useState<ReportViewState>(defaultViews);
   const [search, setSearch] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -84,6 +169,8 @@ export function Reports() {
   const [status, setStatus] = useState("");
   const [amountMin, setAmountMin] = useState("");
   const [amountMax, setAmountMax] = useState("");
+  const [advanceSort, setAdvanceSort] = useState<SortOrder>("desc");
+  const [expenseSort, setExpenseSort] = useState<SortOrder>("desc");
   const [labourers, setLabourers] = useState<Labourer[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
@@ -102,70 +189,139 @@ export function Reports() {
       workspaceRecords(offlineDb.partnerEntries),
       workspaceRecords(offlineDb.sales),
     ]).then(([nextLabourers, nextAttendance, nextVouchers, nextAdvances, nextAccounts, nextEntries, nextSales]) => {
-      setLabourers(nextLabourers); setAttendance(nextAttendance); setVouchers(nextVouchers); setAdvances(nextAdvances);
-      setAccounts(nextAccounts); setEntries(nextEntries); setSales(nextSales);
+      setLabourers(nextLabourers);
+      setAttendance(nextAttendance);
+      setVouchers(nextVouchers);
+      setAdvances(nextAdvances);
+      setAccounts(nextAccounts);
+      setEntries(nextEntries);
+      setSales(nextSales);
     });
   }, []);
+
   useEffect(() => {
     if (normalizedRequestedReport && reportOptions.includes(normalizedRequestedReport)) setReport(normalizedRequestedReport);
   }, [normalizedRequestedReport]);
 
-  const term = search.trim().toLowerCase();
-  const min = amountMin ? Number(amountMin) : null;
-  const max = amountMax ? Number(amountMax) : null;
+  useEffect(() => {
+    const clearPrintTarget = () => {
+      document.querySelectorAll(".reports-print-section.is-print-target").forEach((node) => node.classList.remove("is-print-target"));
+    };
+    window.addEventListener("afterprint", clearPrintTarget);
+    return () => window.removeEventListener("afterprint", clearPrintTarget);
+  }, []);
+
   const labourById = useMemo(() => new Map(labourers.map((labourer) => [labourer.id, labourer])), [labourers]);
   const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
   const accountName = (id?: string) => accountById.get(id ?? "")?.name ?? t("reportsPage.unknownAccount");
   const labourName = (id: string) => labourById.get(id)?.name ?? t("reportsPage.unknownLabour");
+  const term = search.trim().toLowerCase();
+  const min = amountMin ? Number(amountMin) : null;
+  const max = amountMax ? Number(amountMax) : null;
+  const rangeLabel = formatRangeLabel(from, to);
+
   const matches = (date: string, values: unknown[], amount?: number) => inRange(date, from, to)
     && (min === null || amount === undefined || amount >= min)
     && (max === null || amount === undefined || amount <= max)
     && (!term || values.some((value) => String(value ?? "").toLowerCase().includes(term)));
-  const clearFilters = () => { setSearch(""); setFrom(""); setTo(""); setAccountId(""); setCategory(""); setStatus(""); setAmountMin(""); setAmountMax(""); };
+
+  const clearFilters = () => {
+    setSearch("");
+    setFrom("");
+    setTo("");
+    setAccountId("");
+    setCategory("");
+    setStatus("");
+    setAmountMin("");
+    setAmountMax("");
+  };
+
   const filtered = Boolean(search || from || to || accountId || category || status || amountMin || amountMax);
   const switchReport = (next: Report) => {
     setReport(next);
-    setSearchParams((current) => { current.set("report", next); return current; });
+    setSearchParams((current) => {
+      current.set("report", next);
+      return current;
+    });
+  };
+  const switchView = <T extends Report>(reportKey: T, nextView: ReportViewState[T]) => {
+    setViews((current) => ({ ...current, [reportKey]: nextView }));
+  };
+  const printSection = (sectionId: string) => {
+    document.querySelectorAll(".reports-print-section.is-print-target").forEach((node) => node.classList.remove("is-print-target"));
+    const section = document.querySelector<HTMLElement>(`.reports-print-section[data-print-section="${sectionId}"]`);
+    if (!section) return;
+    section.classList.add("is-print-target");
+    window.print();
   };
 
-  const attendanceRows = attendance.filter((item) => (!status || item.status === status)
-    && matches(item.date, [labourName(item.labourerId), item.status]));
-  const attendanceSummary = useMemo(() => labourers.map((labourer) => {
-    const records = attendanceRows.filter((item) => item.labourerId === labourer.id);
-    const present = records.filter((item) => item.status === "present").length;
-    const halfDay = records.filter((item) => item.status === "half_day").length;
-    const absent = records.filter((item) => item.status === "absent").length;
-    const payable = present + halfDay * 0.5;
-    return { labourer, present, halfDay, absent, payable, wage: payable * labourer.dailyWage };
-  }).filter((item) => item.present || item.halfDay || item.absent), [attendanceRows, labourers]);
+  const attendanceRows = attendance
+    .filter((item) => (!status || item.status === status) && matches(item.date, [labourName(item.labourerId), item.status]))
+    .sort((a, b) => a.date.localeCompare(b.date) || labourName(a.labourerId).localeCompare(labourName(b.labourerId)));
+  const attendanceSummary = useMemo(() => labourers
+    .map((labourer) => {
+      const records = attendanceRows.filter((item) => item.labourerId === labourer.id);
+      const present = records.filter((item) => item.status === "present").length;
+      const halfDay = records.filter((item) => item.status === "half_day").length;
+      const absent = records.filter((item) => item.status === "absent").length;
+      const payable = present + halfDay * 0.5;
+      return { labourer, records, present, halfDay, absent, payable, wage: payable * labourer.dailyWage };
+    })
+    .filter((item) => item.records.length > 0), [attendanceRows, labourers]);
+  const attendanceDates = useMemo(() => buildDateColumns(from, to, attendanceRows), [attendanceRows, from, to]);
 
-  const advanceRows = advances.filter((item) => (!accountId || item.accountId === accountId)
-    && matches(item.date, [labourName(item.labourerId), accountName(item.accountId), item.notes, item.sourceAccountName], item.amount));
-  const advanceSummary = useMemo(() => labourers.map((labourer) => {
-    const records = advanceRows.filter((item) => item.labourerId === labourer.id);
-    return { labourer, records, total: records.reduce((sum, item) => sum + item.amount, 0), lastDate: records.map((item) => item.date).sort().at(-1) ?? "-" };
-  }).filter((item) => item.records.length), [advanceRows, labourers]);
+  const advanceRows = useMemo(() => advances
+    .filter((item) => (!accountId || item.accountId === accountId)
+      && matches(item.date, [labourName(item.labourerId), accountName(item.accountId), item.notes, item.sourceAccountName], item.amount))
+    .sort((a, b) => advanceSort === "desc" ? b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt) : a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt)), [accountId, accountName, advanceSort, advances, labourName, matches]);
+  const advanceSummary = useMemo(() => labourers
+    .map((labourer) => {
+      const records = advanceRows.filter((item) => item.labourerId === labourer.id);
+      const total = records.reduce((sum, item) => sum + item.amount, 0);
+      const payable = attendanceSummary.find((item) => item.labourer.id === labourer.id)?.wage ?? 0;
+      return { labourer, records, total, outstanding: payable - total };
+    })
+    .filter((item) => item.records.length > 0), [advanceRows, attendanceSummary, labourers]);
 
-  const voucherRows = vouchers.filter((item) => (!accountId || item.accountId === accountId)
-    && (!category || item.category === category)
-    && matches(item.date, [item.voucherNumber, item.category, item.subcategory, item.description, item.notes, accountName(item.accountId)], item.amount));
-  const categories = [...new Set(vouchers.map((item) => item.category).filter(Boolean))].sort();
+  const voucherRows = useMemo(() => vouchers
+    .filter((item) => (!accountId || item.accountId === accountId)
+      && (!category || item.category === category)
+      && matches(item.date, [item.voucherNumber, item.category, item.subcategory, item.description, item.notes, accountName(item.accountId)], item.amount))
+    .sort((a, b) => expenseSort === "desc" ? b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt) : a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt)), [accountId, accountName, category, expenseSort, matches, vouchers]);
+  const voucherCategories = [...new Set(vouchers.map((item) => item.category).filter(Boolean))].sort();
 
-  const partnerRows = entries.filter((item) => !item.deletedAt
-    && (!accountId || item.accountId === accountId || item.fromAccountId === accountId || item.toAccountId === accountId)
-    && matches(item.date, [item.partnerName, item.fromPartner, item.toPartner, item.type, item.notes], item.amount));
-  const saleRows = sales.filter((item) => (!accountId || item.accountId === accountId)
-    && matches(item.date, [item.buyerName, item.produceType, accountName(item.accountId)], item.amount));
-  const positions = useMemo(() => accounts.filter((account) => !accountId || account.id === accountId).map((account) => {
-    const voucherExpenses = voucherRows.filter((item) => item.accountId === account.id).reduce((sum, item) => sum + item.amount, 0);
-    const labourAdvances = advanceRows.filter((item) => item.accountId === account.id).reduce((sum, item) => sum + item.amount, 0);
-    const contributions = partnerRows.filter((item) => item.type === "contribution" && item.accountId === account.id).reduce((sum, item) => sum + item.amount, 0);
-    const withdrawals = partnerRows.filter((item) => item.type === "withdrawal" && item.accountId === account.id).reduce((sum, item) => sum + item.amount, 0);
-    const settlementsSent = partnerRows.filter((item) => item.type === "settlement" && item.fromAccountId === account.id).reduce((sum, item) => sum + item.amount, 0);
-    const settlementsReceived = partnerRows.filter((item) => item.type === "settlement" && item.toAccountId === account.id).reduce((sum, item) => sum + item.amount, 0);
-    const salesReceived = saleRows.filter((item) => item.accountId === account.id).reduce((sum, item) => sum + item.amount, 0);
-    return { account, voucherExpenses, labourAdvances, contributions, withdrawals, settlementsSent, settlementsReceived, salesReceived, net: salesReceived - voucherExpenses - labourAdvances + contributions - withdrawals - settlementsSent + settlementsReceived };
-  }), [accountId, accounts, advanceRows, partnerRows, saleRows, voucherRows]);
+  const partnerRows = entries
+    .filter((item) => !item.deletedAt
+      && (!accountId || item.accountId === accountId || item.fromAccountId === accountId || item.toAccountId === accountId)
+      && matches(item.date, [item.partnerName, item.fromPartner, item.toPartner, item.type, item.notes], item.amount))
+    .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+  const saleRows = sales
+    .filter((item) => (!accountId || item.accountId === accountId)
+      && matches(item.date, [item.buyerName, item.produceType, accountName(item.accountId)], item.amount))
+    .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+
+  const positions = useMemo(() => accounts
+    .filter((account) => !accountId || account.id === accountId)
+    .map((account) => {
+      const voucherExpenses = voucherRows.filter((item) => item.accountId === account.id).reduce((sum, item) => sum + item.amount, 0);
+      const labourAdvances = advanceRows.filter((item) => item.accountId === account.id).reduce((sum, item) => sum + item.amount, 0);
+      const contributions = partnerRows.filter((item) => item.type === "contribution" && item.accountId === account.id).reduce((sum, item) => sum + item.amount, 0);
+      const withdrawals = partnerRows.filter((item) => item.type === "withdrawal" && item.accountId === account.id).reduce((sum, item) => sum + item.amount, 0);
+      const settlementsSent = partnerRows.filter((item) => item.type === "settlement" && item.fromAccountId === account.id).reduce((sum, item) => sum + item.amount, 0);
+      const settlementsReceived = partnerRows.filter((item) => item.type === "settlement" && item.toAccountId === account.id).reduce((sum, item) => sum + item.amount, 0);
+      const salesReceived = saleRows.filter((item) => item.accountId === account.id).reduce((sum, item) => sum + item.amount, 0);
+      return {
+        account,
+        voucherExpenses,
+        labourAdvances,
+        contributions,
+        withdrawals,
+        settlementsSent,
+        settlementsReceived,
+        salesReceived,
+        net: salesReceived - voucherExpenses - labourAdvances + contributions - withdrawals - settlementsSent + settlementsReceived,
+      };
+    }), [accountId, accounts, advanceRows, partnerRows, saleRows, voucherRows]);
 
   const accountLedgerRows = useMemo(() => {
     const rows: Array<{ id: string; date: string; accountId: string; type: string; reference: string; description: string; debit: number; credit: number; path: string }> = [];
@@ -180,84 +336,206 @@ export function Reports() {
       }
     }
     const running = new Map<string, number>();
-    return rows.filter((item) => !accountId || item.accountId === accountId).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id)).map((item) => {
-      const next = (running.get(item.accountId) ?? 0) + item.credit - item.debit;
-      running.set(item.accountId, next);
-      return { ...item, running: next };
-    });
-  }, [accountId, advanceRows, partnerRows, saleRows, t, voucherRows]);
+    return rows
+      .filter((item) => !accountId || item.accountId === accountId)
+      .sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id))
+      .map((item) => {
+        const next = (running.get(item.accountId) ?? 0) + item.credit - item.debit;
+        running.set(item.accountId, next);
+        return { ...item, running: next };
+      });
+  }, [accountId, advanceRows, labourName, partnerRows, saleRows, t, voucherRows]);
 
-  const exportCurrent = () => {
-    if (report === "attendance") downloadCsv("attendance-report.csv", [[t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.status")], ...attendanceRows.map((item) => [item.date, labourName(item.labourerId), item.status])]);
-    if (report === "advances") downloadCsv("labour-advances-log.csv", [[t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.amount"), t("reportsPage.account"), t("reportsPage.notes")], ...advanceRows.map((item) => [item.date, labourName(item.labourerId), item.amount, accountName(item.accountId), item.notes])]);
-    if (report === "expenditures") downloadCsv("expenditure-report.csv", [[t("reportsPage.date"), t("reportsPage.voucher"), t("reportsPage.category"), t("reportsPage.subcategory"), t("reportsPage.account"), t("reportsPage.description"), t("reportsPage.amount")], ...voucherRows.map((item) => [item.date, item.voucherNumber, item.category, item.subcategory, accountName(item.accountId), item.description, item.amount])]);
-    if (report === "partner-position") downloadCsv("partner-ledger.csv", [[t("reportsPage.date"), t("reportsPage.partner"), t("reportsPage.type"), t("reportsPage.amount"), t("reportsPage.notes")], ...partnerRows.map((item) => [item.date, item.partnerName ?? `${item.fromPartner ?? "-"} → ${item.toPartner ?? "-"}`, item.type, item.amount, item.notes])]);
-    if (report === "account-ledger") downloadCsv("account-ledger.csv", [[t("reportsPage.date"), t("reportsPage.account"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.description"), t("reportsPage.debit"), t("reportsPage.credit"), t("reportsPage.runningBalance")], ...accountLedgerRows.map((item) => [item.date, accountName(item.accountId), item.type, item.reference, item.description, item.debit, item.credit, item.running])]);
+  const exportAttendanceRegister = () => {
+    const rows = [
+      ["Labour Name", ...attendanceDates.map(formatShortDate), "Total Days", "Wage Rate", "Gross Wages"],
+      ...attendanceSummary.map((item) => [
+        item.labourer.name,
+        ...attendanceDates.map((date) => attendanceMark(item.records.find((record) => record.date === date)?.status)),
+        formatNumber(item.payable),
+        item.labourer.dailyWage,
+        item.wage,
+      ]),
+    ];
+    downloadCsv("attendance-register.csv", rows);
   };
+  const exportAttendanceSummary = () => downloadCsv("attendance-summary.csv", [
+    [t("reportsPage.labour"), t("reportsPage.present"), t("reportsPage.halfDay"), t("reportsPage.absent"), t("reportsPage.payableDays"), t("reportsPage.totalWages")],
+    ...attendanceSummary.map((item) => [item.labourer.name, item.present, item.halfDay, item.absent, formatNumber(item.payable), item.wage]),
+  ]);
+  const exportAdvanceSummary = () => downloadCsv("labour-advances-summary.csv", [
+    [t("reportsPage.labour"), t("reportsPage.transactions"), t("reportsPage.total"), t("reportsPage.netBalance")],
+    ...advanceSummary.map((item) => [item.labourer.name, item.records.length, item.total, item.outstanding]),
+  ]);
+  const exportAdvanceLog = () => downloadCsv("labour-advances-log.csv", [
+    [t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.amount"), t("reportsPage.account"), t("reportsPage.description"), t("reportsPage.reference")],
+    ...advanceRows.map((item) => [item.date, labourName(item.labourerId), item.amount, accountName(item.accountId), item.notes || "-", item.id.slice(0, 8)]),
+  ]);
+  const exportExpenseSummary = () => {
+    const categoryTotals = [...new Set(voucherRows.map((item) => item.category))].map((name) => [name, voucherRows.filter((item) => item.category === name).reduce((sum, item) => sum + item.amount, 0)]);
+    const accountTotals = [...new Set(voucherRows.map((item) => accountName(item.accountId)))].map((name) => [name, voucherRows.filter((item) => accountName(item.accountId) === name).reduce((sum, item) => sum + item.amount, 0)]);
+    downloadCsv("expense-summary.csv", [
+      ["Date Range", rangeLabel],
+      [],
+      ["Category", "Total"],
+      ...categoryTotals,
+      [],
+      ["Account", "Total"],
+      ...accountTotals,
+      [],
+      ["Total", voucherRows.reduce((sum, item) => sum + item.amount, 0)],
+    ]);
+  };
+  const exportExpenseLog = () => downloadCsv("expense-log.csv", [
+    [t("reportsPage.voucher"), t("reportsPage.date"), t("reportsPage.description"), t("reportsPage.category"), t("reportsPage.account"), t("reportsPage.amount")],
+    ...voucherRows.map((item) => [item.voucherNumber, item.date, item.description, `${item.category} / ${item.subcategory}`, accountName(item.accountId), item.amount]),
+  ]);
+  const exportPartnerPosition = () => downloadCsv("partner-position.csv", [
+    [t("reportsPage.partner"), t("reportsPage.voucherExpenses"), t("reportsPage.labourAdvance"), t("reportsPage.contributions"), t("reportsPage.withdrawals"), t("reportsPage.netPosition")],
+    ...positions.map((item) => [item.account.name, item.voucherExpenses, item.labourAdvances, item.contributions, item.withdrawals, item.net]),
+  ]);
+  const exportPartnerLedger = () => downloadCsv("partner-ledger.csv", [
+    [t("reportsPage.date"), t("reportsPage.partner"), t("reportsPage.type"), t("reportsPage.amount"), t("reportsPage.notes")],
+    ...partnerRows.map((item) => [item.date, item.partnerName ?? `${item.fromPartner ?? "-"} → ${item.toPartner ?? "-"}`, item.type, item.amount, item.notes || "-"]),
+  ]);
+  const exportAccountBalances = () => downloadCsv("account-balances.csv", [
+    [t("reportsPage.account"), t("reportsPage.voucherExpenses"), t("reportsPage.labourAdvance"), t("reportsPage.totalCredit"), t("reportsPage.totalDebit"), t("reportsPage.closingBalance")],
+    ...positions.map((item) => [item.account.name, item.voucherExpenses, item.labourAdvances, item.salesReceived + item.contributions + item.settlementsReceived, item.withdrawals + item.settlementsSent, item.net]),
+  ]);
+  const exportAccountLedger = () => downloadCsv("account-ledger.csv", [
+    [t("reportsPage.date"), t("reportsPage.account"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.description"), t("reportsPage.debit"), t("reportsPage.credit"), t("reportsPage.runningBalance")],
+    ...accountLedgerRows.map((item) => [item.date, accountName(item.accountId), item.type, item.reference, item.description, item.debit, item.credit, item.running]),
+  ]);
 
-  return <div className="dashboard-page"><SubpageHeader title={t("reportsPage.title")} /><main className="subpage module-workspace reports-page">
-    <section className="record-panel reports-tabs" aria-label={t("reportsPage.title")}>
-      {reportOptions.map((item) => <button className={report === item ? "is-active" : ""} type="button" key={item} onClick={() => switchReport(item)}>{t(`reportsPage.tabs.${item}`)}</button>)}
-    </section>
-    <section className="record-panel reports-filter-panel">
-      <div className="reports-filter-heading"><h2>{t("reportsPage.filters")}</h2>{filtered && <button type="button" onClick={clearFilters}>{t("reportsPage.clearFilters")}</button>}</div>
-      <div className="reports-filters">
-        <SearchInput value={search} onChange={setSearch} placeholder={t("reportsPage.searchPlaceholder")} />
-        <input aria-label={t("reportsPage.fromDate")} type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
-        <input aria-label={t("reportsPage.toDate")} type="date" value={to} onChange={(event) => setTo(event.target.value)} />
-        <select aria-label={t("reportsPage.account")} value={accountId} onChange={(event) => setAccountId(event.target.value)}><option value="">{t("reportsPage.allAccounts")}</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select>
-        {(report === "expenditures") && <select aria-label={t("reportsPage.category")} value={category} onChange={(event) => setCategory(event.target.value)}><option value="">{t("reportsPage.allCategories")}</option>{categories.map((item) => <option key={item}>{item}</option>)}</select>}
-        {(report === "attendance") && <select aria-label={t("reportsPage.status")} value={status} onChange={(event) => setStatus(event.target.value)}><option value="">{t("reportsPage.allStatuses")}</option><option value="present">{t("reportsPage.present")}</option><option value="half_day">{t("reportsPage.halfDay")}</option><option value="absent">{t("reportsPage.absent")}</option></select>}
-        {(report === "advances" || report === "expenditures" || report === "partner-position" || report === "account-ledger") && <><input aria-label={t("reportsPage.minimumAmount")} inputMode="decimal" placeholder={t("reportsPage.minimumAmount")} value={amountMin} onChange={(event) => setAmountMin(event.target.value)} /><input aria-label={t("reportsPage.maximumAmount")} inputMode="decimal" placeholder={t("reportsPage.maximumAmount")} value={amountMax} onChange={(event) => setAmountMax(event.target.value)} /></>}
-      </div>
-      <footer className="reports-actions"><button type="button" onClick={exportCurrent}>{t("reportsPage.exportCsv")}</button><button type="button" onClick={() => window.print()}>{t("reportsPage.print")}</button></footer>
-    </section>
-    {report === "attendance" && <AttendanceReport rows={attendanceRows} summary={attendanceSummary} labourName={labourName} t={t} />}
-    {report === "advances" && <AdvanceReport rows={advanceRows} summary={advanceSummary} accountName={accountName} labourName={labourName} navigate={navigate} t={t} />}
-    {report === "expenditures" && <ExpenseReport rows={voucherRows} advances={advanceRows} accountName={accountName} labourName={labourName} navigate={navigate} t={t} />}
-    {report === "partner-position" && <PartnerReport rows={partnerRows} positions={positions} navigate={navigate} t={t} />}
-    {report === "account-ledger" && <AccountReport rows={accountLedgerRows} positions={positions} accountName={accountName} navigate={navigate} t={t} />}
-  </main></div>;
-}
+  return <div className="dashboard-page">
+    <SubpageHeader title={t("reportsPage.title")} />
+    <main className="subpage module-workspace reports-page">
+      <section className="record-panel reports-tabs" aria-label={t("reportsPage.title")}>
+        {reportOptions.map((item) => <button className={report === item ? "is-active" : ""} type="button" key={item} onClick={() => switchReport(item)}>{t(`reportsPage.tabs.${item}`)}</button>)}
+      </section>
+      <section className="record-panel reports-filter-panel">
+        <div className="reports-filter-heading">
+          <h2>{t("reportsPage.filters")}</h2>
+          {filtered && <button type="button" onClick={clearFilters}>{t("reportsPage.clearFilters")}</button>}
+        </div>
+        <div className="reports-filters">
+          <SearchInput value={search} onChange={setSearch} placeholder={t("reportsPage.searchPlaceholder")} />
+          <input aria-label={t("reportsPage.fromDate")} type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
+          <input aria-label={t("reportsPage.toDate")} type="date" value={to} onChange={(event) => setTo(event.target.value)} />
+          <select aria-label={t("reportsPage.account")} value={accountId} onChange={(event) => setAccountId(event.target.value)}><option value="">{t("reportsPage.allAccounts")}</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select>
+          {report === "expenditures" && <select aria-label={t("reportsPage.category")} value={category} onChange={(event) => setCategory(event.target.value)}><option value="">{t("reportsPage.allCategories")}</option>{voucherCategories.map((item) => <option key={item}>{item}</option>)}</select>}
+          {report === "attendance" && views.attendance === "summary" && <select aria-label={t("reportsPage.status")} value={status} onChange={(event) => setStatus(event.target.value)}><option value="">{t("reportsPage.allStatuses")}</option><option value="present">{t("reportsPage.present")}</option><option value="half_day">{t("reportsPage.halfDay")}</option><option value="absent">{t("reportsPage.absent")}</option></select>}
+          {(report === "advances" && views.advances === "log") && <select aria-label="Advance sort" value={advanceSort} onChange={(event) => setAdvanceSort(event.target.value as SortOrder)}><option value="desc">{t("advancesPage.newestFirst")}</option><option value="asc">{t("advancesPage.oldestFirst")}</option></select>}
+          {(report === "expenditures" && views.expenditures === "log") && <select aria-label="Expense sort" value={expenseSort} onChange={(event) => setExpenseSort(event.target.value as SortOrder)}><option value="desc">{t("advancesPage.newestFirst")}</option><option value="asc">{t("advancesPage.oldestFirst")}</option></select>}
+          {(report === "advances" || report === "expenditures" || report === "partner-position" || report === "account-ledger") && <>
+            <input aria-label={t("reportsPage.minimumAmount")} inputMode="decimal" placeholder={t("reportsPage.minimumAmount")} value={amountMin} onChange={(event) => setAmountMin(event.target.value)} />
+            <input aria-label={t("reportsPage.maximumAmount")} inputMode="decimal" placeholder={t("reportsPage.maximumAmount")} value={amountMax} onChange={(event) => setAmountMax(event.target.value)} />
+          </>}
+        </div>
+      </section>
 
-type Translator = (key: string, options?: Record<string, unknown>) => string;
-function AttendanceReport({ rows, summary, labourName, t }: { rows: Attendance[]; summary: Array<{ labourer: Labourer; present: number; halfDay: number; absent: number; payable: number; wage: number }>; labourName: (id: string) => string; t: Translator }) {
-  return <section className="record-panel"><h2>{t("reportsPage.attendanceTitle")}</h2>
-    <Kpis values={[[t("reportsPage.labour"), summary.length], [t("reportsPage.present"), rows.filter((item) => item.status === "present").length], [t("reportsPage.halfDay"), rows.filter((item) => item.status === "half_day").length], [t("reportsPage.absent"), rows.filter((item) => item.status === "absent").length], [t("reportsPage.totalWages"), money(summary.reduce((sum, item) => sum + item.wage, 0))]]} />
-    <h3>{t("reportsPage.attendanceSummary")}</h3>
-    <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.labour"), t("reportsPage.present"), t("reportsPage.halfDay"), t("reportsPage.absent"), t("reportsPage.payableDays"), t("reportsPage.totalWages")]} rows={summary.map((item) => ({ id: item.labourer.id, title: item.labourer.name, value: money(item.wage), meta: `${t("reportsPage.payableDays")}: ${formatNumber(item.payable)}`, cells: [item.labourer.name, item.present, item.halfDay, item.absent, formatNumber(item.payable), money(item.wage)], details: [[t("reportsPage.present"), item.present], [t("reportsPage.halfDay"), item.halfDay], [t("reportsPage.absent"), item.absent]] }))} />
-    <h3>{t("reportsPage.attendanceLog")}</h3>
-    <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.status")]} rows={rows.map((item) => ({ id: item.id, title: labourName(item.labourerId), value: item.status, meta: item.date, cells: [item.date, labourName(item.labourerId), item.status], details: [[t("reportsPage.date"), item.date], [t("reportsPage.status"), item.status]] }))} />
-  </section>;
-}
-function AdvanceReport({ rows, summary, accountName, labourName, navigate, t }: { rows: Advance[]; summary: Array<{ labourer: Labourer; records: Advance[]; total: number; lastDate: string }>; accountName: (id?: string) => string; labourName: (id: string) => string; navigate: (path: string) => void; t: Translator }) {
-  return <><section className="record-panel"><h2>{t("reportsPage.advanceSummary")}</h2><Kpis values={[[t("reportsPage.totalAdvances"), money(rows.reduce((sum, item) => sum + item.amount, 0))], [t("reportsPage.transactions"), rows.length], [t("reportsPage.labour"), summary.length]]} /><ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.labour"), t("reportsPage.transactions"), t("reportsPage.lastAdvanceDate"), t("reportsPage.total")]} rows={summary.map((item) => ({ id: item.labourer.id, title: item.labourer.name, value: money(item.total), meta: item.lastDate, cells: [item.labourer.name, item.records.length, item.lastDate, money(item.total)], details: [[t("reportsPage.transactions"), item.records.length], [t("reportsPage.lastAdvanceDate"), item.lastDate], [t("reportsPage.account"), [...new Set(item.records.map((record) => accountName(record.accountId)))].join(", ")], [t("reportsPage.status"), item.labourer.active === false ? t("reportsPage.inactive") : t("reportsPage.active")]] }))} /></section>
-    <section className="record-panel"><h2>{t("reportsPage.advanceLog")}</h2><ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.amount"), t("reportsPage.account"), t("reportsPage.notes")]} rows={rows.map((item) => ({ id: item.id, title: labourName(item.labourerId), value: money(item.amount), meta: item.date, cells: [item.date, labourName(item.labourerId), money(item.amount), accountName(item.accountId), item.notes || "-"], details: [[t("reportsPage.account"), accountName(item.accountId)], [t("reportsPage.notes"), item.notes || "-"]], onOpen: () => navigate(`/workspace/labour-advances?recordId=${item.id}`) }))} /></section></>;
-}
-function ExpenseReport({ rows, advances, accountName, labourName, navigate, t }: { rows: Voucher[]; advances: Advance[]; accountName: (id?: string) => string; labourName: (id: string) => string; navigate: (path: string) => void; t: Translator }) {
-  const groupTotals = (values: Array<[string, number]>) => [...new Set(values.map(([name]) => name || "-"))].map((name) => [name, values.filter(([item]) => (item || "-") === name).reduce((sum, [, amount]) => sum + amount, 0)] as const);
-  const categories = groupTotals(rows.map((item) => [item.category, item.amount]));
-  const subcategories = groupTotals(rows.map((item) => [item.subcategory, item.amount]));
-  const accounts = groupTotals(rows.map((item) => [accountName(item.accountId), item.amount]));
-  const Breakdown = ({ title, values }: { title: string; values: ReadonlyArray<readonly [string, number]> }) => <div><h3>{title}</h3><div className="reports-summary-list">{values.map(([name, total]) => <article key={name}><span>{name}</span><strong>{money(total)}</strong></article>)}</div></div>;
-  const voucherTotal = rows.reduce((sum, item) => sum + item.amount, 0);
-  const advanceTotal = advances.reduce((sum, item) => sum + item.amount, 0);
-  return <><section className="record-panel"><h2>{t("reportsPage.expenseSummary")}</h2><Kpis values={[[t("reportsPage.voucherExpenses"), money(voucherTotal)], [t("reportsPage.labourAdvance"), money(advanceTotal)], [t("reportsPage.totalBusinessExpenses"), money(voucherTotal + advanceTotal)], [t("reportsPage.vouchers"), new Set(rows.map((item) => item.voucherNumber)).size], [t("reportsPage.categories"), categories.length]]} /><div className="reports-breakdowns"><Breakdown title={t("reportsPage.byCategory")} values={categories} /><Breakdown title={t("reportsPage.bySubcategory")} values={subcategories} /><Breakdown title={t("reportsPage.byAccount")} values={accounts} /></div></section>
-    <section className="record-panel"><h2>{t("reportsPage.expenseLog")}</h2><ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.voucher"), t("reportsPage.category"), t("reportsPage.account"), t("reportsPage.description"), t("reportsPage.amount")]} rows={rows.map((item) => ({ id: item.id, title: item.voucherNumber, value: money(item.amount), meta: item.date, cells: [item.date, item.voucherNumber, `${item.category} / ${item.subcategory}`, accountName(item.accountId), item.description, money(item.amount)], details: [[t("reportsPage.category"), `${item.category} / ${item.subcategory}`], [t("reportsPage.account"), accountName(item.accountId)], [t("reportsPage.description"), item.description]], onOpen: () => navigate(`/workspace/expenses?recordId=${item.id}`) }))} /></section>
-    <section className="record-panel"><h2>{t("reportsPage.businessExpenseLog")}</h2><ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.account"), t("reportsPage.description"), t("reportsPage.amount")]} rows={[...rows.map((item) => ({ id: `voucher:${item.id}`, title: item.voucherNumber, value: money(item.amount), meta: item.date, cells: [item.date, t("reportsPage.voucherExpense"), item.voucherNumber, accountName(item.accountId), item.description, money(item.amount)], details: [[t("reportsPage.account"), accountName(item.accountId)] as [string, ReactNode]], onOpen: () => navigate(`/workspace/expenses?recordId=${item.id}`) })), ...advances.map((item) => ({ id: `advance:${item.id}`, title: labourName(item.labourerId), value: money(item.amount), meta: item.date, cells: [item.date, t("reportsPage.labourAdvance"), item.id.slice(0, 8), accountName(item.accountId), item.notes || "-", money(item.amount)], details: [[t("reportsPage.account"), accountName(item.accountId)] as [string, ReactNode]], onOpen: () => navigate(`/workspace/labour-advances?recordId=${item.id}`) }))]} /></section></>;
-}
-function PartnerReport({ rows, positions, navigate, t }: { rows: PartnerEntry[]; positions: Array<{ account: Account; voucherExpenses: number; labourAdvances: number; contributions: number; withdrawals: number; settlementsSent: number; settlementsReceived: number; salesReceived: number; net: number }>; navigate: (path: string) => void; t: Translator }) {
-  return <><section className="record-panel"><h2>{t("reportsPage.partnerPositionTitle")}</h2><ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.partner"), t("reportsPage.voucherExpenses"), t("reportsPage.labourAdvance"), t("reportsPage.contributions"), t("reportsPage.withdrawals"), t("reportsPage.netPosition")]} rows={positions.map((item) => ({ id: item.account.id, title: item.account.name, value: money(item.net), cells: [item.account.name, money(item.voucherExpenses), money(item.labourAdvances), money(item.contributions), money(item.withdrawals), money(item.net)], details: [[t("reportsPage.salesReceived"), money(item.salesReceived)], [t("reportsPage.settlementsSent"), money(item.settlementsSent)], [t("reportsPage.settlementsReceived"), money(item.settlementsReceived)]] }))} /></section>
-    <section className="record-panel"><h2>{t("reportsPage.partnerLedger")}</h2><ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.partner"), t("reportsPage.type"), t("reportsPage.amount"), t("reportsPage.notes")]} rows={rows.map((item) => ({ id: item.id, title: item.partnerName ?? `${item.fromPartner ?? "-"} → ${item.toPartner ?? "-"}`, value: money(item.amount), meta: item.date, cells: [item.date, item.partnerName ?? `${item.fromPartner ?? "-"} → ${item.toPartner ?? "-"}`, item.type, money(item.amount), item.notes || "-"], details: [[t("reportsPage.type"), item.type], [t("reportsPage.notes"), item.notes || "-"]], onOpen: () => navigate(`/workspace/partner-ledger?recordId=${item.id}`) }))} /></section></>;
-}
-function AccountReport({ rows, positions, accountName, navigate, t }: { rows: Array<{ id: string; date: string; accountId: string; type: string; reference: string; description: string; debit: number; credit: number; running: number; path: string }>; positions: Array<{ account: Account; net: number }>; accountName: (id?: string) => string; navigate: (path: string) => void; t: Translator }) {
-  const movements = positions.map((item) => {
-    const accountRows = rows.filter((row) => row.accountId === item.account.id);
-    const debit = accountRows.reduce((sum, row) => sum + row.debit, 0);
-    const credit = accountRows.reduce((sum, row) => sum + row.credit, 0);
-    return { ...item, debit, credit, closing: credit - debit };
-  });
-  return <><section className="record-panel"><h2>{t("reportsPage.accountBalances")}</h2><div className="reports-kpis">{positions.map((item) => <article key={item.account.id}><span>{item.account.name}</span><strong>{money(item.net)}</strong></article>)}</div></section>
-    <section className="record-panel"><h2>{t("reportsPage.cashBankMovement")}</h2><ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.account"), t("reportsPage.openingBalance"), t("reportsPage.totalDebit"), t("reportsPage.totalCredit"), t("reportsPage.closingBalance")]} rows={movements.map((item) => ({ id: item.account.id, title: item.account.name, value: money(item.closing), cells: [item.account.name, money(0), money(item.debit), money(item.credit), money(item.closing)], details: [[t("reportsPage.totalDebit"), money(item.debit)], [t("reportsPage.totalCredit"), money(item.credit)]] }))} /></section>
-    <section className="record-panel"><h2>{t("reportsPage.accountLedgerTitle")}</h2><ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.account"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.debit"), t("reportsPage.credit"), t("reportsPage.runningBalance")]} rows={rows.map((item) => ({ id: item.id, title: item.reference, value: item.credit ? `+${money(item.credit)}` : `-${money(item.debit)}`, meta: `${item.date} | ${accountName(item.accountId)}`, cells: [item.date, accountName(item.accountId), item.type, item.reference, item.debit ? money(item.debit) : "-", item.credit ? money(item.credit) : "-", money(item.running)], details: [[t("reportsPage.description"), item.description], [t("reportsPage.runningBalance"), money(item.running)]], onOpen: () => navigate(item.path) }))} /></section></>;
+      {report === "attendance" && <>
+        <section className="record-panel reports-subtabs">
+          <button className={views.attendance === "register" ? "is-active" : ""} type="button" onClick={() => switchView("attendance", "register")}>Register</button>
+          <button className={views.attendance === "summary" ? "is-active" : ""} type="button" onClick={() => switchView("attendance", "summary")}>Summary</button>
+        </section>
+        {views.attendance === "register" && <ReportShell title="Attendance Register" rangeLabel={rangeLabel} sectionId="attendance-register" onPrint={() => printSection("attendance-register")} onExport={exportAttendanceRegister}>
+          <Kpis values={[[t("reportsPage.labour"), attendanceSummary.length], [t("reportsPage.present"), attendanceRows.filter((item) => item.status === "present").length], [t("reportsPage.halfDay"), attendanceRows.filter((item) => item.status === "half_day").length], [t("reportsPage.absent"), attendanceRows.filter((item) => item.status === "absent").length], [t("reportsPage.totalWages"), money(attendanceSummary.reduce((sum, item) => sum + item.wage, 0))]]} />
+          <div className="attendance-import-table-wrap report-wide-table report-wide-table--mobile">
+            <table className="report-data-table attendance-register-report">
+              <thead>
+                <tr>
+                  <th>{t("reportsPage.labour")}</th>
+                  {attendanceDates.map((date) => <th key={date}>{formatShortDate(date)}</th>)}
+                  <th>{t("reportsPage.payableDays")}</th>
+                  <th>Wage Rate</th>
+                  <th>{t("reportsPage.totalWages")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {attendanceSummary.map((item) => <tr key={item.labourer.id}>
+                  <th>{item.labourer.name}</th>
+                  {attendanceDates.map((date) => <td key={date}>{attendanceMark(item.records.find((record) => record.date === date)?.status)}</td>)}
+                  <td>{formatNumber(item.payable)}</td>
+                  <td>{money(item.labourer.dailyWage)}</td>
+                  <td>{money(item.wage)}</td>
+                </tr>)}
+              </tbody>
+            </table>
+          </div>
+        </ReportShell>}
+        {views.attendance === "summary" && <ReportShell title={t("reportsPage.attendanceSummary")} rangeLabel={rangeLabel} sectionId="attendance-summary" onPrint={() => printSection("attendance-summary")} onExport={exportAttendanceSummary}>
+          <Kpis values={[[t("reportsPage.labour"), attendanceSummary.length], [t("reportsPage.present"), attendanceRows.filter((item) => item.status === "present").length], [t("reportsPage.halfDay"), attendanceRows.filter((item) => item.status === "half_day").length], [t("reportsPage.absent"), attendanceRows.filter((item) => item.status === "absent").length], [t("reportsPage.totalWages"), money(attendanceSummary.reduce((sum, item) => sum + item.wage, 0))]]} />
+          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.labour"), t("reportsPage.present"), t("reportsPage.halfDay"), t("reportsPage.absent"), t("reportsPage.payableDays"), t("reportsPage.totalWages")]} rows={attendanceSummary.map((item) => ({ id: item.labourer.id, title: item.labourer.name, value: money(item.wage), meta: `${t("reportsPage.payableDays")}: ${formatNumber(item.payable)}`, cells: [item.labourer.name, item.present, item.halfDay, item.absent, formatNumber(item.payable), money(item.wage)], details: [[t("reportsPage.present"), item.present], [t("reportsPage.halfDay"), item.halfDay], [t("reportsPage.absent"), item.absent]] }))} />
+        </ReportShell>}
+      </>}
+
+      {report === "advances" && <>
+        <section className="record-panel reports-subtabs">
+          <button className={views.advances === "summary" ? "is-active" : ""} type="button" onClick={() => switchView("advances", "summary")}>Summary</button>
+          <button className={views.advances === "log" ? "is-active" : ""} type="button" onClick={() => switchView("advances", "log")}>Log</button>
+        </section>
+        {views.advances === "summary" && <ReportShell title={t("reportsPage.advanceSummary")} rangeLabel={rangeLabel} sectionId="advance-summary" onPrint={() => printSection("advance-summary")} onExport={exportAdvanceSummary}>
+          <Kpis values={[[t("reportsPage.totalAdvances"), money(advanceRows.reduce((sum, item) => sum + item.amount, 0))], [t("reportsPage.transactions"), advanceRows.length], [t("reportsPage.labour"), advanceSummary.length]]} />
+          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.labour"), t("reportsPage.transactions"), t("reportsPage.total"), t("reportsPage.netBalance")]} rows={advanceSummary.map((item) => ({ id: item.labourer.id, title: item.labourer.name, value: money(item.total), meta: `${item.records.length} ${t("reportsPage.transactions")}`, cells: [item.labourer.name, item.records.length, money(item.total), money(item.outstanding)], details: [[t("reportsPage.account"), [...new Set(item.records.map((record) => accountName(record.accountId)))].join(", ")], [t("reportsPage.status"), item.labourer.active === false ? t("reportsPage.inactive") : t("reportsPage.active")]] }))} />
+        </ReportShell>}
+        {views.advances === "log" && <ReportShell title={t("reportsPage.advanceLog")} rangeLabel={rangeLabel} sectionId="advance-log" onPrint={() => printSection("advance-log")} onExport={exportAdvanceLog}>
+          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.amount"), t("reportsPage.account"), t("reportsPage.description"), t("reportsPage.reference")]} rows={advanceRows.map((item) => ({ id: item.id, title: labourName(item.labourerId), value: money(item.amount), meta: item.date, cells: [item.date, labourName(item.labourerId), money(item.amount), accountName(item.accountId), item.notes || "-", item.id.slice(0, 8)], details: [[t("reportsPage.account"), accountName(item.accountId)], [t("reportsPage.notes"), item.notes || "-"]], onOpen: () => navigate(`/workspace/labour-advances?recordId=${item.id}`) }))} />
+        </ReportShell>}
+      </>}
+
+      {report === "expenditures" && <>
+        <section className="record-panel reports-subtabs">
+          <button className={views.expenditures === "summary" ? "is-active" : ""} type="button" onClick={() => switchView("expenditures", "summary")}>Summary</button>
+          <button className={views.expenditures === "log" ? "is-active" : ""} type="button" onClick={() => switchView("expenditures", "log")}>Log</button>
+        </section>
+        {views.expenditures === "summary" && <ReportShell title={t("reportsPage.expenseSummary")} rangeLabel={rangeLabel} sectionId="expense-summary" onPrint={() => printSection("expense-summary")} onExport={exportExpenseSummary}>
+          <Kpis values={[[t("reportsPage.totalExpenses"), money(voucherRows.reduce((sum, item) => sum + item.amount, 0))], [t("reportsPage.vouchers"), new Set(voucherRows.map((item) => item.voucherNumber)).size], [t("reportsPage.categories"), new Set(voucherRows.map((item) => item.category)).size], [t("reportsPage.account"), new Set(voucherRows.map((item) => item.accountId)).size]]} />
+          <div className="reports-breakdowns">
+            <div>
+              <h3>{t("reportsPage.byCategory")}</h3>
+              <div className="reports-summary-list">
+                {[...new Set(voucherRows.map((item) => item.category))].map((name) => <article key={name}><span>{name}</span><strong>{money(voucherRows.filter((item) => item.category === name).reduce((sum, item) => sum + item.amount, 0))}</strong></article>)}
+              </div>
+            </div>
+            <div>
+              <h3>{t("reportsPage.byAccount")}</h3>
+              <div className="reports-summary-list">
+                {[...new Set(voucherRows.map((item) => accountName(item.accountId)))].map((name) => <article key={name}><span>{name}</span><strong>{money(voucherRows.filter((item) => accountName(item.accountId) === name).reduce((sum, item) => sum + item.amount, 0))}</strong></article>)}
+              </div>
+            </div>
+          </div>
+        </ReportShell>}
+        {views.expenditures === "log" && <ReportShell title={t("reportsPage.expenseLog")} rangeLabel={rangeLabel} sectionId="expense-log" onPrint={() => printSection("expense-log")} onExport={exportExpenseLog}>
+          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.voucher"), t("reportsPage.date"), t("reportsPage.description"), t("reportsPage.category"), t("reportsPage.account"), t("reportsPage.amount")]} rows={voucherRows.map((item) => ({ id: item.id, title: item.voucherNumber, value: money(item.amount), meta: item.date, cells: [item.voucherNumber, item.date, item.description, `${item.category} / ${item.subcategory}`, accountName(item.accountId), money(item.amount)], details: [[t("reportsPage.category"), `${item.category} / ${item.subcategory}`], [t("reportsPage.account"), accountName(item.accountId)]], onOpen: () => navigate(`/workspace/expenses?recordId=${item.id}`) }))} />
+        </ReportShell>}
+      </>}
+
+      {report === "partner-position" && <>
+        <section className="record-panel reports-subtabs">
+          <button className={views["partner-position"] === "position" ? "is-active" : ""} type="button" onClick={() => switchView("partner-position", "position")}>Position</button>
+          <button className={views["partner-position"] === "ledger" ? "is-active" : ""} type="button" onClick={() => switchView("partner-position", "ledger")}>Ledger</button>
+        </section>
+        {views["partner-position"] === "position" && <ReportShell title={t("reportsPage.partnerPositionTitle")} rangeLabel={rangeLabel} sectionId="partner-position" onPrint={() => printSection("partner-position")} onExport={exportPartnerPosition}>
+          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.partner"), t("reportsPage.voucherExpenses"), t("reportsPage.labourAdvance"), t("reportsPage.contributions"), t("reportsPage.withdrawals"), t("reportsPage.netPosition")]} rows={positions.map((item) => ({ id: item.account.id, title: item.account.name, value: money(item.net), cells: [item.account.name, money(item.voucherExpenses), money(item.labourAdvances), money(item.contributions), money(item.withdrawals), money(item.net)], details: [[t("reportsPage.salesReceived"), money(item.salesReceived)], [t("reportsPage.settlementsSent"), money(item.settlementsSent)], [t("reportsPage.settlementsReceived"), money(item.settlementsReceived)]] }))} />
+        </ReportShell>}
+        {views["partner-position"] === "ledger" && <ReportShell title={t("reportsPage.partnerLedger")} rangeLabel={rangeLabel} sectionId="partner-ledger" onPrint={() => printSection("partner-ledger")} onExport={exportPartnerLedger}>
+          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.partner"), t("reportsPage.type"), t("reportsPage.amount"), t("reportsPage.notes")]} rows={partnerRows.map((item) => ({ id: item.id, title: item.partnerName ?? `${item.fromPartner ?? "-"} → ${item.toPartner ?? "-"}`, value: money(item.amount), meta: item.date, cells: [item.date, item.partnerName ?? `${item.fromPartner ?? "-"} → ${item.toPartner ?? "-"}`, item.type, money(item.amount), item.notes || "-"], details: [[t("reportsPage.type"), item.type], [t("reportsPage.notes"), item.notes || "-"]], onOpen: () => navigate(`/workspace/partner-ledger?recordId=${item.id}`) }))} />
+        </ReportShell>}
+      </>}
+
+      {report === "account-ledger" && <>
+        <section className="record-panel reports-subtabs">
+          <button className={views["account-ledger"] === "balances" ? "is-active" : ""} type="button" onClick={() => switchView("account-ledger", "balances")}>Balances</button>
+          <button className={views["account-ledger"] === "ledger" ? "is-active" : ""} type="button" onClick={() => switchView("account-ledger", "ledger")}>Ledger</button>
+        </section>
+        {views["account-ledger"] === "balances" && <ReportShell title={t("reportsPage.accountBalances")} rangeLabel={rangeLabel} sectionId="account-balances" onPrint={() => printSection("account-balances")} onExport={exportAccountBalances}>
+          <div className="reports-kpis">{positions.map((item) => <article key={item.account.id}><span>{item.account.name}</span><strong>{money(item.net)}</strong></article>)}</div>
+        </ReportShell>}
+        {views["account-ledger"] === "ledger" && <ReportShell title={t("reportsPage.accountLedgerTitle")} rangeLabel={rangeLabel} sectionId="account-ledger" onPrint={() => printSection("account-ledger")} onExport={exportAccountLedger}>
+          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.account"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.debit"), t("reportsPage.credit"), t("reportsPage.runningBalance")]} rows={accountLedgerRows.map((item) => ({ id: item.id, title: item.reference, value: item.credit ? `+${money(item.credit)}` : `-${money(item.debit)}`, meta: `${item.date} | ${accountName(item.accountId)}`, cells: [item.date, accountName(item.accountId), item.type, item.reference, item.debit ? money(item.debit) : "-", item.credit ? money(item.credit) : "-", money(item.running)], details: [[t("reportsPage.description"), item.description], [t("reportsPage.runningBalance"), money(item.running)]], onOpen: () => navigate(item.path) }))} />
+        </ReportShell>}
+      </>}
+    </main>
+  </div>;
 }
