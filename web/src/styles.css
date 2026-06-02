@@ -2046,16 +2046,23 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 10px 17px;
+  min-width: 0;
   padding: 12px 13px;
+  width: 100%;
 }
 
 .record-list article strong {
   margin-inline-end: auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .record-list article span {
   color: var(--text-secondary);
   font-size: 0.85rem;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .record-list article span:last-child {
@@ -2091,6 +2098,8 @@ button {
 .partner-position-table { overflow-x: auto; }
 .partner-position-row { align-items: center; border-bottom: 1px solid var(--border); display: grid; font-size: .78rem; gap: 8px; grid-template-columns: minmax(120px, 1.4fr) repeat(8, minmax(82px, 1fr)); min-width: 980px; padding: 8px 0; }
 .partner-position-row--header { color: var(--text-secondary); font-size: .7rem; font-weight: 800; text-transform: uppercase; }
+.partner-position-cards { display: none; }
+.partner-ledger-submit { align-items: center; color: #fff !important; display: inline-flex; justify-content: center; }
 
 .account-card-clickable {
   cursor: pointer;
@@ -3281,6 +3290,14 @@ button {
     width: 100%;
   }
 
+  .subpage-toolbar {
+    min-height: 54px;
+  }
+
+  .subpage-toolbar .toolbar__actions {
+    display: none;
+  }
+
   .shell-header .shell-action {
     flex: 1 1 auto;
     justify-content: center;
@@ -3308,6 +3325,71 @@ button {
   .admin-metric-grid,
   .shell-grid {
     grid-template-columns: 1fr;
+  }
+
+  .workspace-intro {
+    gap: 12px;
+    padding: 16px;
+  }
+
+  .workspace-intro p {
+    overflow-wrap: anywhere;
+  }
+
+  .record-panel {
+    min-width: 0;
+    padding: 14px;
+  }
+
+  .partner-position-table {
+    display: none;
+  }
+
+  .partner-position-cards {
+    display: grid;
+    gap: 10px;
+  }
+
+  .partner-position-cards article {
+    background: var(--surface-soft);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    display: grid;
+    gap: 7px;
+    min-width: 0;
+    padding: 10px;
+  }
+
+  .partner-position-cards header,
+  .partner-position-cards div {
+    align-items: center;
+    display: flex;
+    gap: 10px;
+    justify-content: space-between;
+    min-width: 0;
+  }
+
+  .partner-position-cards header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 7px;
+  }
+
+  .partner-position-cards header strong,
+  .partner-position-cards header b {
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+  }
+
+  .partner-position-cards div span {
+    color: var(--text-secondary);
+    font-size: .74rem;
+  }
+
+  .partner-position-cards div strong {
+    color: var(--text-primary);
+    flex-shrink: 0;
+    font-size: .78rem;
+    font-variant-numeric: tabular-nums;
   }
 }
 

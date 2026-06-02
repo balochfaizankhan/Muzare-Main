@@ -2136,7 +2136,7 @@ function PartnerLedgerModule() {
             <option value="">Select cash/bank account</option>
             {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
           </select>}
-          <button disabled={saving} type="submit">{saving ? "Saving..." : editing ? "Update entry" : "Save entry"}</button>
+          <button className="partner-ledger-submit" disabled={saving} type="submit">{saving ? "Saving..." : editing ? "Update entry" : "Save entry"}</button>
           {editing && <button className="secondary-button" disabled={saving} type="button" onClick={resetForm}>Cancel edit</button>}
         </form>
         {error && <p className="worker-action-error">{error}</p>}
@@ -2150,6 +2150,18 @@ function PartnerLedgerModule() {
           {partnerPositions.map((item) => <div className="partner-position-row" key={item.name}>
             <strong>{item.name}</strong><span>{money(item.voucherExpensesPaid)}</span><span>{money(item.labourAdvancesPaid)}</span><span>{money(item.totalPaid)}</span><span>{money(item.contributions)}</span><span>{money(item.withdrawals)}</span><span>{money(item.settlementsSent)}</span><span>{money(item.settlementsReceived)}</span><b>{money(item.netPosition)}</b>
           </div>)}
+        </div>}
+        {!!partnerPositions.length && <div className="partner-position-cards">
+          {partnerPositions.map((item) => <article key={`mobile-${item.name}`}>
+            <header><strong>{item.name}</strong><b>{money(item.netPosition)}</b></header>
+            <div><span>Voucher expenses</span><strong>{money(item.voucherExpensesPaid)}</strong></div>
+            <div><span>Labour advances</span><strong>{money(item.labourAdvancesPaid)}</strong></div>
+            <div><span>Total paid</span><strong>{money(item.totalPaid)}</strong></div>
+            <div><span>Contributions</span><strong>{money(item.contributions)}</strong></div>
+            <div><span>Withdrawals</span><strong>{money(item.withdrawals)}</strong></div>
+            <div><span>Settlements sent</span><strong>{money(item.settlementsSent)}</strong></div>
+            <div><span>Settlements received</span><strong>{money(item.settlementsReceived)}</strong></div>
+          </article>)}
         </div>}
       </section>
       <label className="partner-ledger-filter"><span>Ledger filter</span><select value={entryFilter} onChange={(event) => setEntryFilter(event.target.value as typeof entryFilter)}>
