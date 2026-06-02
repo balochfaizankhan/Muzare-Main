@@ -1,4 +1,4 @@
-import { BarChart3, BookOpenText, Boxes, CalendarCheck, CloudUpload, LayoutDashboard, LogOut, PackageOpen, ReceiptText, RefreshCw, Settings, ShoppingBasket, Users } from "lucide-react";
+import { BarChart3, BookOpenText, Boxes, CalendarCheck, CloudUpload, HandCoins, LayoutDashboard, LogOut, PackageOpen, ReceiptText, RefreshCw, Settings, ShoppingBasket, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink, Outlet } from "react-router-dom";
@@ -14,6 +14,7 @@ const nav = [
   ["/workspace/attendance", "layout.attendance", CalendarCheck],
   ["/workspace/sales", "layout.sales", ShoppingBasket],
   ["/workspace/expenses", "layout.expenses", ReceiptText],
+  ["/workspace/labour-advances", "layout.advances", HandCoins],
   ["/workspace/dispatch", "layout.dispatch", PackageOpen],
   ["/workspace/inventory", "layout.inventory", Boxes],
   ["/workspace/reports", "layout.reports", BarChart3],

@@ -60,13 +60,6 @@ const modules: Array<{
   { key: "partnerLedger", path: "/workspace/partner-ledger", icon: Leaf, detailKey: "dashboard.partnerLedgerDetail" },
 ];
 
-const quickActions = [
-  { labelKey: "dashboard.markAttendance", path: "/workspace/attendance", icon: UsersRound },
-  { labelKey: "dashboard.newExpense", path: "/workspace/expenses", icon: BanknoteArrowDown },
-  { labelKey: "dashboard.recordDispatch", path: "/workspace/dispatch", icon: PackageOpen },
-  { labelKey: "dashboard.recordSale", path: "/workspace/sales", icon: ShoppingBasket },
-] as const;
-
 const today = () => new Date().toISOString().slice(0, 10);
 const money = formatMoney;
 export function DashboardPage() {
@@ -232,24 +225,6 @@ export function DashboardPage() {
                       <strong>{t(key)}</strong>
                       <span>{t(detailKey)}</span>
                     </div>
-                    <ArrowRight size={16} />
-                  </Link>
-                ))}
-              </div>
-            </section>
-
-            <section className="panel quick-panel">
-              <div className="panel-heading">
-                <div>
-                  <h2>{t("dashboardPage.quickActions")}</h2>
-                  <p>{t("dashboardPage.dailyEntries")}</p>
-                </div>
-              </div>
-              <div className="quick-grid">
-                {quickActions.map(({ labelKey, path, icon: Icon }) => (
-                  <Link className="quick-action" to={path} key={labelKey}>
-                    <Icon size={19} />
-                    <span>{t(labelKey)}</span>
                     <ArrowRight size={16} />
                   </Link>
                 ))}
