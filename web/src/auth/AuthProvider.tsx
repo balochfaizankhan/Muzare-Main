@@ -20,6 +20,7 @@ type AuthState = {
   login(email: string, password: string): Promise<void>;
   logout(): Promise<void>;
   switchWorkspace(workspaceId: string): Promise<void>;
+  updateUser(user: AppUser): void;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -96,7 +97,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
     setUser(session.user);
   }, [token, user?.workspaceId]);
 
-  const value = useMemo(() => ({ user, token, loading, login, logout, switchWorkspace }), [user, token, loading, login, logout, switchWorkspace]);
+  const updateUser = useCallback((nextUser: AppUser) => {
+    window.localStorage.setItem(cachedUserKey, JSON.stringify(nextUser));
+    setUser(nextUser);
+  }, []);
+
+  const value = useMemo(() => ({ user, token, loading, login, logout, switchWorkspace, updateUser }), [user, token, loading, login, logout, switchWorkspace, updateUser]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

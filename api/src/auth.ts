@@ -5,7 +5,7 @@ import { and, eq, gt, sql } from "drizzle-orm";
 import { config, localDevelopmentMode } from "./config.js";
 import { db } from "./db/client.js";
 import { userSessions, users, workspaceMemberships, workspaces } from "./db/schema.js";
-import { hasPermission, type AppRole, type Permission, type PlatformRole, type WorkspaceRole } from "./permissions.js";
+import { hasPermission, type AppRole, type Permission, type PlatformRole, type WorkspaceModulePermissions, type WorkspaceRole } from "./permissions.js";
 
 const scrypt = promisify(scryptCallback);
 
@@ -14,6 +14,7 @@ export type WorkspaceMembership = {
   workspaceName: string;
   role: WorkspaceRole;
   active: boolean;
+  permissions: WorkspaceModulePermissions | null;
 };
 
 export type AuthenticatedUser = {
@@ -112,6 +113,7 @@ async function loadMemberships(userId: string): Promise<WorkspaceMembership[]> {
       workspaceName: workspaces.name,
       role: workspaceMemberships.role,
       active: workspaceMemberships.active,
+      permissions: workspaceMemberships.permissions,
     })
     .from(workspaceMemberships)
     .innerJoin(workspaces, eq(workspaces.id, workspaceMemberships.workspaceId))

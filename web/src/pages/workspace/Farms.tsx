@@ -1,22 +1,80 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Leaf, LogOut, MapPin, Pencil, Plus, UserRound, XCircle } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { CheckCircle2, Leaf, LogOut, MapPin, Pencil, Plus, ShieldCheck, UserRound, UsersRound, XCircle } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
 import { SubpageHeader } from "../../components/SubpageHeader";
 import {
   archiveWorkspaceFarm,
   createWorkspaceFarm,
   fetchWorkspaceFarms,
+  fetchWorkspaceProfile,
   selectActiveFarm,
+  updateWorkspaceProfile,
   updateWorkspaceFarm,
   type Farm,
   type FarmInput,
+  type WorkspaceProfileInput,
 } from "../../lib/api";
 import { hasPermission } from "../../lib/permissions";
 
 const emptyForm: FarmInput = { name: "", location: "", owner: "", remarks: "", contactName: "", contactEmail: "", contactPhone: "" };
+const emptyProfile: WorkspaceProfileInput = { name: "", contactEmail: "", contactPhone: "" };
+
+function WorkspaceProfileCard({ token, workspaceId }: { token: string; workspaceId: string }) {
+  const { t } = useTranslation();
+  const { user, updateUser } = useAuth();
+  const [form, setForm] = useState<WorkspaceProfileInput>(emptyProfile);
+  const profile = useQuery({
+    queryKey: ["workspace-profile", workspaceId],
+    queryFn: () => fetchWorkspaceProfile(token, workspaceId),
+    enabled: Boolean(token && workspaceId),
+  });
+  const canEdit = user?.memberships.some((membership) => membership.active && membership.workspaceId === workspaceId && membership.role === "workspace_owner") ?? false;
+
+  useEffect(() => {
+    if (!profile.data?.workspace) return;
+    setForm({
+      name: profile.data.workspace.name,
+      contactEmail: profile.data.workspace.contactEmail,
+      contactPhone: profile.data.workspace.contactPhone ?? "",
+    });
+  }, [profile.data?.workspace]);
+
+  const save = useMutation({
+    mutationFn: () => updateWorkspaceProfile(token, workspaceId, form),
+    onSuccess: async (result) => {
+      updateUser(result.user);
+      await profile.refetch();
+    },
+  });
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    save.mutate();
+  };
+
+  return (
+    <section className="record-panel workspace-profile">
+      <div className="workspace-profile__heading">
+        <div><h2>{t("workspaceProfile.title")}</h2><p>{t("workspaceProfile.description")}</p></div>
+        {!canEdit && <span>{t("workspaceProfile.ownerOnly")}</span>}
+      </div>
+      {profile.isLoading && <p className="context-message">{t("workspaceProfile.loading")}</p>}
+      {profile.isError && <p className="error">{profile.error.message}</p>}
+      {profile.data && (
+        <form className="module-form workspace-profile__form" onSubmit={submit}>
+          <label><span>{t("workspaceProfile.name")}</span><input required disabled={!canEdit} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+          <label><span>{t("workspaceProfile.contactEmail")}</span><input required disabled={!canEdit} type="email" value={form.contactEmail} onChange={(event) => setForm({ ...form, contactEmail: event.target.value })} /></label>
+          <label><span>{t("workspaceProfile.contactPhone")}</span><input disabled={!canEdit} value={form.contactPhone} onChange={(event) => setForm({ ...form, contactPhone: event.target.value })} /></label>
+          {canEdit && <div className="farm-actions"><button disabled={save.isPending} type="submit">{save.isPending ? t("workspaceProfile.saving") : t("workspaceProfile.save")}</button></div>}
+          {save.isSuccess && <p className="success">{t("workspaceProfile.saved")}</p>}
+          {save.isError && <p className="error">{save.error.message}</p>}
+        </form>
+      )}
+    </section>
+  );
+}
 
 export function Farms() {
   const { t } = useTranslation();
@@ -24,6 +82,7 @@ export function Farms() {
   const location = useLocation();
   const client = useQueryClient();
   const workspaceId = user?.workspaceId ?? "";
+  const isSettings = location.pathname.endsWith("/settings");
   const canManage = Boolean(user && workspaceId && hasPermission(user, "MANAGE_FARMS", workspaceId));
   const [editing, setEditing] = useState<Farm | null>(null);
   const [form, setForm] = useState<FarmInput>(emptyForm);
@@ -74,10 +133,16 @@ export function Farms() {
 
   return (
     <div className="dashboard-page">
-      <SubpageHeader title={t("farmsPage.title")} />
+      <SubpageHeader title={isSettings ? t("workspaceProfile.settingsTitle") : t("farmsPage.title")} />
       <main className="subpage module-workspace">
-        {location.pathname.endsWith("/settings") && <section className="mobile-settings-menu">
+        {isSettings && <section className="mobile-settings-menu">
           <button type="button" onClick={() => void logout()}><LogOut size={17} />{t("common.logout")}</button>
+        </section>}
+        {isSettings && token && workspaceId && <WorkspaceProfileCard token={token} workspaceId={workspaceId} />}
+        {isSettings && <section className="settings-link-grid">
+          <Link to="/workspace/settings/team"><UsersRound size={19} /><div><strong>{t("workspaceTeam.title")}</strong><span>{t("workspaceTeam.settingsCard")}</span></div></Link>
+          <Link to="/workspace/settings/approvals"><ShieldCheck size={19} /><div><strong>{t("workspaceApprovals.title")}</strong><span>{t("workspaceApprovals.settingsCard")}</span></div></Link>
+          <Link to="/workspace/seasons"><Leaf size={19} /><div><strong>{t("seasonsPage.title")}</strong><span>{t("seasonsPage.managementDescription")}</span></div></Link>
         </section>}
         <section className="workspace-intro">
           <div><h2>{t("farmsPage.managementTitle")}</h2><p>{t("farmsPage.managementDescription")}</p></div>

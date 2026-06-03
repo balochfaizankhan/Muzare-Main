@@ -57,6 +57,7 @@ export const users = pgTable("users", {
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   displayName: text("display_name"),
+  phone: text("phone"),
   platformRole: platformRole("platform_role"),
   status: userStatus("status").default("pending").notNull(),
   active: boolean("active").default(true).notNull(),
@@ -73,10 +74,27 @@ export const workspaceMemberships = pgTable(
     userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
     role: workspaceRole("role").default("viewer").notNull(),
     active: boolean("active").default(true).notNull(),
+    permissions: jsonb("permissions").$type<Record<string, Record<string, boolean>> | null>(),
     ...timestamps,
   },
   (table) => [uniqueIndex("workspace_memberships_workspace_user_uidx").on(table.workspaceId, table.userId)],
 );
+
+export const workspaceTeamInvitations = pgTable("workspace_team_invitations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+  email: text("email").notNull(),
+  phone: text("phone"),
+  role: workspaceRole("role").default("viewer").notNull(),
+  permissions: jsonb("permissions").$type<Record<string, Record<string, boolean>> | null>(),
+  tokenHash: text("token_hash").notNull().unique(),
+  status: text("status").default("pending").notNull(),
+  invitedBy: uuid("invited_by").references(() => users.id).notNull(),
+  acceptedBy: uuid("accepted_by").references(() => users.id),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+  ...timestamps,
+});
 
 export const userSessions = pgTable("user_sessions", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -388,6 +406,7 @@ export const workspaceApprovals = pgTable("workspace_approvals", {
   status: approvalStatus("status").default("pending").notNull(),
   decidedBy: uuid("decided_by").references(() => users.id),
   decidedAt: timestamp("decided_at", { withTimezone: true }),
+  decisionNote: text("decision_note"),
   ...timestamps,
 });
 

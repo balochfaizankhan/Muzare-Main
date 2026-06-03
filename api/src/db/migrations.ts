@@ -15,6 +15,7 @@ const expenseImportMigrationUrl = new URL("../../../database/migrations/0012_exp
 const attendanceOfflineIdentityMigrationUrl = new URL("../../../database/migrations/0013_attendance_offline_identity.sql", import.meta.url);
 const labourAdvanceYounisAccountBackfillMigrationUrl = new URL("../../../database/migrations/0014_labour_advance_younis_account_backfill.sql", import.meta.url);
 const partnerSettlementAccountIdsMigrationUrl = new URL("../../../database/migrations/0015_partner_settlement_account_ids.sql", import.meta.url);
+const workspaceTeamPermissionsMigrationUrl = new URL("../../../database/migrations/0016_workspace_team_permissions.sql", import.meta.url);
 
 async function tableExists(tableName: string): Promise<boolean> {
   const result = (await db.execute(
@@ -106,4 +107,6 @@ export async function ensureWorkspaceSchema(): Promise<void> {
   await db.execute(labourAdvanceYounisAccountBackfillMigration);
   const partnerSettlementAccountIdsMigration = await readFile(partnerSettlementAccountIdsMigrationUrl, "utf8");
   await db.execute(partnerSettlementAccountIdsMigration);
+  const workspaceTeamPermissionsMigration = await readFile(workspaceTeamPermissionsMigrationUrl, "utf8");
+  await db.execute(workspaceTeamPermissionsMigration);
 }

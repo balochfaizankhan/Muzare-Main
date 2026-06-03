@@ -1301,6 +1301,85 @@ button {
   gap: 8px;
 }
 
+.workspace-profile__heading {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.workspace-profile__heading p {
+  color: var(--text-secondary);
+  font-size: .86rem;
+  margin: -8px 0 15px;
+}
+
+.workspace-profile__heading > span {
+  color: var(--text-secondary);
+  font-size: .75rem;
+}
+
+.workspace-profile__form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.workspace-profile__form label {
+  display: grid;
+  gap: 6px;
+}
+
+.workspace-profile__form label span {
+  color: var(--text-secondary);
+  font-size: .76rem;
+  font-weight: 700;
+}
+
+.workspace-profile__form .farm-actions,
+.workspace-profile__form .success,
+.workspace-profile__form .error {
+  grid-column: 1 / -1;
+}
+
+.settings-link-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.settings-link-grid a,
+.team-card {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 13px;
+  text-decoration: none;
+}
+
+.settings-link-grid svg { color: var(--brand-primary); flex-shrink: 0; }
+.settings-link-grid div, .team-card div { display: grid; gap: 3px; min-width: 0; }
+.settings-link-grid span, .team-card span, .team-card small { color: var(--text-secondary); font-size: .74rem; overflow-wrap: anywhere; }
+.settings-link-grid strong, .team-card strong { color: var(--text-primary); }
+.team-invite-form { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.team-list { display: grid; gap: 9px; }
+.team-card__actions { display: flex !important; flex-shrink: 0; }
+.team-card button, .invite-share button { align-items: center; display: inline-flex; gap: 5px; }
+.invite-share { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 7px; margin-top: 12px; padding: 11px; }
+.invite-share p { margin: 0; }
+.invite-share code { overflow-wrap: anywhere; }
+.permission-dialog { max-width: min(760px, 96vw); }
+.permission-matrix { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 12px; }
+.permission-matrix section { border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 5px; padding: 9px; }
+.permission-matrix label { align-items: center; display: flex; font-size: .78rem; gap: 6px; }
+.team-activity { border-bottom: 1px solid var(--border); display: grid; gap: 3px; padding: 9px 0; }
+.team-activity:last-child { border-bottom: 0; }
+.team-activity span, .team-activity small { color: var(--text-secondary); font-size: .76rem; }
+.approval-note { display: grid; gap: 6px; margin-bottom: 12px; }
+
 .empty-page {
   justify-items: start;
   padding-top: 60px;
@@ -3000,6 +3079,16 @@ button {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     min-width: 0;
     width: 100%;
+  }
+
+  .workspace-profile__form {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-link-grid,
+  .team-invite-form,
+  .permission-matrix {
+    grid-template-columns: 1fr;
   }
 
   .context-chip {

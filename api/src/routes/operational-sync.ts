@@ -5,7 +5,7 @@ import { requireUser, type AuthenticatedUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { auditLogs, expenseVoucherSequences, operationalRecords, userSessions } from "../db/schema.js";
-import { hasPermission } from "../permissions.js";
+import { hasModulePermission, hasPermission, type WorkspaceModule } from "../permissions.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
 import { resolveExpenseCategory } from "./expense-categories.js";
 
@@ -133,6 +133,17 @@ function requireEntityWrite(user: AuthenticatedUser, workspaceId: string, entity
   return !["labourer", "account", "vehicle", "dateType"].includes(entity) || hasPermission(user, "MANAGE_RECORDS", workspaceId);
 }
 
+function entityModule(entity: typeof entities[number]): WorkspaceModule {
+  if (["labourer", "labourGroup", "labourPayment", "productionEntry"].includes(entity)) return "workforce";
+  if (entity === "attendance") return "attendance";
+  if (entity === "advance") return "advances";
+  if (entity === "voucher") return "expenses";
+  if (entity === "sale") return "sales";
+  if (["dispatch", "vehicle", "dateType"].includes(entity)) return "dispatch";
+  if (entity === "inventoryEntry") return "inventory";
+  return "accounts";
+}
+
 const seasonRequiredEntities = new Set<typeof entities[number]>([
   "attendance",
   "advance",
@@ -224,7 +235,8 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       return reply.code(403).send({ message: "Workspace membership is required." });
     }
     if (localDevelopmentMode) return {
-      records: [...localRecords.values()].filter((item) => item.workspaceId === parsed.data.workspaceId),
+      records: [...localRecords.values()].filter((item) => item.workspaceId === parsed.data.workspaceId
+        && hasModulePermission(request.appUser!, parsed.data.workspaceId, entityModule(item.entity), "view")),
       snapshotConfirmed: true,
       farmId: null,
       seasonId: null,
@@ -244,7 +256,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       snapshotConfirmed: true,
       farmId: selected.activeFarmId,
       seasonId: selected.activeSeasonId,
-      records: records.map((item) => ({
+      records: records.filter((item) => hasModulePermission(request.appUser!, parsed.data.workspaceId, entityModule(item.entityType as typeof entities[number]), "view")).map((item) => ({
         workspaceId: item.workspaceId, farmId: item.farmId, seasonId: item.seasonId, entity: item.entityType,
         record: { ...item.payload, id: item.clientRecordId, updatedAt: item.clientUpdatedAt.toISOString() },
       })),
@@ -295,7 +307,12 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       });
     }
     if (localDevelopmentMode) {
-      localRecords.set(`${parsed.data.workspaceId}:${parsed.data.entity}:${parsed.data.record.id}`, parsed.data);
+      const key = `${parsed.data.workspaceId}:${parsed.data.entity}:${parsed.data.record.id}`;
+      const action = localRecords.has(key) ? "edit" : "create";
+      if (!hasModulePermission(request.appUser, parsed.data.workspaceId, entityModule(parsed.data.entity), action)) {
+        return reply.code(403).send({ message: `Module ${action} permission is required.` });
+      }
+      localRecords.set(key, parsed.data);
       return { record: parsed.data.record, conflict: false };
     }
     const selected = await sessionContext(request.sessionId);
@@ -356,6 +373,12 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     }
     if (existing && (existing.farmId !== (parsed.data.farmId ?? null) || existing.seasonId !== (parsed.data.seasonId ?? null))) {
       return reply.code(403).send({ message: "Operational record does not belong to the selected farm and season." });
+    }
+    if (!existing && !hasModulePermission(request.appUser, parsed.data.workspaceId, entityModule(parsed.data.entity), "create")) {
+      return reply.code(403).send({ message: "Module create permission is required." });
+    }
+    if (existing && !hasModulePermission(request.appUser, parsed.data.workspaceId, entityModule(parsed.data.entity), "edit")) {
+      return reply.code(403).send({ message: "Module edit permission is required." });
     }
     if (existing && parsed.data.entity === "voucher" && !hasPermission(request.appUser, "MANAGE_RECORDS", parsed.data.workspaceId)) {
       return reply.code(403).send({ message: "Workspace record management permission is required to update expense vouchers." });
@@ -439,6 +462,9 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     }
     if (request.appUser.workspaceId !== parsed.data.workspaceId) {
       return reply.code(403).send({ message: "Select this workspace before deleting records." });
+    }
+    if (!hasModulePermission(request.appUser, parsed.data.workspaceId, entityModule(parsed.data.entity), "delete")) {
+      return reply.code(403).send({ message: "Module delete permission is required." });
     }
     if (localDevelopmentMode) {
       const key = `${parsed.data.workspaceId}:${parsed.data.entity}:${parsed.data.recordId}`;

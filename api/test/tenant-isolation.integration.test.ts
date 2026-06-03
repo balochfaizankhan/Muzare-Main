@@ -16,6 +16,7 @@ import {
   users,
   workspaceApprovals,
   workspaceMemberships,
+  workspaceTeamInvitations,
   workspaces,
 } from "../src/db/schema.js";
 
@@ -79,12 +80,14 @@ after(async () => {
   await db.delete(expenseImportSessions).where(inArray(expenseImportSessions.workspaceId, ids));
   await db.delete(auditLogs).where(inArray(auditLogs.workspaceId, ids));
   await db.delete(workspaceApprovals).where(inArray(workspaceApprovals.workspaceId, ids));
+  await db.delete(workspaceTeamInvitations).where(inArray(workspaceTeamInvitations.workspaceId, ids));
   await db.delete(operationalRecords).where(inArray(operationalRecords.workspaceId, ids));
   await db.delete(userSessions).where(inArray(userSessions.userId, [alpha.userId, bravo.userId, supervisor.userId, operator.userId]));
   await db.delete(seasons).where(inArray(seasons.workspaceId, ids));
   await db.delete(farms).where(inArray(farms.workspaceId, ids));
   await db.delete(workspaceMemberships).where(inArray(workspaceMemberships.workspaceId, ids));
   await db.delete(users).where(inArray(users.id, [alpha.userId, bravo.userId, supervisor.userId, operator.userId]));
+  await db.delete(users).where(eq(users.email, "invited.member@example.test"));
   await db.delete(workspaces).where(inArray(workspaces.id, ids));
   await closeDatabaseConnection();
 });
@@ -1091,4 +1094,72 @@ test("workspace farm CRUD and active selection remain tenant scoped", async () =
   const farmsList = (await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/farms`)).json();
   assert.equal(farmsList.farms.find((farm: { id: string }) => farm.id === farmId).active, false);
   assert.equal(farmsList.activeFarmId, null);
+});
+
+test("workspace owners can update their profile while non-owners and foreign tenants cannot", async () => {
+  const originalBravo = await request(bravo.token, "GET", `/v1/workspace/${bravo.workspaceId}/profile`);
+  assert.equal(originalBravo.statusCode, 200);
+
+  const updated = await request(alpha.token, "PATCH", `/v1/workspace/${alpha.workspaceId}/profile`, {
+    name: "Workspace Alpha Renamed",
+    contactEmail: "alpha-renamed@example.test",
+    contactPhone: "+966500000099",
+  });
+  assert.equal(updated.statusCode, 200);
+  assert.equal(updated.json().workspace.name, "Workspace Alpha Renamed");
+  assert.equal(updated.json().user.workspaceName, "Workspace Alpha Renamed");
+  assert.equal(updated.json().user.memberships.find((membership: { workspaceId: string }) => membership.workspaceId === alpha.workspaceId).workspaceName, "Workspace Alpha Renamed");
+
+  const refreshedSession = await request(alpha.token, "GET", "/v1/session");
+  assert.equal(refreshedSession.statusCode, 200);
+  assert.equal(refreshedSession.json().user.workspaceName, "Workspace Alpha Renamed");
+
+  assert.equal((await request(supervisor.token, "GET", `/v1/workspace/${alpha.workspaceId}/profile`)).statusCode, 200);
+  assert.equal((await request(supervisor.token, "PATCH", `/v1/workspace/${alpha.workspaceId}/profile`, {
+    name: "Supervisor Forged Rename",
+    contactEmail: "forged@example.test",
+  })).statusCode, 403);
+  assert.equal((await request(bravo.token, "PATCH", `/v1/workspace/${alpha.workspaceId}/profile`, {
+    name: "Foreign Forged Rename",
+    contactEmail: "foreign@example.test",
+  })).statusCode, 403);
+
+  const bravoProfile = await request(bravo.token, "GET", `/v1/workspace/${bravo.workspaceId}/profile`);
+  assert.equal(bravoProfile.statusCode, 200);
+  assert.equal(bravoProfile.json().workspace.name, originalBravo.json().workspace.name);
+});
+
+test("workspace team invitations, module overrides, and last-owner protection remain tenant scoped", async () => {
+  assert.equal((await request(bravo.token, "GET", `/v1/workspace/${alpha.workspaceId}/team`)).statusCode, 403);
+  assert.equal((await request(supervisor.token, "POST", `/v1/workspace/${alpha.workspaceId}/team/invitations`, {
+    email: "forged.member@example.test", role: "viewer",
+  })).statusCode, 403);
+
+  const invitation = await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/team/invitations`, {
+    email: "invited.member@example.test", phone: "+966500000123", role: "operator",
+  });
+  assert.equal(invitation.statusCode, 201);
+  assert.ok(invitation.json().invitationToken);
+  assert.equal((await request("", "POST", "/v1/workspace/team/invitations/accept", {
+    token: invitation.json().invitationToken,
+    displayName: "Invited Member",
+    phone: "+966500000123",
+    password: "password123",
+  })).statusCode, 201);
+  const team = await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/team`);
+  assert.equal(team.statusCode, 200);
+  assert.ok(team.json().members.some((member: { email: string; role: string }) => member.email === "invited.member@example.test" && member.role === "operator"));
+
+  const supervisorMembership = team.json().members.find((member: { userId: string }) => member.userId === supervisor.userId);
+  assert.ok(supervisorMembership);
+  assert.equal((await request(alpha.token, "PATCH", `/v1/workspace/${alpha.workspaceId}/team/${supervisorMembership.id}`, {
+    role: "supervisor", active: true, permissions: { attendance: { view: false } },
+  })).statusCode, 200);
+  const supervisorSnapshot = await request(supervisor.token, "GET", `/v1/workspace/${alpha.workspaceId}/operational-records`);
+  assert.equal(supervisorSnapshot.statusCode, 200);
+  assert.ok(supervisorSnapshot.json().records.every((record: { entity: string }) => record.entity !== "attendance"));
+
+  const ownerMembership = team.json().members.find((member: { userId: string }) => member.userId === alpha.userId);
+  assert.ok(ownerMembership);
+  assert.equal((await request(alpha.token, "DELETE", `/v1/workspace/${alpha.workspaceId}/team/${ownerMembership.id}`)).statusCode, 409);
 });

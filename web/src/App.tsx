@@ -10,6 +10,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { ModulePage } from "./pages/ModulePage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { SignupPage } from "./pages/SignupPage";
+import { AcceptInvitationPage } from "./pages/AcceptInvitationPage";
 import { AdminDashboard } from "./pages/admin/AdminDashboard";
 import { AdminSection } from "./pages/admin/AdminSection";
 import { AuditLogs } from "./pages/admin/AuditLogs";
@@ -27,6 +28,8 @@ import { Sales } from "./pages/workspace/Sales";
 import { WorkspaceDashboard } from "./pages/workspace/WorkspaceDashboard";
 import { Farms } from "./pages/workspace/Farms";
 import { Seasons } from "./pages/workspace/Seasons";
+import { WorkspaceApprovals } from "./pages/workspace/WorkspaceApprovals";
+import { WorkspaceTeam } from "./pages/workspace/WorkspaceTeam";
 
 function RequireAuth({ children }: PropsWithChildren) {
   const { user, loading } = useAuth();
@@ -67,6 +70,7 @@ export default function App() {
   return <Routes>
     <Route path="/login" element={<LoginPage />} />
     <Route path="/signup" element={<SignupPage />} />
+    <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
     <Route path="/" element={<RequireAuth><HomeRedirect /></RequireAuth>} />
     <Route path="/admin" element={<RequirePlatform><AdminLayout /></RequirePlatform>}>
       <Route path="dashboard" element={<AdminDashboard />} />
@@ -90,6 +94,8 @@ export default function App() {
       <Route path="reports" element={<Reports />} />
       <Route path="team" element={<ModulePage module="workforce" />} />
       <Route path="settings" element={<Farms />} />
+      <Route path="settings/team" element={<WorkspaceTeam />} />
+      <Route path="settings/approvals" element={<WorkspaceApprovals />} />
       <Route path="farms" element={<Farms />} />
       <Route path="seasons" element={<Seasons />} />
       <Route path="accounts" element={<ModulePage module="accounts" />} />

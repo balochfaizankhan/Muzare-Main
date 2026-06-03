@@ -8,19 +8,20 @@ import { LanguageSwitch } from "../components/LanguageSwitch";
 import { useSyncState } from "../hooks/useSyncState";
 import { refreshOperationalData, startSyncService, stopSyncService, syncNow } from "../services/syncService";
 import { setActiveWorkspaceId } from "../lib/offline-db";
+import { hasModulePermission } from "../lib/permissions";
 
 const nav = [
-  ["/workspace/dashboard", "layout.dashboard", LayoutDashboard],
-  ["/workspace/attendance", "layout.attendance", CalendarCheck],
-  ["/workspace/sales", "layout.sales", ShoppingBasket],
-  ["/workspace/expenses", "layout.expenses", ReceiptText],
-  ["/workspace/labour-advances", "layout.advances", HandCoins],
-  ["/workspace/dispatch", "layout.dispatch", PackageOpen],
-  ["/workspace/inventory", "layout.inventory", Boxes],
-  ["/workspace/reports", "layout.reports", BarChart3],
-  ["/workspace/team", "layout.workforce", Users],
-  ["/workspace/accounts", "layout.accounts", BookOpenText],
-  ["/workspace/settings", "layout.settings", Settings],
+  ["/workspace/dashboard", "layout.dashboard", LayoutDashboard, "dashboard"],
+  ["/workspace/attendance", "layout.attendance", CalendarCheck, "attendance"],
+  ["/workspace/sales", "layout.sales", ShoppingBasket, "sales"],
+  ["/workspace/expenses", "layout.expenses", ReceiptText, "expenses"],
+  ["/workspace/labour-advances", "layout.advances", HandCoins, "advances"],
+  ["/workspace/dispatch", "layout.dispatch", PackageOpen, "dispatch"],
+  ["/workspace/inventory", "layout.inventory", Boxes, "inventory"],
+  ["/workspace/reports", "layout.reports", BarChart3, "reports"],
+  ["/workspace/team", "layout.workforce", Users, "workforce"],
+  ["/workspace/accounts", "layout.accounts", BookOpenText, "accounts"],
+  ["/workspace/settings", "layout.settings", Settings, "settings"],
 ] as const;
 
 export function WorkspaceLayout() {
@@ -69,7 +70,7 @@ export function WorkspaceLayout() {
       <aside className="app-sidebar">
         <Brand compact />
         <span className="shell-label">{user?.workspaceName ?? t("layout.workspace")}</span>
-        <nav>{nav.map(([to, label, Icon]) => <NavLink to={to} key={to}><Icon size={17} />{t(label)}</NavLink>)}</nav>
+        <nav>{nav.filter(([, , , module]) => !user || hasModulePermission(user, module, "view")).map(([to, label, Icon]) => <NavLink to={to} key={to}><Icon size={17} />{t(label)}</NavLink>)}</nav>
       </aside>
       <div className="app-shell__body">
         <header className="shell-header">

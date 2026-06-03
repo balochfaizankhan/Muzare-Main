@@ -25,6 +25,7 @@ const decisionSchema = z.object({
   workspaceId: z.string().uuid(),
   approvalId: z.string().uuid(),
   decision: z.enum(["approved", "rejected"]),
+  note: z.string().trim().max(1000).optional(),
 });
 
 export async function workspaceApprovalRoutes(app: FastifyInstance): Promise<void> {
@@ -83,6 +84,7 @@ export async function workspaceApprovalRoutes(app: FastifyInstance): Promise<voi
       status: parsed.data.decision,
       decidedBy: request.appUser.id,
       decidedAt: new Date(),
+      decisionNote: parsed.data.note ?? null,
       updatedAt: new Date(),
     } : {
       currentStep: approval.currentStep + 1,
