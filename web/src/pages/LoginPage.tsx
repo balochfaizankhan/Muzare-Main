@@ -78,13 +78,18 @@ export function LoginPage() {
         </div>
 
         <div className="login-landscape" aria-hidden="true">
+          <div className="login-sky-glow" />
           <div className="login-sun" />
           <div className="login-hills login-hills--far" />
           <div className="login-hills login-hills--near" />
           <div className="login-palms">
             <span /><span /><span />
           </div>
+          <div className="login-irrigation login-irrigation--one" />
+          <div className="login-irrigation login-irrigation--two" />
           <div className="login-field-rows" />
+          <div className="login-field-grid" />
+          <div className="login-waterline" />
         </div>
       </section>
 

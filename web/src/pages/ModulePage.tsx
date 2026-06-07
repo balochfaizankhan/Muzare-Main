@@ -103,7 +103,17 @@ function FormCard({ title, children }: { title: string; children: ReactNode }) {
 
 const attendanceMark = (status?: "present" | "half_day" | "absent" | null) => status === "present" ? "P" : status === "half_day" ? "1/2" : status === "absent" ? "A" : "-";
 
-function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { openAttendanceOnLoad?: boolean; onAttendanceClose?: () => void }) {
+function WorkforceModule({
+  openAttendanceOnLoad = false,
+  openAdvanceOnLoad = false,
+  onAttendanceClose,
+  onAdvanceClose,
+}: {
+  openAttendanceOnLoad?: boolean;
+  openAdvanceOnLoad?: boolean;
+  onAttendanceClose?: () => void;
+  onAdvanceClose?: () => void;
+}) {
   const { t } = useTranslation();
   const { token, user } = useAuth();
   const sync = useSyncState();
@@ -279,6 +289,9 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
   useEffect(() => {
     if (openAttendanceOnLoad) setShowAttendanceEntry(true);
   }, [openAttendanceOnLoad]);
+  useEffect(() => {
+    if (openAdvanceOnLoad) setShowAdvanceEntry(true);
+  }, [openAdvanceOnLoad]);
   useEffect(() => {
     if (attendanceSaveState !== "saved" || sync.pendingCount > 0 || sync.status === "syncing") return;
     const handle = window.setTimeout(() => setAttendanceSaveState("idle"), 1400);
@@ -517,11 +530,13 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
         labourers={labourers}
         groups={groups}
         accounts={accounts}
-        onClose={() => setShowAdvanceEntry(false)}
+        onClose={() => {
+          setShowAdvanceEntry(false);
+          onAdvanceClose?.();
+        }}
         onSave={async (record) => {
           await saveAdvance(record);
           await refreshAdvances();
-          setShowAdvanceEntry(false);
         }}
       />}
       {selectedLabourer && labourAction === "production" && <AddProductionPanel labourer={selectedLabourer} onClose={() => setLabourAction(null)} onSave={saveProduction} />}
@@ -902,6 +917,7 @@ function AdvanceEntryPanel({
   const [form, setForm] = useState({ date: today(), amount: "", accountId: "", notes: "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const labourInputRef = useRef<HTMLInputElement>(null);
   const filteredLabourers = labourers.filter((labourer) => labourer.active !== false && (groupId === "all" || labourer.groupId === groupId));
   const selectedLabourer = filteredLabourers.find((labourer) => labourer.id === labourerId);
   const submit = async (event: FormEvent) => {
@@ -913,6 +929,9 @@ function AdvanceEntryPanel({
     setBusy(true); setError("");
     try {
       await onSave({ ...makeLocalRecord(), labourerId: selectedLabourer.id, date: form.date, amount, accountId: form.accountId, notes: form.notes.trim() });
+      setLabourerId("");
+      setForm((current) => ({ ...current, amount: "", notes: "" }));
+      window.requestAnimationFrame(() => labourInputRef.current?.focus());
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to add advance.");
     } finally {
@@ -930,10 +949,12 @@ function AdvanceEntryPanel({
         <span>Labour *</span>
         <LabourSelectCombobox
           ariaLabel="Labour"
+          inputRef={labourInputRef}
           options={filteredLabourers}
           placeholder="Search labour"
           value={labourerId}
           onChange={setLabourerId}
+          noResultsLabel="No matching labour found"
         />
       </label>
       <label><span>Advance amount *</span><input required min="0.01" step="0.01" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
@@ -2395,13 +2416,22 @@ export function ModulePage({
   module,
   workforceMode = "register",
   onAttendanceClose,
+  onAdvanceClose,
 }: {
   module: ModuleKey;
-  workforceMode?: "register" | "attendance";
+  workforceMode?: "register" | "attendance" | "advance";
   onAttendanceClose?: () => void;
+  onAdvanceClose?: () => void;
 }) {
   const { t } = useTranslation();
-  const moduleTitle = t(`moduleTitles.${module}`);
+  const moduleTitle = workforceMode === "advance"
+    ? t("layout.advances")
+    : workforceMode === "attendance"
+      ? t("layout.attendance")
+      : t(`moduleTitles.${module}`);
+  const moduleDescription = workforceMode === "advance"
+    ? t("advancesPage.introDescription")
+    : t(`moduleDescriptions.${module}`);
 
   return (
     <div className="dashboard-page">
@@ -2410,11 +2440,16 @@ export function ModulePage({
         <section className="workspace-intro">
           <div>
             <h2>{moduleTitle}</h2>
-            <p>{t(`moduleDescriptions.${module}`)}</p>
+            <p>{moduleDescription}</p>
           </div>
           <span className="local-pill">{t("layout.databaseSynced")}</span>
         </section>
-        {module === "workforce" && <WorkforceModule openAttendanceOnLoad={workforceMode === "attendance"} onAttendanceClose={onAttendanceClose} />}
+        {module === "workforce" && <WorkforceModule
+          openAttendanceOnLoad={workforceMode === "attendance"}
+          openAdvanceOnLoad={workforceMode === "advance"}
+          onAttendanceClose={onAttendanceClose}
+          onAdvanceClose={onAdvanceClose}
+        />}
         {module === "expenses" && <ExpensesModule />}
         {module === "dispatch" && <DispatchModule />}
         {module === "sales" && <SalesModule />}

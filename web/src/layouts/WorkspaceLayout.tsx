@@ -15,7 +15,7 @@ const nav = [
   ["/workspace/attendance", "layout.attendance", CalendarCheck, "attendance"],
   ["/workspace/sales", "layout.sales", ShoppingBasket, "sales"],
   ["/workspace/expenses", "layout.expenses", ReceiptText, "expenses"],
-  ["/workspace/labour-advances", "layout.advances", HandCoins, "advances"],
+  ["/workspace/advances", "layout.advances", HandCoins, "advances"],
   ["/workspace/dispatch", "layout.dispatch", PackageOpen, "dispatch"],
   ["/workspace/inventory", "layout.inventory", Boxes, "inventory"],
   ["/workspace/reports", "layout.reports", BarChart3, "reports"],

@@ -126,9 +126,11 @@ export function LabourAdvances() {
               options={labourers.slice().sort((a, b) => a.name.localeCompare(b.name))}
               value={labourerId}
               onChange={setLabourerId}
+              clearValue="all"
               includeAllOption
               allOptionLabel={t("advancesPage.allLabour")}
               placeholder={t("workforcePage.searchLabour")}
+              noResultsLabel={t("workforcePage.noLabourFound")}
             />
             <select aria-label={t("advancesPage.group")} value={group} onChange={(event) => setGroup(event.target.value)}>
               <option value="all">{t("advancesPage.allGroups")}</option>

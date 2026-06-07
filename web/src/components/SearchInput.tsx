@@ -1,5 +1,5 @@
 import { Search, X } from "lucide-react";
-import { useRef, type InputHTMLAttributes, type KeyboardEvent } from "react";
+import { forwardRef, useRef, type InputHTMLAttributes, type KeyboardEvent } from "react";
 
 type SearchInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "onChange"> & {
   value: string;
@@ -7,8 +7,17 @@ type SearchInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "on
   onClear?: () => void;
 };
 
-export function SearchInput({ value, onChange, onClear, className, ...rest }: SearchInputProps) {
+export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(function SearchInput({ value, onChange, onClear, className, ...rest }, forwardedRef) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const setRef = (node: HTMLInputElement | null) => {
+    inputRef.current = node;
+    if (!forwardedRef) return;
+    if (typeof forwardedRef === "function") {
+      forwardedRef(node);
+      return;
+    }
+    forwardedRef.current = node;
+  };
   const clear = () => {
     if (!value) return;
     onChange("");
@@ -27,7 +36,7 @@ export function SearchInput({ value, onChange, onClear, className, ...rest }: Se
       <Search size={16} className="search-input__icon" aria-hidden="true" />
       <input
         {...rest}
-        ref={inputRef}
+        ref={setRef}
         type="text"
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -40,5 +49,5 @@ export function SearchInput({ value, onChange, onClear, className, ...rest }: Se
       ) : null}
     </div>
   );
-}
+});
 

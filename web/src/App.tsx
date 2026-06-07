@@ -19,6 +19,7 @@ import { Settings } from "./pages/admin/Settings";
 import { Users } from "./pages/admin/Users";
 import { Workspaces } from "./pages/admin/Workspaces";
 import { Attendance } from "./pages/workspace/Attendance";
+import { Advances } from "./pages/workspace/Advances";
 import { Dispatch } from "./pages/workspace/Dispatch";
 import { Expenses } from "./pages/workspace/Expenses";
 import { Inventory } from "./pages/workspace/Inventory";
@@ -86,6 +87,7 @@ export default function App() {
     <Route path="/workspace" element={<RequireWorkspace><WorkspaceLayout /></RequireWorkspace>}>
       <Route path="dashboard" element={<WorkspaceDashboard />} />
       <Route path="attendance" element={<Attendance />} />
+      <Route path="advances" element={<Advances />} />
       <Route path="sales" element={<Sales />} />
       <Route path="expenses" element={<Expenses />} />
       <Route path="dispatch" element={<Dispatch />} />
@@ -101,7 +103,7 @@ export default function App() {
       <Route path="accounts" element={<ModulePage module="accounts" />} />
       <Route path="partner-ledger" element={<ModulePage module="partnerLedger" />} />
     </Route>
-    {["workforce", "expenses", "sales", "dispatch", "accounts", "partner-ledger", "farms", "seasons"].map((path) =>
+    {["workforce", "advances", "expenses", "sales", "dispatch", "accounts", "partner-ledger", "farms", "seasons"].map((path) =>
       <Route key={path} path={`/${path}`} element={<Navigate to={`/workspace/${path === "workforce" ? "attendance" : path}`} replace />} />,
     )}
     <Route path="*" element={<RequireAuth><NotFoundPage /></RequireAuth>} />

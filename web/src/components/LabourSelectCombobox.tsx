@@ -1,5 +1,5 @@
-import { ChevronDown, Check } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Check } from "lucide-react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { SearchInput } from "./SearchInput";
 import type { Labourer } from "../lib/offline-db";
 
@@ -12,11 +12,16 @@ type LabourSelectComboboxProps = {
   includeAllOption?: boolean;
   ariaLabel?: string;
   disabled?: boolean;
+  clearValue?: string;
+  noResultsLabel?: string;
+  inputRef?: RefObject<HTMLInputElement | null>;
 };
+
 type LabourOption = {
   id: string;
   name: string;
-  phone?: string;
+  phone: string;
+  searchText: string;
 };
 
 const normalize = (value: string) => value.trim().toLowerCase();
@@ -30,92 +35,104 @@ export function LabourSelectCombobox({
   includeAllOption = false,
   ariaLabel = "Labour",
   disabled = false,
+  clearValue = "",
+  noResultsLabel = "No matching labour found",
+  inputRef,
 }: LabourSelectComboboxProps) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
-  const labourOptions = useMemo<LabourOption[]>(() => options.map((option) => ({
-    id: option.id,
-    name: option.name,
-    phone: option.mobile ?? option.phone ?? "",
-  })), [options]);
+  const deferredQuery = useDeferredValue(query);
+
+  const labourOptions = useMemo<LabourOption[]>(() => options.map((option) => {
+    const phone = option.mobile ?? option.phone ?? "";
+    return {
+      id: option.id,
+      name: option.name,
+      phone,
+      searchText: normalize(`${option.name} ${phone}`),
+    };
+  }), [options]);
+
   const selected = useMemo(() => labourOptions.find((option) => option.id === value), [labourOptions, value]);
-  const filtered = useMemo(() => {
-    const term = normalize(query);
-    if (!term) return labourOptions;
-    return labourOptions.filter((option) => {
-      const phone = option.phone ?? "";
-      return normalize(option.name).includes(term) || normalize(phone).includes(term);
-    });
-  }, [labourOptions, query]);
-  const items = useMemo(
-    () => includeAllOption ? [{ id: "all", name: allOptionLabel }, ...filtered] : filtered,
-    [allOptionLabel, filtered, includeAllOption],
-  );
   const selectedLabel = value === "all" ? allOptionLabel : (selected?.name ?? "");
 
   useEffect(() => {
+    if (!open) setQuery(selectedLabel);
+  }, [open, selectedLabel]);
+
+  const filtered = useMemo(() => {
+    const term = normalize(deferredQuery);
+    if (!term) return labourOptions;
+    return labourOptions.filter((option) => option.searchText.includes(term));
+  }, [deferredQuery, labourOptions]);
+
+  const items = useMemo(
+    () => includeAllOption && !normalize(deferredQuery) ? [{ id: "all", name: allOptionLabel, phone: "", searchText: "" }, ...filtered] : filtered,
+    [allOptionLabel, deferredQuery, filtered, includeAllOption],
+  );
+
+  useEffect(() => {
     if (!open) return;
-    const onPointerDown = (event: MouseEvent) => {
+    const onPointerDown = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) {
         setOpen(false);
       }
     };
-    window.addEventListener("mousedown", onPointerDown);
-    return () => window.removeEventListener("mousedown", onPointerDown);
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
   }, [open]);
 
   useEffect(() => {
     if (activeIndex >= items.length) setActiveIndex(0);
   }, [activeIndex, items.length]);
 
+  useEffect(() => {
+    if (!open) return;
+    optionRefs.current[activeIndex]?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex, open]);
+
   const select = (nextValue: string) => {
+    const nextLabel = nextValue === "all"
+      ? allOptionLabel
+      : labourOptions.find((option) => option.id === nextValue)?.name ?? "";
     onChange(nextValue);
+    setQuery(nextLabel);
     setOpen(false);
-    setQuery("");
     setActiveIndex(0);
   };
 
-  const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+  const clear = () => {
+    onChange(clearValue);
+    setQuery("");
+    setOpen(false);
+    setActiveIndex(0);
+  };
+
+  const onInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (disabled) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      if (!open) { setOpen(true); return; }
+      if (!open) {
+        setOpen(true);
+        return;
+      }
       setActiveIndex((index) => (index + 1) % Math.max(items.length, 1));
       return;
     }
     if (event.key === "ArrowUp") {
       event.preventDefault();
-      if (!open) { setOpen(true); return; }
+      if (!open) {
+        setOpen(true);
+        return;
+      }
       setActiveIndex((index) => (index - 1 + Math.max(items.length, 1)) % Math.max(items.length, 1));
       return;
     }
     if (event.key === "Enter") {
-      event.preventDefault();
-      if (!open) { setOpen(true); return; }
-      const item = items[activeIndex];
-      if (item) select(item.id);
-      return;
-    }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      setOpen(false);
-      setQuery("");
-    }
-  };
-  const onMenuKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setActiveIndex((index) => (index + 1) % Math.max(items.length, 1));
-      return;
-    }
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setActiveIndex((index) => (index - 1 + Math.max(items.length, 1)) % Math.max(items.length, 1));
-      return;
-    }
-    if (event.key === "Enter") {
+      if (!open) return;
       event.preventDefault();
       const item = items[activeIndex];
       if (item) select(item.id);
@@ -123,63 +140,46 @@ export function LabourSelectCombobox({
     }
     if (event.key === "Escape") {
       event.preventDefault();
-      setOpen(false);
-      setQuery("");
+      if (open) {
+        setOpen(false);
+      } else if (query) {
+        clear();
+      }
     }
   };
 
   return (
     <div className="labour-combobox" ref={rootRef}>
-      <button
-        type="button"
-        className="labour-combobox__trigger"
+      <SearchInput
         aria-label={ariaLabel}
+        className="labour-combobox__input"
+        disabled={disabled}
+        ref={inputRef}
+        onChange={(nextValue) => {
+          if (value && nextValue !== selectedLabel) onChange(clearValue);
+          setQuery(nextValue);
+          setOpen(true);
+          setActiveIndex(0);
+        }}
+        onClear={clear}
+        onFocus={() => { if (!disabled) setOpen(true); }}
+        onKeyDown={onInputKeyDown}
+        placeholder={placeholder}
+        role="combobox"
         aria-expanded={open}
         aria-haspopup="listbox"
-        disabled={disabled}
-        onClick={() => setOpen((current) => !current)}
-        onKeyDown={onKeyDown}
-      >
-        <span className={selectedLabel ? "" : "labour-combobox__placeholder"}>
-          {selectedLabel || placeholder}
-        </span>
-        <span className="labour-combobox__trigger-actions">
-          {value && value !== "all" ? (
-            <span
-              aria-label="Clear search"
-              className="labour-combobox__clear"
-              role="button"
-              tabIndex={0}
-              onClick={(event) => {
-                event.stopPropagation();
-                onChange("");
-                setQuery("");
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onChange("");
-                  setQuery("");
-                }
-              }}
-            >
-              ×
-            </span>
-          ) : null}
-          <ChevronDown size={16} />
-        </span>
-      </button>
+        aria-controls="labour-combobox-options"
+        value={query}
+      />
       {open ? (
-        <div className="labour-combobox__menu" role="listbox" aria-label={ariaLabel}>
-          <SearchInput placeholder={placeholder} value={query} onChange={setQuery} onKeyDown={onMenuKeyDown} />
+        <div className="labour-combobox__menu" id="labour-combobox-options" role="listbox" aria-label={ariaLabel}>
           <div className="labour-combobox__options">
-            {items.length === 0 ? <p className="empty-records">No labour found.</p> : items.map((option, index) => {
+            {items.length === 0 ? <p className="empty-records labour-combobox__empty">{noResultsLabel}</p> : items.map((option, index) => {
               const isActive = activeIndex === index;
               const isSelected = value === option.id;
-              const phone = option.phone ?? "";
               return (
                 <button
+                  ref={(node) => { optionRefs.current[index] = node; }}
                   type="button"
                   key={option.id}
                   className={`labour-combobox__option${isActive ? " is-active" : ""}${isSelected ? " is-selected" : ""}`}
@@ -187,7 +187,7 @@ export function LabourSelectCombobox({
                   onClick={() => select(option.id)}
                 >
                   <span>{option.name}</span>
-                  {phone ? <small>{phone}</small> : null}
+                  {option.phone ? <small>{option.phone}</small> : null}
                   {isSelected ? <Check size={14} /> : null}
                 </button>
               );
