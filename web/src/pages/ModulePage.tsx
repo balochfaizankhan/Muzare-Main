@@ -9,6 +9,7 @@ import { LabourSelectCombobox } from "../components/LabourSelectCombobox";
 import { useAuth } from "../auth/AuthProvider";
 import { useSyncState } from "../hooks/useSyncState";
 import { calculateAccountBalance } from "../lib/accounting";
+import { attendanceStatusKey, buildAttendanceStatusMap, previousLocalDateKey, todayLocalDateKey } from "../lib/attendanceStatus";
 import { confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteOrDeactivateLabour, fetchExpenseCategories, fetchLabourDeletionPreview, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type LabourDeletionPreview } from "../lib/api";
 import { hasPermission } from "../lib/permissions";
 import { formatMoney } from "../lib/format";
@@ -39,7 +40,7 @@ import { deleteOperationalRecord, persistOperationalRecord, refreshOperationalDa
 
 export type ModuleKey = "workforce" | "expenses" | "sales" | "dispatch" | "accounts" | "partnerLedger";
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = todayLocalDateKey;
 const money = formatMoney;
 const readableSyncTime = (value: string | null) => value ? new Date(value).toLocaleString() : "Not synced yet";
 const paymentTypes = ["daily_wage", "production_based", "contract_lump_sum", "monthly_salary", "other"] as const;
@@ -182,17 +183,19 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
     }
   };
 
-  const attendanceByLabourer = new Map(
-    attendance.filter((entry) => entry.date === date).map((entry) => [entry.labourerId, entry.status]),
-  );
-  const yesterday = new Date(`${date}T00:00:00`);
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayDate = yesterday.toISOString().slice(0, 10);
-  const yesterdayByLabourer = new Map(
-    attendance.filter((entry) => entry.date === yesterdayDate).map((entry) => [entry.labourerId, entry.status]),
-  );
+  const attendanceLookup = useMemo(() => buildAttendanceStatusMap(attendance, date), [attendance, date]);
+  const yesterdayDate = useMemo(() => previousLocalDateKey(date), [date]);
+  const yesterdayLookup = useMemo(() => buildAttendanceStatusMap(attendance, yesterdayDate), [attendance, yesterdayDate]);
+  const attendanceByLabourer = attendanceLookup.statuses;
+  const yesterdayByLabourer = yesterdayLookup.statuses;
+  useEffect(() => {
+    const duplicates = [...attendanceLookup.duplicates, ...yesterdayLookup.duplicates];
+    if (duplicates.length) {
+      console.warn("Duplicate attendance records detected for labour/date. Showing the newest record deterministically.", duplicates);
+    }
+  }, [attendanceLookup.duplicates, yesterdayLookup.duplicates]);
   const filteredLabourers = labourers.filter((labourer) => {
-    const status = attendanceByLabourer.get(labourer.id);
+    const status = attendanceByLabourer.get(attendanceStatusKey(labourer.id, date));
     const matchesActive = showInactiveLabour || canMarkAttendanceOn(labourer, date);
     const matchesStatus = attendanceFilter === "all" || status === attendanceFilter;
     const matchesSearch = labourer.name.toLowerCase().includes(attendanceSearch.trim().toLowerCase());
@@ -436,8 +439,8 @@ function WorkforceModule({ openAttendanceOnLoad = false, onAttendanceClose }: { 
               {!labourers.length && sync.dataSource === "cache"
                 ? <Empty>No labour list is saved on this device. Connect once to sync labour.</Empty>
                 : !filteredLabourers.length ? <Empty>{t("workforcePage.noLabourSearch")}</Empty> : filteredLabourers.map((labourer, index) => {
-                const currentStatus = attendanceByLabourer.get(labourer.id);
-                const previousStatus = yesterdayByLabourer.get(labourer.id);
+                const currentStatus = attendanceByLabourer.get(attendanceStatusKey(labourer.id, date));
+                const previousStatus = yesterdayByLabourer.get(attendanceStatusKey(labourer.id, yesterdayDate));
                 const markable = canMarkAttendanceOn(labourer, date);
                 return (
                   <article className="attendance-card" key={labourer.id} ref={(node) => { attendanceRowRefs.current[labourer.id] = node; }}>
