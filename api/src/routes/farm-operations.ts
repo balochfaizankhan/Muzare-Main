@@ -14,6 +14,7 @@ import {
   plots,
   seasons,
   valves,
+  waterAssets,
 } from "../db/schema.js";
 import { hasPermission } from "../permissions.js";
 
@@ -24,6 +25,7 @@ const nullableText = z.string().trim().max(2000).optional().nullable().or(z.lite
 const featureTypes = ["farm_boundary", "plot", "irrigation_line", "valve", "landmark", "other"] as const;
 const activityTypes = ["irrigation", "fertilizer", "pesticide", "pruning", "thinning", "pollination", "harvesting", "maintenance", "other"] as const;
 const productTypes = ["fertilizer", "pesticide", "other"] as const;
+const waterAssetTypes = ["pump", "reservoir"] as const;
 
 const mapInput = z.object({
   seasonId: maybeUuid,
@@ -84,6 +86,15 @@ const productInput = z.object({
   unit: z.string().trim().max(40).optional().nullable(),
   notes: nullableText,
   active: z.boolean().optional().default(true),
+});
+const waterAssetInput = z.object({
+  seasonId: maybeUuid,
+  assetType: z.enum(waterAssetTypes),
+  assetCode: z.string().trim().min(1).max(80),
+  assetName: z.string().trim().min(1).max(160),
+  linkedFeatureId: maybeUuid,
+  status: z.string().trim().max(80).optional().nullable(),
+  notes: nullableText,
 });
 const logInput = z.object({
   seasonId: z.string().uuid(),
@@ -199,11 +210,12 @@ async function readDashboard(workspaceId: string, farmId: string, seasonId?: str
   const featureSeasonFilter = seasonId ? eq(farmMapFeatures.seasonId, seasonId) : sql`true`;
   const logSeasonFilter = seasonId ? eq(operationLogs.seasonId, seasonId) : sql`true`;
   const [map] = await db.select().from(farmMaps).where(and(eq(farmMaps.workspaceId, workspaceId), eq(farmMaps.farmId, farmId), seasonId ? eq(farmMaps.seasonId, seasonId) : sql`true`)).orderBy(desc(farmMaps.updatedAt)).limit(1);
-  const [features, plotRows, lineRows, valveRows, rules, recentOperations] = await Promise.all([
+  const [features, plotRows, lineRows, valveRows, waterAssetRows, rules, recentOperations] = await Promise.all([
     db.select().from(farmMapFeatures).where(and(eq(farmMapFeatures.workspaceId, workspaceId), eq(farmMapFeatures.farmId, farmId), featureSeasonFilter, eq(farmMapFeatures.active, true))).orderBy(farmMapFeatures.displayOrder, farmMapFeatures.featureName),
     db.select().from(plots).where(and(eq(plots.workspaceId, workspaceId), eq(plots.farmId, farmId), seasonFilter)).orderBy(plots.plotCode),
     db.select().from(irrigationLines).where(and(eq(irrigationLines.workspaceId, workspaceId), eq(irrigationLines.farmId, farmId), seasonId ? eq(irrigationLines.seasonId, seasonId) : sql`true`)).orderBy(irrigationLines.lineCode),
     db.select().from(valves).where(and(eq(valves.workspaceId, workspaceId), eq(valves.farmId, farmId), seasonId ? eq(valves.seasonId, seasonId) : sql`true`)).orderBy(valves.valveCode),
+    db.select().from(waterAssets).where(and(eq(waterAssets.workspaceId, workspaceId), eq(waterAssets.farmId, farmId), seasonId ? eq(waterAssets.seasonId, seasonId) : sql`true`)).orderBy(waterAssets.assetType, waterAssets.assetCode),
     db.select().from(operationDueRules).where(and(eq(operationDueRules.workspaceId, workspaceId), eq(operationDueRules.farmId, farmId), seasonId ? eq(operationDueRules.seasonId, seasonId) : sql`true`, eq(operationDueRules.active, true))),
     db.select().from(operationLogs).where(and(eq(operationLogs.workspaceId, workspaceId), eq(operationLogs.farmId, farmId), logSeasonFilter)).orderBy(desc(operationLogs.operationDate), desc(operationLogs.createdAt)).limit(25),
   ]);
@@ -247,6 +259,7 @@ async function readDashboard(workspaceId: string, farmId: string, seasonId?: str
     plots: plotRows,
     irrigationLines: lineRows,
     valves: valveRows,
+    waterAssets: waterAssetRows,
     plotStatusSummary,
     valveStatusSummary,
     overdueCounts: {
@@ -313,6 +326,7 @@ export async function farmOperationRoutes(app: FastifyInstance): Promise<void> {
     { name: "plots", table: plots, schema: plotInput, write: "manage" as const, values: (data: z.infer<typeof plotInput>, p: z.infer<typeof paramsSchema>) => ({ workspaceId: p.workspaceId, farmId: p.farmId, seasonId: blankToNull(data.seasonId), plotCode: data.plotCode, plotName: blankToNull(data.plotName), variety: blankToNull(data.variety), treeCount: data.treeCount ?? null, area: numberString(data.area), notes: blankToNull(data.notes), geoFeatureId: blankToNull(data.geoFeatureId), active: data.active }) },
     { name: "irrigation-lines", table: irrigationLines, schema: lineInput, write: "manage" as const, values: (data: z.infer<typeof lineInput>, p: z.infer<typeof paramsSchema>) => ({ workspaceId: p.workspaceId, farmId: p.farmId, seasonId: blankToNull(data.seasonId), lineCode: data.lineCode, lineName: blankToNull(data.lineName), description: blankToNull(data.description), geoFeatureId: blankToNull(data.geoFeatureId), active: data.active }) },
     { name: "valves", table: valves, schema: valveInput, write: "manage" as const, values: (data: z.infer<typeof valveInput>, p: z.infer<typeof paramsSchema>) => ({ workspaceId: p.workspaceId, farmId: p.farmId, seasonId: blankToNull(data.seasonId), valveCode: data.valveCode, valveName: blankToNull(data.valveName), irrigationLineId: blankToNull(data.irrigationLineId), plotId: blankToNull(data.plotId), estimatedTreeCount: data.estimatedTreeCount ?? null, notes: blankToNull(data.notes), geoFeatureId: blankToNull(data.geoFeatureId), active: data.active }) },
+    { name: "water-assets", table: waterAssets, schema: waterAssetInput, write: "manage" as const, values: (data: z.infer<typeof waterAssetInput>, p: z.infer<typeof paramsSchema>, u: string) => ({ workspaceId: p.workspaceId, farmId: p.farmId, seasonId: blankToNull(data.seasonId), assetType: data.assetType, assetCode: data.assetCode, assetName: data.assetName, linkedFeatureId: blankToNull(data.linkedFeatureId), status: blankToNull(data.status), notes: blankToNull(data.notes), createdBy: u }) },
     { name: "operation-logs", table: operationLogs, schema: logInput, write: "submit" as const, values: (data: z.infer<typeof logInput>, p: z.infer<typeof paramsSchema>, u: string) => ({ workspaceId: p.workspaceId, farmId: p.farmId, seasonId: data.seasonId, plotId: blankToNull(data.plotId), irrigationLineId: blankToNull(data.irrigationLineId), valveId: blankToNull(data.valveId), activityType: data.activityType, activityCategory: blankToNull(data.activityCategory), productId: blankToNull(data.productId), productNameText: blankToNull(data.productNameText), operationDate: data.operationDate, startTime: blankToNull(data.startTime), endTime: blankToNull(data.endTime), durationMinutes: data.durationMinutes ?? null, qtyPerTree: numberString(data.qtyPerTree), totalQty: numberString(data.totalQty), unit: blankToNull(data.unit), treeCountCovered: data.treeCountCovered ?? null, performedBy: blankToNull(data.performedBy), labourTeamId: blankToNull(data.labourTeamId), remarks: blankToNull(data.remarks), createdBy: u }) },
     { name: "operation-due-rules", table: operationDueRules, schema: ruleInput, write: "manage" as const, values: (data: z.infer<typeof ruleInput>, p: z.infer<typeof paramsSchema>) => ({ workspaceId: p.workspaceId, farmId: p.farmId, seasonId: blankToNull(data.seasonId), plotId: blankToNull(data.plotId), activityType: data.activityType, activityCategory: blankToNull(data.activityCategory), productId: blankToNull(data.productId), intervalDays: data.intervalDays, dueSoonDays: data.dueSoonDays, active: data.active, notes: blankToNull(data.notes) }) },
   ];

@@ -251,6 +251,10 @@ export type FarmValve = {
   id: string; workspaceId: string; farmId: string; seasonId: string | null; valveCode: string; valveName: string | null;
   irrigationLineId: string | null; plotId: string | null; estimatedTreeCount: number | null; notes: string | null; geoFeatureId: string | null; active: boolean;
 };
+export type WaterAsset = {
+  id: string; workspaceId: string; farmId: string; seasonId: string | null; assetType: "pump" | "reservoir";
+  assetCode: string; assetName: string; linkedFeatureId: string | null; status: string | null; notes: string | null;
+};
 export type FarmProduct = {
   id: string; workspaceId: string; productType: "fertilizer" | "pesticide" | "other"; category: string | null; productName: string; unit: string | null; notes: string | null; active: boolean;
 };
@@ -266,6 +270,7 @@ export type OperationDueRule = {
 };
 export type FarmOperationsDashboard = {
   farmMap: FarmMap | null; features: FarmMapFeature[]; plots: FarmPlot[]; irrigationLines: IrrigationLine[]; valves: FarmValve[];
+  waterAssets: WaterAsset[];
   plotStatusSummary: Array<{ plotId: string; statuses: Record<"irrigation" | "fertilizer" | "pesticide", string> }>;
   valveStatusSummary: Array<{ valveId: string; statuses: Record<"irrigation" | "fertilizer" | "pesticide", string> }>;
   overdueCounts: { plots: number; valves: number }; dueSoonCounts: { plots: number; valves: number };

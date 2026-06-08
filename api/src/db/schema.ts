@@ -638,6 +638,28 @@ export const farmProducts = pgTable("farm_products", {
   ...timestamps,
 });
 
+export const waterAssets = pgTable(
+  "water_assets",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+    farmId: uuid("farm_id").references(() => farms.id).notNull(),
+    seasonId: uuid("season_id").references(() => seasons.id),
+    assetType: text("asset_type").notNull(),
+    assetCode: text("asset_code").notNull(),
+    assetName: text("asset_name").notNull(),
+    linkedFeatureId: uuid("linked_feature_id").references(() => farmMapFeatures.id, { onDelete: "set null" }),
+    status: text("status"),
+    notes: text("notes"),
+    createdBy: uuid("created_by").references(() => users.id),
+    ...timestamps,
+  },
+  (table) => [
+    foreignKey({ columns: [table.workspaceId, table.farmId], foreignColumns: [farms.workspaceId, farms.id], name: "water_assets_workspace_farm_fk" }),
+    foreignKey({ columns: [table.workspaceId, table.farmId, table.seasonId], foreignColumns: [seasons.workspaceId, seasons.farmId, seasons.id], name: "water_assets_workspace_farm_season_fk" }),
+  ],
+);
+
 export const operationLogs = pgTable(
   "operation_logs",
   {

@@ -13,6 +13,7 @@ import {
   fetchFarmOperationsDashboard,
   fetchFarmOperationsProducts,
   updateFarmOperationResource,
+  type FarmFeatureType,
   type FarmMapFeature,
   type FarmPlot,
   type IrrigationLine,
@@ -23,8 +24,19 @@ import { formatNumber } from "../../lib/format";
 import { hasPermission } from "../../lib/permissions";
 
 type Mode = "builder" | "live";
-type Selected = { kind: "plot"; id: string } | { kind: "valve"; id: string } | null;
-type LayerKey = "plots" | "irrigation" | "valves" | "fertilizerStatus" | "pesticideStatus" | "irrigationStatus";
+type Selected = { kind: "plot"; id: string } | { kind: "valve"; id: string } | { kind: "water_asset"; id: string } | null;
+type WaterAssetMode = "pump" | "reservoir" | null;
+type LayerKey = "plots" | "irrigation" | "valves" | "pumps" | "reservoirs" | "fertilizerStatus" | "pesticideStatus" | "irrigationStatus";
+type ImportGeometryType = "Polygon" | "LineString" | "Point";
+type ImportPreviewRow = {
+  id: string;
+  selected: boolean;
+  sourceName: string;
+  featureName: string;
+  geometryType: ImportGeometryType;
+  featureType: FarmFeatureType;
+  geojson: Record<string, unknown>;
+};
 
 const emptyFeature = {
   seasonId: null,
@@ -41,6 +53,7 @@ const emptyFeature = {
 const emptyPlot = { seasonId: null, plotCode: "", plotName: "", variety: "", treeCount: "", area: "", notes: "", geoFeatureId: "", active: true };
 const emptyLine = { seasonId: null, lineCode: "", lineName: "", description: "", geoFeatureId: "", active: true };
 const emptyValve = { seasonId: null, valveCode: "", valveName: "", irrigationLineId: "", plotId: "", estimatedTreeCount: "", notes: "", geoFeatureId: "", active: true };
+const emptyWaterAsset = { assetCode: "", assetName: "", status: "", notes: "" };
 const emptyLog = {
   seasonId: "",
   plotId: "",
@@ -74,6 +87,107 @@ const statusColors: Record<string, string> = {
   none: "#9ca3af",
 };
 const activityOptions: OperationActivityType[] = ["irrigation", "fertilizer", "pesticide", "pruning", "thinning", "pollination", "harvesting", "maintenance", "other"];
+const featureTypeOptions: FarmFeatureType[] = ["farm_boundary", "plot", "irrigation_line", "valve", "landmark", "other"];
+
+function localChildren(element: Element | Document, name: string) {
+  return Array.from(element.getElementsByTagName("*")).filter((item) => item.localName === name);
+}
+
+function firstLocalText(element: Element, name: string) {
+  return localChildren(element, name)[0]?.textContent?.trim() ?? "";
+}
+
+function parseKmlCoordinates(text: string) {
+  return text.trim().split(/\s+/).map((tuple) => {
+    const [lng, lat] = tuple.split(",").map(Number);
+    return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null;
+  }).filter(Boolean) as number[][];
+}
+
+function closeRing(ring: number[][]) {
+  if (ring.length < 3) return ring;
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  return first[0] === last[0] && first[1] === last[1] ? ring : [...ring, first];
+}
+
+function defaultFeatureType(geometryType: ImportGeometryType): FarmFeatureType {
+  if (geometryType === "Polygon") return "plot";
+  if (geometryType === "LineString") return "irrigation_line";
+  return "valve";
+}
+
+function geometryFeatureTypes(geometryType: ImportGeometryType): FarmFeatureType[] {
+  if (geometryType === "Polygon") return ["plot", "farm_boundary", "other"];
+  if (geometryType === "LineString") return ["irrigation_line", "other"];
+  return ["valve", "landmark", "other"];
+}
+
+function parseKmlToPreviewRows(kmlText: string) {
+  const documentXml = new DOMParser().parseFromString(kmlText, "application/xml");
+  if (documentXml.querySelector("parsererror")) throw new Error("The KML file could not be parsed.");
+  const placemarks = localChildren(documentXml, "Placemark");
+  const rows: ImportPreviewRow[] = [];
+  placemarks.forEach((placemark, placemarkIndex) => {
+    const name = firstLocalText(placemark, "name") || `Placemark ${placemarkIndex + 1}`;
+    localChildren(placemark, "Polygon").forEach((polygon, index) => {
+      const rings = localChildren(polygon, "LinearRing")
+        .map((ring) => closeRing(parseKmlCoordinates(firstLocalText(ring, "coordinates"))))
+        .filter((ring) => ring.length >= 4);
+      if (!rings.length) return;
+      const geometryType = "Polygon" as const;
+      rows.push({
+        id: `${placemarkIndex}:polygon:${index}`,
+        selected: true,
+        sourceName: name,
+        featureName: index ? `${name} polygon ${index + 1}` : name,
+        geometryType,
+        featureType: defaultFeatureType(geometryType),
+        geojson: { type: "Polygon", coordinates: rings },
+      });
+    });
+    localChildren(placemark, "LineString").forEach((line, index) => {
+      const coordinates = parseKmlCoordinates(firstLocalText(line, "coordinates"));
+      if (coordinates.length < 2) return;
+      const geometryType = "LineString" as const;
+      rows.push({
+        id: `${placemarkIndex}:line:${index}`,
+        selected: true,
+        sourceName: name,
+        featureName: index ? `${name} path ${index + 1}` : name,
+        geometryType,
+        featureType: defaultFeatureType(geometryType),
+        geojson: { type: "LineString", coordinates },
+      });
+    });
+    localChildren(placemark, "Point").forEach((point, index) => {
+      const coordinates = parseKmlCoordinates(firstLocalText(point, "coordinates"))[0];
+      if (!coordinates) return;
+      const geometryType = "Point" as const;
+      rows.push({
+        id: `${placemarkIndex}:point:${index}`,
+        selected: true,
+        sourceName: name,
+        featureName: index ? `${name} marker ${index + 1}` : name,
+        geometryType,
+        featureType: defaultFeatureType(geometryType),
+        geojson: { type: "Point", coordinates },
+      });
+    });
+  });
+  return rows;
+}
+
+async function readKmlOrKmz(file: File) {
+  const extension = file.name.toLowerCase().split(".").pop();
+  if (extension === "kml") return file.text();
+  if (extension !== "kmz") throw new Error("Upload a .kml or .kmz file.");
+  const { default: JSZip } = await import("jszip");
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  const kmlEntry = zip.file(/(^|\/)(doc\.kml|[^/]+\.kml)$/i)[0];
+  if (!kmlEntry) throw new Error("The KMZ file does not contain a KML document.");
+  return kmlEntry.async("text");
+}
 
 function normalizeFeature(feature: FarmMapFeature, statusByPlot: Map<string, Record<string, string>>, statusLayer: OperationActivityType) {
   const geojson = feature.geojson.type === "Feature"
@@ -93,6 +207,27 @@ function normalizeFeature(feature: FarmMapFeature, statusByPlot: Map<string, Rec
       fillColor: feature.featureType === "plot" ? statusColors[status] : "#2e7d32",
     },
   };
+}
+
+function buildWaterAssetFeatures(dashboard: NonNullable<ReturnType<typeof useDashboardData>["dashboard"]>) {
+  const featuresById = new Map(dashboard.features.map((feature) => [feature.id, feature]));
+  return dashboard.waterAssets.flatMap((asset) => {
+    const feature = featuresById.get(asset.linkedFeatureId ?? "");
+    if (!feature) return [];
+    const geojson = feature.geojson.type === "Feature"
+      ? feature.geojson
+      : { type: "Feature", geometry: feature.geojson, properties: {} };
+    return [{
+      ...geojson,
+      id: `water:${asset.id}`,
+      properties: {
+        ...((geojson.properties as Record<string, unknown>) ?? {}),
+        featureId: feature.id,
+        featureType: asset.assetType === "pump" ? "water_pump" : "water_reservoir",
+        waterAssetId: asset.id,
+      },
+    }];
+  });
 }
 
 function firstCoordinate(features: FarmMapFeature[]) {
@@ -115,11 +250,15 @@ function MapCanvas({
   activeStatus,
   layers,
   onSelect,
+  assetMode,
+  onMapPoint,
 }: {
   dashboard: ReturnType<typeof useDashboardData>["dashboard"];
   activeStatus: OperationActivityType;
   layers: Record<LayerKey, boolean>;
   onSelect: (selection: Selected) => void;
+  assetMode?: WaterAssetMode;
+  onMapPoint?: (point: { lng: number; lat: number }) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -149,25 +288,43 @@ function MapCanvas({
       },
     });
     mapRef.current.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
+    mapRef.current.on("click", (event) => {
+      if (assetMode && onMapPoint) onMapPoint({ lng: event.lngLat.lng, lat: event.lngLat.lat });
+    });
     mapRef.current.on("click", "plot-fill", (event) => {
+      if (assetMode) return;
       const id = event.features?.[0]?.properties?.linkedPlotId as string | undefined;
       if (id) onSelect({ kind: "plot", id });
     });
     mapRef.current.on("click", "valve-points", (event) => {
+      if (assetMode) return;
       const id = event.features?.[0]?.properties?.linkedValveId as string | undefined;
       if (id) onSelect({ kind: "valve", id });
+    });
+    mapRef.current.on("click", "water-pumps", (event) => {
+      if (assetMode) return;
+      const id = event.features?.[0]?.properties?.waterAssetId as string | undefined;
+      if (id) onSelect({ kind: "water_asset", id });
+    });
+    mapRef.current.on("click", "water-reservoirs", (event) => {
+      if (assetMode) return;
+      const id = event.features?.[0]?.properties?.waterAssetId as string | undefined;
+      if (id) onSelect({ kind: "water_asset", id });
     });
     return () => {
       mapRef.current?.remove();
       mapRef.current = null;
     };
-  }, [dashboard?.farmMap, dashboard?.features, onSelect]);
+  }, [assetMode, dashboard?.farmMap, dashboard?.features, onMapPoint, onSelect]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !dashboard) return;
     const render = () => {
-      const allFeatures = dashboard.features.map((feature) => normalizeFeature(feature, statusByPlot, activeStatus));
+      const allFeatures = [
+        ...dashboard.features.map((feature) => normalizeFeature(feature, statusByPlot, activeStatus)),
+        ...buildWaterAssetFeatures(dashboard),
+      ];
       const collection = { type: "FeatureCollection", features: allFeatures };
       if (map.getSource("farm-features")) {
         (map.getSource("farm-features") as maplibregl.GeoJSONSource).setData(collection as never);
@@ -178,15 +335,19 @@ function MapCanvas({
         map.addLayer({ id: "plot-line", type: "line", source: "farm-features", filter: ["==", ["get", "featureType"], "plot"], paint: { "line-color": "#f8fafc", "line-width": 2 } });
         map.addLayer({ id: "irrigation-lines", type: "line", source: "farm-features", filter: ["==", ["get", "featureType"], "irrigation_line"], paint: { "line-color": "#38bdf8", "line-width": 4 } });
         map.addLayer({ id: "valve-points", type: "circle", source: "farm-features", filter: ["==", ["get", "featureType"], "valve"], paint: { "circle-radius": 7, "circle-color": "#2563eb", "circle-stroke-width": 2, "circle-stroke-color": "#ffffff" } });
+        map.addLayer({ id: "water-pumps", type: "circle", source: "farm-features", filter: ["==", ["get", "featureType"], "water_pump"], paint: { "circle-radius": 8, "circle-color": "#f97316", "circle-stroke-width": 2, "circle-stroke-color": "#ffffff" } });
+        map.addLayer({ id: "water-reservoirs", type: "circle", source: "farm-features", filter: ["==", ["get", "featureType"], "water_reservoir"], paint: { "circle-radius": 9, "circle-color": "#0891b2", "circle-stroke-width": 2, "circle-stroke-color": "#ffffff" } });
       }
       map.setLayoutProperty("plot-fill", "visibility", layers.plots ? "visible" : "none");
       map.setLayoutProperty("plot-line", "visibility", layers.plots ? "visible" : "none");
       map.setLayoutProperty("irrigation-lines", "visibility", layers.irrigation ? "visible" : "none");
       map.setLayoutProperty("valve-points", "visibility", layers.valves ? "visible" : "none");
+      map.setLayoutProperty("water-pumps", "visibility", layers.pumps ? "visible" : "none");
+      map.setLayoutProperty("water-reservoirs", "visibility", layers.reservoirs ? "visible" : "none");
     };
     if (map.loaded()) render();
     else map.once("load", render);
-  }, [activeStatus, dashboard, layers.irrigation, layers.plots, layers.valves, statusByPlot]);
+  }, [activeStatus, dashboard, layers.irrigation, layers.plots, layers.pumps, layers.reservoirs, layers.valves, statusByPlot]);
 
   return <div className="farm-map-canvas" ref={containerRef} />;
 }
@@ -266,6 +427,7 @@ function SideDrawer({
   if (!selected) return null;
   const plot = selected.kind === "plot" ? dashboard.plots.find((item) => item.id === selected.id) : null;
   const valve = selected.kind === "valve" ? dashboard.valves.find((item) => item.id === selected.id) : null;
+  const waterAsset = selected.kind === "water_asset" ? dashboard.waterAssets.find((item) => item.id === selected.id) : null;
   const linkedPlot = plot ?? dashboard.plots.find((item) => item.id === valve?.plotId);
   const linkedValves = linkedPlot ? dashboard.valves.filter((item) => item.plotId === linkedPlot.id) : [];
   const line = dashboard.irrigationLines.find((item) => item.id === valve?.irrigationLineId);
@@ -273,21 +435,30 @@ function SideDrawer({
   const scopedLogs = logs.filter((item) => selected.kind === "plot" ? item.plotId === selected.id : item.valveId === selected.id).slice(0, 12);
   return <aside className="farm-map-drawer">
     <button className="farm-map-drawer__close" type="button" onClick={onClose}>Close</button>
+    {waterAsset && <>
+      <h2>{waterAsset.assetType === "pump" ? "Pump / Borehole" : "Reservoir"}</h2>
+      <dl className="farm-map-facts">
+        <div><dt>Asset Code</dt><dd>{waterAsset.assetCode}</dd></div>
+        <div><dt>Asset Name</dt><dd>{waterAsset.assetName}</dd></div>
+        <div><dt>Status</dt><dd>{waterAsset.status || "-"}</dd></div>
+        <div><dt>Notes</dt><dd>{waterAsset.notes || "-"}</dd></div>
+      </dl>
+    </>}
     {plot && <><h2>{plot.plotCode} {plot.plotName ?? ""}</h2><p>{plot.variety ?? "Variety not recorded"} | {plot.treeCount ?? 0} trees</p><StatusBadges statuses={statuses} /></>}
     {valve && <><h2>{valve.valveCode} {valve.valveName ?? ""}</h2><p>{line?.lineName ?? line?.lineCode ?? "No line"} | {linkedPlot?.plotName ?? linkedPlot?.plotCode ?? "No plot"}</p><StatusBadges statuses={statuses} /></>}
-    <div className="farm-quick-actions">
+    {!waterAsset && <div className="farm-quick-actions">
       <button type="button" onClick={() => onQuickLog("irrigation", selected)}><Droplets size={17} />Log irrigation</button>
       <button type="button" onClick={() => onQuickLog("fertilizer", selected)}><FlaskConical size={17} />Log fertilizer</button>
       <button type="button" onClick={() => onQuickLog("pesticide", selected)}><SprayCan size={17} />Log spray</button>
       <button type="button" onClick={() => onQuickLog("maintenance", selected)}><FileText size={17} />Report issue</button>
-    </div>
-    <dl className="farm-map-facts">
+    </div>}
+    {!waterAsset && <dl className="farm-map-facts">
       <div><dt>Linked valves</dt><dd>{linkedValves.map((item) => item.valveCode).join(", ") || "-"}</dd></div>
       <div><dt>Linked lines</dt><dd>{[...new Set(linkedValves.map((item) => dashboard.irrigationLines.find((lineItem) => lineItem.id === item.irrigationLineId)?.lineCode).filter(Boolean))].join(", ") || line?.lineCode || "-"}</dd></div>
       <div><dt>Pending work</dt><dd>{dashboard.dueWorkList.filter((item) => item.plotId === linkedPlot?.id).map((item) => `${item.activityType} ${item.status}`).join(", ") || "-"}</dd></div>
-    </dl>
-    <h3>Operation history</h3>
-    <div className="farm-log-list">{scopedLogs.map((log) => <article key={log.id}><strong>{log.activityType}</strong><span>{log.operationDate} {log.totalQty ? `| ${log.totalQty} ${log.unit ?? ""}` : ""}</span><small>{log.performedBy || log.remarks || "-"}</small></article>)}</div>
+    </dl>}
+    {!waterAsset && <><h3>Operation history</h3>
+      <div className="farm-log-list">{scopedLogs.map((log) => <article key={log.id}><strong>{log.activityType}</strong><span>{log.operationDate} {log.totalQty ? `| ${log.totalQty} ${log.unit ?? ""}` : ""}</span><small>{log.performedBy || log.remarks || "-"}</small></article>)}</div></>}
   </aside>;
 }
 
@@ -305,14 +476,20 @@ export function FarmOperationsMap({ mode }: { mode: Mode }) {
   const canManage = Boolean(user && hasPermission(user, "MANAGE_RECORDS", workspaceId));
   const [selected, setSelected] = useState<Selected>(null);
   const [activeStatus, setActiveStatus] = useState<OperationActivityType>("irrigation");
-  const [layers, setLayers] = useState<Record<LayerKey, boolean>>({ plots: true, irrigation: true, valves: true, fertilizerStatus: true, pesticideStatus: true, irrigationStatus: true });
+  const [layers, setLayers] = useState<Record<LayerKey, boolean>>({ plots: true, irrigation: true, valves: true, pumps: true, reservoirs: true, fertilizerStatus: true, pesticideStatus: true, irrigationStatus: true });
   const [featureForm, setFeatureForm] = useState<FeatureForm>(emptyFeature);
   const [plotForm, setPlotForm] = useState<PlotForm>(emptyPlot);
   const [lineForm, setLineForm] = useState<LineForm>(emptyLine);
   const [valveForm, setValveForm] = useState<ValveForm>(emptyValve);
+  const [assetMode, setAssetMode] = useState<WaterAssetMode>(null);
+  const [assetPoint, setAssetPoint] = useState<{ lng: number; lat: number } | null>(null);
+  const [assetForm, setAssetForm] = useState(emptyWaterAsset);
   const [mapForm, setMapForm] = useState({ mapName: "Farm satellite operations map", centerLat: "24.7136", centerLng: "46.6753", defaultZoom: "16", notes: "" });
   const [logForm, setLogForm] = useState(emptyLog);
   const [showLog, setShowLog] = useState(false);
+  const [importRows, setImportRows] = useState<ImportPreviewRow[]>([]);
+  const [importFilename, setImportFilename] = useState("");
+  const [importError, setImportError] = useState("");
   const dashboard = dashboardQuery.dashboard;
   useEffect(() => {
     if (activeSeasonId) {
@@ -370,6 +547,101 @@ export function FarmOperationsMap({ mode }: { mode: Mode }) {
     const input = { ...mapForm, seasonId: activeSeasonId, baseMapProvider: "maplibre_satellite" };
     saveResource.mutate({ resource: "maps", id: dashboard?.farmMap?.id, input });
   };
+  const beginWaterAsset = (nextMode: Exclude<WaterAssetMode, null>) => {
+    setAssetMode(nextMode);
+    setAssetPoint(null);
+    setAssetForm(emptyWaterAsset);
+    window.dispatchEvent(new CustomEvent("muzare-toast", { detail: `Click the map location for the ${nextMode === "pump" ? "pump / borehole" : "reservoir"}.` }));
+  };
+  const saveWaterAsset = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!assetMode || !assetPoint) return;
+    try {
+      const featureResult = await saveResource.mutateAsync({
+        resource: "features",
+        input: {
+          seasonId: activeSeasonId,
+          featureType: "landmark",
+          featureCode: assetForm.assetCode,
+          featureName: assetForm.assetName,
+          geojson: { type: "Point", coordinates: [assetPoint.lng, assetPoint.lat] },
+          linkedPlotId: "",
+          linkedIrrigationLineId: "",
+          linkedValveId: "",
+          styleJson: { waterAssetType: assetMode },
+          displayOrder: 0,
+          active: true,
+        },
+      }) as { record: FarmMapFeature };
+      await saveResource.mutateAsync({
+        resource: "water-assets",
+        input: {
+          seasonId: activeSeasonId,
+          assetType: assetMode,
+          assetCode: assetForm.assetCode,
+          assetName: assetForm.assetName,
+          linkedFeatureId: featureResult.record.id,
+          status: assetForm.status,
+          notes: assetForm.notes,
+        },
+      });
+      setAssetMode(null);
+      setAssetPoint(null);
+      setAssetForm(emptyWaterAsset);
+      await refresh();
+    } catch (error) {
+      window.dispatchEvent(new CustomEvent("muzare-toast", { detail: error instanceof Error ? error.message : "Unable to save water asset." }));
+    }
+  };
+  const uploadKml = async (file: File | null) => {
+    if (!file) return;
+    setImportError("");
+    setImportFilename(file.name);
+    try {
+      const rows = parseKmlToPreviewRows(await readKmlOrKmz(file));
+      setImportRows(rows);
+      if (!rows.length) setImportError("No Polygon, LineString, or Point placemarks were found in this file.");
+    } catch (error) {
+      setImportRows([]);
+      setImportError(error instanceof Error ? error.message : "Unable to import this farm layout.");
+    }
+  };
+  const updateImportRow = (id: string, patch: Partial<ImportPreviewRow>) => {
+    setImportRows((rows) => rows.map((row) => row.id === id ? { ...row, ...patch } : row));
+  };
+  const saveImportRows = async () => {
+    const selectedRows = importRows.filter((row) => row.selected);
+    if (!selectedRows.length) {
+      setImportError("Select at least one feature to import.");
+      return;
+    }
+    setImportError("");
+    try {
+      for (const [index, row] of selectedRows.entries()) {
+        await saveResource.mutateAsync({
+          resource: "features",
+          input: {
+            seasonId: activeSeasonId,
+            featureType: row.featureType,
+            featureCode: row.featureName.trim().slice(0, 80) || `${row.geometryType}-${index + 1}`,
+            featureName: row.featureName.trim() || row.sourceName,
+            geojson: row.geojson,
+            linkedPlotId: "",
+            linkedIrrigationLineId: "",
+            linkedValveId: "",
+            styleJson: null,
+            displayOrder: index,
+            active: true,
+          },
+        });
+      }
+      setImportRows([]);
+      window.dispatchEvent(new CustomEvent("muzare-toast", { detail: `${selectedRows.length} farm map features imported.` }));
+      await refresh();
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : "Unable to save imported features.");
+    }
+  };
   const logs = logsQuery.data?.records ?? [];
   const selectedStatus = selected?.kind === "plot" ? dashboard?.plotStatusSummary.find((item) => item.plotId === selected.id)?.statuses : undefined;
   const totalTrees = dashboard?.plots.reduce((sum, plot) => sum + (plot.treeCount ?? 0), 0) ?? 0;
@@ -388,18 +660,20 @@ export function FarmOperationsMap({ mode }: { mode: Mode }) {
           <article><span>Fertilizer due</span><strong>{dashboard.plotStatusSummary.filter((item) => ["overdue", "due_soon"].includes(item.statuses.fertilizer)).length}</strong></article>
           <article><span>Pesticide due</span><strong>{dashboard.plotStatusSummary.filter((item) => ["overdue", "due_soon"].includes(item.statuses.pesticide)).length}</strong></article>
           <article><span>Completed today</span><strong>{dashboard.completedTodayCount}</strong></article>
+          <article><span>Total pumps</span><strong>{dashboard.waterAssets.filter((item) => item.assetType === "pump").length}</strong></article>
+          <article><span>Total reservoirs</span><strong>{dashboard.waterAssets.filter((item) => item.assetType === "reservoir").length}</strong></article>
         </section>
         <section className="farm-map-workspace">
           <div className="farm-map-panel">
             <div className="farm-map-toolbar">
               <div className="farm-map-layer-toggles">
-                {(["plots", "irrigation", "valves"] as LayerKey[]).map((key) => <button className={layers[key] ? "is-active" : ""} type="button" key={key} onClick={() => setLayers({ ...layers, [key]: !layers[key] })}><Layers size={15} />{key}</button>)}
+                {(["plots", "irrigation", "valves", "pumps", "reservoirs"] as LayerKey[]).map((key) => <button className={layers[key] ? "is-active" : ""} type="button" key={key} onClick={() => setLayers({ ...layers, [key]: !layers[key] })}><Layers size={15} />{key}</button>)}
               </div>
               <div className="farm-map-layer-toggles">
                 {(["irrigation", "fertilizer", "pesticide"] as OperationActivityType[]).map((key) => <button className={activeStatus === key ? "is-active" : ""} type="button" key={key} onClick={() => setActiveStatus(key)}>{key}</button>)}
               </div>
             </div>
-            <MapCanvas dashboard={dashboard} activeStatus={activeStatus} layers={layers} onSelect={setSelected} />
+            <MapCanvas dashboard={dashboard} activeStatus={activeStatus} layers={layers} onSelect={setSelected} assetMode={assetMode} onMapPoint={setAssetPoint} />
           </div>
           <aside className="farm-map-side">
             <div className="farm-map-actions">
@@ -430,9 +704,67 @@ export function FarmOperationsMap({ mode }: { mode: Mode }) {
             <textarea placeholder="Notes" value={mapForm.notes} onChange={(event) => setMapForm({ ...mapForm, notes: event.target.value })} />
             <button type="submit"><Save size={16} />Save map</button>
           </form>
+          <section className="record-panel farm-water-builder">
+            <header>
+              <h2>Water infrastructure</h2>
+              <div>
+                <button type="button" className={assetMode === "pump" ? "is-active" : ""} onClick={() => beginWaterAsset("pump")}><Plus size={16} />Add Pump / Borehole</button>
+                <button type="button" className={assetMode === "reservoir" ? "is-active" : ""} onClick={() => beginWaterAsset("reservoir")}><Plus size={16} />Add Reservoir</button>
+              </div>
+            </header>
+            {assetMode && <form className="farm-builder-form" onSubmit={saveWaterAsset}>
+              <p>{assetPoint ? `Location selected: ${assetPoint.lat.toFixed(6)}, ${assetPoint.lng.toFixed(6)}` : "Click the map location, then enter code and name."}</p>
+              <input required placeholder="Asset code" value={assetForm.assetCode} onChange={(event) => setAssetForm({ ...assetForm, assetCode: event.target.value })} />
+              <input required placeholder="Asset name" value={assetForm.assetName} onChange={(event) => setAssetForm({ ...assetForm, assetName: event.target.value })} />
+              <input placeholder="Status" value={assetForm.status} onChange={(event) => setAssetForm({ ...assetForm, status: event.target.value })} />
+              <textarea placeholder="Notes" value={assetForm.notes} onChange={(event) => setAssetForm({ ...assetForm, notes: event.target.value })} />
+              <div className="farm-water-builder__actions">
+                <button type="submit" disabled={!assetPoint || saveResource.isPending}><Save size={16} />Save {assetMode === "pump" ? "pump / borehole" : "reservoir"}</button>
+                <button className="secondary-button" type="button" onClick={() => { setAssetMode(null); setAssetPoint(null); }}>Cancel</button>
+              </div>
+            </form>}
+          </section>
+          <section className="record-panel farm-kml-import">
+            <header>
+              <div>
+                <h2><Upload size={17} />KML/KMZ farm layout import</h2>
+                <p>Import Google Earth polygons as plots, paths as irrigation lines, and placemarks as valves.</p>
+              </div>
+              <label className="farm-file-picker">
+                <Upload size={16} />
+                Choose KML/KMZ
+                <input accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz" type="file" onChange={(event) => void uploadKml(event.target.files?.[0] ?? null)} />
+              </label>
+            </header>
+            {importFilename && <p className="farm-import-meta">{importFilename} | {importRows.length} detected features</p>}
+            {importError && <p className="error">{importError}</p>}
+            {importRows.length > 0 && <>
+              <div className="farm-import-table-wrap">
+                <table className="farm-import-table">
+                  <thead><tr><th>Import</th><th>Name</th><th>Geometry</th><th>Map as</th><th>Coordinates</th></tr></thead>
+                  <tbody>
+                    {importRows.map((row) => {
+                      const coordinates = row.geojson.coordinates as unknown[];
+                      return <tr key={row.id}>
+                        <td><input aria-label={`Import ${row.featureName}`} type="checkbox" checked={row.selected} onChange={(event) => updateImportRow(row.id, { selected: event.target.checked })} /></td>
+                        <td><input value={row.featureName} onChange={(event) => updateImportRow(row.id, { featureName: event.target.value })} /></td>
+                        <td>{row.geometryType}</td>
+                        <td><select value={row.featureType} onChange={(event) => updateImportRow(row.id, { featureType: event.target.value as FarmFeatureType })}>{geometryFeatureTypes(row.geometryType).map((type) => <option key={type}>{type}</option>)}</select></td>
+                        <td>{Array.isArray(coordinates[0]) ? coordinates.length : 1}</td>
+                      </tr>;
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <footer>
+                <button type="button" disabled={saveResource.isPending} onClick={() => void saveImportRows()}><Save size={16} />Save selected features</button>
+                <button className="secondary-button" type="button" onClick={() => setImportRows([])}>Clear preview</button>
+              </footer>
+            </>}
+          </section>
           <form className="record-panel farm-builder-form" onSubmit={saveFeature}>
             <h2>GeoJSON feature</h2>
-            <select value={featureForm.featureType} onChange={(event) => setFeatureForm({ ...featureForm, featureType: event.target.value })}>{["farm_boundary", "plot", "irrigation_line", "valve", "landmark", "other"].map((item) => <option key={item}>{item}</option>)}</select>
+            <select value={featureForm.featureType} onChange={(event) => setFeatureForm({ ...featureForm, featureType: event.target.value })}>{featureTypeOptions.map((item) => <option key={item}>{item}</option>)}</select>
             <input placeholder="Feature code" value={featureForm.featureCode} onChange={(event) => setFeatureForm({ ...featureForm, featureCode: event.target.value })} />
             <input required placeholder="Feature name" value={featureForm.featureName} onChange={(event) => setFeatureForm({ ...featureForm, featureName: event.target.value })} />
             <textarea required placeholder='Paste GeoJSON geometry or Feature' value={featureForm.geojsonText} onChange={(event) => setFeatureForm({ ...featureForm, geojsonText: event.target.value })} />
