@@ -227,6 +227,56 @@ export type ExpenseImportPreview = {
   };
 };
 export type ExpenseImportResult = { recordsCreated: number; duplicatesSkipped: number; grandTotal: number };
+export type FarmFeatureType = "farm_boundary" | "plot" | "irrigation_line" | "valve" | "landmark" | "other";
+export type OperationActivityType = "irrigation" | "fertilizer" | "pesticide" | "pruning" | "thinning" | "pollination" | "harvesting" | "maintenance" | "other";
+export type FarmMap = {
+  id: string; workspaceId: string; farmId: string; seasonId: string | null; mapName: string;
+  centerLat: string; centerLng: string; defaultZoom: string; baseMapProvider: string; notes: string | null;
+};
+export type FarmMapFeature = {
+  id: string; workspaceId: string; farmId: string; seasonId: string | null; featureType: FarmFeatureType;
+  featureCode: string | null; featureName: string; geojson: Record<string, unknown>; linkedPlotId: string | null;
+  linkedIrrigationLineId: string | null; linkedValveId: string | null; styleJson: Record<string, unknown> | null;
+  displayOrder: number; active: boolean;
+};
+export type FarmPlot = {
+  id: string; workspaceId: string; farmId: string; seasonId: string | null; plotCode: string; plotName: string | null;
+  variety: string | null; treeCount: number | null; area: string | null; notes: string | null; geoFeatureId: string | null; active: boolean;
+};
+export type IrrigationLine = {
+  id: string; workspaceId: string; farmId: string; seasonId: string | null; lineCode: string; lineName: string | null;
+  description: string | null; geoFeatureId: string | null; active: boolean;
+};
+export type FarmValve = {
+  id: string; workspaceId: string; farmId: string; seasonId: string | null; valveCode: string; valveName: string | null;
+  irrigationLineId: string | null; plotId: string | null; estimatedTreeCount: number | null; notes: string | null; geoFeatureId: string | null; active: boolean;
+};
+export type FarmProduct = {
+  id: string; workspaceId: string; productType: "fertilizer" | "pesticide" | "other"; category: string | null; productName: string; unit: string | null; notes: string | null; active: boolean;
+};
+export type OperationLog = {
+  id: string; workspaceId: string; farmId: string; seasonId: string; plotId: string | null; irrigationLineId: string | null; valveId: string | null;
+  activityType: OperationActivityType; activityCategory: string | null; productId: string | null; productNameText: string | null; operationDate: string;
+  startTime: string | null; endTime: string | null; durationMinutes: number | null; qtyPerTree: string | null; totalQty: string | null; unit: string | null;
+  treeCountCovered: number | null; performedBy: string | null; remarks: string | null; createdAt: string;
+};
+export type OperationDueRule = {
+  id: string; workspaceId: string; farmId: string; seasonId: string | null; plotId: string | null; activityType: OperationActivityType;
+  activityCategory: string | null; productId: string | null; intervalDays: number; dueSoonDays: number; active: boolean; notes: string | null;
+};
+export type FarmOperationsDashboard = {
+  farmMap: FarmMap | null; features: FarmMapFeature[]; plots: FarmPlot[]; irrigationLines: IrrigationLine[]; valves: FarmValve[];
+  plotStatusSummary: Array<{ plotId: string; statuses: Record<"irrigation" | "fertilizer" | "pesticide", string> }>;
+  valveStatusSummary: Array<{ valveId: string; statuses: Record<"irrigation" | "fertilizer" | "pesticide", string> }>;
+  overdueCounts: { plots: number; valves: number }; dueSoonCounts: { plots: number; valves: number };
+  completedTodayCount: number; recentOperations: OperationLog[]; dueWorkList: Array<{ plotId: string; activityType: string; status: string }>;
+};
+export type FarmMapInput = Omit<FarmMap, "id" | "workspaceId" | "farmId">;
+export type FarmMapFeatureInput = Omit<FarmMapFeature, "id" | "workspaceId" | "farmId">;
+export type FarmPlotInput = Omit<FarmPlot, "id" | "workspaceId" | "farmId">;
+export type IrrigationLineInput = Omit<IrrigationLine, "id" | "workspaceId" | "farmId">;
+export type FarmValveInput = Omit<FarmValve, "id" | "workspaceId" | "farmId">;
+export type OperationLogInput = Omit<OperationLog, "id" | "workspaceId" | "farmId" | "createdAt">;
 
 async function apiRequest<T>(path: string, options: RequestInit = {}, token?: string, requestOptions: { timeoutMs?: number; debugLabel?: string } = {}): Promise<T> {
   const headers = new Headers(options.headers);
@@ -406,3 +456,27 @@ export const confirmExpenseImport = (token: string, workspaceId: string, input: 
   `/api/workspaces/${workspaceId}/expense-imports/confirm`, { method: "POST", body: JSON.stringify(input) }, token,
   { timeoutMs: 60_000, debugLabel: "expense-import-confirm" },
 );
+export const fetchFarmOperationsDashboard = (token: string, workspaceId: string, farmId: string, seasonId?: string | null) => {
+  const query = new URLSearchParams();
+  if (seasonId) query.set("seasonId", seasonId);
+  return apiRequest<FarmOperationsDashboard>(`/v1/workspace/${workspaceId}/farms/${farmId}/farm-operations/dashboard?${query.toString()}`, {}, token);
+};
+export const fetchFarmOperationsProducts = (token: string, workspaceId: string, farmId: string) =>
+  apiRequest<{ records: FarmProduct[] }>(`/v1/workspace/${workspaceId}/farms/${farmId}/farm-operations/products`, {}, token);
+export const createFarmOperationResource = <TInput, TResult>(token: string, workspaceId: string, farmId: string, resource: string, input: TInput) =>
+  apiRequest<{ record: TResult }>(`/v1/workspace/${workspaceId}/farms/${farmId}/farm-operations/${resource}`, { method: "POST", body: JSON.stringify(input) }, token);
+export const updateFarmOperationResource = <TInput, TResult>(token: string, workspaceId: string, farmId: string, resource: string, id: string, input: TInput) =>
+  apiRequest<{ record: TResult }>(`/v1/workspace/${workspaceId}/farms/${farmId}/farm-operations/${resource}/${id}`, { method: "PATCH", body: JSON.stringify(input) }, token);
+export const fetchFarmOperationLogs = (token: string, workspaceId: string, filters: {
+  farmId: string; seasonId?: string | null; plotId?: string; valveId?: string; irrigationLineId?: string; activityType?: OperationActivityType | ""; dateFrom?: string; dateTo?: string;
+}) => {
+  const query = new URLSearchParams({ farmId: filters.farmId });
+  if (filters.seasonId) query.set("seasonId", filters.seasonId);
+  if (filters.plotId) query.set("plotId", filters.plotId);
+  if (filters.valveId) query.set("valveId", filters.valveId);
+  if (filters.irrigationLineId) query.set("irrigationLineId", filters.irrigationLineId);
+  if (filters.activityType) query.set("activityType", filters.activityType);
+  if (filters.dateFrom) query.set("dateFrom", filters.dateFrom);
+  if (filters.dateTo) query.set("dateTo", filters.dateTo);
+  return apiRequest<{ records: OperationLog[] }>(`/v1/workspace/${workspaceId}/farm-operations/logs?${query.toString()}`, {}, token);
+};

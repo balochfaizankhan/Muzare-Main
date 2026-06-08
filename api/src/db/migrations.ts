@@ -16,6 +16,7 @@ const attendanceOfflineIdentityMigrationUrl = new URL("../../../database/migrati
 const labourAdvanceYounisAccountBackfillMigrationUrl = new URL("../../../database/migrations/0014_labour_advance_younis_account_backfill.sql", import.meta.url);
 const partnerSettlementAccountIdsMigrationUrl = new URL("../../../database/migrations/0015_partner_settlement_account_ids.sql", import.meta.url);
 const workspaceTeamPermissionsMigrationUrl = new URL("../../../database/migrations/0016_workspace_team_permissions.sql", import.meta.url);
+const liveGeoFarmOperationsMigrationUrl = new URL("../../../database/migrations/0017_live_geo_farm_operations.sql", import.meta.url);
 
 async function tableExists(tableName: string): Promise<boolean> {
   const result = (await db.execute(
@@ -109,4 +110,6 @@ export async function ensureWorkspaceSchema(): Promise<void> {
   await db.execute(partnerSettlementAccountIdsMigration);
   const workspaceTeamPermissionsMigration = await readFile(workspaceTeamPermissionsMigrationUrl, "utf8");
   await db.execute(workspaceTeamPermissionsMigration);
+  const liveGeoFarmOperationsMigration = await readFile(liveGeoFarmOperationsMigrationUrl, "utf8");
+  await db.execute(liveGeoFarmOperationsMigration);
 }

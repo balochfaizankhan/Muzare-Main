@@ -27,6 +27,7 @@ import { Reports } from "./pages/workspace/Reports";
 import { Sales } from "./pages/workspace/Sales";
 import { WorkspaceDashboard } from "./pages/workspace/WorkspaceDashboard";
 import { Farms } from "./pages/workspace/Farms";
+import { FarmOperationsMap } from "./pages/workspace/FarmOperationsMap";
 import { Seasons } from "./pages/workspace/Seasons";
 import { WorkspaceApprovals } from "./pages/workspace/WorkspaceApprovals";
 import { WorkspaceTeam } from "./pages/workspace/WorkspaceTeam";
@@ -98,6 +99,8 @@ export default function App() {
       <Route path="settings/team" element={<WorkspaceTeam />} />
       <Route path="settings/approvals" element={<WorkspaceApprovals />} />
       <Route path="farms" element={<Farms />} />
+      <Route path=":workspaceId/farms/:farmId/map-builder" element={<FarmOperationsMap mode="builder" />} />
+      <Route path=":workspaceId/farms/:farmId/operations-map" element={<FarmOperationsMap mode="live" />} />
       <Route path="seasons" element={<Seasons />} />
       <Route path="accounts" element={<ModulePage module="accounts" />} />
       <Route path="partner-ledger" element={<ModulePage module="partnerLedger" />} />

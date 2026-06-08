@@ -508,3 +508,189 @@ export const expenseImportSessions = pgTable("expense_import_sessions", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
 });
+
+export const farmMaps = pgTable(
+  "farm_maps",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+    farmId: uuid("farm_id").references(() => farms.id).notNull(),
+    seasonId: uuid("season_id").references(() => seasons.id),
+    mapName: text("map_name").notNull(),
+    centerLat: numeric("center_lat", { precision: 10, scale: 7 }).default("0").notNull(),
+    centerLng: numeric("center_lng", { precision: 10, scale: 7 }).default("0").notNull(),
+    defaultZoom: numeric("default_zoom", { precision: 5, scale: 2 }).default("16").notNull(),
+    baseMapProvider: text("base_map_provider").default("maplibre_satellite").notNull(),
+    notes: text("notes"),
+    createdBy: uuid("created_by").references(() => users.id),
+    ...timestamps,
+  },
+  (table) => [
+    foreignKey({ columns: [table.workspaceId, table.farmId], foreignColumns: [farms.workspaceId, farms.id], name: "farm_maps_workspace_farm_fk" }),
+    foreignKey({ columns: [table.workspaceId, table.farmId, table.seasonId], foreignColumns: [seasons.workspaceId, seasons.farmId, seasons.id], name: "farm_maps_workspace_farm_season_fk" }),
+  ],
+);
+
+export const farmMapFeatures = pgTable(
+  "farm_map_features",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+    farmId: uuid("farm_id").references(() => farms.id).notNull(),
+    seasonId: uuid("season_id").references(() => seasons.id),
+    featureType: text("feature_type").notNull(),
+    featureCode: text("feature_code"),
+    featureName: text("feature_name").notNull(),
+    geojson: jsonb("geojson").$type<Record<string, unknown>>().notNull(),
+    linkedPlotId: uuid("linked_plot_id"),
+    linkedIrrigationLineId: uuid("linked_irrigation_line_id"),
+    linkedValveId: uuid("linked_valve_id"),
+    styleJson: jsonb("style_json").$type<Record<string, unknown> | null>(),
+    displayOrder: integer("display_order").default(0).notNull(),
+    active: boolean("active").default(true).notNull(),
+    createdBy: uuid("created_by").references(() => users.id),
+    ...timestamps,
+  },
+  (table) => [
+    foreignKey({ columns: [table.workspaceId, table.farmId], foreignColumns: [farms.workspaceId, farms.id], name: "farm_map_features_workspace_farm_fk" }),
+    foreignKey({ columns: [table.workspaceId, table.farmId, table.seasonId], foreignColumns: [seasons.workspaceId, seasons.farmId, seasons.id], name: "farm_map_features_workspace_farm_season_fk" }),
+  ],
+);
+
+export const plots = pgTable(
+  "plots",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+    farmId: uuid("farm_id").references(() => farms.id).notNull(),
+    seasonId: uuid("season_id").references(() => seasons.id),
+    plotCode: text("plot_code").notNull(),
+    plotName: text("plot_name"),
+    variety: text("variety"),
+    treeCount: integer("tree_count"),
+    area: numeric("area", { precision: 14, scale: 2 }),
+    notes: text("notes"),
+    geoFeatureId: uuid("geo_feature_id").references(() => farmMapFeatures.id, { onDelete: "set null" }),
+    active: boolean("active").default(true).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    foreignKey({ columns: [table.workspaceId, table.farmId], foreignColumns: [farms.workspaceId, farms.id], name: "plots_workspace_farm_fk" }),
+    foreignKey({ columns: [table.workspaceId, table.farmId, table.seasonId], foreignColumns: [seasons.workspaceId, seasons.farmId, seasons.id], name: "plots_workspace_farm_season_fk" }),
+    uniqueIndex("plots_workspace_code_uidx").on(table.workspaceId, table.farmId, table.seasonId, table.plotCode),
+  ],
+);
+
+export const irrigationLines = pgTable(
+  "irrigation_lines",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+    farmId: uuid("farm_id").references(() => farms.id).notNull(),
+    seasonId: uuid("season_id").references(() => seasons.id),
+    lineCode: text("line_code").notNull(),
+    lineName: text("line_name"),
+    description: text("description"),
+    geoFeatureId: uuid("geo_feature_id").references(() => farmMapFeatures.id, { onDelete: "set null" }),
+    active: boolean("active").default(true).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    foreignKey({ columns: [table.workspaceId, table.farmId], foreignColumns: [farms.workspaceId, farms.id], name: "irrigation_lines_workspace_farm_fk" }),
+    foreignKey({ columns: [table.workspaceId, table.farmId, table.seasonId], foreignColumns: [seasons.workspaceId, seasons.farmId, seasons.id], name: "irrigation_lines_workspace_farm_season_fk" }),
+    uniqueIndex("irrigation_lines_workspace_code_uidx").on(table.workspaceId, table.farmId, table.seasonId, table.lineCode),
+  ],
+);
+
+export const valves = pgTable(
+  "valves",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+    farmId: uuid("farm_id").references(() => farms.id).notNull(),
+    seasonId: uuid("season_id").references(() => seasons.id),
+    valveCode: text("valve_code").notNull(),
+    valveName: text("valve_name"),
+    irrigationLineId: uuid("irrigation_line_id").references(() => irrigationLines.id, { onDelete: "set null" }),
+    plotId: uuid("plot_id").references(() => plots.id, { onDelete: "set null" }),
+    estimatedTreeCount: integer("estimated_tree_count"),
+    notes: text("notes"),
+    geoFeatureId: uuid("geo_feature_id").references(() => farmMapFeatures.id, { onDelete: "set null" }),
+    active: boolean("active").default(true).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    foreignKey({ columns: [table.workspaceId, table.farmId], foreignColumns: [farms.workspaceId, farms.id], name: "valves_workspace_farm_fk" }),
+    foreignKey({ columns: [table.workspaceId, table.farmId, table.seasonId], foreignColumns: [seasons.workspaceId, seasons.farmId, seasons.id], name: "valves_workspace_farm_season_fk" }),
+    uniqueIndex("valves_workspace_code_uidx").on(table.workspaceId, table.farmId, table.seasonId, table.valveCode),
+  ],
+);
+
+export const farmProducts = pgTable("farm_products", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+  productType: text("product_type").notNull(),
+  category: text("category"),
+  productName: text("product_name").notNull(),
+  unit: text("unit"),
+  notes: text("notes"),
+  active: boolean("active").default(true).notNull(),
+  ...timestamps,
+});
+
+export const operationLogs = pgTable(
+  "operation_logs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+    farmId: uuid("farm_id").references(() => farms.id).notNull(),
+    seasonId: uuid("season_id").references(() => seasons.id).notNull(),
+    plotId: uuid("plot_id").references(() => plots.id, { onDelete: "set null" }),
+    irrigationLineId: uuid("irrigation_line_id").references(() => irrigationLines.id, { onDelete: "set null" }),
+    valveId: uuid("valve_id").references(() => valves.id, { onDelete: "set null" }),
+    activityType: text("activity_type").notNull(),
+    activityCategory: text("activity_category"),
+    productId: uuid("product_id").references(() => farmProducts.id, { onDelete: "set null" }),
+    productNameText: text("product_name_text"),
+    operationDate: date("operation_date").notNull(),
+    startTime: time("start_time"),
+    endTime: time("end_time"),
+    durationMinutes: integer("duration_minutes"),
+    qtyPerTree: numeric("qty_per_tree", { precision: 14, scale: 4 }),
+    totalQty: numeric("total_qty", { precision: 14, scale: 4 }),
+    unit: text("unit"),
+    treeCountCovered: integer("tree_count_covered"),
+    performedBy: text("performed_by"),
+    labourTeamId: uuid("labour_team_id"),
+    remarks: text("remarks"),
+    createdBy: uuid("created_by").references(() => users.id),
+    ...timestamps,
+  },
+  (table) => [
+    foreignKey({ columns: [table.workspaceId, table.farmId], foreignColumns: [farms.workspaceId, farms.id], name: "operation_logs_workspace_farm_fk" }),
+    foreignKey({ columns: [table.workspaceId, table.farmId, table.seasonId], foreignColumns: [seasons.workspaceId, seasons.farmId, seasons.id], name: "operation_logs_workspace_farm_season_fk" }),
+  ],
+);
+
+export const operationDueRules = pgTable(
+  "operation_due_rules",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+    farmId: uuid("farm_id").references(() => farms.id).notNull(),
+    seasonId: uuid("season_id").references(() => seasons.id),
+    plotId: uuid("plot_id").references(() => plots.id, { onDelete: "cascade" }),
+    activityType: text("activity_type").notNull(),
+    activityCategory: text("activity_category"),
+    productId: uuid("product_id").references(() => farmProducts.id, { onDelete: "set null" }),
+    intervalDays: integer("interval_days").notNull(),
+    dueSoonDays: integer("due_soon_days").default(2).notNull(),
+    active: boolean("active").default(true).notNull(),
+    notes: text("notes"),
+    ...timestamps,
+  },
+  (table) => [
+    foreignKey({ columns: [table.workspaceId, table.farmId], foreignColumns: [farms.workspaceId, farms.id], name: "operation_due_rules_workspace_farm_fk" }),
+    foreignKey({ columns: [table.workspaceId, table.farmId, table.seasonId], foreignColumns: [seasons.workspaceId, seasons.farmId, seasons.id], name: "operation_due_rules_workspace_farm_season_fk" }),
+  ],
+);

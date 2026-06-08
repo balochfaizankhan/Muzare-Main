@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Leaf, LogOut, MapPin, Pencil, Plus, ShieldCheck, UserRound, UsersRound, XCircle } from "lucide-react";
+import { CheckCircle2, Leaf, LogOut, Map, MapPin, Pencil, Plus, Satellite, ShieldCheck, UserRound, UsersRound, XCircle } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
@@ -184,6 +184,8 @@ export function Farms() {
                   {farm.contactPhone && <small>{farm.contactPhone}</small>}
                   {farm.remarks && <small>{farm.remarks}</small>}
                   <footer>
+                    <Link to={`/workspace/${workspaceId}/farms/${farm.id}/operations-map`}><Satellite size={15} />Operations map</Link>
+                    {canManage && <Link to={`/workspace/${workspaceId}/farms/${farm.id}/map-builder`}><Map size={15} />Map builder</Link>}
                     {farm.active && !isCurrent && <button type="button" onClick={() => select.mutate(farm.id)}><Leaf size={15} />{t("farmsPage.setActive")}</button>}
                     {canManage && <button type="button" onClick={() => edit(farm)}><Pencil size={15} />{t("farmsPage.edit")}</button>}
                     {canManage && farm.active && <button className="danger-button" type="button" onClick={() => archive.mutate(farm.id)}><XCircle size={15} />{t("farmsPage.archive")}</button>}
