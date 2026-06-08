@@ -296,8 +296,8 @@ export function FarmOperationsMap({ mode }: { mode: Mode }) {
   const params = useParams();
   const queryClient = useQueryClient();
   const workspaceId = params.workspaceId ?? user?.workspaceId ?? "";
-  const farmId = params.farmId ?? "";
   const bootstrap = useQuery({ queryKey: ["bootstrap", token], queryFn: () => fetchBootstrap(token!), enabled: Boolean(token) });
+  const farmId = params.farmId ?? bootstrap.data?.activeFarmId ?? "";
   const activeSeasonId = bootstrap.data?.activeSeasonId ?? null;
   const dashboardQuery = useDashboardData(workspaceId, farmId, activeSeasonId);
   const products = useQuery({ queryKey: ["farm-products", workspaceId, farmId], queryFn: () => fetchFarmOperationsProducts(token!, workspaceId, farmId), enabled: Boolean(token && workspaceId && farmId) });

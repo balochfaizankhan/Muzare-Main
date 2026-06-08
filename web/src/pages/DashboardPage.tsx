@@ -8,6 +8,7 @@ import {
   CloudUpload,
   Leaf,
   PackageOpen,
+  Satellite,
   ShoppingBasket,
   TrendingUp,
   UsersRound,
@@ -56,6 +57,7 @@ const modules: Array<{
   { key: "expenses", path: "/workspace/expenses", icon: BanknoteArrowDown, detailKey: "dashboard.expensesDetail" },
   { key: "sales", path: "/workspace/sales", icon: ShoppingBasket, detailKey: "dashboard.salesDetail" },
   { key: "dispatch", path: "/workspace/dispatch", icon: PackageOpen, detailKey: "dashboard.dispatchDetail" },
+  { key: "operationsMap", path: "/workspace/operations-map", icon: Satellite, detailKey: "dashboard.operationsMapDetail" },
   { key: "accounts", path: "/workspace/accounts", icon: BookOpenText, detailKey: "dashboard.accountsDetail" },
   { key: "partnerLedger", path: "/workspace/partner-ledger", icon: Leaf, detailKey: "dashboard.partnerLedgerDetail" },
 ];

@@ -94,6 +94,8 @@ export default function App() {
       <Route path="inventory" element={<Inventory />} />
       <Route path="labour-advances" element={<LabourAdvances />} />
       <Route path="reports" element={<Reports />} />
+      <Route path="operations-map" element={<FarmOperationsMap mode="live" />} />
+      <Route path="map-builder" element={<FarmOperationsMap mode="builder" />} />
       <Route path="team" element={<ModulePage module="workforce" />} />
       <Route path="settings" element={<Farms />} />
       <Route path="settings/team" element={<WorkspaceTeam />} />

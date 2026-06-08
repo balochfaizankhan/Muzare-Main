@@ -1,4 +1,4 @@
-import { BarChart3, BookOpenText, Boxes, CalendarCheck, CloudUpload, HandCoins, LayoutDashboard, LogOut, PackageOpen, ReceiptText, RefreshCw, Settings, ShoppingBasket, Users } from "lucide-react";
+import { BarChart3, BookOpenText, Boxes, CalendarCheck, CloudUpload, HandCoins, LayoutDashboard, LogOut, PackageOpen, ReceiptText, RefreshCw, Satellite, Settings, ShoppingBasket, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink, Outlet } from "react-router-dom";
@@ -18,6 +18,7 @@ const nav = [
   ["/workspace/advances", "layout.advances", HandCoins, "advances"],
   ["/workspace/dispatch", "layout.dispatch", PackageOpen, "dispatch"],
   ["/workspace/inventory", "layout.inventory", Boxes, "inventory"],
+  ["/workspace/operations-map", "operationsMap", Satellite, "dashboard"],
   ["/workspace/reports", "layout.reports", BarChart3, "reports"],
   ["/workspace/team", "layout.workforce", Users, "workforce"],
   ["/workspace/accounts", "layout.accounts", BookOpenText, "accounts"],

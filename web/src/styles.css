@@ -1825,6 +1825,7 @@ button {
 }
 
 .farm-card footer button,
+.farm-card footer a,
 .secondary-button {
   align-items: center;
   background: #fff;
@@ -1835,6 +1836,7 @@ button {
   display: inline-flex;
   gap: 5px;
   padding: 8px 10px;
+  text-decoration: none;
 }
 
 .farm-card footer .danger-button {
