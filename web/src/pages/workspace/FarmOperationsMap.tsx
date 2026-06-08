@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarClock, Droplets, FileText, FlaskConical, Layers, MapPinned, Pencil, Plus, Save, SprayCan, Trash2, Upload, X } from "lucide-react";
+import { CalendarClock, Droplets, FlaskConical, Layers, MapPinned, Pencil, Plus, Save, SprayCan, Trash2, Upload, X } from "lucide-react";
 import maplibregl, { type Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
@@ -406,31 +406,102 @@ function OperationLogForm({
 }) {
   const [form, setForm] = useState(initial);
   useEffect(() => setForm(initial), [initial]);
+  const selectedValve = dashboard.valves.find((valve) => valve.id === form.valveId) ?? null;
+  const selectedPlot = dashboard.plots.find((plot) => plot.id === form.plotId) ?? null;
+  const selectedProduct = products.find((product) => product.id === form.productId) ?? null;
+  const availableValves = form.irrigationLineId
+    ? dashboard.valves.filter((valve) => valve.irrigationLineId === form.irrigationLineId)
+    : dashboard.valves;
+  const formTitle = form.activityType === "irrigation"
+    ? "Log Irrigation"
+    : form.activityType === "fertilizer"
+      ? "Log Fertilizer"
+      : "Log Spray";
   useEffect(() => {
-    const trees = Number(form.treeCountCovered || dashboard.plots.find((plot) => plot.id === form.plotId)?.treeCount || 0);
+    if (!selectedValve) return;
+    setForm((current) => ({
+      ...current,
+      irrigationLineId: selectedValve.irrigationLineId ?? current.irrigationLineId,
+      plotId: selectedValve.plotId ?? current.plotId,
+      treeCountCovered: selectedValve.plotId
+        ? String(dashboard.plots.find((plot) => plot.id === selectedValve.plotId)?.treeCount ?? "")
+        : current.treeCountCovered,
+    }));
+  }, [dashboard.plots, selectedValve]);
+  useEffect(() => {
+    if (!form.irrigationLineId || !form.valveId) return;
+    if (availableValves.some((valve) => valve.id === form.valveId)) return;
+    setForm((current) => ({ ...current, valveId: "", plotId: "", treeCountCovered: "" }));
+  }, [availableValves, form.irrigationLineId, form.valveId]);
+  useEffect(() => {
+    const trees = Number(selectedPlot?.treeCount || form.treeCountCovered || 0);
     const qty = Number(form.qtyPerTree || 0);
-    if (trees > 0 && qty > 0 && !form.totalQty) setForm((current) => ({ ...current, totalQty: String(Number((trees * qty).toFixed(4))) }));
-  }, [dashboard.plots, form.plotId, form.qtyPerTree, form.totalQty, form.treeCountCovered]);
+    if (form.activityType !== "fertilizer") return;
+    if (trees > 0 && qty > 0) setForm((current) => ({ ...current, totalQty: String(Number((trees * qty).toFixed(4))) }));
+  }, [form.activityType, form.qtyPerTree, form.treeCountCovered, selectedPlot?.treeCount]);
+  useEffect(() => {
+    if (!selectedProduct?.unit) return;
+    setForm((current) => current.unit === selectedProduct.unit ? current : { ...current, unit: selectedProduct.unit ?? "" });
+  }, [selectedProduct?.unit]);
   const submit = (event: FormEvent) => {
     event.preventDefault();
     onSubmit(form);
   };
-  const activityProducts = products.filter((product) => product.productType === form.activityType || product.productType === "other");
-  return <form className="farm-operation-form" onSubmit={submit}>
-    <select value={form.activityType} onChange={(event) => setForm({ ...form, activityType: event.target.value as OperationActivityType, productId: "" })}>{activityOptions.map((item) => <option key={item}>{item}</option>)}</select>
+  const activityProducts = products.filter((product) => {
+    if (form.activityType === "fertilizer") return product.productType === "fertilizer" || product.productType === "other";
+    if (form.activityType === "pesticide") return product.productType === "pesticide" || product.productType === "other";
+    return false;
+  });
+  return <form className="farm-operation-form farm-operation-form--simple" onSubmit={submit}>
+    <div className="farm-operation-form__header">
+      <h3>{formTitle}</h3>
+      <p>Select line and valve. Plot fills automatically from the valve.</p>
+    </div>
+    <select value={form.irrigationLineId} onChange={(event) => setForm({ ...form, irrigationLineId: event.target.value, valveId: "", plotId: "", treeCountCovered: "" })}>
+      <option value="">Line</option>
+      {dashboard.irrigationLines.map((line) => <option key={line.id} value={line.id}>{line.lineCode} {line.lineName ?? ""}</option>)}
+    </select>
+    <select value={form.valveId} onChange={(event) => setForm({ ...form, valveId: event.target.value })}>
+      <option value="">Valve</option>
+      {availableValves.map((valve) => <option key={valve.id} value={valve.id}>{valve.valveCode} {valve.valveName ?? ""}</option>)}
+    </select>
+    <div className="farm-operation-form__readonly">
+      <span>Plot</span>
+      <strong>{selectedPlot ? `${selectedPlot.plotCode}${selectedPlot.plotName ? ` • ${selectedPlot.plotName}` : ""}` : "Auto-filled from valve"}</strong>
+    </div>
     <input type="date" value={form.operationDate} onChange={(event) => setForm({ ...form, operationDate: event.target.value })} />
-    <select value={form.plotId} onChange={(event) => setForm({ ...form, plotId: event.target.value })}><option value="">Plot</option>{dashboard.plots.map((plot) => <option key={plot.id} value={plot.id}>{plot.plotCode} {plot.plotName ?? ""}</option>)}</select>
-    <select value={form.irrigationLineId} onChange={(event) => setForm({ ...form, irrigationLineId: event.target.value })}><option value="">Irrigation line</option>{dashboard.irrigationLines.map((line) => <option key={line.id} value={line.id}>{line.lineCode} {line.lineName ?? ""}</option>)}</select>
-    <select value={form.valveId} onChange={(event) => setForm({ ...form, valveId: event.target.value })}><option value="">Valve</option>{dashboard.valves.map((valve) => <option key={valve.id} value={valve.id}>{valve.valveCode} {valve.valveName ?? ""}</option>)}</select>
-    {(form.activityType === "irrigation") && <><input type="time" value={form.startTime} onChange={(event) => setForm({ ...form, startTime: event.target.value })} /><input type="time" value={form.endTime} onChange={(event) => setForm({ ...form, endTime: event.target.value })} /><input inputMode="numeric" placeholder="Duration minutes" value={form.durationMinutes} onChange={(event) => setForm({ ...form, durationMinutes: event.target.value })} /></>}
-    {(form.activityType === "fertilizer" || form.activityType === "pesticide") && <><input placeholder="Category" value={form.activityCategory} onChange={(event) => setForm({ ...form, activityCategory: event.target.value })} /><select value={form.productId} onChange={(event) => setForm({ ...form, productId: event.target.value })}><option value="">Product</option>{activityProducts.map((product) => <option key={product.id} value={product.id}>{product.productName}</option>)}</select><input placeholder="Product text" value={form.productNameText} onChange={(event) => setForm({ ...form, productNameText: event.target.value })} /></>}
-    <input inputMode="decimal" placeholder="Qty per tree" value={form.qtyPerTree} onChange={(event) => setForm({ ...form, qtyPerTree: event.target.value, totalQty: "" })} />
-    <input inputMode="decimal" placeholder="Total quantity" value={form.totalQty} onChange={(event) => setForm({ ...form, totalQty: event.target.value })} />
-    <input placeholder="Unit" value={form.unit} onChange={(event) => setForm({ ...form, unit: event.target.value })} />
-    <input inputMode="numeric" placeholder="Trees covered" value={form.treeCountCovered} onChange={(event) => setForm({ ...form, treeCountCovered: event.target.value, totalQty: "" })} />
-    <input placeholder="Performed by" value={form.performedBy} onChange={(event) => setForm({ ...form, performedBy: event.target.value })} />
-    <textarea placeholder="Remarks" value={form.remarks} onChange={(event) => setForm({ ...form, remarks: event.target.value })} />
-    <button type="submit" disabled={pending}><Save size={16} />Log operation</button>
+    {form.activityType === "irrigation" && <>
+      <div className="farm-duration-presets">
+        {[1, 2, 3, 4, 5].map((hours) => <button key={hours} className={form.durationMinutes === String(hours * 60) ? "is-active" : ""} type="button" onClick={() => setForm({ ...form, durationMinutes: String(hours * 60) })}>{hours} hour{hours > 1 ? "s" : ""}</button>)}
+        <button className={!["60", "120", "180", "240", "300"].includes(form.durationMinutes) && form.durationMinutes ? "is-active" : ""} type="button" onClick={() => setForm({ ...form, durationMinutes: "" })}>Custom</button>
+      </div>
+      <input inputMode="numeric" placeholder="Duration (minutes)" value={form.durationMinutes} onChange={(event) => setForm({ ...form, durationMinutes: event.target.value })} />
+    </>}
+    {form.activityType === "fertilizer" && <>
+      <select value={form.productId} onChange={(event) => setForm({ ...form, productId: event.target.value })}>
+        <option value="">Product</option>
+        {activityProducts.map((product) => <option key={product.id} value={product.id}>{product.productName}</option>)}
+      </select>
+      <input inputMode="decimal" placeholder="Qty per tree" value={form.qtyPerTree} onChange={(event) => setForm({ ...form, qtyPerTree: event.target.value })} />
+      <div className="farm-operation-form__readonly">
+        <span>Total quantity {selectedProduct?.unit ? `(${selectedProduct.unit})` : ""}</span>
+        <strong>{form.totalQty || "0"}</strong>
+      </div>
+    </>}
+    {form.activityType === "pesticide" && <>
+      <select value={form.productId} onChange={(event) => setForm({ ...form, productId: event.target.value })}>
+        <option value="">Product</option>
+        {activityProducts.map((product) => <option key={product.id} value={product.id}>{product.productName}</option>)}
+      </select>
+      <input inputMode="decimal" placeholder={`Quantity / dose${selectedProduct?.unit ? ` (${selectedProduct.unit})` : ""}`} value={form.totalQty} onChange={(event) => setForm({ ...form, totalQty: event.target.value })} />
+      <input placeholder="Target pest / disease" value={form.activityCategory} onChange={(event) => setForm({ ...form, activityCategory: event.target.value })} />
+    </>}
+    <input placeholder="Performed by (optional)" value={form.performedBy} onChange={(event) => setForm({ ...form, performedBy: event.target.value })} />
+    <textarea placeholder="Remarks (optional)" value={form.remarks} onChange={(event) => setForm({ ...form, remarks: event.target.value })} />
+    <button type="submit" disabled={pending || !form.irrigationLineId || !form.valveId || !form.plotId}>
+      <Save size={16} />
+      {pending ? "Saving..." : formTitle}
+    </button>
   </form>;
 }
 
@@ -501,7 +572,6 @@ function SideDrawer({
       <button type="button" onClick={() => onQuickLog("irrigation", selected)}><Droplets size={17} />Log irrigation</button>
       <button type="button" onClick={() => onQuickLog("fertilizer", selected)}><FlaskConical size={17} />Log fertilizer</button>
       <button type="button" onClick={() => onQuickLog("pesticide", selected)}><SprayCan size={17} />Log spray</button>
-      <button type="button" onClick={() => onQuickLog("maintenance", selected)}><FileText size={17} />Report issue</button>
     </div>}
     {plot && <><div className="farm-drawer-actions"><button type="button" onClick={() => onEditPlot(plot)}><Pencil size={15} />Edit plot</button><button className="danger-button" type="button" onClick={() => onDeactivatePlot(plot)}><Trash2 size={15} />Delete / deactivate</button></div>{managementHint}</>}
     {irrigationLine && <><div className="farm-drawer-actions"><button type="button" onClick={() => onEditLine(irrigationLine)}><Pencil size={15} />Edit line</button><button className="danger-button" type="button" onClick={() => onDeactivateLine(irrigationLine)}><Trash2 size={15} />Delete / deactivate</button></div>{managementHint}</>}
@@ -622,8 +692,15 @@ export function FarmOperationsMap({ mode }: { mode: Mode }) {
     const valve = selection?.kind === "valve" ? dashboard?.valves.find((item) => item.id === selection.id) : null;
     const line = selection?.kind === "line" ? dashboard?.irrigationLines.find((item) => item.id === selection.id) : dashboard?.irrigationLines.find((item) => item.id === valve?.irrigationLineId);
     const plot = selection?.kind === "plot" ? dashboard?.plots.find((item) => item.id === selection.id) : dashboard?.plots.find((item) => item.id === valve?.plotId);
-    setLogForm({ ...emptyLog, seasonId: activeSeasonId ?? "", activityType: activity, plotId: plot?.id ?? "", valveId: valve?.id ?? "", irrigationLineId: valve?.irrigationLineId ?? "", treeCountCovered: String(plot?.treeCount ?? valve?.estimatedTreeCount ?? "") });
-    if (selection?.kind === "line" && line) setLogForm((current) => ({ ...current, irrigationLineId: line.id }));
+    setLogForm({
+      ...emptyLog,
+      seasonId: activeSeasonId ?? "",
+      activityType: activity,
+      plotId: plot?.id ?? "",
+      valveId: valve?.id ?? "",
+      irrigationLineId: line?.id ?? valve?.irrigationLineId ?? "",
+      treeCountCovered: String(plot?.treeCount ?? valve?.estimatedTreeCount ?? ""),
+    });
     setEditingIds((current) => ({ ...current, log: null }));
     setShowLog(true);
   };
@@ -632,12 +709,19 @@ export function FarmOperationsMap({ mode }: { mode: Mode }) {
     id: editingIds.log ?? undefined,
     input: {
       ...input,
-      durationMinutes: input.durationMinutes || null,
-      qtyPerTree: input.qtyPerTree || null,
-      totalQty: input.totalQty || null,
-      treeCountCovered: input.treeCountCovered || null,
+      durationMinutes: input.activityType === "irrigation" ? input.durationMinutes || null : null,
+      qtyPerTree: input.activityType === "fertilizer" ? input.qtyPerTree || null : null,
+      totalQty: (input.activityType === "fertilizer" || input.activityType === "pesticide") ? input.totalQty || null : null,
+      unit: input.activityType === "fertilizer" || input.activityType === "pesticide" ? input.unit || null : null,
+      treeCountCovered: input.activityType === "fertilizer" ? input.treeCountCovered || null : null,
+      activityCategory: input.activityType === "pesticide" ? input.activityCategory || null : null,
+      productId: input.activityType === "fertilizer" || input.activityType === "pesticide" ? input.productId || null : null,
+      productNameText: null,
+      startTime: null,
+      endTime: null,
     },
   }, { onSuccess: () => {
+    window.dispatchEvent(new CustomEvent("muzare-toast", { detail: `${input.activityType === "irrigation" ? "Irrigation" : input.activityType === "fertilizer" ? "Fertilizer" : "Spray"} logged successfully.` }));
     resetLogForm();
     setShowLog(false);
   } });
@@ -1110,7 +1194,7 @@ export function FarmOperationsMap({ mode }: { mode: Mode }) {
           </form>
         </section>}
         {showLog && <section className="record-panel farm-log-panel">
-          <header><h2>{editingIds.log ? "Edit operation entry" : "Operation logging"}</h2><button type="button" onClick={() => { resetLogForm(); setShowLog(false); }}>Close</button></header>
+          <header><h2>{editingIds.log ? "Edit operation entry" : logForm.activityType === "irrigation" ? "Log Irrigation" : logForm.activityType === "fertilizer" ? "Log Fertilizer" : "Log Spray"}</h2><button type="button" onClick={() => { resetLogForm(); setShowLog(false); }}>Close</button></header>
           <OperationLogForm dashboard={dashboard} products={products.data?.records ?? []} initial={logForm} onSubmit={submitLog} pending={saveResource.isPending} />
         </section>}
         <section className="record-panel farm-logs-report">
