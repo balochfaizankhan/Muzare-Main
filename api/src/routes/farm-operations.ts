@@ -95,6 +95,7 @@ const waterAssetInput = z.object({
   linkedFeatureId: maybeUuid,
   status: z.string().trim().max(80).optional().nullable(),
   notes: nullableText,
+  active: z.boolean().optional().default(true),
 });
 const logInput = z.object({
   seasonId: z.string().uuid(),
@@ -170,6 +171,48 @@ async function seasonExists(workspaceId: string, farmId: string, seasonId?: stri
   return Boolean(season);
 }
 
+async function countLinkedRecords(resource: string, workspaceId: string, farmId: string, id: string) {
+  switch (resource) {
+    case "plots": {
+      const [logCount, valveCount, ruleCount, featureCount] = await Promise.all([
+        db.select({ count: sql<number>`count(*)::int` }).from(operationLogs).where(and(eq(operationLogs.workspaceId, workspaceId), eq(operationLogs.farmId, farmId), eq(operationLogs.plotId, id))),
+        db.select({ count: sql<number>`count(*)::int` }).from(valves).where(and(eq(valves.workspaceId, workspaceId), eq(valves.farmId, farmId), eq(valves.plotId, id), eq(valves.active, true))),
+        db.select({ count: sql<number>`count(*)::int` }).from(operationDueRules).where(and(eq(operationDueRules.workspaceId, workspaceId), eq(operationDueRules.farmId, farmId), eq(operationDueRules.plotId, id), eq(operationDueRules.active, true))),
+        db.select({ count: sql<number>`count(*)::int` }).from(farmMapFeatures).where(and(eq(farmMapFeatures.workspaceId, workspaceId), eq(farmMapFeatures.farmId, farmId), eq(farmMapFeatures.linkedPlotId, id), eq(farmMapFeatures.active, true))),
+      ]);
+      return (logCount[0]?.count ?? 0) + (valveCount[0]?.count ?? 0) + (ruleCount[0]?.count ?? 0) + (featureCount[0]?.count ?? 0);
+    }
+    case "irrigation-lines": {
+      const [logCount, valveCount, featureCount] = await Promise.all([
+        db.select({ count: sql<number>`count(*)::int` }).from(operationLogs).where(and(eq(operationLogs.workspaceId, workspaceId), eq(operationLogs.farmId, farmId), eq(operationLogs.irrigationLineId, id))),
+        db.select({ count: sql<number>`count(*)::int` }).from(valves).where(and(eq(valves.workspaceId, workspaceId), eq(valves.farmId, farmId), eq(valves.irrigationLineId, id), eq(valves.active, true))),
+        db.select({ count: sql<number>`count(*)::int` }).from(farmMapFeatures).where(and(eq(farmMapFeatures.workspaceId, workspaceId), eq(farmMapFeatures.farmId, farmId), eq(farmMapFeatures.linkedIrrigationLineId, id), eq(farmMapFeatures.active, true))),
+      ]);
+      return (logCount[0]?.count ?? 0) + (valveCount[0]?.count ?? 0) + (featureCount[0]?.count ?? 0);
+    }
+    case "valves": {
+      const [logCount, featureCount] = await Promise.all([
+        db.select({ count: sql<number>`count(*)::int` }).from(operationLogs).where(and(eq(operationLogs.workspaceId, workspaceId), eq(operationLogs.farmId, farmId), eq(operationLogs.valveId, id))),
+        db.select({ count: sql<number>`count(*)::int` }).from(farmMapFeatures).where(and(eq(farmMapFeatures.workspaceId, workspaceId), eq(farmMapFeatures.farmId, farmId), eq(farmMapFeatures.linkedValveId, id), eq(farmMapFeatures.active, true))),
+      ]);
+      return (logCount[0]?.count ?? 0) + (featureCount[0]?.count ?? 0);
+    }
+    case "water-assets":
+      return 0;
+    case "features": {
+      const [plotCount, lineCount, valveCount, assetCount] = await Promise.all([
+        db.select({ count: sql<number>`count(*)::int` }).from(plots).where(and(eq(plots.workspaceId, workspaceId), eq(plots.farmId, farmId), eq(plots.geoFeatureId, id), eq(plots.active, true))),
+        db.select({ count: sql<number>`count(*)::int` }).from(irrigationLines).where(and(eq(irrigationLines.workspaceId, workspaceId), eq(irrigationLines.farmId, farmId), eq(irrigationLines.geoFeatureId, id), eq(irrigationLines.active, true))),
+        db.select({ count: sql<number>`count(*)::int` }).from(valves).where(and(eq(valves.workspaceId, workspaceId), eq(valves.farmId, farmId), eq(valves.geoFeatureId, id), eq(valves.active, true))),
+        db.select({ count: sql<number>`count(*)::int` }).from(waterAssets).where(and(eq(waterAssets.workspaceId, workspaceId), eq(waterAssets.farmId, farmId), eq(waterAssets.linkedFeatureId, id), eq(waterAssets.active, true))),
+      ]);
+      return (plotCount[0]?.count ?? 0) + (lineCount[0]?.count ?? 0) + (valveCount[0]?.count ?? 0) + (assetCount[0]?.count ?? 0);
+    }
+    default:
+      return 0;
+  }
+}
+
 async function ensureScope(reply: { code: (status: number) => { send: (body: unknown) => unknown } }, request: FastifyRequest, workspaceId: string, farmId: string, write: "read" | "submit" | "manage") {
   const allowed = write === "read" ? canRead(request, workspaceId) : write === "submit" ? canSubmit(request, workspaceId) : canManage(request, workspaceId);
   if (!allowed) {
@@ -212,10 +255,10 @@ async function readDashboard(workspaceId: string, farmId: string, seasonId?: str
   const [map] = await db.select().from(farmMaps).where(and(eq(farmMaps.workspaceId, workspaceId), eq(farmMaps.farmId, farmId), seasonId ? eq(farmMaps.seasonId, seasonId) : sql`true`)).orderBy(desc(farmMaps.updatedAt)).limit(1);
   const [features, plotRows, lineRows, valveRows, waterAssetRows, rules, recentOperations] = await Promise.all([
     db.select().from(farmMapFeatures).where(and(eq(farmMapFeatures.workspaceId, workspaceId), eq(farmMapFeatures.farmId, farmId), featureSeasonFilter, eq(farmMapFeatures.active, true))).orderBy(farmMapFeatures.displayOrder, farmMapFeatures.featureName),
-    db.select().from(plots).where(and(eq(plots.workspaceId, workspaceId), eq(plots.farmId, farmId), seasonFilter)).orderBy(plots.plotCode),
-    db.select().from(irrigationLines).where(and(eq(irrigationLines.workspaceId, workspaceId), eq(irrigationLines.farmId, farmId), seasonId ? eq(irrigationLines.seasonId, seasonId) : sql`true`)).orderBy(irrigationLines.lineCode),
-    db.select().from(valves).where(and(eq(valves.workspaceId, workspaceId), eq(valves.farmId, farmId), seasonId ? eq(valves.seasonId, seasonId) : sql`true`)).orderBy(valves.valveCode),
-    db.select().from(waterAssets).where(and(eq(waterAssets.workspaceId, workspaceId), eq(waterAssets.farmId, farmId), seasonId ? eq(waterAssets.seasonId, seasonId) : sql`true`)).orderBy(waterAssets.assetType, waterAssets.assetCode),
+    db.select().from(plots).where(and(eq(plots.workspaceId, workspaceId), eq(plots.farmId, farmId), seasonFilter, eq(plots.active, true))).orderBy(plots.plotCode),
+    db.select().from(irrigationLines).where(and(eq(irrigationLines.workspaceId, workspaceId), eq(irrigationLines.farmId, farmId), seasonId ? eq(irrigationLines.seasonId, seasonId) : sql`true`, eq(irrigationLines.active, true))).orderBy(irrigationLines.lineCode),
+    db.select().from(valves).where(and(eq(valves.workspaceId, workspaceId), eq(valves.farmId, farmId), seasonId ? eq(valves.seasonId, seasonId) : sql`true`, eq(valves.active, true))).orderBy(valves.valveCode),
+    db.select().from(waterAssets).where(and(eq(waterAssets.workspaceId, workspaceId), eq(waterAssets.farmId, farmId), seasonId ? eq(waterAssets.seasonId, seasonId) : sql`true`, eq(waterAssets.active, true))).orderBy(waterAssets.assetType, waterAssets.assetCode),
     db.select().from(operationDueRules).where(and(eq(operationDueRules.workspaceId, workspaceId), eq(operationDueRules.farmId, farmId), seasonId ? eq(operationDueRules.seasonId, seasonId) : sql`true`, eq(operationDueRules.active, true))),
     db.select().from(operationLogs).where(and(eq(operationLogs.workspaceId, workspaceId), eq(operationLogs.farmId, farmId), logSeasonFilter)).orderBy(desc(operationLogs.operationDate), desc(operationLogs.createdAt)).limit(25),
   ]);
@@ -326,7 +369,7 @@ export async function farmOperationRoutes(app: FastifyInstance): Promise<void> {
     { name: "plots", table: plots, schema: plotInput, write: "manage" as const, values: (data: z.infer<typeof plotInput>, p: z.infer<typeof paramsSchema>) => ({ workspaceId: p.workspaceId, farmId: p.farmId, seasonId: blankToNull(data.seasonId), plotCode: data.plotCode, plotName: blankToNull(data.plotName), variety: blankToNull(data.variety), treeCount: data.treeCount ?? null, area: numberString(data.area), notes: blankToNull(data.notes), geoFeatureId: blankToNull(data.geoFeatureId), active: data.active }) },
     { name: "irrigation-lines", table: irrigationLines, schema: lineInput, write: "manage" as const, values: (data: z.infer<typeof lineInput>, p: z.infer<typeof paramsSchema>) => ({ workspaceId: p.workspaceId, farmId: p.farmId, seasonId: blankToNull(data.seasonId), lineCode: data.lineCode, lineName: blankToNull(data.lineName), description: blankToNull(data.description), geoFeatureId: blankToNull(data.geoFeatureId), active: data.active }) },
     { name: "valves", table: valves, schema: valveInput, write: "manage" as const, values: (data: z.infer<typeof valveInput>, p: z.infer<typeof paramsSchema>) => ({ workspaceId: p.workspaceId, farmId: p.farmId, seasonId: blankToNull(data.seasonId), valveCode: data.valveCode, valveName: blankToNull(data.valveName), irrigationLineId: blankToNull(data.irrigationLineId), plotId: blankToNull(data.plotId), estimatedTreeCount: data.estimatedTreeCount ?? null, notes: blankToNull(data.notes), geoFeatureId: blankToNull(data.geoFeatureId), active: data.active }) },
-    { name: "water-assets", table: waterAssets, schema: waterAssetInput, write: "manage" as const, values: (data: z.infer<typeof waterAssetInput>, p: z.infer<typeof paramsSchema>, u: string) => ({ workspaceId: p.workspaceId, farmId: p.farmId, seasonId: blankToNull(data.seasonId), assetType: data.assetType, assetCode: data.assetCode, assetName: data.assetName, linkedFeatureId: blankToNull(data.linkedFeatureId), status: blankToNull(data.status), notes: blankToNull(data.notes), createdBy: u }) },
+    { name: "water-assets", table: waterAssets, schema: waterAssetInput, write: "manage" as const, values: (data: z.infer<typeof waterAssetInput>, p: z.infer<typeof paramsSchema>, u: string) => ({ workspaceId: p.workspaceId, farmId: p.farmId, seasonId: blankToNull(data.seasonId), assetType: data.assetType, assetCode: data.assetCode, assetName: data.assetName, linkedFeatureId: blankToNull(data.linkedFeatureId), status: blankToNull(data.status), notes: blankToNull(data.notes), active: data.active, createdBy: u }) },
     { name: "operation-logs", table: operationLogs, schema: logInput, write: "submit" as const, values: (data: z.infer<typeof logInput>, p: z.infer<typeof paramsSchema>, u: string) => ({ workspaceId: p.workspaceId, farmId: p.farmId, seasonId: data.seasonId, plotId: blankToNull(data.plotId), irrigationLineId: blankToNull(data.irrigationLineId), valveId: blankToNull(data.valveId), activityType: data.activityType, activityCategory: blankToNull(data.activityCategory), productId: blankToNull(data.productId), productNameText: blankToNull(data.productNameText), operationDate: data.operationDate, startTime: blankToNull(data.startTime), endTime: blankToNull(data.endTime), durationMinutes: data.durationMinutes ?? null, qtyPerTree: numberString(data.qtyPerTree), totalQty: numberString(data.totalQty), unit: blankToNull(data.unit), treeCountCovered: data.treeCountCovered ?? null, performedBy: blankToNull(data.performedBy), labourTeamId: blankToNull(data.labourTeamId), remarks: blankToNull(data.remarks), createdBy: u }) },
     { name: "operation-due-rules", table: operationDueRules, schema: ruleInput, write: "manage" as const, values: (data: z.infer<typeof ruleInput>, p: z.infer<typeof paramsSchema>) => ({ workspaceId: p.workspaceId, farmId: p.farmId, seasonId: blankToNull(data.seasonId), plotId: blankToNull(data.plotId), activityType: data.activityType, activityCategory: blankToNull(data.activityCategory), productId: blankToNull(data.productId), intervalDays: data.intervalDays, dueSoonDays: data.dueSoonDays, active: data.active, notes: blankToNull(data.notes) }) },
   ];
@@ -376,6 +419,10 @@ export async function farmOperationRoutes(app: FastifyInstance): Promise<void> {
       const params = idParamSchema.safeParse(request.params);
       if (!request.appUser || !params.success) return reply.code(400).send({ message: "Valid record id is required." });
       if (!(await ensureScope(reply, request, params.data.workspaceId, params.data.farmId, "manage"))) return reply;
+      const linkedCount = await countLinkedRecords(resource.name, params.data.workspaceId, params.data.farmId, params.data.id);
+      if (linkedCount > 0 && ["plots", "irrigation-lines", "valves", "features", "water-assets"].includes(resource.name)) {
+        return reply.code(409).send({ message: "This record has linked map or history records. Deactivate it instead of deleting.", linkedCount });
+      }
       const [record] = await db.delete(resource.table)
         .where(and(eq(resource.table.id, params.data.id), eq(resource.table.workspaceId, params.data.workspaceId), eq(resource.table.farmId, params.data.farmId)))
         .returning({ id: resource.table.id });

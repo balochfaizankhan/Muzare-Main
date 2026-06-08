@@ -5217,13 +5217,46 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   background: var(--surface-soft);
   border: 1px solid var(--border);
   border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 34px;
   padding: 6px 10px;
+}
+.farm-drawer-actions,
+.farm-form-actions,
+.farm-table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.farm-drawer-link {
+  justify-content: center;
+  text-decoration: none;
+}
+.farm-drawer-actions button,
+.farm-form-actions button,
+.farm-table-actions button,
+.farm-show-inactive {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+.farm-show-inactive {
+  color: var(--text-secondary);
+  font-size: .8rem;
+  font-weight: 700;
+}
+.farm-show-inactive input {
+  height: 16px;
+  margin: 0;
+  width: 16px;
 }
 .farm-map-facts { display: grid; gap: 7px; margin: 0; }
 .farm-map-facts div { display: grid; gap: 3px; }
 .farm-map-facts dd { margin: 0; }
 .farm-builder-grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.farm-builder-grid > .farm-show-inactive { grid-column: 1 / -1; }
 .farm-water-builder { display: grid; gap: 10px; }
 .farm-water-builder header {
   align-items: flex-start;
@@ -5298,6 +5331,39 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   width: 100%;
 }
 .farm-builder-form textarea, .farm-operation-form textarea { min-height: 86px; resize: vertical; }
+.farm-record-list {
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 10px;
+}
+.farm-record-list h3 {
+  font-size: .84rem;
+  margin: 0;
+}
+.farm-record-list__item {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 10px;
+}
+.farm-record-list__item > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.farm-record-list__item strong,
+.farm-record-list__item small {
+  overflow-wrap: anywhere;
+}
+.farm-record-list__item small {
+  color: var(--text-secondary);
+}
 .farm-log-panel, .farm-logs-report { display: grid; gap: 10px; padding: 12px; }
 .farm-log-panel header { align-items: center; display: flex; justify-content: space-between; }
 .farm-log-panel header button { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 7px; min-height: 34px; padding: 6px 10px; }
@@ -5342,6 +5408,16 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .farm-kml-import header { display: grid; }
   .farm-file-picker, .farm-kml-import footer button { justify-content: center; width: 100%; }
   .farm-operation-form { grid-template-columns: minmax(0, 1fr); }
+  .farm-record-list__item {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .farm-drawer-actions,
+  .farm-form-actions,
+  .farm-table-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .farm-map-drawer {
     border-bottom-left-radius: 0;
     border-bottom-right-radius: 0;

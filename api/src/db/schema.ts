@@ -651,6 +651,7 @@ export const waterAssets = pgTable(
     linkedFeatureId: uuid("linked_feature_id").references(() => farmMapFeatures.id, { onDelete: "set null" }),
     status: text("status"),
     notes: text("notes"),
+    active: boolean("active").default(true).notNull(),
     createdBy: uuid("created_by").references(() => users.id),
     ...timestamps,
   },

@@ -18,6 +18,7 @@ const partnerSettlementAccountIdsMigrationUrl = new URL("../../../database/migra
 const workspaceTeamPermissionsMigrationUrl = new URL("../../../database/migrations/0016_workspace_team_permissions.sql", import.meta.url);
 const liveGeoFarmOperationsMigrationUrl = new URL("../../../database/migrations/0017_live_geo_farm_operations.sql", import.meta.url);
 const simpleWaterAssetsMigrationUrl = new URL("../../../database/migrations/0018_simple_water_assets.sql", import.meta.url);
+const farmOperationsSoftDeleteMigrationUrl = new URL("../../../database/migrations/0019_farm_operations_soft_delete.sql", import.meta.url);
 
 async function tableExists(tableName: string): Promise<boolean> {
   const result = (await db.execute(
@@ -115,4 +116,6 @@ export async function ensureWorkspaceSchema(): Promise<void> {
   await db.execute(liveGeoFarmOperationsMigration);
   const simpleWaterAssetsMigration = await readFile(simpleWaterAssetsMigrationUrl, "utf8");
   await db.execute(simpleWaterAssetsMigration);
+  const farmOperationsSoftDeleteMigration = await readFile(farmOperationsSoftDeleteMigrationUrl, "utf8");
+  await db.execute(farmOperationsSoftDeleteMigration);
 }

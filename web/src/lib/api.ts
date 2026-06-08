@@ -253,7 +253,7 @@ export type FarmValve = {
 };
 export type WaterAsset = {
   id: string; workspaceId: string; farmId: string; seasonId: string | null; assetType: "pump" | "reservoir";
-  assetCode: string; assetName: string; linkedFeatureId: string | null; status: string | null; notes: string | null;
+  assetCode: string; assetName: string; linkedFeatureId: string | null; status: string | null; notes: string | null; active: boolean;
 };
 export type FarmProduct = {
   id: string; workspaceId: string; productType: "fertilizer" | "pesticide" | "other"; category: string | null; productName: string; unit: string | null; notes: string | null; active: boolean;
@@ -468,10 +468,14 @@ export const fetchFarmOperationsDashboard = (token: string, workspaceId: string,
 };
 export const fetchFarmOperationsProducts = (token: string, workspaceId: string, farmId: string) =>
   apiRequest<{ records: FarmProduct[] }>(`/v1/workspace/${workspaceId}/farms/${farmId}/farm-operations/products`, {}, token);
+export const fetchFarmOperationResources = <TRecord>(token: string, workspaceId: string, farmId: string, resource: string) =>
+  apiRequest<{ records: TRecord[] }>(`/v1/workspace/${workspaceId}/farms/${farmId}/farm-operations/${resource}`, {}, token);
 export const createFarmOperationResource = <TInput, TResult>(token: string, workspaceId: string, farmId: string, resource: string, input: TInput) =>
   apiRequest<{ record: TResult }>(`/v1/workspace/${workspaceId}/farms/${farmId}/farm-operations/${resource}`, { method: "POST", body: JSON.stringify(input) }, token);
 export const updateFarmOperationResource = <TInput, TResult>(token: string, workspaceId: string, farmId: string, resource: string, id: string, input: TInput) =>
   apiRequest<{ record: TResult }>(`/v1/workspace/${workspaceId}/farms/${farmId}/farm-operations/${resource}/${id}`, { method: "PATCH", body: JSON.stringify(input) }, token);
+export const deleteFarmOperationResource = (token: string, workspaceId: string, farmId: string, resource: string, id: string) =>
+  apiRequest<void>(`/v1/workspace/${workspaceId}/farms/${farmId}/farm-operations/${resource}/${id}`, { method: "DELETE" }, token);
 export const fetchFarmOperationLogs = (token: string, workspaceId: string, filters: {
   farmId: string; seasonId?: string | null; plotId?: string; valveId?: string; irrigationLineId?: string; activityType?: OperationActivityType | ""; dateFrom?: string; dateTo?: string;
 }) => {
