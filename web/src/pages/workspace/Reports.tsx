@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { SearchInput } from "../../components/SearchInput";
 import { SubpageHeader } from "../../components/SubpageHeader";
 import { formatMoney, formatNumber } from "../../lib/format";
+import { saleProduceLabel } from "../../lib/dispatch-sales";
 import {
   offlineDb,
   workspaceRecords,
@@ -317,7 +318,7 @@ export function Reports() {
     .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
   const saleRows = sales
     .filter((item) => (!accountId || item.accountId === accountId)
-      && matches(item.date, [item.buyerName, item.produceType, accountName(item.accountId)], item.amount))
+      && matches(item.date, [item.buyerName, saleProduceLabel(item), item.dispatchDate, item.vehicleNumber, accountName(item.accountId)], item.amount))
     .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
 
   const positions = useMemo(() => accounts
@@ -347,7 +348,17 @@ export function Reports() {
     const rows: Array<{ id: string; date: string; accountId: string; type: string; reference: string; description: string; debit: number; credit: number; path: string }> = [];
     for (const voucher of voucherRows) rows.push({ id: `voucher:${voucher.id}`, date: voucher.date, accountId: voucher.accountId, type: t("reportsPage.voucherExpense"), reference: voucher.voucherNumber, description: voucher.description, debit: voucher.amount, credit: 0, path: `/workspace/expenses?recordId=${voucher.id}` });
     for (const advance of advanceRows) rows.push({ id: `advance:${advance.id}`, date: advance.date, accountId: advance.accountId ?? "", type: t("reportsPage.labourAdvance"), reference: advance.id.slice(0, 8), description: `${labourName(advance.labourerId)}${advance.notes ? ` - ${advance.notes}` : ""}`, debit: advance.amount, credit: 0, path: `/workspace/labour-advances?recordId=${advance.id}` });
-    for (const sale of saleRows) rows.push({ id: `sale:${sale.id}`, date: sale.date, accountId: sale.accountId, type: t("reportsPage.sale"), reference: sale.id.slice(0, 8), description: `${sale.buyerName} - ${sale.produceType}`, debit: 0, credit: sale.amount, path: `/workspace/sales?recordId=${sale.id}` });
+    for (const sale of saleRows) rows.push({
+      id: `sale:${sale.id}`,
+      date: sale.date,
+      accountId: sale.accountId,
+      type: t("reportsPage.sale"),
+      reference: sale.dispatchDate ? `DSP ${sale.dispatchDate}` : sale.id.slice(0, 8),
+      description: `${sale.buyerName} - ${saleProduceLabel(sale)}${sale.vehicleNumber ? ` - ${sale.vehicleNumber}` : ""}`,
+      debit: 0,
+      credit: sale.amount,
+      path: `/workspace/sales?recordId=${sale.id}`,
+    });
     for (const entry of partnerRows) {
       if (entry.type === "contribution" || entry.type === "withdrawal") rows.push({ id: `partner:${entry.id}`, date: entry.date, accountId: entry.accountId ?? "", type: entry.type === "contribution" ? t("reportsPage.contribution") : t("reportsPage.withdrawal"), reference: entry.id.slice(0, 8), description: `${entry.partnerName ?? "-"}${entry.notes ? ` - ${entry.notes}` : ""}`, debit: entry.type === "withdrawal" ? entry.amount : 0, credit: entry.type === "contribution" ? entry.amount : 0, path: `/workspace/partner-ledger?recordId=${entry.id}` });
       if (entry.type === "settlement") {

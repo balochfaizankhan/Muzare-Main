@@ -84,7 +84,29 @@ const partnerEntryPayloadSchema = z.discriminatedUnion("type", [
   }).passthrough(),
 ]);
 const financialPayloadSchemas = {
-  sale: z.object({ date: dateSchema, amount: positiveAmountSchema, accountId: z.string().min(1) }).passthrough(),
+  sale: z.object({
+    date: dateSchema,
+    buyerName: z.string().trim().min(1),
+    produceType: z.string().trim().min(1),
+    quantity: positiveAmountSchema,
+    unitPrice: z.coerce.number().nonnegative(),
+    amount: positiveAmountSchema,
+    accountId: z.string().min(1),
+    dispatchId: z.string().min(1).optional(),
+    dispatchItemId: z.string().min(1).optional(),
+    dispatchDate: dateSchema.optional(),
+    vehicleId: z.string().min(1).optional(),
+    vehicleNumber: z.string().trim().optional(),
+    dateTypeId: z.string().min(1).optional(),
+    dateTypeName: z.string().trim().optional(),
+  }).superRefine((record, context) => {
+    if (Boolean(record.dispatchId) !== Boolean(record.dispatchItemId)) {
+      context.addIssue({ code: "custom", message: "Dispatch sales must include both dispatchId and dispatchItemId.", path: ["dispatchId"] });
+    }
+    if (Math.abs(record.amount - (record.quantity * record.unitPrice)) > 0.01) {
+      context.addIssue({ code: "custom", message: "Sale total must match quantity x unit price.", path: ["amount"] });
+    }
+  }).passthrough(),
   voucher: z.object({ date: dateSchema, amount: positiveAmountSchema, accountId: z.string().min(1) }).passthrough(),
   advance: z.object({
     date: dateSchema, amount: positiveAmountSchema, accountId: z.string().min(1),
@@ -224,6 +246,68 @@ async function dispatchMasterIsUsed(
   return dispatches.some(({ payload }) => !payload.deletedAt && (entity === "vehicle"
     ? payload.vehicleId === recordId
     : Array.isArray(payload.items) && payload.items.some((item: { dateTypeId?: unknown }) => item.dateTypeId === recordId)));
+}
+
+async function validateLinkedDispatchSale({
+  workspaceId,
+  farmId,
+  seasonId,
+  record,
+  existingRecordId,
+}: {
+  workspaceId: string;
+  farmId: string;
+  seasonId: string;
+  record: Record<string, unknown>;
+  existingRecordId?: string;
+}) {
+  const dispatchId = typeof record.dispatchId === "string" ? record.dispatchId : "";
+  const dispatchItemId = typeof record.dispatchItemId === "string" ? record.dispatchItemId : "";
+  const saleDate = typeof record.date === "string" ? record.date : "";
+  const quantity = Number(record.quantity ?? 0);
+  if (!dispatchId && !dispatchItemId) return null;
+  if (!dispatchId || !dispatchItemId) return "Sales must be linked to a dispatch record.";
+
+  const [dispatch] = await db.select({ clientRecordId: operationalRecords.clientRecordId, payload: operationalRecords.payload })
+    .from(operationalRecords)
+    .where(and(
+      eq(operationalRecords.workspaceId, workspaceId),
+      eq(operationalRecords.farmId, farmId),
+      eq(operationalRecords.seasonId, seasonId),
+      eq(operationalRecords.entityType, "dispatch"),
+      eq(operationalRecords.clientRecordId, dispatchId),
+    ))
+    .limit(1);
+  if (!dispatch || dispatch.payload.deletedAt) return "Select an active dispatch record before recording a sale.";
+  if (typeof dispatch.payload.date === "string" && saleDate < dispatch.payload.date) {
+    return "Sale date cannot be earlier than the dispatch date.";
+  }
+
+  const dispatchItem = Array.isArray(dispatch.payload.items)
+    ? dispatch.payload.items.find((item: { id?: unknown }) => item.id === dispatchItemId)
+    : null;
+  if (!dispatchItem || typeof dispatchItem.cartons !== "number") {
+    return "Selected dispatch item could not be found.";
+  }
+
+  const existingSales = await db.select({ clientRecordId: operationalRecords.clientRecordId, payload: operationalRecords.payload })
+    .from(operationalRecords)
+    .where(and(
+      eq(operationalRecords.workspaceId, workspaceId),
+      eq(operationalRecords.farmId, farmId),
+      eq(operationalRecords.seasonId, seasonId),
+      eq(operationalRecords.entityType, "sale"),
+    ));
+  const alreadySold = existingSales.reduce((sum, sale) => {
+    if (sale.clientRecordId === existingRecordId || sale.payload.deletedAt) return sum;
+    return sale.payload.dispatchId === dispatchId && sale.payload.dispatchItemId === dispatchItemId
+      ? sum + Number(sale.payload.quantity ?? 0)
+      : sum;
+  }, 0);
+  if (alreadySold + quantity > dispatchItem.cartons) {
+    return "Sale quantity cannot exceed the remaining cartons on the selected dispatch.";
+  }
+  return null;
 }
 
 export async function operationalSyncRoutes(app: FastifyInstance): Promise<void> {
@@ -388,6 +472,16 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     }
     if (existing && ["partnerEntry", "advance", "voucher"].includes(parsed.data.entity) && existing.payload.deletedAt) {
       return reply.code(409).send({ message: "Deleted financial records cannot be edited." });
+    }
+    if (parsed.data.entity === "sale") {
+      const saleLinkError = await validateLinkedDispatchSale({
+        workspaceId: parsed.data.workspaceId,
+        farmId: parsed.data.farmId!,
+        seasonId: parsed.data.seasonId!,
+        record: parsed.data.record,
+        existingRecordId: existing?.clientRecordId,
+      });
+      if (saleLinkError) return reply.code(409).send({ message: saleLinkError });
     }
     const clientUpdatedAt = new Date(parsed.data.record.updatedAt);
     if (existing && existing.clientUpdatedAt > clientUpdatedAt) {

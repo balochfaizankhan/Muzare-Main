@@ -197,6 +197,100 @@ test("dispatch masters are tenant scoped and used masters remain protected", asy
   })).statusCode, 204);
 });
 
+test("dispatch-linked sales enforce remaining cartons and active dispatch references", async () => {
+  const accountId = await createAccount(alpha, "Dispatch Sale Cash");
+  const vehicleId = randomUUID();
+  const dateTypeId = randomUUID();
+  const dispatchId = randomUUID();
+  const dispatchItemId = randomUUID();
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "vehicle", vehicleId, {
+    number: "SAL-101", active: true,
+  }))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "dateType", dateTypeId, {
+    name: "Ajwa", active: true,
+  }))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "dispatch", dispatchId, {
+    date: "2026-06-03", vehicleId, items: [{ id: dispatchItemId, dateTypeId, cartons: 40 }],
+  }))).statusCode, 200);
+
+  const firstSale = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "sale", randomUUID(), {
+    date: "2026-06-03",
+    buyerName: "Buyer One",
+    produceType: "Ajwa",
+    quantity: 25,
+    unitPrice: 12,
+    amount: 300,
+    accountId,
+    dispatchId,
+    dispatchItemId,
+    dispatchDate: "2026-06-03",
+    vehicleId,
+    vehicleNumber: "SAL-101",
+    dateTypeId,
+    dateTypeName: "Ajwa",
+  }));
+  assert.equal(firstSale.statusCode, 200);
+
+  const oversell = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "sale", randomUUID(), {
+    date: "2026-06-04",
+    buyerName: "Buyer Two",
+    produceType: "Ajwa",
+    quantity: 20,
+    unitPrice: 12,
+    amount: 240,
+    accountId,
+    dispatchId,
+    dispatchItemId,
+    dispatchDate: "2026-06-03",
+    vehicleId,
+    vehicleNumber: "SAL-101",
+    dateTypeId,
+    dateTypeName: "Ajwa",
+  }));
+  assert.equal(oversell.statusCode, 409);
+  assert.equal(oversell.json().message, "Sale quantity cannot exceed the remaining cartons on the selected dispatch.");
+
+  const beforeDispatch = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "sale", randomUUID(), {
+    date: "2026-06-02",
+    buyerName: "Buyer Three",
+    produceType: "Ajwa",
+    quantity: 5,
+    unitPrice: 12,
+    amount: 60,
+    accountId,
+    dispatchId,
+    dispatchItemId,
+    dispatchDate: "2026-06-03",
+    vehicleId,
+    vehicleNumber: "SAL-101",
+    dateTypeId,
+    dateTypeName: "Ajwa",
+  }));
+  assert.equal(beforeDispatch.statusCode, 409);
+
+  assert.equal((await request(alpha.token, "DELETE", "/v1/workspace/operational-records", {
+    workspaceId: alpha.workspaceId, farmId: alpha.farmId, seasonId: alpha.seasonId, entity: "dispatch", recordId: dispatchId,
+  })).statusCode, 204);
+
+  const deletedDispatchSale = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "sale", randomUUID(), {
+    date: "2026-06-04",
+    buyerName: "Buyer Four",
+    produceType: "Ajwa",
+    quantity: 5,
+    unitPrice: 12,
+    amount: 60,
+    accountId,
+    dispatchId,
+    dispatchItemId,
+    dispatchDate: "2026-06-03",
+    vehicleId,
+    vehicleNumber: "SAL-101",
+    dateTypeId,
+    dateTypeName: "Ajwa",
+  }));
+  assert.equal(deletedDispatchSale.statusCode, 409);
+});
+
 test("financial sync rejects accountless or invalid advances and soft deletes advances idempotently", async () => {
   const labourerId = randomUUID();
   const accountId = await createAccount(alpha, "Advance Deletion Cash");
@@ -277,7 +371,7 @@ const createAccount = async (tenant: typeof alpha, name: string) => {
 };
 const financialRecord = (tenant: typeof alpha, entity: "sale" | "voucher", record: Record<string, unknown> = {}) => ({
   date: "2026-06-01", amount: 100, accountId: `${tenant.seasonId}:local-cash`,
-  ...(entity === "sale" ? { buyerName: "Buyer", produceType: "Produce" } : { description: "Expense" }),
+  ...(entity === "sale" ? { buyerName: "Buyer", produceType: "Produce", quantity: 10, unitPrice: 10 } : { description: "Expense" }),
   ...record,
 });
 

@@ -132,6 +132,13 @@ export type Sale = LocalRecord & {
   unitPrice: number;
   amount: number;
   accountId: string;
+  dispatchId?: string;
+  dispatchItemId?: string;
+  dispatchDate?: string;
+  vehicleId?: string;
+  vehicleNumber?: string;
+  dateTypeId?: string;
+  dateTypeName?: string;
 };
 
 export type PartnerEntry = LocalRecord & {

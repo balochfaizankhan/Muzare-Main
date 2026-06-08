@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
@@ -6,12 +6,13 @@ import { useAuth } from "../../auth/AuthProvider";
 import { LabourSelectCombobox } from "../../components/LabourSelectCombobox";
 import { SearchInput } from "../../components/SearchInput";
 import { SubpageHeader } from "../../components/SubpageHeader";
+import { todayLocalDateKey } from "../../lib/attendanceStatus";
 import { formatMoney } from "../../lib/format";
 import { hasPermission } from "../../lib/permissions";
-import { offlineDb, workspaceRecords, type Account, type Advance, type Labourer } from "../../lib/offline-db";
+import { ensureLocalAccounts, makeLocalRecord, offlineDb, workspaceRecords, type Account, type Advance, type Labourer } from "../../lib/offline-db";
 import { deleteOperationalRecord, persistOperationalRecord } from "../../services/syncService";
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = todayLocalDateKey;
 const monthStart = () => `${today().slice(0, 8)}01`;
 const money = formatMoney;
 
@@ -27,15 +28,25 @@ export function LabourAdvances() {
   const [search, setSearch] = useState("");
   const [from, setFrom] = useState(monthStart());
   const [to, setTo] = useState(today());
+  const [entryDate, setEntryDate] = useState(today());
+  const [entryLabourerId, setEntryLabourerId] = useState("");
+  const [entryAmount, setEntryAmount] = useState("");
+  const [entryAccountId, setEntryAccountId] = useState("");
+  const [entryNotes, setEntryNotes] = useState("");
   const [labourerId, setLabourerId] = useState("all");
   const [group, setGroup] = useState("all");
   const [paymentType, setPaymentType] = useState("all");
   const [sort, setSort] = useState<Sort>("date_desc");
   const [selected, setSelected] = useState<Advance | null>(null);
   const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [entryError, setEntryError] = useState("");
+  const canRecord = Boolean(user?.workspaceId && hasPermission(user, "SUBMIT_RECORDS", user.workspaceId));
   const canManage = Boolean(user?.workspaceId && hasPermission(user, "MANAGE_RECORDS", user.workspaceId));
+  const labourInputRef = useRef<HTMLInputElement | null>(null);
 
   const refresh = useCallback(async () => {
+    await ensureLocalAccounts();
     const [nextAdvances, nextLabourers, nextAccounts] = await Promise.all([
       workspaceRecords(offlineDb.advances),
       workspaceRecords(offlineDb.labourers),
@@ -63,6 +74,15 @@ export function LabourAdvances() {
   const labourById = useMemo(() => new Map(labourers.map((labourer) => [labourer.id, labourer])), [labourers]);
   const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account.name])), [accounts]);
   const groups = useMemo(() => [...new Set(labourers.map((labourer) => labourer.group).filter(Boolean))].sort(), [labourers]);
+  const groupedLabourers = useMemo(() => labourers
+    .filter((labourer) => group === "all" || labourer.group === group)
+    .sort((left, right) => left.name.localeCompare(right.name)), [group, labourers]);
+
+  useEffect(() => {
+    if (entryLabourerId && !groupedLabourers.some((labourer) => labourer.id === entryLabourerId)) setEntryLabourerId("");
+    if (labourerId !== "all" && !groupedLabourers.some((labourer) => labourer.id === labourerId)) setLabourerId("all");
+  }, [entryLabourerId, groupedLabourers, labourerId]);
+
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return advances
@@ -95,6 +115,39 @@ export function LabourAdvances() {
 
   const total = filtered.reduce((sum, advance) => sum + advance.amount, 0);
   const labourCount = new Set(filtered.map((advance) => advance.labourerId)).size;
+  const selectedEntryAccountId = entryAccountId || accounts[0]?.id || "";
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    const amount = Number(entryAmount);
+    if (!entryDate || !entryLabourerId || !selectedEntryAccountId || !Number.isFinite(amount) || amount <= 0) {
+      setEntryError(t("advancesPage.advanceValidation"));
+      return;
+    }
+    setSaving(true);
+    setEntryError("");
+    try {
+      const record: Advance = {
+        ...makeLocalRecord(),
+        labourerId: entryLabourerId,
+        date: entryDate,
+        amount,
+        accountId: selectedEntryAccountId,
+        sourceAccountName: accountById.get(selectedEntryAccountId),
+        notes: entryNotes.trim(),
+      };
+      await persistOperationalRecord("advance", record);
+      setEntryLabourerId("");
+      setEntryAmount("");
+      setEntryNotes("");
+      await refresh();
+      window.dispatchEvent(new CustomEvent("muzare-toast", { detail: t("advancesPage.advanceSaved") }));
+      window.requestAnimationFrame(() => labourInputRef.current?.focus());
+    } catch (caught) {
+      setEntryError(caught instanceof Error ? caught.message : t("advancesPage.unableUpdate"));
+    } finally {
+      setSaving(false);
+    }
+  };
   const remove = async (advance: Advance) => {
     if (!canManage || !window.confirm(t("advancesPage.deleteConfirm"))) return;
     await deleteOperationalRecord("advance", advance);
@@ -115,36 +168,69 @@ export function LabourAdvances() {
           <article><span>{t("advancesPage.transactions")}</span><strong>{filtered.length}</strong></article>
           <article><span>{t("advancesPage.labourWithAdvances")}</span><strong>{labourCount}</strong></article>
         </section>
+        {canRecord && <section className="record-panel">
+          <div className="advances-heading"><h2>{t("advancesPage.recordAdvance")}</h2><span>{t("advancesPage.recordAdvanceDescription")}</span></div>
+          <form className="module-form advances-entry-form" onSubmit={(event) => void submit(event)}>
+            <label className="advances-filter-field"><span>{t("advancesPage.date")}</span><input required type="date" value={entryDate} onChange={(event) => setEntryDate(event.target.value)} /></label>
+            <label className="advances-filter-field"><span>{t("advancesPage.group")}</span><select value={group} onChange={(event) => setGroup(event.target.value)}>
+              <option value="all">{t("advancesPage.allGroups")}</option>
+              {groups.map((name) => <option key={name}>{name}</option>)}
+            </select></label>
+            <label className="advances-filter-field advances-filter-field--full"><span>{t("advancesPage.labour")}</span><LabourSelectCombobox
+              ariaLabel={t("advancesPage.labour")}
+              options={groupedLabourers}
+              value={entryLabourerId}
+              onChange={setEntryLabourerId}
+              placeholder={t("workforcePage.searchLabour")}
+              noResultsLabel={t("workforcePage.noLabourFound")}
+              inputRef={labourInputRef}
+            /></label>
+            <label className="advances-filter-field"><span>{t("advancesPage.amount")}</span><input required min="0.01" step="0.01" type="number" value={entryAmount} onChange={(event) => setEntryAmount(event.target.value)} /></label>
+            <label className="advances-filter-field"><span>{t("advancesPage.paymentAccount")}</span><select required value={selectedEntryAccountId} onChange={(event) => setEntryAccountId(event.target.value)}>
+              <option value="">{t("advancesPage.selectAccount")}</option>
+              {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+            </select></label>
+            <label className="advances-filter-field advances-filter-field--full"><span>{t("advancesPage.notesReference")}</span><input value={entryNotes} placeholder={t("advancesPage.notesReference")} onChange={(event) => setEntryNotes(event.target.value)} /></label>
+            {entryError ? <p className="form-error">{entryError}</p> : null}
+            <button disabled={saving} type="submit">{saving ? t("advancesPage.saving") : t("advancesPage.saveAdvance")}</button>
+          </form>
+        </section>}
         <section className="record-panel">
           <div className="advances-heading"><h2>{t("advancesPage.advanceHistory")}</h2><span>{t("advancesPage.transactionCount", { count: filtered.length })}</span></div>
           <div className="advances-filters">
             <SearchInput placeholder={t("advancesPage.searchPlaceholder")} value={search} onChange={setSearch} />
-            <input aria-label={t("advancesPage.dateFrom")} type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
-            <input aria-label={t("advancesPage.dateTo")} type="date" value={to} onChange={(event) => setTo(event.target.value)} />
-            <LabourSelectCombobox
-              ariaLabel={t("advancesPage.labour")}
-              options={labourers.slice().sort((a, b) => a.name.localeCompare(b.name))}
-              value={labourerId}
-              onChange={setLabourerId}
-              clearValue="all"
-              includeAllOption
-              allOptionLabel={t("advancesPage.allLabour")}
-              placeholder={t("workforcePage.searchLabour")}
-              noResultsLabel={t("workforcePage.noLabourFound")}
-            />
-            <select aria-label={t("advancesPage.group")} value={group} onChange={(event) => setGroup(event.target.value)}>
-              <option value="all">{t("advancesPage.allGroups")}</option>
-              {groups.map((name) => <option key={name}>{name}</option>)}
-            </select>
-            <select aria-label={t("advancesPage.paymentType")} value={paymentType} onChange={(event) => setPaymentType(event.target.value)}>
-              <option value="all">{t("advancesPage.allPaymentTypes")}</option>
-              <option value="daily_wage">{t("workforcePage.dailyWage")}</option><option value="production_based">Production Based</option>
-              <option value="contract_lump_sum">Contract</option><option value="monthly_salary">Monthly Salary</option><option value="other">Other</option>
-            </select>
-            <select aria-label={t("advancesPage.transactions")} value={sort} onChange={(event) => setSort(event.target.value as Sort)}>
-              <option value="date_desc">{t("advancesPage.newestFirst")}</option><option value="date_asc">{t("advancesPage.oldestFirst")}</option>
-              <option value="amount_desc">{t("advancesPage.highestAmount")}</option><option value="amount_asc">{t("advancesPage.lowestAmount")}</option>
-            </select>
+            <div className="advances-filter-row">
+              <label className="advances-filter-field"><span>{t("advancesPage.dateFrom")}</span><input aria-label={t("advancesPage.dateFrom")} type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
+              <label className="advances-filter-field"><span>{t("advancesPage.dateTo")}</span><input aria-label={t("advancesPage.dateTo")} type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
+            </div>
+            <div className="advances-filter-row">
+              <label className="advances-filter-field"><span>{t("advancesPage.labour")}</span><LabourSelectCombobox
+                ariaLabel={t("advancesPage.labour")}
+                options={groupedLabourers}
+                value={labourerId}
+                onChange={setLabourerId}
+                clearValue="all"
+                includeAllOption
+                allOptionLabel={t("advancesPage.allLabour")}
+                placeholder={t("workforcePage.searchLabour")}
+                noResultsLabel={t("workforcePage.noLabourFound")}
+              /></label>
+              <label className="advances-filter-field"><span>{t("advancesPage.group")}</span><select aria-label={t("advancesPage.group")} value={group} onChange={(event) => setGroup(event.target.value)}>
+                <option value="all">{t("advancesPage.allGroups")}</option>
+                {groups.map((name) => <option key={name}>{name}</option>)}
+              </select></label>
+            </div>
+            <div className="advances-filter-row">
+              <label className="advances-filter-field"><span>{t("advancesPage.paymentType")}</span><select aria-label={t("advancesPage.paymentType")} value={paymentType} onChange={(event) => setPaymentType(event.target.value)}>
+                <option value="all">{t("advancesPage.allPaymentTypes")}</option>
+                <option value="daily_wage">{t("workforcePage.dailyWage")}</option><option value="production_based">Production Based</option>
+                <option value="contract_lump_sum">Contract</option><option value="monthly_salary">Monthly Salary</option><option value="other">Other</option>
+              </select></label>
+              <label className="advances-filter-field"><span>{t("advancesPage.transactions")}</span><select aria-label={t("advancesPage.transactions")} value={sort} onChange={(event) => setSort(event.target.value as Sort)}>
+                <option value="date_desc">{t("advancesPage.newestFirst")}</option><option value="date_asc">{t("advancesPage.oldestFirst")}</option>
+                <option value="amount_desc">{t("advancesPage.highestAmount")}</option><option value="amount_asc">{t("advancesPage.lowestAmount")}</option>
+              </select></label>
+            </div>
           </div>
           {!filtered.length ? <p className="empty-records">{t("advancesPage.noResults")}</p> : <div className="advances-list">
             {filtered.map((advance) => {
