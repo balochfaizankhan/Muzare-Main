@@ -5349,6 +5349,17 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   min-height: 42px;
   padding: 8px 10px;
 }
+.farm-operation-form__location {
+  align-items: start;
+  display: grid;
+  gap: 8px;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.farm-operation-form__location .secondary-button {
+  align-self: stretch;
+  justify-content: center;
+}
 .farm-duration-presets { display: flex; flex-wrap: wrap; gap: 8px; }
 .farm-duration-presets button {
   background: var(--surface);
@@ -5442,6 +5453,7 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .farm-file-picker, .farm-kml-import footer button { justify-content: center; width: 100%; }
   .farm-operation-form,
   .farm-operation-form--simple { grid-template-columns: minmax(0, 1fr); }
+  .farm-operation-form__location { grid-template-columns: minmax(0, 1fr); }
   .farm-record-list__item {
     align-items: stretch;
     flex-direction: column;

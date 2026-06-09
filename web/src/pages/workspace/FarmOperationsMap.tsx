@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarClock, Droplets, FlaskConical, Layers, MapPinned, Pencil, Plus, Save, SprayCan, Trash2, Upload, X } from "lucide-react";
+import { CalendarClock, Droplets, FileText, FlaskConical, Layers, MapPinned, Pencil, Plus, Save, SprayCan, Trash2, Upload, X } from "lucide-react";
 import maplibregl, { type Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
@@ -96,6 +96,11 @@ type PlotForm = Omit<typeof emptyPlot, "seasonId"> & { seasonId: string | null }
 type LineForm = Omit<typeof emptyLine, "seasonId"> & { seasonId: string | null };
 type ValveForm = Omit<typeof emptyValve, "seasonId"> & { seasonId: string | null };
 type RuleForm = Omit<typeof emptyRule, "seasonId"> & { seasonId: string | null };
+type LocationContext = {
+  plot: FarmPlot | null;
+  line: IrrigationLine | null;
+  valve: FarmValve | null;
+};
 const statusColors: Record<string, string> = {
   ok: "#16a34a",
   due_soon: "#eab308",
@@ -105,6 +110,48 @@ const statusColors: Record<string, string> = {
 };
 const activityOptions: OperationActivityType[] = ["irrigation", "fertilizer", "pesticide", "pruning", "thinning", "pollination", "harvesting", "maintenance", "other"];
 const featureTypeOptions: FarmFeatureType[] = ["farm_boundary", "plot", "irrigation_line", "valve", "landmark", "other"];
+
+function deriveLocationContext(
+  selection: Selected,
+  dashboard: NonNullable<ReturnType<typeof useDashboardData>["dashboard"]> | undefined,
+): LocationContext {
+  if (!selection || !dashboard) return { plot: null, line: null, valve: null };
+  if (selection.kind === "valve") {
+    const valve = dashboard.valves.find((item) => item.id === selection.id) ?? null;
+    return {
+      valve,
+      line: dashboard.irrigationLines.find((item) => item.id === valve?.irrigationLineId) ?? null,
+      plot: dashboard.plots.find((item) => item.id === valve?.plotId) ?? null,
+    };
+  }
+  if (selection.kind === "plot") {
+    const plot = dashboard.plots.find((item) => item.id === selection.id) ?? null;
+    const valve = dashboard.valves.find((item) => item.plotId === plot?.id) ?? null;
+    return {
+      plot,
+      valve,
+      line: dashboard.irrigationLines.find((item) => item.id === valve?.irrigationLineId) ?? null,
+    };
+  }
+  if (selection.kind === "line") {
+    const line = dashboard.irrigationLines.find((item) => item.id === selection.id) ?? null;
+    const valve = dashboard.valves.find((item) => item.irrigationLineId === line?.id) ?? null;
+    return {
+      line,
+      valve,
+      plot: dashboard.plots.find((item) => item.id === valve?.plotId) ?? null,
+    };
+  }
+  return { plot: null, line: null, valve: null };
+}
+
+function locationSummary(context: LocationContext) {
+  return [
+    context.plot?.plotCode ?? "Plot not linked",
+    context.line?.lineCode ?? "Line not linked",
+    context.valve?.valveCode ?? "Valve not linked",
+  ].join(" | ");
+}
 
 function localChildren(element: Element | Document, name: string) {
   return Array.from(element.getElementsByTagName("*")).filter((item) => item.localName === name);
@@ -397,48 +444,32 @@ function OperationLogForm({
   initial,
   onSubmit,
   pending,
+  onChangeLocation,
 }: {
   dashboard: NonNullable<ReturnType<typeof useDashboardData>["dashboard"]>;
   products: Awaited<ReturnType<typeof fetchFarmOperationsProducts>>["records"];
   initial: typeof emptyLog;
   onSubmit: (input: typeof emptyLog) => void;
   pending: boolean;
+  onChangeLocation: () => void;
 }) {
   const [form, setForm] = useState(initial);
   useEffect(() => setForm(initial), [initial]);
   const selectedValve = dashboard.valves.find((valve) => valve.id === form.valveId) ?? null;
   const selectedPlot = dashboard.plots.find((plot) => plot.id === form.plotId) ?? null;
+  const selectedLine = dashboard.irrigationLines.find((line) => line.id === form.irrigationLineId) ?? null;
   const selectedProduct = products.find((product) => product.id === form.productId) ?? null;
-  const availableValves = form.irrigationLineId
-    ? dashboard.valves.filter((valve) => valve.irrigationLineId === form.irrigationLineId)
-    : dashboard.valves;
   const formTitle = form.activityType === "irrigation"
     ? "Log Irrigation"
     : form.activityType === "fertilizer"
       ? "Log Fertilizer"
       : "Log Spray";
   useEffect(() => {
-    if (!selectedValve) return;
-    setForm((current) => ({
-      ...current,
-      irrigationLineId: selectedValve.irrigationLineId ?? current.irrigationLineId,
-      plotId: selectedValve.plotId ?? current.plotId,
-      treeCountCovered: selectedValve.plotId
-        ? String(dashboard.plots.find((plot) => plot.id === selectedValve.plotId)?.treeCount ?? "")
-        : current.treeCountCovered,
-    }));
-  }, [dashboard.plots, selectedValve]);
-  useEffect(() => {
-    if (!form.irrigationLineId || !form.valveId) return;
-    if (availableValves.some((valve) => valve.id === form.valveId)) return;
-    setForm((current) => ({ ...current, valveId: "", plotId: "", treeCountCovered: "" }));
-  }, [availableValves, form.irrigationLineId, form.valveId]);
-  useEffect(() => {
     const trees = Number(selectedPlot?.treeCount || form.treeCountCovered || 0);
-    const qty = Number(form.qtyPerTree || 0);
+    const qty = Number(form.totalQty || 0);
     if (form.activityType !== "fertilizer") return;
-    if (trees > 0 && qty > 0) setForm((current) => ({ ...current, totalQty: String(Number((trees * qty).toFixed(4))) }));
-  }, [form.activityType, form.qtyPerTree, form.treeCountCovered, selectedPlot?.treeCount]);
+    if (trees > 0 && qty > 0) setForm((current) => ({ ...current, qtyPerTree: String(Number((qty / trees).toFixed(4))) }));
+  }, [form.activityType, form.totalQty, form.treeCountCovered, selectedPlot?.treeCount]);
   useEffect(() => {
     if (!selectedProduct?.unit) return;
     setForm((current) => current.unit === selectedProduct.unit ? current : { ...current, unit: selectedProduct.unit ?? "" });
@@ -455,19 +486,14 @@ function OperationLogForm({
   return <form className="farm-operation-form farm-operation-form--simple" onSubmit={submit}>
     <div className="farm-operation-form__header">
       <h3>{formTitle}</h3>
-      <p>Select line and valve. Plot fills automatically from the valve.</p>
+      <p>Use the map to identify the place, then save the record fast.</p>
     </div>
-    <select value={form.irrigationLineId} onChange={(event) => setForm({ ...form, irrigationLineId: event.target.value, valveId: "", plotId: "", treeCountCovered: "" })}>
-      <option value="">Line</option>
-      {dashboard.irrigationLines.map((line) => <option key={line.id} value={line.id}>{line.lineCode} {line.lineName ?? ""}</option>)}
-    </select>
-    <select value={form.valveId} onChange={(event) => setForm({ ...form, valveId: event.target.value })}>
-      <option value="">Valve</option>
-      {availableValves.map((valve) => <option key={valve.id} value={valve.id}>{valve.valveCode} {valve.valveName ?? ""}</option>)}
-    </select>
-    <div className="farm-operation-form__readonly">
-      <span>Plot</span>
-      <strong>{selectedPlot ? `${selectedPlot.plotCode}${selectedPlot.plotName ? ` • ${selectedPlot.plotName}` : ""}` : "Auto-filled from valve"}</strong>
+    <div className="farm-operation-form__location">
+      <div className="farm-operation-form__readonly">
+        <span>Location</span>
+        <strong>{locationSummary({ plot: selectedPlot, line: selectedLine, valve: selectedValve })}</strong>
+      </div>
+      <button className="secondary-button" type="button" onClick={onChangeLocation}>Change location</button>
     </div>
     <input type="date" value={form.operationDate} onChange={(event) => setForm({ ...form, operationDate: event.target.value })} />
     {form.activityType === "irrigation" && <>
@@ -482,11 +508,8 @@ function OperationLogForm({
         <option value="">Product</option>
         {activityProducts.map((product) => <option key={product.id} value={product.id}>{product.productName}</option>)}
       </select>
-      <input inputMode="decimal" placeholder="Qty per tree" value={form.qtyPerTree} onChange={(event) => setForm({ ...form, qtyPerTree: event.target.value })} />
-      <div className="farm-operation-form__readonly">
-        <span>Total quantity {selectedProduct?.unit ? `(${selectedProduct.unit})` : ""}</span>
-        <strong>{form.totalQty || "0"}</strong>
-      </div>
+      <input inputMode="decimal" placeholder="Quantity" value={form.totalQty} onChange={(event) => setForm({ ...form, totalQty: event.target.value })} />
+      <input placeholder="Unit" value={form.unit || "kg"} onChange={(event) => setForm({ ...form, unit: event.target.value })} />
     </>}
     {form.activityType === "pesticide" && <>
       <select value={form.productId} onChange={(event) => setForm({ ...form, productId: event.target.value })}>
@@ -494,13 +517,11 @@ function OperationLogForm({
         {activityProducts.map((product) => <option key={product.id} value={product.id}>{product.productName}</option>)}
       </select>
       <input inputMode="decimal" placeholder={`Quantity / dose${selectedProduct?.unit ? ` (${selectedProduct.unit})` : ""}`} value={form.totalQty} onChange={(event) => setForm({ ...form, totalQty: event.target.value })} />
-      <input placeholder="Target pest / disease" value={form.activityCategory} onChange={(event) => setForm({ ...form, activityCategory: event.target.value })} />
     </>}
-    <input placeholder="Performed by (optional)" value={form.performedBy} onChange={(event) => setForm({ ...form, performedBy: event.target.value })} />
     <textarea placeholder="Remarks (optional)" value={form.remarks} onChange={(event) => setForm({ ...form, remarks: event.target.value })} />
-    <button type="submit" disabled={pending || !form.irrigationLineId || !form.valveId || !form.plotId}>
+    <button type="submit" disabled={pending || !form.plotId || !form.valveId || !form.irrigationLineId || (form.activityType !== "irrigation" && !form.productId)}>
       <Save size={16} />
-      {pending ? "Saving..." : formTitle}
+      {pending ? "Saving..." : "Save"}
     </button>
   </form>;
 }
@@ -521,6 +542,7 @@ function SideDrawer({
   onDeactivateLine,
   onDeactivateValve,
   onDeleteWaterAsset,
+  onViewHistory,
 }: {
   selected: Selected;
   dashboard: NonNullable<ReturnType<typeof useDashboardData>["dashboard"]>;
@@ -537,6 +559,7 @@ function SideDrawer({
   onDeactivateLine: (line: IrrigationLine) => void;
   onDeactivateValve: (valve: FarmValve) => void;
   onDeleteWaterAsset: (asset: WaterAsset) => void;
+  onViewHistory: () => void;
 }) {
   if (!selected) return null;
   const plot = selected.kind === "plot" ? dashboard.plots.find((item) => item.id === selected.id) : null;
@@ -549,6 +572,7 @@ function SideDrawer({
   const statuses = linkedPlot ? dashboard.plotStatusSummary.find((item) => item.plotId === linkedPlot.id)?.statuses : undefined;
   const scopedLogs = logs.filter((item) => selected.kind === "plot" ? item.plotId === selected.id : selected.kind === "line" ? item.irrigationLineId === selected.id : item.valveId === selected.id).slice(0, 12);
   const managementHint = mode === "live" ? <Link className="secondary-button farm-drawer-link" to={builderHref}>Open builder to edit</Link> : null;
+  const lastByActivity = (activity: OperationActivityType) => scopedLogs.find((log) => log.activityType === activity) ?? null;
   return <aside className="farm-map-drawer">
     <button className="farm-map-drawer__close" type="button" onClick={onClose}><X size={16} /></button>
     {waterAsset && <>
@@ -572,11 +596,15 @@ function SideDrawer({
       <button type="button" onClick={() => onQuickLog("irrigation", selected)}><Droplets size={17} />Log irrigation</button>
       <button type="button" onClick={() => onQuickLog("fertilizer", selected)}><FlaskConical size={17} />Log fertilizer</button>
       <button type="button" onClick={() => onQuickLog("pesticide", selected)}><SprayCan size={17} />Log spray</button>
+      <button type="button" onClick={onViewHistory}><FileText size={17} />View history</button>
     </div>}
     {plot && <><div className="farm-drawer-actions"><button type="button" onClick={() => onEditPlot(plot)}><Pencil size={15} />Edit plot</button><button className="danger-button" type="button" onClick={() => onDeactivatePlot(plot)}><Trash2 size={15} />Delete / deactivate</button></div>{managementHint}</>}
     {irrigationLine && <><div className="farm-drawer-actions"><button type="button" onClick={() => onEditLine(irrigationLine)}><Pencil size={15} />Edit line</button><button className="danger-button" type="button" onClick={() => onDeactivateLine(irrigationLine)}><Trash2 size={15} />Delete / deactivate</button></div>{managementHint}</>}
     {valve && <><div className="farm-drawer-actions"><button type="button" onClick={() => onEditValve(valve)}><Pencil size={15} />Edit valve</button><button className="danger-button" type="button" onClick={() => onDeactivateValve(valve)}><Trash2 size={15} />Delete / deactivate</button></div>{managementHint}</>}
     {!waterAsset && <dl className="farm-map-facts">
+      <div><dt>Last irrigation</dt><dd>{lastByActivity("irrigation")?.operationDate ?? "-"}</dd></div>
+      <div><dt>Last fertilizer</dt><dd>{lastByActivity("fertilizer")?.operationDate ?? "-"}</dd></div>
+      <div><dt>Last spray</dt><dd>{lastByActivity("pesticide")?.operationDate ?? "-"}</dd></div>
       <div><dt>Linked valves</dt><dd>{linkedValves.map((item) => item.valveCode).join(", ") || "-"}</dd></div>
       <div><dt>Linked lines</dt><dd>{[...new Set(linkedValves.map((item) => dashboard.irrigationLines.find((lineItem) => lineItem.id === item.irrigationLineId)?.lineCode).filter(Boolean))].join(", ") || line?.lineCode || "-"}</dd></div>
       <div><dt>Pending work</dt><dd>{dashboard.dueWorkList.filter((item) => item.plotId === linkedPlot?.id).map((item) => `${item.activityType} ${item.status}`).join(", ") || "-"}</dd></div>
@@ -623,6 +651,7 @@ export function FarmOperationsMap({ mode }: { mode: Mode }) {
   const [importRows, setImportRows] = useState<ImportPreviewRow[]>([]);
   const [importFilename, setImportFilename] = useState("");
   const [importError, setImportError] = useState("");
+  const logsSectionRef = useRef<HTMLElement | null>(null);
   const dashboard = dashboardQuery.dashboard;
   useEffect(() => {
     if (activeSeasonId) {
@@ -689,17 +718,20 @@ export function FarmOperationsMap({ mode }: { mode: Mode }) {
     await refresh();
   };
   const quickLog = (activity: OperationActivityType, selection: Selected) => {
-    const valve = selection?.kind === "valve" ? dashboard?.valves.find((item) => item.id === selection.id) : null;
-    const line = selection?.kind === "line" ? dashboard?.irrigationLines.find((item) => item.id === selection.id) : dashboard?.irrigationLines.find((item) => item.id === valve?.irrigationLineId);
-    const plot = selection?.kind === "plot" ? dashboard?.plots.find((item) => item.id === selection.id) : dashboard?.plots.find((item) => item.id === valve?.plotId);
+    const context = deriveLocationContext(selection, dashboard);
+    if (!context.plot || !context.line || !context.valve) {
+      window.dispatchEvent(new CustomEvent("muzare-toast", { detail: "Link this location to a plot, line, and valve before logging work." }));
+      return;
+    }
     setLogForm({
       ...emptyLog,
       seasonId: activeSeasonId ?? "",
       activityType: activity,
-      plotId: plot?.id ?? "",
-      valveId: valve?.id ?? "",
-      irrigationLineId: line?.id ?? valve?.irrigationLineId ?? "",
-      treeCountCovered: String(plot?.treeCount ?? valve?.estimatedTreeCount ?? ""),
+      plotId: context.plot.id,
+      valveId: context.valve.id,
+      irrigationLineId: context.line.id,
+      treeCountCovered: String(context.plot.treeCount ?? context.valve.estimatedTreeCount ?? ""),
+      unit: activity === "fertilizer" ? "kg" : "",
     });
     setEditingIds((current) => ({ ...current, log: null }));
     setShowLog(true);
@@ -977,6 +1009,7 @@ export function FarmOperationsMap({ mode }: { mode: Mode }) {
   const managedRules = (rulesQuery.data?.records ?? []).filter((item) => showInactive || item.active);
   const selectedStatus = selected?.kind === "plot" ? dashboard?.plotStatusSummary.find((item) => item.plotId === selected.id)?.statuses : undefined;
   const totalTrees = dashboard?.plots.reduce((sum, plot) => sum + (plot.treeCount ?? 0), 0) ?? 0;
+  const viewSelectedHistory = () => logsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 
   return <div className="dashboard-page farm-map-page">
     <SubpageHeader title={mode === "builder" ? "Farm Map Builder" : "Live Farm Operations Map"} />
@@ -1195,9 +1228,9 @@ export function FarmOperationsMap({ mode }: { mode: Mode }) {
         </section>}
         {showLog && <section className="record-panel farm-log-panel">
           <header><h2>{editingIds.log ? "Edit operation entry" : logForm.activityType === "irrigation" ? "Log Irrigation" : logForm.activityType === "fertilizer" ? "Log Fertilizer" : "Log Spray"}</h2><button type="button" onClick={() => { resetLogForm(); setShowLog(false); }}>Close</button></header>
-          <OperationLogForm dashboard={dashboard} products={products.data?.records ?? []} initial={logForm} onSubmit={submitLog} pending={saveResource.isPending} />
+          <OperationLogForm dashboard={dashboard} products={products.data?.records ?? []} initial={logForm} onSubmit={submitLog} pending={saveResource.isPending} onChangeLocation={() => { setShowLog(false); }} />
         </section>}
-        <section className="record-panel farm-logs-report">
+        <section className="record-panel farm-logs-report" ref={logsSectionRef}>
           <h2>Operation logs report</h2>
           <div className="attendance-import-table-wrap report-wide-table">
             <table className="report-data-table"><thead><tr><th>Date</th><th>Activity</th><th>Plot</th><th>Valve</th><th>Product</th><th>Qty</th><th>Performed by</th><th>Remarks</th><th>Actions</th></tr></thead><tbody>
@@ -1239,6 +1272,7 @@ export function FarmOperationsMap({ mode }: { mode: Mode }) {
             notes: asset.notes ?? "",
             active: asset.active,
           })}
+          onViewHistory={viewSelectedHistory}
         />
       </>}
     </main>
