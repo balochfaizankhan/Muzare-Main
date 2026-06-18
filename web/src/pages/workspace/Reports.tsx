@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { SearchInput } from "../../components/SearchInput";
 import { SubpageHeader } from "../../components/SubpageHeader";
+import { defaultTransactionGroupExpansion, groupAccountTransactions, type AccountTransactionGroupKey } from "../../lib/accountTransactionGroups";
 import { formatMoney, formatNumber } from "../../lib/format";
 import { saleProduceLabel } from "../../lib/dispatch-sales";
 import {
@@ -34,6 +36,21 @@ type ReportRow = {
   value?: ReactNode;
   meta?: ReactNode;
   onOpen?: () => void;
+};
+type AccountLedgerReportRow = {
+  id: string;
+  date: string;
+  accountId: string;
+  accountName: string;
+  type: string;
+  typeLabel: string;
+  reference: string;
+  description: string;
+  debit: number;
+  credit: number;
+  running: number;
+  path: string;
+  classification?: string;
 };
 
 const reportOptions: Report[] = ["attendance", "advances", "expenditures", "partner-position", "account-ledger"];
@@ -173,6 +190,8 @@ export function Reports() {
   const [amountMax, setAmountMax] = useState("");
   const [advanceSort, setAdvanceSort] = useState<SortOrder>("desc");
   const [expenseSort, setExpenseSort] = useState<SortOrder>("desc");
+  const [showEmptyLedgerGroups, setShowEmptyLedgerGroups] = useState(false);
+  const [reportGroupExpanded, setReportGroupExpanded] = useState<Record<AccountTransactionGroupKey, boolean>>(defaultTransactionGroupExpansion);
   const [labourers, setLabourers] = useState<Labourer[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
@@ -217,6 +236,13 @@ export function Reports() {
   const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
   const accountName = (id?: string) => accountById.get(id ?? "")?.name ?? t("reportsPage.unknownAccount");
   const labourName = (id: string) => labourById.get(id)?.name ?? t("reportsPage.unknownLabour");
+  const ledgerGroupTitle = (groupKey: AccountTransactionGroupKey) => ({
+    expenses: t("reportsPage.groupExpenses"),
+    advances: t("reportsPage.groupAdvances"),
+    settlements: t("reportsPage.groupSettlements"),
+    income: t("reportsPage.groupIncome"),
+    other: t("reportsPage.groupOther"),
+  }[groupKey]);
   const labourGroups = useMemo(() => [...new Set(labourers.map((labourer) => labourer.group?.trim()).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b)), [labourers]);
   const term = search.trim().toLowerCase();
   const min = amountMin ? Number(amountMin) : null;
@@ -345,25 +371,28 @@ export function Reports() {
     }), [accountId, accounts, advanceRows, partnerRows, saleRows, voucherRows]);
 
   const accountLedgerRows = useMemo(() => {
-    const rows: Array<{ id: string; date: string; accountId: string; type: string; reference: string; description: string; debit: number; credit: number; path: string }> = [];
-    for (const voucher of voucherRows) rows.push({ id: `voucher:${voucher.id}`, date: voucher.date, accountId: voucher.accountId, type: t("reportsPage.voucherExpense"), reference: voucher.voucherNumber, description: voucher.description, debit: voucher.amount, credit: 0, path: `/workspace/expenses?recordId=${voucher.id}` });
-    for (const advance of advanceRows) rows.push({ id: `advance:${advance.id}`, date: advance.date, accountId: advance.accountId ?? "", type: t("reportsPage.labourAdvance"), reference: advance.id.slice(0, 8), description: `${labourName(advance.labourerId)}${advance.notes ? ` - ${advance.notes}` : ""}`, debit: advance.amount, credit: 0, path: `/workspace/labour-advances?recordId=${advance.id}` });
+    const rows: Array<Omit<AccountLedgerReportRow, "running">> = [];
+    for (const voucher of voucherRows) rows.push({ id: `voucher:${voucher.id}`, date: voucher.date, accountId: voucher.accountId, accountName: accountName(voucher.accountId), type: "voucher", typeLabel: t("reportsPage.voucherExpense"), reference: voucher.voucherNumber, description: voucher.description, debit: voucher.amount, credit: 0, path: `/workspace/expenses?recordId=${voucher.id}`, classification: "voucher" });
+    for (const advance of advanceRows) rows.push({ id: `advance:${advance.id}`, date: advance.date, accountId: advance.accountId ?? "", accountName: accountName(advance.accountId), type: "advance", typeLabel: t("reportsPage.labourAdvance"), reference: advance.id.slice(0, 8), description: `${labourName(advance.labourerId)}${advance.notes ? ` - ${advance.notes}` : ""}`, debit: advance.amount, credit: 0, path: `/workspace/labour-advances?recordId=${advance.id}`, classification: "advance" });
     for (const sale of saleRows) rows.push({
       id: `sale:${sale.id}`,
       date: sale.date,
       accountId: sale.accountId,
-      type: t("reportsPage.sale"),
+      accountName: accountName(sale.accountId),
+      type: "sale",
+      typeLabel: t("reportsPage.sale"),
       reference: sale.dispatchDate ? `DSP ${sale.dispatchDate}` : sale.id.slice(0, 8),
       description: `${sale.buyerName} - ${saleProduceLabel(sale)}${sale.vehicleNumber ? ` - ${sale.vehicleNumber}` : ""}`,
       debit: 0,
       credit: sale.amount,
       path: `/workspace/sales?recordId=${sale.id}`,
+      classification: "sale",
     });
     for (const entry of partnerRows) {
-      if (entry.type === "contribution" || entry.type === "withdrawal") rows.push({ id: `partner:${entry.id}`, date: entry.date, accountId: entry.accountId ?? "", type: entry.type === "contribution" ? t("reportsPage.contribution") : t("reportsPage.withdrawal"), reference: entry.id.slice(0, 8), description: `${entry.partnerName ?? "-"}${entry.notes ? ` - ${entry.notes}` : ""}`, debit: entry.type === "withdrawal" ? entry.amount : 0, credit: entry.type === "contribution" ? entry.amount : 0, path: `/workspace/partner-ledger?recordId=${entry.id}` });
+      if (entry.type === "contribution" || entry.type === "withdrawal") rows.push({ id: `partner:${entry.id}`, date: entry.date, accountId: entry.accountId ?? "", accountName: accountName(entry.accountId), type: entry.type, typeLabel: entry.type === "contribution" ? t("reportsPage.contribution") : t("reportsPage.withdrawal"), reference: entry.id.slice(0, 8), description: `${entry.partnerName ?? "-"}${entry.notes ? ` - ${entry.notes}` : ""}`, debit: entry.type === "withdrawal" ? entry.amount : 0, credit: entry.type === "contribution" ? entry.amount : 0, path: `/workspace/partner-ledger?recordId=${entry.id}`, classification: entry.type });
       if (entry.type === "settlement") {
-        rows.push({ id: `settlement:${entry.id}:sent`, date: entry.date, accountId: entry.fromAccountId ?? "", type: t("reportsPage.settlementSent"), reference: entry.id.slice(0, 8), description: `${entry.fromPartner ?? "-"} → ${entry.toPartner ?? "-"}`, debit: entry.amount, credit: 0, path: `/workspace/partner-ledger?recordId=${entry.id}` });
-        rows.push({ id: `settlement:${entry.id}:received`, date: entry.date, accountId: entry.toAccountId ?? "", type: t("reportsPage.settlementReceived"), reference: entry.id.slice(0, 8), description: `${entry.fromPartner ?? "-"} → ${entry.toPartner ?? "-"}`, debit: 0, credit: entry.amount, path: `/workspace/partner-ledger?recordId=${entry.id}` });
+        rows.push({ id: `settlement:${entry.id}:sent`, date: entry.date, accountId: entry.fromAccountId ?? "", accountName: accountName(entry.fromAccountId), type: "settlement_sent", typeLabel: t("reportsPage.settlementSent"), reference: entry.id.slice(0, 8), description: `${entry.fromPartner ?? "-"} → ${entry.toPartner ?? "-"}`, debit: entry.amount, credit: 0, path: `/workspace/partner-ledger?recordId=${entry.id}`, classification: "settlement_sent" });
+        rows.push({ id: `settlement:${entry.id}:received`, date: entry.date, accountId: entry.toAccountId ?? "", accountName: accountName(entry.toAccountId), type: "settlement_received", typeLabel: t("reportsPage.settlementReceived"), reference: entry.id.slice(0, 8), description: `${entry.fromPartner ?? "-"} → ${entry.toPartner ?? "-"}`, debit: 0, credit: entry.amount, path: `/workspace/partner-ledger?recordId=${entry.id}`, classification: "settlement_received" });
       }
     }
     const running = new Map<string, number>();
@@ -373,9 +402,26 @@ export function Reports() {
       .map((item) => {
         const next = (running.get(item.accountId) ?? 0) + item.credit - item.debit;
         running.set(item.accountId, next);
-        return { ...item, running: next };
+        return { ...item, running: next, accountName: item.accountName || accountName(item.accountId) };
       });
-  }, [accountId, advanceRows, labourName, partnerRows, saleRows, t, voucherRows]);
+  }, [accountId, accountName, advanceRows, labourName, partnerRows, saleRows, t, voucherRows]);
+  const groupedAccountLedgerRows = useMemo(() => groupAccountTransactions(accountLedgerRows), [accountLedgerRows]);
+  const visibleAccountLedgerGroups = useMemo(() => groupedAccountLedgerRows.filter((group) => showEmptyLedgerGroups || group.count > 0), [groupedAccountLedgerRows, showEmptyLedgerGroups]);
+  const accountLedgerSummary = useMemo(() => {
+    const summary = { expenses: 0, advances: 0, settlements: 0, income: 0, other: 0 };
+    for (const group of groupedAccountLedgerRows) {
+      if (group.groupKey === "expenses") summary.expenses += group.debitTotal;
+      if (group.groupKey === "advances") summary.advances += group.debitTotal;
+      if (group.groupKey === "settlements") summary.settlements += group.totalAmount;
+      if (group.groupKey === "income") summary.income += group.totalAmount;
+      if (group.groupKey === "other") summary.other += group.totalAmount;
+    }
+    return { ...summary, netBalance: summary.income - summary.expenses - summary.advances + summary.settlements + summary.other };
+  }, [groupedAccountLedgerRows]);
+  const selectedAccountRecord = accountId ? accounts.find((item) => item.id === accountId) ?? null : null;
+  const currentLedgerBalance = selectedAccountRecord ? positions.find((item) => item.account.id === selectedAccountRecord.id)?.net ?? 0 : accountLedgerSummary.netBalance;
+  const reportLedgerDelta = Math.round((currentLedgerBalance - accountLedgerSummary.netBalance) * 100) / 100;
+  const showReportLedgerWarning = selectedAccountRecord && Math.abs(reportLedgerDelta) > 0.009;
 
   const exportAttendanceRegister = () => {
     const rows = [
@@ -433,10 +479,16 @@ export function Reports() {
     [t("reportsPage.account"), t("reportsPage.voucherExpenses"), t("reportsPage.labourAdvance"), t("reportsPage.totalCredit"), t("reportsPage.totalDebit"), t("reportsPage.closingBalance")],
     ...positions.map((item) => [item.account.name, item.voucherExpenses, item.labourAdvances, item.salesReceived + item.contributions + item.settlementsReceived, item.withdrawals + item.settlementsSent, item.net]),
   ]);
-  const exportAccountLedger = () => downloadCsv("account-ledger.csv", [
-    [t("reportsPage.date"), t("reportsPage.account"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.description"), t("reportsPage.debit"), t("reportsPage.credit"), t("reportsPage.runningBalance")],
-    ...accountLedgerRows.map((item) => [item.date, accountName(item.accountId), item.type, item.reference, item.description, item.debit, item.credit, item.running]),
-  ]);
+  const exportAccountLedger = () => {
+    const rows: unknown[][] = [[t("reportsPage.account"), selectedAccountRecord?.name ?? t("reportsPage.allAccounts")], [t("reportsPage.netPosition"), currentLedgerBalance], []];
+    for (const group of visibleAccountLedgerGroups) {
+      rows.push([ledgerGroupTitle(group.groupKey), group.totalAmount, t("reportsPage.transactions"), group.count]);
+      rows.push([t("reportsPage.date"), t("reportsPage.account"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.description"), t("reportsPage.debit"), t("reportsPage.credit"), t("reportsPage.runningBalance")]);
+      rows.push(...group.transactions.map((item) => [item.date, item.accountName, item.typeLabel, item.reference, item.description, item.debit, item.credit, item.running]));
+      rows.push([]);
+    }
+    downloadCsv("account-ledger.csv", rows);
+  };
 
   return <div className="dashboard-page">
     <SubpageHeader title={t("reportsPage.title")} />
@@ -648,7 +700,29 @@ export function Reports() {
           <div className="reports-kpis">{positions.map((item) => <article key={item.account.id}><span>{item.account.name}</span><strong>{money(item.net)}</strong></article>)}</div>
         </ReportShell>}
         {views["account-ledger"] === "ledger" && <ReportShell title={t("reportsPage.accountLedgerTitle")} rangeLabel={rangeLabel} sectionId="account-ledger" onPrint={() => printSection("account-ledger")} onExport={exportAccountLedger}>
-          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.account"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.debit"), t("reportsPage.credit"), t("reportsPage.runningBalance")]} rows={accountLedgerRows.map((item) => ({ id: item.id, title: item.reference, value: item.credit ? `+${money(item.credit)}` : `-${money(item.debit)}`, meta: `${item.date} | ${accountName(item.accountId)}`, cells: [item.date, accountName(item.accountId), item.type, item.reference, item.debit ? money(item.debit) : "-", item.credit ? money(item.credit) : "-", money(item.running)], details: [[t("reportsPage.description"), item.description], [t("reportsPage.runningBalance"), money(item.running)]], onOpen: () => navigate(item.path) }))} />
+          <Kpis values={[
+            [t("reportsPage.account"), selectedAccountRecord?.name ?? t("reportsPage.allAccounts")],
+            [t("reportsPage.currentBalance"), money(currentLedgerBalance)],
+            [t("reportsPage.voucherExpenses"), money(accountLedgerSummary.expenses)],
+            [t("reportsPage.labourAdvance"), money(accountLedgerSummary.advances)],
+            [t("reportsPage.settlements"), money(accountLedgerSummary.settlements)],
+            [t("reportsPage.incomeFundsSales"), money(accountLedgerSummary.income)],
+            [t("reportsPage.netPosition"), money(accountLedgerSummary.netBalance)],
+          ]} />
+          {showReportLedgerWarning && <p className="worker-action-warning">{t("reportsPage.groupedReconciliationWarning", { delta: money(reportLedgerDelta) })}</p>}
+          <label className="account-ledger-toggle"><input type="checkbox" checked={showEmptyLedgerGroups} onChange={(event) => setShowEmptyLedgerGroups(event.target.checked)} />{t("reportsPage.showEmptyGroups")}</label>
+          {!visibleAccountLedgerGroups.length ? <p className="empty-records">{t("reportsPage.noRecords")}</p> : <div className="account-transaction-groups">
+            {visibleAccountLedgerGroups.map((group) => {
+              const expanded = reportGroupExpanded[group.groupKey];
+              return <section className="account-transaction-group" key={group.groupKey}>
+                <button className="account-transaction-group__header" type="button" onClick={() => setReportGroupExpanded((current) => ({ ...current, [group.groupKey]: !current[group.groupKey] }))}>
+                  <span className="account-transaction-group__title">{expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}{ledgerGroupTitle(group.groupKey)}</span>
+                  <span className="account-transaction-group__meta"><strong>{money(group.totalAmount)}</strong><small>{t("reportsPage.transactionCount", { count: group.count })}</small></span>
+                </button>
+                {expanded && <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.account"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.debit"), t("reportsPage.credit"), t("reportsPage.runningBalance")]} rows={group.transactions.map((item) => ({ id: item.id, title: item.reference, value: item.credit ? `+${money(item.credit)}` : `-${money(item.debit)}`, meta: `${item.date} | ${item.accountName}`, cells: [item.date, item.accountName, item.typeLabel, item.reference, item.debit ? money(item.debit) : "-", item.credit ? money(item.credit) : "-", money(item.running)], details: [[t("reportsPage.description"), item.description], [t("reportsPage.runningBalance"), money(item.running)]], onOpen: () => navigate(item.path) }))} />}
+              </section>;
+            })}
+          </div>}
         </ReportShell>}
       </>}
     </main>

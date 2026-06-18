@@ -2965,6 +2965,74 @@ button {
   grid-column: 1 / -1;
 }
 
+.account-ledger-toggle {
+  align-items: center;
+  color: var(--text-secondary);
+  display: inline-flex;
+  gap: 8px;
+  width: fit-content;
+}
+
+.account-ledger-toggle input {
+  height: 16px;
+  margin: 0;
+  width: 16px;
+}
+
+.account-transaction-groups {
+  display: grid;
+  gap: 10px;
+}
+
+.account-transaction-group {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.account-transaction-group__header {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-primary);
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-height: 54px;
+  padding: 12px 14px;
+  text-align: start;
+  width: 100%;
+}
+
+.account-transaction-group__title {
+  align-items: center;
+  display: inline-flex;
+  font-weight: 800;
+  gap: 8px;
+}
+
+.account-transaction-group__meta {
+  align-items: end;
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+}
+
+.account-transaction-group__meta strong {
+  color: var(--text-primary);
+}
+
+.account-transaction-group__meta small {
+  color: var(--text-secondary);
+  font-size: .72rem;
+}
+
+.account-transaction-group .report-wide-table,
+.account-transaction-group .report-mobile-cards {
+  padding: 0 12px 12px;
+}
+
 .expense-search-meta {
   align-items: center;
   display: flex;
@@ -2991,6 +3059,15 @@ button {
 
   .account-ledger-filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .account-transaction-group__header {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .account-transaction-group__meta {
+    justify-items: start;
   }
 }
 

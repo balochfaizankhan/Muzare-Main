@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { CalendarDays, MoreVertical, X } from "lucide-react";
+import { CalendarDays, ChevronDown, ChevronRight, MoreVertical, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -9,6 +9,7 @@ import { LabourSelectCombobox } from "../components/LabourSelectCombobox";
 import { useAuth } from "../auth/AuthProvider";
 import { useSyncState } from "../hooks/useSyncState";
 import { calculateAccountBalance } from "../lib/accounting";
+import { defaultTransactionGroupExpansion, groupAccountTransactions, type AccountTransactionGroupKey } from "../lib/accountTransactionGroups";
 import { attendanceStatusKey, buildAttendanceStatusMap, previousLocalDateKey, todayLocalDateKey } from "../lib/attendanceStatus";
 import { confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteOrDeactivateLabour, fetchExpenseCategories, fetchLabourDeletionPreview, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type LabourDeletionPreview } from "../lib/api";
 import { buildDispatchAvailability, dispatchCartons, dispatchItemKey, saleProduceLabel, soldQuantityByDispatchItem } from "../lib/dispatch-sales";
@@ -49,6 +50,20 @@ type PaymentType = typeof paymentTypes[number];
 const hasEndedBefore = (labourer: Labourer, date: string) => Boolean(labourer.endedOn && labourer.endedOn < date);
 const isInactiveOn = (labourer: Labourer, date: string) => labourer.active === false || hasEndedBefore(labourer, date);
 const canMarkAttendanceOn = (labourer: Labourer, date: string) => !isInactiveOn(labourer, date);
+type AccountLedgerRow = {
+  id: string;
+  date: string;
+  type: "sale" | "voucher" | "advance" | "settlement_sent" | "settlement_received" | "contribution" | "withdrawal";
+  reference: string;
+  description: string;
+  debit: number;
+  credit: number;
+  source: "sales" | "expenses" | "labour_advances" | "partner_ledger";
+  sourceId: string;
+  counterparty?: string;
+  runningBalance?: number;
+  classification?: string;
+};
 const paymentTypeLabel = (paymentType: PaymentType | undefined) => ({
   daily_wage: "Daily Wage",
   production_based: "Production Based",
@@ -2202,6 +2217,8 @@ function AccountsModule() {
   const [ledgerType, setLedgerType] = useState<"all" | "sale" | "voucher" | "advance" | "settlement_sent" | "settlement_received" | "contribution" | "withdrawal">("all");
   const [ledgerFrom, setLedgerFrom] = useState("");
   const [ledgerTo, setLedgerTo] = useState("");
+  const [showEmptyLedgerGroups, setShowEmptyLedgerGroups] = useState(false);
+  const [ledgerGroupExpanded, setLedgerGroupExpanded] = useState<Record<AccountTransactionGroupKey, boolean>>(defaultTransactionGroupExpansion);
   const [name, setName] = useState("");
   const [type, setType] = useState<Account["type"]>("bank");
 
@@ -2216,22 +2233,25 @@ function AccountsModule() {
   const totalAdvances = advances.reduce((sum, item) => sum + item.amount, 0);
   const totalVoucherExpenses = vouchers.reduce((sum, item) => sum + item.amount, 0);
   const selectedAccount = selectedAccountId ? accounts.find((item) => item.id === selectedAccountId) ?? null : null;
+  const ledgerGroupTitle = useCallback((groupKey: AccountTransactionGroupKey) => ({
+    expenses: t("accountsPage.groupExpenses"),
+    advances: t("accountsPage.groupAdvances"),
+    settlements: t("accountsPage.groupSettlements"),
+    income: t("accountsPage.groupIncome"),
+    other: t("accountsPage.groupOther"),
+  }[groupKey]), [t]);
+  const ledgerTypeLabel = useCallback((row: Pick<AccountLedgerRow, "type">) => (
+    row.type === "sale" ? t("accountsPage.saleCredit")
+      : row.type === "voucher" ? t("accountsPage.voucherExpense")
+        : row.type === "advance" ? t("accountsPage.labourAdvance")
+          : row.type === "settlement_sent" ? t("accountsPage.settlementSent")
+            : row.type === "settlement_received" ? t("accountsPage.settlementReceived")
+              : row.type === "contribution" ? t("accountsPage.contribution")
+                : t("accountsPage.withdrawal")
+  ), [t]);
   const ledgerRows = useMemo(() => {
     if (!selectedAccount) return [];
-    type LedgerRow = {
-      id: string;
-      date: string;
-      type: "sale" | "voucher" | "advance" | "settlement_sent" | "settlement_received" | "contribution" | "withdrawal";
-      reference: string;
-      description: string;
-      debit: number;
-      credit: number;
-      source: "sales" | "expenses" | "labour_advances" | "partner_ledger";
-      sourceId: string;
-      counterparty?: string;
-      runningBalance?: number;
-    };
-    const rows: LedgerRow[] = [];
+    const rows: AccountLedgerRow[] = [];
     for (const sale of sales.filter((item) => item.accountId === selectedAccount.id)) {
       rows.push({
         id: `sale:${sale.id}`,
@@ -2243,6 +2263,7 @@ function AccountsModule() {
         credit: sale.amount,
         source: "sales",
         sourceId: sale.id,
+        classification: "sale",
       });
     }
     for (const voucher of vouchers.filter((item) => item.accountId === selectedAccount.id)) {
@@ -2256,6 +2277,7 @@ function AccountsModule() {
         credit: 0,
         source: "expenses",
         sourceId: voucher.id,
+        classification: "voucher",
       });
     }
     for (const advance of advances.filter((item) => item.accountId === selectedAccount.id)) {
@@ -2269,6 +2291,7 @@ function AccountsModule() {
         credit: 0,
         source: "labour_advances",
         sourceId: advance.id,
+        classification: "advance",
       });
     }
     for (const entry of entries.filter((item) => !item.deletedAt)) {
@@ -2284,6 +2307,7 @@ function AccountsModule() {
           source: "partner_ledger",
           sourceId: entry.id,
           counterparty: entry.partnerName,
+          classification: "contribution",
         });
       }
       if (entry.type === "withdrawal" && entry.accountId === selectedAccount.id) {
@@ -2298,6 +2322,7 @@ function AccountsModule() {
           source: "partner_ledger",
           sourceId: entry.id,
           counterparty: entry.partnerName,
+          classification: "withdrawal",
         });
       }
       if (entry.type === "settlement") {
@@ -2313,6 +2338,7 @@ function AccountsModule() {
             source: "partner_ledger",
             sourceId: entry.id,
             counterparty: entry.toPartner,
+            classification: "settlement_sent",
           });
         }
         if (entry.toAccountId === selectedAccount.id) {
@@ -2327,6 +2353,7 @@ function AccountsModule() {
             source: "partner_ledger",
             sourceId: entry.id,
             counterparty: entry.fromPartner,
+            classification: "settlement_received",
           });
         }
       }
@@ -2371,6 +2398,32 @@ function AccountsModule() {
       netBalance: byType.salesReceived - byType.voucherExpensesPaid - byType.labourAdvancesPaid + byType.contributions - byType.withdrawals - byType.settlementsSent + byType.settlementsReceived,
     };
   }, [filteredLedgerRows]);
+  const groupedLedgerRows = useMemo(() => groupAccountTransactions(filteredLedgerRows), [filteredLedgerRows]);
+  const visibleLedgerGroups = useMemo(() => groupedLedgerRows.filter((group) => showEmptyLedgerGroups || group.count > 0), [groupedLedgerRows, showEmptyLedgerGroups]);
+  const ledgerCurrentBalance = selectedAccount ? balance(selectedAccount) : 0;
+  const ledgerSummary = useMemo(() => {
+    const summary = {
+      expenses: 0,
+      advances: 0,
+      settlements: 0,
+      income: 0,
+      other: 0,
+    };
+    for (const group of groupedLedgerRows) {
+      if (group.groupKey === "expenses") summary.expenses += group.debitTotal;
+      if (group.groupKey === "advances") summary.advances += group.debitTotal;
+      if (group.groupKey === "settlements") summary.settlements += group.totalAmount;
+      if (group.groupKey === "income") summary.income += group.totalAmount;
+      if (group.groupKey === "other") summary.other += group.totalAmount;
+    }
+    return {
+      ...summary,
+      netBalance: summary.income - summary.expenses - summary.advances + summary.settlements + summary.other,
+    };
+  }, [groupedLedgerRows]);
+  const hasLedgerFilters = Boolean(ledgerSearch.trim() || ledgerType !== "all" || ledgerFrom || ledgerTo);
+  const ledgerReconciliationDelta = Math.round((ledgerCurrentBalance - ledgerSummary.netBalance) * 100) / 100;
+  const showLedgerWarning = selectedAccount && Math.abs(ledgerReconciliationDelta) > 0.009;
   const openSource = (row: (typeof filteredLedgerRows)[number]) => {
     const farmId = getActiveFarmId();
     const seasonId = getActiveSeasonId();
@@ -2449,6 +2502,17 @@ function AccountsModule() {
           <header><h2>{t("accountsPage.ledgerTitle", { name: selectedAccount.name })}</h2><button aria-label={t("common.close")} type="button" onClick={() => setSelectedAccountId(null)}><X size={19} /></button></header>
           <div className="worker-action-form">
             <div className="account-ledger-breakdown">
+              <article><strong>{t("accountsPage.currentAccount")}</strong><span>{selectedAccount.name}</span></article>
+              <article><strong>{t("accountsPage.currentBalance")}</strong><b>{money(ledgerCurrentBalance)}</b></article>
+              <article><strong>{t("accountsPage.voucherExpensesPaid")}</strong><span>{money(ledgerSummary.expenses)}</span></article>
+              <article><strong>{t("accountsPage.labourAdvancesPaid")}</strong><span>{money(ledgerSummary.advances)}</span></article>
+              <article><strong>{t("accountsPage.partnerSettlementsNet")}</strong><span>{money(ledgerSummary.settlements)}</span></article>
+              <article><strong>{t("accountsPage.incomeFundsSales")}</strong><span>{money(ledgerSummary.income)}</span></article>
+              <article><strong>{t("accountsPage.otherTransactions")}</strong><span>{money(ledgerSummary.other)}</span></article>
+              <article><strong>{t("accountsPage.netBalance")}</strong><b>{money(ledgerSummary.netBalance)}</b></article>
+            </div>
+            {showLedgerWarning && <p className="worker-action-warning">{hasLedgerFilters ? t("accountsPage.filteredReconciliationWarning") : t("accountsPage.reconciliationWarning", { delta: money(ledgerReconciliationDelta) })}</p>}
+            <div className="account-ledger-breakdown">
               <article><strong>{t("accountsPage.voucherExpensesPaid")}</strong><span>{money(ledgerBreakdown.voucherExpensesPaid)}</span></article>
               <article><strong>{t("accountsPage.salesReceived")}</strong><span>{money(ledgerBreakdown.salesReceived)}</span></article>
               <article><strong>{t("accountsPage.labourAdvancesPaid")}</strong><span>{money(ledgerBreakdown.labourAdvancesPaid)}</span></article>
@@ -2473,39 +2537,53 @@ function AccountsModule() {
               <input aria-label={t("accountsPage.ledgerFromDate")} type="date" value={ledgerFrom} onChange={(event) => setLedgerFrom(event.target.value)} />
               <input aria-label={t("accountsPage.ledgerToDate")} type="date" value={ledgerTo} onChange={(event) => setLedgerTo(event.target.value)} />
             </div>
-            <div className="attendance-import-table-wrap report-wide-table">
-              <table>
-                <thead><tr><th>{t("expensesPage.date")}</th><th>{t("partnerLedgerPage.type")}</th><th>{t("accountsPage.reference")}</th><th>{t("expensesPage.description")}</th><th>{t("accountsPage.debit")}</th><th>{t("accountsPage.credit")}</th><th>{t("accountsPage.runningBalance")}</th><th>{t("accountsPage.source")}</th></tr></thead>
-                <tbody>
-                  {filteredLedgerRows.map((row) => <tr key={row.id}>
-                    <td>{row.date}</td>
-                    <td>{row.type === "sale" ? t("accountsPage.saleCredit") : row.type === "voucher" ? t("accountsPage.voucherExpense") : row.type === "advance" ? t("accountsPage.labourAdvance") : row.type === "settlement_sent" ? t("accountsPage.settlementSent") : row.type === "settlement_received" ? t("accountsPage.settlementReceived") : row.type === "contribution" ? t("accountsPage.contribution") : t("accountsPage.withdrawal")}</td>
-                    <td>{row.reference}</td>
-                    <td>{row.description}{row.counterparty ? ` (${row.counterparty})` : ""}</td>
-                    <td>{row.debit ? money(row.debit) : "-"}</td>
-                    <td>{row.credit ? money(row.credit) : "-"}</td>
-                    <td>{money(row.runningBalance ?? 0)}</td>
-                    <td><button type="button" onClick={() => openSource(row)}>{t("accountsPage.open")}</button></td>
-                  </tr>)}
-                </tbody>
-              </table>
-            </div>
-            <div className="report-mobile-cards">
-              {filteredLedgerRows.map((row) => <article className="report-mobile-card" key={`mobile-${row.id}`}>
-                <header><strong>{row.reference}</strong><b>{row.credit ? `+${money(row.credit)}` : `-${money(row.debit)}`}</b></header>
-                <span>{row.date} | {row.type === "sale" ? t("accountsPage.saleCredit") : row.type === "voucher" ? t("accountsPage.voucherExpense") : row.type === "advance" ? t("accountsPage.labourAdvance") : row.type === "settlement_sent" ? t("accountsPage.settlementSent") : row.type === "settlement_received" ? t("accountsPage.settlementReceived") : row.type === "contribution" ? t("accountsPage.contribution") : t("accountsPage.withdrawal")}</span>
-                <p>{row.description}{row.counterparty ? ` (${row.counterparty})` : ""}</p>
-                <div className="report-mobile-card__balance"><span>{t("accountsPage.runningBalance")}</span><strong>{money(row.runningBalance ?? 0)}</strong></div>
-                <details>
-                  <summary>{t("accountsPage.viewDetails")}</summary>
-                  <dl>
-                    <div><dt>{t("accountsPage.debit")}</dt><dd>{row.debit ? money(row.debit) : "-"}</dd></div>
-                    <div><dt>{t("accountsPage.credit")}</dt><dd>{row.credit ? money(row.credit) : "-"}</dd></div>
-                  </dl>
-                  <button type="button" onClick={() => openSource(row)}>{t("accountsPage.open")}</button>
-                </details>
-              </article>)}
-            </div>
+            <label className="account-ledger-toggle"><input type="checkbox" checked={showEmptyLedgerGroups} onChange={(event) => setShowEmptyLedgerGroups(event.target.checked)} />{t("accountsPage.showEmptyGroups")}</label>
+            {!visibleLedgerGroups.length ? <Empty>{t("accountsPage.noGroupedTransactions")}</Empty> : <div className="account-transaction-groups">
+              {visibleLedgerGroups.map((group) => {
+                const expanded = ledgerGroupExpanded[group.groupKey];
+                return <section className="account-transaction-group" key={group.groupKey}>
+                  <button className="account-transaction-group__header" type="button" onClick={() => setLedgerGroupExpanded((current) => ({ ...current, [group.groupKey]: !current[group.groupKey] }))}>
+                    <span className="account-transaction-group__title">{expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}{ledgerGroupTitle(group.groupKey)}</span>
+                    <span className="account-transaction-group__meta"><strong>{money(group.totalAmount)}</strong><small>{t("accountsPage.transactionCount", { count: group.count })}</small></span>
+                  </button>
+                  {expanded && <>
+                    <div className="attendance-import-table-wrap report-wide-table">
+                      <table>
+                        <thead><tr><th>{t("expensesPage.date")}</th><th>{t("partnerLedgerPage.type")}</th><th>{t("accountsPage.reference")}</th><th>{t("expensesPage.description")}</th><th>{t("accountsPage.debit")}</th><th>{t("accountsPage.credit")}</th><th>{t("accountsPage.runningBalance")}</th><th>{t("accountsPage.source")}</th></tr></thead>
+                        <tbody>
+                          {group.transactions.map((row) => <tr key={row.id}>
+                            <td>{row.date}</td>
+                            <td>{ledgerTypeLabel(row)}</td>
+                            <td>{row.reference}</td>
+                            <td>{row.description}{row.counterparty ? ` (${row.counterparty})` : ""}</td>
+                            <td>{row.debit ? money(row.debit) : "-"}</td>
+                            <td>{row.credit ? money(row.credit) : "-"}</td>
+                            <td>{money(row.runningBalance ?? 0)}</td>
+                            <td><button type="button" onClick={() => openSource(row)}>{t("accountsPage.open")}</button></td>
+                          </tr>)}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="report-mobile-cards">
+                      {group.transactions.map((row) => <article className="report-mobile-card" key={`mobile-${row.id}`}>
+                        <header><strong>{row.reference}</strong><b>{row.credit ? `+${money(row.credit)}` : `-${money(row.debit)}`}</b></header>
+                        <span>{row.date} | {ledgerTypeLabel(row)}</span>
+                        <p>{row.description}{row.counterparty ? ` (${row.counterparty})` : ""}</p>
+                        <div className="report-mobile-card__balance"><span>{t("accountsPage.runningBalance")}</span><strong>{money(row.runningBalance ?? 0)}</strong></div>
+                        <details>
+                          <summary>{t("accountsPage.viewDetails")}</summary>
+                          <dl>
+                            <div><dt>{t("accountsPage.debit")}</dt><dd>{row.debit ? money(row.debit) : "-"}</dd></div>
+                            <div><dt>{t("accountsPage.credit")}</dt><dd>{row.credit ? money(row.credit) : "-"}</dd></div>
+                          </dl>
+                          <button type="button" onClick={() => openSource(row)}>{t("accountsPage.open")}</button>
+                        </details>
+                      </article>)}
+                    </div>
+                  </>}
+                </section>;
+              })}
+            </div>}
             <footer><button type="button" onClick={() => setSelectedAccountId(null)}>{t("accountsPage.back")}</button></footer>
           </div>
         </section>
