@@ -38,9 +38,13 @@ test("farm and season switching scope browser records to the selected context", 
   assert.match(sync, /bootstrap\.activeSeasonId/);
 });
 
-test("attendance report query keys include tenant context and date range", async () => {
-  const modulePage = await source("web/src/pages/ModulePage.tsx");
-  assert.match(modulePage, /queryKey: \["attendance-report", workspaceId, farmId, seasonId, submitted\?\.from, submitted\?\.to, submitted\?\.labourIds\?\.join\(","\), submitted\?\.status\]/);
+test("attendance reports scope cached tenant data and selected date range", async () => {
+  const reports = await source("web/src/pages/workspace/Reports.tsx");
+  assert.match(reports, /workspaceRecords\(offlineDb\.labourers\)/);
+  assert.match(reports, /workspaceRecords\(offlineDb\.attendance\)/);
+  assert.match(reports, /buildDateColumns\(from, to, attendanceRows\)/);
+  assert.match(reports, /matchesGroup\(labourer\)/);
+  assert.match(reports, /matches\(item\.date, \[labourName\(item\.labourerId\), labourer\?\.group, item\.status\]\)/);
 });
 
 test("operational writes queue locally before background sync", async () => {
@@ -88,8 +92,9 @@ test("partner ledger supports audited edits and offline soft deletes without dup
   assert.match(route, /hasPermission\(request\.appUser, "MANAGE_RECORDS", parsed\.data\.workspaceId\)/);
   assert.match(offlineDb, /Boolean\(options\.includeDeleted\) \|\| !record\.deletedAt/);
   assert.match(sync, /entity === "partnerEntry" \|\| entity === "advance" \|\| entity === "voucher"/);
-  assert.match(modulePage, /Show deleted/);
-  assert.match(modulePage, /Partner ledger entry deleted successfully\./);
+  assert.match(modulePage, /const \[showDeleted, setShowDeleted\] = useState\(false\);/);
+  assert.match(modulePage, /t\("partnerLedgerPage\.showDeleted"\)/);
+  assert.match(modulePage, /t\("partnerLedgerPage\.entryDeleted"\)/);
   assert.match(modulePage, /actions=\{visibleEntries\.map/);
 });
 
@@ -113,8 +118,8 @@ test("partner settlements transfer matching account and partner positions withou
   assert.match(modulePage, /position\(accountName\)\.labourAdvancesPaid \+= advance\.amount/);
   assert.match(modulePage, /totalPaid: item\.voucherExpensesPaid \+ item\.labourAdvancesPaid/);
   assert.match(modulePage, /-\s*item\.voucherExpensesPaid[\s\S]*-\s*item\.labourAdvancesPaid[\s\S]*\+\s*item\.contributions[\s\S]*-\s*item\.withdrawals[\s\S]*-\s*item\.settlementsSent[\s\S]*\+\s*item\.settlementsReceived/);
-  assert.match(modulePage, /<option value="settlement">Partner Settlement<\/option>/);
-  assert.match(modulePage, /<option value="settlement">Settlements<\/option>/);
+  assert.match(modulePage, /<option value="settlement">\{t\("partnerLedgerPage\.partnerSettlement"\)\}<\/option>/);
+  assert.match(modulePage, /<option value="settlement">\{t\("partnerLedgerPage\.partnerSettlement"\)\}<\/option>/);
   assert.match(dashboard, /item\.type === "withdrawal" \? -item\.amount : 0/);
   assert.match(dashboard, /netPosition: calculateAvailableBalance\(accounts, sales, vouchers, advances, entries\)/);
 });
@@ -147,39 +152,32 @@ test("mobile styles contain page overflow and keep navigation scrollable", async
   assert.match(styles, /\.partner-ledger-submit \{[\s\S]*color: #fff !important;/);
 });
 
-test("report modal is compact responsive and dark-mode aware", async () => {
-  const modulePage = await source("web/src/pages/ModulePage.tsx");
+test("reports module stays compact and responsive across desktop and mobile views", async () => {
+  const reports = await source("web/src/pages/workspace/Reports.tsx");
   const styles = await source("web/src/styles.css");
-  assert.match(modulePage, /aria-label=\{t\("reports\.closeReport"\)\}><X size=\{19\} \/><\/button>/);
-  assert.match(modulePage, /attendance-report-cancel" type="button" onClick=\{onClose\}/);
-  assert.match(modulePage, /attendance-report-generate" type="submit"/);
-  assert.match(styles, /\.attendance-report-dialog \{[\s\S]*max-width: 600px;[\s\S]*width: min\(600px, 95vw\);/);
-  assert.match(styles, /@media \(max-width: 767px\) \{[\s\S]*\.attendance-report-filters \{ grid-template-columns: minmax\(0, 1fr\); \}/);
-  assert.match(styles, /\.attendance-report-header/);
+  assert.match(reports, /className="subpage module-workspace reports-page"/);
+  assert.match(reports, /className="record-panel reports-subtabs"/);
+  assert.match(reports, /className="reports-view-header"/);
+  assert.match(styles, /\.reports-view-header \{ align-items: flex-start; display: flex;/);
+  assert.match(styles, /\.report-wide-table \{ display: none; \}/);
+  assert.match(styles, /\.report-mobile-cards \{ display: grid; gap: 8px; \}/);
+  assert.match(styles, /\.reports-subtabs \{ flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; \}/);
+  assert.match(styles, /\.report-mobile-cards \{ display: none; \}/);
 });
 
-test("attendance report preview renders a printable register and structured exports", async () => {
-  const modulePage = await source("web/src/pages/ModulePage.tsx");
+test("attendance reports provide printable register and structured exports from the reports module", async () => {
+  const reports = await source("web/src/pages/workspace/Reports.tsx");
   const styles = await source("web/src/styles.css");
-  assert.match(modulePage, /t\("reports\.farmLabourRegister"\)/);
-  assert.match(modulePage, /t\("reports\.exportPdf"\)/);
-  assert.match(modulePage, /Daily payable total/);
-  assert.match(modulePage, /attendanceMark\(status\)/);
-  assert.match(modulePage, /Adv \(SAR\)/);
-  assert.match(modulePage, /Wages \(SAR\)/);
-  assert.match(modulePage, /Net \(SAR\)/);
-  assert.match(modulePage, /className="print-summary"/);
-  assert.match(modulePage, /compactDate\(date\)/);
-  assert.match(modulePage, /compactAdvance\(advance\)/);
-  assert.match(modulePage, /t\("reports\.printRangeWarning"\)/);
-  assert.match(styles, /@page \{ size: A4 landscape; margin: 5mm; \}/);
-  assert.match(styles, /\.print-summary \{ border-bottom: 1px solid #2d862f; display: grid;[\s\S]*max-height: 20mm;/);
-  assert.match(styles, /\.attendance-register-table \{ border-collapse: collapse; font-size: 5px; min-width: 0; table-layout: fixed; width: 100%; \}/);
-  assert.match(styles, /\.attendance-register-table thead \{ display: table-header-group; \}/);
-  assert.match(styles, /\.attendance-register-table tfoot \{ display: table-row-group; \}/);
-  assert.match(styles, /\.attendance-register-table tr \{ break-inside: avoid; page-break-inside: avoid; \}/);
-  assert.match(styles, /\.attendance-register-table th:nth-child\(n\+9\), \.attendance-register-table td:nth-child\(n\+9\) \{ width: 18px; \}/);
-  assert.match(styles, /\.register-status--present \{ background: #dff2d7;/);
+  assert.match(reports, /title="Attendance Register"/);
+  assert.match(reports, /t\("reportsPage\.exportCsv"\)/);
+  assert.match(reports, /t\("reportsPage\.registerOnlyPrint"\)/);
+  assert.match(reports, /const attendanceMark = \(status\?: Attendance\["status"\]\)/);
+  assert.match(reports, /function buildDateColumns\(from: string, to: string, rows: Attendance\[\]\)/);
+  assert.match(reports, /downloadCsv\("attendance-register\.csv"/);
+  assert.match(reports, /printSection\("attendance-register-print"\)/);
+  assert.match(reports, /className="report-data-table attendance-register-report"/);
+  assert.match(styles, /@media print \{[\s\S]*\.reports-page \{ display: block; \}/);
+  assert.match(styles, /@media print \{[\s\S]*\.report-wide-table \{ display: block !important; \}/);
 });
 
 test("expense entry uses dependent searchable category selectors and grouped totals", async () => {
@@ -187,7 +185,7 @@ test("expense entry uses dependent searchable category selectors and grouped tot
   assert.match(modulePage, /list="expense-category-options"/);
   assert.match(modulePage, /list="expense-subcategory-options"/);
   assert.match(modulePage, /disabled=\{!categoryId\}/);
-  assert.match(modulePage, /Expenses by category/);
+  assert.match(modulePage, /t\("expensesPage\.expensesByCategory"\)/);
   assert.match(modulePage, /MANAGE_EXPENSE_CATEGORIES/);
 });
 
@@ -197,7 +195,7 @@ test("financial cards and expense category totals use readable tokenized surface
   const styles = await source("web/src/styles.css");
   assert.match(format, /minimumFractionDigits: 0,[\s\S]*maximumFractionDigits: 2/);
   assert.match(modulePage, /<header><h3>\{category\}<\/h3><strong>\{money\(categoryTotal\)\}<\/strong><\/header>/);
-  assert.match(modulePage, /<b>Category total <span>\{money\(categoryTotal\)\}<\/span><\/b>/);
+  assert.match(modulePage, /<b>\{t\("expensesPage\.categoryTotal"\)\} <span>\{money\(categoryTotal\)\}<\/span><\/b>/);
   assert.match(styles, /--text-primary: var\(--text\);[\s\S]*--surface-muted: var\(--surface-soft\);[\s\S]*--accent: var\(--brand-secondary\);/);
   assert.match(styles, /\.summary-card \{[\s\S]*background: var\(--surface\);[\s\S]*border: 1px solid var\(--border\);[\s\S]*color: var\(--text-primary\);/);
   assert.match(styles, /\.expense-category-report header strong,[\s\S]*\.expense-category-report p strong \{[\s\S]*color: var\(--text-primary\);/);
@@ -241,17 +239,18 @@ test("labour details actions edit labour and add separate optimistic advances", 
   assert.match(styles, /@media \(max-width: 767px\) \{[\s\S]*\.worker-action-backdrop \{ align-items: flex-end; padding: 0; \}/);
 });
 
-test("workforce screen provides add-labour modal, independent advance report, and instant labour-register search", async () => {
+test("workforce screen provides add-labour modal and instant labour-register search while advance reporting lives in dedicated modules", async () => {
   const modulePage = await source("web/src/pages/ModulePage.tsx");
+  const advances = await source("web/src/pages/workspace/LabourAdvances.tsx");
   assert.match(modulePage, /const \[labourSearch, setLabourSearch\] = useState\(""\);/);
   assert.match(modulePage, /const filteredRegister = labourers\.filter\(\(labourer\) =>/);
   assert.match(modulePage, /workforcePage\.searchRegister/);
   assert.match(modulePage, /workforcePage\.noLabourFound/);
-  assert.match(modulePage, /setShowAdvanceReport\(true\)/);
   assert.match(modulePage, /setShowAddLabour\(true\)/);
   assert.match(modulePage, /function AddLabourPanel\(/);
-  assert.match(modulePage, /function AdvanceReportPanel\(/);
-  assert.match(modulePage, /queryKey: \[[\s\S]*"advance-report",[\s\S]*workspaceId,[\s\S]*farmId,[\s\S]*seasonId/);
+  assert.match(advances, /recordAdvance/);
+  assert.match(advances, /advanceHistory/);
+  assert.match(advances, /SearchInput placeholder=\{t\("advancesPage\.searchPlaceholder"\)\}/);
 });
 
 test("attendance import confirmation batches writes and shows bounded progress feedback", async () => {
@@ -305,6 +304,7 @@ test("expense voucher search is debounced online, cache-first offline, and tenan
   const route = await source("api/src/routes/expense-search.ts");
   const api = await source("web/src/lib/api.ts");
   const modulePage = await source("web/src/pages/ModulePage.tsx");
+  const i18n = await source("web/src/i18n.ts");
   const styles = await source("web/src/styles.css");
   assert.match(app, /expenseSearchRoutes/);
   assert.match(route, /eq\(operationalRecords\.workspaceId, params\.data\.workspaceId\)/);
@@ -318,16 +318,17 @@ test("expense voucher search is debounced online, cache-first offline, and tenan
   assert.match(modulePage, /const filteredVouchers = useMemo/);
   assert.match(modulePage, /const total = filteredVouchers\.reduce\(\(sum, item\) => sum \+ item\.amount, 0\)/);
   assert.match(modulePage, /const grouped = \[\.\.\.filteredVouchers\.reduce/);
-  assert.match(modulePage, /Showing totals for current filters/);
-  assert.match(modulePage, /Clear filters/);
-  assert.match(modulePage, /<legend>Date range<\/legend>/);
-  assert.match(modulePage, /<CalendarDays size=\{15\} \/>From date/);
-  assert.match(modulePage, /<CalendarDays size=\{15\} \/>To date/);
-  assert.match(modulePage, /<span>Payment account<\/span>/);
+  assert.match(modulePage, /expensesPage\.showingCurrentFilters/);
+  assert.match(modulePage, /expensesPage\.clearFilters/);
+  assert.match(modulePage, /expensesPage\.dateRange/);
+  assert.match(modulePage, /<span><CalendarDays size=\{15\} \/>\{t\("expensesPage\.fromDate"\)\}<\/span>/);
+  assert.match(modulePage, /<span><CalendarDays size=\{15\} \/>\{t\("expensesPage\.toDate"\)\}<\/span>/);
+  assert.match(modulePage, /expensesPage\.paymentAccount/);
   assert.match(styles, /\.expense-search-filters input\[type="date"\] \{[\s\S]*-webkit-text-fill-color: var\(--text\);/);
   assert.match(styles, /@media \(max-width: 767px\) \{[\s\S]*\.expense-date-range,[\s\S]*\.expense-filter-grid \{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/);
-  assert.match(modulePage, /<h2>Search vouchers<\/h2>[\s\S]*Summary value=\{money\(total\)\} label=\{hasActiveFilters \? "Total expenses - current filters" : "Total expenses - current season"\}/);
-  assert.match(modulePage, /No expenses found for this search\./);
+  assert.match(modulePage, /expensesPage\.searchVouchers/);
+  assert.match(modulePage, /label=\{hasActiveFilters \? t\("expensesPage\.totalCurrentFilters"\) : t\("expensesPage\.totalCurrentSeason"\)\}/);
+  assert.match(i18n, /noExpensesFound: "No expenses found for this search\."/);
 });
 
 test("labour lifecycle UI preserves history and hides inactive labour from daily marking by default", async () => {
@@ -351,6 +352,7 @@ test("labour lifecycle UI preserves history and hides inactive labour from daily
 test("accounts drill-down exposes live ledger totals and source links", async () => {
   const modulePage = await source("web/src/pages/ModulePage.tsx");
   const accounting = await source("web/src/lib/accounting.ts");
+  const i18n = await source("web/src/i18n.ts");
   assert.match(modulePage, /className="account-card-clickable"/);
   assert.match(modulePage, /setSelectedAccountId\(account\.id\)/);
   assert.match(modulePage, /openExpenseVisibility\("voucher"\)/);
@@ -362,7 +364,8 @@ test("accounts drill-down exposes live ledger totals and source links", async ()
   assert.match(modulePage, /settlementsReceived/);
   assert.match(modulePage, /contributions/);
   assert.match(modulePage, /withdrawals/);
-  assert.match(modulePage, /Search voucher\/reference, description, amount, or counterparty/);
+  assert.match(modulePage, /accountsPage\.ledgerSearchPlaceholder/);
+  assert.match(i18n, /ledgerSearchPlaceholder: "Search voucher\/reference, description, amount, or counterparty"/);
   assert.match(modulePage, /openSource\(row\)/);
   assert.match(modulePage, /source === "expenses"/);
   assert.match(modulePage, /source === "labour_advances"/);

@@ -5,6 +5,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { Brand } from "../components/Brand";
 import { LanguageSwitch } from "../components/LanguageSwitch";
+import { config } from "../config";
 import { useSyncState } from "../hooks/useSyncState";
 import { refreshOperationalData, startSyncService, stopSyncService, syncNow } from "../services/syncService";
 import { setActiveWorkspaceId } from "../lib/offline-db";
@@ -71,7 +72,10 @@ export function WorkspaceLayout() {
       <aside className="app-sidebar">
         <Brand compact />
         <span className="shell-label">{user?.workspaceName ?? t("layout.workspace")}</span>
-        <nav>{nav.filter(([, , , module]) => !user || hasModulePermission(user, module, "view")).map(([to, label, Icon]) => <NavLink to={to} key={to}><Icon size={17} />{t(label)}</NavLink>)}</nav>
+        <nav>{nav
+          .filter(([to]) => config.featureFarmMap || to !== "/workspace/operations-map")
+          .filter(([, , , module]) => !user || hasModulePermission(user, module, "view"))
+          .map(([to, label, Icon]) => <NavLink to={to} key={to}><Icon size={17} />{t(label)}</NavLink>)}</nav>
       </aside>
       <div className="app-shell__body">
         <header className="shell-header">

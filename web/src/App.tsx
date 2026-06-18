@@ -2,6 +2,7 @@ import { useEffect, type PropsWithChildren } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./auth/AuthProvider";
+import { config } from "./config";
 import { AdminLayout } from "./layouts/AdminLayout";
 import { WorkspaceLayout } from "./layouts/WorkspaceLayout";
 import { getHomePath, isPlatformUser } from "./lib/permissions";
@@ -60,6 +61,14 @@ function HomeRedirect() {
   return <Navigate to={user ? getHomePath(user) : "/login"} replace />;
 }
 
+function FarmMapDisabledRedirect() {
+  const { t } = useTranslation();
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("muzare-toast", { detail: t("farmMap.disabled") }));
+  }, [t]);
+  return <Navigate to="/workspace/dashboard" replace />;
+}
+
 export default function App() {
   const { i18n, t } = useTranslation();
   useEffect(() => {
@@ -94,15 +103,15 @@ export default function App() {
       <Route path="inventory" element={<Inventory />} />
       <Route path="labour-advances" element={<LabourAdvances />} />
       <Route path="reports" element={<Reports />} />
-      <Route path="operations-map" element={<FarmOperationsMap mode="live" />} />
-      <Route path="map-builder" element={<FarmOperationsMap mode="builder" />} />
+      <Route path="operations-map" element={config.featureFarmMap ? <FarmOperationsMap mode="live" /> : <FarmMapDisabledRedirect />} />
+      <Route path="map-builder" element={config.featureFarmMap ? <FarmOperationsMap mode="builder" /> : <FarmMapDisabledRedirect />} />
       <Route path="team" element={<ModulePage module="workforce" />} />
       <Route path="settings" element={<Farms />} />
       <Route path="settings/team" element={<WorkspaceTeam />} />
       <Route path="settings/approvals" element={<WorkspaceApprovals />} />
       <Route path="farms" element={<Farms />} />
-      <Route path=":workspaceId/farms/:farmId/map-builder" element={<FarmOperationsMap mode="builder" />} />
-      <Route path=":workspaceId/farms/:farmId/operations-map" element={<FarmOperationsMap mode="live" />} />
+      <Route path=":workspaceId/farms/:farmId/map-builder" element={config.featureFarmMap ? <FarmOperationsMap mode="builder" /> : <FarmMapDisabledRedirect />} />
+      <Route path=":workspaceId/farms/:farmId/operations-map" element={config.featureFarmMap ? <FarmOperationsMap mode="live" /> : <FarmMapDisabledRedirect />} />
       <Route path="seasons" element={<Seasons />} />
       <Route path="accounts" element={<ModulePage module="accounts" />} />
       <Route path="partner-ledger" element={<ModulePage module="partnerLedger" />} />

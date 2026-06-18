@@ -730,6 +730,9 @@ const extraResources = {
         sale: "Sale",
       partnerLedger: "Partner Ledger",
       operationsMap: "Farm Operations Map",
+      farmMap: {
+        disabled: "Farm map is currently disabled.",
+      },
         accountBalances: "Account Balances",
         reference: "Reference",
         debit: "Debit",
@@ -1289,6 +1292,9 @@ const extraResources = {
         sale: "مبيعات",
       partnerLedger: "دفتر الشركاء",
       operationsMap: "خريطة عمليات المزرعة",
+      farmMap: {
+        disabled: "خريطة المزرعة معطلة حالياً.",
+      },
         accountBalances: "أرصدة الحسابات",
         reference: "المرجع",
         debit: "مدين",
@@ -1848,6 +1854,9 @@ const extraResources = {
         sale: "فروخت",
       partnerLedger: "پارٹنر لیجر",
       operationsMap: "فارم آپریشنز میپ",
+      farmMap: {
+        disabled: "فارم میپ اس وقت غیر فعال ہے۔",
+      },
         accountBalances: "اکاؤنٹ بیلنس",
         reference: "حوالہ",
         debit: "ڈیبٹ",

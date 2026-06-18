@@ -147,6 +147,7 @@ function WorkforceModule({
   const [attendanceFilter, setAttendanceFilter] = useState<Attendance["status"] | "all">("all");
   const [showInactiveLabour, setShowInactiveLabour] = useState(false);
   const [selectedLabourer, setSelectedLabourer] = useState<Labourer | null>(null);
+  const [actionLabourer, setActionLabourer] = useState<Labourer | null>(null);
   const [markingLabourers, setMarkingLabourers] = useState<Set<string>>(() => new Set());
   const [showAdvanceEntry, setShowAdvanceEntry] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -252,11 +253,17 @@ function WorkforceModule({
   const canManageLabour = Boolean(user?.workspaceId && hasPermission(user, "MANAGE_TEAM", user.workspaceId));
   const canAddAdvance = Boolean(user?.workspaceId && hasPermission(user, "MANAGE_RECORDS", user.workspaceId));
   const showToast = (message: string) => window.dispatchEvent(new CustomEvent("muzare-toast", { detail: message }));
+  const closeLabourAction = () => {
+    setLabourAction(null);
+    setActionLabourer(null);
+  };
   const saveLabour = async (record: Labourer) => {
-    setSelectedLabourer(record);
+    if (selectedLabourer?.id === record.id) setSelectedLabourer(record);
+    if (actionLabourer?.id === record.id) setActionLabourer(record);
     await persistOperationalRecord("labourer", record);
     await refreshLabourers();
-    setSelectedLabourer(record);
+    if (selectedLabourer?.id === record.id) setSelectedLabourer(record);
+    if (actionLabourer?.id === record.id) setActionLabourer(record);
     showToast(t("workforcePage.labourUpdated"));
   };
   const saveAdvance = async (record: Advance) => {
@@ -374,8 +381,9 @@ function WorkforceModule({
                   {labourer.endedOn && <small>End date: {labourer.endedOn}</small>}
                 </span>
                 <button className="workforce-row__action" type="button" onClick={(event) => {
+                  event.preventDefault();
                   event.stopPropagation();
-                  setSelectedLabourer(labourer);
+                  setActionLabourer(labourer);
                   setLabourAction("update");
                 }}>Update</button>
               </article>
@@ -512,21 +520,24 @@ function WorkforceModule({
               </dl>
             </div>
             <footer className="worker-dialog__footer">
-              {canManageLabour && <button className="worker-dialog__link" type="button" onClick={() => setLabourAction("update")}>Update</button>}
-              {canAddAdvance && <button className="worker-dialog__link" type="button" onClick={() => setLabourAction("advance")}>Advance</button>}
-              {canAddAdvance && selectedLabourer.paymentType === "production_based" && <button className="worker-dialog__link" type="button" onClick={() => setLabourAction("production")}>Production</button>}
-              {canAddAdvance && <button className="worker-dialog__link" type="button" onClick={() => setLabourAction("payment")}>Payment</button>}
+              {canManageLabour && <button className="worker-dialog__link" type="button" onClick={() => { setActionLabourer(selectedLabourer); setLabourAction("update"); }}>Update</button>}
+              {canAddAdvance && <button className="worker-dialog__link" type="button" onClick={() => { setActionLabourer(selectedLabourer); setLabourAction("advance"); }}>Advance</button>}
+              {canAddAdvance && selectedLabourer.paymentType === "production_based" && <button className="worker-dialog__link" type="button" onClick={() => { setActionLabourer(selectedLabourer); setLabourAction("production"); }}>Production</button>}
+              {canAddAdvance && <button className="worker-dialog__link" type="button" onClick={() => { setActionLabourer(selectedLabourer); setLabourAction("payment"); }}>Payment</button>}
               {canManageLabour && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => {
                 if (!navigator.onLine || sync.pendingCount > 0) showToast(t("errors.syncPendingBeforeDeactivate"));
-                else setLabourAction("deactivate");
+                else {
+                  setActionLabourer(selectedLabourer);
+                  setLabourAction("deactivate");
+                }
               }}>{selectedLabourer.active === false ? "Delete" : "Deactivate / Delete"}</button>}
               <button className="worker-dialog__close" type="button" onClick={() => setSelectedLabourer(null)}>Close</button>
             </footer>
           </section>
         </div>
       )}
-      {selectedLabourer && labourAction === "update" && <EditLabourPanel labourer={selectedLabourer} onClose={() => setLabourAction(null)} onSave={saveLabour} />}
-      {selectedLabourer && labourAction === "advance" && <AddAdvancePanel labourer={selectedLabourer} accounts={accounts} onClose={() => setLabourAction(null)} onSave={saveAdvance} />}
+      {actionLabourer && labourAction === "update" && <EditLabourPanel labourer={actionLabourer} onClose={closeLabourAction} onSave={saveLabour} />}
+      {actionLabourer && labourAction === "advance" && <AddAdvancePanel labourer={actionLabourer} accounts={accounts} onClose={closeLabourAction} onSave={saveAdvance} />}
       {showAdvanceEntry && <AdvanceEntryPanel
         labourers={labourers}
         groups={groups}
@@ -540,8 +551,8 @@ function WorkforceModule({
           await refreshAdvances();
         }}
       />}
-      {selectedLabourer && labourAction === "production" && <AddProductionPanel labourer={selectedLabourer} onClose={() => setLabourAction(null)} onSave={saveProduction} />}
-      {selectedLabourer && labourAction === "payment" && <AddPaymentPanel labourer={selectedLabourer} onClose={() => setLabourAction(null)} onSave={savePayment} />}
+      {actionLabourer && labourAction === "production" && <AddProductionPanel labourer={actionLabourer} onClose={closeLabourAction} onSave={saveProduction} />}
+      {actionLabourer && labourAction === "payment" && <AddPaymentPanel labourer={actionLabourer} onClose={closeLabourAction} onSave={savePayment} />}
       {showAddGroup && <AddGroupPanel onClose={() => setShowAddGroup(false)} onSave={async (record) => {
         await saveGroup(record);
         setShowAddGroup(false);
@@ -560,13 +571,14 @@ function WorkforceModule({
         setShowAddLabour(false);
         showToast(t("workforcePage.labourAdded"));
       }} />}
-      {selectedLabourer && labourAction === "deactivate" && token && user?.workspaceId && (
+      {actionLabourer && labourAction === "deactivate" && token && user?.workspaceId && (
         <DeactivateLabourPanel
-          token={token} workspaceId={user.workspaceId} labourer={selectedLabourer}
-          onClose={() => setLabourAction(null)}
+          token={token} workspaceId={user.workspaceId} labourer={actionLabourer}
+          onClose={closeLabourAction}
           onComplete={async (action) => {
             await refreshOperationalData(); await Promise.all([refreshLabourers(), refreshAttendance(), refreshAdvances(), refreshPayments(), refreshProductionEntries()]);
-            setLabourAction(null); setSelectedLabourer(null);
+            closeLabourAction();
+            if (selectedLabourer?.id === actionLabourer.id) setSelectedLabourer(null);
             showToast(action === "deleted" ? t("workforcePage.labourDeleted") : t("workforcePage.labourDeactivated"));
           }}
         />

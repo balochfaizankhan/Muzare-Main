@@ -8,7 +8,6 @@ import {
   CloudUpload,
   Leaf,
   PackageOpen,
-  Satellite,
   ShoppingBasket,
   TrendingUp,
   UsersRound,
@@ -21,6 +20,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
+import { config } from "../config";
 import { calculateAvailableBalance } from "../lib/accounting";
 import { fetchBootstrap } from "../lib/api";
 import { formatDate, formatMoney } from "../lib/format";
@@ -57,7 +57,6 @@ const modules: Array<{
   { key: "expenses", path: "/workspace/expenses", icon: BanknoteArrowDown, detailKey: "dashboard.expensesDetail" },
   { key: "sales", path: "/workspace/sales", icon: ShoppingBasket, detailKey: "dashboard.salesDetail" },
   { key: "dispatch", path: "/workspace/dispatch", icon: PackageOpen, detailKey: "dashboard.dispatchDetail" },
-  { key: "operationsMap", path: "/workspace/operations-map", icon: Satellite, detailKey: "dashboard.operationsMapDetail" },
   { key: "accounts", path: "/workspace/accounts", icon: BookOpenText, detailKey: "dashboard.accountsDetail" },
   { key: "partnerLedger", path: "/workspace/partner-ledger", icon: Leaf, detailKey: "dashboard.partnerLedgerDetail" },
 ];
@@ -220,7 +219,9 @@ export function DashboardPage() {
                 </div>
               </div>
               <div className="operation-grid">
-                {modules.map(({ key, path, detailKey, icon: Icon }) => (
+                {modules
+                  .filter(({ path }) => config.featureFarmMap || path !== "/workspace/operations-map")
+                  .map(({ key, path, detailKey, icon: Icon }) => (
                   <Link className="operation-card" key={key} to={path}>
                     <Icon size={22} />
                     <div>
