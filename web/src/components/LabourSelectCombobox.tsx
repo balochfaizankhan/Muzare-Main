@@ -1,4 +1,5 @@
 import { Check } from "lucide-react";
+import type { ReactNode } from "react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { SearchInput } from "./SearchInput";
 import type { Labourer } from "../lib/offline-db";
@@ -15,6 +16,9 @@ type LabourSelectComboboxProps = {
   clearValue?: string;
   noResultsLabel?: string;
   inputRef?: RefObject<HTMLInputElement | null>;
+  maxSuggestions?: number;
+  renderOption?: (option: Labourer, state: { selected: boolean; active: boolean }) => ReactNode;
+  renderSelectedValue?: (option: Labourer, actions: { change: () => void; clear: () => void }) => ReactNode;
 };
 
 type LabourOption = {
@@ -38,6 +42,9 @@ export function LabourSelectCombobox({
   clearValue = "",
   noResultsLabel = "No matching labour found",
   inputRef,
+  maxSuggestions = 8,
+  renderOption,
+  renderSelectedValue,
 }: LabourSelectComboboxProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -70,8 +77,8 @@ export function LabourSelectCombobox({
   }, [deferredQuery, labourOptions]);
 
   const items = useMemo(
-    () => includeAllOption && !normalize(deferredQuery) ? [{ id: "all", name: allOptionLabel, phone: "", searchText: "" }, ...filtered] : filtered,
-    [allOptionLabel, deferredQuery, filtered, includeAllOption],
+    () => (includeAllOption && !normalize(deferredQuery) ? [{ id: "all", name: allOptionLabel, phone: "", searchText: "" }, ...filtered] : filtered).slice(0, maxSuggestions),
+    [allOptionLabel, deferredQuery, filtered, includeAllOption, maxSuggestions],
   );
 
   useEffect(() => {
@@ -110,6 +117,14 @@ export function LabourSelectCombobox({
     setOpen(false);
     setActiveIndex(0);
   };
+
+  const beginChange = () => {
+    clear();
+    setOpen(true);
+    window.requestAnimationFrame(() => inputRef?.current?.focus());
+  };
+
+  const selectedLabour = value && value !== "all" ? options.find((option) => option.id === value) : undefined;
 
   const onInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (disabled) return;
@@ -150,9 +165,10 @@ export function LabourSelectCombobox({
 
   return (
     <div className="labour-combobox" ref={rootRef}>
+      {selectedLabour && !open && renderSelectedValue ? renderSelectedValue(selectedLabour, { change: beginChange, clear }) : null}
       <SearchInput
         aria-label={ariaLabel}
-        className="labour-combobox__input"
+        className={`labour-combobox__input${selectedLabour && !open && renderSelectedValue ? " labour-combobox__input--hidden" : ""}`}
         disabled={disabled}
         ref={inputRef}
         onChange={(nextValue) => {
@@ -177,6 +193,7 @@ export function LabourSelectCombobox({
             {items.length === 0 ? <p className="empty-records labour-combobox__empty">{noResultsLabel}</p> : items.map((option, index) => {
               const isActive = activeIndex === index;
               const isSelected = value === option.id;
+              const fullOption = option.id === "all" ? undefined : options.find((item) => item.id === option.id);
               return (
                 <button
                   ref={(node) => { optionRefs.current[index] = node; }}
@@ -186,8 +203,10 @@ export function LabourSelectCombobox({
                   onMouseEnter={() => setActiveIndex(index)}
                   onClick={() => select(option.id)}
                 >
-                  <span>{option.name}</span>
-                  {option.phone ? <small>{option.phone}</small> : null}
+                  {fullOption && renderOption ? renderOption(fullOption, { selected: isSelected, active: isActive }) : <>
+                    <span>{option.name}</span>
+                    {option.phone ? <small>{option.phone}</small> : null}
+                  </>}
                   {isSelected ? <Check size={14} /> : null}
                 </button>
               );

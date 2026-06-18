@@ -72,6 +72,7 @@ const partnerEntryPayloadSchema = z.discriminatedUnion("type", [
     type: z.enum(["contribution", "withdrawal"]),
     partnerName: z.string().trim().min(1),
     accountId: z.string().min(1),
+    partnerAccountId: z.string().min(1).optional(),
   }).passthrough(),
   partnerEntryBaseSchema.extend({
     type: z.literal("settlement"),
@@ -415,6 +416,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       farmId: parsed.data.farmId,
       seasonId: parsed.data.seasonId,
       accountId: parsed.data.record.accountId,
+      partnerAccountId: parsed.data.record.partnerAccountId,
       fromAccountId: parsed.data.record.fromAccountId,
       toAccountId: parsed.data.record.toAccountId,
       ledgerId: parsed.data.record.ledgerId,

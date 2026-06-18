@@ -18,6 +18,16 @@ const money = formatMoney;
 
 type Sort = "date_desc" | "date_asc" | "amount_desc" | "amount_asc";
 
+const paymentTypeLabel = (labourer?: Labourer) => {
+  switch (labourer?.paymentType) {
+    case "production_based": return "Production Based";
+    case "contract_lump_sum": return "Contract";
+    case "monthly_salary": return "Monthly Salary";
+    case "other": return "Other";
+    default: return "Daily Wage";
+  }
+};
+
 export function LabourAdvances() {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -77,6 +87,11 @@ export function LabourAdvances() {
   const groupedLabourers = useMemo(() => labourers
     .filter((labourer) => group === "all" || labourer.group === group)
     .sort((left, right) => left.name.localeCompare(right.name)), [group, labourers]);
+  const advanceTotalByLabour = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const advance of advances) totals.set(advance.labourerId, (totals.get(advance.labourerId) ?? 0) + advance.amount);
+    return totals;
+  }, [advances]);
 
   useEffect(() => {
     if (entryLabourerId && !groupedLabourers.some((labourer) => labourer.id === entryLabourerId)) setEntryLabourerId("");
@@ -181,9 +196,25 @@ export function LabourAdvances() {
               options={groupedLabourers}
               value={entryLabourerId}
               onChange={setEntryLabourerId}
-              placeholder={t("workforcePage.searchLabour")}
+              placeholder={t("advancesPage.searchLabourByName")}
               noResultsLabel={t("workforcePage.noLabourFound")}
               inputRef={labourInputRef}
+              maxSuggestions={6}
+              renderOption={(option) => <div className="labour-combobox__option-content">
+                <strong>{option.name}</strong>
+                <small>{paymentTypeLabel(option)}</small>
+                <small>{t("advancesPage.outstandingAdvance")}: {money(advanceTotalByLabour.get(option.id) ?? 0)}</small>
+              </div>}
+              renderSelectedValue={(option, actions) => <article className="labour-selected-card">
+                <div className="labour-selected-card__body">
+                  <strong>{option.name}</strong>
+                  <dl>
+                    <div><dt>{t("advancesPage.group")}</dt><dd>{paymentTypeLabel(option)}</dd></div>
+                    <div><dt>{t("advancesPage.outstandingAdvance")}</dt><dd>{money(advanceTotalByLabour.get(option.id) ?? 0)}</dd></div>
+                  </dl>
+                </div>
+                <button type="button" className="labour-selected-card__change" onClick={actions.change}>{t("advancesPage.changeLabour")}</button>
+              </article>}
             /></label>
             <label className="advances-filter-field"><span>{t("advancesPage.amount")}</span><input required min="0.01" step="0.01" type="number" value={entryAmount} onChange={(event) => setEntryAmount(event.target.value)} /></label>
             <label className="advances-filter-field"><span>{t("advancesPage.paymentAccount")}</span><select required value={selectedEntryAccountId} onChange={(event) => setEntryAccountId(event.target.value)}>

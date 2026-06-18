@@ -1,0 +1,243 @@
+import type { Account, Advance, PartnerEntry, Sale, Voucher } from "./offline-db";
+
+export type PartnerLiabilityPosition = {
+  account: Account | null;
+  key: string;
+  name: string;
+  openingBalance: number;
+  capitalInjected: number;
+  directExpensesPaid: number;
+  directVoucherExpensesPaid: number;
+  directLabourAdvancesPaid: number;
+  transfersIn: number;
+  transfersOut: number;
+  moneyReturned: number;
+  adjustments: number;
+  currentPartnerBalance: number;
+  reconciliationDelta: number;
+};
+
+export type PartnerLiabilityLedgerGroupKey =
+  | "capital_injected"
+  | "direct_expenses_paid"
+  | "transfers_in"
+  | "transfers_out"
+  | "money_returned"
+  | "adjustments";
+
+export type PartnerLiabilityGroupableTransaction = {
+  id: string;
+  date: string;
+  debit: number;
+  credit: number;
+  partnerLiabilityGroup?: PartnerLiabilityLedgerGroupKey;
+};
+
+export type PartnerLiabilityLedgerGroup<T extends PartnerLiabilityGroupableTransaction> = {
+  groupKey: PartnerLiabilityLedgerGroupKey;
+  transactions: T[];
+  totalAmount: number;
+  debitTotal: number;
+  creditTotal: number;
+  count: number;
+};
+
+export const partnerLiabilityGroupOrder: PartnerLiabilityLedgerGroupKey[] = [
+  "capital_injected",
+  "direct_expenses_paid",
+  "transfers_in",
+  "transfers_out",
+  "money_returned",
+  "adjustments",
+];
+
+export const defaultPartnerLiabilityGroupExpansion = (): Record<PartnerLiabilityLedgerGroupKey, boolean> => ({
+  capital_injected: true,
+  direct_expenses_paid: true,
+  transfers_in: true,
+  transfers_out: true,
+  money_returned: true,
+  adjustments: true,
+});
+
+const normalized = (value: string) => value.trim().toLowerCase();
+
+export const isPartnerAccount = (account?: Account | null) => account?.type === "partner";
+
+export function resolvePartnerAccountId(entry: Pick<PartnerEntry, "partnerAccountId" | "partnerName">, accounts: Account[]) {
+  if (entry.partnerAccountId && accounts.some((account) => account.id === entry.partnerAccountId && account.type === "partner")) return entry.partnerAccountId;
+  const name = entry.partnerName?.trim();
+  if (!name) return undefined;
+  const matches = accounts.filter((account) => account.type === "partner" && normalized(account.name) === normalized(name));
+  return matches.length === 1 ? matches[0]!.id : undefined;
+}
+
+export function partnerAccountBalanceEffect(
+  account: Account,
+  sales: Sale[],
+  vouchers: Voucher[],
+  advances: Advance[],
+  entries: PartnerEntry[],
+  allAccounts: Account[],
+) {
+  if (account.type !== "partner") return 0;
+  const capitalInjected = entries
+    .filter((entry) => !entry.deletedAt && entry.type === "contribution" && resolvePartnerAccountId(entry, allAccounts) === account.id)
+    .reduce((sum, entry) => sum + entry.amount, 0);
+  const moneyReturned = entries
+    .filter((entry) => !entry.deletedAt && entry.type === "withdrawal" && resolvePartnerAccountId(entry, allAccounts) === account.id)
+    .reduce((sum, entry) => sum + entry.amount, 0);
+  const transfersIn = entries
+    .filter((entry) => !entry.deletedAt && entry.type === "settlement" && entry.toAccountId === account.id)
+    .reduce((sum, entry) => sum + entry.amount, 0);
+  const transfersOut = entries
+    .filter((entry) => !entry.deletedAt && entry.type === "settlement" && entry.fromAccountId === account.id)
+    .reduce((sum, entry) => sum + entry.amount, 0);
+  const directVoucherExpensesPaid = vouchers
+    .filter((voucher) => voucher.accountId === account.id)
+    .reduce((sum, voucher) => sum + voucher.amount, 0);
+  const directLabourAdvancesPaid = advances
+    .filter((advance) => advance.accountId === account.id)
+    .reduce((sum, advance) => sum + advance.amount, 0);
+  const adjustments = sales
+    .filter((sale) => sale.accountId === account.id)
+    .reduce((sum, sale) => sum - sale.amount, 0);
+  return capitalInjected
+    + directVoucherExpensesPaid
+    + directLabourAdvancesPaid
+    + transfersIn
+    - transfersOut
+    - moneyReturned
+    + adjustments;
+}
+
+export function buildPartnerLiabilityPositions(
+  accounts: Account[],
+  vouchers: Voucher[],
+  advances: Advance[],
+  entries: PartnerEntry[],
+  sales: Sale[] = [],
+) {
+  const partnerAccounts = accounts.filter((account) => account.type === "partner");
+  const positions = new Map<string, PartnerLiabilityPosition>();
+  const ensure = (key: string, name: string, account: Account | null) => {
+    const current = positions.get(key) ?? {
+      account,
+      key,
+      name,
+      openingBalance: 0,
+      capitalInjected: 0,
+      directExpensesPaid: 0,
+      directVoucherExpensesPaid: 0,
+      directLabourAdvancesPaid: 0,
+      transfersIn: 0,
+      transfersOut: 0,
+      moneyReturned: 0,
+      adjustments: 0,
+      currentPartnerBalance: 0,
+      reconciliationDelta: 0,
+    };
+    if (!positions.has(key)) positions.set(key, current);
+    return current;
+  };
+
+  for (const account of partnerAccounts) ensure(account.id, account.name, account);
+
+  for (const entry of entries.filter((item) => !item.deletedAt)) {
+    if (entry.type === "settlement") {
+      if (entry.fromAccountId) ensure(entry.fromAccountId, accounts.find((account) => account.id === entry.fromAccountId)?.name ?? entry.fromPartner ?? "-", accounts.find((account) => account.id === entry.fromAccountId) ?? null).transfersOut += entry.amount;
+      if (entry.toAccountId) ensure(entry.toAccountId, accounts.find((account) => account.id === entry.toAccountId)?.name ?? entry.toPartner ?? "-", accounts.find((account) => account.id === entry.toAccountId) ?? null).transfersIn += entry.amount;
+      continue;
+    }
+    const resolvedId = resolvePartnerAccountId(entry, accounts);
+    if (resolvedId) {
+      const account = accounts.find((item) => item.id === resolvedId) ?? null;
+      const position = ensure(resolvedId, account?.name ?? entry.partnerName ?? "-", account);
+      if (entry.type === "contribution") position.capitalInjected += entry.amount;
+      if (entry.type === "withdrawal") position.moneyReturned += entry.amount;
+      continue;
+    }
+    const fallbackName = entry.partnerName?.trim();
+    if (!fallbackName) continue;
+    const position = ensure(`legacy:${normalized(fallbackName)}`, fallbackName, null);
+    if (entry.type === "contribution") position.capitalInjected += entry.amount;
+    if (entry.type === "withdrawal") position.moneyReturned += entry.amount;
+  }
+
+  for (const voucher of vouchers) {
+    const account = partnerAccounts.find((item) => item.id === voucher.accountId);
+    if (!account) continue;
+    const position = ensure(account.id, account.name, account);
+    position.directVoucherExpensesPaid += voucher.amount;
+    position.directExpensesPaid += voucher.amount;
+  }
+
+  for (const advance of advances) {
+    const account = partnerAccounts.find((item) => item.id === advance.accountId);
+    if (!account) continue;
+    const position = ensure(account.id, account.name, account);
+    position.directLabourAdvancesPaid += advance.amount;
+    position.directExpensesPaid += advance.amount;
+  }
+
+  for (const sale of sales) {
+    const account = partnerAccounts.find((item) => item.id === sale.accountId);
+    if (!account) continue;
+    const position = ensure(account.id, account.name, account);
+    position.adjustments -= sale.amount;
+  }
+
+  return [...positions.values()]
+    .map((position) => {
+      const currentPartnerBalance = position.openingBalance
+        + position.capitalInjected
+        + position.directExpensesPaid
+        + position.transfersIn
+        - position.transfersOut
+        - position.moneyReturned
+        + position.adjustments;
+      return {
+        ...position,
+        currentPartnerBalance,
+        reconciliationDelta: currentPartnerBalance - (
+          position.openingBalance
+          + position.capitalInjected
+          + position.directExpensesPaid
+          + position.transfersIn
+          - position.transfersOut
+          - position.moneyReturned
+          + position.adjustments
+        ),
+      };
+    })
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+export function groupPartnerLiabilityTransactions<T extends PartnerLiabilityGroupableTransaction>(transactions: T[]) {
+  const groups = new Map<PartnerLiabilityLedgerGroupKey, PartnerLiabilityLedgerGroup<T>>();
+  for (const groupKey of partnerLiabilityGroupOrder) {
+    groups.set(groupKey, {
+      groupKey,
+      transactions: [],
+      totalAmount: 0,
+      debitTotal: 0,
+      creditTotal: 0,
+      count: 0,
+    });
+  }
+
+  for (const transaction of transactions) {
+    const groupKey = transaction.partnerLiabilityGroup ?? "adjustments";
+    const group = groups.get(groupKey)!;
+    group.transactions.push(transaction);
+    group.count += 1;
+    group.debitTotal += transaction.debit;
+    group.creditTotal += transaction.credit;
+    group.totalAmount += transaction.credit - transaction.debit;
+  }
+
+  return partnerLiabilityGroupOrder.map((groupKey) => ({
+    ...groups.get(groupKey)!,
+    transactions: [...groups.get(groupKey)!.transactions].sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id)),
+  }));
+}

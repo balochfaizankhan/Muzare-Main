@@ -8,6 +8,7 @@ export type TenantReferences = {
   farmId?: string | null;
   seasonId?: string | null;
   accountId?: unknown;
+  partnerAccountId?: unknown;
   fromAccountId?: unknown;
   toAccountId?: unknown;
   ledgerId?: unknown;
@@ -43,7 +44,7 @@ export async function validateTenantReferences(workspaceId: string, references: 
       .limit(1);
     if (!season) return "Season is not active in the selected workspace farm.";
   }
-  for (const accountId of [references.accountId, references.fromAccountId, references.toAccountId]) {
+  for (const accountId of [references.accountId, references.partnerAccountId, references.fromAccountId, references.toAccountId]) {
     if (typeof accountId === "string" && !virtualAccountIds.has(accountId)
       && ![...virtualAccountIds].some((id) => references.farmId && accountId === `${references.farmId}:${id}`)
       && ![...virtualAccountIds].some((id) => references.seasonId && accountId === `${references.seasonId}:${id}`)

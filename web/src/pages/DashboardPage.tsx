@@ -24,6 +24,7 @@ import { config } from "../config";
 import { calculateAvailableBalance } from "../lib/accounting";
 import { fetchBootstrap } from "../lib/api";
 import { formatDate, formatMoney } from "../lib/format";
+import { buildPartnerLiabilityPositions } from "../lib/partnerAccounting";
 import { ensureLocalAccounts, offlineDb, workspaceRecords } from "../lib/offline-db";
 import { useSyncState } from "../hooks/useSyncState";
 import { refreshOperationalData, syncNow } from "../services/syncService";
@@ -99,10 +100,8 @@ export function DashboardPage() {
     const totalSales = sales.reduce((sum, item) => sum + item.amount, 0);
     const labourAdvances = advances.reduce((sum, item) => sum + item.amount, 0);
     const totalExpenses = vouchers.reduce((sum, item) => sum + item.amount, 0) + labourAdvances;
-    const partnerBalance = entries.reduce(
-      (sum, item) => sum + (item.type === "contribution" ? item.amount : item.type === "withdrawal" ? -item.amount : 0),
-      0,
-    );
+    const partnerBalance = buildPartnerLiabilityPositions(accounts, vouchers, advances, entries, sales)
+      .reduce((sum, item) => sum + item.currentPartnerBalance, 0);
     setTotals({
       presentToday: attendance.filter((item) => item.date === date && item.status === "present").length,
       cartonsToday: dispatches.filter((item) => item.date === date).reduce((sum, item) => sum + (item.items?.reduce((itemSum, entry) => itemSum + entry.cartons, 0) ?? item.cartons ?? 0), 0),
