@@ -9,6 +9,8 @@ import { calculateAccountBalance } from "../../lib/accounting";
 import { formatMoney, formatNumber } from "../../lib/format";
 import {
   buildPartnerLiabilityPositions,
+  getPartnerBalanceState,
+  partnerLiabilityGroupDisplayTotal,
   defaultPartnerLiabilityGroupExpansion,
   groupPartnerLiabilityTransactions,
   resolvePartnerAccountId,
@@ -319,8 +321,8 @@ export function Reports() {
   const partnerLiabilityGroupTitle = (groupKey: PartnerLiabilityLedgerGroupKey) => ({
     capital_injected: t("reportsPage.capitalInjected"),
     direct_expenses_paid: t("reportsPage.directExpensesPaid"),
-    transfers_in: t("reportsPage.transfersIn"),
     transfers_out: t("reportsPage.transfersOut"),
+    transfers_in: t("reportsPage.transfersIn"),
     money_returned: t("reportsPage.moneyReturned"),
     adjustments: t("reportsPage.adjustments"),
   }[groupKey]);
@@ -614,8 +616,8 @@ export function Reports() {
         }
       }
       if (entry.type === "settlement") {
-        rows.push({ id: `settlement:${entry.id}:sent`, date: entry.date, accountId: entry.fromAccountId ?? "", accountName: accountName(entry.fromAccountId), type: "settlement_sent", typeLabel: t("reportsPage.settlementSent"), reference: entry.id.slice(0, 8), description: `${entry.fromPartner ?? "-"} → ${entry.toPartner ?? "-"}`, debit: entry.amount, credit: 0, path: `/workspace/partner-ledger?recordId=${entry.id}`, classification: "settlement_sent", counterparty: entry.toPartner, partnerLiabilityGroup: accountById.get(entry.fromAccountId ?? "")?.type === "partner" ? "transfers_out" : undefined });
-        rows.push({ id: `settlement:${entry.id}:received`, date: entry.date, accountId: entry.toAccountId ?? "", accountName: accountName(entry.toAccountId), type: "settlement_received", typeLabel: t("reportsPage.settlementReceived"), reference: entry.id.slice(0, 8), description: `${entry.fromPartner ?? "-"} → ${entry.toPartner ?? "-"}`, debit: 0, credit: entry.amount, path: `/workspace/partner-ledger?recordId=${entry.id}`, classification: "settlement_received", counterparty: entry.fromPartner, partnerLiabilityGroup: accountById.get(entry.toAccountId ?? "")?.type === "partner" ? "transfers_in" : undefined });
+        rows.push({ id: `settlement:${entry.id}:sent`, date: entry.date, accountId: entry.fromAccountId ?? "", accountName: accountName(entry.fromAccountId), type: "settlement_sent", typeLabel: t("reportsPage.settlementSent"), reference: entry.id.slice(0, 8), description: `${entry.fromPartner ?? "-"} → ${entry.toPartner ?? "-"}`, debit: accountById.get(entry.fromAccountId ?? "")?.type === "partner" ? 0 : entry.amount, credit: accountById.get(entry.fromAccountId ?? "")?.type === "partner" ? entry.amount : 0, path: `/workspace/partner-ledger?recordId=${entry.id}`, classification: "settlement_sent", counterparty: entry.toPartner, partnerLiabilityGroup: accountById.get(entry.fromAccountId ?? "")?.type === "partner" ? "transfers_out" : undefined });
+        rows.push({ id: `settlement:${entry.id}:received`, date: entry.date, accountId: entry.toAccountId ?? "", accountName: accountName(entry.toAccountId), type: "settlement_received", typeLabel: t("reportsPage.settlementReceived"), reference: entry.id.slice(0, 8), description: `${entry.fromPartner ?? "-"} → ${entry.toPartner ?? "-"}`, debit: accountById.get(entry.toAccountId ?? "")?.type === "partner" ? entry.amount : 0, credit: accountById.get(entry.toAccountId ?? "")?.type === "partner" ? 0 : entry.amount, path: `/workspace/partner-ledger?recordId=${entry.id}`, classification: "settlement_received", counterparty: entry.fromPartner, partnerLiabilityGroup: accountById.get(entry.toAccountId ?? "")?.type === "partner" ? "transfers_in" : undefined });
       }
     }
     const running = new Map<string, number>();
@@ -648,14 +650,14 @@ export function Reports() {
     for (const group of groupedPartnerLedgerRows) {
       if (group.groupKey === "capital_injected") summary.capitalInjected += group.totalAmount;
       if (group.groupKey === "direct_expenses_paid") summary.directExpensesPaid += group.totalAmount;
-      if (group.groupKey === "transfers_in") summary.transfersIn += group.totalAmount;
-      if (group.groupKey === "transfers_out") summary.transfersOut += -group.totalAmount;
+      if (group.groupKey === "transfers_in") summary.transfersIn += Math.abs(group.totalAmount);
+      if (group.groupKey === "transfers_out") summary.transfersOut += Math.abs(group.totalAmount);
       if (group.groupKey === "money_returned") summary.moneyReturned += -group.totalAmount;
       if (group.groupKey === "adjustments") summary.adjustments += group.totalAmount;
     }
     return {
       ...summary,
-      netBalance: summary.capitalInjected + summary.directExpensesPaid + summary.transfersIn - summary.transfersOut - summary.moneyReturned + summary.adjustments,
+      netBalance: summary.capitalInjected + summary.directExpensesPaid + summary.transfersOut - summary.transfersIn - summary.moneyReturned + summary.adjustments,
     };
   }, [groupedPartnerLedgerRows, selectedAccountRecord]);
   const rawStandardAccountLedgerSummary = useMemo(() => {
@@ -742,8 +744,8 @@ export function Reports() {
     ...voucherRows.map((item) => [item.voucherNumber, item.date, item.description, `${item.category} / ${item.subcategory}`, accountName(item.accountId), item.amount]),
   ]);
   const exportPartnerPosition = () => downloadCsv("partner-position.csv", [
-    [t("reportsPage.partner"), t("reportsPage.openingBalance"), t("reportsPage.capitalInjected"), t("reportsPage.directExpensesPaid"), t("reportsPage.transfersIn"), t("reportsPage.transfersOut"), t("reportsPage.moneyReturned"), t("reportsPage.adjustments"), t("reportsPage.currentPartnerBalance")],
-    ...partnerLiabilityPositions.map((item) => [item.name, item.openingBalance, item.capitalInjected, item.directExpensesPaid, item.transfersIn, item.transfersOut, item.moneyReturned, item.adjustments, item.currentPartnerBalance]),
+    [t("reportsPage.partner"), t("reportsPage.openingBalance"), t("reportsPage.capitalInjected"), t("reportsPage.directExpensesPaid"), t("reportsPage.transfersOut"), t("reportsPage.transfersIn"), t("reportsPage.moneyReturned"), t("reportsPage.adjustments"), t("reportsPage.currentPartnerBalance")],
+    ...partnerLiabilityPositions.map((item) => [item.name, item.openingBalance, item.capitalInjected, item.directExpensesPaid, item.transfersOut, item.transfersIn, item.moneyReturned, item.adjustments, item.currentPartnerBalance]),
   ]);
   const exportPartnerLedger = () => downloadCsv("partner-ledger.csv", [
     [t("reportsPage.date"), t("reportsPage.partner"), t("reportsPage.type"), t("reportsPage.amount"), t("reportsPage.notes")],
@@ -757,7 +759,7 @@ export function Reports() {
     const rows: unknown[][] = [[t("reportsPage.account"), selectedAccountRecord?.name ?? t("reportsPage.allAccounts")], [t("reportsPage.netPosition"), currentLedgerBalance], []];
     const groups = selectedAccountRecord?.type === "partner" ? visiblePartnerLedgerGroups : visibleAccountLedgerGroups;
     for (const group of groups) {
-      rows.push([selectedAccountRecord?.type === "partner" ? partnerLiabilityGroupTitle(group.groupKey as PartnerLiabilityLedgerGroupKey) : ledgerGroupTitle(group.groupKey as AccountTransactionGroupKey), group.totalAmount, t("reportsPage.transactions"), group.count]);
+      rows.push([selectedAccountRecord?.type === "partner" ? partnerLiabilityGroupTitle(group.groupKey as PartnerLiabilityLedgerGroupKey) : ledgerGroupTitle(group.groupKey as AccountTransactionGroupKey), selectedAccountRecord?.type === "partner" ? partnerLiabilityGroupDisplayTotal(group.groupKey as PartnerLiabilityLedgerGroupKey, group.totalAmount) : group.totalAmount, t("reportsPage.transactions"), group.count]);
       rows.push([t("reportsPage.date"), t("reportsPage.account"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.description"), t("reportsPage.debit"), t("reportsPage.credit"), t("reportsPage.runningBalance")]);
       rows.push(...group.transactions.map((item) => [item.date, item.accountName, item.typeLabel, item.reference, item.description, item.debit, item.credit, item.running]));
       rows.push([]);
@@ -1063,7 +1065,7 @@ export function Reports() {
           <button className={views["partner-position"] === "ledger" ? "is-active" : ""} type="button" onClick={() => switchView("partner-position", "ledger")}>Ledger</button>
         </section>
         {views["partner-position"] === "position" && <ReportShell title={t("reportsPage.partnerPositionTitle")} rangeLabel={rangeLabel} sectionId="partner-position" onPrint={() => printSection("partner-position")} onExport={exportPartnerPosition}>
-          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.partner"), t("reportsPage.capitalInjected"), t("reportsPage.directExpensesPaid"), t("reportsPage.transfersIn"), t("reportsPage.transfersOut"), t("reportsPage.moneyReturned"), t("reportsPage.currentPartnerBalance")]} rows={partnerLiabilityPositions.map((item) => ({ id: item.key, title: item.name, value: money(item.currentPartnerBalance), cells: [item.name, money(item.capitalInjected), money(item.directExpensesPaid), money(item.transfersIn), money(item.transfersOut), money(item.moneyReturned), money(item.currentPartnerBalance)], details: [[t("reportsPage.openingBalance"), money(item.openingBalance)], [t("reportsPage.adjustments"), money(item.adjustments)], [t("reportsPage.directVoucherExpensesPaid"), money(item.directVoucherExpensesPaid)], [t("reportsPage.directLabourAdvancesPaid"), money(item.directLabourAdvancesPaid)]] }))} />
+          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.partner"), t("reportsPage.capitalInjected"), t("reportsPage.directExpensesPaid"), t("reportsPage.transfersOut"), t("reportsPage.transfersIn"), t("reportsPage.moneyReturned"), t("reportsPage.currentPartnerBalance")]} rows={partnerLiabilityPositions.map((item) => ({ id: item.key, title: item.name, value: money(item.currentPartnerBalance), meta: getPartnerBalanceState(item.currentPartnerBalance) === "partner_holds_business_money" ? t("reportsPage.partnerHoldsBusinessMoney") : t("reportsPage.farmOwesPartner"), cells: [item.name, money(item.capitalInjected), money(item.directExpensesPaid), money(item.transfersOut), money(item.transfersIn), money(item.moneyReturned), money(item.currentPartnerBalance)], details: [[t("reportsPage.openingBalance"), money(item.openingBalance)], [t("reportsPage.adjustments"), money(item.adjustments)], [t("reportsPage.directVoucherExpensesPaid"), money(item.directVoucherExpensesPaid)], [t("reportsPage.directLabourAdvancesPaid"), money(item.directLabourAdvancesPaid)]] }))} />
         </ReportShell>}
         {views["partner-position"] === "ledger" && <ReportShell title={t("reportsPage.partnerLedger")} rangeLabel={rangeLabel} sectionId="partner-ledger" onPrint={() => printSection("partner-ledger")} onExport={exportPartnerLedger}>
           <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.partner"), t("reportsPage.type"), t("reportsPage.amount"), t("reportsPage.notes")]} rows={partnerRows.map((item) => ({ id: item.id, title: item.partnerName ?? `${item.fromPartner ?? "-"} → ${item.toPartner ?? "-"}`, value: money(item.amount), meta: item.date, cells: [item.date, item.partnerName ?? `${item.fromPartner ?? "-"} → ${item.toPartner ?? "-"}`, item.type, money(item.amount), item.notes || "-"], details: [[t("reportsPage.type"), item.type], [t("reportsPage.notes"), item.notes || "-"]], onOpen: () => navigate(`/workspace/partner-ledger?recordId=${item.id}`) }))} />
@@ -1089,10 +1091,11 @@ export function Reports() {
             [isPartnerLedgerReport ? t("reportsPage.currentPartnerBalance") : t("reportsPage.currentBalance"), money(currentLedgerBalance)],
             ...(isPartnerLedgerReport && partnerAccountLedgerSummaryView
               ? [
+                  [t("reportsPage.partnerBalanceMeaning"), getPartnerBalanceState(currentLedgerBalance) === "partner_holds_business_money" ? t("reportsPage.partnerHoldsBusinessMoney") : t("reportsPage.farmOwesPartner")],
                   [t("reportsPage.capitalInjected"), money(partnerAccountLedgerSummaryView.capitalInjected)],
                   [t("reportsPage.directExpensesPaid"), money(partnerAccountLedgerSummaryView.directExpensesPaid)],
-                  [t("reportsPage.transfersIn"), money(partnerAccountLedgerSummaryView.transfersIn)],
                   [t("reportsPage.transfersOut"), money(partnerAccountLedgerSummaryView.transfersOut)],
+                  [t("reportsPage.transfersIn"), money(partnerAccountLedgerSummaryView.transfersIn)],
                   [t("reportsPage.moneyReturned"), money(partnerAccountLedgerSummaryView.moneyReturned)],
                   [t("reportsPage.adjustments"), money(partnerAccountLedgerSummaryView.adjustments)],
                   [t("reportsPage.currentPartnerBalance"), money(partnerAccountLedgerSummaryView.netBalance)],
@@ -1115,7 +1118,7 @@ export function Reports() {
               return <section className="account-transaction-group" key={group.groupKey}>
                 <button className="account-transaction-group__header" type="button" onClick={() => setPartnerReportGroupExpanded((current) => ({ ...current, [group.groupKey]: !current[group.groupKey] }))}>
                   <span className="account-transaction-group__title">{expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}{partnerLiabilityGroupTitle(group.groupKey)}</span>
-                  <span className="account-transaction-group__meta"><strong>{money(group.totalAmount)}</strong><small>{t("reportsPage.transactionCount", { count: group.count })}</small></span>
+                  <span className="account-transaction-group__meta"><strong>{money(partnerLiabilityGroupDisplayTotal(group.groupKey, group.totalAmount))}</strong><small>{t("reportsPage.transactionCount", { count: group.count })}</small></span>
                 </button>
                 {expanded && <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.account"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.debit"), t("reportsPage.credit"), t("reportsPage.runningBalance")]} rows={group.transactions.map((item) => ({ id: item.id, title: item.reference, value: item.credit ? `+${money(item.credit)}` : `-${money(item.debit)}`, meta: `${item.date} | ${item.accountName}`, cells: [item.date, item.accountName, item.typeLabel, item.reference, item.debit ? money(item.debit) : "-", item.credit ? money(item.credit) : "-", money(item.running)], details: [[t("reportsPage.description"), item.description], [t("reportsPage.runningBalance"), money(item.running)]], onOpen: () => navigate(item.path) }))} />}
               </section>;

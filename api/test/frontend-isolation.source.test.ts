@@ -119,10 +119,12 @@ test("partner settlements transfer matching account and partner positions withou
   assert.match(partnerAccounting, /position\.adjustments -= sale\.amount;/);
   assert.match(partnerAccounting, /position\.capitalInjected \+= entry\.amount/);
   assert.match(partnerAccounting, /position\.moneyReturned \+= entry\.amount/);
-  assert.match(partnerAccounting, /currentPartnerBalance = position\.openingBalance[\s\S]*\+ position\.capitalInjected[\s\S]*\+ position\.directExpensesPaid[\s\S]*\+ position\.transfersIn[\s\S]*- position\.transfersOut[\s\S]*- position\.moneyReturned[\s\S]*\+ position\.adjustments/);
+  assert.match(partnerAccounting, /currentPartnerBalance = calculatePartnerLiabilityBalance\(position\)/);
+  assert.match(partnerAccounting, /return position\.openingBalance[\s\S]*\+ position\.capitalInjected[\s\S]*\+ position\.directExpensesPaid[\s\S]*\+ position\.transfersOut[\s\S]*- position\.transfersIn[\s\S]*- position\.moneyReturned[\s\S]*\+ position\.adjustments/);
   assert.match(modulePage, /buildPartnerLiabilityPositions\(accounts, vouchers, advances, activeEntries, sales\)/);
   assert.match(modulePage, /<span>\{t\("partnerLedgerPage\.directExpensesPaid"\)\}<\/span>/);
-  assert.match(modulePage, /<span>\{t\("partnerLedgerPage\.currentPartnerBalance"\)\}<\/span>/);
+  assert.match(modulePage, /t\("partnerLedgerPage\.farmOwesPartner"\)/);
+  assert.match(modulePage, /t\("partnerLedgerPage\.partnerHoldsBusinessMoney"\)/);
   assert.match(modulePage, /<option value="settlement">\{t\("partnerLedgerPage\.partnerSettlement"\)\}<\/option>/);
   assert.match(dashboard, /buildPartnerLiabilityPositions\(accounts, vouchers, advances, entries, sales\)/);
   assert.match(dashboard, /netPosition: calculateAvailableBalance\(accounts, sales, vouchers, advances, entries\)/);

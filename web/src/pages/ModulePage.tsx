@@ -16,6 +16,8 @@ import { buildDispatchAvailability, dispatchCartons, dispatchItemKey, saleProduc
 import { hasPermission } from "../lib/permissions";
 import {
   buildPartnerLiabilityPositions,
+  getPartnerBalanceState,
+  partnerLiabilityGroupDisplayTotal,
   defaultPartnerLiabilityGroupExpansion,
   groupPartnerLiabilityTransactions,
   resolvePartnerAccountId,
@@ -2095,8 +2097,8 @@ function PartnerLedgerModule() {
         }
         const fromName = accounts.find((account) => account.id === entry.fromAccountId)?.name ?? entry.fromPartner!;
         const toName = accounts.find((account) => account.id === entry.toAccountId)?.name ?? entry.toPartner!;
-        adjust(entry.fromAccountId, fromName, -entry.amount);
-        adjust(entry.toAccountId, toName, entry.amount);
+        adjust(entry.fromAccountId, fromName, entry.amount);
+        adjust(entry.toAccountId, toName, -entry.amount);
         labels.set(entry.id, `${fromName}: ${money(balances.get(entry.fromAccountId)!.amount)} | ${toName}: ${money(balances.get(entry.toAccountId)!.amount)}`);
       } else {
         const resolvedId = resolvePartnerAccountId(entry, accounts);
@@ -2143,24 +2145,30 @@ function PartnerLedgerModule() {
         </form>
         {error && <p className="worker-action-error">{error}</p>}
       </FormCard>
-      <Summary label={t("partnerLedgerPage.partnerBalance")} value={money(balance)} />
+      <Summary
+        label={getPartnerBalanceState(balance) === "partner_holds_business_money"
+          ? t("partnerLedgerPage.partnerHoldsBusinessMoney")
+          : t("partnerLedgerPage.farmOwesPartner")}
+        value={money(balance)}
+      />
       {activeEntries.some((entry) => entry.type === "settlement" && (!entry.fromAccountId || !entry.toAccountId)) && <p className="worker-action-error">{t("partnerLedgerPage.unresolvedSettlementRepair")}</p>}
       <section className="record-panel">
         <h2>{t("partnerLedgerPage.partnerPosition")}</h2>
         {!partnerPositions.length ? <Empty>{t("partnerLedgerPage.noPartnerPositions")}</Empty> : <div className="partner-position-table">
-          <div className="partner-position-row partner-position-row--header"><span>{t("partnerLedgerPage.partner")}</span><span>{t("partnerLedgerPage.openingBalance")}</span><span>{t("partnerLedgerPage.capitalInjected")}</span><span>{t("partnerLedgerPage.directExpensesPaid")}</span><span>{t("partnerLedgerPage.transfersIn")}</span><span>{t("partnerLedgerPage.transfersOut")}</span><span>{t("partnerLedgerPage.moneyReturned")}</span><span>{t("partnerLedgerPage.adjustments")}</span><span>{t("partnerLedgerPage.currentPartnerBalance")}</span></div>
+          <div className="partner-position-row partner-position-row--header"><span>{t("partnerLedgerPage.partner")}</span><span>{t("partnerLedgerPage.openingBalance")}</span><span>{t("partnerLedgerPage.capitalInjected")}</span><span>{t("partnerLedgerPage.directExpensesPaid")}</span><span>{t("partnerLedgerPage.transfersOut")}</span><span>{t("partnerLedgerPage.transfersIn")}</span><span>{t("partnerLedgerPage.moneyReturned")}</span><span>{t("partnerLedgerPage.adjustments")}</span><span>{t("partnerLedgerPage.currentPartnerBalance")}</span></div>
           {partnerPositions.map((item) => <div className="partner-position-row" key={item.name}>
-            <strong>{item.name}</strong><span>{money(item.openingBalance)}</span><span>{money(item.capitalInjected)}</span><span>{money(item.directExpensesPaid)}</span><span>{money(item.transfersIn)}</span><span>{money(item.transfersOut)}</span><span>{money(item.moneyReturned)}</span><span>{money(item.adjustments)}</span><b>{money(item.currentPartnerBalance)}</b>
+            <strong>{item.name}</strong><span>{money(item.openingBalance)}</span><span>{money(item.capitalInjected)}</span><span>{money(item.directExpensesPaid)}</span><span>{money(item.transfersOut)}</span><span>{money(item.transfersIn)}</span><span>{money(item.moneyReturned)}</span><span>{money(item.adjustments)}</span><b>{money(item.currentPartnerBalance)}</b>
           </div>)}
         </div>}
         {!!partnerPositions.length && <div className="partner-position-cards">
           {partnerPositions.map((item) => <article key={`mobile-${item.name}`}>
             <header><strong>{item.name}</strong><b>{money(item.currentPartnerBalance)}</b></header>
+            <p>{getPartnerBalanceState(item.currentPartnerBalance) === "partner_holds_business_money" ? t("partnerLedgerPage.partnerHoldsBusinessMoney") : t("partnerLedgerPage.farmOwesPartner")}</p>
             <div><span>{t("partnerLedgerPage.openingBalance")}</span><strong>{money(item.openingBalance)}</strong></div>
             <div><span>{t("partnerLedgerPage.capitalInjected")}</span><strong>{money(item.capitalInjected)}</strong></div>
             <div><span>{t("partnerLedgerPage.directExpensesPaid")}</span><strong>{money(item.directExpensesPaid)}</strong></div>
-            <div><span>{t("partnerLedgerPage.transfersIn")}</span><strong>{money(item.transfersIn)}</strong></div>
             <div><span>{t("partnerLedgerPage.transfersOut")}</span><strong>{money(item.transfersOut)}</strong></div>
+            <div><span>{t("partnerLedgerPage.transfersIn")}</span><strong>{money(item.transfersIn)}</strong></div>
             <div><span>{t("partnerLedgerPage.moneyReturned")}</span><strong>{money(item.moneyReturned)}</strong></div>
             <div><span>{t("partnerLedgerPage.adjustments")}</span><strong>{money(item.adjustments)}</strong></div>
           </article>)}
@@ -2366,8 +2374,8 @@ function AccountsModule() {
             type: "settlement_sent",
             reference: entry.id.slice(0, 8),
             description: entry.notes || t("accountsPage.settlementSent"),
-            debit: entry.amount,
-            credit: 0,
+            debit: selectedIsPartner ? 0 : entry.amount,
+            credit: selectedIsPartner ? entry.amount : 0,
             source: "partner_ledger",
             sourceId: entry.id,
             counterparty: entry.toPartner,
@@ -2382,8 +2390,8 @@ function AccountsModule() {
             type: "settlement_received",
             reference: entry.id.slice(0, 8),
             description: entry.notes || t("accountsPage.settlementReceived"),
-            debit: 0,
-            credit: entry.amount,
+            debit: selectedIsPartner ? entry.amount : 0,
+            credit: selectedIsPartner ? 0 : entry.amount,
             source: "partner_ledger",
             sourceId: entry.id,
             counterparty: entry.fromPartner,
@@ -2443,8 +2451,8 @@ function AccountsModule() {
       if (row.type === "voucher") byType.directVoucherExpensesPaid += row.credit;
       if (row.type === "advance") byType.directLabourAdvancesPaid += row.credit;
       if (row.partnerLiabilityGroup === "direct_expenses_paid") byType.directExpensesPaid += row.credit - row.debit;
-      if (row.partnerLiabilityGroup === "transfers_in") byType.transfersIn += row.credit;
-      if (row.partnerLiabilityGroup === "transfers_out") byType.transfersOut += row.debit;
+      if (row.partnerLiabilityGroup === "transfers_in") byType.transfersIn += Math.max(row.debit, row.credit);
+      if (row.partnerLiabilityGroup === "transfers_out") byType.transfersOut += Math.max(row.debit, row.credit);
       if (row.partnerLiabilityGroup === "money_returned") byType.moneyReturned += row.debit;
       if (row.partnerLiabilityGroup === "adjustments") byType.adjustments += row.credit - row.debit;
     }
@@ -2452,8 +2460,8 @@ function AccountsModule() {
       ...byType,
       netBalance: byType.capitalInjected
         + byType.directExpensesPaid
-        + byType.transfersIn
-        - byType.transfersOut
+        + byType.transfersOut
+        - byType.transfersIn
         - byType.moneyReturned
         + byType.adjustments,
     };
@@ -2493,14 +2501,14 @@ function AccountsModule() {
     for (const group of partnerLedgerGroups) {
       if (group.groupKey === "capital_injected") summary.capitalInjected += group.totalAmount;
       if (group.groupKey === "direct_expenses_paid") summary.directExpensesPaid += group.totalAmount;
-      if (group.groupKey === "transfers_in") summary.transfersIn += group.totalAmount;
-      if (group.groupKey === "transfers_out") summary.transfersOut += -group.totalAmount;
+      if (group.groupKey === "transfers_in") summary.transfersIn += Math.abs(group.totalAmount);
+      if (group.groupKey === "transfers_out") summary.transfersOut += Math.abs(group.totalAmount);
       if (group.groupKey === "money_returned") summary.moneyReturned += -group.totalAmount;
       if (group.groupKey === "adjustments") summary.adjustments += group.totalAmount;
     }
     return {
       ...summary,
-      netBalance: summary.capitalInjected + summary.directExpensesPaid + summary.transfersIn - summary.transfersOut - summary.moneyReturned + summary.adjustments,
+      netBalance: summary.capitalInjected + summary.directExpensesPaid + summary.transfersOut - summary.transfersIn - summary.moneyReturned + summary.adjustments,
     };
   }, [partnerLedgerGroups, selectedAccount]);
   const rawStandardLedgerSummary = useMemo(() => {
@@ -2654,15 +2662,19 @@ function AccountsModule() {
           <div className="worker-action-form">
             <div className="account-ledger-breakdown">
               <article><strong>{t("accountsPage.currentAccount")}</strong><span>{selectedAccount.name}</span></article>
-              <article><strong>{isSelectedPartner ? t("accountsPage.currentPartnerBalance") : t("accountsPage.currentBalance")}</strong><b>{money(ledgerCurrentBalance)}</b></article>
+              <article>
+                <strong>{isSelectedPartner ? t("accountsPage.currentPartnerBalance") : t("accountsPage.currentBalance")}</strong>
+                <b>{money(ledgerCurrentBalance)}</b>
+                {isSelectedPartner && <small>{getPartnerBalanceState(ledgerCurrentBalance) === "partner_holds_business_money" ? t("accountsPage.partnerHoldsBusinessMoney") : t("accountsPage.farmOwesPartner")}</small>}
+              </article>
               {isSelectedPartner && partnerLedgerSummaryView ? <>
                 <article><strong>{t("accountsPage.capitalInjected")}</strong><span>{money(partnerLedgerSummaryView.capitalInjected)}</span></article>
                 <article><strong>{t("accountsPage.directExpensesPaid")}</strong><span>{money(partnerLedgerSummaryView.directExpensesPaid)}</span></article>
-                <article><strong>{t("accountsPage.transfersIn")}</strong><span>{money(partnerLedgerSummaryView.transfersIn)}</span></article>
                 <article><strong>{t("accountsPage.transfersOut")}</strong><span>{money(partnerLedgerSummaryView.transfersOut)}</span></article>
+                <article><strong>{t("accountsPage.transfersIn")}</strong><span>{money(partnerLedgerSummaryView.transfersIn)}</span></article>
                 <article><strong>{t("accountsPage.moneyReturned")}</strong><span>{money(partnerLedgerSummaryView.moneyReturned)}</span></article>
                 <article><strong>{t("accountsPage.adjustments")}</strong><span>{money(partnerLedgerSummaryView.adjustments)}</span></article>
-                <article><strong>{t("accountsPage.netBalance")}</strong><b>{money(partnerLedgerSummaryView.netBalance)}</b></article>
+                <article><strong>{t("accountsPage.currentPartnerBalance")}</strong><b>{money(partnerLedgerSummaryView.netBalance)}</b></article>
               </> : <>
                 <article><strong>{t("accountsPage.voucherExpensesPaid")}</strong><span>{money(standardLedgerSummaryView?.expenses ?? 0)}</span></article>
                 <article><strong>{t("accountsPage.labourAdvancesPaid")}</strong><span>{money(standardLedgerSummaryView?.advances ?? 0)}</span></article>
@@ -2678,8 +2690,8 @@ function AccountsModule() {
                 <article><strong>{t("accountsPage.capitalInjected")}</strong><span>{money(partnerLedgerBreakdownView.capitalInjected)}</span></article>
                 <article><strong>{t("accountsPage.directVoucherExpensesPaid")}</strong><span>{money(partnerLedgerBreakdownView.directVoucherExpensesPaid)}</span></article>
                 <article><strong>{t("accountsPage.directLabourAdvancesPaid")}</strong><span>{money(partnerLedgerBreakdownView.directLabourAdvancesPaid)}</span></article>
-                <article><strong>{t("accountsPage.transfersIn")}</strong><span>{money(partnerLedgerBreakdownView.transfersIn)}</span></article>
                 <article><strong>{t("accountsPage.transfersOut")}</strong><span>{money(partnerLedgerBreakdownView.transfersOut)}</span></article>
+                <article><strong>{t("accountsPage.transfersIn")}</strong><span>{money(partnerLedgerBreakdownView.transfersIn)}</span></article>
                 <article><strong>{t("accountsPage.moneyReturned")}</strong><span>{money(partnerLedgerBreakdownView.moneyReturned)}</span></article>
                 <article><strong>{t("accountsPage.adjustments")}</strong><span>{money(partnerLedgerBreakdownView.adjustments)}</span></article>
                 <article><strong>{t("accountsPage.currentPartnerBalance")}</strong><b>{money(partnerLedgerBreakdownView.netBalance)}</b></article>
@@ -2721,7 +2733,7 @@ function AccountsModule() {
                 return <section className="account-transaction-group" key={group.groupKey}>
                   <button className="account-transaction-group__header" type="button" onClick={() => setPartnerLedgerGroupExpanded((current) => ({ ...current, [group.groupKey]: !current[group.groupKey] }))}>
                     <span className="account-transaction-group__title">{expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}{partnerLiabilityGroupTitle(group.groupKey)}</span>
-                    <span className="account-transaction-group__meta"><strong>{money(group.totalAmount)}</strong><small>{t("accountsPage.transactionCount", { count: group.count })}</small></span>
+                    <span className="account-transaction-group__meta"><strong>{money(partnerLiabilityGroupDisplayTotal(group.groupKey, group.totalAmount))}</strong><small>{t("accountsPage.transactionCount", { count: group.count })}</small></span>
                   </button>
                   {expanded && <>
                     <div className="attendance-import-table-wrap report-wide-table">

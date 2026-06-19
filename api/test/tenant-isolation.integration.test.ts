@@ -609,8 +609,8 @@ test("partner settlements move only partner positions and remain idempotent, edi
     ))).filter((record) => !record.payload.deletedAt);
     return records.reduce((result, record) => {
       const amount = Number(record.payload.amount);
-      result[String(record.payload.fromPartner)] = (result[String(record.payload.fromPartner)] ?? 0) - amount;
-      result[String(record.payload.toPartner)] = (result[String(record.payload.toPartner)] ?? 0) + amount;
+      result[String(record.payload.fromPartner)] = (result[String(record.payload.fromPartner)] ?? 0) + amount;
+      result[String(record.payload.toPartner)] = (result[String(record.payload.toPartner)] ?? 0) - amount;
       return result;
     }, {} as Record<string, number>);
   };
@@ -627,8 +627,8 @@ test("partner settlements move only partner positions and remain idempotent, edi
     return Object.fromEntries(accounts.map((account) => {
       const name = String(account.payload.name);
       const amount = settlements.reduce((sum, entry) => sum
-        + (String(entry.payload.toAccountId) === account.clientRecordId ? Number(entry.payload.amount) : 0)
-        - (String(entry.payload.fromAccountId) === account.clientRecordId ? Number(entry.payload.amount) : 0), 0);
+        + (String(entry.payload.fromAccountId) === account.clientRecordId ? Number(entry.payload.amount) : 0)
+        - (String(entry.payload.toAccountId) === account.clientRecordId ? Number(entry.payload.amount) : 0), 0);
       return [name, amount];
     }));
   };
@@ -637,19 +637,19 @@ test("partner settlements move only partner positions and remain idempotent, edi
   const totalsBefore = await operationalTotals();
 
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", settlementPayload(settlementId, younisAccountId, sajidAccountId, younisName, sajidName, 101_140, 1_000))).statusCode, 200);
-  assert.deepEqual(await positions(), { [younisName]: -101_140, [sajidName]: 101_140 });
-  assert.deepEqual(await accountPositions(), { [younisName]: -101_140, [sajidName]: 101_140 });
+  assert.deepEqual(await positions(), { [younisName]: 101_140, [sajidName]: -101_140 });
+  assert.deepEqual(await accountPositions(), { [younisName]: 101_140, [sajidName]: -101_140 });
   assert.deepEqual(await operationalTotals(), totalsBefore);
 
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", settlementPayload(settlementId, younisAccountId, sajidAccountId, younisName, sajidName, 101_140, 2_000))).statusCode, 200);
   assert.equal((await db.select().from(operationalRecords).where(and(
     eq(operationalRecords.workspaceId, alpha.workspaceId), eq(operationalRecords.entityType, "partnerEntry"), eq(operationalRecords.clientRecordId, settlementId),
   ))).length, 1);
-  assert.deepEqual(await positions(), { [younisName]: -101_140, [sajidName]: 101_140 });
+  assert.deepEqual(await positions(), { [younisName]: 101_140, [sajidName]: -101_140 });
   assert.deepEqual(await accountPositions(), await positions());
 
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", settlementPayload(settlementId, younisAccountId, sajidAccountId, younisName, sajidName, 90_000, 3_000))).statusCode, 200);
-  assert.deepEqual(await positions(), { [younisName]: -90_000, [sajidName]: 90_000 });
+  assert.deepEqual(await positions(), { [younisName]: 90_000, [sajidName]: -90_000 });
   assert.deepEqual(await accountPositions(), await positions());
   assert.deepEqual(await operationalTotals(), totalsBefore);
 

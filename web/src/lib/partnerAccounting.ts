@@ -17,6 +17,8 @@ export type PartnerLiabilityPosition = {
   reconciliationDelta: number;
 };
 
+export type PartnerBalanceState = "farm_owes_partner" | "partner_holds_business_money" | "settled";
+
 export type PartnerLiabilityLedgerGroupKey =
   | "capital_injected"
   | "direct_expenses_paid"
@@ -62,6 +64,27 @@ export const defaultPartnerLiabilityGroupExpansion = (): Record<PartnerLiability
 
 const normalized = (value: string) => value.trim().toLowerCase();
 
+export function calculatePartnerLiabilityBalance(position: Pick<PartnerLiabilityPosition, "openingBalance" | "capitalInjected" | "directExpensesPaid" | "transfersIn" | "transfersOut" | "moneyReturned" | "adjustments">) {
+  return position.openingBalance
+    + position.capitalInjected
+    + position.directExpensesPaid
+    + position.transfersOut
+    - position.transfersIn
+    - position.moneyReturned
+    + position.adjustments;
+}
+
+export function getPartnerBalanceState(balance: number): PartnerBalanceState {
+  if (balance > 0.009) return "farm_owes_partner";
+  if (balance < -0.009) return "partner_holds_business_money";
+  return "settled";
+}
+
+export function partnerLiabilityGroupDisplayTotal(groupKey: PartnerLiabilityLedgerGroupKey, totalAmount: number) {
+  if (groupKey === "transfers_in" || groupKey === "money_returned") return Math.abs(totalAmount);
+  return totalAmount;
+}
+
 export const isPartnerAccount = (account?: Account | null) => account?.type === "partner";
 
 export function resolvePartnerAccountId(entry: Pick<PartnerEntry, "partnerAccountId" | "partnerName">, accounts: Account[]) {
@@ -105,8 +128,8 @@ export function partnerAccountBalanceEffect(
   return capitalInjected
     + directVoucherExpensesPaid
     + directLabourAdvancesPaid
-    + transfersIn
-    - transfersOut
+    + transfersOut
+    - transfersIn
     - moneyReturned
     + adjustments;
 }
@@ -189,25 +212,11 @@ export function buildPartnerLiabilityPositions(
 
   return [...positions.values()]
     .map((position) => {
-      const currentPartnerBalance = position.openingBalance
-        + position.capitalInjected
-        + position.directExpensesPaid
-        + position.transfersIn
-        - position.transfersOut
-        - position.moneyReturned
-        + position.adjustments;
+      const currentPartnerBalance = calculatePartnerLiabilityBalance(position);
       return {
         ...position,
         currentPartnerBalance,
-        reconciliationDelta: currentPartnerBalance - (
-          position.openingBalance
-          + position.capitalInjected
-          + position.directExpensesPaid
-          + position.transfersIn
-          - position.transfersOut
-          - position.moneyReturned
-          + position.adjustments
-        ),
+        reconciliationDelta: currentPartnerBalance - calculatePartnerLiabilityBalance(position),
       };
     })
     .sort((left, right) => left.name.localeCompare(right.name));
