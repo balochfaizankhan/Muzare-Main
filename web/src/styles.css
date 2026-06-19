@@ -3645,6 +3645,70 @@ button {
   padding: 18px 20px 16px;
 }
 
+.permission-dialog {
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
+  max-width: min(760px, calc(100vw - 32px));
+  width: min(100%, 760px);
+}
+
+.permission-dialog > header,
+.permission-dialog > footer {
+  flex-shrink: 0;
+}
+
+.permission-dialog__body {
+  max-height: calc(90vh - 170px);
+  overflow-y: auto;
+  padding-right: 12px;
+}
+
+.permission-dialog__meta {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-bottom: 14px;
+}
+
+.permission-dialog__footer-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.permission-matrix {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.permission-matrix section {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.permission-matrix section strong {
+  color: var(--text-primary);
+  font-size: .88rem;
+}
+
+.permission-matrix section label {
+  align-items: center;
+  color: var(--text-secondary);
+  display: flex;
+  gap: 8px;
+  font-size: .82rem;
+}
+
+.permission-matrix section label input {
+  flex-shrink: 0;
+}
+
 .dispatch-master-form {
   display: grid;
   gap: 12px;
@@ -4361,6 +4425,26 @@ button {
   .worker-dialog__footer {
     grid-template-columns: 1fr 1fr;
     padding: 12px;
+  }
+
+  .permission-dialog {
+    max-height: 92vh;
+    width: calc(100vw - 24px);
+  }
+
+  .permission-dialog__body {
+    max-height: calc(92vh - 170px);
+    padding-right: 10px;
+  }
+
+  .permission-dialog__meta,
+  .permission-matrix {
+    grid-template-columns: 1fr;
+  }
+
+  .permission-dialog__footer-actions {
+    flex-direction: column;
+    width: 100%;
   }
 
   .worker-dialog__close {

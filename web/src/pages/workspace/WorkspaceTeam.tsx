@@ -4,6 +4,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../auth/AuthProvider";
 import { SubpageHeader } from "../../components/SubpageHeader";
+import { config } from "../../config";
 import {
   cancelWorkspaceInvitation,
   fetchWorkspaceMemberActivity,
@@ -57,6 +58,10 @@ export function WorkspaceTeam() {
   const remove = useMutation({ mutationFn: (id: string) => removeWorkspaceMember(token!, workspaceId, id), onSuccess: refresh });
   const cancelInvite = useMutation({ mutationFn: (id: string) => cancelWorkspaceInvitation(token!, workspaceId, id), onSuccess: refresh });
   const invitationLink = useMemo(() => shareToken ? `${window.location.origin}/accept-invitation?token=${encodeURIComponent(shareToken)}` : "", [shareToken]);
+  const visibleModules = useMemo(
+    () => modules.filter((module) => config.featureInventory || module !== "inventory"),
+    [],
+  );
   const startEdit = (member: WorkspaceTeamMember) => {
     setEditing({ ...member });
     setPermissions(member.permissions ?? cloneDefaults(member.role));
@@ -90,11 +95,13 @@ export function WorkspaceTeam() {
         </article>)}
       </div></section>}
       {team.data?.invitations.length ? <section className="record-panel"><h2>{t("workspaceTeam.pendingInvites")}</h2>{team.data.invitations.map((item) => <article className="team-card" key={item.id}><div><strong>{item.email}</strong><span>{t(`workspaceTeam.roles.${item.role}`)}</span></div>{isOwner && <button type="button" onClick={() => cancelInvite.mutate(item.id)}>{t("workspaceTeam.cancelInvite")}</button>}</article>)}</section> : null}
-      {editing && <div className="worker-dialog-backdrop"><section className="worker-action-dialog permission-dialog"><header><div><h2>{t("workspaceTeam.editMember")}</h2><p>{editing.email}</p></div><button type="button" onClick={() => setEditing(null)}>×</button></header><div className="worker-action-dialog__body">
-        <label>{t("workspaceTeam.role")}<select value={editing.role} onChange={(event) => { const role = event.target.value as WorkspaceRole; setEditing({ ...editing, role }); setPermissions(cloneDefaults(role)); }}>{roles.map((role) => <option value={role} key={role}>{t(`workspaceTeam.roles.${role}`)}</option>)}</select></label>
-        <label className="compact-checkbox"><input type="checkbox" checked={editing.active} onChange={(event) => setEditing({ ...editing, active: event.target.checked })} />{t("workspaceTeam.activeMember")}</label>
-        <div className="permission-matrix">{modules.map((module) => <section key={module}><strong>{t(`workspaceTeam.modules.${module}`)}</strong>{actions.map((action) => <label key={action}><input type="checkbox" checked={permissions[module]?.[action] ?? roleModulePermissions[editing.role][module][action]} onChange={() => toggle(module, action)} />{t(`workspaceTeam.actions.${action}`)}</label>)}</section>)}</div>
-      </div><footer><button className="secondary-button" type="button" onClick={() => setPermissions(cloneDefaults(editing.role))}><RotateCcw size={15} />{t("workspaceTeam.reset")}</button><button type="button" disabled={saveMember.isPending} onClick={() => saveMember.mutate()}>{t("workspaceTeam.save")}</button></footer></section></div>}
+      {editing && <div className="worker-dialog-backdrop"><section className="worker-action-dialog permission-dialog" role="dialog" aria-modal="true" aria-label={t("workspaceTeam.editMember")}><header><div><h2>{t("workspaceTeam.editMember")}</h2><p>{editing.email}</p></div><button type="button" onClick={() => setEditing(null)}>×</button></header><div className="worker-action-dialog__body permission-dialog__body">
+        <div className="permission-dialog__meta">
+          <label>{t("workspaceTeam.role")}<select value={editing.role} onChange={(event) => { const role = event.target.value as WorkspaceRole; setEditing({ ...editing, role }); setPermissions(cloneDefaults(role)); }}>{roles.map((role) => <option value={role} key={role}>{t(`workspaceTeam.roles.${role}`)}</option>)}</select></label>
+          <label className="compact-checkbox"><input type="checkbox" checked={editing.active} onChange={(event) => setEditing({ ...editing, active: event.target.checked })} />{t("workspaceTeam.activeMember")}</label>
+        </div>
+        <div className="permission-matrix">{visibleModules.map((module) => <section key={module}><strong>{t(`workspaceTeam.modules.${module}`)}</strong>{actions.map((action) => <label key={action}><input type="checkbox" checked={permissions[module]?.[action] ?? roleModulePermissions[editing.role][module][action]} onChange={() => toggle(module, action)} />{t(`workspaceTeam.actions.${action}`)}</label>)}</section>)}</div>
+      </div><footer><button className="secondary-button" type="button" onClick={() => setPermissions(cloneDefaults(editing.role))}><RotateCcw size={15} />{t("workspaceTeam.reset")}</button><div className="permission-dialog__footer-actions"><button className="secondary-button" type="button" onClick={() => setEditing(null)}>{t("common.close")}</button><button type="button" disabled={saveMember.isPending} onClick={() => saveMember.mutate()}>{t("workspaceTeam.save")}</button></div></footer></section></div>}
       {activityMember && <div className="worker-dialog-backdrop"><section className="worker-action-dialog permission-dialog"><header><div><h2>{t("workspaceTeam.activity")}</h2><p>{activityMember.name || activityMember.email}</p></div><button type="button" onClick={() => setActivityMember(null)}>×</button></header><div className="worker-action-dialog__body">
         {activity.isLoading && <p>{t("workspaceTeam.loadingActivity")}</p>}
         {activity.isError && <p className="error">{activity.error.message}</p>}
