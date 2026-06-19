@@ -4437,20 +4437,44 @@ button {
   align-items: center;
   background: rgba(255, 255, 255, 0.94);
   border-bottom: 1px solid rgba(5, 35, 63, 0.1);
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  gap: 10px;
   min-height: 66px;
   padding: 10px 22px;
-  gap: 10px;
 }
 
-.shell-header > strong,
+.shell-header__top,
+.shell-header__controls,
 .toolbar__actions {
   min-width: 0;
 }
 
+.shell-header__top {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.shell-header__title {
+  color: var(--text-primary);
+  font-size: 1rem;
+  line-height: 1.1;
+}
+
+.shell-header__meta {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
 .shell-header .toolbar__actions {
+  align-items: center;
+  display: flex;
   flex-wrap: wrap;
+  gap: 8px;
   justify-content: flex-end;
 }
 
@@ -4463,27 +4487,33 @@ button {
   align-items: center;
   background: #fff;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 10px;
   color: var(--text-secondary);
   display: inline-flex;
   font-size: 0.78rem;
   font-weight: 750;
   gap: 6px;
-  padding: 9px 10px;
+  min-height: 38px;
+  padding: 8px 11px;
 }
 
 .sync-badge {
   align-items: center;
-  color: var(--text-secondary);
+  background: #f8fbf7;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-primary);
   display: inline-flex;
   font-size: 0.75rem;
-  flex: 0 0 140px;
+  flex: 0 0 auto;
   font-weight: 800;
   gap: 6px;
-  justify-content: flex-start;
-  max-width: 140px;
-  min-width: 140px;
+  justify-content: center;
+  max-width: 160px;
+  min-height: 38px;
+  min-width: 96px;
   overflow: hidden;
+  padding: 0 12px;
   text-overflow: ellipsis;
   transition: color 0.16s ease, opacity 0.16s ease;
   white-space: nowrap;
@@ -4662,24 +4692,31 @@ button {
   }
 
   .shell-header {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     min-height: 0;
-    padding: 8px 10px;
+    padding: 8px 12px 6px;
   }
 
-  .shell-header .toolbar__actions {
+  .shell-header__top {
+    gap: 8px;
+  }
+
+  .shell-header__meta {
+    flex: 0 0 auto;
+    gap: 6px;
+  }
+
+  .shell-header__controls {
     align-items: center;
     flex-wrap: nowrap;
     gap: 4px;
-    justify-content: flex-start;
+    justify-content: space-between;
     min-width: 0;
-    overflow: hidden;
+    overflow-x: clip;
     width: 100%;
   }
 
-  .shell-header > strong {
+  .shell-header__title {
     font-size: .9rem;
     line-height: 1.1;
   }
@@ -4694,26 +4731,26 @@ button {
 
   .shell-header .shell-action {
     flex: 0 0 auto;
-    gap: 3px;
+    border-radius: 10px;
+    gap: 4px;
     justify-content: center;
     min-height: 36px;
-    padding: 6px 7px;
+    padding: 0 10px;
   }
 
   .workspace-switcher {
-    flex: 0 1 52px;
-    font-size: .72rem;
-    height: 36px;
-    max-width: 52px;
-    min-width: 0;
+    display: none;
   }
 
   .sync-badge {
-    flex: 0 0 72px;
-    font-size: .68rem;
+    border-radius: 999px;
+    flex: 0 0 auto;
+    font-size: .7rem;
     gap: 4px;
-    max-width: 72px;
-    min-width: 72px;
+    max-width: 96px;
+    min-height: 24px;
+    min-width: 0;
+    padding: 0 8px;
   }
 
   .sync-badge::before {
@@ -4723,11 +4760,13 @@ button {
   }
 
   .shell-action--refresh {
-    width: 36px;
+    flex: 1 1 0;
+    min-width: 0;
   }
 
   .shell-action--sync {
-    width: 54px;
+    flex: 1 1 0;
+    min-width: 0;
   }
 
   .shell-action__desktop,
@@ -4742,14 +4781,15 @@ button {
   }
 
   .language-switch {
+    border-radius: 10px;
     flex: 0 0 auto;
-    gap: 2px;
+    gap: 4px;
     height: 36px;
-    max-width: 52px;
+    max-width: 66px;
     min-width: 0;
     overflow: hidden;
-    padding: 0 5px;
-    width: 52px;
+    padding: 0 8px;
+    width: 66px;
   }
 
   .language-switch svg {
@@ -4758,10 +4798,11 @@ button {
   }
 
   .language-switch select {
-    font-size: .72rem;
-    max-width: 29px;
+    font-size: .74rem;
+    font-weight: 700;
+    max-width: 34px;
     min-width: 0;
-    width: 29px;
+    width: 34px;
   }
 
   .mobile-settings-menu {

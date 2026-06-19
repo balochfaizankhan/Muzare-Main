@@ -79,19 +79,24 @@ export function WorkspaceLayout() {
       </aside>
       <div className="app-shell__body">
         <header className="shell-header">
-          <strong>{t("layout.farmOperations")}</strong>
-          <div className="toolbar__actions">
-            {user && user.memberships.length > 1 && (
-              <select className="workspace-switcher" aria-label={t("layout.currentWorkspace")} value={user.workspaceId ?? ""} onChange={(event) => void switchWorkspace(event.target.value)}>
-                {user.memberships.filter((membership) => membership.active).map((membership) => (
-                  <option key={membership.workspaceId} value={membership.workspaceId}>{membership.workspaceName}</option>
-                ))}
-              </select>
-            )}
-            <span className={`sync-badge sync-badge--${sync.status}`}>{statusText}</span>
+          <div className="shell-header__top">
+            <strong className="shell-header__title">{t("layout.farmOperations")}</strong>
+            <div className="shell-header__meta">
+              {user && user.memberships.length > 1 && (
+                <select className="workspace-switcher" aria-label={t("layout.currentWorkspace")} value={user.workspaceId ?? ""} onChange={(event) => void switchWorkspace(event.target.value)}>
+                  {user.memberships.filter((membership) => membership.active).map((membership) => (
+                    <option key={membership.workspaceId} value={membership.workspaceId}>{membership.workspaceName}</option>
+                  ))}
+                </select>
+              )}
+              <span className={`sync-badge sync-badge--${sync.status}`}>{statusText}</span>
+            </div>
+          </div>
+          <div className="toolbar__actions shell-header__controls">
             <button className="shell-action shell-action--refresh" type="button" aria-label={t("layout.refresh")} onClick={() => void refreshOperationalData()}><RefreshCw size={16} /><span className="shell-action__desktop">{t("layout.refresh")}</span></button>
             <button className="shell-action shell-action--sync" type="button" aria-label={t("layout.syncNow")} onClick={() => void syncNow()}><CloudUpload size={16} /><span className="shell-action__desktop">{t("layout.syncNow")}</span><span className="shell-action__mobile">{t("layout.sync")}</span></button>
-            <LanguageSwitch /><button className="ghost-icon shell-logout" aria-label={t("common.logout")} onClick={() => void logout()}><LogOut size={18} /></button>
+            <LanguageSwitch />
+            <button className="ghost-icon shell-logout" aria-label={t("common.logout")} onClick={() => void logout()}><LogOut size={18} /></button>
           </div>
         </header>
         <Outlet />
