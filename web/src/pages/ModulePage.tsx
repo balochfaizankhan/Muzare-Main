@@ -12,7 +12,7 @@ import { calculateAccountBalance } from "../lib/accounting";
 import { defaultTransactionGroupExpansion, groupAccountTransactions, type AccountTransactionGroupKey } from "../lib/accountTransactionGroups";
 import { attendanceStatusKey, buildAttendanceStatusMap, previousLocalDateKey, todayLocalDateKey } from "../lib/attendanceStatus";
 import { confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteOrDeactivateLabour, fetchExpenseCategories, fetchLabourDeletionPreview, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type LabourDeletionPreview } from "../lib/api";
-import { buildDispatchAvailability, dispatchCartons, dispatchItemKey, saleProduceLabel, soldQuantityByDispatchItem } from "../lib/dispatch-sales";
+import { buildDispatchAvailability, dispatchCartons, dispatchItemKey, resolveSaleType, saleProduceLabel, soldQuantityByDispatchItem } from "../lib/dispatch-sales";
 import { hasPermission } from "../lib/permissions";
 import {
   buildPartnerLiabilityPositions,
@@ -1822,7 +1822,7 @@ function DispatchDateTypeManager({ dateTypes, dispatches, onClose, onRefresh }: 
 }
 
 function SalesModule() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const load = useCallback(async () => (await workspaceRecords(offlineDb.sales)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts), []);
   const loadDispatches = useCallback(async () => (await workspaceRecords(offlineDb.dispatches)).sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)), []);
@@ -1833,6 +1833,7 @@ function SalesModule() {
   const [dispatches] = useData(loadDispatches);
   const [vehicles] = useData(loadVehicles);
   const [dateTypes] = useData(loadDateTypes);
+  const [saleType, setSaleType] = useState<NonNullable<Sale["saleType"]>>("dispatch_sale");
   const [date, setDate] = useState(today());
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [buyerName, setBuyerName] = useState("");
@@ -1842,108 +1843,203 @@ function SalesModule() {
   const [unitPrice, setUnitPrice] = useState("");
   const [accountId, setAccountId] = useState("");
   const [remarks, setRemarks] = useState("");
+  const [directDateTypeId, setDirectDateTypeId] = useState("");
+  const [directProduceType, setDirectProduceType] = useState("");
   const [dispatchSearch, setDispatchSearch] = useState("");
   const [selectedDispatchKey, setSelectedDispatchKey] = useState("");
   const [error, setError] = useState("");
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
+  const [editingSale, setEditingSale] = useState<Sale | null>(null);
   const vehicleLabel = useCallback((dispatch: Dispatch) => vehicles.find((item) => item.id === dispatch.vehicleId)?.number ?? dispatch.vehicleNumber ?? "Unknown vehicle", [vehicles]);
   const availability = useMemo(() => buildDispatchAvailability(dispatches, sales, dateTypes, vehicleLabel), [dateTypes, dispatches, sales, vehicleLabel]);
+  const activeDateTypes = useMemo(() => dateTypes.filter((item) => item.active !== false), [dateTypes]);
+  const editingDispatchKey = editingSale?.dispatchId && editingSale?.dispatchItemId ? dispatchItemKey(editingSale.dispatchId, editingSale.dispatchItemId) : "";
   const filteredAvailability = useMemo(() => availability
-    .filter((item) => item.remainingCartons > 0)
-    .filter((item) => !dispatchSearch.trim() || item.searchText.includes(dispatchSearch.trim().toLowerCase())), [availability, dispatchSearch]);
+    .filter((item) => item.remainingCartons > 0 || dispatchItemKey(item.dispatch.id, item.itemId) === editingDispatchKey)
+    .filter((item) => !dispatchSearch.trim() || item.searchText.includes(dispatchSearch.trim().toLowerCase())), [availability, dispatchSearch, editingDispatchKey]);
   const selectedDispatch = useMemo(() => availability.find((item) => dispatchItemKey(item.dispatch.id, item.itemId) === selectedDispatchKey) ?? null, [availability, selectedDispatchKey]);
+  const selectedDirectType = useMemo(() => activeDateTypes.find((item) => item.id === directDateTypeId) ?? null, [activeDateTypes, directDateTypeId]);
+  const currentSaleType = saleType;
+  const selectedDispatchMax = selectedDispatch
+    ? selectedDispatch.remainingCartons + (editingDispatchKey === selectedDispatchKey ? Number(editingSale?.quantity ?? 0) : 0)
+    : undefined;
+  const totalAmount = (Number(quantity) || 0) * (Number(unitPrice) || 0);
+  const canSave = Boolean(accountId || accounts[0]?.id);
+  const saleTypeLabel = (sale: Pick<Sale, "saleType" | "dispatchId">) => resolveSaleType(sale) === "farm_direct_sale" ? "Direct Farm Sale" : "From Dispatch";
+  const resetForm = useCallback(() => {
+    setEditingSale(null);
+    setSaleType("dispatch_sale");
+    setDate(today());
+    setInvoiceNumber("");
+    setBuyerName("");
+    setDeliveryDate("");
+    setPaymentDate(today());
+    setQuantity("");
+    setUnitPrice("");
+    setAccountId(accounts[0]?.id ?? "");
+    setRemarks("");
+    setDirectDateTypeId("");
+    setDirectProduceType("");
+    setDispatchSearch("");
+    setSelectedDispatchKey("");
+    setError("");
+  }, [accounts]);
+  const editSale = useCallback((sale: Sale) => {
+    setSelectedSale(null);
+    setEditingSale(sale);
+    setSaleType(resolveSaleType(sale));
+    setDate(sale.date);
+    setInvoiceNumber(sale.invoiceNumber ?? "");
+    setBuyerName(sale.buyerName ?? "");
+    setDeliveryDate(sale.deliveryDate ?? "");
+    setPaymentDate(sale.paymentDate ?? today());
+    setQuantity(String(sale.quantity));
+    setUnitPrice(String(sale.unitPrice));
+    setAccountId(sale.accountId ?? accounts[0]?.id ?? "");
+    setRemarks(sale.remarks ?? "");
+    setDirectDateTypeId(sale.dateTypeId ?? "");
+    setDirectProduceType(sale.produceType ?? "");
+    setDispatchSearch("");
+    setSelectedDispatchKey(dispatchItemKey(sale.dispatchId, sale.dispatchItemId));
+    setError("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [accounts]);
+  const removeSale = useCallback(async (sale: Sale) => {
+    if (!window.confirm(`Delete sale${sale.invoiceNumber ? ` ${sale.invoiceNumber}` : ""}?`)) return;
+    await deleteOperationalRecord("sale", sale);
+    setSelectedSale((current) => current?.id === sale.id ? null : current);
+    setEditingSale((current) => current?.id === sale.id ? null : current);
+    await refresh();
+    window.dispatchEvent(new CustomEvent("muzare-toast", { detail: "Sale deleted successfully." }));
+  }, [refresh]);
   useEffect(() => {
     const recordId = searchParams.get("recordId");
-    if (recordId) setSelectedSale(sales.find((sale) => sale.id === recordId) ?? null);
-  }, [sales, searchParams]);
+    const mode = searchParams.get("mode");
+    if (!recordId) return;
+    const sale = sales.find((item) => item.id === recordId) ?? null;
+    if (!sale) return;
+    if (mode === "edit") editSale(sale);
+    else setSelectedSale(sale);
+    setSearchParams((current) => {
+      current.delete("recordId");
+      current.delete("mode");
+      return current;
+    }, { replace: true });
+  }, [editSale, sales, searchParams, setSearchParams]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!selectedDispatch) return setError("Select a dispatch record before saving a sale.");
     const quantityValue = Number(quantity);
     const unitPriceValue = Number(unitPrice);
-    if (date < selectedDispatch.dispatch.date) return setError("Sale date cannot be earlier than the dispatch date.");
     if (!quantityValue || quantityValue <= 0) return setError("Enter a valid sale quantity.");
-    if (quantityValue > selectedDispatch.remainingCartons) return setError("Sale quantity cannot exceed the remaining cartons on this dispatch.");
     if (!unitPriceValue || unitPriceValue < 0) return setError("Enter a valid unit price.");
+    if (!canSave) return setError("Select a payment account.");
+    if (currentSaleType === "dispatch_sale") {
+      if (!selectedDispatch) return setError("Select a dispatch record before saving a sale.");
+      if (date < selectedDispatch.dispatch.date) return setError("Sale date cannot be earlier than the dispatch date.");
+      if (quantityValue > (selectedDispatchMax ?? 0)) return setError("Sale quantity cannot exceed the remaining cartons on this dispatch.");
+    }
+    const directProduct = selectedDirectType?.name ?? directProduceType.trim();
+    if (currentSaleType === "farm_direct_sale" && !directProduct) return setError("Select or enter a product / variety.");
     const record: Sale = {
-      ...makeLocalRecord(),
+      ...(editingSale ?? makeLocalRecord()),
+      saleType: currentSaleType,
       date,
       invoiceNumber: invoiceNumber.trim() || undefined,
       buyerName: buyerName.trim() || undefined,
-      produceType: selectedDispatch.dateTypeName,
+      produceType: currentSaleType === "dispatch_sale" ? (selectedDispatch?.dateTypeName ?? "") : directProduct,
       quantity: quantityValue,
       unitPrice: unitPriceValue,
       amount: quantityValue * unitPriceValue,
       accountId: accountId || accounts[0]?.id || "",
-      dispatchId: selectedDispatch.dispatch.id,
-      dispatchItemId: selectedDispatch.itemId,
-      dispatchDate: selectedDispatch.dispatch.date,
+      dispatchId: currentSaleType === "dispatch_sale" ? selectedDispatch?.dispatch.id : undefined,
+      dispatchItemId: currentSaleType === "dispatch_sale" ? selectedDispatch?.itemId : undefined,
+      dispatchDate: currentSaleType === "dispatch_sale" ? selectedDispatch?.dispatch.date : undefined,
       deliveryDate: deliveryDate || undefined,
-      vehicleId: selectedDispatch.dispatch.vehicleId,
-      vehicleNumber: selectedDispatch.vehicleLabel,
-      dateTypeId: selectedDispatch.dateTypeId,
-      dateTypeName: selectedDispatch.dateTypeName,
+      vehicleId: currentSaleType === "dispatch_sale" ? selectedDispatch?.dispatch.vehicleId : undefined,
+      vehicleNumber: currentSaleType === "dispatch_sale" ? selectedDispatch?.vehicleLabel : undefined,
+      dateTypeId: currentSaleType === "dispatch_sale" ? selectedDispatch?.dateTypeId : (selectedDirectType?.id ?? undefined),
+      dateTypeName: currentSaleType === "dispatch_sale" ? selectedDispatch?.dateTypeName : (selectedDirectType?.name ?? undefined),
       paymentStatus: "paid",
       paymentDate,
       paymentReceived: quantityValue * unitPriceValue,
-      plotName: selectedDispatch.dispatch.plotName,
+      plotName: currentSaleType === "dispatch_sale" ? selectedDispatch?.dispatch.plotName : undefined,
       unit: "cartons",
       remarks: remarks.trim() || undefined,
     };
     await persistOperationalRecord("sale", record);
-    setInvoiceNumber(""); setBuyerName(""); setDeliveryDate(""); setPaymentDate(today()); setQuantity(""); setUnitPrice(""); setRemarks(""); setDispatchSearch(""); setSelectedDispatchKey(""); setError("");
+    resetForm();
     await refresh();
-    window.dispatchEvent(new CustomEvent("muzare-toast", { detail: "Sale recorded successfully." }));
+    window.dispatchEvent(new CustomEvent("muzare-toast", { detail: editingSale ? "Sale updated successfully." : "Sale recorded successfully." }));
   };
 
   return (
     <>
       <FormCard title="Record sale">
         <form className="module-form sales-form" onSubmit={(event) => void submit(event)}>
+          <div className="sales-type-toggle">
+            <button className={currentSaleType === "dispatch_sale" ? "is-active" : ""} type="button" onClick={() => { setSaleType("dispatch_sale"); setError(""); }}>
+              From Dispatch
+            </button>
+            <button className={currentSaleType === "farm_direct_sale" ? "is-active" : ""} type="button" onClick={() => { setSaleType("farm_direct_sale"); setSelectedDispatchKey(""); setError(""); }}>
+              Direct Farm Sale
+            </button>
+          </div>
           <label><span>Sale date</span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
-          <label><span>Invoice number</span><input placeholder="Optional invoice no." value={invoiceNumber} onChange={(event) => setInvoiceNumber(event.target.value)} /></label>
+          <label><span>Invoice / market serial</span><input placeholder="Optional invoice or serial no." value={invoiceNumber} onChange={(event) => setInvoiceNumber(event.target.value)} /></label>
           <label><span>Buyer / customer</span><input placeholder="Optional buyer name" value={buyerName} onChange={(event) => setBuyerName(event.target.value)} /></label>
           <label><span>Delivery date</span><input type="date" value={deliveryDate} onChange={(event) => setDeliveryDate(event.target.value)} /></label>
-          <div className="sales-dispatch-picker">
-            <div className="sales-dispatch-picker__header">
-              <label><span>Dispatch record</span></label>
-              <span>{filteredAvailability.length} available</span>
+          {currentSaleType === "dispatch_sale"
+            ? <div className="sales-dispatch-picker">
+              <div className="sales-dispatch-picker__header">
+                <label><span>Dispatch record</span></label>
+                <span>{filteredAvailability.length} available</span>
+              </div>
+              <SearchInput placeholder="Search dispatch by type, vehicle, or date" value={dispatchSearch} onChange={setDispatchSearch} onClear={() => setDispatchSearch("")} />
+              {selectedDispatch ? <div className="sales-selected-dispatch">
+                <strong>{selectedDispatch.dateTypeName}</strong>
+                <span>{selectedDispatch.dispatch.date} | {selectedDispatch.vehicleLabel}</span>
+                <span>{selectedDispatch.destination || "No destination"} | Remaining {selectedDispatchMax ?? selectedDispatch.remainingCartons}</span>
+              </div> : null}
+              <div className="dispatch-list sales-availability-list">
+                {filteredAvailability.length ? filteredAvailability.map((item) => {
+                  const selected = selectedDispatchKey === dispatchItemKey(item.dispatch.id, item.itemId);
+                  const availableCartons = item.remainingCartons + (editingDispatchKey === dispatchItemKey(item.dispatch.id, item.itemId) ? Number(editingSale?.quantity ?? 0) : 0);
+                  return <article className={selected ? "is-selected" : ""} key={dispatchItemKey(item.dispatch.id, item.itemId)}>
+                    <header>
+                      <div>
+                        <strong>{item.dispatch.date}</strong>
+                        <h3>{item.dateTypeName}</h3>
+                        <p>{item.vehicleLabel}{item.destination ? ` | ${item.destination}` : ""}</p>
+                      </div>
+                      <b>{availableCartons} left</b>
+                    </header>
+                    <p className="dispatch-linked-summary">Dispatched {item.dispatchedCartons} | Sold {item.soldCartons} | Remaining {availableCartons}</p>
+                    <footer><button type="button" onClick={() => setSelectedDispatchKey(dispatchItemKey(item.dispatch.id, item.itemId))}>Select dispatch</button></footer>
+                  </article>;
+                }) : <Empty>No available dispatches match this search.</Empty>}
+              </div>
             </div>
-            <SearchInput placeholder="Search dispatch by type, vehicle, or date" value={dispatchSearch} onChange={setDispatchSearch} onClear={() => setDispatchSearch("")} />
-            {selectedDispatch ? <div className="sales-selected-dispatch">
-              <strong>{selectedDispatch.dateTypeName}</strong>
-              <span>{selectedDispatch.dispatch.date} | {selectedDispatch.vehicleLabel}</span>
-              <span>{selectedDispatch.destination || "No destination"} | Remaining {selectedDispatch.remainingCartons}</span>
-            </div> : null}
-            <div className="dispatch-list sales-availability-list">
-              {filteredAvailability.length ? filteredAvailability.map((item) => {
-                const selected = selectedDispatchKey === dispatchItemKey(item.dispatch.id, item.itemId);
-                return <article className={selected ? "is-selected" : ""} key={dispatchItemKey(item.dispatch.id, item.itemId)}>
-                  <header>
-                    <div>
-                      <strong>{item.dispatch.date}</strong>
-                      <h3>{item.dateTypeName}</h3>
-                      <p>{item.vehicleLabel}{item.destination ? ` | ${item.destination}` : ""}</p>
-                    </div>
-                    <b>{item.remainingCartons} left</b>
-                  </header>
-                  <p className="dispatch-linked-summary">Dispatched {item.dispatchedCartons} | Sold {item.soldCartons} | Remaining {item.remainingCartons}</p>
-                  <footer><button type="button" onClick={() => setSelectedDispatchKey(dispatchItemKey(item.dispatch.id, item.itemId))}>Record sale</button></footer>
-                </article>;
-              }) : <Empty>No available dispatches match this search.</Empty>}
-            </div>
-          </div>
-          <label><span>Cartons sold</span><input required type="number" min="1" max={selectedDispatch?.remainingCartons || undefined} placeholder="Quantity" value={quantity} onChange={(event) => setQuantity(event.target.value)} /></label>
+            : activeDateTypes.length
+              ? <label><span>Product / variety</span><select value={directDateTypeId} onChange={(event) => setDirectDateTypeId(event.target.value)}>
+                <option value="">Select product / variety</option>
+                {activeDateTypes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select></label>
+              : <label><span>Product / variety</span><input required placeholder="Enter product / variety" value={directProduceType} onChange={(event) => setDirectProduceType(event.target.value)} /></label>}
+          <label><span>Cartons sold</span><input required type="number" min="1" max={currentSaleType === "dispatch_sale" ? selectedDispatchMax : undefined} placeholder="Quantity" value={quantity} onChange={(event) => setQuantity(event.target.value)} /></label>
           <label><span>Rate / price</span><input required type="number" min="0" step="0.01" placeholder="Unit price" value={unitPrice} onChange={(event) => setUnitPrice(event.target.value)} /></label>
+          <label><span>Total amount</span><input readOnly value={totalAmount ? money(totalAmount) : money(0)} /></label>
           <label><span>Payment account</span><select value={accountId || accounts[0]?.id || ""} onChange={(event) => setAccountId(event.target.value)}>
             {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
           </select></label>
           <label><span>Payment date</span><input type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} /></label>
           <label><span>Remarks</span><input placeholder="Optional remarks" value={remarks} onChange={(event) => setRemarks(event.target.value)} /></label>
-          {selectedDispatch ? <p className="dispatch-linked-summary">Dispatch {selectedDispatch.dispatch.date} | {selectedDispatch.dateTypeName} | Remaining {selectedDispatch.remainingCartons}</p> : null}
+          {currentSaleType === "dispatch_sale" && selectedDispatch ? <p className="dispatch-linked-summary">Dispatch {selectedDispatch.dispatch.date} | {selectedDispatch.dateTypeName} | Remaining {selectedDispatchMax ?? selectedDispatch.remainingCartons}</p> : null}
           {error ? <p className="form-error">{error}</p> : null}
-          <button type="submit">Save sale</button>
+          <div className="sales-form__actions">
+            {editingSale && <button className="secondary-action" type="button" onClick={resetForm}>Cancel Edit</button>}
+            <button disabled={!canSave} type="submit">{editingSale ? "Update sale" : "Save sale"}</button>
+          </div>
         </form>
       </FormCard>
       <div className="summary-grid">
@@ -1955,14 +2051,18 @@ function SalesModule() {
         empty="No sales recorded yet."
         rows={sales.map((item) => [
           item.date,
-          item.buyerName ?? "-",
-          `${saleProduceLabel(item)}${item.dispatchDate ? ` | Dispatch ${item.dispatchDate}` : " | Unlinked sale"}`,
+          `${saleTypeLabel(item)}${item.invoiceNumber ? ` | ${item.invoiceNumber}` : ""}`,
+          `${item.buyerName ?? "-"} | ${saleProduceLabel(item)}`,
           `${item.quantity} x ${money(item.unitPrice)}`,
           money(item.amount),
         ])}
-        actions={sales.map((item) => <button key={item.id} type="button" onClick={() => setSelectedSale(item)}>View</button>)}
+        actions={sales.map((item) => <>
+          <button key={`${item.id}-view`} type="button" onClick={() => setSelectedSale(item)}>View</button>
+          <button key={`${item.id}-edit`} type="button" onClick={() => editSale(item)}>Edit</button>
+          <button key={`${item.id}-delete`} type="button" onClick={() => void removeSale(item)}>Delete</button>
+        </>)}
       />
-      {selectedSale && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedSale(null)}><section className="worker-dialog" role="dialog" aria-modal="true" aria-label="Sale details" onClick={(event) => event.stopPropagation()}><header className="worker-dialog__header"><h2>Sale Details</h2><button type="button" onClick={() => setSelectedSale(null)}><X size={18} /></button></header><div className="worker-dialog__body"><dl className="worker-stats"><div><dt>Date</dt><dd>{selectedSale.date}</dd></div><div><dt>Invoice</dt><dd>{selectedSale.invoiceNumber ?? "-"}</dd></div><div><dt>Dispatch date</dt><dd>{selectedSale.dispatchDate ?? "Unlinked sale"}</dd></div><div><dt>Delivery date</dt><dd>{selectedSale.deliveryDate ?? "-"}</dd></div><div><dt>Payment date</dt><dd>{selectedSale.paymentDate ?? "-"}</dd></div><div><dt>Buyer</dt><dd>{selectedSale.buyerName ?? "-"}</dd></div><div><dt>Plot</dt><dd>{selectedSale.plotName ?? "-"}</dd></div><div><dt>Produce</dt><dd>{saleProduceLabel(selectedSale)}</dd></div><div><dt>Vehicle</dt><dd>{selectedSale.vehicleNumber ?? "-"}</dd></div><div><dt>Quantity</dt><dd>{selectedSale.quantity}</dd></div><div><dt>Rate</dt><dd>{money(selectedSale.unitPrice)}</dd></div><div><dt>Amount</dt><dd>{money(selectedSale.amount)}</dd></div><div><dt>Remarks</dt><dd>{selectedSale.remarks ?? "-"}</dd></div></dl></div></section></div>}
+      {selectedSale && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedSale(null)}><section className="worker-dialog" role="dialog" aria-modal="true" aria-label="Sale details" onClick={(event) => event.stopPropagation()}><header className="worker-dialog__header"><h2>Sale Details</h2><button type="button" onClick={() => setSelectedSale(null)}><X size={18} /></button></header><div className="worker-dialog__body"><dl className="worker-stats"><div><dt>Sale type</dt><dd>{saleTypeLabel(selectedSale)}</dd></div><div><dt>Date</dt><dd>{selectedSale.date}</dd></div><div><dt>Invoice</dt><dd>{selectedSale.invoiceNumber ?? "-"}</dd></div><div><dt>Dispatch date</dt><dd>{selectedSale.dispatchDate ?? "-"}</dd></div><div><dt>Delivery date</dt><dd>{selectedSale.deliveryDate ?? "-"}</dd></div><div><dt>Payment date</dt><dd>{selectedSale.paymentDate ?? "-"}</dd></div><div><dt>Buyer</dt><dd>{selectedSale.buyerName ?? "-"}</dd></div><div><dt>Plot</dt><dd>{selectedSale.plotName ?? "-"}</dd></div><div><dt>Produce</dt><dd>{saleProduceLabel(selectedSale)}</dd></div><div><dt>Vehicle</dt><dd>{selectedSale.vehicleNumber ?? "-"}</dd></div><div><dt>Quantity</dt><dd>{selectedSale.quantity}</dd></div><div><dt>Rate</dt><dd>{money(selectedSale.unitPrice)}</dd></div><div><dt>Amount</dt><dd>{money(selectedSale.amount)}</dd></div><div><dt>Payment account</dt><dd>{accounts.find((account) => account.id === selectedSale.accountId)?.name ?? "-"}</dd></div><div><dt>Remarks</dt><dd>{selectedSale.remarks ?? "-"}</dd></div></dl></div><footer className="worker-dialog__footer"><button type="button" onClick={() => setSelectedSale(null)}>Close</button><button type="button" onClick={() => editSale(selectedSale)}>Edit</button><button type="button" onClick={() => void removeSale(selectedSale)}>Delete</button></footer></section></div>}
     </>
   );
 }

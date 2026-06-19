@@ -131,6 +131,7 @@ export type DateType = LocalRecord & {
 };
 
 export type Sale = LocalRecord & {
+  saleType?: "dispatch_sale" | "farm_direct_sale";
   date: string;
   buyerName?: string;
   invoiceNumber?: string;

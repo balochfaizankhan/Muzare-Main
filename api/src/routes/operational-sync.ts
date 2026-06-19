@@ -86,6 +86,7 @@ const partnerEntryPayloadSchema = z.discriminatedUnion("type", [
 ]);
 const financialPayloadSchemas = {
   sale: z.object({
+    saleType: z.enum(["dispatch_sale", "farm_direct_sale"]).optional(),
     date: dateSchema,
     buyerName: z.string().trim().optional(),
     invoiceNumber: z.string().trim().optional(),
@@ -111,6 +112,12 @@ const financialPayloadSchemas = {
   }).superRefine((record, context) => {
     if (Boolean(record.dispatchId) !== Boolean(record.dispatchItemId)) {
       context.addIssue({ code: "custom", message: "Dispatch sales must include both dispatchId and dispatchItemId.", path: ["dispatchId"] });
+    }
+    if (record.saleType === "dispatch_sale" && (!record.dispatchId || !record.dispatchItemId)) {
+      context.addIssue({ code: "custom", message: "From-dispatch sales must include a dispatch item.", path: ["dispatchId"] });
+    }
+    if (record.saleType === "farm_direct_sale" && (record.dispatchId || record.dispatchItemId)) {
+      context.addIssue({ code: "custom", message: "Direct farm sales cannot include a dispatch item.", path: ["dispatchId"] });
     }
     if (Math.abs(record.amount - (record.quantity * record.unitPrice)) > 0.01) {
       context.addIssue({ code: "custom", message: "Sale total must match quantity x unit price.", path: ["amount"] });

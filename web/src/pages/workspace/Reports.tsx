@@ -17,7 +17,7 @@ import {
   resolvePartnerAccountId,
   type PartnerLiabilityLedgerGroupKey,
 } from "../../lib/partnerAccounting";
-import { saleProduceLabel } from "../../lib/dispatch-sales";
+import { resolveSaleType, saleProduceLabel } from "../../lib/dispatch-sales";
 import {
   offlineDb,
   workspaceRecords,
@@ -30,11 +30,13 @@ import {
   type Sale,
   type Voucher,
 } from "../../lib/offline-db";
+import { deleteOperationalRecord } from "../../services/syncService";
 
 type Report = "attendance" | "advances" | "expenditures" | "sales" | "dispatch" | "partner-position" | "account-ledger";
 type SortOrder = "desc" | "asc";
 type SalesDateType = "saleDate" | "dispatchDate" | "deliveryDate" | "paymentDate" | "createdDate";
 type DispatchDateType = "dispatchDate" | "deliveryDate" | "saleDate" | "createdDate";
+type SalesTypeFilter = "all" | "dispatch_sale" | "farm_direct_sale";
 type ReportViewState = {
   attendance: "register" | "summary";
   advances: "summary" | "log";
@@ -91,6 +93,7 @@ const formatRangeLabel = (from: string, to: string) => from && to ? `${from} - $
 const normalizeText = (value?: string | null) => value?.trim() ?? "";
 const dispatchReference = (dispatch: Pick<Dispatch, "dispatchNumber" | "id" | "date">) => normalizeText(dispatch.dispatchNumber) || `DSP-${dispatch.id.slice(0, 8).toUpperCase()}`;
 const invoiceReference = (sale: Pick<Sale, "invoiceNumber" | "id">) => normalizeText(sale.invoiceNumber) || "-";
+const saleTypeLabel = (sale: Pick<Sale, "saleType" | "dispatchId">) => resolveSaleType(sale) === "farm_direct_sale" ? "Direct Farm Sale" : "From Dispatch";
 const salePaymentStatus = (sale: Sale) => sale.paymentStatus ?? (sale.accountId ? "paid" : "unpaid");
 const salePaymentsReceived = (sale: Sale) => {
   if (typeof sale.paymentReceived === "number") return sale.paymentReceived;
@@ -103,6 +106,7 @@ const saleOutstanding = (sale: Sale) => Math.max(sale.amount - salePaymentsRecei
 
 type SalesReportRecord = {
   sale: Sale;
+  saleType: string;
   invoiceNumber: string;
   buyerName: string;
   product: string;
@@ -112,6 +116,7 @@ type SalesReportRecord = {
   paymentsReceived: number;
   outstanding: number;
   dispatchReference: string;
+  paymentAccount: string;
 };
 
 type DispatchReportRecord = {
@@ -260,6 +265,7 @@ export function Reports() {
   const [vehicleFilter, setVehicleFilter] = useState("");
   const [paymentStatusFilter, setPaymentStatusFilter] = useState("");
   const [dispatchStatusFilter, setDispatchStatusFilter] = useState("");
+  const [saleTypeFilter, setSaleTypeFilter] = useState<SalesTypeFilter>("all");
   const [showEmptyLedgerGroups, setShowEmptyLedgerGroups] = useState(false);
   const [reportGroupExpanded, setReportGroupExpanded] = useState<Record<AccountTransactionGroupKey, boolean>>(defaultTransactionGroupExpansion);
   const [partnerReportGroupExpanded, setPartnerReportGroupExpanded] = useState<Record<PartnerLiabilityLedgerGroupKey, boolean>>(defaultPartnerLiabilityGroupExpansion);
@@ -273,6 +279,13 @@ export function Reports() {
   const [dispatches, setDispatches] = useState<Dispatch[]>([]);
   const [selectedSaleRecord, setSelectedSaleRecord] = useState<SalesReportRecord | null>(null);
   const [selectedDispatchRecord, setSelectedDispatchRecord] = useState<DispatchReportRecord | null>(null);
+  const deleteSaleRecord = async (sale: Sale) => {
+    if (!window.confirm(`Delete sale${sale.invoiceNumber ? ` ${sale.invoiceNumber}` : ""}?`)) return;
+    await deleteOperationalRecord("sale", sale);
+    setSales((current) => current.filter((item) => item.id !== sale.id));
+    setSelectedSaleRecord(null);
+    window.dispatchEvent(new CustomEvent("muzare-toast", { detail: "Sale deleted successfully." }));
+  };
 
   useEffect(() => {
     void Promise.all([
@@ -360,6 +373,7 @@ export function Reports() {
     setVehicleFilter("");
     setPaymentStatusFilter("");
     setDispatchStatusFilter("");
+    setSaleTypeFilter("all");
     setSalesDateType("saleDate");
     setDispatchDateType("dispatchDate");
   };
@@ -440,7 +454,8 @@ export function Reports() {
     .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
   const saleRows = sales
     .filter((item) => (!accountId || item.accountId === accountId)
-      && matches(item.date, [item.buyerName, saleProduceLabel(item), item.dispatchDate, item.vehicleNumber, accountName(item.accountId)], item.amount))
+      && (!saleTypeFilter || saleTypeFilter === "all" || resolveSaleType(item) === saleTypeFilter)
+      && matches(item.date, [item.buyerName, item.invoiceNumber, saleProduceLabel(item), saleTypeLabel(item), item.dispatchDate, item.vehicleNumber, accountName(item.accountId), item.paymentDate], item.amount))
     .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
   const salesByDispatchKey = useMemo(() => {
     const map = new Map<string, Sale[]>();
@@ -457,6 +472,7 @@ export function Reports() {
     .map((sale) => {
       const record: SalesReportRecord = {
         sale,
+        saleType: saleTypeLabel(sale),
         invoiceNumber: invoiceReference(sale),
         buyerName: normalizeText(sale.buyerName) || t("reportsPage.unassignedBuyer"),
         product: saleProduceLabel(sale),
@@ -465,7 +481,8 @@ export function Reports() {
         paymentStatus: salePaymentStatus(sale),
         paymentsReceived: salePaymentsReceived(sale),
         outstanding: saleOutstanding(sale),
-        dispatchReference: sale.dispatchId ? `DSP ${sale.dispatchDate ?? sale.dispatchId.slice(0, 8)}` : t("reportsPage.unlinkedSale"),
+        dispatchReference: sale.dispatchId ? `DSP ${sale.dispatchDate ?? sale.dispatchId.slice(0, 8)}` : "-",
+        paymentAccount: accountName(sale.accountId),
       };
       return record;
     })
@@ -485,7 +502,9 @@ export function Reports() {
         && (!buyerFilter || item.buyerName.toLowerCase().includes(buyerFilter.trim().toLowerCase()))
         && (!productFilter || item.product.toLowerCase().includes(productFilter.trim().toLowerCase()))
         && (!paymentStatusFilter || item.paymentStatus === paymentStatusFilter)
+        && (saleTypeFilter === "all" || resolveSaleType(item.sale) === saleTypeFilter)
         && matches(dateValue || item.sale.date, [
+          item.saleType,
           item.invoiceNumber,
           item.buyerName,
           item.product,
@@ -493,9 +512,11 @@ export function Reports() {
           item.sale.quantity,
           item.sale.remarks,
           item.dispatchReference,
+          item.paymentAccount,
+          item.sale.paymentDate,
         ], item.sale.amount);
     })
-    .sort((a, b) => b.sale.date.localeCompare(a.sale.date) || b.sale.createdAt.localeCompare(a.sale.createdAt)), [buyerFilter, from, max, matches, min, paymentStatusFilter, productFilter, sales, salesDateType, t, to]);
+    .sort((a, b) => b.sale.date.localeCompare(a.sale.date) || b.sale.createdAt.localeCompare(a.sale.createdAt)), [accountName, buyerFilter, from, max, matches, min, paymentStatusFilter, productFilter, saleTypeFilter, sales, salesDateType, t, to]);
   const dispatchReportRows = useMemo(() => dispatches
     .filter((item) => !item.deletedAt)
     .flatMap((dispatch) => (dispatch.items ?? []).map((dispatchItem) => {
@@ -807,8 +828,8 @@ export function Reports() {
     [t("reportsPage.totalInvoices"), salesReportRows.length],
     [t("reportsPage.outstandingReceivables"), salesReportRows.reduce((sum, item) => sum + item.outstanding, 0)],
     [],
-    [t("reportsPage.saleDate"), t("reportsPage.invoiceNumber"), t("reportsPage.buyerName"), t("reportsPage.plot"), t("reportsPage.dispatchReference"), t("reportsPage.product"), t("reportsPage.quantity"), t("reportsPage.unit"), t("reportsPage.rate"), t("reportsPage.amount"), t("reportsPage.paymentStatus"), t("reportsPage.remarks")],
-    ...salesReportRows.map((item) => [item.sale.date, item.invoiceNumber, item.buyerName, item.plot, item.dispatchReference, item.product, item.sale.quantity, item.unit, item.sale.unitPrice, item.sale.amount, t(`reportsPage.paymentStatuses.${item.paymentStatus}`), item.sale.remarks || "-"]),
+    ["Sale Type", t("reportsPage.saleDate"), t("reportsPage.invoiceNumber"), t("reportsPage.buyerName"), t("reportsPage.plot"), t("reportsPage.dispatchReference"), t("reportsPage.product"), t("reportsPage.quantity"), t("reportsPage.unit"), t("reportsPage.rate"), t("reportsPage.amount"), "Payment Account", t("reportsPage.paymentDate"), t("reportsPage.paymentStatus"), t("reportsPage.remarks")],
+    ...salesReportRows.map((item) => [item.saleType, item.sale.date, item.invoiceNumber, item.buyerName, item.plot, item.dispatchReference, item.product, item.sale.quantity, item.unit, item.sale.unitPrice, item.sale.amount, item.paymentAccount, item.sale.paymentDate || "-", t(`reportsPage.paymentStatuses.${item.paymentStatus}`), item.sale.remarks || "-"]),
   ]);
   const exportDispatchReport = () => downloadCsv("dispatch-report.csv", [
     [t("reportsPage.dateType"), t(`reportsPage.dispatchDateTypes.${dispatchDateType}`)],
@@ -906,6 +927,14 @@ export function Reports() {
             </select>}
             <input aria-label={t("reportsPage.minimumAmount")} inputMode="decimal" placeholder={t("reportsPage.minimumAmount")} value={amountMin} onChange={(event) => setAmountMin(event.target.value)} />
             <input aria-label={t("reportsPage.maximumAmount")} inputMode="decimal" placeholder={t("reportsPage.maximumAmount")} value={amountMax} onChange={(event) => setAmountMax(event.target.value)} />
+          </>}
+
+          {report === "sales" && <>
+            <select aria-label="Sale type" value={saleTypeFilter} onChange={(event) => setSaleTypeFilter(event.target.value as SalesTypeFilter)}>
+              <option value="all">All sale types</option>
+              <option value="dispatch_sale">From Dispatch</option>
+              <option value="farm_direct_sale">Direct Farm Sale</option>
+            </select>
           </>}
 
           {report === "sales" && <>
@@ -1053,13 +1082,14 @@ export function Reports() {
           [t("reportsPage.totalInvoices"), salesReportRows.length],
           [t("reportsPage.outstandingReceivables"), money(salesReportRows.reduce((sum, item) => sum + item.outstanding, 0))],
         ]} />
-        <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.saleDate"), t("reportsPage.invoiceNumber"), t("reportsPage.buyerName"), t("reportsPage.plot"), t("reportsPage.dispatchReference"), t("reportsPage.product"), t("reportsPage.quantity"), t("reportsPage.unit"), t("reportsPage.rate"), t("reportsPage.amount"), t("reportsPage.paymentStatus"), t("reportsPage.remarks")]} rows={salesReportRows.map((item) => ({
+        <ReportTable empty={t("reportsPage.noRecords")} columns={["Sale Type", t("reportsPage.saleDate"), t("reportsPage.invoiceNumber"), t("reportsPage.buyerName"), t("reportsPage.plot"), t("reportsPage.dispatchReference"), t("reportsPage.product"), t("reportsPage.quantity"), t("reportsPage.unit"), t("reportsPage.rate"), t("reportsPage.amount"), "Payment Account", t("reportsPage.paymentDate"), t("reportsPage.paymentStatus"), t("reportsPage.remarks")]} rows={salesReportRows.map((item) => ({
           id: item.sale.id,
           title: item.invoiceNumber === "-" ? item.product : item.invoiceNumber,
           value: money(item.sale.amount),
           meta: `${item.sale.date} | ${item.buyerName}`,
-          cells: [item.sale.date, item.invoiceNumber, item.buyerName, item.plot, item.dispatchReference, item.product, formatNumber(item.sale.quantity), item.unit, money(item.sale.unitPrice), money(item.sale.amount), t(`reportsPage.paymentStatuses.${item.paymentStatus}`), item.sale.remarks || "-"],
+          cells: [item.saleType, item.sale.date, item.invoiceNumber, item.buyerName, item.plot, item.dispatchReference, item.product, formatNumber(item.sale.quantity), item.unit, money(item.sale.unitPrice), money(item.sale.amount), item.paymentAccount, item.sale.paymentDate || "-", t(`reportsPage.paymentStatuses.${item.paymentStatus}`), item.sale.remarks || "-"],
           details: [
+            ["Sale Type", item.saleType],
             [t("reportsPage.dispatchReference"), item.dispatchReference],
             [t("reportsPage.paymentsReceived"), money(item.paymentsReceived)],
             [t("reportsPage.outstanding"), money(item.outstanding)],
@@ -1199,6 +1229,7 @@ export function Reports() {
             <dl className="worker-stats">
               <div><dt>{t("reportsPage.invoiceNumber")}</dt><dd>{selectedSaleRecord.invoiceNumber}</dd></div>
               <div><dt>{t("reportsPage.buyerName")}</dt><dd>{selectedSaleRecord.buyerName}</dd></div>
+              <div><dt>Sale Type</dt><dd>{selectedSaleRecord.saleType}</dd></div>
               <div><dt>{t("reportsPage.saleDate")}</dt><dd>{selectedSaleRecord.sale.date}</dd></div>
               <div><dt>{t("reportsPage.dispatchDate")}</dt><dd>{selectedSaleRecord.sale.dispatchDate ?? "-"}</dd></div>
               <div><dt>{t("reportsPage.deliveryDate")}</dt><dd>{selectedSaleRecord.sale.deliveryDate ?? "-"}</dd></div>
@@ -1208,6 +1239,7 @@ export function Reports() {
               <div><dt>{t("reportsPage.quantity")}</dt><dd>{formatNumber(selectedSaleRecord.sale.quantity)} {selectedSaleRecord.unit}</dd></div>
               <div><dt>{t("reportsPage.rate")}</dt><dd>{money(selectedSaleRecord.sale.unitPrice)}</dd></div>
               <div><dt>{t("reportsPage.totalAmount")}</dt><dd>{money(selectedSaleRecord.sale.amount)}</dd></div>
+              <div><dt>Payment Account</dt><dd>{selectedSaleRecord.paymentAccount}</dd></div>
               <div><dt>{t("reportsPage.paymentsReceived")}</dt><dd>{money(selectedSaleRecord.paymentsReceived)}</dd></div>
               <div><dt>{t("reportsPage.outstanding")}</dt><dd>{money(selectedSaleRecord.outstanding)}</dd></div>
               <div><dt>{t("reportsPage.paymentStatus")}</dt><dd>{t(`reportsPage.paymentStatuses.${selectedSaleRecord.paymentStatus}`)}</dd></div>
@@ -1215,7 +1247,8 @@ export function Reports() {
             </dl>
             <div className="reports-detail-links">
               <button type="button" onClick={() => navigate(`/workspace/sales?recordId=${selectedSaleRecord.sale.id}`)}>{t("reportsPage.view")}</button>
-              <button type="button" onClick={() => navigate(`/workspace/sales?recordId=${selectedSaleRecord.sale.id}`)}>{t("reportsPage.edit")}</button>
+              <button type="button" onClick={() => navigate(`/workspace/sales?recordId=${selectedSaleRecord.sale.id}&mode=edit`)}>{t("reportsPage.edit")}</button>
+              <button type="button" onClick={() => void deleteSaleRecord(selectedSaleRecord.sale)}>{t("reportsPage.delete")}</button>
               <button type="button" onClick={() => printSection("sales-report")}>{t("reportsPage.print")}</button>
               {selectedSaleRecord.sale.dispatchId && <button type="button" onClick={() => {
                 const linked = dispatchReportRows.find((item) => item.dispatch.id === selectedSaleRecord.sale.dispatchId && item.linkedSales.some((sale) => sale.id === selectedSaleRecord.sale.id));

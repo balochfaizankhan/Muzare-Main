@@ -5603,6 +5603,7 @@ button {
 .dispatch-toolbar p { color: var(--text-secondary); font-size: .86rem; margin-top: 3px; }
 .dispatch-toolbar div:last-child, .dispatch-form-actions, .dispatch-list footer, .master-list article > div:last-child { display: flex; flex-wrap: wrap; gap: 8px; }
 .dispatch-toolbar button, .dispatch-form-actions button, .dispatch-list button, .master-list button, .secondary-action { background: var(--brand-primary); border: 1px solid var(--brand-primary); border-radius: 8px; color: #fff; font-weight: 750; min-height: 38px; padding: 7px 11px; }
+.inventory-disabled__action { align-items: center; background: var(--brand-primary); border: 1px solid var(--brand-primary); border-radius: 8px; color: #fff; display: inline-flex; font-weight: 750; justify-content: center; margin-top: 12px; min-height: 40px; padding: 0 14px; text-decoration: none; width: fit-content; }
 .dispatch-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .dispatch-form label, .dispatch-summary label { display: grid; gap: 5px; min-width: 0; }
 .dispatch-form label span, .dispatch-summary label span { color: var(--text-secondary); font-size: .76rem; font-weight: 750; }
@@ -5611,6 +5612,7 @@ button {
 .dispatch-items { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 9px; display: grid; gap: 9px; padding: 10px; }
 .dispatch-item-row { align-items: end; display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) minmax(88px, .32fr) auto; }
 .dispatch-toolbar .secondary-action, .dispatch-form .secondary-action, .dispatch-list .danger-link, .master-list .danger-link { background: var(--surface); border-color: var(--border); color: var(--text-primary); }
+.inventory-disabled__action:hover { filter: brightness(1.02); }
 .dispatch-list, .master-list { display: grid; gap: 8px; }
 .dispatch-list article, .master-list article { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 9px; padding: 10px; }
 .dispatch-list header, .master-list article { align-items: start; display: flex; gap: 10px; justify-content: space-between; }
@@ -5630,9 +5632,14 @@ button {
 .sales-form { gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 .sales-form > button,
 .sales-form > .form-error,
+.sales-type-toggle,
 .sales-dispatch-picker,
 .sales-selected-dispatch,
-.sales-form > .dispatch-linked-summary { grid-column: 1 / -1; }
+.sales-form > .dispatch-linked-summary,
+.sales-form__actions { grid-column: 1 / -1; }
+.sales-type-toggle { display: inline-grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.sales-type-toggle button { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 10px; color: var(--text-secondary); font-weight: 700; min-height: 46px; }
+.sales-type-toggle button.is-active { background: #f1f8eb; border-color: #8db58d; color: var(--text-primary); }
 .sales-dispatch-picker { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 9px; display: grid; gap: 10px; padding: 12px; }
 .sales-dispatch-picker__header { align-items: center; display: flex; gap: 10px; justify-content: space-between; }
 .sales-dispatch-picker__header span { color: var(--text-secondary); font-size: .76rem; font-weight: 700; }
@@ -5642,6 +5649,7 @@ button {
 .sales-availability-list { max-height: 360px; overflow-y: auto; padding-right: 2px; }
 .sales-availability-list article.is-selected { border-color: #8db58d; box-shadow: 0 0 0 1px rgba(46, 125, 50, 0.12); }
 .sales-availability-list .empty-records { margin: 0; }
+.sales-form__actions { display: flex; gap: 10px; justify-content: flex-end; }
 @keyframes attendance-import-spin { to { transform: rotate(360deg); } }
 .attendance-import-errors, .attendance-import-warnings, .attendance-import-error { border-radius: 8px; font-size: .78rem; padding: 9px; }
 .attendance-import-errors, .attendance-import-error { background: var(--danger-bg); color: var(--danger); }
@@ -6200,6 +6208,8 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .dispatch-summary__filters,
   .dispatch-summary__groups { grid-template-columns: minmax(0, 1fr); }
   .sales-availability-list { max-height: 300px; }
+  .sales-type-toggle { grid-template-columns: 1fr; }
+  .sales-form__actions { flex-direction: column; }
 }
 
 @media (max-width: 479px) {

@@ -12,4 +12,5 @@ const booleanValue = (key: string, fallback: boolean): boolean => {
 export const config = {
   apiUrl: value("VITE_API_URL") ?? "http://localhost:3001",
   featureFarmMap: booleanValue("VITE_FEATURE_FARM_MAP", false),
+  featureInventory: booleanValue("VITE_ENABLE_INVENTORY", false),
 };

@@ -117,7 +117,7 @@ export default function App() {
       <Route path="accounts" element={<ModulePage module="accounts" />} />
       <Route path="partner-ledger" element={<ModulePage module="partnerLedger" />} />
     </Route>
-    {["workforce", "advances", "expenses", "sales", "dispatch", "accounts", "partner-ledger", "farms", "seasons"].map((path) =>
+    {["workforce", "advances", "expenses", "sales", "dispatch", "inventory", "accounts", "partner-ledger", "farms", "seasons"].map((path) =>
       <Route key={path} path={`/${path}`} element={<Navigate to={`/workspace/${path === "workforce" ? "attendance" : path}`} replace />} />,
     )}
     <Route path="*" element={<RequireAuth><NotFoundPage /></RequireAuth>} />

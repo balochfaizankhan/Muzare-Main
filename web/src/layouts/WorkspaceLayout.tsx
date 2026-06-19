@@ -74,6 +74,7 @@ export function WorkspaceLayout() {
         <span className="shell-label">{user?.workspaceName ?? t("layout.workspace")}</span>
         <nav>{nav
           .filter(([to]) => config.featureFarmMap || to !== "/workspace/operations-map")
+          .filter(([to]) => config.featureInventory || to !== "/workspace/inventory")
           .filter(([, , , module]) => !user || hasModulePermission(user, module, "view"))
           .map(([to, label, Icon]) => <NavLink to={to} key={to}><Icon size={17} />{t(label)}</NavLink>)}</nav>
       </aside>

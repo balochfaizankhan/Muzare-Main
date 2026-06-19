@@ -833,6 +833,9 @@ const extraResources = {
       inventoryPage: {
         title: "Inventory",
         description: "Track workspace stock and produce inventory.",
+        disabledTitle: "Inventory module is temporarily disabled.",
+        disabledDescription: "This feature will be enabled in a future release.",
+        backToDashboard: "Back to Dashboard",
       },
       workspaceProfile: {
         settingsTitle: "Settings",
@@ -1534,6 +1537,9 @@ const extraResources = {
       inventoryPage: {
         title: "المخزون",
         description: "تابع مخزون مساحة العمل ومخزون الإنتاج.",
+        disabledTitle: "تم تعطيل وحدة المخزون مؤقتاً.",
+        disabledDescription: "سيتم تفعيل هذه الميزة في إصدار لاحق.",
+        backToDashboard: "العودة إلى لوحة المعلومات",
       },
       workspaceProfile: {
         settingsTitle: "الإعدادات",
@@ -2235,6 +2241,9 @@ const extraResources = {
       inventoryPage: {
         title: "انوینٹری",
         description: "ورک اسپیس اسٹاک اور پیداوار کی انوینٹری ٹریک کریں۔",
+        disabledTitle: "انوینٹری ماڈیول عارضی طور پر غیر فعال ہے۔",
+        disabledDescription: "یہ فیچر آئندہ ریلیز میں فعال کیا جائے گا۔",
+        backToDashboard: "ڈیش بورڈ پر واپس جائیں",
       },
       workspaceProfile: {
         settingsTitle: "ترتیبات",

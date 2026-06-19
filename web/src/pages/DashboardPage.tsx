@@ -220,6 +220,7 @@ export function DashboardPage() {
               <div className="operation-grid">
                 {modules
                   .filter(({ path }) => config.featureFarmMap || path !== "/workspace/operations-map")
+                  .filter(({ key }) => config.featureInventory || key !== "inventory")
                   .map(({ key, path, detailKey, icon: Icon }) => (
                   <Link className="operation-card" key={key} to={path}>
                     <Icon size={22} />

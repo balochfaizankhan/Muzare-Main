@@ -25,6 +25,9 @@ export const saleDispatchKey = (sale: Pick<Sale, "dispatchId" | "dispatchItemId"
 export const saleProduceLabel = (sale: Pick<Sale, "dateTypeName" | "produceType" | "dispatchId">) =>
   sale.dateTypeName?.trim() || sale.produceType?.trim() || (sale.dispatchId ? "Dispatch sale" : "Unlinked sale");
 
+export const resolveSaleType = (sale: Pick<Sale, "saleType" | "dispatchId">) =>
+  sale.saleType ?? (sale.dispatchId ? "dispatch_sale" : "farm_direct_sale");
+
 export function soldQuantityByDispatchItem(sales: Sale[]) {
   const sold = new Map<string, number>();
   for (const sale of sales) {

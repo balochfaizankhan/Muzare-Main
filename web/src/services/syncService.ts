@@ -89,7 +89,7 @@ export async function persistOperationalRecord<T extends LocalRecord>(entity: Op
 export async function deleteOperationalRecord(entity: OperationalEntity, record: LocalRecord & { deletionReason?: string }): Promise<void> {
   if (!context) throw new Error("Workspace synchronization is not initialized.");
   const queuedAt = new Date().toISOString();
-  const softDelete = entity === "partnerEntry" || entity === "advance" || entity === "voucher";
+  const softDelete = entity === "partnerEntry" || entity === "advance" || entity === "voucher" || entity === "sale";
   const payload = softDelete ? { ...record, deletedAt: queuedAt, updatedAt: queuedAt, pendingSync: true } : { ...record, updatedAt: queuedAt, pendingSync: true };
   if (softDelete) await tableFor(entity).put(payload);
   else await tableFor(entity).delete(record.id);
@@ -103,6 +103,7 @@ export async function deleteOperationalRecord(entity: OperationalEntity, record:
   const label = entity === "partnerEntry" ? "Partner ledger entry deleted"
     : entity === "advance" ? "Labour advance deleted"
       : entity === "voucher" ? "Expense voucher deleted"
+        : entity === "sale" ? "Sale deleted"
         : entity === "dispatch" ? "Dispatch deleted"
           : entity === "vehicle" ? "Vehicle deleted"
             : entity === "dateType" ? "Date type deleted" : "Attendance cleared";
