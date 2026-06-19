@@ -26,9 +26,54 @@ type LabourOption = {
   name: string;
   phone: string;
   searchText: string;
+  normalizedName: string;
+  words: string[];
 };
 
 const normalize = (value: string) => value.trim().toLowerCase();
+
+const isSubsequenceMatch = (text: string, term: string) => {
+  if (!term) return true;
+  let cursor = 0;
+  for (const character of text) {
+    if (character === term[cursor]) cursor += 1;
+    if (cursor === term.length) return true;
+  }
+  return false;
+};
+
+const scoreLabourOption = (option: LabourOption, rawTerm: string) => {
+  const term = normalize(rawTerm);
+  if (!term) return 0;
+
+  const compactName = option.normalizedName.replace(/\s+/g, " ").trim();
+  if (compactName === term) return 5000;
+
+  const terms = term.split(/\s+/).filter(Boolean);
+  const firstWord = option.words[0] ?? "";
+  const joinedWords = option.words.join(" ");
+
+  if (terms.length === 1) {
+    const [single] = terms;
+    if (firstWord.startsWith(single)) return 4200 - Math.min(firstWord.length, 80);
+    if (option.words.some((word) => word.startsWith(single))) return 3600 - Math.min(joinedWords.indexOf(single), 500);
+    if (compactName.includes(single)) return 2800 - Math.min(compactName.indexOf(single), 500);
+    if (option.phone.includes(single)) return 2200;
+    if (isSubsequenceMatch(compactName.replace(/\s+/g, ""), single.replace(/\s+/g, ""))) return 1200;
+    return -1;
+  }
+
+  const allTermsMatch = terms.every((part) => option.words.some((word) => word.startsWith(part)) || compactName.includes(part) || option.phone.includes(part));
+  if (allTermsMatch) {
+    const startsCount = terms.filter((part) => option.words.some((word) => word.startsWith(part))).length;
+    return 3400 + startsCount * 120 - terms.join(" ").length;
+  }
+
+  const compactJoined = compactName.replace(/\s+/g, "");
+  const compactTerm = terms.join("");
+  if (compactTerm && isSubsequenceMatch(compactJoined, compactTerm)) return 1100;
+  return -1;
+};
 
 export function LabourSelectCombobox({
   options,
@@ -55,11 +100,14 @@ export function LabourSelectCombobox({
 
   const labourOptions = useMemo<LabourOption[]>(() => options.map((option) => {
     const phone = option.mobile ?? option.phone ?? "";
+    const normalizedName = normalize(option.name);
     return {
       id: option.id,
       name: option.name,
       phone,
       searchText: normalize(`${option.name} ${phone}`),
+      normalizedName,
+      words: normalizedName.split(/\s+/).filter(Boolean),
     };
   }), [options]);
 
@@ -73,7 +121,14 @@ export function LabourSelectCombobox({
   const filtered = useMemo(() => {
     const term = normalize(deferredQuery);
     if (!term) return labourOptions;
-    return labourOptions.filter((option) => option.searchText.includes(term));
+    return labourOptions
+      .map((option) => ({ option, score: scoreLabourOption(option, term) }))
+      .filter((entry) => entry.score >= 0)
+      .sort((left, right) => {
+        if (right.score !== left.score) return right.score - left.score;
+        return left.option.name.localeCompare(right.option.name);
+      })
+      .map((entry) => entry.option);
   }, [deferredQuery, labourOptions]);
 
   const items = useMemo(

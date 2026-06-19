@@ -28,6 +28,11 @@ const paymentTypeLabel = (labourer?: Labourer) => {
   }
 };
 
+const labourGroupSummary = (labourer?: Labourer) => {
+  const parts = [labourer?.group?.trim(), paymentTypeLabel(labourer)].filter(Boolean);
+  return parts.join(" · ");
+};
+
 export function LabourAdvances() {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -92,6 +97,9 @@ export function LabourAdvances() {
     for (const advance of advances) totals.set(advance.labourerId, (totals.get(advance.labourerId) ?? 0) + advance.amount);
     return totals;
   }, [advances]);
+  const noLabourResultsMessage = group === "all"
+    ? t("advancesPage.noLabourResults")
+    : t("advancesPage.noLabourResultsInGroup", { group });
 
   useEffect(() => {
     if (entryLabourerId && !groupedLabourers.some((labourer) => labourer.id === entryLabourerId)) setEntryLabourerId("");
@@ -197,21 +205,28 @@ export function LabourAdvances() {
               value={entryLabourerId}
               onChange={setEntryLabourerId}
               placeholder={t("advancesPage.searchLabourByName")}
-              noResultsLabel={t("workforcePage.noLabourFound")}
+              noResultsLabel={noLabourResultsMessage}
               inputRef={labourInputRef}
               maxSuggestions={6}
               renderOption={(option) => <div className="labour-combobox__option-content">
-                <strong>{option.name}</strong>
-                <small>{paymentTypeLabel(option)}</small>
-                <small>{t("advancesPage.outstandingAdvance")}: {money(advanceTotalByLabour.get(option.id) ?? 0)}</small>
+                <div className="labour-combobox__option-content-top">
+                  <strong>{option.name}</strong>
+                  <span className="labour-combobox__option-value">{money(advanceTotalByLabour.get(option.id) ?? 0)}</span>
+                </div>
+                <div className="labour-combobox__option-meta">
+                  <span>{labourGroupSummary(option)}</span>
+                  <span className="labour-combobox__option-meta-dot" aria-hidden="true" />
+                  <span>{t("advancesPage.outstandingAdvance")}</span>
+                </div>
               </div>}
               renderSelectedValue={(option, actions) => <article className="labour-selected-card">
                 <div className="labour-selected-card__body">
+                  <span className="labour-selected-card__eyebrow">{t("advancesPage.selectedLabour")}</span>
                   <strong>{option.name}</strong>
-                  <dl>
-                    <div><dt>{t("advancesPage.group")}</dt><dd>{paymentTypeLabel(option)}</dd></div>
-                    <div><dt>{t("advancesPage.outstandingAdvance")}</dt><dd>{money(advanceTotalByLabour.get(option.id) ?? 0)}</dd></div>
-                  </dl>
+                  <div className="labour-selected-card__summary">
+                    {labourGroupSummary(option)}{" "}
+                    <strong>{t("advancesPage.outstandingAdvance")} {money(advanceTotalByLabour.get(option.id) ?? 0)}</strong>
+                  </div>
                 </div>
                 <button type="button" className="labour-selected-card__change" onClick={actions.change}>{t("advancesPage.changeLabour")}</button>
               </article>}
@@ -244,7 +259,7 @@ export function LabourAdvances() {
                 includeAllOption
                 allOptionLabel={t("advancesPage.allLabour")}
                 placeholder={t("workforcePage.searchLabour")}
-                noResultsLabel={t("workforcePage.noLabourFound")}
+                noResultsLabel={noLabourResultsMessage}
               /></label>
               <label className="advances-filter-field"><span>{t("advancesPage.group")}</span><select aria-label={t("advancesPage.group")} value={group} onChange={(event) => setGroup(event.target.value)}>
                 <option value="all">{t("advancesPage.allGroups")}</option>
