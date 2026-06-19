@@ -46,9 +46,10 @@ export async function adminWorkspaceRoutes(app: FastifyInstance): Promise<void> 
         LIMIT 1
       ) owner ON true
       LEFT JOIN (
-        SELECT workspace_id, count(*) FILTER (WHERE active = true)::int AS users_count
-        FROM workspace_memberships
-        GROUP BY workspace_id
+        SELECT wm.workspace_id, count(*) FILTER (WHERE wm.active = true AND u.active = true AND u.status = 'approved')::int AS users_count
+        FROM workspace_memberships wm
+        INNER JOIN users u ON u.id = wm.user_id
+        GROUP BY wm.workspace_id
       ) member_counts ON member_counts.workspace_id = w.id
       LEFT JOIN (
         SELECT workspace_id, count(*) FILTER (WHERE active = true)::int AS farms_count
@@ -98,6 +99,8 @@ export async function adminWorkspaceRoutes(app: FastifyInstance): Promise<void> 
       userId: workspaceMemberships.userId,
       role: workspaceMemberships.role,
       active: workspaceMemberships.active,
+      userActive: users.active,
+      userStatus: users.status,
       email: users.email,
       displayName: users.displayName,
     }).from(workspaceMemberships)
@@ -123,7 +126,11 @@ export async function adminWorkspaceRoutes(app: FastifyInstance): Promise<void> 
     return {
       workspace: {
         ...workspace,
-        members: memberships,
+        members: memberships.map((member) => ({
+          ...member,
+          displayName: member.displayName?.trim() || member.email || "Unnamed member",
+          hasWorkspaceAccess: Boolean(member.active && member.userActive && member.userStatus === "approved"),
+        })),
         history,
       },
     };

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { CalendarDays, ChevronDown, ChevronRight, MoreVertical, X } from "lucide-react";
+import { CalendarDays, ChevronDown, ChevronRight, Eye, MoreVertical, Pencil, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { SubpageHeader } from "../components/SubpageHeader";
 import { SearchInput } from "../components/SearchInput";
 import { LabourSelectCombobox } from "../components/LabourSelectCombobox";
+import { ClearableSelect } from "../components/ClearableSelect";
 import { useAuth } from "../auth/AuthProvider";
 import { useSyncState } from "../hooks/useSyncState";
 import { calculateAccountBalance } from "../lib/accounting";
@@ -24,7 +25,7 @@ import {
   resolvePartnerAccountId,
   type PartnerLiabilityLedgerGroupKey,
 } from "../lib/partnerAccounting";
-import { formatMoney } from "../lib/format";
+import { formatDate, formatMoney } from "../lib/format";
 import {
   ensureLocalAccounts,
   getActiveWorkspaceId,
@@ -54,6 +55,7 @@ export type ModuleKey = "workforce" | "expenses" | "sales" | "dispatch" | "accou
 
 const today = todayLocalDateKey;
 const money = formatMoney;
+const shortDate = (value: string) => formatDate(value, { day: "numeric", month: "short", year: "numeric" });
 const readableSyncTime = (value: string | null) => value ? new Date(value).toLocaleString() : "Not synced yet";
 const paymentTypes = ["daily_wage", "production_based", "contract_lump_sum", "monthly_salary", "other"] as const;
 type PaymentType = typeof paymentTypes[number];
@@ -375,18 +377,18 @@ function WorkforceModule({
           </div>
         </div>
         {showRegisterFilters && <div className="attendance-tools workforce-filters">
-          <select value={groupFilterId} onChange={(event) => setGroupFilterId(event.target.value)}>
+          <ClearableSelect value={groupFilterId} clearValue="all" onChange={setGroupFilterId}>
             <option value="all">All groups</option>
             {groups.filter((group) => group.active !== false).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
-          </select>
-          <select value={paymentTypeFilter} onChange={(event) => setPaymentTypeFilter(event.target.value as PaymentType | "all")}>
+          </ClearableSelect>
+          <ClearableSelect value={paymentTypeFilter} clearValue="all" onChange={(value) => setPaymentTypeFilter(value as PaymentType | "all")}>
             <option value="all">All payment types</option>
             <option value="daily_wage">Daily Wage</option>
             <option value="production_based">Production Based</option>
             <option value="contract_lump_sum">Contract / Lump Sum</option>
             <option value="monthly_salary">Monthly Salary</option>
             <option value="other">Other</option>
-          </select>
+          </ClearableSelect>
           <button type="button" onClick={() => {
             setLabourSearch("");
             setGroupFilterId("all");
@@ -444,10 +446,10 @@ function WorkforceModule({
               <strong>Pending sync: {sync.pendingCount} change{sync.pendingCount === 1 ? "" : "s"} waiting.</strong>
             </div>}
             <div className="attendance-entry-controls">
-              <select value={groupFilterId} onChange={(event) => setGroupFilterId(event.target.value)}>
+              <ClearableSelect value={groupFilterId} clearValue="all" onChange={setGroupFilterId}>
                 <option value="all">All groups</option>
                 {groups.filter((group) => group.active !== false).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
-              </select>
+              </ClearableSelect>
               <label className="attendance-date-control">
                 <span>Date</span>
                 <input aria-label="Attendance date" type="date" value={date} onChange={(event) => setDate(event.target.value)} />
@@ -1459,12 +1461,12 @@ function ExpensesModule() {
       <FormCard title={editingVoucher ? t("expensesPage.editVoucher", { number: editingVoucher.voucherNumber }) : t("expensesPage.newVoucher")}>
         <form className="module-form inline-form" onSubmit={(event) => void submit(event)}>
           <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-          <label><span>{t("expensesPage.categoryRequired")}</span><input required list="expense-category-options" placeholder={t("expensesPage.selectCategory")} value={categorySearch} onChange={(event) => {
-            const next = categories.data?.categories.find((item) => item.name === event.target.value); setCategorySearch(event.target.value); setCategoryId(next?.id ?? ""); setSubcategoryId(""); setSubcategorySearch("");
-          }} /><datalist id="expense-category-options">{categories.data?.categories.map((item) => <option key={item.id} value={item.name} />)}</datalist></label>
-          <label><span>{t("expensesPage.subcategoryRequired")}</span><input required disabled={!categoryId} list="expense-subcategory-options" placeholder={t("expensesPage.selectSubcategory")} value={subcategorySearch} onChange={(event) => {
-            const next = selectedCategory?.subcategories.find((item) => item.name === event.target.value); setSubcategorySearch(event.target.value); setSubcategoryId(next?.id ?? "");
-          }} /><datalist id="expense-subcategory-options">{selectedCategory?.subcategories.map((item) => <option key={item.id} value={item.name} />)}</datalist></label>
+          <label><span>{t("expensesPage.categoryRequired")}</span><SearchInput required list="expense-category-options" placeholder={t("expensesPage.selectCategory")} value={categorySearch} onChange={(value) => {
+            const next = categories.data?.categories.find((item) => item.name === value); setCategorySearch(value); setCategoryId(next?.id ?? ""); setSubcategoryId(""); setSubcategorySearch("");
+          }} onClear={() => { setCategoryId(""); setCategorySearch(""); setSubcategoryId(""); setSubcategorySearch(""); }} /><datalist id="expense-category-options">{categories.data?.categories.map((item) => <option key={item.id} value={item.name} />)}</datalist></label>
+          <label><span>{t("expensesPage.subcategoryRequired")}</span><SearchInput required disabled={!categoryId} list="expense-subcategory-options" placeholder={t("expensesPage.selectSubcategory")} value={subcategorySearch} onChange={(value) => {
+            const next = selectedCategory?.subcategories.find((item) => item.name === value); setSubcategorySearch(value); setSubcategoryId(next?.id ?? "");
+          }} onClear={() => { setSubcategoryId(""); setSubcategorySearch(""); }} /><datalist id="expense-subcategory-options">{selectedCategory?.subcategories.map((item) => <option key={item.id} value={item.name} />)}</datalist></label>
           <input required value={description} placeholder={t("expensesPage.description")} onChange={(event) => setDescription(event.target.value)} />
           <input required min="0.01" step="0.01" type="number" value={amount} placeholder={t("expensesPage.amount")} onChange={(event) => setAmount(event.target.value)} />
           <select value={accountId || accounts[0]?.id || ""} onChange={(event) => setAccountId(event.target.value)}>
@@ -1486,15 +1488,15 @@ function ExpensesModule() {
             <label className="expense-filter-field expense-date-field"><span><CalendarDays size={15} />{t("expensesPage.toDate")}</span><input aria-label={t("expensesPage.toDate")} type="date" value={voucherTo} onChange={(event) => setVoucherTo(event.target.value)} /></label>
           </fieldset>
           <div className="expense-filter-grid">
-            <label className="expense-filter-field"><span>{t("expensesPage.category")}</span><select aria-label={t("expensesPage.category")} value={voucherCategory} onChange={(event) => { setVoucherCategory(event.target.value); setVoucherSubcategory(""); }}>
+            <label className="expense-filter-field"><span>{t("expensesPage.category")}</span><ClearableSelect aria-label={t("expensesPage.category")} value={voucherCategory} onChange={(value) => { setVoucherCategory(value); setVoucherSubcategory(""); }}>
               <option value="">{t("expensesPage.allCategories")}</option>{categories.data?.categories.map((item) => <option key={item.id}>{item.name}</option>)}
-            </select></label>
-            <label className="expense-filter-field"><span>{t("expensesPage.subcategory")}</span><select aria-label={t("expensesPage.subcategory")} value={voucherSubcategory} onChange={(event) => setVoucherSubcategory(event.target.value)}>
+            </ClearableSelect></label>
+            <label className="expense-filter-field"><span>{t("expensesPage.subcategory")}</span><ClearableSelect aria-label={t("expensesPage.subcategory")} value={voucherSubcategory} onChange={setVoucherSubcategory}>
               <option value="">{t("expensesPage.allSubcategories")}</option>{[...new Set(voucherSubcategories)].map((name) => <option key={name}>{name}</option>)}
-            </select></label>
-            <label className="expense-filter-field expense-filter-field--account"><span>{t("expensesPage.paymentAccount")}</span><select aria-label={t("expensesPage.paymentAccount")} value={voucherAccountId} onChange={(event) => setVoucherAccountId(event.target.value)}>
+            </ClearableSelect></label>
+            <label className="expense-filter-field expense-filter-field--account"><span>{t("expensesPage.paymentAccount")}</span><ClearableSelect aria-label={t("expensesPage.paymentAccount")} value={voucherAccountId} onChange={setVoucherAccountId}>
               <option value="">{t("expensesPage.allAccounts")}</option>{accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-            </select></label>
+            </ClearableSelect></label>
           </div>
         </div>
         <div className="expense-search-meta">
@@ -1639,22 +1641,22 @@ function DispatchModule() {
       <FormCard title={editing ? t("dispatchPage.updateDispatch") : t("dispatchPage.newDispatch")}>
         <form className="module-form dispatch-form" onSubmit={(event) => void submit(event)}>
           <label><span>{t("dispatchPage.dispatchDate")}</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
-          <label><span>{t("dispatchPage.vehicle")}</span><select required value={vehicleId} onChange={(event) => setVehicleId(event.target.value)}><option value="">{t("dispatchPage.selectActiveVehicle")}</option>{activeVehicles.map((item) => <option key={item.id} value={item.id}>{item.number}{item.driverName ? ` - ${item.driverName}` : ""}</option>)}</select></label>
+          <label><span>{t("dispatchPage.vehicle")}</span><ClearableSelect required value={vehicleId} onChange={setVehicleId}><option value="">{t("dispatchPage.selectActiveVehicle")}</option>{activeVehicles.map((item) => <option key={item.id} value={item.id}>{item.number}{item.driverName ? ` - ${item.driverName}` : ""}</option>)}</ClearableSelect></label>
           <label><span>Dispatch number</span><input placeholder={t("dispatchPage.optional")} value={dispatchNumber} onChange={(event) => setDispatchNumber(event.target.value)} /></label>
           <label><span>Plot</span><input placeholder={t("dispatchPage.optional")} value={plotName} onChange={(event) => setPlotName(event.target.value)} /></label>
           <label><span>{t("dispatchPage.destinationBuyer")}</span><input placeholder={t("dispatchPage.optional")} value={destination} onChange={(event) => setDestination(event.target.value)} /></label>
           <label><span>Delivery date</span><input type="date" value={deliveryDate} onChange={(event) => setDeliveryDate(event.target.value)} /></label>
-          <label><span>Status</span><select value={dispatchStatus} onChange={(event) => setDispatchStatus(event.target.value as NonNullable<Dispatch["status"]>)}>
+          <label><span>Status</span><ClearableSelect clearValue="dispatched" value={dispatchStatus} onChange={(value) => setDispatchStatus(value as NonNullable<Dispatch["status"]>)}>
             <option value="pending">Pending</option>
             <option value="dispatched">Dispatched</option>
             <option value="delivered">Delivered</option>
             <option value="sold">Sold</option>
-          </select></label>
+          </ClearableSelect></label>
           <label><span>{t("dispatchPage.notes")}</span><input placeholder={t("dispatchPage.optional")} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
           <div className="dispatch-items">
             <h3>{t("dispatchPage.dateTypesAndCartons")}</h3>
             {items.map((item, index) => <div className="dispatch-item-row" key={item.id}>
-              <label><span>{t("dispatchPage.dateType", { index: index + 1 })}</span><select required value={item.dateTypeId} onChange={(event) => updateItem(item.id, "dateTypeId", event.target.value)}><option value="">{t("dispatchPage.selectType")}</option>{activeDateTypes.filter((type) => type.id === item.dateTypeId || !items.some((current) => current.id !== item.id && current.dateTypeId === type.id)).map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}</select></label>
+              <label><span>{t("dispatchPage.dateType", { index: index + 1 })}</span><ClearableSelect required value={item.dateTypeId} onChange={(value) => updateItem(item.id, "dateTypeId", value)}><option value="">{t("dispatchPage.selectType")}</option>{activeDateTypes.filter((type) => type.id === item.dateTypeId || !items.some((current) => current.id !== item.id && current.dateTypeId === type.id)).map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}</ClearableSelect></label>
               <label><span>{t("dispatchPage.cartons")}</span><input required type="number" min="1" step="1" value={item.cartons} onChange={(event) => updateItem(item.id, "cartons", event.target.value)} /></label>
               {items.length > 1 && <button className="danger-link" type="button" onClick={() => setItems((current) => current.filter((currentItem) => currentItem.id !== item.id))}>{t("dispatchPage.remove")}</button>}
             </div>)}
@@ -1849,6 +1851,7 @@ function SalesModule() {
   const [selectedDispatchKey, setSelectedDispatchKey] = useState("");
   const [error, setError] = useState("");
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
+  const [salePendingDelete, setSalePendingDelete] = useState<Sale | null>(null);
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
   const vehicleLabel = useCallback((dispatch: Dispatch) => vehicles.find((item) => item.id === dispatch.vehicleId)?.number ?? dispatch.vehicleNumber ?? "Unknown vehicle", [vehicles]);
   const availability = useMemo(() => buildDispatchAvailability(dispatches, sales, dateTypes, vehicleLabel), [dateTypes, dispatches, sales, vehicleLabel]);
@@ -1905,9 +1908,9 @@ function SalesModule() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [accounts]);
   const removeSale = useCallback(async (sale: Sale) => {
-    if (!window.confirm(`Delete sale${sale.invoiceNumber ? ` ${sale.invoiceNumber}` : ""}?`)) return;
     await deleteOperationalRecord("sale", sale);
     setSelectedSale((current) => current?.id === sale.id ? null : current);
+    setSalePendingDelete((current) => current?.id === sale.id ? null : current);
     setEditingSale((current) => current?.id === sale.id ? null : current);
     await refresh();
     window.dispatchEvent(new CustomEvent("muzare-toast", { detail: "Sale deleted successfully." }));
@@ -2021,17 +2024,18 @@ function SalesModule() {
               </div>
             </div>
             : activeDateTypes.length
-              ? <label><span>Product / variety</span><select value={directDateTypeId} onChange={(event) => setDirectDateTypeId(event.target.value)}>
+              ? <label><span>Product / variety</span><ClearableSelect value={directDateTypeId} onChange={setDirectDateTypeId}>
                 <option value="">Select product / variety</option>
                 {activeDateTypes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-              </select></label>
+              </ClearableSelect></label>
               : <label><span>Product / variety</span><input required placeholder="Enter product / variety" value={directProduceType} onChange={(event) => setDirectProduceType(event.target.value)} /></label>}
           <label><span>Cartons sold</span><input required type="number" min="1" max={currentSaleType === "dispatch_sale" ? selectedDispatchMax : undefined} placeholder="Quantity" value={quantity} onChange={(event) => setQuantity(event.target.value)} /></label>
           <label><span>Rate / price</span><input required type="number" min="0" step="0.01" placeholder="Unit price" value={unitPrice} onChange={(event) => setUnitPrice(event.target.value)} /></label>
           <label><span>Total amount</span><input readOnly value={totalAmount ? money(totalAmount) : money(0)} /></label>
-          <label><span>Payment account</span><select value={accountId || accounts[0]?.id || ""} onChange={(event) => setAccountId(event.target.value)}>
+          <label><span>Payment account</span><ClearableSelect value={accountId || ""} onChange={setAccountId}>
+            <option value="">Select payment account</option>
             {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-          </select></label>
+          </ClearableSelect></label>
           <label><span>Payment date</span><input type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} /></label>
           <label><span>Remarks</span><input placeholder="Optional remarks" value={remarks} onChange={(event) => setRemarks(event.target.value)} /></label>
           {currentSaleType === "dispatch_sale" && selectedDispatch ? <p className="dispatch-linked-summary">Dispatch {selectedDispatch.dispatch.date} | {selectedDispatch.dateTypeName} | Remaining {selectedDispatchMax ?? selectedDispatch.remainingCartons}</p> : null}
@@ -2047,22 +2051,73 @@ function SalesModule() {
         <Summary label="Available dispatch items" value={String(filteredAvailability.length)} />
         <Summary label="Unsold cartons" value={String(filteredAvailability.reduce((sum, item) => sum + item.remainingCartons, 0))} />
       </div>
-      <RecordTable
-        empty="No sales recorded yet."
-        rows={sales.map((item) => [
-          item.date,
-          `${saleTypeLabel(item)}${item.invoiceNumber ? ` | ${item.invoiceNumber}` : ""}`,
-          `${item.buyerName ?? "-"} | ${saleProduceLabel(item)}`,
-          `${item.quantity} x ${money(item.unitPrice)}`,
-          money(item.amount),
-        ])}
-        actions={sales.map((item) => <>
-          <button key={`${item.id}-view`} type="button" onClick={() => setSelectedSale(item)}>View</button>
-          <button key={`${item.id}-edit`} type="button" onClick={() => editSale(item)}>Edit</button>
-          <button key={`${item.id}-delete`} type="button" onClick={() => void removeSale(item)}>Delete</button>
-        </>)}
-      />
-      {selectedSale && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedSale(null)}><section className="worker-dialog" role="dialog" aria-modal="true" aria-label="Sale details" onClick={(event) => event.stopPropagation()}><header className="worker-dialog__header"><h2>Sale Details</h2><button type="button" onClick={() => setSelectedSale(null)}><X size={18} /></button></header><div className="worker-dialog__body"><dl className="worker-stats"><div><dt>Sale type</dt><dd>{saleTypeLabel(selectedSale)}</dd></div><div><dt>Date</dt><dd>{selectedSale.date}</dd></div><div><dt>Invoice</dt><dd>{selectedSale.invoiceNumber ?? "-"}</dd></div><div><dt>Dispatch date</dt><dd>{selectedSale.dispatchDate ?? "-"}</dd></div><div><dt>Delivery date</dt><dd>{selectedSale.deliveryDate ?? "-"}</dd></div><div><dt>Payment date</dt><dd>{selectedSale.paymentDate ?? "-"}</dd></div><div><dt>Buyer</dt><dd>{selectedSale.buyerName ?? "-"}</dd></div><div><dt>Plot</dt><dd>{selectedSale.plotName ?? "-"}</dd></div><div><dt>Produce</dt><dd>{saleProduceLabel(selectedSale)}</dd></div><div><dt>Vehicle</dt><dd>{selectedSale.vehicleNumber ?? "-"}</dd></div><div><dt>Quantity</dt><dd>{selectedSale.quantity}</dd></div><div><dt>Rate</dt><dd>{money(selectedSale.unitPrice)}</dd></div><div><dt>Amount</dt><dd>{money(selectedSale.amount)}</dd></div><div><dt>Payment account</dt><dd>{accounts.find((account) => account.id === selectedSale.accountId)?.name ?? "-"}</dd></div><div><dt>Remarks</dt><dd>{selectedSale.remarks ?? "-"}</dd></div></dl></div><footer className="worker-dialog__footer"><button type="button" onClick={() => setSelectedSale(null)}>Close</button><button type="button" onClick={() => editSale(selectedSale)}>Edit</button><button type="button" onClick={() => void removeSale(selectedSale)}>Delete</button></footer></section></div>}
+      <section className="record-panel sales-records-panel">
+        <div className="sales-records-panel__header">
+          <h2>Recent records</h2>
+          <span>{sales.length} sale{sales.length === 1 ? "" : "s"}</span>
+        </div>
+        {!sales.length ? <Empty>No sales recorded yet.<br />Record a dispatch sale or direct farm sale to start tracking revenue.</Empty> : <div className="sales-record-list">
+          {sales.map((item) => {
+            const paymentStatus = item.paymentStatus ?? "paid";
+            return <article className="sales-record-card" key={item.id}>
+              <div className="sales-record-card__date">
+                <strong>{shortDate(item.date)}</strong>
+                <span className={`sales-type-badge sales-type-badge--${resolveSaleType(item)}`}>{saleTypeLabel(item)}</span>
+              </div>
+              <div className="sales-record-card__body">
+                <div className="sales-record-card__identity">
+                  <strong>{item.buyerName?.trim() || "Unassigned buyer"}</strong>
+                  <span>{saleProduceLabel(item)}</span>
+                  <small>
+                    {item.dispatchDate ? `Dispatch ${item.dispatchDate}` : "Direct farm sale"}
+                    {item.invoiceNumber ? ` • ${item.invoiceNumber}` : ""}
+                  </small>
+                </div>
+                <div className="sales-record-card__metrics">
+                  <span>{item.quantity} × {money(item.unitPrice)}</span>
+                  <strong>{money(item.amount)}</strong>
+                  <small className={`status-badge status-badge--${paymentStatus === "paid" ? "approved" : paymentStatus === "partial" ? "pending" : "rejected"}`}>
+                    {paymentStatus === "paid" ? "Paid" : paymentStatus === "partial" ? "Partial" : "Unpaid"}
+                  </small>
+                </div>
+              </div>
+              <div className="sales-record-card__actions">
+                <button className="sales-action-button sales-action-button--neutral" type="button" aria-label={`View sale ${item.invoiceNumber ?? item.date}`} onClick={() => setSelectedSale(item)}>
+                  <Eye size={15} />
+                  <span>View</span>
+                </button>
+                <button className="sales-action-button sales-action-button--edit" type="button" aria-label={`Edit sale ${item.invoiceNumber ?? item.date}`} onClick={() => editSale(item)}>
+                  <Pencil size={15} />
+                  <span>Edit</span>
+                </button>
+                <button className="sales-action-button sales-action-button--danger" type="button" aria-label={`Delete sale ${item.invoiceNumber ?? item.date}`} onClick={() => setSalePendingDelete(item)}>
+                  <Trash2 size={15} />
+                  <span>Delete</span>
+                </button>
+              </div>
+            </article>;
+          })}
+        </div>}
+      </section>
+      {selectedSale && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedSale(null)}><section className="worker-dialog" role="dialog" aria-modal="true" aria-label="Sale details" onClick={(event) => event.stopPropagation()}><header className="worker-dialog__header"><h2>Sale Details</h2><button type="button" onClick={() => setSelectedSale(null)}><X size={18} /></button></header><div className="worker-dialog__body"><dl className="worker-stats"><div><dt>Sale type</dt><dd>{saleTypeLabel(selectedSale)}</dd></div><div><dt>Date</dt><dd>{selectedSale.date}</dd></div><div><dt>Invoice</dt><dd>{selectedSale.invoiceNumber ?? "-"}</dd></div><div><dt>Dispatch date</dt><dd>{selectedSale.dispatchDate ?? "-"}</dd></div><div><dt>Delivery date</dt><dd>{selectedSale.deliveryDate ?? "-"}</dd></div><div><dt>Payment date</dt><dd>{selectedSale.paymentDate ?? "-"}</dd></div><div><dt>Buyer</dt><dd>{selectedSale.buyerName ?? "-"}</dd></div><div><dt>Plot</dt><dd>{selectedSale.plotName ?? "-"}</dd></div><div><dt>Produce</dt><dd>{saleProduceLabel(selectedSale)}</dd></div><div><dt>Vehicle</dt><dd>{selectedSale.vehicleNumber ?? "-"}</dd></div><div><dt>Quantity</dt><dd>{selectedSale.quantity}</dd></div><div><dt>Rate</dt><dd>{money(selectedSale.unitPrice)}</dd></div><div><dt>Amount</dt><dd>{money(selectedSale.amount)}</dd></div><div><dt>Payment account</dt><dd>{accounts.find((account) => account.id === selectedSale.accountId)?.name ?? "-"}</dd></div><div><dt>Remarks</dt><dd>{selectedSale.remarks ?? "-"}</dd></div></dl></div><footer className="worker-dialog__footer"><button className="worker-dialog__close" type="button" onClick={() => setSelectedSale(null)}>Close</button><button className="worker-dialog__link" type="button" onClick={() => editSale(selectedSale)}>Edit</button><button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => setSalePendingDelete(selectedSale)}>Delete</button></footer></section></div>}
+      {salePendingDelete && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSalePendingDelete(null)}>
+        <section className="worker-action-dialog sales-delete-dialog" role="dialog" aria-modal="true" aria-label="Delete sale" onClick={(event) => event.stopPropagation()}>
+          <header>
+            <div>
+              <h2>Delete sale?</h2>
+              <p>{salePendingDelete.invoiceNumber ? `Invoice ${salePendingDelete.invoiceNumber}` : `${salePendingDelete.date} • ${saleProduceLabel(salePendingDelete)}`}</p>
+            </div>
+            <button type="button" onClick={() => setSalePendingDelete(null)} aria-label="Close delete sale confirmation"><X size={18} /></button>
+          </header>
+          <div className="worker-action-dialog__body">
+            <p>This will remove or cancel the selected sale record. Continue?</p>
+          </div>
+          <footer>
+            <button type="button" onClick={() => setSalePendingDelete(null)}>Cancel</button>
+            <button className="danger-button" type="button" onClick={() => void removeSale(salePendingDelete)}>Delete</button>
+          </footer>
+        </section>
+      </div>}
     </>
   );
 }
@@ -2217,30 +2272,30 @@ function PartnerLedgerModule() {
       <FormCard title={editing ? t("partnerLedgerPage.editPartnerEntry") : t("partnerLedgerPage.recordPartnerEntry")}>
         <form className="module-form inline-form" onSubmit={(event) => void submit(event)}>
           <input required type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-          <select value={type} onChange={(event) => setType(event.target.value as PartnerEntry["type"])}>
+          <ClearableSelect allowClear={false} value={type} onChange={(value) => setType(value as PartnerEntry["type"])}>
             <option value="contribution">{t("partnerLedgerPage.capitalInjected")}</option>
             <option value="withdrawal">{t("partnerLedgerPage.moneyReturned")}</option>
             <option value="settlement">{t("partnerLedgerPage.partnerSettlement")}</option>
-          </select>
+          </ClearableSelect>
           {type === "settlement" ? <>
-            <select required value={fromAccountId} onChange={(event) => setFromAccountId(event.target.value)}><option value="">{t("partnerLedgerPage.fromPartnerAccount")}</option>{partnerAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select>
-            <select required value={toAccountId} onChange={(event) => setToAccountId(event.target.value)}><option value="">{t("partnerLedgerPage.toPartnerAccount")}</option>{partnerAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select>
+            <ClearableSelect required value={fromAccountId} onChange={setFromAccountId}><option value="">{t("partnerLedgerPage.fromPartnerAccount")}</option>{partnerAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</ClearableSelect>
+            <ClearableSelect required value={toAccountId} onChange={setToAccountId}><option value="">{t("partnerLedgerPage.toPartnerAccount")}</option>{partnerAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</ClearableSelect>
           </> : <>
-            <select required value={partnerAccountId} onChange={(event) => {
-              setPartnerAccountId(event.target.value);
-              setPartnerName(partnerAccounts.find((account) => account.id === event.target.value)?.name ?? "");
+            <ClearableSelect required value={partnerAccountId} onChange={(value) => {
+              setPartnerAccountId(value);
+              setPartnerName(partnerAccounts.find((account) => account.id === value)?.name ?? "");
             }}>
               <option value="">{t("partnerLedgerPage.partnerAccount")}</option>
               {partnerAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-            </select>
+            </ClearableSelect>
             <input required placeholder={t("partnerLedgerPage.partnerName")} value={partnerName} onChange={(event) => setPartnerName(event.target.value)} />
           </>}
           <input required type="number" min="0.01" step="0.01" placeholder={t("partnerLedgerPage.amount")} value={amount} onChange={(event) => setAmount(event.target.value)} />
           <input placeholder={t("partnerLedgerPage.notes")} value={notes} onChange={(event) => setNotes(event.target.value)} />
-          {type !== "settlement" && <select required value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+          {type !== "settlement" && <ClearableSelect required value={accountId} onChange={setAccountId}>
             <option value="">{t("partnerLedgerPage.selectCashBankAccount")}</option>
             {cashBankAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-          </select>}
+          </ClearableSelect>}
           <button className="partner-ledger-submit" disabled={saving} type="submit">{saving ? t("partnerLedgerPage.saving") : editing ? t("partnerLedgerPage.updateEntry") : t("partnerLedgerPage.saveEntry")}</button>
           {editing && <button className="secondary-button" disabled={saving} type="button" onClick={resetForm}>{t("partnerLedgerPage.cancelEdit")}</button>}
         </form>
@@ -2839,7 +2894,7 @@ function AccountsModule() {
             </div>}
             <div className="account-ledger-filters">
               <SearchInput placeholder={t("accountsPage.ledgerSearchPlaceholder")} value={ledgerSearch} onChange={setLedgerSearch} />
-              <select value={ledgerType} onChange={(event) => setLedgerType(event.target.value as typeof ledgerType)}>
+              <ClearableSelect value={ledgerType} clearValue="all" onChange={(value) => setLedgerType(value as typeof ledgerType)}>
                 <option value="all">{t("accountsPage.allTypes")}</option>
                 {!isSelectedPartner && <option value="sale">{t("accountsPage.saleCredit")}</option>}
                 <option value="voucher">{t("accountsPage.voucherExpense")}</option>
@@ -2849,7 +2904,7 @@ function AccountsModule() {
                 <option value="contribution">{t("accountsPage.contribution")}</option>
                 <option value="withdrawal">{t("accountsPage.withdrawal")}</option>
                 {isSelectedPartner && <option value="adjustment">{t("accountsPage.adjustment")}</option>}
-              </select>
+              </ClearableSelect>
               <input aria-label={t("accountsPage.ledgerFromDate")} type="date" value={ledgerFrom} onChange={(event) => setLedgerFrom(event.target.value)} />
               <input aria-label={t("accountsPage.ledgerToDate")} type="date" value={ledgerTo} onChange={(event) => setLedgerTo(event.target.value)} />
               <input aria-label={t("accountsPage.minimumAmount")} inputMode="decimal" placeholder={t("accountsPage.minimumAmount")} value={ledgerMinAmount} onChange={(event) => setLedgerMinAmount(event.target.value)} />

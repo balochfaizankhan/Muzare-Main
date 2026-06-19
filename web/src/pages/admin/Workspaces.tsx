@@ -185,7 +185,7 @@ export function Workspaces({ defaultStatusFilter = "all" }: { defaultStatusFilte
                     <strong>{member.displayName ?? member.email}</strong>
                     <span>{member.email} • {member.role}</span>
                   </div>
-                  <small>{member.active ? "Active member" : "Inactive member"}</small>
+                  <small>{member.hasWorkspaceAccess ? "Active member" : (member.userStatus === "suspended" ? "Suspended user" : "Inactive member")}</small>
                 </article>)}
               </div>}
             </section>

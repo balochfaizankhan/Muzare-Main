@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, X } from "lucide-react";
+import { CalendarDays, ChevronDown, ChevronRight, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { SearchInput } from "../../components/SearchInput";
+import { ClearableSelect } from "../../components/ClearableSelect";
 import { SubpageHeader } from "../../components/SubpageHeader";
 import { defaultTransactionGroupExpansion, groupAccountTransactions, type AccountTransactionGroupKey } from "../../lib/accountTransactionGroups";
 import { calculateAccountBalance } from "../../lib/accounting";
@@ -103,6 +104,37 @@ const salePaymentsReceived = (sale: Sale) => {
   return 0;
 };
 const saleOutstanding = (sale: Sale) => Math.max(sale.amount - salePaymentsReceived(sale), 0);
+
+const reportDateFormatter = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+});
+
+function formatReportDateValue(value: string) {
+  if (!value) return "";
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return reportDateFormatter.format(date);
+}
+
+function todayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function startOfWeekKey() {
+  const date = new Date();
+  const day = date.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  date.setDate(date.getDate() + diff);
+  return date.toISOString().slice(0, 10);
+}
+
+function monthStartKey() {
+  const date = new Date();
+  date.setDate(1);
+  return date.toISOString().slice(0, 10);
+}
 
 type SalesReportRecord = {
   sale: Sale;
@@ -206,6 +238,29 @@ function ReportTable({
 
 function Kpis({ values }: { values: Array<[string, ReactNode]> }) {
   return <div className="reports-kpis">{values.map(([label, value]) => <article key={label}><span>{label}</span><strong>{value}</strong></article>)}</div>;
+}
+
+function ReportDateField({
+  label,
+  placeholder,
+  value,
+  onChange,
+}: {
+  label: string;
+  placeholder: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="reports-date-field">
+      <span className="sr-only">{label}</span>
+      <CalendarDays size={16} aria-hidden="true" />
+      <span className={`reports-date-field__value${value ? " is-filled" : ""}`}>
+        {value ? formatReportDateValue(value) : placeholder}
+      </span>
+      <input aria-label={label} type="date" value={value} onChange={(event) => onChange(event.target.value)} />
+    </label>
+  );
 }
 
 function ReportShell({
@@ -376,6 +431,22 @@ export function Reports() {
     setSaleTypeFilter("all");
     setSalesDateType("saleDate");
     setDispatchDateType("dispatchDate");
+  };
+
+  const applyTodayRange = () => {
+    const value = todayKey();
+    setFrom(value);
+    setTo(value);
+  };
+
+  const applyWeekRange = () => {
+    setFrom(startOfWeekKey());
+    setTo(todayKey());
+  };
+
+  const applyMonthRange = () => {
+    setFrom(monthStartKey());
+    setTo(todayKey());
   };
 
   const filtered = Boolean(search || from || to || accountId || groupFilter || category || status || amountMin || amountMax || buyerFilter || productFilter || vehicleFilter || paymentStatusFilter || dispatchStatusFilter);
@@ -872,69 +943,87 @@ export function Reports() {
                   : t("reportsPage.searchPlaceholder")
             }
           />
-          {(report === "sales" || report === "dispatch") && <select aria-label={t("reportsPage.dateType")} value={report === "sales" ? salesDateType : dispatchDateType} onChange={(event) => report === "sales" ? setSalesDateType(event.target.value as SalesDateType) : setDispatchDateType(event.target.value as DispatchDateType)}>
+          <div className="reports-date-row">
+            <ReportDateField
+              label={t("reportsPage.fromDate")}
+              placeholder={t("reportsPage.fromDate")}
+              value={from}
+              onChange={setFrom}
+            />
+            <ReportDateField
+              label={t("reportsPage.toDate")}
+              placeholder={t("reportsPage.toDate")}
+              value={to}
+              onChange={setTo}
+            />
+          </div>
+          <div className="reports-range-actions" aria-label="Quick date ranges">
+            <button type="button" onClick={applyTodayRange}>{t("reportsPage.quickToday")}</button>
+            <button type="button" onClick={applyWeekRange}>{t("reportsPage.quickThisWeek")}</button>
+            <button type="button" onClick={applyMonthRange}>{t("reportsPage.quickThisMonth")}</button>
+            <button type="button" onClick={clearFilters}>{t("reportsPage.quickClear")}</button>
+          </div>
+          {(report === "sales" || report === "dispatch") && <ClearableSelect allowClear={false} aria-label={t("reportsPage.dateType")} value={report === "sales" ? salesDateType : dispatchDateType} onChange={(value) => report === "sales" ? setSalesDateType(value as SalesDateType) : setDispatchDateType(value as DispatchDateType)}>
             {report === "sales"
               ? (["saleDate", "dispatchDate", "deliveryDate", "paymentDate", "createdDate"] as SalesDateType[]).map((item) => <option key={item} value={item}>{t(`reportsPage.salesDateTypes.${item}`)}</option>)
               : (["dispatchDate", "deliveryDate", "saleDate", "createdDate"] as DispatchDateType[]).map((item) => <option key={item} value={item}>{t(`reportsPage.dispatchDateTypes.${item}`)}</option>)}
-          </select>}
-          <input aria-label={t("reportsPage.fromDate")} type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
-          <input aria-label={t("reportsPage.toDate")} type="date" value={to} onChange={(event) => setTo(event.target.value)} />
+          </ClearableSelect>}
 
           {report === "attendance" && <>
-            <select aria-label={t("reportsPage.group")} value={groupFilter} onChange={(event) => setGroupFilter(event.target.value)}>
+            <ClearableSelect aria-label={t("reportsPage.group")} value={groupFilter} onChange={setGroupFilter}>
               <option value="">{t("reportsPage.allGroups")}</option>
               {labourGroups.map((group) => <option key={group} value={group}>{group}</option>)}
               <option value={ungroupedValue}>{t("reportsPage.ungrouped")}</option>
-            </select>
-            {views.attendance === "summary" && <select aria-label={t("reportsPage.status")} value={status} onChange={(event) => setStatus(event.target.value)}>
+            </ClearableSelect>
+            {views.attendance === "summary" && <ClearableSelect aria-label={t("reportsPage.status")} value={status} onChange={setStatus}>
               <option value="">{t("reportsPage.allStatuses")}</option>
               <option value="present">{t("reportsPage.present")}</option>
               <option value="half_day">{t("reportsPage.halfDay")}</option>
               <option value="absent">{t("reportsPage.absent")}</option>
-            </select>}
+            </ClearableSelect>}
           </>}
 
           {report === "advances" && <>
-            <select aria-label={t("reportsPage.group")} value={groupFilter} onChange={(event) => setGroupFilter(event.target.value)}>
+            <ClearableSelect aria-label={t("reportsPage.group")} value={groupFilter} onChange={setGroupFilter}>
               <option value="">{t("reportsPage.allGroups")}</option>
               {labourGroups.map((group) => <option key={group} value={group}>{group}</option>)}
               <option value={ungroupedValue}>{t("reportsPage.ungrouped")}</option>
-            </select>
-            <select aria-label={t("reportsPage.account")} value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+            </ClearableSelect>
+            <ClearableSelect aria-label={t("reportsPage.account")} value={accountId} onChange={setAccountId}>
               <option value="">{t("reportsPage.allAccounts")}</option>
               {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-            </select>
-            {views.advances === "log" && <select aria-label="Advance sort" value={advanceSort} onChange={(event) => setAdvanceSort(event.target.value as SortOrder)}>
+            </ClearableSelect>
+            {views.advances === "log" && <ClearableSelect clearValue="desc" aria-label="Advance sort" value={advanceSort} onChange={(value) => setAdvanceSort(value as SortOrder)}>
               <option value="desc">{t("advancesPage.newestFirst")}</option>
               <option value="asc">{t("advancesPage.oldestFirst")}</option>
-            </select>}
+            </ClearableSelect>}
             <input aria-label={t("reportsPage.minimumAmount")} inputMode="decimal" placeholder={t("reportsPage.minimumAmount")} value={amountMin} onChange={(event) => setAmountMin(event.target.value)} />
             <input aria-label={t("reportsPage.maximumAmount")} inputMode="decimal" placeholder={t("reportsPage.maximumAmount")} value={amountMax} onChange={(event) => setAmountMax(event.target.value)} />
           </>}
 
           {report === "expenditures" && <>
-            <select aria-label={t("reportsPage.account")} value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+            <ClearableSelect aria-label={t("reportsPage.account")} value={accountId} onChange={setAccountId}>
               <option value="">{t("reportsPage.allAccounts")}</option>
               {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-            </select>
-            <select aria-label={t("reportsPage.category")} value={category} onChange={(event) => setCategory(event.target.value)}>
+            </ClearableSelect>
+            <ClearableSelect aria-label={t("reportsPage.category")} value={category} onChange={setCategory}>
               <option value="">{t("reportsPage.allCategories")}</option>
               {voucherCategories.map((item) => <option key={item}>{item}</option>)}
-            </select>
-            {views.expenditures === "log" && <select aria-label="Expense sort" value={expenseSort} onChange={(event) => setExpenseSort(event.target.value as SortOrder)}>
+            </ClearableSelect>
+            {views.expenditures === "log" && <ClearableSelect clearValue="desc" aria-label="Expense sort" value={expenseSort} onChange={(value) => setExpenseSort(value as SortOrder)}>
               <option value="desc">{t("advancesPage.newestFirst")}</option>
               <option value="asc">{t("advancesPage.oldestFirst")}</option>
-            </select>}
+            </ClearableSelect>}
             <input aria-label={t("reportsPage.minimumAmount")} inputMode="decimal" placeholder={t("reportsPage.minimumAmount")} value={amountMin} onChange={(event) => setAmountMin(event.target.value)} />
             <input aria-label={t("reportsPage.maximumAmount")} inputMode="decimal" placeholder={t("reportsPage.maximumAmount")} value={amountMax} onChange={(event) => setAmountMax(event.target.value)} />
           </>}
 
           {report === "sales" && <>
-            <select aria-label="Sale type" value={saleTypeFilter} onChange={(event) => setSaleTypeFilter(event.target.value as SalesTypeFilter)}>
+            <ClearableSelect aria-label="Sale type" clearValue="all" value={saleTypeFilter} onChange={(value) => setSaleTypeFilter(value as SalesTypeFilter)}>
               <option value="all">All sale types</option>
               <option value="dispatch_sale">From Dispatch</option>
               <option value="farm_direct_sale">Direct Farm Sale</option>
-            </select>
+            </ClearableSelect>
           </>}
 
           {report === "sales" && <>
@@ -942,40 +1031,40 @@ export function Reports() {
             <input aria-label={t("reportsPage.productVariety")} placeholder={t("reportsPage.productVariety")} value={productFilter} onChange={(event) => setProductFilter(event.target.value)} />
             <input aria-label={t("reportsPage.minimumAmount")} inputMode="decimal" placeholder={t("reportsPage.minimumAmount")} value={amountMin} onChange={(event) => setAmountMin(event.target.value)} />
             <input aria-label={t("reportsPage.maximumAmount")} inputMode="decimal" placeholder={t("reportsPage.maximumAmount")} value={amountMax} onChange={(event) => setAmountMax(event.target.value)} />
-            <select aria-label={t("reportsPage.paymentStatus")} value={paymentStatusFilter} onChange={(event) => setPaymentStatusFilter(event.target.value)}>
+            <ClearableSelect aria-label={t("reportsPage.paymentStatus")} value={paymentStatusFilter} onChange={setPaymentStatusFilter}>
               <option value="">{t("reportsPage.allPaymentStatuses")}</option>
               <option value="paid">{t("reportsPage.paymentStatuses.paid")}</option>
               <option value="partial">{t("reportsPage.paymentStatuses.partial")}</option>
               <option value="unpaid">{t("reportsPage.paymentStatuses.unpaid")}</option>
-            </select>
+            </ClearableSelect>
           </>}
 
           {report === "dispatch" && <>
             <input aria-label={t("reportsPage.productVariety")} placeholder={t("reportsPage.productVariety")} value={productFilter} onChange={(event) => setProductFilter(event.target.value)} />
             <input aria-label={t("reportsPage.vehicle")} placeholder={t("reportsPage.vehicle")} value={vehicleFilter} onChange={(event) => setVehicleFilter(event.target.value)} />
-            <select aria-label={t("reportsPage.status")} value={dispatchStatusFilter} onChange={(event) => setDispatchStatusFilter(event.target.value)}>
+            <ClearableSelect aria-label={t("reportsPage.status")} value={dispatchStatusFilter} onChange={setDispatchStatusFilter}>
               <option value="">{t("reportsPage.allStatuses")}</option>
               <option value="pending">{t("reportsPage.dispatchStatuses.pending")}</option>
               <option value="dispatched">{t("reportsPage.dispatchStatuses.dispatched")}</option>
               <option value="delivered">{t("reportsPage.dispatchStatuses.delivered")}</option>
               <option value="sold">{t("reportsPage.dispatchStatuses.sold")}</option>
-            </select>
+            </ClearableSelect>
           </>}
 
           {report === "partner-position" && <>
-            <select aria-label={t("reportsPage.partner")} value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+            <ClearableSelect aria-label={t("reportsPage.partner")} value={accountId} onChange={setAccountId}>
               <option value="">{t("reportsPage.allAccounts")}</option>
               {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-            </select>
+            </ClearableSelect>
             <input aria-label={t("reportsPage.minimumAmount")} inputMode="decimal" placeholder={t("reportsPage.minimumAmount")} value={amountMin} onChange={(event) => setAmountMin(event.target.value)} />
             <input aria-label={t("reportsPage.maximumAmount")} inputMode="decimal" placeholder={t("reportsPage.maximumAmount")} value={amountMax} onChange={(event) => setAmountMax(event.target.value)} />
           </>}
 
           {report === "account-ledger" && <>
-            <select aria-label={t("reportsPage.account")} value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+            <ClearableSelect aria-label={t("reportsPage.account")} value={accountId} onChange={setAccountId}>
               <option value="">{t("reportsPage.allAccounts")}</option>
               {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-            </select>
+            </ClearableSelect>
             <input aria-label={t("reportsPage.minimumAmount")} inputMode="decimal" placeholder={t("reportsPage.minimumAmount")} value={amountMin} onChange={(event) => setAmountMin(event.target.value)} />
             <input aria-label={t("reportsPage.maximumAmount")} inputMode="decimal" placeholder={t("reportsPage.maximumAmount")} value={amountMax} onChange={(event) => setAmountMax(event.target.value)} />
           </>}

@@ -155,7 +155,9 @@ export type AdminRecentActivity = {
   id: string; action: string; entityType: string; entityId: string | null; workspaceName: string | null; actorName: string | null; createdAt: string;
 };
 export type AdminWorkspaceMember = {
-  id: string; userId: string; role: WorkspaceRole; active: boolean; email: string; displayName: string | null;
+  id: string; userId: string; role: WorkspaceRole; active: boolean; userActive: boolean;
+  userStatus: "pending" | "approved" | "rejected" | "suspended"; hasWorkspaceAccess: boolean;
+  email: string; displayName: string | null;
 };
 export type AdminWorkspaceHistory = {
   id: string; action: string; entityType: string; entityId: string | null; createdAt: string; actorName: string | null; actorEmail: string | null; details: unknown;
