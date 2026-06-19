@@ -117,7 +117,7 @@ export function DashboardPage() {
         id: item.id,
         path: "/workspace/sales",
         title: t("dashboard.saleRecorded"),
-        detail: item.buyerName,
+        detail: item.buyerName ?? "-",
         value: money(item.amount),
         createdAt: item.createdAt,
       })),

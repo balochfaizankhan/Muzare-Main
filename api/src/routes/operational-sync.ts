@@ -87,7 +87,8 @@ const partnerEntryPayloadSchema = z.discriminatedUnion("type", [
 const financialPayloadSchemas = {
   sale: z.object({
     date: dateSchema,
-    buyerName: z.string().trim().min(1),
+    buyerName: z.string().trim().optional(),
+    invoiceNumber: z.string().trim().optional(),
     produceType: z.string().trim().min(1),
     quantity: positiveAmountSchema,
     unitPrice: z.coerce.number().nonnegative(),
@@ -96,10 +97,17 @@ const financialPayloadSchemas = {
     dispatchId: z.string().min(1).optional(),
     dispatchItemId: z.string().min(1).optional(),
     dispatchDate: dateSchema.optional(),
+    deliveryDate: dateSchema.optional(),
+    paymentDate: dateSchema.optional(),
+    paymentStatus: z.enum(["paid", "partial", "unpaid"]).optional(),
+    paymentReceived: z.coerce.number().nonnegative().optional(),
     vehicleId: z.string().min(1).optional(),
     vehicleNumber: z.string().trim().optional(),
     dateTypeId: z.string().min(1).optional(),
     dateTypeName: z.string().trim().optional(),
+    plotName: z.string().trim().optional(),
+    remarks: z.string().trim().optional(),
+    unit: z.string().trim().optional(),
   }).superRefine((record, context) => {
     if (Boolean(record.dispatchId) !== Boolean(record.dispatchItemId)) {
       context.addIssue({ code: "custom", message: "Dispatch sales must include both dispatchId and dispatchItemId.", path: ["dispatchId"] });

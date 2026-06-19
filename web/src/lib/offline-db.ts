@@ -96,11 +96,17 @@ export type Dispatch = LocalRecord & {
   vehicleId?: string;
   destination?: string;
   notes?: string;
+  remarks?: string;
+  dispatchNumber?: string;
+  deliveryDate?: string;
+  status?: "pending" | "dispatched" | "delivered" | "sold";
+  plotName?: string;
   items?: DispatchItem[];
   vehicleNumber?: string;
   driverName?: string;
   produceType?: string;
   cartons?: number;
+  unit?: string;
 };
 
 export type DispatchItem = {
@@ -126,19 +132,27 @@ export type DateType = LocalRecord & {
 
 export type Sale = LocalRecord & {
   date: string;
-  buyerName: string;
+  buyerName?: string;
+  invoiceNumber?: string;
   produceType: string;
   quantity: number;
   unitPrice: number;
   amount: number;
-  accountId: string;
+  accountId?: string;
   dispatchId?: string;
   dispatchItemId?: string;
   dispatchDate?: string;
+  deliveryDate?: string;
+  paymentDate?: string;
+  paymentStatus?: "paid" | "partial" | "unpaid";
+  paymentReceived?: number;
   vehicleId?: string;
   vehicleNumber?: string;
   dateTypeId?: string;
   dateTypeName?: string;
+  plotName?: string;
+  remarks?: string;
+  unit?: string;
 };
 
 export type PartnerEntry = LocalRecord & {

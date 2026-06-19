@@ -1544,7 +1544,11 @@ function DispatchModule() {
   const [sales] = useData(loadSales);
   const [date, setDate] = useState(today());
   const [vehicleId, setVehicleId] = useState("");
+  const [dispatchNumber, setDispatchNumber] = useState("");
+  const [plotName, setPlotName] = useState("");
   const [destination, setDestination] = useState("");
+  const [deliveryDate, setDeliveryDate] = useState("");
+  const [dispatchStatus, setDispatchStatus] = useState<NonNullable<Dispatch["status"]>>("dispatched");
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<DispatchItemDraft[]>([newDispatchItem()]);
   const [editing, setEditing] = useState<Dispatch | null>(null);
@@ -1567,10 +1571,10 @@ function DispatchModule() {
   }, new Map<string, number>()), [sales]);
 
   const reset = () => {
-    setEditing(null); setDate(today()); setVehicleId(""); setDestination(""); setNotes(""); setItems([newDispatchItem()]); setError("");
+    setEditing(null); setDate(today()); setVehicleId(""); setDispatchNumber(""); setPlotName(""); setDestination(""); setDeliveryDate(""); setDispatchStatus("dispatched"); setNotes(""); setItems([newDispatchItem()]); setError("");
   };
   const edit = (record: Dispatch) => {
-    setEditing(record); setDate(record.date); setVehicleId(record.vehicleId ?? ""); setDestination(record.destination ?? ""); setNotes(record.notes ?? "");
+    setEditing(record); setDate(record.date); setVehicleId(record.vehicleId ?? ""); setDispatchNumber(record.dispatchNumber ?? ""); setPlotName(record.plotName ?? ""); setDestination(record.destination ?? ""); setDeliveryDate(record.deliveryDate ?? ""); setDispatchStatus(record.status ?? "dispatched"); setNotes(record.notes ?? "");
     setItems(record.items?.map((item) => ({ ...item, cartons: String(item.cartons) })) ?? [newDispatchItem()]);
     setError("");
   };
@@ -1588,6 +1592,12 @@ function DispatchModule() {
     try {
       const record: Dispatch = {
         ...(editing ?? makeLocalRecord()), date, vehicleId, destination: destination.trim(), notes: notes.trim(),
+        dispatchNumber: dispatchNumber.trim() || undefined,
+        plotName: plotName.trim() || undefined,
+        deliveryDate: deliveryDate || undefined,
+        status: dispatchStatus,
+        unit: "cartons",
+        remarks: notes.trim() || undefined,
         vehicleNumber: selectedVehicle.number, driverName: selectedVehicle.driverName,
         items: validItems.map((item) => ({ ...item, dateTypeName: dateTypeName(item.dateTypeId) })),
       };
@@ -1627,7 +1637,16 @@ function DispatchModule() {
         <form className="module-form dispatch-form" onSubmit={(event) => void submit(event)}>
           <label><span>{t("dispatchPage.dispatchDate")}</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
           <label><span>{t("dispatchPage.vehicle")}</span><select required value={vehicleId} onChange={(event) => setVehicleId(event.target.value)}><option value="">{t("dispatchPage.selectActiveVehicle")}</option>{activeVehicles.map((item) => <option key={item.id} value={item.id}>{item.number}{item.driverName ? ` - ${item.driverName}` : ""}</option>)}</select></label>
+          <label><span>Dispatch number</span><input placeholder={t("dispatchPage.optional")} value={dispatchNumber} onChange={(event) => setDispatchNumber(event.target.value)} /></label>
+          <label><span>Plot</span><input placeholder={t("dispatchPage.optional")} value={plotName} onChange={(event) => setPlotName(event.target.value)} /></label>
           <label><span>{t("dispatchPage.destinationBuyer")}</span><input placeholder={t("dispatchPage.optional")} value={destination} onChange={(event) => setDestination(event.target.value)} /></label>
+          <label><span>Delivery date</span><input type="date" value={deliveryDate} onChange={(event) => setDeliveryDate(event.target.value)} /></label>
+          <label><span>Status</span><select value={dispatchStatus} onChange={(event) => setDispatchStatus(event.target.value as NonNullable<Dispatch["status"]>)}>
+            <option value="pending">Pending</option>
+            <option value="dispatched">Dispatched</option>
+            <option value="delivered">Delivered</option>
+            <option value="sold">Sold</option>
+          </select></label>
           <label><span>{t("dispatchPage.notes")}</span><input placeholder={t("dispatchPage.optional")} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
           <div className="dispatch-items">
             <h3>{t("dispatchPage.dateTypesAndCartons")}</h3>
@@ -1657,11 +1676,11 @@ function DispatchModule() {
         const soldCartons = soldCartonsForDispatch(record);
         const remainingCartons = Math.max(dispatchCartons(record) - soldCartons, 0);
         const linkedSales = linkedSalesByDispatch.get(record.id) ?? 0;
-        return <article key={record.id}><header><div><strong>{record.date}</strong><h3>{record.vehicleNumber ?? vehicleName(record.vehicleId)}</h3>{record.destination && <p>{record.destination}</p>}</div><b>{dispatchCartons(record)} {t("dispatchPage.cartons")}</b></header><div className="dispatch-breakdown">{record.items?.map((item) => {
+        return <article key={record.id}><header><div><strong>{record.dispatchNumber ?? record.date}</strong><h3>{record.vehicleNumber ?? vehicleName(record.vehicleId)}</h3><p>{record.date}{record.plotName ? ` | ${record.plotName}` : ""}{record.destination ? ` | ${record.destination}` : ""}</p></div><b>{dispatchCartons(record)} {t("dispatchPage.cartons")}</b></header><div className="dispatch-breakdown">{record.items?.map((item) => {
           const sold = soldByItem.get(dispatchItemKey(record.id, item.id)) ?? 0;
           const remaining = Math.max(item.cartons - sold, 0);
           return <span key={item.id}>{dateTypeName(item.dateTypeId, item.dateTypeName)}: {item.cartons} | Sold {sold} | Remaining {remaining}</span>;
-        }) ?? <span>{record.produceType}: {record.cartons}</span>}</div><p className="dispatch-linked-summary">Sold {soldCartons} | Remaining {remainingCartons} | Linked sales {linkedSales}</p><footer><button type="button" onClick={() => edit(record)}>{t("dispatchPage.update")}</button>{canManage && <button className="danger-link" type="button" onClick={() => void remove(record)}>{t("dispatchPage.delete")}</button>}</footer></article>;
+        }) ?? <span>{record.produceType}: {record.cartons}</span>}</div><p className="dispatch-linked-summary">Status {record.status ?? "dispatched"} | Sold {soldCartons} | Remaining {remainingCartons} | Linked sales {linkedSales}</p><footer><button type="button" onClick={() => edit(record)}>{t("dispatchPage.update")}</button>{canManage && <button className="danger-link" type="button" onClick={() => void remove(record)}>{t("dispatchPage.delete")}</button>}</footer></article>;
       })}</div>}</section>
       {showVehicles && <DispatchVehicleManager vehicles={vehicles} dispatches={records} onClose={() => setShowVehicles(false)} onRefresh={refreshVehicles} />}
       {showDateTypes && <DispatchDateTypeManager dateTypes={dateTypes} dispatches={records} onClose={() => setShowDateTypes(false)} onRefresh={refreshDateTypes} />}
@@ -1812,10 +1831,14 @@ function SalesModule() {
   const [vehicles] = useData(loadVehicles);
   const [dateTypes] = useData(loadDateTypes);
   const [date, setDate] = useState(today());
+  const [invoiceNumber, setInvoiceNumber] = useState("");
   const [buyerName, setBuyerName] = useState("");
+  const [deliveryDate, setDeliveryDate] = useState("");
+  const [paymentDate, setPaymentDate] = useState(today());
   const [quantity, setQuantity] = useState("");
   const [unitPrice, setUnitPrice] = useState("");
   const [accountId, setAccountId] = useState("");
+  const [remarks, setRemarks] = useState("");
   const [dispatchSearch, setDispatchSearch] = useState("");
   const [selectedDispatchKey, setSelectedDispatchKey] = useState("");
   const [error, setError] = useState("");
@@ -1843,7 +1866,8 @@ function SalesModule() {
     const record: Sale = {
       ...makeLocalRecord(),
       date,
-      buyerName: buyerName.trim(),
+      invoiceNumber: invoiceNumber.trim() || undefined,
+      buyerName: buyerName.trim() || undefined,
       produceType: selectedDispatch.dateTypeName,
       quantity: quantityValue,
       unitPrice: unitPriceValue,
@@ -1852,13 +1876,20 @@ function SalesModule() {
       dispatchId: selectedDispatch.dispatch.id,
       dispatchItemId: selectedDispatch.itemId,
       dispatchDate: selectedDispatch.dispatch.date,
+      deliveryDate: deliveryDate || undefined,
       vehicleId: selectedDispatch.dispatch.vehicleId,
       vehicleNumber: selectedDispatch.vehicleLabel,
       dateTypeId: selectedDispatch.dateTypeId,
       dateTypeName: selectedDispatch.dateTypeName,
+      paymentStatus: "paid",
+      paymentDate,
+      paymentReceived: quantityValue * unitPriceValue,
+      plotName: selectedDispatch.dispatch.plotName,
+      unit: "cartons",
+      remarks: remarks.trim() || undefined,
     };
     await persistOperationalRecord("sale", record);
-    setBuyerName(""); setQuantity(""); setUnitPrice(""); setDispatchSearch(""); setSelectedDispatchKey(""); setError("");
+    setInvoiceNumber(""); setBuyerName(""); setDeliveryDate(""); setPaymentDate(today()); setQuantity(""); setUnitPrice(""); setRemarks(""); setDispatchSearch(""); setSelectedDispatchKey(""); setError("");
     await refresh();
     window.dispatchEvent(new CustomEvent("muzare-toast", { detail: "Sale recorded successfully." }));
   };
@@ -1868,7 +1899,9 @@ function SalesModule() {
       <FormCard title="Record sale">
         <form className="module-form sales-form" onSubmit={(event) => void submit(event)}>
           <label><span>Sale date</span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
-          <label><span>Buyer / customer</span><input required placeholder="Buyer name" value={buyerName} onChange={(event) => setBuyerName(event.target.value)} /></label>
+          <label><span>Invoice number</span><input placeholder="Optional invoice no." value={invoiceNumber} onChange={(event) => setInvoiceNumber(event.target.value)} /></label>
+          <label><span>Buyer / customer</span><input placeholder="Optional buyer name" value={buyerName} onChange={(event) => setBuyerName(event.target.value)} /></label>
+          <label><span>Delivery date</span><input type="date" value={deliveryDate} onChange={(event) => setDeliveryDate(event.target.value)} /></label>
           <div className="sales-dispatch-picker">
             <div className="sales-dispatch-picker__header">
               <label><span>Dispatch record</span></label>
@@ -1903,6 +1936,8 @@ function SalesModule() {
           <label><span>Payment account</span><select value={accountId || accounts[0]?.id || ""} onChange={(event) => setAccountId(event.target.value)}>
             {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
           </select></label>
+          <label><span>Payment date</span><input type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} /></label>
+          <label><span>Remarks</span><input placeholder="Optional remarks" value={remarks} onChange={(event) => setRemarks(event.target.value)} /></label>
           {selectedDispatch ? <p className="dispatch-linked-summary">Dispatch {selectedDispatch.dispatch.date} | {selectedDispatch.dateTypeName} | Remaining {selectedDispatch.remainingCartons}</p> : null}
           {error ? <p className="form-error">{error}</p> : null}
           <button type="submit">Save sale</button>
@@ -1917,14 +1952,14 @@ function SalesModule() {
         empty="No sales recorded yet."
         rows={sales.map((item) => [
           item.date,
-          item.buyerName,
+          item.buyerName ?? "-",
           `${saleProduceLabel(item)}${item.dispatchDate ? ` | Dispatch ${item.dispatchDate}` : " | Unlinked sale"}`,
           `${item.quantity} x ${money(item.unitPrice)}`,
           money(item.amount),
         ])}
         actions={sales.map((item) => <button key={item.id} type="button" onClick={() => setSelectedSale(item)}>View</button>)}
       />
-      {selectedSale && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedSale(null)}><section className="worker-dialog" role="dialog" aria-modal="true" aria-label="Sale details" onClick={(event) => event.stopPropagation()}><header className="worker-dialog__header"><h2>Sale Details</h2><button type="button" onClick={() => setSelectedSale(null)}><X size={18} /></button></header><div className="worker-dialog__body"><dl className="worker-stats"><div><dt>Date</dt><dd>{selectedSale.date}</dd></div><div><dt>Dispatch date</dt><dd>{selectedSale.dispatchDate ?? "Unlinked sale"}</dd></div><div><dt>Buyer</dt><dd>{selectedSale.buyerName}</dd></div><div><dt>Produce</dt><dd>{saleProduceLabel(selectedSale)}</dd></div><div><dt>Vehicle</dt><dd>{selectedSale.vehicleNumber ?? "-"}</dd></div><div><dt>Quantity</dt><dd>{selectedSale.quantity}</dd></div><div><dt>Rate</dt><dd>{money(selectedSale.unitPrice)}</dd></div><div><dt>Amount</dt><dd>{money(selectedSale.amount)}</dd></div></dl></div></section></div>}
+      {selectedSale && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedSale(null)}><section className="worker-dialog" role="dialog" aria-modal="true" aria-label="Sale details" onClick={(event) => event.stopPropagation()}><header className="worker-dialog__header"><h2>Sale Details</h2><button type="button" onClick={() => setSelectedSale(null)}><X size={18} /></button></header><div className="worker-dialog__body"><dl className="worker-stats"><div><dt>Date</dt><dd>{selectedSale.date}</dd></div><div><dt>Invoice</dt><dd>{selectedSale.invoiceNumber ?? "-"}</dd></div><div><dt>Dispatch date</dt><dd>{selectedSale.dispatchDate ?? "Unlinked sale"}</dd></div><div><dt>Delivery date</dt><dd>{selectedSale.deliveryDate ?? "-"}</dd></div><div><dt>Payment date</dt><dd>{selectedSale.paymentDate ?? "-"}</dd></div><div><dt>Buyer</dt><dd>{selectedSale.buyerName ?? "-"}</dd></div><div><dt>Plot</dt><dd>{selectedSale.plotName ?? "-"}</dd></div><div><dt>Produce</dt><dd>{saleProduceLabel(selectedSale)}</dd></div><div><dt>Vehicle</dt><dd>{selectedSale.vehicleNumber ?? "-"}</dd></div><div><dt>Quantity</dt><dd>{selectedSale.quantity}</dd></div><div><dt>Rate</dt><dd>{money(selectedSale.unitPrice)}</dd></div><div><dt>Amount</dt><dd>{money(selectedSale.amount)}</dd></div><div><dt>Remarks</dt><dd>{selectedSale.remarks ?? "-"}</dd></div></dl></div></section></div>}
     </>
   );
 }
