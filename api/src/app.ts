@@ -7,6 +7,7 @@ import { healthRoutes } from "./routes/health.js";
 import { sessionRoutes } from "./routes/session.js";
 import { workspaceApprovalRoutes } from "./routes/workspace-approvals.js";
 import { adminDashboardRoutes } from "./routes/admin-dashboard.js";
+import { adminUserRoutes } from "./routes/admin-users.js";
 import { adminWorkspaceRoutes } from "./routes/admin-workspaces.js";
 import { operationalSyncRoutes } from "./routes/operational-sync.js";
 import { workspaceFarmRoutes } from "./routes/workspace-farms.js";
@@ -52,6 +53,7 @@ export async function buildApp() {
   await app.register(bootstrapRoutes);
   await app.register(workspaceApprovalRoutes);
   await app.register(adminDashboardRoutes);
+  await app.register(adminUserRoutes);
   await app.register(adminWorkspaceRoutes);
   await app.register(operationalSyncRoutes);
   await app.register(workspaceProfileRoutes);

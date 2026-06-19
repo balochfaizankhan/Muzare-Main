@@ -116,11 +116,49 @@ export type SeasonInput = {
 
 export type AdminDashboardData = {
   totalWorkspaces: number; activeWorkspaces: number; suspendedWorkspaces: number; pendingWorkspaceRequests: number;
+  approvedWorkspaces: number; rejectedWorkspaces: number;
   totalUsers: number; totalActiveUsers: number; subscriptionRevenue: number; expiringSubscriptions: number; systemHealth: string;
+  recentWorkspaces: AdminOverviewWorkspace[]; pendingWorkspaces: AdminOverviewWorkspace[]; suspendedWorkspacesList: AdminOverviewWorkspace[];
+  recentActivity: AdminRecentActivity[];
 };
 export type AdminWorkspace = {
   id: string; name: string; slug: string; contactEmail: string; contactPhone: string | null;
-  status: "pending" | "approved" | "rejected" | "suspended"; createdAt: string;
+  ownerEmail: string | null; ownerName: string | null;
+  status: "pending" | "approved" | "rejected" | "suspended"; createdAt: string; approvedAt: string | null; suspendedAt: string | null;
+  usersCount: number; farmsCount: number;
+};
+export type AdminOverviewWorkspace = {
+  id: string; name: string; contactEmail: string; status: "pending" | "approved" | "rejected" | "suspended";
+  createdAt: string; approvedAt: string | null; updatedAt: string | null;
+};
+export type AdminRecentActivity = {
+  id: string; action: string; entityType: string; entityId: string | null; workspaceName: string | null; actorName: string | null; createdAt: string;
+};
+export type AdminWorkspaceMember = {
+  id: string; userId: string; role: WorkspaceRole; active: boolean; email: string; displayName: string | null;
+};
+export type AdminWorkspaceHistory = {
+  id: string; action: string; entityType: string; entityId: string | null; createdAt: string; actorName: string | null; actorEmail: string | null; details: unknown;
+};
+export type AdminWorkspaceDetail = {
+  id: string; name: string; slug: string; contactEmail: string; contactPhone: string | null;
+  status: "pending" | "approved" | "rejected" | "suspended"; createdAt: string; approvedAt: string | null; updatedAt: string;
+  members: AdminWorkspaceMember[]; history: AdminWorkspaceHistory[];
+};
+export type AdminUserSummary = {
+  id: string; email: string; displayName: string | null; phone: string | null; platformRole: PlatformRole | null;
+  status: "pending" | "approved" | "rejected" | "suspended"; active: boolean; createdAt: string; workspaceCount: number; lastLoginAt: string | null;
+};
+export type AdminUserWorkspaceMembership = {
+  id: string; workspaceId: string; workspaceName: string; role: WorkspaceRole; active: boolean; permissions: WorkspaceModulePermissions | null; createdAt: string;
+};
+export type AdminUserDetail = {
+  id: string; email: string; displayName: string | null; phone: string | null; platformRole: PlatformRole | null;
+  status: "pending" | "approved" | "rejected" | "suspended"; active: boolean; approvedAt: string | null; createdAt: string; updatedAt: string;
+  lastLoginAt: string | null; workspaces: AdminUserWorkspaceMembership[];
+};
+export type AdminAuditLog = {
+  id: string; action: string; entityType: string; entityId: string | null; createdAt: string; workspaceName: string | null; actorName: string | null; details: unknown;
 };
 export type OperationalEntity =
   | "labourer"
@@ -373,13 +411,24 @@ export const selectActiveSeason = (token: string, workspaceId: string, farmId: s
 export const archiveFarmSeason = (token: string, workspaceId: string, farmId: string, seasonId: string) =>
   apiRequest<void>(`/v1/workspace/${workspaceId}/farms/${farmId}/seasons/${seasonId}/archive`, { method: "POST" }, token);
 export const fetchAdminDashboard = (token: string) => apiRequest<AdminDashboardData>("/v1/admin/dashboard", {}, token);
+export const fetchAdminOverview = (token: string) => apiRequest<AdminDashboardData>("/v1/admin/overview", {}, token);
 export const fetchAdminWorkspaces = (token: string) => apiRequest<{ workspaces: AdminWorkspace[] }>("/v1/admin/workspaces", {}, token);
+export const fetchAdminWorkspace = (token: string, workspaceId: string) =>
+  apiRequest<{ workspace: AdminWorkspaceDetail | null }>(`/v1/admin/workspaces/${workspaceId}`, {}, token);
 export const createAdminWorkspace = (token: string, input: { name: string; contactEmail: string }) =>
   apiRequest<void>("/v1/admin/workspaces", { method: "POST", body: JSON.stringify(input) }, token);
 export const suspendAdminWorkspace = (token: string, workspaceId: string) =>
   apiRequest<void>(`/v1/admin/workspaces/${workspaceId}/suspend`, { method: "POST" }, token);
+export const updateAdminWorkspaceStatus = (token: string, workspaceId: string, input: { status: "pending" | "approved" | "rejected" | "suspended"; note?: string }) =>
+  apiRequest<void>(`/v1/admin/workspaces/${workspaceId}/status`, { method: "PATCH", body: JSON.stringify(input) }, token);
 export const deleteAdminWorkspace = (token: string, workspaceId: string) =>
   apiRequest<void>(`/v1/admin/workspaces/${workspaceId}`, { method: "DELETE" }, token);
+export const fetchAdminUsers = (token: string) => apiRequest<{ users: AdminUserSummary[] }>("/v1/admin/users", {}, token);
+export const fetchAdminUser = (token: string, userId: string) =>
+  apiRequest<{ user: AdminUserDetail | null }>(`/v1/admin/users/${userId}`, {}, token);
+export const updateAdminUserStatus = (token: string, userId: string, input: { active: boolean }) =>
+  apiRequest<void>(`/v1/admin/users/${userId}/status`, { method: "PATCH", body: JSON.stringify(input) }, token);
+export const fetchAdminAuditLogs = (token: string) => apiRequest<{ records: AdminAuditLog[] }>("/v1/admin/audit-logs", {}, token);
 export const fetchApprovals = (token: string) =>
   apiRequest<{ requests: PendingApproval[] }>("/v1/admin/approvals", {}, token);
 export const approveSignup = (token: string, userId: string) =>

@@ -1,4 +1,4 @@
-import { BarChart3, CreditCard, FileClock, LayoutDashboard, ReceiptText, Settings, Users, Warehouse, LogOut } from "lucide-react";
+import { FileClock, LayoutDashboard, LogOut, Settings, ShieldAlert, UserRoundPlus, Users, Warehouse } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
@@ -6,14 +6,13 @@ import { Brand } from "../components/Brand";
 import { LanguageSwitch } from "../components/LanguageSwitch";
 
 const nav = [
-  ["/admin/dashboard", "layout.dashboard", LayoutDashboard],
-  ["/admin/workspaces", "layout.workspaces", Warehouse],
-  ["/admin/users", "layout.users", Users],
-  ["/admin/subscriptions", "layout.subscriptions", ReceiptText],
-  ["/admin/billing", "layout.billing", CreditCard],
-  ["/admin/audit-logs", "layout.auditLogs", FileClock],
-  ["/admin/reports", "layout.reports", BarChart3],
-  ["/admin/settings", "layout.settings", Settings],
+  ["/admin/dashboard", "Overview", LayoutDashboard],
+  ["/admin/users", "Users", Users],
+  ["/admin/workspaces", "Workspaces", Warehouse],
+  ["/admin/approvals", "Approvals", UserRoundPlus],
+  ["/admin/suspended", "Suspended", ShieldAlert],
+  ["/admin/audit-logs", "Audit Logs", FileClock],
+  ["/admin/settings", "Settings", Settings],
 ] as const;
 
 export function AdminLayout() {
@@ -24,7 +23,7 @@ export function AdminLayout() {
       <aside className="app-sidebar">
         <Brand compact />
         <span className="shell-label">{t("layout.platformConsole")}</span>
-        <nav>{nav.map(([to, label, Icon]) => <NavLink to={to} key={to}><Icon size={17} />{t(label)}</NavLink>)}</nav>
+        <nav>{nav.map(([to, label, Icon]) => <NavLink to={to} key={to}><Icon size={17} />{label}</NavLink>)}</nav>
       </aside>
       <div className="app-shell__body">
         <header className="shell-header">
