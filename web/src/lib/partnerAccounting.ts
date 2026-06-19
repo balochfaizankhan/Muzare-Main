@@ -25,7 +25,8 @@ export type PartnerLiabilityLedgerGroupKey =
   | "transfers_in"
   | "transfers_out"
   | "money_returned"
-  | "adjustments";
+  | "adjustments"
+  | "other";
 
 export type PartnerLiabilityGroupableTransaction = {
   id: string;
@@ -51,6 +52,7 @@ export const partnerLiabilityGroupOrder: PartnerLiabilityLedgerGroupKey[] = [
   "transfers_out",
   "money_returned",
   "adjustments",
+  "other",
 ];
 
 export const defaultPartnerLiabilityGroupExpansion = (): Record<PartnerLiabilityLedgerGroupKey, boolean> => ({
@@ -60,6 +62,7 @@ export const defaultPartnerLiabilityGroupExpansion = (): Record<PartnerLiability
   transfers_out: true,
   money_returned: true,
   adjustments: true,
+  other: false,
 });
 
 const normalized = (value: string) => value.trim().toLowerCase();
@@ -236,7 +239,7 @@ export function groupPartnerLiabilityTransactions<T extends PartnerLiabilityGrou
   }
 
   for (const transaction of transactions) {
-    const groupKey = transaction.partnerLiabilityGroup ?? "adjustments";
+    const groupKey = transaction.partnerLiabilityGroup ?? "other";
     const group = groups.get(groupKey)!;
     group.transactions.push(transaction);
     group.count += 1;

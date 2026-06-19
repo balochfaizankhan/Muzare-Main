@@ -3136,6 +3136,74 @@ button {
   font-size: .86rem;
 }
 
+.account-ledger-breakdown--partner {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.account-ledger-breakdown__expenses-card {
+  align-content: start;
+}
+
+.account-ledger-breakdown__expenses-card b {
+  font-size: 1rem;
+}
+
+.account-ledger-breakdown__expenses-card small {
+  color: var(--text-secondary);
+  font-size: .74rem;
+  line-height: 1.4;
+}
+
+.account-ledger-reconciliation {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.account-ledger-reconciliation h3 {
+  color: var(--text-primary);
+  font-size: .96rem;
+  margin: 0;
+}
+
+.account-ledger-reconciliation__rows {
+  display: grid;
+  gap: 8px;
+}
+
+.account-ledger-reconciliation__rows > div {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.account-ledger-reconciliation__rows span {
+  color: var(--text-secondary);
+  font-size: .82rem;
+}
+
+.account-ledger-reconciliation__rows strong {
+  color: var(--text-primary);
+  font-size: .9rem;
+  text-align: end;
+}
+
+.account-ledger-reconciliation__total {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  padding-top: 10px;
+}
+
+.account-ledger-reconciliation__total span,
+.account-ledger-reconciliation__total strong {
+  font-size: .92rem;
+  font-weight: 800;
+}
+
 .account-ledger-filters {
   display: grid;
   gap: 8px;
@@ -3238,6 +3306,10 @@ button {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .account-ledger-breakdown--partner {
+    grid-template-columns: 1fr;
+  }
+
   .account-ledger-filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -3249,6 +3321,16 @@ button {
 
   .account-transaction-group__meta {
     justify-items: start;
+  }
+
+  .account-ledger-reconciliation__rows > div {
+    align-items: start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .account-ledger-reconciliation__rows strong {
+    text-align: start;
   }
 }
 

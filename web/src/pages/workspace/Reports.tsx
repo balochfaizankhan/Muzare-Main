@@ -9,6 +9,7 @@ import { calculateAccountBalance } from "../../lib/accounting";
 import { formatMoney, formatNumber } from "../../lib/format";
 import {
   buildPartnerLiabilityPositions,
+  calculatePartnerLiabilityBalance,
   getPartnerBalanceState,
   partnerLiabilityGroupDisplayTotal,
   defaultPartnerLiabilityGroupExpansion,
@@ -325,6 +326,7 @@ export function Reports() {
     transfers_in: t("reportsPage.transfersIn"),
     money_returned: t("reportsPage.moneyReturned"),
     adjustments: t("reportsPage.adjustments"),
+    other: t("reportsPage.groupOther"),
   }[groupKey]);
   const labourGroups = useMemo(() => [...new Set(labourers.map((labourer) => labourer.group?.trim()).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b)), [labourers]);
   const term = search.trim().toLowerCase();
@@ -677,9 +679,39 @@ export function Reports() {
   const showReportLedgerWarning = selectedAccountRecord && Math.abs(reportLedgerDelta) > 0.009;
   const showReportNoVisibleTransactionsWarning = selectedAccountRecord && accountLedgerRows.length === 0 && Math.abs(currentLedgerBalance) > 0.009;
   const isPartnerLedgerReport = selectedAccountRecord?.type === "partner";
-  const partnerAccountLedgerSummaryView = isPartnerLedgerReport
-    ? accountLedgerSummary as {
+  const rawPartnerAccountLedgerOverview = useMemo(() => {
+    const overview = {
+      openingBalance: 0,
+      capitalInjected: 0,
+      directVoucherExpensesPaid: 0,
+      directLabourAdvancesPaid: 0,
+      directExpensesPaid: 0,
+      transfersIn: 0,
+      transfersOut: 0,
+      moneyReturned: 0,
+      adjustments: 0,
+    };
+    if (selectedAccountRecord?.type !== "partner") return { ...overview, netBalance: 0 };
+    for (const row of accountLedgerRows) {
+      if (row.partnerLiabilityGroup === "capital_injected") overview.capitalInjected += row.credit;
+      if (row.type === "voucher") overview.directVoucherExpensesPaid += row.credit;
+      if (row.type === "advance") overview.directLabourAdvancesPaid += row.credit;
+      if (row.partnerLiabilityGroup === "direct_expenses_paid") overview.directExpensesPaid += row.credit - row.debit;
+      if (row.partnerLiabilityGroup === "transfers_in") overview.transfersIn += Math.max(row.debit, row.credit);
+      if (row.partnerLiabilityGroup === "transfers_out") overview.transfersOut += Math.max(row.debit, row.credit);
+      if (row.partnerLiabilityGroup === "money_returned") overview.moneyReturned += row.debit;
+      if (row.partnerLiabilityGroup === "adjustments") overview.adjustments += row.credit - row.debit;
+    }
+    return {
+      ...overview,
+      netBalance: calculatePartnerLiabilityBalance(overview),
+    };
+  }, [accountLedgerRows, selectedAccountRecord]);
+  const partnerAccountLedgerOverviewView = isPartnerLedgerReport
+    ? rawPartnerAccountLedgerOverview as {
         capitalInjected: number;
+        directVoucherExpensesPaid: number;
+        directLabourAdvancesPaid: number;
         directExpensesPaid: number;
         transfersIn: number;
         transfersOut: number;
@@ -1086,28 +1118,46 @@ export function Reports() {
           }}><span>{item.account.name}</span><strong>{money(item.net)}</strong><small>{t("reportsPage.viewLedger")}</small></article>)}</div>
         </ReportShell>}
         {views["account-ledger"] === "ledger" && <ReportShell title={t("reportsPage.accountLedgerTitle")} rangeLabel={rangeLabel} sectionId="account-ledger" onPrint={() => printSection("account-ledger")} onExport={exportAccountLedger}>
-          <Kpis values={[
-            [t("reportsPage.account"), selectedAccountRecord?.name ?? t("reportsPage.allAccounts")],
-            [isPartnerLedgerReport ? t("reportsPage.currentPartnerBalance") : t("reportsPage.currentBalance"), money(currentLedgerBalance)],
-            ...(isPartnerLedgerReport && partnerAccountLedgerSummaryView
-              ? [
-                  [t("reportsPage.partnerBalanceMeaning"), getPartnerBalanceState(currentLedgerBalance) === "partner_holds_business_money" ? t("reportsPage.partnerHoldsBusinessMoney") : t("reportsPage.farmOwesPartner")],
-                  [t("reportsPage.capitalInjected"), money(partnerAccountLedgerSummaryView.capitalInjected)],
-                  [t("reportsPage.directExpensesPaid"), money(partnerAccountLedgerSummaryView.directExpensesPaid)],
-                  [t("reportsPage.transfersOut"), money(partnerAccountLedgerSummaryView.transfersOut)],
-                  [t("reportsPage.transfersIn"), money(partnerAccountLedgerSummaryView.transfersIn)],
-                  [t("reportsPage.moneyReturned"), money(partnerAccountLedgerSummaryView.moneyReturned)],
-                  [t("reportsPage.adjustments"), money(partnerAccountLedgerSummaryView.adjustments)],
-                  [t("reportsPage.currentPartnerBalance"), money(partnerAccountLedgerSummaryView.netBalance)],
-                ] as Array<[string, string]>
-              : [
-                  [t("reportsPage.voucherExpenses"), money(standardAccountLedgerSummaryView?.expenses ?? 0)],
-                  [t("reportsPage.labourAdvance"), money(standardAccountLedgerSummaryView?.advances ?? 0)],
-                  [t("reportsPage.settlements"), money(standardAccountLedgerSummaryView?.settlements ?? 0)],
-                  [t("reportsPage.incomeFundsSales"), money(standardAccountLedgerSummaryView?.income ?? 0)],
-                  [t("reportsPage.netPosition"), money(standardAccountLedgerSummaryView?.netBalance ?? 0)],
-                ] as Array<[string, string]>),
-          ]} />
+          {isPartnerLedgerReport && partnerAccountLedgerOverviewView
+            ? <>
+              <div className="account-ledger-breakdown account-ledger-breakdown--partner">
+                <article><strong>{t("reportsPage.account")}</strong><b>{selectedAccountRecord?.name ?? t("reportsPage.allAccounts")}</b></article>
+                <article><strong>{t("reportsPage.currentPartnerBalance")}</strong><b>{money(currentLedgerBalance)}</b></article>
+                <article><strong>{t("reportsPage.capitalInjected")}</strong><span>{money(partnerAccountLedgerOverviewView.capitalInjected)}</span></article>
+                <article className="account-ledger-breakdown__expenses-card">
+                  <strong>{t("reportsPage.directExpensesPaid")}</strong>
+                  <b>{money(partnerAccountLedgerOverviewView.directExpensesPaid)}</b>
+                  <small>{t("reportsPage.directVoucherExpensesPaid")}: {money(partnerAccountLedgerOverviewView.directVoucherExpensesPaid)}</small>
+                  <small>{t("reportsPage.directLabourAdvancesPaid")}: {money(partnerAccountLedgerOverviewView.directLabourAdvancesPaid)}</small>
+                </article>
+                <article><strong>{t("reportsPage.transfersOut")}</strong><span>{money(partnerAccountLedgerOverviewView.transfersOut)}</span></article>
+                <article><strong>{t("reportsPage.transfersIn")}</strong><span>{money(partnerAccountLedgerOverviewView.transfersIn)}</span></article>
+                <article><strong>{t("reportsPage.moneyReturned")}</strong><span>{money(partnerAccountLedgerOverviewView.moneyReturned)}</span></article>
+                <article><strong>{t("reportsPage.adjustments")}</strong><span>{money(partnerAccountLedgerOverviewView.adjustments)}</span></article>
+              </div>
+              <section className="account-ledger-reconciliation">
+                <h3>{t("reportsPage.reconciliationTitle")}</h3>
+                <div className="account-ledger-reconciliation__rows">
+                  <div><span>{t("reportsPage.capitalInjected")}</span><strong>{money(partnerAccountLedgerOverviewView.capitalInjected)}</strong></div>
+                  <div><span>+ {t("reportsPage.directExpensesPaid")}</span><strong>{money(partnerAccountLedgerOverviewView.directExpensesPaid)}</strong></div>
+                  <div><span>+ {t("reportsPage.transfersOut")}</span><strong>{money(partnerAccountLedgerOverviewView.transfersOut)}</strong></div>
+                  <div><span>- {t("reportsPage.transfersIn")}</span><strong>{money(partnerAccountLedgerOverviewView.transfersIn)}</strong></div>
+                  <div><span>- {t("reportsPage.moneyReturned")}</span><strong>{money(partnerAccountLedgerOverviewView.moneyReturned)}</strong></div>
+                  <div><span>+/- {t("reportsPage.adjustments")}</span><strong>{money(partnerAccountLedgerOverviewView.adjustments)}</strong></div>
+                  <div className="account-ledger-reconciliation__total"><span>= {t("reportsPage.reconciliationComputed")}</span><strong>{money(partnerAccountLedgerOverviewView.netBalance)}</strong></div>
+                </div>
+                {Math.abs(partnerAccountLedgerOverviewView.netBalance - currentLedgerBalance) > 0.009 && <p className="worker-action-warning">{t("reportsPage.reconciliationComponentsWarning")}</p>}
+              </section>
+            </>
+            : <Kpis values={[
+              [t("reportsPage.account"), selectedAccountRecord?.name ?? t("reportsPage.allAccounts")],
+              [t("reportsPage.currentBalance"), money(currentLedgerBalance)],
+              [t("reportsPage.voucherExpenses"), money(standardAccountLedgerSummaryView?.expenses ?? 0)],
+              [t("reportsPage.labourAdvance"), money(standardAccountLedgerSummaryView?.advances ?? 0)],
+              [t("reportsPage.settlements"), money(standardAccountLedgerSummaryView?.settlements ?? 0)],
+              [t("reportsPage.incomeFundsSales"), money(standardAccountLedgerSummaryView?.income ?? 0)],
+              [t("reportsPage.netPosition"), money(standardAccountLedgerSummaryView?.netBalance ?? 0)],
+            ]} />}
           {showReportLedgerWarning && <p className="worker-action-warning">{t("reportsPage.groupedReconciliationWarning", { delta: money(reportLedgerDelta) })}</p>}
           {showReportNoVisibleTransactionsWarning && <p className="worker-action-warning">{t("reportsPage.noVisibleTransactionsWarning")}</p>}
           <label className="account-ledger-toggle"><input type="checkbox" checked={showEmptyLedgerGroups} onChange={(event) => setShowEmptyLedgerGroups(event.target.checked)} />{t("reportsPage.showEmptyGroups")}</label>
