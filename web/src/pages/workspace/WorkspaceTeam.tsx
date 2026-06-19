@@ -37,6 +37,7 @@ export function WorkspaceTeam() {
   const isOwner = user?.memberships.some((membership) => membership.workspaceId === workspaceId && membership.active && membership.role === "workspace_owner") ?? false;
   const [invite, setInvite] = useState(blankInvite);
   const [shareToken, setShareToken] = useState("");
+  const [inviteMessage, setInviteMessage] = useState("");
   const [editing, setEditing] = useState<WorkspaceTeamMember | null>(null);
   const [activityMember, setActivityMember] = useState<WorkspaceTeamMember | null>(null);
   const [permissions, setPermissions] = useState<WorkspaceModulePermissions>({});
@@ -47,6 +48,7 @@ export function WorkspaceTeam() {
     mutationFn: () => inviteWorkspaceMember(token!, workspaceId, invite),
     onSuccess: async (result) => {
       setShareToken(result.invitationToken ?? "");
+      setInviteMessage(result.alreadyHasAccess ? "This user already has access. Open permissions to review or update their role." : "");
       setInvite(blankInvite);
       await refresh();
     },
@@ -84,13 +86,20 @@ export function WorkspaceTeam() {
           <button disabled={inviteMember.isPending} type="submit"><UserPlus size={16} />{t("workspaceTeam.sendInvite")}</button>
         </form>
         {inviteMember.isError && <p className="error">{inviteMember.error.message}</p>}
+        {!inviteMember.isError && inviteMessage && <p>{inviteMessage}</p>}
         {invitationLink && <div className="invite-share"><p>{t("workspaceTeam.shareLink")}</p><code>{invitationLink}</code><button type="button" onClick={() => void navigator.clipboard.writeText(invitationLink)}><Copy size={15} />{t("workspaceTeam.copy")}</button></div>}
       </section>}
       {team.isLoading && <p>{t("workspaceTeam.loading")}</p>}
       {team.isError && <p className="error">{team.error.message}</p>}
       {team.data && <section className="record-panel"><h2>{t("workspaceTeam.members")}</h2><div className="team-list">
         {team.data.members.map((member) => <article className="team-card" key={member.id}>
-          <div><strong>{member.name || member.email}</strong><span>{member.email}{member.phone ? ` | ${member.phone}` : ""}</span><small>{t(`workspaceTeam.roles.${member.role}`)} | {member.active ? t("common.active") : t("common.inactive")}</small></div>
+          <div>
+            <strong>{member.displayName || member.name || member.email || "Unnamed member"}</strong>
+            <span>{member.email}{member.phone ? ` | ${member.phone}` : ""}</span>
+            <small>
+              {t(`workspaceTeam.roles.${member.role}`)} | {member.hasWorkspaceAccess ? t("common.active") : (member.userStatus === "suspended" ? t("common.suspended") : t("common.inactive"))}
+            </small>
+          </div>
           {isOwner && <div className="team-card__actions"><button type="button" onClick={() => setActivityMember(member)}><Activity size={15} />{t("workspaceTeam.activity")}</button><button type="button" onClick={() => startEdit(member)}>{t("workspaceTeam.permissions")}</button><button className="danger-button" type="button" onClick={() => window.confirm(t("workspaceTeam.confirmRemove")) && remove.mutate(member.id)}><Trash2 size={15} />{t("workspaceTeam.remove")}</button></div>}
         </article>)}
       </div></section>}

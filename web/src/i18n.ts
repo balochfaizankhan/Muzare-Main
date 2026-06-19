@@ -15,6 +15,7 @@ const resources = {
         details: "Details",
         active: "Active",
         inactive: "Inactive",
+        suspended: "Suspended",
       },
       auth: {
         welcomeBack: "Welcome back",
@@ -206,6 +207,7 @@ const resources = {
         details: "التفاصيل",
         active: "نشط",
         inactive: "غير نشط",
+        suspended: "موقوف",
       },
       auth: {
         welcomeBack: "مرحبًا بعودتك",
@@ -386,6 +388,7 @@ const resources = {
         details: "تفصیل",
         active: "فعال",
         inactive: "غیرفعال",
+        suspended: "معطل",
       },
       auth: {
         welcomeBack: "واپسی پر خوش آمدید",

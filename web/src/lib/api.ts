@@ -86,7 +86,8 @@ export type WorkspaceProfileInput = {
 };
 export type WorkspaceTeamMember = {
   id: string; userId: string; name: string | null; email: string; phone: string | null; role: WorkspaceRole;
-  active: boolean; permissions: WorkspaceModulePermissions | null; lastActiveAt: string | null;
+  active: boolean; userActive: boolean; userStatus: "pending" | "approved" | "rejected" | "suspended";
+  hasWorkspaceAccess: boolean; displayName: string; permissions: WorkspaceModulePermissions | null; lastActiveAt: string | null;
 };
 export type WorkspaceTeamInvitation = {
   id: string; email: string; phone: string | null; role: WorkspaceRole; status: string; expiresAt: string; createdAt: string;
@@ -95,6 +96,25 @@ export type WorkspaceTeamData = {
   members: WorkspaceTeamMember[];
   invitations: WorkspaceTeamInvitation[];
   roleDefaults: Record<WorkspaceRole, Record<WorkspaceModule, Record<WorkspaceModuleAction, boolean>>>;
+  diagnostics?: {
+    email: string;
+    workspaceId: string;
+    member: {
+      membershipId: string;
+      userId: string;
+      role: WorkspaceRole;
+      membershipActive: boolean;
+      userActive: boolean;
+      userStatus: "pending" | "approved" | "rejected" | "suspended";
+      hasWorkspaceAccess: boolean;
+    } | null;
+    invitation: {
+      invitationId: string;
+      status: string;
+      role: WorkspaceRole;
+      expiresAt: string;
+    } | null;
+  };
 };
 export type WorkspaceMemberActivity = {
   id: string; action: string; entityType: string; entityId: string | null; createdAt: string;
@@ -375,7 +395,7 @@ export const updateWorkspaceProfile = (token: string, workspaceId: string, input
 export const fetchWorkspaceTeam = (token: string, workspaceId: string) =>
   apiRequest<WorkspaceTeamData>(`/v1/workspace/${workspaceId}/team`, {}, token);
 export const inviteWorkspaceMember = (token: string, workspaceId: string, input: { email: string; phone?: string; role: WorkspaceRole; permissions?: WorkspaceModulePermissions | null }) =>
-  apiRequest<{ memberAdded: boolean; invitationToken?: string }>(`/v1/workspace/${workspaceId}/team/invitations`, { method: "POST", body: JSON.stringify(input) }, token);
+  apiRequest<{ memberAdded: boolean; alreadyHasAccess?: boolean; invitationToken?: string }>(`/v1/workspace/${workspaceId}/team/invitations`, { method: "POST", body: JSON.stringify(input) }, token);
 export const updateWorkspaceMember = (token: string, workspaceId: string, membershipId: string, input: { role: WorkspaceRole; active: boolean; permissions?: WorkspaceModulePermissions | null }) =>
   apiRequest<void>(`/v1/workspace/${workspaceId}/team/${membershipId}`, { method: "PATCH", body: JSON.stringify(input) }, token);
 export const removeWorkspaceMember = (token: string, workspaceId: string, membershipId: string) =>

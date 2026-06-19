@@ -18,6 +18,9 @@ import {
 const workspaceParams = z.object({ workspaceId: z.string().uuid() });
 const membershipParams = workspaceParams.extend({ membershipId: z.string().uuid() });
 const invitationParams = workspaceParams.extend({ invitationId: z.string().uuid() });
+const teamQuerySchema = z.object({
+  debugEmail: z.string().trim().email().optional(),
+});
 const permissionSchema = z.record(z.string(), z.record(z.string(), z.boolean())).nullable().optional().superRefine((permissions, context) => {
   if (!permissions) return;
   for (const [module, actions] of Object.entries(permissions)) {
@@ -80,8 +83,10 @@ export async function workspaceTeamRoutes(app: FastifyInstance): Promise<void> {
   app.get("/v1/workspace/:workspaceId/team", { preHandler: requireUser }, async (request, reply) => {
     if (!request.appUser) return reply;
     const params = workspaceParams.safeParse(request.params);
+    const query = teamQuerySchema.safeParse(request.query);
     if (!params.success || !canViewTeam(request, params.data.workspaceId)) return reply.code(403).send({ message: "Workspace team view permission is required." });
     if (localDevelopmentMode) return { members: [], invitations: [], roleDefaults: roleModulePermissions };
+    if (!query.success) return reply.code(400).send({ message: "A valid team query is required." });
     const members = await db.select({
       id: workspaceMemberships.id,
       userId: users.id,
@@ -90,6 +95,8 @@ export async function workspaceTeamRoutes(app: FastifyInstance): Promise<void> {
       phone: users.phone,
       role: workspaceMemberships.role,
       active: workspaceMemberships.active,
+      userActive: users.active,
+      userStatus: users.status,
       permissions: workspaceMemberships.permissions,
       lastActiveAt: sql<Date | null>`(SELECT max(created_at) FROM user_sessions WHERE user_sessions.user_id = ${users.id})`,
     }).from(workspaceMemberships).innerJoin(users, eq(users.id, workspaceMemberships.userId))
@@ -106,7 +113,44 @@ export async function workspaceTeamRoutes(app: FastifyInstance): Promise<void> {
       eq(workspaceTeamInvitations.workspaceId, params.data.workspaceId),
       eq(workspaceTeamInvitations.status, "pending"),
     )).orderBy(desc(workspaceTeamInvitations.createdAt));
-    return { members, invitations, roleDefaults: roleModulePermissions };
+    const normalizedMembers = members.map((member) => ({
+      ...member,
+      displayName: member.name?.trim() || member.email || "Unnamed member",
+      hasWorkspaceAccess: Boolean(member.active && member.userActive && member.userStatus === "approved"),
+    }));
+
+    const debugEmail = query.data.debugEmail?.toLowerCase();
+    const debugMember = debugEmail
+      ? normalizedMembers.find((member) => member.email.toLowerCase() === debugEmail) ?? null
+      : null;
+    const debugInvitation = debugEmail
+      ? invitations.find((invitation) => invitation.email.toLowerCase() === debugEmail) ?? null
+      : null;
+
+    return {
+      members: normalizedMembers,
+      invitations,
+      roleDefaults: roleModulePermissions,
+      diagnostics: debugEmail ? {
+        email: debugEmail,
+        workspaceId: params.data.workspaceId,
+        member: debugMember ? {
+          membershipId: debugMember.id,
+          userId: debugMember.userId,
+          role: debugMember.role,
+          membershipActive: debugMember.active,
+          userActive: debugMember.userActive,
+          userStatus: debugMember.userStatus,
+          hasWorkspaceAccess: debugMember.hasWorkspaceAccess,
+        } : null,
+        invitation: debugInvitation ? {
+          invitationId: debugInvitation.id,
+          status: debugInvitation.status,
+          role: debugInvitation.role,
+          expiresAt: debugInvitation.expiresAt,
+        } : null,
+      } : undefined,
+    };
   });
 
   app.post("/v1/workspace/:workspaceId/team/invitations", { preHandler: requireUser }, async (request, reply) => {
@@ -119,6 +163,13 @@ export async function workspaceTeamRoutes(app: FastifyInstance): Promise<void> {
     const email = input.data.email.toLowerCase();
     const [existingUser] = await db.select().from(users).where(eq(users.email, email)).limit(1);
     if (existingUser) {
+      const [existingMembership] = await db.select().from(workspaceMemberships).where(and(
+        eq(workspaceMemberships.workspaceId, params.data.workspaceId),
+        eq(workspaceMemberships.userId, existingUser.id),
+      )).limit(1);
+      if (existingMembership?.active && existingUser.active && existingUser.status === "approved") {
+        return reply.code(200).send({ membership: existingMembership, memberAdded: false, alreadyHasAccess: true });
+      }
       const [membership] = await db.insert(workspaceMemberships).values({
         workspaceId: params.data.workspaceId, userId: existingUser.id, role: input.data.role, active: true, permissions: input.data.permissions ?? null,
       }).onConflictDoUpdate({
@@ -126,7 +177,7 @@ export async function workspaceTeamRoutes(app: FastifyInstance): Promise<void> {
         set: { role: input.data.role, active: true, permissions: input.data.permissions ?? null, updatedAt: new Date() },
       }).returning();
       await audit(params.data.workspaceId, request.appUser.id, "workspace_member_added", membership!.id, { userId: existingUser.id, email, role: input.data.role });
-      return reply.code(201).send({ membership, memberAdded: true });
+      return reply.code(201).send({ membership, memberAdded: true, alreadyHasAccess: false });
     }
     const token = randomBytes(32).toString("base64url");
     const [invitation] = await db.insert(workspaceTeamInvitations).values({
@@ -140,7 +191,7 @@ export async function workspaceTeamRoutes(app: FastifyInstance): Promise<void> {
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     }).returning({ id: workspaceTeamInvitations.id, email: workspaceTeamInvitations.email, expiresAt: workspaceTeamInvitations.expiresAt });
     await audit(params.data.workspaceId, request.appUser.id, "workspace_member_invited", invitation!.id, { email, role: input.data.role });
-    return reply.code(201).send({ invitation, invitationToken: token, memberAdded: false });
+    return reply.code(201).send({ invitation, invitationToken: token, memberAdded: false, alreadyHasAccess: false });
   });
 
   app.post("/v1/workspace/team/invitations/accept", async (request, reply) => {
