@@ -9,6 +9,7 @@ export function partnerSettlementEffect(entry: PartnerEntry, accountId: string):
 
 export function partnerEntryAccountEffect(entry: PartnerEntry, account: Account): number {
   if (entry.type === "settlement") return partnerSettlementEffect(entry, account.id);
+  if (entry.type === "adjustment") return 0;
   if (isPartnerAccount(account)) return 0;
   if (entry.accountId !== account.id) return 0;
   return entry.type === "contribution" ? entry.amount : -entry.amount;

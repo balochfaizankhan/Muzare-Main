@@ -77,6 +77,10 @@ export function calculatePartnerLiabilityBalance(position: Pick<PartnerLiability
     + position.adjustments;
 }
 
+export function partnerAdjustmentEffect(entry: Pick<PartnerEntry, "amount" | "adjustmentDirection">) {
+  return entry.adjustmentDirection === "decrease" ? -entry.amount : entry.amount;
+}
+
 export function getPartnerBalanceState(balance: number): PartnerBalanceState {
   if (balance > 0.009) return "farm_owes_partner";
   if (balance < -0.009) return "partner_holds_business_money";
@@ -119,6 +123,9 @@ export function partnerAccountBalanceEffect(
   const transfersOut = entries
     .filter((entry) => !entry.deletedAt && entry.type === "settlement" && entry.fromAccountId === account.id)
     .reduce((sum, entry) => sum + entry.amount, 0);
+  const entryAdjustments = entries
+    .filter((entry) => !entry.deletedAt && entry.type === "adjustment" && resolvePartnerAccountId(entry, allAccounts) === account.id)
+    .reduce((sum, entry) => sum + partnerAdjustmentEffect(entry), 0);
   const directVoucherExpensesPaid = vouchers
     .filter((voucher) => voucher.accountId === account.id)
     .reduce((sum, voucher) => sum + voucher.amount, 0);
@@ -134,6 +141,7 @@ export function partnerAccountBalanceEffect(
     + transfersOut
     - transfersIn
     - moneyReturned
+    + entryAdjustments
     + adjustments;
 }
 
@@ -181,6 +189,7 @@ export function buildPartnerLiabilityPositions(
       const position = ensure(resolvedId, account?.name ?? entry.partnerName ?? "-", account);
       if (entry.type === "contribution") position.capitalInjected += entry.amount;
       if (entry.type === "withdrawal") position.moneyReturned += entry.amount;
+      if (entry.type === "adjustment") position.adjustments += partnerAdjustmentEffect(entry);
       continue;
     }
     const fallbackName = entry.partnerName?.trim();
@@ -188,6 +197,7 @@ export function buildPartnerLiabilityPositions(
     const position = ensure(`legacy:${normalized(fallbackName)}`, fallbackName, null);
     if (entry.type === "contribution") position.capitalInjected += entry.amount;
     if (entry.type === "withdrawal") position.moneyReturned += entry.amount;
+    if (entry.type === "adjustment") position.adjustments += partnerAdjustmentEffect(entry);
   }
 
   for (const voucher of vouchers) {

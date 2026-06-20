@@ -23,6 +23,7 @@ import {
   partnerLiabilityGroupDisplayTotal,
   defaultPartnerLiabilityGroupExpansion,
   groupPartnerLiabilityTransactions,
+  partnerAdjustmentEffect,
   resolvePartnerAccountId,
   type PartnerLiabilityLedgerGroupKey,
 } from "../lib/partnerAccounting";
@@ -347,15 +348,15 @@ function WorkforceModule({
     <>
       <section className="record-panel">
         <header className="workforce-page-header">
-          <h2>Workforce</h2>
-          <p>Manage labour, attendance, advances, and groups.</p>
+          <h2>{t("moduleTitles.workforce")}</h2>
+          <p>{t("moduleDescriptions.workforce")}</p>
         </header>
         <div className="workforce-top-actions">
-          <button className="workforce-mark-attendance" type="button" onClick={() => setShowAttendanceEntry(true)}>Mark Attendance</button>
+          <button className="workforce-mark-attendance" type="button" onClick={() => setShowAttendanceEntry(true)}>{t("workforcePage.markAttendance")}</button>
           <div className="workforce-toolbar">
             {canManageLabour && <button type="button" onClick={() => setShowAddLabour(true)}>{t("workforcePage.addLabour")}</button>}
-            {canAddAdvance && <button type="button" onClick={() => setShowAdvanceEntry(true)}>Advance</button>}
-            {canManageLabour && <button type="button" onClick={() => setShowAddGroup(true)}>Groups</button>}
+            {canAddAdvance && <button type="button" onClick={() => setShowAdvanceEntry(true)}>{t("layout.advances")}</button>}
+            {canManageLabour && <button type="button" onClick={() => setShowAddGroup(true)}>{t("workforcePage.groups")}</button>}
             {user?.workspaceId && hasPermission(user, "IMPORT_ATTENDANCE", user.workspaceId) && <button className="workforce-toolbar__import" type="button" onClick={() => {
               if (!navigator.onLine) window.dispatchEvent(new CustomEvent("muzare-toast", { detail: t("errors.csvImportOnlineOnly") }));
               else setShowImport(true);
@@ -363,21 +364,21 @@ function WorkforceModule({
           </div>
         </div>
         <div className="workforce-list-header">
-          <h2>Labour List</h2>
+          <h2>{t("workforcePage.labourList")}</h2>
           <div className="workforce-list-header__controls">
             <SearchInput placeholder={t("workforcePage.searchRegister")} value={labourSearch} onChange={setLabourSearch} />
-            <button type="button" aria-label="More workforce filters" onClick={() => setShowRegisterFilters((current) => !current)}>
+            <button type="button" aria-label={t("workforcePage.moreFilters")} onClick={() => setShowRegisterFilters((current) => !current)}>
               <MoreVertical size={18} />
             </button>
           </div>
         </div>
         {showRegisterFilters && <div className="attendance-tools workforce-filters">
           <ClearableSelect value={groupFilterId} clearValue="all" onChange={setGroupFilterId}>
-            <option value="all">All groups</option>
+            <option value="all">{t("reportsPage.allGroups")}</option>
             {groups.filter((group) => group.active !== false).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
           </ClearableSelect>
           <ClearableSelect value={paymentTypeFilter} clearValue="all" onChange={(value) => setPaymentTypeFilter(value as PaymentType | "all")}>
-            <option value="all">All payment types</option>
+            <option value="all">{t("workforcePage.allPaymentTypes")}</option>
             <option value="daily_wage">{translatePaymentType("daily_wage")}</option>
             <option value="production_based">{translatePaymentType("production_based")}</option>
             <option value="contract_lump_sum">{translatePaymentType("contract_lump_sum")}</option>
@@ -400,15 +401,15 @@ function WorkforceModule({
                 <span className="workforce-row__body">
                   <strong>{labourer.name}</strong>
                   <span>{labourer.group} • {paymentTypeLabel(labourer.paymentType)}</span>
-                  <em className={isInactiveOn(labourer, today()) ? "status-inactive" : "status-active"}>{isInactiveOn(labourer, today()) ? "Inactive" : "Active"}</em>
-                  {labourer.endedOn && <small>End date: {labourer.endedOn}</small>}
+                  <em className={isInactiveOn(labourer, today()) ? "status-inactive" : "status-active"}>{isInactiveOn(labourer, today()) ? t("common.inactive") : t("common.active")}</em>
+                  {labourer.endedOn && <small>{t("workforcePage.endDate")}: {labourer.endedOn}</small>}
                 </span>
                 <button className="workforce-row__action" type="button" onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
                   setActionLabourer(labourer);
                   setLabourAction("update");
-                }}>Update</button>
+                }}>{t("common.update")}</button>
               </article>
             ))}
           </div>
@@ -422,14 +423,14 @@ function WorkforceModule({
           <header className="attendance-report-header">
             <div className="attendance-report-header__copy">
               <span>{t("workforcePage.dailyAttendance")}</span>
-              <h2 id="mark-attendance-title">Mark Attendance</h2>
+              <h2 id="mark-attendance-title">{t("workforcePage.markAttendance")}</h2>
             </div>
             <div className="attendance-header-actions">
               <span className={`attendance-auto-save attendance-auto-save--${sync.status}`} role="status" aria-live="polite">{attendanceSaveLabel}</span>
               <button className="attendance-report-close" type="button" onClick={() => {
                 if (onAttendanceClose) onAttendanceClose();
                 else setShowAttendanceEntry(false);
-              }} aria-label="Close mark attendance"><X size={19} /></button>
+              }} aria-label={t("workforcePage.closeMarkAttendance")}><X size={19} /></button>
             </div>
           </header>
           <section className="record-panel daily-attendance-panel attendance-entry-modal-body">
@@ -447,7 +448,7 @@ function WorkforceModule({
               </ClearableSelect>
               <label className="attendance-date-control">
                 <span>{t("workforcePage.date")}</span>
-                <input aria-label="Attendance date" type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+                <input aria-label={t("workforcePage.attendanceDate")} type="date" value={date} onChange={(event) => setDate(event.target.value)} />
               </label>
               <SearchInput className="attendance-entry-search" placeholder={t("workforcePage.searchLabour")} value={attendanceSearch} onChange={setAttendanceSearch} />
             </div>
@@ -2125,7 +2126,13 @@ const partnerEntryName = (entry: PartnerEntry, settlementTemplate?: (from: strin
   entry.type === "settlement"
     ? settlementTemplate?.(entry.fromPartner ?? "-", entry.toPartner ?? "-") ?? `${entry.fromPartner} to ${entry.toPartner}`
     : entry.partnerName ?? "-";
-const partnerEntryBalanceEffect = (entry: PartnerEntry) => entry.type === "contribution" ? entry.amount : entry.type === "withdrawal" ? -entry.amount : 0;
+const partnerEntryBalanceEffect = (entry: PartnerEntry) => entry.type === "contribution"
+  ? entry.amount
+  : entry.type === "withdrawal"
+    ? -entry.amount
+    : entry.type === "adjustment"
+      ? partnerAdjustmentEffect(entry)
+      : 0;
 
 function PartnerAccountAutocomplete({
   accounts,
@@ -2275,6 +2282,7 @@ function PartnerLedgerModule() {
   const [amount, setAmount] = useState("");
   const [notes, setNotes] = useState("");
   const [accountId, setAccountId] = useState("");
+  const [adjustmentDirection, setAdjustmentDirection] = useState<NonNullable<PartnerEntry["adjustmentDirection"]>>("increase");
   const [editing, setEditing] = useState<PartnerEntry | null>(null);
   const [viewing, setViewing] = useState<PartnerEntry | null>(null);
   const [deleting, setDeleting] = useState<PartnerEntry | null>(null);
@@ -2283,13 +2291,19 @@ function PartnerLedgerModule() {
   const [error, setError] = useState("");
   const [entryFilter, setEntryFilter] = useState<"all" | PartnerEntry["type"]>("all");
   const partnerAccounts = useMemo(() => accounts.filter((account) => account.type === "partner"), [accounts]);
-  const cashBankAccounts = useMemo(() => accounts.filter((account) => account.type !== "partner"), [accounts]);
+  const cashBankAccounts = useMemo(() => accounts.filter((account) => account.type === "cash" || account.type === "bank"), [accounts]);
   const defaultCashAccountId = useMemo(() => cashBankAccounts.find((account) => account.type === "cash")?.id ?? cashBankAccounts[0]?.id ?? "", [cashBankAccounts]);
+  const selectedDepositAccountId = useMemo(
+    () => cashBankAccounts.some((account) => account.id === accountId) ? accountId : defaultCashAccountId,
+    [accountId, cashBankAccounts, defaultCashAccountId],
+  );
   const partnerEntryLabel = (entry: PartnerEntry) => entry.type === "contribution"
     ? t("partnerLedgerPage.capitalInjected")
     : entry.type === "withdrawal"
-      ? t("partnerLedgerPage.moneyReturned")
-      : t("partnerLedgerPage.transfersOut");
+      ? t("partnerLedgerPage.returnMoneyToPartner")
+      : entry.type === "adjustment"
+        ? t("partnerLedgerPage.adjustments")
+        : t("partnerLedgerPage.transfersOut");
   const partnerSettlementRoute = (from: string, to: string) => t("partnerLedgerPage.partnerSettlementRoute", { from, to });
   useEffect(() => {
     const recordId = searchParams.get("recordId");
@@ -2297,7 +2311,7 @@ function PartnerLedgerModule() {
   }, [entries, searchParams]);
 
   const resetForm = () => {
-    setEditing(null); setDate(today()); setPartnerName(""); setPartnerAccountId(""); setFromPartner(""); setToPartner(""); setFromAccountId(""); setToAccountId(""); setType("contribution"); setAmount(""); setNotes(""); setAccountId(""); setError("");
+    setEditing(null); setDate(today()); setPartnerName(""); setPartnerAccountId(""); setFromPartner(""); setToPartner(""); setFromAccountId(""); setToAccountId(""); setType("contribution"); setAmount(""); setNotes(""); setAccountId(""); setAdjustmentDirection("increase"); setError("");
   };
 
   const edit = (entry: PartnerEntry) => {
@@ -2305,27 +2319,42 @@ function PartnerLedgerModule() {
     setPartnerAccountId(entry.partnerAccountId ?? resolvePartnerAccountId(entry, accounts) ?? "");
     setFromPartner(entry.fromPartner ?? ""); setToPartner(entry.toPartner ?? "");
     setFromAccountId(entry.fromAccountId ?? ""); setToAccountId(entry.toAccountId ?? "");
-    setAmount(String(entry.amount)); setNotes(entry.notes); setAccountId(entry.accountId ?? ""); setError("");
+    setAmount(String(entry.amount)); setNotes(entry.notes); setAccountId(entry.accountId ?? ""); setAdjustmentDirection(entry.adjustmentDirection ?? "increase"); setError("");
   };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const settlement = type === "settlement";
-    const resolvedAccountId = type === "contribution" ? (accountId || defaultCashAccountId) : (accountId || defaultCashAccountId);
-    if (!date || Number(amount) <= 0 || (!settlement && (!resolvedAccountId || !partnerName.trim() || !partnerAccountId))
-      || (settlement && (!fromAccountId || !toAccountId || fromAccountId === toAccountId))) {
-      return setError(settlement ? t("partnerLedgerPage.settlementValidation") : t("partnerLedgerPage.standardValidation"));
+    const needsCashBankAccount = type === "contribution" || type === "withdrawal";
+    const resolvedAccountId = needsCashBankAccount ? selectedDepositAccountId : undefined;
+    const amountValue = Number(amount);
+    if (!date) return setError(t("partnerLedgerPage.pleaseSelectDate"));
+    if (!Number.isFinite(amountValue) || amountValue <= 0) return setError(t("partnerLedgerPage.pleaseEnterAmount"));
+    if (settlement) {
+      if (!fromAccountId) return setError(t("partnerLedgerPage.pleaseSelectFromPartner"));
+      if (!toAccountId) return setError(t("partnerLedgerPage.pleaseSelectToPartner"));
+      if (fromAccountId === toAccountId) return setError(t("partnerLedgerPage.differentPartnerValidation"));
+    } else if (!partnerName.trim() || !partnerAccountId) {
+      return setError(t("partnerLedgerPage.pleaseSelectPartner"));
+    }
+    if (needsCashBankAccount && !resolvedAccountId) {
+      return setError(t("partnerLedgerPage.noCashBankAccount"));
     }
     setSaving(true); setError("");
     try {
       const fields = settlement
         ? {
-            date, type, amount: Number(amount), notes, fromAccountId, toAccountId,
+            date, type, amount: amountValue, notes, fromAccountId, toAccountId,
             fromPartner: accounts.find((account) => account.id === fromAccountId)?.name ?? fromPartner.trim(),
             toPartner: accounts.find((account) => account.id === toAccountId)?.name ?? toPartner.trim(),
-            partnerName: undefined, partnerAccountId: undefined, accountId: undefined,
+            partnerName: undefined, partnerAccountId: undefined, accountId: undefined, adjustmentDirection: undefined,
           }
-        : { date, type, amount: Number(amount), notes, partnerName: partnerName.trim(), partnerAccountId, accountId: resolvedAccountId, fromPartner: undefined, toPartner: undefined };
+        : {
+            date, type, amount: amountValue, notes, partnerName: partnerName.trim(), partnerAccountId,
+            accountId: needsCashBankAccount ? resolvedAccountId : undefined,
+            adjustmentDirection: type === "adjustment" ? adjustmentDirection : undefined,
+            fromPartner: undefined, toPartner: undefined, fromAccountId: undefined, toAccountId: undefined,
+          };
       const record: PartnerEntry = editing
         ? { ...editing, ...fields }
         : { ...makeLocalRecord(), ...fields };
@@ -2396,8 +2425,9 @@ function PartnerLedgerModule() {
           <label><span>{t("partnerLedgerPage.date")}</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
           <label><span>{t("partnerLedgerPage.type")}</span><ClearableSelect allowClear={false} value={type} onChange={(value) => setType(value as PartnerEntry["type"])}>
             <option value="contribution">{t("partnerLedgerPage.capitalInjected")}</option>
-            <option value="withdrawal">{t("partnerLedgerPage.moneyReturned")}</option>
             <option value="settlement">{t("partnerLedgerPage.transfersOut")}</option>
+            <option value="withdrawal">{t("partnerLedgerPage.returnMoneyToPartner")}</option>
+            <option value="adjustment">{t("partnerLedgerPage.adjustments")}</option>
           </ClearableSelect></label>
           {type === "settlement" ? <>
             <label><span>{t("partnerLedgerPage.fromPartnerAccount")}</span><ClearableSelect required value={fromAccountId} onChange={setFromAccountId}><option value="">{t("partnerLedgerPage.searchPartner")}</option>{partnerAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</ClearableSelect></label>
@@ -2416,10 +2446,17 @@ function PartnerLedgerModule() {
             />
           </>}
           <label><span>{t("partnerLedgerPage.amount")}</span><input required type="number" min="0.01" step="0.01" placeholder={t("partnerLedgerPage.amount")} value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
-          <label><span>{t("partnerLedgerPage.notes")}</span><input placeholder={t("partnerLedgerPage.notes")} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
-          {type === "contribution" && <label><span>{t("partnerLedgerPage.depositTo")}</span><ClearableSelect value={accountId || defaultCashAccountId} onChange={setAccountId}>
-            {cashBankAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+          {type === "adjustment" && <label><span>{t("partnerLedgerPage.adjustmentDirection")}</span><ClearableSelect allowClear={false} value={adjustmentDirection} onChange={(value) => setAdjustmentDirection(value as NonNullable<PartnerEntry["adjustmentDirection"]>)}>
+            <option value="increase">{t("partnerLedgerPage.increaseFarmOwesPartner")}</option>
+            <option value="decrease">{t("partnerLedgerPage.decreaseFarmOwesPartner")}</option>
           </ClearableSelect></label>}
+          <label><span>{type === "adjustment" ? t("partnerLedgerPage.reasonNotes") : t("partnerLedgerPage.notes")}</span><input placeholder={type === "adjustment" ? t("partnerLedgerPage.reasonNotes") : t("partnerLedgerPage.notes")} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
+          {(type === "contribution" || type === "withdrawal") && <label><span>{type === "contribution" ? t("partnerLedgerPage.depositTo") : t("partnerLedgerPage.paymentFrom")}</span>
+            {cashBankAccounts.length > 0 ? <ClearableSelect value={selectedDepositAccountId} onChange={setAccountId}>
+              <option value="">{type === "contribution" ? t("partnerLedgerPage.depositToPlaceholder") : t("partnerLedgerPage.paymentFromPlaceholder")}</option>
+              {cashBankAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+            </ClearableSelect> : <p className="worker-action-error">{t("partnerLedgerPage.noCashBankAccount")}</p>}
+          </label>}
           <button className="partner-ledger-submit" disabled={saving} type="submit">{saving ? t("partnerLedgerPage.saving") : editing ? t("partnerLedgerPage.updateEntry") : t("partnerLedgerPage.saveEntry")}</button>
           {editing && <button className="secondary-button" disabled={saving} type="button" onClick={resetForm}>{t("partnerLedgerPage.cancelEdit")}</button>}
         </form>
@@ -2455,7 +2492,7 @@ function PartnerLedgerModule() {
         </div>}
       </section>
       <label className="partner-ledger-filter"><span>{t("partnerLedgerPage.ledgerFilter")}</span><select value={entryFilter} onChange={(event) => setEntryFilter(event.target.value as typeof entryFilter)}>
-        <option value="all">{t("partnerLedgerPage.all")}</option><option value="contribution">{t("partnerLedgerPage.capitalInjected")}</option><option value="withdrawal">{t("partnerLedgerPage.moneyReturned")}</option><option value="settlement">{t("partnerLedgerPage.partnerSettlement")}</option>
+        <option value="all">{t("partnerLedgerPage.all")}</option><option value="contribution">{t("partnerLedgerPage.capitalInjected")}</option><option value="settlement">{t("partnerLedgerPage.partnerSettlement")}</option><option value="withdrawal">{t("partnerLedgerPage.returnMoneyToPartner")}</option><option value="adjustment">{t("partnerLedgerPage.adjustments")}</option>
       </select></label>
       {canManage && <label className="partner-ledger-show-deleted"><input checked={showDeleted} type="checkbox" onChange={(event) => setShowDeleted(event.target.checked)} /> {t("partnerLedgerPage.showDeleted")}</label>}
       <RecordTable

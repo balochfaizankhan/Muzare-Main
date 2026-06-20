@@ -160,10 +160,11 @@ export type PartnerEntry = LocalRecord & {
   date: string;
   partnerName?: string;
   partnerAccountId?: string;
-  type: "contribution" | "withdrawal" | "settlement";
+  type: "contribution" | "withdrawal" | "settlement" | "adjustment";
   amount: number;
   notes: string;
   accountId?: string;
+  adjustmentDirection?: "increase" | "decrease";
   fromPartner?: string;
   toPartner?: string;
   fromAccountId?: string;

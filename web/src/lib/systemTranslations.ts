@@ -143,6 +143,15 @@ function normalizeKey(value: string) {
   return value.trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
 }
 
+function readableSystemFallback(value: string) {
+  return value
+    .trim()
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
 export function resolveSystemValue(domain: SystemTranslationDomain, value?: string | null) {
   if (!value) return null;
   const normalized = normalizeKey(value);
@@ -152,10 +161,10 @@ export function resolveSystemValue(domain: SystemTranslationDomain, value?: stri
 export function translateSystemValue(domain: SystemTranslationDomain, value?: string | null) {
   if (!value) return "";
   const resolved = resolveSystemValue(domain, value);
-  if (!resolved) return value;
+  if (!resolved) return readableSystemFallback(value);
   const key = `systemValues.${domain}.${resolved}`;
   const translated = i18n.t(key);
-  return translated === key ? value : translated;
+  return translated === key ? readableSystemFallback(value) : translated;
 }
 
 export const translatePaymentType = (value?: string | null) => translateSystemValue("paymentTypes", value);

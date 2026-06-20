@@ -83,6 +83,12 @@ const partnerEntryPayloadSchema = z.discriminatedUnion("type", [
   }).refine((record) => record.fromAccountId !== record.toAccountId, {
     message: "Settlement accounts must be different.",
   }).passthrough(),
+  partnerEntryBaseSchema.extend({
+    type: z.literal("adjustment"),
+    partnerName: z.string().trim().min(1),
+    partnerAccountId: z.string().min(1).optional(),
+    adjustmentDirection: z.enum(["increase", "decrease"]),
+  }).passthrough(),
 ]);
 const financialPayloadSchemas = {
   sale: z.object({
