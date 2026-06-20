@@ -6,9 +6,10 @@ type SearchInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "on
   value: string;
   onChange: (value: string) => void;
   onClear?: () => void;
+  showClear?: boolean;
 };
 
-export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(function SearchInput({ value, onChange, onClear, className, ...rest }, forwardedRef) {
+export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(function SearchInput({ value, onChange, onClear, showClear, className, ...rest }, forwardedRef) {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const setRef = (node: HTMLInputElement | null) => {
@@ -44,7 +45,7 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(functi
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={onKeyDown}
       />
-      {value ? (
+      {(showClear ?? Boolean(value)) ? (
         <button
           type="button"
           className="search-input__clear"

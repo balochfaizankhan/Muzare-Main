@@ -24,14 +24,15 @@ export function ClearableSelect({
   ...rest
 }: ClearableSelectProps) {
   const { t } = useTranslation();
+  const hasClearableValue = Boolean(value) && value !== clearValue;
   const clear = () => {
-    if (!value || disabled) return;
+    if (!hasClearableValue || disabled) return;
     onChange(clearValue);
     onClear?.();
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLSelectElement>) => {
-    if (event.key === "Escape" && value) {
+    if (event.key === "Escape" && hasClearableValue) {
       event.preventDefault();
       clear();
     }
@@ -50,7 +51,7 @@ export function ClearableSelect({
         {children}
       </select>
       <div className="clearable-select__actions">
-        {allowClear && value ? (
+        {allowClear && hasClearableValue ? (
           <button
             type="button"
             className="clearable-select__clear"

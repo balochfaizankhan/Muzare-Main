@@ -1,4 +1,4 @@
-import { Check } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import type { ReactNode } from "react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
@@ -119,6 +119,8 @@ export function LabourSelectCombobox({
 
   const selected = useMemo(() => labourOptions.find((option) => option.id === value), [labourOptions, value]);
   const selectedLabel = value === "all" ? resolvedAllOptionLabel : (selected?.name ?? "");
+  const isDefaultSelection = value === clearValue || (!value && !clearValue);
+  const showClear = Boolean(query) && !(isDefaultSelection && query === selectedLabel);
 
   useEffect(() => {
     if (!open) setQuery(selectedLabel);
@@ -143,17 +145,6 @@ export function LabourSelectCombobox({
   );
 
   useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-    window.addEventListener("pointerdown", onPointerDown);
-    return () => window.removeEventListener("pointerdown", onPointerDown);
-  }, [open]);
-
-  useEffect(() => {
     if (activeIndex >= items.length) setActiveIndex(0);
   }, [activeIndex, items.length]);
 
@@ -172,6 +163,19 @@ export function LabourSelectCombobox({
     setActiveIndex(0);
   };
 
+  const openMenu = () => {
+    if (disabled) return;
+    setOpen(true);
+    setActiveIndex(0);
+    if (query === selectedLabel) setQuery("");
+  };
+
+  const closeMenu = () => {
+    setOpen(false);
+    setQuery(selectedLabel);
+    setActiveIndex(0);
+  };
+
   const clear = () => {
     onChange(clearValue);
     setQuery("");
@@ -185,6 +189,15 @@ export function LabourSelectCombobox({
     window.requestAnimationFrame(() => inputRef?.current?.focus());
   };
 
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) closeMenu();
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [open, selectedLabel]);
+
   const selectedLabour = value && value !== "all" ? options.find((option) => option.id === value) : undefined;
 
   const onInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -192,7 +205,7 @@ export function LabourSelectCombobox({
     if (event.key === "ArrowDown") {
       event.preventDefault();
       if (!open) {
-        setOpen(true);
+        openMenu();
         return;
       }
       setActiveIndex((index) => (index + 1) % Math.max(items.length, 1));
@@ -201,7 +214,7 @@ export function LabourSelectCombobox({
     if (event.key === "ArrowUp") {
       event.preventDefault();
       if (!open) {
-        setOpen(true);
+        openMenu();
         return;
       }
       setActiveIndex((index) => (index - 1 + Math.max(items.length, 1)) % Math.max(items.length, 1));
@@ -217,7 +230,7 @@ export function LabourSelectCombobox({
     if (event.key === "Escape") {
       event.preventDefault();
       if (open) {
-        setOpen(false);
+        closeMenu();
       } else if (query) {
         clear();
       }
@@ -239,15 +252,20 @@ export function LabourSelectCombobox({
           setActiveIndex(0);
         }}
         onClear={clear}
-        onFocus={() => { if (!disabled) setOpen(true); }}
+        onFocus={openMenu}
+        onClick={openMenu}
         onKeyDown={onInputKeyDown}
         placeholder={resolvedPlaceholder}
         role="combobox"
+        autoComplete="off"
+        aria-autocomplete="list"
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-controls="labour-combobox-options"
+        showClear={showClear}
         value={query}
       />
+      <ChevronDown className={`labour-combobox__chevron${open ? " is-open" : ""}`} size={16} aria-hidden="true" />
       {open ? (
         <div className="labour-combobox__menu" id="labour-combobox-options" role="listbox" aria-label={resolvedAriaLabel}>
           <div className="labour-combobox__options">

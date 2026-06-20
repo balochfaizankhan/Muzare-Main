@@ -270,14 +270,17 @@ button {
   border: 1px solid var(--border);
   border-radius: 14px;
   color: var(--text);
+  cursor: pointer;
   min-height: 50px;
   padding-block: 0;
+  padding-inline-end: 66px !important;
   transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease;
 }
 
 .labour-combobox__input input:focus {
   border-color: rgba(46, 125, 50, 0.52);
   box-shadow: 0 0 0 4px rgba(46, 125, 50, 0.12);
+  cursor: text;
   outline: none;
 }
 
@@ -287,11 +290,27 @@ button {
   box-shadow: none;
   color: var(--text-secondary);
   height: 34px;
-  inset-inline-end: 8px;
+  inset-inline-end: 34px;
   min-height: 34px;
   min-width: 34px;
   opacity: 0.88;
   width: 34px;
+}
+
+.labour-combobox__chevron {
+  color: var(--text-secondary);
+  inset-inline-end: 14px;
+  pointer-events: none;
+  position: absolute;
+  top: 25px;
+  transform: translateY(-50%);
+  transition: transform .16s ease, color .16s ease;
+  z-index: 2;
+}
+
+.labour-combobox__chevron.is-open {
+  color: var(--text-primary);
+  transform: translateY(-50%) rotate(180deg);
 }
 
 .labour-combobox__input .search-input__clear:hover,
@@ -3668,7 +3687,9 @@ button {
   background: transparent;
   border: 0;
   height: 100%;
-  padding: 0 40px 0 34px;
+  padding-block: 0;
+  padding-inline-end: 66px !important;
+  padding-inline-start: 34px !important;
 }
 
 .module-form .labour-combobox__option,
@@ -3711,6 +3732,7 @@ button {
   border: 0;
   color: var(--text-secondary);
   height: 34px;
+  inset-inline-end: 34px;
   min-height: 34px;
   min-width: 34px;
   padding: 0;
