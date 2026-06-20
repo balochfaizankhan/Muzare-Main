@@ -1,6 +1,7 @@
 import { deleteOperationalRecord as deleteOperationalRecordFromApi, fetchBootstrap, fetchOperationalRecords, saveOperationalRecord, type OperationalEntity, type OperationalRecordEnvelope } from "../lib/api";
 import { clearCachedData, offlineDb, setActiveFarmId, setActiveSeasonId, setActiveWorkspaceId, type LocalRecord, type PendingMutation } from "../lib/offline-db";
 import type { Table } from "dexie";
+import i18n from "../i18n";
 
 export type SyncStatus = "online" | "offline" | "pending" | "syncing" | "error";
 export type SyncState = {
@@ -60,12 +61,12 @@ function applyOperationalContext(token: string, workspaceId: string, farmId?: st
 }
 
 async function cacheRecord(entity: OperationalEntity, record: OperationalRecordEnvelope["record"], pendingSync: boolean, farmId: string | null | undefined = context?.farmId, seasonId: string | null | undefined = context?.seasonId) {
-  if (!context) throw new Error("Workspace synchronization is not initialized.");
+  if (!context) throw new Error(i18n.t("sync.workspaceSyncNotInitialized"));
   await tableFor(entity).put({ ...record, workspaceId: context.workspaceId, farmId, seasonId, pendingSync } as LocalRecord);
 }
 
 export async function queueOfflineRecord(entity: OperationalEntity, record: LocalRecord): Promise<void> {
-  if (!context) throw new Error("Workspace synchronization is not initialized.");
+  if (!context) throw new Error(i18n.t("sync.workspaceSyncNotInitialized"));
   await cacheRecord(entity, record, true);
   const queuedAt = new Date().toISOString();
   const mutation: PendingMutation = {
@@ -75,7 +76,7 @@ export async function queueOfflineRecord(entity: OperationalEntity, record: Loca
   };
   await offlineDb.pendingMutations.put(mutation);
   emit({ status: navigator.onLine ? "pending" : "offline", pendingCount: await getPendingCount() });
-  notify(navigator.onLine ? "Saved locally. Syncing..." : "Saved locally. Will sync automatically when connection is restored.");
+  notify(navigator.onLine ? i18n.t("sync.savedLocallySyncing") : i18n.t("sync.savedLocallyOffline"));
   window.dispatchEvent(new Event("muzare-local-data-change"));
 }
 
@@ -100,14 +101,14 @@ export async function deleteOperationalRecord(entity: OperationalEntity, record:
     createdAt: queuedAt, updatedAt: queuedAt,
   });
   emit({ status: navigator.onLine ? "pending" : "offline", pendingCount: await getPendingCount() });
-  const label = entity === "partnerEntry" ? "Partner ledger entry deleted"
-    : entity === "advance" ? "Labour advance deleted"
-      : entity === "voucher" ? "Expense voucher deleted"
-        : entity === "sale" ? "Sale deleted"
-        : entity === "dispatch" ? "Dispatch deleted"
-          : entity === "vehicle" ? "Vehicle deleted"
-            : entity === "dateType" ? "Date type deleted" : "Attendance cleared";
-  notify(navigator.onLine ? `${label} locally. Syncing...` : `${label} locally. Will sync automatically when connection is restored.`);
+  const translatedLabel = entity === "partnerEntry" ? i18n.t("sync.partnerLedgerEntryDeleted")
+    : entity === "advance" ? i18n.t("sync.labourAdvanceDeleted")
+      : entity === "voucher" ? i18n.t("sync.expenseVoucherDeleted")
+        : entity === "sale" ? i18n.t("sync.saleDeleted")
+          : entity === "dispatch" ? i18n.t("sync.dispatchDeleted")
+            : entity === "vehicle" ? i18n.t("sync.vehicleDeleted")
+              : entity === "dateType" ? i18n.t("sync.dateTypeDeleted") : i18n.t("sync.attendanceCleared");
+  notify(navigator.onLine ? i18n.t("sync.deletedLocallySyncing", { item: translatedLabel }) : i18n.t("sync.deletedLocallyOffline", { item: translatedLabel }));
   window.dispatchEvent(new Event("muzare-local-data-change"));
   if (navigator.onLine) void syncPendingRecords();
 }
@@ -143,7 +144,7 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
         workspaceId: context.workspaceId, farmId: mutation.farmId || context.farmId, seasonId: mutation.seasonId || context.seasonId,
         entity: mutation.entity, record: normalizeRecord(mutation.payload as OperationalRecordEnvelope["record"]),
       });
-      if (response.conflict) notify("A newer database change was found. The server version was kept.");
+      if (response.conflict) notify(i18n.t("sync.newerDatabaseChangeKept"));
       const latest = await offlineDb.pendingMutations.get(mutation.id);
       if (latest?.updatedAt !== mutation.updatedAt) continue;
       if (response.record.id !== (mutation.payload as LocalRecord).id) {
@@ -188,23 +189,23 @@ function normalizeRecord(record: OperationalRecordEnvelope["record"]) {
 
 export async function syncNow() {
   if (!navigator.onLine) {
-    notify("Working offline. Pending changes will sync when connectivity returns.");
+    notify(i18n.t("sync.workingOfflinePendingChanges"));
     return { synced: 0, pending: await getPendingCount() };
   }
   if ((await getPendingCount()) === 0) {
     await refreshOperationalData({ notifySuccess: false });
-    notify("Database synchronized.");
+    notify(i18n.t("sync.databaseSynchronized"));
     return { synced: 0, pending: 0 };
   }
   const result = await syncPendingRecords({ force: true });
-  notify(result.pending ? `${result.pending} records remain pending` : `${result.synced} records synced successfully`);
+  notify(result.pending ? i18n.t("sync.recordsRemainPending", { count: result.pending }) : i18n.t("sync.recordsSyncedSuccessfully", { count: result.synced }));
   return result;
 }
 
 export async function refreshOperationalData(options: { notifySuccess?: boolean } = {}): Promise<void> {
   if (!context || !navigator.onLine) {
     emit({ status: "offline" });
-    notify("Working offline. Refresh will retry when connectivity returns.");
+    notify(i18n.t("sync.workingOfflineRefreshRetry"));
     return;
   }
   try {
@@ -223,10 +224,10 @@ export async function refreshOperationalData(options: { notifySuccess?: boolean 
     localStorage.setItem(lastSyncKey(context.workspaceId), lastSyncTime);
     emit({ status: (await getPendingCount()) ? "pending" : "online", dataSource: "server", lastSyncTime, pendingCount: await getPendingCount() });
     window.dispatchEvent(new Event("muzare-data-refresh"));
-    if (options.notifySuccess !== false) notify("Latest workspace data loaded from the database.");
+    if (options.notifySuccess !== false) notify(i18n.t("sync.latestWorkspaceDataLoaded"));
   } catch {
-    emit({ status: navigator.onLine ? "error" : "offline", dataSource: "cache", pendingCount: await getPendingCount(), message: "Showing cached labour" });
-    notify("Unable to refresh from the database. Cached workspace data is still available.");
+    emit({ status: navigator.onLine ? "error" : "offline", dataSource: "cache", pendingCount: await getPendingCount(), message: i18n.t("workforcePage.cachedLoadingLabour") });
+    notify(i18n.t("sync.unableToRefreshCachedAvailable"));
   }
 }
 
@@ -282,7 +283,7 @@ export async function startSyncService(token: string, workspaceId: string) {
     await refreshOperationalData();
     await syncPendingRecords();
   } catch {
-    emit({ status: navigator.onLine ? "error" : "offline", dataSource: "cache", pendingCount: await getPendingCount(), message: "Showing cached labour" });
+    emit({ status: navigator.onLine ? "error" : "offline", dataSource: "cache", pendingCount: await getPendingCount(), message: i18n.t("workforcePage.cachedLoadingLabour") });
   }
 }
 

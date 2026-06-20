@@ -64,7 +64,7 @@ test("CORS uses ALLOWED_ORIGINS and Sync Now backs off without uploading an empt
   assert.match(app, /methods: corsMethods,[\s\S]*allowedHeaders: corsHeaders,[\s\S]*credentials: false/);
   assert.match(sync, /const maxAutomaticAttempts = 3;/);
   assert.match(sync, /nextAttemptAt: new Date\(Date\.now\(\) \+ 1_000 \* 2 \*\* \(attempts - 1\)\)\.toISOString\(\)/);
-  assert.match(sync, /if \(\(await getPendingCount\(\)\) === 0\) \{[\s\S]*await refreshOperationalData\(\{ notifySuccess: false \}\);[\s\S]*notify\("Database synchronized\."\)/);
+  assert.match(sync, /if \(\(await getPendingCount\(\)\) === 0\) \{[\s\S]*await refreshOperationalData\(\{ notifySuccess: false \}\);[\s\S]*notify\(i18n\.t\("sync\.databaseSynchronized"\)\)/);
 });
 
 test("attendance marking updates local UI immediately, reuses a daily record, and toggles the active status off", async () => {
@@ -139,9 +139,9 @@ test("attendance labour directory loads cache-first and keeps cached data during
   assert.match(sync, /dataSource: "cache"/);
   assert.match(sync, /await cacheRecord\(item\.entity, item\.record, false,[\s\S]*if \(result\.snapshotConfirmed && result\.farmId === context\.farmId && result\.seasonId === context\.seasonId\) \{\s+await pruneSynchronizedCache\(result\.records\);/);
   assert.match(sync, /item\.farmId === context!\.farmId && \(item\.seasonId === context!\.seasonId \|\| item\.seasonId == null\)/);
-  assert.match(modulePage, /Offline mode: showing cached labour\. Attendance will sync later\./);
-  assert.match(modulePage, /No labour list is saved on this device\. Connect once to sync labour\./);
-  assert.match(modulePage, /Last synced: \{readableSyncTime\(sync\.lastSyncTime\)\}/);
+  assert.match(modulePage, /t\("workforcePage\.offlineCachedLabour"\)/);
+  assert.match(modulePage, /t\("workforcePage\.noCachedLabour"\)/);
+  assert.match(modulePage, /t\("workforcePage\.lastSynced"\)[\s\S]*readableSyncTime\(sync\.lastSyncTime\)/);
 });
 
 test("mobile styles contain page overflow and keep navigation scrollable", async () => {
@@ -174,7 +174,7 @@ test("reports module stays compact and responsive across desktop and mobile view
 test("attendance reports provide printable register and structured exports from the reports module", async () => {
   const reports = await source("web/src/pages/workspace/Reports.tsx");
   const styles = await source("web/src/styles.css");
-  assert.match(reports, /title="Attendance Register"/);
+  assert.match(reports, /title=\{t\("reportsPage\.attendanceRegister"\)\}/);
   assert.match(reports, /t\("reportsPage\.exportCsv"\)/);
   assert.match(reports, /t\("reportsPage\.registerOnlyPrint"\)/);
   assert.match(reports, /const attendanceMark = \(status\?: Attendance\["status"\]\)/);
@@ -200,7 +200,7 @@ test("financial cards and expense category totals use readable tokenized surface
   const format = await source("web/src/lib/format.ts");
   const styles = await source("web/src/styles.css");
   assert.match(format, /minimumFractionDigits: 0,[\s\S]*maximumFractionDigits: 2/);
-  assert.match(modulePage, /<header><h3>\{category\}<\/h3><strong>\{money\(categoryTotal\)\}<\/strong><\/header>/);
+  assert.match(modulePage, /<header><h3>\{translateExpenseCategory\(category\)\}<\/h3><strong>\{money\(categoryTotal\)\}<\/strong><\/header>/);
   assert.match(modulePage, /<b>\{t\("expensesPage\.categoryTotal"\)\} <span>\{money\(categoryTotal\)\}<\/span><\/b>/);
   assert.match(styles, /--text-primary: var\(--text\);[\s\S]*--surface-muted: var\(--surface-soft\);[\s\S]*--accent: var\(--brand-secondary\);/);
   assert.match(styles, /\.summary-card \{[\s\S]*background: var\(--surface\);[\s\S]*border: 1px solid var\(--border\);[\s\S]*color: var\(--text-primary\);/);

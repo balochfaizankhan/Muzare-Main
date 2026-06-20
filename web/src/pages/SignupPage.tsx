@@ -2,6 +2,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Building2, CheckCircle2, ClipboardCheck, LockKeyhole, MailCheck, ShieldCheck, Sprout } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { z } from "zod";
 import { LanguageSwitch } from "../components/LanguageSwitch";
@@ -18,6 +19,7 @@ const schema = z.object({
 type SignupFields = z.infer<typeof schema>;
 
 export function SignupPage() {
+  const { t } = useTranslation();
   const [submitted, setSubmitted] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +35,7 @@ export function SignupPage() {
   const submit = async (fields: SignupFields) => {
     setError(null);
     const result = await signup(fields).catch((caught) => {
-      setError(caught instanceof Error ? caught.message : "Unable to submit request.");
+      setError(caught instanceof Error ? caught.message : t("authSignup.submitFailed"));
       return null;
     });
     if (!result) return;
@@ -49,30 +51,30 @@ export function SignupPage() {
       <section className="onboarding-shell">
         <div className="onboarding-story">
           <div className="onboarding-story__copy">
-            <span className="auth-kicker">Workspace onboarding</span>
-            <h1>Start with a clean farm workspace</h1>
-            <p>Submit your operation details once. An administrator reviews the request, then your approved workspace opens with isolated data.</p>
+            <span className="auth-kicker">{t("authSignup.kicker")}</span>
+            <h1>{t("authSignup.title")}</h1>
+            <p>{t("authSignup.description")}</p>
           </div>
-          <div className="journey-steps" aria-label="Onboarding journey">
+          <div className="journey-steps" aria-label={t("authSignup.journeyLabel")}>
             <article>
               <Building2 size={18} />
               <div>
-                <strong>Create workspace</strong>
-                <span>Tell us the farm operation this account will manage.</span>
+                <strong>{t("authSignup.steps.createWorkspace.title")}</strong>
+                <span>{t("authSignup.steps.createWorkspace.description")}</span>
               </div>
             </article>
             <article>
               <ShieldCheck size={18} />
               <div>
-                <strong>Admin approval</strong>
-                <span>An administrator reviews every signup before access is granted.</span>
+                <strong>{t("authSignup.steps.adminApproval.title")}</strong>
+                <span>{t("authSignup.steps.adminApproval.description")}</span>
               </div>
             </article>
             <article>
               <Sprout size={18} />
               <div>
-                <strong>Start clean</strong>
-                <span>Your workspace data stays separated from every other farm.</span>
+                <strong>{t("authSignup.steps.startClean.title")}</strong>
+                <span>{t("authSignup.steps.startClean.description")}</span>
               </div>
             </article>
           </div>
@@ -82,56 +84,56 @@ export function SignupPage() {
           {submitted ? (
             <div className="approval-state">
               <CheckCircle2 size={38} />
-              <h1>Request received</h1>
-              <p>{message ?? "Your workspace request is waiting for administrator approval."}</p>
-              <Link className="primary-link" to="/login">Back to login</Link>
+              <h1>{t("authSignup.requestReceived")}</h1>
+              <p>{message ?? t("authSignup.requestPending")}</p>
+              <Link className="primary-link" to="/login">{t("authSignup.backToLogin")}</Link>
             </div>
           ) : (
             <>
               <div className="onboarding-heading">
                 <ClipboardCheck size={22} />
                 <div>
-                  <h1>Request a workspace</h1>
-                  <p>No payment needed. We will keep access pending until an administrator approves it.</p>
+                  <h1>{t("authSignup.requestWorkspace")}</h1>
+                  <p>{t("authSignup.requestWorkspaceDescription")}</p>
                 </div>
               </div>
               <div className="auth-note auth-note--signup">
                 <MailCheck size={16} />
-                <span>Use an email your administrator can recognize for faster approval.</span>
+                <span>{t("authSignup.emailHint")}</span>
               </div>
               <form className="module-form onboarding-form" onSubmit={handleSubmit(submit)}>
                 <label>
-                  <span>Workspace name</span>
-                  <input placeholder="Example: Green Valley Farms" {...register("workspaceName")} />
-                  {errors.workspaceName && <small>{errors.workspaceName.message}</small>}
+                  <span>{t("authSignup.workspaceName")}</span>
+                  <input placeholder={t("authSignup.workspaceNamePlaceholder")} {...register("workspaceName")} />
+                  {errors.workspaceName && <small>{t("authSignup.validation.workspaceNameRequired")}</small>}
                 </label>
                 <label>
-                  <span>Your name</span>
-                  <input placeholder="Owner or manager name" {...register("ownerName")} />
-                  {errors.ownerName && <small>{errors.ownerName.message}</small>}
+                  <span>{t("authSignup.ownerName")}</span>
+                  <input placeholder={t("authSignup.ownerNamePlaceholder")} {...register("ownerName")} />
+                  {errors.ownerName && <small>{t("authSignup.validation.ownerNameRequired")}</small>}
                 </label>
                 <label>
-                  <span>Email</span>
-                  <input type="email" autoComplete="email" placeholder="you@farm.com" {...register("email")} />
-                  {errors.email && <small>{errors.email.message}</small>}
+                  <span>{t("email")}</span>
+                  <input type="email" autoComplete="email" placeholder={t("auth.emailPlaceholder")} {...register("email")} />
+                  {errors.email && <small>{t("validation.validEmail")}</small>}
                 </label>
                 <label>
-                  <span>Phone</span>
-                  <input placeholder="+966..." {...register("phone")} />
+                  <span>{t("workspaceTeam.phone")}</span>
+                  <input placeholder={t("authSignup.phonePlaceholder")} {...register("phone")} />
                 </label>
                 <label>
-                  <span>Password</span>
+                  <span>{t("password")}</span>
                   <input type="password" autoComplete="new-password" {...register("password")} />
-                  {errors.password && <small>{errors.password.message}</small>}
+                  {errors.password && <small>{t("authSignup.validation.passwordMin")}</small>}
                 </label>
                 <div className="password-hint">
                   <LockKeyhole size={15} />
-                  <span>Use at least 8 characters. You will sign in after approval.</span>
+                  <span>{t("authSignup.passwordHint")}</span>
                 </div>
                 {error && <p className="error">{error}</p>}
-                <button type="submit" disabled={isSubmitting}>{isSubmitting ? "Submitting..." : "Submit for approval"}</button>
+                <button type="submit" disabled={isSubmitting}>{isSubmitting ? t("authSignup.submitting") : t("authSignup.submitForApproval")}</button>
               </form>
-              <p className="auth-switch">Already approved? <Link to="/login">Sign in</Link></p>
+              <p className="auth-switch">{t("authSignup.alreadyApproved")} <Link to="/login">{t("signIn")}</Link></p>
             </>
           )}
         </section>

@@ -1,5 +1,6 @@
 import { ChevronDown, X } from "lucide-react";
 import { type KeyboardEvent, type SelectHTMLAttributes } from "react";
+import { useTranslation } from "react-i18next";
 
 type ClearableSelectProps = Omit<SelectHTMLAttributes<HTMLSelectElement>, "onChange" | "value"> & {
   value: string;
@@ -15,13 +16,14 @@ export function ClearableSelect({
   onChange,
   clearValue = "",
   onClear,
-  clearLabel = "Clear selection",
+  clearLabel,
   allowClear = true,
   className,
   children,
   disabled,
   ...rest
 }: ClearableSelectProps) {
+  const { t } = useTranslation();
   const clear = () => {
     if (!value || disabled) return;
     onChange(clearValue);
@@ -52,8 +54,8 @@ export function ClearableSelect({
           <button
             type="button"
             className="clearable-select__clear"
-            aria-label={clearLabel}
-            title={clearLabel}
+            aria-label={clearLabel || t("common.clearSelection")}
+            title={clearLabel || t("common.clearSelection")}
             onClick={clear}
             disabled={disabled}
           >

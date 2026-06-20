@@ -87,10 +87,10 @@ export default function App() {
       <Route path="workspaces" element={<Workspaces />} />
       <Route path="suspended" element={<Workspaces defaultStatusFilter="suspended" />} />
       <Route path="users" element={<Users />} />
-      <Route path="subscriptions" element={<AdminSection title={t("layout.subscriptions")} description={t("adminSections.subscriptionsDescription")} emptyDescription="Subscription management will surface platform plans and renewals here when billing workflows are enabled." />} />
+      <Route path="subscriptions" element={<AdminSection title={t("layout.subscriptions")} description={t("adminSections.subscriptionsDescription")} emptyDescription={t("adminSections.subscriptionsDescription")} />} />
       <Route path="billing" element={<Billing />} />
       <Route path="audit-logs" element={<AuditLogs />} />
-      <Route path="reports" element={<AdminSection title={t("layout.reports")} description={t("adminSections.reportsDescription")} emptyDescription="Platform reports will appear here once cross-workspace analytics are enabled." />} />
+      <Route path="reports" element={<AdminSection title={t("layout.reports")} description={t("adminSections.reportsDescription")} emptyDescription={t("adminSections.reportsDescription")} />} />
       <Route path="settings" element={<Settings />} />
       <Route path="approvals" element={<AdminApprovalsPage />} />
     </Route>

@@ -6,13 +6,13 @@ import { Brand } from "../components/Brand";
 import { LanguageSwitch } from "../components/LanguageSwitch";
 
 const nav = [
-  ["/admin/dashboard", "Overview", LayoutDashboard],
-  ["/admin/users", "Users", Users],
-  ["/admin/workspaces", "Workspaces", Warehouse],
-  ["/admin/approvals", "Approvals", UserRoundPlus],
-  ["/admin/suspended", "Suspended", ShieldAlert],
-  ["/admin/audit-logs", "Audit Logs", FileClock],
-  ["/admin/settings", "Settings", Settings],
+  ["/admin/dashboard", "layout.dashboard", LayoutDashboard],
+  ["/admin/users", "layout.users", Users],
+  ["/admin/workspaces", "layout.workspaces", Warehouse],
+  ["/admin/approvals", "adminApprovals.title", UserRoundPlus],
+  ["/admin/suspended", "common.suspended", ShieldAlert],
+  ["/admin/audit-logs", "layout.auditLogs", FileClock],
+  ["/admin/settings", "layout.settings", Settings],
 ] as const;
 
 export function AdminLayout() {
@@ -23,7 +23,7 @@ export function AdminLayout() {
       <aside className="app-sidebar">
         <Brand compact />
         <span className="shell-label">{t("layout.platformConsole")}</span>
-        <nav>{nav.map(([to, label, Icon]) => <NavLink to={to} key={to}><Icon size={17} />{label}</NavLink>)}</nav>
+        <nav>{nav.map(([to, label, Icon]) => <NavLink to={to} key={to}><Icon size={17} />{t(label)}</NavLink>)}</nav>
       </aside>
       <div className="app-shell__body">
         <header className="shell-header">

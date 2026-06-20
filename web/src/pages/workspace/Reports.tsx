@@ -33,6 +33,7 @@ import {
   type Voucher,
 } from "../../lib/offline-db";
 import { deleteOperationalRecord } from "../../services/syncService";
+import i18n from "../../i18n";
 
 type Report = "attendance" | "advances" | "expenditures" | "sales" | "dispatch" | "partner-position" | "account-ledger";
 type SortOrder = "desc" | "asc";
@@ -91,7 +92,7 @@ const money = formatMoney;
 const inRange = (date: string, from: string, to: string) => (!from || date >= from) && (!to || date <= to);
 const attendanceMark = (status?: Attendance["status"]) => status === "present" ? "P" : status === "half_day" ? "H" : status === "absent" ? "A" : "-";
 const formatShortDate = (date: string) => date.length >= 10 ? `${date.slice(8, 10)}/${date.slice(5, 7)}` : date;
-const formatRangeLabel = (from: string, to: string) => from && to ? `${from} - ${to}` : from ? `From ${from}` : to ? `To ${to}` : "All dates";
+const formatRangeLabel = (from: string, to: string) => from && to ? `${from} - ${to}` : from ? `${i18n.t("reportsPage.fromDate")} ${from}` : to ? `${i18n.t("reportsPage.toDate")} ${to}` : i18n.t("reportsPage.allDates");
 const normalizeText = (value?: string | null) => value?.trim() ?? "";
 const dispatchReference = (dispatch: Pick<Dispatch, "dispatchNumber" | "id" | "date">) => normalizeText(dispatch.dispatchNumber) || `DSP-${dispatch.id.slice(0, 8).toUpperCase()}`;
 const invoiceReference = (sale: Pick<Sale, "invoiceNumber" | "id">) => normalizeText(sale.invoiceNumber) || "-";
@@ -342,7 +343,7 @@ export function Reports() {
     await deleteOperationalRecord("sale", sale);
     setSales((current) => current.filter((item) => item.id !== sale.id));
     setSelectedSaleRecord(null);
-    window.dispatchEvent(new CustomEvent("muzare-toast", { detail: "Sale deleted successfully." }));
+    window.dispatchEvent(new CustomEvent("muzare-toast", { detail: t("reportsPage.saleDeletedSuccessfully") }));
   };
 
   useEffect(() => {
@@ -828,7 +829,7 @@ export function Reports() {
 
   const exportAttendanceRegister = () => {
     const rows = [
-      ["Labour Name", ...attendanceDates.map(formatShortDate), "Total Days", "Wage Rate", "Gross Wages"],
+      [t("reportsPage.labourName"), ...attendanceDates.map(formatShortDate), t("reportsPage.totalDays"), t("reportsPage.wageRate"), t("reportsPage.grossWages")],
       ...attendanceSummary.map((item) => [
         item.labourer.name,
         ...attendanceDates.map((date) => attendanceMark(item.records.find((record) => record.date === date)?.status)),
@@ -855,15 +856,15 @@ export function Reports() {
     const categoryTotals = [...new Set(voucherRows.map((item) => item.category))].map((name) => [translateExpenseCategory(name), voucherRows.filter((item) => item.category === name).reduce((sum, item) => sum + item.amount, 0)]);
     const accountTotals = [...new Set(voucherRows.map((item) => accountName(item.accountId)))].map((name) => [name, voucherRows.filter((item) => accountName(item.accountId) === name).reduce((sum, item) => sum + item.amount, 0)]);
     downloadCsv("expense-summary.csv", [
-      ["Date Range", rangeLabel],
+      [t("reportsPage.dateRange"), rangeLabel],
       [],
-      ["Category", "Total"],
+      [t("reportsPage.category"), t("reportsPage.total")],
       ...categoryTotals,
       [],
-      ["Account", "Total"],
+      [t("reportsPage.account"), t("reportsPage.total")],
       ...accountTotals,
       [],
-      ["Total", voucherRows.reduce((sum, item) => sum + item.amount, 0)],
+      [t("reportsPage.total"), voucherRows.reduce((sum, item) => sum + item.amount, 0)],
     ]);
   };
   const exportExpenseLog = () => downloadCsv("expense-log.csv", [
@@ -960,7 +961,7 @@ export function Reports() {
               onChange={setTo}
             />
           </div>
-          <div className="reports-range-actions" aria-label="Quick date ranges">
+          <div className="reports-range-actions" aria-label={t("reportsPage.quickDateRanges")}>
             <button type="button" onClick={applyTodayRange}>{t("reportsPage.quickToday")}</button>
             <button type="button" onClick={applyWeekRange}>{t("reportsPage.quickThisWeek")}</button>
             <button type="button" onClick={applyMonthRange}>{t("reportsPage.quickThisMonth")}</button>
@@ -996,7 +997,7 @@ export function Reports() {
               <option value="">{t("reportsPage.allAccounts")}</option>
               {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
             </ClearableSelect>
-            {views.advances === "log" && <ClearableSelect clearValue="desc" aria-label="Advance sort" value={advanceSort} onChange={(value) => setAdvanceSort(value as SortOrder)}>
+            {views.advances === "log" && <ClearableSelect clearValue="desc" aria-label={t("reportsPage.advanceSort")} value={advanceSort} onChange={(value) => setAdvanceSort(value as SortOrder)}>
               <option value="desc">{t("advancesPage.newestFirst")}</option>
               <option value="asc">{t("advancesPage.oldestFirst")}</option>
             </ClearableSelect>}
@@ -1013,7 +1014,7 @@ export function Reports() {
               <option value="">{t("reportsPage.allCategories")}</option>
               {voucherCategories.map((item) => <option key={item} value={item}>{translateExpenseCategory(item)}</option>)}
             </ClearableSelect>
-            {views.expenditures === "log" && <ClearableSelect clearValue="desc" aria-label="Expense sort" value={expenseSort} onChange={(value) => setExpenseSort(value as SortOrder)}>
+            {views.expenditures === "log" && <ClearableSelect clearValue="desc" aria-label={t("reportsPage.expenseSort")} value={expenseSort} onChange={(value) => setExpenseSort(value as SortOrder)}>
               <option value="desc">{t("advancesPage.newestFirst")}</option>
               <option value="asc">{t("advancesPage.oldestFirst")}</option>
             </ClearableSelect>}
@@ -1022,8 +1023,8 @@ export function Reports() {
           </>}
 
           {report === "sales" && <>
-            <ClearableSelect aria-label="Sale type" clearValue="all" value={saleTypeFilter} onChange={(value) => setSaleTypeFilter(value as SalesTypeFilter)}>
-              <option value="all">All sale types</option>
+            <ClearableSelect aria-label={t("reportsPage.saleType")} clearValue="all" value={saleTypeFilter} onChange={(value) => setSaleTypeFilter(value as SalesTypeFilter)}>
+              <option value="all">{t("reportsPage.allSaleTypes")}</option>
               <option value="dispatch_sale">{translateSaleType("dispatch_sale")}</option>
               <option value="farm_direct_sale">{translateSaleType("farm_direct_sale")}</option>
             </ClearableSelect>
@@ -1076,10 +1077,10 @@ export function Reports() {
 
       {report === "attendance" && <>
         <section className="record-panel reports-subtabs">
-          <button className={views.attendance === "register" ? "is-active" : ""} type="button" onClick={() => switchView("attendance", "register")}>Register</button>
-          <button className={views.attendance === "summary" ? "is-active" : ""} type="button" onClick={() => switchView("attendance", "summary")}>Summary</button>
+          <button className={views.attendance === "register" ? "is-active" : ""} type="button" onClick={() => switchView("attendance", "register")}>{t("reportsPage.register")}</button>
+          <button className={views.attendance === "summary" ? "is-active" : ""} type="button" onClick={() => switchView("attendance", "summary")}>{t("reportsPage.summary")}</button>
         </section>
-        {views.attendance === "register" && <ReportShell title="Attendance Register" rangeLabel={rangeLabel} sectionId="attendance-register" onPrint={() => printSection("attendance-register-print")} onExport={exportAttendanceRegister}>
+        {views.attendance === "register" && <ReportShell title={t("reportsPage.attendanceRegister")} rangeLabel={rangeLabel} sectionId="attendance-register" onPrint={() => printSection("attendance-register-print")} onExport={exportAttendanceRegister}>
           <Kpis values={[[t("reportsPage.labour"), attendanceSummary.length], [t("reportsPage.present"), attendanceRows.filter((item) => item.status === "present").length], [t("reportsPage.halfDay"), attendanceRows.filter((item) => item.status === "half_day").length], [t("reportsPage.absent"), attendanceRows.filter((item) => item.status === "absent").length], [t("reportsPage.totalWages"), money(attendanceSummary.reduce((sum, item) => sum + item.wage, 0))]]} />
           <div className="reports-register-shell">
             <p>{t("reportsPage.registerOnlyPrint")}</p>
@@ -1093,7 +1094,7 @@ export function Reports() {
         <section className="record-panel reports-print-section reports-print-only" data-print-section="attendance-register-print" aria-hidden="true">
           <header className="reports-view-header">
             <div>
-              <h2>Attendance Register</h2>
+              <h2>{t("reportsPage.attendanceRegister")}</h2>
               <p>{rangeLabel}</p>
             </div>
           </header>
@@ -1104,8 +1105,8 @@ export function Reports() {
                   <th>{t("reportsPage.labour")}</th>
                   {attendanceDates.map((date) => <th key={date}>{formatShortDate(date)}</th>)}
                   <th>{t("reportsPage.payableDays")}</th>
-                  <th>Wage Rate</th>
-                  <th>{t("reportsPage.totalWages")}</th>
+                  <th>{t("reportsPage.wageRate")}</th>
+                  <th>{t("reportsPage.grossWages")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1128,8 +1129,8 @@ export function Reports() {
 
       {report === "advances" && <>
         <section className="record-panel reports-subtabs">
-          <button className={views.advances === "summary" ? "is-active" : ""} type="button" onClick={() => switchView("advances", "summary")}>Summary</button>
-          <button className={views.advances === "log" ? "is-active" : ""} type="button" onClick={() => switchView("advances", "log")}>Log</button>
+          <button className={views.advances === "summary" ? "is-active" : ""} type="button" onClick={() => switchView("advances", "summary")}>{t("reportsPage.summary")}</button>
+          <button className={views.advances === "log" ? "is-active" : ""} type="button" onClick={() => switchView("advances", "log")}>{t("reportsPage.log")}</button>
         </section>
         {views.advances === "summary" && <ReportShell title={t("reportsPage.advanceSummary")} rangeLabel={rangeLabel} sectionId="advance-summary" onPrint={() => printSection("advance-summary")} onExport={exportAdvanceSummary}>
           <Kpis values={[[t("reportsPage.totalAdvances"), money(advanceRows.reduce((sum, item) => sum + item.amount, 0))], [t("reportsPage.transactions"), advanceRows.length], [t("reportsPage.labour"), advanceSummary.length]]} />
@@ -1142,8 +1143,8 @@ export function Reports() {
 
       {report === "expenditures" && <>
         <section className="record-panel reports-subtabs">
-          <button className={views.expenditures === "summary" ? "is-active" : ""} type="button" onClick={() => switchView("expenditures", "summary")}>Summary</button>
-          <button className={views.expenditures === "log" ? "is-active" : ""} type="button" onClick={() => switchView("expenditures", "log")}>Log</button>
+          <button className={views.expenditures === "summary" ? "is-active" : ""} type="button" onClick={() => switchView("expenditures", "summary")}>{t("reportsPage.summary")}</button>
+          <button className={views.expenditures === "log" ? "is-active" : ""} type="button" onClick={() => switchView("expenditures", "log")}>{t("reportsPage.log")}</button>
         </section>
         {views.expenditures === "summary" && <ReportShell title={t("reportsPage.expenseSummary")} rangeLabel={rangeLabel} sectionId="expense-summary" onPrint={() => printSection("expense-summary")} onExport={exportExpenseSummary}>
           <Kpis values={[[t("reportsPage.totalExpenses"), money(voucherRows.reduce((sum, item) => sum + item.amount, 0))], [t("reportsPage.vouchers"), new Set(voucherRows.map((item) => item.voucherNumber)).size], [t("reportsPage.categories"), new Set(voucherRows.map((item) => item.category)).size], [t("reportsPage.account"), new Set(voucherRows.map((item) => item.accountId)).size]]} />
@@ -1215,8 +1216,8 @@ export function Reports() {
 
       {report === "partner-position" && <>
         <section className="record-panel reports-subtabs">
-          <button className={views["partner-position"] === "position" ? "is-active" : ""} type="button" onClick={() => switchView("partner-position", "position")}>Position</button>
-          <button className={views["partner-position"] === "ledger" ? "is-active" : ""} type="button" onClick={() => switchView("partner-position", "ledger")}>Ledger</button>
+          <button className={views["partner-position"] === "position" ? "is-active" : ""} type="button" onClick={() => switchView("partner-position", "position")}>{t("reportsPage.position")}</button>
+          <button className={views["partner-position"] === "ledger" ? "is-active" : ""} type="button" onClick={() => switchView("partner-position", "ledger")}>{t("reportsPage.ledger")}</button>
         </section>
         {views["partner-position"] === "position" && <ReportShell title={t("reportsPage.partnerPositionTitle")} rangeLabel={rangeLabel} sectionId="partner-position" onPrint={() => printSection("partner-position")} onExport={exportPartnerPosition}>
           <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.partner"), t("reportsPage.capitalInjected"), t("reportsPage.directExpensesPaid"), t("reportsPage.transfersOut"), t("reportsPage.transfersIn"), t("reportsPage.moneyReturned"), t("reportsPage.currentPartnerBalance")]} rows={partnerLiabilityPositions.map((item) => ({ id: item.key, title: item.name, value: money(item.currentPartnerBalance), meta: getPartnerBalanceState(item.currentPartnerBalance) === "partner_holds_business_money" ? t("reportsPage.partnerHoldsBusinessMoney") : t("reportsPage.farmOwesPartner"), cells: [item.name, money(item.capitalInjected), money(item.directExpensesPaid), money(item.transfersOut), money(item.transfersIn), money(item.moneyReturned), money(item.currentPartnerBalance)], details: [[t("reportsPage.openingBalance"), money(item.openingBalance)], [t("reportsPage.adjustments"), money(item.adjustments)], [t("reportsPage.directVoucherExpensesPaid"), money(item.directVoucherExpensesPaid)], [t("reportsPage.directLabourAdvancesPaid"), money(item.directLabourAdvancesPaid)]] }))} />
@@ -1228,8 +1229,8 @@ export function Reports() {
 
       {report === "account-ledger" && <>
         <section className="record-panel reports-subtabs">
-          <button className={views["account-ledger"] === "balances" ? "is-active" : ""} type="button" onClick={() => switchView("account-ledger", "balances")}>Balances</button>
-          <button className={views["account-ledger"] === "ledger" ? "is-active" : ""} type="button" onClick={() => switchView("account-ledger", "ledger")}>Ledger</button>
+          <button className={views["account-ledger"] === "balances" ? "is-active" : ""} type="button" onClick={() => switchView("account-ledger", "balances")}>{t("reportsPage.balances")}</button>
+          <button className={views["account-ledger"] === "ledger" ? "is-active" : ""} type="button" onClick={() => switchView("account-ledger", "ledger")}>{t("reportsPage.ledger")}</button>
         </section>
         {views["account-ledger"] === "balances" && <ReportShell title={t("reportsPage.accountBalances")} rangeLabel={rangeLabel} sectionId="account-balances" onPrint={() => printSection("account-balances")} onExport={exportAccountBalances}>
           <div className="reports-kpis">{positions.map((item) => <article className="account-card-clickable" key={item.account.id} role="button" tabIndex={0} onClick={() => openAccountLedger(item.account.id)} onKeyDown={(event) => {

@@ -48,7 +48,7 @@ export function WorkspaceTeam() {
     mutationFn: () => inviteWorkspaceMember(token!, workspaceId, invite),
     onSuccess: async (result) => {
       setShareToken(result.invitationToken ?? "");
-      setInviteMessage(result.alreadyHasAccess ? "This user already has access. Open permissions to review or update their role." : "");
+      setInviteMessage(result.alreadyHasAccess ? t("workspaceTeam.alreadyHasAccess") : "");
       setInvite(blankInvite);
       await refresh();
     },
@@ -94,7 +94,7 @@ export function WorkspaceTeam() {
       {team.data && <section className="record-panel"><h2>{t("workspaceTeam.members")}</h2><div className="team-list">
         {team.data.members.map((member) => <article className="team-card" key={member.id}>
           <div>
-            <strong>{member.displayName || member.name || member.email || "Unnamed member"}</strong>
+            <strong>{member.displayName || member.name || member.email || t("workspaceTeam.unnamedMember")}</strong>
             <span>{member.email}{member.phone ? ` | ${member.phone}` : ""}</span>
             <small>
               {t(`workspaceTeam.roles.${member.role}`)} | {member.hasWorkspaceAccess ? t("common.active") : (member.userStatus === "suspended" ? t("common.suspended") : t("common.inactive"))}

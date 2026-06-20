@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 
-export function AdminSection({ title, description, emptyTitle = "No records yet", emptyDescription }: {
+export function AdminSection({ title, description, emptyTitle, emptyDescription }: {
   title: string;
   description: string;
   emptyTitle?: string;
@@ -10,12 +10,12 @@ export function AdminSection({ title, description, emptyTitle = "No records yet"
   return <main className="shell-page">
     <section className="shell-page__intro">
       <span className="eyebrow">{t("layout.platformAdministrationEyebrow")}</span>
-      <h1>{title}</h1>
-      <p>{description}</p>
+      <h1>{t(title)}</h1>
+      <p>{t(description)}</p>
     </section>
     <section className="panel admin-empty-panel">
-      <h2>{emptyTitle}</h2>
-      <p>{emptyDescription ?? description}</p>
+      <h2>{t(emptyTitle || "adminShared.noRecordsYet")}</h2>
+      <p>{t(emptyDescription ?? description)}</p>
     </section>
   </main>;
 }

@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc -b && vite build",
     "check": "tsc -b --pretty false",
+    "i18n:audit": "node ./scripts/i18n-audit.mjs",
     "dev": "vite",
     "preview": "vite preview"
   },

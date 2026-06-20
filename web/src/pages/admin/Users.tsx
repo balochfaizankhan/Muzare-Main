@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, ShieldCheck, UserX, X } from "lucide-react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../../auth/AuthProvider";
 import { fetchAdminUser, fetchAdminUsers, updateAdminUserStatus } from "../../lib/api";
 import { formatDate, formatNumber } from "../../lib/format";
 
 export function Users() {
+  const { t } = useTranslation();
   const { user, token } = useAuth();
   const canManage = user?.platformRole === "platform_admin";
   const client = useQueryClient();
@@ -37,37 +39,37 @@ export function Users() {
 
   return <main className="shell-page">
     <section className="shell-page__intro">
-      <span className="eyebrow">Platform administration</span>
-      <h1>Users</h1>
-      <p>Review platform users, membership counts, last login activity, and account status from one place.</p>
+      <span className="eyebrow">{t("layout.platformAdministrationEyebrow")}</span>
+      <h1>{t("adminUsers.title")}</h1>
+      <p>{t("adminUsers.description")}</p>
     </section>
 
     <section className="admin-metric-grid">
-      <article><ShieldCheck size={19} /><span>Total users</span><strong>{formatNumber(users.length)}</strong></article>
-      <article><ShieldCheck size={19} /><span>Active users</span><strong>{formatNumber(activeUsers)}</strong></article>
-      <article><UserX size={19} /><span>Inactive users</span><strong>{formatNumber(users.length - activeUsers)}</strong></article>
+      <article><ShieldCheck size={19} /><span>{t("adminUsers.metrics.totalUsers")}</span><strong>{formatNumber(users.length)}</strong></article>
+      <article><ShieldCheck size={19} /><span>{t("adminUsers.metrics.activeUsers")}</span><strong>{formatNumber(activeUsers)}</strong></article>
+      <article><UserX size={19} /><span>{t("adminUsers.metrics.inactiveUsers")}</span><strong>{formatNumber(users.length - activeUsers)}</strong></article>
     </section>
 
     <section className="panel">
       <div className="panel-heading">
         <div>
-          <h2>Platform users</h2>
-          <p>Users, account status, last login, and how many workspaces each person belongs to.</p>
+          <h2>{t("adminUsers.platformUsers")}</h2>
+          <p>{t("adminUsers.platformUsersDescription")}</p>
         </div>
       </div>
 
       {query.isError && <p className="error">{query.error.message}</p>}
-      {!users.length ? <div className="admin-empty-panel"><h2>No users yet</h2><p>This page will show platform users once accounts are created.</p></div> : <div className="admin-table-card">
+      {!users.length ? <div className="admin-empty-panel"><h2>{t("adminUsers.emptyTitle")}</h2><p>{t("adminUsers.emptyDescription")}</p></div> : <div className="admin-table-card">
         <table className="admin-table">
           <thead>
             <tr>
-              <th>User</th>
-              <th>Role</th>
-              <th>Workspaces</th>
-              <th>Status</th>
-              <th>Created</th>
-              <th>Last login</th>
-              <th>Actions</th>
+              <th>{t("adminUsers.columns.user")}</th>
+              <th>{t("adminUsers.columns.role")}</th>
+              <th>{t("adminUsers.columns.workspaces")}</th>
+              <th>{t("common.status")}</th>
+              <th>{t("adminUsers.columns.created")}</th>
+              <th>{t("adminUsers.columns.lastLogin")}</th>
+              <th>{t("reportsPage.actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -76,16 +78,16 @@ export function Users() {
                 <strong>{item.displayName ?? item.email}</strong>
                 <span>{item.email}</span>
               </td>
-              <td>{item.platformRole ?? "workspace user"}</td>
+              <td>{item.platformRole ?? t("adminUsers.workspaceUser")}</td>
               <td>{formatNumber(item.workspaceCount)}</td>
-              <td><span className={`status-badge status-badge--${item.active ? "approved" : "suspended"}`}>{item.active ? "active" : item.status}</span></td>
+              <td><span className={`status-badge status-badge--${item.active ? "approved" : "suspended"}`}>{item.active ? t("common.active") : item.status}</span></td>
               <td>{formatDate(item.createdAt, { dateStyle: "medium" })}</td>
-              <td>{item.lastLoginAt ? formatDate(item.lastLoginAt, { dateStyle: "medium", timeStyle: "short" }) : "Never"}</td>
+              <td>{item.lastLoginAt ? formatDate(item.lastLoginAt, { dateStyle: "medium", timeStyle: "short" }) : t("adminUsers.never")}</td>
               <td>
                 <div className="record-list__actions admin-row-actions">
-                  <button type="button" onClick={() => setSelectedUserId(item.id)}><Eye size={15} />View</button>
-                  {canManage && item.active && <button type="button" className="danger-button" onClick={() => changeStatus.mutate({ userId: item.id, active: false })}>Deactivate</button>}
-                  {canManage && !item.active && <button type="button" onClick={() => changeStatus.mutate({ userId: item.id, active: true })}>Activate</button>}
+                  <button type="button" onClick={() => setSelectedUserId(item.id)}><Eye size={15} />{t("common.view")}</button>
+                  {canManage && item.active && <button type="button" className="danger-button" onClick={() => changeStatus.mutate({ userId: item.id, active: false })}>{t("adminUsers.deactivate")}</button>}
+                  {canManage && !item.active && <button type="button" onClick={() => changeStatus.mutate({ userId: item.id, active: true })}>{t("adminUsers.activate")}</button>}
                 </div>
               </td>
             </tr>)}
@@ -95,11 +97,11 @@ export function Users() {
     </section>
 
     {selectedUserId && <div className="worker-dialog-backdrop worker-action-backdrop" role="presentation" onClick={() => setSelectedUserId(null)}>
-      <section className="worker-action-dialog admin-detail-dialog" role="dialog" aria-modal="true" aria-label="User details" onClick={(event) => event.stopPropagation()}>
+      <section className="worker-action-dialog admin-detail-dialog" role="dialog" aria-modal="true" aria-label={t("adminUsers.userDetails")} onClick={(event) => event.stopPropagation()}>
         <header>
           <div>
-            <h2>{detail.data?.user?.displayName ?? detail.data?.user?.email ?? "User details"}</h2>
-            <p>{detail.data?.user?.email ?? "Loading user profile"}</p>
+            <h2>{detail.data?.user?.displayName ?? detail.data?.user?.email ?? t("adminUsers.userDetails")}</h2>
+            <p>{detail.data?.user?.email ?? t("adminUsers.loadingUserProfile")}</p>
           </div>
           <button type="button" onClick={() => setSelectedUserId(null)}><X size={18} /></button>
         </header>
@@ -108,23 +110,23 @@ export function Users() {
           {detail.data?.user && <>
             <section className="admin-detail-section">
               <dl className="worker-stats admin-detail-stats">
-                <div><dt>Status</dt><dd><span className={`status-badge status-badge--${detail.data.user.active ? "approved" : "suspended"}`}>{detail.data.user.active ? "active" : detail.data.user.status}</span></dd></div>
-                <div><dt>Platform role</dt><dd>{detail.data.user.platformRole ?? "-"}</dd></div>
-                <div><dt>Phone</dt><dd>{detail.data.user.phone ?? "-"}</dd></div>
-                <div><dt>Created</dt><dd>{formatDate(detail.data.user.createdAt, { dateStyle: "medium", timeStyle: "short" })}</dd></div>
-                <div><dt>Last login</dt><dd>{detail.data.user.lastLoginAt ? formatDate(detail.data.user.lastLoginAt, { dateStyle: "medium", timeStyle: "short" }) : "Never"}</dd></div>
+                <div><dt>{t("common.status")}</dt><dd><span className={`status-badge status-badge--${detail.data.user.active ? "approved" : "suspended"}`}>{detail.data.user.active ? t("common.active") : detail.data.user.status}</span></dd></div>
+                <div><dt>{t("adminUsers.columns.role")}</dt><dd>{detail.data.user.platformRole ?? "-"}</dd></div>
+                <div><dt>{t("workspaceTeam.phone")}</dt><dd>{detail.data.user.phone ?? "-"}</dd></div>
+                <div><dt>{t("adminUsers.columns.created")}</dt><dd>{formatDate(detail.data.user.createdAt, { dateStyle: "medium", timeStyle: "short" })}</dd></div>
+                <div><dt>{t("adminUsers.columns.lastLogin")}</dt><dd>{detail.data.user.lastLoginAt ? formatDate(detail.data.user.lastLoginAt, { dateStyle: "medium", timeStyle: "short" }) : t("adminUsers.never")}</dd></div>
               </dl>
             </section>
 
             <section className="admin-detail-section">
-              <h3>Workspace memberships</h3>
-              {!detail.data.user.workspaces.length ? <p className="activity-empty">This user is not assigned to any workspace yet.</p> : <div className="admin-activity-list">
+              <h3>{t("adminUsers.workspaceMemberships")}</h3>
+              {!detail.data.user.workspaces.length ? <p className="activity-empty">{t("adminUsers.noWorkspaceMemberships")}</p> : <div className="admin-activity-list">
                 {detail.data.user.workspaces.map((workspace) => <article key={workspace.id}>
                   <div>
                     <strong>{workspace.workspaceName}</strong>
                     <span>{workspace.role}</span>
                   </div>
-                  <small>{workspace.active ? "Active membership" : "Inactive membership"}</small>
+                  <small>{workspace.active ? t("adminUsers.activeMembership") : t("adminUsers.inactiveMembership")}</small>
                 </article>)}
               </div>}
             </section>

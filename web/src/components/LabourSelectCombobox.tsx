@@ -1,6 +1,7 @@
 import { Check } from "lucide-react";
 import type { ReactNode } from "react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { useTranslation } from "react-i18next";
 import { SearchInput } from "./SearchInput";
 import type { Labourer } from "../lib/offline-db";
 
@@ -79,24 +80,29 @@ export function LabourSelectCombobox({
   options,
   value,
   onChange,
-  placeholder = "Search labour",
-  allOptionLabel = "All labour",
+  placeholder,
+  allOptionLabel,
   includeAllOption = false,
-  ariaLabel = "Labour",
+  ariaLabel,
   disabled = false,
   clearValue = "",
-  noResultsLabel = "No matching labour found",
+  noResultsLabel,
   inputRef,
   maxSuggestions = 8,
   renderOption,
   renderSelectedValue,
 }: LabourSelectComboboxProps) {
+  const { t } = useTranslation();
   const rootRef = useRef<HTMLDivElement>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const deferredQuery = useDeferredValue(query);
+  const resolvedPlaceholder = placeholder ?? t("workforcePage.searchLabour");
+  const resolvedAllOptionLabel = allOptionLabel ?? t("workforcePage.allLabour");
+  const resolvedAriaLabel = ariaLabel ?? t("reports.labour");
+  const resolvedNoResultsLabel = noResultsLabel ?? t("advancesPage.noLabourResults");
 
   const labourOptions = useMemo<LabourOption[]>(() => options.map((option) => {
     const phone = option.mobile ?? option.phone ?? "";
@@ -112,7 +118,7 @@ export function LabourSelectCombobox({
   }), [options]);
 
   const selected = useMemo(() => labourOptions.find((option) => option.id === value), [labourOptions, value]);
-  const selectedLabel = value === "all" ? allOptionLabel : (selected?.name ?? "");
+  const selectedLabel = value === "all" ? resolvedAllOptionLabel : (selected?.name ?? "");
 
   useEffect(() => {
     if (!open) setQuery(selectedLabel);
@@ -132,8 +138,8 @@ export function LabourSelectCombobox({
   }, [deferredQuery, labourOptions]);
 
   const items = useMemo(
-    () => (includeAllOption && !normalize(deferredQuery) ? [{ id: "all", name: allOptionLabel, phone: "", searchText: "" }, ...filtered] : filtered).slice(0, maxSuggestions),
-    [allOptionLabel, deferredQuery, filtered, includeAllOption, maxSuggestions],
+    () => (includeAllOption && !normalize(deferredQuery) ? [{ id: "all", name: resolvedAllOptionLabel, phone: "", searchText: "" }, ...filtered] : filtered).slice(0, maxSuggestions),
+    [resolvedAllOptionLabel, deferredQuery, filtered, includeAllOption, maxSuggestions],
   );
 
   useEffect(() => {
@@ -158,7 +164,7 @@ export function LabourSelectCombobox({
 
   const select = (nextValue: string) => {
     const nextLabel = nextValue === "all"
-      ? allOptionLabel
+      ? resolvedAllOptionLabel
       : labourOptions.find((option) => option.id === nextValue)?.name ?? "";
     onChange(nextValue);
     setQuery(nextLabel);
@@ -222,7 +228,7 @@ export function LabourSelectCombobox({
     <div className="labour-combobox" ref={rootRef}>
       {selectedLabour && !open && renderSelectedValue ? renderSelectedValue(selectedLabour, { change: beginChange, clear }) : null}
       <SearchInput
-        aria-label={ariaLabel}
+        aria-label={resolvedAriaLabel}
         className={`labour-combobox__input${selectedLabour && !open && renderSelectedValue ? " labour-combobox__input--hidden" : ""}`}
         disabled={disabled}
         ref={inputRef}
@@ -235,7 +241,7 @@ export function LabourSelectCombobox({
         onClear={clear}
         onFocus={() => { if (!disabled) setOpen(true); }}
         onKeyDown={onInputKeyDown}
-        placeholder={placeholder}
+        placeholder={resolvedPlaceholder}
         role="combobox"
         aria-expanded={open}
         aria-haspopup="listbox"
@@ -243,9 +249,9 @@ export function LabourSelectCombobox({
         value={query}
       />
       {open ? (
-        <div className="labour-combobox__menu" id="labour-combobox-options" role="listbox" aria-label={ariaLabel}>
+        <div className="labour-combobox__menu" id="labour-combobox-options" role="listbox" aria-label={resolvedAriaLabel}>
           <div className="labour-combobox__options">
-            {items.length === 0 ? <p className="empty-records labour-combobox__empty">{noResultsLabel}</p> : items.map((option, index) => {
+            {items.length === 0 ? <p className="empty-records labour-combobox__empty">{resolvedNoResultsLabel}</p> : items.map((option, index) => {
               const isActive = activeIndex === index;
               const isSelected = value === option.id;
               const fullOption = option.id === "all" ? undefined : options.find((item) => item.id === option.id);

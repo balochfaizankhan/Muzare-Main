@@ -185,8 +185,8 @@ export function Farms() {
                   {farm.contactPhone && <small>{farm.contactPhone}</small>}
                   {farm.remarks && <small>{farm.remarks}</small>}
                   <footer>
-                    {config.featureFarmMap && <Link to={`/workspace/${workspaceId}/farms/${farm.id}/operations-map`}><Satellite size={15} />Operations map</Link>}
-                    {config.featureFarmMap && canManage && <Link to={`/workspace/${workspaceId}/farms/${farm.id}/map-builder`}><Map size={15} />Map builder</Link>}
+                    {config.featureFarmMap && <Link to={`/workspace/${workspaceId}/farms/${farm.id}/operations-map`}><Satellite size={15} />{t("farmMap.operationsMap")}</Link>}
+                    {config.featureFarmMap && canManage && <Link to={`/workspace/${workspaceId}/farms/${farm.id}/map-builder`}><Map size={15} />{t("farmMap.mapBuilder")}</Link>}
                     {farm.active && !isCurrent && <button type="button" onClick={() => select.mutate(farm.id)}><Leaf size={15} />{t("farmsPage.setActive")}</button>}
                     {canManage && <button type="button" onClick={() => edit(farm)}><Pencil size={15} />{t("farmsPage.edit")}</button>}
                     {canManage && farm.active && <button className="danger-button" type="button" onClick={() => archive.mutate(farm.id)}><XCircle size={15} />{t("farmsPage.archive")}</button>}

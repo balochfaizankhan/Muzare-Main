@@ -1,14 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, type FormEvent } from "react";
 import { Building2, Eye, RefreshCcw, ShieldAlert, UserRoundPlus, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
 import { createAdminWorkspace, deleteAdminWorkspace, fetchAdminWorkspace, fetchAdminWorkspaces, type AdminWorkspace, updateAdminWorkspaceStatus } from "../../lib/api";
 import { formatDate, formatNumber } from "../../lib/format";
+import i18n from "../../i18n";
 
 type WorkspaceStatusFilter = "all" | AdminWorkspace["status"];
 
 export function Workspaces({ defaultStatusFilter = "all" }: { defaultStatusFilter?: WorkspaceStatusFilter }) {
+  const { t } = useTranslation();
   const { user, token } = useAuth();
   const canManage = user?.platformRole === "platform_admin";
   const client = useQueryClient();
@@ -74,59 +77,59 @@ export function Workspaces({ defaultStatusFilter = "all" }: { defaultStatusFilte
 
   return <main className="shell-page">
     <section className="shell-page__intro">
-      <span className="eyebrow">Platform administration</span>
-      <h1>Workspaces</h1>
-      <p>Approve pending workspaces, suspend or reactivate customers, and inspect membership and status history.</p>
-      <Link className="primary-link" to="/admin/approvals">Review pending requests</Link>
+      <span className="eyebrow">{t("layout.platformAdministrationEyebrow")}</span>
+      <h1>{t("adminWorkspaces.title")}</h1>
+      <p>{t("adminWorkspaces.description")}</p>
+      <Link className="primary-link" to="/admin/approvals">{t("adminWorkspaces.reviewPendingRequests")}</Link>
     </section>
 
     <section className="admin-metric-grid">
-      <article><Building2 size={19} /><span>Total workspaces</span><strong>{formatNumber(counts.total)}</strong></article>
-      <article><UserRoundPlus size={19} /><span>Pending</span><strong>{formatNumber(counts.pending)}</strong></article>
-      <article><ShieldAlert size={19} /><span>Suspended</span><strong>{formatNumber(counts.suspended)}</strong></article>
+      <article><Building2 size={19} /><span>{t("adminWorkspaces.metrics.totalWorkspaces")}</span><strong>{formatNumber(counts.total)}</strong></article>
+      <article><UserRoundPlus size={19} /><span>{t("adminWorkspaces.metrics.pending")}</span><strong>{formatNumber(counts.pending)}</strong></article>
+      <article><ShieldAlert size={19} /><span>{t("adminWorkspaces.metrics.suspended")}</span><strong>{formatNumber(counts.suspended)}</strong></article>
     </section>
 
     {canManage && <section className="panel">
       <div className="panel-heading">
         <div>
-          <h2>Create workspace</h2>
-          <p>Create a new approved workspace directly from the platform console.</p>
+          <h2>{t("adminWorkspaces.createWorkspace")}</h2>
+          <p>{t("adminWorkspaces.createWorkspaceDescription")}</p>
         </div>
       </div>
       <form className="compact-form form-grid" onSubmit={submit}>
-        <input required placeholder="Workspace name" value={name} onChange={(event) => setName(event.target.value)} />
-        <input required type="email" placeholder="Contact email" value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} />
-        <button type="submit" disabled={create.isPending}>Create workspace</button>
+        <input required placeholder={t("workspaceProfile.name")} value={name} onChange={(event) => setName(event.target.value)} />
+        <input required type="email" placeholder={t("workspaceProfile.contactEmail")} value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} />
+        <button type="submit" disabled={create.isPending}>{t("adminWorkspaces.createWorkspace")}</button>
       </form>
     </section>}
 
     <section className="panel">
       <div className="panel-heading">
         <div>
-          <h2>Workspace directory</h2>
-          <p>Customer workspaces, ownership, lifecycle status, and account counts.</p>
+          <h2>{t("adminWorkspaces.directoryTitle")}</h2>
+          <p>{t("adminWorkspaces.directoryDescription")}</p>
         </div>
-        <div className="admin-filter-chips" role="tablist" aria-label="Workspace status filters">
+        <div className="admin-filter-chips" role="tablist" aria-label={t("adminWorkspaces.statusFilters")}>
           {[
-            ["all", `All (${counts.total})`],
-            ["pending", `Pending (${counts.pending})`],
-            ["approved", `Active (${counts.approved})`],
-            ["suspended", `Suspended (${counts.suspended})`],
+            ["all", `${t("adminWorkspaces.filters.all")} (${counts.total})`],
+            ["pending", `${t("adminWorkspaces.filters.pending")} (${counts.pending})`],
+            ["approved", `${t("adminWorkspaces.filters.active")} (${counts.approved})`],
+            ["suspended", `${t("adminWorkspaces.filters.suspended")} (${counts.suspended})`],
           ].map(([value, label]) => <button key={value} type="button" className={filter === value ? "is-active" : ""} onClick={() => setFilter(value as WorkspaceStatusFilter)}>{label}</button>)}
         </div>
       </div>
 
       {query.isError && <p className="error">{query.error.message}</p>}
-      {!workspaces.length ? <div className="admin-empty-panel"><h2>No workspaces found</h2><p>There are no workspaces in this status yet.</p></div> : <div className="admin-table-card">
+      {!workspaces.length ? <div className="admin-empty-panel"><h2>{t("adminWorkspaces.emptyTitle")}</h2><p>{t("adminWorkspaces.emptyDescription")}</p></div> : <div className="admin-table-card">
         <table className="admin-table">
           <thead>
             <tr>
-              <th>Workspace</th>
-              <th>Status</th>
-              <th>Users</th>
-              <th>Farms</th>
-              <th>Created</th>
-              <th>Actions</th>
+              <th>{t("adminWorkspaces.columns.workspace")}</th>
+              <th>{t("common.status")}</th>
+              <th>{t("adminWorkspaces.columns.users")}</th>
+              <th>{t("farms")}</th>
+              <th>{t("adminWorkspaces.columns.created")}</th>
+              <th>{t("reportsPage.actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -141,12 +144,12 @@ export function Workspaces({ defaultStatusFilter = "all" }: { defaultStatusFilte
               <td>{formatDate(workspace.createdAt, { dateStyle: "medium" })}</td>
               <td>
                 <div className="record-list__actions admin-row-actions">
-                  <button type="button" onClick={() => setSelectedWorkspaceId(workspace.id)}><Eye size={15} />View</button>
-                  {canManage && workspace.status === "pending" && <button type="button" onClick={() => changeStatus.mutate({ workspaceId: workspace.id, status: "approved" })}>Approve</button>}
-                  {canManage && workspace.status === "approved" && <button type="button" onClick={() => changeStatus.mutate({ workspaceId: workspace.id, status: "suspended" })}>Suspend</button>}
-                  {canManage && workspace.status === "suspended" && <button type="button" onClick={() => changeStatus.mutate({ workspaceId: workspace.id, status: "approved" })}><RefreshCcw size={15} />Unsuspend</button>}
-                  {canManage && workspace.status === "pending" && <button type="button" className="danger-button" onClick={() => changeStatus.mutate({ workspaceId: workspace.id, status: "rejected" })}>Reject</button>}
-                  {canManage && <button type="button" className="danger-button" onClick={() => remove.mutate(workspace.id)}>Delete</button>}
+                  <button type="button" onClick={() => setSelectedWorkspaceId(workspace.id)}><Eye size={15} />{t("common.view")}</button>
+                  {canManage && workspace.status === "pending" && <button type="button" onClick={() => changeStatus.mutate({ workspaceId: workspace.id, status: "approved" })}>{t("adminApprovals.approve")}</button>}
+                  {canManage && workspace.status === "approved" && <button type="button" onClick={() => changeStatus.mutate({ workspaceId: workspace.id, status: "suspended" })}>{t("adminWorkspaces.suspend")}</button>}
+                  {canManage && workspace.status === "suspended" && <button type="button" onClick={() => changeStatus.mutate({ workspaceId: workspace.id, status: "approved" })}><RefreshCcw size={15} />{t("adminWorkspaces.unsuspend")}</button>}
+                  {canManage && workspace.status === "pending" && <button type="button" className="danger-button" onClick={() => changeStatus.mutate({ workspaceId: workspace.id, status: "rejected" })}>{t("adminApprovals.reject")}</button>}
+                  {canManage && <button type="button" className="danger-button" onClick={() => remove.mutate(workspace.id)}>{t("common.delete")}</button>}
                 </div>
               </td>
             </tr>)}
@@ -156,11 +159,11 @@ export function Workspaces({ defaultStatusFilter = "all" }: { defaultStatusFilte
     </section>
 
     {selectedWorkspaceId && <div className="worker-dialog-backdrop worker-action-backdrop" role="presentation" onClick={() => setSelectedWorkspaceId(null)}>
-      <section className="worker-action-dialog admin-detail-dialog" role="dialog" aria-modal="true" aria-label="Workspace details" onClick={(event) => event.stopPropagation()}>
+      <section className="worker-action-dialog admin-detail-dialog" role="dialog" aria-modal="true" aria-label={t("adminWorkspaces.workspaceDetails")} onClick={(event) => event.stopPropagation()}>
         <header>
           <div>
-            <h2>{detail.data?.workspace?.name ?? "Workspace details"}</h2>
-            <p>{detail.data?.workspace?.contactEmail ?? "Loading workspace metadata"}</p>
+            <h2>{detail.data?.workspace?.name ?? t("adminWorkspaces.workspaceDetails")}</h2>
+            <p>{detail.data?.workspace?.contactEmail ?? t("adminWorkspaces.loadingWorkspaceMetadata")}</p>
           </div>
           <button type="button" onClick={() => setSelectedWorkspaceId(null)}><X size={18} /></button>
         </header>
@@ -169,34 +172,34 @@ export function Workspaces({ defaultStatusFilter = "all" }: { defaultStatusFilte
           {detail.data?.workspace && <>
             <section className="admin-detail-section">
               <dl className="worker-stats admin-detail-stats">
-                <div><dt>Status</dt><dd><span className={`status-badge status-badge--${detail.data.workspace.status}`}>{detail.data.workspace.status}</span></dd></div>
-                <div><dt>Created</dt><dd>{formatDate(detail.data.workspace.createdAt, { dateStyle: "medium", timeStyle: "short" })}</dd></div>
-                <div><dt>Approved</dt><dd>{detail.data.workspace.approvedAt ? formatDate(detail.data.workspace.approvedAt, { dateStyle: "medium", timeStyle: "short" }) : "-"}</dd></div>
-                <div><dt>Slug</dt><dd>{detail.data.workspace.slug}</dd></div>
-                <div><dt>Phone</dt><dd>{detail.data.workspace.contactPhone ?? "-"}</dd></div>
+                <div><dt>{t("common.status")}</dt><dd><span className={`status-badge status-badge--${detail.data.workspace.status}`}>{detail.data.workspace.status}</span></dd></div>
+                <div><dt>{t("adminWorkspaces.columns.created")}</dt><dd>{formatDate(detail.data.workspace.createdAt, { dateStyle: "medium", timeStyle: "short" })}</dd></div>
+                <div><dt>{t("adminWorkspaces.approved")}</dt><dd>{detail.data.workspace.approvedAt ? formatDate(detail.data.workspace.approvedAt, { dateStyle: "medium", timeStyle: "short" }) : "-"}</dd></div>
+                <div><dt>{t("adminWorkspaces.slug")}</dt><dd>{detail.data.workspace.slug}</dd></div>
+                <div><dt>{t("workspaceTeam.phone")}</dt><dd>{detail.data.workspace.contactPhone ?? "-"}</dd></div>
               </dl>
             </section>
 
             <section className="admin-detail-section">
-              <h3>Members</h3>
-              {!detail.data.workspace.members.length ? <p className="activity-empty">No members found for this workspace yet.</p> : <div className="admin-activity-list">
+              <h3>{t("workspaceTeam.members")}</h3>
+              {!detail.data.workspace.members.length ? <p className="activity-empty">{t("adminWorkspaces.noMembers")}</p> : <div className="admin-activity-list">
                 {detail.data.workspace.members.map((member) => <article key={member.id}>
                   <div>
                     <strong>{member.displayName ?? member.email}</strong>
                     <span>{member.email} • {member.role}</span>
                   </div>
-                  <small>{member.hasWorkspaceAccess ? "Active member" : (member.userStatus === "suspended" ? "Suspended user" : "Inactive member")}</small>
+                  <small>{member.hasWorkspaceAccess ? t("adminWorkspaces.activeMember") : (member.userStatus === "suspended" ? t("adminWorkspaces.suspendedUser") : t("adminWorkspaces.inactiveMember"))}</small>
                 </article>)}
               </div>}
             </section>
 
             <section className="admin-detail-section">
-              <h3>Status history</h3>
-              {!detail.data.workspace.history.length ? <p className="activity-empty">No status history has been recorded yet.</p> : <div className="admin-activity-list">
+              <h3>{t("adminWorkspaces.statusHistory")}</h3>
+              {!detail.data.workspace.history.length ? <p className="activity-empty">{t("adminWorkspaces.noStatusHistory")}</p> : <div className="admin-activity-list">
                 {detail.data.workspace.history.map((item) => <article key={item.id}>
                   <div>
                     <strong>{humanizeAction(item.action)}</strong>
-                    <span>{item.actorName ?? item.actorEmail ?? "System"}</span>
+                    <span>{item.actorName ?? item.actorEmail ?? t("common.system")}</span>
                   </div>
                   <small>{formatDate(item.createdAt, { dateStyle: "medium", timeStyle: "short" })}</small>
                 </article>)}
@@ -210,8 +213,11 @@ export function Workspaces({ defaultStatusFilter = "all" }: { defaultStatusFilte
 }
 
 function humanizeAction(action: string) {
-  return action
+  const normalized = action
     .replace(/^admin\./, "")
     .replace(/[._]+/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+    .trim();
+  return i18n.t(`adminAudit.actions.${normalized.replace(/\s+/g, "_")}`, {
+    defaultValue: normalized.replace(/\b\w/g, (letter) => letter.toUpperCase()),
+  });
 }
