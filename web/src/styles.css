@@ -426,6 +426,271 @@ button {
   outline-offset: -2px;
 }
 
+.labour-multiselect {
+  position: relative;
+  width: 100%;
+}
+
+.labour-multiselect__trigger {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  gap: 10px;
+  height: 42px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 0 10px 0 12px;
+  text-align: start;
+  width: 100%;
+}
+
+.labour-multiselect__trigger:focus-visible {
+  border-color: rgba(46, 125, 50, 0.52);
+  box-shadow: 0 0 0 4px rgba(46, 125, 50, 0.12);
+  outline: none;
+}
+
+.labour-multiselect__trigger > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.labour-multiselect__actions {
+  align-items: center;
+  color: var(--text-secondary);
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 4px;
+}
+
+.labour-multiselect__actions svg.is-open {
+  transform: rotate(180deg);
+}
+
+.labour-multiselect__clear {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  display: inline-flex;
+  height: 32px;
+  justify-content: center;
+  width: 32px;
+}
+
+.labour-multiselect__clear:hover,
+.labour-multiselect__clear:focus-visible {
+  background: var(--surface-soft);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.labour-multiselect__menu {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 18px 46px rgba(15, 23, 42, 0.16);
+  display: grid;
+  gap: 8px;
+  inset-inline: 0;
+  margin-top: 8px;
+  max-height: min(360px, 70vh);
+  overflow: hidden;
+  padding: 8px;
+  position: absolute;
+  z-index: 50;
+}
+
+.labour-multiselect__search {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-height: 42px;
+  padding: 0 8px;
+}
+
+.labour-multiselect__search svg {
+  color: var(--text-secondary);
+}
+
+.labour-multiselect__search input {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  font: inherit;
+  height: 40px;
+  min-width: 0;
+  outline: none;
+  padding: 0;
+}
+
+.labour-multiselect__search button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  display: inline-flex;
+  height: 32px;
+  justify-content: center;
+  padding: 0;
+  width: 32px;
+}
+
+.labour-multiselect__search button:hover,
+.labour-multiselect__search button:focus-visible {
+  background: var(--surface);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.labour-multiselect__toolbar {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.labour-multiselect__toolbar button {
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: var(--primary);
+  font-size: .82rem;
+  font-weight: 800;
+  padding: 7px 9px;
+}
+
+.labour-multiselect__toolbar button:hover,
+.labour-multiselect__toolbar button:focus-visible {
+  background: #eef7ed;
+  outline: none;
+}
+
+.labour-multiselect__options {
+  display: grid;
+  gap: 4px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding-inline-end: 2px;
+}
+
+.labour-multiselect__option {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid transparent;
+  border-radius: 12px;
+  color: var(--text);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 24px minmax(0, 1fr);
+  min-height: 52px;
+  padding: 8px 10px;
+  text-align: start;
+  width: 100%;
+}
+
+.labour-multiselect__option:hover,
+.labour-multiselect__option:focus-visible {
+  background: #f5fbf5;
+  border-color: rgba(46, 125, 50, 0.24);
+  outline: none;
+}
+
+.labour-multiselect__option.is-selected {
+  background: #eff8ef;
+  border-color: #b7dbb8;
+}
+
+.labour-multiselect__checkbox {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--primary);
+  display: inline-flex;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
+}
+
+.labour-multiselect__option.is-selected .labour-multiselect__checkbox {
+  background: #e5f3e4;
+  border-color: rgba(46, 125, 50, 0.48);
+}
+
+.labour-multiselect__option-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.labour-multiselect__option-text strong,
+.labour-multiselect__option > strong {
+  color: var(--text-primary);
+  font-size: .9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.labour-multiselect__option-text small {
+  color: var(--text-secondary);
+  font-size: .75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.labour-multiselect__empty {
+  color: var(--text-secondary);
+  font-size: .85rem;
+  margin: 0;
+  padding: 12px 10px;
+}
+
+.labour-multiselect__footer {
+  align-items: center;
+  background: linear-gradient(180deg, rgba(255,255,255,0.92), var(--surface));
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin: 0 -8px -8px;
+  padding: 8px;
+  position: sticky;
+  bottom: 0;
+}
+
+.labour-multiselect__footer span {
+  color: var(--text-secondary);
+  font-size: .82rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.labour-multiselect__footer button {
+  background: var(--primary);
+  border: 0;
+  border-radius: 10px;
+  color: white;
+  font-weight: 800;
+  min-height: 38px;
+  padding: 0 14px;
+}
+
 .labour-selected-card {
   align-items: start;
   background: linear-gradient(180deg, #ffffff, #fbfdf9);
@@ -6285,11 +6550,13 @@ button {
 .reports-date-field svg {
   color: #123a63;
   flex: 0 0 auto;
+  pointer-events: none;
 }
 .reports-date-field__value {
   color: var(--text-secondary);
   font-size: .95rem;
   min-width: 0;
+  pointer-events: none;
 }
 .reports-date-field__value.is-filled {
   color: var(--text-primary);
@@ -6301,6 +6568,11 @@ button {
   opacity: 0;
   position: absolute;
   width: 100%;
+}
+
+.reports-date-field:focus-within {
+  border-color: rgba(46, 125, 50, 0.52);
+  box-shadow: 0 0 0 4px rgba(46, 125, 50, 0.12);
 }
 .reports-range-actions {
   display: flex;

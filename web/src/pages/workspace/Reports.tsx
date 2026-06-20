@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CalendarDays, ChevronDown, ChevronRight, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { SearchInput } from "../../components/SearchInput";
 import { ClearableSelect } from "../../components/ClearableSelect";
+import { LabourMultiSelectFilter } from "../../components/LabourMultiSelectFilter";
 import { SubpageHeader } from "../../components/SubpageHeader";
 import { defaultTransactionGroupExpansion, groupAccountTransactions, type AccountTransactionGroupKey } from "../../lib/accountTransactionGroups";
 import { calculateAccountBalance } from "../../lib/accounting";
@@ -253,14 +254,33 @@ function ReportDateField({
   value: string;
   onChange: (value: string) => void;
 }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const openPicker = () => {
+    const input = inputRef.current;
+    if (!input) return;
+    input.focus();
+    if (typeof input.showPicker === "function") {
+      try {
+        input.showPicker();
+      } catch {
+        input.click();
+      }
+    } else {
+      input.click();
+    }
+  };
   return (
-    <label className="reports-date-field">
+    <label className="reports-date-field" onPointerDown={(event) => {
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      event.preventDefault();
+      openPicker();
+    }}>
       <span className="sr-only">{label}</span>
       <CalendarDays size={16} aria-hidden="true" />
       <span className={`reports-date-field__value${value ? " is-filled" : ""}`}>
         {value ? formatReportDateValue(value) : placeholder}
       </span>
-      <input aria-label={label} type="date" value={value} onChange={(event) => onChange(event.target.value)} />
+      <input ref={inputRef} aria-label={label} type="date" value={value} onChange={(event) => onChange(event.target.value)} onClick={(event) => event.stopPropagation()} />
     </label>
   );
 }
@@ -309,6 +329,7 @@ export function Reports() {
   const [to, setTo] = useState("");
   const [accountId, setAccountId] = useState("");
   const [groupFilter, setGroupFilter] = useState("");
+  const [selectedLabourerIds, setSelectedLabourerIds] = useState<string[]>([]);
   const [category, setCategory] = useState("");
   const [status, setStatus] = useState("");
   const [amountMin, setAmountMin] = useState("");
@@ -408,6 +429,11 @@ export function Reports() {
     if (groupFilter === ungroupedValue) return !(labourer?.group ?? "").trim();
     return (labourer?.group ?? "") === groupFilter;
   };
+  const reportLabourOptions = useMemo(
+    () => labourers.filter((labourer) => matchesGroup(labourer)).sort((left, right) => left.name.localeCompare(right.name)),
+    [groupFilter, labourers],
+  );
+  const matchesLabourFilter = (labourerId: string) => selectedLabourerIds.length === 0 || selectedLabourerIds.includes(labourerId);
 
   const matches = (date: string, values: unknown[], amount?: number) => inRange(date, from, to)
     && (min === null || amount === undefined || amount >= min)
@@ -420,6 +446,7 @@ export function Reports() {
     setTo("");
     setAccountId("");
     setGroupFilter("");
+    setSelectedLabourerIds([]);
     setCategory("");
     setStatus("");
     setAmountMin("");
@@ -432,6 +459,10 @@ export function Reports() {
     setSalesDateType("saleDate");
     setDispatchDateType("dispatchDate");
   };
+
+  useEffect(() => {
+    setSelectedLabourerIds((current) => current.filter((id) => reportLabourOptions.some((labourer) => labourer.id === id)));
+  }, [reportLabourOptions]);
 
   const applyTodayRange = () => {
     const value = todayKey();
@@ -449,7 +480,8 @@ export function Reports() {
     setTo(todayKey());
   };
 
-  const filtered = Boolean(search || from || to || accountId || groupFilter || category || status || amountMin || amountMax || buyerFilter || productFilter || vehicleFilter || paymentStatusFilter);
+  const labourFilterActive = (report === "attendance" || report === "advances") && selectedLabourerIds.length > 0;
+  const filtered = Boolean(search || from || to || accountId || groupFilter || labourFilterActive || category || status || amountMin || amountMax || buyerFilter || productFilter || vehicleFilter || paymentStatusFilter);
   const switchReport = (next: Report) => {
     setReport(next);
     setSearchParams((current) => {
@@ -476,12 +508,14 @@ export function Reports() {
     .filter((item) => {
       const labourer = labourById.get(item.labourerId);
       return matchesGroup(labourer)
+        && matchesLabourFilter(item.labourerId)
         && (!status || item.status === status)
         && matches(item.date, [labourName(item.labourerId), labourer?.group, item.status]);
     })
     .sort((a, b) => a.date.localeCompare(b.date) || labourName(a.labourerId).localeCompare(labourName(b.labourerId)));
   const attendanceSummary = useMemo(() => labourers
     .filter((labourer) => matchesGroup(labourer))
+    .filter((labourer) => matchesLabourFilter(labourer.id))
     .map((labourer) => {
       const records = attendanceRows.filter((item) => item.labourerId === labourer.id);
       const present = records.filter((item) => item.status === "present").length;
@@ -497,12 +531,14 @@ export function Reports() {
     .filter((item) => {
       const labourer = labourById.get(item.labourerId);
       return matchesGroup(labourer)
+        && matchesLabourFilter(item.labourerId)
         && (!accountId || item.accountId === accountId)
         && matches(item.date, [labourName(item.labourerId), labourer?.group, accountName(item.accountId), item.notes, item.sourceAccountName], item.amount);
     })
-    .sort((a, b) => advanceSort === "desc" ? b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt) : a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt)), [accountId, accountName, advanceSort, advances, labourById, labourName, matches]);
+    .sort((a, b) => advanceSort === "desc" ? b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt) : a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt)), [accountId, accountName, advanceSort, advances, labourById, labourName, matches, selectedLabourerIds]);
   const advanceSummary = useMemo(() => labourers
     .filter((labourer) => matchesGroup(labourer))
+    .filter((labourer) => matchesLabourFilter(labourer.id))
     .map((labourer) => {
       const records = advanceRows.filter((item) => item.labourerId === labourer.id);
       const total = records.reduce((sum, item) => sum + item.amount, 0);
@@ -962,6 +998,13 @@ export function Reports() {
               {labourGroups.map((group) => <option key={group} value={group}>{group}</option>)}
               <option value={ungroupedValue}>{t("reportsPage.ungrouped")}</option>
             </ClearableSelect>
+            <LabourMultiSelectFilter
+              ariaLabel={t("reportsPage.labour")}
+              options={reportLabourOptions}
+              selectedIds={selectedLabourerIds}
+              onChange={setSelectedLabourerIds}
+              placeholder={t("common.searchLabour")}
+            />
             {views.attendance === "summary" && <ClearableSelect aria-label={t("reportsPage.status")} value={status} onChange={setStatus}>
               <option value="">{t("reportsPage.allStatuses")}</option>
               <option value="present">{t("reportsPage.present")}</option>
@@ -976,6 +1019,13 @@ export function Reports() {
               {labourGroups.map((group) => <option key={group} value={group}>{group}</option>)}
               <option value={ungroupedValue}>{t("reportsPage.ungrouped")}</option>
             </ClearableSelect>
+            <LabourMultiSelectFilter
+              ariaLabel={t("reportsPage.labour")}
+              options={reportLabourOptions}
+              selectedIds={selectedLabourerIds}
+              onChange={setSelectedLabourerIds}
+              placeholder={t("common.searchLabour")}
+            />
             <ClearableSelect aria-label={t("reportsPage.account")} value={accountId} onChange={setAccountId}>
               <option value="">{t("reportsPage.allAccounts")}</option>
               {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}

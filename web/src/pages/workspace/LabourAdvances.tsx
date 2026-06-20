@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
 import { ClearableSelect } from "../../components/ClearableSelect";
+import { LabourMultiSelectFilter } from "../../components/LabourMultiSelectFilter";
 import { LabourSelectCombobox } from "../../components/LabourSelectCombobox";
 import { SearchInput } from "../../components/SearchInput";
 import { SubpageHeader } from "../../components/SubpageHeader";
@@ -50,7 +51,7 @@ export function LabourAdvances() {
   const [entryAmount, setEntryAmount] = useState("");
   const [entryAccountId, setEntryAccountId] = useState("");
   const [entryNotes, setEntryNotes] = useState("");
-  const [labourerId, setLabourerId] = useState("all");
+  const [selectedLabourerIds, setSelectedLabourerIds] = useState<string[]>([]);
   const [group, setGroup] = useState("all");
   const [paymentType, setPaymentType] = useState("all");
   const [sort, setSort] = useState<Sort>("date_desc");
@@ -105,14 +106,14 @@ export function LabourAdvances() {
 
   useEffect(() => {
     if (entryLabourerId && !groupedLabourers.some((labourer) => labourer.id === entryLabourerId)) setEntryLabourerId("");
-    if (labourerId !== "all" && !groupedLabourers.some((labourer) => labourer.id === labourerId)) setLabourerId("all");
-  }, [entryLabourerId, groupedLabourers, labourerId]);
+    setSelectedLabourerIds((current) => current.filter((id) => groupedLabourers.some((labourer) => labourer.id === id)));
+  }, [entryLabourerId, groupedLabourers]);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return advances
       .filter((advance) => advance.date >= from && advance.date <= to)
-      .filter((advance) => labourerId === "all" || advance.labourerId === labourerId)
+      .filter((advance) => selectedLabourerIds.length === 0 || selectedLabourerIds.includes(advance.labourerId))
       .filter((advance) => {
         const labourer = labourById.get(advance.labourerId);
         return group === "all" || labourer?.group === group;
@@ -136,7 +137,7 @@ export function LabourAdvances() {
         if (sort === "amount_asc") return left.amount - right.amount || right.date.localeCompare(left.date);
         return right.date.localeCompare(left.date) || right.createdAt.localeCompare(left.createdAt);
       });
-  }, [accountById, advances, labourById, from, group, labourerId, paymentType, search, sort, to]);
+  }, [accountById, advances, labourById, from, group, paymentType, search, selectedLabourerIds, sort, to]);
 
   const total = filtered.reduce((sum, advance) => sum + advance.amount, 0);
   const labourCount = new Set(filtered.map((advance) => advance.labourerId)).size;
@@ -252,15 +253,12 @@ export function LabourAdvances() {
               <label className="advances-filter-field"><span>{t("advancesPage.dateTo")}</span><input aria-label={t("advancesPage.dateTo")} type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
             </div>
             <div className="advances-filter-row">
-              <label className="advances-filter-field"><span>{t("advancesPage.labour")}</span><LabourSelectCombobox
+              <label className="advances-filter-field"><span>{t("advancesPage.labour")}</span><LabourMultiSelectFilter
                 ariaLabel={t("advancesPage.labour")}
                 options={groupedLabourers}
-                value={labourerId}
-                onChange={setLabourerId}
-                clearValue="all"
-                includeAllOption
-                allOptionLabel={t("advancesPage.allLabour")}
-                placeholder={t("workforcePage.searchLabour")}
+                selectedIds={selectedLabourerIds}
+                onChange={setSelectedLabourerIds}
+                placeholder={t("common.searchLabour")}
                 noResultsLabel={noLabourResultsMessage}
               /></label>
               <label className="advances-filter-field"><span>{t("advancesPage.group")}</span><ClearableSelect aria-label={t("advancesPage.group")} value={group} clearValue="all" onChange={setGroup}>
