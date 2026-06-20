@@ -10,6 +10,7 @@ import { SubpageHeader } from "../../components/SubpageHeader";
 import { todayLocalDateKey } from "../../lib/attendanceStatus";
 import { formatMoney } from "../../lib/format";
 import { hasPermission } from "../../lib/permissions";
+import { translatePaymentType } from "../../lib/systemTranslations";
 import { ensureLocalAccounts, makeLocalRecord, offlineDb, workspaceRecords, type Account, type Advance, type Labourer } from "../../lib/offline-db";
 import { deleteOperationalRecord, persistOperationalRecord } from "../../services/syncService";
 
@@ -21,11 +22,11 @@ type Sort = "date_desc" | "date_asc" | "amount_desc" | "amount_asc";
 
 const paymentTypeLabel = (labourer?: Labourer) => {
   switch (labourer?.paymentType) {
-    case "production_based": return "Production Based";
-    case "contract_lump_sum": return "Contract";
-    case "monthly_salary": return "Monthly Salary";
-    case "other": return "Other";
-    default: return "Daily Wage";
+    case "production_based": return translatePaymentType("production_based");
+    case "contract_lump_sum": return translatePaymentType("contract_lump_sum");
+    case "monthly_salary": return translatePaymentType("monthly_salary");
+    case "other": return translatePaymentType("other");
+    default: return translatePaymentType("daily_wage");
   }
 };
 
@@ -270,8 +271,8 @@ export function LabourAdvances() {
             <div className="advances-filter-row">
               <label className="advances-filter-field"><span>{t("advancesPage.paymentType")}</span><ClearableSelect aria-label={t("advancesPage.paymentType")} value={paymentType} clearValue="all" onChange={setPaymentType}>
                 <option value="all">{t("advancesPage.allPaymentTypes")}</option>
-                <option value="daily_wage">{t("workforcePage.dailyWage")}</option><option value="production_based">Production Based</option>
-                <option value="contract_lump_sum">Contract</option><option value="monthly_salary">Monthly Salary</option><option value="other">Other</option>
+                <option value="daily_wage">{translatePaymentType("daily_wage")}</option><option value="production_based">{translatePaymentType("production_based")}</option>
+                <option value="contract_lump_sum">{translatePaymentType("contract_lump_sum")}</option><option value="monthly_salary">{translatePaymentType("monthly_salary")}</option><option value="other">{translatePaymentType("other")}</option>
               </ClearableSelect></label>
               <label className="advances-filter-field"><span>{t("advancesPage.transactions")}</span><ClearableSelect aria-label={t("advancesPage.transactions")} value={sort} clearValue="date_desc" onChange={(value) => setSort(value as Sort)}>
                 <option value="date_desc">{t("advancesPage.newestFirst")}</option><option value="date_asc">{t("advancesPage.oldestFirst")}</option>

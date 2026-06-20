@@ -15,6 +15,7 @@ import { attendanceStatusKey, buildAttendanceStatusMap, previousLocalDateKey, to
 import { confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteOrDeactivateLabour, fetchExpenseCategories, fetchLabourDeletionPreview, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type LabourDeletionPreview } from "../lib/api";
 import { buildDispatchAvailability, dispatchCartons, dispatchItemKey, resolveSaleType, saleProduceLabel, soldQuantityByDispatchItem } from "../lib/dispatch-sales";
 import { hasPermission } from "../lib/permissions";
+import { translateDispatchStatus, translateExpenseCategory, translateExpenseSubcategory, translatePaymentType, translateSaleType, translateSalesStatus } from "../lib/systemTranslations";
 import {
   buildPartnerLiabilityPositions,
   calculatePartnerLiabilityBalance,
@@ -77,13 +78,7 @@ type AccountLedgerRow = {
   classification?: string;
   partnerLiabilityGroup?: PartnerLiabilityLedgerGroupKey;
 };
-const paymentTypeLabel = (paymentType: PaymentType | undefined) => ({
-  daily_wage: "Daily Wage",
-  production_based: "Production Based",
-  contract_lump_sum: "Contract",
-  monthly_salary: "Monthly Salary",
-  other: "Other",
-}[paymentType ?? "daily_wage"]);
+const paymentTypeLabel = (paymentType: PaymentType | undefined) => translatePaymentType(paymentType ?? "daily_wage");
 
 const labourPaymentSummary = (labourer: Labourer) => {
   const type = labourer.paymentType ?? "daily_wage";
@@ -93,7 +88,7 @@ const labourPaymentSummary = (labourer: Labourer) => {
   }
   if (type === "contract_lump_sum") return `${money(labourer.contractAmount ?? 0)} contract`;
   if (type === "monthly_salary") return `${money(labourer.monthlySalary ?? 0)}/month`;
-  if (type === "other") return labourer.otherPaymentRate ? money(labourer.otherPaymentRate) : (labourer.otherPaymentDescription || "Other");
+  if (type === "other") return labourer.otherPaymentRate ? money(labourer.otherPaymentRate) : (labourer.otherPaymentDescription || translatePaymentType("other"));
   return `${money(labourer.dailyWage)}/day`;
 };
 
@@ -383,11 +378,11 @@ function WorkforceModule({
           </ClearableSelect>
           <ClearableSelect value={paymentTypeFilter} clearValue="all" onChange={(value) => setPaymentTypeFilter(value as PaymentType | "all")}>
             <option value="all">All payment types</option>
-            <option value="daily_wage">Daily Wage</option>
-            <option value="production_based">Production Based</option>
-            <option value="contract_lump_sum">Contract / Lump Sum</option>
-            <option value="monthly_salary">Monthly Salary</option>
-            <option value="other">Other</option>
+            <option value="daily_wage">{translatePaymentType("daily_wage")}</option>
+            <option value="production_based">{translatePaymentType("production_based")}</option>
+            <option value="contract_lump_sum">{translatePaymentType("contract_lump_sum")}</option>
+            <option value="monthly_salary">{translatePaymentType("monthly_salary")}</option>
+            <option value="other">{translatePaymentType("other")}</option>
           </ClearableSelect>
           <button type="button" onClick={() => {
             setLabourSearch("");
@@ -439,19 +434,19 @@ function WorkforceModule({
           </header>
           <section className="record-panel daily-attendance-panel attendance-entry-modal-body">
             {(sync.status === "offline" || sync.dataSource === "cache") && <div className="attendance-cache-banner" role="status">
-              <strong>{sync.status === "offline" ? "Offline mode: showing cached labour. Attendance will sync later." : "Showing cached labour while the latest records load."}</strong>
-              <small>Last synced: {readableSyncTime(sync.lastSyncTime)}</small>
+              <strong>{sync.status === "offline" ? t("workforcePage.offlineCachedLabour") : t("workforcePage.cachedLoadingLabour")}</strong>
+              <small>{t("workforcePage.lastSynced")}: {readableSyncTime(sync.lastSyncTime)}</small>
             </div>}
             {sync.pendingCount > 0 && <div className="attendance-cache-banner attendance-cache-banner--pending" role="status">
-              <strong>Pending sync: {sync.pendingCount} change{sync.pendingCount === 1 ? "" : "s"} waiting.</strong>
+              <strong>{t("workforcePage.pendingSync", { count: sync.pendingCount })}</strong>
             </div>}
             <div className="attendance-entry-controls">
               <ClearableSelect value={groupFilterId} clearValue="all" onChange={setGroupFilterId}>
-                <option value="all">All groups</option>
+                <option value="all">{t("reportsPage.allGroups")}</option>
                 {groups.filter((group) => group.active !== false).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
               </ClearableSelect>
               <label className="attendance-date-control">
-                <span>Date</span>
+                <span>{t("workforcePage.date")}</span>
                 <input aria-label="Attendance date" type="date" value={date} onChange={(event) => setDate(event.target.value)} />
               </label>
               <SearchInput className="attendance-entry-search" placeholder={t("workforcePage.searchLabour")} value={attendanceSearch} onChange={setAttendanceSearch} />
@@ -487,7 +482,7 @@ function WorkforceModule({
             </div>
             <div className="attendance-board">
               {!labourers.length && sync.dataSource === "cache"
-                ? <Empty>No labour list is saved on this device. Connect once to sync labour.</Empty>
+                ? <Empty>{t("workforcePage.noCachedLabour")}</Empty>
                 : !filteredLabourers.length ? <Empty>{t("workforcePage.noLabourSearch")}</Empty> : filteredLabourers.map((labourer, index) => {
                 const currentStatus = attendanceByLabourer.get(attendanceStatusKey(labourer.id, date));
                 const previousStatus = yesterdayByLabourer.get(attendanceStatusKey(labourer.id, yesterdayDate));
@@ -498,7 +493,7 @@ function WorkforceModule({
                     <div className="attendance-card__body">
                       <strong>{labourer.name}</strong>
                       <span>{t("workforcePage.yesterday")}: {previousStatus ? previousStatus === "half_day" ? "1/2" : previousStatus === "present" ? "P" : "A" : "-"}</span>
-                      {!markable && <span className="status-inactive">Not available for attendance</span>}
+                      {!markable && <span className="status-inactive">{t("workforcePage.notAvailableForAttendance")}</span>}
                     </div>
                     <div className="attendance-status-buttons">
                       <button disabled={!markable || markingLabourers.has(labourer.id)} className={currentStatus === "present" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "present")}>P</button>
@@ -525,41 +520,41 @@ function WorkforceModule({
               <h2 id="worker-dialog-title">{selectedLabourer.name}</h2>
             </header>
             <div className="worker-dialog__body">
-              <h3>Attendance Statistics</h3>
+              <h3>{t("workforcePage.attendanceStatistics")}</h3>
               <dl className="worker-stats">
-                <div><dt>Status</dt><dd className={selectedLabourer.active === false ? "negative" : "positive"}>{selectedLabourer.active === false ? "Inactive" : "Active"}</dd></div>
-                <div><dt>Payment Type</dt><dd>{(selectedLabourer.paymentType ?? "daily_wage").replaceAll("_", " ")}</dd></div>
-                <div><dt>Payment Summary</dt><dd>{labourPaymentSummary(selectedLabourer)}</dd></div>
-                <div><dt>Group</dt><dd>{selectedLabourer.group}</dd></div>
-                <div><dt>Join Date</dt><dd>{selectedLabourer.joinedOn ?? selectedLabourer.createdAt.slice(0, 10)}</dd></div>
-                <div><dt>End Date</dt><dd>{selectedLabourer.endedOn || "-"}</dd></div>
-                <div><dt>Present</dt><dd>{presentCount}</dd></div>
-                <div><dt>1/2 Day</dt><dd>{halfDayCount}</dd></div>
-                <div><dt>Absent</dt><dd>{absentCount}</dd></div>
+                <div><dt>{t("common.status")}</dt><dd className={selectedLabourer.active === false ? "negative" : "positive"}>{selectedLabourer.active === false ? t("common.inactive") : t("common.active")}</dd></div>
+                <div><dt>{t("workforcePage.paymentTypeLabel")}</dt><dd>{translatePaymentType(selectedLabourer.paymentType ?? "daily_wage")}</dd></div>
+                <div><dt>{t("workforcePage.paymentSummary")}</dt><dd>{labourPaymentSummary(selectedLabourer)}</dd></div>
+                <div><dt>{t("workforcePage.groupLabel")}</dt><dd>{selectedLabourer.group}</dd></div>
+                <div><dt>{t("workforcePage.joinDate")}</dt><dd>{selectedLabourer.joinedOn ?? selectedLabourer.createdAt.slice(0, 10)}</dd></div>
+                <div><dt>{t("workforcePage.endDate")}</dt><dd>{selectedLabourer.endedOn || "-"}</dd></div>
+                <div><dt>{t("workforcePage.present")}</dt><dd>{presentCount}</dd></div>
+                <div><dt>{t("workforcePage.halfDay")}</dt><dd>{halfDayCount}</dd></div>
+                <div><dt>{t("workforcePage.absent")}</dt><dd>{absentCount}</dd></div>
               </dl>
 
-              <h3>Financial Overview</h3>
+              <h3>{t("workforcePage.financialOverview")}</h3>
               <dl className="worker-stats">
-                <div><dt>Daily Wage (SAR)</dt><dd>{money(selectedLabourer.dailyWage)}</dd></div>
-                <div><dt>Total Earnings</dt><dd className="positive">{money(totalEarnings)}</dd></div>
-                <div><dt>Advance</dt><dd className={advanceAmount > 0 ? "negative" : ""}>{money(advanceAmount)}</dd></div>
-                <div><dt>Payments</dt><dd className={paidAmount > 0 ? "negative" : ""}>{money(paidAmount)}</dd></div>
-                <div><dt>Net Balance</dt><dd className={netBalance < 0 ? "negative" : "positive"}>{money(netBalance)}</dd></div>
+                <div><dt>{t("workforcePage.paymentSummary")}</dt><dd>{labourPaymentSummary(selectedLabourer)}</dd></div>
+                <div><dt>{t("reportsPage.total")}</dt><dd className="positive">{money(totalEarnings)}</dd></div>
+                <div><dt>{t("advancesPage.recordAdvance")}</dt><dd className={advanceAmount > 0 ? "negative" : ""}>{money(advanceAmount)}</dd></div>
+                <div><dt>{t("workforcePage.paymentsLabel")}</dt><dd className={paidAmount > 0 ? "negative" : ""}>{money(paidAmount)}</dd></div>
+                <div><dt>{t("workforcePage.netBalanceLabel")}</dt><dd className={netBalance < 0 ? "negative" : "positive"}>{money(netBalance)}</dd></div>
               </dl>
             </div>
             <footer className="worker-dialog__footer">
-              {canManageLabour && <button className="worker-dialog__link" type="button" onClick={() => { setActionLabourer(selectedLabourer); setLabourAction("update"); }}>Update</button>}
-              {canAddAdvance && <button className="worker-dialog__link" type="button" onClick={() => { setActionLabourer(selectedLabourer); setLabourAction("advance"); }}>Advance</button>}
-              {canAddAdvance && selectedLabourer.paymentType === "production_based" && <button className="worker-dialog__link" type="button" onClick={() => { setActionLabourer(selectedLabourer); setLabourAction("production"); }}>Production</button>}
-              {canAddAdvance && <button className="worker-dialog__link" type="button" onClick={() => { setActionLabourer(selectedLabourer); setLabourAction("payment"); }}>Payment</button>}
+              {canManageLabour && <button className="worker-dialog__link" type="button" onClick={() => { setActionLabourer(selectedLabourer); setLabourAction("update"); }}>{t("common.edit")}</button>}
+              {canAddAdvance && <button className="worker-dialog__link" type="button" onClick={() => { setActionLabourer(selectedLabourer); setLabourAction("advance"); }}>{t("advancesPage.recordAdvance")}</button>}
+              {canAddAdvance && selectedLabourer.paymentType === "production_based" && <button className="worker-dialog__link" type="button" onClick={() => { setActionLabourer(selectedLabourer); setLabourAction("production"); }}>{t("workforcePage.recordProduction")}</button>}
+              {canAddAdvance && <button className="worker-dialog__link" type="button" onClick={() => { setActionLabourer(selectedLabourer); setLabourAction("payment"); }}>{t("workforcePage.paymentAction")}</button>}
               {canManageLabour && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => {
                 if (!navigator.onLine || sync.pendingCount > 0) showToast(t("errors.syncPendingBeforeDeactivate"));
                 else {
                   setActionLabourer(selectedLabourer);
                   setLabourAction("deactivate");
                 }
-              }}>{selectedLabourer.active === false ? "Delete" : "Deactivate / Delete"}</button>}
-              <button className="worker-dialog__close" type="button" onClick={() => setSelectedLabourer(null)}>Close</button>
+              }}>{selectedLabourer.active === false ? t("common.delete") : t("workforcePage.deactivateDelete")}</button>}
+              <button className="worker-dialog__close" type="button" onClick={() => setSelectedLabourer(null)}>{t("common.close")}</button>
             </footer>
           </section>
         </div>
@@ -649,42 +644,44 @@ type LabourEditorForm = {
 };
 
 function LabourPaymentFields({ form, setForm }: { form: LabourEditorForm; setForm: (next: LabourEditorForm) => void }) {
+  const { t } = useTranslation();
   return <>
-    <label><span>Payment type *</span><select required value={form.paymentType} onChange={(event) => setForm({ ...form, paymentType: event.target.value as PaymentType })}>
-      <option value="daily_wage">Daily Wage</option>
-      <option value="production_based">Production Based</option>
-      <option value="contract_lump_sum">Contract / Lump Sum</option>
-      <option value="monthly_salary">Monthly Salary</option>
-      <option value="other">Other</option>
+    <label><span>{t("workforcePage.paymentTypeField")} *</span><select required value={form.paymentType} onChange={(event) => setForm({ ...form, paymentType: event.target.value as PaymentType })}>
+      <option value="daily_wage">{translatePaymentType("daily_wage")}</option>
+      <option value="production_based">{translatePaymentType("production_based")}</option>
+      <option value="contract_lump_sum">{translatePaymentType("contract_lump_sum")}</option>
+      <option value="monthly_salary">{translatePaymentType("monthly_salary")}</option>
+      <option value="other">{translatePaymentType("other")}</option>
     </select></label>
-    {form.paymentType === "daily_wage" && <label><span>Daily wage rate *</span><input required min="0" step="0.01" type="number" value={form.dailyWage} onChange={(event) => setForm({ ...form, dailyWage: event.target.value })} /></label>}
+    {form.paymentType === "daily_wage" && <label><span>{t("workforcePage.dailyWageRate")} *</span><input required min="0" step="0.01" type="number" value={form.dailyWage} onChange={(event) => setForm({ ...form, dailyWage: event.target.value })} /></label>}
     {form.paymentType === "production_based" && <>
-      <label><span>Production unit *</span><select value={form.productionUnit} onChange={(event) => setForm({ ...form, productionUnit: event.target.value })}>
-        <option value="carton">Carton</option><option value="crate">Crate</option><option value="tree">Tree</option><option value="task">Task</option><option value="custom">Custom</option>
+      <label><span>{t("workforcePage.productionUnit")} *</span><select value={form.productionUnit} onChange={(event) => setForm({ ...form, productionUnit: event.target.value })}>
+        <option value="carton">{t("workforcePage.carton")}</option><option value="crate">{t("workforcePage.crate")}</option><option value="tree">{t("workforcePage.tree")}</option><option value="task">{t("workforcePage.task")}</option><option value="custom">{t("workforcePage.custom")}</option>
       </select></label>
-      {form.productionUnit === "custom" && <label><span>Custom unit name *</span><input required value={form.customProductionUnit} onChange={(event) => setForm({ ...form, customProductionUnit: event.target.value })} /></label>}
-      <label><span>Unit rate *</span><input required min="0" step="0.01" type="number" value={form.productionUnitRate} onChange={(event) => setForm({ ...form, productionUnitRate: event.target.value })} /></label>
-      <label><span>Minimum guarantee</span><input min="0" step="0.01" type="number" value={form.minimumGuarantee} onChange={(event) => setForm({ ...form, minimumGuarantee: event.target.value })} /></label>
+      {form.productionUnit === "custom" && <label><span>{t("workforcePage.customUnitName")} *</span><input required value={form.customProductionUnit} onChange={(event) => setForm({ ...form, customProductionUnit: event.target.value })} /></label>}
+      <label><span>{t("workforcePage.unitRate")} *</span><input required min="0" step="0.01" type="number" value={form.productionUnitRate} onChange={(event) => setForm({ ...form, productionUnitRate: event.target.value })} /></label>
+      <label><span>{t("workforcePage.minimumGuarantee")}</span><input min="0" step="0.01" type="number" value={form.minimumGuarantee} onChange={(event) => setForm({ ...form, minimumGuarantee: event.target.value })} /></label>
     </>}
     {form.paymentType === "contract_lump_sum" && <>
-      <label><span>Contract title/name</span><input value={form.contractTitle} onChange={(event) => setForm({ ...form, contractTitle: event.target.value })} /></label>
-      <label><span>Total contract amount *</span><input required min="0" step="0.01" type="number" value={form.contractAmount} onChange={(event) => setForm({ ...form, contractAmount: event.target.value })} /></label>
-      <label><span>Contract start date</span><input type="date" value={form.contractStartDate} onChange={(event) => setForm({ ...form, contractStartDate: event.target.value })} /></label>
-      <label><span>Expected end date</span><input type="date" value={form.contractExpectedEndDate} onChange={(event) => setForm({ ...form, contractExpectedEndDate: event.target.value })} /></label>
-      <label><span>Payment terms/notes</span><textarea value={form.contractTerms} onChange={(event) => setForm({ ...form, contractTerms: event.target.value })} /></label>
+      <label><span>{t("workforcePage.contractTitle")}</span><input value={form.contractTitle} onChange={(event) => setForm({ ...form, contractTitle: event.target.value })} /></label>
+      <label><span>{t("workforcePage.totalContractAmount")} *</span><input required min="0" step="0.01" type="number" value={form.contractAmount} onChange={(event) => setForm({ ...form, contractAmount: event.target.value })} /></label>
+      <label><span>{t("workforcePage.contractStartDate")}</span><input type="date" value={form.contractStartDate} onChange={(event) => setForm({ ...form, contractStartDate: event.target.value })} /></label>
+      <label><span>{t("workforcePage.expectedEndDate")}</span><input type="date" value={form.contractExpectedEndDate} onChange={(event) => setForm({ ...form, contractExpectedEndDate: event.target.value })} /></label>
+      <label><span>{t("workforcePage.paymentTermsNotes")}</span><textarea value={form.contractTerms} onChange={(event) => setForm({ ...form, contractTerms: event.target.value })} /></label>
     </>}
     {form.paymentType === "monthly_salary" && <>
-      <label><span>Monthly salary amount *</span><input required min="0" step="0.01" type="number" value={form.monthlySalary} onChange={(event) => setForm({ ...form, monthlySalary: event.target.value })} /></label>
-      <label><span>Payment day</span><input min="1" max="31" step="1" type="number" value={form.paymentDay} onChange={(event) => setForm({ ...form, paymentDay: event.target.value })} /></label>
+      <label><span>{t("workforcePage.monthlySalaryAmount")} *</span><input required min="0" step="0.01" type="number" value={form.monthlySalary} onChange={(event) => setForm({ ...form, monthlySalary: event.target.value })} /></label>
+      <label><span>{t("workforcePage.paymentDay")}</span><input min="1" max="31" step="1" type="number" value={form.paymentDay} onChange={(event) => setForm({ ...form, paymentDay: event.target.value })} /></label>
     </>}
     {form.paymentType === "other" && <>
-      <label><span>Description</span><input value={form.otherPaymentDescription} onChange={(event) => setForm({ ...form, otherPaymentDescription: event.target.value })} /></label>
-      <label><span>Amount/rate</span><input min="0" step="0.01" type="number" value={form.otherPaymentRate} onChange={(event) => setForm({ ...form, otherPaymentRate: event.target.value })} /></label>
+      <label><span>{t("reportsPage.description")}</span><input value={form.otherPaymentDescription} onChange={(event) => setForm({ ...form, otherPaymentDescription: event.target.value })} /></label>
+      <label><span>{t("workforcePage.amountRate")}</span><input min="0" step="0.01" type="number" value={form.otherPaymentRate} onChange={(event) => setForm({ ...form, otherPaymentRate: event.target.value })} /></label>
     </>}
   </>;
 }
 
 function EditLabourPanel({ labourer, onClose, onSave }: { labourer: Labourer; onClose: () => void; onSave: (record: Labourer) => Promise<void> }) {
+  const { t } = useTranslation();
   const [form, setForm] = useState<LabourEditorForm>({
     name: labourer.name,
     paymentType: labourer.paymentType ?? "daily_wage",
@@ -714,7 +711,7 @@ function EditLabourPanel({ labourer, onClose, onSave }: { labourer: Labourer; on
   const [error, setError] = useState("");
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!form.name.trim()) { setError("Labour name is required."); return; }
+    if (!form.name.trim()) { setError(t("workforcePage.labourNameRequired")); return; }
     if (busy) return;
     setBusy(true); setError("");
     try {
@@ -746,21 +743,21 @@ function EditLabourPanel({ labourer, onClose, onSave }: { labourer: Labourer; on
         updatedAt: new Date().toISOString(),
       });
       onClose();
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to update labour."); }
+    } catch (caught) { setError(caught instanceof Error ? caught.message : t("workforcePage.unableUpdateLabour")); }
     finally { setBusy(false); }
   };
-  return <ActionPanel title="Update Labour" onClose={onClose}>
+  return <ActionPanel title={t("workforcePage.updateLabourTitle")} onClose={onClose}>
     <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
-      <label><span>Labour name *</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
-      <label><span>Group</span><input value={form.group} onChange={(event) => setForm({ ...form, group: event.target.value })} /></label>
+      <label><span>{t("workforcePage.labourName")} *</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+      <label><span>{t("workforcePage.groupLabel")}</span><input value={form.group} onChange={(event) => setForm({ ...form, group: event.target.value })} /></label>
       <LabourPaymentFields form={form} setForm={setForm} />
-      <label><span>Status</span><select value={form.active ? "active" : "inactive"} onChange={(event) => setForm({ ...form, active: event.target.value === "active" })}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
-      <label><span>Join date</span><input type="date" value={form.joinedOn} onChange={(event) => setForm({ ...form, joinedOn: event.target.value })} /></label>
-      <label><span>End date</span><input type="date" value={form.endedOn} onChange={(event) => setForm({ ...form, endedOn: event.target.value })} /></label>
-      <label><span>Phone / contact</span><input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
-      <label><span>Notes</span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
+      <label><span>{t("workforcePage.statusLabel")}</span><select value={form.active ? "active" : "inactive"} onChange={(event) => setForm({ ...form, active: event.target.value === "active" })}><option value="active">{t("common.active")}</option><option value="inactive">{t("common.inactive")}</option></select></label>
+      <label><span>{t("workforcePage.joinDate")}</span><input type="date" value={form.joinedOn} onChange={(event) => setForm({ ...form, joinedOn: event.target.value })} /></label>
+      <label><span>{t("workforcePage.endDate")}</span><input type="date" value={form.endedOn} onChange={(event) => setForm({ ...form, endedOn: event.target.value })} /></label>
+      <label><span>{t("workforcePage.phoneContact")}</span><input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
+      <label><span>{t("reportsPage.notes")}</span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
       {error && <p className="worker-action-error">{error}</p>}
-      <footer><button type="button" onClick={onClose}>Cancel</button><button disabled={busy} type="submit">{busy ? "Saving..." : "Save Labour"}</button></footer>
+      <footer><button type="button" onClick={onClose}>{t("common.cancel")}</button><button disabled={busy} type="submit">{busy ? t("workforcePage.saving") : t("workforcePage.saveLabour")}</button></footer>
     </form>
   </ActionPanel>;
 }
@@ -776,6 +773,7 @@ function AddLabourPanel({
   onClose: () => void;
   onSave: (record: Labourer) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [form, setForm] = useState<LabourEditorForm>({
     name: "",
     paymentType: "daily_wage",
@@ -805,7 +803,7 @@ function AddLabourPanel({
   const [error, setError] = useState("");
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!form.name.trim()) { setError("Labour name is required."); return; }
+    if (!form.name.trim()) { setError(t("workforcePage.labourNameRequired")); return; }
     setBusy(true);
     setError("");
     try {
@@ -840,30 +838,30 @@ function AddLabourPanel({
         active: form.active,
       });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to add labour.");
+      setError(caught instanceof Error ? caught.message : t("workforcePage.unableAddLabour"));
     } finally {
       setBusy(false);
     }
   };
-  return <ActionPanel title="Add Labour" onClose={onClose}>
+  return <ActionPanel title={t("workforcePage.addLabourTitle")} onClose={onClose}>
     <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
-      <label><span>Labour name *</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
-      <label><span>Date of joining *</span><input required type="date" value={form.joinedOn} onChange={(event) => setForm({ ...form, joinedOn: event.target.value })} /></label>
-      <label><span>Group</span><select value={form.groupId} onChange={(event) => {
+      <label><span>{t("workforcePage.labourName")} *</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+      <label><span>{t("workforcePage.dateOfJoining")} *</span><input required type="date" value={form.joinedOn} onChange={(event) => setForm({ ...form, joinedOn: event.target.value })} /></label>
+      <label><span>{t("workforcePage.groupLabel")}</span><select value={form.groupId} onChange={(event) => {
         const next = event.target.value;
         const group = groups.find((item) => item.id === next);
         setForm({ ...form, groupId: next, group: group?.name ?? form.group });
       }}>
-        <option value="">None</option>
+        <option value="">{t("workforcePage.none")}</option>
         {groups.filter((group) => group.active !== false).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
-        <option value="__new_group__">Create new group</option>
+        <option value="__new_group__">{t("workforcePage.createNewGroup")}</option>
       </select></label>
-      {form.groupId === "__new_group__" && <label><span>New group name *</span><input required value={form.group} onChange={(event) => setForm({ ...form, group: event.target.value })} /></label>}
+      {form.groupId === "__new_group__" && <label><span>{t("workforcePage.newGroupName")} *</span><input required value={form.group} onChange={(event) => setForm({ ...form, group: event.target.value })} /></label>}
       <LabourPaymentFields form={form} setForm={setForm} />
-      <label><span>Phone / contact</span><input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
-      <label><span>Status</span><select value={form.active ? "active" : "inactive"} onChange={(event) => setForm({ ...form, active: event.target.value === "active" })}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
+      <label><span>{t("workforcePage.phoneContact")}</span><input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
+      <label><span>{t("workforcePage.statusLabel")}</span><select value={form.active ? "active" : "inactive"} onChange={(event) => setForm({ ...form, active: event.target.value === "active" })}><option value="active">{t("common.active")}</option><option value="inactive">{t("common.inactive")}</option></select></label>
       {error && <p className="worker-action-error">{error}</p>}
-      <footer><button type="button" onClick={onClose}>Cancel</button><button disabled={busy} type="submit">{busy ? "Saving..." : "Save Labour"}</button></footer>
+      <footer><button type="button" onClick={onClose}>{t("common.cancel")}</button><button disabled={busy} type="submit">{busy ? t("workforcePage.saving") : t("workforcePage.saveLabour")}</button></footer>
     </form>
   </ActionPanel>;
 }
@@ -1489,10 +1487,10 @@ function ExpensesModule() {
           </fieldset>
           <div className="expense-filter-grid">
             <label className="expense-filter-field"><span>{t("expensesPage.category")}</span><ClearableSelect aria-label={t("expensesPage.category")} value={voucherCategory} onChange={(value) => { setVoucherCategory(value); setVoucherSubcategory(""); }}>
-              <option value="">{t("expensesPage.allCategories")}</option>{categories.data?.categories.map((item) => <option key={item.id}>{item.name}</option>)}
+              <option value="">{t("expensesPage.allCategories")}</option>{categories.data?.categories.map((item) => <option key={item.id} value={item.name}>{translateExpenseCategory(item.name)}</option>)}
             </ClearableSelect></label>
             <label className="expense-filter-field"><span>{t("expensesPage.subcategory")}</span><ClearableSelect aria-label={t("expensesPage.subcategory")} value={voucherSubcategory} onChange={setVoucherSubcategory}>
-              <option value="">{t("expensesPage.allSubcategories")}</option>{[...new Set(voucherSubcategories)].map((name) => <option key={name}>{name}</option>)}
+              <option value="">{t("expensesPage.allSubcategories")}</option>{[...new Set(voucherSubcategories)].map((name) => <option key={name} value={name}>{translateExpenseSubcategory(name)}</option>)}
             </ClearableSelect></label>
             <label className="expense-filter-field expense-filter-field--account"><span>{t("expensesPage.paymentAccount")}</span><ClearableSelect aria-label={t("expensesPage.paymentAccount")} value={voucherAccountId} onChange={setVoucherAccountId}>
               <option value="">{t("expensesPage.allAccounts")}</option>{accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
@@ -1508,18 +1506,18 @@ function ExpensesModule() {
         {voucherSearchQuery.isError && <small>{t("expensesPage.apiRefreshFailed")}</small>}
       </section>
       <Summary value={money(total)} label={hasActiveFilters ? t("expensesPage.totalCurrentFilters") : t("expensesPage.totalCurrentSeason")} />
-      <section className="record-panel"><h2>{t("expensesPage.expensesByCategory")}</h2>{!grouped.length ? <Empty>{t("expensesPage.noExpenseTotals")}</Empty> : <div className="expense-category-report">{grouped.map(([category, items]) => { const categoryTotal = [...items.values()].reduce((sum, amount) => sum + amount, 0); return <article key={category}><header><h3>{category}</h3><strong>{money(categoryTotal)}</strong></header>{[...items].map(([subcategory, amount]) => <p key={subcategory}><span>{subcategory}</span><strong>{money(amount)}</strong></p>)}<b>{t("expensesPage.categoryTotal")} <span>{money(categoryTotal)}</span></b></article>; })}</div>}</section>
-      {canManage && <section className="record-panel"><h2>{t("expensesPage.customSubcategories")}</h2><form className="module-form compact-form" onSubmit={(event) => void addCustom(event)}><select required value={categoryId} onChange={(event) => { setCategoryId(event.target.value); setCategorySearch(categories.data?.categories.find((item) => item.id === event.target.value)?.name ?? ""); }}><option value="">{t("expensesPage.selectCategory")}</option>{categories.data?.categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><input required placeholder={t("expensesPage.newSubcategory")} value={customName} onChange={(event) => setCustomName(event.target.value)} /><button type="submit">{t("expensesPage.addSubcategory")}</button></form><div className="custom-subcategory-list">{categories.data?.categories.flatMap((item) => item.subcategories.filter((subcategory) => !subcategory.isSystem).map((subcategory) => <span key={subcategory.id}>{item.name} / {subcategory.name}<button type="button" onClick={() => { const name = window.prompt(t("expensesPage.renameCustomSubcategory"), subcategory.name); if (token && name?.trim()) void updateExpenseSubcategory(token, workspaceId, subcategory.id, { name: name.trim() }).then(() => categories.refetch()); }}>{t("expensesPage.edit")}</button><button type="button" onClick={() => token && void updateExpenseSubcategory(token, workspaceId, subcategory.id, { active: false }).then(() => categories.refetch())}>{t("expensesPage.disable")}</button></span>))}</div></section>}
+      <section className="record-panel"><h2>{t("expensesPage.expensesByCategory")}</h2>{!grouped.length ? <Empty>{t("expensesPage.noExpenseTotals")}</Empty> : <div className="expense-category-report">{grouped.map(([category, items]) => { const categoryTotal = [...items.values()].reduce((sum, amount) => sum + amount, 0); return <article key={category}><header><h3>{translateExpenseCategory(category)}</h3><strong>{money(categoryTotal)}</strong></header>{[...items].map(([subcategory, amount]) => <p key={subcategory}><span>{subcategory === "Miscellaneous" ? t("expensesPage.miscellaneous") : translateExpenseSubcategory(subcategory)}</span><strong>{money(amount)}</strong></p>)}<b>{t("expensesPage.categoryTotal")} <span>{money(categoryTotal)}</span></b></article>; })}</div>}</section>
+      {canManage && <section className="record-panel"><h2>{t("expensesPage.customSubcategories")}</h2><form className="module-form compact-form" onSubmit={(event) => void addCustom(event)}><select required value={categoryId} onChange={(event) => { setCategoryId(event.target.value); setCategorySearch(categories.data?.categories.find((item) => item.id === event.target.value)?.name ?? ""); }}><option value="">{t("expensesPage.selectCategory")}</option>{categories.data?.categories.map((item) => <option key={item.id} value={item.id}>{translateExpenseCategory(item.name)}</option>)}</select><input required placeholder={t("expensesPage.newSubcategory")} value={customName} onChange={(event) => setCustomName(event.target.value)} /><button type="submit">{t("expensesPage.addSubcategory")}</button></form><div className="custom-subcategory-list">{categories.data?.categories.flatMap((item) => item.subcategories.filter((subcategory) => !subcategory.isSystem).map((subcategory) => <span key={subcategory.id}>{translateExpenseCategory(item.name)} / {subcategory.name}<button type="button" onClick={() => { const name = window.prompt(t("expensesPage.renameCustomSubcategory"), subcategory.name); if (token && name?.trim()) void updateExpenseSubcategory(token, workspaceId, subcategory.id, { name: name.trim() }).then(() => categories.refetch()); }}>{t("expensesPage.edit")}</button><button type="button" onClick={() => token && void updateExpenseSubcategory(token, workspaceId, subcategory.id, { active: false }).then(() => categories.refetch())}>{t("expensesPage.disable")}</button></span>))}</div></section>}
       <RecordTable
         empty={t("expensesPage.noExpensesFound")}
-        rows={filteredVouchers.map((item) => [item.voucherNumber, item.date, `${item.category} / ${item.subcategory || t("expensesPage.miscellaneous")}`, item.description, accountById.get(item.accountId) ?? t("expensesPage.unknownAccount"), money(item.amount)])}
+        rows={filteredVouchers.map((item) => [item.voucherNumber, item.date, `${translateExpenseCategory(item.category)} / ${item.subcategory ? translateExpenseSubcategory(item.subcategory) : t("expensesPage.miscellaneous")}`, item.description, accountById.get(item.accountId) ?? t("expensesPage.unknownAccount"), money(item.amount)])}
         actions={filteredVouchers.map((item) => <div className="record-list__actions" key={item.id}><button type="button" onClick={() => setSelectedVoucher(item)}>{t("expensesPage.viewDetails")}</button>{canEditVouchers && <button type="button" onClick={() => openEdit(item)}>{t("expensesPage.edit")}</button>}</div>)}
       />
       {selectedVoucher && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedVoucher(null)}>
         <section className="worker-dialog" role="dialog" aria-modal="true" aria-label={t("expensesPage.voucherDetails")} onClick={(event) => event.stopPropagation()}>
           <header className="worker-dialog__header"><h2>{t("expensesPage.voucherTitle", { number: selectedVoucher.voucherNumber })}</h2><button type="button" onClick={() => setSelectedVoucher(null)}><X size={18} /></button></header>
           <div className="worker-dialog__body"><dl className="worker-stats">
-            <div><dt>{t("expensesPage.date")}</dt><dd>{selectedVoucher.date}</dd></div><div><dt>{t("expensesPage.category")}</dt><dd>{selectedVoucher.category} / {selectedVoucher.subcategory}</dd></div>
+            <div><dt>{t("expensesPage.date")}</dt><dd>{selectedVoucher.date}</dd></div><div><dt>{t("expensesPage.category")}</dt><dd>{translateExpenseCategory(selectedVoucher.category)} / {translateExpenseSubcategory(selectedVoucher.subcategory)}</dd></div>
             <div><dt>{t("expensesPage.description")}</dt><dd>{selectedVoucher.description}</dd></div><div><dt>{t("expensesPage.amount")}</dt><dd>{money(selectedVoucher.amount)}</dd></div>
             <div><dt>{t("expensesPage.paymentSource")}</dt><dd>{accounts.find((item) => item.id === selectedVoucher.accountId)?.name ?? t("expensesPage.unknownAccount")}</dd></div>
             {selectedVoucher.notes && <div><dt>{t("expensesPage.notesOptional")}</dt><dd>{selectedVoucher.notes}</dd></div>}
@@ -1642,15 +1640,15 @@ function DispatchModule() {
         <form className="module-form dispatch-form" onSubmit={(event) => void submit(event)}>
           <label><span>{t("dispatchPage.dispatchDate")}</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
           <label><span>{t("dispatchPage.vehicle")}</span><ClearableSelect required value={vehicleId} onChange={setVehicleId}><option value="">{t("dispatchPage.selectActiveVehicle")}</option>{activeVehicles.map((item) => <option key={item.id} value={item.id}>{item.number}{item.driverName ? ` - ${item.driverName}` : ""}</option>)}</ClearableSelect></label>
-          <label><span>Dispatch number</span><input placeholder={t("dispatchPage.optional")} value={dispatchNumber} onChange={(event) => setDispatchNumber(event.target.value)} /></label>
-          <label><span>Plot</span><input placeholder={t("dispatchPage.optional")} value={plotName} onChange={(event) => setPlotName(event.target.value)} /></label>
+          <label><span>{t("reportsPage.dispatchNumber")}</span><input placeholder={t("dispatchPage.optional")} value={dispatchNumber} onChange={(event) => setDispatchNumber(event.target.value)} /></label>
+          <label><span>{t("reportsPage.plot")}</span><input placeholder={t("dispatchPage.optional")} value={plotName} onChange={(event) => setPlotName(event.target.value)} /></label>
           <label><span>{t("dispatchPage.destinationBuyer")}</span><input placeholder={t("dispatchPage.optional")} value={destination} onChange={(event) => setDestination(event.target.value)} /></label>
-          <label><span>Delivery date</span><input type="date" value={deliveryDate} onChange={(event) => setDeliveryDate(event.target.value)} /></label>
-          <label><span>Status</span><ClearableSelect clearValue="dispatched" value={dispatchStatus} onChange={(value) => setDispatchStatus(value as NonNullable<Dispatch["status"]>)}>
-            <option value="pending">Pending</option>
-            <option value="dispatched">Dispatched</option>
-            <option value="delivered">Delivered</option>
-            <option value="sold">Sold</option>
+          <label><span>{t("reportsPage.deliveryDate")}</span><input type="date" value={deliveryDate} onChange={(event) => setDeliveryDate(event.target.value)} /></label>
+          <label><span>{t("common.status")}</span><ClearableSelect clearValue="dispatched" value={dispatchStatus} onChange={(value) => setDispatchStatus(value as NonNullable<Dispatch["status"]>)}>
+            <option value="pending">{translateDispatchStatus("pending")}</option>
+            <option value="dispatched">{translateDispatchStatus("dispatched")}</option>
+            <option value="delivered">{translateDispatchStatus("delivered")}</option>
+            <option value="sold">{translateDispatchStatus("sold")}</option>
           </ClearableSelect></label>
           <label><span>{t("dispatchPage.notes")}</span><input placeholder={t("dispatchPage.optional")} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
           <div className="dispatch-items">
@@ -1669,8 +1667,8 @@ function DispatchModule() {
       </FormCard>
       <div className="summary-grid">
         <Summary label={t("dispatchPage.totalDispatchedCartons")} value={String(totalDispatched)} />
-        <Summary label="Sold cartons" value={String(totalSold)} />
-        <Summary label="Remaining cartons" value={String(totalRemaining)} />
+        <Summary label={t("salesPage.soldCartons")} value={String(totalSold)} />
+        <Summary label={t("salesPage.remainingCartons")} value={String(totalRemaining)} />
       </div>
       <section className="record-panel dispatch-summary">
         <h2>{t("dispatchPage.dispatchSummary")}</h2>
@@ -1684,8 +1682,8 @@ function DispatchModule() {
         return <article key={record.id}><header><div><strong>{record.dispatchNumber ?? record.date}</strong><h3>{record.vehicleNumber ?? vehicleName(record.vehicleId)}</h3><p>{record.date}{record.plotName ? ` | ${record.plotName}` : ""}{record.destination ? ` | ${record.destination}` : ""}</p></div><b>{dispatchCartons(record)} {t("dispatchPage.cartons")}</b></header><div className="dispatch-breakdown">{record.items?.map((item) => {
           const sold = soldByItem.get(dispatchItemKey(record.id, item.id)) ?? 0;
           const remaining = Math.max(item.cartons - sold, 0);
-          return <span key={item.id}>{dateTypeName(item.dateTypeId, item.dateTypeName)}: {item.cartons} | Sold {sold} | Remaining {remaining}</span>;
-        }) ?? <span>{record.produceType}: {record.cartons}</span>}</div><p className="dispatch-linked-summary">Status {record.status ?? "dispatched"} | Sold {soldCartons} | Remaining {remainingCartons} | Linked sales {linkedSales}</p><footer><button type="button" onClick={() => edit(record)}>{t("dispatchPage.update")}</button>{canManage && <button className="danger-link" type="button" onClick={() => void remove(record)}>{t("dispatchPage.delete")}</button>}</footer></article>;
+          return <span key={item.id}>{dateTypeName(item.dateTypeId, item.dateTypeName)}: {item.cartons} | {t("salesPage.soldCartons")} {sold} | {t("salesPage.remainingCartons")} {remaining}</span>;
+        }) ?? <span>{record.produceType}: {record.cartons}</span>}</div><p className="dispatch-linked-summary">{t("reportsPage.status")} {translateDispatchStatus(record.status ?? "dispatched")} | {t("salesPage.soldCartons")} {soldCartons} | {t("salesPage.remainingCartons")} {remainingCartons} | {t("dispatchPage.linkedSales")} {linkedSales}</p><footer><button type="button" onClick={() => edit(record)}>{t("dispatchPage.update")}</button>{canManage && <button className="danger-link" type="button" onClick={() => void remove(record)}>{t("dispatchPage.delete")}</button>}</footer></article>;
       })}</div>}</section>
       {showVehicles && <DispatchVehicleManager vehicles={vehicles} dispatches={records} onClose={() => setShowVehicles(false)} onRefresh={refreshVehicles} />}
       {showDateTypes && <DispatchDateTypeManager dateTypes={dateTypes} dispatches={records} onClose={() => setShowDateTypes(false)} onRefresh={refreshDateTypes} />}
@@ -1824,6 +1822,7 @@ function DispatchDateTypeManager({ dateTypes, dispatches, onClose, onRefresh }: 
 }
 
 function SalesModule() {
+  const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const load = useCallback(async () => (await workspaceRecords(offlineDb.sales)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts), []);
@@ -1868,7 +1867,7 @@ function SalesModule() {
     : undefined;
   const totalAmount = (Number(quantity) || 0) * (Number(unitPrice) || 0);
   const canSave = Boolean(accountId || accounts[0]?.id);
-  const saleTypeLabel = (sale: Pick<Sale, "saleType" | "dispatchId">) => resolveSaleType(sale) === "farm_direct_sale" ? "Direct Farm Sale" : "From Dispatch";
+  const saleTypeLabel = (sale: Pick<Sale, "saleType" | "dispatchId">) => translateSaleType(resolveSaleType(sale));
   const resetForm = useCallback(() => {
     setEditingSale(null);
     setSaleType("dispatch_sale");
@@ -1913,8 +1912,8 @@ function SalesModule() {
     setSalePendingDelete((current) => current?.id === sale.id ? null : current);
     setEditingSale((current) => current?.id === sale.id ? null : current);
     await refresh();
-    window.dispatchEvent(new CustomEvent("muzare-toast", { detail: "Sale deleted successfully." }));
-  }, [refresh]);
+    window.dispatchEvent(new CustomEvent("muzare-toast", { detail: t("salesPage.saleDeleted") }));
+  }, [refresh, t]);
   useEffect(() => {
     const recordId = searchParams.get("recordId");
     const mode = searchParams.get("mode");
@@ -1934,16 +1933,16 @@ function SalesModule() {
     event.preventDefault();
     const quantityValue = Number(quantity);
     const unitPriceValue = Number(unitPrice);
-    if (!quantityValue || quantityValue <= 0) return setError("Enter a valid sale quantity.");
-    if (!unitPriceValue || unitPriceValue < 0) return setError("Enter a valid unit price.");
-    if (!canSave) return setError("Select a payment account.");
+    if (!quantityValue || quantityValue <= 0) return setError(t("salesPage.validQuantity"));
+    if (!unitPriceValue || unitPriceValue < 0) return setError(t("salesPage.validUnitPrice"));
+    if (!canSave) return setError(t("salesPage.selectAccountError"));
     if (currentSaleType === "dispatch_sale") {
-      if (!selectedDispatch) return setError("Select a dispatch record before saving a sale.");
-      if (date < selectedDispatch.dispatch.date) return setError("Sale date cannot be earlier than the dispatch date.");
-      if (quantityValue > (selectedDispatchMax ?? 0)) return setError("Sale quantity cannot exceed the remaining cartons on this dispatch.");
+      if (!selectedDispatch) return setError(t("salesPage.selectDispatchError"));
+      if (date < selectedDispatch.dispatch.date) return setError(t("salesPage.dateEarlierThanDispatch"));
+      if (quantityValue > (selectedDispatchMax ?? 0)) return setError(t("salesPage.quantityExceeds"));
     }
     const directProduct = selectedDirectType?.name ?? directProduceType.trim();
-    if (currentSaleType === "farm_direct_sale" && !directProduct) return setError("Select or enter a product / variety.");
+    if (currentSaleType === "farm_direct_sale" && !directProduct) return setError(t("salesPage.selectOrEnterProduct"));
     const record: Sale = {
       ...(editingSale ?? makeLocalRecord()),
       saleType: currentSaleType,
@@ -1973,36 +1972,36 @@ function SalesModule() {
     await persistOperationalRecord("sale", record);
     resetForm();
     await refresh();
-    window.dispatchEvent(new CustomEvent("muzare-toast", { detail: editingSale ? "Sale updated successfully." : "Sale recorded successfully." }));
+    window.dispatchEvent(new CustomEvent("muzare-toast", { detail: editingSale ? t("salesPage.saleUpdated") : t("salesPage.saleRecorded") }));
   };
 
   return (
     <>
-      <FormCard title="Record sale">
+      <FormCard title={t("salesPage.title")}>
         <form className="module-form sales-form" onSubmit={(event) => void submit(event)}>
           <div className="sales-type-toggle">
             <button className={currentSaleType === "dispatch_sale" ? "is-active" : ""} type="button" onClick={() => { setSaleType("dispatch_sale"); setError(""); }}>
-              From Dispatch
+              {t("salesPage.fromDispatch")}
             </button>
             <button className={currentSaleType === "farm_direct_sale" ? "is-active" : ""} type="button" onClick={() => { setSaleType("farm_direct_sale"); setSelectedDispatchKey(""); setError(""); }}>
-              Direct Farm Sale
+              {t("salesPage.directFarmSale")}
             </button>
           </div>
-          <label><span>Sale date</span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
-          <label><span>Invoice / market serial</span><input placeholder="Optional invoice or serial no." value={invoiceNumber} onChange={(event) => setInvoiceNumber(event.target.value)} /></label>
-          <label><span>Buyer / customer</span><input placeholder="Optional buyer name" value={buyerName} onChange={(event) => setBuyerName(event.target.value)} /></label>
-          <label><span>Delivery date</span><input type="date" value={deliveryDate} onChange={(event) => setDeliveryDate(event.target.value)} /></label>
+          <label><span>{t("reportsPage.saleDate")}</span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
+          <label><span>{t("salesPage.invoiceSerial")}</span><input placeholder={t("dispatchPage.optional")} value={invoiceNumber} onChange={(event) => setInvoiceNumber(event.target.value)} /></label>
+          <label><span>{t("salesPage.buyerCustomer")}</span><input placeholder={t("dispatchPage.optional")} value={buyerName} onChange={(event) => setBuyerName(event.target.value)} /></label>
+          <label><span>{t("reportsPage.deliveryDate")}</span><input type="date" value={deliveryDate} onChange={(event) => setDeliveryDate(event.target.value)} /></label>
           {currentSaleType === "dispatch_sale"
             ? <div className="sales-dispatch-picker">
               <div className="sales-dispatch-picker__header">
-                <label><span>Dispatch record</span></label>
-                <span>{filteredAvailability.length} available</span>
+                <label><span>{t("salesPage.dispatchRecord")}</span></label>
+                <span>{t("salesPage.availableCount", { count: filteredAvailability.length })}</span>
               </div>
-              <SearchInput placeholder="Search dispatch by type, vehicle, or date" value={dispatchSearch} onChange={setDispatchSearch} onClear={() => setDispatchSearch("")} />
+              <SearchInput placeholder={t("salesPage.searchDispatch")} value={dispatchSearch} onChange={setDispatchSearch} onClear={() => setDispatchSearch("")} />
               {selectedDispatch ? <div className="sales-selected-dispatch">
                 <strong>{selectedDispatch.dateTypeName}</strong>
                 <span>{selectedDispatch.dispatch.date} | {selectedDispatch.vehicleLabel}</span>
-                <span>{selectedDispatch.destination || "No destination"} | Remaining {selectedDispatchMax ?? selectedDispatch.remainingCartons}</span>
+                <span>{selectedDispatch.destination || "-"} | {t("salesPage.remainingCartons")} {selectedDispatchMax ?? selectedDispatch.remainingCartons}</span>
               </div> : null}
               <div className="dispatch-list sales-availability-list">
                 {filteredAvailability.length ? filteredAvailability.map((item) => {
@@ -2015,48 +2014,48 @@ function SalesModule() {
                         <h3>{item.dateTypeName}</h3>
                         <p>{item.vehicleLabel}{item.destination ? ` | ${item.destination}` : ""}</p>
                       </div>
-                      <b>{availableCartons} left</b>
+                      <b>{availableCartons} {t("salesPage.remainingCartons").toLowerCase()}</b>
                     </header>
-                    <p className="dispatch-linked-summary">Dispatched {item.dispatchedCartons} | Sold {item.soldCartons} | Remaining {availableCartons}</p>
-                    <footer><button type="button" onClick={() => setSelectedDispatchKey(dispatchItemKey(item.dispatch.id, item.itemId))}>Select dispatch</button></footer>
+                    <p className="dispatch-linked-summary">{t("systemValues.dispatchStatuses.dispatched")} {item.dispatchedCartons} | {t("salesPage.soldCartons")} {item.soldCartons} | {t("salesPage.remainingCartons")} {availableCartons}</p>
+                    <footer><button type="button" onClick={() => setSelectedDispatchKey(dispatchItemKey(item.dispatch.id, item.itemId))}>{t("salesPage.selectDispatch")}</button></footer>
                   </article>;
-                }) : <Empty>No available dispatches match this search.</Empty>}
+                }) : <Empty>{t("salesPage.noAvailableDispatch")}</Empty>}
               </div>
             </div>
             : activeDateTypes.length
-              ? <label><span>Product / variety</span><ClearableSelect value={directDateTypeId} onChange={setDirectDateTypeId}>
-                <option value="">Select product / variety</option>
+              ? <label><span>{t("reportsPage.productVariety")}</span><ClearableSelect value={directDateTypeId} onChange={setDirectDateTypeId}>
+                <option value="">{t("salesPage.selectProductVariety")}</option>
                 {activeDateTypes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
               </ClearableSelect></label>
-              : <label><span>Product / variety</span><input required placeholder="Enter product / variety" value={directProduceType} onChange={(event) => setDirectProduceType(event.target.value)} /></label>}
-          <label><span>Cartons sold</span><input required type="number" min="1" max={currentSaleType === "dispatch_sale" ? selectedDispatchMax : undefined} placeholder="Quantity" value={quantity} onChange={(event) => setQuantity(event.target.value)} /></label>
-          <label><span>Rate / price</span><input required type="number" min="0" step="0.01" placeholder="Unit price" value={unitPrice} onChange={(event) => setUnitPrice(event.target.value)} /></label>
-          <label><span>Total amount</span><input readOnly value={totalAmount ? money(totalAmount) : money(0)} /></label>
-          <label><span>Payment account</span><ClearableSelect value={accountId || ""} onChange={setAccountId}>
-            <option value="">Select payment account</option>
+              : <label><span>{t("reportsPage.productVariety")}</span><input required placeholder={t("salesPage.enterProductVariety")} value={directProduceType} onChange={(event) => setDirectProduceType(event.target.value)} /></label>}
+          <label><span>{t("salesPage.cartonsSold")}</span><input required type="number" min="1" max={currentSaleType === "dispatch_sale" ? selectedDispatchMax : undefined} placeholder={t("reportsPage.quantity")} value={quantity} onChange={(event) => setQuantity(event.target.value)} /></label>
+          <label><span>{t("salesPage.ratePrice")}</span><input required type="number" min="0" step="0.01" placeholder={t("reportsPage.rate")} value={unitPrice} onChange={(event) => setUnitPrice(event.target.value)} /></label>
+          <label><span>{t("salesPage.totalAmount")}</span><input readOnly value={totalAmount ? money(totalAmount) : money(0)} /></label>
+          <label><span>{t("salesPage.paymentAccount")}</span><ClearableSelect value={accountId || ""} onChange={setAccountId}>
+            <option value="">{t("salesPage.selectPaymentAccount")}</option>
             {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
           </ClearableSelect></label>
-          <label><span>Payment date</span><input type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} /></label>
-          <label><span>Remarks</span><input placeholder="Optional remarks" value={remarks} onChange={(event) => setRemarks(event.target.value)} /></label>
-          {currentSaleType === "dispatch_sale" && selectedDispatch ? <p className="dispatch-linked-summary">Dispatch {selectedDispatch.dispatch.date} | {selectedDispatch.dateTypeName} | Remaining {selectedDispatchMax ?? selectedDispatch.remainingCartons}</p> : null}
+          <label><span>{t("reportsPage.paymentDate")}</span><input type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} /></label>
+          <label><span>{t("reportsPage.remarks")}</span><input placeholder={t("dispatchPage.optional")} value={remarks} onChange={(event) => setRemarks(event.target.value)} /></label>
+          {currentSaleType === "dispatch_sale" && selectedDispatch ? <p className="dispatch-linked-summary">{t("salesPage.dispatchMeta", { date: selectedDispatch.dispatch.date })} | {selectedDispatch.dateTypeName} | {t("salesPage.remainingCartons")} {selectedDispatchMax ?? selectedDispatch.remainingCartons}</p> : null}
           {error ? <p className="form-error">{error}</p> : null}
           <div className="sales-form__actions">
-            {editingSale && <button className="secondary-action" type="button" onClick={resetForm}>Cancel Edit</button>}
-            <button disabled={!canSave} type="submit">{editingSale ? "Update sale" : "Save sale"}</button>
+            {editingSale && <button className="secondary-action" type="button" onClick={resetForm}>{t("expensesPage.cancelEdit")}</button>}
+            <button disabled={!canSave} type="submit">{editingSale ? t("salesPage.updateSale") : t("salesPage.saveSale")}</button>
           </div>
         </form>
       </FormCard>
       <div className="summary-grid">
-        <Summary label="Total sales" value={money(sales.reduce((sum, item) => sum + item.amount, 0))} />
-        <Summary label="Available dispatch items" value={String(filteredAvailability.length)} />
-        <Summary label="Unsold cartons" value={String(filteredAvailability.reduce((sum, item) => sum + item.remainingCartons, 0))} />
+        <Summary label={t("dashboard.totalSales")} value={money(sales.reduce((sum, item) => sum + item.amount, 0))} />
+        <Summary label={t("salesPage.availableDispatchItems")} value={String(filteredAvailability.length)} />
+        <Summary label={t("salesPage.unsoldCartons")} value={String(filteredAvailability.reduce((sum, item) => sum + item.remainingCartons, 0))} />
       </div>
       <section className="record-panel sales-records-panel">
         <div className="sales-records-panel__header">
-          <h2>Recent records</h2>
-          <span>{sales.length} sale{sales.length === 1 ? "" : "s"}</span>
+          <h2>{t("common.recentRecords")}</h2>
+          <span>{t("reportsPage.transactionCount", { count: sales.length })}</span>
         </div>
-        {!sales.length ? <Empty>No sales recorded yet.<br />Record a dispatch sale or direct farm sale to start tracking revenue.</Empty> : <div className="sales-record-list">
+        {!sales.length ? <Empty>{t("salesPage.noSalesRecorded")}<br />{t("salesPage.noSalesRecordedDescription")}</Empty> : <div className="sales-record-list">
           {sales.map((item) => {
             const paymentStatus = item.paymentStatus ?? "paid";
             return <article className="sales-record-card" key={item.id}>
@@ -2066,10 +2065,10 @@ function SalesModule() {
               </div>
               <div className="sales-record-card__body">
                 <div className="sales-record-card__identity">
-                  <strong>{item.buyerName?.trim() || "Unassigned buyer"}</strong>
+                  <strong>{item.buyerName?.trim() || t("salesPage.unassignedBuyer")}</strong>
                   <span>{saleProduceLabel(item)}</span>
                   <small>
-                    {item.dispatchDate ? `Dispatch ${item.dispatchDate}` : "Direct farm sale"}
+                    {item.dispatchDate ? t("salesPage.dispatchMeta", { date: item.dispatchDate }) : t("salesPage.directFarmSaleMeta")}
                     {item.invoiceNumber ? ` • ${item.invoiceNumber}` : ""}
                   </small>
                 </div>
@@ -2077,44 +2076,44 @@ function SalesModule() {
                   <span>{item.quantity} × {money(item.unitPrice)}</span>
                   <strong>{money(item.amount)}</strong>
                   <small className={`status-badge status-badge--${paymentStatus === "paid" ? "approved" : paymentStatus === "partial" ? "pending" : "rejected"}`}>
-                    {paymentStatus === "paid" ? "Paid" : paymentStatus === "partial" ? "Partial" : "Unpaid"}
+                    {translateSalesStatus(paymentStatus)}
                   </small>
                 </div>
               </div>
               <div className="sales-record-card__actions">
-                <button className="sales-action-button sales-action-button--neutral" type="button" aria-label={`View sale ${item.invoiceNumber ?? item.date}`} onClick={() => setSelectedSale(item)}>
+                <button className="sales-action-button sales-action-button--neutral" type="button" aria-label={`${t("common.view")} ${item.invoiceNumber ?? item.date}`} onClick={() => setSelectedSale(item)}>
                   <Eye size={15} />
-                  <span>View</span>
+                  <span>{t("common.view")}</span>
                 </button>
-                <button className="sales-action-button sales-action-button--edit" type="button" aria-label={`Edit sale ${item.invoiceNumber ?? item.date}`} onClick={() => editSale(item)}>
+                <button className="sales-action-button sales-action-button--edit" type="button" aria-label={`${t("common.edit")} ${item.invoiceNumber ?? item.date}`} onClick={() => editSale(item)}>
                   <Pencil size={15} />
-                  <span>Edit</span>
+                  <span>{t("common.edit")}</span>
                 </button>
-                <button className="sales-action-button sales-action-button--danger" type="button" aria-label={`Delete sale ${item.invoiceNumber ?? item.date}`} onClick={() => setSalePendingDelete(item)}>
+                <button className="sales-action-button sales-action-button--danger" type="button" aria-label={`${t("common.delete")} ${item.invoiceNumber ?? item.date}`} onClick={() => setSalePendingDelete(item)}>
                   <Trash2 size={15} />
-                  <span>Delete</span>
+                  <span>{t("common.delete")}</span>
                 </button>
               </div>
             </article>;
           })}
         </div>}
       </section>
-      {selectedSale && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedSale(null)}><section className="worker-dialog" role="dialog" aria-modal="true" aria-label="Sale details" onClick={(event) => event.stopPropagation()}><header className="worker-dialog__header"><h2>Sale Details</h2><button type="button" onClick={() => setSelectedSale(null)}><X size={18} /></button></header><div className="worker-dialog__body"><dl className="worker-stats"><div><dt>Sale type</dt><dd>{saleTypeLabel(selectedSale)}</dd></div><div><dt>Date</dt><dd>{selectedSale.date}</dd></div><div><dt>Invoice</dt><dd>{selectedSale.invoiceNumber ?? "-"}</dd></div><div><dt>Dispatch date</dt><dd>{selectedSale.dispatchDate ?? "-"}</dd></div><div><dt>Delivery date</dt><dd>{selectedSale.deliveryDate ?? "-"}</dd></div><div><dt>Payment date</dt><dd>{selectedSale.paymentDate ?? "-"}</dd></div><div><dt>Buyer</dt><dd>{selectedSale.buyerName ?? "-"}</dd></div><div><dt>Plot</dt><dd>{selectedSale.plotName ?? "-"}</dd></div><div><dt>Produce</dt><dd>{saleProduceLabel(selectedSale)}</dd></div><div><dt>Vehicle</dt><dd>{selectedSale.vehicleNumber ?? "-"}</dd></div><div><dt>Quantity</dt><dd>{selectedSale.quantity}</dd></div><div><dt>Rate</dt><dd>{money(selectedSale.unitPrice)}</dd></div><div><dt>Amount</dt><dd>{money(selectedSale.amount)}</dd></div><div><dt>Payment account</dt><dd>{accounts.find((account) => account.id === selectedSale.accountId)?.name ?? "-"}</dd></div><div><dt>Remarks</dt><dd>{selectedSale.remarks ?? "-"}</dd></div></dl></div><footer className="worker-dialog__footer"><button className="worker-dialog__close" type="button" onClick={() => setSelectedSale(null)}>Close</button><button className="worker-dialog__link" type="button" onClick={() => editSale(selectedSale)}>Edit</button><button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => setSalePendingDelete(selectedSale)}>Delete</button></footer></section></div>}
+      {selectedSale && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedSale(null)}><section className="worker-dialog" role="dialog" aria-modal="true" aria-label={t("salesPage.saleDetails")} onClick={(event) => event.stopPropagation()}><header className="worker-dialog__header"><h2>{t("salesPage.saleDetails")}</h2><button type="button" onClick={() => setSelectedSale(null)}><X size={18} /></button></header><div className="worker-dialog__body"><dl className="worker-stats"><div><dt>{t("salesPage.saleType")}</dt><dd>{saleTypeLabel(selectedSale)}</dd></div><div><dt>{t("reportsPage.date")}</dt><dd>{selectedSale.date}</dd></div><div><dt>{t("reportsPage.invoiceNumber")}</dt><dd>{selectedSale.invoiceNumber ?? "-"}</dd></div><div><dt>{t("reportsPage.dispatchDate")}</dt><dd>{selectedSale.dispatchDate ?? "-"}</dd></div><div><dt>{t("reportsPage.deliveryDate")}</dt><dd>{selectedSale.deliveryDate ?? "-"}</dd></div><div><dt>{t("reportsPage.paymentDate")}</dt><dd>{selectedSale.paymentDate ?? "-"}</dd></div><div><dt>{t("reportsPage.buyer")}</dt><dd>{selectedSale.buyerName ?? "-"}</dd></div><div><dt>{t("reportsPage.plot")}</dt><dd>{selectedSale.plotName ?? "-"}</dd></div><div><dt>{t("reportsPage.product")}</dt><dd>{saleProduceLabel(selectedSale)}</dd></div><div><dt>{t("reportsPage.vehicle")}</dt><dd>{selectedSale.vehicleNumber ?? "-"}</dd></div><div><dt>{t("reportsPage.quantity")}</dt><dd>{selectedSale.quantity}</dd></div><div><dt>{t("reportsPage.rate")}</dt><dd>{money(selectedSale.unitPrice)}</dd></div><div><dt>{t("reportsPage.amount")}</dt><dd>{money(selectedSale.amount)}</dd></div><div><dt>{t("salesPage.paymentAccount")}</dt><dd>{accounts.find((account) => account.id === selectedSale.accountId)?.name ?? "-"}</dd></div><div><dt>{t("reportsPage.remarks")}</dt><dd>{selectedSale.remarks ?? "-"}</dd></div></dl></div><footer className="worker-dialog__footer"><button className="worker-dialog__close" type="button" onClick={() => setSelectedSale(null)}>{t("common.close")}</button><button className="worker-dialog__link" type="button" onClick={() => editSale(selectedSale)}>{t("common.edit")}</button><button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => setSalePendingDelete(selectedSale)}>{t("common.delete")}</button></footer></section></div>}
       {salePendingDelete && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSalePendingDelete(null)}>
-        <section className="worker-action-dialog sales-delete-dialog" role="dialog" aria-modal="true" aria-label="Delete sale" onClick={(event) => event.stopPropagation()}>
+        <section className="worker-action-dialog sales-delete-dialog" role="dialog" aria-modal="true" aria-label={t("salesPage.deleteSaleTitle")} onClick={(event) => event.stopPropagation()}>
           <header>
             <div>
-              <h2>Delete sale?</h2>
-              <p>{salePendingDelete.invoiceNumber ? `Invoice ${salePendingDelete.invoiceNumber}` : `${salePendingDelete.date} • ${saleProduceLabel(salePendingDelete)}`}</p>
+              <h2>{t("salesPage.deleteSaleTitle")}</h2>
+              <p>{salePendingDelete.invoiceNumber ? `${t("reportsPage.invoiceNumber")} ${salePendingDelete.invoiceNumber}` : `${salePendingDelete.date} • ${saleProduceLabel(salePendingDelete)}`}</p>
             </div>
-            <button type="button" onClick={() => setSalePendingDelete(null)} aria-label="Close delete sale confirmation"><X size={18} /></button>
+            <button type="button" onClick={() => setSalePendingDelete(null)} aria-label={t("common.close")}><X size={18} /></button>
           </header>
           <div className="worker-action-dialog__body">
-            <p>This will remove or cancel the selected sale record. Continue?</p>
+            <p>{t("salesPage.deleteSaleWarning")}</p>
           </div>
           <footer>
-            <button type="button" onClick={() => setSalePendingDelete(null)}>Cancel</button>
-            <button className="danger-button" type="button" onClick={() => void removeSale(salePendingDelete)}>Delete</button>
+            <button type="button" onClick={() => setSalePendingDelete(null)}>{t("common.cancel")}</button>
+            <button className="danger-button" type="button" onClick={() => void removeSale(salePendingDelete)}>{t("common.delete")}</button>
           </footer>
         </section>
       </div>}
