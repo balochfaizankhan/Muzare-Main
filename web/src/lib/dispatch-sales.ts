@@ -9,7 +9,6 @@ export type DispatchAvailability = {
   dispatchedCartons: number;
   soldCartons: number;
   remainingCartons: number;
-  destination: string;
   searchText: string;
 };
 
@@ -58,7 +57,6 @@ export function buildDispatchAvailability(
       const remainingCartons = Math.max(item.cartons - soldCartons, 0);
       const dateTypeName = item.dateTypeName ?? dateTypeNames.get(item.dateTypeId) ?? "Unknown type";
       const vehicle = vehicleLabel(dispatch);
-      const destination = dispatch.destination?.trim() ?? "";
       rows.push({
         dispatch,
         itemId: item.id,
@@ -68,8 +66,7 @@ export function buildDispatchAvailability(
         dispatchedCartons: item.cartons,
         soldCartons,
         remainingCartons,
-        destination,
-        searchText: `${dispatch.date} ${dateTypeName} ${vehicle} ${destination}`.toLowerCase(),
+        searchText: `${dispatch.date} ${dateTypeName} ${vehicle}`.toLowerCase(),
       });
     }
   }

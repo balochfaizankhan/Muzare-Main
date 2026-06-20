@@ -94,6 +94,7 @@ export type Voucher = LocalRecord & {
 export type Dispatch = LocalRecord & {
   date: string;
   vehicleId?: string;
+  serialNumber?: string;
   destination?: string;
   notes?: string;
   remarks?: string;

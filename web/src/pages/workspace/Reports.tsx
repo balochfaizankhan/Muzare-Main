@@ -8,7 +8,7 @@ import { SubpageHeader } from "../../components/SubpageHeader";
 import { defaultTransactionGroupExpansion, groupAccountTransactions, type AccountTransactionGroupKey } from "../../lib/accountTransactionGroups";
 import { calculateAccountBalance } from "../../lib/accounting";
 import { formatMoney, formatNumber } from "../../lib/format";
-import { translateDispatchStatus, translateExpenseCategory, translateExpenseSubcategory, translateSaleType, translateSalesStatus } from "../../lib/systemTranslations";
+import { translateExpenseCategory, translateExpenseSubcategory, translateSaleType, translateSalesStatus } from "../../lib/systemTranslations";
 import {
   buildPartnerLiabilityPositions,
   calculatePartnerLiabilityBalance,
@@ -38,7 +38,7 @@ import i18n from "../../i18n";
 type Report = "attendance" | "advances" | "expenditures" | "sales" | "dispatch" | "partner-position" | "account-ledger";
 type SortOrder = "desc" | "asc";
 type SalesDateType = "saleDate" | "dispatchDate" | "deliveryDate" | "paymentDate" | "createdDate";
-type DispatchDateType = "dispatchDate" | "deliveryDate" | "saleDate" | "createdDate";
+type DispatchDateType = "dispatchDate" | "saleDate" | "createdDate";
 type SalesTypeFilter = "all" | "dispatch_sale" | "farm_direct_sale";
 type ReportViewState = {
   attendance: "register" | "summary";
@@ -94,7 +94,8 @@ const attendanceMark = (status?: Attendance["status"]) => status === "present" ?
 const formatShortDate = (date: string) => date.length >= 10 ? `${date.slice(8, 10)}/${date.slice(5, 7)}` : date;
 const formatRangeLabel = (from: string, to: string) => from && to ? `${from} - ${to}` : from ? `${i18n.t("reportsPage.fromDate")} ${from}` : to ? `${i18n.t("reportsPage.toDate")} ${to}` : i18n.t("reportsPage.allDates");
 const normalizeText = (value?: string | null) => value?.trim() ?? "";
-const dispatchReference = (dispatch: Pick<Dispatch, "dispatchNumber" | "id" | "date">) => normalizeText(dispatch.dispatchNumber) || `DSP-${dispatch.id.slice(0, 8).toUpperCase()}`;
+const dispatchReference = (dispatch: Pick<Dispatch, "serialNumber" | "dispatchNumber" | "id" | "date">) =>
+  normalizeText(dispatch.serialNumber) || normalizeText(dispatch.dispatchNumber) || `DIS-${dispatch.date.replaceAll("-", "")}-${dispatch.id.slice(0, 3).toUpperCase()}`;
 const invoiceReference = (sale: Pick<Sale, "invoiceNumber" | "id">) => normalizeText(sale.invoiceNumber) || "-";
 const saleTypeLabel = (sale: Pick<Sale, "saleType" | "dispatchId">) => translateSaleType(resolveSaleType(sale));
 const salePaymentStatus = (sale: Sale) => sale.paymentStatus ?? (sale.accountId ? "paid" : "unpaid");
@@ -160,15 +161,12 @@ type DispatchReportRecord = {
   dispatch: Dispatch;
   dispatchNumber: string;
   product: string;
-  plot: string;
   quantity: number;
   unit: string;
   vehicle: string;
   driver: string;
-  destination: string;
   soldQuantity: number;
   remainingQuantity: number;
-  status: "pending" | "dispatched" | "delivered" | "sold";
   linkedSales: Sale[];
   saleDate?: string;
 };
@@ -323,7 +321,6 @@ export function Reports() {
   const [productFilter, setProductFilter] = useState("");
   const [vehicleFilter, setVehicleFilter] = useState("");
   const [paymentStatusFilter, setPaymentStatusFilter] = useState("");
-  const [dispatchStatusFilter, setDispatchStatusFilter] = useState("");
   const [saleTypeFilter, setSaleTypeFilter] = useState<SalesTypeFilter>("all");
   const [showEmptyLedgerGroups, setShowEmptyLedgerGroups] = useState(false);
   const [reportGroupExpanded, setReportGroupExpanded] = useState<Record<AccountTransactionGroupKey, boolean>>(defaultTransactionGroupExpansion);
@@ -431,7 +428,6 @@ export function Reports() {
     setProductFilter("");
     setVehicleFilter("");
     setPaymentStatusFilter("");
-    setDispatchStatusFilter("");
     setSaleTypeFilter("all");
     setSalesDateType("saleDate");
     setDispatchDateType("dispatchDate");
@@ -453,7 +449,7 @@ export function Reports() {
     setTo(todayKey());
   };
 
-  const filtered = Boolean(search || from || to || accountId || groupFilter || category || status || amountMin || amountMax || buyerFilter || productFilter || vehicleFilter || paymentStatusFilter || dispatchStatusFilter);
+  const filtered = Boolean(search || from || to || accountId || groupFilter || category || status || amountMin || amountMax || buyerFilter || productFilter || vehicleFilter || paymentStatusFilter);
   const switchReport = (next: Report) => {
     setReport(next);
     setSearchParams((current) => {
@@ -599,32 +595,23 @@ export function Reports() {
       const linkedSales = (salesByDispatchKey.get(key) ?? []).filter((sale) => !sale.deletedAt).sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
       const soldQuantity = linkedSales.reduce((sum, sale) => sum + sale.quantity, 0);
       const quantity = dispatchItem.cartons;
-      const deliveryDate = normalizeText(dispatch.deliveryDate);
-      const explicitStatus = dispatch.status;
-      const statusResolved: DispatchReportRecord["status"] = explicitStatus
-        ?? (soldQuantity >= quantity && quantity > 0 ? "sold" : deliveryDate ? "delivered" : "dispatched");
       return {
         id: key,
         dispatch,
         dispatchNumber: dispatchReference(dispatch),
         product: normalizeText(dispatchItem.dateTypeName) || normalizeText(dispatch.produceType) || t("reportsPage.unknownProduct"),
-        plot: normalizeText(dispatch.plotName) || "-",
         quantity,
         unit: normalizeText(dispatch.unit) || t("reportsPage.defaultDispatchUnit"),
         vehicle: normalizeText(dispatch.vehicleNumber) || t("reportsPage.unknownVehicle"),
         driver: normalizeText(dispatch.driverName) || "-",
-        destination: normalizeText(dispatch.destination) || "-",
         soldQuantity,
         remainingQuantity: Math.max(quantity - soldQuantity, 0),
-        status: statusResolved,
         linkedSales,
         saleDate: linkedSales[0]?.date,
       } satisfies DispatchReportRecord;
     }))
     .filter((item) => {
-      const dateValue = dispatchDateType === "deliveryDate"
-        ? item.dispatch.deliveryDate ?? ""
-        : dispatchDateType === "saleDate"
+      const dateValue = dispatchDateType === "saleDate"
           ? item.saleDate ?? ""
           : dispatchDateType === "createdDate"
             ? item.dispatch.createdAt.slice(0, 10)
@@ -632,19 +619,16 @@ export function Reports() {
       return inRange(dateValue || item.dispatch.date, from, to)
         && (!productFilter || item.product.toLowerCase().includes(productFilter.trim().toLowerCase()))
         && (!vehicleFilter || item.vehicle.toLowerCase().includes(vehicleFilter.trim().toLowerCase()) || item.driver.toLowerCase().includes(vehicleFilter.trim().toLowerCase()))
-        && (!dispatchStatusFilter || item.status === dispatchStatusFilter)
         && matches(dateValue || item.dispatch.date, [
           item.dispatchNumber,
-          item.plot,
           item.product,
           item.vehicle,
           item.driver,
-          item.destination,
           item.dispatch.notes,
           item.dispatch.remarks,
         ], item.linkedSales.reduce((sum, sale) => sum + sale.amount, 0));
     })
-    .sort((a, b) => b.dispatch.date.localeCompare(a.dispatch.date) || a.dispatchNumber.localeCompare(b.dispatchNumber)), [dispatchDateType, dispatches, from, matches, productFilter, salesByDispatchKey, to, vehicleFilter, dispatchStatusFilter, t]);
+    .sort((a, b) => b.dispatch.date.localeCompare(a.dispatch.date) || a.dispatchNumber.localeCompare(b.dispatchNumber)), [dispatchDateType, dispatches, from, matches, productFilter, salesByDispatchKey, to, vehicleFilter, t]);
 
   const positions = useMemo(() => accounts
     .filter((account) => !accountId || account.id === accountId)
@@ -912,12 +896,11 @@ export function Reports() {
     [],
     [t("reportsPage.totalDispatches"), new Set(dispatchReportRows.map((item) => item.dispatch.id)).size],
     [t("reportsPage.totalQuantity"), dispatchReportRows.reduce((sum, item) => sum + item.quantity, 0)],
-    [t("reportsPage.pendingDispatches"), dispatchReportRows.filter((item) => item.status === "pending").length],
-    [t("reportsPage.deliveredDispatches"), dispatchReportRows.filter((item) => item.status === "delivered").length],
-    [t("reportsPage.soldDispatches"), dispatchReportRows.filter((item) => item.status === "sold").length],
+    [t("reportsPage.soldQuantity"), dispatchReportRows.reduce((sum, item) => sum + item.soldQuantity, 0)],
+    [t("reportsPage.remainingQuantity"), dispatchReportRows.reduce((sum, item) => sum + item.remainingQuantity, 0)],
     [],
-    [t("reportsPage.dispatchDate"), t("reportsPage.dispatchNumber"), t("reportsPage.plot"), t("reportsPage.product"), t("reportsPage.quantity"), t("reportsPage.unit"), t("reportsPage.vehicle"), t("reportsPage.driver"), t("reportsPage.destination"), t("reportsPage.linkedSale"), t("reportsPage.status"), t("reportsPage.remarks")],
-    ...dispatchReportRows.map((item) => [item.dispatch.date, item.dispatchNumber, item.plot, item.product, item.quantity, item.unit, item.vehicle, item.driver, item.destination, item.linkedSales.map((sale) => invoiceReference(sale)).join(", ") || "-", translateDispatchStatus(item.status), item.dispatch.remarks || item.dispatch.notes || "-"]),
+    [t("reportsPage.dispatchDate"), t("reportsPage.dispatchNumber"), t("reportsPage.product"), t("reportsPage.quantity"), t("reportsPage.unit"), t("reportsPage.vehicle"), t("reportsPage.driver"), t("reportsPage.linkedSale"), t("reportsPage.soldQuantity"), t("reportsPage.remainingQuantity"), t("reportsPage.remarks")],
+    ...dispatchReportRows.map((item) => [item.dispatch.date, item.dispatchNumber, item.product, item.quantity, item.unit, item.vehicle, item.driver, item.linkedSales.map((sale) => invoiceReference(sale)).join(", ") || "-", item.soldQuantity, item.remainingQuantity, item.dispatch.remarks || item.dispatch.notes || "-"]),
   ]);
 
   return <div className="dashboard-page">
@@ -970,7 +953,7 @@ export function Reports() {
           {(report === "sales" || report === "dispatch") && <ClearableSelect allowClear={false} aria-label={t("reportsPage.dateType")} value={report === "sales" ? salesDateType : dispatchDateType} onChange={(value) => report === "sales" ? setSalesDateType(value as SalesDateType) : setDispatchDateType(value as DispatchDateType)}>
             {report === "sales"
               ? (["saleDate", "dispatchDate", "deliveryDate", "paymentDate", "createdDate"] as SalesDateType[]).map((item) => <option key={item} value={item}>{t(`reportsPage.salesDateTypes.${item}`)}</option>)
-              : (["dispatchDate", "deliveryDate", "saleDate", "createdDate"] as DispatchDateType[]).map((item) => <option key={item} value={item}>{t(`reportsPage.dispatchDateTypes.${item}`)}</option>)}
+              : (["dispatchDate", "saleDate", "createdDate"] as DispatchDateType[]).map((item) => <option key={item} value={item}>{t(`reportsPage.dispatchDateTypes.${item}`)}</option>)}
           </ClearableSelect>}
 
           {report === "attendance" && <>
@@ -1046,13 +1029,6 @@ export function Reports() {
           {report === "dispatch" && <>
             <input aria-label={t("reportsPage.productVariety")} placeholder={t("reportsPage.productVariety")} value={productFilter} onChange={(event) => setProductFilter(event.target.value)} />
             <input aria-label={t("reportsPage.vehicle")} placeholder={t("reportsPage.vehicle")} value={vehicleFilter} onChange={(event) => setVehicleFilter(event.target.value)} />
-            <ClearableSelect aria-label={t("reportsPage.status")} value={dispatchStatusFilter} onChange={setDispatchStatusFilter}>
-              <option value="">{t("reportsPage.allStatuses")}</option>
-              <option value="pending">{t("reportsPage.dispatchStatuses.pending")}</option>
-              <option value="dispatched">{t("reportsPage.dispatchStatuses.dispatched")}</option>
-              <option value="delivered">{t("reportsPage.dispatchStatuses.delivered")}</option>
-              <option value="sold">{t("reportsPage.dispatchStatuses.sold")}</option>
-            </ClearableSelect>
           </>}
 
           {report === "partner-position" && <>
@@ -1195,16 +1171,15 @@ export function Reports() {
         <Kpis values={[
           [t("reportsPage.totalDispatches"), new Set(dispatchReportRows.map((item) => item.dispatch.id)).size],
           [t("reportsPage.totalQuantity"), formatNumber(dispatchReportRows.reduce((sum, item) => sum + item.quantity, 0))],
-          [t("reportsPage.pendingDispatches"), dispatchReportRows.filter((item) => item.status === "pending").length],
-          [t("reportsPage.deliveredDispatches"), dispatchReportRows.filter((item) => item.status === "delivered").length],
-          [t("reportsPage.soldDispatches"), dispatchReportRows.filter((item) => item.status === "sold").length],
+          [t("reportsPage.soldQuantity"), formatNumber(dispatchReportRows.reduce((sum, item) => sum + item.soldQuantity, 0))],
+          [t("reportsPage.remainingQuantity"), formatNumber(dispatchReportRows.reduce((sum, item) => sum + item.remainingQuantity, 0))],
         ]} />
-        <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.dispatchDate"), t("reportsPage.dispatchNumber"), t("reportsPage.plot"), t("reportsPage.product"), t("reportsPage.quantity"), t("reportsPage.unit"), t("reportsPage.vehicle"), t("reportsPage.driver"), t("reportsPage.destination"), t("reportsPage.linkedSale"), t("reportsPage.status"), t("reportsPage.remarks")]} rows={dispatchReportRows.map((item) => ({
+        <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.dispatchDate"), t("reportsPage.dispatchNumber"), t("reportsPage.product"), t("reportsPage.quantity"), t("reportsPage.unit"), t("reportsPage.vehicle"), t("reportsPage.driver"), t("reportsPage.linkedSale"), t("reportsPage.soldQuantity"), t("reportsPage.remainingQuantity"), t("reportsPage.remarks")]} rows={dispatchReportRows.map((item) => ({
           id: item.id,
           title: item.dispatchNumber,
           value: `${formatNumber(item.quantity)} ${item.unit}`,
           meta: `${item.dispatch.date} | ${item.product}`,
-          cells: [item.dispatch.date, item.dispatchNumber, item.plot, item.product, formatNumber(item.quantity), item.unit, item.vehicle, item.driver, item.destination, item.linkedSales.map((sale) => invoiceReference(sale)).join(", ") || "-", t(`reportsPage.dispatchStatuses.${item.status}`), item.dispatch.remarks || item.dispatch.notes || "-"],
+          cells: [item.dispatch.date, item.dispatchNumber, item.product, formatNumber(item.quantity), item.unit, item.vehicle, item.driver, item.linkedSales.map((sale) => invoiceReference(sale)).join(", ") || "-", formatNumber(item.soldQuantity), formatNumber(item.remainingQuantity), item.dispatch.remarks || item.dispatch.notes || "-"],
           details: [
             [t("reportsPage.soldQuantity"), formatNumber(item.soldQuantity)],
             [t("reportsPage.remainingQuantity"), formatNumber(item.remainingQuantity)],
@@ -1362,14 +1337,12 @@ export function Reports() {
             <dl className="worker-stats">
               <div><dt>{t("reportsPage.dispatchNumber")}</dt><dd>{selectedDispatchRecord.dispatchNumber}</dd></div>
               <div><dt>{t("reportsPage.dispatchDate")}</dt><dd>{selectedDispatchRecord.dispatch.date}</dd></div>
-              <div><dt>{t("reportsPage.deliveryDate")}</dt><dd>{selectedDispatchRecord.dispatch.deliveryDate ?? "-"}</dd></div>
-              <div><dt>{t("reportsPage.plot")}</dt><dd>{selectedDispatchRecord.plot}</dd></div>
               <div><dt>{t("reportsPage.product")}</dt><dd>{selectedDispatchRecord.product}</dd></div>
               <div><dt>{t("reportsPage.quantity")}</dt><dd>{formatNumber(selectedDispatchRecord.quantity)} {selectedDispatchRecord.unit}</dd></div>
               <div><dt>{t("reportsPage.vehicle")}</dt><dd>{selectedDispatchRecord.vehicle}</dd></div>
               <div><dt>{t("reportsPage.driver")}</dt><dd>{selectedDispatchRecord.driver}</dd></div>
-              <div><dt>{t("reportsPage.destination")}</dt><dd>{selectedDispatchRecord.destination}</dd></div>
-              <div><dt>{t("reportsPage.status")}</dt><dd>{translateDispatchStatus(selectedDispatchRecord.status)}</dd></div>
+              <div><dt>{t("reportsPage.soldQuantity")}</dt><dd>{formatNumber(selectedDispatchRecord.soldQuantity)}</dd></div>
+              <div><dt>{t("reportsPage.remainingQuantity")}</dt><dd>{formatNumber(selectedDispatchRecord.remainingQuantity)}</dd></div>
               <div><dt>{t("reportsPage.remarks")}</dt><dd>{selectedDispatchRecord.dispatch.remarks || selectedDispatchRecord.dispatch.notes || "-"}</dd></div>
             </dl>
             {selectedDispatchRecord.linkedSales.length > 0 && <div className="reports-linked-records">

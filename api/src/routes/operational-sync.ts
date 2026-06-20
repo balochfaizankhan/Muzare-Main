@@ -155,7 +155,7 @@ const masterPayloadSchemas = {
 const dispatchPayloadSchema = z.object({
   date: dateSchema,
   vehicleId: z.string().min(1),
-  destination: z.string().trim().optional(),
+  serialNumber: z.string().trim().optional(),
   notes: z.string().trim().optional(),
   items: z.array(z.object({
     id: z.string().min(1),

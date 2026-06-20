@@ -15,7 +15,7 @@ import { attendanceStatusKey, buildAttendanceStatusMap, previousLocalDateKey, to
 import { confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteOrDeactivateLabour, fetchExpenseCategories, fetchLabourDeletionPreview, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type LabourDeletionPreview } from "../lib/api";
 import { buildDispatchAvailability, dispatchCartons, dispatchItemKey, resolveSaleType, saleProduceLabel, soldQuantityByDispatchItem } from "../lib/dispatch-sales";
 import { hasPermission } from "../lib/permissions";
-import { translateDispatchStatus, translateExpenseCategory, translateExpenseSubcategory, translatePaymentType, translateSaleType, translateSalesStatus } from "../lib/systemTranslations";
+import { translateExpenseCategory, translateExpenseSubcategory, translatePaymentType, translateSaleType, translateSalesStatus } from "../lib/systemTranslations";
 import {
   buildPartnerLiabilityPositions,
   calculatePartnerLiabilityBalance,
@@ -1534,6 +1534,22 @@ function ExpensesModule() {
 type DispatchItemDraft = Omit<DispatchItem, "cartons"> & { cartons: string };
 const newDispatchItem = (): DispatchItemDraft => ({ id: crypto.randomUUID(), dateTypeId: "", cartons: "" });
 
+const dispatchSerialFor = (dispatch: Pick<Dispatch, "serialNumber" | "dispatchNumber" | "id" | "date">) =>
+  dispatch.serialNumber?.trim() || dispatch.dispatchNumber?.trim() || `DIS-${dispatch.date.replaceAll("-", "")}-${dispatch.id.slice(0, 3).toUpperCase()}`;
+
+function nextDispatchSerial(records: Dispatch[], date: string, editing?: Dispatch | null) {
+  if (editing?.serialNumber) return editing.serialNumber;
+  const dateToken = date.replaceAll("-", "");
+  const prefix = `DIS-${dateToken}-`;
+  const used = records
+    .filter((record) => record.id !== editing?.id)
+    .map((record) => record.serialNumber ?? record.dispatchNumber ?? "")
+    .filter((value) => value.startsWith(prefix))
+    .map((value) => Number(value.slice(prefix.length)))
+    .filter((value) => Number.isFinite(value));
+  return `${prefix}${String(Math.max(0, ...used) + 1).padStart(3, "0")}`;
+}
+
 function DispatchModule() {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -1548,11 +1564,6 @@ function DispatchModule() {
   const [sales] = useData(loadSales);
   const [date, setDate] = useState(today());
   const [vehicleId, setVehicleId] = useState("");
-  const [dispatchNumber, setDispatchNumber] = useState("");
-  const [plotName, setPlotName] = useState("");
-  const [destination, setDestination] = useState("");
-  const [deliveryDate, setDeliveryDate] = useState("");
-  const [dispatchStatus, setDispatchStatus] = useState<NonNullable<Dispatch["status"]>>("dispatched");
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<DispatchItemDraft[]>([newDispatchItem()]);
   const [editing, setEditing] = useState<Dispatch | null>(null);
@@ -1575,10 +1586,10 @@ function DispatchModule() {
   }, new Map<string, number>()), [sales]);
 
   const reset = () => {
-    setEditing(null); setDate(today()); setVehicleId(""); setDispatchNumber(""); setPlotName(""); setDestination(""); setDeliveryDate(""); setDispatchStatus("dispatched"); setNotes(""); setItems([newDispatchItem()]); setError("");
+    setEditing(null); setDate(today()); setVehicleId(""); setNotes(""); setItems([newDispatchItem()]); setError("");
   };
   const edit = (record: Dispatch) => {
-    setEditing(record); setDate(record.date); setVehicleId(record.vehicleId ?? ""); setDispatchNumber(record.dispatchNumber ?? ""); setPlotName(record.plotName ?? ""); setDestination(record.destination ?? ""); setDeliveryDate(record.deliveryDate ?? ""); setDispatchStatus(record.status ?? "dispatched"); setNotes(record.notes ?? "");
+    setEditing(record); setDate(record.date); setVehicleId(record.vehicleId ?? ""); setNotes(record.notes ?? record.remarks ?? "");
     setItems(record.items?.map((item) => ({ ...item, cartons: String(item.cartons) })) ?? [newDispatchItem()]);
     setError("");
   };
@@ -1594,12 +1605,14 @@ function DispatchModule() {
     if (new Set(validItems.map((item) => item.dateTypeId)).size !== validItems.length) return setError(t("dispatchPage.uniqueTypeRequired"));
     setSaving(true); setError("");
     try {
+      const serialNumber = nextDispatchSerial(records, date, editing);
       const record: Dispatch = {
-        ...(editing ?? makeLocalRecord()), date, vehicleId, destination: destination.trim(), notes: notes.trim(),
-        dispatchNumber: dispatchNumber.trim() || undefined,
-        plotName: plotName.trim() || undefined,
-        deliveryDate: deliveryDate || undefined,
-        status: dispatchStatus,
+        ...(editing ?? makeLocalRecord()), date, vehicleId, serialNumber, notes: notes.trim(),
+        destination: undefined,
+        dispatchNumber: undefined,
+        plotName: undefined,
+        deliveryDate: undefined,
+        status: undefined,
         unit: "cartons",
         remarks: notes.trim() || undefined,
         vehicleNumber: selectedVehicle.number, driverName: selectedVehicle.driverName,
@@ -1641,16 +1654,6 @@ function DispatchModule() {
         <form className="module-form dispatch-form" onSubmit={(event) => void submit(event)}>
           <label><span>{t("dispatchPage.dispatchDate")}</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
           <label><span>{t("dispatchPage.vehicle")}</span><ClearableSelect required value={vehicleId} onChange={setVehicleId}><option value="">{t("dispatchPage.selectActiveVehicle")}</option>{activeVehicles.map((item) => <option key={item.id} value={item.id}>{item.number}{item.driverName ? ` - ${item.driverName}` : ""}</option>)}</ClearableSelect></label>
-          <label><span>{t("reportsPage.dispatchNumber")}</span><input placeholder={t("dispatchPage.optional")} value={dispatchNumber} onChange={(event) => setDispatchNumber(event.target.value)} /></label>
-          <label><span>{t("reportsPage.plot")}</span><input placeholder={t("dispatchPage.optional")} value={plotName} onChange={(event) => setPlotName(event.target.value)} /></label>
-          <label><span>{t("dispatchPage.destinationBuyer")}</span><input placeholder={t("dispatchPage.optional")} value={destination} onChange={(event) => setDestination(event.target.value)} /></label>
-          <label><span>{t("reportsPage.deliveryDate")}</span><input type="date" value={deliveryDate} onChange={(event) => setDeliveryDate(event.target.value)} /></label>
-          <label><span>{t("common.status")}</span><ClearableSelect clearValue="dispatched" value={dispatchStatus} onChange={(value) => setDispatchStatus(value as NonNullable<Dispatch["status"]>)}>
-            <option value="pending">{translateDispatchStatus("pending")}</option>
-            <option value="dispatched">{translateDispatchStatus("dispatched")}</option>
-            <option value="delivered">{translateDispatchStatus("delivered")}</option>
-            <option value="sold">{translateDispatchStatus("sold")}</option>
-          </ClearableSelect></label>
           <label><span>{t("dispatchPage.notes")}</span><input placeholder={t("dispatchPage.optional")} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
           <div className="dispatch-items">
             <h3>{t("dispatchPage.dateTypesAndCartons")}</h3>
@@ -1680,11 +1683,12 @@ function DispatchModule() {
         const soldCartons = soldCartonsForDispatch(record);
         const remainingCartons = Math.max(dispatchCartons(record) - soldCartons, 0);
         const linkedSales = linkedSalesByDispatch.get(record.id) ?? 0;
-        return <article key={record.id}><header><div><strong>{record.dispatchNumber ?? record.date}</strong><h3>{record.vehicleNumber ?? vehicleName(record.vehicleId)}</h3><p>{record.date}{record.plotName ? ` | ${record.plotName}` : ""}{record.destination ? ` | ${record.destination}` : ""}</p></div><b>{dispatchCartons(record)} {t("dispatchPage.cartons")}</b></header><div className="dispatch-breakdown">{record.items?.map((item) => {
+        const typeCount = record.items?.length ?? (record.produceType ? 1 : 0);
+        return <article key={record.id}><header><div><strong>{dispatchSerialFor(record)}</strong><h3>{record.vehicleNumber ?? vehicleName(record.vehicleId)}</h3><p>{record.date} · {t("dispatchPage.typeCount", { count: typeCount })}</p></div><b>{dispatchCartons(record)} {t("dispatchPage.cartons")}</b></header><div className="dispatch-breakdown">{record.items?.map((item) => {
           const sold = soldByItem.get(dispatchItemKey(record.id, item.id)) ?? 0;
           const remaining = Math.max(item.cartons - sold, 0);
           return <span key={item.id}>{dateTypeName(item.dateTypeId, item.dateTypeName)}: {item.cartons} | {t("salesPage.soldCartons")} {sold} | {t("salesPage.remainingCartons")} {remaining}</span>;
-        }) ?? <span>{record.produceType}: {record.cartons}</span>}</div><p className="dispatch-linked-summary">{t("reportsPage.status")} {translateDispatchStatus(record.status ?? "dispatched")} | {t("salesPage.soldCartons")} {soldCartons} | {t("salesPage.remainingCartons")} {remainingCartons} | {t("dispatchPage.linkedSales")} {linkedSales}</p><footer><button type="button" onClick={() => edit(record)}>{t("dispatchPage.update")}</button>{canManage && <button className="danger-link" type="button" onClick={() => void remove(record)}>{t("dispatchPage.delete")}</button>}</footer></article>;
+        }) ?? <span>{record.produceType}: {record.cartons}</span>}</div><p className="dispatch-linked-summary">{t("salesPage.soldCartons")} {soldCartons} | {t("salesPage.remainingCartons")} {remainingCartons} | {t("dispatchPage.linkedSales")} {linkedSales}</p><footer><button type="button" onClick={() => edit(record)}>{t("common.view")}</button>{canManage && <button className="danger-link" type="button" onClick={() => void remove(record)}>{t("dispatchPage.delete")}</button>}</footer></article>;
       })}</div>}</section>
       {showVehicles && <DispatchVehicleManager vehicles={vehicles} dispatches={records} onClose={() => setShowVehicles(false)} onRefresh={refreshVehicles} />}
       {showDateTypes && <DispatchDateTypeManager dateTypes={dateTypes} dispatches={records} onClose={() => setShowDateTypes(false)} onRefresh={refreshDateTypes} />}
@@ -2002,7 +2006,7 @@ function SalesModule() {
               {selectedDispatch ? <div className="sales-selected-dispatch">
                 <strong>{selectedDispatch.dateTypeName}</strong>
                 <span>{selectedDispatch.dispatch.date} | {selectedDispatch.vehicleLabel}</span>
-                <span>{selectedDispatch.destination || "-"} | {t("salesPage.remainingCartons")} {selectedDispatchMax ?? selectedDispatch.remainingCartons}</span>
+                <span>{t("salesPage.remainingCartons")} {selectedDispatchMax ?? selectedDispatch.remainingCartons}</span>
               </div> : null}
               <div className="dispatch-list sales-availability-list">
                 {filteredAvailability.length ? filteredAvailability.map((item) => {
@@ -2013,7 +2017,7 @@ function SalesModule() {
                       <div>
                         <strong>{item.dispatch.date}</strong>
                         <h3>{item.dateTypeName}</h3>
-                        <p>{item.vehicleLabel}{item.destination ? ` | ${item.destination}` : ""}</p>
+                        <p>{item.vehicleLabel}</p>
                       </div>
                       <b>{availableCartons} {t("salesPage.remainingCartons").toLowerCase()}</b>
                     </header>
