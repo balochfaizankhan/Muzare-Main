@@ -45,7 +45,14 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(functi
         onKeyDown={onKeyDown}
       />
       {value ? (
-        <button type="button" className="search-input__clear" aria-label={t("common.clearSearch")} title={t("common.clearSearch")} onClick={clear}>
+        <button
+          type="button"
+          className="search-input__clear"
+          aria-label={t("common.clearSearch")}
+          title={t("common.clearSearch")}
+          onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); }}
+          onClick={(event) => { event.preventDefault(); event.stopPropagation(); clear(); }}
+        >
           <X size={16} />
         </button>
       ) : null}

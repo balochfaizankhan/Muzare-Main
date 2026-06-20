@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { CalendarDays, ChevronDown, ChevronRight, Eye, MoreVertical, Pencil, Trash2, X } from "lucide-react";
+import { CalendarDays, ChevronDown, ChevronRight, Eye, MoreVertical, Pencil, Search, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -2127,6 +2127,127 @@ const partnerEntryName = (entry: PartnerEntry, settlementTemplate?: (from: strin
     : entry.partnerName ?? "-";
 const partnerEntryBalanceEffect = (entry: PartnerEntry) => entry.type === "contribution" ? entry.amount : entry.type === "withdrawal" ? -entry.amount : 0;
 
+function PartnerAccountAutocomplete({
+  accounts,
+  label,
+  noResultsLabel,
+  onSelect,
+  placeholder,
+  value,
+}: {
+  accounts: Account[];
+  label: string;
+  noResultsLabel: string;
+  onSelect: (account: Account | null) => void;
+  placeholder: string;
+  value: string;
+}) {
+  const rootRef = useRef<HTMLLabelElement | null>(null);
+  const selected = accounts.find((account) => account.id === value) ?? null;
+  const [query, setQuery] = useState(selected?.name ?? "");
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  useEffect(() => {
+    if (!open) setQuery(selected?.name ?? "");
+  }, [open, selected?.name]);
+
+  useEffect(() => {
+    const close = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, []);
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const matches = useMemo(() => {
+    const score = (account: Account) => {
+      const name = account.name.toLowerCase();
+      const email = String((account as Account & { email?: string }).email ?? "").toLowerCase();
+      if (!normalizedQuery) return 1;
+      if (name === normalizedQuery || email === normalizedQuery) return 0;
+      if (name.startsWith(normalizedQuery) || email.startsWith(normalizedQuery)) return 1;
+      if (name.split(/\s+/).some((word) => word.startsWith(normalizedQuery))) return 2;
+      if (name.includes(normalizedQuery) || email.includes(normalizedQuery)) return 3;
+      return 99;
+    };
+    return accounts
+      .map((account) => ({ account, score: score(account) }))
+      .filter((item) => item.score < 99)
+      .sort((a, b) => a.score - b.score || a.account.name.localeCompare(b.account.name))
+      .slice(0, 8)
+      .map((item) => item.account);
+  }, [accounts, normalizedQuery]);
+
+  useEffect(() => setActiveIndex(0), [normalizedQuery]);
+
+  const select = (account: Account) => {
+    onSelect(account);
+    setQuery(account.name);
+    setOpen(false);
+  };
+  const clear = () => {
+    onSelect(null);
+    setQuery("");
+    setOpen(false);
+  };
+
+  return (
+    <label className="partner-autocomplete" ref={rootRef}>
+      <span>{label}</span>
+      <div className="partner-autocomplete__control">
+        <Search size={16} aria-hidden="true" />
+        <input
+          autoComplete="off"
+          placeholder={placeholder}
+          value={query}
+          onChange={(event) => { setQuery(event.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              setOpen(true);
+              setActiveIndex((current) => Math.min(current + 1, Math.max(matches.length - 1, 0)));
+            }
+            if (event.key === "ArrowUp") {
+              event.preventDefault();
+              setActiveIndex((current) => Math.max(current - 1, 0));
+            }
+            if (event.key === "Enter" && open && matches[activeIndex]) {
+              event.preventDefault();
+              select(matches[activeIndex]);
+            }
+            if (event.key === "Escape") setOpen(false);
+          }}
+        />
+        {(query || selected) && <button
+          type="button"
+          aria-label={label}
+          onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); }}
+          onClick={(event) => { event.preventDefault(); event.stopPropagation(); clear(); }}
+        ><X size={15} /></button>}
+      </div>
+      {open && <div className="partner-autocomplete__menu" role="listbox">
+        {matches.length ? matches.map((account, index) => (
+          <button
+            className={index === activeIndex ? "is-active" : ""}
+            key={account.id}
+            type="button"
+            role="option"
+            aria-selected={account.id === value}
+            onMouseEnter={() => setActiveIndex(index)}
+            onClick={() => select(account)}
+          >
+            <strong>{account.name}</strong>
+            <small>{account.type}</small>
+          </button>
+        )) : <p>{noResultsLabel}</p>}
+      </div>}
+    </label>
+  );
+}
+
 function PartnerLedgerModule() {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -2163,11 +2284,12 @@ function PartnerLedgerModule() {
   const [entryFilter, setEntryFilter] = useState<"all" | PartnerEntry["type"]>("all");
   const partnerAccounts = useMemo(() => accounts.filter((account) => account.type === "partner"), [accounts]);
   const cashBankAccounts = useMemo(() => accounts.filter((account) => account.type !== "partner"), [accounts]);
+  const defaultCashAccountId = useMemo(() => cashBankAccounts.find((account) => account.type === "cash")?.id ?? cashBankAccounts[0]?.id ?? "", [cashBankAccounts]);
   const partnerEntryLabel = (entry: PartnerEntry) => entry.type === "contribution"
     ? t("partnerLedgerPage.capitalInjected")
     : entry.type === "withdrawal"
       ? t("partnerLedgerPage.moneyReturned")
-      : t("partnerLedgerPage.partnerSettlement");
+      : t("partnerLedgerPage.transfersOut");
   const partnerSettlementRoute = (from: string, to: string) => t("partnerLedgerPage.partnerSettlementRoute", { from, to });
   useEffect(() => {
     const recordId = searchParams.get("recordId");
@@ -2189,7 +2311,8 @@ function PartnerLedgerModule() {
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const settlement = type === "settlement";
-    if (!date || Number(amount) <= 0 || (!settlement && (!accountId || !partnerName.trim() || !partnerAccountId))
+    const resolvedAccountId = type === "contribution" ? (accountId || defaultCashAccountId) : (accountId || defaultCashAccountId);
+    if (!date || Number(amount) <= 0 || (!settlement && (!resolvedAccountId || !partnerName.trim() || !partnerAccountId))
       || (settlement && (!fromAccountId || !toAccountId || fromAccountId === toAccountId))) {
       return setError(settlement ? t("partnerLedgerPage.settlementValidation") : t("partnerLedgerPage.standardValidation"));
     }
@@ -2202,7 +2325,7 @@ function PartnerLedgerModule() {
             toPartner: accounts.find((account) => account.id === toAccountId)?.name ?? toPartner.trim(),
             partnerName: undefined, partnerAccountId: undefined, accountId: undefined,
           }
-        : { date, type, amount: Number(amount), notes, partnerName: partnerName.trim(), partnerAccountId, accountId, fromPartner: undefined, toPartner: undefined };
+        : { date, type, amount: Number(amount), notes, partnerName: partnerName.trim(), partnerAccountId, accountId: resolvedAccountId, fromPartner: undefined, toPartner: undefined };
       const record: PartnerEntry = editing
         ? { ...editing, ...fields }
         : { ...makeLocalRecord(), ...fields };
@@ -2269,32 +2392,34 @@ function PartnerLedgerModule() {
   return (
     <>
       <FormCard title={editing ? t("partnerLedgerPage.editPartnerEntry") : t("partnerLedgerPage.recordPartnerEntry")}>
-        <form className="module-form inline-form" onSubmit={(event) => void submit(event)}>
-          <input required type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-          <ClearableSelect allowClear={false} value={type} onChange={(value) => setType(value as PartnerEntry["type"])}>
+        <form className="module-form partner-entry-form" onSubmit={(event) => void submit(event)}>
+          <label><span>{t("partnerLedgerPage.date")}</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
+          <label><span>{t("partnerLedgerPage.type")}</span><ClearableSelect allowClear={false} value={type} onChange={(value) => setType(value as PartnerEntry["type"])}>
             <option value="contribution">{t("partnerLedgerPage.capitalInjected")}</option>
             <option value="withdrawal">{t("partnerLedgerPage.moneyReturned")}</option>
-            <option value="settlement">{t("partnerLedgerPage.partnerSettlement")}</option>
-          </ClearableSelect>
+            <option value="settlement">{t("partnerLedgerPage.transfersOut")}</option>
+          </ClearableSelect></label>
           {type === "settlement" ? <>
-            <ClearableSelect required value={fromAccountId} onChange={setFromAccountId}><option value="">{t("partnerLedgerPage.fromPartnerAccount")}</option>{partnerAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</ClearableSelect>
-            <ClearableSelect required value={toAccountId} onChange={setToAccountId}><option value="">{t("partnerLedgerPage.toPartnerAccount")}</option>{partnerAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</ClearableSelect>
+            <label><span>{t("partnerLedgerPage.fromPartnerAccount")}</span><ClearableSelect required value={fromAccountId} onChange={setFromAccountId}><option value="">{t("partnerLedgerPage.searchPartner")}</option>{partnerAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</ClearableSelect></label>
+            <label><span>{t("partnerLedgerPage.toPartnerAccount")}</span><ClearableSelect required value={toAccountId} onChange={setToAccountId}><option value="">{t("partnerLedgerPage.searchPartner")}</option>{partnerAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</ClearableSelect></label>
           </> : <>
-            <ClearableSelect required value={partnerAccountId} onChange={(value) => {
-              setPartnerAccountId(value);
-              setPartnerName(partnerAccounts.find((account) => account.id === value)?.name ?? "");
-            }}>
-              <option value="">{t("partnerLedgerPage.partnerAccount")}</option>
-              {partnerAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-            </ClearableSelect>
-            <input required placeholder={t("partnerLedgerPage.partnerName")} value={partnerName} onChange={(event) => setPartnerName(event.target.value)} />
+            <PartnerAccountAutocomplete
+              accounts={partnerAccounts}
+              label={t("partnerLedgerPage.partner")}
+              noResultsLabel={t("partnerLedgerPage.noPartnerMatches")}
+              placeholder={t("partnerLedgerPage.searchPartner")}
+              value={partnerAccountId}
+              onSelect={(account) => {
+                setPartnerAccountId(account?.id ?? "");
+                setPartnerName(account?.name ?? "");
+              }}
+            />
           </>}
-          <input required type="number" min="0.01" step="0.01" placeholder={t("partnerLedgerPage.amount")} value={amount} onChange={(event) => setAmount(event.target.value)} />
-          <input placeholder={t("partnerLedgerPage.notes")} value={notes} onChange={(event) => setNotes(event.target.value)} />
-          {type !== "settlement" && <ClearableSelect required value={accountId} onChange={setAccountId}>
-            <option value="">{t("partnerLedgerPage.selectCashBankAccount")}</option>
+          <label><span>{t("partnerLedgerPage.amount")}</span><input required type="number" min="0.01" step="0.01" placeholder={t("partnerLedgerPage.amount")} value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
+          <label><span>{t("partnerLedgerPage.notes")}</span><input placeholder={t("partnerLedgerPage.notes")} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
+          {type === "contribution" && <label><span>{t("partnerLedgerPage.depositTo")}</span><ClearableSelect value={accountId || defaultCashAccountId} onChange={setAccountId}>
             {cashBankAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-          </ClearableSelect>}
+          </ClearableSelect></label>}
           <button className="partner-ledger-submit" disabled={saving} type="submit">{saving ? t("partnerLedgerPage.saving") : editing ? t("partnerLedgerPage.updateEntry") : t("partnerLedgerPage.saveEntry")}</button>
           {editing && <button className="secondary-button" disabled={saving} type="button" onClick={resetForm}>{t("partnerLedgerPage.cancelEdit")}</button>}
         </form>

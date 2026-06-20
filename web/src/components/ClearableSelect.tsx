@@ -56,7 +56,8 @@ export function ClearableSelect({
             className="clearable-select__clear"
             aria-label={clearLabel || t("common.clearSelection")}
             title={clearLabel || t("common.clearSelection")}
-            onClick={clear}
+            onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); }}
+            onClick={(event) => { event.preventDefault(); event.stopPropagation(); clear(); }}
             disabled={disabled}
           >
             <X size={14} />
