@@ -1379,6 +1379,9 @@ const extraResources = {
         subscriptionsDescription: "Manage plans, renewals, and upcoming expirations.",
         reportsDescription: "Review platform analytics across workspaces.",
       },
+      adminMigration: {
+        title: "Migration Import",
+      },
       moduleDescriptions: {
         workforce: "Attendance, wages, advances, and labour registers.",
         expenses: "Vouchers, invoices, categories, and expense reporting.",
@@ -2355,6 +2358,9 @@ const extraResources = {
         subscriptionsDescription: "أدر الباقات والتجديدات والانتهاءات القادمة.",
         reportsDescription: "راجع تحليلات المنصة عبر مساحات العمل.",
       },
+      adminMigration: {
+        title: "استيراد الترحيل",
+      },
       moduleDescriptions: {
         workforce: "الحضور والأجور والسلف وسجلات العمال.",
         expenses: "السندات والفواتير والتصنيفات وتقارير المصروفات.",
@@ -3318,6 +3324,9 @@ const extraResources = {
       adminSections: {
         subscriptionsDescription: "پلانز، رینیولز اور آنے والی ایکسپائریز کا انتظام کریں۔",
         reportsDescription: "تمام ورک اسپیسز کی پلیٹ فارم اینالیٹکس دیکھیں۔",
+      },
+      adminMigration: {
+        title: "مائیگریشن امپورٹ",
       },
       moduleDescriptions: {
         workforce: "حاضری، اجرت، ایڈوانس اور مزدور رجسٹرز۔",

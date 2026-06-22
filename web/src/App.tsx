@@ -19,6 +19,7 @@ import { Billing } from "./pages/admin/Billing";
 import { Settings } from "./pages/admin/Settings";
 import { Users } from "./pages/admin/Users";
 import { Workspaces } from "./pages/admin/Workspaces";
+import { MigrationImport } from "./pages/admin/MigrationImport";
 import { Attendance } from "./pages/workspace/Attendance";
 import { Dispatch } from "./pages/workspace/Dispatch";
 import { Expenses } from "./pages/workspace/Expenses";
@@ -90,6 +91,7 @@ export default function App() {
       <Route path="subscriptions" element={<AdminSection title={t("layout.subscriptions")} description={t("adminSections.subscriptionsDescription")} emptyDescription={t("adminSections.subscriptionsDescription")} />} />
       <Route path="billing" element={<Billing />} />
       <Route path="audit-logs" element={<AuditLogs />} />
+      <Route path="migration-import" element={<MigrationImport />} />
       <Route path="reports" element={<AdminSection title={t("layout.reports")} description={t("adminSections.reportsDescription")} emptyDescription={t("adminSections.reportsDescription")} />} />
       <Route path="settings" element={<Settings />} />
       <Route path="approvals" element={<AdminApprovalsPage />} />

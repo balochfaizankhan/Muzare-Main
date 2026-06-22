@@ -1,4 +1,4 @@
-import { FileClock, LayoutDashboard, LogOut, Settings, ShieldAlert, UserRoundPlus, Users, Warehouse } from "lucide-react";
+import { DatabaseBackup, FileClock, LayoutDashboard, LogOut, Settings, ShieldAlert, UserRoundPlus, Users, Warehouse } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
@@ -11,6 +11,7 @@ const nav = [
   ["/admin/workspaces", "layout.workspaces", Warehouse],
   ["/admin/approvals", "adminApprovals.title", UserRoundPlus],
   ["/admin/suspended", "common.suspended", ShieldAlert],
+  ["/admin/migration-import", "adminMigration.title", DatabaseBackup],
   ["/admin/audit-logs", "layout.auditLogs", FileClock],
   ["/admin/settings", "layout.settings", Settings],
 ] as const;

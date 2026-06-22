@@ -22,6 +22,7 @@ import { labourManagementRoutes } from "./routes/labour-management.js";
 import { expenseImportRoutes } from "./routes/expense-imports.js";
 import { expenseSearchRoutes } from "./routes/expense-search.js";
 import { farmOperationRoutes } from "./routes/farm-operations.js";
+import { migrationImportRoutes } from "./routes/migration-import.js";
 
 export async function buildApp() {
   const app = Fastify({ logger: true });
@@ -68,6 +69,7 @@ export async function buildApp() {
   await app.register(expenseImportRoutes);
   await app.register(expenseSearchRoutes);
   await app.register(farmOperationRoutes);
+  await app.register(migrationImportRoutes);
 
   return app;
 }

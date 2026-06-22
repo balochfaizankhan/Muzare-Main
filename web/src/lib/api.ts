@@ -182,6 +182,24 @@ export type AdminUserDetail = {
 export type AdminAuditLog = {
   id: string; action: string; entityType: string; entityId: string | null; createdAt: string; workspaceName: string | null; actorName: string | null; details: unknown;
 };
+export type MigrationImportIssue = { level: "error" | "warning"; path: string; message: string };
+export type MigrationImportSummary = {
+  exportVersion: string | null; exportedAt: string | null; source: string | null;
+  counts: Record<string, number>;
+  voucherCount: number; voucherItemCount: number; totalExpenses: number; totalAdvances: number; totalSales: number;
+  partnerBalances: Array<{ name: string; balance: number }>;
+  cashBankBalances: Array<{ name: string; balance: number }>;
+};
+export type MigrationImportValidation = {
+  issues: MigrationImportIssue[];
+  summary: MigrationImportSummary;
+  canImport?: boolean;
+  dryRunRecommended?: boolean;
+  imported?: boolean;
+  dryRun?: boolean;
+  message?: string;
+  result?: { insertedOperationalRecords: number };
+};
 export type OperationalEntity =
   | "labourer"
   | "labourGroup"
@@ -451,6 +469,10 @@ export const fetchAdminUser = (token: string, userId: string) =>
 export const updateAdminUserStatus = (token: string, userId: string, input: { active: boolean }) =>
   apiRequest<void>(`/v1/admin/users/${userId}/status`, { method: "PATCH", body: JSON.stringify(input) }, token);
 export const fetchAdminAuditLogs = (token: string) => apiRequest<{ records: AdminAuditLog[] }>("/v1/admin/audit-logs", {}, token);
+export const validateMigrationImport = (token: string, input: { workspaceId: string; payload: unknown }) =>
+  apiRequest<MigrationImportValidation>("/v1/admin/migration-import/validate", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 60_000, debugLabel: "migration-import-validate" });
+export const importMigrationData = (token: string, input: { workspaceId: string; payload: unknown; dryRun: boolean; allowDatabaseWrite: boolean }) =>
+  apiRequest<MigrationImportValidation>("/v1/admin/migration-import/import", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 120_000, debugLabel: "migration-import-import" });
 export const fetchApprovals = (token: string) =>
   apiRequest<{ requests: PendingApproval[] }>("/v1/admin/approvals", {}, token);
 export const approveSignup = (token: string, userId: string) =>

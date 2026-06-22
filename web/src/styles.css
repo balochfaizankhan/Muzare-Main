@@ -4527,6 +4527,158 @@ button {
   padding: 8px 13px;
 }
 
+.migration-page {
+  display: grid;
+  gap: 16px;
+}
+
+.admin-section-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 14px 36px rgba(5, 35, 63, 0.06);
+  padding: 18px;
+}
+
+.migration-warning {
+  align-items: start;
+  background: #fff8e8;
+  border-color: #ead9a4;
+  display: flex;
+  gap: 12px;
+}
+
+.migration-warning svg {
+  color: #9b6b00;
+  flex-shrink: 0;
+}
+
+.migration-warning p,
+.migration-context {
+  color: var(--text-secondary);
+  margin: 4px 0 0;
+}
+
+.migration-form {
+  display: grid;
+  gap: 14px;
+}
+
+.migration-form label:not(.migration-file-picker),
+.migration-form .migration-options {
+  display: grid;
+  gap: 6px;
+}
+
+.migration-form select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-primary);
+  min-height: 44px;
+  padding: 0 12px;
+}
+
+.migration-file-picker {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px dashed #9fb89c;
+  border-radius: 14px;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  min-height: 64px;
+  padding: 14px;
+  position: relative;
+}
+
+.migration-file-picker input {
+  inset: 0;
+  opacity: 0;
+  position: absolute;
+}
+
+.migration-options {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.migration-options label {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: flex !important;
+  gap: 8px !important;
+  min-height: 42px;
+  padding: 0 10px;
+}
+
+.migration-summary {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.migration-summary article,
+.migration-balance-list {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.migration-summary__wide {
+  grid-column: 1 / -1;
+}
+
+.migration-summary span,
+.migration-balance-list h3,
+.migration-issues h3,
+.migration-issues h4 {
+  color: var(--text-secondary);
+  font-size: .78rem;
+  margin: 0 0 5px;
+}
+
+.migration-summary strong {
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+.migration-summary p {
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.migration-balance-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin-top: 12px;
+}
+
+.migration-balance-list div {
+  align-items: center;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+}
+
+.migration-issues {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.migration-issues p {
+  background: var(--surface-soft);
+  border-radius: 8px;
+  margin: 0;
+  padding: 8px 10px;
+}
+
 .approval-summary {
   display: grid;
   gap: 12px;
