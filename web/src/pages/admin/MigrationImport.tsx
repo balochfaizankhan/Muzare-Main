@@ -9,6 +9,7 @@ function SummaryGrid({ summary }: { summary: MigrationImportSummary }) {
   const countRows = Object.entries(summary.counts);
   const androidRows = Object.entries(summary.androidCounts ?? {});
   const mappedRows = summary.mappedCounts ?? [];
+  const importRows = summary.importCounts ?? [];
   return (
     <div className="migration-summary">
       <article><span>Source</span><strong>{summary.source ?? "-"}</strong></article>
@@ -21,6 +22,7 @@ function SummaryGrid({ summary }: { summary: MigrationImportSummary }) {
       <article><span>Total sales</span><strong>{formatMoney(summary.totalSales)}</strong></article>
       <article className="migration-summary__wide"><span>Android source counts</span><p>{androidRows.map(([key, value]) => `${key}: ${value}`).join(" · ")}</p></article>
       <article className="migration-summary__wide"><span>Android → PWA mapping</span><p>{mappedRows.map((item) => `${item.androidKey} → ${item.pwaKey}: ${item.count}`).join(" · ")}</p></article>
+      <article className="migration-summary__wide"><span>Import counts</span><p>{importRows.map((item) => `${item.label}: ${item.count}`).join(" · ")}</p></article>
       <article className="migration-summary__wide"><span>Record counts</span><p>{countRows.map(([key, value]) => `${key}: ${value}`).join(" · ")}</p></article>
     </div>
   );
