@@ -186,6 +186,8 @@ export type MigrationImportIssue = { level: "error" | "warning"; path: string; m
 export type MigrationImportSummary = {
   exportVersion: string | null; exportedAt: string | null; source: string | null;
   counts: Record<string, number>;
+  androidCounts: Record<string, number>;
+  mappedCounts: Array<{ androidKey: string; pwaKey: string; count: number }>;
   voucherCount: number; voucherItemCount: number; totalExpenses: number; totalAdvances: number; totalSales: number;
   partnerBalances: Array<{ name: string; balance: number }>;
   cashBankBalances: Array<{ name: string; balance: number }>;

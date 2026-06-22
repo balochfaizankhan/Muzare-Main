@@ -22,6 +22,30 @@ const requiredArrays = [
   "settlements",
   "partnerTransfers",
 ] as const;
+const androidExportArrays = [
+  "labours",
+  "fundSources",
+  "vouchers",
+  "voucherItems",
+  "advances",
+  "attendance",
+  "groups",
+  "fundEntries",
+  "accountTransactions",
+  "expCategories",
+] as const;
+const androidToPwaArrayMap = {
+  labours: "labour",
+  fundSources: "accounts",
+  vouchers: "expenses",
+  voucherItems: "expenseItems",
+} as const;
+const arrayAliases: Partial<Record<typeof requiredArrays[number], readonly string[]>> = {
+  labour: ["labours"],
+  accounts: ["fundSources"],
+  expenses: ["vouchers"],
+  expenseItems: ["voucherItems"],
+};
 
 const payloadSchema = z.object({
   workspaceId: z.string().uuid(),
@@ -41,6 +65,8 @@ type ImportSummary = {
   exportedAt: string | null;
   source: string | null;
   counts: Record<typeof requiredArrays[number], number>;
+  androidCounts: Record<string, number>;
+  mappedCounts: Array<{ androidKey: string; pwaKey: string; count: number }>;
   voucherCount: number;
   voucherItemCount: number;
   totalExpenses: number;
@@ -50,7 +76,22 @@ type ImportSummary = {
   cashBankBalances: Array<{ name: string; balance: number }>;
 };
 
-const asArray = (payload: AndroidPayload, key: typeof requiredArrays[number]) => Array.isArray(payload[key]) ? payload[key] as AndroidRecord[] : [];
+const rawArray = (payload: AndroidPayload, key: string) => Array.isArray(payload[key]) ? payload[key] as AndroidRecord[] : [];
+const asArray = (payload: AndroidPayload, key: typeof requiredArrays[number]) => {
+  if (Array.isArray(payload[key])) return payload[key] as AndroidRecord[];
+  for (const alias of arrayAliases[key] ?? []) {
+    if (Array.isArray(payload[alias])) return payload[alias] as AndroidRecord[];
+  }
+  return [];
+};
+const hasArray = (payload: AndroidPayload, key: string) => Array.isArray(payload[key]);
+const hasCanonicalOrAliasArray = (payload: AndroidPayload, key: typeof requiredArrays[number]) =>
+  hasArray(payload, key) || (arrayAliases[key] ?? []).some((alias) => hasArray(payload, alias));
+const acceptedSourceArray = (payload: AndroidPayload, androidKey: typeof androidExportArrays[number]) => {
+  if (hasArray(payload, androidKey)) return true;
+  const pwaKey = androidToPwaArrayMap[androidKey as keyof typeof androidToPwaArrayMap];
+  return pwaKey ? hasArray(payload, pwaKey) : false;
+};
 const text = (record: AndroidRecord, keys: string[], fallback = "") => {
   for (const key of keys) {
     const value = record[key];
@@ -81,8 +122,23 @@ const nowIso = () => new Date().toISOString();
 function validatePayload(payload: AndroidPayload): { issues: ImportIssue[]; summary: ImportSummary } {
   const issues: ImportIssue[] = [];
   const counts = Object.fromEntries(requiredArrays.map((key) => [key, asArray(payload, key).length])) as ImportSummary["counts"];
+  const androidCounts = Object.fromEntries(androidExportArrays.map((key) => [key, rawArray(payload, key).length])) as Record<string, number>;
+  const mappedCounts = Object.entries(androidToPwaArrayMap).map(([androidKey, pwaKey]) => ({
+    androidKey,
+    pwaKey,
+    count: rawArray(payload, androidKey).length || asArray(payload, pwaKey).length,
+  }));
+  const hasAndroidShape = androidExportArrays.some((key) => hasArray(payload, key));
+  if (hasAndroidShape) {
+    for (const key of androidExportArrays) {
+      if (!acceptedSourceArray(payload, key)) issues.push({ level: "error", path: key, message: `Required Android export array '${key}' is missing.` });
+    }
+  }
   for (const key of requiredArrays) {
-    if (!Array.isArray(payload[key])) issues.push({ level: "error", path: key, message: `Required array '${key}' is missing.` });
+    if (!hasAndroidShape && !hasCanonicalOrAliasArray(payload, key)) {
+      const aliases = arrayAliases[key]?.length ? ` or ${arrayAliases[key]!.join("/")}` : "";
+      issues.push({ level: "error", path: key, message: `Required array '${key}'${aliases} is missing.` });
+    }
   }
 
   for (const key of ["exportVersion", "exportedAt", "source"]) {
@@ -109,7 +165,7 @@ function validatePayload(payload: AndroidPayload): { issues: ImportIssue[]; summ
   const expensesByOldId = new Set(asArray(payload, "expenses").map(oldId).filter(Boolean));
   const dispatchesByOldId = new Set(asArray(payload, "dispatches").map(oldId).filter(Boolean));
 
-  const seasonScopedKeys: Array<typeof requiredArrays[number]> = ["expenses", "expenseItems", "advances", "dispatches", "dispatchItems", "sales", "settlements", "partnerTransfers"];
+  const seasonScopedKeys: Array<typeof requiredArrays[number]> = ["expenses", "advances", "dispatches", "sales", "settlements", "partnerTransfers"];
   for (const key of seasonScopedKeys) {
     asArray(payload, key).forEach((record, index) => {
       const farmRef = relation(record, ["farm_id", "farmId", "farm_old_android_id", "farmOldAndroidId"]);
@@ -141,11 +197,16 @@ function validatePayload(payload: AndroidPayload): { issues: ImportIssue[]; summ
   }
   for (const expense of asArray(payload, "expenses")) {
     const id = oldId(expense);
-    const total = numberValue(expense, ["total", "totalAmount", "amount", "voucherTotal"]);
+    const total = numberValue(expense, ["total_amount", "totalAmount", "total", "amount", "voucherTotal"]);
     const itemTotal = (expenseItemsByParent.get(id) ?? []).reduce((sum, item) => sum + numberValue(item, ["amount", "total", "lineTotal"]), 0);
     if ((expenseItemsByParent.get(id)?.length ?? 0) > 0 && Math.abs(total - itemTotal) > 0.01) {
       issues.push({ level: "error", path: `expenses.${id}.total`, message: `Voucher total ${total} does not match item sum ${itemTotal}.` });
     }
+  }
+  const voucherTotal = asArray(payload, "expenses").reduce((sum, record) => sum + numberValue(record, ["total_amount", "totalAmount", "total", "amount", "voucherTotal"]), 0);
+  const voucherItemTotal = asArray(payload, "expenseItems").reduce((sum, record) => sum + numberValue(record, ["amount", "total", "lineTotal"]), 0);
+  if (asArray(payload, "expenses").length && asArray(payload, "expenseItems").length && Math.abs(voucherTotal - voucherItemTotal) > 0.01) {
+    issues.push({ level: "error", path: "vouchers.total_amount", message: `sum(vouchers.total_amount) ${voucherTotal} does not match sum(voucherItems.amount) ${voucherItemTotal}.` });
   }
 
   const partnerBalances = new Map<string, number>();
@@ -161,7 +222,7 @@ function validatePayload(payload: AndroidPayload): { issues: ImportIssue[]; summ
   const accountName = (id: string) => text(asArray(payload, "accounts").find((item) => oldId(item) === id) ?? {}, ["name", "accountName"], id || "Unknown");
   for (const expense of asArray(payload, "expenses")) {
     const accountId = relation(expense, ["account_id", "accountId", "paid_from_account_id", "paidFromAccountId"]);
-    if (accountId) cashBankBalances.set(accountName(accountId), (cashBankBalances.get(accountName(accountId)) ?? 0) - numberValue(expense, ["total", "totalAmount", "amount", "voucherTotal"]));
+    if (accountId) cashBankBalances.set(accountName(accountId), (cashBankBalances.get(accountName(accountId)) ?? 0) - numberValue(expense, ["total_amount", "totalAmount", "total", "amount", "voucherTotal"]));
   }
   for (const advance of asArray(payload, "advances")) {
     const accountId = relation(advance, ["account_id", "accountId", "payment_account_id", "paymentAccountId"]);
@@ -179,9 +240,11 @@ function validatePayload(payload: AndroidPayload): { issues: ImportIssue[]; summ
       exportedAt: typeof payload.exportedAt === "string" ? payload.exportedAt : null,
       source: typeof payload.source === "string" ? payload.source : null,
       counts,
+      androidCounts,
+      mappedCounts,
       voucherCount: counts.expenses,
       voucherItemCount: counts.expenseItems,
-      totalExpenses: asArray(payload, "expenses").reduce((sum, record) => sum + numberValue(record, ["total", "totalAmount", "amount", "voucherTotal"]), 0),
+      totalExpenses: voucherTotal,
       totalAdvances: asArray(payload, "advances").reduce((sum, record) => sum + numberValue(record, ["amount"]), 0),
       totalSales: asArray(payload, "sales").reduce((sum, record) => sum + numberValue(record, ["total", "totalAmount", "amount"]), 0),
       partnerBalances: [...partnerBalances.entries()].map(([name, balance]) => ({ name, balance })),
@@ -327,7 +390,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         await writeRecord("voucher", source, {
           voucherNumber: text(source, ["voucherNumber", "voucher_no", "voucher"], `A-${oldId(source)}`),
           date: dateValue(source, ["date", "voucherDate"]),
-          amount: numberValue(source, ["total", "totalAmount", "amount", "voucherTotal"]),
+          amount: numberValue(source, ["total_amount", "totalAmount", "total", "amount", "voucherTotal"]),
           accountId: maps.accounts.get(relation(source, ["account_id", "accountId", "paid_from_account_id", "paidFromAccountId"])),
           description: text(source, ["description", "notes"], "Imported Android voucher"),
           items: items.map((item) => ({ ...item, old_android_id: oldId(item) })),
