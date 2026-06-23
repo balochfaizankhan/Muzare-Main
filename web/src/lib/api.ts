@@ -236,7 +236,7 @@ export type MigrationImportJobStatus = {
   jobId: string;
   importBatchId: string;
   workspaceId: string;
-  status: "queued" | "running" | "completed" | "failed";
+  status: "queued" | "running" | "completed" | "failed" | "partial_failed" | "rolled_back";
   currentStep: string;
   sourceRows: number;
   totalBatches: number;
@@ -251,6 +251,22 @@ export type MigrationImportJobStatus = {
   startedAt: string;
   lastProgressAt: string;
   completedAt?: string;
+  steps: Array<{
+    name: string;
+    status: "pending" | "running" | "completed" | "failed";
+    source: number;
+    imported: number;
+    updated: number;
+    skipped: number;
+    failed: number;
+    processed: number;
+    total: number;
+    batch?: number;
+    batchTotal?: number;
+    startedAt?: string;
+    completedAt?: string;
+    message?: string;
+  }>;
   logs: MigrationImportLogEntry[];
 };
 export type MigrationImportLogEntry = {
@@ -269,6 +285,18 @@ export type MigrationImportHistoryRecord = {
   action: string;
   details: unknown;
   createdAt: string;
+};
+export type MigrationImportBatchRecord = {
+  id: string;
+  source: string;
+  exportVersion: string | null;
+  fileName: string | null;
+  fileHash: string;
+  status: string;
+  startedAt: string;
+  completedAt: string | null;
+  summaryJson: unknown;
+  errorJson: unknown;
 };
 export type MigrationVisibilityRepairResult = {
   repairedRecords: number;
@@ -477,7 +505,7 @@ async function apiRequest<T>(path: string, options: RequestInit = {}, token?: st
     if (controller.signal.aborted) {
       const isMigrationImport = requestOptions.debugLabel === "migration-import-import";
       throw new Error(isMigrationImport
-        ? "Migration import is still running or the server timed out. Check Import history for the current step and row counts."
+        ? "Import is still running. Attendance is processing in the background."
         : "Request is taking longer than expected. Please try again.");
     }
     throw error;
@@ -590,10 +618,20 @@ export const updateAdminUserStatus = (token: string, userId: string, input: { ac
 export const fetchAdminAuditLogs = (token: string) => apiRequest<{ records: AdminAuditLog[] }>("/v1/admin/audit-logs", {}, token);
 export const validateMigrationImport = (token: string, input: { workspaceId: string; payload: unknown; allowSummaryMismatch?: boolean }) =>
   apiRequest<MigrationImportValidation>("/v1/admin/migration-import/validate", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 60_000, debugLabel: "migration-import-validate" });
-export const importMigrationData = (token: string, input: { workspaceId: string; payload: unknown; dryRun: boolean; allowDatabaseWrite: boolean; allowSummaryMismatch?: boolean }) =>
+export const importMigrationData = (token: string, input: { workspaceId: string; payload: unknown; dryRun: boolean; allowDatabaseWrite: boolean; allowSummaryMismatch?: boolean; fileName?: string }) =>
   apiRequest<MigrationImportValidation>("/v1/admin/migration-import/imports/start", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 120_000, debugLabel: "migration-import-import" });
 export const fetchMigrationImportJobStatus = (token: string, jobId: string) =>
   apiRequest<{ job: MigrationImportJobStatus }>(`/v1/admin/migration-import/imports/status/${encodeURIComponent(jobId)}`, {}, token, { timeoutMs: 30_000, debugLabel: "migration-import-job-status" });
+export const fetchActiveMigrationImportJob = (token: string, workspaceId: string) =>
+  apiRequest<{ job: MigrationImportJobStatus | null }>(`/v1/admin/migration-import/imports/active?workspaceId=${encodeURIComponent(workspaceId)}`, {}, token, { timeoutMs: 30_000, debugLabel: "migration-import-active-job" });
+export const fetchMigrationImportBatches = (token: string, workspaceId: string) =>
+  apiRequest<{ records: MigrationImportBatchRecord[] }>(`/v1/admin/migration-import/batches?workspaceId=${encodeURIComponent(workspaceId)}`, {}, token, { timeoutMs: 30_000, debugLabel: "migration-import-batches" });
+export const retryMigrationAttendance = (token: string, input: { workspaceId: string; batchId: string }) =>
+  apiRequest<{ job: MigrationImportJobStatus }>("/v1/admin/migration-import/retry-attendance", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 30_000, debugLabel: "migration-import-retry-attendance" });
+export const rollbackMigrationImportBatch = (token: string, input: { workspaceId: string; batchId: string }) =>
+  apiRequest<{ message: string; result: { operationalRecords: number; seasons: number; farms: number } }>("/v1/admin/migration-import/rollback", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 60_000, debugLabel: "migration-import-rollback" });
+export const markMigrationImportBatchClosed = (token: string, input: { workspaceId: string; batchId: string }) =>
+  apiRequest<{ message: string }>("/v1/admin/migration-import/mark-closed", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 30_000, debugLabel: "migration-import-mark-closed" });
 export const fetchMigrationImportHistory = (token: string, workspaceId: string) =>
   apiRequest<{ records: MigrationImportHistoryRecord[] }>(`/v1/admin/migration-import/history?workspaceId=${encodeURIComponent(workspaceId)}`, {}, token, { timeoutMs: 30_000, debugLabel: "migration-import-history" });
 export const repairMigrationImportVisibility = (token: string, input: { workspaceId: string }) =>

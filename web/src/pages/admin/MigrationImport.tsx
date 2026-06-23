@@ -1,8 +1,8 @@
-import { useMemo, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Database, FileJson, ShieldAlert, UploadCloud } from "lucide-react";
 import { useAuth } from "../../auth/AuthProvider";
-import { fetchAdminWorkspaces, fetchMigrationImportHistory, fetchMigrationImportJobStatus, importMigrationData, repairMigrationImportVisibility, validateMigrationImport, type MigrationImportHistoryRecord, type MigrationImportIssue, type MigrationImportJobStatus, type MigrationImportLogEntry, type MigrationImportSummary } from "../../lib/api";
+import { fetchActiveMigrationImportJob, fetchAdminWorkspaces, fetchMigrationImportBatches, fetchMigrationImportHistory, fetchMigrationImportJobStatus, importMigrationData, markMigrationImportBatchClosed, repairMigrationImportVisibility, retryMigrationAttendance, rollbackMigrationImportBatch, validateMigrationImport, type MigrationImportBatchRecord, type MigrationImportHistoryRecord, type MigrationImportIssue, type MigrationImportJobStatus, type MigrationImportLogEntry, type MigrationImportSummary } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 
 function SummaryGrid({ summary }: { summary: MigrationImportSummary }) {
@@ -44,27 +44,54 @@ function BalanceList({ title, rows }: { title: string; rows: Array<{ name: strin
   );
 }
 
-function AttendanceJobPanel({ job }: { job: MigrationImportJobStatus }) {
+function CurrentImportPanel({ job }: { job: MigrationImportJobStatus }) {
+  const progress = job.steps.reduce((sum, step) => sum + step.processed, 0);
+  const total = job.steps.reduce((sum, step) => sum + step.total, 0);
+  const progressPercent = total > 0 ? Math.min(100, Math.round((progress / total) * 100)) : 0;
   return (
     <section className="migration-issues">
-      <h3>Attendance import job</h3>
+      <h3>Current Import</h3>
       <p className={job.status === "failed" ? "worker-action-error" : "positive"}>
         {job.status === "completed"
-          ? "IMPORT ATTENDANCE completed."
-          : job.status === "failed"
-            ? "IMPORT ATTENDANCE failed."
-            : `Import job running. Attendance: ${job.processedRows} / ${job.sourceRows} processed.`}
+          ? "Import Complete"
+          : job.status === "failed" || job.status === "partial_failed"
+            ? "Import completed with failures."
+            : job.status === "rolled_back"
+              ? "Import was rolled back."
+              : "Import job running."}
       </p>
+      <p><b>Job ID</b> {job.jobId}</p>
       <p><b>Status</b> {job.status}</p>
       <p><b>Current step</b> {job.currentStep}</p>
+      <p><b>Overall</b> {progress} / {total} processed</p>
+      <div aria-hidden="true" style={{ height: 10, borderRadius: 999, background: "rgba(15, 23, 42, 0.08)", overflow: "hidden", margin: "0.75rem 0" }}>
+        <div style={{ width: `${progressPercent}%`, height: "100%", background: "linear-gradient(90deg, #1f7a2e, #4f9a49)" }} />
+      </div>
+      <p><b>Base import</b> {job.steps.filter((step) => step.name !== "Attendance").every((step) => step.status === "completed") ? "Completed" : "Running"}</p>
+      <p><b>Attendance</b> {job.steps.find((step) => step.name === "Attendance")?.status ?? "pending"} {job.processedRows} / {job.sourceRows}</p>
       <p><b>Current batch</b> {job.currentBatch} / {job.totalBatches}</p>
       <p><b>Imported</b> {job.importedRows} · <b>Updated</b> {job.updatedRows} · <b>Skipped</b> {job.skippedRows} · <b>Failed</b> {job.failedRows}</p>
       {job.currentRow ? <p><b>Current row</b> {job.currentRow}</p> : null}
       {job.message ? <p><b>Message</b> {job.message}</p> : null}
       <p><b>Last progress</b> {new Date(job.lastProgressAt).toLocaleString()}</p>
+      <div>
+        <h4>Detailed steps</h4>
+        {job.steps.map((step) => (
+          <p key={step.name}>
+            <b>{step.name}</b> {step.status}
+            {typeof step.batch === "number" && typeof step.batchTotal === "number" ? ` · batch ${step.batch}/${step.batchTotal}` : ""}
+            {` · processed ${step.processed}/${step.total}`}
+            {` · imported ${step.imported}`}
+            {` · updated ${step.updated}`}
+            {` · skipped ${step.skipped}`}
+            {` · failed ${step.failed}`}
+            {step.message ? ` · ${step.message}` : ""}
+          </p>
+        ))}
+      </div>
       {job.logs?.length ? (
         <div>
-          <h4>Recent attendance batches</h4>
+          <h4>Recent job updates</h4>
           {job.logs.slice(-8).map((item, index) => (
             <p key={`${item.step}:${item.createdAt}:${index}`}>
               <b>{item.step}</b> {item.status}
@@ -139,24 +166,74 @@ const readLogDetails = (record: MigrationImportHistoryRecord) => {
 };
 
 function ImportHistory({ records }: { records: MigrationImportHistoryRecord[] }) {
+  const grouped = records.reduce<Map<string, MigrationImportHistoryRecord[]>>((map, record) => {
+    const batch = readLogDetails(record).batch;
+    map.set(batch, [...(map.get(batch) ?? []), record]);
+    return map;
+  }, new Map());
   return (
     <section className="migration-issues">
       <h3>Import history</h3>
       {!records.length ? <p className="activity-empty">No migration import logs for this workspace yet.</p> : null}
-      {records.slice(0, 18).map((record) => {
-        const details = readLogDetails(record);
-        return (
-          <p key={record.id} className={details.status === "failed" ? "negative" : undefined}>
-            <b>{details.step}</b> {details.status} · {new Date(record.createdAt).toLocaleString()}
-            {typeof details.sourceRows === "number" ? ` · source ${details.sourceRows}` : ""}
-            {typeof details.importedRows === "number" ? ` · imported ${details.importedRows}` : ""}
-            {typeof details.updatedRows === "number" ? ` · updated ${details.updatedRows}` : ""}
-            {typeof details.skippedRows === "number" ? ` · skipped ${details.skippedRows}` : ""}
-            {typeof details.failedRows === "number" ? ` · failed ${details.failedRows}` : ""}
-            {details.message ? ` · ${details.message}` : ""}
-          </p>
-        );
-      })}
+      {[...grouped.entries()].slice(0, 8).map(([batch, batchRecords]) => (
+        <div key={batch}>
+          <p><b>Import job</b> {batch} · {new Date(batchRecords[0]?.createdAt ?? Date.now()).toLocaleString()}</p>
+          {batchRecords.slice(0, 8).map((record) => {
+            const details = readLogDetails(record);
+            return (
+              <p key={record.id} className={details.status === "failed" ? "negative" : undefined}>
+                <b>{details.step}</b> {details.status}
+                {typeof details.sourceRows === "number" ? ` · source ${details.sourceRows}` : ""}
+                {typeof details.importedRows === "number" ? ` · imported ${details.importedRows}` : ""}
+                {typeof details.updatedRows === "number" ? ` · updated ${details.updatedRows}` : ""}
+                {typeof details.skippedRows === "number" ? ` · skipped ${details.skippedRows}` : ""}
+                {typeof details.failedRows === "number" ? ` · failed ${details.failedRows}` : ""}
+                {details.message ? ` · ${details.message}` : ""}
+              </p>
+            );
+          })}
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function LatestBatchPanel({
+  batch,
+  onRetryAttendance,
+  onRollback,
+  onMarkClosed,
+  retrying,
+  rollingBack,
+  closing,
+}: {
+  batch: MigrationImportBatchRecord;
+  onRetryAttendance: () => void;
+  onRollback: () => void;
+  onMarkClosed: () => void;
+  retrying: boolean;
+  rollingBack: boolean;
+  closing: boolean;
+}) {
+  return (
+    <section className="migration-issues">
+      <h3>Latest Import Batch</h3>
+      <p><b>Batch ID</b> {batch.id}</p>
+      <p><b>Status</b> {batch.status}</p>
+      <p><b>File</b> {batch.fileName ?? "Imported JSON"} · {batch.fileHash.slice(0, 12)}</p>
+      <p><b>Started</b> {new Date(batch.startedAt).toLocaleString()}</p>
+      {batch.completedAt ? <p><b>Completed</b> {new Date(batch.completedAt).toLocaleString()}</p> : null}
+      <div className="record-list__actions">
+        <button type="button" className="secondary-button" onClick={onRetryAttendance} disabled={retrying || batch.status === "running"}>
+          Retry Attendance Only
+        </button>
+        <button type="button" className="secondary-button" onClick={onRollback} disabled={rollingBack || batch.status === "running" || batch.status === "rolled_back"}>
+          Rollback This Import
+        </button>
+        <button type="button" className="secondary-button" onClick={onMarkClosed} disabled={closing || !["failed", "partial_failed"].includes(batch.status)}>
+          Mark Failed Batch Closed
+        </button>
+      </div>
     </section>
   );
 }
@@ -165,6 +242,7 @@ export function MigrationImport() {
   const { token } = useAuth();
   const queryClient = useQueryClient();
   const [workspaceId, setWorkspaceId] = useState("");
+  const currentJobStorageKey = workspaceId ? `migration-import-current-job:${workspaceId}` : "";
   const [fileName, setFileName] = useState("");
   const [payload, setPayload] = useState<unknown>(null);
   const [fileError, setFileError] = useState("");
@@ -186,13 +264,27 @@ export function MigrationImport() {
     queryFn: () => fetchMigrationImportHistory(token!, workspaceId),
     enabled: Boolean(token && workspaceId),
   });
+  const batches = useQuery({
+    queryKey: ["admin-migration-import-batches", workspaceId],
+    queryFn: () => fetchMigrationImportBatches(token!, workspaceId),
+    enabled: Boolean(token && workspaceId),
+    refetchInterval: 4000,
+  });
+  const activeImportJob = useQuery({
+    queryKey: ["admin-migration-import-active-job", workspaceId],
+    queryFn: () => fetchActiveMigrationImportJob(token!, workspaceId),
+    enabled: Boolean(token && workspaceId),
+    refetchInterval: 2000,
+  });
   const refreshAfterImport = () => {
     void queryClient.invalidateQueries();
   };
   const runImport = useMutation({
-    mutationFn: () => importMigrationData(token!, { workspaceId, payload, dryRun: false, allowDatabaseWrite: true, allowSummaryMismatch }),
+    mutationFn: () => importMigrationData(token!, { workspaceId, payload, dryRun: false, allowDatabaseWrite: true, allowSummaryMismatch, fileName }),
     onSuccess: (data) => {
-      setAttendanceJobId(data.result?.attendanceJobId ?? "");
+      const jobId = data.result?.attendanceJobId ?? "";
+      setAttendanceJobId(jobId);
+      if (jobId && currentJobStorageKey) window.localStorage.setItem(currentJobStorageKey, jobId);
       refreshAfterImport();
     },
   });
@@ -209,6 +301,41 @@ export function MigrationImport() {
     mutationFn: () => repairMigrationImportVisibility(token!, { workspaceId }),
     onSuccess: refreshAfterImport,
   });
+  const retryAttendanceOnly = useMutation({
+    mutationFn: (batchId: string) => retryMigrationAttendance(token!, { workspaceId, batchId }),
+    onSuccess: (data) => {
+      setAttendanceJobId(data.job.jobId);
+      if (currentJobStorageKey) window.localStorage.setItem(currentJobStorageKey, data.job.jobId);
+      refreshAfterImport();
+    },
+  });
+  const rollbackBatch = useMutation({
+    mutationFn: (batchId: string) => rollbackMigrationImportBatch(token!, { workspaceId, batchId }),
+    onSuccess: refreshAfterImport,
+  });
+  const markBatchClosed = useMutation({
+    mutationFn: (batchId: string) => markMigrationImportBatchClosed(token!, { workspaceId, batchId }),
+    onSuccess: refreshAfterImport,
+  });
+
+  useEffect(() => {
+    if (!currentJobStorageKey) return;
+    const savedJobId = window.localStorage.getItem(currentJobStorageKey);
+    if (savedJobId) setAttendanceJobId(savedJobId);
+  }, [currentJobStorageKey]);
+
+  useEffect(() => {
+    const activeJobId = activeImportJob.data?.job?.jobId;
+    if (!activeJobId || !currentJobStorageKey) return;
+    setAttendanceJobId(activeJobId);
+    window.localStorage.setItem(currentJobStorageKey, activeJobId);
+  }, [activeImportJob.data?.job?.jobId, currentJobStorageKey]);
+
+  useEffect(() => {
+    const status = attendanceJob.data?.job.status;
+    if (!currentJobStorageKey || !status) return;
+    if (status === "completed" || status === "failed") window.localStorage.removeItem(currentJobStorageKey);
+  }, [attendanceJob.data?.job.status, currentJobStorageKey]);
 
   const readFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -233,8 +360,11 @@ export function MigrationImport() {
   };
 
   const validation = runImport.data ?? validate.data;
+  const currentImportJob = attendanceJob.data?.job ?? activeImportJob.data?.job ?? runImport.data?.result?.attendanceJob ?? null;
+  const latestBatch = batches.data?.records?.[0] ?? null;
+  const isImportRunning = currentImportJob?.status === "queued" || currentImportJob?.status === "running";
   const canValidate = Boolean(token && workspaceId && payload && !validate.isPending);
-  const canImport = Boolean(token && workspaceId && payload && validate.data?.canImport && !runImport.isPending);
+  const canImport = Boolean(token && workspaceId && payload && validate.data?.canImport && !runImport.isPending && !isImportRunning);
 
   return (
     <main className="admin-page migration-page">
@@ -287,12 +417,32 @@ export function MigrationImport() {
             Repair previous import visibility
           </button>
         </div>
+        {isImportRunning && currentImportJob ? (
+          <p className="positive">
+            An import is already running. Resume progress below for job <b>{currentImportJob.jobId}</b>.
+          </p>
+        ) : null}
         {validate.error ? <p className="worker-action-error">{validate.error instanceof Error ? validate.error.message : "Validation failed."}</p> : null}
         {runImport.error ? <p className="worker-action-error">{runImport.error instanceof Error ? runImport.error.message : "Import failed."}</p> : null}
         {repairVisibility.error ? <p className="worker-action-error">{repairVisibility.error instanceof Error ? repairVisibility.error.message : "Visibility repair failed."}</p> : null}
         {repairVisibility.data ? <p className="positive">{repairVisibility.data.message} Repaired records: {repairVisibility.data.repairedRecords}.</p> : null}
       </section>
 
+      {currentImportJob ? <CurrentImportPanel job={currentImportJob} /> : null}
+      {latestBatch ? (
+        <LatestBatchPanel
+          batch={latestBatch}
+          onRetryAttendance={() => retryAttendanceOnly.mutate(latestBatch.id)}
+          onRollback={() => rollbackBatch.mutate(latestBatch.id)}
+          onMarkClosed={() => markBatchClosed.mutate(latestBatch.id)}
+          retrying={retryAttendanceOnly.isPending}
+          rollingBack={rollbackBatch.isPending}
+          closing={markBatchClosed.isPending}
+        />
+      ) : null}
+      {retryAttendanceOnly.error ? <p className="worker-action-error">{retryAttendanceOnly.error instanceof Error ? retryAttendanceOnly.error.message : "Attendance retry failed."}</p> : null}
+      {rollbackBatch.error ? <p className="worker-action-error">{rollbackBatch.error instanceof Error ? rollbackBatch.error.message : "Rollback failed."}</p> : null}
+      {markBatchClosed.error ? <p className="worker-action-error">{markBatchClosed.error instanceof Error ? markBatchClosed.error.message : "Could not close failed batch."}</p> : null}
       {workspaceId ? <ImportHistory records={history.data?.records ?? []} /> : null}
 
       {validation ? (
@@ -324,7 +474,6 @@ export function MigrationImport() {
               <p><b>Total advances</b> {formatMoney(runImport.data.result.totalAdvances)}</p>
               <p><b>Inserted operational records</b> {runImport.data.result.insertedOperationalRecords}</p>
               {runImport.data.result.currentStep ? <p><b>Current step</b> {runImport.data.result.currentStep}</p> : null}
-              {attendanceJob.data?.job ? <AttendanceJobPanel job={attendanceJob.data.job} /> : runImport.data.result.attendanceJob ? <AttendanceJobPanel job={runImport.data.result.attendanceJob} /> : null}
               {attendanceJob.error ? <p className="worker-action-error">{attendanceJob.error instanceof Error ? attendanceJob.error.message : "Could not load attendance import job status."}</p> : null}
               {typeof runImport.data.result.failedRows === "number" ? <p><b>Failed/skipped rows</b> {runImport.data.result.failedRows}</p> : null}
               {runImport.data.result.startedAt ? <p><b>Started at</b> {new Date(runImport.data.result.startedAt).toLocaleString()}</p> : null}
