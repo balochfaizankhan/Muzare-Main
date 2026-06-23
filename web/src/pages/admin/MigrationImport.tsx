@@ -2,7 +2,7 @@ import { useMemo, useState, type ChangeEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Database, FileJson, ShieldAlert, UploadCloud } from "lucide-react";
 import { useAuth } from "../../auth/AuthProvider";
-import { fetchAdminWorkspaces, fetchMigrationImportHistory, importMigrationData, repairMigrationImportVisibility, validateMigrationImport, type MigrationImportHistoryRecord, type MigrationImportIssue, type MigrationImportLogEntry, type MigrationImportSummary } from "../../lib/api";
+import { fetchAdminWorkspaces, fetchMigrationImportHistory, fetchMigrationImportJobStatus, importMigrationData, repairMigrationImportVisibility, validateMigrationImport, type MigrationImportHistoryRecord, type MigrationImportIssue, type MigrationImportJobStatus, type MigrationImportLogEntry, type MigrationImportSummary } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 
 function SummaryGrid({ summary }: { summary: MigrationImportSummary }) {
@@ -40,6 +40,43 @@ function BalanceList({ title, rows }: { title: string; rows: Array<{ name: strin
           <strong>{formatMoney(row.balance)}</strong>
         </div>
       ))}
+    </section>
+  );
+}
+
+function AttendanceJobPanel({ job }: { job: MigrationImportJobStatus }) {
+  return (
+    <section className="migration-issues">
+      <h3>Attendance import job</h3>
+      <p className={job.status === "failed" ? "worker-action-error" : "positive"}>
+        {job.status === "completed"
+          ? "IMPORT ATTENDANCE completed."
+          : job.status === "failed"
+            ? "IMPORT ATTENDANCE failed."
+            : `Import job running. Attendance: ${job.processedRows} / ${job.sourceRows} processed.`}
+      </p>
+      <p><b>Status</b> {job.status}</p>
+      <p><b>Current step</b> {job.currentStep}</p>
+      <p><b>Current batch</b> {job.currentBatch} / {job.totalBatches}</p>
+      <p><b>Imported</b> {job.importedRows} · <b>Updated</b> {job.updatedRows} · <b>Skipped</b> {job.skippedRows} · <b>Failed</b> {job.failedRows}</p>
+      {job.currentRow ? <p><b>Current row</b> {job.currentRow}</p> : null}
+      {job.message ? <p><b>Message</b> {job.message}</p> : null}
+      <p><b>Last progress</b> {new Date(job.lastProgressAt).toLocaleString()}</p>
+      {job.logs?.length ? (
+        <div>
+          <h4>Recent attendance batches</h4>
+          {job.logs.slice(-8).map((item, index) => (
+            <p key={`${item.step}:${item.createdAt}:${index}`}>
+              <b>{item.step}</b> {item.status}
+              {typeof item.importedRows === "number" ? ` · imported ${item.importedRows}` : ""}
+              {typeof item.updatedRows === "number" ? ` · updated ${item.updatedRows}` : ""}
+              {typeof item.skippedRows === "number" ? ` · skipped ${item.skippedRows}` : ""}
+              {typeof item.failedRows === "number" ? ` · failed ${item.failedRows}` : ""}
+              {item.message ? ` · ${item.message}` : ""}
+            </p>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -132,6 +169,7 @@ export function MigrationImport() {
   const [payload, setPayload] = useState<unknown>(null);
   const [fileError, setFileError] = useState("");
   const [allowSummaryMismatch, setAllowSummaryMismatch] = useState(false);
+  const [attendanceJobId, setAttendanceJobId] = useState("");
   const workspaces = useQuery({
     queryKey: ["admin-workspaces"],
     queryFn: () => fetchAdminWorkspaces(token!),
@@ -153,7 +191,19 @@ export function MigrationImport() {
   };
   const runImport = useMutation({
     mutationFn: () => importMigrationData(token!, { workspaceId, payload, dryRun: false, allowDatabaseWrite: true, allowSummaryMismatch }),
-    onSuccess: refreshAfterImport,
+    onSuccess: (data) => {
+      setAttendanceJobId(data.result?.attendanceJobId ?? "");
+      refreshAfterImport();
+    },
+  });
+  const attendanceJob = useQuery({
+    queryKey: ["admin-migration-import-attendance-job", attendanceJobId],
+    queryFn: () => fetchMigrationImportJobStatus(token!, attendanceJobId),
+    enabled: Boolean(token && attendanceJobId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.job.status;
+      return status === "completed" || status === "failed" ? false : 2000;
+    },
   });
   const repairVisibility = useMutation({
     mutationFn: () => repairMigrationImportVisibility(token!, { workspaceId }),
@@ -165,6 +215,7 @@ export function MigrationImport() {
     setFileError("");
     setPayload(null);
     setAllowSummaryMismatch(false);
+    setAttendanceJobId("");
     validate.reset();
     runImport.reset();
     repairVisibility.reset();
@@ -273,6 +324,8 @@ export function MigrationImport() {
               <p><b>Total advances</b> {formatMoney(runImport.data.result.totalAdvances)}</p>
               <p><b>Inserted operational records</b> {runImport.data.result.insertedOperationalRecords}</p>
               {runImport.data.result.currentStep ? <p><b>Current step</b> {runImport.data.result.currentStep}</p> : null}
+              {attendanceJob.data?.job ? <AttendanceJobPanel job={attendanceJob.data.job} /> : runImport.data.result.attendanceJob ? <AttendanceJobPanel job={runImport.data.result.attendanceJob} /> : null}
+              {attendanceJob.error ? <p className="worker-action-error">{attendanceJob.error instanceof Error ? attendanceJob.error.message : "Could not load attendance import job status."}</p> : null}
               {typeof runImport.data.result.failedRows === "number" ? <p><b>Failed/skipped rows</b> {runImport.data.result.failedRows}</p> : null}
               {runImport.data.result.startedAt ? <p><b>Started at</b> {new Date(runImport.data.result.startedAt).toLocaleString()}</p> : null}
               {runImport.data.result.completedAt ? <p><b>Completed at</b> {new Date(runImport.data.result.completedAt).toLocaleString()}</p> : null}

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requirePermission } from "../auth.js";
@@ -68,6 +68,7 @@ const importSchema = payloadSchema.extend({
 });
 const repairSchema = z.object({ workspaceId: z.string().uuid() });
 const historyQuerySchema = z.object({ workspaceId: z.string().uuid() });
+const jobParamsSchema = z.object({ jobId: z.string().uuid() });
 
 type AndroidRecord = Record<string, unknown>;
 type AndroidPayload = z.infer<typeof payloadSchema>["payload"];
@@ -97,6 +98,8 @@ type ImportResult = {
   farmImportStats: { created: number; updated: number; skippedDuplicates: number };
   activeFarmId: string;
   activeSeasonId: string;
+  attendanceJobId?: string;
+  attendanceJob?: AttendanceImportJobStatus;
   importBatchId: string;
   startedAt: string;
   completedAt: string;
@@ -117,6 +120,29 @@ type ImportLogEntry = {
   failedRows?: number;
   createdAt: string;
 };
+type AttendanceImportJobStatus = {
+  jobId: string;
+  importBatchId: string;
+  workspaceId: string;
+  status: "queued" | "running" | "completed" | "failed";
+  currentStep: string;
+  sourceRows: number;
+  totalBatches: number;
+  currentBatch: number;
+  processedRows: number;
+  importedRows: number;
+  updatedRows: number;
+  skippedRows: number;
+  failedRows: number;
+  currentRow?: string;
+  message?: string;
+  startedAt: string;
+  lastProgressAt: string;
+  completedAt?: string;
+  logs: ImportLogEntry[];
+};
+
+const attendanceImportJobs = new Map<string, AttendanceImportJobStatus>();
 
 const importCountKeys: Array<{ label: string; key: ImportCountKey }> = [
   { label: "Farms imported", key: "farms" },
@@ -507,7 +533,15 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
     };
   });
 
-  app.post("/v1/admin/migration-import/import", { preHandler: requirePermission("CREATE_WORKSPACE"), bodyLimit: 50 * 1024 * 1024 }, async (request, reply) => {
+  app.get("/v1/admin/migration-import/imports/status/:jobId", { preHandler: requirePermission("CREATE_WORKSPACE") }, async (request, reply) => {
+    const parsed = jobParamsSchema.safeParse(request.params);
+    if (!parsed.success) return reply.code(400).send({ message: "A valid import job id is required." });
+    const job = attendanceImportJobs.get(parsed.data.jobId);
+    if (!job) return reply.code(404).send({ message: "Import job not found." });
+    return { job };
+  });
+
+  const handleMigrationImport = async (request: FastifyRequest, reply: FastifyReply) => {
     const parsed = importSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ message: "A valid migration import request is required." });
     const validation = validatePayload(parsed.data.payload, { allowSummaryMismatch: parsed.data.allowSummaryMismatch });
@@ -859,37 +893,153 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         }
       }
       await logStep("IMPORT ADVANCES", "completed", { sourceRows: asArray(parsed.data.payload, "advances").length, importedRows: importedCounts.advances, updatedRows: updatedAdvances, skippedRows: skippedAdvances, failedRows: skippedAdvances, message: advanceFailures.slice(0, 8).join("; ") });
-      await logStep("IMPORT ATTENDANCE", "started");
-      let skippedAttendanceRows = 0;
-      let updatedAttendance = 0;
-      const attendanceFailures: string[] = [];
-      for (const batch of chunks(asArray(parsed.data.payload, "attendance"), 250)) {
-        for (const source of batch) {
-          const labourerId = resolveLabourId(source);
-          if (!labourerId) {
-            skippedAttendanceRows += 1;
-            attendanceFailures.push(`${oldId(source) || "unknown"}: missing mapped labour`);
-            continue;
+      const attendanceRows = asArray(parsed.data.payload, "attendance");
+      const attendanceJobId = randomUUID();
+      const attendanceJob: AttendanceImportJobStatus = {
+        jobId: attendanceJobId,
+        importBatchId,
+        workspaceId: parsed.data.workspaceId,
+        status: attendanceRows.length ? "queued" : "completed",
+        currentStep: attendanceRows.length ? "IMPORT ATTENDANCE queued" : "IMPORT ATTENDANCE completed",
+        sourceRows: attendanceRows.length,
+        totalBatches: Math.ceil(attendanceRows.length / 100),
+        currentBatch: 0,
+        processedRows: 0,
+        importedRows: 0,
+        updatedRows: 0,
+        skippedRows: 0,
+        failedRows: 0,
+        startedAt: new Date().toISOString(),
+        lastProgressAt: new Date().toISOString(),
+        completedAt: attendanceRows.length ? undefined : new Date().toISOString(),
+        logs: [],
+      };
+      attendanceImportJobs.set(attendanceJobId, attendanceJob);
+
+      const updateAttendanceJob = (patch: Partial<AttendanceImportJobStatus>) => {
+        Object.assign(attendanceJob, patch, { lastProgressAt: new Date().toISOString() });
+        attendanceImportJobs.set(attendanceJobId, attendanceJob);
+      };
+      const pushAttendanceJobLog = (entry: ImportLogEntry) => {
+        attendanceJob.logs.push(entry);
+        if (attendanceJob.logs.length > 80) attendanceJob.logs.splice(0, attendanceJob.logs.length - 80);
+      };
+
+      const runAttendanceJob = async () => {
+        if (!attendanceRows.length) return;
+        let lastHangingLogAt = Date.now();
+        updateAttendanceJob({ status: "running", currentStep: "IMPORT ATTENDANCE" });
+        await logStep("IMPORT ATTENDANCE", "started", { sourceRows: attendanceRows.length, message: `Attendance import job ${attendanceJobId} started.` });
+        for (const [batchIndex, batch] of chunks(attendanceRows, 100).entries()) {
+          const batchNumber = batchIndex + 1;
+          updateAttendanceJob({ currentBatch: batchNumber, currentStep: `Attendance batch ${batchNumber}/${attendanceJob.totalBatches}` });
+          const batchStartedAt = Date.now();
+          await logStep("IMPORT ATTENDANCE BATCH", "started", {
+            sourceRows: attendanceRows.length,
+            importedRows: attendanceJob.importedRows,
+            updatedRows: attendanceJob.updatedRows,
+            skippedRows: attendanceJob.skippedRows,
+            failedRows: attendanceJob.failedRows,
+            message: `Attendance batch ${batchNumber}/${attendanceJob.totalBatches}. Processed ${attendanceJob.processedRows}/${attendanceRows.length}.`,
+          });
+          for (const source of batch) {
+            const currentRow = String(oldId(source) || `${attendanceJob.processedRows + 1}`);
+            updateAttendanceJob({ currentRow });
+            const labourerId = resolveLabourId(source);
+            if (!labourerId) {
+              updateAttendanceJob({
+                processedRows: attendanceJob.processedRows + 1,
+                skippedRows: attendanceJob.skippedRows + 1,
+                failedRows: attendanceJob.failedRows + 1,
+                message: `${currentRow}: missing mapped labour`,
+              });
+              continue;
+            }
+            try {
+              const result = await writeRecord("attendance", sourceTypeFor("attendance"), source, {
+                date: dateValue(source, ["date", "attendanceDate", "day"]),
+                labourerId,
+                status: attendanceStatus(source),
+                remarks: text(source, ["remarks", "notes"]),
+                oldFarmId: farmRef(source),
+                oldSeasonId: seasonRef(source),
+                oldLabourId: labourRef(source),
+              });
+              updateAttendanceJob({
+                processedRows: attendanceJob.processedRows + 1,
+                importedRows: attendanceJob.importedRows + (result.inserted ? 1 : 0),
+                updatedRows: attendanceJob.updatedRows + (result.updated ? 1 : 0),
+              });
+            } catch (error) {
+              updateAttendanceJob({
+                processedRows: attendanceJob.processedRows + 1,
+                skippedRows: attendanceJob.skippedRows + 1,
+                failedRows: attendanceJob.failedRows + 1,
+                message: `${currentRow}: ${readableImportError(error)}`,
+              });
+            }
+            if (Date.now() - lastHangingLogAt > 30_000) {
+              lastHangingLogAt = Date.now();
+              await logStep("IMPORT ATTENDANCE PROGRESS", "started", {
+                sourceRows: attendanceRows.length,
+                importedRows: attendanceJob.importedRows,
+                updatedRows: attendanceJob.updatedRows,
+                skippedRows: attendanceJob.skippedRows,
+                failedRows: attendanceJob.failedRows,
+                message: `Current attendance row ${currentRow}; processed ${attendanceJob.processedRows}/${attendanceRows.length}; mappedLabourId ${labourerId}; mappedSeasonId ${maps.seasons.get(seasonRef(source)) ?? "fallback"}.`,
+              });
+            }
           }
-          try {
-            const result = await writeRecord("attendance", sourceTypeFor("attendance"), source, {
-              date: dateValue(source, ["date", "attendanceDate", "day"]),
-              labourerId,
-              status: attendanceStatus(source),
-              remarks: text(source, ["remarks", "notes"]),
-              oldFarmId: farmRef(source),
-              oldSeasonId: seasonRef(source),
-              oldLabourId: labourRef(source),
-            });
-            if (result.inserted) importedCounts.attendance += 1;
-            if (result.updated) updatedAttendance += 1;
-          } catch (error) {
-            skippedAttendanceRows += 1;
-            attendanceFailures.push(`${oldId(source) || "unknown"}: ${readableImportError(error)}`);
-          }
+          const elapsedSeconds = Math.round((Date.now() - batchStartedAt) / 100) / 10;
+          const batchLog: ImportLogEntry = {
+            step: "IMPORT ATTENDANCE BATCH",
+            status: "completed",
+            createdAt: new Date().toISOString(),
+            sourceRows: attendanceRows.length,
+            importedRows: attendanceJob.importedRows,
+            updatedRows: attendanceJob.updatedRows,
+            skippedRows: attendanceJob.skippedRows,
+            failedRows: attendanceJob.failedRows,
+            message: `Attendance batch ${batchNumber}/${attendanceJob.totalBatches} completed in ${elapsedSeconds}s. Processed ${attendanceJob.processedRows}/${attendanceRows.length}.`,
+          };
+          pushAttendanceJobLog(batchLog);
+          await logStep(batchLog.step, batchLog.status, batchLog);
         }
-      }
-      await logStep("IMPORT ATTENDANCE", "completed", { sourceRows: asArray(parsed.data.payload, "attendance").length, importedRows: importedCounts.attendance, updatedRows: updatedAttendance, skippedRows: skippedAttendanceRows, failedRows: skippedAttendanceRows, message: attendanceFailures.slice(0, 8).join("; ") });
+        const completedAt = new Date().toISOString();
+        updateAttendanceJob({
+          status: attendanceJob.failedRows ? "failed" : "completed",
+          currentStep: "IMPORT ATTENDANCE completed",
+          completedAt,
+          message: attendanceJob.failedRows
+            ? `Attendance import completed with ${attendanceJob.failedRows} failed/skipped rows.`
+            : "Attendance import completed.",
+        });
+        const finalLog: ImportLogEntry = {
+          step: "IMPORT ATTENDANCE",
+          status: attendanceJob.failedRows ? "failed" : "completed",
+          createdAt: completedAt,
+          sourceRows: attendanceRows.length,
+          importedRows: attendanceJob.importedRows,
+          updatedRows: attendanceJob.updatedRows,
+          skippedRows: attendanceJob.skippedRows,
+          failedRows: attendanceJob.failedRows,
+          message: attendanceJob.message,
+        };
+        pushAttendanceJobLog(finalLog);
+        await logStep(finalLog.step, finalLog.status, finalLog);
+      };
+      void runAttendanceJob().catch(async (error) => {
+        const message = error instanceof Error ? error.message : "Unknown attendance import failure.";
+        updateAttendanceJob({ status: "failed", currentStep: "IMPORT ATTENDANCE failed", completedAt: new Date().toISOString(), message });
+        await logStep("IMPORT ATTENDANCE", "failed", {
+          sourceRows: attendanceRows.length,
+          importedRows: attendanceJob.importedRows,
+          updatedRows: attendanceJob.updatedRows,
+          skippedRows: attendanceJob.skippedRows,
+          failedRows: attendanceJob.failedRows + 1,
+          message,
+        });
+      });
       const assertProcessed = (label: string, sourceRows: number, processedRows: number, skippedRows = 0) => {
         if (sourceRows > 0 && processedRows === 0 && skippedRows === 0) {
           throw new Error(`Schema mismatch or mapping failure: ${label} source count ${sourceRows} but imported/updated 0.`);
@@ -899,7 +1049,6 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       assertProcessed("labours", asArray(parsed.data.payload, "labour").length, importedCounts.labour + updatedLabour);
       assertProcessed("expenses", asArray(parsed.data.payload, "expenses").length, importedCounts.expenses + updatedExpenses);
       assertProcessed("advances", asArray(parsed.data.payload, "advances").length, importedCounts.advances + updatedAdvances, skippedAdvances);
-      assertProcessed("attendance", asArray(parsed.data.payload, "attendance").length, importedCounts.attendance + updatedAttendance, skippedAttendanceRows);
       for (const source of asArray(parsed.data.payload, "sales")) {
         await writeRecord("sale", sourceTypeFor("sales"), source, { date: dateValue(source, ["date", "saleDate"]), buyerName: text(source, ["buyerName", "buyer"], "Imported Buyer"), amount: numberValue(source, ["total", "totalAmount", "amount"]), accountId: maps.accounts.get(accountRef(source)) ?? defaultAccountId });
       }
@@ -930,18 +1079,26 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         details: { source: validation.summary.source, exportedAt: validation.summary.exportedAt, insertedOperationalRecords, farmImportStats },
       });
       const completedAt = new Date().toISOString();
-      await logStep("IMPORT COMPLETE", "completed", { message: `Imported ${insertedOperationalRecords} operational records.`, importedRows: insertedOperationalRecords, failedRows: skippedAttendanceRows });
+      await logStep("IMPORT COMPLETE", "completed", {
+        message: attendanceRows.length
+          ? `Base import completed. Attendance job ${attendanceJobId} is running in the background.`
+          : `Imported ${insertedOperationalRecords} operational records.`,
+        importedRows: insertedOperationalRecords,
+        failedRows: 0,
+      });
       return {
         insertedOperationalRecords,
         importCounts: importCountKeys.map(({ label, key }) => ({ label, key, count: importedCounts[key] })),
         farmImportStats,
         activeFarmId: defaultFarmId,
         activeSeasonId: selectedImportSeasonId,
+        attendanceJobId,
+        attendanceJob,
         importBatchId,
         startedAt,
         completedAt,
         currentStep: "IMPORT COMPLETE",
-        failedRows: skippedAttendanceRows,
+        failedRows: 0,
         logs,
         totalExpenses: validation.summary.totalExpenses,
         totalAdvances: validation.summary.totalAdvances,
@@ -954,7 +1111,10 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
     }
 
     return { ...validation, imported: true, dryRun: false, message: "Migration imported successfully.", result };
-  });
+  };
+
+  app.post("/v1/admin/migration-import/import", { preHandler: requirePermission("CREATE_WORKSPACE"), bodyLimit: 50 * 1024 * 1024 }, handleMigrationImport);
+  app.post("/v1/admin/migration-import/imports/start", { preHandler: requirePermission("CREATE_WORKSPACE"), bodyLimit: 50 * 1024 * 1024 }, handleMigrationImport);
 
   app.post("/v1/admin/migration-import/repair-visibility", { preHandler: requirePermission("CREATE_WORKSPACE") }, async (request, reply) => {
     const parsed = repairSchema.safeParse(request.body);
