@@ -219,9 +219,29 @@ export type MigrationImportValidation = {
     importCounts: Array<{ label: string; key: string; count: number }>;
     activeFarmId?: string;
     activeSeasonId?: string;
+    importBatchId?: string;
+    startedAt?: string;
+    completedAt?: string;
+    currentStep?: string;
+    failedRows?: number;
+    logs?: MigrationImportLogEntry[];
     totalExpenses: number;
     totalAdvances: number;
   };
+};
+export type MigrationImportLogEntry = {
+  step: string;
+  status: "started" | "completed" | "failed";
+  message?: string;
+  importedRows?: number;
+  failedRows?: number;
+  createdAt: string;
+};
+export type MigrationImportHistoryRecord = {
+  id: string;
+  action: string;
+  details: unknown;
+  createdAt: string;
 };
 export type MigrationVisibilityRepairResult = {
   repairedRecords: number;
@@ -427,7 +447,12 @@ async function apiRequest<T>(path: string, options: RequestInit = {}, token?: st
   try {
     response = await fetch(`${config.apiUrl}${path}`, { ...options, headers, signal: controller.signal });
   } catch (error) {
-    if (controller.signal.aborted) throw new Error("Import is taking longer than expected. Please check import history or try again.");
+    if (controller.signal.aborted) {
+      const isMigrationImport = requestOptions.debugLabel === "migration-import-import";
+      throw new Error(isMigrationImport
+        ? "Migration import is still running or the server timed out. Check Import history for the current step and row counts."
+        : "Request is taking longer than expected. Please try again.");
+    }
     throw error;
   } finally {
     if (timeout) window.clearTimeout(timeout);
@@ -539,7 +564,9 @@ export const fetchAdminAuditLogs = (token: string) => apiRequest<{ records: Admi
 export const validateMigrationImport = (token: string, input: { workspaceId: string; payload: unknown }) =>
   apiRequest<MigrationImportValidation>("/v1/admin/migration-import/validate", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 60_000, debugLabel: "migration-import-validate" });
 export const importMigrationData = (token: string, input: { workspaceId: string; payload: unknown; dryRun: boolean; allowDatabaseWrite: boolean }) =>
-  apiRequest<MigrationImportValidation>("/v1/admin/migration-import/import", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 120_000, debugLabel: "migration-import-import" });
+  apiRequest<MigrationImportValidation>("/v1/admin/migration-import/import", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 600_000, debugLabel: "migration-import-import" });
+export const fetchMigrationImportHistory = (token: string, workspaceId: string) =>
+  apiRequest<{ records: MigrationImportHistoryRecord[] }>(`/v1/admin/migration-import/history?workspaceId=${encodeURIComponent(workspaceId)}`, {}, token, { timeoutMs: 30_000, debugLabel: "migration-import-history" });
 export const repairMigrationImportVisibility = (token: string, input: { workspaceId: string }) =>
   apiRequest<MigrationVisibilityRepairResult>("/v1/admin/migration-import/repair-visibility", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 60_000, debugLabel: "migration-import-repair-visibility" });
 export const fetchApprovals = (token: string) =>

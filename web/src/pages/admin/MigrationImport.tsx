@@ -1,8 +1,8 @@
 import { useMemo, useState, type ChangeEvent } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Database, FileJson, ShieldAlert, UploadCloud } from "lucide-react";
 import { useAuth } from "../../auth/AuthProvider";
-import { fetchAdminWorkspaces, importMigrationData, repairMigrationImportVisibility, validateMigrationImport, type MigrationImportIssue, type MigrationImportSummary } from "../../lib/api";
+import { fetchAdminWorkspaces, fetchMigrationImportHistory, importMigrationData, repairMigrationImportVisibility, validateMigrationImport, type MigrationImportHistoryRecord, type MigrationImportIssue, type MigrationImportLogEntry, type MigrationImportSummary } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 
 function SummaryGrid({ summary }: { summary: MigrationImportSummary }) {
@@ -84,8 +84,41 @@ function IssueList({ issues }: { issues: MigrationImportIssue[] }) {
   );
 }
 
+const readLogDetails = (record: MigrationImportHistoryRecord) => {
+  const details = record.details && typeof record.details === "object" ? record.details as Partial<MigrationImportLogEntry> & { importBatchId?: string } : {};
+  return {
+    batch: details.importBatchId ?? "-",
+    step: details.step ?? record.action,
+    status: details.status ?? record.action.replace("admin.migration_import.", ""),
+    message: details.message ?? "",
+    importedRows: details.importedRows,
+    failedRows: details.failedRows,
+  };
+};
+
+function ImportHistory({ records }: { records: MigrationImportHistoryRecord[] }) {
+  return (
+    <section className="migration-issues">
+      <h3>Import history</h3>
+      {!records.length ? <p className="activity-empty">No migration import logs for this workspace yet.</p> : null}
+      {records.slice(0, 18).map((record) => {
+        const details = readLogDetails(record);
+        return (
+          <p key={record.id} className={details.status === "failed" ? "negative" : undefined}>
+            <b>{details.step}</b> {details.status} · {new Date(record.createdAt).toLocaleString()}
+            {typeof details.importedRows === "number" ? ` · imported ${details.importedRows}` : ""}
+            {typeof details.failedRows === "number" ? ` · failed ${details.failedRows}` : ""}
+            {details.message ? ` · ${details.message}` : ""}
+          </p>
+        );
+      })}
+    </section>
+  );
+}
+
 export function MigrationImport() {
   const { token } = useAuth();
+  const queryClient = useQueryClient();
   const [workspaceId, setWorkspaceId] = useState("");
   const [fileName, setFileName] = useState("");
   const [payload, setPayload] = useState<unknown>(null);
@@ -101,11 +134,21 @@ export function MigrationImport() {
   const validate = useMutation({
     mutationFn: () => validateMigrationImport(token!, { workspaceId, payload }),
   });
+  const history = useQuery({
+    queryKey: ["admin-migration-import-history", workspaceId],
+    queryFn: () => fetchMigrationImportHistory(token!, workspaceId),
+    enabled: Boolean(token && workspaceId),
+  });
+  const refreshAfterImport = () => {
+    void queryClient.invalidateQueries();
+  };
   const runImport = useMutation({
     mutationFn: () => importMigrationData(token!, { workspaceId, payload, dryRun: false, allowDatabaseWrite: true }),
+    onSuccess: refreshAfterImport,
   });
   const repairVisibility = useMutation({
     mutationFn: () => repairMigrationImportVisibility(token!, { workspaceId }),
+    onSuccess: refreshAfterImport,
   });
 
   const readFile = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -185,6 +228,8 @@ export function MigrationImport() {
         {repairVisibility.data ? <p className="positive">{repairVisibility.data.message} Repaired records: {repairVisibility.data.repairedRecords}.</p> : null}
       </section>
 
+      {workspaceId ? <ImportHistory records={history.data?.records ?? []} /> : null}
+
       {validation ? (
         <section className="admin-section-card migration-results">
           <div className="admin-section-heading">
@@ -213,8 +258,25 @@ export function MigrationImport() {
               <p><b>Total expenses</b> {formatMoney(runImport.data.result.totalExpenses)}</p>
               <p><b>Total advances</b> {formatMoney(runImport.data.result.totalAdvances)}</p>
               <p><b>Inserted operational records</b> {runImport.data.result.insertedOperationalRecords}</p>
+              {runImport.data.result.currentStep ? <p><b>Current step</b> {runImport.data.result.currentStep}</p> : null}
+              {typeof runImport.data.result.failedRows === "number" ? <p><b>Failed/skipped rows</b> {runImport.data.result.failedRows}</p> : null}
+              {runImport.data.result.startedAt ? <p><b>Started at</b> {new Date(runImport.data.result.startedAt).toLocaleString()}</p> : null}
+              {runImport.data.result.completedAt ? <p><b>Completed at</b> {new Date(runImport.data.result.completedAt).toLocaleString()}</p> : null}
               {runImport.data.result.activeFarmId && runImport.data.result.activeSeasonId ? (
                 <p><b>Active import context</b> Farm {runImport.data.result.activeFarmId} · Season {runImport.data.result.activeSeasonId}</p>
+              ) : null}
+              {runImport.data.result.logs?.length ? (
+                <div>
+                  <h4>Step log</h4>
+                  {runImport.data.result.logs.map((item, index) => (
+                    <p key={`${item.step}:${item.status}:${index}`}>
+                      <b>{item.step}</b> {item.status}
+                      {typeof item.importedRows === "number" ? ` · imported ${item.importedRows}` : ""}
+                      {typeof item.failedRows === "number" ? ` · failed ${item.failedRows}` : ""}
+                      {item.message ? ` · ${item.message}` : ""}
+                    </p>
+                  ))}
+                </div>
               ) : null}
               <div className="record-list__actions">
                 <button type="button" className="secondary-button" disabled={repairVisibility.isPending} onClick={() => repairVisibility.mutate()}>

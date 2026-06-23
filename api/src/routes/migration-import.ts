@@ -58,6 +58,7 @@ const importSchema = payloadSchema.extend({
   allowDatabaseWrite: z.boolean().default(false),
 });
 const repairSchema = z.object({ workspaceId: z.string().uuid() });
+const historyQuerySchema = z.object({ workspaceId: z.string().uuid() });
 
 type AndroidRecord = Record<string, unknown>;
 type AndroidPayload = z.infer<typeof payloadSchema>["payload"];
@@ -86,8 +87,22 @@ type ImportResult = {
   farmImportStats: { created: number; updated: number; skippedDuplicates: number };
   activeFarmId: string;
   activeSeasonId: string;
+  importBatchId: string;
+  startedAt: string;
+  completedAt: string;
+  currentStep: string;
+  failedRows: number;
+  logs: ImportLogEntry[];
   totalExpenses: number;
   totalAdvances: number;
+};
+type ImportLogEntry = {
+  step: string;
+  status: "started" | "completed" | "failed";
+  message?: string;
+  importedRows?: number;
+  failedRows?: number;
+  createdAt: string;
 };
 
 const importCountKeys: Array<{ label: string; key: ImportCountKey }> = [
@@ -398,6 +413,29 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
     return { ...validation, canImport: validation.issues.every((issue) => issue.level !== "error"), dryRunRecommended: true };
   });
 
+  app.get("/v1/admin/migration-import/history", { preHandler: requirePermission("CREATE_WORKSPACE") }, async (request, reply) => {
+    const parsed = historyQuerySchema.safeParse(request.query);
+    if (!parsed.success) return reply.code(400).send({ message: "A workspaceId is required." });
+    if (localDevelopmentMode) return { records: [] };
+    const records = await db.select({
+      id: auditLogs.id,
+      action: auditLogs.action,
+      details: auditLogs.details,
+      createdAt: auditLogs.createdAt,
+    }).from(auditLogs).where(and(
+      eq(auditLogs.workspaceId, parsed.data.workspaceId),
+      sql`${auditLogs.action} LIKE 'admin.migration_import.%'`,
+    )).orderBy(sql`${auditLogs.createdAt} DESC`).limit(80);
+    return {
+      records: records.map((record) => ({
+        id: record.id,
+        action: record.action,
+        details: record.details,
+        createdAt: record.createdAt.toISOString(),
+      })),
+    };
+  });
+
   app.post("/v1/admin/migration-import/import", { preHandler: requirePermission("CREATE_WORKSPACE"), bodyLimit: 50 * 1024 * 1024 }, async (request, reply) => {
     const parsed = importSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ message: "A valid migration import request is required." });
@@ -412,8 +450,31 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
     const [workspace] = await db.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.id, parsed.data.workspaceId)).limit(1);
     if (!workspace) return reply.code(404).send({ message: "Workspace not found." });
 
-    const result = await db.transaction(async (tx) => {
-      const importBatchId = randomUUID();
+    const importBatchId = randomUUID();
+    const startedAt = new Date().toISOString();
+    const logs: ImportLogEntry[] = [];
+    let currentStep = "START IMPORT";
+    const logStep = async (step: string, status: ImportLogEntry["status"], details: Omit<ImportLogEntry, "step" | "status" | "createdAt"> = {}) => {
+      currentStep = step;
+      const entry = { step, status, createdAt: new Date().toISOString(), ...details };
+      logs.push(entry);
+      const message = `[MIGRATION IMPORT ${importBatchId}] ${status.toUpperCase()} ${step}${details.message ? ` - ${details.message}` : ""}`;
+      if (status === "failed") console.error(message);
+      else console.info(message);
+      await db.insert(auditLogs).values({
+        workspaceId: parsed.data.workspaceId,
+        userId,
+        action: `admin.migration_import.${status}`,
+        entityType: "migration_import",
+        details: { importBatchId, ...entry },
+      }).catch((error) => console.error(`[MIGRATION IMPORT ${importBatchId}] failed to persist import log`, error));
+    };
+
+    await logStep("START IMPORT", "started", { message: "Android JSON import started." });
+
+    let result: ImportResult;
+    try {
+      result = await (async (tx: typeof db) => {
       const importYear = inferImportYear(parsed.data.payload);
       const maps = { farms: new Map<string, string>(), seasons: new Map<string, string>(), labour: new Map<string, string>(), accounts: new Map<string, string>(), partners: new Map<string, string>() };
       let insertedOperationalRecords = 0;
@@ -429,6 +490,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         attendance: 0,
       };
 
+      await logStep("CREATE FARM", "started");
       for (const [index, source] of asArray(parsed.data.payload, "farms").entries()) {
         const sourceType = sourceTypeFor("farms");
         const androidId = oldId(source);
@@ -496,6 +558,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         importedCounts.farms += 1;
         farmImportStats.created += 1;
       }
+      await logStep("CREATE FARM", "completed", { importedRows: importedCounts.farms, failedRows: 0 });
       const importedFarmIds = [...maps.farms.values()];
       const [activeImportedFarm] = await tx.select({ id: farms.id }).from(farms).where(and(
         eq(farms.workspaceId, parsed.data.workspaceId),
@@ -508,6 +571,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       const defaultFarmId = activeImportedFarm?.id ?? importedFarmIds[0]!;
       const seasonByFarm = new Map<string, string>();
       const farmBySeason = new Map<string, string>();
+      await logStep("CREATE SEASON", "started");
       for (const source of asArray(parsed.data.payload, "seasons")) {
         const marker = `source_type:${sourceTypeFor("seasons")};old_android_id:${oldId(source)}`;
         const legacyMarker = `old_android_id:${oldId(source)}`;
@@ -571,12 +635,16 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         seasonByFarm.set(farmId, fallbackSeasonId);
         farmBySeason.set(fallbackSeasonId, farmId);
       }
+      await logStep("CREATE SEASON", "completed", { importedRows: importedCounts.seasons, failedRows: 0 });
       const defaultSeasonId = firstMapValue(maps.seasons)!;
       const selectedImportSeasonId = seasonByFarm.get(defaultFarmId) ?? defaultSeasonId;
+      await logStep("ACTIVATE FARM", "started", { message: defaultFarmId });
       await tx.update(userSessions).set({
         activeFarmId: defaultFarmId,
         activeSeasonId: selectedImportSeasonId,
       }).where(eq(userSessions.workspaceId, parsed.data.workspaceId));
+      await logStep("ACTIVATE FARM", "completed", { message: defaultFarmId });
+      await logStep("ACTIVATE SEASON", "completed", { message: selectedImportSeasonId });
 
       const writeRecord = async (entity: string, sourceType: string, source: AndroidRecord, extra: Record<string, unknown> = {}) => {
         const referencedSeasonId = maps.seasons.get(seasonRef(source));
@@ -619,6 +687,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         return { inserted: true, payloadId: payloadId(record.payload) };
       };
 
+      await logStep("IMPORT ACCOUNTS", "started");
       for (const source of asArray(parsed.data.payload, "accounts")) {
         const id = randomUUID();
         const result = await writeRecord("account", sourceTypeFor("accounts"), source, { id, name: text(source, ["name", "accountName"], "Imported Account"), type: text(source, ["type", "accountType"], "cash") });
@@ -630,7 +699,9 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         const result = await writeRecord("account", sourceTypeFor("partners"), source, { id, name: text(source, ["name", "partnerName"], "Imported Partner"), type: "partner" });
         maps.partners.set(oldId(source), result.payloadId ?? id);
       }
+      await logStep("IMPORT ACCOUNTS", "completed", { importedRows: importedCounts.accounts, failedRows: 0 });
       const labourNameMap = new Map<string, string>();
+      await logStep("IMPORT LABOUR", "started");
       for (const source of asArray(parsed.data.payload, "labour")) {
         const id = randomUUID();
         const name = text(source, ["name", "labourName", "workerName", "employeeName"], "Imported Labour");
@@ -640,6 +711,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         labourNameMap.set(name.trim().toLowerCase(), labourId);
         if (result.inserted) importedCounts.labour += 1;
       }
+      await logStep("IMPORT LABOUR", "completed", { importedRows: importedCounts.labour, failedRows: 0 });
       const resolveLabourId = (source: AndroidRecord) => maps.labour.get(labourRef(source))
         ?? labourNameMap.get(text(source, ["labourName", "labour_name", "workerName", "worker_name", "employeeName", "name"]).trim().toLowerCase());
       const defaultAccountId = firstMapValue(maps.accounts);
@@ -649,6 +721,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         const parentId = relation(item, ["expense_id", "expenseId", "voucher_id", "voucherId", "parent_id", "parentId"]);
         expenseItemsByParent.set(parentId, [...(expenseItemsByParent.get(parentId) ?? []), item]);
       }
+      await logStep("IMPORT EXPENSES", "started");
       for (const source of asArray(parsed.data.payload, "expenses")) {
         const items = expenseItemsByParent.get(oldId(source)) ?? [];
         const result = await writeRecord("voucher", sourceTypeFor("expenses"), source, {
@@ -668,6 +741,8 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
           importedCounts.expenseItems += items.length;
         }
       }
+      await logStep("IMPORT EXPENSES", "completed", { importedRows: importedCounts.expenses, failedRows: 0 });
+      await logStep("IMPORT ADVANCES", "started");
       for (const source of asArray(parsed.data.payload, "advances")) {
         const result = await writeRecord("advance", sourceTypeFor("advances"), source, {
           date: dateValue(source, ["date", "advanceDate"]),
@@ -678,9 +753,15 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         });
         if (result.inserted) importedCounts.advances += 1;
       }
+      await logStep("IMPORT ADVANCES", "completed", { importedRows: importedCounts.advances, failedRows: 0 });
+      await logStep("IMPORT ATTENDANCE", "started");
+      let skippedAttendanceRows = 0;
       for (const source of asArray(parsed.data.payload, "attendance")) {
         const labourerId = resolveLabourId(source);
-        if (!labourerId) continue;
+        if (!labourerId) {
+          skippedAttendanceRows += 1;
+          continue;
+        }
         const result = await writeRecord("attendance", sourceTypeFor("attendance"), source, {
           date: dateValue(source, ["date", "attendanceDate", "day"]),
           labourerId,
@@ -688,6 +769,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         });
         if (result.inserted) importedCounts.attendance += 1;
       }
+      await logStep("IMPORT ATTENDANCE", "completed", { importedRows: importedCounts.attendance, failedRows: skippedAttendanceRows });
       const dispatchItemsByParent = new Map<string, AndroidRecord[]>();
       for (const item of asArray(parsed.data.payload, "dispatchItems")) {
         const parentId = relation(item, ["dispatch_id", "dispatchId", "parent_id", "parentId"]);
@@ -717,16 +799,29 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         entityType: "migration_import",
         details: { source: validation.summary.source, exportedAt: validation.summary.exportedAt, insertedOperationalRecords, farmImportStats },
       });
+      const completedAt = new Date().toISOString();
+      await logStep("IMPORT COMPLETE", "completed", { message: `Imported ${insertedOperationalRecords} operational records.`, importedRows: insertedOperationalRecords, failedRows: skippedAttendanceRows });
       return {
         insertedOperationalRecords,
         importCounts: importCountKeys.map(({ label, key }) => ({ label, key, count: importedCounts[key] })),
         farmImportStats,
         activeFarmId: defaultFarmId,
         activeSeasonId: selectedImportSeasonId,
+        importBatchId,
+        startedAt,
+        completedAt,
+        currentStep: "IMPORT COMPLETE",
+        failedRows: skippedAttendanceRows,
+        logs,
         totalExpenses: validation.summary.totalExpenses,
         totalAdvances: validation.summary.totalAdvances,
       } satisfies ImportResult;
-    });
+      })(db);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown import failure.";
+      await logStep(currentStep, "failed", { message, failedRows: 1 });
+      return reply.code(500).send({ message: `${currentStep} failed: ${message}`, issues: validation.issues, summary: validation.summary, logs });
+    }
 
     return { ...validation, imported: true, dryRun: false, message: "Migration imported successfully.", result };
   });
