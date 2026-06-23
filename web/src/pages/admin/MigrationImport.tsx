@@ -2,7 +2,7 @@ import { useMemo, useState, type ChangeEvent } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Database, FileJson, ShieldAlert, UploadCloud } from "lucide-react";
 import { useAuth } from "../../auth/AuthProvider";
-import { fetchAdminWorkspaces, importMigrationData, validateMigrationImport, type MigrationImportIssue, type MigrationImportSummary } from "../../lib/api";
+import { fetchAdminWorkspaces, importMigrationData, repairMigrationImportVisibility, validateMigrationImport, type MigrationImportIssue, type MigrationImportSummary } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 
 function SummaryGrid({ summary }: { summary: MigrationImportSummary }) {
@@ -43,14 +43,43 @@ function BalanceList({ title, rows }: { title: string; rows: Array<{ name: strin
 }
 
 function IssueList({ issues }: { issues: MigrationImportIssue[] }) {
+  const [showDetails, setShowDetails] = useState(false);
   const errors = issues.filter((issue) => issue.level === "error");
   const warnings = issues.filter((issue) => issue.level === "warning");
+  const warningSummaries = [...warnings.reduce((map, issue) => {
+    const current = map.get(issue.message);
+    if (current) {
+      current.count += 1;
+      current.paths.push(issue.path);
+    } else {
+      map.set(issue.message, { count: 1, paths: [issue.path], message: issue.message });
+    }
+    return map;
+  }, new Map<string, { count: number; paths: string[]; message: string }>()).values()];
+  const visibleErrors = showDetails ? errors : errors.slice(0, 12);
+  const visibleWarnings = showDetails ? warnings : [];
   return (
     <section className="migration-issues">
       <h3>Validation issues</h3>
       {!issues.length ? <p className="positive">No validation errors or warnings.</p> : null}
-      {errors.length ? <><h4>Errors</h4>{errors.map((issue, index) => <p className="negative" key={`error:${index}`}><b>{issue.path}</b> {issue.message}</p>)}</> : null}
-      {warnings.length ? <><h4>Warnings</h4>{warnings.map((issue, index) => <p key={`warning:${index}`}><b>{issue.path}</b> {issue.message}</p>)}</> : null}
+      {errors.length ? <><h4>Critical issues</h4>{visibleErrors.map((issue, index) => <p className="negative" key={`error:${index}`}><b>{issue.path}</b> {issue.message}</p>)}</> : null}
+      {errors.length > visibleErrors.length ? <p>{errors.length - visibleErrors.length} more errors hidden. Use Show details to inspect all rows.</p> : null}
+      {warningSummaries.length ? (
+        <>
+          <h4>Warnings summary</h4>
+          {warningSummaries.slice(0, showDetails ? warningSummaries.length : 12).map((item, index) => (
+            <p key={`warning-summary:${index}`}>
+              <b>{item.count > 1 ? `${item.count} warnings` : item.paths[0]}</b> {item.message}
+            </p>
+          ))}
+        </>
+      ) : null}
+      {visibleWarnings.length ? <><h4>Warning details</h4>{visibleWarnings.map((issue, index) => <p key={`warning:${index}`}><b>{issue.path}</b> {issue.message}</p>)}</> : null}
+      {issues.length > 0 ? (
+        <button type="button" className="secondary-button" onClick={() => setShowDetails((value) => !value)}>
+          {showDetails ? "Hide details" : "Show details"}
+        </button>
+      ) : null}
     </section>
   );
 }
@@ -75,6 +104,9 @@ export function MigrationImport() {
   const runImport = useMutation({
     mutationFn: () => importMigrationData(token!, { workspaceId, payload, dryRun: false, allowDatabaseWrite: true }),
   });
+  const repairVisibility = useMutation({
+    mutationFn: () => repairMigrationImportVisibility(token!, { workspaceId }),
+  });
 
   const readFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -82,6 +114,7 @@ export function MigrationImport() {
     setPayload(null);
     validate.reset();
     runImport.reset();
+    repairVisibility.reset();
     if (!file) return;
     setFileName(file.name);
     if (!file.name.toLowerCase().endsWith(".json")) {
@@ -124,7 +157,10 @@ export function MigrationImport() {
         </div>
         <label>
           <span>Target workspace</span>
-          <select value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)}>
+          <select value={workspaceId} onChange={(event) => {
+            setWorkspaceId(event.target.value);
+            repairVisibility.reset();
+          }}>
             <option value="">Select workspace</option>
             {workspaceOptions.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name} ({workspace.status})</option>)}
           </select>
@@ -139,9 +175,14 @@ export function MigrationImport() {
         <div className="record-list__actions">
           <button type="button" disabled={!canValidate} onClick={() => validate.mutate()}><UploadCloud size={16} />Validate Import</button>
           {validate.data?.canImport ? <button type="button" disabled={!canImport} onClick={() => runImport.mutate()}><Database size={16} />Import Data</button> : null}
+          <button type="button" className="secondary-button" disabled={!token || !workspaceId || repairVisibility.isPending} onClick={() => repairVisibility.mutate()}>
+            Repair previous import visibility
+          </button>
         </div>
         {validate.error ? <p className="worker-action-error">{validate.error instanceof Error ? validate.error.message : "Validation failed."}</p> : null}
         {runImport.error ? <p className="worker-action-error">{runImport.error instanceof Error ? runImport.error.message : "Import failed."}</p> : null}
+        {repairVisibility.error ? <p className="worker-action-error">{repairVisibility.error instanceof Error ? repairVisibility.error.message : "Visibility repair failed."}</p> : null}
+        {repairVisibility.data ? <p className="positive">{repairVisibility.data.message} Repaired records: {repairVisibility.data.repairedRecords}.</p> : null}
       </section>
 
       {validation ? (
@@ -172,7 +213,16 @@ export function MigrationImport() {
               <p><b>Total expenses</b> {formatMoney(runImport.data.result.totalExpenses)}</p>
               <p><b>Total advances</b> {formatMoney(runImport.data.result.totalAdvances)}</p>
               <p><b>Inserted operational records</b> {runImport.data.result.insertedOperationalRecords}</p>
+              {runImport.data.result.activeFarmId && runImport.data.result.activeSeasonId ? (
+                <p><b>Active import context</b> Farm {runImport.data.result.activeFarmId} · Season {runImport.data.result.activeSeasonId}</p>
+              ) : null}
               <div className="record-list__actions">
+                <button type="button" className="secondary-button" disabled={repairVisibility.isPending} onClick={() => repairVisibility.mutate()}>
+                  Set imported farm active
+                </button>
+                <button type="button" className="secondary-button" disabled={repairVisibility.isPending} onClick={() => repairVisibility.mutate()}>
+                  Set imported season active
+                </button>
                 <a className="secondary-button" href="/workspace/farms">View Imported Data</a>
                 <a className="secondary-button" href="/workspace/farms">View farms</a>
                 <a className="secondary-button" href="/workspace/seasons">View season</a>

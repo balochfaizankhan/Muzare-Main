@@ -217,9 +217,19 @@ export type MigrationImportValidation = {
     insertedOperationalRecords: number;
     farmImportStats?: { created: number; updated: number; skippedDuplicates: number };
     importCounts: Array<{ label: string; key: string; count: number }>;
+    activeFarmId?: string;
+    activeSeasonId?: string;
     totalExpenses: number;
     totalAdvances: number;
   };
+};
+export type MigrationVisibilityRepairResult = {
+  repairedRecords: number;
+  activeFarmId: string;
+  activeSeasonId: string;
+  activeFarmName: string;
+  activeSeasonName: string;
+  message: string;
 };
 export type OperationalEntity =
   | "labourer"
@@ -530,6 +540,8 @@ export const validateMigrationImport = (token: string, input: { workspaceId: str
   apiRequest<MigrationImportValidation>("/v1/admin/migration-import/validate", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 60_000, debugLabel: "migration-import-validate" });
 export const importMigrationData = (token: string, input: { workspaceId: string; payload: unknown; dryRun: boolean; allowDatabaseWrite: boolean }) =>
   apiRequest<MigrationImportValidation>("/v1/admin/migration-import/import", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 120_000, debugLabel: "migration-import-import" });
+export const repairMigrationImportVisibility = (token: string, input: { workspaceId: string }) =>
+  apiRequest<MigrationVisibilityRepairResult>("/v1/admin/migration-import/repair-visibility", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 60_000, debugLabel: "migration-import-repair-visibility" });
 export const fetchApprovals = (token: string) =>
   apiRequest<{ requests: PendingApproval[] }>("/v1/admin/approvals", {}, token);
 export const approveSignup = (token: string, userId: string) =>

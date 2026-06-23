@@ -57,6 +57,7 @@ const importSchema = payloadSchema.extend({
   dryRun: z.boolean().default(true),
   allowDatabaseWrite: z.boolean().default(false),
 });
+const repairSchema = z.object({ workspaceId: z.string().uuid() });
 
 type AndroidRecord = Record<string, unknown>;
 type AndroidPayload = z.infer<typeof payloadSchema>["payload"];
@@ -83,6 +84,8 @@ type ImportResult = {
   insertedOperationalRecords: number;
   importCounts: Array<{ label: string; key: ImportCountKey; count: number }>;
   farmImportStats: { created: number; updated: number; skippedDuplicates: number };
+  activeFarmId: string;
+  activeSeasonId: string;
   totalExpenses: number;
   totalAdvances: number;
 };
@@ -185,6 +188,32 @@ const importedActive = (record: AndroidRecord) => {
   return true;
 };
 
+const inferImportYear = (payload: AndroidPayload) => {
+  const candidates = [
+    ...asArray(payload, "seasons").map((record) => numberValue(record, ["year"], NaN)),
+    ...asArray(payload, "expenses").map((record) => Number(dateValue(record, ["date", "expenseDate"]).slice(0, 4))),
+    ...asArray(payload, "attendance").map((record) => Number(dateValue(record, ["date", "attendanceDate", "day"]).slice(0, 4))),
+    ...asArray(payload, "advances").map((record) => Number(dateValue(record, ["date", "advanceDate"]).slice(0, 4))),
+  ].filter((year) => Number.isInteger(year) && year >= 2000 && year <= 2100);
+  return candidates[0] ?? new Date().getFullYear();
+};
+
+const scopedWarningLabel = (key: typeof importedEntityArrays[number], count: number) => {
+  const labels: Partial<Record<typeof importedEntityArrays[number], [string, string]>> = {
+    labour: ["labour record", "labour records"],
+    accounts: ["account record", "account records"],
+    expenses: ["expense", "expenses"],
+    advances: ["advance", "advances"],
+    dispatches: ["dispatch", "dispatches"],
+    sales: ["sale", "sales"],
+    settlements: ["settlement", "settlements"],
+    partnerTransfers: ["partner transfer", "partner transfers"],
+    attendance: ["attendance record", "attendance records"],
+  };
+  const [singular, plural] = labels[key] ?? [key, key];
+  return `${count} ${count === 1 ? singular : plural}`;
+};
+
 function validatePayload(payload: AndroidPayload): { issues: ImportIssue[]; summary: ImportSummary } {
   const issues: ImportIssue[] = [];
   const counts = Object.fromEntries(requiredArrays.map((key) => [key, asArray(payload, key).length])) as ImportSummary["counts"];
@@ -225,14 +254,30 @@ function validatePayload(payload: AndroidPayload): { issues: ImportIssue[]; summ
 
   const seasonScopedKeys: Array<typeof importedEntityArrays[number]> = ["labour", "accounts", "expenses", "advances", "dispatches", "sales", "settlements", "partnerTransfers", "attendance"];
   for (const key of seasonScopedKeys) {
-    asArray(payload, key).forEach((record, index) => {
+    let missingFarmCount = 0;
+    let missingSeasonCount = 0;
+    const unknownFarmRefs = new Map<string, number>();
+    const unknownSeasonRefs = new Map<string, number>();
+    asArray(payload, key).forEach((record) => {
       const farmReference = farmRef(record);
       const seasonReference = seasonRef(record);
-      if (!farmReference) issues.push({ level: "warning", path: `${key}[${index}].farm_id`, message: "No farm reference found. This row will use the first imported active farm." });
-      if (!seasonReference) issues.push({ level: "warning", path: `${key}[${index}].season_id`, message: "No season reference found. This row will use the imported active season." });
-      if (farmReference && !farmsByOldId.has(farmReference)) issues.push({ level: "warning", path: `${key}[${index}].farm_id`, message: `Unknown farm reference '${farmReference}'. This row will use the first imported active farm.` });
-      if (seasonReference && !seasonsByOldId.has(seasonReference)) issues.push({ level: "warning", path: `${key}[${index}].season_id`, message: `Unknown season reference '${seasonReference}'. This row will use the imported active season.` });
+      if (!farmReference) missingFarmCount += 1;
+      if (!seasonReference) missingSeasonCount += 1;
+      if (farmReference && !farmsByOldId.has(farmReference)) unknownFarmRefs.set(farmReference, (unknownFarmRefs.get(farmReference) ?? 0) + 1);
+      if (seasonReference && !seasonsByOldId.has(seasonReference)) unknownSeasonRefs.set(seasonReference, (unknownSeasonRefs.get(seasonReference) ?? 0) + 1);
     });
+    if (missingFarmCount > 0) {
+      issues.push({ level: "warning", path: `${key}.*.farm_id`, message: `${scopedWarningLabel(key, missingFarmCount)} had no farm reference and will be assigned to the imported active farm.` });
+    }
+    if (missingSeasonCount > 0) {
+      issues.push({ level: "warning", path: `${key}.*.season_id`, message: `${scopedWarningLabel(key, missingSeasonCount)} had no season reference and will be assigned to the imported active season.` });
+    }
+    for (const [reference, count] of unknownFarmRefs) {
+      issues.push({ level: "warning", path: `${key}.*.farm_id`, message: `${scopedWarningLabel(key, count)} referenced unknown farm '${reference}' and will be assigned to the imported active farm.` });
+    }
+    for (const [reference, count] of unknownSeasonRefs) {
+      issues.push({ level: "warning", path: `${key}.*.season_id`, message: `${scopedWarningLabel(key, count)} referenced unknown season '${reference}' and will be assigned to the imported active season.` });
+    }
   }
 
   asArray(payload, "expenseItems").forEach((record, index) => {
@@ -369,6 +414,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
 
     const result = await db.transaction(async (tx) => {
       const importBatchId = randomUUID();
+      const importYear = inferImportYear(parsed.data.payload);
       const maps = { farms: new Map<string, string>(), seasons: new Map<string, string>(), labour: new Map<string, string>(), accounts: new Map<string, string>(), partners: new Map<string, string>() };
       let insertedOperationalRecords = 0;
       const farmImportStats = { created: 0, updated: 0, skippedDuplicates: 0 };
@@ -461,6 +507,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       }
       const defaultFarmId = activeImportedFarm?.id ?? importedFarmIds[0]!;
       const seasonByFarm = new Map<string, string>();
+      const farmBySeason = new Map<string, string>();
       for (const source of asArray(parsed.data.payload, "seasons")) {
         const marker = `source_type:${sourceTypeFor("seasons")};old_android_id:${oldId(source)}`;
         const legacyMarker = `old_android_id:${oldId(source)}`;
@@ -472,15 +519,17 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         const id = existing?.id ?? randomUUID();
         maps.seasons.set(oldId(source), id);
         seasonByFarm.set(farmId, id);
+        farmBySeason.set(id, farmId);
         if (!existing) {
+          const seasonYear = numberValue(source, ["year"], importYear);
           await tx.insert(seasons).values({
             id,
             workspaceId: parsed.data.workspaceId,
             farmId,
-            name: text(source, ["name", "seasonName"], `Season ${numberValue(source, ["year"], new Date().getFullYear())}`),
+            name: text(source, ["name", "seasonName"], `Imported Season ${seasonYear}`),
             cropType: text(source, ["cropType", "crop_type"]) || null,
-            year: numberValue(source, ["year"], new Date().getFullYear()),
-            startsOn: dateValue(source, ["startsOn", "starts_on", "startDate"], `${new Date().getFullYear()}-01-01`),
+            year: seasonYear,
+            startsOn: dateValue(source, ["startsOn", "starts_on", "startDate"], `${seasonYear}-01-01`),
             endsOn: text(source, ["endsOn", "ends_on", "endDate"]) || null,
             status: "active",
             notes: marker,
@@ -501,7 +550,6 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
           eq(seasons.notes, marker),
         )).limit(1);
         const fallbackSeasonId = existingDefaultSeason?.id ?? randomUUID();
-        const fallbackYear = new Date().getFullYear();
         if (existingDefaultSeason) {
           await tx.update(seasons).set({ status: "active", active: true, updatedAt: new Date() }).where(eq(seasons.id, existingDefaultSeason.id));
         } else {
@@ -509,9 +557,9 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
             id: fallbackSeasonId,
             workspaceId: parsed.data.workspaceId,
             farmId,
-            name: `Season ${fallbackYear}`,
-            year: fallbackYear,
-            startsOn: `${fallbackYear}-01-01`,
+            name: `Imported Season ${importYear}`,
+            year: importYear,
+            startsOn: `${importYear}-01-01`,
             status: "active",
             notes: marker,
             active: true,
@@ -521,19 +569,19 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         }
         maps.seasons.set(`default:${farmId}`, fallbackSeasonId);
         seasonByFarm.set(farmId, fallbackSeasonId);
+        farmBySeason.set(fallbackSeasonId, farmId);
       }
       const defaultSeasonId = firstMapValue(maps.seasons)!;
+      const selectedImportSeasonId = seasonByFarm.get(defaultFarmId) ?? defaultSeasonId;
       await tx.update(userSessions).set({
         activeFarmId: defaultFarmId,
-        activeSeasonId: seasonByFarm.get(defaultFarmId) ?? defaultSeasonId,
-      }).where(and(
-        eq(userSessions.workspaceId, parsed.data.workspaceId),
-        sql`${userSessions.activeFarmId} IS NULL`,
-      ));
+        activeSeasonId: selectedImportSeasonId,
+      }).where(eq(userSessions.workspaceId, parsed.data.workspaceId));
 
       const writeRecord = async (entity: string, sourceType: string, source: AndroidRecord, extra: Record<string, unknown> = {}) => {
-        const targetFarmId = scopedFarmId(source, maps, defaultFarmId);
-        const targetSeasonId = maps.seasons.get(seasonRef(source)) ?? seasonByFarm.get(targetFarmId) ?? defaultSeasonId;
+        const referencedSeasonId = maps.seasons.get(seasonRef(source));
+        const targetFarmId = referencedSeasonId ? farmBySeason.get(referencedSeasonId) ?? scopedFarmId(source, maps, defaultFarmId) : scopedFarmId(source, maps, defaultFarmId);
+        const targetSeasonId = referencedSeasonId ?? seasonByFarm.get(targetFarmId) ?? defaultSeasonId;
         const record = operationalRecord(entity, source, sourceType, maps, { farmId: targetFarmId, seasonId: targetSeasonId }, extra);
         const recordPayload = record.payload as Record<string, unknown>;
         const androidId = oldId(source) || [
@@ -673,11 +721,133 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         insertedOperationalRecords,
         importCounts: importCountKeys.map(({ label, key }) => ({ label, key, count: importedCounts[key] })),
         farmImportStats,
+        activeFarmId: defaultFarmId,
+        activeSeasonId: selectedImportSeasonId,
         totalExpenses: validation.summary.totalExpenses,
         totalAdvances: validation.summary.totalAdvances,
       } satisfies ImportResult;
     });
 
     return { ...validation, imported: true, dryRun: false, message: "Migration imported successfully.", result };
+  });
+
+  app.post("/v1/admin/migration-import/repair-visibility", { preHandler: requirePermission("CREATE_WORKSPACE") }, async (request, reply) => {
+    const parsed = repairSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ message: "A workspaceId is required." });
+    if (localDevelopmentMode) return { repairedRecords: 0, message: "Local memory mode cannot repair imported visibility. Configure a dev database first." };
+
+    const userId = request.appUser?.id;
+    if (!userId) return reply.code(403).send({ message: "Admin user is required." });
+    const [workspace] = await db.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.id, parsed.data.workspaceId)).limit(1);
+    if (!workspace) return reply.code(404).send({ message: "Workspace not found." });
+
+    const result = await db.transaction(async (tx) => {
+      const [importedFarm] = await tx.select({ id: farms.id, name: farms.name }).from(farms).where(and(
+        eq(farms.workspaceId, parsed.data.workspaceId),
+        eq(farms.sourceType, "farm"),
+      )).limit(1);
+      if (!importedFarm) return null;
+
+      await tx.update(farms).set({ active: true, updatedAt: new Date() }).where(eq(farms.id, importedFarm.id));
+
+      const [existingSeason] = await tx.select({ id: seasons.id, name: seasons.name }).from(seasons).where(and(
+        eq(seasons.workspaceId, parsed.data.workspaceId),
+        eq(seasons.farmId, importedFarm.id),
+        eq(seasons.status, "active"),
+      )).limit(1);
+      const importYear = new Date().getFullYear();
+      let activeSeason = existingSeason;
+      if (!activeSeason) {
+        const fallbackSeasonId = randomUUID();
+        activeSeason = { id: fallbackSeasonId, name: `Imported Season ${importYear}` };
+        await tx.insert(seasons).values({
+          id: fallbackSeasonId,
+          workspaceId: parsed.data.workspaceId,
+          farmId: importedFarm.id,
+          name: activeSeason.name,
+          year: importYear,
+          startsOn: `${importYear}-01-01`,
+          status: "active",
+          notes: `source_type:season;old_android_id:repair:${importedFarm.id}`,
+          active: true,
+          createdBy: userId,
+        });
+      }
+
+      const brokenCountResult = await tx.execute(sql`
+        SELECT count(*)::int AS count
+        FROM operational_records r
+        WHERE r.workspace_id = ${parsed.data.workspaceId}
+          AND r.payload ? 'source_type'
+          AND (
+            r.farm_id IS NULL
+            OR r.season_id IS NULL
+            OR NOT EXISTS (
+              SELECT 1 FROM farms f
+              WHERE f.id = r.farm_id
+                AND f.workspace_id = r.workspace_id
+                AND f.deleted_at IS NULL
+            )
+            OR NOT EXISTS (
+              SELECT 1 FROM seasons s
+              WHERE s.id = r.season_id
+                AND s.workspace_id = r.workspace_id
+                AND s.farm_id = r.farm_id
+                AND s.status = 'active'
+            )
+          )
+      `);
+      const repairedRecords = Number((brokenCountResult.rows[0] as Record<string, unknown> | undefined)?.count ?? 0);
+
+      await tx.execute(sql`
+        UPDATE operational_records r
+        SET farm_id = ${importedFarm.id},
+            season_id = ${activeSeason.id},
+            updated_at = now()
+        WHERE r.workspace_id = ${parsed.data.workspaceId}
+          AND r.payload ? 'source_type'
+          AND (
+            r.farm_id IS NULL
+            OR r.season_id IS NULL
+            OR NOT EXISTS (
+              SELECT 1 FROM farms f
+              WHERE f.id = r.farm_id
+                AND f.workspace_id = r.workspace_id
+                AND f.deleted_at IS NULL
+            )
+            OR NOT EXISTS (
+              SELECT 1 FROM seasons s
+              WHERE s.id = r.season_id
+                AND s.workspace_id = r.workspace_id
+                AND s.farm_id = r.farm_id
+                AND s.status = 'active'
+            )
+          )
+      `);
+
+      await tx.update(userSessions).set({
+        activeFarmId: importedFarm.id,
+        activeSeasonId: activeSeason.id,
+      }).where(eq(userSessions.workspaceId, parsed.data.workspaceId));
+
+      await tx.insert(auditLogs).values({
+        workspaceId: parsed.data.workspaceId,
+        userId,
+        action: "admin.migration_import.visibility_repaired",
+        entityType: "migration_import",
+        details: { farmId: importedFarm.id, seasonId: activeSeason.id, repairedRecords },
+      });
+
+      return {
+        repairedRecords,
+        activeFarmId: importedFarm.id,
+        activeSeasonId: activeSeason.id,
+        activeFarmName: importedFarm.name,
+        activeSeasonName: activeSeason.name,
+      };
+    });
+
+    if (!result) return reply.code(404).send({ message: "No imported farm was found for this workspace." });
+    return { ...result, message: "Imported farm and season are active. Imported records with missing or invalid season links were repaired." };
   });
 }
