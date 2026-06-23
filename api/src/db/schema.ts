@@ -421,11 +421,30 @@ export const auditLogs = pgTable("audit_logs", {
   workspaceId: uuid("workspace_id").references(() => workspaces.id),
   userId: uuid("user_id").references(() => users.id),
   farmId: uuid("farm_id").references(() => farms.id),
+  actorUserId: uuid("actor_user_id").references(() => users.id),
   action: text("action").notNull(),
   entityType: text("entity_type").notNull(),
   entityId: uuid("entity_id"),
   details: jsonb("details"),
+  beforeJson: jsonb("before_json").$type<Record<string, unknown> | null>(),
+  afterJson: jsonb("after_json").$type<Record<string, unknown> | null>(),
+  notes: text("notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const farmDeletionRequests = pgTable("farm_deletion_requests", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+  farmId: uuid("farm_id").references(() => farms.id).notNull(),
+  requestedBy: uuid("requested_by").references(() => users.id).notNull(),
+  reason: text("reason"),
+  recordCountsJson: jsonb("record_counts_json").$type<Record<string, number>>().default({}).notNull(),
+  status: text("status").default("pending").notNull(),
+  reviewedBy: uuid("reviewed_by").references(() => users.id),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  reviewNotes: text("review_notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const workspaceApprovalConfigurations = pgTable(

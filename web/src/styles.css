@@ -3243,17 +3243,26 @@ button {
   grid-template-columns: 28px minmax(0, 1fr) repeat(4, auto);
 }
 
-.receipt-crop-modal {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 22px;
-  box-shadow: 0 24px 70px rgba(15, 23, 42, .24);
-  display: grid;
-  gap: 14px;
-  max-height: 92vh;
-  max-width: min(720px, calc(100vw - 24px));
+.receipt-scanner-backdrop {
+  align-items: center;
+  background: rgba(7, 16, 24, .78);
+  display: flex;
+  justify-content: center;
   overflow: hidden;
-  padding: 16px;
+}
+
+.receipt-crop-modal {
+  background: #0d1720;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 22px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .34);
+  color: #fff;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: min(92dvh, 860px);
+  max-width: min(760px, calc(100vw - 24px));
+  overflow: hidden;
+  padding: 0;
   width: 100%;
 }
 
@@ -3263,6 +3272,8 @@ button {
   display: flex;
   gap: 10px;
   justify-content: space-between;
+  padding: 12px 14px;
+  z-index: 2;
 }
 
 .receipt-crop-modal h2,
@@ -3271,45 +3282,49 @@ button {
 }
 
 .receipt-crop-modal h2 {
-  color: var(--text-primary);
+  color: #fff;
   font-size: 1.05rem;
 }
 
 .receipt-crop-modal p {
-  color: var(--text-secondary);
+  color: rgba(255, 255, 255, .72);
   font-size: .84rem;
 }
 
 .receipt-crop-modal header button,
 .receipt-crop-modal footer button {
   align-items: center;
-  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, .1);
+  border: 1px solid rgba(255, 255, 255, .16);
   border-radius: 999px;
+  color: #fff;
   cursor: pointer;
   display: inline-flex;
   font-weight: 750;
   gap: 6px;
-  min-height: 40px;
-  padding: 8px 12px;
+  min-height: 44px;
+  padding: 9px 13px;
 }
 
 .receipt-crop-modal footer button:last-child {
-  background: var(--brand-primary);
-  border-color: var(--brand-primary);
+  background: #2f8f3a;
+  border-color: #2f8f3a;
   color: #fff;
 }
 
+.receipt-crop-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
 .receipt-crop-stage {
-  background:
-    linear-gradient(45deg, rgba(15, 23, 42, .06) 25%, transparent 25%),
-    linear-gradient(-45deg, rgba(15, 23, 42, .06) 25%, transparent 25%),
-    #eef4ed;
-  background-size: 22px 22px;
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  min-height: 320px;
+  background: radial-gradient(circle at 50% 25%, rgba(255,255,255,.08), transparent 42%), #071018;
+  border-block: 1px solid rgba(255, 255, 255, .1);
+  min-height: 0;
   overflow: hidden;
   position: relative;
+  touch-action: none;
 }
 
 .receipt-crop-stage img {
@@ -3323,47 +3338,31 @@ button {
 }
 
 .receipt-crop-overlay {
-  border: 2px solid var(--brand-primary);
+  border: 2px solid #4ade80;
   border-radius: 10px;
-  box-shadow: 0 0 0 999px rgba(15, 23, 42, .34);
+  box-shadow: 0 0 0 999px rgba(0, 0, 0, .48), 0 0 26px rgba(74, 222, 128, .2);
   pointer-events: none;
   position: absolute;
 }
 
-.receipt-crop-overlay span {
+.receipt-crop-overlay button {
   background: #fff;
-  border: 2px solid var(--brand-primary);
+  border: 3px solid #22c55e;
   border-radius: 999px;
-  height: 18px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, .3);
+  cursor: grab;
+  height: 34px;
+  padding: 0;
+  pointer-events: auto;
   position: absolute;
-  width: 18px;
+  touch-action: none;
+  width: 34px;
 }
 
-.receipt-crop-overlay span:nth-child(1) { left: -10px; top: -10px; }
-.receipt-crop-overlay span:nth-child(2) { right: -10px; top: -10px; }
-.receipt-crop-overlay span:nth-child(3) { bottom: -10px; left: -10px; }
-.receipt-crop-overlay span:nth-child(4) { bottom: -10px; right: -10px; }
-
-.receipt-crop-controls {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.receipt-crop-controls label {
-  background: var(--surface-soft);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  display: grid;
-  gap: 5px;
-  padding: 8px;
-}
-
-.receipt-crop-controls span {
-  color: var(--text-secondary);
-  font-size: .76rem;
-  font-weight: 750;
-}
+.receipt-crop-overlay button:nth-child(1) { left: -18px; top: -18px; }
+.receipt-crop-overlay button:nth-child(2) { right: -18px; top: -18px; }
+.receipt-crop-overlay button:nth-child(3) { bottom: -18px; left: -18px; }
+.receipt-crop-overlay button:nth-child(4) { bottom: -18px; right: -18px; }
 
 .receipt-ocr-result {
   background: #fff;
@@ -3387,25 +3386,35 @@ button {
   }
 
   .receipt-crop-modal {
-    border-radius: 18px 18px 0 0;
-    bottom: 0;
-    max-height: 96vh;
+    border: 0;
+    border-radius: 0;
+    height: 100dvh;
+    max-height: 100dvh;
     max-width: 100vw;
-    position: fixed;
+    width: 100vw;
   }
 
-  .receipt-crop-stage {
-    min-height: 260px;
-  }
-
-  .receipt-crop-controls {
-    grid-template-columns: 1fr;
+  .receipt-crop-modal header {
+    padding-top: max(12px, env(safe-area-inset-top));
   }
 
   .receipt-crop-modal footer {
     align-items: stretch;
     display: grid;
     grid-template-columns: 1fr 1fr;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+
+  .receipt-crop-modal header button,
+  .receipt-crop-modal footer button {
+    font-size: .8rem;
+    min-height: 46px;
+    padding: 8px 10px;
+  }
+
+  .receipt-crop-toolbar button:not(:last-child) {
+    font-size: 0;
+    min-width: 44px;
   }
 }
 

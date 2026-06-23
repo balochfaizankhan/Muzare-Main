@@ -1,4 +1,4 @@
-import { Activity, AlertCircle, Building2, CheckCircle2, Clock3, ShieldAlert, UserRoundPlus, Users } from "lucide-react";
+import { Activity, AlertCircle, Building2, CheckCircle2, Clock3, LandPlot, ShieldAlert, UserRoundPlus, Users } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -10,6 +10,7 @@ import i18n from "../../i18n";
 const actions = [
   ["/admin/approvals", "adminOverview.actions.pendingApprovals", UserRoundPlus],
   ["/admin/workspaces", "adminOverview.actions.reviewWorkspaces", Building2],
+  ["/admin/farms", "adminOverview.actions.reviewFarms", LandPlot],
   ["/admin/users", "adminOverview.actions.reviewUsers", Users],
   ["/admin/audit-logs", "adminOverview.actions.auditLogs", Activity],
 ] as const;
@@ -31,6 +32,8 @@ export function AdminDashboard() {
     [t("adminOverview.metrics.pendingWorkspaces"), data?.pendingWorkspaceRequests ?? 0, Clock3],
     [t("adminOverview.metrics.activeWorkspaces"), data?.approvedWorkspaces ?? 0, CheckCircle2],
     [t("adminOverview.metrics.suspendedWorkspaces"), data?.suspendedWorkspaces ?? 0, ShieldAlert],
+    [t("adminOverview.metrics.totalFarms"), data?.totalFarms ?? 0, LandPlot],
+    [t("adminOverview.metrics.pendingFarmDeletionRequests"), data?.pendingFarmDeletionRequests ?? 0, ShieldAlert],
   ] as const;
 
   return <main className="shell-page">

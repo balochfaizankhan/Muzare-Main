@@ -16,6 +16,8 @@ export async function adminDashboardRoutes(app: FastifyInstance): Promise<void> 
         rejectedWorkspaces: 0,
         totalUsers: 4,
         totalActiveUsers: 3,
+        totalFarms: 0,
+        pendingFarmDeletionRequests: 0,
         subscriptionRevenue: 0,
         expiringSubscriptions: 0,
         systemHealth: "Healthy",
@@ -35,6 +37,8 @@ export async function adminDashboardRoutes(app: FastifyInstance): Promise<void> 
         (SELECT count(*)::int FROM workspaces WHERE status = 'rejected') AS rejected_workspaces,
         (SELECT count(*)::int FROM users) AS total_users,
         (SELECT count(*)::int FROM users WHERE active = true AND status = 'approved') AS total_active_users,
+        (SELECT count(*)::int FROM farms) AS total_farms,
+        (SELECT count(*)::int FROM farm_deletion_requests WHERE status = 'pending') AS pending_farm_deletion_requests,
         (SELECT COALESCE(sum(amount), 0)::numeric FROM billing_invoices WHERE status = 'paid') AS subscription_revenue,
         (SELECT count(*)::int FROM workspace_subscriptions
           WHERE status IN ('trial', 'active') AND expires_at <= now() + interval '30 days') AS expiring_subscriptions
@@ -77,6 +81,7 @@ export async function adminDashboardRoutes(app: FastifyInstance): Promise<void> 
       suspendedWorkspaces: Number(row.suspended_workspaces), pendingWorkspaceRequests: Number(row.pending_workspace_requests),
       rejectedWorkspaces: Number(row.rejected_workspaces),
       totalUsers: Number(row.total_users), totalActiveUsers: Number(row.total_active_users),
+      totalFarms: Number(row.total_farms), pendingFarmDeletionRequests: Number(row.pending_farm_deletion_requests),
       subscriptionRevenue: Number(row.subscription_revenue), expiringSubscriptions: Number(row.expiring_subscriptions),
       systemHealth: "Healthy",
       recentWorkspaces,

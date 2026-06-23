@@ -16,6 +16,7 @@ import { AdminDashboard } from "./pages/admin/AdminDashboard";
 import { AdminSection } from "./pages/admin/AdminSection";
 import { AuditLogs } from "./pages/admin/AuditLogs";
 import { Billing } from "./pages/admin/Billing";
+import { AdminFarms } from "./pages/admin/Farms";
 import { Settings } from "./pages/admin/Settings";
 import { Users } from "./pages/admin/Users";
 import { Workspaces } from "./pages/admin/Workspaces";
@@ -86,6 +87,7 @@ export default function App() {
     <Route path="/admin" element={<RequirePlatform><AdminLayout /></RequirePlatform>}>
       <Route path="dashboard" element={<AdminDashboard />} />
       <Route path="workspaces" element={<Workspaces />} />
+      <Route path="farms" element={<AdminFarms />} />
       <Route path="suspended" element={<Workspaces defaultStatusFilter="suspended" />} />
       <Route path="users" element={<Users />} />
       <Route path="subscriptions" element={<AdminSection title={t("layout.subscriptions")} description={t("adminSections.subscriptionsDescription")} emptyDescription={t("adminSections.subscriptionsDescription")} />} />

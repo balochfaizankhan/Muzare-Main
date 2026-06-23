@@ -71,7 +71,7 @@ export type BootstrapData = {
 
 export type Farm = {
   id: string; workspaceId: string; name: string; location: string | null; owner: string | null; remarks: string | null;
-  contactName: string | null; contactEmail: string | null; contactPhone: string | null; active: boolean;
+  contactName: string | null; contactEmail: string | null; contactPhone: string | null; active: boolean; deletionRequestStatus?: string | null;
 };
 
 export type FarmInput = {
@@ -137,6 +137,7 @@ export type SeasonInput = {
 export type AdminDashboardData = {
   totalWorkspaces: number; activeWorkspaces: number; suspendedWorkspaces: number; pendingWorkspaceRequests: number;
   approvedWorkspaces: number; rejectedWorkspaces: number;
+  totalFarms?: number; pendingFarmDeletionRequests?: number;
   totalUsers: number; totalActiveUsers: number; subscriptionRevenue: number; expiringSubscriptions: number; systemHealth: string;
   recentWorkspaces: AdminOverviewWorkspace[]; pendingWorkspaces: AdminOverviewWorkspace[]; suspendedWorkspacesList: AdminOverviewWorkspace[];
   recentActivity: AdminRecentActivity[];
@@ -165,7 +166,18 @@ export type AdminWorkspaceHistory = {
 export type AdminWorkspaceDetail = {
   id: string; name: string; slug: string; contactEmail: string; contactPhone: string | null;
   status: "pending" | "approved" | "rejected" | "suspended"; createdAt: string; approvedAt: string | null; updatedAt: string;
-  members: AdminWorkspaceMember[]; history: AdminWorkspaceHistory[];
+  members: AdminWorkspaceMember[]; history: AdminWorkspaceHistory[]; farms?: AdminFarmSummary[]; deletionRequests?: AdminFarmDeletionRequest[];
+};
+export type AdminFarmSummary = {
+  id: string; workspaceId: string; workspaceName: string; name: string; location: string | null; owner: string | null; ownerEmail: string | null;
+  active: boolean; status: "active" | "archived" | "delete_pending"; createdAt: string; totalRecords: number;
+  counts: { labour: number; attendance: number; advances: number; expenses: number; sales: number; dispatch: number };
+  deletionRequestStatus: string | null;
+};
+export type AdminFarmDeletionRequest = {
+  id: string; workspaceId: string; farmId: string; workspaceName: string; farmName: string; requestedByEmail: string;
+  reason: string | null; recordCounts: Record<string, number>; status: "pending" | "approved" | "rejected" | "cancelled";
+  reviewedByEmail: string | null; reviewedAt: string | null; reviewNotes: string | null; createdAt: string;
 };
 export type AdminUserSummary = {
   id: string; email: string; displayName: string | null; phone: string | null; platformRole: PlatformRole | null;
@@ -472,6 +484,8 @@ export const archiveWorkspaceFarm = (token: string, workspaceId: string, farmId:
   apiRequest<void>(`/v1/workspace/${workspaceId}/farms/${farmId}/archive`, { method: "POST" }, token);
 export const deleteWorkspaceFarm = (token: string, workspaceId: string, farmId: string) =>
   apiRequest<void>(`/v1/workspace/${workspaceId}/farms/${farmId}`, { method: "DELETE" }, token);
+export const requestWorkspaceFarmDeletion = (token: string, workspaceId: string, farmId: string, input: { reason?: string }) =>
+  apiRequest<{ request: unknown }>(`/v1/workspace/${workspaceId}/farms/${farmId}/delete-request`, { method: "POST", body: JSON.stringify(input) }, token);
 export const selectActiveFarm = (token: string, workspaceId: string, farmId: string) =>
   apiRequest<void>(`/v1/workspace/${workspaceId}/farms/${farmId}/select`, { method: "POST" }, token);
 export const fetchFarmSeasons = (token: string, workspaceId: string, farmId: string) =>
@@ -489,6 +503,14 @@ export const fetchAdminOverview = (token: string) => apiRequest<AdminDashboardDa
 export const fetchAdminWorkspaces = (token: string) => apiRequest<{ workspaces: AdminWorkspace[] }>("/v1/admin/workspaces", {}, token);
 export const fetchAdminWorkspace = (token: string, workspaceId: string) =>
   apiRequest<{ workspace: AdminWorkspaceDetail | null }>(`/v1/admin/workspaces/${workspaceId}`, {}, token);
+export const fetchAdminFarms = (token: string) =>
+  apiRequest<{ farms: AdminFarmSummary[]; deletionRequests: AdminFarmDeletionRequest[] }>("/v1/admin/farms", {}, token);
+export const fetchAdminFarmDeletionRequests = (token: string) =>
+  apiRequest<{ requests: AdminFarmDeletionRequest[] }>("/v1/admin/farm-deletion-requests", {}, token);
+export const approveAdminFarmDeletionRequest = (token: string, requestId: string, input: { notes?: string }) =>
+  apiRequest<void>(`/v1/admin/farm-deletion-requests/${requestId}/approve`, { method: "POST", body: JSON.stringify(input) }, token);
+export const rejectAdminFarmDeletionRequest = (token: string, requestId: string, input: { notes?: string }) =>
+  apiRequest<void>(`/v1/admin/farm-deletion-requests/${requestId}/reject`, { method: "POST", body: JSON.stringify(input) }, token);
 export const createAdminWorkspace = (token: string, input: { name: string; contactEmail: string }) =>
   apiRequest<void>("/v1/admin/workspaces", { method: "POST", body: JSON.stringify(input) }, token);
 export const suspendAdminWorkspace = (token: string, workspaceId: string) =>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { CalendarDays, Camera, ChevronDown, ChevronRight, Eye, FileText, ImageIcon, MoreVertical, Paperclip, Pencil, RotateCw, Search, Trash2, UploadCloud, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
@@ -1377,8 +1377,10 @@ async function cropReceiptImage(file: File, crop: CropBox, rotation: number): Pr
 
 function ReceiptCropReviewModal({ file, onCancel, onAccept }: { file: File; onCancel: () => void; onAccept: (receipt: PendingReceipt) => void }) {
   const { t } = useTranslation();
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [crop, setCrop] = useState<CropBox>({ left: 6, top: 6, right: 94, bottom: 94 });
+  const [activeCorner, setActiveCorner] = useState<"topLeft" | "topRight" | "bottomLeft" | "bottomRight" | null>(null);
   const [rotation, setRotation] = useState(0);
   const [status, setStatus] = useState(t("expensesPage.detectingReceiptBorders"));
   const [busy, setBusy] = useState(false);
@@ -1391,9 +1393,32 @@ function ReceiptCropReviewModal({ file, onCancel, onAccept }: { file: File; onCa
       URL.revokeObjectURL(url);
     };
   }, [file, t]);
-  const updateCrop = (key: keyof CropBox, value: number) => setCrop((current) => ({ ...current, [key]: value }));
+  const autoDetect = () => {
+    setCrop({ left: 6, top: 6, right: 94, bottom: 94 });
+    setStatus(t("expensesPage.cropDetectedReview"));
+  };
+  const dragCorner = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!activeCorner || !stageRef.current) return;
+    const rect = stageRef.current.getBoundingClientRect();
+    const x = Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100));
+    const y = Math.max(0, Math.min(100, ((event.clientY - rect.top) / rect.height) * 100));
+    const minSize = 12;
+    setCrop((current) => {
+      if (activeCorner === "topLeft") return { ...current, left: Math.min(x, current.right - minSize), top: Math.min(y, current.bottom - minSize) };
+      if (activeCorner === "topRight") return { ...current, right: Math.max(x, current.left + minSize), top: Math.min(y, current.bottom - minSize) };
+      if (activeCorner === "bottomLeft") return { ...current, left: Math.min(x, current.right - minSize), bottom: Math.max(y, current.top + minSize) };
+      return { ...current, right: Math.max(x, current.left + minSize), bottom: Math.max(y, current.top + minSize) };
+    });
+    setStatus(t("expensesPage.adjustCorners"));
+  };
+  const startCornerDrag = (corner: typeof activeCorner) => (event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setActiveCorner(corner);
+  };
   const acceptCrop = async () => {
     setBusy(true);
+    setStatus(t("expensesPage.croppingReceipt"));
     try {
       const result = await cropReceiptImage(file, crop, rotation);
       onAccept({ id: crypto.randomUUID(), file: result.file, originalFile: file, cropMetadata: result.metadata, previewUrl: URL.createObjectURL(result.file) });
@@ -1403,27 +1428,35 @@ function ReceiptCropReviewModal({ file, onCancel, onAccept }: { file: File; onCa
   };
   const skipCrop = () => onAccept({ id: crypto.randomUUID(), file, originalFile: file, cropMetadata: { skipped: true, originalName: file.name, processedAt: new Date().toISOString() }, previewUrl: URL.createObjectURL(file) });
   return (
-    <div className="modal-backdrop">
+    <div className="modal-backdrop receipt-scanner-backdrop">
       <section className="receipt-crop-modal" role="dialog" aria-modal="true" aria-label={t("expensesPage.receiptCropReview")}>
         <header>
           <div><h2>{t("expensesPage.receiptCropReview")}</h2><p>{status}</p></div>
-          <button aria-label={t("common.close")} type="button" onClick={onCancel}><X size={18} /></button>
+          <div className="receipt-crop-toolbar">
+            <button type="button" onClick={() => setRotation((value) => (value + 90) % 360)}><RotateCw size={15} />{t("expensesPage.rotate")}</button>
+            <button type="button" onClick={autoDetect}>{t("expensesPage.resetCrop")}</button>
+            <button aria-label={t("common.close")} type="button" onClick={onCancel}><X size={18} /></button>
+          </div>
         </header>
-        <div className="receipt-crop-stage">
+        <div
+          className="receipt-crop-stage"
+          ref={stageRef}
+          onPointerMove={dragCorner}
+          onPointerUp={() => setActiveCorner(null)}
+          onPointerCancel={() => setActiveCorner(null)}
+        >
           {previewUrl ? <img alt={file.name} src={previewUrl} style={{ transform: `rotate(${rotation}deg)` }} /> : null}
           <div className="receipt-crop-overlay" style={{ left: `${crop.left}%`, top: `${crop.top}%`, right: `${100 - crop.right}%`, bottom: `${100 - crop.bottom}%` }}>
-            <span /><span /><span /><span />
+            <button aria-label={t("expensesPage.cropTopLeft")} type="button" onPointerDown={startCornerDrag("topLeft")} />
+            <button aria-label={t("expensesPage.cropTopRight")} type="button" onPointerDown={startCornerDrag("topRight")} />
+            <button aria-label={t("expensesPage.cropBottomLeft")} type="button" onPointerDown={startCornerDrag("bottomLeft")} />
+            <button aria-label={t("expensesPage.cropBottomRight")} type="button" onPointerDown={startCornerDrag("bottomRight")} />
           </div>
         </div>
-        <div className="receipt-crop-controls">
-          {(["left", "top", "right", "bottom"] as const).map((key) => (
-            <label key={key}><span>{t(`expensesPage.crop${key[0].toUpperCase()}${key.slice(1)}`)}</span><input type="range" min={0} max={100} value={crop[key]} onChange={(event) => updateCrop(key, Number(event.target.value))} /></label>
-          ))}
-        </div>
         <footer>
-          <button type="button" onClick={() => setCrop({ left: 6, top: 6, right: 94, bottom: 94 })}>{t("expensesPage.acceptAutoCrop")}</button>
-          <button type="button" onClick={() => setRotation((value) => (value + 90) % 360)}><RotateCw size={15} />{t("expensesPage.rotate")}</button>
-          <button type="button" onClick={skipCrop}>{t("expensesPage.skipCrop")}</button>
+          <button type="button" onClick={autoDetect}>{t("expensesPage.acceptAutoCrop")}</button>
+          <button type="button" onClick={onCancel}>{t("expensesPage.retakeOrReplace")}</button>
+          <button type="button" onClick={skipCrop}>{t("expensesPage.saveOriginal")}</button>
           <button type="button" disabled={busy} onClick={() => void acceptCrop()}>{busy ? t("expensesPage.processingReceipt") : t("expensesPage.acceptCrop")}</button>
         </footer>
       </section>
@@ -1572,7 +1605,10 @@ function ExpensesModule() {
     }
   };
   const advanceReceiptCropQueue = (accepted?: PendingReceipt) => {
-    if (accepted) setPendingReceipts((current) => [...current, accepted]);
+    if (accepted) {
+      setPendingReceipts((current) => [...current, accepted]);
+      showToast(accepted.cropMetadata?.skipped ? t("expensesPage.receiptAttached") : t("expensesPage.receiptCroppedAttached"));
+    }
     setReceiptCropQueue((current) => {
       const [next, ...rest] = current;
       setReceiptCropTarget(next ?? null);

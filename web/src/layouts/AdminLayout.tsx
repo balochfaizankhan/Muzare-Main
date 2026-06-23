@@ -1,4 +1,4 @@
-import { DatabaseBackup, FileClock, LayoutDashboard, LogOut, Settings, ShieldAlert, UserRoundPlus, Users, Warehouse } from "lucide-react";
+import { DatabaseBackup, FileClock, LandPlot, LayoutDashboard, LogOut, Settings, ShieldAlert, UserRoundPlus, Users, Warehouse } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
@@ -9,6 +9,7 @@ const nav = [
   ["/admin/dashboard", "layout.dashboard", LayoutDashboard],
   ["/admin/users", "layout.users", Users],
   ["/admin/workspaces", "layout.workspaces", Warehouse],
+  ["/admin/farms", "adminFarms.title", LandPlot],
   ["/admin/approvals", "adminApprovals.title", UserRoundPlus],
   ["/admin/suspended", "common.suspended", ShieldAlert],
   ["/admin/migration-import", "adminMigration.title", DatabaseBackup],

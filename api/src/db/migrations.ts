@@ -22,6 +22,7 @@ const farmOperationsSoftDeleteMigrationUrl = new URL("../../../database/migratio
 const expenseAttachmentsMigrationUrl = new URL("../../../database/migrations/0020_expense_attachments.sql", import.meta.url);
 const farmImportMetadataMigrationUrl = new URL("../../../database/migrations/0021_farm_import_metadata.sql", import.meta.url);
 const expenseReceiptProcessingMigrationUrl = new URL("../../../database/migrations/0022_expense_receipt_processing.sql", import.meta.url);
+const farmDeletionRequestsMigrationUrl = new URL("../../../database/migrations/0023_farm_deletion_requests.sql", import.meta.url);
 
 async function tableExists(tableName: string): Promise<boolean> {
   const result = (await db.execute(
@@ -127,4 +128,6 @@ export async function ensureWorkspaceSchema(): Promise<void> {
   await db.execute(farmImportMetadataMigration);
   const expenseReceiptProcessingMigration = await readFile(expenseReceiptProcessingMigrationUrl, "utf8");
   await db.execute(expenseReceiptProcessingMigration);
+  const farmDeletionRequestsMigration = await readFile(farmDeletionRequestsMigrationUrl, "utf8");
+  await db.execute(farmDeletionRequestsMigration);
 }

@@ -12,6 +12,7 @@ import {
   deleteWorkspaceFarm,
   fetchWorkspaceFarms,
   fetchWorkspaceProfile,
+  requestWorkspaceFarmDeletion,
   selectActiveFarm,
   updateWorkspaceProfile,
   updateWorkspaceFarm,
@@ -119,6 +120,10 @@ export function Farms() {
     mutationFn: (farmId: string) => deleteWorkspaceFarm(token!, workspaceId, farmId),
     onSuccess: refresh,
   });
+  const requestDeletion = useMutation({
+    mutationFn: ({ farmId, reason }: { farmId: string; reason?: string }) => requestWorkspaceFarmDeletion(token!, workspaceId, farmId, { reason }),
+    onSuccess: refresh,
+  });
   const select = useMutation({
     mutationFn: (farmId: string) => selectActiveFarm(token!, workspaceId, farmId),
     onSuccess: refresh,
@@ -141,6 +146,11 @@ export function Farms() {
   };
   const requestDelete = (farm: Farm) => {
     if (window.confirm(`${t("farmsPage.deleteFarmConfirm")}\n\n${t("farmsPage.deleteFarmDescription")}`)) deleteFarm.mutate(farm.id);
+  };
+  const requestAdminDeletion = (farm: Farm) => {
+    const reason = window.prompt(t("farmsPage.requestDeletionReason"), "");
+    if (reason === null) return;
+    requestDeletion.mutate({ farmId: farm.id, reason: reason.trim() || undefined });
   };
 
   return (
@@ -201,7 +211,9 @@ export function Farms() {
                     {farm.active && !isCurrent && <button type="button" onClick={() => select.mutate(farm.id)}><Leaf size={15} />{t("farmsPage.setActive")}</button>}
                     {canManage && <button type="button" onClick={() => edit(farm)}><Pencil size={15} />{t("farmsPage.edit")}</button>}
                     {canManage && farm.active && <button className="danger-button" type="button" onClick={() => requestArchive(farm)}><XCircle size={15} />{t("farmsPage.archive")}</button>}
-                    {canManage && !isCurrent && <button className="danger-button" type="button" onClick={() => requestDelete(farm)}><Trash2 size={15} />{t("farmsPage.deleteFarm")}</button>}
+                    {farm.deletionRequestStatus === "pending" && <span className="status-badge status-badge--pending">{t("farmsPage.deletionPending")}</span>}
+                    {canManage && !isCurrent && farm.deletionRequestStatus !== "pending" && <button className="danger-button" type="button" onClick={() => requestDelete(farm)}><Trash2 size={15} />{t("farmsPage.deleteFarm")}</button>}
+                    {canManage && !isCurrent && farm.deletionRequestStatus !== "pending" && <button type="button" onClick={() => requestAdminDeletion(farm)}>{t("farmsPage.requestDeletion")}</button>}
                   </footer>
                 </article>
               );
@@ -210,6 +222,7 @@ export function Farms() {
           </section>
         )}
         {deleteFarm.isError && <p className="error">{deleteFarm.error.message}</p>}
+        {requestDeletion.isError && <p className="error">{requestDeletion.error.message}</p>}
       </main>
     </div>
   );

@@ -194,6 +194,32 @@ export function Workspaces({ defaultStatusFilter = "all" }: { defaultStatusFilte
             </section>
 
             <section className="admin-detail-section">
+              <h3>{t("adminFarms.farmDirectory")}</h3>
+              {!detail.data.workspace.farms?.length ? <p className="activity-empty">{t("adminFarms.noFarms")}</p> : <div className="admin-activity-list">
+                {detail.data.workspace.farms.map((farm) => <article key={farm.id}>
+                  <div>
+                    <strong>{farm.name}</strong>
+                    <span>{farm.status} • {t("adminFarms.records")}: {formatNumber(farm.totalRecords)}</span>
+                  </div>
+                  <small>{Object.entries(farm.counts).map(([key, value]) => `${key}: ${value}`).join(" · ")}</small>
+                </article>)}
+              </div>}
+            </section>
+
+            <section className="admin-detail-section">
+              <h3>{t("adminFarms.deletionRequests")}</h3>
+              {!detail.data.workspace.deletionRequests?.length ? <p className="activity-empty">{t("adminFarms.noDeletionRequests")}</p> : <div className="admin-activity-list">
+                {detail.data.workspace.deletionRequests.map((request) => <article key={request.id}>
+                  <div>
+                    <strong>{request.farmName}</strong>
+                    <span>{request.status} • {request.requestedByEmail}</span>
+                  </div>
+                  <small>{formatDate(request.createdAt, { dateStyle: "medium", timeStyle: "short" })}</small>
+                </article>)}
+              </div>}
+            </section>
+
+            <section className="admin-detail-section">
               <h3>{t("adminWorkspaces.statusHistory")}</h3>
               {!detail.data.workspace.history.length ? <p className="activity-empty">{t("adminWorkspaces.noStatusHistory")}</p> : <div className="admin-activity-list">
                 {detail.data.workspace.history.map((item) => <article key={item.id}>
