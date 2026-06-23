@@ -203,6 +203,7 @@ export type MigrationImportValidation = {
   message?: string;
   result?: {
     insertedOperationalRecords: number;
+    farmImportStats?: { created: number; updated: number; skippedDuplicates: number };
     importCounts: Array<{ label: string; key: string; count: number }>;
     totalExpenses: number;
     totalAdvances: number;
@@ -316,13 +317,19 @@ export type ExpenseImportResult = { recordsCreated: number; duplicatesSkipped: n
 export type ExpenseAttachment = {
   id: string; workspaceId: string; farmId: string | null; seasonId: string | null; expenseId: string;
   fileName: string; fileType: string; fileSize: number; storageKey: string; fileUrl: string | null;
+  originalFileKey?: string | null; croppedFileKey?: string | null; cropMetadata?: Record<string, unknown> | null;
+  ocrStatus?: string; ocrProvider?: string | null; ocrRawText?: string | null; ocrParsedJson?: Record<string, unknown> | null;
+  ocrConfidence?: string | null; userCorrectedJson?: Record<string, unknown> | null; processedAt?: string | null;
   uploadedBy: string; uploadedAt: string; deletedAt: string | null;
 };
 export type ExpenseAttachmentUpload = {
   farmId?: string | null; seasonId?: string | null; fileName: string; fileType: string; fileSize: number; contentBase64: string;
+  originalContentBase64?: string; originalFileSize?: number; cropMetadata?: Record<string, unknown>;
 };
 export type ExpenseOcrSuggestion = {
   confidence: "high" | "medium" | "low";
+  status?: "complete" | "failed" | "not_configured";
+  provider?: string;
   message: string;
   suggested: null | {
     date?: string; supplier?: string; receiptNumber?: string; totalAmount?: number; vatAmount?: number;
@@ -463,6 +470,8 @@ export const updateWorkspaceFarm = (token: string, workspaceId: string, farmId: 
   apiRequest<{ farm: Farm }>(`/v1/workspace/${workspaceId}/farms/${farmId}`, { method: "PATCH", body: JSON.stringify(input) }, token);
 export const archiveWorkspaceFarm = (token: string, workspaceId: string, farmId: string) =>
   apiRequest<void>(`/v1/workspace/${workspaceId}/farms/${farmId}/archive`, { method: "POST" }, token);
+export const deleteWorkspaceFarm = (token: string, workspaceId: string, farmId: string) =>
+  apiRequest<void>(`/v1/workspace/${workspaceId}/farms/${farmId}`, { method: "DELETE" }, token);
 export const selectActiveFarm = (token: string, workspaceId: string, farmId: string) =>
   apiRequest<void>(`/v1/workspace/${workspaceId}/farms/${farmId}/select`, { method: "POST" }, token);
 export const fetchFarmSeasons = (token: string, workspaceId: string, farmId: string) =>
@@ -587,8 +596,9 @@ export const deleteExpenseAttachment = (token: string, workspaceId: string, expe
   apiRequest<void>(`/v1/workspace/${workspaceId}/expenses/${expenseId}/attachments/${attachmentId}`, { method: "DELETE" }, token);
 export const extractExpenseReceipt = (token: string, workspaceId: string, expenseId: string, attachmentId: string) =>
   apiRequest<ExpenseOcrSuggestion>(`/v1/workspace/${workspaceId}/expenses/${expenseId}/attachments/${attachmentId}/ocr`, { method: "POST", body: JSON.stringify({}) }, token, { timeoutMs: 60_000 });
-export async function openExpenseAttachment(token: string, workspaceId: string, expenseId: string, attachment: Pick<ExpenseAttachment, "id" | "fileName">): Promise<void> {
-  const response = await fetch(`${config.apiUrl}/v1/workspace/${workspaceId}/expenses/${expenseId}/attachments/${attachment.id}/download`, {
+export async function openExpenseAttachment(token: string, workspaceId: string, expenseId: string, attachment: Pick<ExpenseAttachment, "id" | "fileName">, variant: "cropped" | "original" = "cropped"): Promise<void> {
+  const suffix = variant === "original" ? "/original" : "/download";
+  const response = await fetch(`${config.apiUrl}/v1/workspace/${workspaceId}/expenses/${expenseId}/attachments/${attachment.id}${suffix}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!response.ok) throw new ApiError("Unable to open receipt attachment.", response.status);

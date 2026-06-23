@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { CalendarDays, Camera, ChevronDown, ChevronRight, Eye, FileText, ImageIcon, MoreVertical, Paperclip, Pencil, Search, Trash2, UploadCloud, X } from "lucide-react";
+import { CalendarDays, Camera, ChevronDown, ChevronRight, Eye, FileText, ImageIcon, MoreVertical, Paperclip, Pencil, RotateCw, Search, Trash2, UploadCloud, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -1302,7 +1302,8 @@ function ExpenseImportPanel({ token, workspaceId, farmId, seasonId, onClose, onI
   </section></div>;
 }
 
-type PendingReceipt = { id: string; file: File; previewUrl?: string };
+type PendingReceipt = { id: string; file: File; originalFile?: File; cropMetadata?: Record<string, unknown>; previewUrl?: string };
+type CropBox = { left: number; top: number; right: number; bottom: number };
 const receiptTypes = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 const receiptMaxSize = 10 * 1024 * 1024;
 
@@ -1313,6 +1314,121 @@ function fileToBase64(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error("Unable to read receipt file."));
     reader.readAsDataURL(file);
   });
+}
+
+function imageFromFile(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Unable to read receipt image."));
+    };
+    image.src = url;
+  });
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality = 0.86): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Unable to process receipt image.")), type, quality);
+  });
+}
+
+async function cropReceiptImage(file: File, crop: CropBox, rotation: number): Promise<{ file: File; metadata: Record<string, unknown> }> {
+  const image = await imageFromFile(file);
+  const normalizedRotation = ((rotation % 360) + 360) % 360;
+  const rotatedCanvas = document.createElement("canvas");
+  const rotatedContext = rotatedCanvas.getContext("2d");
+  if (!rotatedContext) throw new Error("Image processing is not available.");
+  const sideways = normalizedRotation === 90 || normalizedRotation === 270;
+  rotatedCanvas.width = sideways ? image.naturalHeight : image.naturalWidth;
+  rotatedCanvas.height = sideways ? image.naturalWidth : image.naturalHeight;
+  rotatedContext.translate(rotatedCanvas.width / 2, rotatedCanvas.height / 2);
+  rotatedContext.rotate((normalizedRotation * Math.PI) / 180);
+  rotatedContext.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2);
+
+  const left = Math.max(0, Math.min(crop.left, 90));
+  const top = Math.max(0, Math.min(crop.top, 90));
+  const right = Math.max(left + 5, Math.min(crop.right, 100));
+  const bottom = Math.max(top + 5, Math.min(crop.bottom, 100));
+  const sourceX = Math.round((left / 100) * rotatedCanvas.width);
+  const sourceY = Math.round((top / 100) * rotatedCanvas.height);
+  const sourceWidth = Math.round(((right - left) / 100) * rotatedCanvas.width);
+  const sourceHeight = Math.round(((bottom - top) / 100) * rotatedCanvas.height);
+  const output = document.createElement("canvas");
+  output.width = sourceWidth;
+  output.height = sourceHeight;
+  const outputContext = output.getContext("2d");
+  if (!outputContext) throw new Error("Image processing is not available.");
+  outputContext.filter = "contrast(1.08) saturate(0.98)";
+  outputContext.drawImage(rotatedCanvas, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, sourceWidth, sourceHeight);
+  const type = file.type === "image/png" ? "image/png" : "image/jpeg";
+  const blob = await canvasToBlob(output, type);
+  const name = file.name.replace(/\.[^.]+$/, "") + "-cropped." + (type === "image/png" ? "png" : "jpg");
+  return {
+    file: new File([blob], name, { type, lastModified: Date.now() }),
+    metadata: { crop, rotation: normalizedRotation, originalName: file.name, processedAt: new Date().toISOString() },
+  };
+}
+
+function ReceiptCropReviewModal({ file, onCancel, onAccept }: { file: File; onCancel: () => void; onAccept: (receipt: PendingReceipt) => void }) {
+  const { t } = useTranslation();
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [crop, setCrop] = useState<CropBox>({ left: 6, top: 6, right: 94, bottom: 94 });
+  const [rotation, setRotation] = useState(0);
+  const [status, setStatus] = useState(t("expensesPage.detectingReceiptBorders"));
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    const timer = window.setTimeout(() => setStatus(t("expensesPage.cropDetectedReview")), 450);
+    return () => {
+      window.clearTimeout(timer);
+      URL.revokeObjectURL(url);
+    };
+  }, [file, t]);
+  const updateCrop = (key: keyof CropBox, value: number) => setCrop((current) => ({ ...current, [key]: value }));
+  const acceptCrop = async () => {
+    setBusy(true);
+    try {
+      const result = await cropReceiptImage(file, crop, rotation);
+      onAccept({ id: crypto.randomUUID(), file: result.file, originalFile: file, cropMetadata: result.metadata, previewUrl: URL.createObjectURL(result.file) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const skipCrop = () => onAccept({ id: crypto.randomUUID(), file, originalFile: file, cropMetadata: { skipped: true, originalName: file.name, processedAt: new Date().toISOString() }, previewUrl: URL.createObjectURL(file) });
+  return (
+    <div className="modal-backdrop">
+      <section className="receipt-crop-modal" role="dialog" aria-modal="true" aria-label={t("expensesPage.receiptCropReview")}>
+        <header>
+          <div><h2>{t("expensesPage.receiptCropReview")}</h2><p>{status}</p></div>
+          <button aria-label={t("common.close")} type="button" onClick={onCancel}><X size={18} /></button>
+        </header>
+        <div className="receipt-crop-stage">
+          {previewUrl ? <img alt={file.name} src={previewUrl} style={{ transform: `rotate(${rotation}deg)` }} /> : null}
+          <div className="receipt-crop-overlay" style={{ left: `${crop.left}%`, top: `${crop.top}%`, right: `${100 - crop.right}%`, bottom: `${100 - crop.bottom}%` }}>
+            <span /><span /><span /><span />
+          </div>
+        </div>
+        <div className="receipt-crop-controls">
+          {(["left", "top", "right", "bottom"] as const).map((key) => (
+            <label key={key}><span>{t(`expensesPage.crop${key[0].toUpperCase()}${key.slice(1)}`)}</span><input type="range" min={0} max={100} value={crop[key]} onChange={(event) => updateCrop(key, Number(event.target.value))} /></label>
+          ))}
+        </div>
+        <footer>
+          <button type="button" onClick={() => setCrop({ left: 6, top: 6, right: 94, bottom: 94 })}>{t("expensesPage.acceptAutoCrop")}</button>
+          <button type="button" onClick={() => setRotation((value) => (value + 90) % 360)}><RotateCw size={15} />{t("expensesPage.rotate")}</button>
+          <button type="button" onClick={skipCrop}>{t("expensesPage.skipCrop")}</button>
+          <button type="button" disabled={busy} onClick={() => void acceptCrop()}>{busy ? t("expensesPage.processingReceipt") : t("expensesPage.acceptCrop")}</button>
+        </footer>
+      </section>
+    </div>
+  );
 }
 
 function ReceiptAttachmentPicker({ pending, onFiles, onRemove }: { pending: PendingReceipt[]; onFiles: (files: FileList | null) => void; onRemove: (id: string) => void }) {
@@ -1327,7 +1443,7 @@ function ReceiptAttachmentPicker({ pending, onFiles, onRemove }: { pending: Pend
       {pending.length ? <div className="receipt-preview-grid">{pending.map((item) => (
         <article key={item.id}>
           {item.previewUrl ? <img alt={item.file.name} src={item.previewUrl} /> : <FileText size={28} />}
-          <div><strong>{item.file.name}</strong><small>{Math.round(item.file.size / 1024)} KB</small></div>
+          <div><strong>{item.file.name}</strong><small>{Math.round(item.file.size / 1024)} KB{item.originalFile ? ` · ${t("expensesPage.croppedReceipt")}` : ""}</small></div>
           <button aria-label={t("common.delete")} type="button" onClick={() => onRemove(item.id)}><X size={14} /></button>
         </article>
       ))}</div> : null}
@@ -1335,7 +1451,7 @@ function ReceiptAttachmentPicker({ pending, onFiles, onRemove }: { pending: Pend
   );
 }
 
-function ReceiptAttachmentList({ attachments, onOpen, onDelete, onExtract, ocrResult }: { attachments: ExpenseAttachment[]; onOpen: (item: ExpenseAttachment) => void; onDelete?: (item: ExpenseAttachment) => void; onExtract?: (item: ExpenseAttachment) => void; ocrResult?: ExpenseOcrSuggestion | null }) {
+function ReceiptAttachmentList({ attachments, onOpen, onOpenOriginal, onDelete, onExtract, ocrResult }: { attachments: ExpenseAttachment[]; onOpen: (item: ExpenseAttachment) => void; onOpenOriginal?: (item: ExpenseAttachment) => void; onDelete?: (item: ExpenseAttachment) => void; onExtract?: (item: ExpenseAttachment) => void; ocrResult?: ExpenseOcrSuggestion | null }) {
   const { t } = useTranslation();
   return (
     <section className="receipt-detail-card">
@@ -1343,13 +1459,31 @@ function ReceiptAttachmentList({ attachments, onOpen, onDelete, onExtract, ocrRe
       {!attachments.length ? <p className="activity-empty">{t("expensesPage.missingReceipt")}</p> : attachments.map((item) => (
         <article key={item.id}>
           <span>{item.fileType.startsWith("image/") ? <ImageIcon size={18} /> : <FileText size={18} />}</span>
-          <div><strong>{item.fileName}</strong><small>{Math.round(item.fileSize / 1024)} KB · {item.fileType}</small></div>
-          <button type="button" onClick={() => onOpen(item)}>{t("common.view")}</button>
+          <div><strong>{item.fileName}</strong><small>{Math.round(item.fileSize / 1024)} KB · {item.fileType}{item.ocrStatus ? ` · OCR: ${item.ocrStatus}` : ""}</small></div>
+          <button type="button" onClick={() => onOpen(item)}>{t("expensesPage.viewCropped")}</button>
+          {onOpenOriginal && <button type="button" onClick={() => onOpenOriginal(item)}>{t("expensesPage.viewOriginal")}</button>}
           {onExtract && <button type="button" onClick={() => onExtract(item)}>{t("expensesPage.extractFromReceipt")}</button>}
           {onDelete && <button className="danger-link" type="button" onClick={() => onDelete(item)}>{t("common.delete")}</button>}
         </article>
       ))}
-      {ocrResult ? <div className="receipt-ocr-result"><strong>{t("expensesPage.suggestedExpenseData")}</strong><p>{ocrResult.message}</p><small>{t("expensesPage.confidence")}: {ocrResult.confidence}</small></div> : null}
+      {ocrResult ? <div className="receipt-ocr-result">
+        <strong>{t("expensesPage.suggestedExpenseData")}</strong>
+        <p>{ocrResult.message}</p>
+        <small>{t("expensesPage.confidence")}: {ocrResult.confidence}{ocrResult.provider ? ` · ${ocrResult.provider}` : ""}</small>
+        {ocrResult.suggested ? <dl>
+          {ocrResult.suggested.date && <><dt>{t("expensesPage.date")}</dt><dd>{ocrResult.suggested.date}</dd></>}
+          {ocrResult.suggested.supplier && <><dt>{t("expensesPage.supplier")}</dt><dd>{ocrResult.suggested.supplier}</dd></>}
+          {ocrResult.suggested.receiptNumber && <><dt>{t("expensesPage.receiptNumber")}</dt><dd>{ocrResult.suggested.receiptNumber}</dd></>}
+          {ocrResult.suggested.totalAmount !== undefined && <><dt>{t("expensesPage.amount")}</dt><dd>{formatMoney(ocrResult.suggested.totalAmount)}</dd></>}
+          {ocrResult.suggested.vatAmount !== undefined && <><dt>{t("expensesPage.vat")}</dt><dd>{formatMoney(ocrResult.suggested.vatAmount)}</dd></>}
+          {ocrResult.suggested.paymentMethod && <><dt>{t("expensesPage.paymentMethod")}</dt><dd>{ocrResult.suggested.paymentMethod}</dd></>}
+          {ocrResult.suggested.description && <><dt>{t("expensesPage.description")}</dt><dd>{ocrResult.suggested.description}</dd></>}
+        </dl> : null}
+        {ocrResult.lineItems.length ? <div className="receipt-ocr-lines">
+          <b>{t("expensesPage.suggestedLineItems")}</b>
+          {ocrResult.lineItems.map((line, index) => <p key={`${line.itemName}:${index}`}><span>{line.itemName}</span><strong>{line.amount !== undefined ? formatMoney(line.amount) : "-"}</strong></p>)}
+        </div> : null}
+      </div> : null}
     </section>
   );
 }
@@ -1378,6 +1512,8 @@ function ExpensesModule() {
   const [editingVoucher, setEditingVoucher] = useState<Voucher | null>(null);
   const [showExpenseImport, setShowExpenseImport] = useState(false);
   const [pendingReceipts, setPendingReceipts] = useState<PendingReceipt[]>([]);
+  const [, setReceiptCropQueue] = useState<File[]>([]);
+  const [receiptCropTarget, setReceiptCropTarget] = useState<File | null>(null);
   const [receiptError, setReceiptError] = useState("");
   const [detailAttachments, setDetailAttachments] = useState<ExpenseAttachment[]>([]);
   const [detailOcr, setDetailOcr] = useState<ExpenseOcrSuggestion | null>(null);
@@ -1416,6 +1552,7 @@ function ExpensesModule() {
     if (!files) return;
     setReceiptError("");
     const next: PendingReceipt[] = [];
+    const imageQueue: File[] = [];
     for (const file of Array.from(files)) {
       if (!receiptTypes.has(file.type)) {
         setReceiptError(t("expensesPage.receiptTypeError"));
@@ -1425,9 +1562,22 @@ function ExpensesModule() {
         setReceiptError(t("expensesPage.receiptSizeError"));
         continue;
       }
-      next.push({ id: crypto.randomUUID(), file, previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined });
+      if (file.type.startsWith("image/")) imageQueue.push(file);
+      else next.push({ id: crypto.randomUUID(), file });
     }
     setPendingReceipts((current) => [...current, ...next]);
+    if (imageQueue.length) {
+      setReceiptCropQueue((current) => [...current, ...imageQueue.slice(1)]);
+      if (!receiptCropTarget) setReceiptCropTarget(imageQueue[0]);
+    }
+  };
+  const advanceReceiptCropQueue = (accepted?: PendingReceipt) => {
+    if (accepted) setPendingReceipts((current) => [...current, accepted]);
+    setReceiptCropQueue((current) => {
+      const [next, ...rest] = current;
+      setReceiptCropTarget(next ?? null);
+      return rest;
+    });
   };
   const removePendingReceipt = (id: string) => {
     setPendingReceipts((current) => {
@@ -1450,6 +1600,9 @@ function ExpensesModule() {
         fileType: item.file.type,
         fileSize: item.file.size,
         contentBase64: await fileToBase64(item.file),
+        originalContentBase64: item.originalFile ? await fileToBase64(item.originalFile) : undefined,
+        originalFileSize: item.originalFile?.size,
+        cropMetadata: item.cropMetadata,
       });
     }
   };
@@ -1562,6 +1715,11 @@ function ExpensesModule() {
     try { await openExpenseAttachment(token, workspaceId, selectedVoucher.id, attachment); }
     catch (error) { showToast(error instanceof Error ? error.message : "Unable to open receipt attachment."); }
   };
+  const openOriginalReceipt = async (attachment: ExpenseAttachment) => {
+    if (!token || !workspaceId || !selectedVoucher) return;
+    try { await openExpenseAttachment(token, workspaceId, selectedVoucher.id, attachment, "original"); }
+    catch (error) { showToast(error instanceof Error ? error.message : "Unable to open original receipt."); }
+  };
   const removeReceipt = async (attachment: ExpenseAttachment) => {
     if (!token || !workspaceId || !selectedVoucher || !window.confirm(t("expensesPage.deleteReceiptConfirm"))) return;
     setAttachmentBusy(true);
@@ -1575,8 +1733,13 @@ function ExpensesModule() {
   const extractReceipt = async (attachment: ExpenseAttachment) => {
     if (!token || !workspaceId || !selectedVoucher) return;
     setAttachmentBusy(true); setDetailOcr(null);
-    try { setDetailOcr(await extractExpenseReceipt(token, workspaceId, selectedVoucher.id, attachment.id)); }
-    catch { setDetailOcr({ confidence: "low", message: t("expensesPage.ocrFailed"), suggested: null, lineItems: [] }); }
+    try {
+      const result = await extractExpenseReceipt(token, workspaceId, selectedVoucher.id, attachment.id);
+      setDetailOcr(result);
+      showToast(result.message);
+      await loadVoucherAttachments(selectedVoucher);
+    }
+    catch { setDetailOcr({ confidence: "low", status: "failed", message: t("expensesPage.ocrFailed"), suggested: null, lineItems: [] }); }
     finally { setAttachmentBusy(false); }
   };
   const removeVoucher = async (voucher: Voucher) => {
@@ -1597,6 +1760,7 @@ function ExpensesModule() {
   return (
     <>
       <FormCard title={editingVoucher ? t("expensesPage.editVoucher", { number: editingVoucher.voucherNumber }) : t("expensesPage.newVoucher")}>
+        {receiptCropTarget && <ReceiptCropReviewModal file={receiptCropTarget} onCancel={() => advanceReceiptCropQueue()} onAccept={advanceReceiptCropQueue} />}
         <form className="module-form inline-form" onSubmit={(event) => void submit(event)}>
           <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
           <label><span>{t("expensesPage.categoryRequired")}</span><SearchInput required list="expense-category-options" placeholder={t("expensesPage.selectCategory")} value={categorySearch} onChange={(value) => {
@@ -1668,6 +1832,7 @@ function ExpensesModule() {
             attachments={detailAttachments}
             ocrResult={detailOcr}
             onOpen={(item) => void openReceipt(item)}
+            onOpenOriginal={(item) => void openOriginalReceipt(item)}
             onExtract={(item) => void extractReceipt(item)}
             onDelete={canEditVouchers && !attachmentBusy ? (item) => void removeReceipt(item) : undefined}
           />

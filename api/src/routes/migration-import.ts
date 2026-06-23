@@ -80,6 +80,7 @@ type ImportCountKey = "farms" | "seasons" | "labour" | "accounts" | "expenses" |
 type ImportResult = {
   insertedOperationalRecords: number;
   importCounts: Array<{ label: string; key: ImportCountKey; count: number }>;
+  farmImportStats: { created: number; updated: number; skippedDuplicates: number };
   totalExpenses: number;
   totalAdvances: number;
 };
@@ -144,6 +145,14 @@ const sourceTypeFor = (key: typeof requiredArrays[number] | string) => ({
   settlements: "settlement",
   partnerTransfers: "partnerTransfer",
 }[key] ?? key);
+const farmName = (record: AndroidRecord, index: number) =>
+  text(record, ["name", "farmName", "farm_name", "title", "farmTitle", "farm_title", "displayName", "display_name"], `Imported Farm ${index + 1}`);
+const importedActive = (record: AndroidRecord) => {
+  const status = text(record, ["status", "state"]).toLowerCase();
+  if (status === "archived" || status === "inactive" || status === "deleted") return false;
+  if (record.active === false || record.archived === true || record.isArchived === true || record.deleted === true) return false;
+  return true;
+};
 
 function validatePayload(payload: AndroidPayload): { issues: ImportIssue[]; summary: ImportSummary } {
   const issues: ImportIssue[] = [];
@@ -321,8 +330,10 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
     if (!workspace) return reply.code(404).send({ message: "Workspace not found." });
 
     const result = await db.transaction(async (tx) => {
+      const importBatchId = randomUUID();
       const maps = { farms: new Map<string, string>(), seasons: new Map<string, string>(), labour: new Map<string, string>(), accounts: new Map<string, string>(), partners: new Map<string, string>() };
       let insertedOperationalRecords = 0;
+      const farmImportStats = { created: 0, updated: 0, skippedDuplicates: 0 };
       const importedCounts: Record<ImportCountKey, number> = {
         farms: 0,
         seasons: 0,
@@ -333,27 +344,55 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         advances: 0,
       };
 
-      for (const source of asArray(parsed.data.payload, "farms")) {
-        const marker = `source_type:${sourceTypeFor("farms")};old_android_id:${oldId(source)}`;
+      for (const [index, source] of asArray(parsed.data.payload, "farms").entries()) {
+        const sourceType = sourceTypeFor("farms");
+        const androidId = oldId(source);
+        const marker = `source_type:${sourceType};old_android_id:${androidId}`;
         const legacyMarker = `old_android_id:${oldId(source)}`;
-        const [existing] = await tx.select({ id: farms.id }).from(farms).where(and(
+        const existingMatches = await tx.select({ id: farms.id, name: farms.name, remarks: farms.remarks }).from(farms).where(and(
           eq(farms.workspaceId, parsed.data.workspaceId),
-          or(eq(farms.remarks, marker), eq(farms.remarks, legacyMarker)),
-        )).limit(1);
+          or(
+            and(eq(farms.sourceType, sourceType), eq(farms.oldAndroidId, androidId)),
+            eq(farms.remarks, marker),
+            eq(farms.remarks, legacyMarker),
+          ),
+        ));
+        const existing = existingMatches[0];
+        if (existingMatches.length > 1) {
+          farmImportStats.skippedDuplicates += existingMatches.length - 1;
+        }
         const id = existing?.id ?? randomUUID();
         maps.farms.set(oldId(source), id);
+        const nextFarm = {
+          name: farmName(source, index),
+          location: text(source, ["location", "address", "farmLocation", "farm_location"]) || null,
+          owner: text(source, ["owner", "ownerName", "manager", "operator"]) || null,
+          remarks: existing?.remarks?.startsWith("source_type:") || existing?.remarks?.startsWith("old_android_id:") ? null : existing?.remarks ?? (text(source, ["remarks", "notes", "description"]) || null),
+          sourceType,
+          oldAndroidId: androidId,
+          importBatchId,
+          active: importedActive(source),
+          updatedAt: new Date(),
+        };
         if (!existing) {
           await tx.insert(farms).values({
             id,
             workspaceId: parsed.data.workspaceId,
-            name: text(source, ["name", "farmName"], "Imported Farm"),
-            location: text(source, ["location", "address"]) || null,
-            owner: text(source, ["owner"]) || null,
-            remarks: marker,
-            active: source.active !== false,
+            ...nextFarm,
             createdBy: userId,
           });
           importedCounts.farms += 1;
+          farmImportStats.created += 1;
+        } else {
+          await tx.update(farms).set(nextFarm).where(eq(farms.id, existing.id));
+          farmImportStats.updated += 1;
+          for (const duplicate of existingMatches.slice(1)) {
+            await tx.update(farms).set({
+              active: false,
+              remarks: null,
+              updatedAt: new Date(),
+            }).where(eq(farms.id, duplicate.id));
+          }
         }
       }
       for (const source of asArray(parsed.data.payload, "seasons")) {
@@ -478,11 +517,12 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         userId,
         action: "admin.migration_import.completed",
         entityType: "migration_import",
-        details: { source: validation.summary.source, exportedAt: validation.summary.exportedAt, insertedOperationalRecords },
+        details: { source: validation.summary.source, exportedAt: validation.summary.exportedAt, insertedOperationalRecords, farmImportStats },
       });
       return {
         insertedOperationalRecords,
         importCounts: importCountKeys.map(({ label, key }) => ({ label, key, count: importedCounts[key] })),
+        farmImportStats,
         totalExpenses: validation.summary.totalExpenses,
         totalAdvances: validation.summary.totalAdvances,
       } satisfies ImportResult;

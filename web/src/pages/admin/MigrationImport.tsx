@@ -163,9 +163,21 @@ export function MigrationImport() {
               <h3>Import summary</h3>
               <p className="positive">Migration imported successfully.</p>
               {runImport.data.result.importCounts.map((item) => <p key={item.key}><b>{item.label}</b> {item.count}</p>)}
+              {runImport.data.result.farmImportStats ? (
+                <p>
+                  <b>Farm import</b>{" "}
+                  created {runImport.data.result.farmImportStats.created}, updated {runImport.data.result.farmImportStats.updated}, skipped duplicates {runImport.data.result.farmImportStats.skippedDuplicates}
+                </p>
+              ) : null}
               <p><b>Total expenses</b> {formatMoney(runImport.data.result.totalExpenses)}</p>
               <p><b>Total advances</b> {formatMoney(runImport.data.result.totalAdvances)}</p>
               <p><b>Inserted operational records</b> {runImport.data.result.insertedOperationalRecords}</p>
+              <div className="record-list__actions">
+                <a className="secondary-button" href="/workspace/farms">View Imported Farms</a>
+                <a className="secondary-button" href="/workforce">View Labour</a>
+                <a className="secondary-button" href="/expenses">View Expenses</a>
+                <a className="secondary-button" href="/advances">View Advances</a>
+              </div>
             </section>
           ) : null}
         </section>

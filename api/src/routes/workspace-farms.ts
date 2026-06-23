@@ -1,10 +1,10 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
-import { farms, userSessions } from "../db/schema.js";
+import { farms, operationalRecords, seasons, userSessions } from "../db/schema.js";
 import { hasPermission } from "../permissions.js";
 
 const workspaceParams = z.object({ workspaceId: z.string().uuid() });
@@ -21,6 +21,16 @@ const farmInput = z.object({
 
 function optional(value: string | null | undefined) {
   return value?.trim() || null;
+}
+function visibleFarm(farm: typeof farms.$inferSelect) {
+  const { sourceType: _sourceType, oldAndroidId: _oldAndroidId, importBatchId: _importBatchId, ...visible } = farm;
+  void _sourceType;
+  void _oldAndroidId;
+  void _importBatchId;
+  return {
+    ...visible,
+    remarks: farm.remarks?.startsWith("source_type:") || farm.remarks?.startsWith("old_android_id:") ? null : farm.remarks,
+  };
 }
 
 function requireSelectedWorkspace(request: FastifyRequest, workspaceId: string) {
@@ -44,7 +54,7 @@ export async function workspaceFarmRoutes(app: FastifyInstance): Promise<void> {
     const [session] = request.sessionId
       ? await db.select({ activeFarmId: userSessions.activeFarmId }).from(userSessions).where(eq(userSessions.id, request.sessionId)).limit(1)
       : [];
-    return { farms: records, activeFarmId: session?.activeFarmId ?? null };
+    return { farms: records.map(visibleFarm), activeFarmId: session?.activeFarmId ?? null };
   });
 
   app.post("/v1/workspace/:workspaceId/farms", { preHandler: requireUser }, async (request, reply) => {
@@ -107,6 +117,32 @@ export async function workspaceFarmRoutes(app: FastifyInstance): Promise<void> {
     const [farm] = await db.update(farms).set({ active: false, updatedAt: new Date() })
       .where(and(eq(farms.id, params.data.farmId), eq(farms.workspaceId, params.data.workspaceId))).returning({ id: farms.id });
     if (!farm) return reply.code(404).send({ message: "Farm not found." });
+    await db.update(userSessions).set({ activeFarmId: null, activeSeasonId: null })
+      .where(and(eq(userSessions.workspaceId, params.data.workspaceId), eq(userSessions.activeFarmId, params.data.farmId)));
+    return reply.code(204).send();
+  });
+
+  app.delete("/v1/workspace/:workspaceId/farms/:farmId", { preHandler: requireUser }, async (request, reply) => {
+    if (!request.appUser) return reply;
+    const params = farmParams.safeParse(request.params);
+    if (!params.success || !requireSelectedWorkspace(request, params.data.workspaceId) || !canManage(request, params.data.workspaceId)) {
+      return reply.code(403).send({ message: "Workspace farm management permission is required." });
+    }
+    if (localDevelopmentMode) return reply.code(503).send({ message: "Configure PostgreSQL to manage farms." });
+    const [farm] = await db.select({ id: farms.id }).from(farms).where(and(eq(farms.id, params.data.farmId), eq(farms.workspaceId, params.data.workspaceId))).limit(1);
+    if (!farm) return reply.code(404).send({ message: "Farm not found." });
+    const [recordCount] = await db.select({ count: sql<number>`count(*)::int` }).from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, params.data.workspaceId),
+      eq(operationalRecords.farmId, params.data.farmId),
+    ));
+    const [seasonCount] = await db.select({ count: sql<number>`count(*)::int` }).from(seasons).where(and(
+      eq(seasons.workspaceId, params.data.workspaceId),
+      eq(seasons.farmId, params.data.farmId),
+    ));
+    if (Number(recordCount?.count ?? 0) > 0 || Number(seasonCount?.count ?? 0) > 0) {
+      return reply.code(409).send({ message: "This farm has records. You can archive it instead." });
+    }
+    await db.delete(farms).where(and(eq(farms.id, params.data.farmId), eq(farms.workspaceId, params.data.workspaceId)));
     await db.update(userSessions).set({ activeFarmId: null, activeSeasonId: null })
       .where(and(eq(userSessions.workspaceId, params.data.workspaceId), eq(userSessions.activeFarmId, params.data.farmId)));
     return reply.code(204).send();

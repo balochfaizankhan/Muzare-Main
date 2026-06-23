@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Leaf, LogOut, Map, MapPin, Pencil, Plus, Satellite, ShieldCheck, UserRound, UsersRound, XCircle } from "lucide-react";
+import { CheckCircle2, Leaf, LogOut, Map, MapPin, Pencil, Plus, Satellite, ShieldCheck, Trash2, UserRound, UsersRound, XCircle } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
@@ -9,6 +9,7 @@ import { config } from "../../config";
 import {
   archiveWorkspaceFarm,
   createWorkspaceFarm,
+  deleteWorkspaceFarm,
   fetchWorkspaceFarms,
   fetchWorkspaceProfile,
   selectActiveFarm,
@@ -114,6 +115,10 @@ export function Farms() {
     mutationFn: (farmId: string) => archiveWorkspaceFarm(token!, workspaceId, farmId),
     onSuccess: refresh,
   });
+  const deleteFarm = useMutation({
+    mutationFn: (farmId: string) => deleteWorkspaceFarm(token!, workspaceId, farmId),
+    onSuccess: refresh,
+  });
   const select = useMutation({
     mutationFn: (farmId: string) => selectActiveFarm(token!, workspaceId, farmId),
     onSuccess: refresh,
@@ -130,6 +135,12 @@ export function Farms() {
   const submit = (event: FormEvent) => {
     event.preventDefault();
     save.mutate();
+  };
+  const requestArchive = (farm: Farm) => {
+    if (window.confirm(`${t("farmsPage.archiveFarmConfirm")}\n\n${t("farmsPage.archiveFarmDescription")}`)) archive.mutate(farm.id);
+  };
+  const requestDelete = (farm: Farm) => {
+    if (window.confirm(`${t("farmsPage.deleteFarmConfirm")}\n\n${t("farmsPage.deleteFarmDescription")}`)) deleteFarm.mutate(farm.id);
   };
 
   return (
@@ -189,7 +200,8 @@ export function Farms() {
                     {config.featureFarmMap && canManage && <Link to={`/workspace/${workspaceId}/farms/${farm.id}/map-builder`}><Map size={15} />{t("farmMap.mapBuilder")}</Link>}
                     {farm.active && !isCurrent && <button type="button" onClick={() => select.mutate(farm.id)}><Leaf size={15} />{t("farmsPage.setActive")}</button>}
                     {canManage && <button type="button" onClick={() => edit(farm)}><Pencil size={15} />{t("farmsPage.edit")}</button>}
-                    {canManage && farm.active && <button className="danger-button" type="button" onClick={() => archive.mutate(farm.id)}><XCircle size={15} />{t("farmsPage.archive")}</button>}
+                    {canManage && farm.active && <button className="danger-button" type="button" onClick={() => requestArchive(farm)}><XCircle size={15} />{t("farmsPage.archive")}</button>}
+                    {canManage && !isCurrent && <button className="danger-button" type="button" onClick={() => requestDelete(farm)}><Trash2 size={15} />{t("farmsPage.deleteFarm")}</button>}
                   </footer>
                 </article>
               );
@@ -197,6 +209,7 @@ export function Farms() {
             {!farms.data.farms.length && <p className="context-message">{t("farmsPage.noFarms")}</p>}
           </section>
         )}
+        {deleteFarm.isError && <p className="error">{deleteFarm.error.message}</p>}
       </main>
     </div>
   );

@@ -20,6 +20,8 @@ const liveGeoFarmOperationsMigrationUrl = new URL("../../../database/migrations/
 const simpleWaterAssetsMigrationUrl = new URL("../../../database/migrations/0018_simple_water_assets.sql", import.meta.url);
 const farmOperationsSoftDeleteMigrationUrl = new URL("../../../database/migrations/0019_farm_operations_soft_delete.sql", import.meta.url);
 const expenseAttachmentsMigrationUrl = new URL("../../../database/migrations/0020_expense_attachments.sql", import.meta.url);
+const farmImportMetadataMigrationUrl = new URL("../../../database/migrations/0021_farm_import_metadata.sql", import.meta.url);
+const expenseReceiptProcessingMigrationUrl = new URL("../../../database/migrations/0022_expense_receipt_processing.sql", import.meta.url);
 
 async function tableExists(tableName: string): Promise<boolean> {
   const result = (await db.execute(
@@ -121,4 +123,8 @@ export async function ensureWorkspaceSchema(): Promise<void> {
   await db.execute(farmOperationsSoftDeleteMigration);
   const expenseAttachmentsMigration = await readFile(expenseAttachmentsMigrationUrl, "utf8");
   await db.execute(expenseAttachmentsMigration);
+  const farmImportMetadataMigration = await readFile(farmImportMetadataMigrationUrl, "utf8");
+  await db.execute(farmImportMetadataMigration);
+  const expenseReceiptProcessingMigration = await readFile(expenseReceiptProcessingMigrationUrl, "utf8");
+  await db.execute(expenseReceiptProcessingMigration);
 }
