@@ -76,6 +76,23 @@ type ImportSummary = {
   partnerBalances: Array<{ name: string; balance: number }>;
   cashBankBalances: Array<{ name: string; balance: number }>;
 };
+type ImportCountKey = "farms" | "seasons" | "labour" | "accounts" | "expenses" | "expenseItems" | "advances";
+type ImportResult = {
+  insertedOperationalRecords: number;
+  importCounts: Array<{ label: string; key: ImportCountKey; count: number }>;
+  totalExpenses: number;
+  totalAdvances: number;
+};
+
+const importCountKeys: Array<{ label: string; key: ImportCountKey }> = [
+  { label: "Farms imported", key: "farms" },
+  { label: "Seasons imported", key: "seasons" },
+  { label: "Labour imported", key: "labour" },
+  { label: "Accounts imported", key: "accounts" },
+  { label: "Expenses imported", key: "expenses" },
+  { label: "Expense items imported", key: "expenseItems" },
+  { label: "Advances imported", key: "advances" },
+];
 
 const rawArray = (payload: AndroidPayload, key: string) => Array.isArray(payload[key]) ? payload[key] as AndroidRecord[] : [];
 const asArray = (payload: AndroidPayload, key: typeof requiredArrays[number]) => {
@@ -86,13 +103,6 @@ const asArray = (payload: AndroidPayload, key: typeof requiredArrays[number]) =>
   return [];
 };
 const hasArray = (payload: AndroidPayload, key: string) => Array.isArray(payload[key]);
-const hasCanonicalOrAliasArray = (payload: AndroidPayload, key: typeof requiredArrays[number]) =>
-  hasArray(payload, key) || (arrayAliases[key] ?? []).some((alias) => hasArray(payload, alias));
-const acceptedSourceArray = (payload: AndroidPayload, androidKey: typeof androidExportArrays[number]) => {
-  if (hasArray(payload, androidKey)) return true;
-  const pwaKey = androidToPwaArrayMap[androidKey as keyof typeof androidToPwaArrayMap];
-  return pwaKey ? hasArray(payload, pwaKey) : false;
-};
 const text = (record: AndroidRecord, keys: string[], fallback = "") => {
   for (const key of keys) {
     const value = record[key];
@@ -144,18 +154,6 @@ function validatePayload(payload: AndroidPayload): { issues: ImportIssue[]; summ
     pwaKey,
     count: rawArray(payload, androidKey).length || asArray(payload, pwaKey).length,
   }));
-  const hasAndroidShape = androidExportArrays.some((key) => hasArray(payload, key));
-  if (hasAndroidShape) {
-    for (const key of androidExportArrays) {
-      if (!acceptedSourceArray(payload, key)) issues.push({ level: "error", path: key, message: `Required Android export array '${key}' is missing.` });
-    }
-  }
-  for (const key of requiredArrays) {
-    if (!hasAndroidShape && !hasCanonicalOrAliasArray(payload, key)) {
-      const aliases = arrayAliases[key]?.length ? ` or ${arrayAliases[key]!.join("/")}` : "";
-      issues.push({ level: "error", path: key, message: `Required array '${key}'${aliases} is missing.` });
-    }
-  }
 
   for (const key of ["exportVersion", "exportedAt", "source"]) {
     if (typeof payload[key] !== "string" || !String(payload[key]).trim()) {
@@ -163,14 +161,6 @@ function validatePayload(payload: AndroidPayload): { issues: ImportIssue[]; summ
     }
   }
 
-  const importCountKeys: Array<{ label: string; key: typeof requiredArrays[number] }> = [
-    { label: "Farms imported", key: "farms" },
-    { label: "Seasons imported", key: "seasons" },
-    { label: "Labour imported", key: "labour" },
-    { label: "Accounts imported", key: "accounts" },
-    { label: "Expenses imported", key: "expenses" },
-    { label: "Expense Items imported", key: "expenseItems" },
-  ];
   const importCounts = importCountKeys.map(({ label, key }) => ({ label, key, count: counts[key] }));
 
   for (const key of requiredArrays) {
@@ -300,6 +290,12 @@ function operationalRecord(entity: string, record: AndroidRecord, sourceType: st
   };
 }
 
+const payloadId = (payload: unknown) => {
+  if (!payload || typeof payload !== "object") return null;
+  const value = (payload as Record<string, unknown>).id;
+  return typeof value === "string" && value.trim() ? value : null;
+};
+
 export async function migrationImportRoutes(app: FastifyInstance): Promise<void> {
   app.post("/v1/admin/migration-import/validate", { preHandler: requirePermission("CREATE_WORKSPACE"), bodyLimit: 50 * 1024 * 1024 }, async (request, reply) => {
     const parsed = payloadSchema.safeParse(request.body);
@@ -327,6 +323,15 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
     const result = await db.transaction(async (tx) => {
       const maps = { farms: new Map<string, string>(), seasons: new Map<string, string>(), labour: new Map<string, string>(), accounts: new Map<string, string>(), partners: new Map<string, string>() };
       let insertedOperationalRecords = 0;
+      const importedCounts: Record<ImportCountKey, number> = {
+        farms: 0,
+        seasons: 0,
+        labour: 0,
+        accounts: 0,
+        expenses: 0,
+        expenseItems: 0,
+        advances: 0,
+      };
 
       for (const source of asArray(parsed.data.payload, "farms")) {
         const marker = `source_type:${sourceTypeFor("farms")};old_android_id:${oldId(source)}`;
@@ -348,6 +353,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
             active: source.active !== false,
             createdBy: userId,
           });
+          importedCounts.farms += 1;
         }
       }
       for (const source of asArray(parsed.data.payload, "seasons")) {
@@ -376,40 +382,43 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
             active: true,
             createdBy: userId,
           });
+          importedCounts.seasons += 1;
         }
       }
 
       const writeRecord = async (entity: string, sourceType: string, source: AndroidRecord, extra: Record<string, unknown> = {}) => {
         const androidId = oldId(source);
-        const [existing] = await tx.select({ id: operationalRecords.id }).from(operationalRecords).where(and(
+        const [existing] = await tx.select({ id: operationalRecords.id, payload: operationalRecords.payload }).from(operationalRecords).where(and(
           eq(operationalRecords.workspaceId, parsed.data.workspaceId),
           eq(operationalRecords.entityType, entity),
           sql`${operationalRecords.payload}->>'source_type' = ${sourceType}`,
           sql`${operationalRecords.payload}->>'old_android_id' = ${androidId}`,
         )).limit(1);
-        if (existing) return;
+        if (existing) return { inserted: false, payloadId: payloadId(existing.payload) };
         const record = operationalRecord(entity, source, sourceType, maps, extra);
-        if (!record.farmId) return;
         record.workspaceId = parsed.data.workspaceId;
         record.recordedBy = userId;
         await tx.insert(operationalRecords).values(record);
         insertedOperationalRecords += 1;
+        return { inserted: true, payloadId: payloadId(record.payload) };
       };
 
       for (const source of asArray(parsed.data.payload, "accounts")) {
         const id = randomUUID();
-        maps.accounts.set(oldId(source), id);
-        await writeRecord("account", sourceTypeFor("accounts"), source, { id, name: text(source, ["name", "accountName"], "Imported Account"), type: text(source, ["type", "accountType"], "cash") });
+        const result = await writeRecord("account", sourceTypeFor("accounts"), source, { id, name: text(source, ["name", "accountName"], "Imported Account"), type: text(source, ["type", "accountType"], "cash") });
+        maps.accounts.set(oldId(source), result.payloadId ?? id);
+        if (result.inserted) importedCounts.accounts += 1;
       }
       for (const source of asArray(parsed.data.payload, "partners")) {
         const id = randomUUID();
-        maps.partners.set(oldId(source), id);
-        await writeRecord("account", sourceTypeFor("partners"), source, { id, name: text(source, ["name", "partnerName"], "Imported Partner"), type: "partner" });
+        const result = await writeRecord("account", sourceTypeFor("partners"), source, { id, name: text(source, ["name", "partnerName"], "Imported Partner"), type: "partner" });
+        maps.partners.set(oldId(source), result.payloadId ?? id);
       }
       for (const source of asArray(parsed.data.payload, "labour")) {
         const id = randomUUID();
-        maps.labour.set(oldId(source), id);
-        await writeRecord("labourer", sourceTypeFor("labour"), source, { id, name: text(source, ["name", "labourName"], "Imported Labour"), dailyWage: numberValue(source, ["dailyWage", "dailyRate", "wage"]), paymentType: text(source, ["paymentType"], "daily_wage"), active: source.active !== false });
+        const result = await writeRecord("labourer", sourceTypeFor("labour"), source, { id, name: text(source, ["name", "labourName"], "Imported Labour"), dailyWage: numberValue(source, ["dailyWage", "dailyRate", "wage"]), paymentType: text(source, ["paymentType"], "daily_wage"), active: source.active !== false });
+        maps.labour.set(oldId(source), result.payloadId ?? id);
+        if (result.inserted) importedCounts.labour += 1;
       }
 
       const expenseItemsByParent = new Map<string, AndroidRecord[]>();
@@ -419,7 +428,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       }
       for (const source of asArray(parsed.data.payload, "expenses")) {
         const items = expenseItemsByParent.get(oldId(source)) ?? [];
-        await writeRecord("voucher", sourceTypeFor("expenses"), source, {
+        const result = await writeRecord("voucher", sourceTypeFor("expenses"), source, {
           voucherNumber: text(source, ["voucherNumber", "voucher_no", "voucher"], `A-${oldId(source)}`),
           date: dateValue(source, ["date", "voucherDate"]),
           amount: numberValue(source, ["total_amount", "totalAmount", "total", "amount", "voucherTotal"]),
@@ -427,15 +436,20 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
           description: text(source, ["description", "notes"], "Imported Android voucher"),
           items: items.map((item) => ({ ...item, source_type: sourceTypeFor("expenseItems"), old_android_id: oldId(item) })),
         });
+        if (result.inserted) {
+          importedCounts.expenses += 1;
+          importedCounts.expenseItems += items.length;
+        }
       }
       for (const source of asArray(parsed.data.payload, "advances")) {
-        await writeRecord("advance", sourceTypeFor("advances"), source, {
+        const result = await writeRecord("advance", sourceTypeFor("advances"), source, {
           date: dateValue(source, ["date", "advanceDate"]),
           amount: numberValue(source, ["amount"]),
           labourerId: maps.labour.get(relation(source, ["labour_id", "labourId", "labour_old_android_id", "labourOldAndroidId"])),
           accountId: maps.accounts.get(relation(source, ["account_id", "accountId", "payment_account_id", "paymentAccountId"])),
           notes: text(source, ["notes", "description"]),
         });
+        if (result.inserted) importedCounts.advances += 1;
       }
       const dispatchItemsByParent = new Map<string, AndroidRecord[]>();
       for (const item of asArray(parsed.data.payload, "dispatchItems")) {
@@ -466,9 +480,14 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         entityType: "migration_import",
         details: { source: validation.summary.source, exportedAt: validation.summary.exportedAt, insertedOperationalRecords },
       });
-      return { insertedOperationalRecords };
+      return {
+        insertedOperationalRecords,
+        importCounts: importCountKeys.map(({ label, key }) => ({ label, key, count: importedCounts[key] })),
+        totalExpenses: validation.summary.totalExpenses,
+        totalAdvances: validation.summary.totalAdvances,
+      } satisfies ImportResult;
     });
 
-    return { ...validation, imported: true, dryRun: false, result };
+    return { ...validation, imported: true, dryRun: false, message: "Migration imported successfully.", result };
   });
 }

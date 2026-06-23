@@ -61,8 +61,6 @@ export function MigrationImport() {
   const [fileName, setFileName] = useState("");
   const [payload, setPayload] = useState<unknown>(null);
   const [fileError, setFileError] = useState("");
-  const [dryRun, setDryRun] = useState(true);
-  const [allowDatabaseWrite, setAllowDatabaseWrite] = useState(false);
   const workspaces = useQuery({
     queryKey: ["admin-workspaces"],
     queryFn: () => fetchAdminWorkspaces(token!),
@@ -75,7 +73,7 @@ export function MigrationImport() {
     mutationFn: () => validateMigrationImport(token!, { workspaceId, payload }),
   });
   const runImport = useMutation({
-    mutationFn: () => importMigrationData(token!, { workspaceId, payload, dryRun, allowDatabaseWrite }),
+    mutationFn: () => importMigrationData(token!, { workspaceId, payload, dryRun: false, allowDatabaseWrite: true }),
   });
 
   const readFile = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -138,13 +136,9 @@ export function MigrationImport() {
           <input accept="application/json,.json" type="file" onChange={(event) => void readFile(event)} />
         </label>
         {fileError ? <p className="worker-action-error">{fileError}</p> : null}
-        <div className="migration-options">
-          <label><input type="checkbox" checked={dryRun} onChange={(event) => setDryRun(event.target.checked)} /> Dry run only</label>
-          <label><input type="checkbox" checked={allowDatabaseWrite} onChange={(event) => setAllowDatabaseWrite(event.target.checked)} /> Allow database write</label>
-        </div>
         <div className="record-list__actions">
           <button type="button" disabled={!canValidate} onClick={() => validate.mutate()}><UploadCloud size={16} />Validate Import</button>
-          <button type="button" disabled={!canImport} onClick={() => runImport.mutate()}><Database size={16} />{dryRun ? "Run Dry Run" : "Import Data"}</button>
+          {validate.data?.canImport ? <button type="button" disabled={!canImport} onClick={() => runImport.mutate()}><Database size={16} />Import Data</button> : null}
         </div>
         {validate.error ? <p className="worker-action-error">{validate.error instanceof Error ? validate.error.message : "Validation failed."}</p> : null}
         {runImport.error ? <p className="worker-action-error">{runImport.error instanceof Error ? runImport.error.message : "Import failed."}</p> : null}
@@ -164,7 +158,16 @@ export function MigrationImport() {
             <BalanceList title="Cash/bank balances" rows={validation.summary.cashBankBalances} />
           </div>
           <IssueList issues={validation.issues} />
-          {runImport.data?.result ? <p className="positive">Inserted operational records: {runImport.data.result.insertedOperationalRecords}</p> : null}
+          {runImport.data?.result ? (
+            <section className="migration-issues">
+              <h3>Import summary</h3>
+              <p className="positive">Migration imported successfully.</p>
+              {runImport.data.result.importCounts.map((item) => <p key={item.key}><b>{item.label}</b> {item.count}</p>)}
+              <p><b>Total expenses</b> {formatMoney(runImport.data.result.totalExpenses)}</p>
+              <p><b>Total advances</b> {formatMoney(runImport.data.result.totalAdvances)}</p>
+              <p><b>Inserted operational records</b> {runImport.data.result.insertedOperationalRecords}</p>
+            </section>
+          ) : null}
         </section>
       ) : null}
     </main>

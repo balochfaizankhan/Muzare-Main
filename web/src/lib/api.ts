@@ -201,7 +201,12 @@ export type MigrationImportValidation = {
   imported?: boolean;
   dryRun?: boolean;
   message?: string;
-  result?: { insertedOperationalRecords: number };
+  result?: {
+    insertedOperationalRecords: number;
+    importCounts: Array<{ label: string; key: string; count: number }>;
+    totalExpenses: number;
+    totalAdvances: number;
+  };
 };
 export type OperationalEntity =
   | "labourer"
