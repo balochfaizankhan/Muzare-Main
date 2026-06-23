@@ -567,6 +567,22 @@ export const importBatches = pgTable(
   ],
 );
 
+export const importFailures = pgTable(
+  "import_failures",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    importBatchId: uuid("import_batch_id").references(() => importBatches.id, { onDelete: "cascade" }).notNull(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+    step: text("step").notNull(),
+    sourceRow: text("source_row"),
+    errorMessage: text("error_message").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("import_failures_batch_step_row_uidx").on(table.importBatchId, table.step, table.sourceRow),
+  ],
+);
+
 export const expenseVoucherSequences = pgTable(
   "expense_voucher_sequences",
   {

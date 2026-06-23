@@ -8,6 +8,7 @@ import { auditLogs, expenseVoucherSequences, operationalRecords, userSessions } 
 import { hasModulePermission, hasPermission, type WorkspaceModule } from "../permissions.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
 import { resolveExpenseCategory } from "./expense-categories.js";
+import { asPayloadRecord, resolveWorkspaceContext } from "./workspace-context.js";
 
 const entities = [
   "labourer",
@@ -347,8 +348,18 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       farmId: null,
       seasonId: null,
     };
-    const selected = await sessionContext(request.sessionId);
-    if (!selected?.activeFarmId) return { records: [], snapshotConfirmed: true, farmId: null, seasonId: null };
+    const selected = await resolveWorkspaceContext(parsed.data.workspaceId, request.sessionId);
+    if (!selected.activeFarmId) {
+      return {
+        records: [],
+        snapshotConfirmed: true,
+        farmId: null,
+        seasonId: null,
+        needsRepair: selected.needsRepair,
+        contextWarning: selected.contextWarning,
+        malformedRecordsSkipped: 0,
+      };
+    }
     const records = await db.select().from(operationalRecords)
       .where(and(
         eq(operationalRecords.workspaceId, parsed.data.workspaceId),
@@ -358,14 +369,33 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
           : isNull(operationalRecords.seasonId),
       ))
       .orderBy(desc(operationalRecords.updatedAt));
+    let malformedRecordsSkipped = 0;
+    const visibleRecords = records
+      .filter((item) => hasModulePermission(request.appUser!, parsed.data.workspaceId, entityModule(item.entityType as typeof entities[number]), "view"))
+      .flatMap((item) => {
+        const payload = asPayloadRecord(item.payload);
+        if (!payload) {
+          malformedRecordsSkipped += 1;
+          return [];
+        }
+        return [{
+          workspaceId: item.workspaceId,
+          farmId: item.farmId,
+          seasonId: item.seasonId,
+          entity: item.entityType,
+          record: { ...payload, id: item.clientRecordId, updatedAt: item.clientUpdatedAt.toISOString() },
+        }];
+      });
     return {
       snapshotConfirmed: true,
       farmId: selected.activeFarmId,
       seasonId: selected.activeSeasonId,
-      records: records.filter((item) => hasModulePermission(request.appUser!, parsed.data.workspaceId, entityModule(item.entityType as typeof entities[number]), "view")).map((item) => ({
-        workspaceId: item.workspaceId, farmId: item.farmId, seasonId: item.seasonId, entity: item.entityType,
-        record: { ...item.payload, id: item.clientRecordId, updatedAt: item.clientUpdatedAt.toISOString() },
-      })),
+      needsRepair: selected.needsRepair,
+      contextWarning: malformedRecordsSkipped
+        ? `Skipped ${malformedRecordsSkipped} malformed imported records while loading operational data.`
+        : selected.contextWarning,
+      malformedRecordsSkipped,
+      records: visibleRecords,
     };
   });
 

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
   BanknoteArrowDown,
@@ -22,7 +22,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { config } from "../config";
 import { calculateAvailableBalance } from "../lib/accounting";
-import { fetchBootstrap } from "../lib/api";
+import { fetchBootstrap, repairWorkspaceContextRequest } from "../lib/api";
 import { formatDate, formatMoney } from "../lib/format";
 import { buildPartnerLiabilityPositions } from "../lib/partnerAccounting";
 import { ensureLocalAccounts, offlineDb, workspaceRecords } from "../lib/offline-db";
@@ -68,6 +68,7 @@ export function DashboardPage() {
   const { t } = useTranslation();
   const { user, token } = useAuth();
   const sync = useSyncState();
+  const client = useQueryClient();
   const [totals, setTotals] = useState<DashboardTotals>({
     presentToday: 0,
     cartonsToday: 0,
@@ -83,6 +84,17 @@ export function DashboardPage() {
     queryFn: () => fetchBootstrap(token!),
     enabled: Boolean(user && token),
     retry: false,
+  });
+  const repairContext = useMutation({
+    mutationFn: async () => repairWorkspaceContextRequest(token!, user!.workspaceId!),
+    onSuccess: async () => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ["bootstrap", user?.workspaceId] }),
+        client.invalidateQueries({ queryKey: ["workspace-farms", user?.workspaceId] }),
+      ]);
+      window.dispatchEvent(new Event("muzare-farm-changed"));
+      window.dispatchEvent(new Event("muzare-season-changed"));
+    },
   });
 
   const loadLocalDashboard = useCallback(async () => {
@@ -206,6 +218,38 @@ export function DashboardPage() {
             </Link>
           </div>
         </section>
+        {query.isError && user?.workspaceId && (
+          <section className="panel">
+            <div className="panel-heading">
+              <div>
+                <h2>{t("common.dashboard")}</h2>
+                <p>Workspace context needs repair</p>
+              </div>
+            </div>
+            <p className="error">{query.error.message}</p>
+            <div className="farm-actions">
+              <button type="button" onClick={() => repairContext.mutate()} disabled={repairContext.isPending}>
+                {repairContext.isPending ? "Repairing..." : "Repair workspace context"}
+              </button>
+            </div>
+            {repairContext.data ? <p className="positive">{repairContext.data.message}</p> : null}
+            {repairContext.error ? <p className="error">{repairContext.error.message}</p> : null}
+          </section>
+        )}
+        {!query.isError && query.data?.contextWarning && (
+          <section className="panel">
+            <p className={query.data.needsRepair ? "error" : "context-message"}>{query.data.contextWarning}</p>
+            {query.data.needsRepair && user?.workspaceId && (
+              <div className="farm-actions">
+                <button type="button" onClick={() => repairContext.mutate()} disabled={repairContext.isPending}>
+                  {repairContext.isPending ? "Repairing..." : "Repair workspace context"}
+                </button>
+              </div>
+            )}
+            {repairContext.data ? <p className="positive">{repairContext.data.message}</p> : null}
+            {repairContext.error ? <p className="error">{repairContext.error.message}</p> : null}
+          </section>
+        )}
         {!season && <p className="context-message">{t("dashboardPage.noActiveSeason")}</p>}
 
         <section className="dashboard-columns">

@@ -32,7 +32,11 @@ export async function buildApp() {
 
   app.setErrorHandler((error, _request, reply) => {
     app.log.error(error);
-    return reply.code(500).send({ message: "Something went wrong. Please try again or contact support." });
+    const statusCode = typeof (error as { statusCode?: number }).statusCode === "number" ? (error as { statusCode: number }).statusCode : 500;
+    const message = error instanceof Error && error.message.trim()
+      ? error.message
+      : "Something went wrong. Please try again or contact support.";
+    return reply.code(statusCode).send({ message });
   });
 
   app.log.info({ allowedOrigins }, "CORS allowed origins");

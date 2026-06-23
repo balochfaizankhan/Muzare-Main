@@ -13,6 +13,7 @@ import {
   fetchWorkspaceFarms,
   fetchWorkspaceProfile,
   requestWorkspaceFarmDeletion,
+  repairWorkspaceContextRequest,
   selectActiveFarm,
   updateWorkspaceProfile,
   updateWorkspaceFarm,
@@ -124,6 +125,10 @@ export function Farms() {
     mutationFn: ({ farmId, reason }: { farmId: string; reason?: string }) => requestWorkspaceFarmDeletion(token!, workspaceId, farmId, { reason }),
     onSuccess: refresh,
   });
+  const repairContext = useMutation({
+    mutationFn: () => repairWorkspaceContextRequest(token!, workspaceId),
+    onSuccess: refresh,
+  });
   const select = useMutation({
     mutationFn: (farmId: string) => selectActiveFarm(token!, workspaceId, farmId),
     onSuccess: refresh,
@@ -193,6 +198,20 @@ export function Farms() {
 
         {farms.isLoading && <p className="context-message">{t("farmsPage.loadingFarms")}</p>}
         {farms.isError && <p className="error">{farms.error.message}</p>}
+        {farms.data?.contextWarning && (
+          <section className="record-panel">
+            <p className={farms.data.needsRepair ? "error" : "context-message"}>{farms.data.contextWarning}</p>
+            {farms.data.needsRepair && canManage && (
+              <div className="farm-actions">
+                <button type="button" onClick={() => repairContext.mutate()} disabled={repairContext.isPending}>
+                  {repairContext.isPending ? "Repairing..." : "Repair workspace context"}
+                </button>
+              </div>
+            )}
+            {repairContext.data ? <p className="positive">{repairContext.data.message}</p> : null}
+            {repairContext.isError ? <p className="error">{repairContext.error.message}</p> : null}
+          </section>
+        )}
         {farms.data && (
           <section className="farm-grid">
             {farms.data.farms.map((farm) => {

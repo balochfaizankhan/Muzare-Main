@@ -94,6 +94,7 @@ export default function App() {
       <Route path="billing" element={<Billing />} />
       <Route path="audit-logs" element={<AuditLogs />} />
       <Route path="migration-import" element={<MigrationImport />} />
+      <Route path="imports/:jobId" element={<MigrationImport />} />
       <Route path="reports" element={<AdminSection title={t("layout.reports")} description={t("adminSections.reportsDescription")} emptyDescription={t("adminSections.reportsDescription")} />} />
       <Route path="settings" element={<Settings />} />
       <Route path="approvals" element={<AdminApprovalsPage />} />

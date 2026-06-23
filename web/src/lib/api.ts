@@ -67,6 +67,8 @@ export type BootstrapData = {
   activeSeasonId: string | null;
   farms: Farm[];
   seasons: Season[];
+  needsRepair?: boolean;
+  contextWarning?: string | null;
 };
 
 export type Farm = {
@@ -298,6 +300,30 @@ export type MigrationImportBatchRecord = {
   summaryJson: unknown;
   errorJson: unknown;
 };
+export type MigrationImportFailureRecord = {
+  id: string;
+  step: string;
+  sourceRow: string | null;
+  errorMessage: string;
+  createdAt: string;
+};
+export type MigrationImportJobDetail = {
+  jobId: string;
+  status: string;
+  currentStep: string;
+  message: string;
+  error: string;
+  stack: string;
+  failedRows: number;
+  importedRows: number;
+  updatedRows: number;
+  skippedRows: number;
+  firstFailureMessage: string;
+  startedAt: string;
+  completedAt: string | null;
+  steps: MigrationImportJobStatus["steps"];
+  failures: MigrationImportFailureRecord[];
+};
 export type MigrationVisibilityRepairResult = {
   repairedRecords: number;
   activeFarmId: string;
@@ -330,6 +356,18 @@ export type OperationalSnapshot = {
   snapshotConfirmed: boolean;
   farmId: string | null;
   seasonId: string | null;
+  needsRepair?: boolean;
+  contextWarning?: string | null;
+  malformedRecordsSkipped?: number;
+};
+export type WorkspaceContextRepairResult = {
+  repairedRecords: number;
+  activeFarmId: string | null;
+  activeSeasonId: string | null;
+  activeFarmName: string | null;
+  activeSeasonName: string | null;
+  contextWarning: string | null;
+  message: string;
 };
 export type AttendanceReportStatus = "present" | "half_day" | "absent";
 export type AttendanceReportRecord = {
@@ -566,7 +604,7 @@ export const fetchWorkspaceApprovals = (token: string, workspaceId: string) =>
 export const decideWorkspaceApproval = (token: string, workspaceId: string, approvalId: string, decision: "approved" | "rejected", note?: string) =>
   apiRequest<void>("/v1/workspace/approvals/decision", { method: "POST", body: JSON.stringify({ workspaceId, approvalId, decision, note }) }, token);
 export const fetchWorkspaceFarms = (token: string, workspaceId: string) =>
-  apiRequest<{ farms: Farm[]; activeFarmId: string | null }>(`/v1/workspace/${workspaceId}/farms`, {}, token);
+  apiRequest<{ farms: Farm[]; activeFarmId: string | null; needsRepair?: boolean; contextWarning?: string | null }>(`/v1/workspace/${workspaceId}/farms`, {}, token);
 export const createWorkspaceFarm = (token: string, workspaceId: string, input: FarmInput) =>
   apiRequest<{ farm: Farm }>(`/v1/workspace/${workspaceId}/farms`, { method: "POST", body: JSON.stringify(input) }, token);
 export const updateWorkspaceFarm = (token: string, workspaceId: string, farmId: string, input: FarmInput) =>
@@ -579,6 +617,8 @@ export const requestWorkspaceFarmDeletion = (token: string, workspaceId: string,
   apiRequest<{ request: unknown }>(`/v1/workspace/${workspaceId}/farms/${farmId}/delete-request`, { method: "POST", body: JSON.stringify(input) }, token);
 export const selectActiveFarm = (token: string, workspaceId: string, farmId: string) =>
   apiRequest<void>(`/v1/workspace/${workspaceId}/farms/${farmId}/select`, { method: "POST" }, token);
+export const repairWorkspaceContextRequest = (token: string, workspaceId: string) =>
+  apiRequest<WorkspaceContextRepairResult>(`/v1/workspace/${workspaceId}/repair-context`, { method: "POST" }, token, { timeoutMs: 60_000, debugLabel: "workspace-repair-context" });
 export const fetchFarmSeasons = (token: string, workspaceId: string, farmId: string) =>
   apiRequest<{ seasons: Season[]; activeSeasonId: string | null }>(`/v1/workspace/${workspaceId}/farms/${farmId}/seasons`, {}, token);
 export const createFarmSeason = (token: string, workspaceId: string, farmId: string, input: SeasonInput) =>
@@ -622,6 +662,8 @@ export const importMigrationData = (token: string, input: { workspaceId: string;
   apiRequest<MigrationImportValidation>("/v1/admin/migration-import/imports/start", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 120_000, debugLabel: "migration-import-import" });
 export const fetchMigrationImportJobStatus = (token: string, jobId: string) =>
   apiRequest<{ job: MigrationImportJobStatus }>(`/v1/admin/migration-import/imports/status/${encodeURIComponent(jobId)}`, {}, token, { timeoutMs: 30_000, debugLabel: "migration-import-job-status" });
+export const fetchMigrationImportJobDetail = (token: string, jobId: string) =>
+  apiRequest<MigrationImportJobDetail>(`/v1/admin/migration-imports/${encodeURIComponent(jobId)}`, {}, token, { timeoutMs: 30_000, debugLabel: "migration-import-job-detail" });
 export const fetchActiveMigrationImportJob = (token: string, workspaceId: string) =>
   apiRequest<{ job: MigrationImportJobStatus | null }>(`/v1/admin/migration-import/imports/active?workspaceId=${encodeURIComponent(workspaceId)}`, {}, token, { timeoutMs: 30_000, debugLabel: "migration-import-active-job" });
 export const fetchMigrationImportBatches = (token: string, workspaceId: string) =>
@@ -735,6 +777,25 @@ export async function openExpenseAttachment(token: string, workspaceId: string, 
   const url = URL.createObjectURL(blob);
   window.open(url, "_blank", "noopener,noreferrer");
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+export async function downloadMigrationImportFailures(token: string, jobId: string): Promise<void> {
+  const response = await fetch(`${config.apiUrl}/v1/admin/migration-imports/${encodeURIComponent(jobId)}/failures.csv`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { message?: string } | null;
+    throw new ApiError(body?.message ?? "Unable to download migration import failures.", response.status);
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `migration-import-failures-${jobId}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 export const fetchFarmOperationsDashboard = (token: string, workspaceId: string, farmId: string, seasonId?: string | null) => {
   const query = new URLSearchParams();

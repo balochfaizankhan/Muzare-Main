@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Database, FileJson, ShieldAlert, UploadCloud } from "lucide-react";
 import { useAuth } from "../../auth/AuthProvider";
-import { fetchActiveMigrationImportJob, fetchAdminWorkspaces, fetchMigrationImportBatches, fetchMigrationImportHistory, fetchMigrationImportJobStatus, importMigrationData, markMigrationImportBatchClosed, repairMigrationImportVisibility, retryMigrationAttendance, rollbackMigrationImportBatch, validateMigrationImport, type MigrationImportBatchRecord, type MigrationImportHistoryRecord, type MigrationImportIssue, type MigrationImportJobStatus, type MigrationImportLogEntry, type MigrationImportSummary } from "../../lib/api";
+import { Link, useParams } from "react-router-dom";
+import { downloadMigrationImportFailures, fetchActiveMigrationImportJob, fetchAdminWorkspaces, fetchMigrationImportBatches, fetchMigrationImportHistory, fetchMigrationImportJobDetail, fetchMigrationImportJobStatus, importMigrationData, markMigrationImportBatchClosed, repairMigrationImportVisibility, retryMigrationAttendance, rollbackMigrationImportBatch, validateMigrationImport, type MigrationImportBatchRecord, type MigrationImportHistoryRecord, type MigrationImportIssue, type MigrationImportJobDetail, type MigrationImportJobStatus, type MigrationImportLogEntry, type MigrationImportSummary } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 
 function SummaryGrid({ summary }: { summary: MigrationImportSummary }) {
@@ -108,6 +109,36 @@ function CurrentImportPanel({ job }: { job: MigrationImportJobStatus }) {
   );
 }
 
+function JobErrorPanel({ detail, onDownloadFailures }: { detail: MigrationImportJobDetail; onDownloadFailures: () => void }) {
+  const lastSuccessfulStep = [...detail.steps].reverse().find((step) => step.status === "completed")?.name ?? "-";
+  return (
+    <section className="migration-issues">
+      <h3>{detail.currentStep || "Import Failure"}</h3>
+      <p className="worker-action-error">{detail.error || detail.message || detail.firstFailureMessage || "Import failed."}</p>
+      <p><b>Job ID</b> {detail.jobId}</p>
+      <p><b>Current Step</b> {detail.currentStep}</p>
+      <p><b>Last Successful Step</b> {lastSuccessfulStep}</p>
+      <p><b>Processed</b> {detail.importedRows + detail.updatedRows + detail.skippedRows} / {detail.steps.reduce((sum, step) => sum + step.total, 0)}</p>
+      <p><b>Imported</b> {detail.importedRows} · <b>Updated</b> {detail.updatedRows} · <b>Skipped</b> {detail.skippedRows} · <b>Failed</b> {detail.failedRows}</p>
+      {detail.firstFailureMessage ? <p><b>First failure</b> {detail.firstFailureMessage}</p> : null}
+      {detail.completedAt ? <p><b>Failed at</b> {new Date(detail.completedAt).toLocaleString()}</p> : null}
+      <div className="record-list__actions">
+        <button type="button" className="secondary-button" onClick={onDownloadFailures}>Download Failure CSV</button>
+      </div>
+      {detail.failures.slice(0, 10).length ? (
+        <div>
+          <h4>Failure details</h4>
+          {detail.failures.slice(0, 10).map((failure) => (
+            <p key={failure.id}>
+              <b>{failure.step}</b> {failure.sourceRow ? `· row ${failure.sourceRow}` : ""} · {failure.errorMessage}
+            </p>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function IssueList({ issues }: { issues: MigrationImportIssue[] }) {
   const [showDetails, setShowDetails] = useState(false);
   const errors = issues.filter((issue) => issue.level === "error");
@@ -189,6 +220,7 @@ function ImportHistory({ records }: { records: MigrationImportHistoryRecord[] })
                 {typeof details.skippedRows === "number" ? ` · skipped ${details.skippedRows}` : ""}
                 {typeof details.failedRows === "number" ? ` · failed ${details.failedRows}` : ""}
                 {details.message ? ` · ${details.message}` : ""}
+                {batch !== "-" ? <> · <Link to={`/admin/imports/${batch}`}>View Details</Link></> : null}
               </p>
             );
           })}
@@ -240,6 +272,7 @@ function LatestBatchPanel({
 
 export function MigrationImport() {
   const { token } = useAuth();
+  const { jobId: routeJobId } = useParams();
   const queryClient = useQueryClient();
   const [workspaceId, setWorkspaceId] = useState("");
   const currentJobStorageKey = workspaceId ? `migration-import-current-job:${workspaceId}` : "";
@@ -295,6 +328,15 @@ export function MigrationImport() {
     refetchInterval: (query) => {
       const status = query.state.data?.job.status;
       return status === "completed" || status === "failed" ? false : 2000;
+    },
+  });
+  const jobDetail = useQuery({
+    queryKey: ["admin-migration-import-job-detail", routeJobId],
+    queryFn: () => fetchMigrationImportJobDetail(token!, routeJobId!),
+    enabled: Boolean(token && routeJobId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "running" || status === "queued" ? 2000 : false;
     },
   });
   const repairVisibility = useMutation({
@@ -428,6 +470,8 @@ export function MigrationImport() {
         {repairVisibility.data ? <p className="positive">{repairVisibility.data.message} Repaired records: {repairVisibility.data.repairedRecords}.</p> : null}
       </section>
 
+      {jobDetail.data ? <JobErrorPanel detail={jobDetail.data} onDownloadFailures={() => void downloadMigrationImportFailures(token!, jobDetail.data!.jobId)} /> : null}
+      {jobDetail.error ? <p className="worker-action-error">{jobDetail.error instanceof Error ? jobDetail.error.message : "Could not load import job details."}</p> : null}
       {currentImportJob ? <CurrentImportPanel job={currentImportJob} /> : null}
       {latestBatch ? (
         <LatestBatchPanel

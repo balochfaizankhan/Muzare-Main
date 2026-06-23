@@ -6,6 +6,7 @@ import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { auditLogs, farmDeletionRequests, farms, operationalRecords, seasons, userSessions } from "../db/schema.js";
 import { hasPermission } from "../permissions.js";
+import { repairWorkspaceContext, resolveWorkspaceContext } from "./workspace-context.js";
 
 const workspaceParams = z.object({ workspaceId: z.string().uuid() });
 const farmParams = workspaceParams.extend({ farmId: z.string().uuid() });
@@ -97,9 +98,7 @@ export async function workspaceFarmRoutes(app: FastifyInstance): Promise<void> {
     }
     if (localDevelopmentMode) return { farms: [], activeFarmId: null };
     const records = await db.select().from(farms).where(and(eq(farms.workspaceId, parsed.data.workspaceId), isNull(farms.deletedAt))).orderBy(farms.name);
-    const [session] = request.sessionId
-      ? await db.select({ activeFarmId: userSessions.activeFarmId }).from(userSessions).where(eq(userSessions.id, request.sessionId)).limit(1)
-      : [];
+    const context = await resolveWorkspaceContext(parsed.data.workspaceId, request.sessionId);
     const pendingRequests = await db.select({
       farmId: farmDeletionRequests.farmId,
       status: farmDeletionRequests.status,
@@ -110,8 +109,24 @@ export async function workspaceFarmRoutes(app: FastifyInstance): Promise<void> {
     const pendingByFarm = new Map(pendingRequests.map((request) => [request.farmId, request.status]));
     return {
       farms: records.map((farm) => ({ ...visibleFarm(farm), deletionRequestStatus: pendingByFarm.get(farm.id) ?? null })),
-      activeFarmId: session?.activeFarmId ?? null,
+      activeFarmId: context.activeFarmId,
+      needsRepair: context.needsRepair,
+      contextWarning: context.contextWarning,
     };
+  });
+
+  app.post("/v1/workspace/:workspaceId/repair-context", { preHandler: requireUser }, async (request, reply) => {
+    if (!request.appUser) return reply;
+    const parsed = workspaceParams.safeParse(request.params);
+    if (!parsed.success || !requireSelectedWorkspace(request, parsed.data.workspaceId)) {
+      return reply.code(403).send({ message: "Select this workspace before repairing context." });
+    }
+    if (!canManage(request, parsed.data.workspaceId) && !hasPermission(request.appUser, "MANAGE_SEASONS", parsed.data.workspaceId) && !hasPermission(request.appUser, "MANAGE_RECORDS", parsed.data.workspaceId)) {
+      return reply.code(403).send({ message: "Workspace management permission is required to repair workspace context." });
+    }
+    if (localDevelopmentMode) return reply.code(503).send({ message: "Configure PostgreSQL to repair workspace context." });
+    const result = await repairWorkspaceContext(parsed.data.workspaceId, request.appUser.id, request.sessionId);
+    return result;
   });
 
   app.post("/v1/workspace/:workspaceId/farms", { preHandler: requireUser }, async (request, reply) => {

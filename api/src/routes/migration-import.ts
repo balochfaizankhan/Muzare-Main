@@ -5,7 +5,7 @@ import { z } from "zod";
 import { requirePermission } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
-import { auditLogs, farms, importBatches, operationalRecords, seasons, userSessions, workspaces } from "../db/schema.js";
+import { auditLogs, farms, importBatches, importFailures, operationalRecords, seasons, userSessions, workspaces } from "../db/schema.js";
 
 const requiredArrays = [
   "farms",
@@ -159,6 +159,9 @@ type AttendanceImportJobStatus = {
   startedAt: string;
   lastProgressAt: string;
   completedAt?: string;
+  error?: string;
+  stack?: string;
+  firstFailureMessage?: string;
   steps: ImportJobStep[];
   logs: ImportLogEntry[];
 };
@@ -583,6 +586,62 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
     };
   });
 
+  app.get("/v1/admin/migration-imports/:jobId", { preHandler: requirePermission("CREATE_WORKSPACE") }, async (request, reply) => {
+    const parsed = jobParamsSchema.safeParse(request.params);
+    if (!parsed.success) return reply.code(400).send({ message: "A valid import job id is required." });
+    const [batch] = await db.select().from(importBatches).where(eq(importBatches.id, parsed.data.jobId)).limit(1);
+    if (!batch) return reply.code(404).send({ message: "Import job not found." });
+    const failures = await db.select().from(importFailures)
+      .where(eq(importFailures.importBatchId, parsed.data.jobId))
+      .orderBy(sql`${importFailures.createdAt} ASC`)
+      .limit(500);
+    const liveJob = attendanceImportJobs.get(parsed.data.jobId);
+    const summary = batch.summaryJson && typeof batch.summaryJson === "object" ? batch.summaryJson as Record<string, unknown> : {};
+    const job = liveJob ?? (summary.job && typeof summary.job === "object" ? summary.job as AttendanceImportJobStatus : null);
+    return {
+      jobId: batch.id,
+      status: liveJob?.status ?? batch.status,
+      currentStep: liveJob?.currentStep ?? job?.currentStep ?? "Unknown",
+      message: liveJob?.message ?? job?.message ?? ((batch.errorJson && typeof batch.errorJson === "object" ? (batch.errorJson as Record<string, unknown>).message : null) as string | null) ?? "",
+      error: liveJob?.error ?? job?.error ?? ((batch.errorJson && typeof batch.errorJson === "object" ? (batch.errorJson as Record<string, unknown>).error : null) as string | null) ?? "",
+      stack: liveJob?.stack ?? job?.stack ?? ((batch.errorJson && typeof batch.errorJson === "object" ? (batch.errorJson as Record<string, unknown>).stack : null) as string | null) ?? "",
+      failedRows: liveJob?.failedRows ?? job?.failedRows ?? failures.length,
+      importedRows: liveJob?.importedRows ?? job?.importedRows ?? 0,
+      updatedRows: liveJob?.updatedRows ?? job?.updatedRows ?? 0,
+      skippedRows: liveJob?.skippedRows ?? job?.skippedRows ?? 0,
+      firstFailureMessage: liveJob?.firstFailureMessage ?? job?.firstFailureMessage ?? failures[0]?.errorMessage ?? "",
+      startedAt: liveJob?.startedAt ?? job?.startedAt ?? batch.startedAt.toISOString(),
+      completedAt: liveJob?.completedAt ?? job?.completedAt ?? batch.completedAt?.toISOString() ?? null,
+      steps: liveJob?.steps ?? job?.steps ?? ((summary.steps as ImportJobStep[] | undefined) ?? []),
+      failures: failures.map((failure) => ({
+        id: failure.id,
+        step: failure.step,
+        sourceRow: failure.sourceRow,
+        errorMessage: failure.errorMessage,
+        createdAt: failure.createdAt.toISOString(),
+      })),
+    };
+  });
+
+  app.get("/v1/admin/migration-imports/:jobId/failures.csv", { preHandler: requirePermission("CREATE_WORKSPACE") }, async (request, reply) => {
+    const parsed = jobParamsSchema.safeParse(request.params);
+    if (!parsed.success) return reply.code(400).send({ message: "A valid import job id is required." });
+    const failures = await db.select().from(importFailures)
+      .where(eq(importFailures.importBatchId, parsed.data.jobId))
+      .orderBy(sql`${importFailures.createdAt} ASC`);
+    const csv = [
+      "sourceRow,step,reason",
+      ...failures.map((failure) => [
+        JSON.stringify(failure.sourceRow ?? ""),
+        JSON.stringify(failure.step),
+        JSON.stringify(failure.errorMessage),
+      ].join(",")),
+    ].join("\n");
+    reply.header("Content-Type", "text/csv; charset=utf-8");
+    reply.header("Content-Disposition", `attachment; filename=\"migration-import-failures-${parsed.data.jobId}.csv\"`);
+    return csv;
+  });
+
   app.get("/v1/admin/migration-import/imports/status/:jobId", { preHandler: requirePermission("CREATE_WORKSPACE") }, async (request, reply) => {
     const parsed = jobParamsSchema.safeParse(request.params);
     if (!parsed.success) return reply.code(400).send({ message: "A valid import job id is required." });
@@ -756,6 +815,18 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       if (!step) return;
       Object.assign(step, patch);
       updateJob({});
+    };
+    const recordFailure = async (step: string, sourceRow: string | null | undefined, errorMessage: string) => {
+      if (!importJob.firstFailureMessage) updateJob({ firstFailureMessage: errorMessage, error: errorMessage });
+      await db.insert(importFailures).values({
+        importBatchId,
+        workspaceId: parsed.data.workspaceId,
+        step,
+        sourceRow: sourceRow ?? null,
+        errorMessage,
+      }).onConflictDoNothing({
+        target: [importFailures.importBatchId, importFailures.step, importFailures.sourceRow],
+      }).catch((error) => console.error(`[MIGRATION IMPORT ${importBatchId}] failed to persist import failure`, error));
     };
     attendanceImportJobs.set(importJob.jobId, importJob);
     const logStep = async (step: string, status: ImportLogEntry["status"], details: Omit<ImportLogEntry, "step" | "status" | "createdAt"> = {}) => {
@@ -1169,7 +1240,9 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         const labourerId = resolveLabourId(source);
         if (!labourerId) {
           skippedAdvances += 1;
-          advanceFailures.push(`${oldId(source) || "unknown"}: missing mapped labour`);
+          const message = `${oldId(source) || "unknown"}: missing mapped labour`;
+          advanceFailures.push(message);
+          await recordFailure("IMPORT ADVANCES", String(oldId(source) || "unknown"), message);
           continue;
         }
         try {
@@ -1184,7 +1257,9 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
           if (result.updated) updatedAdvances += 1;
         } catch (error) {
           skippedAdvances += 1;
-          advanceFailures.push(`${oldId(source) || "unknown"}: ${readableImportError(error)}`);
+          const message = `${oldId(source) || "unknown"}: ${readableImportError(error)}`;
+          advanceFailures.push(message);
+          await recordFailure("IMPORT ADVANCES", String(oldId(source) || "unknown"), message);
         }
       }
       updateJobStep("Advances", {
@@ -1248,17 +1323,19 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
             updateJob({ currentRow });
             const labourerId = resolveLabourId(source);
             if (!labourerId) {
+              const failureMessage = `${currentRow}: missing mapped labour`;
               updateJob({
                 processedRows: importJob.processedRows + 1,
                 skippedRows: importJob.skippedRows + 1,
                 failedRows: importJob.failedRows + 1,
-                message: `${currentRow}: missing mapped labour`,
+                message: failureMessage,
               });
+              await recordFailure("IMPORT ATTENDANCE", currentRow, failureMessage);
               updateJobStep("Attendance", {
                 processed: importJob.processedRows,
                 skipped: importJob.skippedRows,
                 failed: importJob.failedRows,
-                message: `${currentRow}: missing mapped labour`,
+                message: failureMessage,
               });
               continue;
             }
@@ -1283,17 +1360,19 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
                 updated: importJob.updatedRows,
               });
             } catch (error) {
+              const failureMessage = `${currentRow}: ${readableImportError(error)}`;
               updateJob({
                 processedRows: importJob.processedRows + 1,
                 skippedRows: importJob.skippedRows + 1,
                 failedRows: importJob.failedRows + 1,
-                message: `${currentRow}: ${readableImportError(error)}`,
+                message: failureMessage,
               });
+              await recordFailure("IMPORT ATTENDANCE", currentRow, failureMessage);
               updateJobStep("Attendance", {
                 processed: importJob.processedRows,
                 skipped: importJob.skippedRows,
                 failed: importJob.failedRows,
-                message: `${currentRow}: ${readableImportError(error)}`,
+                message: failureMessage,
               });
             }
             if (Date.now() - lastHangingLogAt > 30_000) {
@@ -1368,7 +1447,8 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       };
       void runAttendanceJob().catch(async (error) => {
         const message = error instanceof Error ? error.message : "Unknown attendance import failure.";
-        updateJob({ status: "failed", currentStep: "IMPORT ATTENDANCE failed", completedAt: new Date().toISOString(), message });
+        updateJob({ status: "failed", currentStep: "IMPORT ATTENDANCE failed", completedAt: new Date().toISOString(), message, error: message, stack: error instanceof Error ? error.stack : undefined });
+        await recordFailure("IMPORT ATTENDANCE", importJob.currentRow, message);
         updateJobStep("Attendance", { status: "failed", completedAt: new Date().toISOString(), message });
         await logStep("IMPORT ATTENDANCE", "failed", {
           sourceRows: attendanceRows.length,
@@ -1445,7 +1525,8 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       })(db);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown import failure.";
-      updateJob({ status: "failed", currentStep, completedAt: new Date().toISOString(), message });
+      updateJob({ status: "failed", currentStep, completedAt: new Date().toISOString(), message, error: message, stack: error instanceof Error ? error.stack : undefined });
+      await recordFailure(currentStep, null, message);
       await logStep(currentStep, "failed", { message, failedRows: 1 });
       return reply.code(500).send({ message: `${currentStep} failed: ${message}`, issues: validation.issues, summary: validation.summary, logs });
     }
