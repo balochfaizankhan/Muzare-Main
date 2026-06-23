@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { CalendarDays, ChevronDown, ChevronRight, Eye, MoreVertical, Pencil, Search, Trash2, X } from "lucide-react";
+import { CalendarDays, Camera, ChevronDown, ChevronRight, Eye, FileText, ImageIcon, MoreVertical, Paperclip, Pencil, Search, Trash2, UploadCloud, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -12,7 +12,7 @@ import { useSyncState } from "../hooks/useSyncState";
 import { calculateAccountBalance } from "../lib/accounting";
 import { defaultTransactionGroupExpansion, groupAccountTransactions, type AccountTransactionGroupKey } from "../lib/accountTransactionGroups";
 import { attendanceStatusKey, buildAttendanceStatusMap, previousLocalDateKey, todayLocalDateKey } from "../lib/attendanceStatus";
-import { confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteOrDeactivateLabour, fetchExpenseCategories, fetchLabourDeletionPreview, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type LabourDeletionPreview } from "../lib/api";
+import { confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteExpenseAttachment, deleteOrDeactivateLabour, extractExpenseReceipt, fetchExpenseAttachments, fetchExpenseCategories, fetchLabourDeletionPreview, openExpenseAttachment, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, uploadExpenseAttachment, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type ExpenseAttachment, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type ExpenseOcrSuggestion, type LabourDeletionPreview } from "../lib/api";
 import { buildDispatchAvailability, dispatchCartons, dispatchItemKey, resolveSaleType, saleProduceLabel, soldQuantityByDispatchItem } from "../lib/dispatch-sales";
 import { hasPermission } from "../lib/permissions";
 import { translateExpenseCategory, translateExpenseSubcategory, translatePaymentType, translateSaleType, translateSalesStatus } from "../lib/systemTranslations";
@@ -1302,6 +1302,58 @@ function ExpenseImportPanel({ token, workspaceId, farmId, seasonId, onClose, onI
   </section></div>;
 }
 
+type PendingReceipt = { id: string; file: File; previewUrl?: string };
+const receiptTypes = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
+const receiptMaxSize = 10 * 1024 * 1024;
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
+    reader.onerror = () => reject(reader.error ?? new Error("Unable to read receipt file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function ReceiptAttachmentPicker({ pending, onFiles, onRemove }: { pending: PendingReceipt[]; onFiles: (files: FileList | null) => void; onRemove: (id: string) => void }) {
+  const { t } = useTranslation();
+  return (
+    <section className="receipt-attachment-card">
+      <header><div><h3>{t("expensesPage.receiptAttachment")}</h3><p>{t("expensesPage.receiptOptional")}</p></div><Paperclip size={18} /></header>
+      <div className="receipt-actions">
+        <label><Camera size={16} />{t("expensesPage.takeReceiptPhoto")}<input accept="image/jpeg,image/png,image/webp" capture="environment" type="file" onChange={(event) => onFiles(event.target.files)} /></label>
+        <label><UploadCloud size={16} />{t("expensesPage.uploadReceipt")}<input accept=".jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf" multiple type="file" onChange={(event) => onFiles(event.target.files)} /></label>
+      </div>
+      {pending.length ? <div className="receipt-preview-grid">{pending.map((item) => (
+        <article key={item.id}>
+          {item.previewUrl ? <img alt={item.file.name} src={item.previewUrl} /> : <FileText size={28} />}
+          <div><strong>{item.file.name}</strong><small>{Math.round(item.file.size / 1024)} KB</small></div>
+          <button aria-label={t("common.delete")} type="button" onClick={() => onRemove(item.id)}><X size={14} /></button>
+        </article>
+      ))}</div> : null}
+    </section>
+  );
+}
+
+function ReceiptAttachmentList({ attachments, onOpen, onDelete, onExtract, ocrResult }: { attachments: ExpenseAttachment[]; onOpen: (item: ExpenseAttachment) => void; onDelete?: (item: ExpenseAttachment) => void; onExtract?: (item: ExpenseAttachment) => void; ocrResult?: ExpenseOcrSuggestion | null }) {
+  const { t } = useTranslation();
+  return (
+    <section className="receipt-detail-card">
+      <h3>{t("expensesPage.receiptAttachment")}</h3>
+      {!attachments.length ? <p className="activity-empty">{t("expensesPage.missingReceipt")}</p> : attachments.map((item) => (
+        <article key={item.id}>
+          <span>{item.fileType.startsWith("image/") ? <ImageIcon size={18} /> : <FileText size={18} />}</span>
+          <div><strong>{item.fileName}</strong><small>{Math.round(item.fileSize / 1024)} KB · {item.fileType}</small></div>
+          <button type="button" onClick={() => onOpen(item)}>{t("common.view")}</button>
+          {onExtract && <button type="button" onClick={() => onExtract(item)}>{t("expensesPage.extractFromReceipt")}</button>}
+          {onDelete && <button className="danger-link" type="button" onClick={() => onDelete(item)}>{t("common.delete")}</button>}
+        </article>
+      ))}
+      {ocrResult ? <div className="receipt-ocr-result"><strong>{t("expensesPage.suggestedExpenseData")}</strong><p>{ocrResult.message}</p><small>{t("expensesPage.confidence")}: {ocrResult.confidence}</small></div> : null}
+    </section>
+  );
+}
+
 function ExpensesModule() {
   const { t } = useTranslation();
   const { token, user } = useAuth();
@@ -1325,6 +1377,11 @@ function ExpensesModule() {
   const [selectedVoucher, setSelectedVoucher] = useState<Voucher | null>(null);
   const [editingVoucher, setEditingVoucher] = useState<Voucher | null>(null);
   const [showExpenseImport, setShowExpenseImport] = useState(false);
+  const [pendingReceipts, setPendingReceipts] = useState<PendingReceipt[]>([]);
+  const [receiptError, setReceiptError] = useState("");
+  const [detailAttachments, setDetailAttachments] = useState<ExpenseAttachment[]>([]);
+  const [detailOcr, setDetailOcr] = useState<ExpenseOcrSuggestion | null>(null);
+  const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [voucherSearch, setVoucherSearch] = useState("");
   const [debouncedVoucherSearch, setDebouncedVoucherSearch] = useState("");
   const [voucherFrom, setVoucherFrom] = useState("");
@@ -1336,12 +1393,17 @@ function ExpensesModule() {
   const resetForm = () => {
     setDate(today()); setCategoryId(""); setCategorySearch(""); setSubcategoryId(""); setSubcategorySearch("");
     setDescription(""); setAmount(""); setAccountId(""); setNotes("");
+    pendingReceipts.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl));
+    setPendingReceipts([]);
+    setReceiptError("");
   };
   const openEdit = (voucher: Voucher) => {
     setSelectedVoucher(null); setEditingVoucher(voucher); setDate(voucher.date); setCategoryId(voucher.categoryId);
     setCategorySearch(voucher.category); setSubcategoryId(voucher.subcategoryId); setSubcategorySearch(voucher.subcategory);
     setDescription(voucher.description); setAmount(String(voucher.amount)); setAccountId(voucher.accountId);
     setNotes(voucher.notes ?? "");
+    setPendingReceipts([]);
+    setReceiptError("");
   };
   const nextLocalVoucherNumber = () => {
     const highest = vouchers.reduce((max, item) => {
@@ -1350,6 +1412,57 @@ function ExpensesModule() {
     }, 0);
     return `V-${String(highest + 1).padStart(4, "0")}`;
   };
+  const addReceiptFiles = (files: FileList | null) => {
+    if (!files) return;
+    setReceiptError("");
+    const next: PendingReceipt[] = [];
+    for (const file of Array.from(files)) {
+      if (!receiptTypes.has(file.type)) {
+        setReceiptError(t("expensesPage.receiptTypeError"));
+        continue;
+      }
+      if (file.size > receiptMaxSize) {
+        setReceiptError(t("expensesPage.receiptSizeError"));
+        continue;
+      }
+      next.push({ id: crypto.randomUUID(), file, previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined });
+    }
+    setPendingReceipts((current) => [...current, ...next]);
+  };
+  const removePendingReceipt = (id: string) => {
+    setPendingReceipts((current) => {
+      const target = current.find((item) => item.id === id);
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      return current.filter((item) => item.id !== id);
+    });
+  };
+  const uploadPendingReceipts = async (expenseId: string) => {
+    if (!pendingReceipts.length) return;
+    if (!navigator.onLine || !token) {
+      showToast(t("expensesPage.receiptUploadRequiresInternet"));
+      return;
+    }
+    for (const item of pendingReceipts) {
+      await uploadExpenseAttachment(token, workspaceId, expenseId, {
+        farmId,
+        seasonId,
+        fileName: item.file.name,
+        fileType: item.file.type,
+        fileSize: item.file.size,
+        contentBase64: await fileToBase64(item.file),
+      });
+    }
+  };
+  const loadVoucherAttachments = useCallback(async (voucher: Voucher | null) => {
+    setDetailOcr(null);
+    if (!voucher || !token || !workspaceId) { setDetailAttachments([]); return; }
+    try {
+      const response = await fetchExpenseAttachments(token, workspaceId, voucher.id);
+      setDetailAttachments(response.attachments);
+    } catch {
+      setDetailAttachments([]);
+    }
+  }, [token, workspaceId]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -1363,6 +1476,7 @@ function ExpensesModule() {
       notes: notes.trim() || undefined,
     };
     await persistOperationalRecord("voucher", record);
+    await uploadPendingReceipts(record.id);
     showToast(editingVoucher ? "Expense voucher updated successfully." : "Expense voucher saved successfully.");
     setEditingVoucher(null);
     resetForm();
@@ -1440,6 +1554,31 @@ function ExpensesModule() {
     const voucher = vouchers.find((item) => item.id === recordId);
     if (voucher) setSelectedVoucher(voucher);
   }, [searchParams, vouchers]);
+  useEffect(() => {
+    void loadVoucherAttachments(selectedVoucher);
+  }, [loadVoucherAttachments, selectedVoucher]);
+  const openReceipt = async (attachment: ExpenseAttachment) => {
+    if (!token || !workspaceId || !selectedVoucher) return;
+    try { await openExpenseAttachment(token, workspaceId, selectedVoucher.id, attachment); }
+    catch (error) { showToast(error instanceof Error ? error.message : "Unable to open receipt attachment."); }
+  };
+  const removeReceipt = async (attachment: ExpenseAttachment) => {
+    if (!token || !workspaceId || !selectedVoucher || !window.confirm(t("expensesPage.deleteReceiptConfirm"))) return;
+    setAttachmentBusy(true);
+    try {
+      await deleteExpenseAttachment(token, workspaceId, selectedVoucher.id, attachment.id);
+      await loadVoucherAttachments(selectedVoucher);
+    } finally {
+      setAttachmentBusy(false);
+    }
+  };
+  const extractReceipt = async (attachment: ExpenseAttachment) => {
+    if (!token || !workspaceId || !selectedVoucher) return;
+    setAttachmentBusy(true); setDetailOcr(null);
+    try { setDetailOcr(await extractExpenseReceipt(token, workspaceId, selectedVoucher.id, attachment.id)); }
+    catch { setDetailOcr({ confidence: "low", message: t("expensesPage.ocrFailed"), suggested: null, lineItems: [] }); }
+    finally { setAttachmentBusy(false); }
+  };
   const removeVoucher = async (voucher: Voucher) => {
     if (!canEditVouchers || !window.confirm(t("expensesPage.deleteVoucherConfirm", { number: voucher.voucherNumber }))) return;
     await deleteOperationalRecord("voucher", voucher);
@@ -1472,6 +1611,8 @@ function ExpensesModule() {
             {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
           </select>
           <input value={notes} placeholder={t("expensesPage.notesOptional")} onChange={(event) => setNotes(event.target.value)} />
+          <ReceiptAttachmentPicker pending={pendingReceipts} onFiles={addReceiptFiles} onRemove={removePendingReceipt} />
+          {receiptError && <p className="worker-action-error">{receiptError}</p>}
           <button type="submit">{editingVoucher ? t("expensesPage.updateVoucher") : t("expensesPage.saveVoucher")}</button>
           {editingVoucher && <button type="button" onClick={() => { setEditingVoucher(null); resetForm(); }}>{t("expensesPage.cancelEdit")}</button>}
         </form>
@@ -1522,7 +1663,15 @@ function ExpensesModule() {
             <div><dt>{t("expensesPage.description")}</dt><dd>{selectedVoucher.description}</dd></div><div><dt>{t("expensesPage.amount")}</dt><dd>{money(selectedVoucher.amount)}</dd></div>
             <div><dt>{t("expensesPage.paymentSource")}</dt><dd>{accounts.find((item) => item.id === selectedVoucher.accountId)?.name ?? t("expensesPage.unknownAccount")}</dd></div>
             {selectedVoucher.notes && <div><dt>{t("expensesPage.notesOptional")}</dt><dd>{selectedVoucher.notes}</dd></div>}
-          </dl></div>
+          </dl>
+          <ReceiptAttachmentList
+            attachments={detailAttachments}
+            ocrResult={detailOcr}
+            onOpen={(item) => void openReceipt(item)}
+            onExtract={(item) => void extractReceipt(item)}
+            onDelete={canEditVouchers && !attachmentBusy ? (item) => void removeReceipt(item) : undefined}
+          />
+          </div>
           <footer className="worker-dialog__footer">{canEditVouchers && <button className="worker-dialog__link" type="button" onClick={() => openEdit(selectedVoucher)}>{t("expensesPage.editVoucherAction")}</button>}{canEditVouchers && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => void removeVoucher(selectedVoucher)}>{t("expensesPage.deleteVoucher")}</button>}<button className="worker-dialog__close" type="button" onClick={() => setSelectedVoucher(null)}>{t("expensesPage.close")}</button></footer>
         </section>
       </div>}

@@ -347,6 +347,37 @@ export const voucherItems = pgTable("voucher_items", {
   amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
 });
 
+export const expenseAttachments = pgTable(
+  "expense_attachments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+    farmId: uuid("farm_id").references(() => farms.id),
+    seasonId: uuid("season_id").references(() => seasons.id),
+    expenseId: uuid("expense_id").notNull(),
+    fileName: text("file_name").notNull(),
+    fileType: text("file_type").notNull(),
+    fileSize: integer("file_size").notNull(),
+    storageKey: text("storage_key").notNull(),
+    fileUrl: text("file_url"),
+    uploadedBy: uuid("uploaded_by").references(() => users.id).notNull(),
+    uploadedAt: timestamp("uploaded_at", { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.workspaceId, table.farmId],
+      foreignColumns: [farms.workspaceId, farms.id],
+      name: "expense_attachments_workspace_farm_fk",
+    }),
+    foreignKey({
+      columns: [table.workspaceId, table.farmId, table.seasonId],
+      foreignColumns: [seasons.workspaceId, seasons.farmId, seasons.id],
+      name: "expense_attachments_workspace_farm_season_fk",
+    }),
+  ],
+);
+
 export const accountTransactions = pgTable("account_transactions", {
   id: uuid("id").defaultRandom().primaryKey(),
   farmId: uuid("farm_id").references(() => farms.id).notNull(),

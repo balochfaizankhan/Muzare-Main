@@ -313,6 +313,23 @@ export type ExpenseImportPreview = {
   };
 };
 export type ExpenseImportResult = { recordsCreated: number; duplicatesSkipped: number; grandTotal: number };
+export type ExpenseAttachment = {
+  id: string; workspaceId: string; farmId: string | null; seasonId: string | null; expenseId: string;
+  fileName: string; fileType: string; fileSize: number; storageKey: string; fileUrl: string | null;
+  uploadedBy: string; uploadedAt: string; deletedAt: string | null;
+};
+export type ExpenseAttachmentUpload = {
+  farmId?: string | null; seasonId?: string | null; fileName: string; fileType: string; fileSize: number; contentBase64: string;
+};
+export type ExpenseOcrSuggestion = {
+  confidence: "high" | "medium" | "low";
+  message: string;
+  suggested: null | {
+    date?: string; supplier?: string; receiptNumber?: string; totalAmount?: number; vatAmount?: number;
+    paymentMethod?: string; description?: string; category?: string; subcategory?: string;
+  };
+  lineItems: Array<{ itemName: string; quantity?: number; unitPrice?: number; amount?: number; category?: string; subcategory?: string }>;
+};
 export type FarmFeatureType = "farm_boundary" | "plot" | "irrigation_line" | "valve" | "landmark" | "other";
 export type OperationActivityType = "irrigation" | "fertilizer" | "pesticide" | "pruning" | "thinning" | "pollination" | "harvesting" | "maintenance" | "other";
 export type FarmMap = {
@@ -562,6 +579,24 @@ export const confirmExpenseImport = (token: string, workspaceId: string, input: 
   `/api/workspaces/${workspaceId}/expense-imports/confirm`, { method: "POST", body: JSON.stringify(input) }, token,
   { timeoutMs: 60_000, debugLabel: "expense-import-confirm" },
 );
+export const fetchExpenseAttachments = (token: string, workspaceId: string, expenseId: string) =>
+  apiRequest<{ attachments: ExpenseAttachment[] }>(`/v1/workspace/${workspaceId}/expenses/${expenseId}/attachments`, {}, token);
+export const uploadExpenseAttachment = (token: string, workspaceId: string, expenseId: string, input: ExpenseAttachmentUpload) =>
+  apiRequest<{ attachment: ExpenseAttachment }>(`/v1/workspace/${workspaceId}/expenses/${expenseId}/attachments`, { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 60_000 });
+export const deleteExpenseAttachment = (token: string, workspaceId: string, expenseId: string, attachmentId: string) =>
+  apiRequest<void>(`/v1/workspace/${workspaceId}/expenses/${expenseId}/attachments/${attachmentId}`, { method: "DELETE" }, token);
+export const extractExpenseReceipt = (token: string, workspaceId: string, expenseId: string, attachmentId: string) =>
+  apiRequest<ExpenseOcrSuggestion>(`/v1/workspace/${workspaceId}/expenses/${expenseId}/attachments/${attachmentId}/ocr`, { method: "POST", body: JSON.stringify({}) }, token, { timeoutMs: 60_000 });
+export async function openExpenseAttachment(token: string, workspaceId: string, expenseId: string, attachment: Pick<ExpenseAttachment, "id" | "fileName">): Promise<void> {
+  const response = await fetch(`${config.apiUrl}/v1/workspace/${workspaceId}/expenses/${expenseId}/attachments/${attachment.id}/download`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new ApiError("Unable to open receipt attachment.", response.status);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  window.open(url, "_blank", "noopener,noreferrer");
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
 export const fetchFarmOperationsDashboard = (token: string, workspaceId: string, farmId: string, seasonId?: string | null) => {
   const query = new URLSearchParams();
   if (seasonId) query.set("seasonId", seasonId);
