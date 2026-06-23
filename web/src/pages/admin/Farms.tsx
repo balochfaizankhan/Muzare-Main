@@ -10,6 +10,13 @@ function countSummary(counts: Record<string, number>) {
   return Object.entries(counts).filter(([, value]) => Number(value) > 0).map(([key, value]) => `${key}: ${value}`).join(" · ");
 }
 
+function farmStatusLabel(t: (key: string) => string, status: string) {
+  if (status === "active") return t("common.active");
+  if (status === "delete_pending") return t("farmsPage.deletionPending");
+  if (status === "deleted") return t("adminFarms.deleted");
+  return t("seasonsPage.archived");
+}
+
 export function AdminFarms() {
   const { t } = useTranslation();
   const { token, user } = useAuth();
@@ -47,7 +54,7 @@ export function AdminFarms() {
     <section className="admin-metric-grid">
       <article><CheckCircle2 size={19} /><span>{t("adminFarms.totalFarms")}</span><strong>{formatNumber(rows.length)}</strong></article>
       <article><ShieldAlert size={19} /><span>{t("adminFarms.pendingDeletionRequests")}</span><strong>{formatNumber(requests.length)}</strong></article>
-      <article><XCircle size={19} /><span>{t("adminFarms.archivedFarms")}</span><strong>{formatNumber(rows.filter((farm) => farm.status !== "active").length)}</strong></article>
+      <article><XCircle size={19} /><span>{t("adminFarms.inactiveFarms")}</span><strong>{formatNumber(rows.filter((farm) => farm.status !== "active").length)}</strong></article>
     </section>
 
     <section className="panel">
@@ -76,7 +83,7 @@ export function AdminFarms() {
           <tbody>{rows.map((farm) => <tr key={farm.id}>
             <td><strong>{farm.name}</strong><span>{farm.ownerEmail ?? farm.owner ?? farm.location ?? "-"}</span></td>
             <td>{farm.workspaceName}</td>
-            <td><span className={`status-badge status-badge--${farm.status === "delete_pending" ? "pending" : farm.status}`}>{farm.status}</span></td>
+            <td><span className={`status-badge status-badge--${farm.status === "delete_pending" ? "pending" : farm.status}`}>{farmStatusLabel(t, farm.status)}</span></td>
             <td>{formatNumber(farm.totalRecords)}</td>
             <td>{Object.entries(farm.counts).map(([key, value]) => `${key}: ${value}`).join(" · ")}</td>
             <td>{formatDate(farm.createdAt, { dateStyle: "medium" })}</td>

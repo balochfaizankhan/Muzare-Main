@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { farms, operationalRecords, seasons } from "./db/schema.js";
 
@@ -32,7 +32,7 @@ async function hasOperationalReference(workspaceId: string, entityTypes: string[
 export async function validateTenantReferences(workspaceId: string, references: TenantReferences): Promise<string | null> {
   if (references.farmId) {
     const [farm] = await db.select({ id: farms.id }).from(farms)
-      .where(and(eq(farms.id, references.farmId), eq(farms.workspaceId, workspaceId), eq(farms.active, true)))
+      .where(and(eq(farms.id, references.farmId), eq(farms.workspaceId, workspaceId), eq(farms.active, true), isNull(farms.deletedAt)))
       .limit(1);
     if (!farm) return "Farm does not belong to the selected workspace.";
   }
@@ -40,7 +40,7 @@ export async function validateTenantReferences(workspaceId: string, references: 
     if (!references.farmId) return "A season requires a farm in the selected workspace.";
     const [season] = await db.select({ id: seasons.id }).from(seasons)
       .innerJoin(farms, and(eq(farms.id, seasons.farmId), eq(farms.workspaceId, workspaceId)))
-      .where(and(eq(seasons.id, references.seasonId), eq(seasons.farmId, references.farmId), eq(seasons.status, "active")))
+      .where(and(eq(seasons.id, references.seasonId), eq(seasons.farmId, references.farmId), eq(seasons.status, "active"), isNull(farms.deletedAt)))
       .limit(1);
     if (!season) return "Season is not active in the selected workspace farm.";
   }

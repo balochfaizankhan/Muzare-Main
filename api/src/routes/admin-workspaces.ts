@@ -5,7 +5,7 @@ import { z } from "zod";
 import { requireAdmin, requirePermission } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
-import { auditLogs, farmDeletionRequests, farms, users, workspaceMemberships, workspaces } from "../db/schema.js";
+import { auditLogs, farmDeletionRequests, farms, userSessions, users, workspaceMemberships, workspaces } from "../db/schema.js";
 
 const workspaceSchema = z.object({
   name: z.string().trim().min(2).max(120),
@@ -31,6 +31,7 @@ async function adminFarmRows(workspaceId?: string) {
       f.location,
       f.owner,
       f.active,
+      f.deleted_at,
       f.created_at,
       w.name AS workspace_name,
       owner.email AS owner_email,
@@ -83,7 +84,7 @@ async function adminFarmRows(workspaceId?: string) {
     owner: row.owner ? String(row.owner) : null,
     ownerEmail: row.owner_email ? String(row.owner_email) : null,
     active: Boolean(row.active),
-    status: row.deletion_request_status ? "delete_pending" : (row.active ? "active" : "archived"),
+    status: row.deleted_at ? "deleted" : (row.deletion_request_status ? "delete_pending" : (row.active ? "active" : "archived")),
     createdAt: String(row.created_at),
     totalRecords: Number(row.total_records ?? 0),
     counts: {
@@ -173,7 +174,7 @@ export async function adminWorkspaceRoutes(app: FastifyInstance): Promise<void> 
         GROUP BY wm.workspace_id
       ) member_counts ON member_counts.workspace_id = w.id
       LEFT JOIN (
-        SELECT workspace_id, count(*) FILTER (WHERE active = true)::int AS farms_count
+        SELECT workspace_id, count(*) FILTER (WHERE active = true AND deleted_at IS NULL)::int AS farms_count
         FROM farms
         GROUP BY workspace_id
       ) farm_counts ON farm_counts.workspace_id = w.id
@@ -300,6 +301,7 @@ export async function adminWorkspaceRoutes(app: FastifyInstance): Promise<void> 
     if (!params.success || !body.success) return reply.code(400).send({ message: "Valid review details are required." });
     const [requestRow] = await db.select().from(farmDeletionRequests).where(eq(farmDeletionRequests.id, params.data.requestId)).limit(1);
     if (!requestRow) return reply.code(404).send({ message: "Farm deletion request not found." });
+    if (requestRow.status !== "pending") return reply.code(409).send({ message: "This farm deletion request has already been reviewed." });
     await db.transaction(async (tx) => {
       await tx.update(farmDeletionRequests).set({
         status: "rejected",
@@ -330,16 +332,27 @@ export async function adminWorkspaceRoutes(app: FastifyInstance): Promise<void> 
     if (!params.success || !body.success) return reply.code(400).send({ message: "Valid review details are required." });
     const [requestRow] = await db.select().from(farmDeletionRequests).where(eq(farmDeletionRequests.id, params.data.requestId)).limit(1);
     if (!requestRow) return reply.code(404).send({ message: "Farm deletion request not found." });
+    if (requestRow.status !== "pending") return reply.code(409).send({ message: "This farm deletion request has already been reviewed." });
     const [farm] = await db.select().from(farms).where(and(eq(farms.id, requestRow.farmId), eq(farms.workspaceId, requestRow.workspaceId))).limit(1);
+    const reviewedAt = new Date();
     await db.transaction(async (tx) => {
       await tx.update(farmDeletionRequests).set({
         status: "approved",
         reviewedBy: request.appUser?.id,
-        reviewedAt: new Date(),
+        reviewedAt,
         reviewNotes: body.data.notes ?? null,
-        updatedAt: new Date(),
+        updatedAt: reviewedAt,
       }).where(eq(farmDeletionRequests.id, params.data.requestId));
-      await tx.update(farms).set({ active: false, updatedAt: new Date() }).where(and(eq(farms.id, requestRow.farmId), eq(farms.workspaceId, requestRow.workspaceId)));
+      await tx.update(farms).set({
+        active: false,
+        deletedAt: reviewedAt,
+        deletedBy: request.appUser?.id,
+        deletionApprovedAt: reviewedAt,
+        deletionApprovedBy: request.appUser?.id,
+        updatedAt: reviewedAt,
+      }).where(and(eq(farms.id, requestRow.farmId), eq(farms.workspaceId, requestRow.workspaceId)));
+      await tx.update(userSessions).set({ activeFarmId: null, activeSeasonId: null })
+        .where(and(eq(userSessions.workspaceId, requestRow.workspaceId), eq(userSessions.activeFarmId, requestRow.farmId)));
       await tx.insert(auditLogs).values({
         workspaceId: requestRow.workspaceId,
         farmId: requestRow.farmId,
@@ -349,7 +362,7 @@ export async function adminWorkspaceRoutes(app: FastifyInstance): Promise<void> 
         entityType: "farm_deletion_request",
         entityId: requestRow.id,
         beforeJson: farm ?? null,
-        afterJson: { status: "archived_after_delete_approval" },
+        afterJson: { status: "deleted", deletedAt: reviewedAt.toISOString(), deletionApprovedBy: request.appUser?.id },
         notes: body.data.notes ?? null,
         details: { requestId: requestRow.id, recordCounts: requestRow.recordCountsJson },
       });

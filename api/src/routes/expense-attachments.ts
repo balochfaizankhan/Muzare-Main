@@ -22,6 +22,10 @@ const paramsSchema = z.object({
   expenseId: z.string().uuid(),
 });
 const attachmentParamsSchema = paramsSchema.extend({ attachmentId: z.string().uuid() });
+const receiptExtractParamsSchema = z.object({
+  workspaceId: z.string().uuid(),
+  attachmentId: z.string().uuid(),
+});
 const uploadSchema = z.object({
   farmId: z.string().uuid().nullable().optional(),
   seasonId: z.string().uuid().nullable().optional(),
@@ -41,6 +45,33 @@ const sanitizeFileName = (value: string) => value.replace(/[^\w.\-() ]+/g, "_").
 const contentBuffer = (base64: string) => Buffer.from(base64.replace(/^data:[^;]+;base64,/, ""), "base64");
 const receiptOcrProvider = () => (process.env.RECEIPT_OCR_PROVIDER ?? "disabled").trim().toLowerCase();
 
+type ReceiptExtractResult = {
+  status: "success" | "not_configured" | "failed";
+  rawText: string;
+  fields: {
+    date?: string;
+    supplier?: string;
+    receiptNumber?: string;
+    totalAmount?: number;
+    vatAmount?: number;
+    paymentMethod?: string;
+    description?: string;
+    suggestedCategory?: string;
+    suggestedSubcategory?: string;
+  };
+  lineItems: Array<{
+    name: string;
+    quantity?: number;
+    unitPrice?: number;
+    amount?: number;
+    suggestedCategory?: string;
+    suggestedSubcategory?: string;
+  }>;
+  confidence: "high" | "medium" | "low";
+  provider?: string;
+  message: string;
+};
+
 async function findExpense(workspaceId: string, expenseId: string) {
   const [record] = await db.select({
     id: operationalRecords.id,
@@ -52,6 +83,65 @@ async function findExpense(workspaceId: string, expenseId: string) {
     eq(operationalRecords.clientRecordId, expenseId),
   )).limit(1);
   return record;
+}
+
+async function findReceiptAttachment(workspaceId: string, attachmentId: string, expenseId?: string) {
+  const filters = [
+    eq(expenseAttachments.id, attachmentId),
+    eq(expenseAttachments.workspaceId, workspaceId),
+    isNull(expenseAttachments.deletedAt),
+  ];
+  if (expenseId) filters.push(eq(expenseAttachments.expenseId, expenseId));
+  const [attachment] = await db.select().from(expenseAttachments).where(and(...filters)).limit(1);
+  return attachment;
+}
+
+async function extractReceiptData(workspaceId: string, attachmentId: string, corrected?: Record<string, unknown>): Promise<ReceiptExtractResult | null> {
+  const attachment = await findReceiptAttachment(workspaceId, attachmentId);
+  if (!attachment) return null;
+
+  const provider = receiptOcrProvider();
+  if (provider === "disabled" || !provider) {
+    const result: ReceiptExtractResult = {
+      status: "not_configured",
+      rawText: "",
+      fields: {},
+      lineItems: [],
+      confidence: "low",
+      provider: "disabled",
+      message: "Receipt OCR is not configured yet. Receipt was attached only.",
+    };
+    await db.update(expenseAttachments).set({
+      ocrStatus: result.status,
+      ocrProvider: result.provider,
+      ocrRawText: result.rawText,
+      ocrParsedJson: { fields: result.fields, lineItems: result.lineItems },
+      ocrConfidence: result.confidence,
+      userCorrectedJson: corrected ?? null,
+      processedAt: new Date(),
+    }).where(eq(expenseAttachments.id, attachmentId));
+    return result;
+  }
+
+  const result: ReceiptExtractResult = {
+    status: "failed",
+    rawText: "",
+    fields: {},
+    lineItems: [],
+    confidence: "low",
+    provider,
+    message: `Receipt OCR provider '${provider}' is configured but extraction is not available in this deployment. Please enter expense manually.`,
+  };
+  await db.update(expenseAttachments).set({
+    ocrStatus: result.status,
+    ocrProvider: result.provider,
+    ocrRawText: result.rawText,
+    ocrParsedJson: { fields: result.fields, lineItems: result.lineItems },
+    ocrConfidence: result.confidence,
+    userCorrectedJson: corrected ?? null,
+    processedAt: new Date(),
+  }).where(eq(expenseAttachments.id, attachmentId));
+  return result;
 }
 
 export async function expenseAttachmentRoutes(app: FastifyInstance): Promise<void> {
@@ -158,48 +248,25 @@ export async function expenseAttachmentRoutes(app: FastifyInstance): Promise<voi
     return reply.code(204).send();
   });
 
+  app.post("/v1/workspace/:workspaceId/expenses/receipts/:attachmentId/extract", { preHandler: requirePermission("SUBMIT_RECORDS", (request) => (request.params as { workspaceId?: string }).workspaceId) }, async (request, reply) => {
+    const params = receiptExtractParamsSchema.safeParse(request.params);
+    const body = ocrCorrectionSchema.safeParse(request.body ?? {});
+    if (!params.success) return reply.code(400).send({ message: "Valid attachment details are required." });
+    if (!body.success) return reply.code(400).send({ message: "Valid OCR review data is required." });
+    const result = await extractReceiptData(params.data.workspaceId, params.data.attachmentId, body.data.corrected);
+    if (!result) return reply.code(404).send({ message: "Receipt attachment not found." });
+    return result;
+  });
+
   app.post("/v1/workspace/:workspaceId/expenses/:expenseId/attachments/:attachmentId/ocr", { preHandler: requirePermission("SUBMIT_RECORDS", (request) => (request.params as { workspaceId?: string }).workspaceId) }, async (request, reply) => {
     const params = attachmentParamsSchema.safeParse(request.params);
     const body = ocrCorrectionSchema.safeParse(request.body ?? {});
     if (!params.success) return reply.code(400).send({ message: "Valid attachment details are required." });
-    const [attachment] = await db.select({ id: expenseAttachments.id }).from(expenseAttachments).where(and(
-      eq(expenseAttachments.id, params.data.attachmentId),
-      eq(expenseAttachments.workspaceId, params.data.workspaceId),
-      eq(expenseAttachments.expenseId, params.data.expenseId),
-      isNull(expenseAttachments.deletedAt),
-    )).limit(1);
-    if (!attachment) return reply.code(404).send({ message: "Receipt attachment not found." });
     if (!body.success) return reply.code(400).send({ message: "Valid OCR review data is required." });
-    const provider = receiptOcrProvider();
-    if (provider === "disabled" || !provider) {
-      await db.update(expenseAttachments).set({
-        ocrStatus: "not_configured",
-        ocrProvider: "disabled",
-        userCorrectedJson: body.data.corrected ?? null,
-        processedAt: new Date(),
-      }).where(eq(expenseAttachments.id, params.data.attachmentId));
-      return {
-        confidence: "low",
-        status: "not_configured",
-        provider: "disabled",
-        message: "Receipt OCR is not configured yet. Receipt was attached only.",
-        suggested: null,
-        lineItems: [],
-      };
-    }
-    await db.update(expenseAttachments).set({
-      ocrStatus: "failed",
-      ocrProvider: provider,
-      userCorrectedJson: body.data.corrected ?? null,
-      processedAt: new Date(),
-    }).where(eq(expenseAttachments.id, params.data.attachmentId));
-    return {
-      confidence: "low",
-      status: "failed",
-      provider,
-      message: `Receipt OCR provider '${provider}' is configured but extraction is not available in this deployment. Please enter expense manually.`,
-      suggested: null,
-      lineItems: [],
-    };
+    const attachment = await findReceiptAttachment(params.data.workspaceId, params.data.attachmentId, params.data.expenseId);
+    if (!attachment) return reply.code(404).send({ message: "Receipt attachment not found." });
+    const result = await extractReceiptData(params.data.workspaceId, params.data.attachmentId, body.data.corrected);
+    if (!result) return reply.code(404).send({ message: "Receipt attachment not found." });
+    return result;
   });
 }

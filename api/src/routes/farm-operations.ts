@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireUser } from "../auth.js";
 import { db } from "../db/client.js";
@@ -160,7 +160,7 @@ function canManage(request: FastifyRequest, workspaceId: string) {
 }
 
 async function farmExists(workspaceId: string, farmId: string) {
-  const [farm] = await db.select({ id: farms.id }).from(farms).where(and(eq(farms.workspaceId, workspaceId), eq(farms.id, farmId))).limit(1);
+  const [farm] = await db.select({ id: farms.id }).from(farms).where(and(eq(farms.workspaceId, workspaceId), eq(farms.id, farmId), isNull(farms.deletedAt))).limit(1);
   return Boolean(farm);
 }
 

@@ -3372,8 +3372,56 @@ button {
   padding: 10px;
 }
 
+.receipt-ocr-loading {
+  background: #eef6ec;
+  border-radius: 10px;
+  color: var(--primary-dark);
+  font-weight: 700;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+}
+
 .receipt-ocr-result p {
   margin: 5px 0;
+}
+
+.receipt-ocr-result dl {
+  display: grid;
+  gap: 6px 12px;
+  grid-template-columns: max-content minmax(0, 1fr);
+  margin: 10px 0;
+}
+
+.receipt-ocr-result dt {
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.receipt-ocr-result dd {
+  color: var(--text-primary);
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.receipt-ocr-lines {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.receipt-ocr-lines p {
+  align-items: center;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin: 0;
+  padding-top: 6px;
+}
+
+.receipt-ocr-apply {
+  margin-top: 12px;
 }
 
 @media (max-width: 640px) {
@@ -5875,7 +5923,9 @@ button {
   color: #b42318;
 }
 
-.status-badge--rejected {
+.status-badge--rejected,
+.status-badge--archived,
+.status-badge--deleted {
   background: #f3f4f6;
   color: #4b5563;
 }

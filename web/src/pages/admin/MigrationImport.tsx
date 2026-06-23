@@ -173,10 +173,13 @@ export function MigrationImport() {
               <p><b>Total advances</b> {formatMoney(runImport.data.result.totalAdvances)}</p>
               <p><b>Inserted operational records</b> {runImport.data.result.insertedOperationalRecords}</p>
               <div className="record-list__actions">
-                <a className="secondary-button" href="/workspace/farms">View Imported Farms</a>
+                <a className="secondary-button" href="/workspace/farms">View Imported Data</a>
+                <a className="secondary-button" href="/workspace/farms">View farms</a>
+                <a className="secondary-button" href="/workspace/seasons">View season</a>
                 <a className="secondary-button" href="/workforce">View Labour</a>
                 <a className="secondary-button" href="/expenses">View Expenses</a>
                 <a className="secondary-button" href="/advances">View Advances</a>
+                <a className="secondary-button" href="/reports?section=attendance">View attendance report</a>
               </div>
             </section>
           ) : null}

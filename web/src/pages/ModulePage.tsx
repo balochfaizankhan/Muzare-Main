@@ -1484,8 +1484,10 @@ function ReceiptAttachmentPicker({ pending, onFiles, onRemove }: { pending: Pend
   );
 }
 
-function ReceiptAttachmentList({ attachments, onOpen, onOpenOriginal, onDelete, onExtract, ocrResult }: { attachments: ExpenseAttachment[]; onOpen: (item: ExpenseAttachment) => void; onOpenOriginal?: (item: ExpenseAttachment) => void; onDelete?: (item: ExpenseAttachment) => void; onExtract?: (item: ExpenseAttachment) => void; ocrResult?: ExpenseOcrSuggestion | null }) {
+function ReceiptAttachmentList({ attachments, onOpen, onOpenOriginal, onDelete, onExtract, onApplyOcr, ocrResult, extracting }: { attachments: ExpenseAttachment[]; onOpen: (item: ExpenseAttachment) => void; onOpenOriginal?: (item: ExpenseAttachment) => void; onDelete?: (item: ExpenseAttachment) => void; onExtract?: (item: ExpenseAttachment) => void; onApplyOcr?: (result: ExpenseOcrSuggestion) => void; ocrResult?: ExpenseOcrSuggestion | null; extracting?: boolean }) {
   const { t } = useTranslation();
+  const fields = ocrResult?.fields ?? {};
+  const hasSuggestions = Boolean(ocrResult && (Object.values(fields).some((value) => value !== undefined && value !== "") || ocrResult.lineItems.length));
   return (
     <section className="receipt-detail-card">
       <h3>{t("expensesPage.receiptAttachment")}</h3>
@@ -1499,23 +1501,27 @@ function ReceiptAttachmentList({ attachments, onOpen, onOpenOriginal, onDelete, 
           {onDelete && <button className="danger-link" type="button" onClick={() => onDelete(item)}>{t("common.delete")}</button>}
         </article>
       ))}
+      {extracting ? <p className="receipt-ocr-loading">{t("expensesPage.extractingReceiptData")}</p> : null}
       {ocrResult ? <div className="receipt-ocr-result">
         <strong>{t("expensesPage.suggestedExpenseData")}</strong>
-        <p>{ocrResult.message}</p>
+        <p>{ocrResult.message || (ocrResult.status === "success" ? t("expensesPage.ocrCompleteReview") : t("expensesPage.ocrFailed"))}</p>
         <small>{t("expensesPage.confidence")}: {ocrResult.confidence}{ocrResult.provider ? ` · ${ocrResult.provider}` : ""}</small>
-        {ocrResult.suggested ? <dl>
-          {ocrResult.suggested.date && <><dt>{t("expensesPage.date")}</dt><dd>{ocrResult.suggested.date}</dd></>}
-          {ocrResult.suggested.supplier && <><dt>{t("expensesPage.supplier")}</dt><dd>{ocrResult.suggested.supplier}</dd></>}
-          {ocrResult.suggested.receiptNumber && <><dt>{t("expensesPage.receiptNumber")}</dt><dd>{ocrResult.suggested.receiptNumber}</dd></>}
-          {ocrResult.suggested.totalAmount !== undefined && <><dt>{t("expensesPage.amount")}</dt><dd>{formatMoney(ocrResult.suggested.totalAmount)}</dd></>}
-          {ocrResult.suggested.vatAmount !== undefined && <><dt>{t("expensesPage.vat")}</dt><dd>{formatMoney(ocrResult.suggested.vatAmount)}</dd></>}
-          {ocrResult.suggested.paymentMethod && <><dt>{t("expensesPage.paymentMethod")}</dt><dd>{ocrResult.suggested.paymentMethod}</dd></>}
-          {ocrResult.suggested.description && <><dt>{t("expensesPage.description")}</dt><dd>{ocrResult.suggested.description}</dd></>}
+        {hasSuggestions ? <dl>
+          {fields.date && <><dt>{t("expensesPage.date")}</dt><dd>{fields.date}</dd></>}
+          {fields.supplier && <><dt>{t("expensesPage.supplier")}</dt><dd>{fields.supplier}</dd></>}
+          {fields.receiptNumber && <><dt>{t("expensesPage.receiptNumber")}</dt><dd>{fields.receiptNumber}</dd></>}
+          {fields.totalAmount !== undefined && <><dt>{t("expensesPage.amount")}</dt><dd>{formatMoney(fields.totalAmount)}</dd></>}
+          {fields.vatAmount !== undefined && <><dt>{t("expensesPage.vat")}</dt><dd>{formatMoney(fields.vatAmount)}</dd></>}
+          {fields.paymentMethod && <><dt>{t("expensesPage.paymentMethod")}</dt><dd>{fields.paymentMethod}</dd></>}
+          {fields.description && <><dt>{t("expensesPage.description")}</dt><dd>{fields.description}</dd></>}
+          {fields.suggestedCategory && <><dt>{t("expensesPage.category")}</dt><dd>{translateExpenseCategory(fields.suggestedCategory)}</dd></>}
+          {fields.suggestedSubcategory && <><dt>{t("expensesPage.subcategory")}</dt><dd>{translateExpenseSubcategory(fields.suggestedSubcategory)}</dd></>}
         </dl> : null}
         {ocrResult.lineItems.length ? <div className="receipt-ocr-lines">
           <b>{t("expensesPage.suggestedLineItems")}</b>
-          {ocrResult.lineItems.map((line, index) => <p key={`${line.itemName}:${index}`}><span>{line.itemName}</span><strong>{line.amount !== undefined ? formatMoney(line.amount) : "-"}</strong></p>)}
+          {ocrResult.lineItems.map((line, index) => <p key={`${line.name}:${index}`}><span>{line.name}</span><strong>{line.amount !== undefined ? formatMoney(line.amount) : "-"}</strong></p>)}
         </div> : null}
+        {hasSuggestions && onApplyOcr ? <button className="receipt-ocr-apply" type="button" onClick={() => onApplyOcr(ocrResult)}>{t("expensesPage.applyToVoucher")}</button> : null}
       </div> : null}
     </section>
   );
@@ -1766,16 +1772,50 @@ function ExpensesModule() {
       setAttachmentBusy(false);
     }
   };
+  const applyOcrToVoucher = (result: ExpenseOcrSuggestion, voucher?: Voucher | null) => {
+    if (voucher) openEdit(voucher);
+    const fields = result.fields ?? {};
+    if (fields.date) setDate(fields.date);
+    if (fields.totalAmount !== undefined) setAmount(String(fields.totalAmount));
+    if (fields.description) setDescription(fields.description);
+    const suggestedCategory = fields.suggestedCategory || result.lineItems.find((line) => line.suggestedCategory)?.suggestedCategory;
+    const suggestedSubcategory = fields.suggestedSubcategory || result.lineItems.find((line) => line.suggestedSubcategory)?.suggestedSubcategory;
+    const normalizedCategory = suggestedCategory?.trim().toLowerCase();
+    const matchedCategory = normalizedCategory
+      ? categories.data?.categories.find((item) => item.name.trim().toLowerCase() === normalizedCategory)
+      : undefined;
+    if (matchedCategory) {
+      setCategoryId(matchedCategory.id);
+      setCategorySearch(matchedCategory.name);
+      const normalizedSubcategory = suggestedSubcategory?.trim().toLowerCase();
+      const matchedSubcategory = normalizedSubcategory
+        ? matchedCategory.subcategories.find((item) => item.name.trim().toLowerCase() === normalizedSubcategory)
+        : undefined;
+      if (matchedSubcategory) {
+        setSubcategoryId(matchedSubcategory.id);
+        setSubcategorySearch(matchedSubcategory.name);
+      }
+    }
+    const noteParts = [
+      fields.supplier ? `${t("expensesPage.supplier")}: ${fields.supplier}` : "",
+      fields.receiptNumber ? `${t("expensesPage.receiptNumber")}: ${fields.receiptNumber}` : "",
+      fields.vatAmount !== undefined ? `${t("expensesPage.vat")}: ${fields.vatAmount}` : "",
+      fields.paymentMethod ? `${t("expensesPage.paymentMethod")}: ${fields.paymentMethod}` : "",
+    ].filter(Boolean);
+    if (noteParts.length) setNotes((current) => current ? `${current}\n${noteParts.join(" · ")}` : noteParts.join(" · "));
+    setSelectedVoucher(null);
+    showToast(t("expensesPage.ocrSuggestionsApplied"));
+  };
   const extractReceipt = async (attachment: ExpenseAttachment) => {
     if (!token || !workspaceId || !selectedVoucher) return;
     setAttachmentBusy(true); setDetailOcr(null);
     try {
-      const result = await extractExpenseReceipt(token, workspaceId, selectedVoucher.id, attachment.id);
+      const result = await extractExpenseReceipt(token, workspaceId, attachment.id);
       setDetailOcr(result);
-      showToast(result.message);
+      showToast(result.message || (result.status === "success" ? t("expensesPage.ocrCompleteReview") : t("expensesPage.ocrFailed")));
       await loadVoucherAttachments(selectedVoucher);
     }
-    catch { setDetailOcr({ confidence: "low", status: "failed", message: t("expensesPage.ocrFailed"), suggested: null, lineItems: [] }); }
+    catch { setDetailOcr({ confidence: "low", status: "failed", rawText: "", fields: {}, message: t("expensesPage.ocrFailed"), lineItems: [] }); }
     finally { setAttachmentBusy(false); }
   };
   const removeVoucher = async (voucher: Voucher) => {
@@ -1867,9 +1907,11 @@ function ExpensesModule() {
           <ReceiptAttachmentList
             attachments={detailAttachments}
             ocrResult={detailOcr}
+            extracting={attachmentBusy}
             onOpen={(item) => void openReceipt(item)}
             onOpenOriginal={(item) => void openOriginalReceipt(item)}
             onExtract={(item) => void extractReceipt(item)}
+            onApplyOcr={(result) => applyOcrToVoucher(result, selectedVoucher)}
             onDelete={canEditVouchers && !attachmentBusy ? (item) => void removeReceipt(item) : undefined}
           />
           </div>

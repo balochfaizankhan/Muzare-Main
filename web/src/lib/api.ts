@@ -170,7 +170,7 @@ export type AdminWorkspaceDetail = {
 };
 export type AdminFarmSummary = {
   id: string; workspaceId: string; workspaceName: string; name: string; location: string | null; owner: string | null; ownerEmail: string | null;
-  active: boolean; status: "active" | "archived" | "delete_pending"; createdAt: string; totalRecords: number;
+  active: boolean; status: "active" | "archived" | "delete_pending" | "deleted"; createdAt: string; totalRecords: number;
   counts: { labour: number; attendance: number; advances: number; expenses: number; sales: number; dispatch: number };
   deletionRequestStatus: string | null;
 };
@@ -339,15 +339,16 @@ export type ExpenseAttachmentUpload = {
   originalContentBase64?: string; originalFileSize?: number; cropMetadata?: Record<string, unknown>;
 };
 export type ExpenseOcrSuggestion = {
-  confidence: "high" | "medium" | "low";
-  status?: "complete" | "failed" | "not_configured";
-  provider?: string;
-  message: string;
-  suggested: null | {
+  status: "success" | "not_configured" | "failed";
+  rawText: string;
+  fields: {
     date?: string; supplier?: string; receiptNumber?: string; totalAmount?: number; vatAmount?: number;
-    paymentMethod?: string; description?: string; category?: string; subcategory?: string;
+    paymentMethod?: string; description?: string; suggestedCategory?: string; suggestedSubcategory?: string;
   };
-  lineItems: Array<{ itemName: string; quantity?: number; unitPrice?: number; amount?: number; category?: string; subcategory?: string }>;
+  lineItems: Array<{ name: string; quantity?: number; unitPrice?: number; amount?: number; suggestedCategory?: string; suggestedSubcategory?: string }>;
+  confidence: "high" | "medium" | "low";
+  provider?: string;
+  message?: string;
 };
 export type FarmFeatureType = "farm_boundary" | "plot" | "irrigation_line" | "valve" | "landmark" | "other";
 export type OperationActivityType = "irrigation" | "fertilizer" | "pesticide" | "pruning" | "thinning" | "pollination" | "harvesting" | "maintenance" | "other";
@@ -616,8 +617,8 @@ export const uploadExpenseAttachment = (token: string, workspaceId: string, expe
   apiRequest<{ attachment: ExpenseAttachment }>(`/v1/workspace/${workspaceId}/expenses/${expenseId}/attachments`, { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 60_000 });
 export const deleteExpenseAttachment = (token: string, workspaceId: string, expenseId: string, attachmentId: string) =>
   apiRequest<void>(`/v1/workspace/${workspaceId}/expenses/${expenseId}/attachments/${attachmentId}`, { method: "DELETE" }, token);
-export const extractExpenseReceipt = (token: string, workspaceId: string, expenseId: string, attachmentId: string) =>
-  apiRequest<ExpenseOcrSuggestion>(`/v1/workspace/${workspaceId}/expenses/${expenseId}/attachments/${attachmentId}/ocr`, { method: "POST", body: JSON.stringify({}) }, token, { timeoutMs: 60_000 });
+export const extractExpenseReceipt = (token: string, workspaceId: string, attachmentId: string) =>
+  apiRequest<ExpenseOcrSuggestion>(`/v1/workspace/${workspaceId}/expenses/receipts/${attachmentId}/extract`, { method: "POST", body: JSON.stringify({}) }, token, { timeoutMs: 60_000 });
 export async function openExpenseAttachment(token: string, workspaceId: string, expenseId: string, attachment: Pick<ExpenseAttachment, "id" | "fileName">, variant: "cropped" | "original" = "cropped"): Promise<void> {
   const suffix = variant === "original" ? "/original" : "/download";
   const response = await fetch(`${config.apiUrl}/v1/workspace/${workspaceId}/expenses/${expenseId}/attachments/${attachment.id}${suffix}`, {

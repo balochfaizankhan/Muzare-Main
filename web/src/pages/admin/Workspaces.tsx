@@ -10,6 +10,13 @@ import i18n from "../../i18n";
 
 type WorkspaceStatusFilter = "all" | AdminWorkspace["status"];
 
+function farmStatusLabel(t: (key: string) => string, status: string) {
+  if (status === "active") return t("common.active");
+  if (status === "delete_pending") return t("farmsPage.deletionPending");
+  if (status === "deleted") return t("adminFarms.deleted");
+  return t("seasonsPage.archived");
+}
+
 export function Workspaces({ defaultStatusFilter = "all" }: { defaultStatusFilter?: WorkspaceStatusFilter }) {
   const { t } = useTranslation();
   const { user, token } = useAuth();
@@ -199,7 +206,7 @@ export function Workspaces({ defaultStatusFilter = "all" }: { defaultStatusFilte
                 {detail.data.workspace.farms.map((farm) => <article key={farm.id}>
                   <div>
                     <strong>{farm.name}</strong>
-                    <span>{farm.status} • {t("adminFarms.records")}: {formatNumber(farm.totalRecords)}</span>
+                    <span>{farmStatusLabel(t, farm.status)} • {t("adminFarms.records")}: {formatNumber(farm.totalRecords)}</span>
                   </div>
                   <small>{Object.entries(farm.counts).map(([key, value]) => `${key}: ${value}`).join(" · ")}</small>
                 </article>)}

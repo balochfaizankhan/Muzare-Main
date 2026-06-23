@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
@@ -96,7 +96,7 @@ export async function workspaceFarmRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(403).send({ message: "Select this workspace before viewing farms." });
     }
     if (localDevelopmentMode) return { farms: [], activeFarmId: null };
-    const records = await db.select().from(farms).where(eq(farms.workspaceId, parsed.data.workspaceId)).orderBy(farms.name);
+    const records = await db.select().from(farms).where(and(eq(farms.workspaceId, parsed.data.workspaceId), isNull(farms.deletedAt))).orderBy(farms.name);
     const [session] = request.sessionId
       ? await db.select({ activeFarmId: userSessions.activeFarmId }).from(userSessions).where(eq(userSessions.id, request.sessionId)).limit(1)
       : [];
@@ -159,7 +159,7 @@ export async function workspaceFarmRoutes(app: FastifyInstance): Promise<void> {
       contactEmail: optional(input.data.contactEmail),
       contactPhone: optional(input.data.contactPhone),
       updatedAt: new Date(),
-    }).where(and(eq(farms.id, params.data.farmId), eq(farms.workspaceId, params.data.workspaceId))).returning();
+    }).where(and(eq(farms.id, params.data.farmId), eq(farms.workspaceId, params.data.workspaceId), isNull(farms.deletedAt))).returning();
     if (!farm) return reply.code(404).send({ message: "Farm not found." });
     return { farm };
   });
@@ -172,7 +172,7 @@ export async function workspaceFarmRoutes(app: FastifyInstance): Promise<void> {
     }
     if (localDevelopmentMode) return reply.code(503).send({ message: "Configure PostgreSQL to manage farms." });
     const [farm] = await db.update(farms).set({ active: false, updatedAt: new Date() })
-      .where(and(eq(farms.id, params.data.farmId), eq(farms.workspaceId, params.data.workspaceId))).returning({ id: farms.id });
+      .where(and(eq(farms.id, params.data.farmId), eq(farms.workspaceId, params.data.workspaceId), isNull(farms.deletedAt))).returning({ id: farms.id });
     if (!farm) return reply.code(404).send({ message: "Farm not found." });
     await db.update(userSessions).set({ activeFarmId: null, activeSeasonId: null })
       .where(and(eq(userSessions.workspaceId, params.data.workspaceId), eq(userSessions.activeFarmId, params.data.farmId)));
@@ -186,7 +186,7 @@ export async function workspaceFarmRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(403).send({ message: "Workspace farm management permission is required." });
     }
     if (localDevelopmentMode) return reply.code(503).send({ message: "Configure PostgreSQL to manage farms." });
-    const [farm] = await db.select({ id: farms.id }).from(farms).where(and(eq(farms.id, params.data.farmId), eq(farms.workspaceId, params.data.workspaceId))).limit(1);
+    const [farm] = await db.select({ id: farms.id }).from(farms).where(and(eq(farms.id, params.data.farmId), eq(farms.workspaceId, params.data.workspaceId), isNull(farms.deletedAt))).limit(1);
     if (!farm) return reply.code(404).send({ message: "Farm not found." });
     const counts = await farmRecordCounts(params.data.workspaceId, params.data.farmId);
     if (totalFarmRecords(counts) > 0) {
@@ -206,7 +206,7 @@ export async function workspaceFarmRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(403).send({ message: "Only the workspace owner can request farm deletion." });
     }
     if (localDevelopmentMode) return reply.code(202).send();
-    const [farm] = await db.select().from(farms).where(and(eq(farms.id, params.data.farmId), eq(farms.workspaceId, params.data.workspaceId))).limit(1);
+    const [farm] = await db.select().from(farms).where(and(eq(farms.id, params.data.farmId), eq(farms.workspaceId, params.data.workspaceId), isNull(farms.deletedAt))).limit(1);
     if (!farm) return reply.code(404).send({ message: "Farm not found." });
     const counts = await farmRecordCounts(params.data.workspaceId, params.data.farmId);
     if (totalFarmRecords(counts) === 0) return reply.code(409).send({ message: "This farm is empty and can be deleted directly." });
@@ -250,7 +250,7 @@ export async function workspaceFarmRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(403).send({ message: "Select this workspace before selecting a farm." });
     }
     const [farm] = await db.select({ id: farms.id }).from(farms)
-      .where(and(eq(farms.id, params.data.farmId), eq(farms.workspaceId, params.data.workspaceId), eq(farms.active, true))).limit(1);
+      .where(and(eq(farms.id, params.data.farmId), eq(farms.workspaceId, params.data.workspaceId), eq(farms.active, true), isNull(farms.deletedAt))).limit(1);
     if (!farm) return reply.code(404).send({ message: "Active farm not found." });
     await db.update(userSessions).set({ activeFarmId: farm.id, activeSeasonId: null }).where(eq(userSessions.id, request.sessionId));
     return reply.code(204).send();

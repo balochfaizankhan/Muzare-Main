@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { requireUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
@@ -32,7 +32,7 @@ export async function bootstrapRoutes(app: FastifyInstance): Promise<void> {
     const activeFarms = await db
       .select()
       .from(farms)
-      .where(and(eq(farms.active, true), eq(farms.workspaceId, request.appUser.workspaceId)))
+      .where(and(eq(farms.active, true), eq(farms.workspaceId, request.appUser.workspaceId), isNull(farms.deletedAt)))
       .orderBy(farms.name);
     const farmIds = activeFarms.map((farm) => farm.id);
     const [session] = request.sessionId
