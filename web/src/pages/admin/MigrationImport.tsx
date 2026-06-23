@@ -8,6 +8,7 @@ import { formatMoney } from "../../lib/format";
 function SummaryGrid({ summary }: { summary: MigrationImportSummary }) {
   const countRows = Object.entries(summary.counts);
   const androidRows = Object.entries(summary.androidCounts ?? {});
+  const exportSummaryRows = Object.entries(summary.exportSummaryCounts ?? {}).filter(([, value]) => value >= 0);
   const mappedRows = summary.mappedCounts ?? [];
   const importRows = summary.importCounts ?? [];
   return (
@@ -21,6 +22,7 @@ function SummaryGrid({ summary }: { summary: MigrationImportSummary }) {
       <article><span>Total advances</span><strong>{formatMoney(summary.totalAdvances)}</strong></article>
       <article><span>Total sales</span><strong>{formatMoney(summary.totalSales)}</strong></article>
       <article className="migration-summary__wide"><span>Android source counts</span><p>{androidRows.map(([key, value]) => `${key}: ${value}`).join(" · ")}</p></article>
+      {exportSummaryRows.length ? <article className="migration-summary__wide"><span>Export summary counts</span><p>{exportSummaryRows.map(([key, value]) => `${key}: ${value}`).join(" · ")}</p></article> : null}
       <article className="migration-summary__wide"><span>Android → PWA mapping</span><p>{mappedRows.map((item) => `${item.androidKey} → ${item.pwaKey}: ${item.count}`).join(" · ")}</p></article>
       <article className="migration-summary__wide"><span>Import counts</span><p>{importRows.map((item) => `${item.label}: ${item.count}`).join(" · ")}</p></article>
       <article className="migration-summary__wide"><span>Record counts</span><p>{countRows.map(([key, value]) => `${key}: ${value}`).join(" · ")}</p></article>
@@ -91,7 +93,10 @@ const readLogDetails = (record: MigrationImportHistoryRecord) => {
     step: details.step ?? record.action,
     status: details.status ?? record.action.replace("admin.migration_import.", ""),
     message: details.message ?? "",
+    sourceRows: details.sourceRows,
     importedRows: details.importedRows,
+    updatedRows: details.updatedRows,
+    skippedRows: details.skippedRows,
     failedRows: details.failedRows,
   };
 };
@@ -106,7 +111,10 @@ function ImportHistory({ records }: { records: MigrationImportHistoryRecord[] })
         return (
           <p key={record.id} className={details.status === "failed" ? "negative" : undefined}>
             <b>{details.step}</b> {details.status} · {new Date(record.createdAt).toLocaleString()}
+            {typeof details.sourceRows === "number" ? ` · source ${details.sourceRows}` : ""}
             {typeof details.importedRows === "number" ? ` · imported ${details.importedRows}` : ""}
+            {typeof details.updatedRows === "number" ? ` · updated ${details.updatedRows}` : ""}
+            {typeof details.skippedRows === "number" ? ` · skipped ${details.skippedRows}` : ""}
             {typeof details.failedRows === "number" ? ` · failed ${details.failedRows}` : ""}
             {details.message ? ` · ${details.message}` : ""}
           </p>
@@ -123,6 +131,7 @@ export function MigrationImport() {
   const [fileName, setFileName] = useState("");
   const [payload, setPayload] = useState<unknown>(null);
   const [fileError, setFileError] = useState("");
+  const [allowSummaryMismatch, setAllowSummaryMismatch] = useState(false);
   const workspaces = useQuery({
     queryKey: ["admin-workspaces"],
     queryFn: () => fetchAdminWorkspaces(token!),
@@ -132,7 +141,7 @@ export function MigrationImport() {
   const selectedWorkspace = useMemo(() => workspaceOptions.find((workspace) => workspace.id === workspaceId), [workspaceId, workspaceOptions]);
 
   const validate = useMutation({
-    mutationFn: () => validateMigrationImport(token!, { workspaceId, payload }),
+    mutationFn: () => validateMigrationImport(token!, { workspaceId, payload, allowSummaryMismatch }),
   });
   const history = useQuery({
     queryKey: ["admin-migration-import-history", workspaceId],
@@ -143,7 +152,7 @@ export function MigrationImport() {
     void queryClient.invalidateQueries();
   };
   const runImport = useMutation({
-    mutationFn: () => importMigrationData(token!, { workspaceId, payload, dryRun: false, allowDatabaseWrite: true }),
+    mutationFn: () => importMigrationData(token!, { workspaceId, payload, dryRun: false, allowDatabaseWrite: true, allowSummaryMismatch }),
     onSuccess: refreshAfterImport,
   });
   const repairVisibility = useMutation({
@@ -155,6 +164,7 @@ export function MigrationImport() {
     const file = event.target.files?.[0];
     setFileError("");
     setPayload(null);
+    setAllowSummaryMismatch(false);
     validate.reset();
     runImport.reset();
     repairVisibility.reset();
@@ -215,6 +225,10 @@ export function MigrationImport() {
           <input accept="application/json,.json" type="file" onChange={(event) => void readFile(event)} />
         </label>
         {fileError ? <p className="worker-action-error">{fileError}</p> : null}
+        <label className="inline-checkbox">
+          <input type="checkbox" checked={allowSummaryMismatch} onChange={(event) => setAllowSummaryMismatch(event.target.checked)} />
+          <span>Allow import if export summary counts do not match actual JSON arrays</span>
+        </label>
         <div className="record-list__actions">
           <button type="button" disabled={!canValidate} onClick={() => validate.mutate()}><UploadCloud size={16} />Validate Import</button>
           {validate.data?.canImport ? <button type="button" disabled={!canImport} onClick={() => runImport.mutate()}><Database size={16} />Import Data</button> : null}
@@ -271,7 +285,10 @@ export function MigrationImport() {
                   {runImport.data.result.logs.map((item, index) => (
                     <p key={`${item.step}:${item.status}:${index}`}>
                       <b>{item.step}</b> {item.status}
+                      {typeof item.sourceRows === "number" ? ` · source ${item.sourceRows}` : ""}
                       {typeof item.importedRows === "number" ? ` · imported ${item.importedRows}` : ""}
+                      {typeof item.updatedRows === "number" ? ` · updated ${item.updatedRows}` : ""}
+                      {typeof item.skippedRows === "number" ? ` · skipped ${item.skippedRows}` : ""}
                       {typeof item.failedRows === "number" ? ` · failed ${item.failedRows}` : ""}
                       {item.message ? ` · ${item.message}` : ""}
                     </p>

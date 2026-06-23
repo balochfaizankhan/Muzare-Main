@@ -24,12 +24,20 @@ const requiredArrays = [
 ] as const;
 const importedEntityArrays = [...requiredArrays, "attendance"] as const;
 const androidExportArrays = [
+  "farms",
+  "seasons",
   "labours",
+  "accounts",
+  "partners",
+  "expenses",
+  "expenseItems",
   "fundSources",
   "vouchers",
   "voucherItems",
   "advances",
   "attendance",
+  "sales",
+  "dispatches",
   "groups",
   "fundEntries",
   "accountTransactions",
@@ -51,6 +59,7 @@ const arrayAliases: Partial<Record<typeof requiredArrays[number], readonly strin
 const payloadSchema = z.object({
   workspaceId: z.string().uuid(),
   payload: z.record(z.string(), z.unknown()),
+  allowSummaryMismatch: z.boolean().default(false),
 });
 
 const importSchema = payloadSchema.extend({
@@ -69,6 +78,7 @@ type ImportSummary = {
   source: string | null;
   counts: Record<typeof requiredArrays[number], number>;
   androidCounts: Record<string, number>;
+  exportSummaryCounts: Record<string, number>;
   mappedCounts: Array<{ androidKey: string; pwaKey: string; count: number }>;
   importCounts: Array<{ label: string; key: string; count: number }>;
   voucherCount: number;
@@ -100,7 +110,10 @@ type ImportLogEntry = {
   step: string;
   status: "started" | "completed" | "failed";
   message?: string;
+  sourceRows?: number;
   importedRows?: number;
+  updatedRows?: number;
+  skippedRows?: number;
   failedRows?: number;
   createdAt: string;
 };
@@ -116,8 +129,26 @@ const importCountKeys: Array<{ label: string; key: ImportCountKey }> = [
   { label: "Attendance imported", key: "attendance" },
 ];
 
+const previewCountKeys: Array<{ label: string; key: typeof importedEntityArrays[number]; summaryKeys: string[] }> = [
+  { label: "Farms count", key: "farms", summaryKeys: ["farms", "farmCount", "farmsCount"] },
+  { label: "Seasons count", key: "seasons", summaryKeys: ["seasons", "seasonCount", "seasonsCount"] },
+  { label: "Labour count", key: "labour", summaryKeys: ["labours", "labour", "labourCount", "laboursCount"] },
+  { label: "Accounts count", key: "accounts", summaryKeys: ["accounts", "accountCount", "accountsCount"] },
+  { label: "Expenses count", key: "expenses", summaryKeys: ["expenses", "expenseCount", "expensesCount"] },
+  { label: "Expense items count", key: "expenseItems", summaryKeys: ["expenseItems", "expenseItemCount", "expenseItemsCount"] },
+  { label: "Advances count", key: "advances", summaryKeys: ["advances", "advanceCount", "advancesCount"] },
+  { label: "Attendance count", key: "attendance", summaryKeys: ["attendance", "attendanceCount"] },
+  { label: "Sales count", key: "sales", summaryKeys: ["sales", "saleCount", "salesCount"] },
+  { label: "Dispatch count", key: "dispatches", summaryKeys: ["dispatches", "dispatchCount", "dispatchesCount"] },
+];
+
 const rawArray = (payload: AndroidPayload, key: string) => Array.isArray(payload[key]) ? payload[key] as AndroidRecord[] : [];
+const isAndroidV2Export = (payload: AndroidPayload) => payload.source === "muzare_android" && String(payload.exportVersion) === "2.0";
 const asArray = (payload: AndroidPayload, key: typeof importedEntityArrays[number]) => {
+  if (isAndroidV2Export(payload)) {
+    if (key === "labour") return rawArray(payload, "labours");
+    return rawArray(payload, key);
+  }
   if (Array.isArray(payload[key])) return payload[key] as AndroidRecord[];
   for (const alias of (key in arrayAliases ? arrayAliases[key as typeof requiredArrays[number]] : undefined) ?? []) {
     if (Array.isArray(payload[alias])) return payload[alias] as AndroidRecord[];
@@ -125,6 +156,15 @@ const asArray = (payload: AndroidPayload, key: typeof importedEntityArrays[numbe
   return [];
 };
 const hasArray = (payload: AndroidPayload, key: string) => Array.isArray(payload[key]);
+const summaryCount = (payload: AndroidPayload, keys: string[]) => {
+  const summary = payload.summary && typeof payload.summary === "object" ? payload.summary as Record<string, unknown> : {};
+  for (const key of keys) {
+    const value = summary[key];
+    const count = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+    if (Number.isFinite(count)) return count;
+  }
+  return undefined;
+};
 const text = (record: AndroidRecord, keys: string[], fallback = "") => {
   for (const key of keys) {
     const value = record[key];
@@ -141,7 +181,7 @@ const numberValue = (record: AndroidRecord, keys: string[], fallback = 0) => {
   }
   return fallback;
 };
-const oldId = (record: AndroidRecord) => text(record, ["old_android_id", "oldAndroidId", "android_id", "androidId", "id", "_id"]);
+const oldId = (record: AndroidRecord) => text(record, ["oldAndroidId", "old_android_id", "android_id", "androidId", "id", "_id"]);
 const dateValue = (record: AndroidRecord, keys: string[], fallback = new Date().toISOString().slice(0, 10)) => {
   const raw = text(record, keys);
   if (!raw) return fallback;
@@ -171,25 +211,26 @@ const sourceTypeFor = (key: typeof requiredArrays[number] | string) => ({
 const farmName = (record: AndroidRecord, index: number) =>
   text(record, ["name", "farmName", "farm_name", "title", "farmTitle", "farm_title", "displayName", "display_name"], `Imported Farm ${index + 1}`);
 const farmRef = (record: AndroidRecord) => relation(record, [
-  "farm_id", "farmId", "farmID", "farm_old_android_id", "farmOldAndroidId", "farm_android_id", "farmAndroidId",
+  "oldFarmId", "farm_id", "farmId", "farmID", "farm_old_android_id", "farmOldAndroidId", "farm_android_id", "farmAndroidId",
   "farm", "farm_id_fk", "farmIdFk",
 ]);
 const seasonRef = (record: AndroidRecord) => relation(record, [
-  "season_id", "seasonId", "seasonID", "season_old_android_id", "seasonOldAndroidId", "season_android_id", "seasonAndroidId",
+  "oldSeasonId", "season_id", "seasonId", "seasonID", "season_old_android_id", "seasonOldAndroidId", "season_android_id", "seasonAndroidId",
   "season", "season_id_fk", "seasonIdFk",
 ]);
 const labourRef = (record: AndroidRecord) => relation(record, [
-  "labour_id", "labourId", "labourID", "labour_old_android_id", "labourOldAndroidId", "labour_android_id", "labourAndroidId",
+  "oldLabourId", "labour_id", "labourId", "labourID", "labour_old_android_id", "labourOldAndroidId", "labour_android_id", "labourAndroidId",
   "worker_id", "workerId", "employee_id", "employeeId",
 ]);
 const accountRef = (record: AndroidRecord) => relation(record, [
-  "account_id", "accountId", "payment_account_id", "paymentAccountId", "paid_from_account_id", "paidFromAccountId",
+  "oldPaymentAccountId", "oldAccountId", "account_id", "accountId", "payment_account_id", "paymentAccountId", "paid_from_account_id", "paidFromAccountId",
   "fund_source_id", "fundSourceId", "deduction_account_id", "deductionAccountId",
 ]);
-const attendanceStatus = (record: AndroidRecord): "present" | "half_day" | "absent" => {
+const attendanceStatus = (record: AndroidRecord): "present" | "half_day" | "absent" | "leave" => {
   const raw = text(record, ["status", "attendance", "mark", "value", "state"]).toLowerCase().replace(/\s+/g, "_");
   if (["p", "present", "full", "full_day", "1"].includes(raw)) return "present";
   if (["h", "half", "half_day", "1/2", "0.5"].includes(raw)) return "half_day";
+  if (["l", "leave", "on_leave"].includes(raw)) return "leave";
   if (["a", "absent", "0"].includes(raw)) return "absent";
   const numeric = numberValue(record, ["statusValue", "dayValue", "attendanceValue"], NaN);
   if (numeric === 1) return "present";
@@ -229,10 +270,11 @@ const scopedWarningLabel = (key: typeof importedEntityArrays[number], count: num
   return `${count} ${count === 1 ? singular : plural}`;
 };
 
-function validatePayload(payload: AndroidPayload): { issues: ImportIssue[]; summary: ImportSummary } {
+function validatePayload(payload: AndroidPayload, options: { allowSummaryMismatch?: boolean } = {}): { issues: ImportIssue[]; summary: ImportSummary } {
   const issues: ImportIssue[] = [];
   const counts = Object.fromEntries(requiredArrays.map((key) => [key, asArray(payload, key).length])) as ImportSummary["counts"];
   const androidCounts = Object.fromEntries(androidExportArrays.map((key) => [key, rawArray(payload, key).length])) as Record<string, number>;
+  const exportSummaryCounts = Object.fromEntries(previewCountKeys.map((item) => [item.key, summaryCount(payload, item.summaryKeys) ?? -1]));
   const mappedCounts = Object.entries(androidToPwaArrayMap).map(([androidKey, pwaKey]) => ({
     androidKey,
     pwaKey,
@@ -242,6 +284,20 @@ function validatePayload(payload: AndroidPayload): { issues: ImportIssue[]; summ
   for (const key of ["exportVersion", "exportedAt", "source"]) {
     if (typeof payload[key] !== "string" || !String(payload[key]).trim()) {
       issues.push({ level: "warning", path: key, message: `${key} is missing or empty.` });
+    }
+  }
+  if (isAndroidV2Export(payload)) {
+    for (const item of previewCountKeys) {
+      const expected = summaryCount(payload, item.summaryKeys);
+      if (expected === undefined) continue;
+      const actual = asArray(payload, item.key).length;
+      if (actual !== expected) {
+        issues.push({
+          level: options.allowSummaryMismatch ? "warning" : "error",
+          path: `summary.${item.key}`,
+          message: `${item.label} mismatch: summary says ${expected}, actual JSON has ${actual}. ${options.allowSummaryMismatch ? "Import allowed by confirmation." : "Confirm summary mismatch before importing."}`,
+        });
+      }
     }
   }
 
@@ -296,13 +352,13 @@ function validatePayload(payload: AndroidPayload): { issues: ImportIssue[]; summ
   }
 
   asArray(payload, "expenseItems").forEach((record, index) => {
-    const expenseRef = relation(record, ["expense_id", "expenseId", "voucher_id", "voucherId", "parent_id", "parentId"]);
+    const expenseRef = relation(record, ["oldExpenseId", "expense_id", "expenseId", "voucher_id", "voucherId", "parent_id", "parentId"]);
     if (!expenseRef || !expensesByOldId.has(expenseRef)) {
       issues.push({ level: "error", path: `expenseItems[${index}].expense_id`, message: `Invalid expense/voucher reference '${expenseRef || "-"}'.` });
     }
   });
   asArray(payload, "dispatchItems").forEach((record, index) => {
-    const dispatchRef = relation(record, ["dispatch_id", "dispatchId", "parent_id", "parentId"]);
+    const dispatchRef = relation(record, ["oldDispatchId", "dispatch_id", "dispatchId", "parent_id", "parentId"]);
     if (!dispatchRef || !dispatchesByOldId.has(dispatchRef)) {
       issues.push({ level: "error", path: `dispatchItems[${index}].dispatch_id`, message: `Invalid dispatch reference '${dispatchRef || "-"}'.` });
     }
@@ -310,7 +366,7 @@ function validatePayload(payload: AndroidPayload): { issues: ImportIssue[]; summ
 
   const expenseItemsByParent = new Map<string, AndroidRecord[]>();
   for (const item of asArray(payload, "expenseItems")) {
-    const parentId = relation(item, ["expense_id", "expenseId", "voucher_id", "voucherId", "parent_id", "parentId"]);
+    const parentId = relation(item, ["oldExpenseId", "expense_id", "expenseId", "voucher_id", "voucherId", "parent_id", "parentId"]);
     expenseItemsByParent.set(parentId, [...(expenseItemsByParent.get(parentId) ?? []), item]);
   }
   for (const expense of asArray(payload, "expenses")) {
@@ -359,6 +415,7 @@ function validatePayload(payload: AndroidPayload): { issues: ImportIssue[]; summ
       source: typeof payload.source === "string" ? payload.source : null,
       counts,
       androidCounts,
+      exportSummaryCounts,
       mappedCounts,
       importCounts,
       voucherCount: counts.expenses,
@@ -409,7 +466,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
     if (!parsed.success) return reply.code(400).send({ message: "A workspaceId and Android export JSON payload are required." });
     const [workspace] = localDevelopmentMode ? [{ id: parsed.data.workspaceId }] : await db.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.id, parsed.data.workspaceId)).limit(1);
     if (!workspace) return reply.code(404).send({ message: "Workspace not found." });
-    const validation = validatePayload(parsed.data.payload);
+    const validation = validatePayload(parsed.data.payload, { allowSummaryMismatch: parsed.data.allowSummaryMismatch });
     return { ...validation, canImport: validation.issues.every((issue) => issue.level !== "error"), dryRunRecommended: true };
   });
 
@@ -439,7 +496,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
   app.post("/v1/admin/migration-import/import", { preHandler: requirePermission("CREATE_WORKSPACE"), bodyLimit: 50 * 1024 * 1024 }, async (request, reply) => {
     const parsed = importSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ message: "A valid migration import request is required." });
-    const validation = validatePayload(parsed.data.payload);
+    const validation = validatePayload(parsed.data.payload, { allowSummaryMismatch: parsed.data.allowSummaryMismatch });
     const hasErrors = validation.issues.some((issue) => issue.level === "error");
     if (hasErrors) return reply.code(400).send({ message: "Resolve validation errors before importing.", ...validation });
     if (parsed.data.dryRun || localDevelopmentMode) return { ...validation, imported: false, dryRun: true, message: localDevelopmentMode ? "Local memory mode cannot write migration data. Configure a dev database first." : "Dry run completed. No data was written." };
@@ -680,48 +737,53 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
             clientUpdatedAt: record.clientUpdatedAt,
             updatedAt: record.updatedAt,
           }).where(eq(operationalRecords.id, existing.id));
-          return { inserted: false, payloadId: payloadId(nextPayload) };
+          return { inserted: false, updated: true, payloadId: payloadId(nextPayload) };
         }
         await tx.insert(operationalRecords).values(record);
         insertedOperationalRecords += 1;
-        return { inserted: true, payloadId: payloadId(record.payload) };
+        return { inserted: true, updated: false, payloadId: payloadId(record.payload) };
       };
 
       await logStep("IMPORT ACCOUNTS", "started");
+      let updatedAccounts = 0;
       for (const source of asArray(parsed.data.payload, "accounts")) {
         const id = randomUUID();
-        const result = await writeRecord("account", sourceTypeFor("accounts"), source, { id, name: text(source, ["name", "accountName"], "Imported Account"), type: text(source, ["type", "accountType"], "cash") });
+        const result = await writeRecord("account", sourceTypeFor("accounts"), source, { id, name: text(source, ["name", "accountName"], "Imported Account"), type: text(source, ["type", "accountType"], "cash"), openingBalance: numberValue(source, ["openingBalance", "opening_balance"]), active: importedActive(source) });
         maps.accounts.set(oldId(source), result.payloadId ?? id);
         if (result.inserted) importedCounts.accounts += 1;
+        if (result.updated) updatedAccounts += 1;
       }
       for (const source of asArray(parsed.data.payload, "partners")) {
         const id = randomUUID();
         const result = await writeRecord("account", sourceTypeFor("partners"), source, { id, name: text(source, ["name", "partnerName"], "Imported Partner"), type: "partner" });
         maps.partners.set(oldId(source), result.payloadId ?? id);
       }
-      await logStep("IMPORT ACCOUNTS", "completed", { importedRows: importedCounts.accounts, failedRows: 0 });
+      await logStep("IMPORT ACCOUNTS", "completed", { sourceRows: asArray(parsed.data.payload, "accounts").length, importedRows: importedCounts.accounts, updatedRows: updatedAccounts, failedRows: 0 });
       const labourNameMap = new Map<string, string>();
       await logStep("IMPORT LABOUR", "started");
+      let updatedLabour = 0;
       for (const source of asArray(parsed.data.payload, "labour")) {
         const id = randomUUID();
         const name = text(source, ["name", "labourName", "workerName", "employeeName"], "Imported Labour");
-        const result = await writeRecord("labourer", sourceTypeFor("labour"), source, { id, name, group: text(source, ["group", "groupName"], "Imported"), dailyWage: numberValue(source, ["dailyWage", "dailyRate", "wage"]), paymentType: text(source, ["paymentType"], "daily_wage"), active: source.active !== false });
+        const result = await writeRecord("labourer", sourceTypeFor("labour"), source, { id, name, phone: text(source, ["phone", "mobile", "mobileNumber"]), notes: text(source, ["notes", "remarks"]), group: text(source, ["groupName", "group", "paymentGroup"], "Imported"), dailyWage: numberValue(source, ["dailyWage", "dailyRate", "wage"]), paymentType: text(source, ["paymentType"], "daily_wage"), active: importedActive(source) });
         const labourId = result.payloadId ?? id;
         maps.labour.set(oldId(source), labourId);
         labourNameMap.set(name.trim().toLowerCase(), labourId);
         if (result.inserted) importedCounts.labour += 1;
+        if (result.updated) updatedLabour += 1;
       }
-      await logStep("IMPORT LABOUR", "completed", { importedRows: importedCounts.labour, failedRows: 0 });
+      await logStep("IMPORT LABOUR", "completed", { sourceRows: asArray(parsed.data.payload, "labour").length, importedRows: importedCounts.labour, updatedRows: updatedLabour, failedRows: 0 });
       const resolveLabourId = (source: AndroidRecord) => maps.labour.get(labourRef(source))
         ?? labourNameMap.get(text(source, ["labourName", "labour_name", "workerName", "worker_name", "employeeName", "name"]).trim().toLowerCase());
       const defaultAccountId = firstMapValue(maps.accounts);
 
       const expenseItemsByParent = new Map<string, AndroidRecord[]>();
       for (const item of asArray(parsed.data.payload, "expenseItems")) {
-        const parentId = relation(item, ["expense_id", "expenseId", "voucher_id", "voucherId", "parent_id", "parentId"]);
+        const parentId = relation(item, ["oldExpenseId", "expense_id", "expenseId", "voucher_id", "voucherId", "parent_id", "parentId"]);
         expenseItemsByParent.set(parentId, [...(expenseItemsByParent.get(parentId) ?? []), item]);
       }
       await logStep("IMPORT EXPENSES", "started");
+      let updatedExpenses = 0;
       for (const source of asArray(parsed.data.payload, "expenses")) {
         const items = expenseItemsByParent.get(oldId(source)) ?? [];
         const result = await writeRecord("voucher", sourceTypeFor("expenses"), source, {
@@ -733,29 +795,41 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
           category: text(source, ["category", "categoryName", "expenseCategory"], "Imported"),
           subcategoryId: text(source, ["subcategory_id", "subcategoryId", "subcategory"], "imported"),
           subcategory: text(source, ["subcategory", "subcategoryName", "expenseSubcategory"], "Imported"),
+          paidByPartnerName: text(source, ["paidByPartnerName", "paid_by_partner_name"]),
           description: text(source, ["description", "notes"], "Imported Android voucher"),
-          items: items.map((item) => ({ ...item, source_type: sourceTypeFor("expenseItems"), old_android_id: oldId(item) })),
+          notes: text(source, ["notes"]),
+          items: items.map((item) => ({ ...item, description: text(item, ["description", "itemName", "name"]), category: text(item, ["category", "categoryName"]), subcategory: text(item, ["subcategory", "subcategoryName"]), amount: numberValue(item, ["amount", "total", "lineTotal"]), quantity: numberValue(item, ["quantity", "qty"], 1), unit: text(item, ["unit"]), source_type: sourceTypeFor("expenseItems"), old_android_id: oldId(item) })),
         });
         if (result.inserted) {
           importedCounts.expenses += 1;
           importedCounts.expenseItems += items.length;
         }
+        if (result.updated) updatedExpenses += 1;
       }
-      await logStep("IMPORT EXPENSES", "completed", { importedRows: importedCounts.expenses, failedRows: 0 });
+      await logStep("IMPORT EXPENSES", "completed", { sourceRows: asArray(parsed.data.payload, "expenses").length, importedRows: importedCounts.expenses, updatedRows: updatedExpenses, failedRows: 0 });
       await logStep("IMPORT ADVANCES", "started");
+      let updatedAdvances = 0;
+      let skippedAdvances = 0;
       for (const source of asArray(parsed.data.payload, "advances")) {
+        const labourerId = resolveLabourId(source);
+        if (!labourerId) {
+          skippedAdvances += 1;
+          continue;
+        }
         const result = await writeRecord("advance", sourceTypeFor("advances"), source, {
           date: dateValue(source, ["date", "advanceDate"]),
           amount: numberValue(source, ["amount"]),
-          labourerId: resolveLabourId(source),
+          labourerId,
           accountId: maps.accounts.get(accountRef(source)) ?? defaultAccountId,
           notes: text(source, ["notes", "description"]),
         });
         if (result.inserted) importedCounts.advances += 1;
+        if (result.updated) updatedAdvances += 1;
       }
-      await logStep("IMPORT ADVANCES", "completed", { importedRows: importedCounts.advances, failedRows: 0 });
+      await logStep("IMPORT ADVANCES", "completed", { sourceRows: asArray(parsed.data.payload, "advances").length, importedRows: importedCounts.advances, updatedRows: updatedAdvances, skippedRows: skippedAdvances, failedRows: skippedAdvances });
       await logStep("IMPORT ATTENDANCE", "started");
       let skippedAttendanceRows = 0;
+      let updatedAttendance = 0;
       for (const source of asArray(parsed.data.payload, "attendance")) {
         const labourerId = resolveLabourId(source);
         if (!labourerId) {
@@ -768,11 +842,22 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
           status: attendanceStatus(source),
         });
         if (result.inserted) importedCounts.attendance += 1;
+        if (result.updated) updatedAttendance += 1;
       }
-      await logStep("IMPORT ATTENDANCE", "completed", { importedRows: importedCounts.attendance, failedRows: skippedAttendanceRows });
+      await logStep("IMPORT ATTENDANCE", "completed", { sourceRows: asArray(parsed.data.payload, "attendance").length, importedRows: importedCounts.attendance, updatedRows: updatedAttendance, skippedRows: skippedAttendanceRows, failedRows: skippedAttendanceRows });
+      const assertProcessed = (label: string, sourceRows: number, processedRows: number, skippedRows = 0) => {
+        if (sourceRows > 0 && processedRows === 0 && skippedRows === 0) {
+          throw new Error(`Schema mismatch or mapping failure: ${label} source count ${sourceRows} but imported/updated 0.`);
+        }
+      };
+      assertProcessed("accounts", asArray(parsed.data.payload, "accounts").length, importedCounts.accounts + updatedAccounts);
+      assertProcessed("labours", asArray(parsed.data.payload, "labour").length, importedCounts.labour + updatedLabour);
+      assertProcessed("expenses", asArray(parsed.data.payload, "expenses").length, importedCounts.expenses + updatedExpenses);
+      assertProcessed("advances", asArray(parsed.data.payload, "advances").length, importedCounts.advances + updatedAdvances, skippedAdvances);
+      assertProcessed("attendance", asArray(parsed.data.payload, "attendance").length, importedCounts.attendance + updatedAttendance, skippedAttendanceRows);
       const dispatchItemsByParent = new Map<string, AndroidRecord[]>();
       for (const item of asArray(parsed.data.payload, "dispatchItems")) {
-        const parentId = relation(item, ["dispatch_id", "dispatchId", "parent_id", "parentId"]);
+        const parentId = relation(item, ["oldDispatchId", "dispatch_id", "dispatchId", "parent_id", "parentId"]);
         dispatchItemsByParent.set(parentId, [...(dispatchItemsByParent.get(parentId) ?? []), item]);
       }
       for (const source of asArray(parsed.data.payload, "dispatches")) {

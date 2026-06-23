@@ -199,6 +199,7 @@ export type MigrationImportSummary = {
   exportVersion: string | null; exportedAt: string | null; source: string | null;
   counts: Record<string, number>;
   androidCounts: Record<string, number>;
+  exportSummaryCounts?: Record<string, number>;
   mappedCounts: Array<{ androidKey: string; pwaKey: string; count: number }>;
   importCounts: Array<{ label: string; key: string; count: number }>;
   voucherCount: number; voucherItemCount: number; totalExpenses: number; totalAdvances: number; totalSales: number;
@@ -233,7 +234,10 @@ export type MigrationImportLogEntry = {
   step: string;
   status: "started" | "completed" | "failed";
   message?: string;
+  sourceRows?: number;
   importedRows?: number;
+  updatedRows?: number;
+  skippedRows?: number;
   failedRows?: number;
   createdAt: string;
 };
@@ -561,9 +565,9 @@ export const fetchAdminUser = (token: string, userId: string) =>
 export const updateAdminUserStatus = (token: string, userId: string, input: { active: boolean }) =>
   apiRequest<void>(`/v1/admin/users/${userId}/status`, { method: "PATCH", body: JSON.stringify(input) }, token);
 export const fetchAdminAuditLogs = (token: string) => apiRequest<{ records: AdminAuditLog[] }>("/v1/admin/audit-logs", {}, token);
-export const validateMigrationImport = (token: string, input: { workspaceId: string; payload: unknown }) =>
+export const validateMigrationImport = (token: string, input: { workspaceId: string; payload: unknown; allowSummaryMismatch?: boolean }) =>
   apiRequest<MigrationImportValidation>("/v1/admin/migration-import/validate", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 60_000, debugLabel: "migration-import-validate" });
-export const importMigrationData = (token: string, input: { workspaceId: string; payload: unknown; dryRun: boolean; allowDatabaseWrite: boolean }) =>
+export const importMigrationData = (token: string, input: { workspaceId: string; payload: unknown; dryRun: boolean; allowDatabaseWrite: boolean; allowSummaryMismatch?: boolean }) =>
   apiRequest<MigrationImportValidation>("/v1/admin/migration-import/import", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 600_000, debugLabel: "migration-import-import" });
 export const fetchMigrationImportHistory = (token: string, workspaceId: string) =>
   apiRequest<{ records: MigrationImportHistoryRecord[] }>(`/v1/admin/migration-import/history?workspaceId=${encodeURIComponent(workspaceId)}`, {}, token, { timeoutMs: 30_000, debugLabel: "migration-import-history" });
