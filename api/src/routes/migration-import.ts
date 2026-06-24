@@ -2,12 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { requirePermission } from "../auth.js";
+import { requirePermission, requireUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { auditLogs, farmDeletionRequests, farms, importBatches, importFailures, operationalRecords, seasons, userSessions, workspaces } from "../db/schema.js";
 import { visibleFarmWhere } from "../farm-visibility.js";
-import { repairWorkspaceContext } from "./workspace-context.js";
+import { repairWorkspaceContext, resolveWorkspaceContext } from "./workspace-context.js";
 
 const requiredArrays = [
   "farms",
@@ -70,6 +70,7 @@ const importSchema = payloadSchema.extend({
   fileName: z.string().trim().min(1).optional(),
 });
 const repairSchema = z.object({ workspaceId: z.string().uuid() });
+const workspaceParams = z.object({ workspaceId: z.string().uuid() });
 const historyQuerySchema = z.object({ workspaceId: z.string().uuid() });
 const jobParamsSchema = z.object({ jobId: z.string().uuid() });
 const activeJobQuerySchema = z.object({ workspaceId: z.string().uuid() });
@@ -106,6 +107,16 @@ type ImportSummary = {
 };
 type ImportCountKey = "farms" | "seasons" | "accounts" | "partners" | "labour" | "expenses" | "expenseItems" | "advances" | "attendance";
 type ScopedMaps = { farms: Map<string, string>; seasons: Map<string, string>; labour: Map<string, string>; accounts: Map<string, string>; partners: Map<string, string> };
+type PostImportAudit = {
+  expectedCounts: Record<string, number>;
+  tableCounts: {
+    farms: number;
+    seasons: number;
+    importFailures: number;
+    failedOrPartialBatches: number;
+  };
+  operationalRecordsByEntity: Array<{ entityType: string; count: number }>;
+};
 type ImportResult = {
   insertedOperationalRecords: number;
   importCounts: Array<{ label: string; key: ImportCountKey; count: number }>;
@@ -122,6 +133,7 @@ type ImportResult = {
   logs: ImportLogEntry[];
   totalExpenses: number;
   totalAdvances: number;
+  postImportAudit: PostImportAudit;
 };
 type ImportLogEntry = {
   step: string;
@@ -181,6 +193,30 @@ type CleanupTarget = {
   workspaceId: string;
   fileHash: string;
   source: string;
+};
+
+type VisibilityAuditResponse = {
+  workspaceId: string;
+  latestImport: {
+    batchId: string | null;
+    fileHash: string | null;
+    source: string | null;
+    status: string | null;
+    startedAt: string | null;
+    completedAt: string | null;
+  };
+  server: {
+    farmsImported: number;
+    seasonsImported: number;
+    operationalRecordsByEntity: Array<{ entityType: string; count: number }>;
+  };
+  context: {
+    activeFarmId: string | null;
+    activeSeasonId: string | null;
+    activeFarmName: string | null;
+    activeSeasonName: string | null;
+    contextWarning: string | null;
+  };
 };
 
 const attendanceImportJobs = new Map<string, AttendanceImportJobStatus>();
@@ -640,6 +676,164 @@ async function cleanupPreview(workspaceId: string, batchId: string) {
   };
 }
 
+async function buildPostImportAudit(
+  workspaceId: string,
+  importBatchId: string,
+  fileHash: string,
+  payload: AndroidPayload,
+): Promise<PostImportAudit> {
+  const [farmCountRows, seasonCountRows, failedBatchRows, entityRows, failureRows] = await Promise.all([
+    db.execute(sql`
+      SELECT count(*)::int AS count
+      FROM farms
+      WHERE workspace_id = ${workspaceId}
+        AND source_file_hash = ${fileHash}
+    `),
+    db.execute(sql`
+      SELECT count(*)::int AS count
+      FROM seasons
+      WHERE workspace_id = ${workspaceId}
+        AND source_file_hash = ${fileHash}
+    `),
+    db.execute(sql`
+      SELECT count(*)::int AS count
+      FROM import_batches
+      WHERE workspace_id = ${workspaceId}
+        AND file_hash = ${fileHash}
+        AND status IN ('failed', 'partial_failed')
+    `),
+    db.execute(sql`
+      SELECT entity_type, count(*)::int AS count
+      FROM operational_records
+      WHERE workspace_id = ${workspaceId}
+        AND source_file_hash = ${fileHash}
+      GROUP BY entity_type
+      ORDER BY entity_type
+    `),
+    db.execute(sql`
+      SELECT count(*)::int AS count
+      FROM import_failures
+      WHERE import_batch_id = ${importBatchId}
+    `),
+  ]);
+
+  return {
+    expectedCounts: {
+      labour: asArray(payload, "labour").length,
+      accounts: asArray(payload, "accounts").length,
+      partners: asArray(payload, "partners").length,
+      expenses: asArray(payload, "expenses").length,
+      expenseItems: asArray(payload, "expenseItems").length,
+      advances: asArray(payload, "advances").length,
+      attendance: asArray(payload, "attendance").length,
+      sales: asArray(payload, "sales").length,
+      dispatches: asArray(payload, "dispatches").length,
+    },
+    tableCounts: {
+      farms: Number((farmCountRows.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
+      seasons: Number((seasonCountRows.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
+      importFailures: Number((failureRows.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
+      failedOrPartialBatches: Number((failedBatchRows.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
+    },
+    operationalRecordsByEntity: entityRows.rows.map((row) => ({
+      entityType: String((row as Record<string, unknown>).entity_type ?? ""),
+      count: Number((row as Record<string, unknown>).count ?? 0),
+    })),
+  };
+}
+
+async function buildVisibilityAudit(workspaceId: string, sessionId?: string | null): Promise<VisibilityAuditResponse> {
+  const [latestBatch] = await db.select().from(importBatches)
+    .where(eq(importBatches.workspaceId, workspaceId))
+    .orderBy(sql`${importBatches.startedAt} DESC`)
+    .limit(1);
+  const fileHash = latestBatch?.fileHash ?? null;
+
+  const context = await resolveWorkspaceContext(workspaceId, sessionId);
+  const activeFarm = context.activeFarmId
+    ? context.farms.find((farm) => farm.id === context.activeFarmId) ?? null
+    : null;
+  const activeSeason = context.activeSeasonId
+    ? context.seasons.find((season) => season.id === context.activeSeasonId) ?? null
+    : null;
+
+  if (!fileHash) {
+    return {
+      workspaceId,
+      latestImport: {
+        batchId: null,
+        fileHash: null,
+        source: null,
+        status: null,
+        startedAt: null,
+        completedAt: null,
+      },
+      server: {
+        farmsImported: 0,
+        seasonsImported: 0,
+        operationalRecordsByEntity: [],
+      },
+      context: {
+        activeFarmId: context.activeFarmId,
+        activeSeasonId: context.activeSeasonId,
+        activeFarmName: activeFarm?.name ?? null,
+        activeSeasonName: activeSeason?.name ?? null,
+        contextWarning: context.contextWarning,
+      },
+    };
+  }
+
+  const [farmRows, seasonRows, entityRows] = await Promise.all([
+    db.execute(sql`
+      SELECT count(*)::int AS count
+      FROM farms
+      WHERE workspace_id = ${workspaceId}
+        AND source_file_hash = ${fileHash}
+    `),
+    db.execute(sql`
+      SELECT count(*)::int AS count
+      FROM seasons
+      WHERE workspace_id = ${workspaceId}
+        AND source_file_hash = ${fileHash}
+    `),
+    db.execute(sql`
+      SELECT entity_type, count(*)::int AS count
+      FROM operational_records
+      WHERE workspace_id = ${workspaceId}
+        AND source_file_hash = ${fileHash}
+      GROUP BY entity_type
+      ORDER BY entity_type
+    `),
+  ]);
+
+  return {
+    workspaceId,
+    latestImport: {
+      batchId: latestBatch!.id,
+      fileHash,
+      source: latestBatch!.source,
+      status: latestBatch!.status,
+      startedAt: latestBatch!.startedAt.toISOString(),
+      completedAt: latestBatch!.completedAt?.toISOString() ?? null,
+    },
+    server: {
+      farmsImported: Number((farmRows.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
+      seasonsImported: Number((seasonRows.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
+      operationalRecordsByEntity: entityRows.rows.map((row) => ({
+        entityType: String((row as Record<string, unknown>).entity_type ?? ""),
+        count: Number((row as Record<string, unknown>).count ?? 0),
+      })),
+    },
+    context: {
+      activeFarmId: context.activeFarmId,
+      activeSeasonId: context.activeSeasonId,
+      activeFarmName: activeFarm?.name ?? null,
+      activeSeasonName: activeSeason?.name ?? null,
+      contextWarning: context.contextWarning,
+    },
+  };
+}
+
 export async function migrationImportRoutes(app: FastifyInstance): Promise<void> {
   app.post("/v1/admin/migration-import/validate", { preHandler: requirePermission("CREATE_WORKSPACE"), bodyLimit: 50 * 1024 * 1024 }, async (request, reply) => {
     const parsed = payloadSchema.safeParse(request.body);
@@ -917,6 +1111,23 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
     return { job: activeJob ?? null };
   });
 
+  app.get("/v1/workspace/:workspaceId/import-visibility-audit", { preHandler: requireUser }, async (request, reply) => {
+    if (!request.appUser) return reply;
+    const parsed = workspaceParams.safeParse(request.params);
+    if (!parsed.success) return reply.code(400).send({ message: "A valid workspaceId is required." });
+    const canAccess = Boolean(
+      request.appUser.platformRole
+      || request.appUser.workspaceId === parsed.data.workspaceId
+      || request.appUser.memberships.some((membership) => membership.active && membership.workspaceId === parsed.data.workspaceId),
+    );
+    if (!canAccess) return reply.code(403).send({ message: "Workspace membership is required." });
+    const audit = await buildVisibilityAudit(
+      parsed.data.workspaceId,
+      request.appUser.platformRole ? null : request.sessionId,
+    );
+    return audit;
+  });
+
   const buildScopedMapsFromDb = async (workspaceId: string) => {
     const [farmRows, seasonRows, labourRows, accountRows, partnerRows] = await Promise.all([
       db.select().from(farms).where(eq(farms.workspaceId, workspaceId)),
@@ -962,9 +1173,9 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         job: existingRunningJob,
       });
     }
-    if (existingBatchForFile && ["completed", "completed_with_warnings", "partial_failed", "failed", "running"].includes(existingBatchForFile.status)) {
+    if (existingBatchForFile && ["partial_failed", "failed", "running"].includes(existingBatchForFile.status)) {
       return reply.code(409).send({
-        message: "This file was already imported. Choose Retry Failed Attendance or Repair instead of full re-import.",
+        message: "This file has a failed or in-progress import batch. Finish cleanup, retry attendance, or repair visibility before starting a fresh import.",
         existingBatch: {
           id: existingBatchForFile.id,
           status: existingBatchForFile.status,
@@ -975,7 +1186,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       });
     }
 
-    const importBatchId = randomUUID();
+    const importBatchId = existingBatchForFile?.id ?? randomUUID();
     const startedAt = new Date().toISOString();
     const logs: ImportLogEntry[] = [];
     let currentStep = "START IMPORT";
@@ -1019,20 +1230,37 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       ],
       logs: [],
     };
-    await db.insert(importBatches).values({
-      id: importBatchId,
-      workspaceId: parsed.data.workspaceId,
-      source: validation.summary.source ?? "unknown",
-      exportVersion: validation.summary.exportVersion,
-      fileName: parsed.data.fileName ?? null,
-      fileHash,
-      status: "running",
-      startedBy: userId,
-      startedAt: new Date(startedAt),
-      payloadJson: parsed.data.payload,
-      summaryJson: { summary: validation.summary, steps: importJob.steps, job: importJob },
-      errorJson: {},
-    });
+    if (existingBatchForFile) {
+      await db.delete(importFailures).where(eq(importFailures.importBatchId, importBatchId));
+      await db.update(importBatches).set({
+        source: validation.summary.source ?? "unknown",
+        exportVersion: validation.summary.exportVersion,
+        fileName: parsed.data.fileName ?? null,
+        status: "running",
+        startedBy: userId,
+        startedAt: new Date(startedAt),
+        completedAt: null,
+        payloadJson: parsed.data.payload,
+        summaryJson: { summary: validation.summary, steps: importJob.steps, job: importJob },
+        errorJson: {},
+        updatedAt: new Date(),
+      }).where(eq(importBatches.id, importBatchId));
+    } else {
+      await db.insert(importBatches).values({
+        id: importBatchId,
+        workspaceId: parsed.data.workspaceId,
+        source: validation.summary.source ?? "unknown",
+        exportVersion: validation.summary.exportVersion,
+        fileName: parsed.data.fileName ?? null,
+        fileHash,
+        status: "running",
+        startedBy: userId,
+        startedAt: new Date(startedAt),
+        payloadJson: parsed.data.payload,
+        summaryJson: { summary: validation.summary, steps: importJob.steps, job: importJob },
+        errorJson: {},
+      });
+    }
     const updateJob = (patch: Partial<AttendanceImportJobStatus>) => {
       Object.assign(importJob, patch, { lastProgressAt: new Date().toISOString() });
       attendanceImportJobs.set(importJob.jobId, importJob);
@@ -1347,6 +1575,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
             seasonId: record.seasonId,
             sourceType,
             oldAndroidId: androidId,
+            importBatchId,
             sourceFileHash: fileHash,
             payload: nextPayload,
             clientUpdatedAt: record.clientUpdatedAt,
@@ -1761,6 +1990,26 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         logs,
         totalExpenses: validation.summary.totalExpenses,
         totalAdvances: validation.summary.totalAdvances,
+        postImportAudit: {
+          expectedCounts: {
+            labour: asArray(parsed.data.payload, "labour").length,
+            accounts: asArray(parsed.data.payload, "accounts").length,
+            partners: asArray(parsed.data.payload, "partners").length,
+            expenses: asArray(parsed.data.payload, "expenses").length,
+            expenseItems: asArray(parsed.data.payload, "expenseItems").length,
+            advances: asArray(parsed.data.payload, "advances").length,
+            attendance: asArray(parsed.data.payload, "attendance").length,
+            sales: asArray(parsed.data.payload, "sales").length,
+            dispatches: asArray(parsed.data.payload, "dispatches").length,
+          },
+          tableCounts: {
+            farms: maps.farms.size,
+            seasons: maps.seasons.size,
+            importFailures: 0,
+            failedOrPartialBatches: 0,
+          },
+          operationalRecordsByEntity: [],
+        },
       } satisfies ImportResult;
       })(db);
     } catch (error) {
@@ -1770,6 +2019,13 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       await logStep(currentStep, "failed", { message, failedRows: 1 });
       return reply.code(500).send({ message: `${currentStep} failed: ${message}`, issues: validation.issues, summary: validation.summary, logs });
     }
+
+    result.postImportAudit = await buildPostImportAudit(
+      parsed.data.workspaceId,
+      result.importBatchId,
+      fileHash,
+      parsed.data.payload,
+    );
 
     return {
       ...validation,
@@ -1919,6 +2175,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
               seasonId: targetSeasonId,
               sourceType: sourceTypeFor("attendance"),
               oldAndroidId: androidId,
+              importBatchId: batch.id,
               sourceFileHash: fileHash,
               payload: nextPayload,
               clientUpdatedAt: payloadRecord.clientUpdatedAt,

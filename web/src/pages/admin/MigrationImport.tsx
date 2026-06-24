@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Database, FileJson, ShieldAlert, UploadCloud } from "lucide-react";
 import { useAuth } from "../../auth/AuthProvider";
+import { ImportVisibilityAuditPanel } from "../../components/ImportVisibilityAuditPanel";
 import { Link, useParams } from "react-router-dom";
 import { cleanFailedMigrationImport, downloadMigrationImportFailures, fetchActiveMigrationImportJob, fetchAdminWorkspaces, fetchMigrationImportBatches, fetchMigrationImportCleanupPreview, fetchMigrationImportHistory, fetchMigrationImportJobDetail, fetchMigrationImportJobStatus, importMigrationData, markMigrationImportBatchClosed, repairMigrationImportVisibility, retryMigrationAttendance, rollbackMigrationImportBatch, validateMigrationImport, type MigrationImportBatchRecord, type MigrationImportHistoryRecord, type MigrationImportIssue, type MigrationImportJobDetail, type MigrationImportJobStatus, type MigrationImportLogEntry, type MigrationImportSummary } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
@@ -604,6 +605,7 @@ export function MigrationImport() {
         </section>
       ) : null}
       {workspaceId ? <ImportHistory records={history.data?.records ?? []} /> : null}
+      {workspaceId ? <ImportVisibilityAuditPanel workspaceId={workspaceId} title="Import Visibility Audit" /> : null}
 
       {validation ? (
         <section className="admin-section-card migration-results">
@@ -640,6 +642,19 @@ export function MigrationImport() {
               {runImport.data.result.completedAt ? <p><b>Completed at</b> {new Date(runImport.data.result.completedAt).toLocaleString()}</p> : null}
               {runImport.data.result.activeFarmId && runImport.data.result.activeSeasonId ? (
                 <p><b>Active import context</b> Farm {runImport.data.result.activeFarmId} · Season {runImport.data.result.activeSeasonId}</p>
+              ) : null}
+              {runImport.data.result.postImportAudit ? (
+                <div>
+                  <h4>Post-import visibility audit</h4>
+                  <p><b>Imported farms in table</b> {runImport.data.result.postImportAudit.tableCounts.farms}</p>
+                  <p><b>Imported seasons in table</b> {runImport.data.result.postImportAudit.tableCounts.seasons}</p>
+                  <p><b>Failed/partial import batches for this file</b> {runImport.data.result.postImportAudit.tableCounts.failedOrPartialBatches}</p>
+                  <p><b>Import failures for current batch</b> {runImport.data.result.postImportAudit.tableCounts.importFailures}</p>
+                  <p><b>Expected Android counts</b> {Object.entries(runImport.data.result.postImportAudit.expectedCounts).map(([key, value]) => `${key}: ${value}`).join(" · ")}</p>
+                  <p><b>Operational records by entity</b> {runImport.data.result.postImportAudit.operationalRecordsByEntity.length
+                    ? runImport.data.result.postImportAudit.operationalRecordsByEntity.map((item) => `${item.entityType}: ${item.count}`).join(" · ")
+                    : "Attendance may still be processing in the background. Refresh or follow the current import panel for live counts."}</p>
+                </div>
               ) : null}
               {runImport.data.result.logs?.length ? (
                 <div>

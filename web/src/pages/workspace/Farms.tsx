@@ -14,6 +14,7 @@ import {
   fetchWorkspaceProfile,
   requestWorkspaceFarmDeletion,
   repairWorkspaceContextRequest,
+  restoreWorkspaceFarm,
   selectActiveFarm,
   updateWorkspaceProfile,
   updateWorkspaceFarm,
@@ -117,6 +118,10 @@ export function Farms() {
     mutationFn: (farmId: string) => archiveWorkspaceFarm(token!, workspaceId, farmId),
     onSuccess: refresh,
   });
+  const restoreFarm = useMutation({
+    mutationFn: (farmId: string) => restoreWorkspaceFarm(token!, workspaceId, farmId),
+    onSuccess: refresh,
+  });
   const deleteFarm = useMutation({
     mutationFn: (farmId: string) => deleteWorkspaceFarm(token!, workspaceId, farmId),
     onSuccess: refresh,
@@ -146,6 +151,17 @@ export function Farms() {
     event.preventDefault();
     save.mutate();
   };
+
+  useEffect(() => {
+    if (!canManage) return;
+    const params = new URLSearchParams(location.search);
+    if (params.get("create") === "1") {
+      setEditing(null);
+      setForm(emptyForm);
+      setShowForm(true);
+    }
+  }, [canManage, location.search]);
+
   const requestArchive = (farm: Farm) => {
     if (window.confirm(`${t("farmsPage.archiveFarmConfirm")}\n\n${t("farmsPage.archiveFarmDescription")}`)) archive.mutate(farm.id);
   };
@@ -157,6 +173,12 @@ export function Farms() {
     if (reason === null) return;
     requestDeletion.mutate({ farmId: farm.id, reason: reason.trim() || undefined });
   };
+  const requestRestore = (farm: Farm) => {
+    if (window.confirm(t("farmsPage.restoreFarmConfirm"))) restoreFarm.mutate(farm.id);
+  };
+  const activeFarms = farms.data?.farms ?? [];
+  const historyFarms = farms.data?.historyFarms ?? [];
+  const hasUsableFarm = activeFarms.length > 0;
 
   return (
     <div className="dashboard-page">
@@ -201,11 +223,14 @@ export function Farms() {
         {farms.data?.contextWarning && (
           <section className="record-panel">
             <p className={farms.data.needsRepair ? "error" : "context-message"}>{farms.data.contextWarning}</p>
-            {farms.data.needsRepair && canManage && (
+            {canManage && (
               <div className="farm-actions">
-                <button type="button" onClick={() => repairContext.mutate()} disabled={repairContext.isPending}>
-                  {repairContext.isPending ? "Repairing..." : "Repair workspace context"}
-                </button>
+                {farms.data.needsRepair && (
+                  <button type="button" onClick={() => repairContext.mutate()} disabled={repairContext.isPending}>
+                    {repairContext.isPending ? "Repairing..." : "Repair workspace context"}
+                  </button>
+                )}
+                {!hasUsableFarm && <button type="button" onClick={() => { setEditing(null); setForm(emptyForm); setShowForm(true); }}>{t("farmsPage.createFarm")}</button>}
               </div>
             )}
             {repairContext.data ? <p className="positive">{repairContext.data.message}</p> : null}
@@ -214,7 +239,7 @@ export function Farms() {
         )}
         {farms.data && (
           <section className="farm-grid">
-            {farms.data.farms.map((farm) => {
+            {activeFarms.map((farm) => {
               const isCurrent = farms.data.activeFarmId === farm.id;
               return (
                 <article className={`farm-card ${isCurrent ? "farm-card--active" : ""}`} key={farm.id}>
@@ -237,11 +262,37 @@ export function Farms() {
                 </article>
               );
             })}
-            {!farms.data.farms.length && <p className="context-message">{t("farmsPage.noFarms")}</p>}
+            {!activeFarms.length && <p className="context-message">{t("farmsPage.noUsableFarms")}</p>}
+          </section>
+        )}
+        {Boolean(historyFarms.length) && (
+          <section className="record-panel">
+            <div className="workspace-intro">
+              <div><h2>{t("farmsPage.historyTitle")}</h2><p>{t("farmsPage.historyDescription")}</p></div>
+            </div>
+            <section className="farm-grid">
+              {historyFarms.map((farm) => (
+                <article className="farm-card" key={farm.id}>
+                  <header>
+                    <div>
+                      <strong>{farm.name}</strong>
+                      <span>{farm.deletedAt ? t("farmsPage.deleted") : t("seasonsPage.archived")}</span>
+                    </div>
+                  </header>
+                  <p><MapPin size={15} />{farm.location || t("farmsPage.locationNotRecorded")}</p>
+                  <p><UserRound size={15} />{farm.owner || farm.contactName || t("farmsPage.contactNotRecorded")}</p>
+                  {farm.remarks && <small>{farm.remarks}</small>}
+                  <footer>
+                    {canManage && <button type="button" onClick={() => requestRestore(farm)}><Leaf size={15} />{t("farmsPage.restoreFarm")}</button>}
+                  </footer>
+                </article>
+              ))}
+            </section>
           </section>
         )}
         {deleteFarm.isError && <p className="error">{deleteFarm.error.message}</p>}
         {requestDeletion.isError && <p className="error">{requestDeletion.error.message}</p>}
+        {restoreFarm.isError && <p className="error">{restoreFarm.error.message}</p>}
       </main>
     </div>
   );

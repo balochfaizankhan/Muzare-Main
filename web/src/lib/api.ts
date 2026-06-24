@@ -73,7 +73,7 @@ export type BootstrapData = {
 
 export type Farm = {
   id: string; workspaceId: string; name: string; location: string | null; owner: string | null; remarks: string | null;
-  contactName: string | null; contactEmail: string | null; contactPhone: string | null; active: boolean; deletionRequestStatus?: string | null;
+  contactName: string | null; contactEmail: string | null; contactPhone: string | null; active: boolean; deletedAt?: string | null; deletionRequestStatus?: string | null;
 };
 
 export type FarmInput = {
@@ -232,6 +232,16 @@ export type MigrationImportValidation = {
     logs?: MigrationImportLogEntry[];
     totalExpenses: number;
     totalAdvances: number;
+    postImportAudit?: {
+      expectedCounts: Record<string, number>;
+      tableCounts: {
+        farms: number;
+        seasons: number;
+        importFailures: number;
+        failedOrPartialBatches: number;
+      };
+      operationalRecordsByEntity: Array<{ entityType: string; count: number }>;
+    };
   };
 };
 export type MigrationImportJobStatus = {
@@ -357,6 +367,29 @@ export type MigrationImportCleanupResult = {
   activeFarmId?: string | null;
   activeSeasonId?: string | null;
   contextMessage?: string | null;
+};
+export type ImportVisibilityAudit = {
+  workspaceId: string;
+  latestImport: {
+    batchId: string | null;
+    fileHash: string | null;
+    source: string | null;
+    status: string | null;
+    startedAt: string | null;
+    completedAt: string | null;
+  };
+  server: {
+    farmsImported: number;
+    seasonsImported: number;
+    operationalRecordsByEntity: Array<{ entityType: string; count: number }>;
+  };
+  context: {
+    activeFarmId: string | null;
+    activeSeasonId: string | null;
+    activeFarmName: string | null;
+    activeSeasonName: string | null;
+    contextWarning: string | null;
+  };
 };
 export type OperationalEntity =
   | "labourer"
@@ -630,13 +663,15 @@ export const fetchWorkspaceApprovals = (token: string, workspaceId: string) =>
 export const decideWorkspaceApproval = (token: string, workspaceId: string, approvalId: string, decision: "approved" | "rejected", note?: string) =>
   apiRequest<void>("/v1/workspace/approvals/decision", { method: "POST", body: JSON.stringify({ workspaceId, approvalId, decision, note }) }, token);
 export const fetchWorkspaceFarms = (token: string, workspaceId: string) =>
-  apiRequest<{ farms: Farm[]; activeFarmId: string | null; needsRepair?: boolean; contextWarning?: string | null }>(`/v1/workspace/${workspaceId}/farms`, {}, token);
+  apiRequest<{ farms: Farm[]; historyFarms?: Farm[]; activeFarmId: string | null; needsRepair?: boolean; contextWarning?: string | null }>(`/v1/workspace/${workspaceId}/farms`, {}, token);
 export const createWorkspaceFarm = (token: string, workspaceId: string, input: FarmInput) =>
   apiRequest<{ farm: Farm }>(`/v1/workspace/${workspaceId}/farms`, { method: "POST", body: JSON.stringify(input) }, token);
 export const updateWorkspaceFarm = (token: string, workspaceId: string, farmId: string, input: FarmInput) =>
   apiRequest<{ farm: Farm }>(`/v1/workspace/${workspaceId}/farms/${farmId}`, { method: "PATCH", body: JSON.stringify(input) }, token);
 export const archiveWorkspaceFarm = (token: string, workspaceId: string, farmId: string) =>
   apiRequest<void>(`/v1/workspace/${workspaceId}/farms/${farmId}/archive`, { method: "POST" }, token);
+export const restoreWorkspaceFarm = (token: string, workspaceId: string, farmId: string) =>
+  apiRequest<{ farm: Farm }>(`/v1/workspace/${workspaceId}/farms/${farmId}/restore`, { method: "POST" }, token);
 export const deleteWorkspaceFarm = (token: string, workspaceId: string, farmId: string) =>
   apiRequest<void>(`/v1/workspace/${workspaceId}/farms/${farmId}`, { method: "DELETE" }, token);
 export const requestWorkspaceFarmDeletion = (token: string, workspaceId: string, farmId: string, input: { reason?: string }) =>
@@ -718,6 +753,8 @@ export const cleanFailedMigrationImport = (token: string, input: {
   token,
   { timeoutMs: 60_000, debugLabel: "migration-import-cleanup-failed" },
 );
+export const fetchImportVisibilityAudit = (token: string, workspaceId: string) =>
+  apiRequest<ImportVisibilityAudit>(`/v1/workspace/${workspaceId}/import-visibility-audit`, {}, token, { timeoutMs: 30_000, debugLabel: "import-visibility-audit" });
 export const fetchApprovals = (token: string) =>
   apiRequest<{ requests: PendingApproval[] }>("/v1/admin/approvals", {}, token);
 export const approveSignup = (token: string, userId: string) =>

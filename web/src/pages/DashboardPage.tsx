@@ -20,6 +20,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
+import { ImportVisibilityAuditPanel } from "../components/ImportVisibilityAuditPanel";
 import { config } from "../config";
 import { calculateAvailableBalance } from "../lib/accounting";
 import { fetchBootstrap, repairWorkspaceContextRequest } from "../lib/api";
@@ -182,6 +183,9 @@ export function DashboardPage() {
 
   const farm = query.data?.farms.find((item) => item.id === query.data.activeFarmId);
   const season = query.data?.seasons.find((item) => item.id === query.data.activeSeasonId);
+  const hasFarm = Boolean(farm);
+  const hasSeason = Boolean(season);
+  const hasOperationalContext = hasFarm && hasSeason;
   const StatusIcon = sync.status === "offline" ? WifiOff : Wifi;
   const displayName = user?.displayName || user?.email || t("common.dashboard");
 
@@ -209,12 +213,12 @@ export function DashboardPage() {
             <Link className="context-chip" to="/workspace/farms">
               <Leaf size={18} />
               <span>{t("currentFarm")}</span>
-              <strong>{farm?.name ?? t("noFarm")}</strong>
+              <strong>{farm?.name ?? t("dashboardPage.noFarmAvailable")}</strong>
             </Link>
             <Link className="context-chip" to="/workspace/seasons">
               <CalendarRange size={18} />
               <span>{t("currentSeason")}</span>
-              <strong>{season?.name ?? t("noSeason")}</strong>
+              <strong>{season?.name ?? (hasFarm ? t("noSeason") : t("dashboardPage.noSeasonUntilFarm"))}</strong>
             </Link>
           </div>
         </section>
@@ -239,18 +243,23 @@ export function DashboardPage() {
         {!query.isError && query.data?.contextWarning && (
           <section className="panel">
             <p className={query.data.needsRepair ? "error" : "context-message"}>{query.data.contextWarning}</p>
-            {query.data.needsRepair && user?.workspaceId && (
+            {user?.workspaceId && (
               <div className="farm-actions">
-                <button type="button" onClick={() => repairContext.mutate()} disabled={repairContext.isPending}>
-                  {repairContext.isPending ? "Repairing..." : "Repair workspace context"}
-                </button>
+                {query.data.needsRepair && (
+                  <button type="button" onClick={() => repairContext.mutate()} disabled={repairContext.isPending}>
+                    {repairContext.isPending ? "Repairing..." : "Repair workspace context"}
+                  </button>
+                )}
+                {!hasFarm && <Link className="secondary-button" to="/workspace/farms?create=1">{t("dashboardPage.createNewFarm")}</Link>}
+                {!hasFarm && <Link className="secondary-button" to="/workspace/farms?view=history">{t("dashboardPage.restoreSoftDeletedFarm")}</Link>}
               </div>
             )}
             {repairContext.data ? <p className="positive">{repairContext.data.message}</p> : null}
             {repairContext.error ? <p className="error">{repairContext.error.message}</p> : null}
           </section>
         )}
-        {!season && <p className="context-message">{t("dashboardPage.noActiveSeason")}</p>}
+        {!hasFarm && <p className="context-message">{t("dashboardPage.noFarmAvailableMessage")}</p>}
+        {hasFarm && !hasSeason && <p className="context-message">{t("dashboardPage.noActiveSeason")}</p>}
 
         <section className="dashboard-columns">
           <div className="dashboard-main">
@@ -265,16 +274,25 @@ export function DashboardPage() {
                 {modules
                   .filter(({ path }) => config.featureFarmMap || path !== "/workspace/operations-map")
                   .filter(({ key }) => config.featureInventory || key !== "inventory")
-                  .map(({ key, path, detailKey, icon: Icon }) => (
-                  <Link className="operation-card" key={key} to={path}>
-                    <Icon size={22} />
-                    <div>
-                      <strong>{t(key)}</strong>
-                      <span>{t(detailKey)}</span>
+                  .map(({ key, path, detailKey, icon: Icon }) => hasOperationalContext ? (
+                    <Link className="operation-card" key={key} to={path}>
+                      <Icon size={22} />
+                      <div>
+                        <strong>{t(key)}</strong>
+                        <span>{t(detailKey)}</span>
+                      </div>
+                      <ArrowRight size={16} />
+                    </Link>
+                  ) : (
+                    <div className="operation-card operation-card--disabled" key={key} aria-disabled="true">
+                      <Icon size={22} />
+                      <div>
+                        <strong>{t(key)}</strong>
+                        <span>{t("dashboardPage.moduleLockedUntilFarmSeason")}</span>
+                      </div>
+                      <ArrowRight size={16} />
                     </div>
-                    <ArrowRight size={16} />
-                  </Link>
-                ))}
+                  ))}
               </div>
             </section>
 
@@ -286,15 +304,23 @@ export function DashboardPage() {
                 </div>
               </div>
               <section className="summary-grid" aria-label={t("dashboard.operationalSummary")}>
-                {summaryCards.map(({ label, value, path, icon: Icon, tone }) => (
+                {summaryCards.map(({ label, value, path, icon: Icon, tone }) => hasOperationalContext ? (
                   <Link className={`metric-card metric-card--${tone}`} to={path} key={label}>
                     <div className="metric-card__icon"><Icon size={20} /></div>
                     <span>{label}</span>
                     <strong>{value}</strong>
                   </Link>
+                ) : (
+                  <div className={`metric-card metric-card--${tone} metric-card--disabled`} key={label} aria-disabled="true">
+                    <div className="metric-card__icon"><Icon size={20} /></div>
+                    <span>{label}</span>
+                    <strong>--</strong>
+                  </div>
                 ))}
               </section>
             </section>
+
+            {user?.workspaceId ? <ImportVisibilityAuditPanel workspaceId={user.workspaceId} title="Visibility Audit" /> : null}
           </div>
 
           <aside className="dashboard-side">

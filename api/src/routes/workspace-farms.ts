@@ -36,6 +36,14 @@ function visibleFarm(farm: typeof farms.$inferSelect) {
   };
 }
 
+function historyFarm(farm: typeof farms.$inferSelect) {
+  return {
+    ...visibleFarm(farm),
+    active: farm.active,
+    deletedAt: farm.deletedAt,
+  };
+}
+
 function requireSelectedWorkspace(request: FastifyRequest, workspaceId: string) {
   return request.appUser?.workspaceId === workspaceId
     && request.appUser.memberships.some((membership) => membership.active && membership.workspaceId === workspaceId);
@@ -98,7 +106,11 @@ export async function workspaceFarmRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(403).send({ message: "Select this workspace before viewing farms." });
     }
     if (localDevelopmentMode) return { farms: [], activeFarmId: null };
-    const records = await db.select().from(farms).where(await visibleFarmWhere(parsed.data.workspaceId, { requireActive: false })).orderBy(farms.name);
+    const activeRecords = await db.select().from(farms).where(await visibleFarmWhere(parsed.data.workspaceId)).orderBy(farms.name);
+    const historyRecords = await db.select().from(farms).where(and(
+      eq(farms.workspaceId, parsed.data.workspaceId),
+      sql`(${farms.deletedAt} IS NOT NULL OR ${farms.active} = false)`,
+    )).orderBy(sql`${farms.deletedAt} DESC NULLS LAST`, farms.name);
     const context = await resolveWorkspaceContext(parsed.data.workspaceId, request.sessionId);
     const pendingRequests = await db.select({
       farmId: farmDeletionRequests.farmId,
@@ -109,7 +121,8 @@ export async function workspaceFarmRoutes(app: FastifyInstance): Promise<void> {
     ));
     const pendingByFarm = new Map(pendingRequests.map((request) => [request.farmId, request.status]));
     return {
-      farms: records.map((farm) => ({ ...visibleFarm(farm), deletionRequestStatus: pendingByFarm.get(farm.id) ?? null })),
+      farms: activeRecords.map((farm) => ({ ...visibleFarm(farm), deletionRequestStatus: pendingByFarm.get(farm.id) ?? null })),
+      historyFarms: historyRecords.map((farm) => ({ ...historyFarm(farm), deletionRequestStatus: pendingByFarm.get(farm.id) ?? null })),
       activeFarmId: context.activeFarmId,
       needsRepair: context.needsRepair,
       contextWarning: context.contextWarning,
@@ -270,5 +283,30 @@ export async function workspaceFarmRoutes(app: FastifyInstance): Promise<void> {
     if (!farm) return reply.code(404).send({ message: "Active farm not found." });
     await db.update(userSessions).set({ activeFarmId: farm.id, activeSeasonId: null }).where(eq(userSessions.id, request.sessionId));
     return reply.code(204).send();
+  });
+
+  app.post("/v1/workspace/:workspaceId/farms/:farmId/restore", { preHandler: requireUser }, async (request, reply) => {
+    if (!request.appUser) return reply;
+    const params = farmParams.safeParse(request.params);
+    if (!params.success || !requireSelectedWorkspace(request, params.data.workspaceId) || !canManage(request, params.data.workspaceId)) {
+      return reply.code(403).send({ message: "Workspace farm management permission is required." });
+    }
+    if (localDevelopmentMode) return reply.code(503).send({ message: "Configure PostgreSQL to manage farms." });
+
+    const [farm] = await db.update(farms).set({
+      active: true,
+      deletedAt: null,
+      deletedBy: null,
+      updatedAt: new Date(),
+    }).where(and(eq(farms.id, params.data.farmId), eq(farms.workspaceId, params.data.workspaceId))).returning();
+    if (!farm) return reply.code(404).send({ message: "Farm not found." });
+
+    if (request.sessionId) {
+      const [session] = await db.select({ activeFarmId: userSessions.activeFarmId }).from(userSessions).where(eq(userSessions.id, request.sessionId)).limit(1);
+      if (!session?.activeFarmId) {
+        await db.update(userSessions).set({ activeFarmId: farm.id, activeSeasonId: null }).where(eq(userSessions.id, request.sessionId));
+      }
+    }
+    return { farm: visibleFarm(farm) };
   });
 }

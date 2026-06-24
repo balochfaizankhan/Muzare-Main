@@ -27,14 +27,9 @@ function pickSeason(records: SeasonRow[], preferredId: string | null | undefined
 }
 
 async function validFarms(workspaceId: string) {
-  const activeRecords = await db.select()
-    .from(farms)
-    .where(await visibleFarmWhere(workspaceId))
-    .orderBy(farms.name);
-  if (activeRecords.length) return activeRecords;
   return db.select()
     .from(farms)
-    .where(await visibleFarmWhere(workspaceId, { requireActive: false }))
+    .where(await visibleFarmWhere(workspaceId))
     .orderBy(farms.name);
 }
 
@@ -78,7 +73,7 @@ export async function resolveWorkspaceContext(workspaceId: string, sessionId?: s
     || invalidFarm
     || invalidSeason;
   const contextWarning = !records.length
-    ? "No active farm is available for this workspace."
+    ? "No farm available. Create or restore a farm."
     : !farmId
       ? "Workspace context needs repair. Select or repair an active farm."
       : !seasonId
@@ -114,11 +109,7 @@ export async function repairWorkspaceContext(workspaceId: string, actorUserId: s
       .from(farms)
       .where(await visibleFarmWhere(workspaceId))
       .orderBy(farms.name);
-    const fallbackFarms = activeFarms.length ? activeFarms : await tx.select()
-      .from(farms)
-      .where(await visibleFarmWhere(workspaceId, { requireActive: false }))
-      .orderBy(farms.name);
-    const targetFarm = fallbackFarms[0] ?? null;
+    const targetFarm = activeFarms[0] ?? null;
     if (!targetFarm) {
       return {
         repairedRecords: 0,
@@ -126,8 +117,8 @@ export async function repairWorkspaceContext(workspaceId: string, actorUserId: s
         activeSeasonId: null,
         activeFarmName: null,
         activeSeasonName: null,
-        contextWarning: "No farm exists in this workspace yet.",
-        message: "No farm could be selected. Create or restore a farm first.",
+        contextWarning: "No farm available. Create or restore a farm.",
+        message: "No usable farm is available yet. Create a new farm or restore a deleted farm first.",
       };
     }
 
