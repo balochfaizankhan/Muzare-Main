@@ -567,6 +567,17 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
     const parsed = batchListQuerySchema.safeParse(request.query);
     if (!parsed.success) return reply.code(400).send({ message: "A workspaceId is required." });
     try {
+      const workspaceId = parsed.data.workspaceId;
+      const normalizeJsonField = (value: unknown, field: "payload_json" | "summary_json" | "error_json") => {
+        console.log("FETCH_BATCHES_PARSE_START", { workspaceId, field });
+        if (value === null || value === undefined) return { value: null, parseError: false };
+        if (typeof value === "object" && !Array.isArray(value)) {
+          console.log("FETCH_BATCHES_PARSE_RESULT", { workspaceId, field, parseError: false });
+          return { value, parseError: false };
+        }
+        console.log("FETCH_BATCHES_PARSE_RESULT", { workspaceId, field, parseError: true });
+        return { value: null, parseError: true };
+      };
       const requiredColumns = [
         "id",
         "workspace_id",
@@ -584,12 +595,23 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         "created_at",
         "updated_at",
       ];
+      console.log("FETCH_BATCHES_START", {
+        workspaceId,
+        fileHash: null,
+        query: "information_schema.columns/import_batches",
+      });
       const columnRows = await db.execute(sql`
         SELECT column_name
         FROM information_schema.columns
         WHERE table_schema = current_schema()
           AND table_name = 'import_batches'
       `);
+      console.log("FETCH_BATCHES_RESULT", {
+        workspaceId,
+        fileHash: null,
+        query: "information_schema.columns/import_batches",
+        count: columnRows.rows.length,
+      });
       const availableColumns = new Set(columnRows.rows.map((row) => String((row as Record<string, unknown>).column_name)));
       if (!availableColumns.size) {
         return reply.code(500).send({
@@ -607,6 +629,11 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         });
       }
 
+      console.log("FETCH_BATCHES_START", {
+        workspaceId,
+        fileHash: null,
+        query: "import_batches/select",
+      });
       const records = await db.select({
         id: importBatches.id,
         source: importBatches.source,
@@ -620,19 +647,25 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         summaryJson: importBatches.summaryJson,
         errorJson: importBatches.errorJson,
       }).from(importBatches)
-        .where(eq(importBatches.workspaceId, parsed.data.workspaceId))
+        .where(eq(importBatches.workspaceId, workspaceId))
         .orderBy(sql`${importBatches.startedAt} DESC`)
         .limit(20);
+      console.log("FETCH_BATCHES_RESULT", {
+        workspaceId,
+        fileHash: null,
+        query: "import_batches/select",
+        count: records.length,
+      });
 
       return {
         records: records.map((record) => {
-          const payloadJson = record.payloadJson && typeof record.payloadJson === "object" ? record.payloadJson : null;
-          const summaryJson = record.summaryJson && typeof record.summaryJson === "object" ? record.summaryJson : null;
-          const errorJson = record.errorJson && typeof record.errorJson === "object" ? record.errorJson : null;
+          const payloadJson = normalizeJsonField(record.payloadJson, "payload_json");
+          const summaryJson = normalizeJsonField(record.summaryJson, "summary_json");
+          const errorJson = normalizeJsonField(record.errorJson, "error_json");
           const parseErrors = [
-            ...(record.payloadJson && !payloadJson ? ["payload_json"] : []),
-            ...(record.summaryJson && !summaryJson ? ["summary_json"] : []),
-            ...(record.errorJson && !errorJson ? ["error_json"] : []),
+            ...(payloadJson.parseError ? ["payload_json"] : []),
+            ...(summaryJson.parseError ? ["summary_json"] : []),
+            ...(errorJson.parseError ? ["error_json"] : []),
           ];
           return {
             id: record.id,
@@ -643,10 +676,11 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
             status: record.status,
             startedAt: record.startedAt.toISOString(),
             completedAt: record.completedAt?.toISOString() ?? null,
-            payloadJson,
-            summaryJson,
-            errorJson,
-            parseError: parseErrors.length ? `Unable to read ${parseErrors.join(", ")}.` : null,
+            payloadJson: payloadJson.value,
+            summaryJson: summaryJson.value,
+            errorJson: errorJson.value,
+            parseError: parseErrors.length > 0,
+            parseErrorFields: parseErrors,
           };
         }),
       };
@@ -661,7 +695,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         constraint?: string;
         stack?: string;
       };
-      console.error("MIGRATION BATCHES ERROR", {
+      console.error("MIGRATION_BATCHES_ERROR", {
         message: details.message,
         code: details.code,
         detail: details.detail,
@@ -671,11 +705,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         constraint: details.constraint,
         stack: details.stack,
       });
-      return reply.code(500).send({
-        success: false,
-        message: "Import history unavailable",
-        details: details.detail || details.message || "The migration import batches query failed.",
-      });
+      throw error;
     }
   });
 
