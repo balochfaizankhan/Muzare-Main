@@ -4,7 +4,7 @@ import { Database, FileJson, ShieldAlert, UploadCloud } from "lucide-react";
 import { useAuth } from "../../auth/AuthProvider";
 import { ImportVisibilityAuditPanel } from "../../components/ImportVisibilityAuditPanel";
 import { Link, useParams } from "react-router-dom";
-import { cleanFailedMigrationImport, downloadMigrationImportFailures, fetchActiveMigrationImportJob, fetchAdminWorkspaces, fetchMigrationImportBatches, fetchMigrationImportCleanupPreview, fetchMigrationImportHistory, fetchMigrationImportJobDetail, fetchMigrationImportJobStatus, importMigrationData, markMigrationImportBatchClosed, repairMigrationImportVisibility, retryMigrationAttendance, rollbackMigrationImportBatch, validateMigrationImport, type MigrationImportBatchRecord, type MigrationImportHistoryRecord, type MigrationImportIssue, type MigrationImportJobDetail, type MigrationImportJobStatus, type MigrationImportLogEntry, type MigrationImportSummary } from "../../lib/api";
+import { cleanFailedMigrationImport, downloadMigrationImportFailures, fetchActiveMigrationImportJob, fetchAdminWorkspaces, fetchMigrationImportBatches, fetchMigrationImportCleanupPreview, fetchMigrationImportHistory, fetchMigrationImportJobDetail, fetchMigrationImportJobStatus, importMigrationData, markMigrationImportBatchClosed, repairDeletedFarmSeasonState, repairMigrationImportVisibility, retryMigrationAttendance, rollbackMigrationImportBatch, validateMigrationImport, type MigrationImportBatchRecord, type MigrationImportHistoryRecord, type MigrationImportIssue, type MigrationImportJobDetail, type MigrationImportJobStatus, type MigrationImportLogEntry, type MigrationImportSummary } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 
 function SummaryGrid({ summary }: { summary: MigrationImportSummary }) {
@@ -409,6 +409,10 @@ export function MigrationImport() {
     mutationFn: () => repairMigrationImportVisibility(token!, { workspaceId }),
     onSuccess: refreshAfterImport,
   });
+  const repairDeletedState = useMutation({
+    mutationFn: () => repairDeletedFarmSeasonState(token!, { workspaceId }),
+    onSuccess: refreshAfterImport,
+  });
   const retryAttendanceOnly = useMutation({
     mutationFn: (batchId: string) => retryMigrationAttendance(token!, { workspaceId, batchId }),
     onSuccess: (data) => {
@@ -473,6 +477,7 @@ export function MigrationImport() {
     validate.reset();
     runImport.reset();
     repairVisibility.reset();
+    repairDeletedState.reset();
     if (!file) return;
     setFileName(file.name);
     if (!file.name.toLowerCase().endsWith(".json")) {
@@ -542,6 +547,9 @@ export function MigrationImport() {
           <button type="button" className="secondary-button" disabled={!token || !workspaceId || repairVisibility.isPending} onClick={() => repairVisibility.mutate()}>
             Repair previous import visibility
           </button>
+          <button type="button" className="secondary-button" disabled={!token || !workspaceId || repairDeletedState.isPending} onClick={() => repairDeletedState.mutate()}>
+            Repair Deleted Farm/Season State
+          </button>
         </div>
         {isImportRunning && currentImportJob ? (
           <p className="positive">
@@ -551,7 +559,13 @@ export function MigrationImport() {
         {validate.error ? <p className="worker-action-error">{validate.error instanceof Error ? validate.error.message : "Validation failed."}</p> : null}
         {runImport.error ? <p className="worker-action-error">{runImport.error instanceof Error ? runImport.error.message : "Import failed."}</p> : null}
         {repairVisibility.error ? <p className="worker-action-error">{repairVisibility.error instanceof Error ? repairVisibility.error.message : "Visibility repair failed."}</p> : null}
+        {repairDeletedState.error ? <p className="worker-action-error">{repairDeletedState.error instanceof Error ? repairDeletedState.error.message : "Deleted farm/season repair failed."}</p> : null}
         {repairVisibility.data ? <p className="positive">{repairVisibility.data.message} Repaired records: {repairVisibility.data.repairedRecords}.</p> : null}
+        {repairDeletedState.data ? (
+          <p className="positive">
+            {repairDeletedState.data.message} Farms deactivated: {repairDeletedState.data.farmsDeactivated}. Seasons deactivated: {repairDeletedState.data.seasonsDeactivated}. Sessions cleared: {repairDeletedState.data.sessionsCleared}.
+          </p>
+        ) : null}
       </section>
 
       {jobDetail.data ? <JobErrorPanel detail={jobDetail.data} onDownloadFailures={() => void downloadMigrationImportFailures(token!, jobDetail.data!.jobId)} /> : null}

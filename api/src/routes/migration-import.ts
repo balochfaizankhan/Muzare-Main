@@ -7,7 +7,7 @@ import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { auditLogs, farmDeletionRequests, farms, importBatches, importFailures, operationalRecords, seasons, userSessions, workspaces } from "../db/schema.js";
 import { visibleFarmWhere } from "../farm-visibility.js";
-import { repairWorkspaceContext, resolveWorkspaceContext } from "./workspace-context.js";
+import { repairDeletedFarmSeasonState, repairWorkspaceContext, resolveWorkspaceContext } from "./workspace-context.js";
 
 const requiredArrays = [
   "farms",
@@ -1437,6 +1437,15 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         const farmId = maps.farms.get(farmRef(source)) ?? defaultFarmId;
         const [existing] = await tx.select({ id: seasons.id }).from(seasons).where(and(
           eq(seasons.workspaceId, parsed.data.workspaceId),
+          eq(seasons.farmId, farmId),
+          sql`EXISTS (
+            SELECT 1
+            FROM farms f
+            WHERE f.id = ${seasons.farmId}
+              AND f.workspace_id = ${seasons.workspaceId}
+              AND f.deleted_at IS NULL
+              AND f.active = true
+          )`,
           or(
             and(eq(seasons.sourceType, sourceTypeFor("seasons")), eq(seasons.oldAndroidId, oldId(source))),
             eq(seasons.notes, marker),
@@ -1491,7 +1500,12 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         )).limit(1);
         const fallbackSeasonId = existingDefaultSeason?.id ?? randomUUID();
         if (existingDefaultSeason) {
-          await tx.update(seasons).set({ status: "active", active: true, updatedAt: new Date() }).where(eq(seasons.id, existingDefaultSeason.id));
+          await tx.update(seasons).set({
+            status: "active",
+            active: true,
+            closed: false,
+            updatedAt: new Date(),
+          }).where(eq(seasons.id, existingDefaultSeason.id));
         } else {
           await tx.insert(seasons).values({
             id: fallbackSeasonId,
@@ -2467,21 +2481,47 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         }
         softDeletedFarms = existingSoftDeleteRows.length;
       }
-      skippedFarms = Math.max(candidateFarmIds.length - hardDeletedFarms - softDeletedFarms, 0);
-
-      const [session] = request.sessionId
-        ? await tx.select({ activeFarmId: userSessions.activeFarmId }).from(userSessions).where(eq(userSessions.id, request.sessionId)).limit(1)
-        : [];
-
-      if (session?.activeFarmId) {
-        await tx.update(userSessions).set({
-          activeFarmId: null,
-          activeSeasonId: null,
+      if (candidateFarmIds.length) {
+        await tx.update(seasons).set({
+          active: false,
+          status: "archived",
+          closed: true,
+          updatedAt: new Date(),
         }).where(and(
-          eq(userSessions.workspaceId, parsed.data.workspaceId),
-          eq(userSessions.id, request.sessionId!),
+          eq(seasons.workspaceId, parsed.data.workspaceId),
+          inArray(seasons.farmId, candidateFarmIds),
         ));
       }
+      skippedFarms = Math.max(candidateFarmIds.length - hardDeletedFarms - softDeletedFarms, 0);
+
+      await tx.execute(sql`
+        UPDATE user_sessions us
+        SET active_farm_id = NULL,
+            active_season_id = NULL
+        WHERE us.workspace_id = ${parsed.data.workspaceId}
+          AND (
+            (us.active_farm_id IS NOT NULL AND NOT EXISTS (
+              SELECT 1
+              FROM farms f
+              WHERE f.id = us.active_farm_id
+                AND f.workspace_id = us.workspace_id
+                AND f.deleted_at IS NULL
+                AND f.active = true
+            ))
+            OR
+            (us.active_season_id IS NOT NULL AND NOT EXISTS (
+              SELECT 1
+              FROM seasons s
+              JOIN farms f ON f.id = s.farm_id AND f.workspace_id = s.workspace_id
+              WHERE s.id = us.active_season_id
+                AND s.workspace_id = us.workspace_id
+                AND s.active = true
+                AND s.status <> 'archived'
+                AND f.deleted_at IS NULL
+                AND f.active = true
+            ))
+          )
+      `);
 
       await tx.insert(auditLogs).values({
         workspaceId: parsed.data.workspaceId,
@@ -2523,6 +2563,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
 
     let contextRepair: { activeFarmId: string | null; activeSeasonId: string | null; message: string } | null = null;
     try {
+      await repairDeletedFarmSeasonState(parsed.data.workspaceId);
       contextRepair = await repairWorkspaceContext(parsed.data.workspaceId, request.appUser!.id, request.sessionId);
     } catch {
       contextRepair = null;
@@ -2561,10 +2602,13 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
     const [workspace] = await db.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.id, parsed.data.workspaceId)).limit(1);
     if (!workspace) return reply.code(404).send({ message: "Workspace not found." });
 
+    await repairDeletedFarmSeasonState(parsed.data.workspaceId);
+
     const result = await db.transaction(async (tx) => {
       const [importedFarm] = await tx.select({ id: farms.id, name: farms.name }).from(farms).where(and(
         eq(farms.workspaceId, parsed.data.workspaceId),
         eq(farms.sourceType, "farm"),
+        sql`${farms.deletedAt} IS NULL`,
       )).limit(1);
       if (!importedFarm) return null;
 
@@ -2574,6 +2618,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         eq(seasons.workspaceId, parsed.data.workspaceId),
         eq(seasons.farmId, importedFarm.id),
         eq(seasons.status, "active"),
+        eq(seasons.active, true),
       )).limit(1);
       const importYear = new Date().getFullYear();
       let activeSeason = existingSeason;
@@ -2669,5 +2714,42 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
 
     if (!result) return reply.code(404).send({ message: "No imported farm was found for this workspace." });
     return { ...result, message: "Imported farm and season are active. Imported records with missing or invalid season links were repaired." };
+  });
+
+  app.post("/v1/admin/migration-import/repair-deleted-state", { preHandler: requirePermission("CREATE_WORKSPACE") }, async (request, reply) => {
+    const parsed = repairSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ message: "A workspaceId is required." });
+    if (localDevelopmentMode) return { message: "Local memory mode cannot repair deleted farm/season state. Configure a dev database first." };
+
+    const userId = request.appUser?.id;
+    if (!userId) return reply.code(403).send({ message: "Admin user is required." });
+
+    const cleanup = await repairDeletedFarmSeasonState(parsed.data.workspaceId);
+    const context = await repairWorkspaceContext(parsed.data.workspaceId, userId, request.sessionId);
+
+    await db.insert(auditLogs).values({
+      workspaceId: parsed.data.workspaceId,
+      userId,
+      actorUserId: userId,
+      action: "admin.migration_import.repair_deleted_state",
+      entityType: "migration_import",
+      details: {
+        farmsDeactivated: cleanup.farmsDeactivated,
+        seasonsDeactivated: cleanup.seasonsDeactivated,
+        sessionsCleared: cleanup.sessionsCleared,
+        activeFarmId: context.activeFarmId,
+        activeSeasonId: context.activeSeasonId,
+      },
+    });
+
+    return {
+      ...cleanup,
+      activeFarmId: context.activeFarmId,
+      activeSeasonId: context.activeSeasonId,
+      contextWarning: context.contextWarning,
+      message: cleanup.farmsDeactivated || cleanup.seasonsDeactivated || cleanup.sessionsCleared
+        ? "Deleted farm and season state was repaired."
+        : "Deleted farm and season state was already clean.",
+    };
   });
 }

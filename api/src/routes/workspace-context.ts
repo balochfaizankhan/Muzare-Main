@@ -36,8 +36,131 @@ async function validFarms(workspaceId: string) {
 async function farmSeasons(workspaceId: string, farmId: string) {
   return db.select()
     .from(seasons)
-    .where(and(eq(seasons.workspaceId, workspaceId), eq(seasons.farmId, farmId)))
+    .where(and(
+      eq(seasons.workspaceId, workspaceId),
+      eq(seasons.farmId, farmId),
+      ne(seasons.status, "archived"),
+    ))
     .orderBy(desc(seasons.startsOn));
+}
+
+export type DeletedFarmSeasonRepairResult = {
+  farmsDeactivated: number;
+  seasonsDeactivated: number;
+  sessionsCleared: number;
+};
+
+export async function repairDeletedFarmSeasonState(workspaceId: string): Promise<DeletedFarmSeasonRepairResult> {
+  return db.transaction(async (tx) => {
+    const farmsDeactivatedRows = await tx.update(farms).set({
+      active: false,
+      updatedAt: new Date(),
+    }).where(and(
+      eq(farms.workspaceId, workspaceId),
+      sql`${farms.deletedAt} IS NOT NULL`,
+      eq(farms.active, true),
+    )).returning({ id: farms.id });
+
+    const seasonsDeactivatedResult = await tx.execute(sql`
+      WITH updated AS (
+        UPDATE seasons s
+        SET active = false,
+            status = 'archived',
+            closed = true,
+            updated_at = now()
+        WHERE s.workspace_id = ${workspaceId}
+          AND (
+            EXISTS (
+              SELECT 1
+              FROM farms f
+              WHERE f.id = s.farm_id
+                AND f.workspace_id = s.workspace_id
+                AND (
+                  f.deleted_at IS NOT NULL
+                  OR f.active = false
+                )
+            )
+            OR NOT EXISTS (
+              SELECT 1
+              FROM farms f
+              WHERE f.id = s.farm_id
+                AND f.workspace_id = s.workspace_id
+            )
+          )
+          AND (
+            s.active = true
+            OR s.status <> 'archived'
+            OR s.closed = false
+          )
+        RETURNING s.id
+      )
+      SELECT count(*)::int AS count FROM updated
+    `);
+
+    const sessionsClearedResult = await tx.execute(sql`
+      WITH updated AS (
+        UPDATE user_sessions us
+        SET active_farm_id = CASE
+              WHEN us.active_farm_id IS NULL THEN NULL
+              WHEN EXISTS (
+                SELECT 1
+                FROM farms f
+                WHERE f.id = us.active_farm_id
+                  AND f.workspace_id = us.workspace_id
+                  AND f.deleted_at IS NULL
+                  AND f.active = true
+              ) THEN us.active_farm_id
+              ELSE NULL
+            END,
+            active_season_id = CASE
+              WHEN us.active_season_id IS NULL THEN NULL
+              WHEN EXISTS (
+                SELECT 1
+                FROM seasons s
+                JOIN farms f ON f.id = s.farm_id AND f.workspace_id = s.workspace_id
+                WHERE s.id = us.active_season_id
+                  AND s.workspace_id = us.workspace_id
+                  AND s.active = true
+                  AND s.status <> 'archived'
+                  AND f.deleted_at IS NULL
+                  AND f.active = true
+              ) THEN us.active_season_id
+              ELSE NULL
+            END
+        WHERE us.workspace_id = ${workspaceId}
+          AND (
+            (us.active_farm_id IS NOT NULL AND NOT EXISTS (
+              SELECT 1
+              FROM farms f
+              WHERE f.id = us.active_farm_id
+                AND f.workspace_id = us.workspace_id
+                AND f.deleted_at IS NULL
+                AND f.active = true
+            ))
+            OR
+            (us.active_season_id IS NOT NULL AND NOT EXISTS (
+              SELECT 1
+              FROM seasons s
+              JOIN farms f ON f.id = s.farm_id AND f.workspace_id = s.workspace_id
+              WHERE s.id = us.active_season_id
+                AND s.workspace_id = us.workspace_id
+                AND s.active = true
+                AND s.status <> 'archived'
+                AND f.deleted_at IS NULL
+                AND f.active = true
+            ))
+          )
+        RETURNING us.id
+      )
+      SELECT count(*)::int AS count FROM updated
+    `);
+
+    return {
+      farmsDeactivated: farmsDeactivatedRows.length,
+      seasonsDeactivated: Number((seasonsDeactivatedResult.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
+      sessionsCleared: Number((sessionsClearedResult.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
+    };
+  });
 }
 
 export async function resolveWorkspaceContext(workspaceId: string, sessionId?: string | null): Promise<WorkspaceContextState> {
@@ -104,6 +227,47 @@ export type WorkspaceRepairResult = {
 
 export async function repairWorkspaceContext(workspaceId: string, actorUserId: string, sessionId?: string | null): Promise<WorkspaceRepairResult> {
   return db.transaction(async (tx) => {
+    await tx.update(farms).set({
+      active: false,
+      updatedAt: new Date(),
+    }).where(and(
+      eq(farms.workspaceId, workspaceId),
+      sql`${farms.deletedAt} IS NOT NULL`,
+      eq(farms.active, true),
+    ));
+
+    await tx.execute(sql`
+      UPDATE seasons s
+      SET active = false,
+          status = 'archived',
+          closed = true,
+          updated_at = now()
+      WHERE s.workspace_id = ${workspaceId}
+        AND (
+          EXISTS (
+            SELECT 1
+            FROM farms f
+            WHERE f.id = s.farm_id
+              AND f.workspace_id = s.workspace_id
+              AND (
+                f.deleted_at IS NOT NULL
+                OR f.active = false
+              )
+          )
+          OR NOT EXISTS (
+            SELECT 1
+            FROM farms f
+            WHERE f.id = s.farm_id
+              AND f.workspace_id = s.workspace_id
+          )
+        )
+        AND (
+          s.active = true
+          OR s.status <> 'archived'
+          OR s.closed = false
+        )
+    `);
+
     const activeFarmGuard = await visibleFarmSqlGuard("f");
     const activeFarms = await tx.select()
       .from(farms)
