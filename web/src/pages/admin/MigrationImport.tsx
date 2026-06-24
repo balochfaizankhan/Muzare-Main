@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Database, FileJson, ShieldAlert, UploadCloud } from "lucide-react";
 import { useAuth } from "../../auth/AuthProvider";
 import { Link, useParams } from "react-router-dom";
-import { downloadMigrationImportFailures, fetchActiveMigrationImportJob, fetchAdminWorkspaces, fetchMigrationImportBatches, fetchMigrationImportHistory, fetchMigrationImportJobDetail, fetchMigrationImportJobStatus, importMigrationData, markMigrationImportBatchClosed, repairMigrationImportVisibility, retryMigrationAttendance, rollbackMigrationImportBatch, validateMigrationImport, type MigrationImportBatchRecord, type MigrationImportHistoryRecord, type MigrationImportIssue, type MigrationImportJobDetail, type MigrationImportJobStatus, type MigrationImportLogEntry, type MigrationImportSummary } from "../../lib/api";
+import { cleanFailedMigrationImport, downloadMigrationImportFailures, fetchActiveMigrationImportJob, fetchAdminWorkspaces, fetchMigrationImportBatches, fetchMigrationImportCleanupPreview, fetchMigrationImportHistory, fetchMigrationImportJobDetail, fetchMigrationImportJobStatus, importMigrationData, markMigrationImportBatchClosed, repairMigrationImportVisibility, retryMigrationAttendance, rollbackMigrationImportBatch, validateMigrationImport, type MigrationImportBatchRecord, type MigrationImportHistoryRecord, type MigrationImportIssue, type MigrationImportJobDetail, type MigrationImportJobStatus, type MigrationImportLogEntry, type MigrationImportSummary } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 
 function SummaryGrid({ summary }: { summary: MigrationImportSummary }) {
@@ -270,6 +270,68 @@ function LatestBatchPanel({
   );
 }
 
+function CleanupPanel({
+  batch,
+  preview,
+  loadingPreview,
+  onLoadPreview,
+  backupConfirmed,
+  setBackupConfirmed,
+  includeEditedImportedRecords,
+  setIncludeEditedImportedRecords,
+  onCleanup,
+  cleaning,
+}: {
+  batch: MigrationImportBatchRecord;
+  preview: Awaited<ReturnType<typeof fetchMigrationImportCleanupPreview>>["preview"] | undefined;
+  loadingPreview: boolean;
+  onLoadPreview: () => void;
+  backupConfirmed: boolean;
+  setBackupConfirmed: (value: boolean) => void;
+  includeEditedImportedRecords: boolean;
+  setIncludeEditedImportedRecords: (value: boolean) => void;
+  onCleanup: () => void;
+  cleaning: boolean;
+}) {
+  return (
+    <section className="migration-issues">
+      <h3>Clean Failed Android Import</h3>
+      <p className="worker-action-error">This will remove failed Android import dump data. This cannot be undone without backup.</p>
+      <p><b>Selected batch</b> {batch.id}</p>
+      <div className="record-list__actions">
+        <button type="button" className="secondary-button" onClick={onLoadPreview} disabled={loadingPreview}>
+          Preview Cleanup
+        </button>
+      </div>
+      {preview ? (
+        <div>
+          <p><b>Import batches</b> {preview.importBatches} · <b>Open/failed batches</b> {preview.openImportBatches}</p>
+          <p><b>Import failures</b> {preview.importFailures}</p>
+          <p><b>Imported farms</b> {preview.importedFarms} · <b>Imported seasons</b> {preview.importedSeasons}</p>
+          <p><b>Edited imported records</b> {preview.editedImportedRecords}</p>
+          <h4>Operational dump by entity</h4>
+          {!preview.operationalRecordsByEntity.length ? <p className="activity-empty">No matching imported operational dump records found.</p> : preview.operationalRecordsByEntity.map((item) => (
+            <p key={item.entityType}><b>{item.entityType}</b> {item.count}</p>
+          ))}
+        </div>
+      ) : null}
+      <label className="inline-checkbox">
+        <input type="checkbox" checked={backupConfirmed} onChange={(event) => setBackupConfirmed(event.target.checked)} />
+        <span>I have created a database backup/export before cleanup.</span>
+      </label>
+      <label className="inline-checkbox">
+        <input type="checkbox" checked={includeEditedImportedRecords} onChange={(event) => setIncludeEditedImportedRecords(event.target.checked)} />
+        <span>Also remove imported records that were later edited.</span>
+      </label>
+      <div className="record-list__actions">
+        <button type="button" disabled={!preview || !backupConfirmed || cleaning} onClick={onCleanup}>
+          Clean Failed Import Dump
+        </button>
+      </div>
+    </section>
+  );
+}
+
 export function MigrationImport() {
   const { token } = useAuth();
   const { jobId: routeJobId } = useParams();
@@ -281,6 +343,8 @@ export function MigrationImport() {
   const [fileError, setFileError] = useState("");
   const [allowSummaryMismatch, setAllowSummaryMismatch] = useState(false);
   const [attendanceJobId, setAttendanceJobId] = useState("");
+  const [cleanupBackupConfirmed, setCleanupBackupConfirmed] = useState(false);
+  const [cleanupIncludeEdited, setCleanupIncludeEdited] = useState(false);
   const workspaces = useQuery({
     queryKey: ["admin-workspaces"],
     queryFn: () => fetchAdminWorkspaces(token!),
@@ -303,6 +367,7 @@ export function MigrationImport() {
     enabled: Boolean(token && workspaceId),
     refetchInterval: 4000,
   });
+  const latestBatch = batches.data?.records?.[0] ?? null;
   const activeImportJob = useQuery({
     queryKey: ["admin-migration-import-active-job", workspaceId],
     queryFn: () => fetchActiveMigrationImportJob(token!, workspaceId),
@@ -359,6 +424,25 @@ export function MigrationImport() {
     mutationFn: (batchId: string) => markMigrationImportBatchClosed(token!, { workspaceId, batchId }),
     onSuccess: refreshAfterImport,
   });
+  const cleanupPreview = useQuery({
+    queryKey: ["admin-migration-import-cleanup-preview", workspaceId, latestBatch?.id],
+    queryFn: () => fetchMigrationImportCleanupPreview(token!, workspaceId, latestBatch!.id),
+    enabled: false,
+  });
+  const cleanFailedImport = useMutation({
+    mutationFn: (batchId: string) => cleanFailedMigrationImport(token!, {
+      workspaceId,
+      batchId,
+      confirmation: "CLEAN FAILED IMPORT",
+      backupConfirmed: true,
+      includeEditedImportedRecords: cleanupIncludeEdited,
+    }),
+    onSuccess: () => {
+      setCleanupBackupConfirmed(false);
+      refreshAfterImport();
+      void cleanupPreview.refetch();
+    },
+  });
 
   useEffect(() => {
     if (!currentJobStorageKey) return;
@@ -403,7 +487,6 @@ export function MigrationImport() {
 
   const validation = runImport.data ?? validate.data;
   const currentImportJob = attendanceJob.data?.job ?? activeImportJob.data?.job ?? runImport.data?.result?.attendanceJob ?? null;
-  const latestBatch = batches.data?.records?.[0] ?? null;
   const isImportRunning = currentImportJob?.status === "queued" || currentImportJob?.status === "running";
   const canValidate = Boolean(token && workspaceId && payload && !validate.isPending);
   const canImport = Boolean(token && workspaceId && payload && validate.data?.canImport && !runImport.isPending && !isImportRunning);
@@ -474,19 +557,36 @@ export function MigrationImport() {
       {jobDetail.error ? <p className="worker-action-error">{jobDetail.error instanceof Error ? jobDetail.error.message : "Could not load import job details."}</p> : null}
       {currentImportJob ? <CurrentImportPanel job={currentImportJob} /> : null}
       {latestBatch ? (
-        <LatestBatchPanel
-          batch={latestBatch}
-          onRetryAttendance={() => retryAttendanceOnly.mutate(latestBatch.id)}
-          onRollback={() => rollbackBatch.mutate(latestBatch.id)}
-          onMarkClosed={() => markBatchClosed.mutate(latestBatch.id)}
-          retrying={retryAttendanceOnly.isPending}
-          rollingBack={rollbackBatch.isPending}
-          closing={markBatchClosed.isPending}
-        />
+        <>
+          <LatestBatchPanel
+            batch={latestBatch}
+            onRetryAttendance={() => retryAttendanceOnly.mutate(latestBatch.id)}
+            onRollback={() => rollbackBatch.mutate(latestBatch.id)}
+            onMarkClosed={() => markBatchClosed.mutate(latestBatch.id)}
+            retrying={retryAttendanceOnly.isPending}
+            rollingBack={rollbackBatch.isPending}
+            closing={markBatchClosed.isPending}
+          />
+          <CleanupPanel
+            batch={latestBatch}
+            preview={cleanupPreview.data?.preview}
+            loadingPreview={cleanupPreview.isFetching}
+            onLoadPreview={() => { void cleanupPreview.refetch(); }}
+            backupConfirmed={cleanupBackupConfirmed}
+            setBackupConfirmed={setCleanupBackupConfirmed}
+            includeEditedImportedRecords={cleanupIncludeEdited}
+            setIncludeEditedImportedRecords={setCleanupIncludeEdited}
+            onCleanup={() => cleanFailedImport.mutate(latestBatch.id)}
+            cleaning={cleanFailedImport.isPending}
+          />
+        </>
       ) : null}
       {retryAttendanceOnly.error ? <p className="worker-action-error">{retryAttendanceOnly.error instanceof Error ? retryAttendanceOnly.error.message : "Attendance retry failed."}</p> : null}
       {rollbackBatch.error ? <p className="worker-action-error">{rollbackBatch.error instanceof Error ? rollbackBatch.error.message : "Rollback failed."}</p> : null}
       {markBatchClosed.error ? <p className="worker-action-error">{markBatchClosed.error instanceof Error ? markBatchClosed.error.message : "Could not close failed batch."}</p> : null}
+      {cleanupPreview.error ? <p className="worker-action-error">{cleanupPreview.error instanceof Error ? cleanupPreview.error.message : "Could not load cleanup preview."}</p> : null}
+      {cleanFailedImport.error ? <p className="worker-action-error">{cleanFailedImport.error instanceof Error ? cleanFailedImport.error.message : "Cleanup failed."}</p> : null}
+      {cleanFailedImport.data ? <p className="positive">{cleanFailedImport.data.message} Removed {cleanFailedImport.data.result.operationalRecords} dump records.</p> : null}
       {workspaceId ? <ImportHistory records={history.data?.records ?? []} /> : null}
 
       {validation ? (

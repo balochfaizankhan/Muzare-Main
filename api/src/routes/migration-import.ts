@@ -7,6 +7,7 @@ import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { auditLogs, farms, importBatches, importFailures, operationalRecords, seasons, userSessions, workspaces } from "../db/schema.js";
 import { visibleFarmWhere } from "../farm-visibility.js";
+import { repairWorkspaceContext } from "./workspace-context.js";
 
 const requiredArrays = [
   "farms",
@@ -73,6 +74,14 @@ const historyQuerySchema = z.object({ workspaceId: z.string().uuid() });
 const jobParamsSchema = z.object({ jobId: z.string().uuid() });
 const activeJobQuerySchema = z.object({ workspaceId: z.string().uuid() });
 const batchActionSchema = z.object({ workspaceId: z.string().uuid(), batchId: z.string().uuid() });
+const cleanupPreviewQuerySchema = z.object({ workspaceId: z.string().uuid(), batchId: z.string().uuid() });
+const cleanupActionSchema = z.object({
+  workspaceId: z.string().uuid(),
+  batchId: z.string().uuid(),
+  confirmation: z.literal("CLEAN FAILED IMPORT"),
+  backupConfirmed: z.literal(true),
+  includeEditedImportedRecords: z.boolean().default(false),
+});
 const batchListQuerySchema = z.object({ workspaceId: z.string().uuid() });
 
 type AndroidRecord = Record<string, unknown>;
@@ -165,6 +174,13 @@ type AttendanceImportJobStatus = {
   firstFailureMessage?: string;
   steps: ImportJobStep[];
   logs: ImportLogEntry[];
+};
+
+type CleanupTarget = {
+  batchId: string;
+  workspaceId: string;
+  fileHash: string;
+  source: string;
 };
 
 const attendanceImportJobs = new Map<string, AttendanceImportJobStatus>();
@@ -531,6 +547,99 @@ const payloadId = (payload: unknown) => {
   return typeof value === "string" && value.trim() ? value : null;
 };
 
+async function loadCleanupTarget(workspaceId: string, batchId: string): Promise<CleanupTarget | null> {
+  const [batch] = await db.select({
+    batchId: importBatches.id,
+    workspaceId: importBatches.workspaceId,
+    fileHash: importBatches.fileHash,
+    source: importBatches.source,
+  }).from(importBatches).where(and(
+    eq(importBatches.id, batchId),
+    eq(importBatches.workspaceId, workspaceId),
+  )).limit(1);
+  return batch ?? null;
+}
+
+async function cleanupPreview(workspaceId: string, batchId: string) {
+  const target = await loadCleanupTarget(workspaceId, batchId);
+  if (!target) return null;
+
+  const operationalRows = await db.execute(sql`
+    SELECT entity_type, count(*)::int AS count
+    FROM operational_records
+    WHERE workspace_id = ${workspaceId}
+      AND (
+        import_batch_id = ${batchId}
+        OR source_file_hash = ${target.fileHash}
+        OR source_type = 'muzare_android'
+      )
+    GROUP BY entity_type
+    ORDER BY entity_type
+  `);
+  const [batchCounts] = await db.execute(sql`
+    SELECT
+      count(*)::int AS batches,
+      count(*) FILTER (WHERE status IN ('failed', 'partial_failed', 'running'))::int AS open_batches
+    FROM import_batches
+    WHERE workspace_id = ${workspaceId}
+      AND (id = ${batchId} OR file_hash = ${target.fileHash} OR source = 'muzare_android')
+  `).then((result) => result.rows as Array<{ batches: number; open_batches: number }>);
+  const [failureCounts] = await db.execute(sql`
+    SELECT count(*)::int AS failures
+    FROM import_failures f
+    INNER JOIN import_batches b ON b.id = f.import_batch_id
+    WHERE b.workspace_id = ${workspaceId}
+      AND (b.id = ${batchId} OR b.file_hash = ${target.fileHash} OR b.source = 'muzare_android')
+  `).then((result) => result.rows as Array<{ failures: number }>);
+  const [farmCounts] = await db.execute(sql`
+    SELECT count(*)::int AS farms
+    FROM farms
+    WHERE workspace_id = ${workspaceId}
+      AND (
+        import_batch_id = ${batchId}
+        OR source_file_hash = ${target.fileHash}
+        OR source_type = 'farm'
+      )
+  `).then((result) => result.rows as Array<{ farms: number }>);
+  const [seasonCounts] = await db.execute(sql`
+    SELECT count(*)::int AS seasons
+    FROM seasons
+    WHERE workspace_id = ${workspaceId}
+      AND (
+        import_batch_id = ${batchId}
+        OR source_file_hash = ${target.fileHash}
+        OR source_type = 'season'
+      )
+  `).then((result) => result.rows as Array<{ seasons: number }>);
+  const [editedCounts] = await db.execute(sql`
+    SELECT count(*)::int AS edited
+    FROM operational_records
+    WHERE workspace_id = ${workspaceId}
+      AND (
+        import_batch_id = ${batchId}
+        OR source_file_hash = ${target.fileHash}
+        OR source_type = 'muzare_android'
+      )
+      AND updated_at > created_at + interval '1 second'
+  `).then((result) => result.rows as Array<{ edited: number }>);
+
+  return {
+    batchId,
+    fileHash: target.fileHash,
+    source: target.source,
+    operationalRecordsByEntity: operationalRows.rows.map((row) => ({
+      entityType: String((row as Record<string, unknown>).entity_type),
+      count: Number((row as Record<string, unknown>).count ?? 0),
+    })),
+    importBatches: Number(batchCounts?.batches ?? 0),
+    openImportBatches: Number(batchCounts?.open_batches ?? 0),
+    importFailures: Number(failureCounts?.failures ?? 0),
+    importedFarms: Number(farmCounts?.farms ?? 0),
+    importedSeasons: Number(seasonCounts?.seasons ?? 0),
+    editedImportedRecords: Number(editedCounts?.edited ?? 0),
+  };
+}
+
 export async function migrationImportRoutes(app: FastifyInstance): Promise<void> {
   app.post("/v1/admin/migration-import/validate", { preHandler: requirePermission("CREATE_WORKSPACE"), bodyLimit: 50 * 1024 * 1024 }, async (request, reply) => {
     const parsed = payloadSchema.safeParse(request.body);
@@ -789,6 +898,14 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       .sort((left, right) => right.startedAt.localeCompare(left.startedAt))
       .find((job) => job.status === "queued" || job.status === "running");
     return { job: activeJob ?? null };
+  });
+
+  app.get("/v1/admin/migration-import/cleanup-preview", { preHandler: requirePermission("CREATE_WORKSPACE") }, async (request, reply) => {
+    const parsed = cleanupPreviewQuerySchema.safeParse(request.query);
+    if (!parsed.success) return reply.code(400).send({ message: "A workspaceId and batchId are required." });
+    const preview = await cleanupPreview(parsed.data.workspaceId, parsed.data.batchId);
+    if (!preview) return reply.code(404).send({ message: "Import batch not found." });
+    return { preview };
   });
   app.get("/v1/admin/migration-imports/active", { preHandler: requirePermission("CREATE_WORKSPACE") }, async (request, reply) => {
     const parsed = activeJobQuerySchema.safeParse(request.query);
@@ -1900,6 +2017,185 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       };
     });
     return { message: "Import batch rolled back.", result };
+  });
+
+  app.post("/v1/admin/migration-import/cleanup-failed", { preHandler: requirePermission("CREATE_WORKSPACE") }, async (request, reply) => {
+    const parsed = cleanupActionSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        message: "Backup confirmation and exact cleanup confirmation are required.",
+      });
+    }
+    const preview = await cleanupPreview(parsed.data.workspaceId, parsed.data.batchId);
+    if (!preview) return reply.code(404).send({ message: "Import batch not found." });
+    if (preview.editedImportedRecords > 0 && !parsed.data.includeEditedImportedRecords) {
+      return reply.code(409).send({
+        message: `Cleanup found ${preview.editedImportedRecords} imported records that were later edited. Confirm edited-record cleanup explicitly before removing them.`,
+      });
+    }
+
+    const target = await loadCleanupTarget(parsed.data.workspaceId, parsed.data.batchId);
+    if (!target) return reply.code(404).send({ message: "Import batch not found." });
+
+    const result = await db.transaction(async (tx) => {
+      const importedOperationalFilter = sql`
+        workspace_id = ${parsed.data.workspaceId}
+        AND (
+          import_batch_id = ${parsed.data.batchId}
+          OR source_file_hash = ${target.fileHash}
+          OR source_type = 'muzare_android'
+        )
+        ${parsed.data.includeEditedImportedRecords
+          ? sql``
+          : sql`AND updated_at <= created_at + interval '1 second'`}
+      `;
+
+      const deletedOperational = await tx.execute(sql`
+        WITH deleted AS (
+          DELETE FROM operational_records
+          WHERE ${importedOperationalFilter}
+          RETURNING id
+        )
+        SELECT count(*)::int AS count FROM deleted
+      `);
+
+      const deletedFailures = await tx.execute(sql`
+        WITH deleted AS (
+          DELETE FROM import_failures f
+          USING import_batches b
+          WHERE b.id = f.import_batch_id
+            AND b.workspace_id = ${parsed.data.workspaceId}
+            AND (b.id = ${parsed.data.batchId} OR b.file_hash = ${target.fileHash} OR b.source = 'muzare_android')
+          RETURNING f.id
+        )
+        SELECT count(*)::int AS count FROM deleted
+      `);
+
+      const deletedBatches = await tx.execute(sql`
+        WITH deleted AS (
+          DELETE FROM import_batches
+          WHERE workspace_id = ${parsed.data.workspaceId}
+            AND (id = ${parsed.data.batchId} OR file_hash = ${target.fileHash} OR source = 'muzare_android')
+          RETURNING id
+        )
+        SELECT count(*)::int AS count FROM deleted
+      `);
+
+      const deletedSeasons = await tx.execute(sql`
+        WITH candidate_seasons AS (
+          SELECT s.id
+          FROM seasons s
+          WHERE s.workspace_id = ${parsed.data.workspaceId}
+            AND (
+              s.import_batch_id = ${parsed.data.batchId}
+              OR s.source_file_hash = ${target.fileHash}
+              OR s.source_type = 'season'
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM operational_records r
+              WHERE r.workspace_id = s.workspace_id
+                AND r.season_id = s.id
+            )
+        ),
+        deleted AS (
+          DELETE FROM seasons s
+          USING candidate_seasons c
+          WHERE s.id = c.id
+          RETURNING s.id
+        )
+        SELECT count(*)::int AS count FROM deleted
+      `);
+
+      const deletedFarms = await tx.execute(sql`
+        WITH candidate_farms AS (
+          SELECT f.id
+          FROM farms f
+          WHERE f.workspace_id = ${parsed.data.workspaceId}
+            AND (
+              f.import_batch_id = ${parsed.data.batchId}
+              OR f.source_file_hash = ${target.fileHash}
+              OR (f.source_type = 'farm' AND f.old_android_id IS NOT NULL)
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM operational_records r
+              WHERE r.workspace_id = f.workspace_id
+                AND r.farm_id = f.id
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM seasons s
+              WHERE s.workspace_id = f.workspace_id
+                AND s.farm_id = f.id
+            )
+        ),
+        deleted AS (
+          DELETE FROM farms f
+          USING candidate_farms c
+          WHERE f.id = c.id
+          RETURNING f.id
+        )
+        SELECT count(*)::int AS count FROM deleted
+      `);
+
+      const [session] = request.sessionId
+        ? await tx.select({ activeFarmId: userSessions.activeFarmId }).from(userSessions).where(eq(userSessions.id, request.sessionId)).limit(1)
+        : [];
+
+      if (session?.activeFarmId) {
+        await tx.update(userSessions).set({
+          activeFarmId: null,
+          activeSeasonId: null,
+        }).where(and(
+          eq(userSessions.workspaceId, parsed.data.workspaceId),
+          eq(userSessions.id, request.sessionId!),
+        ));
+      }
+
+      await tx.insert(auditLogs).values({
+        workspaceId: parsed.data.workspaceId,
+        userId: request.appUser?.id,
+        actorUserId: request.appUser?.id,
+        action: "admin.migration_import.cleanup_failed",
+        entityType: "migration_import",
+        entityId: parsed.data.batchId,
+        details: {
+          batchId: parsed.data.batchId,
+          fileHash: target.fileHash,
+          backupConfirmed: parsed.data.backupConfirmed,
+          includeEditedImportedRecords: parsed.data.includeEditedImportedRecords,
+          deletedOperationalRecords: Number((deletedOperational.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
+          deletedImportFailures: Number((deletedFailures.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
+          deletedImportBatches: Number((deletedBatches.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
+          deletedSeasons: Number((deletedSeasons.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
+          deletedFarms: Number((deletedFarms.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
+        },
+      });
+
+      return {
+        operationalRecords: Number((deletedOperational.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
+        importFailures: Number((deletedFailures.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
+        importBatches: Number((deletedBatches.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
+        seasons: Number((deletedSeasons.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
+        farms: Number((deletedFarms.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
+      };
+    });
+
+    let contextRepair: { activeFarmId: string | null; activeSeasonId: string | null; message: string } | null = null;
+    try {
+      contextRepair = await repairWorkspaceContext(parsed.data.workspaceId, request.appUser!.id, request.sessionId);
+    } catch {
+      contextRepair = null;
+    }
+
+    return {
+      message: "Failed Android import dump data was cleaned. Repair workspace context next if needed.",
+      result: {
+        ...result,
+        activeFarmId: contextRepair?.activeFarmId ?? null,
+        activeSeasonId: contextRepair?.activeSeasonId ?? null,
+        contextMessage: contextRepair?.message ?? null,
+      },
+    };
   });
 
   app.post("/v1/admin/migration-import/mark-closed", { preHandler: requirePermission("CREATE_WORKSPACE") }, async (request, reply) => {

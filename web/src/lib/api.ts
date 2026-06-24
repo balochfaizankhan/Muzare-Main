@@ -332,6 +332,25 @@ export type MigrationVisibilityRepairResult = {
   activeSeasonName: string;
   message: string;
 };
+export type MigrationImportCleanupPreview = {
+  batchId: string;
+  fileHash: string;
+  source: string;
+  operationalRecordsByEntity: Array<{ entityType: string; count: number }>;
+  importBatches: number;
+  openImportBatches: number;
+  importFailures: number;
+  importedFarms: number;
+  importedSeasons: number;
+  editedImportedRecords: number;
+};
+export type MigrationImportCleanupResult = {
+  operationalRecords: number;
+  importFailures: number;
+  importBatches: number;
+  seasons: number;
+  farms: number;
+};
 export type OperationalEntity =
   | "labourer"
   | "labourGroup"
@@ -678,6 +697,20 @@ export const fetchMigrationImportHistory = (token: string, workspaceId: string) 
   apiRequest<{ records: MigrationImportHistoryRecord[] }>(`/v1/admin/migration-import/history?workspaceId=${encodeURIComponent(workspaceId)}`, {}, token, { timeoutMs: 30_000, debugLabel: "migration-import-history" });
 export const repairMigrationImportVisibility = (token: string, input: { workspaceId: string }) =>
   apiRequest<MigrationVisibilityRepairResult>("/v1/admin/migration-import/repair-visibility", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 60_000, debugLabel: "migration-import-repair-visibility" });
+export const fetchMigrationImportCleanupPreview = (token: string, workspaceId: string, batchId: string) =>
+  apiRequest<{ preview: MigrationImportCleanupPreview }>(`/v1/admin/migration-import/cleanup-preview?workspaceId=${encodeURIComponent(workspaceId)}&batchId=${encodeURIComponent(batchId)}`, {}, token, { timeoutMs: 30_000, debugLabel: "migration-import-cleanup-preview" });
+export const cleanFailedMigrationImport = (token: string, input: {
+  workspaceId: string;
+  batchId: string;
+  confirmation: "CLEAN FAILED IMPORT";
+  backupConfirmed: true;
+  includeEditedImportedRecords?: boolean;
+}) => apiRequest<{ message: string; result: MigrationImportCleanupResult }>(
+  "/v1/admin/migration-import/cleanup-failed",
+  { method: "POST", body: JSON.stringify(input) },
+  token,
+  { timeoutMs: 60_000, debugLabel: "migration-import-cleanup-failed" },
+);
 export const fetchApprovals = (token: string) =>
   apiRequest<{ requests: PendingApproval[] }>("/v1/admin/approvals", {}, token);
 export const approveSignup = (token: string, userId: string) =>
