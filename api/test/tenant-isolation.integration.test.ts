@@ -11,6 +11,8 @@ import {
   auditLogs,
   expenseImportSessions,
   operationalRecords,
+  importBatches,
+  importFailures,
   seasons,
   userSessions,
   users,
@@ -25,6 +27,7 @@ const alpha = { workspaceId: randomUUID(), farmId: randomUUID(), seasonId: rando
 const bravo = { workspaceId: randomUUID(), farmId: randomUUID(), seasonId: randomUUID(), userId: randomUUID(), token: `bravo-${randomUUID()}` };
 const supervisor = { userId: randomUUID(), token: `supervisor-${randomUUID()}` };
 const operator = { userId: randomUUID(), token: `operator-${randomUUID()}` };
+const admin = { userId: randomUUID(), token: `admin-${randomUUID()}` };
 const ids = [alpha.workspaceId, bravo.workspaceId];
 let app: Awaited<ReturnType<typeof buildApp>>;
 
@@ -50,6 +53,7 @@ before(async () => {
     { id: bravo.userId, email: `bravo-${bravo.userId}@example.test`, passwordHash: "test", status: "approved" },
     { id: supervisor.userId, email: `supervisor-${supervisor.userId}@example.test`, passwordHash: "test", status: "approved" },
     { id: operator.userId, email: `operator-${operator.userId}@example.test`, passwordHash: "test", status: "approved" },
+    { id: admin.userId, email: `admin-${admin.userId}@example.test`, passwordHash: "test", status: "approved", platformRole: "platform_admin" },
   ]);
   await db.insert(workspaceMemberships).values([
     { workspaceId: alpha.workspaceId, userId: alpha.userId, role: "workspace_owner" },
@@ -70,6 +74,7 @@ before(async () => {
     { userId: bravo.userId, workspaceId: bravo.workspaceId, activeFarmId: bravo.farmId, activeSeasonId: bravo.seasonId, tokenHash: hash(bravo.token), expiresAt: new Date(Date.now() + 60_000) },
     { userId: supervisor.userId, workspaceId: alpha.workspaceId, activeFarmId: alpha.farmId, activeSeasonId: alpha.seasonId, tokenHash: hash(supervisor.token), expiresAt: new Date(Date.now() + 60_000) },
     { userId: operator.userId, workspaceId: alpha.workspaceId, activeFarmId: alpha.farmId, activeSeasonId: alpha.seasonId, tokenHash: hash(operator.token), expiresAt: new Date(Date.now() + 60_000) },
+    { userId: admin.userId, workspaceId: alpha.workspaceId, activeFarmId: alpha.farmId, activeSeasonId: alpha.seasonId, tokenHash: hash(admin.token), expiresAt: new Date(Date.now() + 60_000) },
   ]);
   app = await buildApp();
 });
@@ -81,12 +86,14 @@ after(async () => {
   await db.delete(auditLogs).where(inArray(auditLogs.workspaceId, ids));
   await db.delete(workspaceApprovals).where(inArray(workspaceApprovals.workspaceId, ids));
   await db.delete(workspaceTeamInvitations).where(inArray(workspaceTeamInvitations.workspaceId, ids));
+  await db.delete(importFailures).where(inArray(importFailures.workspaceId, ids));
+  await db.delete(importBatches).where(inArray(importBatches.workspaceId, ids));
   await db.delete(operationalRecords).where(inArray(operationalRecords.workspaceId, ids));
-  await db.delete(userSessions).where(inArray(userSessions.userId, [alpha.userId, bravo.userId, supervisor.userId, operator.userId]));
+  await db.delete(userSessions).where(inArray(userSessions.userId, [alpha.userId, bravo.userId, supervisor.userId, operator.userId, admin.userId]));
   await db.delete(seasons).where(inArray(seasons.workspaceId, ids));
   await db.delete(farms).where(inArray(farms.workspaceId, ids));
   await db.delete(workspaceMemberships).where(inArray(workspaceMemberships.workspaceId, ids));
-  await db.delete(users).where(inArray(users.id, [alpha.userId, bravo.userId, supervisor.userId, operator.userId]));
+  await db.delete(users).where(inArray(users.id, [alpha.userId, bravo.userId, supervisor.userId, operator.userId, admin.userId]));
   await db.delete(users).where(eq(users.email, "invited.member@example.test"));
   await db.delete(workspaces).where(inArray(workspaces.id, ids));
   await closeDatabaseConnection();
@@ -1221,6 +1228,12 @@ test("workspace owners can update their profile while non-owners and foreign ten
   const bravoProfile = await request(bravo.token, "GET", `/v1/workspace/${bravo.workspaceId}/profile`);
   assert.equal(bravoProfile.statusCode, 200);
   assert.equal(bravoProfile.json().workspace.name, originalBravo.json().workspace.name);
+});
+
+test("migration import batches returns 200 with an empty list when no imports exist", async () => {
+  const response = await request(admin.token, "GET", `/v1/admin/migration-import/batches?workspaceId=${alpha.workspaceId}`);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), { records: [] });
 });
 
 test("workspace team invitations, module overrides, and last-owner protection remain tenant scoped", async () => {

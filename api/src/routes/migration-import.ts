@@ -566,24 +566,117 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
   app.get("/v1/admin/migration-import/batches", { preHandler: requirePermission("CREATE_WORKSPACE") }, async (request, reply) => {
     const parsed = batchListQuerySchema.safeParse(request.query);
     if (!parsed.success) return reply.code(400).send({ message: "A workspaceId is required." });
-    const records = await db.select().from(importBatches)
-      .where(eq(importBatches.workspaceId, parsed.data.workspaceId))
-      .orderBy(sql`${importBatches.startedAt} DESC`)
-      .limit(20);
-    return {
-      records: records.map((record) => ({
-        id: record.id,
-        source: record.source,
-        exportVersion: record.exportVersion,
-        fileName: record.fileName,
-        fileHash: record.fileHash,
-        status: record.status,
-        startedAt: record.startedAt.toISOString(),
-        completedAt: record.completedAt?.toISOString() ?? null,
-        summaryJson: record.summaryJson,
-        errorJson: record.errorJson,
-      })),
-    };
+    try {
+      const requiredColumns = [
+        "id",
+        "workspace_id",
+        "source",
+        "export_version",
+        "file_name",
+        "file_hash",
+        "status",
+        "started_by",
+        "started_at",
+        "completed_at",
+        "payload_json",
+        "summary_json",
+        "error_json",
+        "created_at",
+        "updated_at",
+      ];
+      const columnRows = await db.execute(sql`
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'import_batches'
+      `);
+      const availableColumns = new Set(columnRows.rows.map((row) => String((row as Record<string, unknown>).column_name)));
+      if (!availableColumns.size) {
+        return reply.code(500).send({
+          success: false,
+          message: "Import history unavailable",
+          details: "The import_batches table is missing from the current database schema.",
+        });
+      }
+      const missingColumns = requiredColumns.filter((column) => !availableColumns.has(column));
+      if (missingColumns.length) {
+        return reply.code(500).send({
+          success: false,
+          message: "Import history unavailable",
+          details: `The import_batches table is missing required columns: ${missingColumns.join(", ")}.`,
+        });
+      }
+
+      const records = await db.select({
+        id: importBatches.id,
+        source: importBatches.source,
+        exportVersion: importBatches.exportVersion,
+        fileName: importBatches.fileName,
+        fileHash: importBatches.fileHash,
+        status: importBatches.status,
+        startedAt: importBatches.startedAt,
+        completedAt: importBatches.completedAt,
+        payloadJson: importBatches.payloadJson,
+        summaryJson: importBatches.summaryJson,
+        errorJson: importBatches.errorJson,
+      }).from(importBatches)
+        .where(eq(importBatches.workspaceId, parsed.data.workspaceId))
+        .orderBy(sql`${importBatches.startedAt} DESC`)
+        .limit(20);
+
+      return {
+        records: records.map((record) => {
+          const payloadJson = record.payloadJson && typeof record.payloadJson === "object" ? record.payloadJson : null;
+          const summaryJson = record.summaryJson && typeof record.summaryJson === "object" ? record.summaryJson : null;
+          const errorJson = record.errorJson && typeof record.errorJson === "object" ? record.errorJson : null;
+          const parseErrors = [
+            ...(record.payloadJson && !payloadJson ? ["payload_json"] : []),
+            ...(record.summaryJson && !summaryJson ? ["summary_json"] : []),
+            ...(record.errorJson && !errorJson ? ["error_json"] : []),
+          ];
+          return {
+            id: record.id,
+            source: record.source,
+            exportVersion: record.exportVersion,
+            fileName: record.fileName,
+            fileHash: record.fileHash,
+            status: record.status,
+            startedAt: record.startedAt.toISOString(),
+            completedAt: record.completedAt?.toISOString() ?? null,
+            payloadJson,
+            summaryJson,
+            errorJson,
+            parseError: parseErrors.length ? `Unable to read ${parseErrors.join(", ")}.` : null,
+          };
+        }),
+      };
+    } catch (error) {
+      const details = error as {
+        message?: string;
+        code?: string;
+        detail?: string;
+        hint?: string;
+        table?: string;
+        column?: string;
+        constraint?: string;
+        stack?: string;
+      };
+      console.error("MIGRATION BATCHES ERROR", {
+        message: details.message,
+        code: details.code,
+        detail: details.detail,
+        hint: details.hint,
+        table: details.table,
+        column: details.column,
+        constraint: details.constraint,
+        stack: details.stack,
+      });
+      return reply.code(500).send({
+        success: false,
+        message: "Import history unavailable",
+        details: details.detail || details.message || "The migration import batches query failed.",
+      });
+    }
   });
 
   app.get("/v1/admin/migration-imports/:jobId", { preHandler: requirePermission("CREATE_WORKSPACE") }, async (request, reply) => {
