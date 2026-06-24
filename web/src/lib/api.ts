@@ -349,7 +349,14 @@ export type MigrationImportCleanupResult = {
   importFailures: number;
   importBatches: number;
   seasons: number;
-  farms: number;
+  farmsHardDeleted: number;
+  farmsSoftDeleted: number;
+  auditLogsDetached: number;
+  skippedFarms: number;
+  farmCleanupMessage?: string | null;
+  activeFarmId?: string | null;
+  activeSeasonId?: string | null;
+  contextMessage?: string | null;
 };
 export type OperationalEntity =
   | "labourer"

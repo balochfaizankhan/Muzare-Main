@@ -2107,35 +2107,112 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         SELECT count(*)::int AS count FROM deleted
       `);
 
-      const deletedFarms = await tx.execute(sql`
-        WITH candidate_farms AS (
-          SELECT f.id
-          FROM farms f
-          WHERE f.workspace_id = ${parsed.data.workspaceId}
-            AND (
-              f.import_batch_id = ${parsed.data.batchId}
-              OR f.source_file_hash = ${target.fileHash}
-              OR (f.source_type = 'farm' AND f.old_android_id IS NOT NULL)
-            )
-            AND NOT EXISTS (
-              SELECT 1 FROM operational_records r
-              WHERE r.workspace_id = f.workspace_id
-                AND r.farm_id = f.id
-            )
-            AND NOT EXISTS (
-              SELECT 1 FROM seasons s
-              WHERE s.workspace_id = f.workspace_id
-                AND s.farm_id = f.id
-            )
-        ),
-        deleted AS (
-          DELETE FROM farms f
-          USING candidate_farms c
-          WHERE f.id = c.id
-          RETURNING f.id
-        )
-        SELECT count(*)::int AS count FROM deleted
+      const candidateFarmIdsResult = await tx.execute(sql`
+        SELECT f.id
+        FROM farms f
+        WHERE f.workspace_id = ${parsed.data.workspaceId}
+          AND (
+            f.import_batch_id = ${parsed.data.batchId}
+            OR f.source_file_hash = ${target.fileHash}
+            OR (f.source_type = 'farm' AND f.old_android_id IS NOT NULL)
+          )
       `);
+      const candidateFarmIds = candidateFarmIdsResult.rows
+        .map((row) => String((row as Record<string, unknown>).id ?? ""))
+        .filter(Boolean);
+
+      const detachedAuditLogs = candidateFarmIds.length ? await tx.execute(sql`
+        WITH detached AS (
+          UPDATE audit_logs
+          SET farm_id = NULL
+          WHERE workspace_id = ${parsed.data.workspaceId}
+            AND farm_id = ANY(${candidateFarmIds}::uuid[])
+          RETURNING id
+        )
+        SELECT count(*)::int AS count FROM detached
+      `) : { rows: [{ count: 0 }] };
+
+      const farmDeletionRequestsCount = candidateFarmIds.length ? await tx.execute(sql`
+        SELECT count(*)::int AS count
+        FROM farm_deletion_requests
+        WHERE workspace_id = ${parsed.data.workspaceId}
+          AND farm_id = ANY(${candidateFarmIds}::uuid[])
+      `) : { rows: [{ count: 0 }] };
+
+      const candidateFarmsWithoutPrimaryRefs = candidateFarmIds.length ? await tx.execute(sql`
+        SELECT f.id
+        FROM farms f
+        WHERE f.id = ANY(${candidateFarmIds}::uuid[])
+          AND NOT EXISTS (
+            SELECT 1 FROM operational_records r
+            WHERE r.workspace_id = f.workspace_id
+              AND r.farm_id = f.id
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM seasons s
+            WHERE s.workspace_id = f.workspace_id
+              AND s.farm_id = f.id
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM farm_deletion_requests fdr
+            WHERE fdr.workspace_id = f.workspace_id
+              AND fdr.farm_id = f.id
+          )
+      `) : { rows: [] };
+      const hardDeleteCandidateIds = candidateFarmsWithoutPrimaryRefs.rows
+        .map((row) => String((row as Record<string, unknown>).id ?? ""))
+        .filter(Boolean);
+
+      let hardDeletedFarms = 0;
+      let softDeletedFarms = 0;
+      let skippedFarms = 0;
+      let cleanupFarmMessage: string | null = null;
+
+      if (hardDeleteCandidateIds.length) {
+        try {
+          const deletedFarms = await tx.execute(sql`
+            WITH deleted AS (
+              DELETE FROM farms
+              WHERE id = ANY(${hardDeleteCandidateIds}::uuid[])
+              RETURNING id
+            )
+            SELECT count(*)::int AS count FROM deleted
+          `);
+          hardDeletedFarms = Number((deletedFarms.rows[0] as Record<string, unknown> | undefined)?.count ?? 0);
+        } catch (error) {
+          const readable = readableImportError(error);
+          cleanupFarmMessage = "Cleanup could not hard-delete imported farms because references remain. Farms were soft-deleted instead.";
+          console.warn("CLEANUP_FAILED_IMPORT_FARM_HARD_DELETE_BLOCKED", {
+            workspaceId: parsed.data.workspaceId,
+            batchId: parsed.data.batchId,
+            reason: readable,
+          });
+        }
+      }
+
+      const remainingFarmIds = candidateFarmIds.filter((id) => !hardDeleteCandidateIds.includes(id));
+      const fallbackSoftDeleteIds = cleanupFarmMessage ? candidateFarmIds : remainingFarmIds;
+      if (fallbackSoftDeleteIds.length) {
+        const softDeleted = await tx.execute(sql`
+          WITH updated AS (
+            UPDATE farms
+            SET
+              active = false,
+              deleted_at = COALESCE(deleted_at, now()),
+              remarks = CASE
+                WHEN remarks IS NULL OR remarks = '' THEN 'Cleanup soft-delete after failed Android import.'
+                WHEN remarks LIKE '%Cleanup soft-delete after failed Android import.%' THEN remarks
+                ELSE remarks || ' | Cleanup soft-delete after failed Android import.'
+              END,
+              updated_at = now()
+            WHERE id = ANY(${fallbackSoftDeleteIds}::uuid[])
+            RETURNING id
+          )
+          SELECT count(*)::int AS count FROM updated
+        `);
+        softDeletedFarms = Number((softDeleted.rows[0] as Record<string, unknown> | undefined)?.count ?? 0);
+      }
+      skippedFarms = Math.max(candidateFarmIds.length - hardDeletedFarms - softDeletedFarms, 0);
 
       const [session] = request.sessionId
         ? await tx.select({ activeFarmId: userSessions.activeFarmId }).from(userSessions).where(eq(userSessions.id, request.sessionId)).limit(1)
@@ -2167,7 +2244,12 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
           deletedImportFailures: Number((deletedFailures.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
           deletedImportBatches: Number((deletedBatches.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
           deletedSeasons: Number((deletedSeasons.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
-          deletedFarms: Number((deletedFarms.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
+          detachedAuditLogs: Number((detachedAuditLogs.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
+          farmDeletionRequestsRemaining: Number((farmDeletionRequestsCount.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
+          hardDeletedFarms,
+          softDeletedFarms,
+          skippedFarms,
+          cleanupFarmMessage,
         },
       });
 
@@ -2176,7 +2258,11 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         importFailures: Number((deletedFailures.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
         importBatches: Number((deletedBatches.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
         seasons: Number((deletedSeasons.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
-        farms: Number((deletedFarms.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
+        farmsHardDeleted: hardDeletedFarms,
+        farmsSoftDeleted: softDeletedFarms,
+        auditLogsDetached: Number((detachedAuditLogs.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
+        skippedFarms,
+        farmCleanupMessage: cleanupFarmMessage,
       };
     });
 
@@ -2188,7 +2274,8 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
     }
 
     return {
-      message: "Failed Android import dump data was cleaned. Repair workspace context next if needed.",
+      message: result.farmCleanupMessage
+        ?? "Failed Android import dump data was cleaned. Repair workspace context next if needed.",
       result: {
         ...result,
         activeFarmId: contextRepair?.activeFarmId ?? null,

@@ -586,7 +586,23 @@ export function MigrationImport() {
       {markBatchClosed.error ? <p className="worker-action-error">{markBatchClosed.error instanceof Error ? markBatchClosed.error.message : "Could not close failed batch."}</p> : null}
       {cleanupPreview.error ? <p className="worker-action-error">{cleanupPreview.error instanceof Error ? cleanupPreview.error.message : "Could not load cleanup preview."}</p> : null}
       {cleanFailedImport.error ? <p className="worker-action-error">{cleanFailedImport.error instanceof Error ? cleanFailedImport.error.message : "Cleanup failed."}</p> : null}
-      {cleanFailedImport.data ? <p className="positive">{cleanFailedImport.data.message} Removed {cleanFailedImport.data.result.operationalRecords} dump records.</p> : null}
+      {cleanFailedImport.data ? (
+        <section className="migration-issues">
+          <h3>Cleanup result</h3>
+          <p className={cleanFailedImport.data.result.farmCleanupMessage ? "worker-action-error" : "positive"}>
+            {cleanFailedImport.data.message}
+          </p>
+          <p><b>Operational dump removed</b> {cleanFailedImport.data.result.operationalRecords}</p>
+          <p><b>Import failures removed</b> {cleanFailedImport.data.result.importFailures}</p>
+          <p><b>Import batches removed</b> {cleanFailedImport.data.result.importBatches}</p>
+          <p><b>Seasons hard-deleted</b> {cleanFailedImport.data.result.seasons}</p>
+          <p><b>Farms hard-deleted</b> {cleanFailedImport.data.result.farmsHardDeleted}</p>
+          <p><b>Farms soft-deleted</b> {cleanFailedImport.data.result.farmsSoftDeleted}</p>
+          <p><b>Audit logs detached</b> {cleanFailedImport.data.result.auditLogsDetached}</p>
+          <p><b>Farms skipped</b> {cleanFailedImport.data.result.skippedFarms}</p>
+          {cleanFailedImport.data.result.contextMessage ? <p><b>Context repair</b> {cleanFailedImport.data.result.contextMessage}</p> : null}
+        </section>
+      ) : null}
       {workspaceId ? <ImportHistory records={history.data?.records ?? []} /> : null}
 
       {validation ? (
