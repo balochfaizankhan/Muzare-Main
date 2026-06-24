@@ -85,6 +85,27 @@ const cleanupActionSchema = z.object({
 });
 const batchListQuerySchema = z.object({ workspaceId: z.string().uuid() });
 
+function normalizeImportedName(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function normalizeImportedAccountType(value: unknown, fallback = "cash") {
+  const normalized = String(value ?? fallback)
+    .trim()
+    .replace(/\s+/g, "_")
+    .toLowerCase();
+  return normalized || fallback;
+}
+
+function importedAccountGroupKey(payload: Record<string, unknown>, sourceFileHash: string | null, oldAndroidId: string | null) {
+  const type = normalizeImportedAccountType(payload.type);
+  const name = normalizeImportedName(payload.name);
+  return `${sourceFileHash ?? "none"}::${oldAndroidId ? `old:${oldAndroidId}` : `name:${name}`}::${type}`;
+}
+
 type AndroidRecord = Record<string, unknown>;
 type AndroidPayload = z.infer<typeof payloadSchema>["payload"];
 type ImportIssue = { level: "error" | "warning"; path: string; message: string };
@@ -107,6 +128,13 @@ type ImportSummary = {
 };
 type ImportCountKey = "farms" | "seasons" | "accounts" | "partners" | "labour" | "expenses" | "expenseItems" | "advances" | "attendance";
 type ScopedMaps = { farms: Map<string, string>; seasons: Map<string, string>; labour: Map<string, string>; accounts: Map<string, string>; partners: Map<string, string> };
+type AccountDuplicateRepairResult = {
+  duplicateGroupsBefore: number;
+  duplicateGroupsAfter: number;
+  canonicalAccountsKept: number;
+  childRecordsRemapped: number;
+  duplicateAccountsRemoved: number;
+};
 type PostImportAudit = {
   expectedCounts: Record<string, number>;
   tableCounts: {
@@ -595,6 +623,165 @@ const payloadId = (payload: unknown) => {
   const value = (payload as Record<string, unknown>).id;
   return typeof value === "string" && value.trim() ? value : null;
 };
+
+const importedAccountReferenceFields = [
+  "accountId",
+  "paymentAccountId",
+  "paidFromAccountId",
+  "partnerAccountId",
+  "fromAccountId",
+  "toAccountId",
+] as const;
+
+async function findExistingImportedAccountRecord(
+  tx: typeof db,
+  workspaceId: string,
+  fileHash: string,
+  sourceType: string,
+  oldAndroidId: string | null,
+  normalizedName: string,
+  normalizedType: string,
+) {
+  const exactMatch = oldAndroidId
+    ? await tx.select({
+      id: operationalRecords.id,
+      clientRecordId: operationalRecords.clientRecordId,
+      payload: operationalRecords.payload,
+    }).from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, workspaceId),
+      eq(operationalRecords.entityType, "account"),
+      eq(operationalRecords.sourceFileHash, fileHash),
+      eq(operationalRecords.sourceType, sourceType),
+      eq(operationalRecords.oldAndroidId, oldAndroidId),
+      sql`${operationalRecords.payload}->>'deletedAt' IS NULL`,
+    )).limit(1)
+    : [];
+  if (exactMatch[0]) return exactMatch[0];
+
+  const fallbackMatch = await tx.select({
+    id: operationalRecords.id,
+    clientRecordId: operationalRecords.clientRecordId,
+    payload: operationalRecords.payload,
+  }).from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, workspaceId),
+    eq(operationalRecords.entityType, "account"),
+    eq(operationalRecords.sourceFileHash, fileHash),
+    sql`${operationalRecords.payload}->>'deletedAt' IS NULL`,
+    sql`lower(regexp_replace(coalesce(${operationalRecords.payload}->>'name', ''), '\s+', ' ', 'g')) = ${normalizedName}`,
+    sql`lower(replace(coalesce(${operationalRecords.payload}->>'type', 'cash'), ' ', '_')) = ${normalizedType}`,
+  )).limit(1);
+  return fallbackMatch[0] ?? null;
+}
+
+async function repairDuplicateImportedAccounts(workspaceId: string): Promise<AccountDuplicateRepairResult> {
+  return db.transaction(async (tx) => {
+    const accountRows = await tx.select({
+      id: operationalRecords.id,
+      clientRecordId: operationalRecords.clientRecordId,
+      payload: operationalRecords.payload,
+      oldAndroidId: operationalRecords.oldAndroidId,
+      sourceFileHash: operationalRecords.sourceFileHash,
+      createdAt: operationalRecords.createdAt,
+    }).from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, workspaceId),
+      eq(operationalRecords.entityType, "account"),
+      sql`${operationalRecords.payload}->>'deletedAt' IS NULL`,
+      sql`${operationalRecords.sourceFileHash} IS NOT NULL`,
+    ));
+
+    const childRows = await tx.select({
+      id: operationalRecords.id,
+      entityType: operationalRecords.entityType,
+      payload: operationalRecords.payload,
+    }).from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, workspaceId),
+      sql`${operationalRecords.payload}->>'deletedAt' IS NULL`,
+      ne(operationalRecords.entityType, "account"),
+    ));
+
+    const childReferenceCounts = new Map<string, number>();
+    for (const row of childRows) {
+      const payload = row.payload as Record<string, unknown>;
+      for (const field of importedAccountReferenceFields) {
+        const value = payload[field];
+        if (typeof value === "string" && value.trim()) {
+          childReferenceCounts.set(value, (childReferenceCounts.get(value) ?? 0) + 1);
+        }
+      }
+    }
+
+    const grouped = new Map<string, typeof accountRows>();
+    for (const row of accountRows) {
+      const payload = row.payload as Record<string, unknown>;
+      const key = importedAccountGroupKey(payload, row.sourceFileHash, row.oldAndroidId);
+      grouped.set(key, [...(grouped.get(key) ?? []), row]);
+    }
+
+    const duplicateGroups = [...grouped.values()].filter((rows) => rows.length > 1);
+    let childRecordsRemapped = 0;
+    let duplicateAccountsRemoved = 0;
+    let canonicalAccountsKept = 0;
+
+    for (const rows of duplicateGroups) {
+      const sorted = [...rows].sort((a, b) => {
+        const refDelta = (childReferenceCounts.get(b.clientRecordId) ?? 0) - (childReferenceCounts.get(a.clientRecordId) ?? 0);
+        if (refDelta !== 0) return refDelta;
+        return a.createdAt.getTime() - b.createdAt.getTime();
+      });
+      const canonical = sorted[0]!;
+      canonicalAccountsKept += 1;
+      const duplicateIds = sorted.slice(1).map((row) => row.id);
+      const duplicateClientIds = new Set(sorted.slice(1).map((row) => row.clientRecordId));
+      if (!duplicateIds.length) continue;
+
+      for (const row of childRows) {
+        const payload = row.payload as Record<string, unknown>;
+        let changed = false;
+        const nextPayload = { ...payload };
+        for (const field of importedAccountReferenceFields) {
+          const value = nextPayload[field];
+          if (typeof value === "string" && duplicateClientIds.has(value)) {
+            nextPayload[field] = canonical.clientRecordId;
+            changed = true;
+          }
+        }
+        if (changed) {
+          await tx.update(operationalRecords).set({
+            payload: nextPayload,
+            updatedAt: new Date(),
+          }).where(eq(operationalRecords.id, row.id));
+          childRecordsRemapped += 1;
+        }
+      }
+
+      const deleted = await tx.delete(operationalRecords)
+        .where(inArray(operationalRecords.id, duplicateIds))
+        .returning({ id: operationalRecords.id });
+      duplicateAccountsRemoved += deleted.length;
+    }
+
+    await tx.insert(auditLogs).values({
+      workspaceId,
+      action: "admin.migration_import.repair_duplicate_accounts",
+      entityType: "migration_import",
+      details: {
+        duplicateGroupsBefore: duplicateGroups.length,
+        duplicateGroupsAfter: 0,
+        canonicalAccountsKept,
+        childRecordsRemapped,
+        duplicateAccountsRemoved,
+      },
+    });
+
+    return {
+      duplicateGroupsBefore: duplicateGroups.length,
+      duplicateGroupsAfter: 0,
+      canonicalAccountsKept,
+      childRecordsRemapped,
+      duplicateAccountsRemoved,
+    };
+  });
+}
 
 async function loadCleanupTarget(workspaceId: string, batchId: string): Promise<CleanupTarget | null> {
   const [batch] = await db.select({
@@ -1662,7 +1849,13 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       await logStep("ACTIVATE FARM", "completed", { message: defaultFarmId });
       await logStep("ACTIVATE SEASON", "completed", { message: selectedImportSeasonId });
 
-      const writeRecord = async (entity: string, sourceType: string, source: AndroidRecord, extra: Record<string, unknown> = {}) => {
+      const writeRecord = async (
+        entity: string,
+        sourceType: string,
+        source: AndroidRecord,
+        extra: Record<string, unknown> = {},
+        options?: { existingMatch?: { id: string; clientRecordId: string; payload: Record<string, unknown> } | null },
+      ) => {
         const referencedSeasonId = maps.seasons.get(seasonRef(source));
         const targetFarmId = referencedSeasonId ? farmBySeason.get(referencedSeasonId) ?? scopedFarmId(source, maps, defaultFarmId) : scopedFarmId(source, maps, defaultFarmId);
         const targetSeasonId = referencedSeasonId ?? seasonByFarm.get(targetFarmId) ?? defaultSeasonId;
@@ -1690,7 +1883,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         record.oldAndroidId = androidId;
         record.importBatchId = importBatchId;
         record.sourceFileHash = fileHash;
-        const [existing] = await tx.select({ id: operationalRecords.id, payload: operationalRecords.payload, clientRecordId: operationalRecords.clientRecordId }).from(operationalRecords).where(and(
+        const [queriedExisting] = await tx.select({ id: operationalRecords.id, payload: operationalRecords.payload, clientRecordId: operationalRecords.clientRecordId }).from(operationalRecords).where(and(
           eq(operationalRecords.workspaceId, parsed.data.workspaceId),
           eq(operationalRecords.entityType, entity),
           eq(operationalRecords.sourceFileHash, fileHash),
@@ -1727,6 +1920,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
             )`,
           ),
         )).limit(1);
+        const existing = options?.existingMatch ?? queriedExisting ?? null;
         if (existing) {
           const existingPayload = existing.payload && typeof existing.payload === "object" ? existing.payload as Record<string, unknown> : {};
           const nextPayload = {
@@ -1760,14 +1954,48 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       let updatedPartners = 0;
       for (const source of asArray(parsed.data.payload, "accounts")) {
         const id = randomUUID();
-        const result = await writeRecord("account", sourceTypeFor("accounts"), source, { id, name: text(source, ["name", "accountName"], "Imported Account"), type: text(source, ["type", "accountType"], "cash"), openingBalance: numberValue(source, ["openingBalance", "opening_balance"]), active: importedActive(source) });
+        const accountName = text(source, ["name", "accountName"], "Imported Account");
+        const accountType = normalizeImportedAccountType(text(source, ["type", "accountType"], "cash"), "cash");
+        const existingAccount = await findExistingImportedAccountRecord(
+          tx,
+          parsed.data.workspaceId,
+          fileHash,
+          sourceTypeFor("accounts"),
+          oldId(source),
+          normalizeImportedName(accountName),
+          accountType,
+        );
+        const result = await writeRecord("account", sourceTypeFor("accounts"), source, {
+          id: existingAccount?.clientRecordId ?? id,
+          name: accountName,
+          type: accountType,
+          openingBalance: numberValue(source, ["openingBalance", "opening_balance"]),
+          active: importedActive(source),
+        }, { existingMatch: existingAccount });
         maps.accounts.set(oldId(source), result.clientRecordId ?? result.payloadId ?? id);
         if (result.inserted) importedCounts.accounts += 1;
         if (result.updated) updatedAccounts += 1;
       }
       for (const source of asArray(parsed.data.payload, "partners")) {
         const id = randomUUID();
-        const result = await writeRecord("account", sourceTypeFor("partners"), source, { id, accountId: maps.accounts.get(accountRef(source)), name: text(source, ["name", "partnerName"], "Imported Partner"), type: "partner", openingBalance: numberValue(source, ["balance", "openingBalance", "opening_balance"]), active: importedActive(source) });
+        const partnerName = text(source, ["name", "partnerName"], "Imported Partner");
+        const existingPartner = await findExistingImportedAccountRecord(
+          tx,
+          parsed.data.workspaceId,
+          fileHash,
+          sourceTypeFor("partners"),
+          oldId(source),
+          normalizeImportedName(partnerName),
+          "partner",
+        );
+        const result = await writeRecord("account", sourceTypeFor("partners"), source, {
+          id: existingPartner?.clientRecordId ?? id,
+          accountId: maps.accounts.get(accountRef(source)),
+          name: partnerName,
+          type: "partner",
+          openingBalance: numberValue(source, ["balance", "openingBalance", "opening_balance"]),
+          active: importedActive(source),
+        }, { existingMatch: existingPartner });
         maps.partners.set(oldId(source), result.clientRecordId ?? result.payloadId ?? id);
         if (result.inserted) importedCounts.partners += 1;
         if (result.updated) updatedPartners += 1;
@@ -2958,6 +3186,20 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       message: cleanup.farmsDeactivated || cleanup.seasonsDeactivated || cleanup.sessionsCleared
         ? "Deleted farm and season state was repaired."
         : "Deleted farm and season state was already clean.",
+    };
+  });
+
+  app.post("/v1/admin/migration-import/repair-duplicate-accounts", { preHandler: requirePermission("CREATE_WORKSPACE") }, async (request, reply) => {
+    const parsed = repairSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ message: "A workspaceId is required." });
+    if (localDevelopmentMode) return { message: "Local memory mode cannot repair duplicate imported accounts. Configure a dev database first." };
+
+    const result = await repairDuplicateImportedAccounts(parsed.data.workspaceId);
+    return {
+      ...result,
+      message: result.duplicateGroupsBefore
+        ? "Duplicate imported accounts were repaired."
+        : "No duplicate imported accounts were found.",
     };
   });
 }
