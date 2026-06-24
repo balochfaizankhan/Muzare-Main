@@ -5,6 +5,7 @@ import { requireUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { auditLogs, farmDeletionRequests, farms, operationalRecords, seasons, userSessions } from "../db/schema.js";
+import { visibleFarmWhere } from "../farm-visibility.js";
 import { hasPermission } from "../permissions.js";
 import { repairWorkspaceContext, resolveWorkspaceContext } from "./workspace-context.js";
 
@@ -97,7 +98,7 @@ export async function workspaceFarmRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(403).send({ message: "Select this workspace before viewing farms." });
     }
     if (localDevelopmentMode) return { farms: [], activeFarmId: null };
-    const records = await db.select().from(farms).where(and(eq(farms.workspaceId, parsed.data.workspaceId), isNull(farms.deletedAt))).orderBy(farms.name);
+    const records = await db.select().from(farms).where(await visibleFarmWhere(parsed.data.workspaceId, { requireActive: false })).orderBy(farms.name);
     const context = await resolveWorkspaceContext(parsed.data.workspaceId, request.sessionId);
     const pendingRequests = await db.select({
       farmId: farmDeletionRequests.farmId,
@@ -265,7 +266,7 @@ export async function workspaceFarmRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(403).send({ message: "Select this workspace before selecting a farm." });
     }
     const [farm] = await db.select({ id: farms.id }).from(farms)
-      .where(and(eq(farms.id, params.data.farmId), eq(farms.workspaceId, params.data.workspaceId), eq(farms.active, true), isNull(farms.deletedAt))).limit(1);
+      .where(await visibleFarmWhere(params.data.workspaceId, { farmId: params.data.farmId })).limit(1);
     if (!farm) return reply.code(404).send({ message: "Active farm not found." });
     await db.update(userSessions).set({ activeFarmId: farm.id, activeSeasonId: null }).where(eq(userSessions.id, request.sessionId));
     return reply.code(204).send();

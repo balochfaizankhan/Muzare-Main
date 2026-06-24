@@ -27,7 +27,25 @@ export async function bootstrapRoutes(app: FastifyInstance): Promise<void> {
       return { user: request.appUser, activeFarmId: null, activeSeasonId: null, farms: [], seasons: [] };
     }
 
-    const context = await resolveWorkspaceContext(request.appUser.workspaceId, request.sessionId);
+    let context;
+    try {
+      context = await resolveWorkspaceContext(request.appUser.workspaceId, request.sessionId);
+    } catch (error) {
+      request.log.error({
+        err: error,
+        workspaceId: request.appUser.workspaceId,
+        sessionId: request.sessionId,
+      }, "BOOTSTRAP_CONTEXT_RESOLUTION_FAILED");
+      return reply.code(200).send({
+        user: request.appUser,
+        activeFarmId: null,
+        activeSeasonId: null,
+        farms: [],
+        seasons: [],
+        needsRepair: true,
+        contextWarning: "Workspace context needs repair before farm and season data can load.",
+      });
+    }
 
     return {
       user: request.appUser,

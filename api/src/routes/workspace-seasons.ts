@@ -1,10 +1,11 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { and, eq, isNull, ne } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 import { requireUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { farms, seasons, userSessions } from "../db/schema.js";
+import { visibleFarmWhere } from "../farm-visibility.js";
 import { hasPermission } from "../permissions.js";
 
 const paramsSchema = z.object({ workspaceId: z.string().uuid(), farmId: z.string().uuid() });
@@ -35,7 +36,7 @@ function canManage(request: FastifyRequest, workspaceId: string) {
 async function activeFarm(sessionId: string, workspaceId: string, farmId: string) {
   const [farm] = await db.select({ id: farms.id }).from(farms)
     .innerJoin(userSessions, and(eq(userSessions.id, sessionId), eq(userSessions.activeFarmId, farms.id)))
-    .where(and(eq(farms.id, farmId), eq(farms.workspaceId, workspaceId), eq(farms.active, true), isNull(farms.deletedAt))).limit(1);
+    .where(await visibleFarmWhere(workspaceId, { farmId })).limit(1);
   return farm;
 }
 

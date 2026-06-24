@@ -6,6 +6,7 @@ import { requirePermission } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { auditLogs, farms, importBatches, importFailures, operationalRecords, seasons, userSessions, workspaces } from "../db/schema.js";
+import { visibleFarmWhere } from "../farm-visibility.js";
 
 const requiredArrays = [
   "farms",
@@ -1074,8 +1075,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       await logStep("CREATE FARM", "completed", { importedRows: importedCounts.farms, failedRows: 0 });
       const importedFarmIds = [...maps.farms.values()];
       const [activeImportedFarm] = await tx.select({ id: farms.id }).from(farms).where(and(
-        eq(farms.workspaceId, parsed.data.workspaceId),
-        eq(farms.active, true),
+        await visibleFarmWhere(parsed.data.workspaceId),
         inArray(farms.id, importedFarmIds),
       )).limit(1);
       if (!activeImportedFarm && importedFarmIds[0]) {

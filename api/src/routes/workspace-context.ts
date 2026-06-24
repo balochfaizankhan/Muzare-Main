@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { auditLogs, farms, operationalRecords, seasons, userSessions } from "../db/schema.js";
+import { visibleFarmSqlGuard, visibleFarmWhere } from "../farm-visibility.js";
 
 type FarmRow = typeof farms.$inferSelect;
 type SeasonRow = typeof seasons.$inferSelect;
@@ -28,12 +29,12 @@ function pickSeason(records: SeasonRow[], preferredId: string | null | undefined
 async function validFarms(workspaceId: string) {
   const activeRecords = await db.select()
     .from(farms)
-    .where(and(eq(farms.workspaceId, workspaceId), eq(farms.active, true), isNull(farms.deletedAt)))
+    .where(await visibleFarmWhere(workspaceId))
     .orderBy(farms.name);
   if (activeRecords.length) return activeRecords;
   return db.select()
     .from(farms)
-    .where(and(eq(farms.workspaceId, workspaceId), isNull(farms.deletedAt)))
+    .where(await visibleFarmWhere(workspaceId, { requireActive: false }))
     .orderBy(farms.name);
 }
 
@@ -108,13 +109,14 @@ export type WorkspaceRepairResult = {
 
 export async function repairWorkspaceContext(workspaceId: string, actorUserId: string, sessionId?: string | null): Promise<WorkspaceRepairResult> {
   return db.transaction(async (tx) => {
+    const activeFarmGuard = await visibleFarmSqlGuard("f");
     const activeFarms = await tx.select()
       .from(farms)
-      .where(and(eq(farms.workspaceId, workspaceId), eq(farms.active, true), isNull(farms.deletedAt)))
+      .where(await visibleFarmWhere(workspaceId))
       .orderBy(farms.name);
     const fallbackFarms = activeFarms.length ? activeFarms : await tx.select()
       .from(farms)
-      .where(and(eq(farms.workspaceId, workspaceId), isNull(farms.deletedAt)))
+      .where(await visibleFarmWhere(workspaceId, { requireActive: false }))
       .orderBy(farms.name);
     const targetFarm = fallbackFarms[0] ?? null;
     if (!targetFarm) {
@@ -173,12 +175,12 @@ export async function repairWorkspaceContext(workspaceId: string, actorUserId: s
         AND (
           r.farm_id IS NULL
           OR r.season_id IS NULL
-          OR NOT EXISTS (
-            SELECT 1 FROM farms f
-            WHERE f.id = r.farm_id
-              AND f.workspace_id = r.workspace_id
-              AND f.deleted_at IS NULL
-          )
+           OR NOT EXISTS (
+             SELECT 1 FROM farms f
+             WHERE f.id = r.farm_id
+               AND f.workspace_id = r.workspace_id
+               AND ${activeFarmGuard}
+            )
           OR NOT EXISTS (
             SELECT 1 FROM seasons s
             WHERE s.id = r.season_id
@@ -205,7 +207,7 @@ export async function repairWorkspaceContext(workspaceId: string, actorUserId: s
               SELECT 1 FROM farms f
               WHERE f.id = r.farm_id
                 AND f.workspace_id = r.workspace_id
-                AND f.deleted_at IS NULL
+                AND ${activeFarmGuard}
             )
             OR NOT EXISTS (
               SELECT 1 FROM seasons s
@@ -234,8 +236,7 @@ export async function repairWorkspaceContext(workspaceId: string, actorUserId: s
              SELECT 1 FROM farms f
              WHERE f.id = user_sessions.active_farm_id
                AND f.workspace_id = user_sessions.workspace_id
-               AND f.deleted_at IS NULL
-               AND f.active = true
+               AND ${activeFarmGuard}
            )
          )
         THEN ${targetFarm.id}
@@ -289,4 +290,3 @@ export function asPayloadRecord(value: unknown): Record<string, unknown> | null 
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
 }
-

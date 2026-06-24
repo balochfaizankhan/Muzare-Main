@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { farms, operationalRecords, seasons } from "./db/schema.js";
+import { visibleFarmWhere } from "./farm-visibility.js";
 
 const virtualAccountIds = new Set(["local-cash", "local-partner"]);
 
@@ -32,7 +33,7 @@ async function hasOperationalReference(workspaceId: string, entityTypes: string[
 export async function validateTenantReferences(workspaceId: string, references: TenantReferences): Promise<string | null> {
   if (references.farmId) {
     const [farm] = await db.select({ id: farms.id }).from(farms)
-      .where(and(eq(farms.id, references.farmId), eq(farms.workspaceId, workspaceId), eq(farms.active, true), isNull(farms.deletedAt)))
+      .where(await visibleFarmWhere(workspaceId, { farmId: references.farmId }))
       .limit(1);
     if (!farm) return "Farm does not belong to the selected workspace.";
   }
