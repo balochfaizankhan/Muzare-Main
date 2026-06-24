@@ -24,6 +24,30 @@ const farmImportMetadataMigrationUrl = new URL("../../../database/migrations/002
 const expenseReceiptProcessingMigrationUrl = new URL("../../../database/migrations/0022_expense_receipt_processing.sql", import.meta.url);
 const farmDeletionRequestsMigrationUrl = new URL("../../../database/migrations/0023_farm_deletion_requests.sql", import.meta.url);
 const farmDeletionSoftDeleteMigrationUrl = new URL("../../../database/migrations/0024_farm_deletion_soft_delete.sql", import.meta.url);
+const importBatchesRecoveryMigrationUrl = new URL("../../../database/migrations/0025_import_batches_recovery.sql", import.meta.url);
+const importFailuresMigrationUrl = new URL("../../../database/migrations/0026_import_failures.sql", import.meta.url);
+const farmsActiveSchemaRepairMigrationUrl = new URL("../../../database/migrations/0027_farms_active_schema_repair.sql", import.meta.url);
+const importTrackingSchemaAlignmentMigrationUrl = new URL("../../../database/migrations/0028_import_tracking_schema_alignment.sql", import.meta.url);
+
+const requiredImportTrackingSchema = {
+  farms: ["source_type", "old_android_id", "import_batch_id", "source_file_hash", "active", "deleted_at", "deletion_approved_at"],
+  seasons: ["source_type", "old_android_id", "import_batch_id", "source_file_hash"],
+  labour_groups: ["source_type", "old_android_id", "import_batch_id", "source_file_hash"],
+  labourers: ["source_type", "old_android_id", "import_batch_id", "source_file_hash"],
+  attendance_entries: ["source_type", "old_android_id", "import_batch_id", "source_file_hash"],
+  accounts: ["source_type", "old_android_id", "import_batch_id", "source_file_hash"],
+  advance_records: ["source_type", "old_android_id", "import_batch_id", "source_file_hash"],
+  vouchers: ["source_type", "old_android_id", "import_batch_id", "source_file_hash"],
+  voucher_items: ["source_type", "old_android_id", "import_batch_id", "source_file_hash"],
+  dispatches: ["source_type", "old_android_id", "import_batch_id", "source_file_hash"],
+  dispatch_items: ["source_type", "old_android_id", "import_batch_id", "source_file_hash"],
+  sales: ["source_type", "old_android_id", "import_batch_id", "source_file_hash"],
+  sale_items: ["source_type", "old_android_id", "import_batch_id", "source_file_hash"],
+  account_transactions: ["source_type", "old_android_id", "import_batch_id", "source_file_hash"],
+  operational_records: ["source_type", "old_android_id", "import_batch_id", "source_file_hash"],
+  import_batches: ["file_hash", "payload_json", "summary_json", "error_json"],
+  import_failures: ["import_batch_id", "step", "source_row", "error_message"],
+} as const;
 
 async function tableExists(tableName: string): Promise<boolean> {
   const result = (await db.execute(
@@ -31,6 +55,38 @@ async function tableExists(tableName: string): Promise<boolean> {
   )) as { rows: Array<{ exists: boolean }> };
 
   return Boolean(result.rows[0]?.exists);
+}
+
+async function validateRequiredColumns(): Promise<void> {
+  const rows = (await db.execute(`
+    SELECT table_name, column_name
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+  `)) as { rows: Array<{ table_name: string; column_name: string }> };
+
+  const byTable = new Map<string, Set<string>>();
+  for (const row of rows.rows) {
+    const tableName = row.table_name;
+    const columnName = row.column_name;
+    if (!byTable.has(tableName)) byTable.set(tableName, new Set());
+    byTable.get(tableName)!.add(columnName);
+  }
+
+  const issues: string[] = [];
+  for (const [table, columns] of Object.entries(requiredImportTrackingSchema)) {
+    const available = byTable.get(table);
+    if (!available) {
+      issues.push(`${table}: table is missing`);
+      continue;
+    }
+    const missing = columns.filter((column) => !available.has(column));
+    if (missing.length) issues.push(`${table}: missing ${missing.join(", ")}`);
+  }
+
+  if (issues.length) {
+    console.error("MIGRATION_SCHEMA_VALIDATION_FAILED", { issues });
+    throw new Error(`Database schema is missing required import-tracking columns. ${issues.join(" | ")}. Run npm run db:init against the target DATABASE_URL.`);
+  }
 }
 
 async function ensureInitialSchema(): Promise<void> {
@@ -133,4 +189,14 @@ export async function ensureWorkspaceSchema(): Promise<void> {
   await db.execute(farmDeletionRequestsMigration);
   const farmDeletionSoftDeleteMigration = await readFile(farmDeletionSoftDeleteMigrationUrl, "utf8");
   await db.execute(farmDeletionSoftDeleteMigration);
+  const importBatchesRecoveryMigration = await readFile(importBatchesRecoveryMigrationUrl, "utf8");
+  await db.execute(importBatchesRecoveryMigration);
+  const importFailuresMigration = await readFile(importFailuresMigrationUrl, "utf8");
+  await db.execute(importFailuresMigration);
+  const farmsActiveSchemaRepairMigration = await readFile(farmsActiveSchemaRepairMigrationUrl, "utf8");
+  await db.execute(farmsActiveSchemaRepairMigration);
+  const importTrackingSchemaAlignmentMigration = await readFile(importTrackingSchemaAlignmentMigrationUrl, "utf8");
+  await db.execute(importTrackingSchemaAlignmentMigration);
+
+  await validateRequiredColumns();
 }

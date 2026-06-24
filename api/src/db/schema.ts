@@ -19,6 +19,13 @@ const timestamps = {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 };
 
+const importTrackingColumns = {
+  sourceType: text("source_type"),
+  oldAndroidId: text("old_android_id"),
+  importBatchId: uuid("import_batch_id"),
+  sourceFileHash: text("source_file_hash"),
+};
+
 export const platformRole = pgEnum("platform_role", ["platform_admin", "platform_support"]);
 export const workspaceRole = pgEnum("workspace_role", ["workspace_owner", "workspace_manager", "supervisor", "operator", "viewer"]);
 export const userStatus = pgEnum("user_status", ["pending", "approved", "rejected", "suspended"]);
@@ -119,10 +126,7 @@ export const farms = pgTable(
     contactEmail: text("contact_email"),
     contactPhone: text("contact_phone"),
     remarks: text("remarks"),
-    sourceType: text("source_type"),
-    oldAndroidId: text("old_android_id"),
-    importBatchId: uuid("import_batch_id"),
-    sourceFileHash: text("source_file_hash"),
+    ...importTrackingColumns,
     active: boolean("active").default(true).notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     deletedBy: uuid("deleted_by").references(() => users.id),
@@ -149,10 +153,7 @@ export const seasons = pgTable(
     actualEndsOn: date("actual_ends_on"),
     status: seasonStatus("status").default("planned").notNull(),
     notes: text("notes"),
-    sourceType: text("source_type"),
-    oldAndroidId: text("old_android_id"),
-    importBatchId: uuid("import_batch_id"),
-    sourceFileHash: text("source_file_hash"),
+    ...importTrackingColumns,
     active: boolean("active").default(true).notNull(),
     closed: boolean("closed").default(false).notNull(),
     createdBy: uuid("created_by").references(() => users.id),
@@ -175,6 +176,7 @@ export const labourGroups = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     farmId: uuid("farm_id").references(() => farms.id).notNull(),
     name: text("name").notNull(),
+    ...importTrackingColumns,
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [uniqueIndex("labour_groups_farm_name_uidx").on(table.farmId, table.name)],
@@ -191,6 +193,7 @@ export const labourers = pgTable("labourers", {
   joinedOn: date("joined_on"),
   endedOn: date("ended_on"),
   remarks: text("remarks"),
+  ...importTrackingColumns,
   active: boolean("active").default(true).notNull(),
   ...timestamps,
 });
@@ -205,6 +208,7 @@ export const attendanceEntries = pgTable(
     attendanceDate: date("attendance_date").notNull(),
     status: attendanceStatus("status").notNull(),
     recordedBy: uuid("recorded_by").references(() => users.id),
+    ...importTrackingColumns,
     syncVersion: integer("sync_version").default(1).notNull(),
     ...timestamps,
   },
@@ -226,6 +230,7 @@ export const accounts = pgTable(
     name: text("name").notNull(),
     accountType: text("account_type").default("partner").notNull(),
     remarks: text("remarks"),
+    ...importTrackingColumns,
     active: boolean("active").default(true).notNull(),
     ...timestamps,
   },
@@ -242,6 +247,7 @@ export const advanceRecords = pgTable("advance_records", {
   advanceDate: date("advance_date").notNull(),
   description: text("description"),
   createdBy: uuid("created_by").references(() => users.id),
+  ...importTrackingColumns,
   syncVersion: integer("sync_version").default(1).notNull(),
   ...timestamps,
 });
@@ -276,6 +282,7 @@ export const dispatches = pgTable("dispatches", {
   vehicleId: uuid("vehicle_id").references(() => vehicles.id).notNull(),
   dispatchedAt: timestamp("dispatched_at", { withTimezone: true }).notNull(),
   createdBy: uuid("created_by").references(() => users.id),
+  ...importTrackingColumns,
   syncVersion: integer("sync_version").default(1).notNull(),
   ...timestamps,
 });
@@ -285,6 +292,7 @@ export const dispatchItems = pgTable("dispatch_items", {
   dispatchId: uuid("dispatch_id").references(() => dispatches.id, { onDelete: "cascade" }).notNull(),
   produceTypeId: uuid("produce_type_id").references(() => produceTypes.id).notNull(),
   cartonCount: integer("carton_count").notNull(),
+  ...importTrackingColumns,
 });
 
 export const sales = pgTable("sales", {
@@ -296,6 +304,7 @@ export const sales = pgTable("sales", {
   buyerName: text("buyer_name").notNull(),
   totalAmount: numeric("total_amount", { precision: 14, scale: 2 }).notNull(),
   createdBy: uuid("created_by").references(() => users.id),
+  ...importTrackingColumns,
   syncVersion: integer("sync_version").default(1).notNull(),
   ...timestamps,
 });
@@ -306,6 +315,7 @@ export const saleItems = pgTable("sale_items", {
   dispatchItemId: uuid("dispatch_item_id").references(() => dispatchItems.id).notNull(),
   quantity: integer("quantity").notNull(),
   unitPrice: numeric("unit_price", { precision: 14, scale: 2 }).notNull(),
+  ...importTrackingColumns,
 });
 
 export const expenseCategories = pgTable(
@@ -345,6 +355,7 @@ export const vouchers = pgTable(
     voucherDate: date("voucher_date").notNull(),
     totalAmount: numeric("total_amount", { precision: 14, scale: 2 }).notNull(),
     recordedBy: uuid("recorded_by").references(() => users.id),
+    ...importTrackingColumns,
     syncVersion: integer("sync_version").default(1).notNull(),
     ...timestamps,
   },
@@ -357,6 +368,7 @@ export const voucherItems = pgTable("voucher_items", {
   categoryId: uuid("category_id").references(() => expenseCategories.id),
   description: text("description"),
   amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  ...importTrackingColumns,
 });
 
 export const expenseAttachments = pgTable(
@@ -412,6 +424,7 @@ export const accountTransactions = pgTable("account_transactions", {
   transactionDate: date("transaction_date").notNull(),
   remarks: text("remarks"),
   createdBy: uuid("created_by").references(() => users.id),
+  ...importTrackingColumns,
   syncVersion: integer("sync_version").default(1).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -520,10 +533,7 @@ export const operationalRecords = pgTable(
     seasonId: uuid("season_id").references(() => seasons.id),
     clientRecordId: text("client_record_id").notNull(),
     entityType: text("entity_type").notNull(),
-    sourceType: text("source_type"),
-    oldAndroidId: text("old_android_id"),
-    importBatchId: uuid("import_batch_id"),
-    sourceFileHash: text("source_file_hash"),
+    ...importTrackingColumns,
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
     recordedBy: uuid("recorded_by").references(() => users.id).notNull(),
     clientUpdatedAt: timestamp("client_updated_at", { withTimezone: true }).notNull(),
