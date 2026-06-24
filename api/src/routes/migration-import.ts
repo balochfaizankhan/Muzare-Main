@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requirePermission, requireUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
@@ -1345,15 +1345,13 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       for (const [index, source] of asArray(parsed.data.payload, "farms").entries()) {
         const sourceType = sourceTypeFor("farms");
         const androidId = oldId(source);
-        const marker = `source_type:${sourceType};old_android_id:${androidId}`;
-        const legacyMarker = `old_android_id:${oldId(source)}`;
         const existingMatches = await tx.select({ id: farms.id, name: farms.name, remarks: farms.remarks }).from(farms).where(and(
           eq(farms.workspaceId, parsed.data.workspaceId),
-          or(
-            and(eq(farms.sourceType, sourceType), eq(farms.oldAndroidId, androidId)),
-            eq(farms.remarks, marker),
-            eq(farms.remarks, legacyMarker),
-          ),
+          eq(farms.sourceType, sourceType),
+          eq(farms.oldAndroidId, androidId),
+          eq(farms.sourceFileHash, fileHash),
+          sql`${farms.deletedAt} IS NULL`,
+          eq(farms.active, true),
         ));
         const existing = existingMatches[0];
         if (existingMatches.length > 1) {
@@ -1432,12 +1430,15 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       updateJobStep("Seasons", { status: "running", startedAt: new Date().toISOString(), message: "Importing seasons." });
       await logStep("CREATE SEASON", "started");
       for (const source of asArray(parsed.data.payload, "seasons")) {
-        const marker = `source_type:${sourceTypeFor("seasons")};old_android_id:${oldId(source)}`;
-        const legacyMarker = `old_android_id:${oldId(source)}`;
         const farmId = maps.farms.get(farmRef(source)) ?? defaultFarmId;
         const [existing] = await tx.select({ id: seasons.id }).from(seasons).where(and(
           eq(seasons.workspaceId, parsed.data.workspaceId),
           eq(seasons.farmId, farmId),
+          eq(seasons.sourceType, sourceTypeFor("seasons")),
+          eq(seasons.oldAndroidId, oldId(source)),
+          eq(seasons.sourceFileHash, fileHash),
+          eq(seasons.active, true),
+          ne(seasons.status, "archived"),
           sql`EXISTS (
             SELECT 1
             FROM farms f
@@ -1446,11 +1447,6 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
               AND f.deleted_at IS NULL
               AND f.active = true
           )`,
-          or(
-            and(eq(seasons.sourceType, sourceTypeFor("seasons")), eq(seasons.oldAndroidId, oldId(source))),
-            eq(seasons.notes, marker),
-            eq(seasons.notes, legacyMarker),
-          ),
         )).limit(1);
         const id = existing?.id ?? randomUUID();
         maps.seasons.set(oldId(source), id);
@@ -1468,7 +1464,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
             startsOn: dateValue(source, ["startsOn", "starts_on", "startDate"], `${seasonYear}-01-01`),
             endsOn: text(source, ["endsOn", "ends_on", "endDate"]) || null,
             status: "active",
-            notes: marker,
+            notes: `source_type:${sourceTypeFor("seasons")};old_android_id:${oldId(source)}`,
             sourceType: sourceTypeFor("seasons"),
             oldAndroidId: oldId(source),
             importBatchId,
@@ -1492,11 +1488,14 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       }
       for (const farmId of importedFarmIds) {
         if (seasonByFarm.has(farmId)) continue;
-        const marker = `source_type:season;old_android_id:default:${farmId}`;
         const [existingDefaultSeason] = await tx.select({ id: seasons.id }).from(seasons).where(and(
           eq(seasons.workspaceId, parsed.data.workspaceId),
           eq(seasons.farmId, farmId),
-          or(eq(seasons.notes, marker), and(eq(seasons.sourceType, "season"), eq(seasons.oldAndroidId, `default:${farmId}`))),
+          eq(seasons.sourceType, "season"),
+          eq(seasons.oldAndroidId, `default:${farmId}`),
+          eq(seasons.sourceFileHash, fileHash),
+          eq(seasons.active, true),
+          ne(seasons.status, "archived"),
         )).limit(1);
         const fallbackSeasonId = existingDefaultSeason?.id ?? randomUUID();
         if (existingDefaultSeason) {
@@ -1515,7 +1514,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
             year: importYear,
             startsOn: `${importYear}-01-01`,
             status: "active",
-            notes: marker,
+            notes: `source_type:season;old_android_id:default:${farmId}`,
             sourceType: "season",
             oldAndroidId: `default:${farmId}`,
             importBatchId,
@@ -1563,7 +1562,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
           record.seasonId,
         ].filter((value) => value !== undefined && value !== null && value !== "").join(":") || randomUUID();
         record.payload = { ...recordPayload, old_android_id: androidId } as typeof record.payload;
-        record.clientRecordId = `android:${sourceType}:${androidId}`;
+        record.clientRecordId = `android:${fileHash}:${sourceType}:${androidId}`;
         record.workspaceId = parsed.data.workspaceId;
         record.recordedBy = userId;
         record.sourceType = sourceType;
@@ -1573,12 +1572,38 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         const [existing] = await tx.select({ id: operationalRecords.id, payload: operationalRecords.payload }).from(operationalRecords).where(and(
           eq(operationalRecords.workspaceId, parsed.data.workspaceId),
           eq(operationalRecords.entityType, entity),
+          eq(operationalRecords.sourceFileHash, fileHash),
           or(
             and(eq(operationalRecords.sourceType, sourceType), eq(operationalRecords.oldAndroidId, androidId)),
             and(
               sql`${operationalRecords.payload}->>'source_type' = ${sourceType}`,
               sql`${operationalRecords.payload}->>'old_android_id' = ${androidId}`,
             ),
+          ),
+          or(
+            sql`${operationalRecords.farmId} IS NULL`,
+            sql`EXISTS (
+              SELECT 1
+              FROM farms f
+              WHERE f.id = ${operationalRecords.farmId}
+                AND f.workspace_id = ${operationalRecords.workspaceId}
+                AND f.deleted_at IS NULL
+                AND f.active = true
+            )`,
+          ),
+          or(
+            sql`${operationalRecords.seasonId} IS NULL`,
+            sql`EXISTS (
+              SELECT 1
+              FROM seasons s
+              JOIN farms f ON f.id = s.farm_id AND f.workspace_id = s.workspace_id
+              WHERE s.id = ${operationalRecords.seasonId}
+                AND s.workspace_id = ${operationalRecords.workspaceId}
+                AND s.active = true
+                AND s.status <> 'archived'
+                AND f.deleted_at IS NULL
+                AND f.active = true
+            )`,
           ),
         )).limit(1);
         if (existing) {
@@ -2178,9 +2203,35 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
           const [existing] = await db.select({ id: operationalRecords.id }).from(operationalRecords).where(and(
             eq(operationalRecords.workspaceId, parsed.data.workspaceId),
             eq(operationalRecords.entityType, "attendance"),
+            eq(operationalRecords.sourceFileHash, fileHash),
             or(
               and(eq(operationalRecords.sourceType, sourceTypeFor("attendance")), eq(operationalRecords.oldAndroidId, androidId)),
               and(sql`${operationalRecords.payload}->>'source_type' = ${sourceTypeFor("attendance")}`, sql`${operationalRecords.payload}->>'old_android_id' = ${androidId}`),
+            ),
+            or(
+              sql`${operationalRecords.farmId} IS NULL`,
+              sql`EXISTS (
+                SELECT 1
+                FROM farms f
+                WHERE f.id = ${operationalRecords.farmId}
+                  AND f.workspace_id = ${operationalRecords.workspaceId}
+                  AND f.deleted_at IS NULL
+                  AND f.active = true
+              )`,
+            ),
+            or(
+              sql`${operationalRecords.seasonId} IS NULL`,
+              sql`EXISTS (
+                SELECT 1
+                FROM seasons s
+                JOIN farms f ON f.id = s.farm_id AND f.workspace_id = s.workspace_id
+                WHERE s.id = ${operationalRecords.seasonId}
+                  AND s.workspace_id = ${operationalRecords.workspaceId}
+                  AND s.active = true
+                  AND s.status <> 'archived'
+                  AND f.deleted_at IS NULL
+                  AND f.active = true
+              )`,
             ),
           )).limit(1);
           if (existing) {
