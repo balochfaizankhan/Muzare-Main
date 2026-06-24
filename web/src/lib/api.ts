@@ -241,6 +241,19 @@ export type MigrationImportValidation = {
         failedOrPartialBatches: number;
       };
       operationalRecordsByEntity: Array<{ entityType: string; count: number }>;
+      relationshipAudit: {
+        attendanceTotal: number;
+        attendanceLinkedToLabour: number;
+        attendanceMissingLabour: number;
+        advancesTotal: number;
+        advancesLinkedToLabour: number;
+        advancesMissingLabour: number;
+        advancesLinkedToAccount: number;
+        advancesMissingAccount: number;
+        vouchersTotal: number;
+        vouchersLinkedToPaymentAccount: number;
+        vouchersMissingPaymentAccount: number;
+      };
     };
   };
 };

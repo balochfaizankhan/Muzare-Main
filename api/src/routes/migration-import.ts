@@ -116,6 +116,19 @@ type PostImportAudit = {
     failedOrPartialBatches: number;
   };
   operationalRecordsByEntity: Array<{ entityType: string; count: number }>;
+  relationshipAudit: {
+    attendanceTotal: number;
+    attendanceLinkedToLabour: number;
+    attendanceMissingLabour: number;
+    advancesTotal: number;
+    advancesLinkedToLabour: number;
+    advancesMissingLabour: number;
+    advancesLinkedToAccount: number;
+    advancesMissingAccount: number;
+    vouchersTotal: number;
+    vouchersLinkedToPaymentAccount: number;
+    vouchersMissingPaymentAccount: number;
+  };
 };
 type ImportResult = {
   insertedOperationalRecords: number;
@@ -682,7 +695,7 @@ async function buildPostImportAudit(
   fileHash: string,
   payload: AndroidPayload,
 ): Promise<PostImportAudit> {
-  const [farmCountRows, seasonCountRows, failedBatchRows, entityRows, failureRows] = await Promise.all([
+  const [farmCountRows, seasonCountRows, failedBatchRows, entityRows, failureRows, relationshipRows] = await Promise.all([
     db.execute(sql`
       SELECT count(*)::int AS count
       FROM farms
@@ -715,7 +728,97 @@ async function buildPostImportAudit(
       FROM import_failures
       WHERE import_batch_id = ${importBatchId}
     `),
+    db.execute(sql`
+      WITH imported_labour AS (
+        SELECT client_record_id
+        FROM operational_records
+        WHERE workspace_id = ${workspaceId}
+          AND entity_type = 'labourer'
+          AND source_file_hash = ${fileHash}
+      ),
+      imported_accounts AS (
+        SELECT client_record_id
+        FROM operational_records
+        WHERE workspace_id = ${workspaceId}
+          AND entity_type = 'account'
+          AND source_file_hash = ${fileHash}
+      ),
+      imported_rows AS (
+        SELECT entity_type, payload
+        FROM operational_records
+        WHERE workspace_id = ${workspaceId}
+          AND source_file_hash = ${fileHash}
+      )
+      SELECT
+        count(*) FILTER (WHERE entity_type = 'attendance')::int AS attendance_total,
+        count(*) FILTER (
+          WHERE entity_type = 'attendance'
+            AND EXISTS (
+              SELECT 1 FROM imported_labour l
+              WHERE l.client_record_id = payload->>'labourerId'
+            )
+        )::int AS attendance_linked_labour,
+        count(*) FILTER (
+          WHERE entity_type = 'attendance'
+            AND NOT EXISTS (
+              SELECT 1 FROM imported_labour l
+              WHERE l.client_record_id = payload->>'labourerId'
+            )
+        )::int AS attendance_missing_labour,
+        count(*) FILTER (WHERE entity_type = 'advance')::int AS advances_total,
+        count(*) FILTER (
+          WHERE entity_type = 'advance'
+            AND EXISTS (
+              SELECT 1 FROM imported_labour l
+              WHERE l.client_record_id = payload->>'labourerId'
+            )
+        )::int AS advances_linked_labour,
+        count(*) FILTER (
+          WHERE entity_type = 'advance'
+            AND NOT EXISTS (
+              SELECT 1 FROM imported_labour l
+              WHERE l.client_record_id = payload->>'labourerId'
+            )
+        )::int AS advances_missing_labour,
+        count(*) FILTER (
+          WHERE entity_type = 'advance'
+            AND EXISTS (
+              SELECT 1 FROM imported_accounts a
+              WHERE a.client_record_id = payload->>'accountId'
+            )
+        )::int AS advances_linked_account,
+        count(*) FILTER (
+          WHERE entity_type = 'advance'
+            AND (
+              coalesce(payload->>'accountId', '') = ''
+              OR NOT EXISTS (
+                SELECT 1 FROM imported_accounts a
+                WHERE a.client_record_id = payload->>'accountId'
+              )
+            )
+        )::int AS advances_missing_account,
+        count(*) FILTER (WHERE entity_type = 'voucher')::int AS vouchers_total,
+        count(*) FILTER (
+          WHERE entity_type = 'voucher'
+            AND EXISTS (
+              SELECT 1 FROM imported_accounts a
+              WHERE a.client_record_id = payload->>'accountId'
+            )
+        )::int AS vouchers_linked_account,
+        count(*) FILTER (
+          WHERE entity_type = 'voucher'
+            AND (
+              coalesce(payload->>'accountId', '') = ''
+              OR NOT EXISTS (
+                SELECT 1 FROM imported_accounts a
+                WHERE a.client_record_id = payload->>'accountId'
+              )
+            )
+        )::int AS vouchers_missing_account
+      FROM imported_rows
+    `),
   ]);
+  const relationship = (relationshipRows.rows[0] as Record<string, unknown> | undefined) ?? {};
 
   return {
     expectedCounts: {
@@ -739,6 +842,19 @@ async function buildPostImportAudit(
       entityType: String((row as Record<string, unknown>).entity_type ?? ""),
       count: Number((row as Record<string, unknown>).count ?? 0),
     })),
+    relationshipAudit: {
+      attendanceTotal: Number(relationship.attendance_total ?? 0),
+      attendanceLinkedToLabour: Number(relationship.attendance_linked_labour ?? 0),
+      attendanceMissingLabour: Number(relationship.attendance_missing_labour ?? 0),
+      advancesTotal: Number(relationship.advances_total ?? 0),
+      advancesLinkedToLabour: Number(relationship.advances_linked_labour ?? 0),
+      advancesMissingLabour: Number(relationship.advances_missing_labour ?? 0),
+      advancesLinkedToAccount: Number(relationship.advances_linked_account ?? 0),
+      advancesMissingAccount: Number(relationship.advances_missing_account ?? 0),
+      vouchersTotal: Number(relationship.vouchers_total ?? 0),
+      vouchersLinkedToPaymentAccount: Number(relationship.vouchers_linked_account ?? 0),
+      vouchersMissingPaymentAccount: Number(relationship.vouchers_missing_account ?? 0),
+    },
   };
 }
 
@@ -1561,15 +1677,20 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
           record.farmId,
           record.seasonId,
         ].filter((value) => value !== undefined && value !== null && value !== "").join(":") || randomUUID();
-        record.payload = { ...recordPayload, old_android_id: androidId } as typeof record.payload;
         record.clientRecordId = `android:${fileHash}:${sourceType}:${androidId}`;
+        record.payload = {
+          ...recordPayload,
+          id: record.clientRecordId,
+          clientRecordId: record.clientRecordId,
+          old_android_id: androidId,
+        } as typeof record.payload;
         record.workspaceId = parsed.data.workspaceId;
         record.recordedBy = userId;
         record.sourceType = sourceType;
         record.oldAndroidId = androidId;
         record.importBatchId = importBatchId;
         record.sourceFileHash = fileHash;
-        const [existing] = await tx.select({ id: operationalRecords.id, payload: operationalRecords.payload }).from(operationalRecords).where(and(
+        const [existing] = await tx.select({ id: operationalRecords.id, payload: operationalRecords.payload, clientRecordId: operationalRecords.clientRecordId }).from(operationalRecords).where(and(
           eq(operationalRecords.workspaceId, parsed.data.workspaceId),
           eq(operationalRecords.entityType, entity),
           eq(operationalRecords.sourceFileHash, fileHash),
@@ -1608,7 +1729,12 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         )).limit(1);
         if (existing) {
           const existingPayload = existing.payload && typeof existing.payload === "object" ? existing.payload as Record<string, unknown> : {};
-          const nextPayload = { ...existingPayload, ...record.payload, id: payloadId(existing.payload) ?? payloadId(record.payload) ?? randomUUID() };
+          const nextPayload = {
+            ...existingPayload,
+            ...record.payload,
+            id: existing.clientRecordId ?? record.clientRecordId,
+            clientRecordId: existing.clientRecordId ?? record.clientRecordId,
+          };
           await tx.update(operationalRecords).set({
             farmId: record.farmId,
             seasonId: record.seasonId,
@@ -1620,11 +1746,11 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
             clientUpdatedAt: record.clientUpdatedAt,
             updatedAt: record.updatedAt,
           }).where(eq(operationalRecords.id, existing.id));
-          return { inserted: false, updated: true, payloadId: payloadId(nextPayload) };
+          return { inserted: false, updated: true, payloadId: payloadId(nextPayload), clientRecordId: existing.clientRecordId };
         }
         await tx.insert(operationalRecords).values(record);
         insertedOperationalRecords += 1;
-        return { inserted: true, updated: false, payloadId: payloadId(record.payload) };
+        return { inserted: true, updated: false, payloadId: payloadId(record.payload), clientRecordId: record.clientRecordId };
       };
 
       updateJobStep("Accounts", { status: "running", startedAt: new Date().toISOString(), message: "Importing accounts." });
@@ -1635,14 +1761,14 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       for (const source of asArray(parsed.data.payload, "accounts")) {
         const id = randomUUID();
         const result = await writeRecord("account", sourceTypeFor("accounts"), source, { id, name: text(source, ["name", "accountName"], "Imported Account"), type: text(source, ["type", "accountType"], "cash"), openingBalance: numberValue(source, ["openingBalance", "opening_balance"]), active: importedActive(source) });
-        maps.accounts.set(oldId(source), result.payloadId ?? id);
+        maps.accounts.set(oldId(source), result.clientRecordId ?? result.payloadId ?? id);
         if (result.inserted) importedCounts.accounts += 1;
         if (result.updated) updatedAccounts += 1;
       }
       for (const source of asArray(parsed.data.payload, "partners")) {
         const id = randomUUID();
         const result = await writeRecord("account", sourceTypeFor("partners"), source, { id, accountId: maps.accounts.get(accountRef(source)), name: text(source, ["name", "partnerName"], "Imported Partner"), type: "partner", openingBalance: numberValue(source, ["balance", "openingBalance", "opening_balance"]), active: importedActive(source) });
-        maps.partners.set(oldId(source), result.payloadId ?? id);
+        maps.partners.set(oldId(source), result.clientRecordId ?? result.payloadId ?? id);
         if (result.inserted) importedCounts.partners += 1;
         if (result.updated) updatedPartners += 1;
       }
@@ -1670,7 +1796,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         const id = randomUUID();
         const name = text(source, ["name", "labourName", "workerName", "employeeName"], "Imported Labour");
         const result = await writeRecord("labourer", sourceTypeFor("labour"), source, { id, name, phone: text(source, ["phone", "mobile", "mobileNumber"]), notes: text(source, ["notes", "remarks"]), group: text(source, ["groupName", "group", "paymentGroup"], "Imported"), dailyWage: numberValue(source, ["dailyWage", "dailyRate", "wage"]), paymentType: text(source, ["paymentType"], "daily_wage"), active: importedActive(source) });
-        const labourId = result.payloadId ?? id;
+        const labourId = result.clientRecordId ?? result.payloadId ?? id;
         maps.labour.set(oldId(source), labourId);
         labourNameMap.set(name.trim().toLowerCase(), labourId);
         if (result.inserted) importedCounts.labour += 1;
@@ -1705,6 +1831,9 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
           date: dateValue(source, ["date", "voucherDate"]),
           amount: numberValue(source, ["total_amount", "totalAmount", "total", "amount", "voucherTotal"]),
           accountId: maps.accounts.get(accountRef(source)) ?? defaultAccountId,
+          paymentAccountId: maps.accounts.get(accountRef(source)) ?? defaultAccountId,
+          paidFromAccountId: maps.accounts.get(accountRef(source)) ?? defaultAccountId,
+          oldPaymentAccountId: accountRef(source),
           categoryId: text(source, ["category_id", "categoryId", "category"], "imported"),
           category: text(source, ["category", "categoryName", "expenseCategory"], "Imported"),
           subcategoryId: text(source, ["subcategory_id", "subcategoryId", "subcategory"], "imported"),
@@ -1712,6 +1841,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
           paidByPartnerName: text(source, ["paidByPartnerName", "paid_by_partner_name"]),
           description: text(source, ["description", "notes"], "Imported Android voucher"),
           notes: text(source, ["notes"]),
+          oldExpenseId: oldId(source),
           items: items.map((item) => ({ ...item, description: text(item, ["description", "itemName", "name"]), category: text(item, ["category", "categoryName"]), subcategory: text(item, ["subcategory", "subcategoryName"]), amount: numberValue(item, ["amount", "total", "lineTotal"]), quantity: numberValue(item, ["quantity", "qty"], 1), unit: text(item, ["unit"]), source_type: sourceTypeFor("expenseItems"), old_android_id: oldId(item) })),
         });
         if (result.inserted) {
@@ -1758,7 +1888,14 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
             date: dateValue(source, ["date", "advanceDate"]),
             amount: numberValue(source, ["amount"]),
             labourerId,
+            labourId: labourerId,
+            workerId: labourerId,
+            oldLabourId: labourRef(source),
             accountId: maps.accounts.get(accountRef(source)) ?? defaultAccountId,
+            paymentAccountId: maps.accounts.get(accountRef(source)) ?? defaultAccountId,
+            paidFromAccountId: maps.accounts.get(accountRef(source)) ?? defaultAccountId,
+            oldPaymentAccountId: accountRef(source),
+            sourceAccountName: text(source, ["paymentAccountName", "accountName", "sourceAccountName"]),
             notes: text(source, ["notes", "description"]),
           });
           if (result.inserted) importedCounts.advances += 1;
@@ -1851,6 +1988,8 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
               const result = await writeRecord("attendance", sourceTypeFor("attendance"), source, {
                 date: dateValue(source, ["date", "attendanceDate", "day"]),
                 labourerId,
+                labourId: labourerId,
+                workerId: labourerId,
                 status: attendanceStatus(source),
                 remarks: text(source, ["remarks", "notes"]),
                 oldFarmId: farmRef(source),
@@ -2048,6 +2187,19 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
             failedOrPartialBatches: 0,
           },
           operationalRecordsByEntity: [],
+          relationshipAudit: {
+            attendanceTotal: 0,
+            attendanceLinkedToLabour: 0,
+            attendanceMissingLabour: 0,
+            advancesTotal: 0,
+            advancesLinkedToLabour: 0,
+            advancesMissingLabour: 0,
+            advancesLinkedToAccount: 0,
+            advancesMissingAccount: 0,
+            vouchersTotal: 0,
+            vouchersLinkedToPaymentAccount: 0,
+            vouchersMissingPaymentAccount: 0,
+          },
         },
       } satisfies ImportResult;
       })(db);
@@ -2193,13 +2345,18 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
           const payloadRecord = operationalRecord("attendance", source, sourceTypeFor("attendance"), maps, { farmId: targetFarmId, seasonId: targetSeasonId }, {
             date: dateValue(source, ["date", "attendanceDate", "day"]),
             labourerId,
+            labourId: labourerId,
+            workerId: labourerId,
             status: attendanceStatus(source),
             remarks: text(source, ["remarks", "notes"]),
             oldFarmId: farmRef(source),
             oldSeasonId: seasonRef(source),
             oldLabourId: labourRef(source),
           });
-          const nextPayload = { ...(payloadRecord.payload as Record<string, unknown>), old_android_id: androidId };
+          const nextPayload = {
+            ...(payloadRecord.payload as Record<string, unknown>),
+            old_android_id: androidId,
+          };
           const [existing] = await db.select({ id: operationalRecords.id }).from(operationalRecords).where(and(
             eq(operationalRecords.workspaceId, parsed.data.workspaceId),
             eq(operationalRecords.entityType, "attendance"),
@@ -2252,12 +2409,12 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
               ...payloadRecord,
               workspaceId: parsed.data.workspaceId,
               recordedBy: request.appUser!.id,
-              clientRecordId: `android:${sourceTypeFor("attendance")}:${androidId}`,
+              clientRecordId: `android:${fileHash}:${sourceTypeFor("attendance")}:${androidId}`,
               sourceType: sourceTypeFor("attendance"),
               oldAndroidId: androidId,
               importBatchId: batch.id,
               sourceFileHash: fileHash,
-              payload: nextPayload,
+              payload: { ...nextPayload, id: `android:${fileHash}:${sourceTypeFor("attendance")}:${androidId}`, clientRecordId: `android:${fileHash}:${sourceTypeFor("attendance")}:${androidId}` },
             });
             job.importedRows += 1;
           }
