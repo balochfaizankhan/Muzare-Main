@@ -13,6 +13,12 @@ const envSchema = z.object({
   BOOTSTRAP_ADMIN_NAME: z.string().default("Administrator"),
   LOCAL_ADMIN_EMAIL: z.string().email().default("admin@muzare.local"),
   LOCAL_ADMIN_PASSWORD: z.string().min(8).default("ChangeMe123!"),
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().positive().optional(),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  SMTP_FROM: z.string().email().optional(),
+  APP_BASE_URL: z.string().url().optional(),
 }).superRefine((env, ctx) => {
   if (env.NODE_ENV === "production" && !env.DATABASE_URL) {
     ctx.addIssue({
@@ -26,6 +32,7 @@ const envSchema = z.object({
 export const config = envSchema.parse(process.env);
 export const databaseConfigured = Boolean(config.DATABASE_URL);
 export const localDevelopmentMode = config.NODE_ENV !== "production" && !databaseConfigured;
+export const smtpConfigured = Boolean(config.SMTP_HOST && config.SMTP_PORT && config.SMTP_FROM);
 
 export const allowedOrigins = config.ALLOWED_ORIGINS.split(",")
   .map((origin) => origin.trim().replace(/\/+$/, ""))

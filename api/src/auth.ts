@@ -168,6 +168,26 @@ export async function requireUser(request: FastifyRequest, reply: FastifyReply):
   request.appUser = await serializeUser(row.user, row.workspaceId);
 }
 
+export async function authenticateToken(token: string): Promise<{ user: AuthenticatedUser; sessionId: string | null } | null> {
+  if (!token) return null;
+  if (localDevelopmentMode) {
+    const expiry = localSessions.get(hashToken(token));
+    if (!expiry || expiry <= new Date()) return null;
+    return { user: localUser, sessionId: null };
+  }
+  const [row] = await db
+    .select({ sessionId: userSessions.id, workspaceId: userSessions.workspaceId, user: users })
+    .from(userSessions)
+    .innerJoin(users, eq(users.id, userSessions.userId))
+    .where(and(eq(userSessions.tokenHash, hashToken(token)), gt(userSessions.expiresAt, new Date())))
+    .limit(1);
+  if (!row || !row.user.active || row.user.status !== "approved") return null;
+  return {
+    user: await serializeUser(row.user, row.workspaceId),
+    sessionId: row.sessionId,
+  };
+}
+
 export function requirePermission(permission: Permission, workspaceId?: (request: FastifyRequest) => string | undefined) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     await requireUser(request, reply);

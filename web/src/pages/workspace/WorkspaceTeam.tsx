@@ -47,8 +47,12 @@ export function WorkspaceTeam() {
   const inviteMember = useMutation({
     mutationFn: () => inviteWorkspaceMember(token!, workspaceId, invite),
     onSuccess: async (result) => {
-      setShareToken(result.invitationToken ?? "");
-      setInviteMessage(result.alreadyHasAccess ? t("workspaceTeam.alreadyHasAccess") : "");
+      setShareToken(result.invitationUrl ?? result.invitationToken ?? "");
+      setInviteMessage(result.alreadyHasAccess
+        ? t("workspaceTeam.alreadyHasAccess")
+        : result.emailSent
+          ? t("workspaceTeam.emailSent")
+          : (result.warning ?? ""));
       setInvite(blankInvite);
       await refresh();
     },
@@ -59,7 +63,10 @@ export function WorkspaceTeam() {
   });
   const remove = useMutation({ mutationFn: (id: string) => removeWorkspaceMember(token!, workspaceId, id), onSuccess: refresh });
   const cancelInvite = useMutation({ mutationFn: (id: string) => cancelWorkspaceInvitation(token!, workspaceId, id), onSuccess: refresh });
-  const invitationLink = useMemo(() => shareToken ? `${window.location.origin}/accept-invitation?token=${encodeURIComponent(shareToken)}` : "", [shareToken]);
+  const invitationLink = useMemo(() => {
+    if (!shareToken) return "";
+    return shareToken.startsWith("http") ? shareToken : `${window.location.origin}/accept-invitation?token=${encodeURIComponent(shareToken)}`;
+  }, [shareToken]);
   const visibleModules = useMemo(
     () => modules.filter((module) => config.featureInventory || module !== "inventory"),
     [],

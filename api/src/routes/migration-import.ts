@@ -100,6 +100,54 @@ function normalizeImportedAccountType(value: unknown, fallback = "cash") {
   return normalized || fallback;
 }
 
+const explicitPaymentAccountTypes = new Set([
+  "cash",
+  "bank",
+  "payment",
+  "payment_account",
+  "wallet",
+  "petty_cash",
+  "fund_source",
+  "fund",
+]);
+
+const paymentNameFragments = ["cash", "bank", "wallet", "fund"];
+
+function booleanValue(record: AndroidRecord, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") return value !== 0;
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+      if (["true", "yes", "1"].includes(normalized)) return true;
+      if (["false", "no", "0"].includes(normalized)) return false;
+    }
+  }
+  return false;
+}
+
+function accountNameLooksLikePaymentAccount(name: string) {
+  const normalized = normalizeImportedName(name);
+  return paymentNameFragments.some((fragment) => normalized.includes(fragment));
+}
+
+function isExplicitPaymentAccountSource(source: AndroidRecord, explicitType: string, name: string) {
+  if (explicitType && explicitPaymentAccountTypes.has(explicitType)) return true;
+  if (booleanValue(source, ["isPaymentAccount", "paymentAccount", "isCashAccount", "isBankAccount", "cashAccount", "bankAccount"])) return true;
+  return accountNameLooksLikePaymentAccount(name);
+}
+
+function classifyImportedAccountType(source: AndroidRecord, partnerNames: Set<string>) {
+  const name = text(source, ["name", "accountName"], "Imported Account");
+  const normalizedName = normalizeImportedName(name);
+  const explicitType = normalizeImportedAccountType(text(source, ["type", "accountType"], ""), "");
+  const normalizedType = explicitType || "cash";
+  if (normalizedType === "partner") return "partner";
+  if (partnerNames.has(normalizedName) && !isExplicitPaymentAccountSource(source, explicitType, name)) return "partner";
+  return normalizedType;
+}
+
 function importedAccountGroupKey(payload: Record<string, unknown>) {
   const type = normalizeImportedAccountType(payload.type);
   const name = normalizeImportedName(payload.name);
@@ -898,6 +946,73 @@ async function repairDuplicateImportedAccounts(workspaceId: string): Promise<Acc
       canonicalAccountsKept += 1;
       const duplicateIds = sorted.slice(1).map((row) => row.id);
       const duplicateClientIds = new Set(sorted.slice(1).map((row) => row.clientRecordId));
+      if (!duplicateIds.length) continue;
+
+      for (const row of childRows) {
+        const payload = row.payload as Record<string, unknown>;
+        let changed = false;
+        const nextPayload = { ...payload };
+        for (const field of importedAccountReferenceFields) {
+          const value = nextPayload[field];
+          if (typeof value === "string" && duplicateClientIds.has(value)) {
+            nextPayload[field] = canonical.clientRecordId;
+            changed = true;
+          }
+        }
+        if (changed) {
+          await tx.update(operationalRecords).set({
+            payload: nextPayload,
+            updatedAt: new Date(),
+          }).where(eq(operationalRecords.id, row.id));
+          childRecordsRemapped += 1;
+        }
+      }
+
+      const deleted = await tx.delete(operationalRecords)
+        .where(inArray(operationalRecords.id, duplicateIds))
+        .returning({ id: operationalRecords.id });
+      duplicateAccountsRemoved += deleted.length;
+    }
+
+    const mixedTypeGroups = new Map<string, typeof accountRows>();
+    for (const row of await tx.select({
+      id: operationalRecords.id,
+      clientRecordId: operationalRecords.clientRecordId,
+      payload: operationalRecords.payload,
+      oldAndroidId: operationalRecords.oldAndroidId,
+      sourceFileHash: operationalRecords.sourceFileHash,
+      createdAt: operationalRecords.createdAt,
+    }).from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, workspaceId),
+      eq(operationalRecords.entityType, "account"),
+      sql`${operationalRecords.payload}->>'deletedAt' IS NULL`,
+    ))) {
+      const payload = row.payload as Record<string, unknown>;
+      const nameKey = normalizeImportedName(payload.name);
+      mixedTypeGroups.set(nameKey, [...(mixedTypeGroups.get(nameKey) ?? []), row]);
+    }
+
+    for (const rows of mixedTypeGroups.values()) {
+      if (rows.length < 2) continue;
+      const partnerRows = rows.filter((row) => normalizeImportedAccountType((row.payload as Record<string, unknown>).type, "cash") === "partner");
+      const nonPartnerRows = rows.filter((row) => normalizeImportedAccountType((row.payload as Record<string, unknown>).type, "cash") !== "partner");
+      if (!partnerRows.length || !nonPartnerRows.length) continue;
+      const sampleName = String((rows[0]?.payload as Record<string, unknown> | undefined)?.name ?? "").trim();
+      if (accountNameLooksLikePaymentAccount(sampleName)) continue;
+
+      const canonicalPartnerRows = [...partnerRows].sort((a, b) => {
+        const aRefCount = childReferenceCounts.get(a.clientRecordId) ?? 0;
+        const bRefCount = childReferenceCounts.get(b.clientRecordId) ?? 0;
+        const refDelta = bRefCount - aRefCount;
+        if (refDelta !== 0) return refDelta;
+        const hashDelta = Number(Boolean(b.sourceFileHash)) - Number(Boolean(a.sourceFileHash));
+        if (hashDelta !== 0) return hashDelta;
+        return b.createdAt.getTime() - a.createdAt.getTime();
+      });
+      const canonical = canonicalPartnerRows[0];
+      if (!canonical) continue;
+      const duplicateIds = nonPartnerRows.map((row) => row.id);
+      const duplicateClientIds = new Set(nonPartnerRows.map((row) => row.clientRecordId));
       if (!duplicateIds.length) continue;
 
       for (const row of childRows) {
@@ -2255,10 +2370,15 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       await logStep("IMPORT ACCOUNTS", "started");
       let updatedAccounts = 0;
       let updatedPartners = 0;
+      const importedPartnerNames = new Set(
+        asArray(parsed.data.payload, "partners")
+          .map((source) => normalizeImportedName(text(source, ["name", "partnerName"], "")))
+          .filter(Boolean),
+      );
       for (const source of asArray(parsed.data.payload, "accounts")) {
         const id = randomUUID();
         const accountName = text(source, ["name", "accountName"], "Imported Account");
-        const accountType = normalizeImportedAccountType(text(source, ["type", "accountType"], "cash"), "cash");
+        const accountType = classifyImportedAccountType(source, importedPartnerNames);
         const existingAccount = await findExistingImportedAccountRecord(
           tx,
           parsed.data.workspaceId,

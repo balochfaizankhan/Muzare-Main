@@ -21,6 +21,7 @@ type AuthState = {
   logout(): Promise<void>;
   switchWorkspace(workspaceId: string): Promise<void>;
   updateUser(user: AppUser): void;
+  completeSession(token: string, user: AppUser): Promise<void>;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -102,7 +103,16 @@ export function AuthProvider({ children }: PropsWithChildren) {
     setUser(nextUser);
   }, []);
 
-  const value = useMemo(() => ({ user, token, loading, login, logout, switchWorkspace, updateUser }), [user, token, loading, login, logout, switchWorkspace, updateUser]);
+  const completeSession = useCallback(async (nextToken: string, nextUser: AppUser) => {
+    window.localStorage.setItem(tokenKey, nextToken);
+    window.localStorage.setItem(cachedUserKey, JSON.stringify(nextUser));
+    await clearWorkspaceCache();
+    queryClient.clear();
+    setToken(nextToken);
+    setUser(nextUser);
+  }, []);
+
+  const value = useMemo(() => ({ user, token, loading, login, logout, switchWorkspace, updateUser, completeSession }), [user, token, loading, login, logout, switchWorkspace, updateUser, completeSession]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

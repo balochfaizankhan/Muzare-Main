@@ -1,11 +1,12 @@
 import { createHash, randomBytes } from "node:crypto";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { and, desc, eq, gt, ne, sql } from "drizzle-orm";
 import { z } from "zod";
-import { hashPassword, requireUser } from "../auth.js";
-import { localDevelopmentMode } from "../config.js";
+import { authenticateToken, createSession, hashPassword, requireUser, serializeUser, verifyPassword } from "../auth.js";
+import { config, localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { auditLogs, users, workspaceMemberships, workspaceTeamInvitations } from "../db/schema.js";
+import { sendWorkspaceInvitationEmail } from "../email.js";
 import {
   hasModulePermission,
   roleModulePermissions,
@@ -20,6 +21,9 @@ const membershipParams = workspaceParams.extend({ membershipId: z.string().uuid(
 const invitationParams = workspaceParams.extend({ invitationId: z.string().uuid() });
 const teamQuerySchema = z.object({
   debugEmail: z.string().trim().email().optional(),
+});
+const invitationLookupQuerySchema = z.object({
+  token: z.string().min(20),
 });
 const permissionSchema = z.record(z.string(), z.record(z.string(), z.boolean())).nullable().optional().superRefine((permissions, context) => {
   if (!permissions) return;
@@ -44,8 +48,10 @@ const membershipUpdateSchema = z.object({
 });
 const acceptInvitationSchema = z.object({
   token: z.string().min(20),
-  displayName: z.string().trim().min(2).max(120),
-  password: z.string().min(8).max(128),
+  mode: z.enum(["session", "login", "signup"]).default("session"),
+  email: z.string().trim().email().optional(),
+  displayName: z.string().trim().min(2).max(120).optional(),
+  password: z.string().min(8).max(128).optional(),
   phone: z.string().trim().max(40).optional().nullable(),
 });
 
@@ -77,6 +83,53 @@ async function ownerCount(workspaceId: string, excludeMembershipId?: string) {
 
 async function audit(workspaceId: string, userId: string, action: string, entityId: string, details?: Record<string, unknown>) {
   await db.insert(auditLogs).values({ workspaceId, userId, action, entityType: "workspace_membership", entityId, details });
+}
+
+function invitationUrlFor(request: FastifyRequest, token: string) {
+  const baseUrl = config.APP_BASE_URL
+    ?? request.headers.origin
+    ?? `${String(request.headers["x-forwarded-proto"] ?? "https")}://${String(request.headers["x-forwarded-host"] ?? request.headers.host ?? "localhost")}`;
+  return `${baseUrl.replace(/\/+$/, "")}/accept-invitation?token=${encodeURIComponent(token)}`;
+}
+
+async function loadInvitationByToken(token: string) {
+  const [invitation] = await db.select({
+    id: workspaceTeamInvitations.id,
+    workspaceId: workspaceTeamInvitations.workspaceId,
+    email: workspaceTeamInvitations.email,
+    phone: workspaceTeamInvitations.phone,
+    role: workspaceTeamInvitations.role,
+    permissions: workspaceTeamInvitations.permissions,
+    status: workspaceTeamInvitations.status,
+    expiresAt: workspaceTeamInvitations.expiresAt,
+    acceptedAt: workspaceTeamInvitations.acceptedAt,
+    createdAt: workspaceTeamInvitations.createdAt,
+    invitedBy: workspaceTeamInvitations.invitedBy,
+    workspaceName: sql<string>`(select name from workspaces where workspaces.id = ${workspaceTeamInvitations.workspaceId})`,
+    inviterName: sql<string | null>`(select display_name from users where users.id = ${workspaceTeamInvitations.invitedBy})`,
+    inviterEmail: sql<string | null>`(select email from users where users.id = ${workspaceTeamInvitations.invitedBy})`,
+  }).from(workspaceTeamInvitations)
+    .where(eq(workspaceTeamInvitations.tokenHash, hashToken(token)))
+    .limit(1);
+  return invitation ?? null;
+}
+
+async function acceptInvitationMembership(invitation: NonNullable<Awaited<ReturnType<typeof loadInvitationByToken>>>, userId: string) {
+  const [membership] = await db.insert(workspaceMemberships).values({
+    workspaceId: invitation.workspaceId,
+    userId,
+    role: invitation.role,
+    active: true,
+    permissions: invitation.permissions,
+  }).onConflictDoUpdate({
+    target: [workspaceMemberships.workspaceId, workspaceMemberships.userId],
+    set: { role: invitation.role, active: true, permissions: invitation.permissions, updatedAt: new Date() },
+  }).returning();
+  await db.update(workspaceTeamInvitations)
+    .set({ status: "accepted", acceptedBy: userId, acceptedAt: new Date(), updatedAt: new Date() })
+    .where(eq(workspaceTeamInvitations.id, invitation.id));
+  await audit(invitation.workspaceId, userId, "workspace_invitation_accepted", membership!.id, { invitationId: invitation.id });
+  return membership!;
 }
 
 export async function workspaceTeamRoutes(app: FastifyInstance): Promise<void> {
@@ -168,44 +221,133 @@ export async function workspaceTeamRoutes(app: FastifyInstance): Promise<void> {
         eq(workspaceMemberships.userId, existingUser.id),
       )).limit(1);
       if (existingMembership?.active && existingUser.active && existingUser.status === "approved") {
-        return reply.code(200).send({ membership: existingMembership, memberAdded: false, alreadyHasAccess: true });
+        return reply.code(200).send({ memberAdded: false, alreadyHasAccess: true, emailSent: false });
       }
-      const [membership] = await db.insert(workspaceMemberships).values({
-        workspaceId: params.data.workspaceId, userId: existingUser.id, role: input.data.role, active: true, permissions: input.data.permissions ?? null,
-      }).onConflictDoUpdate({
-        target: [workspaceMemberships.workspaceId, workspaceMemberships.userId],
-        set: { role: input.data.role, active: true, permissions: input.data.permissions ?? null, updatedAt: new Date() },
-      }).returning();
-      await audit(params.data.workspaceId, request.appUser.id, "workspace_member_added", membership!.id, { userId: existingUser.id, email, role: input.data.role });
-      return reply.code(201).send({ membership, memberAdded: true, alreadyHasAccess: false });
     }
     const token = randomBytes(32).toString("base64url");
-    const [invitation] = await db.insert(workspaceTeamInvitations).values({
-      workspaceId: params.data.workspaceId,
-      email,
-      phone: optional(input.data.phone),
-      role: input.data.role,
-      permissions: input.data.permissions ?? null,
-      tokenHash: hashToken(token),
-      invitedBy: request.appUser.id,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    }).returning({ id: workspaceTeamInvitations.id, email: workspaceTeamInvitations.email, expiresAt: workspaceTeamInvitations.expiresAt });
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const [existingPending] = await db.select({ id: workspaceTeamInvitations.id }).from(workspaceTeamInvitations).where(and(
+      eq(workspaceTeamInvitations.workspaceId, params.data.workspaceId),
+      eq(workspaceTeamInvitations.email, email),
+      eq(workspaceTeamInvitations.status, "pending"),
+    )).orderBy(desc(workspaceTeamInvitations.createdAt)).limit(1);
+    const [invitation] = existingPending
+      ? await db.update(workspaceTeamInvitations).set({
+        phone: optional(input.data.phone),
+        role: input.data.role,
+        permissions: input.data.permissions ?? null,
+        tokenHash: hashToken(token),
+        invitedBy: request.appUser.id,
+        expiresAt,
+        updatedAt: new Date(),
+      }).where(eq(workspaceTeamInvitations.id, existingPending.id))
+        .returning({ id: workspaceTeamInvitations.id, email: workspaceTeamInvitations.email, expiresAt: workspaceTeamInvitations.expiresAt })
+      : await db.insert(workspaceTeamInvitations).values({
+        workspaceId: params.data.workspaceId,
+        email,
+        phone: optional(input.data.phone),
+        role: input.data.role,
+        permissions: input.data.permissions ?? null,
+        tokenHash: hashToken(token),
+        invitedBy: request.appUser.id,
+        expiresAt,
+      }).returning({ id: workspaceTeamInvitations.id, email: workspaceTeamInvitations.email, expiresAt: workspaceTeamInvitations.expiresAt });
     await audit(params.data.workspaceId, request.appUser.id, "workspace_member_invited", invitation!.id, { email, role: input.data.role });
-    return reply.code(201).send({ invitation, invitationToken: token, memberAdded: false, alreadyHasAccess: false });
+    const invitationUrl = invitationUrlFor(request, token);
+    const emailResult = await sendWorkspaceInvitationEmail({
+      to: email,
+      workspaceName: request.appUser.workspaceName ?? "Muzare Workspace",
+      inviterName: request.appUser.displayName || request.appUser.email,
+      inviterEmail: request.appUser.email,
+      roleLabel: input.data.role,
+      invitationUrl,
+      expiresAt,
+    });
+    return reply.code(201).send({
+      invitation,
+      invitationToken: token,
+      invitationUrl,
+      memberAdded: false,
+      alreadyHasAccess: false,
+      emailSent: emailResult.sent,
+      emailConfigured: emailResult.configured,
+      warning: "warning" in emailResult ? emailResult.warning : null,
+    });
   });
 
-  app.post("/v1/workspace/team/invitations/accept", async (request, reply) => {
+  app.get("/v1/workspace-invitations/lookup", async (request, reply) => {
+    const query = invitationLookupQuerySchema.safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ message: "A valid invitation token is required." });
+    if (localDevelopmentMode) return reply.code(503).send({ message: "Configure PostgreSQL to inspect workspace invitations." });
+    const invitation = await loadInvitationByToken(query.data.token);
+    if (!invitation) return reply.code(404).send({ status: "invalid", message: "Invitation not found." });
+    const now = new Date();
+    const status = invitation.status !== "pending"
+      ? invitation.status
+      : invitation.expiresAt <= now
+        ? "expired"
+        : "pending";
+    return {
+      invitation: {
+        workspaceId: invitation.workspaceId,
+        workspaceName: invitation.workspaceName,
+        email: invitation.email,
+        phone: invitation.phone,
+        role: invitation.role,
+        status,
+        expiresAt: invitation.expiresAt.toISOString(),
+        acceptedAt: invitation.acceptedAt?.toISOString() ?? null,
+        inviterName: invitation.inviterName,
+        inviterEmail: invitation.inviterEmail,
+      },
+    };
+  });
+
+  const acceptInvitationHandler = async (request: FastifyRequest, reply: FastifyReply) => {
     const input = acceptInvitationSchema.safeParse(request.body);
     if (!input.success) return reply.code(400).send({ message: "A valid invitation acceptance is required." });
     if (localDevelopmentMode) return reply.code(503).send({ message: "Configure PostgreSQL to accept workspace invitations." });
-    const [invitation] = await db.select().from(workspaceTeamInvitations).where(and(
-      eq(workspaceTeamInvitations.tokenHash, hashToken(input.data.token)),
-      eq(workspaceTeamInvitations.status, "pending"),
-      gt(workspaceTeamInvitations.expiresAt, new Date()),
-    )).limit(1);
-    if (!invitation) return reply.code(404).send({ message: "Invitation is invalid or expired." });
+    const invitation = await loadInvitationByToken(input.data.token);
+    if (!invitation) return reply.code(404).send({ code: "invalid", message: "Invitation is invalid." });
+    if (invitation.status === "cancelled") return reply.code(409).send({ code: "cancelled", message: "This invitation was cancelled." });
+    if (invitation.status === "accepted") return reply.code(409).send({ code: "accepted", message: "This invitation was already accepted." });
+    if (invitation.expiresAt <= new Date()) return reply.code(410).send({ code: "expired", message: "This invitation has expired." });
+
+    const authHeader = request.headers.authorization?.replace(/^Bearer\s+/i, "");
+    const authenticated = authHeader ? await authenticateToken(authHeader) : null;
+
+    if (input.data.mode === "session") {
+      if (!authenticated) return reply.code(401).send({ code: "auth_required", message: "Please sign in or create an account to accept this invitation." });
+      if (authenticated.user.email.toLowerCase() !== invitation.email.toLowerCase()) {
+        return reply.code(409).send({ code: "email_mismatch", message: "Sign in with the invited email address to accept this invitation." });
+      }
+      await acceptInvitationMembership(invitation, authenticated.user.id);
+      return reply.code(201).send({ workspaceId: invitation.workspaceId, accepted: true });
+    }
+
+    if (input.data.mode === "login") {
+      if (!input.data.email || !input.data.password) return reply.code(400).send({ message: "Email and password are required to sign in." });
+      if (input.data.email.toLowerCase() !== invitation.email.toLowerCase()) {
+        return reply.code(409).send({ code: "email_mismatch", message: "Use the invited email address to accept this invitation." });
+      }
+      const [existingUser] = await db.select().from(users).where(eq(users.email, invitation.email)).limit(1);
+      if (!existingUser || !(await verifyPassword(input.data.password, existingUser.passwordHash))) {
+        return reply.code(401).send({ code: "invalid_credentials", message: "Invalid email or password." });
+      }
+      await acceptInvitationMembership(invitation, existingUser.id);
+      const token = await createSession(existingUser.id, invitation.workspaceId);
+      const user = await serializeUser(existingUser, invitation.workspaceId);
+      return reply.code(201).send({ workspaceId: invitation.workspaceId, accepted: true, token, user });
+    }
+
+    if (!input.data.displayName || !input.data.password) {
+      return reply.code(400).send({ message: "Name and password are required to create your account." });
+    }
     const [existingUser] = await db.select().from(users).where(eq(users.email, invitation.email)).limit(1);
-    const user = existingUser ?? (await db.insert(users).values({
+    if (existingUser) {
+      return reply.code(409).send({ code: "account_exists", message: "An account already exists for this email. Sign in to accept the invitation." });
+    }
+    const [user] = await db.insert(users).values({
       email: invitation.email,
       phone: optional(input.data.phone) ?? invitation.phone,
       displayName: input.data.displayName,
@@ -213,18 +355,16 @@ export async function workspaceTeamRoutes(app: FastifyInstance): Promise<void> {
       status: "approved",
       active: true,
       approvedAt: new Date(),
-    }).returning())[0];
-    if (!user) return reply.code(500).send({ message: "Unable to create invited user." });
-    const [membership] = await db.insert(workspaceMemberships).values({
-      workspaceId: invitation.workspaceId, userId: user.id, role: invitation.role, active: true, permissions: invitation.permissions,
-    }).onConflictDoUpdate({
-      target: [workspaceMemberships.workspaceId, workspaceMemberships.userId],
-      set: { role: invitation.role, active: true, permissions: invitation.permissions, updatedAt: new Date() },
     }).returning();
-    await db.update(workspaceTeamInvitations).set({ status: "accepted", acceptedBy: user.id, acceptedAt: new Date(), updatedAt: new Date() }).where(eq(workspaceTeamInvitations.id, invitation.id));
-    await audit(invitation.workspaceId, user.id, "workspace_invitation_accepted", membership!.id, { invitationId: invitation.id });
-    return reply.code(201).send({ workspaceId: invitation.workspaceId });
-  });
+    if (!user) return reply.code(500).send({ message: "Unable to create invited user." });
+    await acceptInvitationMembership(invitation, user.id);
+    const token = await createSession(user.id, invitation.workspaceId);
+    const serializedUser = await serializeUser(user, invitation.workspaceId);
+    return reply.code(201).send({ workspaceId: invitation.workspaceId, accepted: true, token, user: serializedUser });
+  };
+
+  app.post("/v1/workspace-invitations/accept", acceptInvitationHandler);
+  app.post("/v1/workspace/team/invitations/accept", acceptInvitationHandler);
 
   app.patch("/v1/workspace/:workspaceId/team/:membershipId", { preHandler: requireUser }, async (request, reply) => {
     if (!request.appUser) return reply;

@@ -3,7 +3,7 @@ import { ArrowRight, Building2, Eye, EyeOff, Layers3, LockKeyhole, Mail, ShieldC
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { z } from "zod";
 import { LanguageSwitch } from "../components/LanguageSwitch";
 import { useAuth } from "../auth/AuthProvider";
@@ -19,6 +19,7 @@ type LoginFields = z.infer<typeof schema>;
 export function LoginPage() {
   const { t } = useTranslation();
   const { user, login: signIn } = useAuth();
+  const [searchParams] = useSearchParams();
   const [authError, setAuthError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const {
@@ -30,7 +31,7 @@ export function LoginPage() {
     defaultValues: { email: "", password: "" },
   });
 
-  if (user) return <Navigate to={getHomePath(user)} replace />;
+  if (user) return <Navigate to={searchParams.get("redirect") || getHomePath(user)} replace />;
 
   const login = async (fields: LoginFields) => {
     setAuthError(null);

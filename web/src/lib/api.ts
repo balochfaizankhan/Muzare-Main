@@ -94,6 +94,18 @@ export type WorkspaceTeamMember = {
 export type WorkspaceTeamInvitation = {
   id: string; email: string; phone: string | null; role: WorkspaceRole; status: string; expiresAt: string; createdAt: string;
 };
+export type WorkspaceInvitationLookup = {
+  workspaceId: string;
+  workspaceName: string | null;
+  email: string;
+  phone: string | null;
+  role: WorkspaceRole;
+  status: "pending" | "accepted" | "cancelled" | "expired" | "invalid";
+  expiresAt: string;
+  acceptedAt: string | null;
+  inviterName: string | null;
+  inviterEmail: string | null;
+};
 export type WorkspaceTeamData = {
   members: WorkspaceTeamMember[];
   invitations: WorkspaceTeamInvitation[];
@@ -694,7 +706,7 @@ export const updateWorkspaceProfile = (token: string, workspaceId: string, input
 export const fetchWorkspaceTeam = (token: string, workspaceId: string) =>
   apiRequest<WorkspaceTeamData>(`/v1/workspace/${workspaceId}/team`, {}, token);
 export const inviteWorkspaceMember = (token: string, workspaceId: string, input: { email: string; phone?: string; role: WorkspaceRole; permissions?: WorkspaceModulePermissions | null }) =>
-  apiRequest<{ memberAdded: boolean; alreadyHasAccess?: boolean; invitationToken?: string }>(`/v1/workspace/${workspaceId}/team/invitations`, { method: "POST", body: JSON.stringify(input) }, token);
+  apiRequest<{ memberAdded: boolean; alreadyHasAccess?: boolean; invitationToken?: string; invitationUrl?: string; emailSent?: boolean; emailConfigured?: boolean; warning?: string | null }>(`/v1/workspace/${workspaceId}/team/invitations`, { method: "POST", body: JSON.stringify(input) }, token);
 export const updateWorkspaceMember = (token: string, workspaceId: string, membershipId: string, input: { role: WorkspaceRole; active: boolean; permissions?: WorkspaceModulePermissions | null }) =>
   apiRequest<void>(`/v1/workspace/${workspaceId}/team/${membershipId}`, { method: "PATCH", body: JSON.stringify(input) }, token);
 export const removeWorkspaceMember = (token: string, workspaceId: string, membershipId: string) =>
@@ -703,8 +715,13 @@ export const cancelWorkspaceInvitation = (token: string, workspaceId: string, in
   apiRequest<void>(`/v1/workspace/${workspaceId}/team/invitations/${invitationId}`, { method: "DELETE" }, token);
 export const fetchWorkspaceMemberActivity = (token: string, workspaceId: string, membershipId: string) =>
   apiRequest<{ activity: WorkspaceMemberActivity[] }>(`/v1/workspace/${workspaceId}/team/${membershipId}/activity`, {}, token);
-export const acceptWorkspaceInvitation = (input: { token: string; displayName: string; password: string; phone?: string }) =>
-  apiRequest<{ workspaceId: string }>("/v1/workspace/team/invitations/accept", { method: "POST", body: JSON.stringify(input) });
+export const lookupWorkspaceInvitation = (token: string) =>
+  apiRequest<{ invitation: WorkspaceInvitationLookup }>(`/v1/workspace-invitations/lookup?token=${encodeURIComponent(token)}`);
+export const acceptWorkspaceInvitation = (
+  input: { token: string; mode?: "session" | "login" | "signup"; email?: string; displayName?: string; password?: string; phone?: string },
+  token?: string,
+) =>
+  apiRequest<{ workspaceId: string; accepted: boolean; token?: string; user?: AppUser }>("/v1/workspace-invitations/accept", { method: "POST", body: JSON.stringify(input) }, token);
 export const fetchWorkspaceApprovals = (token: string, workspaceId: string) =>
   apiRequest<{ approvals: WorkspaceApproval[] }>(`/v1/workspace/${workspaceId}/approvals`, {}, token);
 export const decideWorkspaceApproval = (token: string, workspaceId: string, approvalId: string, decision: "approved" | "rejected", note?: string) =>
