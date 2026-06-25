@@ -385,6 +385,8 @@ export type DuplicateImportedAccountsRepairResult = {
   canonicalAccountsKept: number;
   childRecordsRemapped: number;
   duplicateAccountsRemoved: number;
+  groupsBefore: Array<{ name: string; type: string; count: number; accountIds: string[]; canonicalAccountId: string | null }>;
+  groupsAfter: Array<{ name: string; type: string; count: number; accountIds: string[]; canonicalAccountId: string | null }>;
   message: string;
 };
 export type MigrationImportCleanupPreview = {

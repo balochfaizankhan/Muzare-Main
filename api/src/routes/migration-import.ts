@@ -135,6 +135,8 @@ type AccountDuplicateRepairResult = {
   canonicalAccountsKept: number;
   childRecordsRemapped: number;
   duplicateAccountsRemoved: number;
+  groupsBefore: Array<{ name: string; type: string; count: number; accountIds: string[]; canonicalAccountId: string | null }>;
+  groupsAfter: Array<{ name: string; type: string; count: number; accountIds: string[]; canonicalAccountId: string | null }>;
 };
 type PostImportAudit = {
   expectedCounts: Record<string, number>;
@@ -859,17 +861,20 @@ async function repairDuplicateImportedAccounts(workspaceId: string): Promise<Acc
     const grouped = new Map<string, typeof accountRows>();
     for (const row of accountRows) {
       const payload = row.payload as Record<string, unknown>;
-      const key = importedAccountGroupKey(payload);
+      const key = `${String(payload.name ?? "").trim()}::${String(payload.type ?? "cash").trim()}`;
       grouped.set(key, [...(grouped.get(key) ?? []), row]);
     }
 
-    const duplicateGroups = [...grouped.values()].filter((rows) => rows.length > 1);
+    const duplicateGroups = [...grouped.entries()]
+      .map(([groupKey, rows]) => ({ groupKey, rows }))
+      .filter((group) => group.rows.length > 1);
     let childRecordsRemapped = 0;
     let duplicateAccountsRemoved = 0;
     let canonicalAccountsKept = 0;
+    const groupsBefore: AccountDuplicateRepairResult["groupsBefore"] = [];
 
-    for (const rows of duplicateGroups) {
-      const sorted = [...rows].sort((a, b) => {
+    for (const group of duplicateGroups) {
+      const sorted = [...group.rows].sort((a, b) => {
         const aRefCount = childReferenceCounts.get(a.clientRecordId) ?? 0;
         const bRefCount = childReferenceCounts.get(b.clientRecordId) ?? 0;
         const aIsCurrentReferenced = a.sourceFileHash ? aRefCount > 0 : false;
@@ -882,6 +887,14 @@ async function repairDuplicateImportedAccounts(workspaceId: string): Promise<Acc
         return b.createdAt.getTime() - a.createdAt.getTime();
       });
       const canonical = sorted[0]!;
+      const canonicalPayload = canonical.payload as Record<string, unknown>;
+      groupsBefore.push({
+        name: String(canonicalPayload.name ?? "").trim(),
+        type: String(canonicalPayload.type ?? "cash").trim(),
+        count: group.rows.length,
+        accountIds: group.rows.map((row) => row.clientRecordId),
+        canonicalAccountId: canonical.clientRecordId,
+      });
       canonicalAccountsKept += 1;
       const duplicateIds = sorted.slice(1).map((row) => row.id);
       const duplicateClientIds = new Set(sorted.slice(1).map((row) => row.clientRecordId));
@@ -913,25 +926,56 @@ async function repairDuplicateImportedAccounts(workspaceId: string): Promise<Acc
       duplicateAccountsRemoved += deleted.length;
     }
 
+    const accountRowsAfter = await tx.select({
+      clientRecordId: operationalRecords.clientRecordId,
+      payload: operationalRecords.payload,
+    }).from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, workspaceId),
+      eq(operationalRecords.entityType, "account"),
+      sql`${operationalRecords.payload}->>'deletedAt' IS NULL`,
+    ));
+    const groupedAfter = new Map<string, typeof accountRowsAfter>();
+    for (const row of accountRowsAfter) {
+      const payload = row.payload as Record<string, unknown>;
+      const key = `${String(payload.name ?? "").trim()}::${String(payload.type ?? "cash").trim()}`;
+      groupedAfter.set(key, [...(groupedAfter.get(key) ?? []), row]);
+    }
+    const groupsAfter = [...groupedAfter.values()]
+      .filter((rows) => rows.length > 1)
+      .map((rows) => {
+        const payload = rows[0]?.payload as Record<string, unknown> | undefined;
+        return {
+          name: String(payload?.name ?? "").trim(),
+          type: String(payload?.type ?? "cash").trim(),
+          count: rows.length,
+          accountIds: rows.map((row) => row.clientRecordId),
+          canonicalAccountId: rows[0]?.clientRecordId ?? null,
+        };
+      });
+
     await tx.insert(auditLogs).values({
       workspaceId,
       action: "admin.migration_import.repair_duplicate_accounts",
       entityType: "migration_import",
       details: {
         duplicateGroupsBefore: duplicateGroups.length,
-        duplicateGroupsAfter: 0,
+        duplicateGroupsAfter: groupsAfter.length,
         canonicalAccountsKept,
         childRecordsRemapped,
         duplicateAccountsRemoved,
+        groupsBefore,
+        groupsAfter,
       },
     });
 
     return {
       duplicateGroupsBefore: duplicateGroups.length,
-      duplicateGroupsAfter: 0,
+      duplicateGroupsAfter: groupsAfter.length,
       canonicalAccountsKept,
       childRecordsRemapped,
       duplicateAccountsRemoved,
+      groupsBefore,
+      groupsAfter,
     };
   });
 }
