@@ -1,58 +1,83 @@
-import { useEffect, type PropsWithChildren } from "react";
+import { lazy, Suspense, useEffect, type PropsWithChildren, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./auth/AuthProvider";
 import { config } from "./config";
-import { AdminLayout } from "./layouts/AdminLayout";
-import { WorkspaceLayout } from "./layouts/WorkspaceLayout";
 import { getHomePath, isPlatformUser } from "./lib/permissions";
-import { AdminApprovalsPage } from "./pages/AdminApprovalsPage";
 import { LoginPage } from "./pages/LoginPage";
-import { ModulePage } from "./pages/ModulePage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { SignupPage } from "./pages/SignupPage";
 import { AcceptInvitationPage } from "./pages/AcceptInvitationPage";
-import { AdminDashboard } from "./pages/admin/AdminDashboard";
-import { AdminSection } from "./pages/admin/AdminSection";
-import { AuditLogs } from "./pages/admin/AuditLogs";
-import { Billing } from "./pages/admin/Billing";
-import { AdminFarms } from "./pages/admin/Farms";
-import { Settings } from "./pages/admin/Settings";
-import { Users } from "./pages/admin/Users";
-import { Workspaces } from "./pages/admin/Workspaces";
-import { MigrationImport } from "./pages/admin/MigrationImport";
-import { Attendance } from "./pages/workspace/Attendance";
-import { Dispatch } from "./pages/workspace/Dispatch";
-import { Expenses } from "./pages/workspace/Expenses";
-import { Inventory } from "./pages/workspace/Inventory";
-import { LabourAdvances } from "./pages/workspace/LabourAdvances";
-import { Reports } from "./pages/workspace/Reports";
-import { Sales } from "./pages/workspace/Sales";
-import { WorkspaceDashboard } from "./pages/workspace/WorkspaceDashboard";
-import { Farms } from "./pages/workspace/Farms";
-import { FarmOperationsMap } from "./pages/workspace/FarmOperationsMap";
-import { Seasons } from "./pages/workspace/Seasons";
-import { WorkspaceApprovals } from "./pages/workspace/WorkspaceApprovals";
-import { WorkspaceTeam } from "./pages/workspace/WorkspaceTeam";
+
+const AdminLayout = lazy(async () => ({ default: (await import("./layouts/AdminLayout")).AdminLayout }));
+const WorkspaceLayout = lazy(async () => ({ default: (await import("./layouts/WorkspaceLayout")).WorkspaceLayout }));
+const AdminApprovalsPage = lazy(async () => ({ default: (await import("./pages/AdminApprovalsPage")).AdminApprovalsPage }));
+const ModulePage = lazy(async () => ({ default: (await import("./pages/ModulePage")).ModulePage }));
+const AdminDashboard = lazy(async () => ({ default: (await import("./pages/admin/AdminDashboard")).AdminDashboard }));
+const AdminSection = lazy(async () => ({ default: (await import("./pages/admin/AdminSection")).AdminSection }));
+const AuditLogs = lazy(async () => ({ default: (await import("./pages/admin/AuditLogs")).AuditLogs }));
+const Billing = lazy(async () => ({ default: (await import("./pages/admin/Billing")).Billing }));
+const AdminFarms = lazy(async () => ({ default: (await import("./pages/admin/Farms")).AdminFarms }));
+const Settings = lazy(async () => ({ default: (await import("./pages/admin/Settings")).Settings }));
+const Users = lazy(async () => ({ default: (await import("./pages/admin/Users")).Users }));
+const Workspaces = lazy(async () => ({ default: (await import("./pages/admin/Workspaces")).Workspaces }));
+const MigrationImport = lazy(async () => ({ default: (await import("./pages/admin/MigrationImport")).MigrationImport }));
+const Attendance = lazy(async () => ({ default: (await import("./pages/workspace/Attendance")).Attendance }));
+const Dispatch = lazy(async () => ({ default: (await import("./pages/workspace/Dispatch")).Dispatch }));
+const Expenses = lazy(async () => ({ default: (await import("./pages/workspace/Expenses")).Expenses }));
+const Inventory = lazy(async () => ({ default: (await import("./pages/workspace/Inventory")).Inventory }));
+const LabourAdvances = lazy(async () => ({ default: (await import("./pages/workspace/LabourAdvances")).LabourAdvances }));
+const Reports = lazy(async () => ({ default: (await import("./pages/workspace/Reports")).Reports }));
+const Sales = lazy(async () => ({ default: (await import("./pages/workspace/Sales")).Sales }));
+const WorkspaceDashboard = lazy(async () => ({ default: (await import("./pages/workspace/WorkspaceDashboard")).WorkspaceDashboard }));
+const Farms = lazy(async () => ({ default: (await import("./pages/workspace/Farms")).Farms }));
+const FarmOperationsMap = lazy(async () => ({ default: (await import("./pages/workspace/FarmOperationsMap")).FarmOperationsMap }));
+const Seasons = lazy(async () => ({ default: (await import("./pages/workspace/Seasons")).Seasons }));
+const WorkspaceApprovals = lazy(async () => ({ default: (await import("./pages/workspace/WorkspaceApprovals")).WorkspaceApprovals }));
+const WorkspaceTeam = lazy(async () => ({ default: (await import("./pages/workspace/WorkspaceTeam")).WorkspaceTeam }));
+
+function StartupScreen({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div className="app-startup-screen" role="status" aria-live="polite">
+      <div className="app-startup-screen__card">
+        <div className="app-startup-screen__spinner" aria-hidden="true" />
+        <strong>{title}</strong>
+        <p>{detail}</p>
+      </div>
+    </div>
+  );
+}
+
+function RouteFallback({ detail }: { detail: string }) {
+  const { t } = useTranslation();
+  return <StartupScreen title="Muzare" detail={detail || t("common.loading")} />;
+}
+
+function routeElement(element: ReactNode, detail: string) {
+  return <Suspense fallback={<RouteFallback detail={detail} />}>{element}</Suspense>;
+}
 
 function RequireAuth({ children }: PropsWithChildren) {
+  const { t } = useTranslation();
   const { user, loading } = useAuth();
-  if (loading) return <div className="page-loader" aria-label="Loading" />;
+  if (loading) return <StartupScreen title="Muzare" detail={t("sync.checkingSession")} />;
   if (!user) return <Navigate to="/login" replace />;
   return children;
 }
 
 function RequirePlatform({ children }: PropsWithChildren) {
+  const { t } = useTranslation();
   const { user, loading } = useAuth();
-  if (loading) return <div className="page-loader" aria-label="Loading" />;
+  if (loading) return <StartupScreen title="Muzare" detail={t("sync.checkingSession")} />;
   if (!user) return <Navigate to="/login" replace />;
   if (!isPlatformUser(user)) return <Navigate to="/workspace/dashboard" replace />;
   return children;
 }
 
 function RequireWorkspace({ children }: PropsWithChildren) {
+  const { t } = useTranslation();
   const { user, loading } = useAuth();
-  if (loading) return <div className="page-loader" aria-label="Loading" />;
+  if (loading) return <StartupScreen title="Muzare" detail={t("sync.loadingWorkspace")} />;
   if (!user) return <Navigate to="/login" replace />;
   if (isPlatformUser(user) || !user.workspaceId) return <Navigate to="/admin/dashboard" replace />;
   return children;
@@ -84,43 +109,43 @@ export default function App() {
     <Route path="/signup" element={<SignupPage />} />
     <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
     <Route path="/" element={<RequireAuth><HomeRedirect /></RequireAuth>} />
-    <Route path="/admin" element={<RequirePlatform><AdminLayout /></RequirePlatform>}>
-      <Route path="dashboard" element={<AdminDashboard />} />
-      <Route path="workspaces" element={<Workspaces />} />
-      <Route path="farms" element={<AdminFarms />} />
-      <Route path="suspended" element={<Workspaces defaultStatusFilter="suspended" />} />
-      <Route path="users" element={<Users />} />
-      <Route path="subscriptions" element={<AdminSection title={t("layout.subscriptions")} description={t("adminSections.subscriptionsDescription")} emptyDescription={t("adminSections.subscriptionsDescription")} />} />
-      <Route path="billing" element={<Billing />} />
-      <Route path="audit-logs" element={<AuditLogs />} />
-      <Route path="migration-import" element={<MigrationImport />} />
-      <Route path="imports/:jobId" element={<MigrationImport />} />
-      <Route path="reports" element={<AdminSection title={t("layout.reports")} description={t("adminSections.reportsDescription")} emptyDescription={t("adminSections.reportsDescription")} />} />
-      <Route path="settings" element={<Settings />} />
-      <Route path="approvals" element={<AdminApprovalsPage />} />
+    <Route path="/admin" element={<RequirePlatform>{routeElement(<AdminLayout />, "Loading admin workspace")}</RequirePlatform>}>
+      <Route path="dashboard" element={routeElement(<AdminDashboard />, "Loading admin dashboard")} />
+      <Route path="workspaces" element={routeElement(<Workspaces />, "Loading workspaces")} />
+      <Route path="farms" element={routeElement(<AdminFarms />, "Loading farms")} />
+      <Route path="suspended" element={routeElement(<Workspaces defaultStatusFilter="suspended" />, "Loading workspaces")} />
+      <Route path="users" element={routeElement(<Users />, "Loading users")} />
+      <Route path="subscriptions" element={routeElement(<AdminSection title={t("layout.subscriptions")} description={t("adminSections.subscriptionsDescription")} emptyDescription={t("adminSections.subscriptionsDescription")} />, "Loading subscriptions")} />
+      <Route path="billing" element={routeElement(<Billing />, "Loading billing")} />
+      <Route path="audit-logs" element={routeElement(<AuditLogs />, "Loading audit logs")} />
+      <Route path="migration-import" element={routeElement(<MigrationImport />, "Loading migration import")} />
+      <Route path="imports/:jobId" element={routeElement(<MigrationImport />, "Loading import history")} />
+      <Route path="reports" element={routeElement(<AdminSection title={t("layout.reports")} description={t("adminSections.reportsDescription")} emptyDescription={t("adminSections.reportsDescription")} />, "Loading reports")} />
+      <Route path="settings" element={routeElement(<Settings />, "Loading settings")} />
+      <Route path="approvals" element={routeElement(<AdminApprovalsPage />, "Loading approvals")} />
     </Route>
-    <Route path="/workspace" element={<RequireWorkspace><WorkspaceLayout /></RequireWorkspace>}>
-      <Route path="dashboard" element={<WorkspaceDashboard />} />
-      <Route path="attendance" element={<Attendance />} />
-      <Route path="advances" element={<LabourAdvances />} />
-      <Route path="sales" element={<Sales />} />
-      <Route path="expenses" element={<Expenses />} />
-      <Route path="dispatch" element={<Dispatch />} />
-      <Route path="inventory" element={<Inventory />} />
-      <Route path="labour-advances" element={<LabourAdvances />} />
-      <Route path="reports" element={<Reports />} />
-      <Route path="operations-map" element={config.featureFarmMap ? <FarmOperationsMap mode="live" /> : <FarmMapDisabledRedirect />} />
-      <Route path="map-builder" element={config.featureFarmMap ? <FarmOperationsMap mode="builder" /> : <FarmMapDisabledRedirect />} />
-      <Route path="team" element={<ModulePage module="workforce" />} />
-      <Route path="settings" element={<Farms />} />
-      <Route path="settings/team" element={<WorkspaceTeam />} />
-      <Route path="settings/approvals" element={<WorkspaceApprovals />} />
-      <Route path="farms" element={<Farms />} />
-      <Route path=":workspaceId/farms/:farmId/map-builder" element={config.featureFarmMap ? <FarmOperationsMap mode="builder" /> : <FarmMapDisabledRedirect />} />
-      <Route path=":workspaceId/farms/:farmId/operations-map" element={config.featureFarmMap ? <FarmOperationsMap mode="live" /> : <FarmMapDisabledRedirect />} />
-      <Route path="seasons" element={<Seasons />} />
-      <Route path="accounts" element={<ModulePage module="accounts" />} />
-      <Route path="partner-ledger" element={<ModulePage module="partnerLedger" />} />
+    <Route path="/workspace" element={<RequireWorkspace>{routeElement(<WorkspaceLayout />, "Loading workspace shell")}</RequireWorkspace>}>
+      <Route path="dashboard" element={routeElement(<WorkspaceDashboard />, "Loading dashboard")} />
+      <Route path="attendance" element={routeElement(<Attendance />, "Loading attendance")} />
+      <Route path="advances" element={routeElement(<LabourAdvances />, "Loading advances")} />
+      <Route path="sales" element={routeElement(<Sales />, "Loading sales")} />
+      <Route path="expenses" element={routeElement(<Expenses />, "Loading expenses")} />
+      <Route path="dispatch" element={routeElement(<Dispatch />, "Loading dispatch")} />
+      <Route path="inventory" element={routeElement(<Inventory />, "Loading inventory")} />
+      <Route path="labour-advances" element={routeElement(<LabourAdvances />, "Loading advances")} />
+      <Route path="reports" element={routeElement(<Reports />, "Loading reports")} />
+      <Route path="operations-map" element={config.featureFarmMap ? routeElement(<FarmOperationsMap mode="live" />, "Loading operations map") : <FarmMapDisabledRedirect />} />
+      <Route path="map-builder" element={config.featureFarmMap ? routeElement(<FarmOperationsMap mode="builder" />, "Loading map builder") : <FarmMapDisabledRedirect />} />
+      <Route path="team" element={routeElement(<ModulePage module="workforce" />, "Loading workforce")} />
+      <Route path="settings" element={routeElement(<Farms />, "Loading workspace settings")} />
+      <Route path="settings/team" element={routeElement(<WorkspaceTeam />, "Loading workspace team")} />
+      <Route path="settings/approvals" element={routeElement(<WorkspaceApprovals />, "Loading approvals")} />
+      <Route path="farms" element={routeElement(<Farms />, "Loading farms")} />
+      <Route path=":workspaceId/farms/:farmId/map-builder" element={config.featureFarmMap ? routeElement(<FarmOperationsMap mode="builder" />, "Loading map builder") : <FarmMapDisabledRedirect />} />
+      <Route path=":workspaceId/farms/:farmId/operations-map" element={config.featureFarmMap ? routeElement(<FarmOperationsMap mode="live" />, "Loading operations map") : <FarmMapDisabledRedirect />} />
+      <Route path="seasons" element={routeElement(<Seasons />, "Loading seasons")} />
+      <Route path="accounts" element={routeElement(<ModulePage module="accounts" />, "Loading accounts")} />
+      <Route path="partner-ledger" element={routeElement(<ModulePage module="partnerLedger" />, "Loading partner ledger")} />
     </Route>
     {["workforce", "advances", "expenses", "sales", "dispatch", "inventory", "accounts", "partner-ledger", "farms", "seasons"].map((path) =>
       <Route key={path} path={`/${path}`} element={<Navigate to={`/workspace/${path === "workforce" ? "attendance" : path}`} replace />} />,

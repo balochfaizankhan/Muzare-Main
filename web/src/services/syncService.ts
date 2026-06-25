@@ -4,10 +4,14 @@ import type { Table } from "dexie";
 import i18n from "../i18n";
 
 export type SyncStatus = "online" | "offline" | "pending" | "syncing" | "error";
+export type SyncStartupStage = "checkingSession" | "loadingWorkspace" | "loadingContext" | "syncingLatestRecords" | "ready";
 export type SyncState = {
   status: SyncStatus; pendingCount: number; lastSyncTime: string | null; farmId?: string; seasonId?: string;
   failedCount?: number;
   dataSource?: "cache" | "server"; message?: string;
+  startupStage?: SyncStartupStage;
+  startupInProgress?: boolean;
+  lastProgressAt?: string | null;
 };
 
 const lastSyncKey = (workspaceId?: string) => `muzare-last-successful-sync:${workspaceId ?? "none"}`;
@@ -29,6 +33,16 @@ const tables = {
 function emit(next: Partial<SyncState> = {}) {
   state = { ...state, ...next };
   listeners.forEach((listener) => listener(state));
+}
+
+function emitStartup(startupStage: SyncStartupStage, message: string, next: Partial<SyncState> = {}) {
+  emit({
+    startupStage,
+    startupInProgress: startupStage !== "ready",
+    lastProgressAt: new Date().toISOString(),
+    message,
+    ...next,
+  });
 }
 
 function notify(message: string) {
@@ -370,20 +384,45 @@ export function subscribeSyncState(listener: (next: SyncState) => void) {
 export async function startSyncService(token: string, workspaceId: string) {
   const cached = restoreOperationalContext(workspaceId);
   applyOperationalContext(token, workspaceId, cached?.farmId, cached?.seasonId);
+  emitStartup("loadingWorkspace", i18n.t("sync.loadingWorkspace"), {
+    dataSource: "cache",
+    lastSyncTime: getLastSyncTime(),
+    status: navigator.onLine ? "online" : "offline",
+  });
   await refreshSyncState({ dataSource: "cache", lastSyncTime: getLastSyncTime() });
   if (timer) window.clearInterval(timer);
   timer = window.setInterval(() => void syncPendingRecords(), 30_000);
-  try {
-    const bootstrap = await fetchBootstrap(token);
-    const farm = bootstrap.farms.find((item) => item.id === bootstrap.activeFarmId);
-    const season = bootstrap.seasons.find((item) => item.id === bootstrap.activeSeasonId);
-    applyOperationalContext(token, workspaceId, farm?.id, season?.id);
-    rememberOperationalContext(workspaceId, farm?.id, season?.id);
-    await refreshOperationalData();
-    await syncPendingRecords();
-  } catch {
-    await refreshSyncState({ status: navigator.onLine ? "error" : "offline", dataSource: "cache", message: i18n.t("workforcePage.cachedLoadingLabour") });
-  }
+  void (async () => {
+    try {
+      const bootstrap = await fetchBootstrap(token);
+      const farm = bootstrap.farms.find((item) => item.id === bootstrap.activeFarmId);
+      const season = bootstrap.seasons.find((item) => item.id === bootstrap.activeSeasonId);
+      applyOperationalContext(token, workspaceId, farm?.id, season?.id);
+      rememberOperationalContext(workspaceId, farm?.id, season?.id);
+      emitStartup("loadingContext", i18n.t("sync.loadingFarmSeason"), {
+        farmId: farm?.id,
+        seasonId: season?.id,
+        dataSource: "cache",
+      });
+      window.dispatchEvent(new Event("muzare-data-refresh"));
+      emitStartup("syncingLatestRecords", navigator.onLine ? i18n.t("sync.syncingLatestRecords") : i18n.t("sync.offlineReady"));
+      await refreshOperationalData({ notifySuccess: false });
+      await syncPendingRecords();
+      emitStartup("ready", navigator.onLine ? i18n.t("sync.connectedReady") : i18n.t("sync.offlineReady"), {
+        startupInProgress: false,
+        status: navigator.onLine ? state.status : "offline",
+      });
+    } catch {
+      await refreshSyncState({
+        status: navigator.onLine ? "error" : "offline",
+        dataSource: "cache",
+        message: i18n.t("workforcePage.cachedLoadingLabour"),
+        startupStage: "ready",
+        startupInProgress: false,
+        lastProgressAt: new Date().toISOString(),
+      });
+    }
+  })();
 }
 
 export function stopSyncService() {

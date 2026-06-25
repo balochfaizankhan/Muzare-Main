@@ -34,7 +34,9 @@ export function WorkspaceLayout() {
   const [toast, setToast] = useState<string | null>(null);
   const [queueOpen, setQueueOpen] = useState(false);
   const [queueItems, setQueueItems] = useState<PendingMutation[]>([]);
-  setActiveWorkspaceId(user?.workspaceId ?? null);
+  useEffect(() => {
+    setActiveWorkspaceId(user?.workspaceId ?? null);
+  }, [user?.workspaceId]);
   useEffect(() => {
     if (token && user?.workspaceId) void startSyncService(token, user.workspaceId);
     return stopSyncService;
@@ -80,6 +82,7 @@ export function WorkspaceLayout() {
         : sync.pendingCount
           ? t("layout.changesWaiting", { count: sync.pendingCount })
           : t("layout.synced");
+  const startupVisible = sync.startupInProgress || Boolean(sync.message && sync.startupStage && sync.startupStage !== "ready");
   const queueNeedsAttention = (sync.pendingCount ?? 0) > 0 || (sync.failedCount ?? 0) > 0;
   return (
     <div className="app-shell">
@@ -114,6 +117,20 @@ export function WorkspaceLayout() {
             <button className="ghost-icon shell-logout" aria-label={t("common.logout")} onClick={() => void logout()}><LogOut size={18} /></button>
           </div>
         </header>
+        {startupVisible && (
+          <section className="startup-progress-banner" role="status" aria-live="polite">
+            <div className="startup-progress-banner__content">
+              <strong>{sync.message ?? t("sync.loadingWorkspace")}</strong>
+              <span>{sync.startupStage === "ready" ? t("sync.ready") : t("sync.openingWithBackgroundSync")}</span>
+            </div>
+            <div className="startup-progress-banner__steps" aria-hidden="true">
+              <span className={sync.startupStage === "loadingWorkspace" || sync.startupStage === "loadingContext" || sync.startupStage === "syncingLatestRecords" || sync.startupStage === "ready" ? "is-complete" : ""}>{t("sync.loadingWorkspaceShort")}</span>
+              <span className={sync.startupStage === "loadingContext" || sync.startupStage === "syncingLatestRecords" || sync.startupStage === "ready" ? "is-complete" : ""}>{t("sync.loadingFarmSeasonShort")}</span>
+              <span className={sync.startupStage === "syncingLatestRecords" || sync.startupStage === "ready" ? "is-complete" : ""}>{t("sync.syncingLatestRecordsShort")}</span>
+              <span className={sync.startupStage === "ready" ? "is-complete" : ""}>{t("sync.ready")}</span>
+            </div>
+          </section>
+        )}
         {queueOpen && queueNeedsAttention && <section className="sync-queue-panel">
           <div className="sync-queue-panel__header">
             <div>

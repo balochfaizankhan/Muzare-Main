@@ -17,6 +17,7 @@ type AuthState = {
   user: AppUser | null;
   token: string | null;
   loading: boolean;
+  sessionRefreshing: boolean;
   login(email: string, password: string): Promise<void>;
   logout(): Promise<void>;
   switchWorkspace(workspaceId: string): Promise<void>;
@@ -29,17 +30,20 @@ const AuthContext = createContext<AuthState | null>(null);
 export function AuthProvider({ children }: PropsWithChildren) {
   const [user, setUser] = useState<AppUser | null>(() => cachedUser());
   const [token, setToken] = useState<string | null>(() => window.localStorage.getItem(tokenKey));
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => Boolean(window.localStorage.getItem(tokenKey)) && !cachedUser());
+  const [sessionRefreshing, setSessionRefreshing] = useState(() => Boolean(window.localStorage.getItem(tokenKey)));
 
   useEffect(() => {
     if (!token) {
       setUser(null);
       setLoading(false);
+      setSessionRefreshing(false);
       return;
     }
 
     let active = true;
-    setLoading(true);
+    if (!cachedUser()) setLoading(true);
+    setSessionRefreshing(true);
     void fetchSession(token)
       .then((session) => {
         if (active) {
@@ -61,7 +65,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
         setUser(null);
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (active) {
+          setLoading(false);
+          setSessionRefreshing(false);
+        }
       });
 
     return () => {
@@ -112,7 +119,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     setUser(nextUser);
   }, []);
 
-  const value = useMemo(() => ({ user, token, loading, login, logout, switchWorkspace, updateUser, completeSession }), [user, token, loading, login, logout, switchWorkspace, updateUser, completeSession]);
+  const value = useMemo(() => ({ user, token, loading, sessionRefreshing, login, logout, switchWorkspace, updateUser, completeSession }), [user, token, loading, sessionRefreshing, login, logout, switchWorkspace, updateUser, completeSession]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
