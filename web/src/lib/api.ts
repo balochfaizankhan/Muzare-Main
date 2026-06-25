@@ -279,6 +279,23 @@ export type MigrationImportValidation = {
         }>;
       };
       operationalRecordsByEntity: Array<{ entityType: string; count: number }>;
+      voucherNumberAudit: {
+        sourceTotal: number;
+        importedTotal: number;
+        missingSourceVoucherNumbers: number;
+        missingStoredVoucherNumbers: number;
+        mismatches: Array<{
+          oldExpenseId: string;
+          androidVoucherNumber: string;
+          storedVoucherNumber: string;
+          clientRecordId: string;
+        }>;
+        duplicateImportedVoucherNumbers: Array<{
+          voucherNumber: string;
+          count: number;
+          clientRecordIds: string[];
+        }>;
+      };
       relationshipAudit: {
         attendanceTotal: number;
         attendanceLinkedToLabour: number;

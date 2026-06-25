@@ -207,6 +207,23 @@ type PostImportAudit = {
     }>;
   };
   operationalRecordsByEntity: Array<{ entityType: string; count: number }>;
+  voucherNumberAudit: {
+    sourceTotal: number;
+    importedTotal: number;
+    missingSourceVoucherNumbers: number;
+    missingStoredVoucherNumbers: number;
+    mismatches: Array<{
+      oldExpenseId: string;
+      androidVoucherNumber: string;
+      storedVoucherNumber: string;
+      clientRecordId: string;
+    }>;
+    duplicateImportedVoucherNumbers: Array<{
+      voucherNumber: string;
+      count: number;
+      clientRecordIds: string[];
+    }>;
+  };
   relationshipAudit: {
     attendanceTotal: number;
     attendanceLinkedToLabour: number;
@@ -1273,7 +1290,7 @@ async function buildPostImportAudit(
   payload: AndroidPayload,
 ): Promise<PostImportAudit> {
   const duplicateAccountAudit = await auditDuplicateImportedAccounts(workspaceId, fileHash);
-  const [farmCountRows, seasonCountRows, failedBatchRows, entityRows, failureRows, relationshipRows] = await Promise.all([
+  const [farmCountRows, seasonCountRows, failedBatchRows, entityRows, failureRows, relationshipRows, importedVoucherRows, duplicateVoucherRows] = await Promise.all([
     db.execute(sql`
       SELECT count(*)::int AS count
       FROM farms
@@ -1418,8 +1435,55 @@ async function buildPostImportAudit(
         )::int AS vouchers_item_mismatch
       FROM imported_rows
     `),
+    db.execute(sql`
+      SELECT
+        client_record_id,
+        coalesce(payload->>'voucherNumber', '') AS stored_voucher_number,
+        coalesce(payload->>'originalVoucherNumber', '') AS original_voucher_number,
+        coalesce(payload->>'legacyVoucherNumber', '') AS legacy_voucher_number,
+        coalesce(payload->>'oldExpenseId', coalesce(payload->>'old_android_id', old_android_id, '')) AS old_expense_id
+      FROM operational_records
+      WHERE workspace_id = ${workspaceId}
+        AND entity_type = 'voucher'
+        AND source_file_hash = ${fileHash}
+    `),
+    db.execute(sql`
+      SELECT
+        payload->>'voucherNumber' AS voucher_number,
+        count(*)::int AS count,
+        array_agg(client_record_id ORDER BY client_record_id) AS client_record_ids
+      FROM operational_records
+      WHERE workspace_id = ${workspaceId}
+        AND entity_type = 'voucher'
+        AND source_file_hash = ${fileHash}
+        AND nullif(trim(coalesce(payload->>'voucherNumber', '')), '') IS NOT NULL
+      GROUP BY payload->>'voucherNumber'
+      HAVING count(*) > 1
+      ORDER BY payload->>'voucherNumber'
+    `),
   ]);
   const relationship = (relationshipRows.rows[0] as Record<string, unknown> | undefined) ?? {};
+  const sourceVoucherRows = asArray(payload, "expenses");
+  const sourceVoucherNumbers = new Map(sourceVoucherRows.map((record) => [
+    oldId(record),
+    text(record, ["voucherNumber", "voucher_no", "voucherNo", "voucher"], ""),
+  ]));
+  const voucherMismatches: PostImportAudit["voucherNumberAudit"]["mismatches"] = [];
+  let missingStoredVoucherNumbers = 0;
+  for (const row of importedVoucherRows.rows as Array<Record<string, unknown>>) {
+    const oldExpenseId = String(row.old_expense_id ?? "");
+    const androidVoucherNumber = sourceVoucherNumbers.get(oldExpenseId) ?? "";
+    const storedVoucherNumber = String(row.stored_voucher_number ?? row.original_voucher_number ?? row.legacy_voucher_number ?? "");
+    if (!storedVoucherNumber.trim()) missingStoredVoucherNumbers += 1;
+    if (androidVoucherNumber.trim() && storedVoucherNumber.trim() && androidVoucherNumber !== storedVoucherNumber) {
+      voucherMismatches.push({
+        oldExpenseId,
+        androidVoucherNumber,
+        storedVoucherNumber,
+        clientRecordId: String(row.client_record_id ?? ""),
+      });
+    }
+  }
 
   return {
     expectedCounts: {
@@ -1444,6 +1508,20 @@ async function buildPostImportAudit(
       entityType: String((row as Record<string, unknown>).entity_type ?? ""),
       count: Number((row as Record<string, unknown>).count ?? 0),
     })),
+    voucherNumberAudit: {
+      sourceTotal: sourceVoucherRows.length,
+      importedTotal: Number(relationship.vouchers_total ?? 0),
+      missingSourceVoucherNumbers: sourceVoucherRows.filter((record) => !text(record, ["voucherNumber", "voucher_no", "voucherNo", "voucher"], "").trim()).length,
+      missingStoredVoucherNumbers,
+      mismatches: voucherMismatches,
+      duplicateImportedVoucherNumbers: duplicateVoucherRows.rows.map((row) => ({
+        voucherNumber: String((row as Record<string, unknown>).voucher_number ?? ""),
+        count: Number((row as Record<string, unknown>).count ?? 0),
+        clientRecordIds: Array.isArray((row as Record<string, unknown>).client_record_ids)
+          ? ((row as Record<string, unknown>).client_record_ids as unknown[]).map((value) => String(value))
+          : [],
+      })),
+    },
     relationshipAudit: {
       attendanceTotal: Number(relationship.attendance_total ?? 0),
       attendanceLinkedToLabour: Number(relationship.attendance_linked_labour ?? 0),
@@ -2546,8 +2624,12 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
           })();
         const itemTotal = normalizedItems.reduce((sum, item) => sum + numberValue(item, ["amount"]), 0);
         const headerCategory = normalizedItems[0];
+        const androidVoucherNumber = text(source, ["voucherNumber", "voucher_no", "voucherNo", "voucher"], "");
+        const preservedVoucherNumber = androidVoucherNumber || `A-${oldId(source)}`;
         const result = await writeRecord("voucher", sourceTypeFor("expenses"), source, {
-          voucherNumber: text(source, ["voucherNumber", "voucher_no", "voucher"], `A-${oldId(source)}`),
+          voucherNumber: preservedVoucherNumber,
+          originalVoucherNumber: preservedVoucherNumber,
+          legacyVoucherNumber: preservedVoucherNumber,
           date: dateValue(source, ["date", "voucherDate"]),
           amount: itemTotal || numberValue(source, ["total_amount", "totalAmount", "total", "amount", "voucherTotal"]),
           accountId: maps.accounts.get(accountRef(source)) ?? defaultAccountId,
@@ -2906,12 +2988,20 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
             importFailures: 0,
             failedOrPartialBatches: 0,
           },
-          duplicateAccountAudit: {
-            totalGroups: 0,
-            groups: [],
-          },
-          operationalRecordsByEntity: [],
-          relationshipAudit: {
+        duplicateAccountAudit: {
+          totalGroups: 0,
+          groups: [],
+        },
+        operationalRecordsByEntity: [],
+        voucherNumberAudit: {
+          sourceTotal: 0,
+          importedTotal: 0,
+          missingSourceVoucherNumbers: 0,
+          missingStoredVoucherNumbers: 0,
+          mismatches: [],
+          duplicateImportedVoucherNumbers: [],
+        },
+        relationshipAudit: {
             attendanceTotal: 0,
             attendanceLinkedToLabour: 0,
             attendanceMissingLabour: 0,

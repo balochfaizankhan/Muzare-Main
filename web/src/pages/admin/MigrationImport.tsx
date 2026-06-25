@@ -683,10 +683,21 @@ export function MigrationImport() {
                   <p><b>Operational records by entity</b> {runImport.data.result.postImportAudit.operationalRecordsByEntity.length
                     ? runImport.data.result.postImportAudit.operationalRecordsByEntity.map((item) => `${item.entityType}: ${item.count}`).join(" · ")
                     : "Attendance may still be processing in the background. Refresh or follow the current import panel for live counts."}</p>
+                  <p><b>Voucher number audit</b> source {runImport.data.result.postImportAudit.voucherNumberAudit.sourceTotal} · imported {runImport.data.result.postImportAudit.voucherNumberAudit.importedTotal} · missing source {runImport.data.result.postImportAudit.voucherNumberAudit.missingSourceVoucherNumbers} · missing stored {runImport.data.result.postImportAudit.voucherNumberAudit.missingStoredVoucherNumbers} · mismatches {runImport.data.result.postImportAudit.voucherNumberAudit.mismatches.length} · duplicate numbers {runImport.data.result.postImportAudit.voucherNumberAudit.duplicateImportedVoucherNumbers.length}</p>
                   <p><b>Relationship audit</b> attendance {runImport.data.result.postImportAudit.relationshipAudit.attendanceLinkedToLabour}/{runImport.data.result.postImportAudit.relationshipAudit.attendanceTotal} linked to labour · advances labour {runImport.data.result.postImportAudit.relationshipAudit.advancesLinkedToLabour}/{runImport.data.result.postImportAudit.relationshipAudit.advancesTotal} · advances account {runImport.data.result.postImportAudit.relationshipAudit.advancesLinkedToAccount}/{runImport.data.result.postImportAudit.relationshipAudit.advancesTotal} · vouchers account {runImport.data.result.postImportAudit.relationshipAudit.vouchersLinkedToPaymentAccount}/{runImport.data.result.postImportAudit.relationshipAudit.vouchersTotal} · vouchers with multiple items {runImport.data.result.postImportAudit.relationshipAudit.vouchersWithMultipleItems} · stored voucher items {runImport.data.result.postImportAudit.relationshipAudit.voucherItemsStored}</p>
                   {runImport.data.result.postImportAudit.duplicateAccountAudit.totalGroups > 0 ? (
                     <p className="worker-action-error">
                       Duplicate account groups: {runImport.data.result.postImportAudit.duplicateAccountAudit.groups.map((group) => `${group.normalizedName || group.logicalKey} (${group.count})`).join(" · ")}
+                    </p>
+                  ) : null}
+                  {runImport.data.result.postImportAudit.voucherNumberAudit.mismatches.length > 0 ? (
+                    <p className="worker-action-error">
+                      Voucher number mismatches: {runImport.data.result.postImportAudit.voucherNumberAudit.mismatches.slice(0, 8).map((item) => `${item.oldExpenseId}: Android ${item.androidVoucherNumber} -> Stored ${item.storedVoucherNumber}`).join(" · ")}
+                    </p>
+                  ) : null}
+                  {runImport.data.result.postImportAudit.voucherNumberAudit.duplicateImportedVoucherNumbers.length > 0 ? (
+                    <p className="worker-action-error">
+                      Duplicate imported voucher numbers: {runImport.data.result.postImportAudit.voucherNumberAudit.duplicateImportedVoucherNumbers.slice(0, 8).map((item) => `${item.voucherNumber} (${item.count})`).join(" · ")}
                     </p>
                   ) : null}
                   {(runImport.data.result.postImportAudit.relationshipAudit.attendanceMissingLabour
