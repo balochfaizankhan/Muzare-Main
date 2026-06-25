@@ -59,8 +59,22 @@ export async function expenseSearchRoutes(app: FastifyInstance): Promise<void> {
       sql`${operationalRecords.payload}->>'deletedAt' is null`,
       query.data.from ? gte(sql`${operationalRecords.payload}->>'date'`, query.data.from) : undefined,
       query.data.to ? lte(sql`${operationalRecords.payload}->>'date'`, query.data.to) : undefined,
-      query.data.category ? sql`lower(coalesce(${operationalRecords.payload}->>'category', '')) = ${query.data.category.toLowerCase()}` : undefined,
-      query.data.subcategory ? sql`lower(coalesce(${operationalRecords.payload}->>'subcategory', '')) = ${query.data.subcategory.toLowerCase()}` : undefined,
+      query.data.category ? sql`(
+        lower(coalesce(${operationalRecords.payload}->>'category', '')) = ${query.data.category.toLowerCase()}
+        or exists (
+          select 1
+          from jsonb_array_elements(coalesce(${operationalRecords.payload}->'items', '[]'::jsonb)) as item
+          where lower(coalesce(item->>'category', '')) = ${query.data.category.toLowerCase()}
+        )
+      )` : undefined,
+      query.data.subcategory ? sql`(
+        lower(coalesce(${operationalRecords.payload}->>'subcategory', '')) = ${query.data.subcategory.toLowerCase()}
+        or exists (
+          select 1
+          from jsonb_array_elements(coalesce(${operationalRecords.payload}->'items', '[]'::jsonb)) as item
+          where lower(coalesce(item->>'subcategory', '')) = ${query.data.subcategory.toLowerCase()}
+        )
+      )` : undefined,
       query.data.accountId ? sql`${operationalRecords.payload}->>'accountId' = ${query.data.accountId}` : undefined,
       term ? sql`(
         lower(coalesce(${operationalRecords.payload}->>'voucherNumber', '')) like ${term}
@@ -71,6 +85,15 @@ export async function expenseSearchRoutes(app: FastifyInstance): Promise<void> {
         or lower(coalesce(${operationalRecords.payload}->>'amount', '')) like ${term}
         or lower(coalesce(${operationalRecords.payload}->>'date', '')) like ${term}
         or replace(substring(coalesce(${operationalRecords.payload}->>'date', '') from 6 for 5), '-', '/') like ${term}
+        or exists (
+          select 1
+          from jsonb_array_elements(coalesce(${operationalRecords.payload}->'items', '[]'::jsonb)) as item
+          where lower(coalesce(item->>'category', '')) like ${term}
+            or lower(coalesce(item->>'subcategory', '')) like ${term}
+            or lower(coalesce(item->>'description', '')) like ${term}
+            or lower(coalesce(item->>'remarks', '')) like ${term}
+            or lower(coalesce(item->>'amount', '')) like ${term}
+        )
         or exists (
           select 1
           from operational_records account

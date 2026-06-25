@@ -50,6 +50,7 @@ import {
   type Sale,
   type Vehicle,
   type Voucher,
+  type VoucherItem,
 } from "../lib/offline-db";
 import { deleteOperationalRecord, persistOperationalRecord, refreshOperationalData } from "../services/syncService";
 
@@ -1538,13 +1539,103 @@ function ExpensesModule() {
   const [date, setDate] = useState(today());
   const workspaceId = user?.workspaceId ?? "";
   const categories = useQuery({ queryKey: ["expense-categories", workspaceId], queryFn: () => fetchExpenseCategories(token!, workspaceId), enabled: Boolean(token && workspaceId) });
-  const [categoryId, setCategoryId] = useState("");
-  const [categorySearch, setCategorySearch] = useState("");
-  const [subcategoryId, setSubcategoryId] = useState("");
-  const [subcategorySearch, setSubcategorySearch] = useState("");
+  type VoucherItemDraft = {
+    id: string;
+    categoryId: string;
+    categorySearch: string;
+    subcategoryId: string;
+    subcategorySearch: string;
+    amount: string;
+    description: string;
+    remarks: string;
+    oldExpenseItemId?: string | number;
+  };
+  type VoucherLineRow = {
+    id: string;
+    voucherId: string;
+    voucherNumber: string;
+    date: string;
+    accountId: string;
+    notes?: string;
+    amount: number;
+    category: string;
+    categoryId: string;
+    subcategory: string;
+    subcategoryId: string;
+    description: string;
+    remarks?: string;
+  };
+  const newVoucherItemDraft = (): VoucherItemDraft => ({
+    id: crypto.randomUUID(),
+    categoryId: "",
+    categorySearch: "",
+    subcategoryId: "",
+    subcategorySearch: "",
+    amount: "",
+    description: "",
+    remarks: "",
+  });
+  const normalizeVoucherItems = (voucher: Voucher): VoucherItemDraft[] => {
+    if (voucher.items?.length) {
+      return voucher.items.map((item) => ({
+        id: item.id || crypto.randomUUID(),
+        categoryId: item.categoryId,
+        categorySearch: item.category,
+        subcategoryId: item.subcategoryId ?? "",
+        subcategorySearch: item.subcategory ?? "",
+        amount: String(item.amount ?? ""),
+        description: item.description ?? "",
+        remarks: item.remarks ?? "",
+        oldExpenseItemId: item.oldExpenseItemId,
+      }));
+    }
+    return [{
+      id: crypto.randomUUID(),
+      categoryId: voucher.categoryId ?? "",
+      categorySearch: voucher.category ?? "",
+      subcategoryId: voucher.subcategoryId ?? "",
+      subcategorySearch: voucher.subcategory ?? "",
+      amount: voucher.amount ? String(voucher.amount) : "",
+      description: voucher.description ?? "",
+      remarks: "",
+    }];
+  };
+  const voucherLinesFor = useCallback((voucher: Voucher): VoucherLineRow[] => {
+    if (voucher.items?.length) {
+      return voucher.items.map((item) => ({
+        id: `${voucher.id}:${item.id}`,
+        voucherId: voucher.id,
+        voucherNumber: voucher.voucherNumber,
+        date: voucher.date,
+        accountId: voucher.accountId,
+        notes: voucher.notes,
+        amount: item.amount,
+        category: item.category,
+        categoryId: item.categoryId,
+        subcategory: item.subcategory ?? "",
+        subcategoryId: item.subcategoryId ?? "",
+        description: item.description,
+        remarks: item.remarks,
+      }));
+    }
+    return [{
+      id: `${voucher.id}:legacy`,
+      voucherId: voucher.id,
+      voucherNumber: voucher.voucherNumber,
+      date: voucher.date,
+      accountId: voucher.accountId,
+      notes: voucher.notes,
+      amount: voucher.amount,
+      category: voucher.category,
+      categoryId: voucher.categoryId,
+      subcategory: voucher.subcategory,
+      subcategoryId: voucher.subcategoryId,
+      description: voucher.description,
+    }];
+  }, []);
+  const [customCategoryId, setCustomCategoryId] = useState("");
   const [customName, setCustomName] = useState("");
-  const [description, setDescription] = useState("");
-  const [amount, setAmount] = useState("");
+  const [voucherItems, setVoucherItems] = useState<VoucherItemDraft[]>([newVoucherItemDraft()]);
   const [accountId, setAccountId] = useState("");
   const [notes, setNotes] = useState("");
   const [selectedVoucher, setSelectedVoucher] = useState<Voucher | null>(null);
@@ -1566,16 +1657,14 @@ function ExpensesModule() {
   const [voucherAccountId, setVoucherAccountId] = useState("");
   const showToast = (message: string) => window.dispatchEvent(new CustomEvent("muzare-toast", { detail: message }));
   const resetForm = () => {
-    setDate(today()); setCategoryId(""); setCategorySearch(""); setSubcategoryId(""); setSubcategorySearch("");
-    setDescription(""); setAmount(""); setAccountId(""); setNotes("");
+    setDate(today()); setVoucherItems([newVoucherItemDraft()]); setAccountId(""); setNotes("");
     pendingReceipts.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl));
     setPendingReceipts([]);
     setReceiptError("");
   };
   const openEdit = (voucher: Voucher) => {
-    setSelectedVoucher(null); setEditingVoucher(voucher); setDate(voucher.date); setCategoryId(voucher.categoryId);
-    setCategorySearch(voucher.category); setSubcategoryId(voucher.subcategoryId); setSubcategorySearch(voucher.subcategory);
-    setDescription(voucher.description); setAmount(String(voucher.amount)); setAccountId(voucher.accountId);
+    setSelectedVoucher(null); setEditingVoucher(voucher); setDate(voucher.date);
+    setVoucherItems(normalizeVoucherItems(voucher)); setAccountId(voucher.accountId);
     setNotes(voucher.notes ?? "");
     setPendingReceipts([]);
     setReceiptError("");
@@ -1661,14 +1750,38 @@ function ExpensesModule() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const category = categories.data?.categories.find((item) => item.id === categoryId);
-    const subcategory = category?.subcategories.find((item) => item.id === subcategoryId);
-    if (!category || !subcategory) return;
+    const resolvedItems: VoucherItem[] = [];
+    for (const item of voucherItems) {
+      const category = categories.data?.categories.find((entry) => entry.id === item.categoryId);
+      const subcategory = category?.subcategories.find((entry) => entry.id === item.subcategoryId);
+      const parsedAmount = Number(item.amount);
+      if (!category || !subcategory || !item.description.trim() || !Number.isFinite(parsedAmount) || parsedAmount <= 0) return;
+      resolvedItems.push({
+        id: item.id,
+        categoryId: category.id,
+        category: category.name,
+        subcategoryId: subcategory.id,
+        subcategory: subcategory.name,
+        amount: parsedAmount,
+        description: item.description.trim(),
+        remarks: item.remarks.trim() || undefined,
+        oldExpenseItemId: item.oldExpenseItemId,
+      });
+    }
+    if (!resolvedItems.length) return;
+    const primaryItem = resolvedItems[0];
+    const totalAmount = resolvedItems.reduce((sum, item) => sum + item.amount, 0);
     const record: Voucher = {
       ...(editingVoucher ?? makeLocalRecord()), voucherNumber: editingVoucher?.voucherNumber ?? nextLocalVoucherNumber(), date,
-      categoryId: category.id, category: category.name, subcategoryId: subcategory.id, subcategory: subcategory.name,
-      description: description.trim(), amount: Number(amount), accountId: accountId || accounts[0]?.id || "",
+      categoryId: primaryItem.categoryId,
+      category: primaryItem.category,
+      subcategoryId: primaryItem.subcategoryId ?? "",
+      subcategory: primaryItem.subcategory ?? "",
+      description: resolvedItems.length === 1 ? primaryItem.description : `${primaryItem.description} +${resolvedItems.length - 1} ${t("expensesPage.moreItems")}`,
+      amount: totalAmount,
+      accountId: accountId || accounts[0]?.id || "",
       notes: notes.trim() || undefined,
+      items: resolvedItems,
     };
     await persistOperationalRecord("voucher", record);
     await uploadPendingReceipts(record.id);
@@ -1677,7 +1790,6 @@ function ExpensesModule() {
     resetForm();
     await refresh();
   };
-  const selectedCategory = categories.data?.categories.find((item) => item.id === categoryId);
   const canManage = Boolean(user && workspaceId && hasPermission(user, "MANAGE_EXPENSE_CATEGORIES", workspaceId));
   const canEditVouchers = Boolean(user && workspaceId && hasPermission(user, "MANAGE_RECORDS", workspaceId));
   const farmId = getActiveFarmId();
@@ -1703,16 +1815,18 @@ function ExpensesModule() {
       ?? ("accountName" in item && typeof item.accountName === "string" ? item.accountName : "");
     const normalizedSearch = voucherSearch.trim().toLowerCase();
     const shortDate = item.date.length >= 10 ? `${item.date.slice(5, 7)}/${item.date.slice(8, 10)}` : item.date;
+    const lines = voucherLinesFor(item);
     return (!voucherFrom || item.date >= voucherFrom)
       && (!voucherTo || item.date <= voucherTo)
-      && (!voucherCategory || item.category === voucherCategory)
-      && (!voucherSubcategory || item.subcategory === voucherSubcategory)
+      && (!voucherCategory || lines.some((line) => line.category === voucherCategory))
+      && (!voucherSubcategory || lines.some((line) => line.subcategory === voucherSubcategory))
       && (!voucherAccountId || item.accountId === voucherAccountId)
       && (!normalizedSearch || [
         item.voucherNumber, item.description, item.notes ?? "", item.category, item.subcategory, accountName,
         String(item.amount), item.date, shortDate,
+        ...lines.flatMap((line) => [line.category, line.subcategory, line.description, line.remarks ?? "", String(line.amount)]),
       ].some((value) => value.toLowerCase().includes(normalizedSearch)));
-  }, [accountById, voucherAccountId, voucherCategory, voucherFrom, voucherSearch, voucherSubcategory, voucherTo]);
+  }, [accountById, voucherAccountId, voucherCategory, voucherFrom, voucherLinesFor, voucherSearch, voucherSubcategory, voucherTo]);
   const filteredVouchers = useMemo(() => {
     const serverRecords = voucherSearchQuery.data?.records ?? [];
     const merged = navigator.onLine && voucherSearchQuery.data
@@ -1720,8 +1834,9 @@ function ExpensesModule() {
       : vouchers;
     return merged.filter((item) => matchesVoucher(item as Voucher)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) as Voucher[];
   }, [matchesVoucher, voucherSearchQuery.data, vouchers]);
+  const voucherLineItems = useMemo(() => filteredVouchers.flatMap((item) => voucherLinesFor(item)), [filteredVouchers, voucherLinesFor]);
   const total = filteredVouchers.reduce((sum, item) => sum + item.amount, 0);
-  const grouped = [...filteredVouchers.reduce((map, item) => {
+  const grouped = [...voucherLineItems.reduce((map, item) => {
     const category = map.get(item.category) ?? new Map<string, number>();
     category.set(item.subcategory || "Miscellaneous", (category.get(item.subcategory || "Miscellaneous") ?? 0) + item.amount);
     map.set(item.category, category); return map;
@@ -1776,25 +1891,49 @@ function ExpensesModule() {
     if (voucher) openEdit(voucher);
     const fields = result.fields ?? {};
     if (fields.date) setDate(fields.date);
-    if (fields.totalAmount !== undefined) setAmount(String(fields.totalAmount));
-    if (fields.description) setDescription(fields.description);
     const suggestedCategory = fields.suggestedCategory || result.lineItems.find((line) => line.suggestedCategory)?.suggestedCategory;
     const suggestedSubcategory = fields.suggestedSubcategory || result.lineItems.find((line) => line.suggestedSubcategory)?.suggestedSubcategory;
     const normalizedCategory = suggestedCategory?.trim().toLowerCase();
     const matchedCategory = normalizedCategory
       ? categories.data?.categories.find((item) => item.name.trim().toLowerCase() === normalizedCategory)
       : undefined;
-    if (matchedCategory) {
-      setCategoryId(matchedCategory.id);
-      setCategorySearch(matchedCategory.name);
-      const normalizedSubcategory = suggestedSubcategory?.trim().toLowerCase();
-      const matchedSubcategory = normalizedSubcategory
-        ? matchedCategory.subcategories.find((item) => item.name.trim().toLowerCase() === normalizedSubcategory)
-        : undefined;
-      if (matchedSubcategory) {
-        setSubcategoryId(matchedSubcategory.id);
-        setSubcategorySearch(matchedSubcategory.name);
-      }
+    const normalizedSubcategory = suggestedSubcategory?.trim().toLowerCase();
+    const matchedSubcategory = normalizedSubcategory && matchedCategory
+      ? matchedCategory.subcategories.find((item) => item.name.trim().toLowerCase() === normalizedSubcategory)
+      : undefined;
+    if (result.lineItems.length) {
+      setVoucherItems(result.lineItems.map((line, index) => {
+        const lineCategory = line.suggestedCategory?.trim().toLowerCase();
+        const category = lineCategory ? categories.data?.categories.find((item) => item.name.trim().toLowerCase() === lineCategory) : matchedCategory;
+        const lineSubcategory = line.suggestedSubcategory?.trim().toLowerCase();
+        const subcategory = lineSubcategory && category
+          ? category.subcategories.find((item) => item.name.trim().toLowerCase() === lineSubcategory)
+          : category?.id === matchedCategory?.id ? matchedSubcategory : undefined;
+        return {
+          id: crypto.randomUUID(),
+          categoryId: category?.id ?? "",
+          categorySearch: category?.name ?? line.suggestedCategory ?? fields.suggestedCategory ?? "",
+          subcategoryId: subcategory?.id ?? "",
+          subcategorySearch: subcategory?.name ?? line.suggestedSubcategory ?? fields.suggestedSubcategory ?? "",
+          amount: line.amount !== undefined ? String(line.amount) : (index === 0 && fields.totalAmount !== undefined ? String(fields.totalAmount) : ""),
+          description: line.name ?? "",
+          remarks: "",
+        };
+      }));
+    } else {
+      setVoucherItems((current) => {
+        const first = current[0] ?? newVoucherItemDraft();
+        const nextFirst = {
+          ...first,
+          categoryId: matchedCategory?.id ?? first.categoryId,
+          categorySearch: matchedCategory?.name ?? first.categorySearch,
+          subcategoryId: matchedSubcategory?.id ?? first.subcategoryId,
+          subcategorySearch: matchedSubcategory?.name ?? first.subcategorySearch,
+          amount: fields.totalAmount !== undefined ? String(fields.totalAmount) : first.amount,
+          description: fields.description ?? first.description,
+        };
+        return [nextFirst, ...current.slice(1)];
+      });
     }
     const noteParts = [
       fields.supplier ? `${t("expensesPage.supplier")}: ${fields.supplier}` : "",
@@ -1828,10 +1967,14 @@ function ExpensesModule() {
   };
   const addCustom = async (event: FormEvent) => {
     event.preventDefault();
-    if (!token || !workspaceId || !categoryId || !customName.trim()) return;
-    await createExpenseSubcategory(token, workspaceId, { categoryId, name: customName.trim() });
+    if (!token || !workspaceId || !customCategoryId || !customName.trim()) return;
+    await createExpenseSubcategory(token, workspaceId, { categoryId: customCategoryId, name: customName.trim() });
     setCustomName(""); await categories.refetch();
   };
+  const updateVoucherItem = (id: string, updater: (item: VoucherItemDraft) => VoucherItemDraft) => {
+    setVoucherItems((current) => current.map((item) => item.id === id ? updater(item) : item));
+  };
+  const voucherGrandTotal = voucherItems.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
 
   return (
     <>
@@ -1839,18 +1982,46 @@ function ExpensesModule() {
         {receiptCropTarget && <ReceiptCropReviewModal file={receiptCropTarget} onCancel={() => advanceReceiptCropQueue()} onAccept={advanceReceiptCropQueue} />}
         <form className="module-form inline-form" onSubmit={(event) => void submit(event)}>
           <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-          <label><span>{t("expensesPage.categoryRequired")}</span><SearchInput required list="expense-category-options" placeholder={t("expensesPage.selectCategory")} value={categorySearch} onChange={(value) => {
-            const next = categories.data?.categories.find((item) => item.name === value); setCategorySearch(value); setCategoryId(next?.id ?? ""); setSubcategoryId(""); setSubcategorySearch("");
-          }} onClear={() => { setCategoryId(""); setCategorySearch(""); setSubcategoryId(""); setSubcategorySearch(""); }} /><datalist id="expense-category-options">{categories.data?.categories.map((item) => <option key={item.id} value={item.name} />)}</datalist></label>
-          <label><span>{t("expensesPage.subcategoryRequired")}</span><SearchInput required disabled={!categoryId} list="expense-subcategory-options" placeholder={t("expensesPage.selectSubcategory")} value={subcategorySearch} onChange={(value) => {
-            const next = selectedCategory?.subcategories.find((item) => item.name === value); setSubcategorySearch(value); setSubcategoryId(next?.id ?? "");
-          }} onClear={() => { setSubcategoryId(""); setSubcategorySearch(""); }} /><datalist id="expense-subcategory-options">{selectedCategory?.subcategories.map((item) => <option key={item.id} value={item.name} />)}</datalist></label>
-          <input required value={description} placeholder={t("expensesPage.description")} onChange={(event) => setDescription(event.target.value)} />
-          <input required min="0.01" step="0.01" type="number" value={amount} placeholder={t("expensesPage.amount")} onChange={(event) => setAmount(event.target.value)} />
           <select value={accountId || accounts[0]?.id || ""} onChange={(event) => setAccountId(event.target.value)}>
             {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
           </select>
           <input value={notes} placeholder={t("expensesPage.notesOptional")} onChange={(event) => setNotes(event.target.value)} />
+          <div className="expense-voucher-items">
+            <div className="expense-voucher-items__header">
+              <strong>{t("expensesPage.voucherItems")}</strong>
+              <button className="expense-voucher-items__add" type="button" onClick={() => setVoucherItems((current) => [...current, newVoucherItemDraft()])}>{t("expensesPage.addAnotherItem")}</button>
+            </div>
+            <div className="expense-voucher-items__list">
+              {voucherItems.map((item, index) => {
+                const selectedCategory = categories.data?.categories.find((entry) => entry.id === item.categoryId);
+                return (
+                  <article className="expense-voucher-item" key={item.id}>
+                    <div className="expense-voucher-item__top">
+                      <strong>{t("expensesPage.itemNumber", { number: index + 1 })}</strong>
+                      {voucherItems.length > 1 && <button className="expense-voucher-item__remove" type="button" onClick={() => setVoucherItems((current) => current.filter((entry) => entry.id !== item.id))}>{t("expensesPage.removeItem")}</button>}
+                    </div>
+                    <div className="expense-voucher-item__grid">
+                      <label><span>{t("expensesPage.categoryRequired")}</span><SearchInput required list={`expense-category-options-${item.id}`} placeholder={t("expensesPage.selectCategory")} value={item.categorySearch} onChange={(value) => {
+                        const next = categories.data?.categories.find((entry) => entry.name === value);
+                        updateVoucherItem(item.id, (current) => ({ ...current, categorySearch: value, categoryId: next?.id ?? "", subcategoryId: "", subcategorySearch: "" }));
+                      }} onClear={() => updateVoucherItem(item.id, (current) => ({ ...current, categoryId: "", categorySearch: "", subcategoryId: "", subcategorySearch: "" }))} /><datalist id={`expense-category-options-${item.id}`}>{categories.data?.categories.map((entry) => <option key={entry.id} value={entry.name} />)}</datalist></label>
+                      <label><span>{t("expensesPage.subcategoryRequired")}</span><SearchInput required disabled={!item.categoryId} list={`expense-subcategory-options-${item.id}`} placeholder={t("expensesPage.selectSubcategory")} value={item.subcategorySearch} onChange={(value) => {
+                        const next = selectedCategory?.subcategories.find((entry) => entry.name === value);
+                        updateVoucherItem(item.id, (current) => ({ ...current, subcategorySearch: value, subcategoryId: next?.id ?? "" }));
+                      }} onClear={() => updateVoucherItem(item.id, (current) => ({ ...current, subcategoryId: "", subcategorySearch: "" }))} /><datalist id={`expense-subcategory-options-${item.id}`}>{selectedCategory?.subcategories.map((entry) => <option key={entry.id} value={entry.name} />)}</datalist></label>
+                      <label><span>{t("expensesPage.amount")}</span><input required min="0.01" step="0.01" type="number" value={item.amount} placeholder={t("expensesPage.amount")} onChange={(event) => updateVoucherItem(item.id, (current) => ({ ...current, amount: event.target.value }))} /></label>
+                      <label className="expense-voucher-item__description"><span>{t("expensesPage.description")}</span><input required value={item.description} placeholder={t("expensesPage.description")} onChange={(event) => updateVoucherItem(item.id, (current) => ({ ...current, description: event.target.value }))} /></label>
+                      <label className="expense-voucher-item__remarks"><span>{t("expensesPage.itemRemarksOptional")}</span><input value={item.remarks} placeholder={t("expensesPage.itemRemarksOptional")} onChange={(event) => updateVoucherItem(item.id, (current) => ({ ...current, remarks: event.target.value }))} /></label>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+            <div className="expense-voucher-items__total">
+              <span>{t("expensesPage.grandTotal")}</span>
+              <strong>{money(voucherGrandTotal)}</strong>
+            </div>
+          </div>
           <ReceiptAttachmentPicker pending={pendingReceipts} onFiles={addReceiptFiles} onRemove={removePendingReceipt} />
           {receiptError && <p className="worker-action-error">{receiptError}</p>}
           <button type="submit">{editingVoucher ? t("expensesPage.updateVoucher") : t("expensesPage.saveVoucher")}</button>
@@ -1889,21 +2060,43 @@ function ExpensesModule() {
       </section>
       <Summary value={money(total)} label={hasActiveFilters ? t("expensesPage.totalCurrentFilters") : t("expensesPage.totalCurrentSeason")} />
       <section className="record-panel"><h2>{t("expensesPage.expensesByCategory")}</h2>{!grouped.length ? <Empty>{t("expensesPage.noExpenseTotals")}</Empty> : <div className="expense-category-report">{grouped.map(([category, items]) => { const categoryTotal = [...items.values()].reduce((sum, amount) => sum + amount, 0); return <article key={category}><header><h3>{translateExpenseCategory(category)}</h3><strong>{money(categoryTotal)}</strong></header>{[...items].map(([subcategory, amount]) => <p key={subcategory}><span>{subcategory === "Miscellaneous" ? t("expensesPage.miscellaneous") : translateExpenseSubcategory(subcategory)}</span><strong>{money(amount)}</strong></p>)}<b>{t("expensesPage.categoryTotal")} <span>{money(categoryTotal)}</span></b></article>; })}</div>}</section>
-      {canManage && <section className="record-panel"><h2>{t("expensesPage.customSubcategories")}</h2><form className="module-form compact-form" onSubmit={(event) => void addCustom(event)}><select required value={categoryId} onChange={(event) => { setCategoryId(event.target.value); setCategorySearch(categories.data?.categories.find((item) => item.id === event.target.value)?.name ?? ""); }}><option value="">{t("expensesPage.selectCategory")}</option>{categories.data?.categories.map((item) => <option key={item.id} value={item.id}>{translateExpenseCategory(item.name)}</option>)}</select><input required placeholder={t("expensesPage.newSubcategory")} value={customName} onChange={(event) => setCustomName(event.target.value)} /><button type="submit">{t("expensesPage.addSubcategory")}</button></form><div className="custom-subcategory-list">{categories.data?.categories.flatMap((item) => item.subcategories.filter((subcategory) => !subcategory.isSystem).map((subcategory) => <span key={subcategory.id}>{translateExpenseCategory(item.name)} / {subcategory.name}<button type="button" onClick={() => { const name = window.prompt(t("expensesPage.renameCustomSubcategory"), subcategory.name); if (token && name?.trim()) void updateExpenseSubcategory(token, workspaceId, subcategory.id, { name: name.trim() }).then(() => categories.refetch()); }}>{t("expensesPage.edit")}</button><button type="button" onClick={() => token && void updateExpenseSubcategory(token, workspaceId, subcategory.id, { active: false }).then(() => categories.refetch())}>{t("expensesPage.disable")}</button></span>))}</div></section>}
+      {canManage && <section className="record-panel"><h2>{t("expensesPage.customSubcategories")}</h2><form className="module-form compact-form" onSubmit={(event) => void addCustom(event)}><select required value={customCategoryId} onChange={(event) => setCustomCategoryId(event.target.value)}><option value="">{t("expensesPage.selectCategory")}</option>{categories.data?.categories.map((item) => <option key={item.id} value={item.id}>{translateExpenseCategory(item.name)}</option>)}</select><input required placeholder={t("expensesPage.newSubcategory")} value={customName} onChange={(event) => setCustomName(event.target.value)} /><button type="submit">{t("expensesPage.addSubcategory")}</button></form><div className="custom-subcategory-list">{categories.data?.categories.flatMap((item) => item.subcategories.filter((subcategory) => !subcategory.isSystem).map((subcategory) => <span key={subcategory.id}>{translateExpenseCategory(item.name)} / {subcategory.name}<button type="button" onClick={() => { const name = window.prompt(t("expensesPage.renameCustomSubcategory"), subcategory.name); if (token && name?.trim()) void updateExpenseSubcategory(token, workspaceId, subcategory.id, { name: name.trim() }).then(() => categories.refetch()); }}>{t("expensesPage.edit")}</button><button type="button" onClick={() => token && void updateExpenseSubcategory(token, workspaceId, subcategory.id, { active: false }).then(() => categories.refetch())}>{t("expensesPage.disable")}</button></span>))}</div></section>}
       <RecordTable
         empty={t("expensesPage.noExpensesFound")}
-        rows={filteredVouchers.map((item) => [item.voucherNumber, item.date, `${translateExpenseCategory(item.category)} / ${item.subcategory ? translateExpenseSubcategory(item.subcategory) : t("expensesPage.miscellaneous")}`, item.description, accountById.get(item.accountId) ?? t("expensesPage.unknownAccount"), money(item.amount)])}
+        rows={filteredVouchers.map((item) => {
+          const lines = voucherLinesFor(item);
+          const summary = lines.length > 1 ? `${translateExpenseCategory(lines[0].category)} / ${lines[0].subcategory ? translateExpenseSubcategory(lines[0].subcategory) : t("expensesPage.miscellaneous")} +${lines.length - 1} ${t("expensesPage.moreItems")}` : `${translateExpenseCategory(item.category)} / ${item.subcategory ? translateExpenseSubcategory(item.subcategory) : t("expensesPage.miscellaneous")}`;
+          const description = lines.length > 1 ? `${lines[0].description} +${lines.length - 1} ${t("expensesPage.moreItems")}` : item.description;
+          return [item.voucherNumber, item.date, summary, description, accountById.get(item.accountId) ?? t("expensesPage.unknownAccount"), money(item.amount)];
+        })}
         actions={filteredVouchers.map((item) => <div className="record-list__actions" key={item.id}><button type="button" onClick={() => setSelectedVoucher(item)}>{t("expensesPage.viewDetails")}</button>{canEditVouchers && <button type="button" onClick={() => openEdit(item)}>{t("expensesPage.edit")}</button>}</div>)}
       />
       {selectedVoucher && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedVoucher(null)}>
         <section className="worker-dialog" role="dialog" aria-modal="true" aria-label={t("expensesPage.voucherDetails")} onClick={(event) => event.stopPropagation()}>
           <header className="worker-dialog__header"><h2>{t("expensesPage.voucherTitle", { number: selectedVoucher.voucherNumber })}</h2><button type="button" onClick={() => setSelectedVoucher(null)}><X size={18} /></button></header>
           <div className="worker-dialog__body"><dl className="worker-stats">
-            <div><dt>{t("expensesPage.date")}</dt><dd>{selectedVoucher.date}</dd></div><div><dt>{t("expensesPage.category")}</dt><dd>{translateExpenseCategory(selectedVoucher.category)} / {translateExpenseSubcategory(selectedVoucher.subcategory)}</dd></div>
-            <div><dt>{t("expensesPage.description")}</dt><dd>{selectedVoucher.description}</dd></div><div><dt>{t("expensesPage.amount")}</dt><dd>{money(selectedVoucher.amount)}</dd></div>
+            <div><dt>{t("expensesPage.date")}</dt><dd>{selectedVoucher.date}</dd></div><div><dt>{t("expensesPage.amount")}</dt><dd>{money(selectedVoucher.amount)}</dd></div>
             <div><dt>{t("expensesPage.paymentSource")}</dt><dd>{accounts.find((item) => item.id === selectedVoucher.accountId)?.name ?? t("expensesPage.unknownAccount")}</dd></div>
             {selectedVoucher.notes && <div><dt>{t("expensesPage.notesOptional")}</dt><dd>{selectedVoucher.notes}</dd></div>}
           </dl>
+          <div className="expense-voucher-detail-items">
+            <h3>{t("expensesPage.voucherItems")}</h3>
+            {(selectedVoucher.items?.length ? selectedVoucher.items : [{
+              id: `${selectedVoucher.id}:legacy`,
+              category: selectedVoucher.category,
+              subcategory: selectedVoucher.subcategory,
+              amount: selectedVoucher.amount,
+              description: selectedVoucher.description,
+            }]).map((item, index) => (
+              <article className="expense-voucher-detail-item" key={item.id}>
+                <strong>{t("expensesPage.itemNumber", { number: index + 1 })}</strong>
+                <p>{translateExpenseCategory(item.category)} / {item.subcategory ? translateExpenseSubcategory(item.subcategory) : t("expensesPage.miscellaneous")}</p>
+                <p>{item.description}</p>
+                {"remarks" in item && item.remarks ? <small>{item.remarks}</small> : null}
+                <b>{money(item.amount)}</b>
+              </article>
+            ))}
+          </div>
           <ReceiptAttachmentList
             attachments={detailAttachments}
             ocrResult={detailOcr}

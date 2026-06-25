@@ -3172,6 +3172,72 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
+.expense-voucher-items {
+  display: grid;
+  gap: 12px;
+  grid-column: 1 / -1;
+}
+
+.expense-voucher-items__header,
+.expense-voucher-items__total,
+.expense-voucher-item__top {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.expense-voucher-items__list {
+  display: grid;
+  gap: 12px;
+}
+
+.expense-voucher-item,
+.expense-voucher-detail-item {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.expense-voucher-item__grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 10px;
+}
+
+.expense-voucher-item__description,
+.expense-voucher-item__remarks {
+  grid-column: 1 / -1;
+}
+
+.expense-voucher-items__add,
+.expense-voucher-item__remove {
+  background: transparent !important;
+  border: 1px solid var(--border) !important;
+  color: var(--brand-primary) !important;
+  height: 38px !important;
+  padding-inline: 12px !important;
+}
+
+.expense-voucher-detail-items {
+  display: grid;
+  gap: 10px;
+}
+
+.expense-voucher-detail-item {
+  display: grid;
+  gap: 4px;
+}
+
+.expense-voucher-detail-item p,
+.expense-voucher-detail-item small,
+.expense-voucher-detail-item strong,
+.expense-voucher-detail-item b {
+  margin: 0;
+}
+
 .receipt-attachment-card,
 .receipt-detail-card {
   background: var(--surface-soft);
@@ -6287,6 +6353,10 @@ button {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .expense-voucher-item__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .admin-metric-grid,
   .shell-grid {
     grid-template-columns: 1fr;
@@ -7027,7 +7097,20 @@ button {
 .report-mobile-card__days { display: grid; gap: 4px; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: 8px; }
 .report-mobile-card__days span { border: 1px solid var(--border); border-radius: 5px; display: grid; gap: 2px; padding: 4px 2px; text-align: center; }
 .report-mobile-card__days small { font-size: .6rem; white-space: nowrap; }
-.reports-page { display: grid; gap: 12px; }
+.reports-page {
+  box-sizing: border-box;
+  display: grid;
+  gap: 12px;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: clip;
+}
+
+.reports-page > * {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+}
 .reports-tabs { display: flex; flex-wrap: wrap; gap: 7px; }
 .reports-subtabs { display: flex; flex-wrap: wrap; gap: 7px; }
 .reports-tabs button,
@@ -7046,6 +7129,23 @@ button {
 .reports-tabs button.is-active,
 .reports-subtabs button.is-active,
 .reports-actions button:first-child { background: var(--brand-primary); border-color: var(--brand-primary); color: #fff; }
+.reports-filter-panel,
+.reports-print-section,
+.reports-register-shell,
+.reports-breakdowns,
+.reports-summary-list,
+.reports-kpis,
+.reports-view-header,
+.reports-filter-heading,
+.reports-actions,
+.reports-filters,
+.reports-date-row,
+.reports-range-actions {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+}
+
 .reports-filter-heading,
 .reports-actions { align-items: center; display: flex; gap: 8px; justify-content: space-between; }
 .reports-view-header { align-items: flex-start; display: flex; gap: 12px; justify-content: space-between; margin-bottom: 10px; }
@@ -7060,7 +7160,8 @@ button {
   min-height: 34px;
   padding: 6px 9px;
 }
-.reports-filters { display: grid; gap: 8px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 10px; }
+.reports-filters { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-top: 10px; }
+.reports-filters > * { max-width: 100%; min-width: 0; }
 .reports-filters .search-input { grid-column: 1 / -1; }
 .reports-date-row {
   display: grid;
@@ -7141,6 +7242,14 @@ button {
   padding: 7px 9px;
   width: 100%;
 }
+
+.reports-filters .clearable-select,
+.reports-filters .search-input,
+.reports-filters .labour-multi-select-filter,
+.reports-filters .reports-date-field {
+  max-width: 100%;
+  min-width: 0;
+}
 .reports-actions { justify-content: flex-end; margin-top: 10px; }
 .reports-kpis { display: grid; gap: 8px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 10px 0; }
 .reports-kpis article,
@@ -7199,6 +7308,19 @@ button {
 }
 .reports-print-only {
   display: none;
+}
+
+.report-wide-table {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.report-wide-table .report-data-table {
+  min-width: max-content;
+  width: 100%;
 }
 .report-data-table button {
   background: var(--surface);

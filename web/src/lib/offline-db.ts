@@ -89,6 +89,19 @@ export type Voucher = LocalRecord & {
   notes?: string;
   createdBy?: string;
   updatedBy?: string;
+  items?: VoucherItem[];
+};
+
+export type VoucherItem = {
+  id: string;
+  category: string;
+  categoryId: string;
+  subcategory?: string;
+  subcategoryId?: string;
+  amount: number;
+  description: string;
+  remarks?: string;
+  oldExpenseItemId?: string | number;
 };
 
 export type Dispatch = LocalRecord & {
