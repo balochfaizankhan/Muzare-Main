@@ -253,6 +253,9 @@ export type MigrationImportValidation = {
         vouchersTotal: number;
         vouchersLinkedToPaymentAccount: number;
         vouchersMissingPaymentAccount: number;
+        vouchersWithMultipleItems: number;
+        voucherItemsStored: number;
+        vouchersWithItemMismatch: number;
       };
     };
   };

@@ -5,7 +5,7 @@ import { z } from "zod";
 import { requirePermission, requireUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
-import { auditLogs, farmDeletionRequests, farms, importBatches, importFailures, operationalRecords, seasons, userSessions, workspaces } from "../db/schema.js";
+import { auditLogs, expenseCategories, expenseSubcategories, farmDeletionRequests, farms, importBatches, importFailures, operationalRecords, seasons, userSessions, workspaces } from "../db/schema.js";
 import { visibleFarmWhere } from "../farm-visibility.js";
 import { repairDeletedFarmSeasonState, repairWorkspaceContext, resolveWorkspaceContext } from "./workspace-context.js";
 
@@ -108,6 +108,7 @@ function importedAccountGroupKey(payload: Record<string, unknown>, sourceFileHas
 
 type AndroidRecord = Record<string, unknown>;
 type AndroidPayload = z.infer<typeof payloadSchema>["payload"];
+type ImportDbExecutor = Parameters<Parameters<typeof db.transaction>[0]>[0] | typeof db;
 type ImportIssue = { level: "error" | "warning"; path: string; message: string };
 type ImportSummary = {
   exportVersion: string | null;
@@ -156,6 +157,9 @@ type PostImportAudit = {
     vouchersTotal: number;
     vouchersLinkedToPaymentAccount: number;
     vouchersMissingPaymentAccount: number;
+    vouchersWithMultipleItems: number;
+    voucherItemsStored: number;
+    vouchersWithItemMismatch: number;
   };
 };
 type ImportResult = {
@@ -390,6 +394,139 @@ const importedActive = (record: AndroidRecord) => {
   if (record.active === false || record.archived === true || record.isArchived === true || record.deleted === true) return false;
   return true;
 };
+
+const normalizedLabel = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
+const itemSortWeight = (record: AndroidRecord, index: number) => {
+  for (const key of ["sortOrder", "sort_order", "lineOrder", "line_order", "displayOrder", "display_order", "position", "index"]) {
+    const raw = record[key];
+    const parsed = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : NaN;
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return index;
+};
+
+type ExpenseCategoryLookup = {
+  fallback: { categoryId: string; category: string; subcategoryId: string; subcategory: string };
+  byCategory: Map<string, { categoryId: string; category: string }>;
+  bySubcategory: Map<string, { categoryId: string; category: string; subcategoryId: string; subcategory: string }>;
+};
+
+async function loadExpenseCategoryLookup(
+  tx: ImportDbExecutor,
+  workspaceId: string,
+): Promise<ExpenseCategoryLookup> {
+  const [categories, subcategories] = await Promise.all([
+    tx.select({
+      categoryId: expenseCategories.id,
+      category: expenseCategories.name,
+      workspaceId: expenseCategories.workspaceId,
+    }).from(expenseCategories).where(and(
+      eq(expenseCategories.active, true),
+      or(eq(expenseCategories.workspaceId, workspaceId), sql`${expenseCategories.workspaceId} IS NULL`),
+    )),
+    tx.select({
+      categoryId: expenseCategories.id,
+      category: expenseCategories.name,
+      subcategoryId: expenseSubcategories.id,
+      subcategory: expenseSubcategories.name,
+      categoryWorkspaceId: expenseCategories.workspaceId,
+      subcategoryWorkspaceId: expenseSubcategories.workspaceId,
+    }).from(expenseSubcategories).innerJoin(expenseCategories, eq(expenseCategories.id, expenseSubcategories.categoryId)).where(and(
+      eq(expenseCategories.active, true),
+      eq(expenseSubcategories.active, true),
+      or(eq(expenseCategories.workspaceId, workspaceId), sql`${expenseCategories.workspaceId} IS NULL`),
+      or(eq(expenseSubcategories.workspaceId, workspaceId), sql`${expenseSubcategories.workspaceId} IS NULL`),
+    )),
+  ]);
+
+  const byCategory = new Map<string, { categoryId: string; category: string }>();
+  for (const category of categories) {
+    const key = normalizedLabel(category.category);
+    if (!byCategory.has(key) || category.workspaceId === workspaceId) {
+      byCategory.set(key, { categoryId: category.categoryId, category: category.category });
+    }
+  }
+
+  const bySubcategory = new Map<string, { categoryId: string; category: string; subcategoryId: string; subcategory: string }>();
+  for (const subcategory of subcategories) {
+    const key = normalizedLabel(subcategory.subcategory);
+    if (!bySubcategory.has(key) || subcategory.subcategoryWorkspaceId === workspaceId || subcategory.categoryWorkspaceId === workspaceId) {
+      bySubcategory.set(key, {
+        categoryId: subcategory.categoryId,
+        category: subcategory.category,
+        subcategoryId: subcategory.subcategoryId,
+        subcategory: subcategory.subcategory,
+      });
+    }
+  }
+
+  const fallback = bySubcategory.get(normalizedLabel("Miscellaneous"))
+    ?? subcategories[0]
+    ? {
+        categoryId: (bySubcategory.get(normalizedLabel("Miscellaneous")) ?? {
+          categoryId: subcategories[0]!.categoryId,
+          category: subcategories[0]!.category,
+          subcategoryId: subcategories[0]!.subcategoryId,
+          subcategory: subcategories[0]!.subcategory,
+        }).categoryId,
+        category: (bySubcategory.get(normalizedLabel("Miscellaneous")) ?? {
+          categoryId: subcategories[0]!.categoryId,
+          category: subcategories[0]!.category,
+          subcategoryId: subcategories[0]!.subcategoryId,
+          subcategory: subcategories[0]!.subcategory,
+        }).category,
+        subcategoryId: (bySubcategory.get(normalizedLabel("Miscellaneous")) ?? {
+          categoryId: subcategories[0]!.categoryId,
+          category: subcategories[0]!.category,
+          subcategoryId: subcategories[0]!.subcategoryId,
+          subcategory: subcategories[0]!.subcategory,
+        }).subcategoryId,
+        subcategory: (bySubcategory.get(normalizedLabel("Miscellaneous")) ?? {
+          categoryId: subcategories[0]!.categoryId,
+          category: subcategories[0]!.category,
+          subcategoryId: subcategories[0]!.subcategoryId,
+          subcategory: subcategories[0]!.subcategory,
+        }).subcategory,
+      }
+    : {
+        categoryId: "imported",
+        category: "Other",
+        subcategoryId: "imported",
+        subcategory: "Miscellaneous",
+      };
+
+  return { fallback, byCategory, bySubcategory };
+}
+
+function resolveImportedExpenseCategory(
+  lookup: ExpenseCategoryLookup,
+  categoryName: string,
+  subcategoryName: string,
+) {
+  const normalizedCategory = normalizedLabel(categoryName);
+  const normalizedSubcategory = normalizedLabel(subcategoryName);
+  if (normalizedCategory && normalizedSubcategory) {
+    const subcategoryMatch = lookup.bySubcategory.get(normalizedSubcategory);
+    if (subcategoryMatch && normalizedLabel(subcategoryMatch.category) === normalizedCategory) return subcategoryMatch;
+  }
+  if (normalizedSubcategory) {
+    const subcategoryMatch = lookup.bySubcategory.get(normalizedSubcategory);
+    if (subcategoryMatch) return subcategoryMatch;
+  }
+  if (normalizedCategory) {
+    const subcategoryMatch = lookup.bySubcategory.get(normalizedCategory);
+    if (subcategoryMatch) return subcategoryMatch;
+    const categoryMatch = lookup.byCategory.get(normalizedCategory);
+    if (categoryMatch) {
+      return {
+        ...categoryMatch,
+        subcategoryId: lookup.fallback.subcategoryId,
+        subcategory: lookup.fallback.subcategory,
+      };
+    }
+  }
+  return lookup.fallback;
+}
 
 const inferImportYear = (payload: AndroidPayload) => {
   const candidates = [
@@ -1001,7 +1138,30 @@ async function buildPostImportAudit(
                 WHERE a.client_record_id = payload->>'accountId'
               )
             )
-        )::int AS vouchers_missing_account
+        )::int AS vouchers_missing_account,
+        count(*) FILTER (
+          WHERE entity_type = 'voucher'
+            AND jsonb_typeof(coalesce(payload->'items', '[]'::jsonb)) = 'array'
+            AND jsonb_array_length(coalesce(payload->'items', '[]'::jsonb)) > 1
+        )::int AS vouchers_multiple_items,
+        coalesce(sum(
+          CASE
+            WHEN entity_type = 'voucher' AND jsonb_typeof(coalesce(payload->'items', '[]'::jsonb)) = 'array'
+              THEN jsonb_array_length(coalesce(payload->'items', '[]'::jsonb))
+            ELSE 0
+          END
+        ), 0)::int AS voucher_items_stored,
+        count(*) FILTER (
+          WHERE entity_type = 'voucher'
+            AND jsonb_typeof(coalesce(payload->'items', '[]'::jsonb)) = 'array'
+            AND abs(
+              coalesce((payload->>'amount')::numeric, 0)
+              - coalesce((
+                SELECT sum(coalesce((item->>'amount')::numeric, 0))
+                FROM jsonb_array_elements(coalesce(payload->'items', '[]'::jsonb)) AS item
+              ), 0)
+            ) > 0.01
+        )::int AS vouchers_item_mismatch
       FROM imported_rows
     `),
   ]);
@@ -1041,6 +1201,9 @@ async function buildPostImportAudit(
       vouchersTotal: Number(relationship.vouchers_total ?? 0),
       vouchersLinkedToPaymentAccount: Number(relationship.vouchers_linked_account ?? 0),
       vouchersMissingPaymentAccount: Number(relationship.vouchers_missing_account ?? 0),
+      vouchersWithMultipleItems: Number(relationship.vouchers_multiple_items ?? 0),
+      voucherItemsStored: Number(relationship.voucher_items_stored ?? 0),
+      vouchersWithItemMismatch: Number(relationship.vouchers_item_mismatch ?? 0),
     },
   };
 }
@@ -2041,12 +2204,15 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       const resolveLabourId = (source: AndroidRecord) => maps.labour.get(labourRef(source))
         ?? labourNameMap.get(text(source, ["labourName", "labour_name", "workerName", "worker_name", "employeeName", "name"]).trim().toLowerCase());
       const defaultAccountId = firstMapValue(maps.accounts);
+      const expenseCategoryLookup = await loadExpenseCategoryLookup(tx, parsed.data.workspaceId);
 
       const expenseItemsByParent = new Map<string, AndroidRecord[]>();
-      for (const item of asArray(parsed.data.payload, "expenseItems")) {
+      asArray(parsed.data.payload, "expenseItems").forEach((item, index) => {
         const parentId = relation(item, ["oldExpenseId", "expense_id", "expenseId", "voucher_id", "voucherId", "parent_id", "parentId"]);
-        expenseItemsByParent.set(parentId, [...(expenseItemsByParent.get(parentId) ?? []), item]);
-      }
+        const next = [...(expenseItemsByParent.get(parentId) ?? []), { ...item, __importIndex: index }];
+        next.sort((left, right) => itemSortWeight(left, Number(left.__importIndex ?? 0)) - itemSortWeight(right, Number(right.__importIndex ?? 0)));
+        expenseItemsByParent.set(parentId, next);
+      });
       updateJobStep("Expenses", { status: "running", startedAt: new Date().toISOString(), message: "Importing expenses." });
       updateJobStep("Expense Items", { status: "running", startedAt: new Date().toISOString(), message: "Importing expense items." });
       await logStep("IMPORT EXPENSES", "started");
@@ -2054,23 +2220,77 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       let updatedExpenseItems = 0;
       for (const source of asArray(parsed.data.payload, "expenses")) {
         const items = expenseItemsByParent.get(oldId(source)) ?? [];
+        const normalizedItems = items.length
+          ? items.map((item, index) => {
+            const resolvedCategory = resolveImportedExpenseCategory(
+              expenseCategoryLookup,
+              text(item, ["category", "categoryName"]),
+              text(item, ["subcategory", "subcategoryName"]),
+            );
+            return {
+              id: `android:${fileHash}:expense-item:${oldId(item) || `${oldId(source)}:${index + 1}`}`,
+              oldExpenseItemId: oldId(item),
+              oldAndroidId: oldId(item),
+              oldExpenseId: relation(item, ["oldExpenseId", "expense_id", "expenseId", "voucher_id", "voucherId", "parent_id", "parentId"]) || oldId(source),
+              categoryId: resolvedCategory.categoryId,
+              category: resolvedCategory.category,
+              subcategoryId: resolvedCategory.subcategoryId,
+              subcategory: resolvedCategory.subcategory,
+              rawCategory: text(item, ["category", "categoryName"]),
+              rawSubcategory: text(item, ["subcategory", "subcategoryName"]),
+              amount: numberValue(item, ["amount", "total", "lineTotal"]),
+              description: text(item, ["description", "itemName", "name"]),
+              remarks: text(item, ["remarks", "notes"]),
+              quantity: numberValue(item, ["quantity", "qty"], 1),
+              unit: text(item, ["unit"]),
+              sortOrder: itemSortWeight(item, index),
+              source_type: sourceTypeFor("expenseItems"),
+              old_android_id: oldId(item),
+            };
+          })
+          : (() => {
+            const resolvedCategory = resolveImportedExpenseCategory(
+              expenseCategoryLookup,
+              text(source, ["category", "categoryName", "expenseCategory"], "Other"),
+              text(source, ["subcategory", "subcategoryName", "expenseSubcategory"], "Miscellaneous"),
+            );
+            return [{
+              id: `android:${fileHash}:expense-item:fallback:${oldId(source)}`,
+              oldExpenseId: oldId(source),
+              categoryId: resolvedCategory.categoryId,
+              category: resolvedCategory.category,
+              subcategoryId: resolvedCategory.subcategoryId,
+              subcategory: resolvedCategory.subcategory,
+              rawCategory: text(source, ["category", "categoryName", "expenseCategory"]),
+              rawSubcategory: text(source, ["subcategory", "subcategoryName", "expenseSubcategory"]),
+              amount: numberValue(source, ["total_amount", "totalAmount", "total", "amount", "voucherTotal"]),
+              description: text(source, ["description", "notes"], "Imported Android voucher"),
+              remarks: text(source, ["notes"]),
+              quantity: 1,
+              unit: "",
+              sortOrder: 0,
+              source_type: sourceTypeFor("expenseItems"),
+            }];
+          })();
+        const itemTotal = normalizedItems.reduce((sum, item) => sum + numberValue(item, ["amount"]), 0);
+        const headerCategory = normalizedItems[0];
         const result = await writeRecord("voucher", sourceTypeFor("expenses"), source, {
           voucherNumber: text(source, ["voucherNumber", "voucher_no", "voucher"], `A-${oldId(source)}`),
           date: dateValue(source, ["date", "voucherDate"]),
-          amount: numberValue(source, ["total_amount", "totalAmount", "total", "amount", "voucherTotal"]),
+          amount: itemTotal || numberValue(source, ["total_amount", "totalAmount", "total", "amount", "voucherTotal"]),
           accountId: maps.accounts.get(accountRef(source)) ?? defaultAccountId,
           paymentAccountId: maps.accounts.get(accountRef(source)) ?? defaultAccountId,
           paidFromAccountId: maps.accounts.get(accountRef(source)) ?? defaultAccountId,
           oldPaymentAccountId: accountRef(source),
-          categoryId: text(source, ["category_id", "categoryId", "category"], "imported"),
-          category: text(source, ["category", "categoryName", "expenseCategory"], "Imported"),
-          subcategoryId: text(source, ["subcategory_id", "subcategoryId", "subcategory"], "imported"),
-          subcategory: text(source, ["subcategory", "subcategoryName", "expenseSubcategory"], "Imported"),
+          categoryId: headerCategory?.categoryId ?? text(source, ["category_id", "categoryId", "category"], "imported"),
+          category: headerCategory?.category ?? text(source, ["category", "categoryName", "expenseCategory"], "Imported"),
+          subcategoryId: headerCategory?.subcategoryId ?? text(source, ["subcategory_id", "subcategoryId", "subcategory"], "imported"),
+          subcategory: headerCategory?.subcategory ?? text(source, ["subcategory", "subcategoryName", "expenseSubcategory"], "Imported"),
           paidByPartnerName: text(source, ["paidByPartnerName", "paid_by_partner_name"]),
           description: text(source, ["description", "notes"], "Imported Android voucher"),
           notes: text(source, ["notes"]),
           oldExpenseId: oldId(source),
-          items: items.map((item) => ({ ...item, description: text(item, ["description", "itemName", "name"]), category: text(item, ["category", "categoryName"]), subcategory: text(item, ["subcategory", "subcategoryName"]), amount: numberValue(item, ["amount", "total", "lineTotal"]), quantity: numberValue(item, ["quantity", "qty"], 1), unit: text(item, ["unit"]), source_type: sourceTypeFor("expenseItems"), old_android_id: oldId(item) })),
+          items: normalizedItems,
         });
         if (result.inserted) {
           importedCounts.expenses += 1;
@@ -2427,6 +2647,9 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
             vouchersTotal: 0,
             vouchersLinkedToPaymentAccount: 0,
             vouchersMissingPaymentAccount: 0,
+            vouchersWithMultipleItems: 0,
+            voucherItemsStored: 0,
+            vouchersWithItemMismatch: 0,
           },
         },
       } satisfies ImportResult;
