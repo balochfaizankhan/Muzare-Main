@@ -100,10 +100,10 @@ function normalizeImportedAccountType(value: unknown, fallback = "cash") {
   return normalized || fallback;
 }
 
-function importedAccountGroupKey(payload: Record<string, unknown>, sourceFileHash: string | null, oldAndroidId: string | null) {
+function importedAccountGroupKey(payload: Record<string, unknown>) {
   const type = normalizeImportedAccountType(payload.type);
   const name = normalizeImportedName(payload.name);
-  return `${sourceFileHash ?? "none"}::${oldAndroidId ? `old:${oldAndroidId}` : `name:${name}`}::${type}`;
+  return `name:${name}::${type}`;
 }
 
 type AndroidRecord = Record<string, unknown>;
@@ -833,7 +833,6 @@ async function repairDuplicateImportedAccounts(workspaceId: string): Promise<Acc
       eq(operationalRecords.workspaceId, workspaceId),
       eq(operationalRecords.entityType, "account"),
       sql`${operationalRecords.payload}->>'deletedAt' IS NULL`,
-      sql`${operationalRecords.sourceFileHash} IS NOT NULL`,
     ));
 
     const childRows = await tx.select({
@@ -860,7 +859,7 @@ async function repairDuplicateImportedAccounts(workspaceId: string): Promise<Acc
     const grouped = new Map<string, typeof accountRows>();
     for (const row of accountRows) {
       const payload = row.payload as Record<string, unknown>;
-      const key = importedAccountGroupKey(payload, row.sourceFileHash, row.oldAndroidId);
+      const key = importedAccountGroupKey(payload);
       grouped.set(key, [...(grouped.get(key) ?? []), row]);
     }
 
@@ -871,9 +870,16 @@ async function repairDuplicateImportedAccounts(workspaceId: string): Promise<Acc
 
     for (const rows of duplicateGroups) {
       const sorted = [...rows].sort((a, b) => {
-        const refDelta = (childReferenceCounts.get(b.clientRecordId) ?? 0) - (childReferenceCounts.get(a.clientRecordId) ?? 0);
+        const aRefCount = childReferenceCounts.get(a.clientRecordId) ?? 0;
+        const bRefCount = childReferenceCounts.get(b.clientRecordId) ?? 0;
+        const aIsCurrentReferenced = a.sourceFileHash ? aRefCount > 0 : false;
+        const bIsCurrentReferenced = b.sourceFileHash ? bRefCount > 0 : false;
+        if (aIsCurrentReferenced !== bIsCurrentReferenced) return Number(bIsCurrentReferenced) - Number(aIsCurrentReferenced);
+        const refDelta = bRefCount - aRefCount;
         if (refDelta !== 0) return refDelta;
-        return a.createdAt.getTime() - b.createdAt.getTime();
+        const hashDelta = Number(Boolean(b.sourceFileHash)) - Number(Boolean(a.sourceFileHash));
+        if (hashDelta !== 0) return hashDelta;
+        return b.createdAt.getTime() - a.createdAt.getTime();
       });
       const canonical = sorted[0]!;
       canonicalAccountsKept += 1;
@@ -969,9 +975,7 @@ async function auditDuplicateImportedAccounts(workspaceId: string, fileHash: str
   const grouped = new Map<string, typeof accountRows>();
   for (const row of accountRows) {
     const payload = row.payload as Record<string, unknown>;
-    const name = normalizeImportedName(payload.name);
-    const type = normalizeImportedAccountType(payload.type, "cash");
-    const key = `${fileHash}::${row.oldAndroidId ? `old:${row.oldAndroidId}` : `name:${name}`}::${type}`;
+    const key = importedAccountGroupKey(payload);
     grouped.set(key, [...(grouped.get(key) ?? []), row]);
   }
 
@@ -979,9 +983,16 @@ async function auditDuplicateImportedAccounts(workspaceId: string, fileHash: str
     .map(([logicalKey, rows]) => {
       if (rows.length < 2) return null;
       const sorted = [...rows].sort((a, b) => {
-        const refDelta = (childReferenceCounts.get(b.clientRecordId) ?? 0) - (childReferenceCounts.get(a.clientRecordId) ?? 0);
+        const aRefCount = childReferenceCounts.get(a.clientRecordId) ?? 0;
+        const bRefCount = childReferenceCounts.get(b.clientRecordId) ?? 0;
+        const aIsCurrentReferenced = a.sourceFileHash ? aRefCount > 0 : false;
+        const bIsCurrentReferenced = b.sourceFileHash ? bRefCount > 0 : false;
+        if (aIsCurrentReferenced !== bIsCurrentReferenced) return Number(bIsCurrentReferenced) - Number(aIsCurrentReferenced);
+        const refDelta = bRefCount - aRefCount;
         if (refDelta !== 0) return refDelta;
-        return a.createdAt.getTime() - b.createdAt.getTime();
+        const hashDelta = Number(Boolean(b.sourceFileHash)) - Number(Boolean(a.sourceFileHash));
+        if (hashDelta !== 0) return hashDelta;
+        return b.createdAt.getTime() - a.createdAt.getTime();
       });
       const canonical = sorted[0] ?? null;
       const payload = canonical?.payload as Record<string, unknown> | undefined;
