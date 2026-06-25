@@ -678,11 +678,17 @@ export function MigrationImport() {
                   <p><b>Imported seasons in table</b> {runImport.data.result.postImportAudit.tableCounts.seasons}</p>
                   <p><b>Failed/partial import batches for this file</b> {runImport.data.result.postImportAudit.tableCounts.failedOrPartialBatches}</p>
                   <p><b>Import failures for current batch</b> {runImport.data.result.postImportAudit.tableCounts.importFailures}</p>
+                  <p><b>Duplicate imported account groups</b> {runImport.data.result.postImportAudit.duplicateAccountAudit.totalGroups}</p>
                   <p><b>Expected Android counts</b> {Object.entries(runImport.data.result.postImportAudit.expectedCounts).map(([key, value]) => `${key}: ${value}`).join(" · ")}</p>
                   <p><b>Operational records by entity</b> {runImport.data.result.postImportAudit.operationalRecordsByEntity.length
                     ? runImport.data.result.postImportAudit.operationalRecordsByEntity.map((item) => `${item.entityType}: ${item.count}`).join(" · ")
                     : "Attendance may still be processing in the background. Refresh or follow the current import panel for live counts."}</p>
                   <p><b>Relationship audit</b> attendance {runImport.data.result.postImportAudit.relationshipAudit.attendanceLinkedToLabour}/{runImport.data.result.postImportAudit.relationshipAudit.attendanceTotal} linked to labour · advances labour {runImport.data.result.postImportAudit.relationshipAudit.advancesLinkedToLabour}/{runImport.data.result.postImportAudit.relationshipAudit.advancesTotal} · advances account {runImport.data.result.postImportAudit.relationshipAudit.advancesLinkedToAccount}/{runImport.data.result.postImportAudit.relationshipAudit.advancesTotal} · vouchers account {runImport.data.result.postImportAudit.relationshipAudit.vouchersLinkedToPaymentAccount}/{runImport.data.result.postImportAudit.relationshipAudit.vouchersTotal} · vouchers with multiple items {runImport.data.result.postImportAudit.relationshipAudit.vouchersWithMultipleItems} · stored voucher items {runImport.data.result.postImportAudit.relationshipAudit.voucherItemsStored}</p>
+                  {runImport.data.result.postImportAudit.duplicateAccountAudit.totalGroups > 0 ? (
+                    <p className="worker-action-error">
+                      Duplicate account groups: {runImport.data.result.postImportAudit.duplicateAccountAudit.groups.map((group) => `${group.normalizedName || group.logicalKey} (${group.count})`).join(" · ")}
+                    </p>
+                  ) : null}
                   {(runImport.data.result.postImportAudit.relationshipAudit.attendanceMissingLabour
                     || runImport.data.result.postImportAudit.relationshipAudit.advancesMissingLabour
                     || runImport.data.result.postImportAudit.relationshipAudit.advancesMissingAccount

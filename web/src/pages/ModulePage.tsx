@@ -1580,9 +1580,9 @@ function ExpensesModule() {
       return voucher.items.map((item) => ({
         id: item.id || crypto.randomUUID(),
         categoryId: item.categoryId,
-        categorySearch: item.category,
+        categorySearch: item.categoryName ?? item.category,
         subcategoryId: item.subcategoryId ?? "",
-        subcategorySearch: item.subcategory ?? "",
+        subcategorySearch: item.subcategoryName ?? item.subcategory ?? "",
         amount: String(item.amount ?? ""),
         description: item.description ?? "",
         remarks: item.remarks ?? "",
@@ -1610,9 +1610,9 @@ function ExpensesModule() {
         accountId: voucher.accountId,
         notes: voucher.notes,
         amount: item.amount,
-        category: item.category,
+        category: item.categoryName ?? item.category,
         categoryId: item.categoryId,
-        subcategory: item.subcategory ?? "",
+        subcategory: item.subcategoryName ?? item.subcategory ?? "",
         subcategoryId: item.subcategoryId ?? "",
         description: item.description,
         remarks: item.remarks,
@@ -1807,9 +1807,12 @@ function ExpensesModule() {
     enabled: Boolean(token && workspaceId && farmId && seasonId && navigator.onLine),
   });
   const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account.name])), [accounts]);
-  const voucherSubcategories = useMemo(() => categories.data?.categories
-    .filter((category) => !voucherCategory || category.name === voucherCategory)
-    .flatMap((category) => category.subcategories.map((subcategory) => subcategory.name)) ?? [], [categories.data, voucherCategory]);
+  const voucherCategories = useMemo(() => [...new Set(vouchers.flatMap((voucher) => voucherLinesFor(voucher).map((line) => line.category)).filter(Boolean))].sort(), [voucherLinesFor, vouchers]);
+  const voucherSubcategories = useMemo(() => [...new Set(vouchers
+    .flatMap((voucher) => voucherLinesFor(voucher))
+    .filter((line) => !voucherCategory || line.category === voucherCategory)
+    .map((line) => line.subcategory)
+    .filter(Boolean))].sort(), [voucherCategory, voucherLinesFor, vouchers]);
   const matchesVoucher = useCallback((item: Voucher) => {
     const accountName = accountById.get(item.accountId)
       ?? ("accountName" in item && typeof item.accountName === "string" ? item.accountName : "");
@@ -2040,7 +2043,7 @@ function ExpensesModule() {
           </fieldset>
           <div className="expense-filter-grid">
             <label className="expense-filter-field"><span>{t("expensesPage.category")}</span><ClearableSelect aria-label={t("expensesPage.category")} value={voucherCategory} onChange={(value) => { setVoucherCategory(value); setVoucherSubcategory(""); }}>
-              <option value="">{t("expensesPage.allCategories")}</option>{categories.data?.categories.map((item) => <option key={item.id} value={item.name}>{translateExpenseCategory(item.name)}</option>)}
+              <option value="">{t("expensesPage.allCategories")}</option>{voucherCategories.map((item) => <option key={item} value={item}>{translateExpenseCategory(item)}</option>)}
             </ClearableSelect></label>
             <label className="expense-filter-field"><span>{t("expensesPage.subcategory")}</span><ClearableSelect aria-label={t("expensesPage.subcategory")} value={voucherSubcategory} onChange={setVoucherSubcategory}>
               <option value="">{t("expensesPage.allSubcategories")}</option>{[...new Set(voucherSubcategories)].map((name) => <option key={name} value={name}>{translateExpenseSubcategory(name)}</option>)}

@@ -240,6 +240,18 @@ export type MigrationImportValidation = {
         importFailures: number;
         failedOrPartialBatches: number;
       };
+      duplicateAccountAudit: {
+        totalGroups: number;
+        groups: Array<{
+          logicalKey: string;
+          normalizedName: string;
+          normalizedType: string;
+          count: number;
+          canonicalAccountId: string | null;
+          childReferenceCount: number;
+          accountIds: string[];
+        }>;
+      };
       operationalRecordsByEntity: Array<{ entityType: string; count: number }>;
       relationshipAudit: {
         attendanceTotal: number;

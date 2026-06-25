@@ -133,8 +133,8 @@ const voucherReportItems = (voucher: Voucher): VoucherReportLine[] => {
       voucherNumber: voucher.voucherNumber,
       date: voucher.date,
       accountId: voucher.accountId,
-      category: item.category,
-      subcategory: item.subcategory ?? "",
+      category: item.categoryName ?? item.category,
+      subcategory: item.subcategoryName ?? item.subcategory ?? "",
       description: item.description,
       amount: item.amount,
       remarks: item.remarks,
@@ -375,6 +375,7 @@ export function Reports() {
   const [groupFilter, setGroupFilter] = useState("");
   const [selectedLabourerIds, setSelectedLabourerIds] = useState<string[]>([]);
   const [category, setCategory] = useState("");
+  const [subcategory, setSubcategory] = useState("");
   const [status, setStatus] = useState("");
   const [amountMin, setAmountMin] = useState("");
   const [amountMax, setAmountMax] = useState("");
@@ -492,6 +493,7 @@ export function Reports() {
     setGroupFilter("");
     setSelectedLabourerIds([]);
     setCategory("");
+    setSubcategory("");
     setStatus("");
     setAmountMin("");
     setAmountMax("");
@@ -525,7 +527,7 @@ export function Reports() {
   };
 
   const labourFilterActive = (report === "attendance" || report === "advances") && selectedLabourerIds.length > 0;
-  const filtered = Boolean(search || from || to || accountId || groupFilter || labourFilterActive || category || status || amountMin || amountMax || buyerFilter || productFilter || vehicleFilter || paymentStatusFilter);
+  const filtered = Boolean(search || from || to || accountId || groupFilter || labourFilterActive || category || subcategory || status || amountMin || amountMax || buyerFilter || productFilter || vehicleFilter || paymentStatusFilter);
   const switchReport = (next: Report) => {
     setReport(next);
     setSearchParams((current) => {
@@ -591,11 +593,10 @@ export function Reports() {
     })
     .filter((item) => item.records.length > 0), [advanceRows, attendanceSummary, labourers]);
 
-  const voucherRows = useMemo(() => vouchers
+  const voucherBaseRows = useMemo(() => vouchers
     .filter((item) => {
       const lines = voucherReportItems(item);
       return (!accountId || item.accountId === accountId)
-        && (!category || lines.some((line) => line.category === category))
         && matches(item.date, [
           item.voucherNumber,
           item.description,
@@ -603,10 +604,34 @@ export function Reports() {
           accountName(item.accountId),
           ...lines.flatMap((line) => [line.category, line.subcategory, line.description, line.remarks ?? "", String(line.amount)]),
         ], item.amount);
+    }),
+  [accountId, accountName, matches, vouchers]);
+  const voucherRows = useMemo(() => voucherBaseRows
+    .filter((item) => {
+      const lines = voucherReportItems(item);
+      return (!category || lines.some((line) => line.category === category))
+        && (!subcategory || lines.some((line) => (line.subcategory ?? "") === subcategory));
     })
-    .sort((a, b) => expenseSort === "desc" ? b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt) : a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt)), [accountId, accountName, category, expenseSort, matches, vouchers]);
+    .sort((a, b) => expenseSort === "desc" ? b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt) : a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt)),
+  [category, expenseSort, subcategory, voucherBaseRows]);
   const voucherReportLineRows = useMemo(() => voucherRows.flatMap((item) => voucherReportItems(item)), [voucherRows]);
-  const voucherCategories = [...new Set(vouchers.flatMap((item) => voucherReportItems(item).map((line) => line.category)).filter(Boolean))].sort();
+  const voucherCategories = useMemo(
+    () => [...new Set(voucherBaseRows.flatMap((item) => voucherReportItems(item).map((line) => line.category)).filter(Boolean))].sort(),
+    [voucherBaseRows],
+  );
+  const voucherSubcategories = useMemo(
+    () => [...new Set(voucherBaseRows
+      .flatMap((item) => voucherReportItems(item))
+      .filter((line) => !category || line.category === category)
+      .map((line) => line.subcategory)
+      .filter(Boolean))].sort(),
+    [category, voucherBaseRows],
+  );
+
+  useEffect(() => {
+    if (!subcategory) return;
+    if (!voucherSubcategories.includes(subcategory)) setSubcategory("");
+  }, [subcategory, voucherSubcategories]);
 
   const partnerRows = entries
     .filter((item) => !item.deletedAt
@@ -1100,6 +1125,10 @@ export function Reports() {
             <ClearableSelect aria-label={t("reportsPage.category")} value={category} onChange={setCategory}>
               <option value="">{t("reportsPage.allCategories")}</option>
               {voucherCategories.map((item) => <option key={item} value={item}>{translateExpenseCategory(item)}</option>)}
+            </ClearableSelect>
+            <ClearableSelect aria-label={t("reportsPage.subcategory")} value={subcategory} onChange={setSubcategory}>
+              <option value="">{t("reportsPage.allSubcategories")}</option>
+              {voucherSubcategories.map((item) => <option key={item} value={item}>{translateExpenseSubcategory(item)}</option>)}
             </ClearableSelect>
             {views.expenditures === "log" && <ClearableSelect clearValue="desc" aria-label={t("reportsPage.expenseSort")} value={expenseSort} onChange={(value) => setExpenseSort(value as SortOrder)}>
               <option value="desc">{t("advancesPage.newestFirst")}</option>

@@ -101,8 +101,10 @@ export type Voucher = LocalRecord & {
 export type VoucherItem = {
   id: string;
   category: string;
+  categoryName?: string;
   categoryId: string;
   subcategory?: string;
+  subcategoryName?: string;
   subcategoryId?: string;
   amount: number;
   description: string;

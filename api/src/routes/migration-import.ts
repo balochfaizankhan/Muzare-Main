@@ -144,6 +144,18 @@ type PostImportAudit = {
     importFailures: number;
     failedOrPartialBatches: number;
   };
+  duplicateAccountAudit: {
+    totalGroups: number;
+    groups: Array<{
+      logicalKey: string;
+      normalizedName: string;
+      normalizedType: string;
+      count: number;
+      canonicalAccountId: string | null;
+      childReferenceCount: number;
+      accountIds: string[];
+    }>;
+  };
   operationalRecordsByEntity: Array<{ entityType: string; count: number }>;
   relationshipAudit: {
     attendanceTotal: number;
@@ -774,7 +786,6 @@ async function findExistingImportedAccountRecord(
   tx: typeof db,
   workspaceId: string,
   fileHash: string,
-  sourceType: string,
   oldAndroidId: string | null,
   normalizedName: string,
   normalizedType: string,
@@ -788,7 +799,6 @@ async function findExistingImportedAccountRecord(
       eq(operationalRecords.workspaceId, workspaceId),
       eq(operationalRecords.entityType, "account"),
       eq(operationalRecords.sourceFileHash, fileHash),
-      eq(operationalRecords.sourceType, sourceType),
       eq(operationalRecords.oldAndroidId, oldAndroidId),
       sql`${operationalRecords.payload}->>'deletedAt' IS NULL`,
     )).limit(1)
@@ -920,6 +930,79 @@ async function repairDuplicateImportedAccounts(workspaceId: string): Promise<Acc
   });
 }
 
+async function auditDuplicateImportedAccounts(workspaceId: string, fileHash: string) {
+  const [accountRows, childRows] = await Promise.all([
+    db.select({
+      clientRecordId: operationalRecords.clientRecordId,
+      payload: operationalRecords.payload,
+      oldAndroidId: operationalRecords.oldAndroidId,
+      sourceFileHash: operationalRecords.sourceFileHash,
+      createdAt: operationalRecords.createdAt,
+    }).from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, workspaceId),
+      eq(operationalRecords.entityType, "account"),
+      eq(operationalRecords.sourceFileHash, fileHash),
+      sql`${operationalRecords.payload}->>'deletedAt' IS NULL`,
+    )),
+    db.select({
+      id: operationalRecords.id,
+      payload: operationalRecords.payload,
+    }).from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, workspaceId),
+      eq(operationalRecords.sourceFileHash, fileHash),
+      ne(operationalRecords.entityType, "account"),
+      sql`${operationalRecords.payload}->>'deletedAt' IS NULL`,
+    )),
+  ]);
+
+  const childReferenceCounts = new Map<string, number>();
+  for (const row of childRows) {
+    const payload = row.payload as Record<string, unknown>;
+    for (const field of importedAccountReferenceFields) {
+      const value = payload[field];
+      if (typeof value === "string" && value.trim()) {
+        childReferenceCounts.set(value, (childReferenceCounts.get(value) ?? 0) + 1);
+      }
+    }
+  }
+
+  const grouped = new Map<string, typeof accountRows>();
+  for (const row of accountRows) {
+    const payload = row.payload as Record<string, unknown>;
+    const name = normalizeImportedName(payload.name);
+    const type = normalizeImportedAccountType(payload.type, "cash");
+    const key = `${fileHash}::${row.oldAndroidId ? `old:${row.oldAndroidId}` : `name:${name}`}::${type}`;
+    grouped.set(key, [...(grouped.get(key) ?? []), row]);
+  }
+
+  const duplicateGroups = [...grouped.entries()]
+    .map(([logicalKey, rows]) => {
+      if (rows.length < 2) return null;
+      const sorted = [...rows].sort((a, b) => {
+        const refDelta = (childReferenceCounts.get(b.clientRecordId) ?? 0) - (childReferenceCounts.get(a.clientRecordId) ?? 0);
+        if (refDelta !== 0) return refDelta;
+        return a.createdAt.getTime() - b.createdAt.getTime();
+      });
+      const canonical = sorted[0] ?? null;
+      const payload = canonical?.payload as Record<string, unknown> | undefined;
+      return {
+        logicalKey,
+        normalizedName: normalizeImportedName(payload?.name),
+        normalizedType: normalizeImportedAccountType(payload?.type, "cash"),
+        count: rows.length,
+        canonicalAccountId: canonical?.clientRecordId ?? null,
+        childReferenceCount: canonical ? (childReferenceCounts.get(canonical.clientRecordId) ?? 0) : 0,
+        accountIds: rows.map((row) => row.clientRecordId),
+      };
+    })
+    .filter((group): group is NonNullable<typeof group> => Boolean(group));
+
+  return {
+    totalGroups: duplicateGroups.length,
+    groups: duplicateGroups,
+  };
+}
+
 async function loadCleanupTarget(workspaceId: string, batchId: string): Promise<CleanupTarget | null> {
   const [batch] = await db.select({
     batchId: importBatches.id,
@@ -1019,6 +1102,7 @@ async function buildPostImportAudit(
   fileHash: string,
   payload: AndroidPayload,
 ): Promise<PostImportAudit> {
+  const duplicateAccountAudit = await auditDuplicateImportedAccounts(workspaceId, fileHash);
   const [farmCountRows, seasonCountRows, failedBatchRows, entityRows, failureRows, relationshipRows] = await Promise.all([
     db.execute(sql`
       SELECT count(*)::int AS count
@@ -1185,6 +1269,7 @@ async function buildPostImportAudit(
       importFailures: Number((failureRows.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
       failedOrPartialBatches: Number((failedBatchRows.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
     },
+    duplicateAccountAudit,
     operationalRecordsByEntity: entityRows.rows.map((row) => ({
       entityType: String((row as Record<string, unknown>).entity_type ?? ""),
       count: Number((row as Record<string, unknown>).count ?? 0),
@@ -2123,7 +2208,6 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
           tx,
           parsed.data.workspaceId,
           fileHash,
-          sourceTypeFor("accounts"),
           oldId(source),
           normalizeImportedName(accountName),
           accountType,
@@ -2140,13 +2224,18 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         if (result.updated) updatedAccounts += 1;
       }
       for (const source of asArray(parsed.data.payload, "partners")) {
+        const linkedAccountId = maps.accounts.get(accountRef(source));
+        if (linkedAccountId) {
+          maps.partners.set(oldId(source), linkedAccountId);
+          updatedPartners += 1;
+          continue;
+        }
         const id = randomUUID();
         const partnerName = text(source, ["name", "partnerName"], "Imported Partner");
         const existingPartner = await findExistingImportedAccountRecord(
           tx,
           parsed.data.workspaceId,
           fileHash,
-          sourceTypeFor("partners"),
           oldId(source),
           normalizeImportedName(partnerName),
           "partner",
@@ -2222,10 +2311,12 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         const items = expenseItemsByParent.get(oldId(source)) ?? [];
         const normalizedItems = items.length
           ? items.map((item, index) => {
+            const importedCategoryName = text(item, ["category", "categoryName"], "");
+            const importedSubcategoryName = text(item, ["subcategory", "subcategoryName"], "");
             const resolvedCategory = resolveImportedExpenseCategory(
               expenseCategoryLookup,
-              text(item, ["category", "categoryName"]),
-              text(item, ["subcategory", "subcategoryName"]),
+              importedCategoryName,
+              importedSubcategoryName,
             );
             return {
               id: `android:${fileHash}:expense-item:${oldId(item) || `${oldId(source)}:${index + 1}`}`,
@@ -2233,11 +2324,13 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
               oldAndroidId: oldId(item),
               oldExpenseId: relation(item, ["oldExpenseId", "expense_id", "expenseId", "voucher_id", "voucherId", "parent_id", "parentId"]) || oldId(source),
               categoryId: resolvedCategory.categoryId,
-              category: resolvedCategory.category,
+              category: importedCategoryName || resolvedCategory.category,
+              categoryName: importedCategoryName || resolvedCategory.category,
               subcategoryId: resolvedCategory.subcategoryId,
-              subcategory: resolvedCategory.subcategory,
-              rawCategory: text(item, ["category", "categoryName"]),
-              rawSubcategory: text(item, ["subcategory", "subcategoryName"]),
+              subcategory: importedSubcategoryName,
+              subcategoryName: importedSubcategoryName,
+              rawCategory: importedCategoryName,
+              rawSubcategory: importedSubcategoryName,
               amount: numberValue(item, ["amount", "total", "lineTotal"]),
               description: text(item, ["description", "itemName", "name"]),
               remarks: text(item, ["remarks", "notes"]),
@@ -2249,20 +2342,24 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
             };
           })
           : (() => {
+            const importedCategoryName = text(source, ["category", "categoryName", "expenseCategory"], "Other");
+            const importedSubcategoryName = text(source, ["subcategory", "subcategoryName", "expenseSubcategory"], "");
             const resolvedCategory = resolveImportedExpenseCategory(
               expenseCategoryLookup,
-              text(source, ["category", "categoryName", "expenseCategory"], "Other"),
-              text(source, ["subcategory", "subcategoryName", "expenseSubcategory"], "Miscellaneous"),
+              importedCategoryName,
+              importedSubcategoryName,
             );
             return [{
               id: `android:${fileHash}:expense-item:fallback:${oldId(source)}`,
               oldExpenseId: oldId(source),
               categoryId: resolvedCategory.categoryId,
-              category: resolvedCategory.category,
+              category: importedCategoryName || resolvedCategory.category,
+              categoryName: importedCategoryName || resolvedCategory.category,
               subcategoryId: resolvedCategory.subcategoryId,
-              subcategory: resolvedCategory.subcategory,
-              rawCategory: text(source, ["category", "categoryName", "expenseCategory"]),
-              rawSubcategory: text(source, ["subcategory", "subcategoryName", "expenseSubcategory"]),
+              subcategory: importedSubcategoryName,
+              subcategoryName: importedSubcategoryName,
+              rawCategory: importedCategoryName,
+              rawSubcategory: importedSubcategoryName,
               amount: numberValue(source, ["total_amount", "totalAmount", "total", "amount", "voucherTotal"]),
               description: text(source, ["description", "notes"], "Imported Android voucher"),
               remarks: text(source, ["notes"]),
@@ -2634,6 +2731,10 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
             importFailures: 0,
             failedOrPartialBatches: 0,
           },
+          duplicateAccountAudit: {
+            totalGroups: 0,
+            groups: [],
+          },
           operationalRecordsByEntity: [],
           relationshipAudit: {
             attendanceTotal: 0,
@@ -2668,6 +2769,19 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       fileHash,
       parsed.data.payload,
     );
+
+    if (result.postImportAudit.duplicateAccountAudit.totalGroups > 0) {
+      const duplicateSummary = result.postImportAudit.duplicateAccountAudit.groups
+        .slice(0, 5)
+        .map((group) => `${group.normalizedName || group.logicalKey} (${group.normalizedType}) x${group.count}`)
+        .join(", ");
+      return reply.code(500).send({
+        message: `Import audit failed: duplicate logical imported accounts detected after import. ${duplicateSummary}`,
+        issues: validation.issues,
+        summary: validation.summary,
+        result,
+      });
+    }
 
     return {
       ...validation,
