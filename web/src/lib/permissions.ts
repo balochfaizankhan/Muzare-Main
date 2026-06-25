@@ -19,7 +19,21 @@ export function hasPermission(user: AppUser, permission: Permission, workspaceId
   if (platformPermissions.has(permission)) return Boolean(user.platformRole && permissionsByRole[user.platformRole].includes(permission));
   if (!workspaceId) return false;
   const membership = user.memberships.find((item) => item.active && item.workspaceId === workspaceId);
-  return Boolean(membership && permissionsByRole[membership.role].includes(permission));
+  if (!membership || !permissionsByRole[membership.role].includes(permission)) return false;
+  const moduleGate: Partial<Record<Permission, [WorkspaceModule, WorkspaceModuleAction]>> = {
+    APPROVE_ATTENDANCE: ["attendance", "approve"],
+    APPROVE_EXPENSE: ["expenses", "approve"],
+    APPROVE_SALE: ["sales", "approve"],
+    APPROVE_DISPATCH: ["dispatch", "approve"],
+    MANAGE_TEAM: ["team", "edit"],
+    MANAGE_FARMS: ["settings", "edit"],
+    MANAGE_SEASONS: ["settings", "edit"],
+    MANAGE_EXPENSE_CATEGORIES: ["expenses", "edit"],
+    IMPORT_ATTENDANCE: ["attendance", "create"],
+    VIEW_REPORTS: ["reports", "view"],
+  };
+  const gate = moduleGate[permission];
+  return gate ? hasModulePermission(user, gate[0], gate[1], workspaceId) : true;
 }
 
 const allActions = { view: true, create: true, edit: true, delete: true, approve: true, export: true };

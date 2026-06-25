@@ -82,6 +82,7 @@ export const workspaceMemberships = pgTable(
     role: workspaceRole("role").default("viewer").notNull(),
     active: boolean("active").default(true).notNull(),
     permissions: jsonb("permissions").$type<Record<string, Record<string, boolean>> | null>(),
+    farmAccessMode: text("farm_access_mode").default("all").notNull(),
     ...timestamps,
   },
   (table) => [uniqueIndex("workspace_memberships_workspace_user_uidx").on(table.workspaceId, table.userId)],
@@ -94,6 +95,8 @@ export const workspaceTeamInvitations = pgTable("workspace_team_invitations", {
   phone: text("phone"),
   role: workspaceRole("role").default("viewer").notNull(),
   permissions: jsonb("permissions").$type<Record<string, Record<string, boolean>> | null>(),
+  farmAccessMode: text("farm_access_mode").default("all").notNull(),
+  farmIds: jsonb("farm_ids").$type<string[] | null>(),
   tokenHash: text("token_hash").notNull().unique(),
   status: text("status").default("pending").notNull(),
   invitedBy: uuid("invited_by").references(() => users.id).notNull(),
@@ -136,6 +139,20 @@ export const farms = pgTable(
     ...timestamps,
   },
   (table) => [uniqueIndex("farms_workspace_id_id_uidx").on(table.workspaceId, table.id)],
+);
+
+export const workspaceMemberFarms = pgTable(
+  "workspace_member_farms",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+    membershipId: uuid("membership_id").references(() => workspaceMemberships.id, { onDelete: "cascade" }).notNull(),
+    farmId: uuid("farm_id").references(() => farms.id, { onDelete: "cascade" }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("workspace_member_farms_membership_farm_uidx").on(table.membershipId, table.farmId),
+  ],
 );
 
 export const seasons = pgTable(

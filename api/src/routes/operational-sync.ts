@@ -9,6 +9,7 @@ import { hasModulePermission, hasPermission, type WorkspaceModule } from "../per
 import { validateTenantReferences } from "../tenant-ownership.js";
 import { resolveExpenseCategory } from "./expense-categories.js";
 import { asPayloadRecord, resolveWorkspaceContext } from "./workspace-context.js";
+import { allowedFarmIdsForWorkspace, hasFarmAccess } from "../workspace-access.js";
 
 const entities = [
   "labourer",
@@ -348,7 +349,9 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       farmId: null,
       seasonId: null,
     };
-    const selected = await resolveWorkspaceContext(parsed.data.workspaceId, request.sessionId);
+    const selected = await resolveWorkspaceContext(parsed.data.workspaceId, request.sessionId, {
+      allowedFarmIds: allowedFarmIdsForWorkspace(request.appUser, parsed.data.workspaceId),
+    });
     if (!selected.activeFarmId) {
       return {
         records: [],
@@ -454,6 +457,9 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     const selected = await sessionContext(request.sessionId);
     const generalFarmExpense = parsed.data.entity === "voucher" && parsed.data.record.generalFarmExpense === true;
     const requiresSeason = seasonRequiredEntities.has(parsed.data.entity) && !generalFarmExpense;
+    if (!hasFarmAccess(request.appUser, parsed.data.workspaceId, parsed.data.farmId ?? null)) {
+      return reply.code(403).send({ message: "You do not have access to this farm." });
+    }
     if (!selected?.activeFarmId || parsed.data.farmId !== selected.activeFarmId) {
       return reply.code(403).send({ message: "Select the active farm before submitting records." });
     }
@@ -625,6 +631,9 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       return reply.code(204).send();
     }
     const selected = await sessionContext(request.sessionId);
+    if (!hasFarmAccess(request.appUser, parsed.data.workspaceId, parsed.data.farmId)) {
+      return reply.code(403).send({ message: "You do not have access to this farm." });
+    }
     if (!selected?.activeFarmId || parsed.data.farmId !== selected.activeFarmId) {
       return reply.code(403).send({ message: "Select the active farm before deleting records." });
     }

@@ -9,6 +9,7 @@ import {
   cancelWorkspaceInvitation,
   fetchWorkspaceMemberActivity,
   fetchWorkspaceTeam,
+  type FarmAccessMode,
   inviteWorkspaceMember,
   removeWorkspaceMember,
   updateWorkspaceMember,
@@ -23,7 +24,7 @@ import { roleModulePermissions } from "../../lib/permissions";
 const modules: WorkspaceModule[] = ["dashboard", "workforce", "attendance", "advances", "expenses", "sales", "dispatch", "inventory", "accounts", "reports", "settings", "team"];
 const actions: WorkspaceModuleAction[] = ["view", "create", "edit", "delete", "approve", "export"];
 const roles: WorkspaceRole[] = ["workspace_owner", "workspace_manager", "supervisor", "operator", "viewer"];
-const blankInvite = { email: "", phone: "", role: "viewer" as WorkspaceRole };
+const blankInvite = { email: "", phone: "", role: "viewer" as WorkspaceRole, farmAccessMode: "all" as FarmAccessMode, farmIds: [] as string[] };
 
 function cloneDefaults(role: WorkspaceRole): WorkspaceModulePermissions {
   return Object.fromEntries(modules.map((module) => [module, { ...roleModulePermissions[role][module] }]));
@@ -58,7 +59,13 @@ export function WorkspaceTeam() {
     },
   });
   const saveMember = useMutation({
-    mutationFn: () => updateWorkspaceMember(token!, workspaceId, editing!.id, { role: editing!.role, active: editing!.active, permissions }),
+    mutationFn: () => updateWorkspaceMember(token!, workspaceId, editing!.id, {
+      role: editing!.role,
+      active: editing!.active,
+      permissions,
+      farmAccessMode: editing!.role === "workspace_owner" ? "all" : editing!.farmAccessMode,
+      farmIds: editing!.role === "workspace_owner" ? [] : editing!.farmIds,
+    }),
     onSuccess: async () => { setEditing(null); await refresh(); },
   });
   const remove = useMutation({ mutationFn: (id: string) => removeWorkspaceMember(token!, workspaceId, id), onSuccess: refresh });
@@ -75,6 +82,9 @@ export function WorkspaceTeam() {
     setEditing({ ...member });
     setPermissions(member.permissions ?? cloneDefaults(member.role));
   };
+  const toggleFarm = (farmId: string, selected: string[], onChange: (next: string[]) => void) => {
+    onChange(selected.includes(farmId) ? selected.filter((item) => item !== farmId) : [...selected, farmId]);
+  };
   const submitInvite = (event: FormEvent) => { event.preventDefault(); inviteMember.mutate(); };
   const toggle = (module: WorkspaceModule, action: WorkspaceModuleAction) => setPermissions((current) => ({
     ...current,
@@ -90,6 +100,16 @@ export function WorkspaceTeam() {
           <input required type="email" placeholder={t("workspaceTeam.email")} value={invite.email} onChange={(event) => setInvite({ ...invite, email: event.target.value })} />
           <input placeholder={t("workspaceTeam.phone")} value={invite.phone} onChange={(event) => setInvite({ ...invite, phone: event.target.value })} />
           <select value={invite.role} onChange={(event) => setInvite({ ...invite, role: event.target.value as WorkspaceRole })}>{roles.map((role) => <option value={role} key={role}>{t(`workspaceTeam.roles.${role}`)}</option>)}</select>
+          <select value={invite.farmAccessMode} onChange={(event) => setInvite({ ...invite, farmAccessMode: event.target.value as FarmAccessMode, farmIds: event.target.value === "assigned" ? invite.farmIds : [] })}>
+            <option value="all">{t("workspaceTeam.allFarms")}</option>
+            <option value="assigned">{t("workspaceTeam.assignedFarmsOnly")}</option>
+          </select>
+          {invite.farmAccessMode === "assigned" && <div className="team-farm-assignment-list">
+            {team.data?.availableFarms.map((farm) => <label key={farm.id} className="compact-checkbox">
+              <input type="checkbox" checked={invite.farmIds.includes(farm.id)} onChange={() => toggleFarm(farm.id, invite.farmIds, (farmIds) => setInvite({ ...invite, farmIds }))} />
+              {farm.name}
+            </label>)}
+          </div>}
           <button disabled={inviteMember.isPending} type="submit"><UserPlus size={16} />{t("workspaceTeam.sendInvite")}</button>
         </form>
         {inviteMember.isError && <p className="error">{inviteMember.error.message}</p>}
@@ -106,6 +126,7 @@ export function WorkspaceTeam() {
             <small>
               {t(`workspaceTeam.roles.${member.role}`)} | {member.hasWorkspaceAccess ? t("common.active") : (member.userStatus === "suspended" ? t("common.suspended") : t("common.inactive"))}
             </small>
+            <small>{member.farmAccessMode === "assigned" ? t("workspaceTeam.assignedFarmCount", { count: member.farmIds.length }) : t("workspaceTeam.allFarms")}</small>
           </div>
           {isOwner && <div className="team-card__actions"><button type="button" onClick={() => setActivityMember(member)}><Activity size={15} />{t("workspaceTeam.activity")}</button><button type="button" onClick={() => startEdit(member)}>{t("workspaceTeam.permissions")}</button><button className="danger-button" type="button" onClick={() => window.confirm(t("workspaceTeam.confirmRemove")) && remove.mutate(member.id)}><Trash2 size={15} />{t("workspaceTeam.remove")}</button></div>}
         </article>)}
@@ -113,9 +134,19 @@ export function WorkspaceTeam() {
       {team.data?.invitations.length ? <section className="record-panel"><h2>{t("workspaceTeam.pendingInvites")}</h2>{team.data.invitations.map((item) => <article className="team-card" key={item.id}><div><strong>{item.email}</strong><span>{t(`workspaceTeam.roles.${item.role}`)}</span></div>{isOwner && <button type="button" onClick={() => cancelInvite.mutate(item.id)}>{t("workspaceTeam.cancelInvite")}</button>}</article>)}</section> : null}
       {editing && <div className="worker-dialog-backdrop"><section className="worker-action-dialog permission-dialog" role="dialog" aria-modal="true" aria-label={t("workspaceTeam.editMember")}><header><div><h2>{t("workspaceTeam.editMember")}</h2><p>{editing.email}</p></div><button type="button" onClick={() => setEditing(null)}>×</button></header><div className="worker-action-dialog__body permission-dialog__body">
         <div className="permission-dialog__meta">
-          <label>{t("workspaceTeam.role")}<select value={editing.role} onChange={(event) => { const role = event.target.value as WorkspaceRole; setEditing({ ...editing, role }); setPermissions(cloneDefaults(role)); }}>{roles.map((role) => <option value={role} key={role}>{t(`workspaceTeam.roles.${role}`)}</option>)}</select></label>
+          <label>{t("workspaceTeam.role")}<select value={editing.role} onChange={(event) => { const role = event.target.value as WorkspaceRole; setEditing({ ...editing, role, farmAccessMode: role === "workspace_owner" ? "all" : editing.farmAccessMode, farmIds: role === "workspace_owner" ? [] : editing.farmIds }); setPermissions(cloneDefaults(role)); }}>{roles.map((role) => <option value={role} key={role}>{t(`workspaceTeam.roles.${role}`)}</option>)}</select></label>
+          <label>{t("workspaceTeam.farmAccess")}<select value={editing.role === "workspace_owner" ? "all" : editing.farmAccessMode} disabled={editing.role === "workspace_owner"} onChange={(event) => setEditing({ ...editing, farmAccessMode: event.target.value as FarmAccessMode, farmIds: event.target.value === "assigned" ? editing.farmIds : [] })}>
+            <option value="all">{t("workspaceTeam.allFarms")}</option>
+            <option value="assigned">{t("workspaceTeam.assignedFarmsOnly")}</option>
+          </select></label>
           <label className="compact-checkbox"><input type="checkbox" checked={editing.active} onChange={(event) => setEditing({ ...editing, active: event.target.checked })} />{t("workspaceTeam.activeMember")}</label>
         </div>
+        {editing.role !== "workspace_owner" && editing.farmAccessMode === "assigned" && <div className="team-farm-assignment-list">
+          {team.data?.availableFarms.map((farm) => <label key={farm.id} className="compact-checkbox">
+            <input type="checkbox" checked={editing.farmIds.includes(farm.id)} onChange={() => toggleFarm(farm.id, editing.farmIds, (farmIds) => setEditing({ ...editing, farmIds }))} />
+            {farm.name}
+          </label>)}
+        </div>}
         <div className="permission-matrix">{visibleModules.map((module) => <section key={module}><strong>{t(`workspaceTeam.modules.${module}`)}</strong>{actions.map((action) => <label key={action}><input type="checkbox" checked={permissions[module]?.[action] ?? roleModulePermissions[editing.role][module][action]} onChange={() => toggle(module, action)} />{t(`workspaceTeam.actions.${action}`)}</label>)}</section>)}</div>
       </div><footer><button className="secondary-button" type="button" onClick={() => setPermissions(cloneDefaults(editing.role))}><RotateCcw size={15} />{t("workspaceTeam.reset")}</button><div className="permission-dialog__footer-actions"><button className="secondary-button" type="button" onClick={() => setEditing(null)}>{t("common.close")}</button><button type="button" disabled={saveMember.isPending} onClick={() => saveMember.mutate()}>{t("workspaceTeam.save")}</button></div></footer></section></div>}
       {activityMember && <div className="worker-dialog-backdrop"><section className="worker-action-dialog permission-dialog"><header><div><h2>{t("workspaceTeam.activity")}</h2><p>{activityMember.name || activityMember.email}</p></div><button type="button" onClick={() => setActivityMember(null)}>×</button></header><div className="worker-action-dialog__body">

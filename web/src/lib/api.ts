@@ -11,6 +11,7 @@ export type WorkspaceRole = "workspace_owner" | "workspace_manager" | "superviso
 export type WorkspaceModule = "dashboard" | "workforce" | "attendance" | "advances" | "expenses" | "sales" | "dispatch" | "inventory" | "accounts" | "reports" | "settings" | "team";
 export type WorkspaceModuleAction = "view" | "create" | "edit" | "delete" | "approve" | "export";
 export type WorkspaceModulePermissions = Partial<Record<WorkspaceModule, Partial<Record<WorkspaceModuleAction, boolean>>>>;
+export type FarmAccessMode = "all" | "assigned";
 export type AppRole = PlatformRole | WorkspaceRole;
 export type Permission =
   | "CREATE_WORKSPACE" | "DELETE_WORKSPACE" | "VIEW_WORKSPACES" | "VIEW_USERS" | "MANAGE_SUBSCRIPTIONS"
@@ -26,7 +27,15 @@ export type AppUser = {
   displayName: string | null;
   role: AppRole;
   platformRole: PlatformRole | null;
-  memberships: Array<{ workspaceId: string; workspaceName: string; role: WorkspaceRole; active: boolean; permissions?: WorkspaceModulePermissions | null }>;
+  memberships: Array<{
+    workspaceId: string;
+    workspaceName: string;
+    role: WorkspaceRole;
+    active: boolean;
+    permissions?: WorkspaceModulePermissions | null;
+    farmAccessMode?: FarmAccessMode;
+    farmIds?: string[];
+  }>;
   status: "pending" | "approved" | "rejected" | "suspended";
 };
 
@@ -90,9 +99,11 @@ export type WorkspaceTeamMember = {
   id: string; userId: string; name: string | null; email: string; phone: string | null; role: WorkspaceRole;
   active: boolean; userActive: boolean; userStatus: "pending" | "approved" | "rejected" | "suspended";
   hasWorkspaceAccess: boolean; displayName: string; permissions: WorkspaceModulePermissions | null; lastActiveAt: string | null;
+  farmAccessMode: FarmAccessMode; farmIds: string[];
 };
 export type WorkspaceTeamInvitation = {
   id: string; email: string; phone: string | null; role: WorkspaceRole; status: string; expiresAt: string; createdAt: string;
+  farmAccessMode: FarmAccessMode; farmIds: string[];
 };
 export type WorkspaceInvitationLookup = {
   workspaceId: string;
@@ -109,6 +120,7 @@ export type WorkspaceInvitationLookup = {
 export type WorkspaceTeamData = {
   members: WorkspaceTeamMember[];
   invitations: WorkspaceTeamInvitation[];
+  availableFarms: Array<{ id: string; name: string }>;
   roleDefaults: Record<WorkspaceRole, Record<WorkspaceModule, Record<WorkspaceModuleAction, boolean>>>;
   diagnostics?: {
     email: string;
@@ -705,10 +717,22 @@ export const updateWorkspaceProfile = (token: string, workspaceId: string, input
   apiRequest<{ workspace: WorkspaceProfile; user: AppUser }>(`/v1/workspace/${workspaceId}/profile`, { method: "PATCH", body: JSON.stringify(input) }, token);
 export const fetchWorkspaceTeam = (token: string, workspaceId: string) =>
   apiRequest<WorkspaceTeamData>(`/v1/workspace/${workspaceId}/team`, {}, token);
-export const inviteWorkspaceMember = (token: string, workspaceId: string, input: { email: string; phone?: string; role: WorkspaceRole; permissions?: WorkspaceModulePermissions | null }) =>
+export const inviteWorkspaceMember = (token: string, workspaceId: string, input: {
+  email: string;
+  phone?: string;
+  role: WorkspaceRole;
+  permissions?: WorkspaceModulePermissions | null;
+  farmAccessMode?: FarmAccessMode;
+  farmIds?: string[];
+}) =>
   apiRequest<{ memberAdded: boolean; alreadyHasAccess?: boolean; invitationToken?: string; invitationUrl?: string; emailSent?: boolean; emailConfigured?: boolean; warning?: string | null }>(`/v1/workspace/${workspaceId}/team/invitations`, { method: "POST", body: JSON.stringify(input) }, token);
-export const updateWorkspaceMember = (token: string, workspaceId: string, membershipId: string, input: { role: WorkspaceRole; active: boolean; permissions?: WorkspaceModulePermissions | null }) =>
-  apiRequest<void>(`/v1/workspace/${workspaceId}/team/${membershipId}`, { method: "PATCH", body: JSON.stringify(input) }, token);
+export const updateWorkspaceMember = (token: string, workspaceId: string, membershipId: string, input: {
+  role: WorkspaceRole;
+  active: boolean;
+  permissions?: WorkspaceModulePermissions | null;
+  farmAccessMode?: FarmAccessMode;
+  farmIds?: string[];
+}) => apiRequest<{ membership: WorkspaceTeamMember }>(`/v1/workspace/${workspaceId}/team/${membershipId}`, { method: "PATCH", body: JSON.stringify(input) }, token);
 export const removeWorkspaceMember = (token: string, workspaceId: string, membershipId: string) =>
   apiRequest<void>(`/v1/workspace/${workspaceId}/team/${membershipId}`, { method: "DELETE" }, token);
 export const cancelWorkspaceInvitation = (token: string, workspaceId: string, invitationId: string) =>

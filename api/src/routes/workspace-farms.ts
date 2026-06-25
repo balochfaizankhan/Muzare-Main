@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
@@ -8,6 +8,7 @@ import { auditLogs, farmDeletionRequests, farms, operationalRecords, seasons, us
 import { visibleFarmWhere } from "../farm-visibility.js";
 import { hasPermission } from "../permissions.js";
 import { repairWorkspaceContext, resolveWorkspaceContext } from "./workspace-context.js";
+import { allowedFarmIdsForWorkspace, hasFarmAccess, workspaceMembershipFor } from "../workspace-access.js";
 
 const workspaceParams = z.object({ workspaceId: z.string().uuid() });
 const farmParams = workspaceParams.extend({ farmId: z.string().uuid() });
@@ -54,6 +55,12 @@ function canManage(request: FastifyRequest, workspaceId: string) {
 }
 function isWorkspaceOwner(request: FastifyRequest, workspaceId: string) {
   return request.appUser?.memberships.some((membership) => membership.workspaceId === workspaceId && membership.active && membership.role === "workspace_owner") === true;
+}
+
+function canCreateFarm(request: FastifyRequest, workspaceId: string) {
+  const membership = workspaceMembershipFor(request.appUser, workspaceId);
+  if (!membership) return false;
+  return hasPermission(request.appUser!, "MANAGE_FARMS", workspaceId) && membership.farmAccessMode === "all";
 }
 
 async function farmRecordCounts(workspaceId: string, farmId: string) {
@@ -106,12 +113,17 @@ export async function workspaceFarmRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(403).send({ message: "Select this workspace before viewing farms." });
     }
     if (localDevelopmentMode) return { farms: [], activeFarmId: null };
-    const activeRecords = await db.select().from(farms).where(await visibleFarmWhere(parsed.data.workspaceId)).orderBy(farms.name);
+    const allowedFarmIds = allowedFarmIdsForWorkspace(request.appUser, parsed.data.workspaceId);
+    const activeRecords = await db.select().from(farms).where(and(
+      await visibleFarmWhere(parsed.data.workspaceId),
+      allowedFarmIds === null ? undefined : allowedFarmIds.length ? inArray(farms.id, allowedFarmIds) : sql`false`,
+    )).orderBy(farms.name);
     const historyRecords = await db.select().from(farms).where(and(
       eq(farms.workspaceId, parsed.data.workspaceId),
       sql`(${farms.deletedAt} IS NOT NULL OR ${farms.active} = false)`,
+      allowedFarmIds === null ? undefined : allowedFarmIds.length ? inArray(farms.id, allowedFarmIds) : sql`false`,
     )).orderBy(sql`${farms.deletedAt} DESC NULLS LAST`, farms.name);
-    const context = await resolveWorkspaceContext(parsed.data.workspaceId, request.sessionId);
+    const context = await resolveWorkspaceContext(parsed.data.workspaceId, request.sessionId, { allowedFarmIds });
     const pendingRequests = await db.select({
       farmId: farmDeletionRequests.farmId,
       status: farmDeletionRequests.status,
@@ -148,7 +160,7 @@ export async function workspaceFarmRoutes(app: FastifyInstance): Promise<void> {
     const params = workspaceParams.safeParse(request.params);
     const input = farmInput.safeParse(request.body);
     if (!params.success || !input.success) return reply.code(400).send({ message: "Valid farm details are required." });
-    if (!requireSelectedWorkspace(request, params.data.workspaceId) || !canManage(request, params.data.workspaceId)) {
+    if (!requireSelectedWorkspace(request, params.data.workspaceId) || !canCreateFarm(request, params.data.workspaceId)) {
       return reply.code(403).send({ message: "Workspace farm management permission is required." });
     }
     if (localDevelopmentMode) return reply.code(503).send({ message: "Configure PostgreSQL to manage farms." });
@@ -175,7 +187,7 @@ export async function workspaceFarmRoutes(app: FastifyInstance): Promise<void> {
     const params = farmParams.safeParse(request.params);
     const input = farmInput.safeParse(request.body);
     if (!params.success || !input.success) return reply.code(400).send({ message: "Valid farm details are required." });
-    if (!requireSelectedWorkspace(request, params.data.workspaceId) || !canManage(request, params.data.workspaceId)) {
+    if (!requireSelectedWorkspace(request, params.data.workspaceId) || !canManage(request, params.data.workspaceId) || !hasFarmAccess(request.appUser, params.data.workspaceId, params.data.farmId)) {
       return reply.code(403).send({ message: "Workspace farm management permission is required." });
     }
     if (localDevelopmentMode) return reply.code(503).send({ message: "Configure PostgreSQL to manage farms." });
@@ -196,7 +208,7 @@ export async function workspaceFarmRoutes(app: FastifyInstance): Promise<void> {
   app.post("/v1/workspace/:workspaceId/farms/:farmId/archive", { preHandler: requireUser }, async (request, reply) => {
     if (!request.appUser) return reply;
     const params = farmParams.safeParse(request.params);
-    if (!params.success || !requireSelectedWorkspace(request, params.data.workspaceId) || !canManage(request, params.data.workspaceId)) {
+    if (!params.success || !requireSelectedWorkspace(request, params.data.workspaceId) || !canManage(request, params.data.workspaceId) || !hasFarmAccess(request.appUser, params.data.workspaceId, params.data.farmId)) {
       return reply.code(403).send({ message: "Workspace farm management permission is required." });
     }
     if (localDevelopmentMode) return reply.code(503).send({ message: "Configure PostgreSQL to manage farms." });
@@ -211,7 +223,7 @@ export async function workspaceFarmRoutes(app: FastifyInstance): Promise<void> {
   app.delete("/v1/workspace/:workspaceId/farms/:farmId", { preHandler: requireUser }, async (request, reply) => {
     if (!request.appUser) return reply;
     const params = farmParams.safeParse(request.params);
-    if (!params.success || !requireSelectedWorkspace(request, params.data.workspaceId) || !canManage(request, params.data.workspaceId)) {
+    if (!params.success || !requireSelectedWorkspace(request, params.data.workspaceId) || !canManage(request, params.data.workspaceId) || !hasFarmAccess(request.appUser, params.data.workspaceId, params.data.farmId)) {
       return reply.code(403).send({ message: "Workspace farm management permission is required." });
     }
     if (localDevelopmentMode) return reply.code(503).send({ message: "Configure PostgreSQL to manage farms." });
@@ -231,7 +243,7 @@ export async function workspaceFarmRoutes(app: FastifyInstance): Promise<void> {
     if (!request.appUser) return reply;
     const params = farmParams.safeParse(request.params);
     const body = deleteRequestInput.safeParse(request.body ?? {});
-    if (!params.success || !body.success || !requireSelectedWorkspace(request, params.data.workspaceId) || !isWorkspaceOwner(request, params.data.workspaceId)) {
+    if (!params.success || !body.success || !requireSelectedWorkspace(request, params.data.workspaceId) || !isWorkspaceOwner(request, params.data.workspaceId) || !hasFarmAccess(request.appUser, params.data.workspaceId, params.data.farmId)) {
       return reply.code(403).send({ message: "Only the workspace owner can request farm deletion." });
     }
     if (localDevelopmentMode) return reply.code(202).send();
@@ -275,7 +287,7 @@ export async function workspaceFarmRoutes(app: FastifyInstance): Promise<void> {
   app.post("/v1/workspace/:workspaceId/farms/:farmId/select", { preHandler: requireUser }, async (request, reply) => {
     if (!request.appUser || !request.sessionId) return reply.code(401).send({ message: "A database-backed session is required." });
     const params = farmParams.safeParse(request.params);
-    if (!params.success || !requireSelectedWorkspace(request, params.data.workspaceId)) {
+    if (!params.success || !requireSelectedWorkspace(request, params.data.workspaceId) || !hasFarmAccess(request.appUser, params.data.workspaceId, params.data.farmId)) {
       return reply.code(403).send({ message: "Select this workspace before selecting a farm." });
     }
     const [farm] = await db.select({ id: farms.id }).from(farms)
@@ -288,7 +300,7 @@ export async function workspaceFarmRoutes(app: FastifyInstance): Promise<void> {
   app.post("/v1/workspace/:workspaceId/farms/:farmId/restore", { preHandler: requireUser }, async (request, reply) => {
     if (!request.appUser) return reply;
     const params = farmParams.safeParse(request.params);
-    if (!params.success || !requireSelectedWorkspace(request, params.data.workspaceId) || !canManage(request, params.data.workspaceId)) {
+    if (!params.success || !requireSelectedWorkspace(request, params.data.workspaceId) || !canManage(request, params.data.workspaceId) || !hasFarmAccess(request.appUser, params.data.workspaceId, params.data.farmId)) {
       return reply.code(403).send({ message: "Workspace farm management permission is required." });
     }
     if (localDevelopmentMode) return reply.code(503).send({ message: "Configure PostgreSQL to manage farms." });

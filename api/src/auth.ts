@@ -1,11 +1,12 @@
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { and, eq, gt, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, sql } from "drizzle-orm";
 import { config, localDevelopmentMode } from "./config.js";
 import { db } from "./db/client.js";
-import { userSessions, users, workspaceMemberships, workspaces } from "./db/schema.js";
+import { userSessions, users, workspaceMemberFarms, workspaceMemberships, workspaces } from "./db/schema.js";
 import { hasPermission, type AppRole, type Permission, type PlatformRole, type WorkspaceModulePermissions, type WorkspaceRole } from "./permissions.js";
+import type { FarmAccessMode } from "./workspace-access.js";
 
 const scrypt = promisify(scryptCallback);
 
@@ -15,6 +16,8 @@ export type WorkspaceMembership = {
   role: WorkspaceRole;
   active: boolean;
   permissions: WorkspaceModulePermissions | null;
+  farmAccessMode: FarmAccessMode;
+  farmIds: string[];
 };
 
 export type AuthenticatedUser = {
@@ -107,17 +110,37 @@ export async function ensureBootstrapAdmin(): Promise<void> {
 }
 
 async function loadMemberships(userId: string): Promise<WorkspaceMembership[]> {
-  return db
+  const memberships = await db
     .select({
+      id: workspaceMemberships.id,
       workspaceId: workspaceMemberships.workspaceId,
       workspaceName: workspaces.name,
       role: workspaceMemberships.role,
       active: workspaceMemberships.active,
       permissions: workspaceMemberships.permissions,
+      farmAccessMode: workspaceMemberships.farmAccessMode,
     })
     .from(workspaceMemberships)
     .innerJoin(workspaces, eq(workspaces.id, workspaceMemberships.workspaceId))
     .where(and(eq(workspaceMemberships.userId, userId), eq(workspaces.status, "approved")));
+  if (!memberships.length) return [];
+  const membershipIds = memberships.map((membership) => membership.id);
+  const assignments = await db.select({
+    membershipId: workspaceMemberFarms.membershipId,
+    farmId: workspaceMemberFarms.farmId,
+  }).from(workspaceMemberFarms)
+    .where(inArray(workspaceMemberFarms.membershipId, membershipIds));
+  const farmIdsByMembership = new Map<string, string[]>();
+  for (const assignment of assignments) {
+    const list = farmIdsByMembership.get(assignment.membershipId) ?? [];
+    list.push(assignment.farmId);
+    farmIdsByMembership.set(assignment.membershipId, list);
+  }
+  return memberships.map(({ id, ...membership }) => ({
+    ...membership,
+    farmAccessMode: membership.farmAccessMode === "assigned" ? "assigned" : "all",
+    farmIds: farmIdsByMembership.get(id) ?? [],
+  }));
 }
 
 export async function serializeUser(user: typeof users.$inferSelect, workspaceId?: string | null): Promise<AuthenticatedUser> {

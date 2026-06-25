@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { requireUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { resolveWorkspaceContext } from "./workspace-context.js";
+import { allowedFarmIdsForWorkspace } from "../workspace-access.js";
 
 export async function bootstrapRoutes(app: FastifyInstance): Promise<void> {
   app.get("/v1/bootstrap", { preHandler: requireUser }, async (request, reply) => {
@@ -29,7 +30,9 @@ export async function bootstrapRoutes(app: FastifyInstance): Promise<void> {
 
     let context;
     try {
-      context = await resolveWorkspaceContext(request.appUser.workspaceId, request.sessionId);
+      context = await resolveWorkspaceContext(request.appUser.workspaceId, request.sessionId, {
+        allowedFarmIds: allowedFarmIdsForWorkspace(request.appUser, request.appUser.workspaceId),
+      });
     } catch (error) {
       request.log.error({
         err: error,

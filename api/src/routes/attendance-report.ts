@@ -7,6 +7,7 @@ import { db } from "../db/client.js";
 import { farms, operationalRecords, seasons, userSessions } from "../db/schema.js";
 import { hasPermission } from "../permissions.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
+import { hasFarmAccess } from "../workspace-access.js";
 
 const paramsSchema = z.object({ workspaceId: z.string().uuid() });
 const querySchema = z.object({
@@ -48,6 +49,9 @@ export async function attendanceReportRoutes(app: FastifyInstance): Promise<void
     if (labourId) selectedLabourIds.add(labourId);
     if (request.appUser.workspaceId !== workspaceId || !hasPermission(request.appUser, "VIEW_REPORTS", workspaceId)) {
       return reply.code(403).send({ message: "Workspace report permission is required." });
+    }
+    if (!hasFarmAccess(request.appUser, workspaceId, farmId)) {
+      return reply.code(403).send({ message: "You do not have access to this farm." });
     }
     if (localDevelopmentMode) return { records: [], summaries: [], advances: [], dates: reportDates(from, to), metadata: null };
 

@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { auditLogs, farms, operationalRecords, seasons, userSessions } from "../db/schema.js";
 import { visibleFarmSqlGuard, visibleFarmWhere } from "../farm-visibility.js";
@@ -26,10 +26,13 @@ function pickSeason(records: SeasonRow[], preferredId: string | null | undefined
     ?? null;
 }
 
-async function validFarms(workspaceId: string) {
+async function validFarms(workspaceId: string, allowedFarmIds?: string[] | null) {
   return db.select()
     .from(farms)
-    .where(await visibleFarmWhere(workspaceId))
+    .where(and(
+      await visibleFarmWhere(workspaceId),
+      allowedFarmIds === null || allowedFarmIds === undefined ? undefined : allowedFarmIds.length ? inArray(farms.id, allowedFarmIds) : sql`false`,
+    ))
     .orderBy(farms.name);
 }
 
@@ -163,8 +166,12 @@ export async function repairDeletedFarmSeasonState(workspaceId: string): Promise
   });
 }
 
-export async function resolveWorkspaceContext(workspaceId: string, sessionId?: string | null): Promise<WorkspaceContextState> {
-  const records = await validFarms(workspaceId);
+export async function resolveWorkspaceContext(
+  workspaceId: string,
+  sessionId?: string | null,
+  options?: { allowedFarmIds?: string[] | null },
+): Promise<WorkspaceContextState> {
+  const records = await validFarms(workspaceId, options?.allowedFarmIds);
   const [session] = sessionId
     ? await db.select({ activeFarmId: userSessions.activeFarmId, activeSeasonId: userSessions.activeSeasonId })
       .from(userSessions)

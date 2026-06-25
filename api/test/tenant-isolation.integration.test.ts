@@ -16,6 +16,7 @@ import {
   seasons,
   userSessions,
   users,
+  workspaceMemberFarms,
   workspaceApprovals,
   workspaceMemberships,
   workspaceTeamInvitations,
@@ -25,8 +26,10 @@ import {
 const now = new Date().toISOString();
 const alpha = { workspaceId: randomUUID(), farmId: randomUUID(), seasonId: randomUUID(), userId: randomUUID(), token: `alpha-${randomUUID()}` };
 const bravo = { workspaceId: randomUUID(), farmId: randomUUID(), seasonId: randomUUID(), userId: randomUUID(), token: `bravo-${randomUUID()}` };
+const alphaSecondary = { farmId: randomUUID(), seasonId: randomUUID() };
 const supervisor = { userId: randomUUID(), token: `supervisor-${randomUUID()}` };
 const operator = { userId: randomUUID(), token: `operator-${randomUUID()}` };
+const viewer = { userId: randomUUID(), token: `viewer-${randomUUID()}` };
 const admin = { userId: randomUUID(), token: `admin-${randomUUID()}` };
 const ids = [alpha.workspaceId, bravo.workspaceId];
 let app: Awaited<ReturnType<typeof buildApp>>;
@@ -53,6 +56,7 @@ before(async () => {
     { id: bravo.userId, email: `bravo-${bravo.userId}@example.test`, passwordHash: "test", status: "approved" },
     { id: supervisor.userId, email: `supervisor-${supervisor.userId}@example.test`, passwordHash: "test", status: "approved" },
     { id: operator.userId, email: `operator-${operator.userId}@example.test`, passwordHash: "test", status: "approved" },
+    { id: viewer.userId, email: `viewer-${viewer.userId}@example.test`, passwordHash: "test", status: "approved" },
     { id: admin.userId, email: `admin-${admin.userId}@example.test`, passwordHash: "test", status: "approved", platformRole: "platform_admin" },
   ]);
   await db.insert(workspaceMemberships).values([
@@ -60,20 +64,29 @@ before(async () => {
     { workspaceId: bravo.workspaceId, userId: bravo.userId, role: "workspace_owner" },
     { workspaceId: alpha.workspaceId, userId: supervisor.userId, role: "supervisor" },
     { workspaceId: alpha.workspaceId, userId: operator.userId, role: "operator" },
+    { workspaceId: alpha.workspaceId, userId: viewer.userId, role: "viewer", farmAccessMode: "assigned" },
   ]);
   await db.insert(farms).values([
     { id: alpha.farmId, workspaceId: alpha.workspaceId, name: "Alpha Farm" },
+    { id: alphaSecondary.farmId, workspaceId: alpha.workspaceId, name: "Alpha Secondary Farm" },
     { id: bravo.farmId, workspaceId: bravo.workspaceId, name: "Bravo Farm" },
   ]);
   await db.insert(seasons).values([
     { id: alpha.seasonId, workspaceId: alpha.workspaceId, farmId: alpha.farmId, name: "Alpha Season", year: 2026, startsOn: "2026-01-01", status: "active" },
+    { id: alphaSecondary.seasonId, workspaceId: alpha.workspaceId, farmId: alphaSecondary.farmId, name: "Alpha Secondary Season", year: 2026, startsOn: "2026-01-01", status: "active" },
     { id: bravo.seasonId, workspaceId: bravo.workspaceId, farmId: bravo.farmId, name: "Bravo Season", year: 2026, startsOn: "2026-01-01", status: "active" },
   ]);
+  await db.insert(workspaceMemberFarms).values({
+    workspaceId: alpha.workspaceId,
+    membershipId: (await db.select({ id: workspaceMemberships.id }).from(workspaceMemberships).where(and(eq(workspaceMemberships.workspaceId, alpha.workspaceId), eq(workspaceMemberships.userId, viewer.userId))).limit(1))[0]!.id,
+    farmId: alpha.farmId,
+  });
   await db.insert(userSessions).values([
     { userId: alpha.userId, workspaceId: alpha.workspaceId, activeFarmId: alpha.farmId, activeSeasonId: alpha.seasonId, tokenHash: hash(alpha.token), expiresAt: new Date(Date.now() + 60_000) },
     { userId: bravo.userId, workspaceId: bravo.workspaceId, activeFarmId: bravo.farmId, activeSeasonId: bravo.seasonId, tokenHash: hash(bravo.token), expiresAt: new Date(Date.now() + 60_000) },
     { userId: supervisor.userId, workspaceId: alpha.workspaceId, activeFarmId: alpha.farmId, activeSeasonId: alpha.seasonId, tokenHash: hash(supervisor.token), expiresAt: new Date(Date.now() + 60_000) },
     { userId: operator.userId, workspaceId: alpha.workspaceId, activeFarmId: alpha.farmId, activeSeasonId: alpha.seasonId, tokenHash: hash(operator.token), expiresAt: new Date(Date.now() + 60_000) },
+    { userId: viewer.userId, workspaceId: alpha.workspaceId, activeFarmId: alpha.farmId, activeSeasonId: alpha.seasonId, tokenHash: hash(viewer.token), expiresAt: new Date(Date.now() + 60_000) },
     { userId: admin.userId, workspaceId: alpha.workspaceId, activeFarmId: alpha.farmId, activeSeasonId: alpha.seasonId, tokenHash: hash(admin.token), expiresAt: new Date(Date.now() + 60_000) },
   ]);
   app = await buildApp();
@@ -89,11 +102,12 @@ after(async () => {
   await db.delete(importFailures).where(inArray(importFailures.workspaceId, ids));
   await db.delete(importBatches).where(inArray(importBatches.workspaceId, ids));
   await db.delete(operationalRecords).where(inArray(operationalRecords.workspaceId, ids));
-  await db.delete(userSessions).where(inArray(userSessions.userId, [alpha.userId, bravo.userId, supervisor.userId, operator.userId, admin.userId]));
+  await db.delete(userSessions).where(inArray(userSessions.userId, [alpha.userId, bravo.userId, supervisor.userId, operator.userId, viewer.userId, admin.userId]));
   await db.delete(seasons).where(inArray(seasons.workspaceId, ids));
   await db.delete(farms).where(inArray(farms.workspaceId, ids));
+  await db.delete(workspaceMemberFarms).where(eq(workspaceMemberFarms.workspaceId, alpha.workspaceId));
   await db.delete(workspaceMemberships).where(inArray(workspaceMemberships.workspaceId, ids));
-  await db.delete(users).where(inArray(users.id, [alpha.userId, bravo.userId, supervisor.userId, operator.userId, admin.userId]));
+  await db.delete(users).where(inArray(users.id, [alpha.userId, bravo.userId, supervisor.userId, operator.userId, viewer.userId, admin.userId]));
   await db.delete(users).where(eq(users.email, "invited.member@example.test"));
   await db.delete(workspaces).where(inArray(workspaces.id, ids));
   await closeDatabaseConnection();
@@ -1193,8 +1207,9 @@ test("workspace farm CRUD and active selection remain tenant scoped", async () =
 
   assert.equal((await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/farms/${farmId}/archive`)).statusCode, 204);
   const farmsList = (await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/farms`)).json();
-  assert.equal(farmsList.farms.find((farm: { id: string }) => farm.id === farmId).active, false);
-  assert.equal(farmsList.activeFarmId, null);
+  assert.equal(farmsList.farms.some((farm: { id: string }) => farm.id === farmId), false);
+  assert.equal(farmsList.historyFarms.find((farm: { id: string }) => farm.id === farmId)?.active, false);
+  assert.equal(farmsList.activeFarmId, alpha.farmId);
 });
 
 test("workspace owners can update their profile while non-owners and foreign tenants cannot", async () => {
@@ -1269,4 +1284,54 @@ test("workspace team invitations, module overrides, and last-owner protection re
   const ownerMembership = team.json().members.find((member: { userId: string }) => member.userId === alpha.userId);
   assert.ok(ownerMembership);
   assert.equal((await request(alpha.token, "DELETE", `/v1/workspace/${alpha.workspaceId}/team/${ownerMembership.id}`)).statusCode, 409);
+});
+
+test("farm assignment restricts bootstrap, farm lists, reports, and operational writes to assigned farms only", async () => {
+  const bootstrap = await request(viewer.token, "GET", "/v1/bootstrap");
+  assert.equal(bootstrap.statusCode, 200);
+  assert.equal(bootstrap.json().farms.length, 1);
+  assert.equal(bootstrap.json().farms[0].id, alpha.farmId);
+
+  const farmList = await request(viewer.token, "GET", `/v1/workspace/${alpha.workspaceId}/farms`);
+  assert.equal(farmList.statusCode, 200);
+  assert.deepEqual(farmList.json().farms.map((farm: { id: string }) => farm.id), [alpha.farmId]);
+
+  const secondaryReport = await request(viewer.token, "GET", `/v1/workspace/${alpha.workspaceId}/attendance/report?farmId=${alphaSecondary.farmId}&seasonId=${alphaSecondary.seasonId}&from=2026-01-01&to=2026-01-02`);
+  assert.equal(secondaryReport.statusCode, 403);
+
+  const selectSecondaryFarm = await request(viewer.token, "POST", `/v1/workspace/${alpha.workspaceId}/farms/${alphaSecondary.farmId}/select`);
+  assert.equal(selectSecondaryFarm.statusCode, 403);
+
+  const secondaryWrite = await request(viewer.token, "POST", "/v1/workspace/operational-records", {
+    ...envelope(alpha, "attendance", randomUUID(), { labourerId: randomUUID(), date: "2026-06-10", status: "present" }),
+    farmId: alphaSecondary.farmId,
+    seasonId: alphaSecondary.seasonId,
+  });
+  assert.equal(secondaryWrite.statusCode, 403);
+});
+
+test("viewer permissions are enforced server-side for create and delete actions", async () => {
+  const labourerId = randomUUID();
+  const createAttempt = await request(viewer.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", labourerId, {
+    name: "Viewer Created Worker",
+    group: "Restricted",
+    dailyWage: 90,
+  }));
+  assert.equal(createAttempt.statusCode, 403);
+
+  const ownerCreated = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", labourerId, {
+    name: "Owner Created Worker",
+    group: "Allowed",
+    dailyWage: 90,
+  }));
+  assert.equal(ownerCreated.statusCode, 200);
+
+  const deleteAttempt = await request(viewer.token, "DELETE", "/v1/workspace/operational-records", {
+    workspaceId: alpha.workspaceId,
+    farmId: alpha.farmId,
+    seasonId: alpha.seasonId,
+    entity: "attendance",
+    recordId: labourerId,
+  });
+  assert.equal(deleteAttempt.statusCode, 403);
 });

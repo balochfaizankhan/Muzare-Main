@@ -2486,6 +2486,8 @@ button {
 .team-list { display: grid; gap: 9px; }
 .team-card__actions { display: flex !important; flex-shrink: 0; }
 .team-card button, .invite-share button { align-items: center; display: inline-flex; gap: 5px; }
+.team-farm-assignment-list { border: 1px solid var(--border); border-radius: 10px; display: grid; gap: 8px; max-height: 180px; overflow-y: auto; padding: 10px 12px; }
+.team-farm-assignment-list .compact-checkbox { align-items: center; display: flex; gap: 8px; }
 .invite-share { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 7px; margin-top: 12px; padding: 11px; }
 .invite-share p { margin: 0; }
 .invite-share code { overflow-wrap: anywhere; }
@@ -4641,7 +4643,7 @@ button {
 .permission-dialog__meta {
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-bottom: 14px;
 }
 

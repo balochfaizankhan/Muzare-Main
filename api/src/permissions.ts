@@ -103,6 +103,10 @@ export function hasPermission(user: PermissionUser, permission: Permission, work
   const membership = user.memberships.find((item) => item.active && item.workspaceId === workspaceId);
   if (!membership || !workspacePermissions[membership.role].includes(permission as WorkspacePermission)) return false;
   const moduleGate: Partial<Record<WorkspacePermission, [WorkspaceModule, WorkspaceModuleAction]>> = {
+    APPROVE_ATTENDANCE: ["attendance", "approve"],
+    APPROVE_EXPENSE: ["expenses", "approve"],
+    APPROVE_SALE: ["sales", "approve"],
+    APPROVE_DISPATCH: ["dispatch", "approve"],
     MANAGE_TEAM: ["team", "edit"],
     MANAGE_FARMS: ["settings", "edit"],
     MANAGE_SEASONS: ["settings", "edit"],

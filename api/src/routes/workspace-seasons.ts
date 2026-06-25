@@ -7,6 +7,7 @@ import { db } from "../db/client.js";
 import { farms, seasons, userSessions } from "../db/schema.js";
 import { visibleFarmWhere } from "../farm-visibility.js";
 import { hasPermission } from "../permissions.js";
+import { hasFarmAccess } from "../workspace-access.js";
 
 const paramsSchema = z.object({ workspaceId: z.string().uuid(), farmId: z.string().uuid() });
 const seasonParamsSchema = paramsSchema.extend({ seasonId: z.string().uuid() });
@@ -60,7 +61,7 @@ async function activateSeason(sessionId: string, workspaceId: string, farmId: st
 export async function workspaceSeasonRoutes(app: FastifyInstance): Promise<void> {
   app.get("/v1/workspace/:workspaceId/farms/:farmId/seasons", { preHandler: requireUser }, async (request, reply) => {
     const params = paramsSchema.safeParse(request.params);
-    if (!request.appUser || !params.success || !selectedContext(request, params.data.workspaceId, params.data.farmId)) {
+    if (!request.appUser || !params.success || !selectedContext(request, params.data.workspaceId, params.data.farmId) || !hasFarmAccess(request.appUser, params.data.workspaceId, params.data.farmId)) {
       return reply.code(403).send({ message: "Select this workspace and farm before viewing seasons." });
     }
     if (localDevelopmentMode) return { seasons: [], activeSeasonId: null };
@@ -80,6 +81,7 @@ export async function workspaceSeasonRoutes(app: FastifyInstance): Promise<void>
     const input = seasonInput.safeParse(request.body);
     if (!request.appUser || !params.success || !input.success) return reply.code(400).send({ message: "Valid crop-cycle details are required." });
     if (!selectedContext(request, params.data.workspaceId, params.data.farmId) || !canManage(request, params.data.workspaceId)
+      || !hasFarmAccess(request.appUser, params.data.workspaceId, params.data.farmId)
       || !(await activeFarm(request.sessionId!, params.data.workspaceId, params.data.farmId))) {
       return reply.code(403).send({ message: "Workspace season management permission is required for the selected farm." });
     }
@@ -99,6 +101,7 @@ export async function workspaceSeasonRoutes(app: FastifyInstance): Promise<void>
     const input = seasonInput.safeParse(request.body);
     if (!request.appUser || !params.success || !input.success) return reply.code(400).send({ message: "Valid crop-cycle details are required." });
     if (!selectedContext(request, params.data.workspaceId, params.data.farmId) || !canManage(request, params.data.workspaceId)
+      || !hasFarmAccess(request.appUser, params.data.workspaceId, params.data.farmId)
       || !(await activeFarm(request.sessionId!, params.data.workspaceId, params.data.farmId))) {
       return reply.code(403).send({ message: "Workspace season management permission is required for the selected farm." });
     }
@@ -117,6 +120,7 @@ export async function workspaceSeasonRoutes(app: FastifyInstance): Promise<void>
   app.post("/v1/workspace/:workspaceId/farms/:farmId/seasons/:seasonId/select", { preHandler: requireUser }, async (request, reply) => {
     const params = seasonParamsSchema.safeParse(request.params);
     if (!request.appUser || !params.success || !selectedContext(request, params.data.workspaceId, params.data.farmId)
+      || !hasFarmAccess(request.appUser, params.data.workspaceId, params.data.farmId)
       || !(await activeFarm(request.sessionId!, params.data.workspaceId, params.data.farmId))) {
       return reply.code(403).send({ message: "Select this workspace and farm before selecting a season." });
     }
@@ -129,6 +133,7 @@ export async function workspaceSeasonRoutes(app: FastifyInstance): Promise<void>
   app.post("/v1/workspace/:workspaceId/farms/:farmId/seasons/:seasonId/archive", { preHandler: requireUser }, async (request, reply) => {
     const params = seasonParamsSchema.safeParse(request.params);
     if (!request.appUser || !params.success || !selectedContext(request, params.data.workspaceId, params.data.farmId)
+      || !hasFarmAccess(request.appUser, params.data.workspaceId, params.data.farmId)
       || !canManage(request, params.data.workspaceId)) {
       return reply.code(403).send({ message: "Workspace season management permission is required." });
     }

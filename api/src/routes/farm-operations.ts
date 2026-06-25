@@ -17,6 +17,7 @@ import {
   waterAssets,
 } from "../db/schema.js";
 import { hasPermission } from "../permissions.js";
+import { hasFarmAccess } from "../workspace-access.js";
 
 const paramsSchema = z.object({ workspaceId: z.string().uuid(), farmId: z.string().uuid() });
 const idParamSchema = paramsSchema.extend({ id: z.string().uuid() });
@@ -217,6 +218,10 @@ async function ensureScope(reply: { code: (status: number) => { send: (body: unk
   const allowed = write === "read" ? canRead(request, workspaceId) : write === "submit" ? canSubmit(request, workspaceId) : canManage(request, workspaceId);
   if (!allowed) {
     reply.code(403).send({ message: write === "read" ? "Select this workspace before viewing farm operations." : "You do not have permission to change farm operations records." });
+    return false;
+  }
+  if (!hasFarmAccess(request.appUser, workspaceId, farmId)) {
+    reply.code(403).send({ message: "You do not have access to this farm." });
     return false;
   }
   if (!(await farmExists(workspaceId, farmId))) {

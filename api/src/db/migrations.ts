@@ -28,6 +28,7 @@ const importBatchesRecoveryMigrationUrl = new URL("../../../database/migrations/
 const importFailuresMigrationUrl = new URL("../../../database/migrations/0026_import_failures.sql", import.meta.url);
 const farmsActiveSchemaRepairMigrationUrl = new URL("../../../database/migrations/0027_farms_active_schema_repair.sql", import.meta.url);
 const importTrackingSchemaAlignmentMigrationUrl = new URL("../../../database/migrations/0028_import_tracking_schema_alignment.sql", import.meta.url);
+const workspaceMemberFarmScopeMigrationUrl = new URL("../../../database/migrations/0029_workspace_member_farm_scope.sql", import.meta.url);
 
 const requiredImportTrackingSchema = {
   farms: ["source_type", "old_android_id", "import_batch_id", "source_file_hash", "active", "deleted_at", "deletion_approved_at"],
@@ -47,6 +48,9 @@ const requiredImportTrackingSchema = {
   operational_records: ["source_type", "old_android_id", "import_batch_id", "source_file_hash"],
   import_batches: ["file_hash", "payload_json", "summary_json", "error_json"],
   import_failures: ["import_batch_id", "step", "source_row", "error_message"],
+  workspace_memberships: ["farm_access_mode"],
+  workspace_team_invitations: ["farm_access_mode", "farm_ids"],
+  workspace_member_farms: ["workspace_id", "membership_id", "farm_id"],
 } as const;
 
 async function tableExists(tableName: string): Promise<boolean> {
@@ -197,6 +201,8 @@ export async function ensureWorkspaceSchema(): Promise<void> {
   await db.execute(farmsActiveSchemaRepairMigration);
   const importTrackingSchemaAlignmentMigration = await readFile(importTrackingSchemaAlignmentMigrationUrl, "utf8");
   await db.execute(importTrackingSchemaAlignmentMigration);
+  const workspaceMemberFarmScopeMigration = await readFile(workspaceMemberFarmScopeMigrationUrl, "utf8");
+  await db.execute(workspaceMemberFarmScopeMigration);
 
   await validateRequiredColumns();
 }
