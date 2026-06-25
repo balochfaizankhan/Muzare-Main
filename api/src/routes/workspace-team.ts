@@ -122,6 +122,70 @@ async function loadInvitationByToken(token: string) {
   return invitation ?? null;
 }
 
+type InvitationRecord = NonNullable<Awaited<ReturnType<typeof loadInvitationByToken>>>;
+
+async function respondToInvitationAcceptance(
+  invitation: InvitationRecord,
+  input: z.infer<typeof acceptInvitationSchema>,
+  authenticated: Awaited<ReturnType<typeof authenticateToken>>,
+  reply: FastifyReply,
+) {
+  const mode = input.mode
+    ?? (authenticated
+      ? "session"
+      : input.displayName && input.password
+        ? "signup"
+        : input.email && input.password
+          ? "login"
+          : "session");
+
+  if (mode === "session") {
+    if (!authenticated) return reply.code(401).send({ code: "auth_required", message: "Please sign in or create an account to accept this invitation." });
+    if (authenticated.user.email.toLowerCase() !== invitation.email.toLowerCase()) {
+      return reply.code(409).send({ code: "email_mismatch", message: "Sign in with the invited email address to accept this invitation." });
+    }
+    await acceptInvitationMembership(invitation, authenticated.user.id);
+    return reply.code(201).send({ workspaceId: invitation.workspaceId, accepted: true });
+  }
+
+  if (mode === "login") {
+    if (!input.email || !input.password) return reply.code(400).send({ code: "missing_credentials", message: "Email and password are required to sign in." });
+    if (input.email.toLowerCase() !== invitation.email.toLowerCase()) {
+      return reply.code(409).send({ code: "email_mismatch", message: "Use the invited email address to accept this invitation." });
+    }
+    const [existingUser] = await db.select().from(users).where(eq(users.email, invitation.email)).limit(1);
+    if (!existingUser || !(await verifyPassword(input.password, existingUser.passwordHash))) {
+      return reply.code(401).send({ code: "invalid_credentials", message: "Invalid email or password." });
+    }
+    await acceptInvitationMembership(invitation, existingUser.id);
+    const token = await createSession(existingUser.id, invitation.workspaceId);
+    const user = await serializeUser(existingUser, invitation.workspaceId);
+    return reply.code(201).send({ workspaceId: invitation.workspaceId, accepted: true, token, user });
+  }
+
+  if (!input.displayName || !input.password) {
+    return reply.code(400).send({ code: "missing_signup_fields", message: "Name and password are required to create your account." });
+  }
+  const [existingUser] = await db.select().from(users).where(eq(users.email, invitation.email)).limit(1);
+  if (existingUser) {
+    return reply.code(409).send({ code: "account_exists", message: "An account already exists for this email. Sign in to accept the invitation." });
+  }
+  const [user] = await db.insert(users).values({
+    email: invitation.email,
+    phone: optional(input.phone) ?? invitation.phone,
+    displayName: input.displayName,
+    passwordHash: await hashPassword(input.password),
+    status: "approved",
+    active: true,
+    approvedAt: new Date(),
+  }).returning();
+  if (!user) return reply.code(500).send({ code: "user_create_failed", message: "Unable to create invited user." });
+  await acceptInvitationMembership(invitation, user.id);
+  const token = await createSession(user.id, invitation.workspaceId);
+  const serializedUser = await serializeUser(user, invitation.workspaceId);
+  return reply.code(201).send({ workspaceId: invitation.workspaceId, accepted: true, token, user: serializedUser });
+}
+
 async function acceptInvitationMembership(invitation: NonNullable<Awaited<ReturnType<typeof loadInvitationByToken>>>, userId: string) {
   const farmAccessMode = invitation.farmAccessMode === "assigned" ? "assigned" : "all";
   const farmIds = [...new Set(Array.isArray(invitation.farmIds)
@@ -372,6 +436,7 @@ export async function workspaceTeamRoutes(app: FastifyInstance): Promise<void> {
       : invitation.expiresAt <= now
         ? "expired"
         : "pending";
+    const [existingUser] = await db.select({ id: users.id }).from(users).where(eq(users.email, invitation.email)).limit(1);
     return {
       invitation: {
         workspaceId: invitation.workspaceId,
@@ -379,6 +444,7 @@ export async function workspaceTeamRoutes(app: FastifyInstance): Promise<void> {
         email: invitation.email,
         phone: invitation.phone,
         role: invitation.role,
+        permissions: invitation.permissions,
         farmAccessMode: invitation.farmAccessMode === "assigned" ? "assigned" : "all",
         farmIds: Array.isArray(invitation.farmIds) ? invitation.farmIds.filter((farmId): farmId is string => typeof farmId === "string") : [],
         status,
@@ -386,6 +452,7 @@ export async function workspaceTeamRoutes(app: FastifyInstance): Promise<void> {
         acceptedAt: invitation.acceptedAt?.toISOString() ?? null,
         inviterName: invitation.inviterName,
         inviterEmail: invitation.inviterEmail,
+        accountExists: Boolean(existingUser),
       },
     };
   });
@@ -402,64 +469,22 @@ export async function workspaceTeamRoutes(app: FastifyInstance): Promise<void> {
 
     const authHeader = request.headers.authorization?.replace(/^Bearer\s+/i, "");
     const authenticated = authHeader ? await authenticateToken(authHeader) : null;
-    const mode = input.data.mode
-      ?? (authenticated
-        ? "session"
-        : input.data.displayName && input.data.password
-          ? "signup"
-          : input.data.email && input.data.password
-            ? "login"
-            : "session");
-
-    if (mode === "session") {
-      if (!authenticated) return reply.code(401).send({ code: "auth_required", message: "Please sign in or create an account to accept this invitation." });
-      if (authenticated.user.email.toLowerCase() !== invitation.email.toLowerCase()) {
-        return reply.code(409).send({ code: "email_mismatch", message: "Sign in with the invited email address to accept this invitation." });
-      }
-      await acceptInvitationMembership(invitation, authenticated.user.id);
-      return reply.code(201).send({ workspaceId: invitation.workspaceId, accepted: true });
-    }
-
-    if (mode === "login") {
-      if (!input.data.email || !input.data.password) return reply.code(400).send({ message: "Email and password are required to sign in." });
-      if (input.data.email.toLowerCase() !== invitation.email.toLowerCase()) {
-        return reply.code(409).send({ code: "email_mismatch", message: "Use the invited email address to accept this invitation." });
-      }
-      const [existingUser] = await db.select().from(users).where(eq(users.email, invitation.email)).limit(1);
-      if (!existingUser || !(await verifyPassword(input.data.password, existingUser.passwordHash))) {
-        return reply.code(401).send({ code: "invalid_credentials", message: "Invalid email or password." });
-      }
-      await acceptInvitationMembership(invitation, existingUser.id);
-      const token = await createSession(existingUser.id, invitation.workspaceId);
-      const user = await serializeUser(existingUser, invitation.workspaceId);
-      return reply.code(201).send({ workspaceId: invitation.workspaceId, accepted: true, token, user });
-    }
-
-    if (!input.data.displayName || !input.data.password) {
-      return reply.code(400).send({ message: "Name and password are required to create your account." });
-    }
-    const [existingUser] = await db.select().from(users).where(eq(users.email, invitation.email)).limit(1);
-    if (existingUser) {
-      return reply.code(409).send({ code: "account_exists", message: "An account already exists for this email. Sign in to accept the invitation." });
-    }
-    const [user] = await db.insert(users).values({
-      email: invitation.email,
-      phone: optional(input.data.phone) ?? invitation.phone,
-      displayName: input.data.displayName,
-      passwordHash: await hashPassword(input.data.password),
-      status: "approved",
-      active: true,
-      approvedAt: new Date(),
-    }).returning();
-    if (!user) return reply.code(500).send({ message: "Unable to create invited user." });
-    await acceptInvitationMembership(invitation, user.id);
-    const token = await createSession(user.id, invitation.workspaceId);
-    const serializedUser = await serializeUser(user, invitation.workspaceId);
-    return reply.code(201).send({ workspaceId: invitation.workspaceId, accepted: true, token, user: serializedUser });
+    return respondToInvitationAcceptance(invitation, input.data, authenticated, reply);
   };
 
   app.post("/v1/workspace-invitations/accept", acceptInvitationHandler);
   app.post("/v1/workspace/team/invitations/accept", acceptInvitationHandler);
+  app.post("/v1/workspace-invitations/register-and-accept", async (request, reply) => {
+    const input = acceptInvitationSchema.safeParse({ ...(request.body as Record<string, unknown> ?? {}), mode: "signup" });
+    if (!input.success) return reply.code(400).send({ message: "A valid invitation registration is required." });
+    if (localDevelopmentMode) return reply.code(503).send({ message: "Configure PostgreSQL to accept workspace invitations." });
+    const invitation = await loadInvitationByToken(input.data.token);
+    if (!invitation) return reply.code(404).send({ code: "invalid", message: "Invitation is invalid." });
+    if (invitation.status === "cancelled") return reply.code(409).send({ code: "cancelled", message: "This invitation was cancelled." });
+    if (invitation.status === "accepted") return reply.code(409).send({ code: "accepted", message: "This invitation was already accepted." });
+    if (invitation.expiresAt <= new Date()) return reply.code(410).send({ code: "expired", message: "This invitation has expired." });
+    return respondToInvitationAcceptance(invitation, input.data, null, reply);
+  });
 
   app.patch("/v1/workspace/:workspaceId/team/:membershipId", { preHandler: requireUser }, async (request, reply) => {
     if (!request.appUser) return reply;

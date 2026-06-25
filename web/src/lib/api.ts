@@ -111,11 +111,13 @@ export type WorkspaceInvitationLookup = {
   email: string;
   phone: string | null;
   role: WorkspaceRole;
+  permissions?: WorkspaceModulePermissions | null;
   status: "pending" | "accepted" | "cancelled" | "expired" | "invalid";
   expiresAt: string;
   acceptedAt: string | null;
   inviterName: string | null;
   inviterEmail: string | null;
+  accountExists?: boolean;
 };
 export type WorkspaceTeamData = {
   members: WorkspaceTeamMember[];
@@ -746,6 +748,13 @@ export const acceptWorkspaceInvitation = (
   token?: string,
 ) =>
   apiRequest<{ workspaceId: string; accepted: boolean; token?: string; user?: AppUser }>("/v1/workspace-invitations/accept", { method: "POST", body: JSON.stringify(input) }, token);
+export const registerAndAcceptWorkspaceInvitation = (
+  input: { token: string; displayName: string; password: string; phone?: string },
+) =>
+  apiRequest<{ workspaceId: string; accepted: boolean; token?: string; user?: AppUser }>(
+    "/v1/workspace-invitations/register-and-accept",
+    { method: "POST", body: JSON.stringify({ ...input, mode: "signup" }) },
+  );
 export const fetchWorkspaceApprovals = (token: string, workspaceId: string) =>
   apiRequest<{ approvals: WorkspaceApproval[] }>(`/v1/workspace/${workspaceId}/approvals`, {}, token);
 export const decideWorkspaceApproval = (token: string, workspaceId: string, approvalId: string, decision: "approved" | "rejected", note?: string) =>

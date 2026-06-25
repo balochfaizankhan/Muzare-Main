@@ -2534,6 +2534,34 @@ button {
 .invite-share { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 7px; margin-top: 12px; padding: 11px; }
 .invite-share p { margin: 0; }
 .invite-share code { overflow-wrap: anywhere; }
+.invite-share--detail {
+  border-radius: 16px;
+  gap: 8px;
+  margin-top: 0;
+  padding: 16px;
+}
+.invite-status-card {
+  display: grid;
+  gap: 14px;
+}
+.invite-action-button,
+.invite-inline-link {
+  justify-content: center;
+}
+.invite-card {
+  gap: 18px;
+}
+.invite-card .auth-switch {
+  margin-top: 0;
+}
+.success {
+  background: var(--success-bg);
+  border-radius: 12px;
+  color: var(--success);
+  font-size: 0.85rem;
+  margin: 0;
+  padding: 12px 14px;
+}
 .permission-dialog { max-width: min(760px, 96vw); }
 .permission-matrix { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 12px; }
 .permission-matrix section { border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 5px; padding: 9px; }
