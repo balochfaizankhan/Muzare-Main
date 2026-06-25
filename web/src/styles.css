@@ -5833,6 +5833,112 @@ button {
 .sync-badge--syncing::before { background: #3b82f6; }
 .sync-badge--error::before { background: #ef4444; }
 
+.sync-queue-panel {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.08);
+  display: grid;
+  gap: 14px;
+  margin: 0 22px 12px;
+  padding: 16px;
+}
+
+.sync-queue-panel__header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.sync-queue-panel__header strong {
+  color: var(--text-primary);
+  display: block;
+  font-size: 0.96rem;
+}
+
+.sync-queue-panel__header p,
+.sync-queue-panel__empty {
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  margin: 4px 0 0;
+}
+
+.sync-queue-panel__header button {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 700;
+  min-height: 36px;
+  padding: 0 12px;
+}
+
+.sync-queue-list {
+  display: grid;
+  gap: 10px;
+}
+
+.sync-queue-item {
+  background: #fcfdfc;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+}
+
+.sync-queue-item--syncing {
+  border-color: rgba(59, 130, 246, 0.35);
+}
+
+.sync-queue-item--failed {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: #fff7f7;
+}
+
+.sync-queue-item__meta {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.sync-queue-item__meta strong {
+  color: var(--text-primary);
+  font-size: 0.88rem;
+}
+
+.sync-queue-item__meta span,
+.sync-queue-item p {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  margin: 0;
+}
+
+.sync-queue-item__error {
+  color: #b91c1c !important;
+  font-weight: 700;
+}
+
+.sync-queue-item__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sync-queue-item__actions button {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  min-height: 34px;
+  padding: 0 12px;
+}
+
 .sync-buttons {
   display: flex;
   gap: 7px;
@@ -6272,6 +6378,36 @@ button {
     flex: 0 0 8px;
     height: 8px;
     width: 8px;
+  }
+
+  .sync-queue-panel {
+    border-radius: 12px;
+    gap: 12px;
+    margin: 0 12px 10px;
+    padding: 12px;
+  }
+
+  .sync-queue-panel__header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .sync-queue-panel__header button {
+    align-self: flex-start;
+  }
+
+  .sync-queue-item {
+    padding: 12px;
+  }
+
+  .sync-queue-item__meta {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .sync-queue-item__actions button {
+    flex: 1 1 100%;
   }
 
   .shell-action--refresh {

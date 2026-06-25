@@ -31,6 +31,12 @@ export type PendingMutation = LocalRecord & {
   payload: unknown;
   attempts: number;
   nextAttemptAt?: string;
+  clientMutationId?: string;
+  status?: "pending" | "syncing" | "failed" | "resolved" | "discarded";
+  retryable?: boolean;
+  lastError?: string;
+  lastAttemptedAt?: string;
+  resolvedAt?: string;
   workspaceId: string;
   farmId?: string | null;
   seasonId?: string | null;

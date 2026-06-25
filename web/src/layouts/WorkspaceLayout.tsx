@@ -6,8 +6,9 @@ import { useAuth } from "../auth/AuthProvider";
 import { Brand } from "../components/Brand";
 import { LanguageSwitch } from "../components/LanguageSwitch";
 import { config } from "../config";
+import type { PendingMutation } from "../lib/offline-db";
 import { useSyncState } from "../hooks/useSyncState";
-import { refreshOperationalData, startSyncService, stopSyncService, syncNow } from "../services/syncService";
+import { discardSyncQueueItem, getSyncQueueItems, refreshOperationalData, resolveSyncQueueItem, retrySyncQueueItem, startSyncService, stopSyncService, syncNow } from "../services/syncService";
 import { setActiveWorkspaceId } from "../lib/offline-db";
 import { hasModulePermission } from "../lib/permissions";
 
@@ -31,6 +32,8 @@ export function WorkspaceLayout() {
   const { user, token, logout, switchWorkspace } = useAuth();
   const sync = useSyncState();
   const [toast, setToast] = useState<string | null>(null);
+  const [queueOpen, setQueueOpen] = useState(false);
+  const [queueItems, setQueueItems] = useState<PendingMutation[]>([]);
   setActiveWorkspaceId(user?.workspaceId ?? null);
   useEffect(() => {
     if (token && user?.workspaceId) void startSyncService(token, user.workspaceId);
@@ -58,6 +61,16 @@ export function WorkspaceLayout() {
     window.addEventListener("muzare-toast", showToast);
     return () => window.removeEventListener("muzare-toast", showToast);
   }, []);
+  useEffect(() => {
+    const refreshQueue = () => { void getSyncQueueItems().then(setQueueItems); };
+    void refreshQueue();
+    window.addEventListener("muzare-local-data-change", refreshQueue);
+    window.addEventListener("muzare-data-refresh", refreshQueue);
+    return () => {
+      window.removeEventListener("muzare-local-data-change", refreshQueue);
+      window.removeEventListener("muzare-data-refresh", refreshQueue);
+    };
+  }, []);
   const statusText = sync.status === "offline"
     ? t("layout.workingOffline")
     : sync.status === "syncing"
@@ -67,6 +80,7 @@ export function WorkspaceLayout() {
         : sync.pendingCount
           ? t("layout.changesWaiting", { count: sync.pendingCount })
           : t("layout.synced");
+  const queueNeedsAttention = (sync.pendingCount ?? 0) > 0 || (sync.failedCount ?? 0) > 0;
   return (
     <div className="app-shell">
       <aside className="app-sidebar">
@@ -90,7 +104,7 @@ export function WorkspaceLayout() {
                   ))}
                 </select>
               )}
-              <span className={`sync-badge sync-badge--${sync.status}`}>{statusText}</span>
+              <button className={`sync-badge sync-badge--${sync.status}`} type="button" onClick={() => setQueueOpen((current) => !current)} aria-expanded={queueOpen} aria-label={t("sync.queueInspector")}>{statusText}</button>
             </div>
           </div>
           <div className="toolbar__actions shell-header__controls">
@@ -100,6 +114,35 @@ export function WorkspaceLayout() {
             <button className="ghost-icon shell-logout" aria-label={t("common.logout")} onClick={() => void logout()}><LogOut size={18} /></button>
           </div>
         </header>
+        {queueOpen && queueNeedsAttention && <section className="sync-queue-panel">
+          <div className="sync-queue-panel__header">
+            <div>
+              <strong>{t("sync.queueInspector")}</strong>
+              <p>{t("sync.queueSummary", { pending: sync.pendingCount ?? 0, failed: sync.failedCount ?? 0 })}</p>
+            </div>
+            <button type="button" onClick={() => setQueueOpen(false)}>{t("common.close")}</button>
+          </div>
+          {!queueItems.length ? <p className="sync-queue-panel__empty">{t("sync.noQueueItems")}</p> : <div className="sync-queue-list">
+            {queueItems.map((item) => (
+              <article key={item.id} className={`sync-queue-item sync-queue-item--${item.status ?? "pending"}`}>
+                <div className="sync-queue-item__meta">
+                  <strong>{item.entity} · {item.operation}</strong>
+                  <span>{item.status ?? "pending"}</span>
+                </div>
+                <p>{t("sync.queueItemId")}: {item.id}</p>
+                <p>{t("sync.createdAt")}: {new Date(item.createdAt).toLocaleString()}</p>
+                <p>{t("sync.retryCount")}: {item.attempts}</p>
+                {item.lastAttemptedAt ? <p>{t("sync.lastAttemptedAt")}: {new Date(item.lastAttemptedAt).toLocaleString()}</p> : null}
+                {item.lastError ? <p className="sync-queue-item__error">{t("sync.lastError")}: {item.lastError}</p> : null}
+                <div className="sync-queue-item__actions">
+                  <button type="button" onClick={() => void retrySyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.retryItem")}</button>
+                  <button type="button" onClick={() => void resolveSyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.markResolved")}</button>
+                  <button type="button" onClick={() => void discardSyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.discardStaleItem")}</button>
+                </div>
+              </article>
+            ))}
+          </div>}
+        </section>}
         <Outlet />
         {toast && <div className="saas-toast" role="status">{toast}</div>}
       </div>
