@@ -220,6 +220,9 @@ async function acceptInvitationMembership(invitation: NonNullable<Awaited<Return
     await tx.update(workspaceTeamInvitations)
       .set({ status: "accepted", acceptedBy: userId, acceptedAt: new Date(), updatedAt: new Date() })
       .where(eq(workspaceTeamInvitations.id, invitation.id));
+    await tx.update(users).set({
+      workspaceId: invitation.workspaceId,
+    }).where(eq(users.id, userId));
     return [savedMembership];
   });
   await audit(invitation.workspaceId, userId, "workspace_invitation_accepted", membership.id, { invitationId: invitation.id, farmAccessMode, farmIds });

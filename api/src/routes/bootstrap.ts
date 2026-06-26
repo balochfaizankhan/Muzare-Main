@@ -12,6 +12,8 @@ export async function bootstrapRoutes(app: FastifyInstance): Promise<void> {
       if (request.appUser.platformRole) return { user: request.appUser, activeFarmId: null, activeSeasonId: null, farms: [], seasons: [] };
       return {
         user: request.appUser,
+        activeWorkspaceId: request.appUser.workspaceId,
+        availableWorkspaces: request.appUser.memberships.filter((membership) => membership.active),
         activeFarmId: "00000000-0000-0000-0000-000000000010",
         activeSeasonId: "00000000-0000-0000-0000-000000000020",
         farms: [{ id: "00000000-0000-0000-0000-000000000010", name: "Main Farm", location: null, owner: null }],
@@ -25,7 +27,15 @@ export async function bootstrapRoutes(app: FastifyInstance): Promise<void> {
     }
 
     if (request.appUser.platformRole || !request.appUser.workspaceId) {
-      return { user: request.appUser, activeFarmId: null, activeSeasonId: null, farms: [], seasons: [] };
+      return {
+        user: request.appUser,
+        activeWorkspaceId: request.appUser.workspaceId,
+        availableWorkspaces: request.appUser.memberships.filter((membership) => membership.active),
+        activeFarmId: null,
+        activeSeasonId: null,
+        farms: [],
+        seasons: [],
+      };
     }
 
     const membership = request.appUser.memberships.find((item) =>
@@ -36,6 +46,11 @@ export async function bootstrapRoutes(app: FastifyInstance): Promise<void> {
       request.log.info({
         userId: request.appUser?.id ?? null,
         workspaceId: request.appUser?.workspaceId ?? null,
+        availableWorkspaces: request.appUser?.memberships.filter((item) => item.active).map((item) => item.workspaceId) ?? [],
+        selectedWorkspace: request.appUser?.workspaceId ?? null,
+        selectionReason: request.appUser?.workspaceSelectionReason ?? null,
+        lastWorkspace: request.appUser?.workspaceId ?? null,
+        invitationWorkspace: null,
         role: membership?.role ?? null,
         farmAccessMode: membership?.farmAccessMode ?? null,
         permissionSummary: membership?.permissions ?? null,
@@ -56,6 +71,8 @@ export async function bootstrapRoutes(app: FastifyInstance): Promise<void> {
       }, "BOOTSTRAP_CONTEXT_RESOLUTION_FAILED");
       return reply.code(200).send({
         user: request.appUser,
+        activeWorkspaceId: request.appUser.workspaceId,
+        availableWorkspaces: request.appUser.memberships.filter((item) => item.active),
         activeFarmId: null,
         activeSeasonId: null,
         farms: [],
@@ -81,6 +98,8 @@ export async function bootstrapRoutes(app: FastifyInstance): Promise<void> {
 
     return {
       user: request.appUser,
+      activeWorkspaceId: request.appUser.workspaceId,
+      availableWorkspaces: request.appUser.memberships.filter((item) => item.active),
       activeFarmId: context.activeFarmId,
       activeSeasonId: context.activeSeasonId,
       farms: context.farms,

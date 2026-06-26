@@ -6,6 +6,7 @@ import { clearWorkspaceCache } from "../services/syncService";
 
 const tokenKey = "muzare-session-token";
 const cachedUserKey = "muzare-cached-user";
+const lastWorkspaceKey = "muzare-last-workspace-id";
 const cachedUser = () => {
   try {
     return JSON.parse(window.localStorage.getItem(cachedUserKey) ?? "null") as AppUser | null;
@@ -25,6 +26,17 @@ type AuthState = {
   updateUser(user: AppUser): void;
   completeSession(token: string, user: AppUser): Promise<void>;
 };
+
+async function reconcileWorkspacePreference(
+  token: string,
+  user: AppUser,
+): Promise<AppUser> {
+  const preferredWorkspaceId = window.localStorage.getItem(lastWorkspaceKey);
+  if (!preferredWorkspaceId || preferredWorkspaceId === user.workspaceId) return user;
+  if (!user.memberships.some((membership) => membership.active && membership.workspaceId === preferredWorkspaceId)) return user;
+  const session = await selectWorkspace(token, preferredWorkspaceId);
+  return session.user;
+}
 
 const AuthContext = createContext<AuthState | null>(null);
 
@@ -53,6 +65,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       .then((session) => {
         if (active) {
           window.localStorage.setItem(cachedUserKey, JSON.stringify(session.user));
+          if (session.user.workspaceId) window.localStorage.setItem(lastWorkspaceKey, session.user.workspaceId);
           setUser(session.user);
         }
       })
@@ -83,10 +96,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   const login = useCallback(async (email: string, password: string) => {
     const session = await loginRequest(email, password);
+    const nextUser = await reconcileWorkspacePreference(session.token, session.user);
     window.localStorage.setItem(tokenKey, session.token);
-    window.localStorage.setItem(cachedUserKey, JSON.stringify(session.user));
+    window.localStorage.setItem(cachedUserKey, JSON.stringify(nextUser));
+    if (nextUser.workspaceId) window.localStorage.setItem(lastWorkspaceKey, nextUser.workspaceId);
     setToken(session.token);
-    setUser(session.user);
+    setUser(nextUser);
   }, []);
 
   const logout = useCallback(async () => {
@@ -107,17 +122,20 @@ export function AuthProvider({ children }: PropsWithChildren) {
     await clearWorkspaceCache();
     queryClient.clear();
     window.localStorage.setItem(cachedUserKey, JSON.stringify(session.user));
+    window.localStorage.setItem(lastWorkspaceKey, workspaceId);
     setUser(session.user);
   }, [token, user?.workspaceId]);
 
   const updateUser = useCallback((nextUser: AppUser) => {
     window.localStorage.setItem(cachedUserKey, JSON.stringify(nextUser));
+    if (nextUser.workspaceId) window.localStorage.setItem(lastWorkspaceKey, nextUser.workspaceId);
     setUser(nextUser);
   }, []);
 
   const completeSession = useCallback(async (nextToken: string, nextUser: AppUser) => {
     window.localStorage.setItem(tokenKey, nextToken);
     window.localStorage.setItem(cachedUserKey, JSON.stringify(nextUser));
+    if (nextUser.workspaceId) window.localStorage.setItem(lastWorkspaceKey, nextUser.workspaceId);
     await clearWorkspaceCache();
     queryClient.clear();
     setToken(nextToken);

@@ -105,6 +105,9 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
       activeFarmId: null,
       activeSeasonId: null,
     }).where(eq(userSessions.id, request.sessionId));
+    await db.update(users).set({
+      workspaceId: parsed.data.workspaceId,
+    }).where(eq(users.id, request.appUser.id));
     const [user] = await db.select().from(users).where(eq(users.id, request.appUser.id)).limit(1);
     if (!user) return reply.code(404).send({ message: "User not found." });
     return { user: await serializeUser(user, parsed.data.workspaceId) };

@@ -1,10 +1,10 @@
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { and, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { config, localDevelopmentMode } from "./config.js";
 import { db } from "./db/client.js";
-import { userSessions, users, workspaceMemberFarms, workspaceMemberships, workspaces } from "./db/schema.js";
+import { farms, userSessions, users, workspaceMemberFarms, workspaceMemberships, workspaces } from "./db/schema.js";
 import { hasPermission, type AppRole, type Permission, type PlatformRole, type WorkspaceModulePermissions, type WorkspaceRole } from "./permissions.js";
 import type { FarmAccessMode } from "./workspace-access.js";
 
@@ -54,6 +54,7 @@ export type AuthenticatedUser = {
   id: string;
   workspaceId: string | null;
   workspaceName: string | null;
+  workspaceSelectionReason?: "explicit_workspace" | "user_preference" | "first_accessible_workspace";
   email: string;
   displayName: string | null;
   role: AppRole;
@@ -208,16 +209,65 @@ async function loadMemberships(userId: string): Promise<WorkspaceMembership[]> {
   return deduped.map(({ createdAt: _createdAt, updatedAt: _updatedAt, ...membership }) => membership);
 }
 
+async function visibleFarmCounts(workspaceIds: string[]) {
+  if (!workspaceIds.length) return new Map<string, number>();
+  const counts = await db.select({
+    workspaceId: farms.workspaceId,
+    count: sql<number>`count(*)::int`,
+  }).from(farms)
+    .where(and(
+      inArray(farms.workspaceId, workspaceIds),
+      isNull(farms.deletedAt),
+      eq(farms.active, true),
+    ))
+    .groupBy(farms.workspaceId);
+  return new Map(counts.map((row) => [row.workspaceId, Number(row.count ?? 0)]));
+}
+
+async function selectActiveMembership(
+  user: typeof users.$inferSelect,
+  memberships: WorkspaceMembership[],
+  requestedWorkspaceId?: string | null,
+): Promise<{ membership: WorkspaceMembership | null; reason: AuthenticatedUser["workspaceSelectionReason"] }> {
+  const activeMemberships = memberships.filter((membership) => membership.active);
+  if (!activeMemberships.length) return { membership: null, reason: undefined };
+
+  const explicitMembership = requestedWorkspaceId
+    ? activeMemberships.find((membership) => membership.workspaceId === requestedWorkspaceId) ?? null
+    : null;
+  if (explicitMembership) return { membership: explicitMembership, reason: "explicit_workspace" };
+
+  const preferredMembership = user.workspaceId
+    ? activeMemberships.find((membership) => membership.workspaceId === user.workspaceId) ?? null
+    : null;
+  if (preferredMembership) return { membership: preferredMembership, reason: "user_preference" };
+
+  const workspaceIds = activeMemberships.map((membership) => membership.workspaceId);
+  const farmCounts = await visibleFarmCounts(workspaceIds);
+  const ranked = [...activeMemberships].sort((left, right) => {
+    const accessibleLeft = left.farmAccessMode === "all"
+      ? (farmCounts.get(left.workspaceId) ?? 0)
+      : left.farmIds.length;
+    const accessibleRight = right.farmAccessMode === "all"
+      ? (farmCounts.get(right.workspaceId) ?? 0)
+      : right.farmIds.length;
+    if (accessibleRight !== accessibleLeft) return accessibleRight - accessibleLeft;
+    const roleDiff = workspaceRolePriority[right.role] - workspaceRolePriority[left.role];
+    if (roleDiff !== 0) return roleDiff;
+    return left.workspaceName.localeCompare(right.workspaceName);
+  });
+  return { membership: ranked[0] ?? null, reason: "first_accessible_workspace" };
+}
+
 export async function serializeUser(user: typeof users.$inferSelect, workspaceId?: string | null): Promise<AuthenticatedUser> {
   const memberships = user.platformRole ? [] : await loadMemberships(user.id);
-  const currentMembership = memberships.find((membership) => membership.active && membership.workspaceId === workspaceId)
-    ?? memberships.find((membership) => membership.active)
-    ?? null;
+  const { membership: currentMembership, reason } = await selectActiveMembership(user, memberships, workspaceId);
   const role = user.platformRole ?? currentMembership?.role ?? "viewer";
   return {
     id: user.id,
     workspaceId: currentMembership?.workspaceId ?? null,
     workspaceName: currentMembership?.workspaceName ?? null,
+    workspaceSelectionReason: reason,
     email: user.email,
     displayName: user.displayName,
     role,

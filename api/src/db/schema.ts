@@ -65,6 +65,7 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   displayName: text("display_name"),
   phone: text("phone"),
+  workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "set null" }),
   platformRole: platformRole("platform_role"),
   status: userStatus("status").default("pending").notNull(),
   active: boolean("active").default(true).notNull(),

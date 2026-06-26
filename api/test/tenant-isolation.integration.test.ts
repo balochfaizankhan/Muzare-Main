@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { after, before, test } from "node:test";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { buildApp } from "../src/app.js";
+import { hashPassword } from "../src/auth.js";
 import { closeDatabaseConnection, db } from "../src/db/client.js";
 import {
   farms,
@@ -1616,4 +1617,92 @@ test("viewer with all-farm access sees active farms read-only", async () => {
     status: "present",
   }));
   assert.equal(createAttempt.statusCode, 403);
+});
+
+test("login picks the active populated workspace first and workspace switching persists the preference", async () => {
+  const emptyWorkspaceId = randomUUID();
+  const populatedWorkspaceId = randomUUID();
+  const populatedFarmId = randomUUID();
+  const populatedSeasonId = randomUUID();
+  const memberUserId = randomUUID();
+  const email = `multi-workspace-${memberUserId}@example.test`;
+  const password = "Password123!";
+
+  await db.insert(workspaces).values([
+    { id: emptyWorkspaceId, name: "Default Workspace", slug: `default-${emptyWorkspaceId}`, contactEmail: email, status: "approved" },
+    { id: populatedWorkspaceId, name: "مزارع العوشزية", slug: `active-${populatedWorkspaceId}`, contactEmail: email, status: "approved" },
+  ]);
+  await db.insert(users).values({
+    id: memberUserId,
+    email,
+    passwordHash: await hashPassword(password),
+    status: "approved",
+    active: true,
+    workspaceId: null,
+  });
+  await db.insert(workspaceMemberships).values([
+    { workspaceId: emptyWorkspaceId, userId: memberUserId, role: "viewer", active: true, farmAccessMode: "all" },
+    { workspaceId: populatedWorkspaceId, userId: memberUserId, role: "viewer", active: true, farmAccessMode: "all" },
+  ]);
+  await db.insert(farms).values({ id: populatedFarmId, workspaceId: populatedWorkspaceId, name: "Imported Active Farm" });
+  await db.insert(seasons).values({
+    id: populatedSeasonId,
+    workspaceId: populatedWorkspaceId,
+    farmId: populatedFarmId,
+    name: "2026 Season",
+    year: 2026,
+    startsOn: "2026-01-01",
+    status: "active",
+  });
+
+  try {
+    const login = await app.inject({
+      method: "POST",
+      url: "/v1/auth/login",
+      payload: { email, password },
+    });
+    assert.equal(login.statusCode, 200);
+    assert.equal(login.json().user.workspaceId, populatedWorkspaceId);
+    assert.equal(login.json().user.workspaceSelectionReason, "first_accessible_workspace");
+
+    const switched = await app.inject({
+      method: "POST",
+      url: "/v1/session/workspace",
+      headers: { authorization: `Bearer ${login.json().token}` },
+      payload: { workspaceId: emptyWorkspaceId },
+    });
+    assert.equal(switched.statusCode, 200);
+    assert.equal(switched.json().user.workspaceId, emptyWorkspaceId);
+    assert.equal(switched.json().user.workspaceSelectionReason, "explicit_workspace");
+
+    const [updatedUser] = await db.select({ workspaceId: users.workspaceId }).from(users).where(eq(users.id, memberUserId)).limit(1);
+    assert.equal(updatedUser?.workspaceId, emptyWorkspaceId);
+
+    const session = await app.inject({
+      method: "GET",
+      url: "/v1/session",
+      headers: { authorization: `Bearer ${login.json().token}` },
+    });
+    assert.equal(session.statusCode, 200);
+    assert.equal(session.json().user.workspaceId, emptyWorkspaceId);
+
+    const bootstrap = await app.inject({
+      method: "GET",
+      url: "/v1/bootstrap",
+      headers: { authorization: `Bearer ${login.json().token}` },
+    });
+    assert.equal(bootstrap.statusCode, 200);
+    assert.equal(bootstrap.json().activeWorkspaceId, emptyWorkspaceId);
+    assert.equal(bootstrap.json().availableWorkspaces.length, 2);
+    assert.equal(bootstrap.json().workspaceFarmCount, 0);
+    assert.equal(bootstrap.json().accessibleFarmCount, 0);
+    assert.equal(bootstrap.json().farmAccessReason, "no_workspace_farms");
+  } finally {
+    await db.delete(userSessions).where(eq(userSessions.userId, memberUserId));
+    await db.delete(workspaceMemberships).where(eq(workspaceMemberships.userId, memberUserId));
+    await db.delete(seasons).where(inArray(seasons.workspaceId, [emptyWorkspaceId, populatedWorkspaceId]));
+    await db.delete(farms).where(inArray(farms.workspaceId, [emptyWorkspaceId, populatedWorkspaceId]));
+    await db.delete(users).where(eq(users.id, memberUserId));
+    await db.delete(workspaces).where(inArray(workspaces.id, [emptyWorkspaceId, populatedWorkspaceId]));
+  }
 });

@@ -192,6 +192,7 @@ export function DashboardPage() {
   const accessibleFarmCount = query.data?.accessibleFarmCount ?? query.data?.farms.length ?? 0;
   const noAccessibleFarms = workspaceFarmCount > 0 && accessibleFarmCount === 0;
   const noWorkspaceFarms = workspaceFarmCount === 0;
+  const hasOtherWorkspaces = (user?.memberships.filter((membership) => membership.active).length ?? 0) > 1;
   const StatusIcon = sync.status === "offline" ? WifiOff : Wifi;
   const displayName = user?.displayName || user?.email || t("common.dashboard");
 
@@ -264,7 +265,11 @@ export function DashboardPage() {
             {repairContext.error ? <p className="error">{repairContext.error.message}</p> : null}
           </section>
         )}
-        {!hasFarm && noWorkspaceFarms && <p className="context-message">{canManageFarms ? t("dashboardPage.noFarmAvailableMessage") : t("dashboardPage.noFarmVisibleReadOnly")}</p>}
+        {!hasFarm && noWorkspaceFarms && <p className="context-message">{canManageFarms
+          ? t("dashboardPage.noFarmAvailableMessage")
+          : hasOtherWorkspaces
+            ? t("dashboardPage.emptyWorkspaceSwitchHint")
+            : t("dashboardPage.noFarmVisibleReadOnly")}</p>}
         {!hasFarm && noAccessibleFarms && <p className="context-message">{t("dashboardPage.noAccessibleFarmMessage")}</p>}
         {hasFarm && !hasSeason && <p className="context-message">{t("dashboardPage.noActiveSeason")}</p>}
 

@@ -23,6 +23,7 @@ export type AppUser = {
   id: string;
   workspaceId: string | null;
   workspaceName: string | null;
+  workspaceSelectionReason?: "explicit_workspace" | "user_preference" | "first_accessible_workspace";
   email: string;
   displayName: string | null;
   role: AppRole;
@@ -73,6 +74,8 @@ export type PendingApproval = {
 
 export type BootstrapData = {
   user: AppUser;
+  activeWorkspaceId?: string | null;
+  availableWorkspaces?: AppUser["memberships"];
   activeFarmId: string | null;
   activeSeasonId: string | null;
   farms: Farm[];
