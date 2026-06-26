@@ -32,7 +32,7 @@ export type PendingMutation = LocalRecord & {
   attempts: number;
   nextAttemptAt?: string;
   clientMutationId?: string;
-  status?: "pending" | "syncing" | "failed" | "resolved" | "discarded";
+  status?: "pending" | "syncing" | "failed" | "permission_denied" | "resolved" | "discarded";
   retryable?: boolean;
   lastError?: string;
   lastAttemptedAt?: string;

@@ -21,6 +21,15 @@ test("frontend permission helpers expose module-level view, create, edit, delete
   assert.match(permissions, /export const canManagePermissions =/);
 });
 
+test("accountant role is part of shared frontend role and permission maps", async () => {
+  const api = await source("web/src/lib/api.ts");
+  const permissions = await source("web/src/lib/permissions.ts");
+  const team = await source("web/src/pages/workspace/WorkspaceTeam.tsx");
+  assert.match(api, /"workspace_owner" \| "workspace_manager" \| "supervisor" \| "accountant" \| "operator" \| "viewer"/);
+  assert.match(permissions, /accountant: \["MANAGE_RECORDS", "SUBMIT_RECORDS", "VIEW_REPORTS"\]/);
+  assert.match(team, /"workspace_owner", "workspace_manager", "supervisor", "accountant", "operator", "viewer"/);
+});
+
 test("workspace queries and IndexedDB records carry workspace ownership", async () => {
   const dashboard = await source("web/src/pages/DashboardPage.tsx");
   const offlineDb = await source("web/src/lib/offline-db.ts");
@@ -35,6 +44,10 @@ test("sync queue uploads only records belonging to the active workspace farm and
   assert.match(sync, /pendingMutations\.where\("workspaceId"\)\.equals\(context\.workspaceId\)\.sortBy\("createdAt"\)/);
   assert.match(sync, /mutation\.farmId === context!\.farmId && mutation\.seasonId === context!\.seasonId/);
   assert.match(sync, /workspaceId: context\.workspaceId, farmId: mutation\.farmId/);
+  assert.match(sync, /function isPermissionDeniedSyncError\(error: unknown\)/);
+  assert.match(sync, /status: permissionDenied[\s\S]*"permission_denied"/);
+  assert.match(sync, /await tableFor\(mutation\.entity\)\.update\(\(mutation\.payload as LocalRecord\)\.id, \{ pendingSync: false \}\)/);
+  assert.match(sync, /assertCanQueueMutation\(entity, operation\)/);
 });
 
 test("farm and season switching scope browser records to the selected context", async () => {
@@ -60,7 +73,7 @@ test("attendance reports scope cached tenant data and selected date range", asyn
 
 test("operational writes queue locally before background sync", async () => {
   const sync = await source("web/src/services/syncService.ts");
-  assert.match(sync, /await queueOfflineRecord\(entity, nextRecord\);\s+if \(navigator\.onLine\) void syncPendingRecords\(\);/);
+  assert.match(sync, /const existing = await tableFor\(entity\)\.get\(record\.id\);[\s\S]*const operation = existing \? "edit" : "create";[\s\S]*await queueOfflineRecord\(entity, nextRecord, operation\);\s+if \(navigator\.onLine\) void syncPendingRecords\(\);/);
   assert.match(sync, /if \(latest\?\.updatedAt !== mutation\.updatedAt\) continue;/);
 });
 
@@ -85,11 +98,37 @@ test("attendance marking updates local UI immediately, reuses a daily record, an
   assert.match(modulePage, /attendance\.find\(\(entry\) =>[\s\S]*entry\.labourerId === targetLabourerId[\s\S]*entry\.date === date/);
   assert.match(modulePage, /if \(existing\?\.status === status\) \{[\s\S]*setAttendance\(\(current\) => current\.filter\(\(entry\) => entry\.id !== existing\.id\)\);[\s\S]*await deleteOperationalRecord\("attendance", existing\);/);
   assert.match(modulePage, /setAttendance\(\(current\) => \[record, \.\.\.current\.filter\(\(entry\) => entry\.id !== record\.id\)\]\);\s+await persistOperationalRecord/);
-  assert.match(modulePage, /disabled=\{!markable \|\| markingLabourers\.has\(labourer\.id\)\}/);
+  assert.match(modulePage, /disabled=\{!canWriteAttendance \|\| !markable \|\| markingLabourers\.has\(labourer\.id\)\}/);
   assert.match(sync, /operation: "delete"/);
   assert.match(sync, /if \(mutation\.operation === "delete"\) \{[\s\S]*await deleteOperationalRecordFromApi/);
   assert.match(sync, /pendingDeletes\.has\(`\$\{context\.workspaceId\}:\$\{item\.entity\}:\$\{item\.record\.id\}`\)/);
   assert.match(api, /apiRequest<void>\("\/v1\/workspace\/operational-records", \{ method: "DELETE"/);
+});
+
+test("permission context defaults writes to read-only during session refresh and blocks unauthorized queue creation", async () => {
+  const auth = await source("web/src/auth/AuthProvider.tsx");
+  const permissions = await source("web/src/lib/permissions.ts");
+  const sync = await source("web/src/services/syncService.ts");
+  assert.match(auth, /setPermissionContextUser\(sessionRefreshing \? null : user\)/);
+  assert.match(permissions, /export function canQueueOperationalMutation\(/);
+  assert.match(permissions, /if \(!user\?\.workspaceId\) return false;/);
+  assert.match(sync, /notify\(i18n\.t\("common\.viewOnlyAccess"\)\);[\s\S]*throw new Error\(i18n\.t\("sync\.permissionDenied"\)\)/);
+  assert.match(sync, /status: permissionDenied[\s\S]*"permission_denied"/);
+  assert.match(sync, /if \(permissionDenied && mutation\.operation !== "delete"\) \{[\s\S]*pendingSync: false[\s\S]*window\.dispatchEvent\(new Event\("muzare-local-data-change"\)\)/);
+});
+
+test("viewer-facing entry screens gate attendance, expenses, advances, dispatch, sales, partner ledger, and accounts forms by module permissions", async () => {
+  const modulePage = await source("web/src/pages/ModulePage.tsx");
+  const advances = await source("web/src/pages/workspace/LabourAdvances.tsx");
+  const layout = await source("web/src/layouts/WorkspaceLayout.tsx");
+  assert.match(modulePage, /const canWriteAttendance = Boolean\(!sessionRefreshing && user\?\.workspaceId && canCreate\(user, "attendance", user\.workspaceId\)\)/);
+  assert.match(modulePage, /const canCreateVouchers = Boolean\(!sessionRefreshing && user && workspaceId && canCreate\(user, "expenses", workspaceId\)\)/);
+  assert.match(modulePage, /const canCreateDispatch = Boolean\(!sessionRefreshing && user && workspaceId && canCreate\(user, "dispatch", workspaceId\)\)/);
+  assert.match(modulePage, /const canCreateSales = Boolean\(!sessionRefreshing && user && workspaceId && canCreate\(user, "sales", workspaceId\)\)/);
+  assert.match(modulePage, /const canCreateEntries = Boolean\(!sessionRefreshing && user && workspaceId && canCreate\(user, "accounts", workspaceId\)\)/);
+  assert.match(modulePage, /const canCreateAccounts = Boolean\(!sessionRefreshing && user && workspaceId && canCreate\(user, "accounts", workspaceId\)\)/);
+  assert.match(advances, /const canRecord = Boolean\(!sessionRefreshing && user && workspaceId && canCreate\(user, "advances", workspaceId\)\)/);
+  assert.match(layout, /item\.status === "permission_denied" \? t\("sync\.discardUnauthorizedChange"\) : t\("sync\.discardStaleItem"\)/);
 });
 
 test("partner ledger supports audited edits and offline soft deletes without duplicate balance effects", async () => {

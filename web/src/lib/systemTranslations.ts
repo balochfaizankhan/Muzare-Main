@@ -112,6 +112,7 @@ const canonicalValues: Record<SystemTranslationDomain, Record<string, string>> =
     workspace_manager: "workspace_manager",
     manager: "workspace_manager",
     supervisor: "supervisor",
+    accountant: "accountant",
     operator: "operator",
     "operator / data entry": "operator",
     viewer: "viewer",

@@ -27,7 +27,7 @@ const importTrackingColumns = {
 };
 
 export const platformRole = pgEnum("platform_role", ["platform_admin", "platform_support"]);
-export const workspaceRole = pgEnum("workspace_role", ["workspace_owner", "workspace_manager", "supervisor", "operator", "viewer"]);
+export const workspaceRole = pgEnum("workspace_role", ["workspace_owner", "workspace_manager", "supervisor", "accountant", "operator", "viewer"]);
 export const userStatus = pgEnum("user_status", ["pending", "approved", "rejected", "suspended"]);
 export const approvalEntityType = pgEnum("approval_entity_type", ["expense", "attendance", "sale", "dispatch"]);
 export const approvalStatus = pgEnum("approval_status", ["pending", "approved", "rejected"]);

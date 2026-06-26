@@ -84,6 +84,16 @@ export function WorkspaceLayout() {
           : t("layout.synced");
   const startupVisible = sync.startupInProgress || Boolean(sync.message && sync.startupStage && sync.startupStage !== "ready");
   const queueNeedsAttention = (sync.pendingCount ?? 0) > 0 || (sync.failedCount ?? 0) > 0;
+  const queueStatusLabel = (status?: PendingMutation["status"]) => {
+    switch (status ?? "pending") {
+      case "syncing": return t("sync.statusSyncing");
+      case "failed": return t("sync.statusFailed");
+      case "permission_denied": return t("sync.statusPermissionDenied");
+      case "resolved": return t("sync.statusResolved");
+      case "discarded": return t("sync.statusDiscarded");
+      default: return t("sync.statusPending");
+    }
+  };
   return (
     <div className="app-shell">
       <aside className="app-sidebar">
@@ -144,17 +154,18 @@ export function WorkspaceLayout() {
               <article key={item.id} className={`sync-queue-item sync-queue-item--${item.status ?? "pending"}`}>
                 <div className="sync-queue-item__meta">
                   <strong>{item.entity} · {item.operation}</strong>
-                  <span>{item.status ?? "pending"}</span>
+                  <span>{queueStatusLabel(item.status)}</span>
                 </div>
                 <p>{t("sync.queueItemId")}: {item.id}</p>
                 <p>{t("sync.createdAt")}: {new Date(item.createdAt).toLocaleString()}</p>
                 <p>{t("sync.retryCount")}: {item.attempts}</p>
                 {item.lastAttemptedAt ? <p>{t("sync.lastAttemptedAt")}: {new Date(item.lastAttemptedAt).toLocaleString()}</p> : null}
+                {item.status === "permission_denied" ? <p className="sync-queue-item__error">{t("sync.permissionDeniedHint")}</p> : null}
                 {item.lastError ? <p className="sync-queue-item__error">{t("sync.lastError")}: {item.lastError}</p> : null}
                 <div className="sync-queue-item__actions">
-                  <button type="button" onClick={() => void retrySyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.retryItem")}</button>
+                  {item.status !== "permission_denied" && <button type="button" onClick={() => void retrySyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.retryItem")}</button>}
                   <button type="button" onClick={() => void resolveSyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.markResolved")}</button>
-                  <button type="button" onClick={() => void discardSyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.discardStaleItem")}</button>
+                  <button type="button" onClick={() => void discardSyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{item.status === "permission_denied" ? t("sync.discardUnauthorizedChange") : t("sync.discardStaleItem")}</button>
                 </div>
               </article>
             ))}

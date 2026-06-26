@@ -23,7 +23,7 @@ import { roleModulePermissions } from "../../lib/permissions";
 
 const modules: WorkspaceModule[] = ["dashboard", "workforce", "attendance", "advances", "expenses", "sales", "dispatch", "inventory", "accounts", "reports", "settings", "team"];
 const actions: WorkspaceModuleAction[] = ["view", "create", "edit", "delete", "approve", "export"];
-const roles: WorkspaceRole[] = ["workspace_owner", "workspace_manager", "supervisor", "operator", "viewer"];
+const roles: WorkspaceRole[] = ["workspace_owner", "workspace_manager", "supervisor", "accountant", "operator", "viewer"];
 const blankInvite = { email: "", phone: "", role: "viewer" as WorkspaceRole, farmAccessMode: "all" as FarmAccessMode, farmIds: [] as string[] };
 
 function cloneDefaults(role: WorkspaceRole): WorkspaceModulePermissions {

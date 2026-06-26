@@ -14,7 +14,7 @@ import { defaultTransactionGroupExpansion, groupAccountTransactions, type Accoun
 import { attendanceStatusKey, buildAttendanceStatusMap, previousLocalDateKey, todayLocalDateKey } from "../lib/attendanceStatus";
 import { confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteExpenseAttachment, deleteOrDeactivateLabour, extractExpenseReceipt, fetchExpenseAttachments, fetchExpenseCategories, fetchLabourDeletionPreview, openExpenseAttachment, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, uploadExpenseAttachment, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type ExpenseAttachment, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type ExpenseOcrSuggestion, type LabourDeletionPreview } from "../lib/api";
 import { buildDispatchAvailability, dispatchCartons, dispatchItemKey, resolveSaleType, saleProduceLabel, soldQuantityByDispatchItem } from "../lib/dispatch-sales";
-import { hasPermission } from "../lib/permissions";
+import { canCreate, canDelete, canEdit, hasPermission } from "../lib/permissions";
 import { translateExpenseCategory, translateExpenseSubcategory, translatePaymentType, translateSaleType, translateSalesStatus } from "../lib/systemTranslations";
 import {
   buildPartnerLiabilityPositions,
@@ -141,7 +141,7 @@ function WorkforceModule({
   onAdvanceClose?: () => void;
 }) {
   const { t } = useTranslation();
-  const { token, user } = useAuth();
+  const { token, user, sessionRefreshing } = useAuth();
   const sync = useSyncState();
   const loadLabourers = useCallback(async () => (await workspaceRecords(offlineDb.labourers)).sort((a, b) => {
     const dateA = a.joinedOn || a.createdAt;
@@ -186,6 +186,10 @@ function WorkforceModule({
   const attendanceRowRefs = useRef<Record<string, HTMLElement | null>>({});
 
   const markAttendance = async (targetLabourerId: string, status: Attendance["status"]) => {
+    if (!canWriteAttendance) {
+      showToast(t("common.viewOnlyAccess"));
+      return;
+    }
     const labourer = labourers.find((item) => item.id === targetLabourerId);
     if (!labourer || !canMarkAttendanceOn(labourer, date)) return;
     if (markingLabourers.has(targetLabourerId)) return;
@@ -275,8 +279,12 @@ function WorkforceModule({
   const advanceAmount = selectedLabourer ? advances.filter((entry) => entry.labourerId === selectedLabourer.id).reduce((sum, entry) => sum + entry.amount, 0) : 0;
   const paidAmount = selectedLabourer ? payments.filter((entry) => entry.labourerId === selectedLabourer.id).reduce((sum, entry) => sum + entry.amount, 0) : 0;
   const netBalance = totalEarnings - advanceAmount - paidAmount;
-  const canManageLabour = Boolean(user?.workspaceId && hasPermission(user, "MANAGE_TEAM", user.workspaceId));
-  const canAddAdvance = Boolean(user?.workspaceId && hasPermission(user, "MANAGE_RECORDS", user.workspaceId));
+  const canWriteAttendance = Boolean(!sessionRefreshing && user?.workspaceId && canCreate(user, "attendance", user.workspaceId));
+  const canManageLabour = Boolean(!sessionRefreshing && user?.workspaceId && canCreate(user, "workforce", user.workspaceId));
+  const canAddAdvance = Boolean(!sessionRefreshing && user?.workspaceId && canCreate(user, "advances", user.workspaceId));
+  const canCreateGroups = Boolean(!sessionRefreshing && user?.workspaceId && canCreate(user, "workforce", user.workspaceId));
+  const canCreateProduction = Boolean(!sessionRefreshing && user?.workspaceId && canCreate(user, "workforce", user.workspaceId));
+  const canCreatePayments = Boolean(!sessionRefreshing && user?.workspaceId && canCreate(user, "workforce", user.workspaceId));
   const showToast = (message: string) => window.dispatchEvent(new CustomEvent("muzare-toast", { detail: message }));
   const closeLabourAction = () => {
     setLabourAction(null);
@@ -285,6 +293,7 @@ function WorkforceModule({
   const saveLabour = async (record: Labourer) => {
     if (selectedLabourer?.id === record.id) setSelectedLabourer(record);
     if (actionLabourer?.id === record.id) setActionLabourer(record);
+    if (!canManageLabour) throw new Error(t("common.viewOnlyAccess"));
     await persistOperationalRecord("labourer", record);
     await refreshLabourers();
     if (selectedLabourer?.id === record.id) setSelectedLabourer(record);
@@ -292,19 +301,23 @@ function WorkforceModule({
     showToast(t("workforcePage.labourUpdated"));
   };
   const saveAdvance = async (record: Advance) => {
+    if (!canAddAdvance) throw new Error(t("common.viewOnlyAccess"));
     setAdvances((current) => [record, ...current.filter((entry) => entry.id !== record.id)]);
     await persistOperationalRecord("advance", record);
     showToast(t("workforcePage.advanceAdded"));
   };
   const saveGroup = async (record: LabourGroup) => {
+    if (!canCreateGroups) throw new Error(t("common.viewOnlyAccess"));
     await persistOperationalRecord("labourGroup", record);
     await refreshGroups();
   };
   const saveProduction = async (record: ProductionEntry) => {
+    if (!canCreateProduction) throw new Error(t("common.viewOnlyAccess"));
     setProductionEntries((current) => [record, ...current.filter((entry) => entry.id !== record.id)]);
     await persistOperationalRecord("productionEntry", record);
   };
   const savePayment = async (record: LabourPayment) => {
+    if (!canCreatePayments) throw new Error(t("common.viewOnlyAccess"));
     setPayments((current) => [record, ...current.filter((entry) => entry.id !== record.id)]);
     await persistOperationalRecord("labourPayment", record);
   };
@@ -320,11 +333,11 @@ function WorkforceModule({
             ? "Saved locally. Syncing..."
             : attendanceSaveState === "saved" ? "Saved" : "Synced";
   useEffect(() => {
-    if (openAttendanceOnLoad) setShowAttendanceEntry(true);
-  }, [openAttendanceOnLoad]);
+    if (openAttendanceOnLoad && canWriteAttendance) setShowAttendanceEntry(true);
+  }, [canWriteAttendance, openAttendanceOnLoad]);
   useEffect(() => {
-    if (openAdvanceOnLoad) setShowAdvanceEntry(true);
-  }, [openAdvanceOnLoad]);
+    if (openAdvanceOnLoad && canAddAdvance) setShowAdvanceEntry(true);
+  }, [canAddAdvance, openAdvanceOnLoad]);
   useEffect(() => {
     if (attendanceSaveState !== "saved" || sync.pendingCount > 0 || sync.status === "syncing") return;
     const handle = window.setTimeout(() => setAttendanceSaveState("idle"), 1400);
@@ -353,7 +366,7 @@ function WorkforceModule({
           <p>{t("moduleDescriptions.workforce")}</p>
         </header>
         <div className="workforce-top-actions">
-          <button className="workforce-mark-attendance" type="button" onClick={() => setShowAttendanceEntry(true)}>{t("workforcePage.markAttendance")}</button>
+            {canWriteAttendance && <button className="workforce-mark-attendance" type="button" onClick={() => setShowAttendanceEntry(true)}>{t("workforcePage.markAttendance")}</button>}
           <div className="workforce-toolbar">
             {canManageLabour && <button type="button" onClick={() => setShowAddLabour(true)}>{t("workforcePage.addLabour")}</button>}
             {canAddAdvance && <button type="button" onClick={() => setShowAdvanceEntry(true)}>{t("layout.advances")}</button>}
@@ -498,9 +511,9 @@ function WorkforceModule({
                       {!markable && <span className="status-inactive">{t("workforcePage.notAvailableForAttendance")}</span>}
                     </div>
                     <div className="attendance-status-buttons">
-                      <button disabled={!markable || markingLabourers.has(labourer.id)} className={currentStatus === "present" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "present")}>P</button>
-                      <button disabled={!markable || markingLabourers.has(labourer.id)} className={currentStatus === "half_day" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "half_day")}>1/2</button>
-                      <button disabled={!markable || markingLabourers.has(labourer.id)} className={currentStatus === "absent" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "absent")}>A</button>
+                      <button disabled={!canWriteAttendance || !markable || markingLabourers.has(labourer.id)} className={currentStatus === "present" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "present")}>P</button>
+                      <button disabled={!canWriteAttendance || !markable || markingLabourers.has(labourer.id)} className={currentStatus === "half_day" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "half_day")}>1/2</button>
+                      <button disabled={!canWriteAttendance || !markable || markingLabourers.has(labourer.id)} className={currentStatus === "absent" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "absent")}>A</button>
                     </div>
                   </article>
                 );
@@ -1530,7 +1543,7 @@ function ReceiptAttachmentList({ attachments, onOpen, onOpenOriginal, onDelete, 
 
 function ExpensesModule() {
   const { t } = useTranslation();
-  const { token, user } = useAuth();
+  const { token, user, sessionRefreshing } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const load = useCallback(async () => (await workspaceRecords(offlineDb.vouchers, { includeGeneralFarmRecords: true })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts), []);
@@ -1748,8 +1761,17 @@ function ExpensesModule() {
     }
   }, [token, workspaceId]);
 
+  const canCreateVouchers = Boolean(!sessionRefreshing && user && workspaceId && canCreate(user, "expenses", workspaceId));
+  const canEditVouchers = Boolean(!sessionRefreshing && user && workspaceId && canEdit(user, "expenses", workspaceId));
+  const canDeleteVouchers = Boolean(!sessionRefreshing && user && workspaceId && canDelete(user, "expenses", workspaceId));
+  const canManage = Boolean(!sessionRefreshing && user && workspaceId && hasPermission(user, "MANAGE_EXPENSE_CATEGORIES", workspaceId));
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (!(editingVoucher ? canEditVouchers : canCreateVouchers)) {
+      showToast(t("common.viewOnlyAccess"));
+      return;
+    }
     const resolvedItems: VoucherItem[] = [];
     for (const item of voucherItems) {
       const category = categories.data?.categories.find((entry) => entry.id === item.categoryId);
@@ -1790,8 +1812,6 @@ function ExpensesModule() {
     resetForm();
     await refresh();
   };
-  const canManage = Boolean(user && workspaceId && hasPermission(user, "MANAGE_EXPENSE_CATEGORIES", workspaceId));
-  const canEditVouchers = Boolean(user && workspaceId && hasPermission(user, "MANAGE_RECORDS", workspaceId));
   const farmId = getActiveFarmId();
   const seasonId = getActiveSeasonId();
   useEffect(() => {
@@ -1961,7 +1981,7 @@ function ExpensesModule() {
     finally { setAttachmentBusy(false); }
   };
   const removeVoucher = async (voucher: Voucher) => {
-    if (!canEditVouchers || !window.confirm(t("expensesPage.deleteVoucherConfirm", { number: voucher.voucherNumber }))) return;
+    if (!canDeleteVouchers || !window.confirm(t("expensesPage.deleteVoucherConfirm", { number: voucher.voucherNumber }))) return;
     await deleteOperationalRecord("voucher", voucher);
     setSelectedVoucher(null);
     setSearchParams((current) => { current.delete("recordId"); return current; });
@@ -1981,7 +2001,7 @@ function ExpensesModule() {
 
   return (
     <>
-      <FormCard title={editingVoucher ? t("expensesPage.editVoucher", { number: editingVoucher.voucherNumber }) : t("expensesPage.newVoucher")}>
+      {(canCreateVouchers || (editingVoucher && canEditVouchers)) && <FormCard title={editingVoucher ? t("expensesPage.editVoucher", { number: editingVoucher.voucherNumber }) : t("expensesPage.newVoucher")}>
         {receiptCropTarget && <ReceiptCropReviewModal file={receiptCropTarget} onCancel={() => advanceReceiptCropQueue()} onAccept={advanceReceiptCropQueue} />}
         <form className="module-form inline-form" onSubmit={(event) => void submit(event)}>
           <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
@@ -2030,7 +2050,7 @@ function ExpensesModule() {
           <button type="submit">{editingVoucher ? t("expensesPage.updateVoucher") : t("expensesPage.saveVoucher")}</button>
           {editingVoucher && <button type="button" onClick={() => { setEditingVoucher(null); resetForm(); }}>{t("expensesPage.cancelEdit")}</button>}
         </form>
-      </FormCard>
+      </FormCard>}
       {canEditVouchers && <section className="record-panel expense-import-card"><div><h2>{t("expensesPage.historicalImport")}</h2><p>{t("expensesPage.historicalImportDescription")}</p></div><button type="button" onClick={() => navigator.onLine ? setShowExpenseImport(true) : showToast(t("expensesPage.importRequiresInternet"))}>{t("expensesPage.importExpensesCsv")}</button></section>}
       <section className="record-panel expense-search-panel">
         <h2>{t("expensesPage.searchVouchers")}</h2>
@@ -2108,10 +2128,10 @@ function ExpensesModule() {
             onOpenOriginal={(item) => void openOriginalReceipt(item)}
             onExtract={(item) => void extractReceipt(item)}
             onApplyOcr={(result) => applyOcrToVoucher(result, selectedVoucher)}
-            onDelete={canEditVouchers && !attachmentBusy ? (item) => void removeReceipt(item) : undefined}
+            onDelete={canDeleteVouchers && !attachmentBusy ? (item) => void removeReceipt(item) : undefined}
           />
           </div>
-          <footer className="worker-dialog__footer">{canEditVouchers && <button className="worker-dialog__link" type="button" onClick={() => openEdit(selectedVoucher)}>{t("expensesPage.editVoucherAction")}</button>}{canEditVouchers && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => void removeVoucher(selectedVoucher)}>{t("expensesPage.deleteVoucher")}</button>}<button className="worker-dialog__close" type="button" onClick={() => setSelectedVoucher(null)}>{t("expensesPage.close")}</button></footer>
+          <footer className="worker-dialog__footer">{canEditVouchers && <button className="worker-dialog__link" type="button" onClick={() => openEdit(selectedVoucher)}>{t("expensesPage.editVoucherAction")}</button>}{canDeleteVouchers && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => void removeVoucher(selectedVoucher)}>{t("expensesPage.deleteVoucher")}</button>}<button className="worker-dialog__close" type="button" onClick={() => setSelectedVoucher(null)}>{t("expensesPage.close")}</button></footer>
         </section>
       </div>}
       {showExpenseImport && token && farmId && seasonId && <ExpenseImportPanel token={token} workspaceId={workspaceId} farmId={farmId} seasonId={seasonId} onClose={() => setShowExpenseImport(false)} onImported={async () => { await refresh(); await categories.refetch(); }} />}
@@ -2140,8 +2160,12 @@ function nextDispatchSerial(records: Dispatch[], date: string, editing?: Dispatc
 
 function DispatchModule() {
   const { t } = useTranslation();
-  const { user } = useAuth();
-  const canManage = Boolean(user?.workspaceId && hasPermission(user, "MANAGE_RECORDS", user.workspaceId));
+  const { user, sessionRefreshing } = useAuth();
+  const workspaceId = user?.workspaceId ?? "";
+  const canCreateDispatch = Boolean(!sessionRefreshing && user && workspaceId && canCreate(user, "dispatch", workspaceId));
+  const canEditDispatch = Boolean(!sessionRefreshing && user && workspaceId && canEdit(user, "dispatch", workspaceId));
+  const canDeleteDispatch = Boolean(!sessionRefreshing && user && workspaceId && canDelete(user, "dispatch", workspaceId));
+  const canManageMasters = canEditDispatch;
   const load = useCallback(async () => (await workspaceRecords(offlineDb.dispatches)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadVehicles = useCallback(() => workspaceRecords(offlineDb.vehicles), []);
   const loadDateTypes = useCallback(() => workspaceRecords(offlineDb.dateTypes), []);
@@ -2186,6 +2210,10 @@ function DispatchModule() {
   };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (!(editing ? canEditDispatch : canCreateDispatch)) {
+      setError(t("common.viewOnlyAccess"));
+      return;
+    }
     const selectedVehicle = activeVehicles.find((item) => item.id === vehicleId);
     const validItems = items.map((item) => ({ ...item, cartons: Number(item.cartons) }));
     if (!selectedVehicle) return setError(t("dispatchPage.activeVehicleRequired"));
@@ -2216,6 +2244,7 @@ function DispatchModule() {
     }
   };
   const remove = async (record: Dispatch) => {
+    if (!canDeleteDispatch) return;
     if (!window.confirm(t("dispatchPage.dispatchDeleteConfirm"))) return;
     await deleteOperationalRecord("dispatch", record); await refresh();
   };
@@ -2236,9 +2265,9 @@ function DispatchModule() {
     <>
       <div className="dispatch-toolbar">
         <div><h2>{t("dispatchPage.title")}</h2><p>{t("dispatchPage.description")}</p></div>
-        {canManage && <div><button type="button" onClick={() => setShowVehicles(true)}>{t("dispatchPage.manageVehicles")}</button><button type="button" onClick={() => setShowDateTypes(true)}>{t("dispatchPage.manageTypes")}</button></div>}
+        {canManageMasters && <div><button type="button" onClick={() => setShowVehicles(true)}>{t("dispatchPage.manageVehicles")}</button><button type="button" onClick={() => setShowDateTypes(true)}>{t("dispatchPage.manageTypes")}</button></div>}
       </div>
-      <FormCard title={editing ? t("dispatchPage.updateDispatch") : t("dispatchPage.newDispatch")}>
+      {(canCreateDispatch || (editing && canEditDispatch)) && <FormCard title={editing ? t("dispatchPage.updateDispatch") : t("dispatchPage.newDispatch")}>
         <form className="module-form dispatch-form" onSubmit={(event) => void submit(event)}>
           <label><span>{t("dispatchPage.dispatchDate")}</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
           <label><span>{t("dispatchPage.vehicle")}</span><ClearableSelect required value={vehicleId} onChange={setVehicleId}><option value="">{t("dispatchPage.selectActiveVehicle")}</option>{activeVehicles.map((item) => <option key={item.id} value={item.id}>{item.number}{item.driverName ? ` - ${item.driverName}` : ""}</option>)}</ClearableSelect></label>
@@ -2256,7 +2285,7 @@ function DispatchModule() {
           {error && <p className="form-error">{error}</p>}
           <div className="dispatch-form-actions"><button disabled={saving} type="submit">{saving ? t("advancesPage.saving") : editing ? t("dispatchPage.updateDispatch") : t("dispatchPage.newDispatch")}</button>{editing && <button className="secondary-action" type="button" onClick={reset}>{t("common.close")}</button>}</div>
         </form>
-      </FormCard>
+      </FormCard>}
       <div className="summary-grid">
         <Summary label={t("dispatchPage.totalDispatchedCartons")} value={String(totalDispatched)} />
         <Summary label={t("salesPage.soldCartons")} value={String(totalSold)} />
@@ -2276,10 +2305,10 @@ function DispatchModule() {
           const sold = soldByItem.get(dispatchItemKey(record.id, item.id)) ?? 0;
           const remaining = Math.max(item.cartons - sold, 0);
           return <span key={item.id}>{dateTypeName(item.dateTypeId, item.dateTypeName)}: {item.cartons} | {t("salesPage.soldCartons")} {sold} | {t("salesPage.remainingCartons")} {remaining}</span>;
-        }) ?? <span>{record.produceType}: {record.cartons}</span>}</div><p className="dispatch-linked-summary">{t("salesPage.soldCartons")} {soldCartons} | {t("salesPage.remainingCartons")} {remainingCartons} | {t("dispatchPage.linkedSales")} {linkedSales}</p><footer><button type="button" onClick={() => edit(record)}>{t("common.view")}</button>{canManage && <button className="danger-link" type="button" onClick={() => void remove(record)}>{t("dispatchPage.delete")}</button>}</footer></article>;
+        }) ?? <span>{record.produceType}: {record.cartons}</span>}</div><p className="dispatch-linked-summary">{t("salesPage.soldCartons")} {soldCartons} | {t("salesPage.remainingCartons")} {remainingCartons} | {t("dispatchPage.linkedSales")} {linkedSales}</p><footer>{canEditDispatch && <button type="button" onClick={() => edit(record)}>{t("common.view")}</button>}{canDeleteDispatch && <button className="danger-link" type="button" onClick={() => void remove(record)}>{t("dispatchPage.delete")}</button>}</footer></article>;
       })}</div>}</section>
-      {showVehicles && <DispatchVehicleManager vehicles={vehicles} dispatches={records} onClose={() => setShowVehicles(false)} onRefresh={refreshVehicles} />}
-      {showDateTypes && <DispatchDateTypeManager dateTypes={dateTypes} dispatches={records} onClose={() => setShowDateTypes(false)} onRefresh={refreshDateTypes} />}
+      {showVehicles && canManageMasters && <DispatchVehicleManager vehicles={vehicles} dispatches={records} onClose={() => setShowVehicles(false)} onRefresh={refreshVehicles} />}
+      {showDateTypes && canManageMasters && <DispatchDateTypeManager dateTypes={dateTypes} dispatches={records} onClose={() => setShowDateTypes(false)} onRefresh={refreshDateTypes} />}
     </>
   );
 }
@@ -2416,6 +2445,11 @@ function DispatchDateTypeManager({ dateTypes, dispatches, onClose, onRefresh }: 
 
 function SalesModule() {
   const { t } = useTranslation();
+  const { user, sessionRefreshing } = useAuth();
+  const workspaceId = user?.workspaceId ?? "";
+  const canCreateSales = Boolean(!sessionRefreshing && user && workspaceId && canCreate(user, "sales", workspaceId));
+  const canEditSales = Boolean(!sessionRefreshing && user && workspaceId && canEdit(user, "sales", workspaceId));
+  const canDeleteSales = Boolean(!sessionRefreshing && user && workspaceId && canDelete(user, "sales", workspaceId));
   const [searchParams, setSearchParams] = useSearchParams();
   const load = useCallback(async () => (await workspaceRecords(offlineDb.sales)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts), []);
@@ -2524,6 +2558,10 @@ function SalesModule() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (!(editingSale ? canEditSales : canCreateSales)) {
+      setError(t("common.viewOnlyAccess"));
+      return;
+    }
     const quantityValue = Number(quantity);
     const unitPriceValue = Number(unitPrice);
     if (!quantityValue || quantityValue <= 0) return setError(t("salesPage.validQuantity"));
@@ -2570,7 +2608,7 @@ function SalesModule() {
 
   return (
     <>
-      <FormCard title={t("salesPage.title")}>
+      {(canCreateSales || (editingSale && canEditSales)) && <FormCard title={t("salesPage.title")}>
         <form className="module-form sales-form" onSubmit={(event) => void submit(event)}>
           <div className="sales-type-toggle">
             <button className={currentSaleType === "dispatch_sale" ? "is-active" : ""} type="button" onClick={() => { setSaleType("dispatch_sale"); setError(""); }}>
@@ -2610,7 +2648,7 @@ function SalesModule() {
                       <b>{availableCartons} {t("salesPage.remainingCartons").toLowerCase()}</b>
                     </header>
                     <p className="dispatch-linked-summary">{t("systemValues.dispatchStatuses.dispatched")} {item.dispatchedCartons} | {t("salesPage.soldCartons")} {item.soldCartons} | {t("salesPage.remainingCartons")} {availableCartons}</p>
-                    <footer><button type="button" onClick={() => setSelectedDispatchKey(dispatchItemKey(item.dispatch.id, item.itemId))}>{t("salesPage.selectDispatch")}</button></footer>
+                    <footer>{canCreateSales && <button type="button" onClick={() => setSelectedDispatchKey(dispatchItemKey(item.dispatch.id, item.itemId))}>{t("salesPage.selectDispatch")}</button>}</footer>
                   </article>;
                 }) : <Empty>{t("salesPage.noAvailableDispatch")}</Empty>}
               </div>
@@ -2637,7 +2675,7 @@ function SalesModule() {
             <button disabled={!canSave} type="submit">{editingSale ? t("salesPage.updateSale") : t("salesPage.saveSale")}</button>
           </div>
         </form>
-      </FormCard>
+      </FormCard>}
       <div className="summary-grid">
         <Summary label={t("dashboard.totalSales")} value={money(sales.reduce((sum, item) => sum + item.amount, 0))} />
         <Summary label={t("salesPage.availableDispatchItems")} value={String(filteredAvailability.length)} />
@@ -2678,20 +2716,20 @@ function SalesModule() {
                   <Eye size={15} />
                   <span>{t("common.view")}</span>
                 </button>
-                <button className="sales-action-button sales-action-button--edit" type="button" aria-label={`${t("common.edit")} ${item.invoiceNumber ?? item.date}`} onClick={() => editSale(item)}>
+                {canEditSales && <button className="sales-action-button sales-action-button--edit" type="button" aria-label={`${t("common.edit")} ${item.invoiceNumber ?? item.date}`} onClick={() => editSale(item)}>
                   <Pencil size={15} />
                   <span>{t("common.edit")}</span>
-                </button>
-                <button className="sales-action-button sales-action-button--danger" type="button" aria-label={`${t("common.delete")} ${item.invoiceNumber ?? item.date}`} onClick={() => setSalePendingDelete(item)}>
+                </button>}
+                {canDeleteSales && <button className="sales-action-button sales-action-button--danger" type="button" aria-label={`${t("common.delete")} ${item.invoiceNumber ?? item.date}`} onClick={() => setSalePendingDelete(item)}>
                   <Trash2 size={15} />
                   <span>{t("common.delete")}</span>
-                </button>
+                </button>}
               </div>
             </article>;
           })}
         </div>}
       </section>
-      {selectedSale && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedSale(null)}><section className="worker-dialog" role="dialog" aria-modal="true" aria-label={t("salesPage.saleDetails")} onClick={(event) => event.stopPropagation()}><header className="worker-dialog__header"><h2>{t("salesPage.saleDetails")}</h2><button type="button" onClick={() => setSelectedSale(null)}><X size={18} /></button></header><div className="worker-dialog__body"><dl className="worker-stats"><div><dt>{t("salesPage.saleType")}</dt><dd>{saleTypeLabel(selectedSale)}</dd></div><div><dt>{t("reportsPage.date")}</dt><dd>{selectedSale.date}</dd></div><div><dt>{t("reportsPage.invoiceNumber")}</dt><dd>{selectedSale.invoiceNumber ?? "-"}</dd></div><div><dt>{t("reportsPage.dispatchDate")}</dt><dd>{selectedSale.dispatchDate ?? "-"}</dd></div><div><dt>{t("reportsPage.deliveryDate")}</dt><dd>{selectedSale.deliveryDate ?? "-"}</dd></div><div><dt>{t("reportsPage.paymentDate")}</dt><dd>{selectedSale.paymentDate ?? "-"}</dd></div><div><dt>{t("reportsPage.buyer")}</dt><dd>{selectedSale.buyerName ?? "-"}</dd></div><div><dt>{t("reportsPage.plot")}</dt><dd>{selectedSale.plotName ?? "-"}</dd></div><div><dt>{t("reportsPage.product")}</dt><dd>{saleProduceLabel(selectedSale)}</dd></div><div><dt>{t("reportsPage.vehicle")}</dt><dd>{selectedSale.vehicleNumber ?? "-"}</dd></div><div><dt>{t("reportsPage.quantity")}</dt><dd>{selectedSale.quantity}</dd></div><div><dt>{t("reportsPage.rate")}</dt><dd>{money(selectedSale.unitPrice)}</dd></div><div><dt>{t("reportsPage.amount")}</dt><dd>{money(selectedSale.amount)}</dd></div><div><dt>{t("salesPage.paymentAccount")}</dt><dd>{accounts.find((account) => account.id === selectedSale.accountId)?.name ?? "-"}</dd></div><div><dt>{t("reportsPage.remarks")}</dt><dd>{selectedSale.remarks ?? "-"}</dd></div></dl></div><footer className="worker-dialog__footer"><button className="worker-dialog__close" type="button" onClick={() => setSelectedSale(null)}>{t("common.close")}</button><button className="worker-dialog__link" type="button" onClick={() => editSale(selectedSale)}>{t("common.edit")}</button><button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => setSalePendingDelete(selectedSale)}>{t("common.delete")}</button></footer></section></div>}
+      {selectedSale && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedSale(null)}><section className="worker-dialog" role="dialog" aria-modal="true" aria-label={t("salesPage.saleDetails")} onClick={(event) => event.stopPropagation()}><header className="worker-dialog__header"><h2>{t("salesPage.saleDetails")}</h2><button type="button" onClick={() => setSelectedSale(null)}><X size={18} /></button></header><div className="worker-dialog__body"><dl className="worker-stats"><div><dt>{t("salesPage.saleType")}</dt><dd>{saleTypeLabel(selectedSale)}</dd></div><div><dt>{t("reportsPage.date")}</dt><dd>{selectedSale.date}</dd></div><div><dt>{t("reportsPage.invoiceNumber")}</dt><dd>{selectedSale.invoiceNumber ?? "-"}</dd></div><div><dt>{t("reportsPage.dispatchDate")}</dt><dd>{selectedSale.dispatchDate ?? "-"}</dd></div><div><dt>{t("reportsPage.deliveryDate")}</dt><dd>{selectedSale.deliveryDate ?? "-"}</dd></div><div><dt>{t("reportsPage.paymentDate")}</dt><dd>{selectedSale.paymentDate ?? "-"}</dd></div><div><dt>{t("reportsPage.buyer")}</dt><dd>{selectedSale.buyerName ?? "-"}</dd></div><div><dt>{t("reportsPage.plot")}</dt><dd>{selectedSale.plotName ?? "-"}</dd></div><div><dt>{t("reportsPage.product")}</dt><dd>{saleProduceLabel(selectedSale)}</dd></div><div><dt>{t("reportsPage.vehicle")}</dt><dd>{selectedSale.vehicleNumber ?? "-"}</dd></div><div><dt>{t("reportsPage.quantity")}</dt><dd>{selectedSale.quantity}</dd></div><div><dt>{t("reportsPage.rate")}</dt><dd>{money(selectedSale.unitPrice)}</dd></div><div><dt>{t("reportsPage.amount")}</dt><dd>{money(selectedSale.amount)}</dd></div><div><dt>{t("salesPage.paymentAccount")}</dt><dd>{accounts.find((account) => account.id === selectedSale.accountId)?.name ?? "-"}</dd></div><div><dt>{t("reportsPage.remarks")}</dt><dd>{selectedSale.remarks ?? "-"}</dd></div></dl></div><footer className="worker-dialog__footer"><button className="worker-dialog__close" type="button" onClick={() => setSelectedSale(null)}>{t("common.close")}</button>{canEditSales && <button className="worker-dialog__link" type="button" onClick={() => editSale(selectedSale)}>{t("common.edit")}</button>}{canDeleteSales && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => setSalePendingDelete(selectedSale)}>{t("common.delete")}</button>}</footer></section></div>}
       {salePendingDelete && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSalePendingDelete(null)}>
         <section className="worker-action-dialog sales-delete-dialog" role="dialog" aria-modal="true" aria-label={t("salesPage.deleteSaleTitle")} onClick={(event) => event.stopPropagation()}>
           <header>
@@ -2849,9 +2887,12 @@ function PartnerAccountAutocomplete({
 
 function PartnerLedgerModule() {
   const { t } = useTranslation();
-  const { user } = useAuth();
+  const { user, sessionRefreshing } = useAuth();
   const [searchParams] = useSearchParams();
-  const canManage = Boolean(user?.workspaceId && hasPermission(user, "MANAGE_RECORDS", user.workspaceId));
+  const workspaceId = user?.workspaceId ?? "";
+  const canCreateEntries = Boolean(!sessionRefreshing && user && workspaceId && canCreate(user, "accounts", workspaceId));
+  const canEditEntries = Boolean(!sessionRefreshing && user && workspaceId && canEdit(user, "accounts", workspaceId));
+  const canDeleteEntries = Boolean(!sessionRefreshing && user && workspaceId && canDelete(user, "accounts", workspaceId));
   const [showDeleted, setShowDeleted] = useState(false);
   const load = useCallback(async () => (await workspaceRecords(offlineDb.partnerEntries, { includeDeleted: showDeleted })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [showDeleted]);
   const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts), []);
@@ -2916,6 +2957,10 @@ function PartnerLedgerModule() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (!(editing ? canEditEntries : canCreateEntries)) {
+      setError(t("common.viewOnlyAccess"));
+      return;
+    }
     const settlement = type === "settlement";
     const needsCashBankAccount = type === "contribution" || type === "withdrawal";
     const resolvedAccountId = needsCashBankAccount ? selectedDepositAccountId : undefined;
@@ -3012,7 +3057,7 @@ function PartnerLedgerModule() {
 
   return (
     <>
-      <FormCard title={editing ? t("partnerLedgerPage.editPartnerEntry") : t("partnerLedgerPage.recordPartnerEntry")}>
+      {(canCreateEntries || (editing && canEditEntries)) && <FormCard title={editing ? t("partnerLedgerPage.editPartnerEntry") : t("partnerLedgerPage.recordPartnerEntry")}>
         <form className="module-form partner-entry-form" onSubmit={(event) => void submit(event)}>
           <label><span>{t("partnerLedgerPage.date")}</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
           <label><span>{t("partnerLedgerPage.type")}</span><ClearableSelect allowClear={false} value={type} onChange={(value) => setType(value as PartnerEntry["type"])}>
@@ -3053,7 +3098,7 @@ function PartnerLedgerModule() {
           {editing && <button className="secondary-button" disabled={saving} type="button" onClick={resetForm}>{t("partnerLedgerPage.cancelEdit")}</button>}
         </form>
         {error && <p className="worker-action-error">{error}</p>}
-      </FormCard>
+      </FormCard>}
       <Summary
         label={getPartnerBalanceState(balance) === "partner_holds_business_money"
           ? t("partnerLedgerPage.partnerHoldsBusinessMoney")
@@ -3086,15 +3131,15 @@ function PartnerLedgerModule() {
       <label className="partner-ledger-filter"><span>{t("partnerLedgerPage.ledgerFilter")}</span><select value={entryFilter} onChange={(event) => setEntryFilter(event.target.value as typeof entryFilter)}>
         <option value="all">{t("partnerLedgerPage.all")}</option><option value="contribution">{t("partnerLedgerPage.capitalInjected")}</option><option value="settlement">{t("partnerLedgerPage.partnerSettlement")}</option><option value="withdrawal">{t("partnerLedgerPage.returnMoneyToPartner")}</option><option value="adjustment">{t("partnerLedgerPage.adjustments")}</option>
       </select></label>
-      {canManage && <label className="partner-ledger-show-deleted"><input checked={showDeleted} type="checkbox" onChange={(event) => setShowDeleted(event.target.checked)} /> {t("partnerLedgerPage.showDeleted")}</label>}
+      {canDeleteEntries && <label className="partner-ledger-show-deleted"><input checked={showDeleted} type="checkbox" onChange={(event) => setShowDeleted(event.target.checked)} /> {t("partnerLedgerPage.showDeleted")}</label>}
       <RecordTable
         empty={t("partnerLedgerPage.noPartnerEntries")}
         rows={visibleEntries.map((item) => [item.date, partnerEntryName(item, partnerSettlementRoute), partnerEntryLabel(item), item.type === "settlement" ? `${accountName(item.fromAccountId)} -> ${accountName(item.toAccountId)}` : `${accountName(item.partnerAccountId ?? resolvePartnerAccountId(item, accounts))} / ${accountName(item.accountId)}`, item.notes || "-", money(item.type === "withdrawal" ? -item.amount : item.amount), item.deletedAt ? t("partnerLedgerPage.deleted") : runningBalances.get(item.id) ?? "-"])}
         actions={visibleEntries.map((item) => (
           <div className="record-list__actions" key={`actions-${item.id}`}>
             <button type="button" onClick={() => setViewing(item)}>{t("partnerLedgerPage.view")}</button>
-            {canManage && !item.deletedAt && <button type="button" onClick={() => edit(item)}>{t("partnerLedgerPage.edit")}</button>}
-            {canManage && !item.deletedAt && <button className="danger-button" type="button" onClick={() => { setDeleting(item); setDeletionReason(""); }}>{t("partnerLedgerPage.delete")}</button>}
+            {canEditEntries && !item.deletedAt && <button type="button" onClick={() => edit(item)}>{t("partnerLedgerPage.edit")}</button>}
+            {canDeleteEntries && !item.deletedAt && <button className="danger-button" type="button" onClick={() => { setDeleting(item); setDeletionReason(""); }}>{t("partnerLedgerPage.delete")}</button>}
           </div>
         ))}
       />
@@ -3132,6 +3177,9 @@ function PartnerLedgerModule() {
 
 function AccountsModule() {
   const { t } = useTranslation();
+  const { user, sessionRefreshing } = useAuth();
+  const workspaceId = user?.workspaceId ?? "";
+  const canCreateAccounts = Boolean(!sessionRefreshing && user && workspaceId && canCreate(user, "accounts", workspaceId));
   const navigate = useNavigate();
   const loadAccounts = useCallback(async () => (await workspaceRecords(offlineDb.accounts)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)), []);
   const loadVouchers = useCallback(() => workspaceRecords(offlineDb.vouchers, { includeGeneralFarmRecords: true }), []);
@@ -3158,6 +3206,7 @@ function AccountsModule() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (!canCreateAccounts) return;
     const record: Account = { ...makeLocalRecord(), name, type };
     await persistOperationalRecord("account", record);
     setName("");
@@ -3545,7 +3594,7 @@ function AccountsModule() {
 
   return (
     <>
-      <FormCard title={t("accountsPage.createAccount")}>
+      {canCreateAccounts && <FormCard title={t("accountsPage.createAccount")}>
         <form className="module-form compact-form" onSubmit={(event) => void submit(event)}>
           <input required placeholder={t("accountsPage.accountName")} value={name} onChange={(event) => setName(event.target.value)} />
           <select value={type} onChange={(event) => setType(event.target.value as Account["type"])}>
@@ -3553,7 +3602,7 @@ function AccountsModule() {
           </select>
           <button type="submit">{t("accountsPage.createAccount")}</button>
         </form>
-      </FormCard>
+      </FormCard>}
       <section className="record-panel">
         <h2>{t("accountsPage.yourAccounts")}</h2>
         <div className="account-grid">

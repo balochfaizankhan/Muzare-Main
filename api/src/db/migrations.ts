@@ -29,6 +29,7 @@ const importFailuresMigrationUrl = new URL("../../../database/migrations/0026_im
 const farmsActiveSchemaRepairMigrationUrl = new URL("../../../database/migrations/0027_farms_active_schema_repair.sql", import.meta.url);
 const importTrackingSchemaAlignmentMigrationUrl = new URL("../../../database/migrations/0028_import_tracking_schema_alignment.sql", import.meta.url);
 const workspaceMemberFarmScopeMigrationUrl = new URL("../../../database/migrations/0029_workspace_member_farm_scope.sql", import.meta.url);
+const workspaceAccountantRoleMigrationUrl = new URL("../../../database/migrations/0030_workspace_accountant_role.sql", import.meta.url);
 
 const requiredImportTrackingSchema = {
   farms: ["source_type", "old_android_id", "import_batch_id", "source_file_hash", "active", "deleted_at", "deletion_approved_at"],
@@ -203,6 +204,8 @@ export async function ensureWorkspaceSchema(): Promise<void> {
   await db.execute(importTrackingSchemaAlignmentMigration);
   const workspaceMemberFarmScopeMigration = await readFile(workspaceMemberFarmScopeMigrationUrl, "utf8");
   await db.execute(workspaceMemberFarmScopeMigration);
+  const workspaceAccountantRoleMigration = await readFile(workspaceAccountantRoleMigrationUrl, "utf8");
+  await db.execute(workspaceAccountantRoleMigration);
 
   await validateRequiredColumns();
 }

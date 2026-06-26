@@ -1,5 +1,5 @@
 export const platformRoles = ["platform_admin", "platform_support"] as const;
-export const workspaceRoles = ["workspace_owner", "workspace_manager", "supervisor", "operator", "viewer"] as const;
+export const workspaceRoles = ["workspace_owner", "workspace_manager", "supervisor", "accountant", "operator", "viewer"] as const;
 
 export type PlatformRole = (typeof platformRoles)[number];
 export type WorkspaceRole = (typeof workspaceRoles)[number];
@@ -66,6 +66,7 @@ const workspacePermissions: Record<WorkspaceRole, readonly WorkspacePermission[]
     "MANAGE_RECORDS", "MANAGE_FARMS", "MANAGE_SEASONS", "SUBMIT_RECORDS", "VIEW_REPORTS",
   ],
   supervisor: ["APPROVE_EXPENSE", "APPROVE_ATTENDANCE", "APPROVE_SALE", "APPROVE_DISPATCH", "MANAGE_RECORDS", "SUBMIT_RECORDS", "VIEW_REPORTS"],
+  accountant: ["MANAGE_RECORDS", "SUBMIT_RECORDS", "VIEW_REPORTS"],
   operator: ["SUBMIT_RECORDS"],
   viewer: ["VIEW_REPORTS"],
 };
@@ -86,6 +87,20 @@ export const roleModulePermissions: Record<WorkspaceRole, Record<WorkspaceModule
     dashboard: { ...viewOnly }, workforce: { ...viewOnly }, attendance: { ...viewCreateEdit }, advances: { ...viewCreateEdit },
     expenses: { ...viewCreateEdit }, sales: { ...viewCreateEdit }, dispatch: { ...viewCreateEdit }, inventory: { ...viewCreateEdit },
     accounts: { ...viewOnly }, reports: { ...viewOnly }, settings: { ...viewOnly }, team: { ...viewOnly },
+  },
+  accountant: {
+    dashboard: { ...viewOnly },
+    workforce: { ...viewOnly },
+    attendance: { ...viewOnly },
+    advances: { ...viewCreateEdit, export: true },
+    expenses: { ...viewCreateEdit, export: true },
+    sales: { ...viewOnly },
+    dispatch: { ...viewOnly },
+    inventory: { ...viewOnly },
+    accounts: { ...viewCreateEdit, export: true },
+    reports: { ...viewOnly, export: true },
+    settings: { ...viewOnly, view: false },
+    team: { ...viewOnly, view: false },
   },
   operator: {
     dashboard: { ...viewOnly }, workforce: { ...viewOnly }, attendance: { ...viewCreate }, advances: { ...viewCreate },

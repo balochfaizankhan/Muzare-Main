@@ -29,6 +29,7 @@ const bravo = { workspaceId: randomUUID(), farmId: randomUUID(), seasonId: rando
 const alphaSecondary = { farmId: randomUUID(), seasonId: randomUUID() };
 const manager = { userId: randomUUID(), token: `manager-${randomUUID()}` };
 const supervisor = { userId: randomUUID(), token: `supervisor-${randomUUID()}` };
+const accountant = { userId: randomUUID(), token: `accountant-${randomUUID()}` };
 const operator = { userId: randomUUID(), token: `operator-${randomUUID()}` };
 const viewer = { userId: randomUUID(), token: `viewer-${randomUUID()}` };
 const admin = { userId: randomUUID(), token: `admin-${randomUUID()}` };
@@ -57,6 +58,7 @@ before(async () => {
     { id: bravo.userId, email: `bravo-${bravo.userId}@example.test`, passwordHash: "test", status: "approved" },
     { id: manager.userId, email: `manager-${manager.userId}@example.test`, passwordHash: "test", status: "approved" },
     { id: supervisor.userId, email: `supervisor-${supervisor.userId}@example.test`, passwordHash: "test", status: "approved" },
+    { id: accountant.userId, email: `accountant-${accountant.userId}@example.test`, passwordHash: "test", status: "approved" },
     { id: operator.userId, email: `operator-${operator.userId}@example.test`, passwordHash: "test", status: "approved" },
     { id: viewer.userId, email: `viewer-${viewer.userId}@example.test`, passwordHash: "test", status: "approved" },
     { id: admin.userId, email: `admin-${admin.userId}@example.test`, passwordHash: "test", status: "approved", platformRole: "platform_admin" },
@@ -66,6 +68,7 @@ before(async () => {
     { workspaceId: bravo.workspaceId, userId: bravo.userId, role: "workspace_owner" },
     { workspaceId: alpha.workspaceId, userId: manager.userId, role: "workspace_manager" },
     { workspaceId: alpha.workspaceId, userId: supervisor.userId, role: "supervisor" },
+    { workspaceId: alpha.workspaceId, userId: accountant.userId, role: "accountant" },
     { workspaceId: alpha.workspaceId, userId: operator.userId, role: "operator" },
     { workspaceId: alpha.workspaceId, userId: viewer.userId, role: "viewer", farmAccessMode: "assigned" },
   ]);
@@ -89,6 +92,7 @@ before(async () => {
     { userId: bravo.userId, workspaceId: bravo.workspaceId, activeFarmId: bravo.farmId, activeSeasonId: bravo.seasonId, tokenHash: hash(bravo.token), expiresAt: new Date(Date.now() + 60_000) },
     { userId: manager.userId, workspaceId: alpha.workspaceId, activeFarmId: alpha.farmId, activeSeasonId: alpha.seasonId, tokenHash: hash(manager.token), expiresAt: new Date(Date.now() + 60_000) },
     { userId: supervisor.userId, workspaceId: alpha.workspaceId, activeFarmId: alpha.farmId, activeSeasonId: alpha.seasonId, tokenHash: hash(supervisor.token), expiresAt: new Date(Date.now() + 60_000) },
+    { userId: accountant.userId, workspaceId: alpha.workspaceId, activeFarmId: alpha.farmId, activeSeasonId: alpha.seasonId, tokenHash: hash(accountant.token), expiresAt: new Date(Date.now() + 60_000) },
     { userId: operator.userId, workspaceId: alpha.workspaceId, activeFarmId: alpha.farmId, activeSeasonId: alpha.seasonId, tokenHash: hash(operator.token), expiresAt: new Date(Date.now() + 60_000) },
     { userId: viewer.userId, workspaceId: alpha.workspaceId, activeFarmId: alpha.farmId, activeSeasonId: alpha.seasonId, tokenHash: hash(viewer.token), expiresAt: new Date(Date.now() + 60_000) },
     { userId: admin.userId, workspaceId: alpha.workspaceId, activeFarmId: alpha.farmId, activeSeasonId: alpha.seasonId, tokenHash: hash(admin.token), expiresAt: new Date(Date.now() + 60_000) },
@@ -106,12 +110,12 @@ after(async () => {
   await db.delete(importFailures).where(inArray(importFailures.workspaceId, ids));
   await db.delete(importBatches).where(inArray(importBatches.workspaceId, ids));
   await db.delete(operationalRecords).where(inArray(operationalRecords.workspaceId, ids));
-  await db.delete(userSessions).where(inArray(userSessions.userId, [alpha.userId, bravo.userId, manager.userId, supervisor.userId, operator.userId, viewer.userId, admin.userId]));
+  await db.delete(userSessions).where(inArray(userSessions.userId, [alpha.userId, bravo.userId, manager.userId, supervisor.userId, accountant.userId, operator.userId, viewer.userId, admin.userId]));
   await db.delete(seasons).where(inArray(seasons.workspaceId, ids));
   await db.delete(farms).where(inArray(farms.workspaceId, ids));
   await db.delete(workspaceMemberFarms).where(eq(workspaceMemberFarms.workspaceId, alpha.workspaceId));
   await db.delete(workspaceMemberships).where(inArray(workspaceMemberships.workspaceId, ids));
-  await db.delete(users).where(inArray(users.id, [alpha.userId, bravo.userId, manager.userId, supervisor.userId, operator.userId, viewer.userId, admin.userId]));
+  await db.delete(users).where(inArray(users.id, [alpha.userId, bravo.userId, manager.userId, supervisor.userId, accountant.userId, operator.userId, viewer.userId, admin.userId]));
   await db.delete(users).where(eq(users.email, "invited.member@example.test"));
   await db.delete(workspaces).where(inArray(workspaces.id, ids));
   await closeDatabaseConnection();
@@ -1338,6 +1342,25 @@ test("viewer permissions are enforced server-side for create and delete actions"
     recordId: labourerId,
   });
   assert.equal(deleteAttempt.statusCode, 403);
+});
+
+test("accountant role is finance-scoped and cannot mutate attendance records", async () => {
+  const accountId = await createAccount(alpha, "Accountant Cash");
+  const voucherAttempt = await request(accountant.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", randomUUID(), {
+    ...financialRecord(alpha, "voucher"),
+    accountId,
+  }));
+  assert.equal(voucherAttempt.statusCode, 200);
+
+  const attendanceAttempt = await request(accountant.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "attendance", randomUUID(), {
+    labourerId: randomUUID(),
+    date: "2026-06-12",
+    status: "present",
+  }));
+  assert.equal(attendanceAttempt.statusCode, 403);
+
+  const reportAttempt = await request(accountant.token, "GET", `/v1/workspace/${alpha.workspaceId}/expenses/search?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}&from=2026-01-01&to=2026-12-31`);
+  assert.equal(reportAttempt.statusCode, 200);
 });
 
 test("custom module permissions block expense history APIs even when workspace membership exists", async () => {

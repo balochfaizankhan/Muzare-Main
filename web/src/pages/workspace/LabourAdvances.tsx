@@ -10,7 +10,7 @@ import { SearchInput } from "../../components/SearchInput";
 import { SubpageHeader } from "../../components/SubpageHeader";
 import { todayLocalDateKey } from "../../lib/attendanceStatus";
 import { formatMoney } from "../../lib/format";
-import { hasPermission } from "../../lib/permissions";
+import { canCreate, canDelete, canEdit } from "../../lib/permissions";
 import { translatePaymentType } from "../../lib/systemTranslations";
 import { ensureLocalAccounts, makeLocalRecord, offlineDb, workspaceRecords, type Account, type Advance, type Labourer } from "../../lib/offline-db";
 import { deleteOperationalRecord, persistOperationalRecord } from "../../services/syncService";
@@ -38,7 +38,7 @@ const labourGroupSummary = (labourer?: Labourer) => {
 
 export function LabourAdvances() {
   const { t } = useTranslation();
-  const { user } = useAuth();
+  const { user, sessionRefreshing } = useAuth();
   const [searchParams] = useSearchParams();
   const [advances, setAdvances] = useState<Advance[]>([]);
   const [labourers, setLabourers] = useState<Labourer[]>([]);
@@ -59,8 +59,10 @@ export function LabourAdvances() {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [entryError, setEntryError] = useState("");
-  const canRecord = Boolean(user?.workspaceId && hasPermission(user, "SUBMIT_RECORDS", user.workspaceId));
-  const canManage = Boolean(user?.workspaceId && hasPermission(user, "MANAGE_RECORDS", user.workspaceId));
+  const workspaceId = user?.workspaceId ?? "";
+  const canRecord = Boolean(!sessionRefreshing && user && workspaceId && canCreate(user, "advances", workspaceId));
+  const canManage = Boolean(!sessionRefreshing && user && workspaceId && canEdit(user, "advances", workspaceId));
+  const canDeleteAdvances = Boolean(!sessionRefreshing && user && workspaceId && canDelete(user, "advances", workspaceId));
   const labourInputRef = useRef<HTMLInputElement | null>(null);
 
   const refresh = useCallback(async () => {
@@ -144,6 +146,10 @@ export function LabourAdvances() {
   const selectedEntryAccountId = entryAccountId;
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (!canRecord) {
+      setEntryError(t("common.viewOnlyAccess"));
+      return;
+    }
     const amount = Number(entryAmount);
     if (!entryDate || !entryLabourerId || !selectedEntryAccountId || !Number.isFinite(amount) || amount <= 0) {
       setEntryError(t("advancesPage.advanceValidation"));
@@ -175,7 +181,7 @@ export function LabourAdvances() {
     }
   };
   const remove = async (advance: Advance) => {
-    if (!canManage || !window.confirm(t("advancesPage.deleteConfirm"))) return;
+    if (!canDeleteAdvances || !window.confirm(t("advancesPage.deleteConfirm"))) return;
     await deleteOperationalRecord("advance", advance);
     setSelected(null);
     await refresh();
@@ -288,7 +294,7 @@ export function LabourAdvances() {
             })}
           </div>}
         </section>
-        {selected && <AdvanceDetails advance={selected} labourer={labourById.get(selected.labourerId)} accountName={accountById.get(selected.accountId ?? "") ?? selected.sourceAccountName} canManage={canManage} onClose={() => setSelected(null)} onEdit={() => setEditing(true)} onDelete={() => void remove(selected)} />}
+        {selected && <AdvanceDetails advance={selected} labourer={labourById.get(selected.labourerId)} accountName={accountById.get(selected.accountId ?? "") ?? selected.sourceAccountName} canManage={canManage} canDelete={canDeleteAdvances} onClose={() => setSelected(null)} onEdit={() => setEditing(true)} onDelete={() => void remove(selected)} />}
         {selected && editing && <EditAdvance advance={selected} accounts={accounts} onClose={() => setEditing(false)} onSave={async (record) => {
           await persistOperationalRecord("advance", record);
           setSelected(record); setEditing(false); await refresh();
@@ -298,8 +304,8 @@ export function LabourAdvances() {
   );
 }
 
-function AdvanceDetails({ advance, labourer, accountName, canManage, onClose, onEdit, onDelete }: {
-  advance: Advance; labourer?: Labourer; accountName?: string; canManage: boolean; onClose: () => void; onEdit: () => void; onDelete: () => void;
+function AdvanceDetails({ advance, labourer, accountName, canManage, canDelete, onClose, onEdit, onDelete }: {
+  advance: Advance; labourer?: Labourer; accountName?: string; canManage: boolean; canDelete: boolean; onClose: () => void; onEdit: () => void; onDelete: () => void;
 }) {
   const { t } = useTranslation();
   return <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}><section className="worker-dialog" role="dialog" aria-modal="true" aria-label={t("advancesPage.detailsTitle")} onClick={(event) => event.stopPropagation()}>
@@ -309,7 +315,7 @@ function AdvanceDetails({ advance, labourer, accountName, canManage, onClose, on
       <div><dt>{t("advancesPage.group")}</dt><dd>{labourer?.group ?? "-"}</dd></div><div><dt>{t("advancesPage.amount")}</dt><dd>{money(advance.amount)}</dd></div>
       <div><dt>{t("advancesPage.paidFrom")}</dt><dd>{accountName ?? "-"}</dd></div><div><dt>{t("advancesPage.notesReference")}</dt><dd>{advance.notes || "-"}</dd></div><div><dt>{t("advancesPage.createdBy")}</dt><dd>-</dd></div>
     </dl></div>
-    <footer className="worker-dialog__footer">{canManage && <button className="worker-dialog__link" type="button" onClick={onEdit}>{t("advancesPage.edit")}</button>}{canManage && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={onDelete}>{t("advancesPage.delete")}</button>}<button className="worker-dialog__close" type="button" onClick={onClose}>{t("advancesPage.close")}</button></footer>
+    <footer className="worker-dialog__footer">{canManage && <button className="worker-dialog__link" type="button" onClick={onEdit}>{t("advancesPage.edit")}</button>}{canDelete && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={onDelete}>{t("advancesPage.delete")}</button>}<button className="worker-dialog__close" type="button" onClick={onClose}>{t("advancesPage.close")}</button></footer>
   </section></div>;
 }
 

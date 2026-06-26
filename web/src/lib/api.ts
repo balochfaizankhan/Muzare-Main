@@ -7,7 +7,7 @@ export class ApiError extends Error {
 }
 
 export type PlatformRole = "platform_admin" | "platform_support";
-export type WorkspaceRole = "workspace_owner" | "workspace_manager" | "supervisor" | "operator" | "viewer";
+export type WorkspaceRole = "workspace_owner" | "workspace_manager" | "supervisor" | "accountant" | "operator" | "viewer";
 export type WorkspaceModule = "dashboard" | "workforce" | "attendance" | "advances" | "expenses" | "sales" | "dispatch" | "inventory" | "accounts" | "reports" | "settings" | "team";
 export type WorkspaceModuleAction = "view" | "create" | "edit" | "delete" | "approve" | "export";
 export type WorkspaceModulePermissions = Partial<Record<WorkspaceModule, Partial<Record<WorkspaceModuleAction, boolean>>>>;

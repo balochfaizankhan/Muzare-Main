@@ -1,5 +1,6 @@
 import { ApiError, deleteOperationalRecord as deleteOperationalRecordFromApi, fetchBootstrap, fetchOperationalRecords, saveOperationalRecord, type OperationalEntity, type OperationalRecordEnvelope } from "../lib/api";
 import { clearCachedData, offlineDb, setActiveFarmId, setActiveSeasonId, setActiveWorkspaceId, type LocalRecord, type PendingMutation } from "../lib/offline-db";
+import { canQueueOperationalMutation } from "../lib/permissions";
 import type { Table } from "dexie";
 import i18n from "../i18n";
 
@@ -80,9 +81,20 @@ async function cacheRecord(entity: OperationalEntity, record: OperationalRecordE
   await tableFor(entity).put({ ...record, workspaceId: context.workspaceId, farmId, seasonId, pendingSync } as LocalRecord);
 }
 
+function assertCanQueueMutation(entity: OperationalEntity, operation: "create" | "edit" | "delete") {
+  if (!canQueueOperationalMutation(entity, operation)) {
+    notify(i18n.t("common.viewOnlyAccess"));
+    throw new Error(i18n.t("sync.permissionDenied"));
+  }
+}
+
 function isRetryableSyncError(error: unknown) {
   if (!(error instanceof ApiError)) return true;
   return error.status >= 500 || error.status === 408 || error.status === 425 || error.status === 429;
+}
+
+function isPermissionDeniedSyncError(error: unknown) {
+  return error instanceof ApiError && error.status === 403;
 }
 
 async function getContextMutations() {
@@ -98,16 +110,18 @@ async function refreshSyncState(next: Partial<SyncState> = {}) {
   const pendingCount = mutations.filter((mutation) => (mutation.status ?? "pending") !== "resolved"
     && (mutation.status ?? "pending") !== "discarded"
     && (mutation.retryable ?? true)).length;
-  const failedCount = mutations.filter((mutation) => mutation.status === "failed" && !(mutation.retryable ?? true)).length;
+  const failedCount = mutations.filter((mutation) =>
+    (mutation.status === "failed" || mutation.status === "permission_denied") && !(mutation.retryable ?? true)).length;
   emit({ pendingCount, failedCount, ...next });
 }
 
-export async function queueOfflineRecord(entity: OperationalEntity, record: LocalRecord): Promise<void> {
+export async function queueOfflineRecord(entity: OperationalEntity, record: LocalRecord, operation: "create" | "edit" = "create"): Promise<void> {
   if (!context) throw new Error(i18n.t("sync.workspaceSyncNotInitialized"));
+  assertCanQueueMutation(entity, operation);
   await cacheRecord(entity, record, true);
   const queuedAt = new Date().toISOString();
   const mutation: PendingMutation = {
-    id: `${context.workspaceId}:${entity}:${record.id}`, entity, operation: "create", payload: record, attempts: 0,
+    id: `${context.workspaceId}:${entity}:${record.id}`, entity, operation: operation === "edit" ? "update" : operation, payload: record, attempts: 0,
     clientMutationId: `${context.workspaceId}:${entity}:${record.id}`,
     status: "pending",
     retryable: true,
@@ -121,14 +135,17 @@ export async function queueOfflineRecord(entity: OperationalEntity, record: Loca
 }
 
 export async function persistOperationalRecord<T extends LocalRecord>(entity: OperationalEntity, record: T): Promise<T> {
+  const existing = await tableFor(entity).get(record.id);
+  const operation = existing ? "edit" : "create";
   const nextRecord = { ...record, updatedAt: new Date().toISOString(), pendingSync: true };
-  await queueOfflineRecord(entity, nextRecord);
+  await queueOfflineRecord(entity, nextRecord, operation);
   if (navigator.onLine) void syncPendingRecords();
   return nextRecord;
 }
 
 export async function deleteOperationalRecord(entity: OperationalEntity, record: LocalRecord & { deletionReason?: string }): Promise<void> {
   if (!context) throw new Error("Workspace synchronization is not initialized.");
+  assertCanQueueMutation(entity, "delete");
   const queuedAt = new Date().toISOString();
   const softDelete = entity === "partnerEntry" || entity === "advance" || entity === "voucher" || entity === "sale";
   const payload = softDelete ? { ...record, deletedAt: queuedAt, updatedAt: queuedAt, pendingSync: true } : { ...record, updatedAt: queuedAt, pendingSync: true };
@@ -210,6 +227,7 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
       window.dispatchEvent(new Event("muzare-local-data-change"));
       synced += 1;
     } catch (error) {
+      const permissionDenied = isPermissionDeniedSyncError(error);
       if (error instanceof Error && error.message.includes("PostgreSQL is the primary workspace database")) {
         if (mutation.operation === "delete") await tableFor(mutation.entity).delete((mutation.payload as LocalRecord).id);
         else await tableFor(mutation.entity).update((mutation.payload as LocalRecord).id, { pendingSync: false });
@@ -222,22 +240,37 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
       const nextAttemptAt = retryable && attempts < maxAutomaticAttempts
         ? new Date(Date.now() + 1_000 * 2 ** (attempts - 1)).toISOString()
         : undefined;
+      const lastError = permissionDenied
+        ? i18n.t("sync.permissionDenied")
+        : error instanceof Error
+          ? error.message
+          : "Unknown sync failure.";
       await offlineDb.pendingMutations.update(mutation.id, {
         attempts,
         retryable: retryable && attempts < maxAutomaticAttempts,
-        status: retryable && attempts < maxAutomaticAttempts ? "pending" : "failed",
-        lastError: error instanceof Error ? error.message : "Unknown sync failure.",
+        status: permissionDenied
+          ? "permission_denied"
+          : retryable && attempts < maxAutomaticAttempts
+            ? "pending"
+            : "failed",
+        lastError,
         nextAttemptAt,
         lastAttemptedAt: new Date().toISOString(),
       });
+      if (permissionDenied && mutation.operation !== "delete") {
+        await tableFor(mutation.entity).update((mutation.payload as LocalRecord).id, { pendingSync: false });
+        window.dispatchEvent(new Event("muzare-local-data-change"));
+      }
+      if (permissionDenied) notify(i18n.t("sync.permissionDenied"));
       if (!(retryable && attempts < maxAutomaticAttempts)) hadPermanentFailures = true;
       if (retryable && attempts < maxAutomaticAttempts) continue;
-      if (mutation.operation !== "delete") await tableFor(mutation.entity).update((mutation.payload as LocalRecord).id, { pendingSync: true });
+      if (mutation.operation !== "delete") await tableFor(mutation.entity).update((mutation.payload as LocalRecord).id, { pendingSync: false });
     }
   }
   syncing = false;
   const pending = await getPendingCount();
-  const failedMutations = (await getContextMutations()).filter((mutation) => mutation.status === "failed" && !(mutation.retryable ?? true));
+  const failedMutations = (await getContextMutations()).filter((mutation) =>
+    (mutation.status === "failed" || mutation.status === "permission_denied") && !(mutation.retryable ?? true));
   if (pending === 0) {
     const lastSyncTime = new Date().toISOString();
     localStorage.setItem(lastSyncKey(context.workspaceId), lastSyncTime);
@@ -331,6 +364,10 @@ export async function getSyncQueueItems() {
 }
 
 export async function retrySyncQueueItem(mutationId: string) {
+  const item = await offlineDb.pendingMutations.get(mutationId);
+  if (item && item.operation !== "delete") {
+    await tableFor(item.entity).update((item.payload as LocalRecord).id, { pendingSync: true });
+  }
   await offlineDb.pendingMutations.update(mutationId, {
     attempts: 0,
     retryable: true,

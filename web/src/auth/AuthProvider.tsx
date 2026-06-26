@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type PropsWithChildren } from "react";
 import { ApiError, fetchSession, login as loginRequest, logout as logoutRequest, selectWorkspace, type AppUser } from "../lib/api";
+import { setPermissionContextUser } from "../lib/permissions";
 import { queryClient } from "../lib/query-client";
 import { clearWorkspaceCache } from "../services/syncService";
 
@@ -32,6 +33,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [token, setToken] = useState<string | null>(() => window.localStorage.getItem(tokenKey));
   const [loading, setLoading] = useState(() => Boolean(window.localStorage.getItem(tokenKey)) && !cachedUser());
   const [sessionRefreshing, setSessionRefreshing] = useState(() => Boolean(window.localStorage.getItem(tokenKey)));
+
+  useEffect(() => {
+    setPermissionContextUser(sessionRefreshing ? null : user);
+  }, [sessionRefreshing, user]);
 
   useEffect(() => {
     if (!token) {
