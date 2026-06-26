@@ -5,8 +5,9 @@ import { requireUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { operationalRecords, userSessions } from "../db/schema.js";
+import { hasModulePermission } from "../permissions.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
-import { hasFarmAccess } from "../workspace-access.js";
+import { requireFarmAccess } from "../workspace-access.js";
 
 const paramsSchema = z.object({ workspaceId: z.string().uuid() });
 const querySchema = z.object({
@@ -37,7 +38,10 @@ export async function expenseSearchRoutes(app: FastifyInstance): Promise<void> {
     if (query.data.from && query.data.to && query.data.from > query.data.to) {
       return reply.code(400).send({ message: "Expense search date range is invalid." });
     }
-    if (!hasFarmAccess(request.appUser, params.data.workspaceId, query.data.farmId)) {
+    if (!hasModulePermission(request.appUser, params.data.workspaceId, "expenses", "view")) {
+      return reply.code(403).send({ message: "Expenses view permission is required." });
+    }
+    if (!requireFarmAccess(request.appUser, params.data.workspaceId, query.data.farmId)) {
       return reply.code(403).send({ message: "You do not have access to this farm." });
     }
     if (localDevelopmentMode) return { records: [] };

@@ -4,7 +4,8 @@ import { z } from "zod";
 import { requireUser } from "../auth.js";
 import { db } from "../db/client.js";
 import { auditLogs, operationalRecords, userSessions } from "../db/schema.js";
-import { hasPermission } from "../permissions.js";
+import { hasModulePermission } from "../permissions.js";
+import { requireFarmAccess } from "../workspace-access.js";
 
 const paramsSchema = z.object({ workspaceId: z.string().uuid(), labourId: z.string().min(1) });
 const deleteSchema = z.object({ confirmation: z.literal("DELETE"), endDate: z.string().date().optional() });
@@ -36,9 +37,11 @@ async function linkedRecords(workspaceId: string, labourId: string, farmId: stri
 }
 
 async function lifecycleContext(request: FastifyRequest, workspaceId: string) {
-  if (!request.appUser || request.appUser.workspaceId !== workspaceId || !hasPermission(request.appUser, "MANAGE_TEAM", workspaceId)) return null;
+  if (!request.appUser || request.appUser.workspaceId !== workspaceId) return null;
   const farmId = await selectedFarm(request.sessionId);
-  return farmId ? { user: request.appUser, farmId } : null;
+  if (!farmId || !requireFarmAccess(request.appUser, workspaceId, farmId)) return null;
+  if (!hasModulePermission(request.appUser, workspaceId, "workforce", "delete")) return null;
+  return { user: request.appUser, farmId };
 }
 
 export async function labourManagementRoutes(app: FastifyInstance): Promise<void> {

@@ -53,5 +53,26 @@ export function hasModulePermission(user: AppUser, module: WorkspaceModule, acti
   return Boolean(membership && (membership.permissions?.[module]?.[action] ?? roleModulePermissions[membership.role][module][action]));
 }
 
+export const canView = (user: AppUser, module: WorkspaceModule, workspaceId = user.workspaceId ?? "") =>
+  hasModulePermission(user, module, "view", workspaceId);
+
+export const canCreate = (user: AppUser, module: WorkspaceModule, workspaceId = user.workspaceId ?? "") =>
+  hasModulePermission(user, module, "create", workspaceId);
+
+export const canEdit = (user: AppUser, module: WorkspaceModule, workspaceId = user.workspaceId ?? "") =>
+  hasModulePermission(user, module, "edit", workspaceId);
+
+export const canDelete = (user: AppUser, module: WorkspaceModule, workspaceId = user.workspaceId ?? "") =>
+  hasModulePermission(user, module, "delete", workspaceId);
+
+export const canExport = (user: AppUser, module: WorkspaceModule, workspaceId = user.workspaceId ?? "") =>
+  hasModulePermission(user, module, "export", workspaceId);
+
+export const canManageTeam = (user: AppUser, workspaceId = user.workspaceId ?? "") =>
+  hasModulePermission(user, "team", "edit", workspaceId);
+
+export const canManagePermissions = (user: AppUser, workspaceId = user.workspaceId ?? "") =>
+  hasModulePermission(user, "team", "approve", workspaceId) || hasModulePermission(user, "team", "edit", workspaceId);
+
 export const isPlatformUser = (user: AppUser) => Boolean(user.platformRole);
 export const getHomePath = (user: AppUser) => isPlatformUser(user) ? "/admin/dashboard" : "/workspace/dashboard";

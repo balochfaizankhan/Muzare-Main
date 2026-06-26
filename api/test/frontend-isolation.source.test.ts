@@ -10,6 +10,17 @@ test("logout and workspace switching clear IndexedDB and React Query caches", as
   assert.match(auth, /const switchWorkspace[\s\S]*await selectWorkspace[\s\S]*await clearWorkspaceCache\(\);[\s\S]*queryClient\.clear\(\);/);
 });
 
+test("frontend permission helpers expose module-level view, create, edit, delete, export, and team checks", async () => {
+  const permissions = await source("web/src/lib/permissions.ts");
+  assert.match(permissions, /export const canView =/);
+  assert.match(permissions, /export const canCreate =/);
+  assert.match(permissions, /export const canEdit =/);
+  assert.match(permissions, /export const canDelete =/);
+  assert.match(permissions, /export const canExport =/);
+  assert.match(permissions, /export const canManageTeam =/);
+  assert.match(permissions, /export const canManagePermissions =/);
+});
+
 test("workspace queries and IndexedDB records carry workspace ownership", async () => {
   const dashboard = await source("web/src/pages/DashboardPage.tsx");
   const offlineDb = await source("web/src/lib/offline-db.ts");

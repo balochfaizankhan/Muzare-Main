@@ -40,3 +40,11 @@ export function hasFarmAccess(
   if (!farmId) return true;
   return membership.farmAccessMode === "all" || membership.farmIds.includes(farmId);
 }
+
+export function requireFarmAccess(
+  user: Pick<AuthenticatedUser, "memberships"> | null | undefined,
+  workspaceId: string,
+  farmId: string | null | undefined,
+): boolean {
+  return hasFarmAccess(user, workspaceId, farmId);
+}

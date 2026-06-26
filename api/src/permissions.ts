@@ -42,6 +42,12 @@ export type PermissionUser = {
   memberships: Array<{ workspaceId: string; role: WorkspaceRole; active: boolean; permissions?: WorkspaceModulePermissions | null }>;
 };
 
+export type EffectiveWorkspacePermissions = {
+  workspaceId: string;
+  role: WorkspaceRole;
+  permissions: Record<WorkspaceModule, Record<WorkspaceModuleAction, boolean>>;
+};
+
 const platformPermissions: Record<PlatformRole, readonly PlatformPermission[]> = {
   platform_admin: [
     "CREATE_WORKSPACE", "DELETE_WORKSPACE", "VIEW_WORKSPACES", "VIEW_USERS", "MANAGE_SUBSCRIPTIONS",
@@ -93,6 +99,41 @@ export function hasModulePermission(user: PermissionUser, workspaceId: string, m
   const membership = user.memberships.find((item) => item.active && item.workspaceId === workspaceId);
   if (!membership) return false;
   return membership.permissions?.[module]?.[action] ?? roleModulePermissions[membership.role][module][action];
+}
+
+export function getEffectivePermissions(user: PermissionUser, workspaceId: string): EffectiveWorkspacePermissions | null {
+  const membership = user.memberships.find((item) => item.active && item.workspaceId === workspaceId);
+  if (!membership) return null;
+  const permissions = Object.fromEntries(
+    workspaceModules.map((module) => [
+      module,
+      Object.fromEntries(
+        workspaceModuleActions.map((action) => [
+          action,
+          membership.permissions?.[module]?.[action] ?? roleModulePermissions[membership.role][module][action],
+        ]),
+      ) as Record<WorkspaceModuleAction, boolean>,
+    ]),
+  ) as Record<WorkspaceModule, Record<WorkspaceModuleAction, boolean>>;
+  return {
+    workspaceId,
+    role: membership.role,
+    permissions,
+  };
+}
+
+export function requireWorkspacePermission(user: PermissionUser, workspaceId: string, permission: Permission): boolean {
+  return hasPermission(user, permission, workspaceId);
+}
+
+export function requireOwnerOrPermission(
+  user: PermissionUser,
+  workspaceId: string,
+  permission: Permission,
+): boolean {
+  const membership = user.memberships.find((item) => item.active && item.workspaceId === workspaceId);
+  if (!membership) return false;
+  return membership.role === "workspace_owner" || hasPermission(user, permission, workspaceId);
 }
 
 export function hasPermission(user: PermissionUser, permission: Permission, workspaceId?: string): boolean {
