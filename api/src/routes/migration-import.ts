@@ -7,6 +7,7 @@ import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { auditLogs, expenseCategories, expenseSubcategories, farmDeletionRequests, farms, importBatches, importFailures, operationalRecords, seasons, userSessions, workspaces } from "../db/schema.js";
 import { visibleFarmWhere } from "../farm-visibility.js";
+import { canonicalImportedVoucherNumber } from "../lib/import-voucher-numbers.js";
 import { repairDeletedFarmSeasonState, repairWorkspaceContext, resolveWorkspaceContext } from "./workspace-context.js";
 
 const requiredArrays = [
@@ -883,6 +884,52 @@ async function findExistingImportedAccountRecord(
     sql`${operationalRecords.payload}->>'deletedAt' IS NULL`,
     sql`lower(regexp_replace(coalesce(${operationalRecords.payload}->>'name', ''), '\s+', ' ', 'g')) = ${normalizedName}`,
     sql`lower(replace(coalesce(${operationalRecords.payload}->>'type', 'cash'), ' ', '_')) = ${normalizedType}`,
+  )).limit(1);
+  return fallbackMatch[0] ?? null;
+}
+
+async function findExistingImportedVoucherRecord(
+  tx: typeof db,
+  workspaceId: string,
+  fileHash: string,
+  oldExpenseId: string | null,
+  voucherNumber: string | null,
+) {
+  const exactMatch = oldExpenseId
+    ? await tx.select({
+      id: operationalRecords.id,
+      clientRecordId: operationalRecords.clientRecordId,
+      payload: operationalRecords.payload,
+    }).from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, workspaceId),
+      eq(operationalRecords.entityType, "voucher"),
+      eq(operationalRecords.sourceFileHash, fileHash),
+      sql`${operationalRecords.payload}->>'deletedAt' IS NULL`,
+      or(
+        eq(operationalRecords.oldAndroidId, oldExpenseId),
+        sql`coalesce(${operationalRecords.payload}->>'oldExpenseId', '') = ${oldExpenseId}`,
+        sql`coalesce(${operationalRecords.payload}->>'old_android_id', '') = ${oldExpenseId}`,
+      ),
+    )).limit(1)
+    : [];
+  if (exactMatch[0]) return exactMatch[0];
+
+  if (!voucherNumber?.trim()) return null;
+
+  const fallbackMatch = await tx.select({
+    id: operationalRecords.id,
+    clientRecordId: operationalRecords.clientRecordId,
+    payload: operationalRecords.payload,
+  }).from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, workspaceId),
+    eq(operationalRecords.entityType, "voucher"),
+    eq(operationalRecords.sourceFileHash, fileHash),
+    sql`${operationalRecords.payload}->>'deletedAt' IS NULL`,
+    or(
+      sql`coalesce(${operationalRecords.payload}->>'voucherNumber', '') = ${voucherNumber}`,
+      sql`coalesce(${operationalRecords.payload}->>'originalVoucherNumber', '') = ${voucherNumber}`,
+      sql`coalesce(${operationalRecords.payload}->>'legacyVoucherNumber', '') = ${voucherNumber}`,
+    ),
   )).limit(1);
   return fallbackMatch[0] ?? null;
 }
@@ -2419,12 +2466,20 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         const existing = options?.existingMatch ?? queriedExisting ?? null;
         if (existing) {
           const existingPayload = existing.payload && typeof existing.payload === "object" ? existing.payload as Record<string, unknown> : {};
-          const nextPayload = {
+          const nextPayload: Record<string, unknown> = {
             ...existingPayload,
             ...record.payload,
             id: existing.clientRecordId ?? record.clientRecordId,
             clientRecordId: existing.clientRecordId ?? record.clientRecordId,
           };
+          if (entity === "voucher") {
+            const importedVoucherNumber = canonicalImportedVoucherNumber(nextPayload);
+            if (importedVoucherNumber) {
+              nextPayload.voucherNumber = importedVoucherNumber;
+              nextPayload.originalVoucherNumber = importedVoucherNumber;
+              nextPayload.legacyVoucherNumber = importedVoucherNumber;
+            }
+          }
           await tx.update(operationalRecords).set({
             farmId: record.farmId,
             seasonId: record.seasonId,
@@ -2625,7 +2680,18 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         const itemTotal = normalizedItems.reduce((sum, item) => sum + numberValue(item, ["amount"]), 0);
         const headerCategory = normalizedItems[0];
         const androidVoucherNumber = text(source, ["voucherNumber", "voucher_no", "voucherNo", "voucher"], "");
-        const preservedVoucherNumber = androidVoucherNumber || `A-${oldId(source)}`;
+        const preservedVoucherNumber = canonicalImportedVoucherNumber({
+          voucherNumber: androidVoucherNumber,
+          originalVoucherNumber: androidVoucherNumber,
+          legacyVoucherNumber: androidVoucherNumber,
+        }) || `A-${oldId(source)}`;
+        const existingVoucher = await findExistingImportedVoucherRecord(
+          tx,
+          parsed.data.workspaceId,
+          fileHash,
+          oldId(source),
+          preservedVoucherNumber,
+        );
         const result = await writeRecord("voucher", sourceTypeFor("expenses"), source, {
           voucherNumber: preservedVoucherNumber,
           originalVoucherNumber: preservedVoucherNumber,
@@ -2645,7 +2711,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
           notes: text(source, ["notes"]),
           oldExpenseId: oldId(source),
           items: normalizedItems,
-        });
+        }, { existingMatch: existingVoucher });
         if (result.inserted) {
           importedCounts.expenses += 1;
           importedCounts.expenseItems += items.length;
@@ -3042,6 +3108,19 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         .join(", ");
       return reply.code(500).send({
         message: `Import audit failed: duplicate logical imported accounts detected after import. ${duplicateSummary}`,
+        issues: validation.issues,
+        summary: validation.summary,
+        result,
+      });
+    }
+
+    if (result.postImportAudit.voucherNumberAudit.mismatches.length > 0) {
+      const mismatchSummary = result.postImportAudit.voucherNumberAudit.mismatches
+        .slice(0, 5)
+        .map((item) => `${item.oldExpenseId}: Android ${item.androidVoucherNumber} -> Stored ${item.storedVoucherNumber}`)
+        .join(", ");
+      return reply.code(500).send({
+        message: `Import audit failed: imported voucher numbers do not match Android voucher numbers. ${mismatchSummary}`,
         issues: validation.issues,
         summary: validation.summary,
         result,
