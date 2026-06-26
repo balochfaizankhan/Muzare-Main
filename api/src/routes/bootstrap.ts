@@ -28,6 +28,21 @@ export async function bootstrapRoutes(app: FastifyInstance): Promise<void> {
       return { user: request.appUser, activeFarmId: null, activeSeasonId: null, farms: [], seasons: [] };
     }
 
+    const membership = request.appUser.memberships.find((item) =>
+      item.active && item.workspaceId === request.appUser!.workspaceId);
+
+    const devContextLog = (payload: Record<string, unknown>) => {
+      if (!localDevelopmentMode) return;
+      request.log.info({
+        userId: request.appUser?.id ?? null,
+        workspaceId: request.appUser?.workspaceId ?? null,
+        role: membership?.role ?? null,
+        farmAccessMode: membership?.farmAccessMode ?? null,
+        permissionSummary: membership?.permissions ?? null,
+        ...payload,
+      }, "BOOTSTRAP_CONTEXT_DEBUG");
+    };
+
     let context;
     try {
       context = await resolveWorkspaceContext(request.appUser.workspaceId, request.sessionId, {
@@ -45,10 +60,24 @@ export async function bootstrapRoutes(app: FastifyInstance): Promise<void> {
         activeSeasonId: null,
         farms: [],
         seasons: [],
+        workspaceFarmCount: 0,
+        accessibleFarmCount: 0,
+        accessibleFarmIds: [],
+        farmAccessReason: "no_workspace_farms",
         needsRepair: true,
         contextWarning: "Workspace context needs repair before farm and season data can load.",
       });
     }
+
+    devContextLog({
+      workspaceFarmCount: context.workspaceFarmCount,
+      accessibleFarmCount: context.accessibleFarmCount,
+      accessibleFarmIds: context.accessibleFarmIds,
+      activeFarmId: context.activeFarmId,
+      activeSeasonId: context.activeSeasonId,
+      farmAccessReason: context.farmAccessReason,
+      needsRepair: context.needsRepair,
+    });
 
     return {
       user: request.appUser,
@@ -56,6 +85,10 @@ export async function bootstrapRoutes(app: FastifyInstance): Promise<void> {
       activeSeasonId: context.activeSeasonId,
       farms: context.farms,
       seasons: context.seasons,
+      workspaceFarmCount: context.workspaceFarmCount,
+      accessibleFarmCount: context.accessibleFarmCount,
+      accessibleFarmIds: context.accessibleFarmIds,
+      farmAccessReason: context.farmAccessReason,
       needsRepair: context.needsRepair,
       contextWarning: context.contextWarning,
     };

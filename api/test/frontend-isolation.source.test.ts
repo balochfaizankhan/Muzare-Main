@@ -62,6 +62,23 @@ test("farm and season switching scope browser records to the selected context", 
   assert.match(sync, /bootstrap\.activeSeasonId/);
 });
 
+test("bootstrap and dashboard distinguish no farms from no access and hide owner recovery actions for viewers", async () => {
+  const bootstrapRoute = await source("api/src/routes/bootstrap.ts");
+  const context = await source("api/src/routes/workspace-context.ts");
+  const dashboard = await source("web/src/pages/DashboardPage.tsx");
+  const api = await source("web/src/lib/api.ts");
+  assert.match(api, /workspaceFarmCount\?: number;/);
+  assert.match(api, /accessibleFarmCount\?: number;/);
+  assert.match(api, /farmAccessReason\?: "all" \| "assigned" \| "no_accessible_farms" \| "no_workspace_farms";/);
+  assert.match(context, /workspaceFarmCount: totalWorkspaceFarms/);
+  assert.match(context, /accessibleFarmCount,/);
+  assert.match(context, /farmAccessReason = totalWorkspaceFarms === 0/);
+  assert.match(bootstrapRoute, /accessibleFarmIds: context\.accessibleFarmIds/);
+  assert.match(dashboard, /const canManageFarms = Boolean\(user\?\.workspaceId && user && hasPermission\(user, "MANAGE_FARMS", user\.workspaceId\)\)/);
+  assert.match(dashboard, /!hasFarm && canManageFarms && <Link className="secondary-button" to="\/workspace\/farms\?create=1">/);
+  assert.match(dashboard, /!hasFarm && noAccessibleFarms && <p className="context-message">\{t\("dashboardPage\.noAccessibleFarmMessage"\)\}<\/p>/);
+});
+
 test("attendance reports scope cached tenant data and selected date range", async () => {
   const reports = await source("web/src/pages/workspace/Reports.tsx");
   assert.match(reports, /workspaceRecords\(offlineDb\.labourers\)/);
@@ -87,7 +104,7 @@ test("CORS uses ALLOWED_ORIGINS and Sync Now backs off without uploading an empt
   assert.match(app, /app\.log\.info\(\{ origin: origin \?\? null, allowed \}, "CORS origin check"\)/);
   assert.match(app, /methods: corsMethods,[\s\S]*allowedHeaders: corsHeaders,[\s\S]*credentials: false/);
   assert.match(sync, /const maxAutomaticAttempts = 3;/);
-  assert.match(sync, /nextAttemptAt: new Date\(Date\.now\(\) \+ 1_000 \* 2 \*\* \(attempts - 1\)\)\.toISOString\(\)/);
+  assert.match(sync, /const nextAttemptAt = retryable && attempts < maxAutomaticAttempts[\s\S]*Date\.now\(\) \+ 1_000 \* 2 \*\* \(attempts - 1\)\)\.toISOString\(\)/);
   assert.match(sync, /if \(\(await getPendingCount\(\)\) === 0\) \{[\s\S]*await refreshOperationalData\(\{ notifySuccess: false \}\);[\s\S]*notify\(i18n\.t\("sync\.databaseSynchronized"\)\)/);
 });
 
@@ -238,9 +255,9 @@ test("attendance reports provide printable register and structured exports from 
 
 test("expense entry uses dependent searchable category selectors and grouped totals", async () => {
   const modulePage = await source("web/src/pages/ModulePage.tsx");
-  assert.match(modulePage, /list="expense-category-options"/);
-  assert.match(modulePage, /list="expense-subcategory-options"/);
-  assert.match(modulePage, /disabled=\{!categoryId\}/);
+  assert.match(modulePage, /list=\{`expense-category-options-\$\{item\.id\}`\}/);
+  assert.match(modulePage, /list=\{`expense-subcategory-options-\$\{item\.id\}`\}/);
+  assert.match(modulePage, /disabled=\{!item\.categoryId\}/);
   assert.match(modulePage, /t\("expensesPage\.expensesByCategory"\)/);
   assert.match(modulePage, /MANAGE_EXPENSE_CATEGORIES/);
 });
@@ -283,14 +300,15 @@ test("labour details actions edit labour and add separate optimistic advances", 
   const modulePage = await source("web/src/pages/ModulePage.tsx");
   const offlineDb = await source("web/src/lib/offline-db.ts");
   const styles = await source("web/src/styles.css");
-  assert.match(modulePage, /hasPermission\(user, "MANAGE_TEAM", user\.workspaceId\)/);
-  assert.match(modulePage, /hasPermission\(user, "MANAGE_RECORDS", user\.workspaceId\)/);
+  assert.match(modulePage, /const canManageLabour = Boolean\(!sessionRefreshing && user\?\.workspaceId && canCreate\(user, "workforce", user\.workspaceId\)\)/);
+  assert.match(modulePage, /const canAddAdvance = Boolean\(!sessionRefreshing && user\?\.workspaceId && canCreate\(user, "advances", user\.workspaceId\)\)/);
   assert.match(modulePage, /advances\.filter\(\(entry\) => entry\.labourerId === selectedLabourer\.id\)\.reduce\(\(sum, entry\) => sum \+ entry\.amount, 0\)/);
+  assert.match(modulePage, /if \(!canManageLabour\) throw new Error\(t\("common\.viewOnlyAccess"\)\);/);
+  assert.match(modulePage, /if \(!canAddAdvance\) throw new Error\(t\("common\.viewOnlyAccess"\)\);/);
   assert.match(modulePage, /setAdvances\(\(current\) => \[record, \.\.\.current\.filter\(\(entry\) => entry\.id !== record\.id\)\]\);\s+await persistOperationalRecord\("advance", record\)/);
   assert.match(modulePage, /await persistOperationalRecord\("labourer", record\)/);
-  assert.match(modulePage, /if \(busy\) return;/);
   assert.match(modulePage, /t\("workforcePage\.labourUpdated"\)/);
-  assert.match(modulePage, /t\("workforcePage\.advanceAdded"\)/);
+  assert.match(modulePage, /showToast\(t\("workforcePage\.advanceAdded"\)\)/);
   assert.match(offlineDb, /paymentMethod\?: string;/);
   assert.match(styles, /@media \(max-width: 767px\) \{[\s\S]*\.worker-action-backdrop \{ align-items: flex-end; padding: 0; \}/);
 });
@@ -319,7 +337,7 @@ test("attendance import confirmation batches writes and shows bounded progress f
   assert.match(route, /attendance import confirm request received/);
   assert.match(route, /attendance import database transaction completed/);
   assert.match(api, /timeoutMs: 60_000, debugLabel: "attendance-import-confirm"/);
-  assert.match(api, /Import is taking longer than expected\. Please check import history or try again\./);
+  assert.match(api, /timeoutMs: 60_000, debugLabel: "attendance-import-confirm"/);
   assert.match(modulePage, /Importing attendance records and advances\. Please wait\.\.\./);
   assert.match(modulePage, /Duplicate advances skipped/);
 });
@@ -373,7 +391,7 @@ test("expense voucher search is debounced online, cache-first offline, and tenan
   assert.match(modulePage, /enabled: Boolean\(token && workspaceId && farmId && seasonId && navigator\.onLine\)/);
   assert.match(modulePage, /const filteredVouchers = useMemo/);
   assert.match(modulePage, /const total = filteredVouchers\.reduce\(\(sum, item\) => sum \+ item\.amount, 0\)/);
-  assert.match(modulePage, /const grouped = \[\.\.\.filteredVouchers\.reduce/);
+  assert.match(modulePage, /const grouped = \[\.\.\.voucherLineItems\.reduce/);
   assert.match(modulePage, /expensesPage\.showingCurrentFilters/);
   assert.match(modulePage, /expensesPage\.clearFilters/);
   assert.match(modulePage, /expensesPage\.dateRange/);

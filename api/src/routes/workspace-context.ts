@@ -11,6 +11,10 @@ export type WorkspaceContextState = {
   seasons: SeasonRow[];
   activeFarmId: string | null;
   activeSeasonId: string | null;
+  workspaceFarmCount: number;
+  accessibleFarmCount: number;
+  accessibleFarmIds: string[];
+  farmAccessReason: "all" | "assigned" | "no_accessible_farms" | "no_workspace_farms";
   needsRepair: boolean;
   contextWarning: string | null;
 };
@@ -34,6 +38,13 @@ async function validFarms(workspaceId: string, allowedFarmIds?: string[] | null)
       allowedFarmIds === null || allowedFarmIds === undefined ? undefined : allowedFarmIds.length ? inArray(farms.id, allowedFarmIds) : sql`false`,
     ))
     .orderBy(farms.name);
+}
+
+async function workspaceFarmCount(workspaceId: string) {
+  const [row] = await db.select({ count: sql<number>`count(*)::int` })
+    .from(farms)
+    .where(await visibleFarmWhere(workspaceId));
+  return Number(row?.count ?? 0);
 }
 
 async function farmSeasons(workspaceId: string, farmId: string) {
@@ -172,6 +183,7 @@ export async function resolveWorkspaceContext(
   options?: { allowedFarmIds?: string[] | null },
 ): Promise<WorkspaceContextState> {
   const records = await validFarms(workspaceId, options?.allowedFarmIds);
+  const totalWorkspaceFarms = await workspaceFarmCount(workspaceId);
   const [session] = sessionId
     ? await db.select({ activeFarmId: userSessions.activeFarmId, activeSeasonId: userSessions.activeSeasonId })
       .from(userSessions)
@@ -183,6 +195,15 @@ export async function resolveWorkspaceContext(
   const seasonsForFarm = farmId ? await farmSeasons(workspaceId, farmId) : [];
   const selectedSeason = pickSeason(seasonsForFarm, session?.activeSeasonId);
   const seasonId = selectedSeason?.id ?? null;
+  const accessibleFarmIds = records.map((farm) => farm.id);
+  const accessibleFarmCount = accessibleFarmIds.length;
+  const farmAccessReason = totalWorkspaceFarms === 0
+    ? "no_workspace_farms"
+    : accessibleFarmCount === 0
+      ? "no_accessible_farms"
+      : options?.allowedFarmIds == null
+        ? "all"
+        : "assigned";
   const invalidFarm = Boolean(session?.activeFarmId && session.activeFarmId !== farmId);
   const invalidSeason = Boolean(session?.activeSeasonId && session.activeSeasonId !== seasonId);
 
@@ -202,8 +223,10 @@ export async function resolveWorkspaceContext(
     || Boolean(!farmId && records.length > 0)
     || invalidFarm
     || invalidSeason;
-  const contextWarning = !records.length
+  const contextWarning = totalWorkspaceFarms === 0
     ? "No farm available. Create or restore a farm."
+    : accessibleFarmCount === 0
+      ? "You do not currently have access to any active farm in this workspace."
     : !farmId
       ? "Workspace context needs repair. Select or repair an active farm."
       : !seasonId
@@ -217,6 +240,10 @@ export async function resolveWorkspaceContext(
     seasons: seasonsForFarm,
     activeFarmId: farmId,
     activeSeasonId: seasonId,
+    workspaceFarmCount: totalWorkspaceFarms,
+    accessibleFarmCount,
+    accessibleFarmIds,
+    farmAccessReason,
     needsRepair,
     contextWarning,
   };

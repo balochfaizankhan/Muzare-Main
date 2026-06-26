@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { after, before, test } from "node:test";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { buildApp } from "../src/app.js";
 import { closeDatabaseConnection, db } from "../src/db/client.js";
 import {
@@ -117,6 +117,13 @@ after(async () => {
   await db.delete(workspaceMemberships).where(inArray(workspaceMemberships.workspaceId, ids));
   await db.delete(users).where(inArray(users.id, [alpha.userId, bravo.userId, manager.userId, supervisor.userId, accountant.userId, operator.userId, viewer.userId, admin.userId]));
   await db.delete(users).where(eq(users.email, "invited.member@example.test"));
+  await db.delete(users).where(inArray(users.email, [
+    "security.invited@example.test",
+    "repeat.member@example.test",
+    "existing.member@example.test",
+    "duplicate.membership@example.test",
+    "viewer.all@example.test",
+  ]));
   await db.delete(workspaces).where(inArray(workspaces.id, ids));
   await closeDatabaseConnection();
 });
@@ -1299,6 +1306,10 @@ test("farm assignment restricts bootstrap, farm lists, reports, and operational 
   assert.equal(bootstrap.statusCode, 200);
   assert.equal(bootstrap.json().farms.length, 1);
   assert.equal(bootstrap.json().farms[0].id, alpha.farmId);
+  assert.ok(Number(bootstrap.json().workspaceFarmCount ?? 0) >= 2);
+  assert.equal(bootstrap.json().accessibleFarmCount, 1);
+  assert.deepEqual(bootstrap.json().accessibleFarmIds, [alpha.farmId]);
+  assert.equal(bootstrap.json().farmAccessReason, "assigned");
 
   const farmList = await request(viewer.token, "GET", `/v1/workspace/${alpha.workspaceId}/farms`);
   assert.equal(farmList.statusCode, 200);
@@ -1423,4 +1434,186 @@ test("workspace invitation acceptance enforces invited email matching", async ()
   });
   assert.equal(wrongEmail.statusCode, 409);
   assert.equal(wrongEmail.json().code, "email_mismatch");
+});
+
+test("accepting the same invitation twice does not create duplicate workspace memberships", async () => {
+  const invitation = await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/team/invitations`, {
+    email: "repeat.member@example.test",
+    role: "viewer",
+  });
+  assert.equal(invitation.statusCode, 201);
+  const token = invitation.json().invitationToken;
+  assert.ok(token);
+
+  const firstAccept = await request("", "POST", "/v1/workspace/team/invitations/accept", {
+    token,
+    displayName: "Repeat Member",
+    password: "password123",
+  });
+  assert.equal(firstAccept.statusCode, 201);
+
+  const secondAccept = await request("", "POST", "/v1/workspace/team/invitations/accept", {
+    token,
+    displayName: "Repeat Member",
+    password: "password123",
+  });
+  assert.equal(secondAccept.statusCode, 409);
+
+  const [repeatUser] = await db.select({ id: users.id }).from(users).where(eq(users.email, "repeat.member@example.test")).limit(1);
+  assert.ok(repeatUser);
+  const [membershipCount] = await db.select({ count: sql<number>`count(*)::int` }).from(workspaceMemberships).where(and(
+    eq(workspaceMemberships.workspaceId, alpha.workspaceId),
+    eq(workspaceMemberships.userId, repeatUser.id),
+  ));
+  assert.equal(Number(membershipCount?.count ?? 0), 1);
+});
+
+test("inviting an existing member updates the existing membership instead of creating a duplicate", async () => {
+  const memberUserId = randomUUID();
+  await db.insert(users).values({
+    id: memberUserId,
+    email: "existing.member@example.test",
+    passwordHash: "test",
+    status: "approved",
+    active: true,
+  });
+  const [existingMembership] = await db.insert(workspaceMemberships).values({
+    workspaceId: alpha.workspaceId,
+    userId: memberUserId,
+    role: "viewer",
+    active: true,
+    farmAccessMode: "assigned",
+  }).returning({ id: workspaceMemberships.id });
+  await db.insert(workspaceMemberFarms).values({
+    workspaceId: alpha.workspaceId,
+    membershipId: existingMembership!.id,
+    farmId: alpha.farmId,
+  });
+
+  const reinvite = await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/team/invitations`, {
+    email: "existing.member@example.test",
+    role: "supervisor",
+    farmAccessMode: "all",
+  });
+  assert.equal(reinvite.statusCode, 200);
+  assert.equal(reinvite.json().membershipUpdated, true);
+
+  const memberships = await db.select({
+    id: workspaceMemberships.id,
+    role: workspaceMemberships.role,
+    farmAccessMode: workspaceMemberships.farmAccessMode,
+  }).from(workspaceMemberships).where(and(
+    eq(workspaceMemberships.workspaceId, alpha.workspaceId),
+    eq(workspaceMemberships.userId, memberUserId),
+  ));
+  assert.equal(memberships.length, 1);
+  assert.equal(memberships[0]?.role, "supervisor");
+  assert.equal(memberships[0]?.farmAccessMode, "all");
+});
+
+test("duplicate membership repair migration leaves one membership row and preserves farm assignments", async () => {
+  const duplicateUserId = randomUUID();
+  await db.insert(users).values({
+    id: duplicateUserId,
+    email: "duplicate.membership@example.test",
+    passwordHash: "test",
+    status: "approved",
+    active: true,
+  });
+
+  await db.execute(sql.raw("ALTER TABLE workspace_memberships DROP CONSTRAINT IF EXISTS workspace_memberships_workspace_id_user_id_key"));
+  await db.execute(sql.raw("DROP INDEX IF EXISTS workspace_memberships_workspace_user_uidx"));
+  const [staleMembership] = await db.insert(workspaceMemberships).values({
+    workspaceId: alpha.workspaceId,
+    userId: duplicateUserId,
+    role: "viewer",
+    active: true,
+    farmAccessMode: "assigned",
+    permissions: null,
+  }).returning({ id: workspaceMemberships.id });
+  const [preferredMembership] = await db.insert(workspaceMemberships).values({
+    workspaceId: alpha.workspaceId,
+    userId: duplicateUserId,
+    role: "viewer",
+    active: true,
+    farmAccessMode: "all",
+    permissions: { dashboard: { view: true } },
+  }).returning({ id: workspaceMemberships.id });
+
+  await db.insert(workspaceMemberFarms).values({
+    workspaceId: alpha.workspaceId,
+    membershipId: staleMembership!.id,
+    farmId: alpha.farmId,
+  });
+
+  const migrationSql = await readFile(new URL("../../database/migrations/0031_workspace_membership_dedup.sql", import.meta.url), "utf8");
+  await db.execute(sql.raw(migrationSql));
+
+  const repairedMemberships = await db.select({
+    id: workspaceMemberships.id,
+    permissions: workspaceMemberships.permissions,
+    farmAccessMode: workspaceMemberships.farmAccessMode,
+  }).from(workspaceMemberships).where(and(
+    eq(workspaceMemberships.workspaceId, alpha.workspaceId),
+    eq(workspaceMemberships.userId, duplicateUserId),
+  ));
+  assert.equal(repairedMemberships.length, 1);
+  assert.equal(repairedMemberships[0]?.id, preferredMembership!.id);
+  assert.equal(repairedMemberships[0]?.farmAccessMode, "all");
+  assert.ok(repairedMemberships[0]?.permissions);
+
+  const repairedAssignments = await db.select({ farmId: workspaceMemberFarms.farmId })
+    .from(workspaceMemberFarms)
+    .where(eq(workspaceMemberFarms.membershipId, preferredMembership!.id));
+  assert.deepEqual(repairedAssignments.map((assignment) => assignment.farmId), [alpha.farmId]);
+
+  const [duplicateCount] = await db.select({ count: sql<number>`count(*)::int` }).from(workspaceMemberships).where(and(
+    eq(workspaceMemberships.workspaceId, alpha.workspaceId),
+    eq(workspaceMemberships.userId, duplicateUserId),
+  ));
+  assert.equal(Number(duplicateCount?.count ?? 0), 1);
+});
+
+test("viewer with all-farm access sees active farms read-only", async () => {
+  const viewerAllUserId = randomUUID();
+  const viewerAllToken = `viewer-all-${randomUUID()}`;
+  await db.insert(users).values({
+    id: viewerAllUserId,
+    email: "viewer.all@example.test",
+    passwordHash: "test",
+    status: "approved",
+    active: true,
+  });
+  await db.insert(workspaceMemberships).values({
+    workspaceId: alpha.workspaceId,
+    userId: viewerAllUserId,
+    role: "viewer",
+    active: true,
+    farmAccessMode: "all",
+    permissions: { dashboard: { view: true } },
+  });
+  await db.insert(userSessions).values({
+    userId: viewerAllUserId,
+    workspaceId: alpha.workspaceId,
+    activeFarmId: alpha.farmId,
+    activeSeasonId: alpha.seasonId,
+    tokenHash: hash(viewerAllToken),
+    expiresAt: new Date(Date.now() + 60_000),
+  });
+
+  const bootstrap = await request(viewerAllToken, "GET", "/v1/bootstrap");
+  assert.equal(bootstrap.statusCode, 200);
+  const visibleFarmIds = bootstrap.json().farms.map((farm: { id: string }) => farm.id);
+  assert.ok(visibleFarmIds.includes(alpha.farmId));
+  assert.ok(visibleFarmIds.includes(alphaSecondary.farmId));
+  assert.ok(Number(bootstrap.json().workspaceFarmCount ?? 0) >= 2);
+  assert.equal(bootstrap.json().accessibleFarmCount, bootstrap.json().farms.length);
+  assert.equal(bootstrap.json().farmAccessReason, "all");
+
+  const createAttempt = await request(viewerAllToken, "POST", "/v1/workspace/operational-records", envelope(alpha, "attendance", randomUUID(), {
+    labourerId: randomUUID(),
+    date: "2026-06-20",
+    status: "present",
+  }));
+  assert.equal(createAttempt.statusCode, 403);
 });

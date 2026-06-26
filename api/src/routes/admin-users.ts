@@ -34,6 +34,16 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
         GROUP BY user_id
       ) m ON m.user_id = u.id
       LEFT JOIN (
+        SELECT user_id, COALESCE(sum(duplicate_count), 0)::int AS duplicate_membership_count
+        FROM (
+          SELECT user_id, workspace_id, greatest(count(*) - 1, 0) AS duplicate_count
+          FROM workspace_memberships
+          GROUP BY user_id, workspace_id
+          HAVING count(*) > 1
+        ) grouped_duplicates
+        GROUP BY user_id
+      ) d ON d.user_id = u.id
+      LEFT JOIN (
         SELECT user_id, max(created_at) AS last_login_at
         FROM user_sessions
         GROUP BY user_id
@@ -51,6 +61,7 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
         active: Boolean(row.active),
         createdAt: String(row.created_at),
         workspaceCount: Number(row.workspace_count ?? 0),
+        duplicateMembershipCount: Number(row.duplicate_membership_count ?? 0),
         lastLoginAt: row.last_login_at ? String(row.last_login_at) : null,
       })),
     };
@@ -82,11 +93,17 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
       role: workspaceMemberships.role,
       active: workspaceMemberships.active,
       permissions: workspaceMemberships.permissions,
+      farmAccessMode: workspaceMemberships.farmAccessMode,
       createdAt: workspaceMemberships.createdAt,
     }).from(workspaceMemberships)
       .innerJoin(workspaces, eq(workspaces.id, workspaceMemberships.workspaceId))
       .where(eq(workspaceMemberships.userId, parsed.data.userId))
       .orderBy(desc(workspaceMemberships.createdAt));
+
+    const duplicateMemberships = memberships.reduce<Record<string, number>>((accumulator, membership) => {
+      accumulator[membership.workspaceId] = (accumulator[membership.workspaceId] ?? 0) + 1;
+      return accumulator;
+    }, {});
 
     const [lastLogin] = await db.select({ createdAt: userSessions.createdAt }).from(userSessions)
       .where(eq(userSessions.userId, parsed.data.userId))
@@ -98,6 +115,9 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
         ...userRow,
         lastLoginAt: lastLogin?.createdAt ?? null,
         workspaces: memberships,
+        duplicateMemberships: Object.entries(duplicateMemberships)
+          .filter(([, count]) => count > 1)
+          .map(([workspaceId, count]) => ({ workspaceId, count })),
       },
     };
   });

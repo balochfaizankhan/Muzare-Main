@@ -65,8 +65,7 @@ const hashToken = (token: string) => createHash("sha256").update(token).digest("
 const optional = (value: string | null | undefined) => value?.trim() || null;
 
 function membershipFor(request: FastifyRequest, workspaceId: string) {
-  if (request.appUser?.workspaceId !== workspaceId) return null;
-  return request.appUser.memberships.find((membership) => membership.active && membership.workspaceId === workspaceId) ?? null;
+  return request.appUser?.memberships.find((membership) => membership.active && membership.workspaceId === workspaceId) ?? null;
 }
 
 function canViewTeam(request: FastifyRequest, workspaceId: string) {
@@ -365,8 +364,40 @@ export async function workspaceTeamRoutes(app: FastifyInstance): Promise<void> {
         eq(workspaceMemberships.workspaceId, params.data.workspaceId),
         eq(workspaceMemberships.userId, existingUser.id),
       )).limit(1);
-      if (existingMembership?.active && existingUser.active && existingUser.status === "approved") {
-        return reply.code(200).send({ memberAdded: false, alreadyHasAccess: true, emailSent: false });
+      if (existingMembership) {
+        const [savedMembership] = await db.transaction(async (tx) => {
+          const [membership] = await tx.update(workspaceMemberships).set({
+            role: input.data.role,
+            active: true,
+            permissions: input.data.permissions ?? null,
+            farmAccessMode,
+            updatedAt: new Date(),
+          }).where(eq(workspaceMemberships.id, existingMembership.id)).returning();
+          if (!membership) return [];
+          await tx.delete(workspaceMemberFarms).where(eq(workspaceMemberFarms.membershipId, existingMembership.id));
+          if (farmAccessMode === "assigned" && farmIds.length) {
+            await tx.insert(workspaceMemberFarms).values(farmIds.map((farmId) => ({
+              workspaceId: params.data.workspaceId,
+              membershipId: existingMembership.id,
+              farmId,
+            })));
+          }
+          return [membership];
+        });
+        await audit(params.data.workspaceId, request.appUser.id, "workspace_member_reinvited_updated", existingMembership.id, {
+          email,
+          role: input.data.role,
+          farmAccessMode,
+          farmIds,
+        });
+        return reply.code(200).send({
+          memberAdded: true,
+          alreadyHasAccess: true,
+          membershipUpdated: true,
+          membershipId: savedMembership?.id ?? existingMembership.id,
+          emailSent: false,
+          warning: "existing_membership_updated",
+        });
       }
     }
     const token = randomBytes(32).toString("base64url");

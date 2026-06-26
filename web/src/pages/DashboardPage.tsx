@@ -27,6 +27,7 @@ import { fetchBootstrap, repairWorkspaceContextRequest } from "../lib/api";
 import { formatDate, formatMoney } from "../lib/format";
 import { buildPartnerLiabilityPositions } from "../lib/partnerAccounting";
 import { ensureLocalAccounts, offlineDb, workspaceRecords } from "../lib/offline-db";
+import { hasPermission } from "../lib/permissions";
 import { useSyncState } from "../hooks/useSyncState";
 import { refreshOperationalData, syncNow } from "../services/syncService";
 
@@ -186,6 +187,11 @@ export function DashboardPage() {
   const hasFarm = Boolean(farm);
   const hasSeason = Boolean(season);
   const hasOperationalContext = hasFarm && hasSeason;
+  const canManageFarms = Boolean(user?.workspaceId && user && hasPermission(user, "MANAGE_FARMS", user.workspaceId));
+  const workspaceFarmCount = query.data?.workspaceFarmCount ?? query.data?.farms.length ?? 0;
+  const accessibleFarmCount = query.data?.accessibleFarmCount ?? query.data?.farms.length ?? 0;
+  const noAccessibleFarms = workspaceFarmCount > 0 && accessibleFarmCount === 0;
+  const noWorkspaceFarms = workspaceFarmCount === 0;
   const StatusIcon = sync.status === "offline" ? WifiOff : Wifi;
   const displayName = user?.displayName || user?.email || t("common.dashboard");
 
@@ -250,15 +256,16 @@ export function DashboardPage() {
                     {repairContext.isPending ? "Repairing..." : "Repair workspace context"}
                   </button>
                 )}
-                {!hasFarm && <Link className="secondary-button" to="/workspace/farms?create=1">{t("dashboardPage.createNewFarm")}</Link>}
-                {!hasFarm && <Link className="secondary-button" to="/workspace/farms?view=history">{t("dashboardPage.restoreSoftDeletedFarm")}</Link>}
+                {!hasFarm && canManageFarms && <Link className="secondary-button" to="/workspace/farms?create=1">{t("dashboardPage.createNewFarm")}</Link>}
+                {!hasFarm && canManageFarms && <Link className="secondary-button" to="/workspace/farms?view=history">{t("dashboardPage.restoreSoftDeletedFarm")}</Link>}
               </div>
             )}
             {repairContext.data ? <p className="positive">{repairContext.data.message}</p> : null}
             {repairContext.error ? <p className="error">{repairContext.error.message}</p> : null}
           </section>
         )}
-        {!hasFarm && <p className="context-message">{t("dashboardPage.noFarmAvailableMessage")}</p>}
+        {!hasFarm && noWorkspaceFarms && <p className="context-message">{canManageFarms ? t("dashboardPage.noFarmAvailableMessage") : t("dashboardPage.noFarmVisibleReadOnly")}</p>}
+        {!hasFarm && noAccessibleFarms && <p className="context-message">{t("dashboardPage.noAccessibleFarmMessage")}</p>}
         {hasFarm && !hasSeason && <p className="context-message">{t("dashboardPage.noActiveSeason")}</p>}
 
         <section className="dashboard-columns">

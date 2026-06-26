@@ -28,6 +28,7 @@ export type AppUser = {
   role: AppRole;
   platformRole: PlatformRole | null;
   memberships: Array<{
+    membershipId?: string;
     workspaceId: string;
     workspaceName: string;
     role: WorkspaceRole;
@@ -76,6 +77,10 @@ export type BootstrapData = {
   activeSeasonId: string | null;
   farms: Farm[];
   seasons: Season[];
+  workspaceFarmCount?: number;
+  accessibleFarmCount?: number;
+  accessibleFarmIds?: string[];
+  farmAccessReason?: "all" | "assigned" | "no_accessible_farms" | "no_workspace_farms";
   needsRepair?: boolean;
   contextWarning?: string | null;
 };
@@ -744,7 +749,7 @@ export const inviteWorkspaceMember = (token: string, workspaceId: string, input:
   farmAccessMode?: FarmAccessMode;
   farmIds?: string[];
 }) =>
-  apiRequest<{ memberAdded: boolean; alreadyHasAccess?: boolean; invitationToken?: string; invitationUrl?: string; emailSent?: boolean; emailConfigured?: boolean; warning?: string | null }>(`/v1/workspace/${workspaceId}/team/invitations`, { method: "POST", body: JSON.stringify(input) }, token);
+  apiRequest<{ memberAdded: boolean; alreadyHasAccess?: boolean; membershipUpdated?: boolean; membershipId?: string; invitationToken?: string; invitationUrl?: string; emailSent?: boolean; emailConfigured?: boolean; warning?: string | null }>(`/v1/workspace/${workspaceId}/team/invitations`, { method: "POST", body: JSON.stringify(input) }, token);
 export const updateWorkspaceMember = (token: string, workspaceId: string, membershipId: string, input: {
   role: WorkspaceRole;
   active: boolean;

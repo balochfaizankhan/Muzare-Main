@@ -11,6 +11,7 @@ import type { FarmAccessMode } from "./workspace-access.js";
 const scrypt = promisify(scryptCallback);
 
 export type WorkspaceMembership = {
+  membershipId: string;
   workspaceId: string;
   workspaceName: string;
   role: WorkspaceRole;
@@ -18,6 +19,35 @@ export type WorkspaceMembership = {
   permissions: WorkspaceModulePermissions | null;
   farmAccessMode: FarmAccessMode;
   farmIds: string[];
+};
+
+const workspaceRolePriority: Record<WorkspaceRole, number> = {
+  workspace_owner: 5,
+  workspace_manager: 4,
+  supervisor: 3,
+  accountant: 2,
+  operator: 1,
+  viewer: 0,
+};
+
+function compareMembershipRecency(
+  left: WorkspaceMembership & { createdAt: Date | null; updatedAt: Date | null },
+  right: WorkspaceMembership & { createdAt: Date | null; updatedAt: Date | null },
+) {
+  if (left.active !== right.active) return left.active ? -1 : 1;
+  if (Boolean(left.permissions) !== Boolean(right.permissions)) return left.permissions ? -1 : 1;
+  const updatedDiff = (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0);
+  if (updatedDiff !== 0) return updatedDiff;
+  const createdDiff = (right.createdAt?.getTime() ?? 0) - (left.createdAt?.getTime() ?? 0);
+  if (createdDiff !== 0) return createdDiff;
+  const roleDiff = workspaceRolePriority[right.role] - workspaceRolePriority[left.role];
+  if (roleDiff !== 0) return roleDiff;
+  return right.membershipId.localeCompare(left.membershipId);
+}
+
+type LoadedWorkspaceMembership = WorkspaceMembership & {
+  createdAt: Date | null;
+  updatedAt: Date | null;
 };
 
 export type AuthenticatedUser = {
@@ -119,6 +149,8 @@ async function loadMemberships(userId: string): Promise<WorkspaceMembership[]> {
       active: workspaceMemberships.active,
       permissions: workspaceMemberships.permissions,
       farmAccessMode: workspaceMemberships.farmAccessMode,
+      createdAt: workspaceMemberships.createdAt,
+      updatedAt: workspaceMemberships.updatedAt,
     })
     .from(workspaceMemberships)
     .innerJoin(workspaces, eq(workspaces.id, workspaceMemberships.workspaceId))
@@ -136,11 +168,44 @@ async function loadMemberships(userId: string): Promise<WorkspaceMembership[]> {
     list.push(assignment.farmId);
     farmIdsByMembership.set(assignment.membershipId, list);
   }
-  return memberships.map(({ id, ...membership }) => ({
+  const normalized: LoadedWorkspaceMembership[] = memberships.map(({ id, ...membership }) => ({
+    membershipId: id,
     ...membership,
     farmAccessMode: membership.farmAccessMode === "assigned" ? "assigned" : "all",
     farmIds: farmIdsByMembership.get(id) ?? [],
   }));
+
+  const byWorkspace = new Map<string, LoadedWorkspaceMembership[]>();
+  for (const membership of normalized) {
+    const list = byWorkspace.get(membership.workspaceId) ?? [];
+    list.push(membership);
+    byWorkspace.set(membership.workspaceId, list);
+  }
+
+  const deduped: LoadedWorkspaceMembership[] = [];
+  for (const [workspaceId, duplicates] of byWorkspace) {
+    duplicates.sort(compareMembershipRecency);
+    const preferred = duplicates[0]!;
+    const mergedFarmIds = [...new Set(duplicates.flatMap((membership) => membership.farmIds))];
+    const effectiveFarmAccessMode: FarmAccessMode = duplicates.some((membership) => membership.farmAccessMode === "all")
+      ? "all"
+      : "assigned";
+    if (duplicates.length > 1) {
+      console.warn("DUPLICATE_WORKSPACE_MEMBERSHIPS_DETECTED", {
+        userId,
+        workspaceId,
+        membershipIds: duplicates.map((membership) => membership.membershipId),
+        chosenMembershipId: preferred.membershipId,
+      });
+    }
+    deduped.push({
+      ...preferred,
+      farmAccessMode: effectiveFarmAccessMode,
+      farmIds: mergedFarmIds,
+    });
+  }
+
+  return deduped.map(({ createdAt: _createdAt, updatedAt: _updatedAt, ...membership }) => membership);
 }
 
 export async function serializeUser(user: typeof users.$inferSelect, workspaceId?: string | null): Promise<AuthenticatedUser> {

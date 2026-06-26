@@ -49,9 +49,11 @@ export function WorkspaceTeam() {
     mutationFn: () => inviteWorkspaceMember(token!, workspaceId, invite),
     onSuccess: async (result) => {
       setShareToken(result.invitationUrl ?? result.invitationToken ?? "");
-      setInviteMessage(result.alreadyHasAccess
-        ? t("workspaceTeam.alreadyHasAccess")
-        : result.emailSent
+      setInviteMessage(result.membershipUpdated
+        ? t("workspaceTeam.memberUpdated")
+        : result.alreadyHasAccess
+          ? t("workspaceTeam.alreadyHasAccess")
+          : result.emailSent
           ? t("workspaceTeam.emailSent")
           : (result.warning ?? ""));
       setInvite(blankInvite);
