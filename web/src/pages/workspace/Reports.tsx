@@ -22,6 +22,7 @@ import {
 } from "../../lib/partnerAccounting";
 import { resolveSaleType, saleProduceLabel } from "../../lib/dispatch-sales";
 import {
+  compareLabourers,
   offlineDb,
   workspaceRecords,
   type Account,
@@ -239,6 +240,8 @@ function buildDateColumns(from: string, to: string, rows: Attendance[]) {
   return [...new Set(rows.map((row) => row.date))].sort();
 }
 
+const fallbackLabourForSort = (id: string, name: string) => ({ id, name, createdAt: "" });
+
 function ReportTable({
   columns,
   empty,
@@ -420,7 +423,7 @@ export function Reports() {
       workspaceRecords(offlineDb.sales),
       workspaceRecords(offlineDb.dispatches),
     ]).then(([nextLabourers, nextAttendance, nextVouchers, nextAdvances, nextAccounts, nextEntries, nextSales, nextDispatches]) => {
-      setLabourers(nextLabourers);
+      setLabourers(nextLabourers.sort(compareLabourers));
       setAttendance(nextAttendance);
       setVouchers(nextVouchers);
       setAdvances(nextAdvances);
@@ -475,7 +478,7 @@ export function Reports() {
     return (labourer?.group ?? "") === groupFilter;
   };
   const reportLabourOptions = useMemo(
-    () => labourers.filter((labourer) => matchesGroup(labourer)).sort((left, right) => left.name.localeCompare(right.name)),
+    () => labourers.filter((labourer) => matchesGroup(labourer)).sort(compareLabourers),
     [groupFilter, labourers],
   );
   const matchesLabourFilter = (labourerId: string) => selectedLabourerIds.length === 0 || selectedLabourerIds.includes(labourerId);
@@ -558,7 +561,11 @@ export function Reports() {
         && (!status || item.status === status)
         && matches(item.date, [labourName(item.labourerId), labourer?.group, item.status]);
     })
-    .sort((a, b) => a.date.localeCompare(b.date) || labourName(a.labourerId).localeCompare(labourName(b.labourerId)));
+    .sort((a, b) => a.date.localeCompare(b.date)
+      || compareLabourers(
+        labourById.get(a.labourerId) ?? fallbackLabourForSort(a.labourerId, labourName(a.labourerId)),
+        labourById.get(b.labourerId) ?? fallbackLabourForSort(b.labourerId, labourName(b.labourerId)),
+      ));
   const attendanceSummary = useMemo(() => labourers
     .filter((labourer) => matchesGroup(labourer))
     .filter((labourer) => matchesLabourFilter(labourer.id))

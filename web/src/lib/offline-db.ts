@@ -44,6 +44,11 @@ export type PendingMutation = LocalRecord & {
 
 export type Labourer = LocalRecord & {
   name: string;
+  sortOrder?: number;
+  androidSortOrder?: number;
+  originalIndex?: number;
+  oldLabourId?: string;
+  oldAndroidId?: string;
   group: string;
   groupId?: string;
   dailyWage: number;
@@ -417,6 +422,27 @@ export async function workspaceRecords<T extends LocalRecord>(table: EntityTable
     .filter((record) => record.farmId === activeFarmId
       && (record.seasonId === activeSeasonId || (Boolean(options.includeGeneralFarmRecords) && record.seasonId === null))
       && (Boolean(options.includeDeleted) || !record.deletedAt)).toArray();
+}
+
+export function labourSortValue(labourer: Pick<Labourer, "sortOrder" | "androidSortOrder" | "originalIndex" | "createdAt">) {
+  if (typeof labourer.sortOrder === "number" && Number.isFinite(labourer.sortOrder)) return labourer.sortOrder;
+  if (typeof labourer.androidSortOrder === "number" && Number.isFinite(labourer.androidSortOrder)) return labourer.androidSortOrder;
+  if (typeof labourer.originalIndex === "number" && Number.isFinite(labourer.originalIndex)) return labourer.originalIndex;
+  const created = Date.parse(labourer.createdAt);
+  return Number.isFinite(created) ? created : Number.MAX_SAFE_INTEGER;
+}
+
+export function compareLabourers(
+  left: Pick<Labourer, "id" | "name" | "sortOrder" | "androidSortOrder" | "originalIndex" | "createdAt">,
+  right: Pick<Labourer, "id" | "name" | "sortOrder" | "androidSortOrder" | "originalIndex" | "createdAt">,
+) {
+  const sortDelta = labourSortValue(left) - labourSortValue(right);
+  if (sortDelta !== 0) return sortDelta;
+  const createdDelta = left.createdAt.localeCompare(right.createdAt);
+  if (createdDelta !== 0) return createdDelta;
+  const nameDelta = left.name.localeCompare(right.name);
+  if (nameDelta !== 0) return nameDelta;
+  return left.id.localeCompare(right.id);
 }
 
 export async function clearCachedData() {

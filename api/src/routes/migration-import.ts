@@ -225,6 +225,14 @@ type PostImportAudit = {
       clientRecordIds: string[];
     }>;
   };
+  labourOrderAudit: {
+    sourceTotal: number;
+    storedTotal: number;
+    missingSortOrderCount: number;
+    duplicateSortOrderCount: number;
+    firstSourceLabourNames: string[];
+    firstStoredLabourNames: string[];
+  };
   relationshipAudit: {
     attendanceTotal: number;
     attendanceLinkedToLabour: number;
@@ -1337,7 +1345,7 @@ async function buildPostImportAudit(
   payload: AndroidPayload,
 ): Promise<PostImportAudit> {
   const duplicateAccountAudit = await auditDuplicateImportedAccounts(workspaceId, fileHash);
-  const [farmCountRows, seasonCountRows, failedBatchRows, entityRows, failureRows, relationshipRows, importedVoucherRows, duplicateVoucherRows] = await Promise.all([
+  const [farmCountRows, seasonCountRows, failedBatchRows, entityRows, failureRows, relationshipRows, importedVoucherRows, duplicateVoucherRows, labourOrderRows] = await Promise.all([
     db.execute(sql`
       SELECT count(*)::int AS count
       FROM farms
@@ -1508,6 +1516,18 @@ async function buildPostImportAudit(
       HAVING count(*) > 1
       ORDER BY payload->>'voucherNumber'
     `),
+    db.execute(sql`
+      SELECT
+        coalesce(payload->>'name', '') AS name,
+        nullif(coalesce(payload->>'sortOrder', payload->>'androidSortOrder', payload->>'originalIndex', ''), '') AS sort_order
+      FROM operational_records
+      WHERE workspace_id = ${workspaceId}
+        AND entity_type = 'labourer'
+        AND source_file_hash = ${fileHash}
+      ORDER BY
+        coalesce(nullif(payload->>'sortOrder', '')::int, nullif(payload->>'androidSortOrder', '')::int, nullif(payload->>'originalIndex', '')::int, 2147483647),
+        client_record_id
+    `),
   ]);
   const relationship = (relationshipRows.rows[0] as Record<string, unknown> | undefined) ?? {};
   const sourceVoucherRows = asArray(payload, "expenses");
@@ -1531,10 +1551,28 @@ async function buildPostImportAudit(
       });
     }
   }
+  const sourceLabourRows = asArray(payload, "labour");
+  const sortedSourceLabourRows = sourceLabourRows
+    .map((record, index) => ({ record, index }))
+    .sort((left, right) => itemSortWeight(left.record, left.index) - itemSortWeight(right.record, right.index));
+  const storedLabourRows = labourOrderRows.rows as Array<Record<string, unknown>>;
+  const seenSortOrders = new Map<string, number>();
+  let missingSortOrderCount = 0;
+  let duplicateSortOrderCount = 0;
+  for (const row of storedLabourRows) {
+    const sortOrder = String(row.sort_order ?? "").trim();
+    if (!sortOrder) {
+      missingSortOrderCount += 1;
+      continue;
+    }
+    const nextCount = (seenSortOrders.get(sortOrder) ?? 0) + 1;
+    seenSortOrders.set(sortOrder, nextCount);
+    if (nextCount === 2) duplicateSortOrderCount += 1;
+  }
 
   return {
     expectedCounts: {
-      labour: asArray(payload, "labour").length,
+      labour: sourceLabourRows.length,
       accounts: asArray(payload, "accounts").length,
       partners: asArray(payload, "partners").length,
       expenses: asArray(payload, "expenses").length,
@@ -1568,6 +1606,20 @@ async function buildPostImportAudit(
           ? ((row as Record<string, unknown>).client_record_ids as unknown[]).map((value) => String(value))
           : [],
       })),
+    },
+    labourOrderAudit: {
+      sourceTotal: sourceLabourRows.length,
+      storedTotal: storedLabourRows.length,
+      missingSortOrderCount,
+      duplicateSortOrderCount,
+      firstSourceLabourNames: sortedSourceLabourRows
+        .slice(0, 10)
+        .map(({ record }) => text(record, ["name", "labourName", "workerName", "employeeName"], "").trim())
+        .filter(Boolean),
+      firstStoredLabourNames: storedLabourRows
+        .slice(0, 10)
+        .map((row) => String(row.name ?? "").trim())
+        .filter(Boolean),
     },
     relationshipAudit: {
       attendanceTotal: Number(relationship.attendance_total ?? 0),
@@ -2580,10 +2632,24 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       updateJobStep("Labour", { status: "running", startedAt: new Date().toISOString(), message: "Importing labour." });
       await logStep("IMPORT LABOUR", "started");
       let updatedLabour = 0;
-      for (const source of asArray(parsed.data.payload, "labour")) {
+      for (const [index, source] of asArray(parsed.data.payload, "labour").entries()) {
         const id = randomUUID();
         const name = text(source, ["name", "labourName", "workerName", "employeeName"], "Imported Labour");
-        const result = await writeRecord("labourer", sourceTypeFor("labour"), source, { id, name, phone: text(source, ["phone", "mobile", "mobileNumber"]), notes: text(source, ["notes", "remarks"]), group: text(source, ["groupName", "group", "paymentGroup"], "Imported"), dailyWage: numberValue(source, ["dailyWage", "dailyRate", "wage"]), paymentType: text(source, ["paymentType"], "daily_wage"), active: importedActive(source) });
+        const sortOrder = itemSortWeight(source, index);
+        const result = await writeRecord("labourer", sourceTypeFor("labour"), source, {
+          id,
+          name,
+          sortOrder,
+          androidSortOrder: sortOrder,
+          originalIndex: index,
+          oldLabourId: oldId(source),
+          phone: text(source, ["phone", "mobile", "mobileNumber"]),
+          notes: text(source, ["notes", "remarks"]),
+          group: text(source, ["groupName", "group", "paymentGroup"], "Imported"),
+          dailyWage: numberValue(source, ["dailyWage", "dailyRate", "wage"]),
+          paymentType: text(source, ["paymentType"], "daily_wage"),
+          active: importedActive(source),
+        });
         const labourId = result.clientRecordId ?? result.payloadId ?? id;
         maps.labour.set(oldId(source), labourId);
         labourNameMap.set(name.trim().toLowerCase(), labourId);
@@ -3066,6 +3132,14 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
           missingStoredVoucherNumbers: 0,
           mismatches: [],
           duplicateImportedVoucherNumbers: [],
+        },
+        labourOrderAudit: {
+          sourceTotal: 0,
+          storedTotal: 0,
+          missingSortOrderCount: 0,
+          duplicateSortOrderCount: 0,
+          firstSourceLabourNames: [],
+          firstStoredLabourNames: [],
         },
         relationshipAudit: {
             attendanceTotal: 0,

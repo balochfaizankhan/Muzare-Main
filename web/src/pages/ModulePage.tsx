@@ -29,6 +29,7 @@ import {
 } from "../lib/partnerAccounting";
 import { formatDate, formatMoney } from "../lib/format";
 import {
+  compareLabourers,
   ensureLocalAccounts,
   getActiveWorkspaceId,
   getActiveFarmId,
@@ -143,14 +144,7 @@ function WorkforceModule({
   const { t } = useTranslation();
   const { token, user, sessionRefreshing } = useAuth();
   const sync = useSyncState();
-  const loadLabourers = useCallback(async () => (await workspaceRecords(offlineDb.labourers)).sort((a, b) => {
-    const dateA = a.joinedOn || a.createdAt;
-    const dateB = b.joinedOn || b.createdAt;
-    if (dateA !== dateB) return dateA.localeCompare(dateB);
-    const nameCompare = a.name.localeCompare(b.name);
-    if (nameCompare !== 0) return nameCompare;
-    return a.id.localeCompare(b.id);
-  }), []);
+  const loadLabourers = useCallback(async () => (await workspaceRecords(offlineDb.labourers)).sort(compareLabourers), []);
   const loadGroups = useCallback(async () => (await workspaceRecords(offlineDb.labourGroups)).sort((a, b) => a.name.localeCompare(b.name)), []);
   const loadAttendance = useCallback(async () => (await workspaceRecords(offlineDb.attendance)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadAdvances = useCallback(async () => (await workspaceRecords(offlineDb.advances)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
@@ -164,6 +158,16 @@ function WorkforceModule({
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
   const [productionEntries, refreshProductionEntries, setProductionEntries] = useData(loadProductionEntries);
   const [payments, refreshPayments, setPayments] = useData(loadPayments);
+  const nextLabourSortOrder = useMemo(
+    () => labourers.reduce((max, labourer) => Math.max(
+      max,
+      typeof labourer.sortOrder === "number" ? labourer.sortOrder
+        : typeof labourer.androidSortOrder === "number" ? labourer.androidSortOrder
+          : typeof labourer.originalIndex === "number" ? labourer.originalIndex
+            : -1,
+    ), -1) + 1,
+    [labourers],
+  );
   const [date, setDate] = useState(today());
   const [attendanceSearch, setAttendanceSearch] = useState("");
   const [labourSearch, setLabourSearch] = useState("");
@@ -595,7 +599,7 @@ function WorkforceModule({
         await saveGroup(record);
         setShowAddGroup(false);
       }} />}
-      {showAddLabour && <AddLabourPanel groups={groups} onCreateGroup={saveGroup} onClose={() => setShowAddLabour(false)} onSave={async (record) => {
+      {showAddLabour && <AddLabourPanel groups={groups} nextSortOrder={nextLabourSortOrder} onCreateGroup={saveGroup} onClose={() => setShowAddLabour(false)} onSave={async (record) => {
         await persistOperationalRecord("labourer", record);
         await refreshLabourers();
         await refreshGroups();
@@ -779,11 +783,13 @@ function EditLabourPanel({ labourer, onClose, onSave }: { labourer: Labourer; on
 
 function AddLabourPanel({
   groups,
+  nextSortOrder,
   onCreateGroup,
   onClose,
   onSave,
 }: {
   groups: LabourGroup[];
+  nextSortOrder: number;
   onCreateGroup: (record: LabourGroup) => Promise<void>;
   onClose: () => void;
   onSave: (record: Labourer) => Promise<void>;
@@ -831,6 +837,9 @@ function AddLabourPanel({
       await onSave({
         ...makeLocalRecord(),
         name: form.name.trim(),
+        sortOrder: nextSortOrder,
+        androidSortOrder: nextSortOrder,
+        originalIndex: nextSortOrder,
         group: form.group.trim() || "General",
         groupId: nextGroupId || undefined,
         paymentType: form.paymentType,

@@ -12,7 +12,7 @@ import { todayLocalDateKey } from "../../lib/attendanceStatus";
 import { formatMoney } from "../../lib/format";
 import { canCreate, canDelete, canEdit } from "../../lib/permissions";
 import { translatePaymentType } from "../../lib/systemTranslations";
-import { ensureLocalAccounts, makeLocalRecord, offlineDb, workspaceRecords, type Account, type Advance, type Labourer } from "../../lib/offline-db";
+import { compareLabourers, ensureLocalAccounts, makeLocalRecord, offlineDb, workspaceRecords, type Account, type Advance, type Labourer } from "../../lib/offline-db";
 import { deleteOperationalRecord, persistOperationalRecord } from "../../services/syncService";
 
 const today = todayLocalDateKey;
@@ -73,7 +73,7 @@ export function LabourAdvances() {
       workspaceRecords(offlineDb.accounts),
     ]);
     setAdvances(nextAdvances);
-    setLabourers(nextLabourers);
+    setLabourers(nextLabourers.sort(compareLabourers));
     setAccounts(nextAccounts);
   }, []);
 
@@ -96,7 +96,7 @@ export function LabourAdvances() {
   const groups = useMemo(() => [...new Set(labourers.map((labourer) => labourer.group).filter(Boolean))].sort(), [labourers]);
   const groupedLabourers = useMemo(() => labourers
     .filter((labourer) => group === "all" || labourer.group === group)
-    .sort((left, right) => left.name.localeCompare(right.name)), [group, labourers]);
+    .sort(compareLabourers), [group, labourers]);
   const advanceTotalByLabour = useMemo(() => {
     const totals = new Map<string, number>();
     for (const advance of advances) totals.set(advance.labourerId, (totals.get(advance.labourerId) ?? 0) + advance.amount);

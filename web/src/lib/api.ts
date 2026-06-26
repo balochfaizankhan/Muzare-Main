@@ -308,6 +308,14 @@ export type MigrationImportValidation = {
           clientRecordIds: string[];
         }>;
       };
+      labourOrderAudit: {
+        sourceTotal: number;
+        storedTotal: number;
+        missingSortOrderCount: number;
+        duplicateSortOrderCount: number;
+        firstSourceLabourNames: string[];
+        firstStoredLabourNames: string[];
+      };
       relationshipAudit: {
         attendanceTotal: number;
         attendanceLinkedToLabour: number;
