@@ -389,6 +389,43 @@ export async function createPendingWorkspaceOwner(input: {
   await db.insert(workspaceMemberships).values({ workspaceId: workspace.id, userId: user.id, role: "workspace_owner" });
 }
 
+export async function createApprovedWorkspaceOwner(input: {
+  ownerName: string; email: string; password: string; phone?: string | null;
+}): Promise<{ user: typeof users.$inferSelect; workspace: typeof workspaces.$inferSelect }> {
+  const email = input.email.toLowerCase();
+  const workspaceName = "Default Workspace";
+  const baseSlug = workspaceName.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "workspace";
+  const now = new Date();
+  const [workspace] = await db.insert(workspaces).values({
+    name: workspaceName,
+    slug: `${baseSlug}-${randomBytes(3).toString("hex")}`,
+    contactEmail: email,
+    contactPhone: input.phone?.trim() || null,
+    status: "approved",
+    approvedAt: now,
+  }).returning();
+  if (!workspace) throw new Error("Unable to create default workspace.");
+  const [user] = await db.insert(users).values({
+    email,
+    passwordHash: await hashPassword(input.password),
+    displayName: input.ownerName.trim(),
+    phone: input.phone?.trim() || null,
+    status: "approved",
+    active: true,
+    approvedAt: now,
+    workspaceId: workspace.id,
+  }).returning();
+  if (!user) throw new Error("Unable to create user account.");
+  await db.insert(workspaceMemberships).values({
+    workspaceId: workspace.id,
+    userId: user.id,
+    role: "workspace_owner",
+    active: true,
+    farmAccessMode: "all",
+  });
+  return { user, workspace };
+}
+
 export async function authenticateUser(email: string, password: string): Promise<AuthenticatedUser | null> {
   if (localDevelopmentMode) {
     return email.toLowerCase() === localUser.email && password === config.LOCAL_ADMIN_PASSWORD ? localUser : null;

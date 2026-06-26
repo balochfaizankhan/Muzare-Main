@@ -1,15 +1,16 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Building2, CheckCircle2, ClipboardCheck, LockKeyhole, MailCheck, ShieldCheck, Sprout } from "lucide-react";
+import { Building2, ClipboardCheck, LockKeyhole, MailCheck, ShieldCheck, Sprout } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { z } from "zod";
+import { useAuth } from "../auth/AuthProvider";
 import { LanguageSwitch } from "../components/LanguageSwitch";
+import { getHomePath } from "../lib/permissions";
 import { signup } from "../lib/api";
 
 const schema = z.object({
-  workspaceName: z.string().min(2, "Workspace name is required."),
   ownerName: z.string().min(2, "Your name is required."),
   email: z.email("Use a valid email."),
   phone: z.string().optional(),
@@ -20,8 +21,8 @@ type SignupFields = z.infer<typeof schema>;
 
 export function SignupPage() {
   const { t } = useTranslation();
-  const [submitted, setSubmitted] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const { completeSession } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const {
     register,
@@ -29,7 +30,7 @@ export function SignupPage() {
     formState: { errors, isSubmitting },
   } = useForm<SignupFields>({
     resolver: zodResolver(schema),
-    defaultValues: { workspaceName: "", ownerName: "", email: "", phone: "", password: "" },
+    defaultValues: { ownerName: "", email: "", phone: "", password: "" },
   });
 
   const submit = async (fields: SignupFields) => {
@@ -39,8 +40,8 @@ export function SignupPage() {
       return null;
     });
     if (!result) return;
-    setMessage(result.message);
-    setSubmitted(true);
+    await completeSession(result.token, result.user);
+    navigate(getHomePath(result.user), { replace: true });
   };
 
   return (
@@ -81,61 +82,47 @@ export function SignupPage() {
         </div>
 
         <section className="onboarding-panel">
-          {submitted ? (
-            <div className="approval-state">
-              <CheckCircle2 size={38} />
-              <h1>{t("authSignup.requestReceived")}</h1>
-              <p>{message ?? t("authSignup.requestPending")}</p>
-              <Link className="primary-link" to="/login">{t("authSignup.backToLogin")}</Link>
+          <>
+            <div className="onboarding-heading">
+              <ClipboardCheck size={22} />
+              <div>
+                <h1>{t("authSignup.requestWorkspace")}</h1>
+                <p>{t("authSignup.requestWorkspaceDescription")}</p>
+              </div>
             </div>
-          ) : (
-            <>
-              <div className="onboarding-heading">
-                <ClipboardCheck size={22} />
-                <div>
-                  <h1>{t("authSignup.requestWorkspace")}</h1>
-                  <p>{t("authSignup.requestWorkspaceDescription")}</p>
-                </div>
+            <div className="auth-note auth-note--signup">
+              <MailCheck size={16} />
+              <span>{t("authSignup.emailHint")}</span>
+            </div>
+            <form className="module-form onboarding-form" onSubmit={handleSubmit(submit)}>
+              <label>
+                <span>{t("authSignup.ownerName")}</span>
+                <input placeholder={t("authSignup.ownerNamePlaceholder")} {...register("ownerName")} />
+                {errors.ownerName && <small>{t("authSignup.validation.ownerNameRequired")}</small>}
+              </label>
+              <label>
+                <span>{t("email")}</span>
+                <input type="email" autoComplete="email" placeholder={t("auth.emailPlaceholder")} {...register("email")} />
+                {errors.email && <small>{t("validation.validEmail")}</small>}
+              </label>
+              <label>
+                <span>{t("workspaceTeam.phone")}</span>
+                <input placeholder={t("authSignup.phonePlaceholder")} {...register("phone")} />
+              </label>
+              <label>
+                <span>{t("password")}</span>
+                <input type="password" autoComplete="new-password" {...register("password")} />
+                {errors.password && <small>{t("authSignup.validation.passwordMin")}</small>}
+              </label>
+              <div className="password-hint">
+                <LockKeyhole size={15} />
+                <span>{t("authSignup.passwordHint")}</span>
               </div>
-              <div className="auth-note auth-note--signup">
-                <MailCheck size={16} />
-                <span>{t("authSignup.emailHint")}</span>
-              </div>
-              <form className="module-form onboarding-form" onSubmit={handleSubmit(submit)}>
-                <label>
-                  <span>{t("authSignup.workspaceName")}</span>
-                  <input placeholder={t("authSignup.workspaceNamePlaceholder")} {...register("workspaceName")} />
-                  {errors.workspaceName && <small>{t("authSignup.validation.workspaceNameRequired")}</small>}
-                </label>
-                <label>
-                  <span>{t("authSignup.ownerName")}</span>
-                  <input placeholder={t("authSignup.ownerNamePlaceholder")} {...register("ownerName")} />
-                  {errors.ownerName && <small>{t("authSignup.validation.ownerNameRequired")}</small>}
-                </label>
-                <label>
-                  <span>{t("email")}</span>
-                  <input type="email" autoComplete="email" placeholder={t("auth.emailPlaceholder")} {...register("email")} />
-                  {errors.email && <small>{t("validation.validEmail")}</small>}
-                </label>
-                <label>
-                  <span>{t("workspaceTeam.phone")}</span>
-                  <input placeholder={t("authSignup.phonePlaceholder")} {...register("phone")} />
-                </label>
-                <label>
-                  <span>{t("password")}</span>
-                  <input type="password" autoComplete="new-password" {...register("password")} />
-                  {errors.password && <small>{t("authSignup.validation.passwordMin")}</small>}
-                </label>
-                <div className="password-hint">
-                  <LockKeyhole size={15} />
-                  <span>{t("authSignup.passwordHint")}</span>
-                </div>
-                {error && <p className="error">{error}</p>}
-                <button type="submit" disabled={isSubmitting}>{isSubmitting ? t("authSignup.submitting") : t("authSignup.submitForApproval")}</button>
-              </form>
-              <p className="auth-switch">{t("authSignup.alreadyApproved")} <Link to="/login">{t("signIn")}</Link></p>
-            </>
-          )}
+              {error && <p className="error">{error}</p>}
+              <button type="submit" disabled={isSubmitting}>{isSubmitting ? t("authSignup.submitting") : t("authSignup.submitForApproval")}</button>
+            </form>
+            <p className="auth-switch">{t("authSignup.alreadyApproved")} <Link to="/login">{t("signIn")}</Link></p>
+          </>
         </section>
       </section>
     </main>

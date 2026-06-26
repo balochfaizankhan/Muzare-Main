@@ -106,6 +106,7 @@ after(async () => {
   await db.delete(attendanceImportSessions).where(inArray(attendanceImportSessions.workspaceId, ids));
   await db.delete(expenseImportSessions).where(inArray(expenseImportSessions.workspaceId, ids));
   await db.delete(auditLogs).where(inArray(auditLogs.workspaceId, ids));
+  await db.delete(auditLogs).where(inArray(auditLogs.userId, [alpha.userId, bravo.userId, manager.userId, supervisor.userId, accountant.userId, operator.userId, viewer.userId, admin.userId]));
   await db.delete(workspaceApprovals).where(inArray(workspaceApprovals.workspaceId, ids));
   await db.delete(workspaceTeamInvitations).where(inArray(workspaceTeamInvitations.workspaceId, ids));
   await db.delete(importFailures).where(inArray(importFailures.workspaceId, ids));
@@ -116,6 +117,7 @@ after(async () => {
   await db.delete(farms).where(inArray(farms.workspaceId, ids));
   await db.delete(workspaceMemberFarms).where(eq(workspaceMemberFarms.workspaceId, alpha.workspaceId));
   await db.delete(workspaceMemberships).where(inArray(workspaceMemberships.workspaceId, ids));
+  await db.update(users).set({ workspaceId: null }).where(inArray(users.workspaceId, ids));
   await db.delete(users).where(inArray(users.id, [alpha.userId, bravo.userId, manager.userId, supervisor.userId, accountant.userId, operator.userId, viewer.userId, admin.userId]));
   await db.delete(users).where(eq(users.email, "invited.member@example.test"));
   await db.delete(users).where(inArray(users.email, [
@@ -1268,13 +1270,14 @@ test("migration import batches returns 200 with an empty list when no imports ex
 });
 
 test("workspace team invitations, module overrides, and last-owner protection remain tenant scoped", async () => {
+  const invitedEmail = `invited.member.${randomUUID()}@example.test`;
   assert.equal((await request(bravo.token, "GET", `/v1/workspace/${alpha.workspaceId}/team`)).statusCode, 403);
   assert.equal((await request(supervisor.token, "POST", `/v1/workspace/${alpha.workspaceId}/team/invitations`, {
     email: "forged.member@example.test", role: "viewer",
   })).statusCode, 403);
 
   const invitation = await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/team/invitations`, {
-    email: "invited.member@example.test", phone: "+966500000123", role: "operator",
+    email: invitedEmail, phone: "+966500000123", role: "operator",
   });
   assert.equal(invitation.statusCode, 201);
   assert.ok(invitation.json().invitationToken);
@@ -1286,7 +1289,7 @@ test("workspace team invitations, module overrides, and last-owner protection re
   })).statusCode, 201);
   const team = await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/team`);
   assert.equal(team.statusCode, 200);
-  assert.ok(team.json().members.some((member: { email: string; role: string }) => member.email === "invited.member@example.test" && member.role === "operator"));
+  assert.ok(team.json().members.some((member: { email: string; role: string }) => member.email === invitedEmail && member.role === "operator"));
 
   const supervisorMembership = team.json().members.find((member: { userId: string }) => member.userId === supervisor.userId);
   assert.ok(supervisorMembership);
@@ -1419,8 +1422,9 @@ test("admin and migration routes reject ordinary workspace users", async () => {
 });
 
 test("workspace invitation acceptance enforces invited email matching", async () => {
+  const invitedEmail = `security.invited.${randomUUID()}@example.test`;
   const invitation = await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/team/invitations`, {
-    email: "security.invited@example.test",
+    email: invitedEmail,
     role: "viewer",
   });
   assert.equal(invitation.statusCode, 201);
@@ -1438,8 +1442,9 @@ test("workspace invitation acceptance enforces invited email matching", async ()
 });
 
 test("accepting the same invitation twice does not create duplicate workspace memberships", async () => {
+  const repeatEmail = `repeat.member.${randomUUID()}@example.test`;
   const invitation = await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/team/invitations`, {
-    email: "repeat.member@example.test",
+    email: repeatEmail,
     role: "viewer",
   });
   assert.equal(invitation.statusCode, 201);
@@ -1460,7 +1465,7 @@ test("accepting the same invitation twice does not create duplicate workspace me
   });
   assert.equal(secondAccept.statusCode, 409);
 
-  const [repeatUser] = await db.select({ id: users.id }).from(users).where(eq(users.email, "repeat.member@example.test")).limit(1);
+  const [repeatUser] = await db.select({ id: users.id }).from(users).where(eq(users.email, repeatEmail)).limit(1);
   assert.ok(repeatUser);
   const [membershipCount] = await db.select({ count: sql<number>`count(*)::int` }).from(workspaceMemberships).where(and(
     eq(workspaceMemberships.workspaceId, alpha.workspaceId),
@@ -1469,11 +1474,144 @@ test("accepting the same invitation twice does not create duplicate workspace me
   assert.equal(Number(membershipCount?.count ?? 0), 1);
 });
 
+test("normal signup creates an approved user with a single default workspace and active session", async () => {
+  const email = `signup-${randomUUID()}@example.test`;
+  const response = await app.inject({
+    method: "POST",
+    url: "/v1/auth/signup",
+    payload: {
+      ownerName: "Signup Owner",
+      email,
+      phone: "+966500001111",
+      password: "Password123!",
+    },
+  });
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.json().status, "approved");
+  assert.ok(response.json().token);
+  assert.equal(response.json().user.workspaceName, "Default Workspace");
+
+  const [createdUser] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  assert.ok(createdUser);
+  assert.equal(createdUser?.workspaceId, response.json().user.workspaceId);
+
+  const memberships = await db.select({
+    workspaceId: workspaceMemberships.workspaceId,
+    role: workspaceMemberships.role,
+  }).from(workspaceMemberships).where(eq(workspaceMemberships.userId, createdUser!.id));
+  assert.equal(memberships.length, 1);
+  assert.equal(memberships[0]?.role, "workspace_owner");
+
+  const [workspace] = await db.select().from(workspaces).where(eq(workspaces.id, memberships[0]!.workspaceId)).limit(1);
+  assert.equal(workspace?.name, "Default Workspace");
+  assert.equal(workspace?.status, "approved");
+});
+
+test("invitation signup creates only the invited workspace membership and no default workspace", async () => {
+  const invitedEmail = `invited-signup-${randomUUID()}@example.test`;
+  const invitation = await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/team/invitations`, {
+    email: invitedEmail,
+    role: "viewer",
+    farmAccessMode: "all",
+  });
+  assert.equal(invitation.statusCode, 201);
+
+  const accept = await app.inject({
+    method: "POST",
+    url: "/v1/workspace-invitations/register-and-accept",
+    payload: {
+      token: invitation.json().invitationToken,
+      displayName: "Invited Signup",
+      password: "Password123!",
+      phone: "+966500002222",
+      mode: "signup",
+    },
+  });
+  assert.equal(accept.statusCode, 201);
+  assert.equal(accept.json().workspaceId, alpha.workspaceId);
+  assert.equal(accept.json().user.workspaceId, alpha.workspaceId);
+
+  const [invitedUser] = await db.select().from(users).where(eq(users.email, invitedEmail)).limit(1);
+  assert.ok(invitedUser);
+  assert.equal(invitedUser?.workspaceId, alpha.workspaceId);
+
+  const memberships = await db.select({
+    workspaceId: workspaceMemberships.workspaceId,
+    role: workspaceMemberships.role,
+  }).from(workspaceMemberships).where(eq(workspaceMemberships.userId, invitedUser!.id));
+  assert.equal(memberships.length, 1);
+  assert.equal(memberships[0]?.workspaceId, alpha.workspaceId);
+  assert.equal(memberships[0]?.role, "viewer");
+
+  const ownedDefaultWorkspaces = await db.select({
+    workspaceId: workspaces.id,
+  }).from(workspaceMemberships)
+    .innerJoin(workspaces, eq(workspaces.id, workspaceMemberships.workspaceId))
+    .where(and(
+      eq(workspaceMemberships.userId, invitedUser!.id),
+      eq(workspaceMemberships.role, "workspace_owner"),
+      eq(workspaces.name, "Default Workspace"),
+    ));
+  assert.equal(ownedDefaultWorkspaces.length, 0);
+});
+
+test("users can update only their own display name through /v1/me", async () => {
+  const response = await request(alpha.token, "PATCH", "/v1/me", {
+    displayName: "Owner Renamed",
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().user.displayName, "Owner Renamed");
+
+  const me = await request(alpha.token, "GET", "/v1/me");
+  assert.equal(me.statusCode, 200);
+  assert.equal(me.json().user.displayName, "Owner Renamed");
+
+  const [savedUser] = await db.select({ displayName: users.displayName }).from(users).where(eq(users.id, alpha.userId)).limit(1);
+  assert.equal(savedUser?.displayName, "Owner Renamed");
+});
+
+test("admin repair removes empty default workspaces created alongside an invited workspace", async () => {
+  const affectedUserId = randomUUID();
+  const emptyWorkspaceId = randomUUID();
+  const realWorkspaceId = randomUUID();
+  const repairedEmail = `repaired-${affectedUserId}@example.test`;
+  await db.insert(workspaces).values([
+    { id: emptyWorkspaceId, name: "Default Workspace", slug: `default-${emptyWorkspaceId}`, contactEmail: repairedEmail, status: "approved" },
+    { id: realWorkspaceId, name: "Real Invited Workspace", slug: `real-${realWorkspaceId}`, contactEmail: repairedEmail, status: "approved" },
+  ]);
+  await db.insert(users).values({
+    id: affectedUserId,
+    email: repairedEmail,
+    passwordHash: "test",
+    displayName: "Affected Invitee",
+    status: "approved",
+    active: true,
+    workspaceId: emptyWorkspaceId,
+  });
+  await db.insert(workspaceMemberships).values([
+    { workspaceId: emptyWorkspaceId, userId: affectedUserId, role: "workspace_owner", active: true, farmAccessMode: "all" },
+    { workspaceId: realWorkspaceId, userId: affectedUserId, role: "viewer", active: true, farmAccessMode: "all" },
+  ]);
+
+  const repaired = await request(admin.token, "POST", "/v1/admin/users/repair-invited-default-workspaces");
+  assert.equal(repaired.statusCode, 200);
+  assert.ok(repaired.json().repairedCount >= 1);
+
+  const [userRow] = await db.select({ workspaceId: users.workspaceId }).from(users).where(eq(users.id, affectedUserId)).limit(1);
+  assert.equal(userRow?.workspaceId, realWorkspaceId);
+  const remainingMemberships = await db.select().from(workspaceMemberships).where(eq(workspaceMemberships.userId, affectedUserId));
+  assert.equal(remainingMemberships.length, 1);
+  assert.equal(remainingMemberships[0]?.workspaceId, realWorkspaceId);
+  const deletedWorkspace = await db.select().from(workspaces).where(eq(workspaces.id, emptyWorkspaceId));
+  assert.equal(deletedWorkspace.length, 0);
+});
+
 test("inviting an existing member updates the existing membership instead of creating a duplicate", async () => {
+  const memberEmail = `existing.member.${randomUUID()}@example.test`;
   const memberUserId = randomUUID();
   await db.insert(users).values({
     id: memberUserId,
-    email: "existing.member@example.test",
+    email: memberEmail,
     passwordHash: "test",
     status: "approved",
     active: true,
@@ -1492,7 +1630,7 @@ test("inviting an existing member updates the existing membership instead of cre
   });
 
   const reinvite = await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/team/invitations`, {
-    email: "existing.member@example.test",
+    email: memberEmail,
     role: "supervisor",
     farmAccessMode: "all",
   });
@@ -1513,10 +1651,11 @@ test("inviting an existing member updates the existing membership instead of cre
 });
 
 test("duplicate membership repair migration leaves one membership row and preserves farm assignments", async () => {
+  const duplicateEmail = `duplicate.membership.${randomUUID()}@example.test`;
   const duplicateUserId = randomUUID();
   await db.insert(users).values({
     id: duplicateUserId,
-    email: "duplicate.membership@example.test",
+    email: duplicateEmail,
     passwordHash: "test",
     status: "approved",
     active: true,
@@ -1576,11 +1715,12 @@ test("duplicate membership repair migration leaves one membership row and preser
 });
 
 test("viewer with all-farm access sees active farms read-only", async () => {
+  const viewerAllEmail = `viewer.all.${randomUUID()}@example.test`;
   const viewerAllUserId = randomUUID();
   const viewerAllToken = `viewer-all-${randomUUID()}`;
   await db.insert(users).values({
     id: viewerAllUserId,
-    email: "viewer.all@example.test",
+    email: viewerAllEmail,
     passwordHash: "test",
     status: "approved",
     active: true,

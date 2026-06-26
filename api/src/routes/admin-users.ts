@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { requireAdmin, requirePermission } from "../auth.js";
+import { requireAdmin, requirePermission, serializeUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { auditLogs } from "../db/schema.js";
@@ -11,6 +11,85 @@ const userIdSchema = z.object({ userId: z.string().uuid() });
 const userStatusSchema = z.object({
   active: z.boolean(),
 });
+
+async function repairInvitedDefaultWorkspaces(actorUserId: string) {
+  const candidates = await db.execute(sql`
+    SELECT
+      wm.id AS membership_id,
+      wm.user_id,
+      wm.workspace_id,
+      w.name AS workspace_name,
+      u.email
+    FROM workspace_memberships wm
+    INNER JOIN workspaces w ON w.id = wm.workspace_id
+    INNER JOIN users u ON u.id = wm.user_id
+    WHERE wm.role = 'workspace_owner'
+      AND lower(w.name) = 'default workspace'
+      AND NOT EXISTS (SELECT 1 FROM farms f WHERE f.workspace_id = w.id AND f.deleted_at IS NULL)
+      AND NOT EXISTS (SELECT 1 FROM operational_records o WHERE o.workspace_id = w.id)
+      AND EXISTS (
+        SELECT 1
+        FROM workspace_memberships other_wm
+        INNER JOIN workspaces other_w ON other_w.id = other_wm.workspace_id
+        WHERE other_wm.user_id = wm.user_id
+          AND other_wm.workspace_id <> wm.workspace_id
+          AND other_wm.active = true
+          AND other_w.status = 'approved'
+      )
+    ORDER BY wm.created_at DESC
+  `);
+
+  const repairedUsers: Array<{ userId: string; email: string; removedWorkspaceId: string; nextWorkspaceId: string }> = [];
+
+  for (const row of candidates.rows) {
+    const userId = String(row.user_id);
+    const workspaceId = String(row.workspace_id);
+    const email = String(row.email);
+    const [nextMembership] = await db.select({
+      workspaceId: workspaceMemberships.workspaceId,
+      createdAt: workspaceMemberships.createdAt,
+    }).from(workspaceMemberships)
+      .innerJoin(workspaces, eq(workspaces.id, workspaceMemberships.workspaceId))
+      .where(and(
+        eq(workspaceMemberships.userId, userId),
+        eq(workspaceMemberships.active, true),
+        eq(workspaces.status, "approved"),
+        sql`${workspaceMemberships.workspaceId} <> ${workspaceId}`,
+      ))
+      .orderBy(desc(workspaceMemberships.createdAt))
+      .limit(1);
+    if (!nextMembership) continue;
+
+    await db.transaction(async (tx) => {
+      await tx.update(users).set({
+        workspaceId: nextMembership.workspaceId,
+        updatedAt: new Date(),
+      }).where(and(eq(users.id, userId), eq(users.workspaceId, workspaceId)));
+      await tx.delete(auditLogs).where(eq(auditLogs.workspaceId, workspaceId));
+      await tx.delete(userSessions).where(eq(userSessions.workspaceId, workspaceId));
+      await tx.delete(workspaceMemberships).where(eq(workspaceMemberships.workspaceId, workspaceId));
+      await tx.delete(workspaces).where(eq(workspaces.id, workspaceId));
+      await tx.insert(auditLogs).values({
+        workspaceId: nextMembership.workspaceId,
+        userId: actorUserId,
+        action: "admin.repaired_default_invitation_workspace",
+        entityType: "workspace",
+        entityId: nextMembership.workspaceId,
+        details: {
+          repairedUserId: userId,
+          repairedUserEmail: email,
+          removedWorkspaceId: workspaceId,
+        },
+      });
+    });
+    repairedUsers.push({ userId, email, removedWorkspaceId: workspaceId, nextWorkspaceId: nextMembership.workspaceId });
+  }
+
+  return {
+    repairedCount: repairedUsers.length,
+    repairedUsers,
+  };
+}
 
 export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
   app.get("/v1/admin/users", { preHandler: requireAdmin }, async () => {
@@ -160,5 +239,16 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
     ));
 
     return reply.code(204).send();
+  });
+
+  app.post("/v1/admin/users/repair-invited-default-workspaces", { preHandler: requirePermission("CREATE_WORKSPACE") }, async (request, reply) => {
+    if (!request.appUser) return reply;
+    if (localDevelopmentMode) return reply.code(503).send({ message: "Configure PostgreSQL to repair invited default workspaces." });
+    const result = await repairInvitedDefaultWorkspaces(request.appUser.id);
+    const [user] = await db.select().from(users).where(eq(users.id, request.appUser.id)).limit(1);
+    return {
+      ...result,
+      user: user ? await serializeUser(user, request.appUser.workspaceId) : null,
+    };
   });
 }

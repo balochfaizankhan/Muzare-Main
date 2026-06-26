@@ -4,7 +4,7 @@ import { z } from "zod";
 import {
   approveUserAndWorkspace,
   authenticateUser,
-  createPendingWorkspaceOwner,
+  createApprovedWorkspaceOwner,
   createRejectedLoginMessage,
   createSession,
   rejectUserAndWorkspace,
@@ -24,7 +24,7 @@ const loginSchema = z.object({
 });
 
 const signupSchema = z.object({
-  workspaceName: z.string().trim().min(2).max(120),
+  workspaceName: z.string().trim().min(2).max(120).optional(),
   ownerName: z.string().trim().min(2).max(120),
   email: z.string().email(),
   phone: z.string().trim().max(40).optional(),
@@ -44,16 +44,22 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
     const parsed = signupSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ message: "Please complete all required onboarding fields." });
 
-    if (localDevelopmentMode) {
-      return reply.code(202).send({ status: "pending", message: "Your workspace request has been submitted for administrator approval." });
-    }
-
     const email = parsed.data.email.toLowerCase();
     const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
-    if (existing) return reply.code(409).send({ message: "An account request already exists for this email." });
+    if (existing) return reply.code(409).send({ message: "An account already exists for this email." });
 
-    await createPendingWorkspaceOwner({ ...parsed.data, email });
-    return reply.code(202).send({ status: "pending", message: "Your workspace request has been submitted for administrator approval." });
+    if (localDevelopmentMode) {
+      return reply.code(503).send({ message: "Configure PostgreSQL to create accounts." });
+    }
+
+    const created = await createApprovedWorkspaceOwner({ ...parsed.data, email });
+    const token = await createSession(created.user.id, created.workspace.id);
+    return reply.code(201).send({
+      status: "approved",
+      message: "Your account is ready. We created a default workspace you can rename any time.",
+      token,
+      user: await serializeUser(created.user, created.workspace.id),
+    });
   });
 
   app.post("/v1/auth/login", { config: { rateLimit: { max: 8, timeWindow: "1 minute" } } }, async (request, reply) => {
@@ -111,6 +117,27 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
     const [user] = await db.select().from(users).where(eq(users.id, request.appUser.id)).limit(1);
     if (!user) return reply.code(404).send({ message: "User not found." });
     return { user: await serializeUser(user, parsed.data.workspaceId) };
+  });
+
+  app.get("/v1/me", { preHandler: requireUser }, async (request, reply) => {
+    if (!request.appUser) return reply;
+    const [user] = await db.select().from(users).where(eq(users.id, request.appUser.id)).limit(1);
+    if (!user) return reply.code(404).send({ message: "User not found." });
+    return { user: await serializeUser(user, request.appUser.workspaceId) };
+  });
+
+  app.patch("/v1/me", { preHandler: requireUser }, async (request, reply) => {
+    if (!request.appUser) return reply;
+    const parsed = z.object({
+      displayName: z.string().trim().min(2).max(120),
+    }).safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ message: "A valid display name is required." });
+    const [user] = await db.update(users).set({
+      displayName: parsed.data.displayName,
+      updatedAt: new Date(),
+    }).where(eq(users.id, request.appUser.id)).returning();
+    if (!user) return reply.code(404).send({ message: "User not found." });
+    return { user: await serializeUser(user, request.appUser.workspaceId) };
   });
 
   app.get("/v1/admin/approvals", { preHandler: requireAdmin }, async (_request, _reply) => {

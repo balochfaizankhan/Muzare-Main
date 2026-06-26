@@ -55,11 +55,15 @@ export type LoginResult = {
 };
 
 export type SignupRequest = {
-  workspaceName: string;
+  workspaceName?: string;
   ownerName: string;
   email: string;
   phone?: string;
   password: string;
+};
+
+export type UserProfileInput = {
+  displayName: string;
 };
 
 export type PendingApproval = {
@@ -728,13 +732,16 @@ export const login = (email: string, password: string) =>
   });
 
 export const signup = (input: SignupRequest) =>
-  apiRequest<{ status: "pending"; message: string }>("/v1/auth/signup", {
+  apiRequest<{ status: "approved"; message: string; token: string; user: AppUser }>("/v1/auth/signup", {
     method: "POST",
     body: JSON.stringify(input),
   });
 
 export const logout = (token: string) => apiRequest<void>("/v1/auth/logout", { method: "POST" }, token);
 export const fetchSession = (token: string) => apiRequest<Session>("/v1/session", {}, token);
+export const fetchMe = (token: string) => apiRequest<{ user: AppUser }>("/v1/me", {}, token);
+export const updateMe = (token: string, input: UserProfileInput) =>
+  apiRequest<{ user: AppUser }>("/v1/me", { method: "PATCH", body: JSON.stringify(input) }, token);
 export const selectWorkspace = (token: string, workspaceId: string) =>
   apiRequest<{ user: AppUser }>("/v1/session/workspace", { method: "POST", body: JSON.stringify({ workspaceId }) }, token);
 export const fetchBootstrap = (token: string) => apiRequest<BootstrapData>("/v1/bootstrap", {}, token);
@@ -838,6 +845,12 @@ export const fetchAdminUser = (token: string, userId: string) =>
   apiRequest<{ user: AdminUserDetail | null }>(`/v1/admin/users/${userId}`, {}, token);
 export const updateAdminUserStatus = (token: string, userId: string, input: { active: boolean }) =>
   apiRequest<void>(`/v1/admin/users/${userId}/status`, { method: "PATCH", body: JSON.stringify(input) }, token);
+export const repairInvitedDefaultWorkspaces = (token: string) =>
+  apiRequest<{ repairedCount: number; repairedUsers: Array<{ userId: string; email: string; removedWorkspaceId: string; nextWorkspaceId: string }>; user: AppUser | null }>(
+    "/v1/admin/users/repair-invited-default-workspaces",
+    { method: "POST" },
+    token,
+  );
 export const fetchAdminAuditLogs = (token: string) => apiRequest<{ records: AdminAuditLog[] }>("/v1/admin/audit-logs", {}, token);
 export const validateMigrationImport = (token: string, input: { workspaceId: string; payload: unknown; allowSummaryMismatch?: boolean }) =>
   apiRequest<MigrationImportValidation>("/v1/admin/migration-import/validate", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 60_000, debugLabel: "migration-import-validate" });

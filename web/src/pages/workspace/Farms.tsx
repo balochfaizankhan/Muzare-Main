@@ -10,22 +10,74 @@ import {
   archiveWorkspaceFarm,
   createWorkspaceFarm,
   deleteWorkspaceFarm,
+  fetchMe,
   fetchWorkspaceFarms,
   fetchWorkspaceProfile,
   requestWorkspaceFarmDeletion,
   repairWorkspaceContextRequest,
   restoreWorkspaceFarm,
   selectActiveFarm,
+  updateMe,
   updateWorkspaceProfile,
   updateWorkspaceFarm,
   type Farm,
   type FarmInput,
+  type UserProfileInput,
   type WorkspaceProfileInput,
 } from "../../lib/api";
 import { hasPermission } from "../../lib/permissions";
 
 const emptyForm: FarmInput = { name: "", location: "", owner: "", remarks: "", contactName: "", contactEmail: "", contactPhone: "" };
 const emptyProfile: WorkspaceProfileInput = { name: "", contactEmail: "", contactPhone: "" };
+const emptyUserProfile: UserProfileInput = { displayName: "" };
+
+function UserProfileCard({ token }: { token: string }) {
+  const { t } = useTranslation();
+  const { user, updateUser } = useAuth();
+  const [form, setForm] = useState<UserProfileInput>(emptyUserProfile);
+  const profile = useQuery({
+    queryKey: ["me"],
+    queryFn: () => fetchMe(token),
+    enabled: Boolean(token),
+  });
+
+  useEffect(() => {
+    const nextName = profile.data?.user.displayName ?? user?.displayName ?? "";
+    setForm({ displayName: nextName });
+  }, [profile.data?.user.displayName, user?.displayName]);
+
+  const save = useMutation({
+    mutationFn: () => updateMe(token, form),
+    onSuccess: async (result) => {
+      updateUser(result.user);
+      await profile.refetch();
+    },
+  });
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    save.mutate();
+  };
+
+  return (
+    <section className="record-panel workspace-profile">
+      <div className="workspace-profile__heading">
+        <div><h2>{t("userProfile.title")}</h2><p>{t("userProfile.description")}</p></div>
+      </div>
+      {profile.isLoading && <p className="context-message">{t("userProfile.loading")}</p>}
+      {profile.isError && <p className="error">{profile.error.message}</p>}
+      {(profile.data || user) && (
+        <form className="module-form workspace-profile__form" onSubmit={submit}>
+          <label><span>{t("userProfile.displayName")}</span><input required value={form.displayName} onChange={(event) => setForm({ displayName: event.target.value })} /></label>
+          <label><span>{t("email")}</span><input disabled value={profile.data?.user.email ?? user?.email ?? ""} /></label>
+          <div className="farm-actions"><button disabled={save.isPending} type="submit">{save.isPending ? t("userProfile.saving") : t("userProfile.save")}</button></div>
+          {save.isSuccess && <p className="success">{t("userProfile.saved")}</p>}
+          {save.isError && <p className="error">{save.error.message}</p>}
+        </form>
+      )}
+    </section>
+  );
+}
 
 function WorkspaceProfileCard({ token, workspaceId }: { token: string; workspaceId: string }) {
   const { t } = useTranslation();
@@ -187,6 +239,7 @@ export function Farms() {
         {isSettings && <section className="mobile-settings-menu">
           <button type="button" onClick={() => void logout()}><LogOut size={17} />{t("common.logout")}</button>
         </section>}
+        {isSettings && token && <UserProfileCard token={token} />}
         {isSettings && token && workspaceId && <WorkspaceProfileCard token={token} workspaceId={workspaceId} />}
         {isSettings && <section className="settings-link-grid">
           <Link to="/workspace/settings/team"><UsersRound size={19} /><div><strong>{t("workspaceTeam.title")}</strong><span>{t("workspaceTeam.settingsCard")}</span></div></Link>

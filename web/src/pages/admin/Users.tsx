@@ -3,7 +3,7 @@ import { Eye, ShieldCheck, UserX, X } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../auth/AuthProvider";
-import { fetchAdminUser, fetchAdminUsers, updateAdminUserStatus } from "../../lib/api";
+import { fetchAdminUser, fetchAdminUsers, repairInvitedDefaultWorkspaces, updateAdminUserStatus } from "../../lib/api";
 import { formatDate, formatNumber } from "../../lib/format";
 
 export function Users() {
@@ -25,6 +25,16 @@ export function Users() {
   });
   const changeStatus = useMutation({
     mutationFn: ({ userId, active }: { userId: string; active: boolean }) => updateAdminUserStatus(token!, userId, { active }),
+    onSuccess: async () => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ["admin-users"] }),
+        client.invalidateQueries({ queryKey: ["admin-user", selectedUserId] }),
+        client.invalidateQueries({ queryKey: ["admin-overview"] }),
+      ]);
+    },
+  });
+  const repairInvitedDefaults = useMutation({
+    mutationFn: () => repairInvitedDefaultWorkspaces(token!),
     onSuccess: async () => {
       await Promise.all([
         client.invalidateQueries({ queryKey: ["admin-users"] }),
@@ -56,7 +66,14 @@ export function Users() {
           <h2>{t("adminUsers.platformUsers")}</h2>
           <p>{t("adminUsers.platformUsersDescription")}</p>
         </div>
+        {canManage && (
+          <button type="button" className="secondary-button" onClick={() => repairInvitedDefaults.mutate()} disabled={repairInvitedDefaults.isPending}>
+            {repairInvitedDefaults.isPending ? t("adminUsers.repairingInvitedDefaults") : t("adminUsers.repairInvitedDefaults")}
+          </button>
+        )}
       </div>
+      {repairInvitedDefaults.isSuccess && <p className="success">{t("adminUsers.repairedInvitedDefaults", { count: repairInvitedDefaults.data.repairedCount })}</p>}
+      {repairInvitedDefaults.isError && <p className="error">{repairInvitedDefaults.error.message}</p>}
 
       {query.isError && <p className="error">{query.error.message}</p>}
       {!users.length ? <div className="admin-empty-panel"><h2>{t("adminUsers.emptyTitle")}</h2><p>{t("adminUsers.emptyDescription")}</p></div> : <div className="admin-table-card">
