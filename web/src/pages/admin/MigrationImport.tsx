@@ -9,6 +9,41 @@ import { formatMoney } from "../../lib/format";
 
 type StepStatus = "done" | "running" | "waiting" | "failed";
 
+function formatApiError(error: unknown, fallback: string) {
+  if (!error) return fallback;
+  if (typeof error === "object" && error !== null && "status" in error && "message" in error) {
+    const status = String((error as { status?: number }).status ?? "");
+    const message = String((error as { message?: string }).message ?? fallback);
+    return status ? `HTTP ${status}: ${message}` : message;
+  }
+  if (error instanceof Error) return error.message;
+  return fallback;
+}
+
+function buildCleanupStartingProgress(batchId: string): MigrationImportProgress {
+  const now = new Date().toISOString();
+  return {
+    batchId,
+    status: "running",
+    stage: "Starting cleanup...",
+    step: "Stopping import worker",
+    percentage: 5,
+    message: "Starting cleanup...",
+    startedAt: now,
+    updatedAt: now,
+    elapsedSeconds: 0,
+    estimatedRemainingSeconds: null,
+    completedSteps: 0,
+    totalSteps: 9,
+    processedCount: 0,
+    totalCount: 0,
+    importedCount: 0,
+    updatedCount: 0,
+    skippedCount: 0,
+    failedCount: 0,
+  };
+}
+
 function StatusBadge({ status }: { status: string }) {
   const normalized = status.toLowerCase();
   const label = normalized === "in_progress"
@@ -336,6 +371,7 @@ export function MigrationImport() {
   const [cleanupBackupConfirmed, setCleanupBackupConfirmed] = useState(false);
   const [cleanupConfirmationText, setCleanupConfirmationText] = useState("");
   const [cleanupIncludeEdited, setCleanupIncludeEdited] = useState(false);
+  const [cleanupStartingProgress, setCleanupStartingProgress] = useState<MigrationImportProgress | null>(null);
   const workspaces = useQuery({
     queryKey: ["admin-workspaces"],
     queryFn: () => fetchAdminWorkspaces(token!),
@@ -415,9 +451,13 @@ export function MigrationImport() {
     onSuccess: () => {
       setCleanupBackupConfirmed(false);
       setCleanupConfirmationText("");
+      setCleanupStartingProgress(null);
       setOperationIntent(null);
       refreshAfterImport();
       void cleanupPreview.refetch();
+    },
+    onError: () => {
+      setCleanupStartingProgress(null);
     },
   });
   const progressBatchId = operationIntent === "cleanup"
@@ -455,11 +495,15 @@ export function MigrationImport() {
     const status = operationProgress.data?.status;
     if (status === "completed" || status === "failed" || status === "cancelled") {
       setOperationIntent(null);
+      setCleanupStartingProgress(null);
     }
   }, [operationProgress.data?.status]);
 
   useEffect(() => {
-    if (runImport.isError || cleanFailedImport.isError) setOperationIntent(null);
+    if (runImport.isError || cleanFailedImport.isError) {
+      setOperationIntent(null);
+      setCleanupStartingProgress(null);
+    }
   }, [runImport.isError, cleanFailedImport.isError]);
 
   const readFile = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -516,37 +560,43 @@ export function MigrationImport() {
 
   const showProgress = Boolean(operationProgress.data || currentImportJob);
   const cleanupCanSubmit = Boolean(latestBatch && cleanupPreview.data?.preview && cleanupBackupConfirmed && cleanupConfirmationText === "CANCEL AND CLEAN IMPORT" && !cleanFailedImport.isPending);
+  const cleanupProgress = operationIntent === "cleanup"
+    ? (operationProgress.data ?? cleanupStartingProgress)
+    : null;
+  const importProgress = operationIntent !== "cleanup"
+    ? operationProgress.data
+    : null;
 
-  const buildImportStageRows = () => {
+  const buildImportStageRows = (progressSource?: MigrationImportProgress | null) => {
     const stages = ["Reading JSON", "Validating file", "Importing farms", "Importing seasons", "Importing accounts", "Importing partners", "Importing labour", "Importing attendance", "Importing advances", "Importing vouchers", "Importing voucher items", "Repairing references", "Verifying import", "Completed"];
-    const current = (operationProgress.data?.stage || operationProgress.data?.step || currentImportJob?.currentStep || "").toLowerCase();
+    const current = (progressSource?.stage || progressSource?.step || currentImportJob?.currentStep || "").toLowerCase();
     let seenCurrent = false;
     return stages.map((stage) => {
       const normalized = stage.toLowerCase();
-      if (operationProgress.data?.status === "failed" && current.includes(normalized.replace("importing ", ""))) return { label: stage, status: "failed" as const, detail: operationProgress.data?.message };
+      if (progressSource?.status === "failed" && current.includes(normalized.replace("importing ", ""))) return { label: stage, status: "failed" as const, detail: progressSource?.message };
       if (current && (current.includes(normalized) || normalized.includes(current))) {
         seenCurrent = true;
-        return { label: stage, status: operationProgress.data?.status === "completed" && stage === "Completed" ? "done" as const : "running" as const, detail: operationProgress.data?.message };
+        return { label: stage, status: progressSource?.status === "completed" && stage === "Completed" ? "done" as const : "running" as const, detail: progressSource?.message };
       }
       if (!seenCurrent && current) return { label: stage, status: "done" as const };
-      if (operationProgress.data?.status === "completed" && stage === "Completed") return { label: stage, status: "done" as const };
+      if (progressSource?.status === "completed" && stage === "Completed") return { label: stage, status: "done" as const };
       return { label: stage, status: "waiting" as const };
     });
   };
 
-  const buildCleanupStageRows = () => {
+  const buildCleanupStageRows = (progressSource?: MigrationImportProgress | null) => {
     const stages = ["Stopping import worker", "Finding imported records", "Removing operational records", "Removing import failures", "Cleaning seasons", "Cleaning farms", "Detaching audit logs", "Repairing session context", "Updating batch status", "Completed"];
-    const current = (operationProgress.data?.stage || operationProgress.data?.step || "").toLowerCase();
+    const current = (progressSource?.stage || progressSource?.step || "").toLowerCase();
     let seenCurrent = false;
     return stages.map((stage) => {
       const normalized = stage.toLowerCase();
-      if (operationProgress.data?.status === "failed" && current.includes(normalized)) return { label: stage, status: "failed" as const, detail: operationProgress.data?.message };
+      if (progressSource?.status === "failed" && current.includes(normalized)) return { label: stage, status: "failed" as const, detail: progressSource?.message };
       if (current && (current.includes(normalized) || normalized.includes(current))) {
         seenCurrent = true;
-        return { label: stage, status: operationProgress.data?.status === "completed" && stage === "Completed" ? "done" as const : "running" as const, detail: operationProgress.data?.message };
+        return { label: stage, status: progressSource?.status === "completed" && stage === "Completed" ? "done" as const : "running" as const, detail: progressSource?.message };
       }
       if (!seenCurrent && current) return { label: stage, status: "done" as const };
-      if (operationProgress.data?.status === "completed" && stage === "Completed") return { label: stage, status: "done" as const };
+      if (progressSource?.status === "completed" && stage === "Completed") return { label: stage, status: "done" as const };
       return { label: stage, status: "waiting" as const };
     });
   };
@@ -605,9 +655,9 @@ export function MigrationImport() {
 
       {validation ? <ResultCard validation={validation} importResult={runImport.data} onReset={resetWizard} /> : null}
 
-      {showProgress ? (
+      {showProgress || Boolean(cleanupProgress) ? (
         <ProgressCard
-          progress={operationProgress.data ?? {
+          progress={cleanupProgress ?? importProgress ?? {
             batchId: latestBatch?.id ?? "current",
             status: currentImportJob?.status === "queued" ? "pending" : currentImportJob?.status === "partial_failed" || currentImportJob?.status === "rolled_back" ? "failed" : currentImportJob?.status ?? "running",
             stage: currentImportJob?.currentStep ?? "Importing attendance",
@@ -627,7 +677,7 @@ export function MigrationImport() {
             elapsedSeconds: 0,
             estimatedRemainingSeconds: null,
           }}
-          stageRows={operationIntent === "cleanup" ? buildCleanupStageRows() : buildImportStageRows()}
+          stageRows={operationIntent === "cleanup" ? buildCleanupStageRows(cleanupProgress) : buildImportStageRows(importProgress)}
           isCleanup={operationIntent === "cleanup"}
         />
       ) : null}
@@ -719,12 +769,22 @@ export function MigrationImport() {
                   <input type="text" value={cleanupConfirmationText} onChange={(event) => setCleanupConfirmationText(event.target.value)} placeholder="CANCEL AND CLEAN IMPORT" />
                 </label>
                 <div className="record-list__actions">
-                  <button type="button" className="danger-button" disabled={!cleanupCanSubmit} onClick={() => { setOperationIntent("cleanup"); cleanFailedImport.mutate(latestBatch.id); }}>
-                    Cancel and Clean This Import
+                  <button
+                    type="button"
+                    className="danger-button"
+                    disabled={!cleanupCanSubmit}
+                    onClick={() => {
+                      setOperationIntent("cleanup");
+                      setCleanupStartingProgress(buildCleanupStartingProgress(latestBatch.id));
+                      cleanFailedImport.mutate(latestBatch.id);
+                    }}
+                  >
+                    {cleanFailedImport.isPending ? "Starting cleanup..." : "Cancel and Clean This Import"}
                   </button>
                 </div>
+                {cleanFailedImport.isPending && !operationProgress.data ? <p className="positive">Starting cleanup...</p> : null}
                 {cleanupPreview.error ? <p className="worker-action-error">{cleanupPreview.error instanceof Error ? cleanupPreview.error.message : "Could not load cleanup preview."}</p> : null}
-                {cleanFailedImport.error ? <p className="worker-action-error">{cleanFailedImport.error instanceof Error ? cleanFailedImport.error.message : "Cleanup failed."}</p> : null}
+                {cleanFailedImport.error ? <p className="worker-action-error">{formatApiError(cleanFailedImport.error, "Cleanup failed.")}</p> : null}
               </div>
             ) : null}
           </div>
