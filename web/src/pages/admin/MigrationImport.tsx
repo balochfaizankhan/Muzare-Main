@@ -764,9 +764,17 @@ export function MigrationImport() {
                   <input type="checkbox" checked={cleanupIncludeEdited} onChange={(event) => setCleanupIncludeEdited(event.target.checked)} />
                   <span>Also remove imported records that were later edited.</span>
                 </label>
-                <label>
-                  <span>Type confirmation</span>
-                  <input type="text" value={cleanupConfirmationText} onChange={(event) => setCleanupConfirmationText(event.target.value)} placeholder="CANCEL AND CLEAN IMPORT" />
+                <label className="migration-confirmation-field">
+                  <span>Type this exact confirmation text</span>
+                  <div className="migration-confirmation-hint">CANCEL AND CLEAN IMPORT</div>
+                  <input
+                    type="text"
+                    value={cleanupConfirmationText}
+                    onChange={(event) => setCleanupConfirmationText(event.target.value)}
+                    placeholder="Type: CANCEL AND CLEAN IMPORT"
+                    autoCapitalize="characters"
+                    spellCheck={false}
+                  />
                 </label>
                 <div className="record-list__actions">
                   <button

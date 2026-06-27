@@ -5419,6 +5419,36 @@ button {
   margin-top: 14px;
 }
 
+.migration-confirmation-field {
+  display: grid;
+  gap: 8px;
+}
+
+.migration-confirmation-hint {
+  background: #fff;
+  border: 2px dashed #c93b2f;
+  border-radius: 12px;
+  color: #8f241c;
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 14px 16px;
+  text-align: center;
+}
+
+.migration-confirmation-field input {
+  font-size: 1rem;
+  font-weight: 700;
+  min-height: 56px;
+  padding: 0 16px;
+}
+
+.migration-confirmation-field input::placeholder {
+  color: var(--text-secondary);
+  font-weight: 600;
+  opacity: 1;
+}
+
 .migration-history-table-wrap {
   max-width: 100%;
   overflow-x: auto;
