@@ -35,13 +35,13 @@ function compareMembershipRecency(
   right: WorkspaceMembership & { createdAt: Date | null; updatedAt: Date | null },
 ) {
   if (left.active !== right.active) return left.active ? -1 : 1;
+  const roleDiff = workspaceRolePriority[right.role] - workspaceRolePriority[left.role];
+  if (roleDiff !== 0) return roleDiff;
   if (Boolean(left.permissions) !== Boolean(right.permissions)) return left.permissions ? -1 : 1;
   const updatedDiff = (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0);
   if (updatedDiff !== 0) return updatedDiff;
   const createdDiff = (right.createdAt?.getTime() ?? 0) - (left.createdAt?.getTime() ?? 0);
   if (createdDiff !== 0) return createdDiff;
-  const roleDiff = workspaceRolePriority[right.role] - workspaceRolePriority[left.role];
-  if (roleDiff !== 0) return roleDiff;
   return right.membershipId.localeCompare(left.membershipId);
 }
 

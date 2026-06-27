@@ -17,6 +17,35 @@ const permissionsByRole: Record<AppUser["role"], readonly Permission[]> = {
   viewer: ["VIEW_REPORTS"],
 };
 
+const workspaceRolePriority: Record<WorkspaceRole, number> = {
+  workspace_owner: 5,
+  workspace_manager: 4,
+  supervisor: 3,
+  accountant: 2,
+  operator: 1,
+  viewer: 0,
+};
+
+function normalizeWorkspaceRole(role: string | null | undefined): WorkspaceRole {
+  if (role === "owner") return "workspace_owner";
+  if (role === "admin") return "workspace_owner";
+  if (role === "manager") return "workspace_manager";
+  if (role === "worker") return "operator";
+  return (role && role in roleModulePermissions ? role : "viewer") as WorkspaceRole;
+}
+
+function selectWorkspaceMembership(user: AppUser, workspaceId: string) {
+  return user.memberships
+    .filter((item) => item.active && item.workspaceId === workspaceId)
+    .map((item) => ({ ...item, role: normalizeWorkspaceRole(item.role) }))
+    .sort((left, right) => {
+      const roleDiff = workspaceRolePriority[right.role] - workspaceRolePriority[left.role];
+      if (roleDiff !== 0) return roleDiff;
+      if (Boolean(left.permissions) !== Boolean(right.permissions)) return left.permissions ? -1 : 1;
+      return 0;
+    })[0] ?? null;
+}
+
 let permissionContextUser: AppUser | null = null;
 
 export function setPermissionContextUser(user: AppUser | null) {
@@ -30,8 +59,10 @@ export function getPermissionContextUser() {
 export function hasPermission(user: AppUser, permission: Permission, workspaceId?: string): boolean {
   if (platformPermissions.has(permission)) return Boolean(user.platformRole && permissionsByRole[user.platformRole].includes(permission));
   if (!workspaceId) return false;
-  const membership = user.memberships.find((item) => item.active && item.workspaceId === workspaceId);
-  if (!membership || !permissionsByRole[membership.role].includes(permission)) return false;
+  const membership = selectWorkspaceMembership(user, workspaceId);
+  if (!membership) return false;
+  if (membership.role === "workspace_owner") return true;
+  if (!permissionsByRole[membership.role].includes(permission)) return false;
   const moduleGate: Partial<Record<Permission, [WorkspaceModule, WorkspaceModuleAction]>> = {
     APPROVE_ATTENDANCE: ["attendance", "approve"],
     APPROVE_EXPENSE: ["expenses", "approve"],
@@ -62,8 +93,8 @@ export const roleModulePermissions: Record<WorkspaceRole, Record<WorkspaceModule
 };
 
 export function hasModulePermission(user: AppUser, module: WorkspaceModule, action: WorkspaceModuleAction, workspaceId = user.workspaceId ?? "") {
-  const membership = user.memberships.find((item) => item.active && item.workspaceId === workspaceId);
-  return Boolean(membership && (membership.permissions?.[module]?.[action] ?? roleModulePermissions[membership.role][module][action]));
+  const membership = selectWorkspaceMembership(user, workspaceId);
+  return Boolean(membership && (membership.role === "workspace_owner" || (membership.permissions?.[module]?.[action] ?? roleModulePermissions[membership.role][module][action])));
 }
 
 type OperationalEntity =

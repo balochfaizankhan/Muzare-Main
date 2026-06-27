@@ -48,6 +48,35 @@ export type EffectiveWorkspacePermissions = {
   permissions: Record<WorkspaceModule, Record<WorkspaceModuleAction, boolean>>;
 };
 
+const workspaceRolePriority: Record<WorkspaceRole, number> = {
+  workspace_owner: 5,
+  workspace_manager: 4,
+  supervisor: 3,
+  accountant: 2,
+  operator: 1,
+  viewer: 0,
+};
+
+function normalizeWorkspaceRole(role: string | null | undefined): WorkspaceRole {
+  if (role === "owner") return "workspace_owner";
+  if (role === "admin") return "workspace_owner";
+  if (role === "manager") return "workspace_manager";
+  if (role === "worker") return "operator";
+  return workspaceRoles.includes((role ?? "") as WorkspaceRole) ? role as WorkspaceRole : "viewer";
+}
+
+function selectWorkspaceMembership(user: PermissionUser, workspaceId: string) {
+  return user.memberships
+    .filter((item) => item.active && item.workspaceId === workspaceId)
+    .map((item) => ({ ...item, role: normalizeWorkspaceRole(item.role) }))
+    .sort((left, right) => {
+      const roleDiff = workspaceRolePriority[right.role] - workspaceRolePriority[left.role];
+      if (roleDiff !== 0) return roleDiff;
+      if (Boolean(left.permissions) !== Boolean(right.permissions)) return left.permissions ? -1 : 1;
+      return 0;
+    })[0] ?? null;
+}
+
 const platformPermissions: Record<PlatformRole, readonly PlatformPermission[]> = {
   platform_admin: [
     "CREATE_WORKSPACE", "DELETE_WORKSPACE", "VIEW_WORKSPACES", "VIEW_USERS", "MANAGE_SUBSCRIPTIONS",
@@ -111,13 +140,14 @@ export const roleModulePermissions: Record<WorkspaceRole, Record<WorkspaceModule
 };
 
 export function hasModulePermission(user: PermissionUser, workspaceId: string, module: WorkspaceModule, action: WorkspaceModuleAction): boolean {
-  const membership = user.memberships.find((item) => item.active && item.workspaceId === workspaceId);
+  const membership = selectWorkspaceMembership(user, workspaceId);
   if (!membership) return false;
+  if (membership.role === "workspace_owner") return true;
   return membership.permissions?.[module]?.[action] ?? roleModulePermissions[membership.role][module][action];
 }
 
 export function getEffectivePermissions(user: PermissionUser, workspaceId: string): EffectiveWorkspacePermissions | null {
-  const membership = user.memberships.find((item) => item.active && item.workspaceId === workspaceId);
+  const membership = selectWorkspaceMembership(user, workspaceId);
   if (!membership) return null;
   const permissions = Object.fromEntries(
     workspaceModules.map((module) => [
@@ -125,7 +155,9 @@ export function getEffectivePermissions(user: PermissionUser, workspaceId: strin
       Object.fromEntries(
         workspaceModuleActions.map((action) => [
           action,
-          membership.permissions?.[module]?.[action] ?? roleModulePermissions[membership.role][module][action],
+          membership.role === "workspace_owner"
+            ? true
+            : membership.permissions?.[module]?.[action] ?? roleModulePermissions[membership.role][module][action],
         ]),
       ) as Record<WorkspaceModuleAction, boolean>,
     ]),
@@ -146,7 +178,7 @@ export function requireOwnerOrPermission(
   workspaceId: string,
   permission: Permission,
 ): boolean {
-  const membership = user.memberships.find((item) => item.active && item.workspaceId === workspaceId);
+  const membership = selectWorkspaceMembership(user, workspaceId);
   if (!membership) return false;
   return membership.role === "workspace_owner" || hasPermission(user, permission, workspaceId);
 }
@@ -156,8 +188,10 @@ export function hasPermission(user: PermissionUser, permission: Permission, work
     return user.platformRole ? platformPermissions[user.platformRole].includes(permission as PlatformPermission) : false;
   }
   if (!workspaceId) return false;
-  const membership = user.memberships.find((item) => item.active && item.workspaceId === workspaceId);
-  if (!membership || !workspacePermissions[membership.role].includes(permission as WorkspacePermission)) return false;
+  const membership = selectWorkspaceMembership(user, workspaceId);
+  if (!membership) return false;
+  if (membership.role === "workspace_owner") return true;
+  if (!workspacePermissions[membership.role].includes(permission as WorkspacePermission)) return false;
   const moduleGate: Partial<Record<WorkspacePermission, [WorkspaceModule, WorkspaceModuleAction]>> = {
     APPROVE_ATTENDANCE: ["attendance", "approve"],
     APPROVE_EXPENSE: ["expenses", "approve"],

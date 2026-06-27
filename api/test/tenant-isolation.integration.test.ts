@@ -6,6 +6,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { buildApp } from "../src/app.js";
 import { hashPassword } from "../src/auth.js";
 import { closeDatabaseConnection, db } from "../src/db/client.js";
+import { hasModulePermission, hasPermission } from "../src/permissions.js";
 import {
   farms,
   attendanceImportSessions,
@@ -1376,6 +1377,51 @@ test("accountant role is finance-scoped and cannot mutate attendance records", a
 
   const reportAttempt = await request(accountant.token, "GET", `/v1/workspace/${alpha.workspaceId}/expenses/search?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}&from=2026-01-01&to=2026-12-31`);
   assert.equal(reportAttempt.statusCode, 200);
+});
+
+test("workspace owner permissions resolve to full voucher create even when duplicate lower-privilege memberships exist", async () => {
+  const permissionUser = {
+    platformRole: null,
+    memberships: [
+      {
+        workspaceId: alpha.workspaceId,
+        role: "viewer" as const,
+        active: true,
+        permissions: { dashboard: { view: true } },
+      },
+      {
+        workspaceId: alpha.workspaceId,
+        role: "workspace_owner" as const,
+        active: true,
+        permissions: null,
+      },
+    ],
+  };
+
+  assert.equal(hasPermission(permissionUser, "SUBMIT_RECORDS", alpha.workspaceId), true);
+  assert.equal(hasPermission(permissionUser, "MANAGE_RECORDS", alpha.workspaceId), true);
+  assert.equal(hasModulePermission(permissionUser, alpha.workspaceId, "expenses", "create"), true);
+  assert.equal(hasModulePermission(permissionUser, alpha.workspaceId, "expenses", "edit"), true);
+});
+
+test("workspace owner can sync voucher create with null permissions and season mismatch returns stale_context details", async () => {
+  const accountId = await createAccount(alpha, "Owner Voucher Create Cash");
+
+  const voucherAttempt = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", randomUUID(), {
+    ...financialRecord(alpha, "voucher"),
+    accountId,
+  }));
+  assert.equal(voucherAttempt.statusCode, 200);
+
+  const staleSeasonAttempt = await request(alpha.token, "POST", "/v1/workspace/operational-records", {
+    ...envelope(alpha, "voucher", randomUUID(), {
+      ...financialRecord(alpha, "voucher"),
+      accountId,
+    }),
+    seasonId: alphaSecondary.seasonId,
+  });
+  assert.equal(staleSeasonAttempt.statusCode, 403);
+  assert.equal(staleSeasonAttempt.json().details?.code, "stale_season_context");
 });
 
 test("custom module permissions block expense history APIs even when workspace membership exists", async () => {

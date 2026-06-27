@@ -425,11 +425,22 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         operation: "upsert",
       });
     }
+    const membership = request.appUser.memberships.find((item) => item.workspaceId === parsed.data.workspaceId) ?? null;
+    const permissionDebug = {
+      selectedRole: membership?.role ?? request.appUser.role,
+      membershipPermissions: membership?.permissions ?? null,
+      farmAccessMode: membership?.farmAccessMode ?? null,
+      submitRecords: hasPermission(request.appUser, "SUBMIT_RECORDS", parsed.data.workspaceId),
+      manageRecords: hasPermission(request.appUser, "MANAGE_RECORDS", parsed.data.workspaceId),
+      expensesCreate: hasModulePermission(request.appUser, parsed.data.workspaceId, "expenses", "create"),
+      expensesEdit: hasModulePermission(request.appUser, parsed.data.workspaceId, "expenses", "edit"),
+    };
     if (!requireWorkspaceWrite(request.appUser, parsed.data.workspaceId)) {
       return forbiddenResponse(reply, "Workspace record submission permission is required.", {
         code: "missing_workspace_permission",
         permissionKey: "SUBMIT_RECORDS",
         requestWorkspaceId: parsed.data.workspaceId,
+        ...permissionDebug,
       });
     }
     if (!requireEntityWrite(request.appUser, parsed.data.workspaceId, parsed.data.entity)) {
@@ -438,6 +449,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         permissionKey: "MANAGE_RECORDS",
         requestWorkspaceId: parsed.data.workspaceId,
         entityType: parsed.data.entity,
+        ...permissionDebug,
       });
     }
     if (request.appUser.workspaceId !== parsed.data.workspaceId) {
@@ -446,6 +458,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         requestWorkspaceId: parsed.data.workspaceId,
         activeWorkspaceId: request.appUser.workspaceId,
         entityType: parsed.data.entity,
+        ...permissionDebug,
       });
     }
     const financialPayloadSchema = financialPayloadSchemas[parsed.data.entity as keyof typeof financialPayloadSchemas];
@@ -491,7 +504,6 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     const generalFarmExpense = parsed.data.entity === "voucher" && parsed.data.record.generalFarmExpense === true;
     const requiresSeason = seasonRequiredEntities.has(parsed.data.entity) && !generalFarmExpense;
     if (localDevelopmentMode && parsed.data.entity === "voucher") {
-      const membership = request.appUser.memberships.find((item) => item.workspaceId === parsed.data.workspaceId);
       console.log("VOUCHER_SYNC_PERMISSION_DECISION", {
         userId: request.appUser.id,
         workspaceId: parsed.data.workspaceId,
@@ -515,7 +527,8 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         code: "farm_access_denied",
         requestWorkspaceId: parsed.data.workspaceId,
         requestFarmId: parsed.data.farmId ?? null,
-        farmAccessMode: request.appUser.memberships.find((membership) => membership.workspaceId === parsed.data.workspaceId)?.farmAccessMode ?? "assigned",
+        farmAccessResult: false,
+        ...permissionDebug,
       });
     }
     if (!selected?.activeFarmId || parsed.data.farmId !== selected.activeFarmId) {
@@ -524,6 +537,8 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         requestWorkspaceId: parsed.data.workspaceId,
         requestFarmId: parsed.data.farmId ?? null,
         activeFarmId: selected?.activeFarmId ?? null,
+        farmAccessResult: true,
+        ...permissionDebug,
       });
     }
     if (requiresSeason && (!selected.activeSeasonId || parsed.data.seasonId !== selected.activeSeasonId)) {
@@ -532,6 +547,8 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         requestWorkspaceId: parsed.data.workspaceId,
         requestSeasonId: parsed.data.seasonId ?? null,
         activeSeasonId: selected?.activeSeasonId ?? null,
+        farmAccessResult: true,
+        ...permissionDebug,
       });
     }
     if (generalFarmExpense && parsed.data.seasonId) {
@@ -591,6 +608,8 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         permissionKey: `${entityModule(parsed.data.entity)}.create`,
         entityType: parsed.data.entity,
         requestWorkspaceId: parsed.data.workspaceId,
+        farmAccessResult: true,
+        ...permissionDebug,
       });
     }
     if (existing && !hasModulePermission(request.appUser, parsed.data.workspaceId, entityModule(parsed.data.entity), "edit")) {
@@ -599,6 +618,8 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         permissionKey: `${entityModule(parsed.data.entity)}.edit`,
         entityType: parsed.data.entity,
         requestWorkspaceId: parsed.data.workspaceId,
+        farmAccessResult: true,
+        ...permissionDebug,
       });
     }
     if (existing && parsed.data.entity === "voucher" && !hasPermission(request.appUser, "MANAGE_RECORDS", parsed.data.workspaceId)) {
@@ -607,6 +628,8 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         permissionKey: "MANAGE_RECORDS",
         entityType: parsed.data.entity,
         requestWorkspaceId: parsed.data.workspaceId,
+        farmAccessResult: true,
+        ...permissionDebug,
       });
     }
     if (existing && parsed.data.entity === "partnerEntry" && !hasPermission(request.appUser, "MANAGE_RECORDS", parsed.data.workspaceId)) {

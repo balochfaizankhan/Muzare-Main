@@ -45,7 +45,8 @@ test("sync queue uploads only records belonging to the active workspace farm and
   assert.match(sync, /mutation\.farmId === context!\.farmId && mutation\.seasonId === context!\.seasonId/);
   assert.match(sync, /workspaceId: context\.workspaceId, farmId: mutation\.farmId/);
   assert.match(sync, /function isPermissionDeniedSyncError\(error: unknown\)/);
-  assert.match(sync, /status: permissionDenied[\s\S]*"permission_denied"/);
+  assert.match(sync, /status: "stale_context"/);
+  assert.match(sync, /"permission_denied"/);
   assert.match(sync, /await tableFor\(mutation\.entity\)\.update\(\(mutation\.payload as LocalRecord\)\.id, \{ pendingSync: false \}\)/);
   assert.match(sync, /assertCanQueueMutation\(entity, operation\)/);
 });
@@ -130,8 +131,10 @@ test("permission context defaults writes to read-only during session refresh and
   assert.match(permissions, /export function canQueueOperationalMutation\(/);
   assert.match(permissions, /if \(!user\?\.workspaceId\) return false;/);
   assert.match(sync, /notify\(i18n\.t\("common\.viewOnlyAccess"\)\);[\s\S]*throw new Error\(i18n\.t\("sync\.permissionDenied"\)\)/);
-  assert.match(sync, /status: permissionDenied[\s\S]*"permission_denied"/);
-  assert.match(sync, /if \(permissionDenied && mutation\.operation !== "delete"\) \{[\s\S]*pendingSync: false[\s\S]*window\.dispatchEvent\(new Event\("muzare-local-data-change"\)\)/);
+  assert.match(sync, /"permission_denied"/);
+  assert.match(sync, /"stale_context"/);
+  assert.match(sync, /resolveSyncQueueItem/);
+  assert.match(sync, /discardSyncQueueItem/);
 });
 
 test("viewer-facing entry screens gate attendance, expenses, advances, dispatch, sales, partner ledger, and accounts forms by module permissions", async () => {
