@@ -157,6 +157,10 @@ export function WorkspaceLayout() {
                   <span>{queueStatusLabel(item.status)}</span>
                 </div>
                 <p>{t("sync.queueItemId")}: {item.id}</p>
+                <p>Client record: {typeof (item.payload as { id?: unknown })?.id === "string" ? (item.payload as { id: string }).id : "-"}</p>
+                <p>Workspace: {item.workspaceId}</p>
+                <p>Farm: {item.farmId ?? "-"}</p>
+                <p>Season: {item.seasonId ?? "-"}</p>
                 <p>{t("sync.createdAt")}: {new Date(item.createdAt).toLocaleString()}</p>
                 <p>{t("sync.retryCount")}: {item.attempts}</p>
                 {item.lastAttemptedAt ? <p>{t("sync.lastAttemptedAt")}: {new Date(item.lastAttemptedAt).toLocaleString()}</p> : null}

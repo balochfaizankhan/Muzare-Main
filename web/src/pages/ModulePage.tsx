@@ -12,7 +12,7 @@ import { useSyncState } from "../hooks/useSyncState";
 import { calculateAccountBalance } from "../lib/accounting";
 import { defaultTransactionGroupExpansion, groupAccountTransactions, type AccountTransactionGroupKey } from "../lib/accountTransactionGroups";
 import { attendanceStatusKey, buildAttendanceStatusMap, previousLocalDateKey, todayLocalDateKey } from "../lib/attendanceStatus";
-import { confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteExpenseAttachment, deleteOrDeactivateLabour, extractExpenseReceipt, fetchExpenseAttachments, fetchExpenseCategories, fetchLabourDeletionPreview, openExpenseAttachment, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, uploadExpenseAttachment, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type ExpenseAttachment, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type ExpenseOcrSuggestion, type LabourDeletionPreview } from "../lib/api";
+import { confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteExpenseAttachment, deleteOrDeactivateLabour, extractExpenseReceipt, fetchExpenseAttachments, fetchExpenseCategories, fetchLabourDeletionPreview, openExpenseAttachment, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, uploadExpenseAttachment, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type ExpenseAttachment, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type ExpenseOcrSuggestion, type ExpenseSearchRecord, type LabourDeletionPreview } from "../lib/api";
 import { buildDispatchAvailability, dispatchCartons, dispatchItemKey, resolveSaleType, saleProduceLabel, soldQuantityByDispatchItem } from "../lib/dispatch-sales";
 import { canCreate, canDelete, canEdit, hasPermission } from "../lib/permissions";
 import { translateExpenseCategory, translateExpenseSubcategory, translatePaymentType, translateSaleType, translateSalesStatus } from "../lib/systemTranslations";
@@ -119,7 +119,7 @@ function Empty({ children }: { children: ReactNode }) {
   return <p className="empty-records">{children}</p>;
 }
 
-function FormCard({ title, children }: { title: string; children: ReactNode }) {
+function FormCard({ title, children }: { title: ReactNode; children: ReactNode }) {
   return (
     <section className="record-panel">
       <h2>{title}</h2>
@@ -179,7 +179,6 @@ function WorkforceModule({
   const [actionLabourer, setActionLabourer] = useState<Labourer | null>(null);
   const [markingLabourers, setMarkingLabourers] = useState<Set<string>>(() => new Set());
   const [showAdvanceEntry, setShowAdvanceEntry] = useState(false);
-  const [showImport, setShowImport] = useState(false);
   const [showAddLabour, setShowAddLabour] = useState(false);
   const [showAddGroup, setShowAddGroup] = useState(false);
   const [showAttendanceEntry, setShowAttendanceEntry] = useState(false);
@@ -375,10 +374,6 @@ function WorkforceModule({
             {canManageLabour && <button type="button" onClick={() => setShowAddLabour(true)}>{t("workforcePage.addLabour")}</button>}
             {canAddAdvance && <button type="button" onClick={() => setShowAdvanceEntry(true)}>{t("layout.advances")}</button>}
             {canManageLabour && <button type="button" onClick={() => setShowAddGroup(true)}>{t("workforcePage.groups")}</button>}
-            {user?.workspaceId && hasPermission(user, "IMPORT_ATTENDANCE", user.workspaceId) && <button className="workforce-toolbar__import" type="button" onClick={() => {
-              if (!navigator.onLine) window.dispatchEvent(new CustomEvent("muzare-toast", { detail: t("errors.csvImportOnlineOnly") }));
-              else setShowImport(true);
-            }}>{t("workforcePage.importCsv")}</button>}
           </div>
         </div>
         <div className="workforce-list-header">
@@ -623,13 +618,6 @@ function WorkforceModule({
             if (selectedLabourer?.id === actionLabourer.id) setSelectedLabourer(null);
             showToast(action === "deleted" ? t("workforcePage.labourDeleted") : t("workforcePage.labourDeactivated"));
           }}
-        />
-      )}
-      {showImport && token && user?.workspaceId && sync.farmId && sync.seasonId && (
-        <AttendanceImportPanel
-          token={token} workspaceId={user.workspaceId} farmId={sync.farmId} seasonId={sync.seasonId}
-          onClose={() => setShowImport(false)}
-          onImported={() => Promise.all([refreshLabourers(), refreshAttendance(), refreshAdvances(), refreshPayments(), refreshProductionEntries()]).then(() => undefined)}
         />
       )}
     </>
@@ -1150,7 +1138,7 @@ function ActionPanel({ title, onClose, children }: { title: string; onClose: () 
   </div>;
 }
 
-function AttendanceImportPanel({ token, workspaceId, farmId, seasonId, onClose, onImported }: {
+export function AttendanceImportPanel({ token, workspaceId, farmId, seasonId, onClose, onImported }: {
   token: string; workspaceId: string; farmId: string; seasonId: string; onClose: () => void; onImported: () => Promise<void>;
 }) {
   const [step, setStep] = useState(1);
@@ -1252,7 +1240,7 @@ function AttendanceImportPanel({ token, workspaceId, farmId, seasonId, onClose, 
   </div>;
 }
 
-function ExpenseImportPanel({ token, workspaceId, farmId, seasonId, onClose, onImported }: {
+export function ExpenseImportPanel({ token, workspaceId, farmId, seasonId, onClose, onImported }: {
   token: string; workspaceId: string; farmId: string; seasonId: string; onClose: () => void; onImported: () => Promise<void>;
 }) {
   const [file, setFile] = useState<File | null>(null);
@@ -1606,7 +1594,7 @@ function ExpensesModule() {
         subcategoryId: item.subcategoryId ?? "",
         subcategorySearch: item.subcategoryName ?? item.subcategory ?? "",
         amount: String(item.amount ?? ""),
-        description: item.description ?? "",
+        description: item.description ?? item.remarks ?? "",
         remarks: item.remarks ?? "",
         oldExpenseItemId: item.oldExpenseItemId,
       }));
@@ -1636,7 +1624,7 @@ function ExpensesModule() {
         categoryId: item.categoryId,
         subcategory: item.subcategoryName ?? item.subcategory ?? "",
         subcategoryId: item.subcategoryId ?? "",
-        description: item.description,
+        description: item.description || item.remarks || "",
         remarks: item.remarks,
       }));
     }
@@ -1662,7 +1650,6 @@ function ExpensesModule() {
   const [notes, setNotes] = useState("");
   const [selectedVoucher, setSelectedVoucher] = useState<Voucher | null>(null);
   const [editingVoucher, setEditingVoucher] = useState<Voucher | null>(null);
-  const [showExpenseImport, setShowExpenseImport] = useState(false);
   const [pendingReceipts, setPendingReceipts] = useState<PendingReceipt[]>([]);
   const [, setReceiptCropQueue] = useState<File[]>([]);
   const [receiptCropTarget, setReceiptCropTarget] = useState<File | null>(null);
@@ -1677,7 +1664,14 @@ function ExpensesModule() {
   const [voucherCategory, setVoucherCategory] = useState("");
   const [voucherSubcategory, setVoucherSubcategory] = useState("");
   const [voucherAccountId, setVoucherAccountId] = useState("");
+  const voucherFormRef = useRef<HTMLDivElement | null>(null);
+  const voucherDateRef = useRef<HTMLInputElement | null>(null);
+  const voucherItemCategoryRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const pendingEditFocusRef = useRef(false);
   const showToast = (message: string) => window.dispatchEvent(new CustomEvent("muzare-toast", { detail: message }));
+  const isSyntheticLocalAccount = useCallback((value?: string) => Boolean(value?.includes(":local-")), []);
+  const selectableExpenseAccounts = useMemo(() => accounts.filter((account) => !isSyntheticLocalAccount(account.id)), [accounts, isSyntheticLocalAccount]);
+  const resolvedExpenseAccountId = accountId || selectableExpenseAccounts[0]?.id || "";
   const resetForm = () => {
     setDate(today()); setVoucherItems([newVoucherItemDraft()]); setAccountId(""); setNotes("");
     pendingReceipts.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl));
@@ -1690,7 +1684,19 @@ function ExpensesModule() {
     setNotes(voucher.notes ?? "");
     setPendingReceipts([]);
     setReceiptError("");
+    pendingEditFocusRef.current = true;
   };
+  useEffect(() => {
+    if (!editingVoucher || !voucherItems.length || !pendingEditFocusRef.current) return;
+    const handle = window.setTimeout(() => {
+      voucherFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const firstInput = voucherItemCategoryRefs.current[voucherItems[0]!.id] ?? null;
+      firstInput?.focus();
+      if (!firstInput) voucherDateRef.current?.focus();
+      pendingEditFocusRef.current = false;
+    }, 80);
+    return () => window.clearTimeout(handle);
+  }, [editingVoucher, voucherItems]);
   const nextLocalVoucherNumber = () => {
     const highest = vouchers.reduce((max, item) => {
       const match = /^V-(\d+)$/.exec(item.voucherNumber);
@@ -1774,11 +1780,23 @@ function ExpensesModule() {
   const canEditVouchers = Boolean(!sessionRefreshing && user && workspaceId && canEdit(user, "expenses", workspaceId));
   const canDeleteVouchers = Boolean(!sessionRefreshing && user && workspaceId && canDelete(user, "expenses", workspaceId));
   const canManage = Boolean(!sessionRefreshing && user && workspaceId && hasPermission(user, "MANAGE_EXPENSE_CATEGORIES", workspaceId));
+  const addVoucherItem = useCallback(() => {
+    const nextItem = newVoucherItemDraft();
+    setVoucherItems((current) => [...current, nextItem]);
+    window.setTimeout(() => {
+      voucherItemCategoryRefs.current[nextItem.id]?.focus();
+      voucherItemCategoryRefs.current[nextItem.id]?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 60);
+  }, []);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!(editingVoucher ? canEditVouchers : canCreateVouchers)) {
       showToast(t("common.viewOnlyAccess"));
+      return;
+    }
+    if (!resolvedExpenseAccountId || isSyntheticLocalAccount(resolvedExpenseAccountId)) {
+      showToast(t("expensesPage.selectRealPaymentAccount"));
       return;
     }
     const resolvedItems: VoucherItem[] = [];
@@ -1810,13 +1828,13 @@ function ExpensesModule() {
       subcategory: primaryItem.subcategory ?? "",
       description: resolvedItems.length === 1 ? primaryItem.description : `${primaryItem.description} +${resolvedItems.length - 1} ${t("expensesPage.moreItems")}`,
       amount: totalAmount,
-      accountId: accountId || accounts[0]?.id || "",
+      accountId: resolvedExpenseAccountId,
       notes: notes.trim() || undefined,
       items: resolvedItems,
     };
     await persistOperationalRecord("voucher", record);
     await uploadPendingReceipts(record.id);
-    showToast(editingVoucher ? "Expense voucher updated successfully." : "Expense voucher saved successfully.");
+    showToast(editingVoucher ? t("expensesPage.voucherUpdated") : t("expensesPage.voucherSaved"));
     setEditingVoucher(null);
     resetForm();
     await refresh();
@@ -1842,7 +1860,7 @@ function ExpensesModule() {
     .filter((line) => !voucherCategory || line.category === voucherCategory)
     .map((line) => line.subcategory)
     .filter(Boolean))].sort(), [voucherCategory, voucherLinesFor, vouchers]);
-  const matchesVoucher = useCallback((item: Voucher) => {
+  const matchesVoucher = useCallback((item: Voucher | ExpenseSearchRecord) => {
     const accountName = accountById.get(item.accountId)
       ?? ("accountName" in item && typeof item.accountName === "string" ? item.accountName : "");
     const normalizedSearch = voucherSearch.trim().toLowerCase();
@@ -1862,9 +1880,17 @@ function ExpensesModule() {
   const filteredVouchers = useMemo(() => {
     const serverRecords = voucherSearchQuery.data?.records ?? [];
     const merged = navigator.onLine && voucherSearchQuery.data
-      ? [...serverRecords, ...vouchers.filter((item) => item.pendingSync && !serverRecords.some((server) => server.id === item.id))]
+      ? (() => {
+          const mergedMap = new Map<string, Voucher | ExpenseSearchRecord>(serverRecords.map((record) => [record.id, record]));
+          vouchers.forEach((item) => {
+            const existing = mergedMap.get(item.id);
+            if (!item.pendingSync) return;
+            if (!existing || item.updatedAt > existing.updatedAt) mergedMap.set(item.id, item);
+          });
+          return [...mergedMap.values()];
+        })()
       : vouchers;
-    return merged.filter((item) => matchesVoucher(item as Voucher)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) as Voucher[];
+    return (merged as Voucher[]).filter((item) => matchesVoucher(item)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }, [matchesVoucher, voucherSearchQuery.data, vouchers]);
   const voucherLineItems = useMemo(() => filteredVouchers.flatMap((item) => voucherLinesFor(item)), [filteredVouchers, voucherLinesFor]);
   const total = filteredVouchers.reduce((sum, item) => sum + item.amount, 0);
@@ -2010,18 +2036,31 @@ function ExpensesModule() {
 
   return (
     <>
-      {(canCreateVouchers || (editingVoucher && canEditVouchers)) && <FormCard title={editingVoucher ? t("expensesPage.editVoucher", { number: editingVoucher.voucherNumber }) : t("expensesPage.newVoucher")}>
+      {(canCreateVouchers || (editingVoucher && canEditVouchers)) && <FormCard title={<span className="expense-voucher-form__card-title"><span>{editingVoucher ? t("expensesPage.editVoucher", { number: editingVoucher.voucherNumber }) : t("expensesPage.newVoucher")}</span><span className="expense-voucher-form__number">{editingVoucher?.voucherNumber ?? nextLocalVoucherNumber()}</span></span>}>
         {receiptCropTarget && <ReceiptCropReviewModal file={receiptCropTarget} onCancel={() => advanceReceiptCropQueue()} onAccept={advanceReceiptCropQueue} />}
-        <form className="module-form inline-form" onSubmit={(event) => void submit(event)}>
-          <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-          <select value={accountId || accounts[0]?.id || ""} onChange={(event) => setAccountId(event.target.value)}>
-            {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-          </select>
-          <input value={notes} placeholder={t("expensesPage.notesOptional")} onChange={(event) => setNotes(event.target.value)} />
+        <form className="module-form inline-form expense-voucher-form" onSubmit={(event) => void submit(event)}>
+          <div ref={voucherFormRef} />
+          <div className="expense-voucher-form__top-row">
+            <label>
+              <span>{t("expensesPage.date")}</span>
+              <input ref={voucherDateRef} type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+            </label>
+            <label>
+              <span>{t("expensesPage.paymentAccount")}</span>
+              <select value={resolvedExpenseAccountId} onChange={(event) => setAccountId(event.target.value)}>
+                <option value="" disabled>{t("expensesPage.selectPaymentAccount")}</option>
+                {selectableExpenseAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+              </select>
+            </label>
+          </div>
+          {!selectableExpenseAccounts.length && <p className="expense-voucher-form__warning">{t("expensesPage.noRealPaymentAccounts")}</p>}
+          <label className="expense-voucher-form__notes">
+            <span>{t("expensesPage.notesOptional")}</span>
+            <input value={notes} placeholder={t("expensesPage.notesOptional")} onChange={(event) => setNotes(event.target.value)} />
+          </label>
           <div className="expense-voucher-items">
             <div className="expense-voucher-items__header">
               <strong>{t("expensesPage.voucherItems")}</strong>
-              <button className="expense-voucher-items__add" type="button" onClick={() => setVoucherItems((current) => [...current, newVoucherItemDraft()])}>{t("expensesPage.addAnotherItem")}</button>
             </div>
             <div className="expense-voucher-items__list">
               {voucherItems.map((item, index) => {
@@ -2033,7 +2072,7 @@ function ExpensesModule() {
                       {voucherItems.length > 1 && <button className="expense-voucher-item__remove" type="button" onClick={() => setVoucherItems((current) => current.filter((entry) => entry.id !== item.id))}>{t("expensesPage.removeItem")}</button>}
                     </div>
                     <div className="expense-voucher-item__grid">
-                      <label><span>{t("expensesPage.categoryRequired")}</span><SearchInput required list={`expense-category-options-${item.id}`} placeholder={t("expensesPage.selectCategory")} value={item.categorySearch} onChange={(value) => {
+                      <label><span>{t("expensesPage.categoryRequired")}</span><SearchInput ref={(node) => { voucherItemCategoryRefs.current[item.id] = node; }} required list={`expense-category-options-${item.id}`} placeholder={t("expensesPage.selectCategory")} value={item.categorySearch} onChange={(value) => {
                         const next = categories.data?.categories.find((entry) => entry.name === value);
                         updateVoucherItem(item.id, (current) => ({ ...current, categorySearch: value, categoryId: next?.id ?? "", subcategoryId: "", subcategorySearch: "" }));
                       }} onClear={() => updateVoucherItem(item.id, (current) => ({ ...current, categoryId: "", categorySearch: "", subcategoryId: "", subcategorySearch: "" }))} /><datalist id={`expense-category-options-${item.id}`}>{categories.data?.categories.map((entry) => <option key={entry.id} value={entry.name} />)}</datalist></label>
@@ -2043,12 +2082,12 @@ function ExpensesModule() {
                       }} onClear={() => updateVoucherItem(item.id, (current) => ({ ...current, subcategoryId: "", subcategorySearch: "" }))} /><datalist id={`expense-subcategory-options-${item.id}`}>{selectedCategory?.subcategories.map((entry) => <option key={entry.id} value={entry.name} />)}</datalist></label>
                       <label><span>{t("expensesPage.amount")}</span><input required min="0.01" step="0.01" type="number" value={item.amount} placeholder={t("expensesPage.amount")} onChange={(event) => updateVoucherItem(item.id, (current) => ({ ...current, amount: event.target.value }))} /></label>
                       <label className="expense-voucher-item__description"><span>{t("expensesPage.description")}</span><input required value={item.description} placeholder={t("expensesPage.description")} onChange={(event) => updateVoucherItem(item.id, (current) => ({ ...current, description: event.target.value }))} /></label>
-                      <label className="expense-voucher-item__remarks"><span>{t("expensesPage.itemRemarksOptional")}</span><input value={item.remarks} placeholder={t("expensesPage.itemRemarksOptional")} onChange={(event) => updateVoucherItem(item.id, (current) => ({ ...current, remarks: event.target.value }))} /></label>
                     </div>
                   </article>
                 );
               })}
             </div>
+            <button className="expense-voucher-items__add expense-voucher-items__add--bottom" type="button" onClick={addVoucherItem}>{t("expensesPage.addAnotherItem")}</button>
             <div className="expense-voucher-items__total">
               <span>{t("expensesPage.grandTotal")}</span>
               <strong>{money(voucherGrandTotal)}</strong>
@@ -2056,11 +2095,10 @@ function ExpensesModule() {
           </div>
           <ReceiptAttachmentPicker pending={pendingReceipts} onFiles={addReceiptFiles} onRemove={removePendingReceipt} />
           {receiptError && <p className="worker-action-error">{receiptError}</p>}
-          <button type="submit">{editingVoucher ? t("expensesPage.updateVoucher") : t("expensesPage.saveVoucher")}</button>
-          {editingVoucher && <button type="button" onClick={() => { setEditingVoucher(null); resetForm(); }}>{t("expensesPage.cancelEdit")}</button>}
+          <button type="submit" disabled={!selectableExpenseAccounts.length}>{editingVoucher ? t("expensesPage.updateVoucher") : t("expensesPage.saveVoucher")}</button>
+          {editingVoucher && <button type="button" onClick={() => { pendingEditFocusRef.current = false; setEditingVoucher(null); resetForm(); }}>{t("expensesPage.cancelEdit")}</button>}
         </form>
       </FormCard>}
-      {canEditVouchers && <section className="record-panel expense-import-card"><div><h2>{t("expensesPage.historicalImport")}</h2><p>{t("expensesPage.historicalImportDescription")}</p></div><button type="button" onClick={() => navigator.onLine ? setShowExpenseImport(true) : showToast(t("expensesPage.importRequiresInternet"))}>{t("expensesPage.importExpensesCsv")}</button></section>}
       <section className="record-panel expense-search-panel">
         <h2>{t("expensesPage.searchVouchers")}</h2>
         <div className="expense-search-filters">
@@ -2143,7 +2181,6 @@ function ExpensesModule() {
           <footer className="worker-dialog__footer">{canEditVouchers && <button className="worker-dialog__link" type="button" onClick={() => openEdit(selectedVoucher)}>{t("expensesPage.editVoucherAction")}</button>}{canDeleteVouchers && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => void removeVoucher(selectedVoucher)}>{t("expensesPage.deleteVoucher")}</button>}<button className="worker-dialog__close" type="button" onClick={() => setSelectedVoucher(null)}>{t("expensesPage.close")}</button></footer>
         </section>
       </div>}
-      {showExpenseImport && token && farmId && seasonId && <ExpenseImportPanel token={token} workspaceId={workspaceId} farmId={farmId} seasonId={seasonId} onClose={() => setShowExpenseImport(false)} onImported={async () => { await refresh(); await categories.refetch(); }} />}
     </>
   );
 }

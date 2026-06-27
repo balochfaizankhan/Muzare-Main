@@ -24,6 +24,7 @@ let timer: number | null = null;
 let syncing = false;
 let state: SyncState = { status: navigator.onLine ? "online" : "offline", pendingCount: 0, lastSyncTime: null };
 const maxAutomaticAttempts = 3;
+const localDebugEnabled = import.meta.env.DEV;
 
 const tables = {
   labourer: offlineDb.labourers, labourGroup: offlineDb.labourGroups, attendance: offlineDb.attendance, account: offlineDb.accounts,
@@ -48,6 +49,11 @@ function emitStartup(startupStage: SyncStartupStage, message: string, next: Part
 
 function notify(message: string) {
   window.dispatchEvent(new CustomEvent("muzare-toast", { detail: message }));
+}
+
+function debugVoucherSync(stage: string, detail: Record<string, unknown>) {
+  if (!localDebugEnabled) return;
+  console.log(`[voucher-sync] ${stage}`, detail);
 }
 
 function tableFor(entity: OperationalEntity) {
@@ -129,6 +135,16 @@ export async function queueOfflineRecord(entity: OperationalEntity, record: Loca
     createdAt: queuedAt, updatedAt: queuedAt,
   };
   await offlineDb.pendingMutations.put(mutation);
+  if (entity === "voucher") {
+    debugVoucherSync("queued", {
+      operation,
+      mutationId: mutation.id,
+      clientRecordId: record.id,
+      workspaceId: context.workspaceId,
+      farmId: context.farmId,
+      seasonId: context.seasonId,
+    });
+  }
   await refreshSyncState({ status: navigator.onLine ? "pending" : "offline" });
   notify(navigator.onLine ? i18n.t("sync.savedLocallySyncing") : i18n.t("sync.savedLocallyOffline"));
   window.dispatchEvent(new Event("muzare-local-data-change"));
@@ -192,6 +208,17 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
     if (!options.force && !((mutation.retryable ?? true))) continue;
     if (!options.force && (mutation.attempts >= maxAutomaticAttempts || (mutation.nextAttemptAt && mutation.nextAttemptAt > new Date().toISOString()))) continue;
     try {
+      if (mutation.entity === "voucher") {
+        debugVoucherSync("sync-start", {
+          mutationId: mutation.id,
+          clientRecordId: (mutation.payload as LocalRecord).id,
+          workspaceId: mutation.workspaceId,
+          farmId: mutation.farmId,
+          seasonId: mutation.seasonId,
+          operation: mutation.operation,
+          attempts: mutation.attempts,
+        });
+      }
       await offlineDb.pendingMutations.update(mutation.id, {
         status: "syncing",
         lastAttemptedAt: new Date().toISOString(),
@@ -207,6 +234,12 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
         if (latest?.updatedAt !== mutation.updatedAt) continue;
         await tableFor(mutation.entity).delete((mutation.payload as LocalRecord).id);
         await offlineDb.pendingMutations.delete(mutation.id);
+        if (mutation.entity === "voucher") {
+          debugVoucherSync("delete-synced", {
+            mutationId: mutation.id,
+            clientRecordId: (mutation.payload as LocalRecord).id,
+          });
+        }
         window.dispatchEvent(new Event("muzare-local-data-change"));
         synced += 1;
         continue;
@@ -224,6 +257,13 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
       }
       await cacheRecord(mutation.entity, response.record, false, mutation.farmId, mutation.seasonId);
       await offlineDb.pendingMutations.delete(mutation.id);
+      if (mutation.entity === "voucher") {
+        debugVoucherSync("sync-success", {
+          mutationId: mutation.id,
+          clientRecordId: response.record.id,
+          voucherNumber: (response.record as Record<string, unknown>).voucherNumber,
+        });
+      }
       window.dispatchEvent(new Event("muzare-local-data-change"));
       synced += 1;
     } catch (error) {
@@ -257,14 +297,24 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
         nextAttemptAt,
         lastAttemptedAt: new Date().toISOString(),
       });
-      if (permissionDenied && mutation.operation !== "delete") {
-        await tableFor(mutation.entity).update((mutation.payload as LocalRecord).id, { pendingSync: false });
-        window.dispatchEvent(new Event("muzare-local-data-change"));
+      if (mutation.entity === "voucher") {
+        debugVoucherSync("sync-failed", {
+          mutationId: mutation.id,
+          clientRecordId: (mutation.payload as LocalRecord).id,
+          retryable,
+          permissionDenied,
+          attempts,
+          lastError,
+          workspaceId: mutation.workspaceId,
+          farmId: mutation.farmId,
+          seasonId: mutation.seasonId,
+        });
       }
+      window.dispatchEvent(new Event("muzare-local-data-change"));
       if (permissionDenied) notify(i18n.t("sync.permissionDenied"));
+      else if (!(retryable && attempts < maxAutomaticAttempts)) notify(lastError);
       if (!(retryable && attempts < maxAutomaticAttempts)) hadPermanentFailures = true;
       if (retryable && attempts < maxAutomaticAttempts) continue;
-      if (mutation.operation !== "delete") await tableFor(mutation.entity).update((mutation.payload as LocalRecord).id, { pendingSync: false });
     }
   }
   syncing = false;

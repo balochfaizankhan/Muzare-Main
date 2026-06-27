@@ -3251,6 +3251,38 @@ button {
   grid-column: 1 / -1;
 }
 
+.expense-voucher-form__card-title {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.expense-voucher-form__number {
+  color: var(--brand-primary);
+  font-size: 0.92rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.expense-voucher-form__top-row {
+  display: grid;
+  gap: 10px;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.expense-voucher-form__notes {
+  grid-column: 1 / -1;
+}
+
+.expense-voucher-form__warning {
+  color: var(--danger);
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
 .expense-voucher-items__header,
 .expense-voucher-items__total,
 .expense-voucher-item__top {
@@ -3280,8 +3312,7 @@ button {
   margin-top: 10px;
 }
 
-.expense-voucher-item__description,
-.expense-voucher-item__remarks {
+.expense-voucher-item__description {
   grid-column: 1 / -1;
 }
 
@@ -3292,6 +3323,11 @@ button {
   color: var(--brand-primary) !important;
   height: 38px !important;
   padding-inline: 12px !important;
+}
+
+.expense-voucher-items__add--bottom {
+  justify-self: start;
+  margin-top: 2px;
 }
 
 .expense-voucher-detail-items {
@@ -6361,6 +6397,7 @@ button {
   color: var(--text-secondary);
   font-size: 0.8rem;
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .sync-queue-item__error {
@@ -6954,6 +6991,21 @@ button {
 
   .expense-voucher-item__grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .expense-voucher-form__card-title,
+  .expense-voucher-items__header,
+  .expense-voucher-item__top {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .expense-voucher-form__top-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .expense-voucher-items__add--bottom {
+    width: 100%;
   }
 
   .admin-metric-grid,
