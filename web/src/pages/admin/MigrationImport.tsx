@@ -4,7 +4,7 @@ import { Database, FileJson, ShieldAlert, UploadCloud } from "lucide-react";
 import { useAuth } from "../../auth/AuthProvider";
 import { ImportVisibilityAuditPanel } from "../../components/ImportVisibilityAuditPanel";
 import { Link, useParams } from "react-router-dom";
-import { cancelAndCleanMigrationImport, downloadMigrationImportFailures, fetchActiveMigrationImportJob, fetchAdminWorkspaces, fetchMigrationImportBatches, fetchMigrationImportCleanupPreview, fetchMigrationImportHistory, fetchMigrationImportJobDetail, fetchMigrationImportJobStatus, importMigrationData, markMigrationImportBatchClosed, repairDeletedFarmSeasonState, repairDuplicateImportedAccounts, repairMigrationImportVisibility, retryMigrationAttendance, rollbackMigrationImportBatch, validateMigrationImport, type MigrationImportBatchRecord, type MigrationImportHistoryRecord, type MigrationImportIssue, type MigrationImportJobDetail, type MigrationImportJobStatus, type MigrationImportLogEntry, type MigrationImportSummary } from "../../lib/api";
+import { cancelAndCleanMigrationImport, downloadMigrationImportFailures, fetchActiveMigrationImportJob, fetchAdminWorkspaces, fetchMigrationImportBatches, fetchMigrationImportCleanupPreview, fetchMigrationImportHistory, fetchMigrationImportJobDetail, fetchMigrationImportJobStatus, fetchMigrationImportProgress, importMigrationData, markMigrationImportBatchClosed, repairDeletedFarmSeasonState, repairDuplicateImportedAccounts, repairMigrationImportVisibility, retryMigrationAttendance, rollbackMigrationImportBatch, validateMigrationImport, type MigrationImportBatchRecord, type MigrationImportHistoryRecord, type MigrationImportIssue, type MigrationImportJobDetail, type MigrationImportJobStatus, type MigrationImportLogEntry, type MigrationImportProgress, type MigrationImportSummary } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 
 function SummaryGrid({ summary }: { summary: MigrationImportSummary }) {
@@ -354,6 +354,39 @@ function CleanupPanel({
   );
 }
 
+function JobProgressPanel({ progress }: { progress: MigrationImportProgress }) {
+  const staleSeconds = Math.max(0, Math.round((Date.now() - new Date(progress.updatedAt).getTime()) / 1000));
+  const isWorkingButQuiet = progress.status === "running" && staleSeconds > 30;
+  const appearsStuck = progress.status === "running" && staleSeconds > 300;
+  return (
+    <section className="migration-issues">
+      <h3>Live Progress</h3>
+      <p className={progress.status === "failed" ? "worker-action-error" : progress.status === "completed" || progress.status === "cancelled" ? "positive" : undefined}>
+        {progress.status === "completed"
+          ? "Operation completed."
+          : progress.status === "failed"
+            ? "Operation failed."
+            : progress.status === "cancelled"
+              ? "Operation cancelled."
+              : "Operation running..."}
+      </p>
+      <div aria-hidden="true" style={{ height: 12, borderRadius: 999, background: "rgba(15, 23, 42, 0.08)", overflow: "hidden", margin: "0.75rem 0" }}>
+        <div style={{ width: `${progress.percentage}%`, height: "100%", background: "linear-gradient(90deg, #1f7a2e, #4f9a49)" }} />
+      </div>
+      <p><b>{progress.percentage}%</b> · {progress.completedSteps}/{progress.totalSteps} steps</p>
+      <p><b>Current stage</b> {progress.stage}</p>
+      <p><b>Current task</b> {progress.step}</p>
+      <p><b>Message</b> {progress.message}</p>
+      <p><b>Processed</b> {progress.processedCount} / {progress.totalCount}</p>
+      <p><b>Imported</b> {progress.importedCount} · <b>Updated</b> {progress.updatedCount} · <b>Skipped</b> {progress.skippedCount} · <b>Failed</b> {progress.failedCount}</p>
+      <p><b>Elapsed</b> {progress.elapsedSeconds}s · <b>Estimated remaining</b> {progress.estimatedRemainingSeconds ?? "-"}s</p>
+      <p><b>Last update</b> {new Date(progress.updatedAt).toLocaleString()}</p>
+      {isWorkingButQuiet ? <p>Still working...</p> : null}
+      {appearsStuck ? <p className="worker-action-error">This operation appears stuck.</p> : null}
+    </section>
+  );
+}
+
 export function MigrationImport() {
   const { token } = useAuth();
   const { jobId: routeJobId } = useParams();
@@ -388,9 +421,10 @@ export function MigrationImport() {
     queryKey: ["admin-migration-import-batches", workspaceId],
     queryFn: () => fetchMigrationImportBatches(token!, workspaceId),
     enabled: Boolean(token && workspaceId),
-    refetchInterval: 4000,
+    refetchInterval: 1000,
   });
   const latestBatch = batches.data?.records?.[0] ?? null;
+  const [operationIntent, setOperationIntent] = useState<"import" | "cleanup" | null>(null);
   const activeImportJob = useQuery({
     queryKey: ["admin-migration-import-active-job", workspaceId],
     queryFn: () => fetchActiveMigrationImportJob(token!, workspaceId),
@@ -471,9 +505,21 @@ export function MigrationImport() {
     onSuccess: () => {
       setCleanupBackupConfirmed(false);
       setCleanupConfirmationText("");
+      setOperationIntent(null);
       refreshAfterImport();
       void cleanupPreview.refetch();
     },
+  });
+  const progressBatchId = operationIntent === "cleanup"
+    ? latestBatch?.id ?? ""
+    : latestBatch?.status === "running"
+      ? latestBatch.id
+      : "";
+  const operationProgress = useQuery({
+    queryKey: ["admin-migration-import-progress", progressBatchId],
+    queryFn: () => fetchMigrationImportProgress(token!, progressBatchId),
+    enabled: Boolean(token && progressBatchId && (runImport.isPending || cleanFailedImport.isPending || latestBatch?.status === "running")),
+    refetchInterval: 1000,
   });
 
   useEffect(() => {
@@ -494,6 +540,17 @@ export function MigrationImport() {
     if (!currentJobStorageKey || !status) return;
     if (status === "completed" || status === "failed") window.localStorage.removeItem(currentJobStorageKey);
   }, [attendanceJob.data?.job.status, currentJobStorageKey]);
+
+  useEffect(() => {
+    const status = operationProgress.data?.status;
+    if (status === "completed" || status === "failed" || status === "cancelled") {
+      setOperationIntent(null);
+    }
+  }, [operationProgress.data?.status]);
+
+  useEffect(() => {
+    if (runImport.isError || cleanFailedImport.isError) setOperationIntent(null);
+  }, [runImport.isError, cleanFailedImport.isError]);
 
   const readFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -522,8 +579,9 @@ export function MigrationImport() {
   const validation = runImport.data ?? validate.data;
   const currentImportJob = attendanceJob.data?.job ?? activeImportJob.data?.job ?? runImport.data?.result?.attendanceJob ?? null;
   const isImportRunning = currentImportJob?.status === "queued" || currentImportJob?.status === "running";
-  const canValidate = Boolean(token && workspaceId && payload && !validate.isPending);
-  const canImport = Boolean(token && workspaceId && payload && validate.data?.canImport && !runImport.isPending && !isImportRunning);
+  const blockingOperation = Boolean(runImport.isPending || cleanFailedImport.isPending || isImportRunning || operationProgress.data?.status === "running");
+  const canValidate = Boolean(token && workspaceId && payload && !validate.isPending && !blockingOperation);
+  const canImport = Boolean(token && workspaceId && payload && validate.data?.canImport && !runImport.isPending && !blockingOperation);
 
   return (
     <main className="admin-page migration-page">
@@ -571,14 +629,14 @@ export function MigrationImport() {
         </label>
         <div className="record-list__actions">
           <button type="button" disabled={!canValidate} onClick={() => validate.mutate()}><UploadCloud size={16} />Validate Import</button>
-          {validate.data?.canImport ? <button type="button" disabled={!canImport} onClick={() => runImport.mutate()}><Database size={16} />Import Data</button> : null}
-          <button type="button" className="secondary-button" disabled={!token || !workspaceId || repairVisibility.isPending} onClick={() => repairVisibility.mutate()}>
+          {validate.data?.canImport ? <button type="button" disabled={!canImport} onClick={() => { setOperationIntent("import"); runImport.mutate(); }}><Database size={16} />Import Data</button> : null}
+          <button type="button" className="secondary-button" disabled={!token || !workspaceId || repairVisibility.isPending || blockingOperation} onClick={() => repairVisibility.mutate()}>
             Repair previous import visibility
           </button>
-          <button type="button" className="secondary-button" disabled={!token || !workspaceId || repairDeletedState.isPending} onClick={() => repairDeletedState.mutate()}>
+          <button type="button" className="secondary-button" disabled={!token || !workspaceId || repairDeletedState.isPending || blockingOperation} onClick={() => repairDeletedState.mutate()}>
             Repair Deleted Farm/Season State
           </button>
-          <button type="button" className="secondary-button" disabled={!token || !workspaceId || repairDuplicateAccounts.isPending} onClick={() => repairDuplicateAccounts.mutate()}>
+          <button type="button" className="secondary-button" disabled={!token || !workspaceId || repairDuplicateAccounts.isPending || blockingOperation} onClick={() => repairDuplicateAccounts.mutate()}>
             Repair Duplicate Imported Accounts
           </button>
         </div>
@@ -607,7 +665,7 @@ export function MigrationImport() {
 
       {jobDetail.data ? <JobErrorPanel detail={jobDetail.data} onDownloadFailures={() => void downloadMigrationImportFailures(token!, jobDetail.data!.jobId)} /> : null}
       {jobDetail.error ? <p className="worker-action-error">{jobDetail.error instanceof Error ? jobDetail.error.message : "Could not load import job details."}</p> : null}
-      {currentImportJob ? <CurrentImportPanel job={currentImportJob} /> : null}
+      {operationProgress.data ? <JobProgressPanel progress={operationProgress.data} /> : currentImportJob ? <CurrentImportPanel job={currentImportJob} /> : null}
       {latestBatch ? (
         <>
           <LatestBatchPanel
@@ -630,7 +688,7 @@ export function MigrationImport() {
             setConfirmationText={setCleanupConfirmationText}
             includeEditedImportedRecords={cleanupIncludeEdited}
             setIncludeEditedImportedRecords={setCleanupIncludeEdited}
-            onCleanup={() => cleanFailedImport.mutate(latestBatch.id)}
+            onCleanup={() => { setOperationIntent("cleanup"); cleanFailedImport.mutate(latestBatch.id); }}
             cleaning={cleanFailedImport.isPending}
           />
         </>

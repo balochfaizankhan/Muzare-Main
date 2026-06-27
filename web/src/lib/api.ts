@@ -489,6 +489,26 @@ export type MigrationImportCleanupResult = {
   activeSeasonId?: string | null;
   contextMessage?: string | null;
 };
+export type MigrationImportProgress = {
+  batchId: string;
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  stage: string;
+  step: string;
+  percentage: number;
+  message: string;
+  startedAt: string;
+  updatedAt: string;
+  elapsedSeconds: number;
+  estimatedRemainingSeconds: number | null;
+  completedSteps: number;
+  totalSteps: number;
+  processedCount: number;
+  totalCount: number;
+  importedCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  failedCount: number;
+};
 export type ImportVisibilityAudit = {
   workspaceId: string;
   latestImport: {
@@ -883,6 +903,8 @@ export const fetchActiveMigrationImportJob = (token: string, workspaceId: string
   apiRequest<{ job: MigrationImportJobStatus | null }>(`/v1/admin/migration-import/imports/active?workspaceId=${encodeURIComponent(workspaceId)}`, {}, token, { timeoutMs: 30_000, debugLabel: "migration-import-active-job" });
 export const fetchMigrationImportBatches = (token: string, workspaceId: string) =>
   apiRequest<{ records: MigrationImportBatchRecord[] }>(`/v1/admin/migration-import/batches?workspaceId=${encodeURIComponent(workspaceId)}`, {}, token, { timeoutMs: 30_000, debugLabel: "migration-import-batches" });
+export const fetchMigrationImportProgress = (token: string, batchId: string) =>
+  apiRequest<MigrationImportProgress>(`/v1/admin/migration-import/progress?batchId=${encodeURIComponent(batchId)}`, {}, token, { timeoutMs: 15_000, debugLabel: "migration-import-progress" });
 export const retryMigrationAttendance = (token: string, input: { workspaceId: string; batchId: string }) =>
   apiRequest<{ job: MigrationImportJobStatus }>("/v1/admin/migration-import/retry-attendance", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 30_000, debugLabel: "migration-import-retry-attendance" });
 export const rollbackMigrationImportBatch = (token: string, input: { workspaceId: string; batchId: string }) =>

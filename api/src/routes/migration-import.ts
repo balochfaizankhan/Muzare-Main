@@ -92,6 +92,7 @@ const cancelAndCleanActionSchema = z.object({
   includeEditedImportedRecords: z.boolean().default(false),
 });
 const batchListQuerySchema = z.object({ workspaceId: z.string().uuid() });
+const progressQuerySchema = z.object({ batchId: z.string().uuid() });
 
 function normalizeImportedName(value: unknown) {
   return String(value ?? "")
@@ -358,6 +359,27 @@ type VisibilityAuditResponse = {
     activeSeasonName: string | null;
     contextWarning: string | null;
   };
+};
+
+type MigrationBatchProgress = {
+  operation: "import" | "cleanup";
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  stage: string;
+  step: string;
+  completedSteps: number;
+  totalSteps: number;
+  percentage: number;
+  startedAt: string;
+  updatedAt: string;
+  estimatedRemainingSeconds: number | null;
+  currentMessage: string;
+  processedCount?: number;
+  totalCount?: number;
+  importedCount?: number;
+  updatedCount?: number;
+  skippedCount?: number;
+  failedCount?: number;
+  elapsedSeconds?: number;
 };
 
 const attendanceImportJobs = new Map<string, AttendanceImportJobStatus>();
@@ -1297,6 +1319,63 @@ function markRunningImportCancelled(batchId: string, message: string) {
   attendanceImportJobs.set(batchId, job);
 }
 
+function buildProgressState(params: {
+  operation: "import" | "cleanup";
+  status?: MigrationBatchProgress["status"];
+  stage: string;
+  step?: string;
+  completedSteps?: number;
+  totalSteps: number;
+  startedAt?: string;
+  updatedAt?: string;
+  currentMessage?: string;
+  processedCount?: number;
+  totalCount?: number;
+  importedCount?: number;
+  updatedCount?: number;
+  skippedCount?: number;
+  failedCount?: number;
+}): MigrationBatchProgress {
+  const startedAt = params.startedAt ?? new Date().toISOString();
+  const updatedAt = params.updatedAt ?? new Date().toISOString();
+  const elapsedSeconds = Math.max(0, Math.round((Date.parse(updatedAt) - Date.parse(startedAt)) / 1000));
+  const percentage = params.totalSteps > 0
+    ? Math.max(0, Math.min(100, Math.round(((params.completedSteps ?? 0) / params.totalSteps) * 100)))
+    : 0;
+  let estimatedRemainingSeconds: number | null = null;
+  if ((params.completedSteps ?? 0) > 0 && (params.completedSteps ?? 0) < params.totalSteps && elapsedSeconds > 0) {
+    const averagePerStep = elapsedSeconds / Math.max(1, params.completedSteps ?? 0);
+    estimatedRemainingSeconds = Math.round(averagePerStep * (params.totalSteps - (params.completedSteps ?? 0)));
+  }
+  return {
+    operation: params.operation,
+    status: params.status ?? "running",
+    stage: params.stage,
+    step: params.step ?? params.stage,
+    completedSteps: params.completedSteps ?? 0,
+    totalSteps: params.totalSteps,
+    percentage,
+    startedAt,
+    updatedAt,
+    estimatedRemainingSeconds,
+    currentMessage: params.currentMessage ?? params.stage,
+    processedCount: params.processedCount,
+    totalCount: params.totalCount,
+    importedCount: params.importedCount,
+    updatedCount: params.updatedCount,
+    skippedCount: params.skippedCount,
+    failedCount: params.failedCount,
+    elapsedSeconds,
+  };
+}
+
+function readBatchProgress(summaryJson: unknown): MigrationBatchProgress | null {
+  if (!summaryJson || typeof summaryJson !== "object") return null;
+  const progress = (summaryJson as Record<string, unknown>).progress;
+  if (!progress || typeof progress !== "object") return null;
+  return progress as MigrationBatchProgress;
+}
+
 async function cleanupPreview(workspaceId: string, batchId: string) {
   const target = await loadCleanupTarget(workspaceId, batchId);
   if (!target) return null;
@@ -1393,6 +1472,46 @@ async function cancelAndCleanImportBatch(params: {
   }
 
   markRunningImportCancelled(params.batchId, params.reason);
+  const cleanupStartedAt = new Date().toISOString();
+  let cleanupProgress = buildProgressState({
+    operation: "cleanup",
+    status: "running",
+    stage: "Stopping import worker",
+    step: "Stopping import worker",
+    completedSteps: 1,
+    totalSteps: 9,
+    startedAt: cleanupStartedAt,
+    updatedAt: cleanupStartedAt,
+    currentMessage: "Stopping any running import worker for this batch.",
+  });
+  const persistCleanupProgress = async (patch: Partial<MigrationBatchProgress>, statusOverride?: string, errorJson?: Record<string, unknown> | null, executor: ImportDbExecutor = db) => {
+    cleanupProgress = buildProgressState({
+      ...cleanupProgress,
+      ...patch,
+      operation: "cleanup",
+      status: patch.status ?? cleanupProgress.status,
+      stage: patch.stage ?? cleanupProgress.stage,
+      step: patch.step ?? cleanupProgress.step,
+      completedSteps: patch.completedSteps ?? cleanupProgress.completedSteps,
+      totalSteps: cleanupProgress.totalSteps,
+      startedAt: cleanupProgress.startedAt,
+      updatedAt: new Date().toISOString(),
+      currentMessage: patch.currentMessage ?? cleanupProgress.currentMessage,
+      processedCount: patch.processedCount ?? cleanupProgress.processedCount,
+      totalCount: patch.totalCount ?? cleanupProgress.totalCount,
+      importedCount: patch.importedCount ?? cleanupProgress.importedCount,
+      updatedCount: patch.updatedCount ?? cleanupProgress.updatedCount,
+      skippedCount: patch.skippedCount ?? cleanupProgress.skippedCount,
+      failedCount: patch.failedCount ?? cleanupProgress.failedCount,
+    });
+    await executor.update(importBatches).set({
+      status: statusOverride ?? "running",
+      summaryJson: sql`coalesce(${importBatches.summaryJson}, '{}'::jsonb) || ${JSON.stringify({ progress: cleanupProgress })}::jsonb`,
+      errorJson: errorJson ?? undefined,
+      updatedAt: new Date(),
+    }).where(eq(importBatches.id, params.batchId));
+  };
+  await persistCleanupProgress({});
 
   const result = await db.transaction(async (tx) => {
     const [editedOperationalRows, editedFarmRows, editedSeasonRows] = await Promise.all([
@@ -1416,6 +1535,8 @@ async function cancelAndCleanImportBatch(params: {
     const skippedEditedFarms = params.includeEditedImportedRecords ? 0 : editedFarmRows.length;
     const skippedEditedSeasons = params.includeEditedImportedRecords ? 0 : editedSeasonRows.length;
 
+    await persistCleanupProgress({ stage: "Finding imported records", step: "Finding imported records", completedSteps: 2, currentMessage: "Finding records created by the selected import batch." }, undefined, null, tx);
+
     const deletedOperational = await tx.delete(operationalRecords)
       .where(params.includeEditedImportedRecords
         ? and(
@@ -1428,6 +1549,7 @@ async function cancelAndCleanImportBatch(params: {
           sql`NOT (${isEditedImportRecordSql()})`,
         ))
       .returning({ id: operationalRecords.id });
+    await persistCleanupProgress({ stage: "Removing operational records", step: "Removing operational records", completedSteps: 3, currentMessage: `Removed ${deletedOperational.length} operational records.`, processedCount: deletedOperational.length }, undefined, null, tx);
 
     const deletedFailures = await tx.delete(importFailures)
       .where(and(
@@ -1435,6 +1557,7 @@ async function cancelAndCleanImportBatch(params: {
         eq(importFailures.importBatchId, params.batchId),
       ))
       .returning({ id: importFailures.id });
+    await persistCleanupProgress({ stage: "Removing import failures", step: "Removing import failures", completedSteps: 4, currentMessage: `Removed ${deletedFailures.length} import failures.` }, undefined, null, tx);
 
     const candidateSeasonRows = await tx.select({
       id: seasons.id,
@@ -1450,6 +1573,7 @@ async function cancelAndCleanImportBatch(params: {
         eq(seasons.importBatchId, params.batchId),
         sql`NOT (${isEditedImportRecordSql()})`,
       ));
+    await persistCleanupProgress({ stage: "Cleaning seasons", step: "Cleaning seasons", completedSteps: 6, currentMessage: `Found ${candidateSeasonRows.length} imported seasons to clean.` }, undefined, null, tx);
     const candidateSeasonIds = candidateSeasonRows.map((row) => row.id);
 
     const deletableSeasonRows = candidateSeasonIds.length
@@ -1503,6 +1627,7 @@ async function cancelAndCleanImportBatch(params: {
         eq(farms.importBatchId, params.batchId),
         sql`NOT (${isEditedImportRecordSql()})`,
       ));
+    await persistCleanupProgress({ stage: "Cleaning farms", step: "Cleaning farms", completedSteps: 5, currentMessage: `Found ${candidateFarmRows.length} imported farms to clean.` }, undefined, null, tx);
     const candidateFarmIds = candidateFarmRows.map((row) => row.id);
 
     const detachedAuditLogRows = candidateFarmIds.length
@@ -1615,6 +1740,7 @@ async function cancelAndCleanImportBatch(params: {
           ))
         )
     `);
+    await persistCleanupProgress({ stage: "Repairing session context", step: "Repairing session context", completedSteps: 7, currentMessage: "Clearing invalid active farm and season selections." }, undefined, null, tx);
 
     const cleanupSummary = {
       cancelledBy: params.userId ?? null,
@@ -1642,6 +1768,7 @@ async function cancelAndCleanImportBatch(params: {
       errorJson: cleanupSummary,
       updatedAt: new Date(),
     }).where(eq(importBatches.id, params.batchId));
+    await persistCleanupProgress({ stage: "Updating batch status", step: "Updating batch status", completedSteps: 8, currentMessage: "Marking batch cancelled and saving cleanup summary." }, "cancelled", cleanupSummary, tx);
 
     await tx.insert(auditLogs).values({
       workspaceId: params.workspaceId,
@@ -1683,6 +1810,13 @@ async function cancelAndCleanImportBatch(params: {
   }
 
   cancelledImportBatchIds.delete(params.batchId);
+  await persistCleanupProgress({
+    stage: "Completed",
+    step: "Completed",
+    status: "completed",
+    completedSteps: 9,
+    currentMessage: "Cleanup completed.",
+  }, "cancelled");
   return {
     ...result,
     activeFarmId: contextRepair?.activeFarmId ?? null,
@@ -2443,6 +2577,18 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
     const startedAt = new Date().toISOString();
     const logs: ImportLogEntry[] = [];
     let currentStep = "START IMPORT";
+    const importProgressTotalSteps = 14;
+    let batchProgress = buildProgressState({
+      operation: "import",
+      status: "running",
+      stage: "Reading JSON",
+      step: "Reading JSON",
+      completedSteps: 0,
+      totalSteps: importProgressTotalSteps,
+      startedAt,
+      updatedAt: startedAt,
+      currentMessage: "Reading JSON payload...",
+    });
     const buildStep = (name: typeof importStepOrder[number], source = 0): ImportJobStep => ({
       name,
       status: "pending",
@@ -2494,7 +2640,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         startedAt: new Date(startedAt),
         completedAt: null,
         payloadJson: parsed.data.payload,
-        summaryJson: { summary: validation.summary, steps: importJob.steps, job: importJob },
+        summaryJson: { summary: validation.summary, steps: importJob.steps, job: importJob, progress: batchProgress },
         errorJson: {},
         updatedAt: new Date(),
       }).where(eq(importBatches.id, importBatchId));
@@ -2510,7 +2656,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         startedBy: userId,
         startedAt: new Date(startedAt),
         payloadJson: parsed.data.payload,
-        summaryJson: { summary: validation.summary, steps: importJob.steps, job: importJob },
+        summaryJson: { summary: validation.summary, steps: importJob.steps, job: importJob, progress: batchProgress },
         errorJson: {},
       });
     }
@@ -2526,11 +2672,38 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
           summary: validation.summary,
           steps: importJob.steps,
           job: importJob,
+          progress: batchProgress,
           importCounts: importCountKeys.map(({ label, key }) => ({ label, key, count: key === "attendance" ? importJob.importedRows : 0 })),
         },
         errorJson: errorJson ?? null,
         updatedAt: new Date(),
       }).where(eq(importBatches.id, importBatchId));
+    };
+    const setProgress = async (patch: Partial<MigrationBatchProgress>) => {
+      batchProgress = {
+        ...batchProgress,
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      };
+      batchProgress = buildProgressState({
+        ...batchProgress,
+        operation: batchProgress.operation,
+        status: batchProgress.status,
+        stage: batchProgress.stage,
+        step: batchProgress.step,
+        completedSteps: batchProgress.completedSteps,
+        totalSteps: batchProgress.totalSteps,
+        startedAt: batchProgress.startedAt,
+        updatedAt: batchProgress.updatedAt,
+        currentMessage: batchProgress.currentMessage,
+        processedCount: batchProgress.processedCount,
+        totalCount: batchProgress.totalCount,
+        importedCount: batchProgress.importedCount,
+        updatedCount: batchProgress.updatedCount,
+        skippedCount: batchProgress.skippedCount,
+        failedCount: batchProgress.failedCount,
+      });
+      await persistBatch().catch((error) => console.error(`[MIGRATION IMPORT ${importBatchId}] failed to persist progress`, error));
     };
     const updateJobStep = (name: string, patch: Partial<ImportJobStep>) => {
       const step = importJob.steps.find((entry) => entry.name === name);
@@ -2572,6 +2745,12 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         .catch((error) => console.error(`[MIGRATION IMPORT ${importBatchId}] failed to persist batch status`, error));
     };
 
+    await setProgress({
+      stage: "Validating file",
+      step: "Validating file",
+      completedSteps: 1,
+      currentMessage: "Validation passed. Preparing import batch.",
+    });
     await logStep("START IMPORT", "started", { message: "Android JSON import started." });
 
     let result: ImportResult;
@@ -2594,6 +2773,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       };
 
       updateJobStep("Farms", { status: "running", startedAt: new Date().toISOString(), message: "Importing farms." });
+      await setProgress({ stage: "Importing farms", step: "Importing farms", completedSteps: 2, currentMessage: "Creating or updating farms." });
       await logStep("CREATE FARM", "started");
       for (const [index, source] of asArray(parsed.data.payload, "farms").entries()) {
         const sourceType = sourceTypeFor("farms");
@@ -2681,6 +2861,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       const seasonByFarm = new Map<string, string>();
       const farmBySeason = new Map<string, string>();
       updateJobStep("Seasons", { status: "running", startedAt: new Date().toISOString(), message: "Importing seasons." });
+      await setProgress({ stage: "Importing seasons", step: "Importing seasons", completedSteps: 3, currentMessage: "Creating or updating seasons." });
       await logStep("CREATE SEASON", "started");
       for (const source of asArray(parsed.data.payload, "seasons")) {
         const farmId = maps.farms.get(farmRef(source)) ?? defaultFarmId;
@@ -2907,6 +3088,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
 
       updateJobStep("Accounts", { status: "running", startedAt: new Date().toISOString(), message: "Importing accounts." });
       updateJobStep("Partners", { status: "running", startedAt: new Date().toISOString(), message: "Importing partners." });
+      await setProgress({ stage: "Importing accounts", step: "Importing accounts", completedSteps: 4, currentMessage: "Importing payment accounts and partners." });
       await logStep("IMPORT ACCOUNTS", "started");
       let updatedAccounts = 0;
       let updatedPartners = 0;
@@ -2985,6 +3167,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       await logStep("IMPORT PARTNERS", "completed", { sourceRows: asArray(parsed.data.payload, "partners").length, importedRows: importedCounts.partners, updatedRows: updatedPartners, failedRows: 0 });
       const labourNameMap = new Map<string, string>();
       updateJobStep("Labour", { status: "running", startedAt: new Date().toISOString(), message: "Importing labour." });
+      await setProgress({ stage: "Importing labour", step: "Importing labour", completedSteps: 6, currentMessage: "Importing labour records in Android order.", processedCount: 0, totalCount: asArray(parsed.data.payload, "labour").length });
       await logStep("IMPORT LABOUR", "started");
       let updatedLabour = 0;
       for (const [index, source] of asArray(parsed.data.payload, "labour").entries()) {
@@ -3033,6 +3216,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       });
       updateJobStep("Expenses", { status: "running", startedAt: new Date().toISOString(), message: "Importing expenses." });
       updateJobStep("Expense Items", { status: "running", startedAt: new Date().toISOString(), message: "Importing expense items." });
+      await setProgress({ stage: "Importing vouchers", step: "Importing vouchers", completedSteps: 9, currentMessage: "Importing vouchers and voucher items.", processedCount: 0, totalCount: asArray(parsed.data.payload, "expenses").length });
       await logStep("IMPORT EXPENSES", "started");
       let updatedExpenses = 0;
       let updatedExpenseItems = 0;
@@ -3159,6 +3343,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       await logStep("IMPORT EXPENSES", "completed", { sourceRows: asArray(parsed.data.payload, "expenses").length, importedRows: importedCounts.expenses, updatedRows: updatedExpenses, failedRows: 0 });
       await logStep("IMPORT EXPENSE ITEMS", "completed", { sourceRows: asArray(parsed.data.payload, "expenseItems").length, importedRows: importedCounts.expenseItems, updatedRows: updatedExpenseItems, failedRows: 0 });
       updateJobStep("Advances", { status: "running", startedAt: new Date().toISOString(), message: "Importing advances." });
+      await setProgress({ stage: "Importing advances", step: "Importing advances", completedSteps: 10, currentMessage: "Importing labour advances.", processedCount: 0, totalCount: asArray(parsed.data.payload, "advances").length });
       await logStep("IMPORT ADVANCES", "started");
       let updatedAdvances = 0;
       let skippedAdvances = 0;
@@ -3232,6 +3417,14 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         failed: 0,
         completedAt: attendanceRows.length ? undefined : new Date().toISOString(),
       });
+      await setProgress({
+        stage: attendanceRows.length ? "Importing attendance" : "Final verification",
+        step: attendanceRows.length ? "Importing attendance" : "Final verification",
+        completedSteps: attendanceRows.length ? 11 : 13,
+        currentMessage: attendanceRows.length ? "Attendance is processing in the background." : "No attendance rows found. Verifying imported data.",
+        processedCount: 0,
+        totalCount: attendanceRows.length,
+      });
 
       const runAttendanceJob = async () => {
         if (!attendanceRows.length) return;
@@ -3244,6 +3437,18 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
           const batchNumber = batchIndex + 1;
           updateJob({ currentBatch: batchNumber, currentStep: `Attendance batch ${batchNumber}/${importJob.totalBatches}`, message: `Attendance batch ${batchNumber}/${importJob.totalBatches} running.` });
           updateJobStep("Attendance", { batch: batchNumber, batchTotal: importJob.totalBatches, message: `Attendance batch ${batchNumber}/${importJob.totalBatches} running.` });
+          await setProgress({
+            stage: "Importing attendance",
+            step: `Attendance batch ${batchNumber}/${importJob.totalBatches}`,
+            completedSteps: 11,
+            currentMessage: `Attendance batch ${batchNumber}/${importJob.totalBatches} running.`,
+            processedCount: importJob.processedRows,
+            totalCount: attendanceRows.length,
+            importedCount: importJob.importedRows,
+            updatedCount: importJob.updatedRows,
+            skippedCount: importJob.skippedRows,
+            failedCount: importJob.failedRows,
+          });
           const batchStartedAt = Date.now();
           await logStep("IMPORT ATTENDANCE BATCH", "started", {
             sourceRows: attendanceRows.length,
@@ -3349,6 +3554,18 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
             message: batchLog.message,
           });
           await logStep(batchLog.step, batchLog.status, batchLog);
+          await setProgress({
+            stage: "Importing attendance",
+            step: `Attendance batch ${batchNumber}/${importJob.totalBatches}`,
+            completedSteps: 11,
+            currentMessage: batchLog.message,
+            processedCount: importJob.processedRows,
+            totalCount: attendanceRows.length,
+            importedCount: importJob.importedRows,
+            updatedCount: importJob.updatedRows,
+            skippedCount: importJob.skippedRows,
+            failedCount: importJob.failedRows,
+          });
         }
         const completedAt = new Date().toISOString();
         updateJob({
@@ -3382,12 +3599,38 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         });
         importJob.logs = [...importJob.logs.slice(-79), finalLog];
         await logStep(finalLog.step, finalLog.status, finalLog);
+        await setProgress({
+          stage: importJob.failedRows ? "Completed with warnings" : "Completed",
+          step: "Completed",
+          status: importJob.failedRows ? "failed" : "completed",
+          completedSteps: importProgressTotalSteps,
+          currentMessage: finalLog.message ?? "Import Complete",
+          processedCount: importJob.processedRows,
+          totalCount: attendanceRows.length,
+          importedCount: importJob.importedRows,
+          updatedCount: importJob.updatedRows,
+          skippedCount: importJob.skippedRows,
+          failedCount: importJob.failedRows,
+        });
       };
       void runAttendanceJob().catch(async (error) => {
         const message = error instanceof Error ? error.message : "Unknown attendance import failure.";
         updateJob({ status: "failed", currentStep: "IMPORT ATTENDANCE failed", completedAt: new Date().toISOString(), message, error: message, stack: error instanceof Error ? error.stack : undefined });
         await recordFailure("IMPORT ATTENDANCE", importJob.currentRow, message);
         updateJobStep("Attendance", { status: "failed", completedAt: new Date().toISOString(), message });
+        await setProgress({
+          stage: "Importing attendance",
+          step: "Failed",
+          status: "failed",
+          completedSteps: 11,
+          currentMessage: message,
+          processedCount: importJob.processedRows,
+          totalCount: attendanceRows.length,
+          importedCount: importJob.importedRows,
+          updatedCount: importJob.updatedRows,
+          skippedCount: importJob.skippedRows,
+          failedCount: importJob.failedRows + 1,
+        });
         await logStep("IMPORT ATTENDANCE", "failed", {
           sourceRows: attendanceRows.length,
           importedRows: importJob.importedRows,
@@ -3406,6 +3649,12 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       assertProcessed("labours", asArray(parsed.data.payload, "labour").length, importedCounts.labour + updatedLabour);
       assertProcessed("expenses", asArray(parsed.data.payload, "expenses").length, importedCounts.expenses + updatedExpenses);
       assertProcessed("advances", asArray(parsed.data.payload, "advances").length, importedCounts.advances + updatedAdvances, skippedAdvances);
+      await setProgress({
+        stage: "Repairing references",
+        step: "Repairing references",
+        completedSteps: 12,
+        currentMessage: "Importing remaining related records and repairing references.",
+      });
       for (const source of asArray(parsed.data.payload, "sales")) {
         await writeRecord("sale", sourceTypeFor("sales"), source, { date: dateValue(source, ["date", "saleDate"]), buyerName: text(source, ["buyerName", "buyer"], "Imported Buyer"), amount: numberValue(source, ["total", "totalAmount", "amount"]), accountId: maps.accounts.get(accountRef(source)) ?? defaultAccountId });
       }
@@ -3434,6 +3683,12 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         action: "admin.migration_import.completed",
         entityType: "migration_import",
         details: { source: validation.summary.source, exportedAt: validation.summary.exportedAt, insertedOperationalRecords, farmImportStats },
+      });
+      await setProgress({
+        stage: "Final verification",
+        step: "Final verification",
+        completedSteps: 13,
+        currentMessage: "Running final verification and writing audit log.",
       });
       const completedAt = new Date().toISOString();
       await logStep("IMPORT COMPLETE", "completed", {
@@ -3531,6 +3786,16 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       fileHash,
       parsed.data.payload,
     );
+
+    if (result.attendanceJob?.status !== "running") {
+      await setProgress({
+        stage: "Completed",
+        step: "Completed",
+        status: "completed",
+        completedSteps: importProgressTotalSteps,
+        currentMessage: "Import completed successfully.",
+      });
+    }
 
     if (result.postImportAudit.duplicateAccountAudit.totalGroups > 0) {
       const duplicateSummary = result.postImportAudit.duplicateAccountAudit.groups
@@ -3872,6 +4137,43 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       message: result.farmCleanupMessage
         ?? "Failed Android import dump data was cleaned. Repair workspace context next if needed.",
       result,
+    };
+  });
+
+  app.get("/v1/admin/migration-import/progress", { preHandler: requirePermission("CREATE_WORKSPACE") }, async (request, reply) => {
+    const parsed = progressQuerySchema.safeParse(request.query);
+    if (!parsed.success) return reply.code(400).send({ message: "A batchId is required." });
+    const [batch] = await db.select().from(importBatches).where(eq(importBatches.id, parsed.data.batchId)).limit(1);
+    if (!batch) return reply.code(404).send({ message: "Import batch not found." });
+    const progress = readBatchProgress(batch.summaryJson) ?? buildProgressState({
+      operation: "import",
+      status: batch.status === "completed" ? "completed" : batch.status === "cancelled" ? "cancelled" : batch.status === "failed" || batch.status === "partial_failed" ? "failed" : "pending",
+      stage: batch.status === "completed" ? "Completed" : "Waiting",
+      totalSteps: 1,
+      completedSteps: batch.status === "completed" ? 1 : 0,
+      startedAt: batch.startedAt.toISOString(),
+      updatedAt: batch.updatedAt.toISOString(),
+      currentMessage: "No detailed progress available yet.",
+    });
+    return {
+      batchId: batch.id,
+      status: progress.status,
+      stage: progress.stage,
+      step: progress.step,
+      percentage: progress.percentage,
+      message: progress.currentMessage,
+      startedAt: progress.startedAt,
+      updatedAt: progress.updatedAt,
+      elapsedSeconds: progress.elapsedSeconds ?? 0,
+      estimatedRemainingSeconds: progress.estimatedRemainingSeconds,
+      completedSteps: progress.completedSteps,
+      totalSteps: progress.totalSteps,
+      processedCount: progress.processedCount ?? 0,
+      totalCount: progress.totalCount ?? 0,
+      importedCount: progress.importedCount ?? 0,
+      updatedCount: progress.updatedCount ?? 0,
+      skippedCount: progress.skippedCount ?? 0,
+      failedCount: progress.failedCount ?? 0,
     };
   });
 
