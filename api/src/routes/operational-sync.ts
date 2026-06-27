@@ -171,6 +171,14 @@ const dispatchPayloadSchema = z.object({
 }).passthrough();
 const localRecords = new Map<string, z.infer<typeof recordSchema>>();
 
+function forbiddenResponse(
+  reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } },
+  message: string,
+  details: Record<string, unknown>,
+) {
+  return reply.code(403).send({ message, details });
+}
+
 function requireWorkspaceWrite(user: AuthenticatedUser, workspaceId: string) {
   return hasPermission(user, "SUBMIT_RECORDS", workspaceId);
 }
@@ -406,14 +414,39 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     if (!request.appUser) return reply;
     const parsed = recordSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ message: "A valid operational record is required." });
+    if (localDevelopmentMode && parsed.data.entity === "voucher") {
+      console.log("VOUCHER_SYNC_AUDIT", {
+        userId: request.appUser.id,
+        sessionWorkspaceId: request.appUser.workspaceId,
+        requestWorkspaceId: parsed.data.workspaceId,
+        requestFarmId: parsed.data.farmId ?? null,
+        requestSeasonId: parsed.data.seasonId ?? null,
+        entityType: parsed.data.entity,
+        operation: "upsert",
+      });
+    }
     if (!requireWorkspaceWrite(request.appUser, parsed.data.workspaceId)) {
-      return reply.code(403).send({ message: "Workspace record submission permission is required." });
+      return forbiddenResponse(reply, "Workspace record submission permission is required.", {
+        code: "missing_workspace_permission",
+        permissionKey: "SUBMIT_RECORDS",
+        requestWorkspaceId: parsed.data.workspaceId,
+      });
     }
     if (!requireEntityWrite(request.appUser, parsed.data.workspaceId, parsed.data.entity)) {
-      return reply.code(403).send({ message: "Workspace record management permission is required." });
+      return forbiddenResponse(reply, "Workspace record management permission is required.", {
+        code: "missing_workspace_permission",
+        permissionKey: "MANAGE_RECORDS",
+        requestWorkspaceId: parsed.data.workspaceId,
+        entityType: parsed.data.entity,
+      });
     }
     if (request.appUser.workspaceId !== parsed.data.workspaceId) {
-      return reply.code(403).send({ message: "Select this workspace before submitting records." });
+      return forbiddenResponse(reply, "Select this workspace before submitting records.", {
+        code: "stale_workspace_context",
+        requestWorkspaceId: parsed.data.workspaceId,
+        activeWorkspaceId: request.appUser.workspaceId,
+        entityType: parsed.data.entity,
+      });
     }
     const financialPayloadSchema = financialPayloadSchemas[parsed.data.entity as keyof typeof financialPayloadSchemas];
     const financialPayload = financialPayloadSchema?.safeParse(parsed.data.record);
@@ -457,14 +490,49 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     const selected = await sessionContext(request.sessionId);
     const generalFarmExpense = parsed.data.entity === "voucher" && parsed.data.record.generalFarmExpense === true;
     const requiresSeason = seasonRequiredEntities.has(parsed.data.entity) && !generalFarmExpense;
+    if (localDevelopmentMode && parsed.data.entity === "voucher") {
+      const membership = request.appUser.memberships.find((item) => item.workspaceId === parsed.data.workspaceId);
+      console.log("VOUCHER_SYNC_PERMISSION_DECISION", {
+        userId: request.appUser.id,
+        workspaceId: parsed.data.workspaceId,
+        membershipId: membership?.membershipId ?? null,
+        role: membership?.role ?? request.appUser.role,
+        permissions: membership?.permissions ?? null,
+        farmAccessMode: membership?.farmAccessMode ?? null,
+        effectivePermissions: {
+          submitRecords: hasPermission(request.appUser, "SUBMIT_RECORDS", parsed.data.workspaceId),
+          manageRecords: hasPermission(request.appUser, "MANAGE_RECORDS", parsed.data.workspaceId),
+          expensesCreate: hasModulePermission(request.appUser, parsed.data.workspaceId, "expenses", "create"),
+          expensesEdit: hasModulePermission(request.appUser, parsed.data.workspaceId, "expenses", "edit"),
+        },
+        activeWorkspaceId: request.appUser.workspaceId,
+        activeFarmId: selected?.activeFarmId ?? null,
+        activeSeasonId: selected?.activeSeasonId ?? null,
+      });
+    }
     if (!hasFarmAccess(request.appUser, parsed.data.workspaceId, parsed.data.farmId ?? null)) {
-      return reply.code(403).send({ message: "You do not have access to this farm." });
+      return forbiddenResponse(reply, "You do not have access to this farm.", {
+        code: "farm_access_denied",
+        requestWorkspaceId: parsed.data.workspaceId,
+        requestFarmId: parsed.data.farmId ?? null,
+        farmAccessMode: request.appUser.memberships.find((membership) => membership.workspaceId === parsed.data.workspaceId)?.farmAccessMode ?? "assigned",
+      });
     }
     if (!selected?.activeFarmId || parsed.data.farmId !== selected.activeFarmId) {
-      return reply.code(403).send({ message: "Select the active farm before submitting records." });
+      return forbiddenResponse(reply, "Select the active farm before submitting records.", {
+        code: "stale_farm_context",
+        requestWorkspaceId: parsed.data.workspaceId,
+        requestFarmId: parsed.data.farmId ?? null,
+        activeFarmId: selected?.activeFarmId ?? null,
+      });
     }
     if (requiresSeason && (!selected.activeSeasonId || parsed.data.seasonId !== selected.activeSeasonId)) {
-      return reply.code(403).send({ message: "Select an active season before submitting operational records." });
+      return forbiddenResponse(reply, "Select an active season before submitting operational records.", {
+        code: "stale_season_context",
+        requestWorkspaceId: parsed.data.workspaceId,
+        requestSeasonId: parsed.data.seasonId ?? null,
+        activeSeasonId: selected?.activeSeasonId ?? null,
+      });
     }
     if (generalFarmExpense && parsed.data.seasonId) {
       return reply.code(400).send({ message: "General farm expenses must not specify a season." });
@@ -518,13 +586,28 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       return reply.code(403).send({ message: "Operational record does not belong to the selected farm and season." });
     }
     if (!existing && !hasModulePermission(request.appUser, parsed.data.workspaceId, entityModule(parsed.data.entity), "create")) {
-      return reply.code(403).send({ message: "Module create permission is required." });
+      return forbiddenResponse(reply, "Module create permission is required.", {
+        code: "missing_module_permission",
+        permissionKey: `${entityModule(parsed.data.entity)}.create`,
+        entityType: parsed.data.entity,
+        requestWorkspaceId: parsed.data.workspaceId,
+      });
     }
     if (existing && !hasModulePermission(request.appUser, parsed.data.workspaceId, entityModule(parsed.data.entity), "edit")) {
-      return reply.code(403).send({ message: "Module edit permission is required." });
+      return forbiddenResponse(reply, "Module edit permission is required.", {
+        code: "missing_module_permission",
+        permissionKey: `${entityModule(parsed.data.entity)}.edit`,
+        entityType: parsed.data.entity,
+        requestWorkspaceId: parsed.data.workspaceId,
+      });
     }
     if (existing && parsed.data.entity === "voucher" && !hasPermission(request.appUser, "MANAGE_RECORDS", parsed.data.workspaceId)) {
-      return reply.code(403).send({ message: "Workspace record management permission is required to update expense vouchers." });
+      return forbiddenResponse(reply, "Workspace record management permission is required to update expense vouchers.", {
+        code: "missing_workspace_permission",
+        permissionKey: "MANAGE_RECORDS",
+        entityType: parsed.data.entity,
+        requestWorkspaceId: parsed.data.workspaceId,
+      });
     }
     if (existing && parsed.data.entity === "partnerEntry" && !hasPermission(request.appUser, "MANAGE_RECORDS", parsed.data.workspaceId)) {
       return reply.code(403).send({ message: "Workspace record management permission is required to update partner ledger entries." });

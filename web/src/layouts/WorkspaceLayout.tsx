@@ -8,7 +8,7 @@ import { LanguageSwitch } from "../components/LanguageSwitch";
 import { config } from "../config";
 import type { PendingMutation } from "../lib/offline-db";
 import { useSyncState } from "../hooks/useSyncState";
-import { discardSyncQueueItem, getSyncQueueItems, refreshOperationalData, resolveSyncQueueItem, retrySyncQueueItem, startSyncService, stopSyncService, syncNow } from "../services/syncService";
+import { discardSyncQueueItem, getSyncQueueItems, refreshOperationalData, repairStaleSyncQueueItem, resolveSyncQueueItem, retrySyncQueueItem, startSyncService, stopSyncService, syncNow } from "../services/syncService";
 import { setActiveWorkspaceId } from "../lib/offline-db";
 import { hasModulePermission } from "../lib/permissions";
 
@@ -89,6 +89,7 @@ export function WorkspaceLayout() {
       case "syncing": return t("sync.statusSyncing");
       case "failed": return t("sync.statusFailed");
       case "permission_denied": return t("sync.statusPermissionDenied");
+      case "stale_context": return t("sync.statusStaleContext");
       case "resolved": return t("sync.statusResolved");
       case "discarded": return t("sync.statusDiscarded");
       default: return t("sync.statusPending");
@@ -165,9 +166,11 @@ export function WorkspaceLayout() {
                 <p>{t("sync.retryCount")}: {item.attempts}</p>
                 {item.lastAttemptedAt ? <p>{t("sync.lastAttemptedAt")}: {new Date(item.lastAttemptedAt).toLocaleString()}</p> : null}
                 {item.status === "permission_denied" ? <p className="sync-queue-item__error">{t("sync.permissionDeniedHint")}</p> : null}
+                {item.status === "stale_context" ? <p className="sync-queue-item__error">{t("sync.staleContextHint")}</p> : null}
                 {item.lastError ? <p className="sync-queue-item__error">{t("sync.lastError")}: {item.lastError}</p> : null}
                 <div className="sync-queue-item__actions">
-                  {item.status !== "permission_denied" && <button type="button" onClick={() => void retrySyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.retryItem")}</button>}
+                  {item.status !== "permission_denied" && item.status !== "stale_context" && <button type="button" onClick={() => void retrySyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.retryItem")}</button>}
+                  {item.status === "stale_context" && <button type="button" onClick={() => void repairStaleSyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.repairStaleContext")}</button>}
                   <button type="button" onClick={() => void resolveSyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.markResolved")}</button>
                   <button type="button" onClick={() => void discardSyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{item.status === "permission_denied" ? t("sync.discardUnauthorizedChange") : t("sync.discardStaleItem")}</button>
                 </div>

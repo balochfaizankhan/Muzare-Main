@@ -26,6 +26,18 @@ let state: SyncState = { status: navigator.onLine ? "online" : "offline", pendin
 const maxAutomaticAttempts = 3;
 const localDebugEnabled = import.meta.env.DEV;
 
+type SyncErrorDetails = {
+  code?: string;
+  permissionKey?: string;
+  moduleAction?: string;
+  requestWorkspaceId?: string;
+  activeWorkspaceId?: string | null;
+  requestFarmId?: string | null;
+  activeFarmId?: string | null;
+  requestSeasonId?: string | null;
+  activeSeasonId?: string | null;
+};
+
 const tables = {
   labourer: offlineDb.labourers, labourGroup: offlineDb.labourGroups, attendance: offlineDb.attendance, account: offlineDb.accounts,
   vehicle: offlineDb.vehicles, dateType: offlineDb.dateTypes, dispatch: offlineDb.dispatches, sale: offlineDb.sales, voucher: offlineDb.vouchers, partnerEntry: offlineDb.partnerEntries,
@@ -82,9 +94,16 @@ function applyOperationalContext(token: string, workspaceId: string, farmId?: st
   window.dispatchEvent(new Event("muzare-local-data-change"));
 }
 
-async function cacheRecord(entity: OperationalEntity, record: OperationalRecordEnvelope["record"], pendingSync: boolean, farmId: string | null | undefined = context?.farmId, seasonId: string | null | undefined = context?.seasonId) {
+async function cacheRecord(
+  entity: OperationalEntity,
+  record: OperationalRecordEnvelope["record"],
+  pendingSync: boolean,
+  farmId: string | null | undefined = (record as Partial<LocalRecord>).farmId ?? context?.farmId,
+  seasonId: string | null | undefined = (record as Partial<LocalRecord>).seasonId ?? context?.seasonId,
+  workspaceId: string | undefined = (record as Partial<LocalRecord>).workspaceId ?? context?.workspaceId,
+) {
   if (!context) throw new Error(i18n.t("sync.workspaceSyncNotInitialized"));
-  await tableFor(entity).put({ ...record, workspaceId: context.workspaceId, farmId, seasonId, pendingSync } as LocalRecord);
+  await tableFor(entity).put({ ...record, workspaceId: workspaceId ?? context.workspaceId, farmId, seasonId, pendingSync } as LocalRecord);
 }
 
 function assertCanQueueMutation(entity: OperationalEntity, operation: "create" | "edit" | "delete") {
@@ -103,6 +122,45 @@ function isPermissionDeniedSyncError(error: unknown) {
   return error instanceof ApiError && error.status === 403;
 }
 
+function syncErrorDetails(error: unknown): SyncErrorDetails | null {
+  return error instanceof ApiError && error.details && typeof error.details === "object"
+    ? error.details as SyncErrorDetails
+    : null;
+}
+
+function isStaleContextSyncError(error: unknown) {
+  const code = syncErrorDetails(error)?.code;
+  return code === "stale_workspace_context" || code === "stale_farm_context" || code === "stale_season_context";
+}
+
+function formatPermissionDeniedMessage(details: SyncErrorDetails | null) {
+  if (!details?.permissionKey) return i18n.t("sync.permissionDenied");
+  return i18n.t("sync.permissionDeniedWithKey", { permission: details.permissionKey });
+}
+
+function formatStaleContextMessage(details: SyncErrorDetails | null) {
+  if (!details) return i18n.t("sync.staleWorkspaceContext");
+  if (details.code === "stale_workspace_context") {
+    return i18n.t("sync.staleWorkspaceContextDetail", {
+      active: details.activeWorkspaceId ?? "-",
+      request: details.requestWorkspaceId ?? "-",
+    });
+  }
+  if (details.code === "stale_farm_context") {
+    return i18n.t("sync.staleFarmContextDetail", {
+      active: details.activeFarmId ?? "-",
+      request: details.requestFarmId ?? "-",
+    });
+  }
+  if (details.code === "stale_season_context") {
+    return i18n.t("sync.staleSeasonContextDetail", {
+      active: details.activeSeasonId ?? "-",
+      request: details.requestSeasonId ?? "-",
+    });
+  }
+  return i18n.t("sync.staleWorkspaceContext");
+}
+
 async function getContextMutations() {
   return context
     ? offlineDb.pendingMutations.where("workspaceId").equals(context.workspaceId)
@@ -117,21 +175,24 @@ async function refreshSyncState(next: Partial<SyncState> = {}) {
     && (mutation.status ?? "pending") !== "discarded"
     && (mutation.retryable ?? true)).length;
   const failedCount = mutations.filter((mutation) =>
-    (mutation.status === "failed" || mutation.status === "permission_denied") && !(mutation.retryable ?? true)).length;
+    (mutation.status === "failed" || mutation.status === "permission_denied" || mutation.status === "stale_context") && !(mutation.retryable ?? true)).length;
   emit({ pendingCount, failedCount, ...next });
 }
 
 export async function queueOfflineRecord(entity: OperationalEntity, record: LocalRecord, operation: "create" | "edit" = "create"): Promise<void> {
   if (!context) throw new Error(i18n.t("sync.workspaceSyncNotInitialized"));
   assertCanQueueMutation(entity, operation);
-  await cacheRecord(entity, record, true);
+  const recordWorkspaceId = record.workspaceId || context.workspaceId;
+  const recordFarmId = record.farmId ?? context.farmId;
+  const recordSeasonId = record.seasonId ?? context.seasonId;
+  await cacheRecord(entity, { ...record, workspaceId: recordWorkspaceId, farmId: recordFarmId, seasonId: recordSeasonId }, true, recordFarmId, recordSeasonId, recordWorkspaceId);
   const queuedAt = new Date().toISOString();
   const mutation: PendingMutation = {
-    id: `${context.workspaceId}:${entity}:${record.id}`, entity, operation: operation === "edit" ? "update" : operation, payload: record, attempts: 0,
-    clientMutationId: `${context.workspaceId}:${entity}:${record.id}`,
+    id: `${recordWorkspaceId}:${entity}:${record.id}`, entity, operation: operation === "edit" ? "update" : operation, payload: { ...record, workspaceId: recordWorkspaceId, farmId: recordFarmId, seasonId: recordSeasonId }, attempts: 0,
+    clientMutationId: `${recordWorkspaceId}:${entity}:${record.id}`,
     status: "pending",
     retryable: true,
-    workspaceId: context.workspaceId, farmId: context.farmId, seasonId: context.seasonId,
+    workspaceId: recordWorkspaceId, farmId: recordFarmId, seasonId: recordSeasonId,
     createdAt: queuedAt, updatedAt: queuedAt,
   };
   await offlineDb.pendingMutations.put(mutation);
@@ -140,9 +201,9 @@ export async function queueOfflineRecord(entity: OperationalEntity, record: Loca
       operation,
       mutationId: mutation.id,
       clientRecordId: record.id,
-      workspaceId: context.workspaceId,
-      farmId: context.farmId,
-      seasonId: context.seasonId,
+      workspaceId: recordWorkspaceId,
+      farmId: recordFarmId,
+      seasonId: recordSeasonId,
     });
   }
   await refreshSyncState({ status: navigator.onLine ? "pending" : "offline" });
@@ -207,6 +268,38 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
   for (const mutation of pendingRecords) {
     if (!options.force && !((mutation.retryable ?? true))) continue;
     if (!options.force && (mutation.attempts >= maxAutomaticAttempts || (mutation.nextAttemptAt && mutation.nextAttemptAt > new Date().toISOString()))) continue;
+    const payloadScope = mutation.payload as Partial<LocalRecord>;
+    if (
+      (payloadScope.workspaceId && payloadScope.workspaceId !== mutation.workspaceId)
+      || ((payloadScope.farmId ?? null) !== (mutation.farmId ?? null))
+      || ((payloadScope.seasonId ?? null) !== (mutation.seasonId ?? null))
+    ) {
+      const lastError = i18n.t("sync.staleQueueItemScopeMismatch");
+      await offlineDb.pendingMutations.update(mutation.id, {
+        status: "stale_context",
+        retryable: false,
+        lastError,
+        lastAttemptedAt: new Date().toISOString(),
+      });
+      if (mutation.entity === "voucher") {
+        debugVoucherSync("sync-failed", {
+          mutationId: mutation.id,
+          clientRecordId: (mutation.payload as LocalRecord).id,
+          staleContext: true,
+          lastError,
+          mutationWorkspaceId: mutation.workspaceId,
+          payloadWorkspaceId: payloadScope.workspaceId ?? null,
+          mutationFarmId: mutation.farmId ?? null,
+          payloadFarmId: payloadScope.farmId ?? null,
+          mutationSeasonId: mutation.seasonId ?? null,
+          payloadSeasonId: payloadScope.seasonId ?? null,
+        });
+      }
+      window.dispatchEvent(new Event("muzare-local-data-change"));
+      notify(lastError);
+      hadPermanentFailures = true;
+      continue;
+    }
     try {
       if (mutation.entity === "voucher") {
         debugVoucherSync("sync-start", {
@@ -268,6 +361,8 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
       synced += 1;
     } catch (error) {
       const permissionDenied = isPermissionDeniedSyncError(error);
+      const staleContext = isStaleContextSyncError(error);
+      const details = syncErrorDetails(error);
       if (error instanceof Error && error.message.includes("PostgreSQL is the primary workspace database")) {
         if (mutation.operation === "delete") await tableFor(mutation.entity).delete((mutation.payload as LocalRecord).id);
         else await tableFor(mutation.entity).update((mutation.payload as LocalRecord).id, { pendingSync: false });
@@ -280,15 +375,19 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
       const nextAttemptAt = retryable && attempts < maxAutomaticAttempts
         ? new Date(Date.now() + 1_000 * 2 ** (attempts - 1)).toISOString()
         : undefined;
-      const lastError = permissionDenied
-        ? i18n.t("sync.permissionDenied")
+      const lastError = staleContext
+        ? formatStaleContextMessage(details)
+        : permissionDenied
+          ? formatPermissionDeniedMessage(details)
         : error instanceof Error
           ? error.message
           : "Unknown sync failure.";
       await offlineDb.pendingMutations.update(mutation.id, {
         attempts,
-        retryable: retryable && attempts < maxAutomaticAttempts,
-        status: permissionDenied
+        retryable: staleContext ? false : retryable && attempts < maxAutomaticAttempts,
+        status: staleContext
+          ? "stale_context"
+          : permissionDenied
           ? "permission_denied"
           : retryable && attempts < maxAutomaticAttempts
             ? "pending"
@@ -303,15 +402,18 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
           clientRecordId: (mutation.payload as LocalRecord).id,
           retryable,
           permissionDenied,
+          staleContext,
           attempts,
           lastError,
           workspaceId: mutation.workspaceId,
           farmId: mutation.farmId,
           seasonId: mutation.seasonId,
+          details,
         });
       }
       window.dispatchEvent(new Event("muzare-local-data-change"));
-      if (permissionDenied) notify(i18n.t("sync.permissionDenied"));
+      if (staleContext) notify(lastError);
+      else if (permissionDenied) notify(lastError);
       else if (!(retryable && attempts < maxAutomaticAttempts)) notify(lastError);
       if (!(retryable && attempts < maxAutomaticAttempts)) hadPermanentFailures = true;
       if (retryable && attempts < maxAutomaticAttempts) continue;
@@ -320,7 +422,7 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
   syncing = false;
   const pending = await getPendingCount();
   const failedMutations = (await getContextMutations()).filter((mutation) =>
-    (mutation.status === "failed" || mutation.status === "permission_denied") && !(mutation.retryable ?? true));
+    (mutation.status === "failed" || mutation.status === "permission_denied" || mutation.status === "stale_context") && !(mutation.retryable ?? true));
   if (pending === 0) {
     const lastSyncTime = new Date().toISOString();
     localStorage.setItem(lastSyncKey(context.workspaceId), lastSyncTime);
@@ -510,6 +612,35 @@ export async function startSyncService(token: string, workspaceId: string) {
       });
     }
   })();
+}
+
+export async function repairStaleSyncQueueItem(mutationId: string) {
+  if (!context) throw new Error(i18n.t("sync.workspaceSyncNotInitialized"));
+  const item = await offlineDb.pendingMutations.get(mutationId);
+  if (!item) return;
+  const payload = item.payload as LocalRecord;
+  const repairedPayload = {
+    ...payload,
+    workspaceId: context.workspaceId,
+    farmId: payload.farmId ?? context.farmId ?? null,
+    seasonId: payload.seasonId ?? context.seasonId ?? null,
+    pendingSync: true,
+  };
+  await tableFor(item.entity).update(payload.id, repairedPayload);
+  await offlineDb.pendingMutations.update(mutationId, {
+    payload: repairedPayload,
+    workspaceId: context.workspaceId,
+    farmId: repairedPayload.farmId ?? undefined,
+    seasonId: repairedPayload.seasonId ?? undefined,
+    attempts: 0,
+    retryable: true,
+    status: "pending",
+    nextAttemptAt: undefined,
+    lastError: undefined,
+    updatedAt: new Date().toISOString(),
+  });
+  await refreshSyncState({ status: navigator.onLine ? "pending" : "offline" });
+  if (navigator.onLine) await syncPendingRecords({ force: true });
 }
 
 export function stopSyncService() {
