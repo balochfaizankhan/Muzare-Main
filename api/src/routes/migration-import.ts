@@ -195,6 +195,18 @@ type AccountDuplicateRepairResult = {
   groupsBefore: Array<{ name: string; type: string; count: number; accountIds: string[]; canonicalAccountId: string | null }>;
   groupsAfter: Array<{ name: string; type: string; count: number; accountIds: string[]; canonicalAccountId: string | null }>;
 };
+
+type VoucherNumberRepairResult = {
+  vouchersUpdated: number;
+  mismatchesBefore: number;
+  mismatchesAfter: number;
+  updatedVouchers: Array<{
+    clientRecordId: string;
+    oldExpenseId: string | null;
+    previousVoucherNumber: string;
+    repairedVoucherNumber: string;
+  }>;
+};
 type PostImportAudit = {
   expectedCounts: Record<string, number>;
   tableCounts: {
@@ -1194,6 +1206,101 @@ async function repairDuplicateImportedAccounts(workspaceId: string): Promise<Acc
       duplicateAccountsRemoved,
       groupsBefore,
       groupsAfter,
+    };
+  });
+}
+
+async function repairImportedVoucherNumbers(workspaceId: string): Promise<VoucherNumberRepairResult> {
+  return db.transaction(async (tx) => {
+    const voucherRows = await tx.select({
+      id: operationalRecords.id,
+      clientRecordId: operationalRecords.clientRecordId,
+      payload: operationalRecords.payload,
+      sourceType: operationalRecords.sourceType,
+      oldAndroidId: operationalRecords.oldAndroidId,
+    }).from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, workspaceId),
+      eq(operationalRecords.entityType, "voucher"),
+      sql`${operationalRecords.payload}->>'deletedAt' IS NULL`,
+      or(
+        eq(operationalRecords.sourceType, sourceTypeFor("expenses")),
+        sql`${operationalRecords.payload}->>'source_type' = ${sourceTypeFor("expenses")}`,
+        sql`nullif(trim(coalesce(${operationalRecords.payload}->>'originalVoucherNumber', '')), '') IS NOT NULL`,
+        sql`nullif(trim(coalesce(${operationalRecords.payload}->>'legacyVoucherNumber', '')), '') IS NOT NULL`
+      ),
+    ));
+
+    const mismatchedRows = voucherRows.filter((row) => {
+      const payload = row.payload as Record<string, unknown>;
+      const currentVoucherNumber = String(payload.voucherNumber ?? "").trim();
+      const originalVoucherNumber = String(payload.originalVoucherNumber ?? "").trim();
+      const legacyVoucherNumber = String(payload.legacyVoucherNumber ?? "").trim();
+      const repairedVoucherNumber = originalVoucherNumber || legacyVoucherNumber;
+      return Boolean(repairedVoucherNumber) && currentVoucherNumber !== repairedVoucherNumber;
+    });
+
+    const updatedVouchers: VoucherNumberRepairResult["updatedVouchers"] = [];
+    for (const row of mismatchedRows) {
+      const payload = row.payload as Record<string, unknown>;
+      const previousVoucherNumber = String(payload.voucherNumber ?? "").trim();
+      const repairedVoucherNumber = String(payload.originalVoucherNumber ?? "").trim()
+        || String(payload.legacyVoucherNumber ?? "").trim();
+      if (!repairedVoucherNumber) continue;
+      const nextPayload = {
+        ...payload,
+        voucherNumber: repairedVoucherNumber,
+      };
+      await tx.update(operationalRecords).set({
+        payload: nextPayload,
+        updatedAt: new Date(),
+      }).where(eq(operationalRecords.id, row.id));
+      updatedVouchers.push({
+        clientRecordId: row.clientRecordId,
+        oldExpenseId: row.oldAndroidId ?? (typeof payload.oldExpenseId === "string" ? payload.oldExpenseId : null),
+        previousVoucherNumber,
+        repairedVoucherNumber,
+      });
+    }
+
+    const afterRows = await tx.select({
+      payload: operationalRecords.payload,
+    }).from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, workspaceId),
+      eq(operationalRecords.entityType, "voucher"),
+      sql`${operationalRecords.payload}->>'deletedAt' IS NULL`,
+      or(
+        eq(operationalRecords.sourceType, sourceTypeFor("expenses")),
+        sql`${operationalRecords.payload}->>'source_type' = ${sourceTypeFor("expenses")}`,
+        sql`nullif(trim(coalesce(${operationalRecords.payload}->>'originalVoucherNumber', '')), '') IS NOT NULL`,
+        sql`nullif(trim(coalesce(${operationalRecords.payload}->>'legacyVoucherNumber', '')), '') IS NOT NULL`
+      ),
+    ));
+
+    const mismatchesAfter = afterRows.filter((row) => {
+      const payload = row.payload as Record<string, unknown>;
+      const currentVoucherNumber = String(payload.voucherNumber ?? "").trim();
+      const repairedVoucherNumber = String(payload.originalVoucherNumber ?? "").trim()
+        || String(payload.legacyVoucherNumber ?? "").trim();
+      return Boolean(repairedVoucherNumber) && currentVoucherNumber !== repairedVoucherNumber;
+    }).length;
+
+    await tx.insert(auditLogs).values({
+      workspaceId,
+      action: "admin.migration_import.repair_voucher_numbers",
+      entityType: "migration_import",
+      details: {
+        mismatchesBefore: mismatchedRows.length,
+        mismatchesAfter,
+        vouchersUpdated: updatedVouchers.length,
+        updatedVouchers,
+      },
+    });
+
+    return {
+      vouchersUpdated: updatedVouchers.length,
+      mismatchesBefore: mismatchedRows.length,
+      mismatchesAfter,
+      updatedVouchers,
     };
   });
 }
@@ -4394,6 +4501,20 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       message: result.duplicateGroupsBefore
         ? "Duplicate imported accounts were repaired."
         : "No duplicate imported accounts were found.",
+    };
+  });
+
+  app.post("/v1/admin/migration-import/repair-voucher-numbers", { preHandler: requirePermission("CREATE_WORKSPACE") }, async (request, reply) => {
+    const parsed = repairSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ message: "A workspaceId is required." });
+    if (localDevelopmentMode) return { message: "Local memory mode cannot repair imported voucher numbers. Configure a dev database first." };
+
+    const result = await repairImportedVoucherNumbers(parsed.data.workspaceId);
+    return {
+      ...result,
+      message: result.mismatchesBefore
+        ? "Imported voucher numbers were repaired."
+        : "No imported voucher number mismatches were found.",
     };
   });
 }

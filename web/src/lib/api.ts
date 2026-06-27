@@ -453,6 +453,18 @@ export type DuplicateImportedAccountsRepairResult = {
   groupsAfter: Array<{ name: string; type: string; count: number; accountIds: string[]; canonicalAccountId: string | null }>;
   message: string;
 };
+export type ImportedVoucherNumberRepairResult = {
+  vouchersUpdated: number;
+  mismatchesBefore: number;
+  mismatchesAfter: number;
+  updatedVouchers: Array<{
+    clientRecordId: string;
+    oldExpenseId: string | null;
+    previousVoucherNumber: string;
+    repairedVoucherNumber: string;
+  }>;
+  message: string;
+};
 export type MigrationImportCleanupPreview = {
   batchId: string;
   fileHash: string;
@@ -919,6 +931,8 @@ export const repairDeletedFarmSeasonState = (token: string, input: { workspaceId
   apiRequest<DeletedFarmSeasonRepairResult>("/v1/admin/migration-import/repair-deleted-state", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 60_000, debugLabel: "migration-import-repair-deleted-state" });
 export const repairDuplicateImportedAccounts = (token: string, input: { workspaceId: string }) =>
   apiRequest<DuplicateImportedAccountsRepairResult>("/v1/admin/migration-import/repair-duplicate-accounts", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 60_000, debugLabel: "migration-import-repair-duplicate-accounts" });
+export const repairImportedVoucherNumbers = (token: string, input: { workspaceId: string }) =>
+  apiRequest<ImportedVoucherNumberRepairResult>("/v1/admin/migration-import/repair-voucher-numbers", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 60_000, debugLabel: "migration-import-repair-voucher-numbers" });
 export const fetchMigrationImportCleanupPreview = (token: string, workspaceId: string, batchId: string) =>
   apiRequest<{ preview: MigrationImportCleanupPreview }>(`/v1/admin/migration-import/cleanup-preview?workspaceId=${encodeURIComponent(workspaceId)}&batchId=${encodeURIComponent(batchId)}`, {}, token, { timeoutMs: 30_000, debugLabel: "migration-import-cleanup-preview" });
 export const cleanFailedMigrationImport = (token: string, input: {

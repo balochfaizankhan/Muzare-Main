@@ -4,7 +4,7 @@ import { ChevronDown, ChevronUp, Database, FileJson, UploadCloud } from "lucide-
 import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
 import { ImportVisibilityAuditPanel } from "../../components/ImportVisibilityAuditPanel";
-import { cancelAndCleanMigrationImport, downloadMigrationImportFailures, fetchActiveMigrationImportJob, fetchAdminWorkspaces, fetchMigrationImportBatches, fetchMigrationImportCleanupPreview, fetchMigrationImportHistory, fetchMigrationImportJobStatus, fetchMigrationImportProgress, importMigrationData, repairDeletedFarmSeasonState, repairDuplicateImportedAccounts, repairMigrationImportVisibility, validateMigrationImport, type MigrationImportBatchRecord, type MigrationImportHistoryRecord, type MigrationImportIssue, type MigrationImportJobDetail, type MigrationImportLogEntry, type MigrationImportProgress, type MigrationImportSummary } from "../../lib/api";
+import { cancelAndCleanMigrationImport, downloadMigrationImportFailures, fetchActiveMigrationImportJob, fetchAdminWorkspaces, fetchMigrationImportBatches, fetchMigrationImportCleanupPreview, fetchMigrationImportHistory, fetchMigrationImportJobStatus, fetchMigrationImportProgress, importMigrationData, repairDeletedFarmSeasonState, repairDuplicateImportedAccounts, repairImportedVoucherNumbers, repairMigrationImportVisibility, validateMigrationImport, type MigrationImportBatchRecord, type MigrationImportHistoryRecord, type MigrationImportIssue, type MigrationImportJobDetail, type MigrationImportLogEntry, type MigrationImportProgress, type MigrationImportSummary } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 
 type StepStatus = "done" | "running" | "waiting" | "failed";
@@ -435,6 +435,14 @@ export function MigrationImport() {
     mutationFn: () => repairDuplicateImportedAccounts(token!, { workspaceId }),
     onSuccess: refreshAfterImport,
   });
+  const repairVoucherNumbers = useMutation({
+    mutationFn: () => repairImportedVoucherNumbers(token!, { workspaceId }),
+    onSuccess: async () => {
+      refreshAfterImport();
+      window.dispatchEvent(new Event("muzare-data-refresh"));
+      window.dispatchEvent(new Event("muzare-local-data-change"));
+    },
+  });
   const cleanupPreview = useQuery({
     queryKey: ["admin-migration-import-cleanup-preview", workspaceId, latestBatch?.id],
     queryFn: () => fetchMigrationImportCleanupPreview(token!, workspaceId, latestBatch!.id),
@@ -722,6 +730,9 @@ export function MigrationImport() {
               <button type="button" className="secondary-button" disabled={!token || !workspaceId || repairDuplicateAccounts.isPending || blockingOperation} onClick={() => repairDuplicateAccounts.mutate()}>
                 Repair Duplicate Imported Accounts
               </button>
+              <button type="button" className="secondary-button" disabled={!token || !workspaceId || repairVoucherNumbers.isPending || blockingOperation} onClick={() => repairVoucherNumbers.mutate()}>
+                Repair Imported Voucher Numbers
+              </button>
               <button type="button" className="secondary-button" onClick={() => setVisibilityAuditOpen((value) => !value)}>
                 Run Visibility Audit
               </button>
@@ -729,9 +740,11 @@ export function MigrationImport() {
             {repairVisibility.data ? <p className="positive">{repairVisibility.data.message} Repaired records: {repairVisibility.data.repairedRecords}.</p> : null}
             {repairDeletedState.data ? <p className="positive">{repairDeletedState.data.message} Farms deactivated: {repairDeletedState.data.farmsDeactivated}. Seasons deactivated: {repairDeletedState.data.seasonsDeactivated}.</p> : null}
             {repairDuplicateAccounts.data ? <p className="positive">{repairDuplicateAccounts.data.message} Duplicate groups before: {repairDuplicateAccounts.data.duplicateGroupsBefore}. Child records remapped: {repairDuplicateAccounts.data.childRecordsRemapped}. Duplicate accounts removed: {repairDuplicateAccounts.data.duplicateAccountsRemoved}.</p> : null}
+            {repairVoucherNumbers.data ? <p className="positive">{repairVoucherNumbers.data.message} Updated vouchers: {repairVoucherNumbers.data.vouchersUpdated}. Mismatches before: {repairVoucherNumbers.data.mismatchesBefore}. Mismatches after: {repairVoucherNumbers.data.mismatchesAfter}.</p> : null}
             {repairVisibility.error ? <p className="worker-action-error">{repairVisibility.error instanceof Error ? repairVisibility.error.message : "Visibility repair failed."}</p> : null}
             {repairDeletedState.error ? <p className="worker-action-error">{repairDeletedState.error instanceof Error ? repairDeletedState.error.message : "Deleted farm/season repair failed."}</p> : null}
             {repairDuplicateAccounts.error ? <p className="worker-action-error">{repairDuplicateAccounts.error instanceof Error ? repairDuplicateAccounts.error.message : "Duplicate account repair failed."}</p> : null}
+            {repairVoucherNumbers.error ? <p className="worker-action-error">{repairVoucherNumbers.error instanceof Error ? repairVoucherNumbers.error.message : "Voucher number repair failed."}</p> : null}
 
             {visibilityAuditOpen && workspaceId ? <ImportVisibilityAuditPanel workspaceId={workspaceId} title="Import Visibility Audit" /> : null}
 
