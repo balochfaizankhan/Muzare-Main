@@ -84,6 +84,13 @@ const cleanupActionSchema = z.object({
   backupConfirmed: z.literal(true),
   includeEditedImportedRecords: z.boolean().default(false),
 });
+const cancelAndCleanActionSchema = z.object({
+  workspaceId: z.string().uuid(),
+  batchId: z.string().uuid(),
+  confirmationText: z.literal("CANCEL AND CLEAN IMPORT"),
+  backupConfirmed: z.literal(true),
+  includeEditedImportedRecords: z.boolean().default(false),
+});
 const batchListQuerySchema = z.object({ workspaceId: z.string().uuid() });
 
 function normalizeImportedName(value: unknown) {
@@ -299,7 +306,7 @@ type AttendanceImportJobStatus = {
   jobId: string;
   importBatchId: string;
   workspaceId: string;
-  status: "queued" | "running" | "completed" | "failed" | "partial_failed" | "rolled_back";
+  status: "queued" | "running" | "completed" | "failed" | "partial_failed" | "rolled_back" | "cancelled";
   currentStep: string;
   sourceRows: number;
   totalBatches: number;
@@ -326,6 +333,7 @@ type CleanupTarget = {
   workspaceId: string;
   fileHash: string;
   source: string;
+  status: string;
 };
 
 type VisibilityAuditResponse = {
@@ -353,6 +361,7 @@ type VisibilityAuditResponse = {
 };
 
 const attendanceImportJobs = new Map<string, AttendanceImportJobStatus>();
+const cancelledImportBatchIds = new Set<string>();
 const importStepOrder = ["Farms", "Seasons", "Accounts", "Partners", "Labour", "Expenses", "Expense Items", "Advances", "Attendance"] as const;
 
 const importCountKeys: Array<{ label: string; key: ImportCountKey }> = [
@@ -1251,11 +1260,41 @@ async function loadCleanupTarget(workspaceId: string, batchId: string): Promise<
     workspaceId: importBatches.workspaceId,
     fileHash: importBatches.fileHash,
     source: importBatches.source,
+    status: importBatches.status,
   }).from(importBatches).where(and(
     eq(importBatches.id, batchId),
     eq(importBatches.workspaceId, workspaceId),
   )).limit(1);
   return batch ?? null;
+}
+
+const cancelAndCleanAllowedStatuses = new Set(["running", "in_progress", "failed", "partial_failed", "cancelled"]);
+
+function canCancelAndCleanBatch(status: string) {
+  return cancelAndCleanAllowedStatuses.has(status);
+}
+
+function isEditedImportRecordSql() {
+  return sql`updated_at > created_at + interval '1 second'`;
+}
+
+function markRunningImportCancelled(batchId: string, message: string) {
+  cancelledImportBatchIds.add(batchId);
+  const job = attendanceImportJobs.get(batchId);
+  if (!job) return;
+  const completedAt = new Date().toISOString();
+  job.status = "cancelled";
+  job.currentStep = "IMPORT CANCELLED";
+  job.message = message;
+  job.completedAt = completedAt;
+  job.lastProgressAt = completedAt;
+  const attendanceStep = job.steps.find((step) => step.name === "Attendance");
+  if (attendanceStep) {
+    attendanceStep.status = "failed";
+    attendanceStep.completedAt = completedAt;
+    attendanceStep.message = message;
+  }
+  attendanceImportJobs.set(batchId, job);
 }
 
 async function cleanupPreview(workspaceId: string, batchId: string) {
@@ -1266,65 +1305,63 @@ async function cleanupPreview(workspaceId: string, batchId: string) {
     SELECT entity_type, count(*)::int AS count
     FROM operational_records
     WHERE workspace_id = ${workspaceId}
-      AND (
-        import_batch_id = ${batchId}
-        OR source_file_hash = ${target.fileHash}
-        OR source_type = 'muzare_android'
-      )
+      AND import_batch_id = ${batchId}
     GROUP BY entity_type
     ORDER BY entity_type
   `);
   const [batchCounts] = await db.execute(sql`
     SELECT
       count(*)::int AS batches,
-      count(*) FILTER (WHERE status IN ('failed', 'partial_failed', 'running'))::int AS open_batches
+      count(*) FILTER (WHERE status IN ('failed', 'partial_failed', 'running', 'in_progress', 'cancelled'))::int AS open_batches
     FROM import_batches
     WHERE workspace_id = ${workspaceId}
-      AND (id = ${batchId} OR file_hash = ${target.fileHash} OR source = 'muzare_android')
+      AND id = ${batchId}
   `).then((result) => result.rows as Array<{ batches: number; open_batches: number }>);
   const [failureCounts] = await db.execute(sql`
     SELECT count(*)::int AS failures
-    FROM import_failures f
-    INNER JOIN import_batches b ON b.id = f.import_batch_id
-    WHERE b.workspace_id = ${workspaceId}
-      AND (b.id = ${batchId} OR b.file_hash = ${target.fileHash} OR b.source = 'muzare_android')
+    FROM import_failures
+    WHERE workspace_id = ${workspaceId}
+      AND import_batch_id = ${batchId}
   `).then((result) => result.rows as Array<{ failures: number }>);
   const [farmCounts] = await db.execute(sql`
     SELECT count(*)::int AS farms
     FROM farms
     WHERE workspace_id = ${workspaceId}
-      AND (
-        import_batch_id = ${batchId}
-        OR source_file_hash = ${target.fileHash}
-        OR source_type = 'farm'
-      )
+      AND import_batch_id = ${batchId}
   `).then((result) => result.rows as Array<{ farms: number }>);
   const [seasonCounts] = await db.execute(sql`
     SELECT count(*)::int AS seasons
     FROM seasons
     WHERE workspace_id = ${workspaceId}
-      AND (
-        import_batch_id = ${batchId}
-        OR source_file_hash = ${target.fileHash}
-        OR source_type = 'season'
-      )
+      AND import_batch_id = ${batchId}
   `).then((result) => result.rows as Array<{ seasons: number }>);
-  const [editedCounts] = await db.execute(sql`
+  const [operationalEditedCounts] = await db.execute(sql`
     SELECT count(*)::int AS edited
     FROM operational_records
     WHERE workspace_id = ${workspaceId}
-      AND (
-        import_batch_id = ${batchId}
-        OR source_file_hash = ${target.fileHash}
-        OR source_type = 'muzare_android'
-      )
-      AND updated_at > created_at + interval '1 second'
+      AND import_batch_id = ${batchId}
+      AND ${isEditedImportRecordSql()}
+  `).then((result) => result.rows as Array<{ edited: number }>);
+  const [farmEditedCounts] = await db.execute(sql`
+    SELECT count(*)::int AS edited
+    FROM farms
+    WHERE workspace_id = ${workspaceId}
+      AND import_batch_id = ${batchId}
+      AND ${isEditedImportRecordSql()}
+  `).then((result) => result.rows as Array<{ edited: number }>);
+  const [seasonEditedCounts] = await db.execute(sql`
+    SELECT count(*)::int AS edited
+    FROM seasons
+    WHERE workspace_id = ${workspaceId}
+      AND import_batch_id = ${batchId}
+      AND ${isEditedImportRecordSql()}
   `).then((result) => result.rows as Array<{ edited: number }>);
 
   return {
     batchId,
     fileHash: target.fileHash,
     source: target.source,
+    status: target.status,
     operationalRecordsByEntity: operationalRows.rows.map((row) => ({
       entityType: String((row as Record<string, unknown>).entity_type),
       count: Number((row as Record<string, unknown>).count ?? 0),
@@ -1334,7 +1371,323 @@ async function cleanupPreview(workspaceId: string, batchId: string) {
     importFailures: Number(failureCounts?.failures ?? 0),
     importedFarms: Number(farmCounts?.farms ?? 0),
     importedSeasons: Number(seasonCounts?.seasons ?? 0),
-    editedImportedRecords: Number(editedCounts?.edited ?? 0),
+    editedImportedRecords: Number(operationalEditedCounts?.edited ?? 0) + Number(farmEditedCounts?.edited ?? 0) + Number(seasonEditedCounts?.edited ?? 0),
+    editedOperationalRecords: Number(operationalEditedCounts?.edited ?? 0),
+    editedFarms: Number(farmEditedCounts?.edited ?? 0),
+    editedSeasons: Number(seasonEditedCounts?.edited ?? 0),
+  };
+}
+
+async function cancelAndCleanImportBatch(params: {
+  workspaceId: string;
+  batchId: string;
+  includeEditedImportedRecords: boolean;
+  userId?: string | null;
+  sessionId?: string | null;
+  reason: string;
+}) {
+  const target = await loadCleanupTarget(params.workspaceId, params.batchId);
+  if (!target) throw new Error("Import batch not found.");
+  if (!canCancelAndCleanBatch(target.status)) {
+    throw new Error(`Only running, in-progress, failed, partial_failed, or cancelled batches can be cleaned. Current status: ${target.status}.`);
+  }
+
+  markRunningImportCancelled(params.batchId, params.reason);
+
+  const result = await db.transaction(async (tx) => {
+    const [editedOperationalRows, editedFarmRows, editedSeasonRows] = await Promise.all([
+      tx.select({ id: operationalRecords.id }).from(operationalRecords).where(and(
+        eq(operationalRecords.workspaceId, params.workspaceId),
+        eq(operationalRecords.importBatchId, params.batchId),
+        isEditedImportRecordSql(),
+      )),
+      tx.select({ id: farms.id }).from(farms).where(and(
+        eq(farms.workspaceId, params.workspaceId),
+        eq(farms.importBatchId, params.batchId),
+        isEditedImportRecordSql(),
+      )),
+      tx.select({ id: seasons.id }).from(seasons).where(and(
+        eq(seasons.workspaceId, params.workspaceId),
+        eq(seasons.importBatchId, params.batchId),
+        isEditedImportRecordSql(),
+      )),
+    ]);
+    const skippedEditedOperationalRecords = params.includeEditedImportedRecords ? 0 : editedOperationalRows.length;
+    const skippedEditedFarms = params.includeEditedImportedRecords ? 0 : editedFarmRows.length;
+    const skippedEditedSeasons = params.includeEditedImportedRecords ? 0 : editedSeasonRows.length;
+
+    const deletedOperational = await tx.delete(operationalRecords)
+      .where(params.includeEditedImportedRecords
+        ? and(
+          eq(operationalRecords.workspaceId, params.workspaceId),
+          eq(operationalRecords.importBatchId, params.batchId),
+        )
+        : and(
+          eq(operationalRecords.workspaceId, params.workspaceId),
+          eq(operationalRecords.importBatchId, params.batchId),
+          sql`NOT (${isEditedImportRecordSql()})`,
+        ))
+      .returning({ id: operationalRecords.id });
+
+    const deletedFailures = await tx.delete(importFailures)
+      .where(and(
+        eq(importFailures.workspaceId, params.workspaceId),
+        eq(importFailures.importBatchId, params.batchId),
+      ))
+      .returning({ id: importFailures.id });
+
+    const candidateSeasonRows = await tx.select({
+      id: seasons.id,
+      farmId: seasons.farmId,
+      notes: seasons.notes,
+    }).from(seasons).where(params.includeEditedImportedRecords
+      ? and(
+        eq(seasons.workspaceId, params.workspaceId),
+        eq(seasons.importBatchId, params.batchId),
+      )
+      : and(
+        eq(seasons.workspaceId, params.workspaceId),
+        eq(seasons.importBatchId, params.batchId),
+        sql`NOT (${isEditedImportRecordSql()})`,
+      ));
+    const candidateSeasonIds = candidateSeasonRows.map((row) => row.id);
+
+    const deletableSeasonRows = candidateSeasonIds.length
+      ? await tx.select({ id: seasons.id })
+        .from(seasons)
+        .where(and(
+          inArray(seasons.id, candidateSeasonIds),
+          sql`NOT EXISTS (
+            SELECT 1
+            FROM operational_records r
+            WHERE r.workspace_id = ${seasons.workspaceId}
+              AND r.season_id = ${seasons.id}
+          )`,
+        ))
+      : [];
+    const hardDeleteSeasonIds = deletableSeasonRows.map((row) => row.id);
+    let seasonsHardDeleted = 0;
+    if (hardDeleteSeasonIds.length) {
+      const deleted = await tx.delete(seasons)
+        .where(inArray(seasons.id, hardDeleteSeasonIds))
+        .returning({ id: seasons.id });
+      seasonsHardDeleted = deleted.length;
+    }
+    const softDeleteSeasonRows = candidateSeasonRows.filter((row) => !hardDeleteSeasonIds.includes(row.id));
+    for (const season of softDeleteSeasonRows) {
+      const cleanupNote = "Cleanup archived season after cancelled Android import.";
+      await tx.update(seasons).set({
+        active: false,
+        closed: true,
+        status: "archived",
+        notes: !season.notes || season.notes === ""
+          ? cleanupNote
+          : season.notes.includes(cleanupNote)
+            ? season.notes
+            : `${season.notes} | ${cleanupNote}`,
+        updatedAt: new Date(),
+      }).where(eq(seasons.id, season.id));
+    }
+    const seasonsSoftDeleted = softDeleteSeasonRows.length;
+
+    const candidateFarmRows = await tx.select({
+      id: farms.id,
+      remarks: farms.remarks,
+    }).from(farms).where(params.includeEditedImportedRecords
+      ? and(
+        eq(farms.workspaceId, params.workspaceId),
+        eq(farms.importBatchId, params.batchId),
+      )
+      : and(
+        eq(farms.workspaceId, params.workspaceId),
+        eq(farms.importBatchId, params.batchId),
+        sql`NOT (${isEditedImportRecordSql()})`,
+      ));
+    const candidateFarmIds = candidateFarmRows.map((row) => row.id);
+
+    const detachedAuditLogRows = candidateFarmIds.length
+      ? await tx.update(auditLogs)
+        .set({ farmId: null })
+        .where(and(
+          eq(auditLogs.workspaceId, params.workspaceId),
+          inArray(auditLogs.farmId, candidateFarmIds),
+        ))
+        .returning({ id: auditLogs.id })
+      : [];
+
+    const farmDeletionRequestsRows = candidateFarmIds.length
+      ? await tx.select({ id: farmDeletionRequests.id })
+        .from(farmDeletionRequests)
+        .where(and(
+          eq(farmDeletionRequests.workspaceId, params.workspaceId),
+          inArray(farmDeletionRequests.farmId, candidateFarmIds),
+        ))
+      : [];
+
+    const deletableFarmRows = candidateFarmIds.length
+      ? await tx.select({ id: farms.id })
+        .from(farms)
+        .where(and(
+          inArray(farms.id, candidateFarmIds),
+          sql`NOT EXISTS (
+            SELECT 1 FROM operational_records r
+            WHERE r.workspace_id = ${farms.workspaceId}
+              AND r.farm_id = ${farms.id}
+          )`,
+          sql`NOT EXISTS (
+            SELECT 1 FROM seasons s
+            WHERE s.workspace_id = ${farms.workspaceId}
+              AND s.farm_id = ${farms.id}
+          )`,
+          sql`NOT EXISTS (
+            SELECT 1 FROM farm_deletion_requests fdr
+            WHERE fdr.workspace_id = ${farms.workspaceId}
+              AND fdr.farm_id = ${farms.id}
+          )`,
+        ))
+      : [];
+    const hardDeleteFarmIds = deletableFarmRows.map((row) => row.id);
+
+    let farmsHardDeleted = 0;
+    let farmsSoftDeleted = 0;
+    let protectedFarmRefs = 0;
+    let farmCleanupMessage: string | null = null;
+    if (hardDeleteFarmIds.length) {
+      try {
+        const deleted = await tx.delete(farms)
+          .where(inArray(farms.id, hardDeleteFarmIds))
+          .returning({ id: farms.id });
+        farmsHardDeleted = deleted.length;
+      } catch (error) {
+        farmCleanupMessage = "Cleanup could not hard-delete imported farms because references remain. Farms were soft-deleted instead.";
+        console.warn("CANCEL_AND_CLEAN_IMPORT_FARM_HARD_DELETE_BLOCKED", {
+          workspaceId: params.workspaceId,
+          batchId: params.batchId,
+          reason: readableImportError(error),
+        });
+      }
+    }
+
+    const softDeleteFarmIds = candidateFarmIds.filter((id) => !hardDeleteFarmIds.includes(id) || Boolean(farmCleanupMessage));
+    if (softDeleteFarmIds.length) {
+      const cleanupNote = "Cleanup soft-delete after cancelled Android import.";
+      for (const farm of candidateFarmRows.filter((row) => softDeleteFarmIds.includes(row.id))) {
+        await tx.update(farms).set({
+          active: false,
+          deletedAt: new Date(),
+          remarks: !farm.remarks || farm.remarks === ""
+            ? cleanupNote
+            : farm.remarks.includes(cleanupNote)
+              ? farm.remarks
+              : `${farm.remarks} | ${cleanupNote}`,
+          updatedAt: new Date(),
+        }).where(eq(farms.id, farm.id));
+      }
+      farmsSoftDeleted = softDeleteFarmIds.length;
+    }
+    protectedFarmRefs = Math.max(candidateFarmIds.length - farmsHardDeleted - farmsSoftDeleted, 0);
+
+    await tx.execute(sql`
+      UPDATE user_sessions us
+      SET active_farm_id = NULL,
+          active_season_id = NULL
+      WHERE us.workspace_id = ${params.workspaceId}
+        AND (
+          (us.active_farm_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1
+            FROM farms f
+            WHERE f.id = us.active_farm_id
+              AND f.workspace_id = us.workspace_id
+              AND f.deleted_at IS NULL
+              AND f.active = true
+          ))
+          OR
+          (us.active_season_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1
+            FROM seasons s
+            JOIN farms f ON f.id = s.farm_id AND f.workspace_id = s.workspace_id
+            WHERE s.id = us.active_season_id
+              AND s.workspace_id = us.workspace_id
+              AND s.active = true
+              AND s.status <> 'archived'
+              AND f.deleted_at IS NULL
+              AND f.active = true
+          ))
+        )
+    `);
+
+    const cleanupSummary = {
+      cancelledBy: params.userId ?? null,
+      cancelledAt: new Date().toISOString(),
+      reason: params.reason,
+      deletedOperationalRecords: deletedOperational.length,
+      deletedImportFailures: deletedFailures.length,
+      seasonsHardDeleted,
+      seasonsSoftDeleted,
+      farmsHardDeleted,
+      farmsSoftDeleted,
+      auditLogsDetached: detachedAuditLogRows.length,
+      skippedEditedOperationalRecords,
+      skippedEditedFarms,
+      skippedEditedSeasons,
+      skippedProtectedRecords: protectedFarmRefs + farmDeletionRequestsRows.length,
+      protectedFarmRefs,
+      farmDeletionRequestsRemaining: farmDeletionRequestsRows.length,
+      farmCleanupMessage,
+    };
+
+    await tx.update(importBatches).set({
+      status: "cancelled",
+      completedAt: new Date(),
+      errorJson: cleanupSummary,
+      updatedAt: new Date(),
+    }).where(eq(importBatches.id, params.batchId));
+
+    await tx.insert(auditLogs).values({
+      workspaceId: params.workspaceId,
+      userId: params.userId ?? undefined,
+      actorUserId: params.userId ?? undefined,
+      action: "admin.migration_import.cancel_and_clean",
+      entityType: "migration_import",
+      entityId: params.batchId,
+      details: cleanupSummary,
+    });
+
+    return {
+      batchStatus: "cancelled",
+      operationalRecordsRemoved: deletedOperational.length,
+      importFailuresRemoved: deletedFailures.length,
+      seasonsHardDeleted,
+      seasonsSoftDeleted,
+      farmsHardDeleted,
+      farmsSoftDeleted,
+      auditLogsDetached: detachedAuditLogRows.length,
+      skippedEditedOperationalRecords,
+      skippedEditedFarms,
+      skippedEditedSeasons,
+      skippedProtectedRecords: protectedFarmRefs + farmDeletionRequestsRows.length,
+      protectedFarmRefs,
+      farmDeletionRequestsRemaining: farmDeletionRequestsRows.length,
+      farmCleanupMessage,
+    };
+  });
+
+  let contextRepair: { activeFarmId: string | null; activeSeasonId: string | null; message: string } | null = null;
+  try {
+    await repairDeletedFarmSeasonState(params.workspaceId);
+    if (params.userId && params.sessionId) {
+      contextRepair = await repairWorkspaceContext(params.workspaceId, params.userId, params.sessionId);
+    }
+  } catch {
+    contextRepair = null;
+  }
+
+  cancelledImportBatchIds.delete(params.batchId);
+  return {
+    ...result,
+    activeFarmId: contextRepair?.activeFarmId ?? null,
+    activeSeasonId: contextRepair?.activeSeasonId ?? null,
+    contextMessage: contextRepair?.message ?? null,
   };
 }
 
@@ -1845,6 +2198,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         status: importBatches.status,
         startedAt: importBatches.startedAt,
         completedAt: importBatches.completedAt,
+        updatedAt: importBatches.updatedAt,
         payloadJson: importBatches.payloadJson,
         summaryJson: importBatches.summaryJson,
         errorJson: importBatches.errorJson,
@@ -1878,6 +2232,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
             status: record.status,
             startedAt: record.startedAt.toISOString(),
             completedAt: record.completedAt?.toISOString() ?? null,
+            updatedAt: record.updatedAt.toISOString(),
             payloadJson: payloadJson.value,
             summaryJson: summaryJson.value,
             errorJson: errorJson.value,
@@ -2885,6 +3240,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         updateJobStep("Attendance", { status: "running", startedAt: new Date().toISOString(), message: "Attendance import started." });
         await logStep("IMPORT ATTENDANCE", "started", { sourceRows: attendanceRows.length, message: `Attendance import job ${attendanceJobId} started.` });
         for (const [batchIndex, batch] of chunks(attendanceRows, 100).entries()) {
+          if (cancelledImportBatchIds.has(importBatchId)) return;
           const batchNumber = batchIndex + 1;
           updateJob({ currentBatch: batchNumber, currentStep: `Attendance batch ${batchNumber}/${importJob.totalBatches}`, message: `Attendance batch ${batchNumber}/${importJob.totalBatches} running.` });
           updateJobStep("Attendance", { batch: batchNumber, batchTotal: importJob.totalBatches, message: `Attendance batch ${batchNumber}/${importJob.totalBatches} running.` });
@@ -2898,6 +3254,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
             message: `Attendance batch ${batchNumber}/${importJob.totalBatches}. Processed ${importJob.processedRows}/${attendanceRows.length}.`,
           });
           for (const source of batch) {
+            if (cancelledImportBatchIds.has(importBatchId)) return;
             const currentRow = String(oldId(source) || `${importJob.processedRows + 1}`);
             updateJob({ currentRow });
             const labourerId = resolveLabourId(source);
@@ -3299,6 +3656,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
 
     void (async () => {
       for (const [batchIndex, rows] of chunks(attendanceRows, 100).entries()) {
+        if (cancelledImportBatchIds.has(batch.id)) return;
         job.currentBatch = batchIndex + 1;
         job.currentStep = `Attendance batch ${job.currentBatch}/${job.totalBatches}`;
         const attendanceStep = job.steps.find((step) => step.name === "Attendance");
@@ -3308,6 +3666,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         }
         await updateJob();
         for (const source of rows) {
+          if (cancelledImportBatchIds.has(batch.id)) return;
           const androidId = oldId(source);
           const labourerId = resolveLabourId(source);
           job.currentRow = androidId;
@@ -3490,285 +3849,63 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
     }
     const preview = await cleanupPreview(parsed.data.workspaceId, parsed.data.batchId);
     if (!preview) return reply.code(404).send({ message: "Import batch not found." });
+    if (!canCancelAndCleanBatch(preview.status)) {
+      return reply.code(409).send({
+        message: `Only running, in-progress, failed, partial_failed, or cancelled batches can be cleaned. Current status: ${preview.status}.`,
+      });
+    }
     if (preview.editedImportedRecords > 0 && !parsed.data.includeEditedImportedRecords) {
       return reply.code(409).send({
         message: `Cleanup found ${preview.editedImportedRecords} imported records that were later edited. Confirm edited-record cleanup explicitly before removing them.`,
       });
     }
-
-    const target = await loadCleanupTarget(parsed.data.workspaceId, parsed.data.batchId);
-    if (!target) return reply.code(404).send({ message: "Import batch not found." });
-
-    const result = await db.transaction(async (tx) => {
-      const importedOperationalFilter = sql`
-        workspace_id = ${parsed.data.workspaceId}
-        AND (
-          import_batch_id = ${parsed.data.batchId}
-          OR source_file_hash = ${target.fileHash}
-          OR source_type = 'muzare_android'
-        )
-        ${parsed.data.includeEditedImportedRecords
-          ? sql``
-          : sql`AND updated_at <= created_at + interval '1 second'`}
-      `;
-
-      const deletedOperational = await tx.execute(sql`
-        WITH deleted AS (
-          DELETE FROM operational_records
-          WHERE ${importedOperationalFilter}
-          RETURNING id
-        )
-        SELECT count(*)::int AS count FROM deleted
-      `);
-
-      const deletedFailures = await tx.execute(sql`
-        WITH deleted AS (
-          DELETE FROM import_failures f
-          USING import_batches b
-          WHERE b.id = f.import_batch_id
-            AND b.workspace_id = ${parsed.data.workspaceId}
-            AND (b.id = ${parsed.data.batchId} OR b.file_hash = ${target.fileHash} OR b.source = 'muzare_android')
-          RETURNING f.id
-        )
-        SELECT count(*)::int AS count FROM deleted
-      `);
-
-      const deletedBatches = await tx.execute(sql`
-        WITH deleted AS (
-          DELETE FROM import_batches
-          WHERE workspace_id = ${parsed.data.workspaceId}
-            AND (id = ${parsed.data.batchId} OR file_hash = ${target.fileHash} OR source = 'muzare_android')
-          RETURNING id
-        )
-        SELECT count(*)::int AS count FROM deleted
-      `);
-
-      const deletedSeasons = await tx.execute(sql`
-        WITH candidate_seasons AS (
-          SELECT s.id
-          FROM seasons s
-          WHERE s.workspace_id = ${parsed.data.workspaceId}
-            AND (
-              s.import_batch_id = ${parsed.data.batchId}
-              OR s.source_file_hash = ${target.fileHash}
-              OR s.source_type = 'season'
-            )
-            AND NOT EXISTS (
-              SELECT 1
-              FROM operational_records r
-              WHERE r.workspace_id = s.workspace_id
-                AND r.season_id = s.id
-            )
-        ),
-        deleted AS (
-          DELETE FROM seasons s
-          USING candidate_seasons c
-          WHERE s.id = c.id
-          RETURNING s.id
-        )
-        SELECT count(*)::int AS count FROM deleted
-      `);
-
-      const candidateFarmIdsResult = await tx.execute(sql`
-        SELECT f.id
-        FROM farms f
-        WHERE f.workspace_id = ${parsed.data.workspaceId}
-          AND (
-            f.import_batch_id = ${parsed.data.batchId}
-            OR f.source_file_hash = ${target.fileHash}
-            OR (f.source_type = 'farm' AND f.old_android_id IS NOT NULL)
-          )
-      `);
-      const candidateFarmIds = candidateFarmIdsResult.rows
-        .map((row) => String((row as Record<string, unknown>).id ?? ""))
-        .filter(Boolean);
-
-      const detachedAuditLogRows = candidateFarmIds.length
-        ? await tx.update(auditLogs)
-          .set({ farmId: null })
-          .where(and(
-            eq(auditLogs.workspaceId, parsed.data.workspaceId),
-            inArray(auditLogs.farmId, candidateFarmIds),
-          ))
-          .returning({ id: auditLogs.id })
-        : [];
-      const detachedAuditLogs = detachedAuditLogRows.length;
-
-      const farmDeletionRequestsRows = candidateFarmIds.length
-        ? await tx.select({ id: sql<string>`cast(${farms.id} as text)` })
-          .from(farmDeletionRequests)
-          .innerJoin(farms, eq(farms.id, farmDeletionRequests.farmId))
-          .where(and(
-            eq(farmDeletionRequests.workspaceId, parsed.data.workspaceId),
-            inArray(farmDeletionRequests.farmId, candidateFarmIds),
-          ))
-        : [];
-      const farmDeletionRequestsCount = farmDeletionRequestsRows.length;
-
-      const candidateFarmsWithoutPrimaryRefs = candidateFarmIds.length
-        ? await tx.select({ id: farms.id })
-          .from(farms)
-          .where(and(
-            inArray(farms.id, candidateFarmIds),
-            sql`NOT EXISTS (
-              SELECT 1 FROM operational_records r
-              WHERE r.workspace_id = ${farms.workspaceId}
-                AND r.farm_id = ${farms.id}
-            )`,
-            sql`NOT EXISTS (
-              SELECT 1 FROM seasons s
-              WHERE s.workspace_id = ${farms.workspaceId}
-                AND s.farm_id = ${farms.id}
-            )`,
-            sql`NOT EXISTS (
-              SELECT 1 FROM farm_deletion_requests fdr
-              WHERE fdr.workspace_id = ${farms.workspaceId}
-                AND fdr.farm_id = ${farms.id}
-            )`,
-          ))
-        : [];
-      const hardDeleteCandidateIds = candidateFarmsWithoutPrimaryRefs.map((row) => row.id);
-
-      let hardDeletedFarms = 0;
-      let softDeletedFarms = 0;
-      let skippedFarms = 0;
-      let cleanupFarmMessage: string | null = null;
-
-      if (hardDeleteCandidateIds.length) {
-        try {
-          const deletedFarms = await tx.delete(farms)
-            .where(inArray(farms.id, hardDeleteCandidateIds))
-            .returning({ id: farms.id });
-          hardDeletedFarms = deletedFarms.length;
-        } catch (error) {
-          const readable = readableImportError(error);
-          cleanupFarmMessage = "Cleanup could not hard-delete imported farms because references remain. Farms were soft-deleted instead.";
-          console.warn("CLEANUP_FAILED_IMPORT_FARM_HARD_DELETE_BLOCKED", {
-            workspaceId: parsed.data.workspaceId,
-            batchId: parsed.data.batchId,
-            reason: readable,
-          });
-        }
-      }
-
-      const remainingFarmIds = candidateFarmIds.filter((id) => !hardDeleteCandidateIds.includes(id));
-      const fallbackSoftDeleteIds = cleanupFarmMessage ? candidateFarmIds : remainingFarmIds;
-      if (fallbackSoftDeleteIds.length) {
-        const existingSoftDeleteRows = await tx.select({ id: farms.id, remarks: farms.remarks })
-          .from(farms)
-          .where(inArray(farms.id, fallbackSoftDeleteIds));
-        const softDeleteRemark = "Cleanup soft-delete after failed Android import.";
-        for (const farm of existingSoftDeleteRows) {
-          await tx.update(farms).set({
-            active: false,
-            deletedAt: new Date(),
-            remarks: !farm.remarks || farm.remarks === ""
-              ? softDeleteRemark
-              : farm.remarks.includes(softDeleteRemark)
-                ? farm.remarks
-                : `${farm.remarks} | ${softDeleteRemark}`,
-            updatedAt: new Date(),
-          }).where(eq(farms.id, farm.id));
-        }
-        softDeletedFarms = existingSoftDeleteRows.length;
-      }
-      if (candidateFarmIds.length) {
-        await tx.update(seasons).set({
-          active: false,
-          status: "archived",
-          closed: true,
-          updatedAt: new Date(),
-        }).where(and(
-          eq(seasons.workspaceId, parsed.data.workspaceId),
-          inArray(seasons.farmId, candidateFarmIds),
-        ));
-      }
-      skippedFarms = Math.max(candidateFarmIds.length - hardDeletedFarms - softDeletedFarms, 0);
-
-      await tx.execute(sql`
-        UPDATE user_sessions us
-        SET active_farm_id = NULL,
-            active_season_id = NULL
-        WHERE us.workspace_id = ${parsed.data.workspaceId}
-          AND (
-            (us.active_farm_id IS NOT NULL AND NOT EXISTS (
-              SELECT 1
-              FROM farms f
-              WHERE f.id = us.active_farm_id
-                AND f.workspace_id = us.workspace_id
-                AND f.deleted_at IS NULL
-                AND f.active = true
-            ))
-            OR
-            (us.active_season_id IS NOT NULL AND NOT EXISTS (
-              SELECT 1
-              FROM seasons s
-              JOIN farms f ON f.id = s.farm_id AND f.workspace_id = s.workspace_id
-              WHERE s.id = us.active_season_id
-                AND s.workspace_id = us.workspace_id
-                AND s.active = true
-                AND s.status <> 'archived'
-                AND f.deleted_at IS NULL
-                AND f.active = true
-            ))
-          )
-      `);
-
-      await tx.insert(auditLogs).values({
-        workspaceId: parsed.data.workspaceId,
-        userId: request.appUser?.id,
-        actorUserId: request.appUser?.id,
-        action: "admin.migration_import.cleanup_failed",
-        entityType: "migration_import",
-        entityId: parsed.data.batchId,
-        details: {
-          batchId: parsed.data.batchId,
-          fileHash: target.fileHash,
-          backupConfirmed: parsed.data.backupConfirmed,
-          includeEditedImportedRecords: parsed.data.includeEditedImportedRecords,
-          deletedOperationalRecords: Number((deletedOperational.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
-          deletedImportFailures: Number((deletedFailures.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
-          deletedImportBatches: Number((deletedBatches.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
-          deletedSeasons: Number((deletedSeasons.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
-          detachedAuditLogs,
-          farmDeletionRequestsRemaining: farmDeletionRequestsCount,
-          hardDeletedFarms,
-          softDeletedFarms,
-          skippedFarms,
-          cleanupFarmMessage,
-        },
-      });
-
-      return {
-        operationalRecords: Number((deletedOperational.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
-        importFailures: Number((deletedFailures.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
-        importBatches: Number((deletedBatches.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
-        seasons: Number((deletedSeasons.rows[0] as Record<string, unknown> | undefined)?.count ?? 0),
-        farmsHardDeleted: hardDeletedFarms,
-        farmsSoftDeleted: softDeletedFarms,
-        auditLogsDetached: detachedAuditLogs,
-        skippedFarms,
-        farmCleanupMessage: cleanupFarmMessage,
-      };
+    const result = await cancelAndCleanImportBatch({
+      workspaceId: parsed.data.workspaceId,
+      batchId: parsed.data.batchId,
+      includeEditedImportedRecords: parsed.data.includeEditedImportedRecords,
+      userId: request.appUser?.id,
+      sessionId: request.sessionId,
+      reason: "Failed import cleanup requested by admin.",
     });
-
-    let contextRepair: { activeFarmId: string | null; activeSeasonId: string | null; message: string } | null = null;
-    try {
-      await repairDeletedFarmSeasonState(parsed.data.workspaceId);
-      contextRepair = await repairWorkspaceContext(parsed.data.workspaceId, request.appUser!.id, request.sessionId);
-    } catch {
-      contextRepair = null;
-    }
 
     return {
       message: result.farmCleanupMessage
         ?? "Failed Android import dump data was cleaned. Repair workspace context next if needed.",
-      result: {
-        ...result,
-        activeFarmId: contextRepair?.activeFarmId ?? null,
-        activeSeasonId: contextRepair?.activeSeasonId ?? null,
-        contextMessage: contextRepair?.message ?? null,
-      },
+      result,
+    };
+  });
+
+  app.post("/v1/admin/migration-import/cancel-and-clean", { preHandler: requirePermission("CREATE_WORKSPACE") }, async (request, reply) => {
+    const parsed = cancelAndCleanActionSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        message: "Backup confirmation and exact cancel confirmation are required.",
+      });
+    }
+    const preview = await cleanupPreview(parsed.data.workspaceId, parsed.data.batchId);
+    if (!preview) return reply.code(404).send({ message: "Import batch not found." });
+    if (!canCancelAndCleanBatch(preview.status)) {
+      return reply.code(409).send({
+        message: `Only running, in-progress, failed, partial_failed, or cancelled batches can be cleaned. Current status: ${preview.status}.`,
+      });
+    }
+    if (preview.editedImportedRecords > 0 && !parsed.data.includeEditedImportedRecords) {
+      return reply.code(409).send({
+        message: `Cleanup found ${preview.editedImportedRecords} imported records that were later edited. Confirm edited-record cleanup explicitly before removing them.`,
+      });
+    }
+    const result = await cancelAndCleanImportBatch({
+      workspaceId: parsed.data.workspaceId,
+      batchId: parsed.data.batchId,
+      includeEditedImportedRecords: parsed.data.includeEditedImportedRecords,
+      userId: request.appUser?.id,
+      sessionId: request.sessionId,
+      reason: "Import cancelled and cleaned by admin.",
+    });
+    return {
+      message: result.farmCleanupMessage
+        ?? "Import batch cancelled and incomplete imported data cleaned successfully.",
+      result,
     };
   });
 

@@ -339,7 +339,7 @@ export type MigrationImportJobStatus = {
   jobId: string;
   importBatchId: string;
   workspaceId: string;
-  status: "queued" | "running" | "completed" | "failed" | "partial_failed" | "rolled_back";
+  status: "queued" | "running" | "completed" | "failed" | "partial_failed" | "rolled_back" | "cancelled";
   currentStep: string;
   sourceRows: number;
   totalBatches: number;
@@ -398,6 +398,7 @@ export type MigrationImportBatchRecord = {
   status: string;
   startedAt: string;
   completedAt: string | null;
+  updatedAt: string;
   summaryJson: unknown;
   errorJson: unknown;
 };
@@ -456,6 +457,7 @@ export type MigrationImportCleanupPreview = {
   batchId: string;
   fileHash: string;
   source: string;
+  status: string;
   operationalRecordsByEntity: Array<{ entityType: string; count: number }>;
   importBatches: number;
   openImportBatches: number;
@@ -463,16 +465,25 @@ export type MigrationImportCleanupPreview = {
   importedFarms: number;
   importedSeasons: number;
   editedImportedRecords: number;
+  editedOperationalRecords: number;
+  editedFarms: number;
+  editedSeasons: number;
 };
 export type MigrationImportCleanupResult = {
-  operationalRecords: number;
-  importFailures: number;
-  importBatches: number;
-  seasons: number;
+  batchStatus: "cancelled";
+  operationalRecordsRemoved: number;
+  importFailuresRemoved: number;
+  seasonsHardDeleted: number;
+  seasonsSoftDeleted: number;
   farmsHardDeleted: number;
   farmsSoftDeleted: number;
   auditLogsDetached: number;
-  skippedFarms: number;
+  skippedEditedOperationalRecords: number;
+  skippedEditedFarms: number;
+  skippedEditedSeasons: number;
+  skippedProtectedRecords: number;
+  protectedFarmRefs: number;
+  farmDeletionRequestsRemaining: number;
   farmCleanupMessage?: string | null;
   activeFarmId?: string | null;
   activeSeasonId?: string | null;
@@ -899,6 +910,18 @@ export const cleanFailedMigrationImport = (token: string, input: {
   { method: "POST", body: JSON.stringify(input) },
   token,
   { timeoutMs: 60_000, debugLabel: "migration-import-cleanup-failed" },
+);
+export const cancelAndCleanMigrationImport = (token: string, input: {
+  workspaceId: string;
+  batchId: string;
+  confirmationText: "CANCEL AND CLEAN IMPORT";
+  backupConfirmed: true;
+  includeEditedImportedRecords?: boolean;
+}) => apiRequest<{ message: string; result: MigrationImportCleanupResult }>(
+  "/v1/admin/migration-import/cancel-and-clean",
+  { method: "POST", body: JSON.stringify(input) },
+  token,
+  { timeoutMs: 60_000, debugLabel: "migration-import-cancel-and-clean" },
 );
 export const fetchImportVisibilityAudit = (token: string, workspaceId: string) =>
   apiRequest<ImportVisibilityAudit>(`/v1/workspace/${workspaceId}/import-visibility-audit`, {}, token, { timeoutMs: 30_000, debugLabel: "import-visibility-audit" });

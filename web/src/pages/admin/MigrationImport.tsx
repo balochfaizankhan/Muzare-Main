@@ -4,7 +4,7 @@ import { Database, FileJson, ShieldAlert, UploadCloud } from "lucide-react";
 import { useAuth } from "../../auth/AuthProvider";
 import { ImportVisibilityAuditPanel } from "../../components/ImportVisibilityAuditPanel";
 import { Link, useParams } from "react-router-dom";
-import { cleanFailedMigrationImport, downloadMigrationImportFailures, fetchActiveMigrationImportJob, fetchAdminWorkspaces, fetchMigrationImportBatches, fetchMigrationImportCleanupPreview, fetchMigrationImportHistory, fetchMigrationImportJobDetail, fetchMigrationImportJobStatus, importMigrationData, markMigrationImportBatchClosed, repairDeletedFarmSeasonState, repairDuplicateImportedAccounts, repairMigrationImportVisibility, retryMigrationAttendance, rollbackMigrationImportBatch, validateMigrationImport, type MigrationImportBatchRecord, type MigrationImportHistoryRecord, type MigrationImportIssue, type MigrationImportJobDetail, type MigrationImportJobStatus, type MigrationImportLogEntry, type MigrationImportSummary } from "../../lib/api";
+import { cancelAndCleanMigrationImport, downloadMigrationImportFailures, fetchActiveMigrationImportJob, fetchAdminWorkspaces, fetchMigrationImportBatches, fetchMigrationImportCleanupPreview, fetchMigrationImportHistory, fetchMigrationImportJobDetail, fetchMigrationImportJobStatus, importMigrationData, markMigrationImportBatchClosed, repairDeletedFarmSeasonState, repairDuplicateImportedAccounts, repairMigrationImportVisibility, retryMigrationAttendance, rollbackMigrationImportBatch, validateMigrationImport, type MigrationImportBatchRecord, type MigrationImportHistoryRecord, type MigrationImportIssue, type MigrationImportJobDetail, type MigrationImportJobStatus, type MigrationImportLogEntry, type MigrationImportSummary } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 
 function SummaryGrid({ summary }: { summary: MigrationImportSummary }) {
@@ -248,13 +248,15 @@ function LatestBatchPanel({
   rollingBack: boolean;
   closing: boolean;
 }) {
+  const isStuck = ["running", "in_progress"].includes(batch.status) && (Date.now() - new Date(batch.updatedAt).getTime()) > 10 * 60 * 1000;
   return (
     <section className="migration-issues">
       <h3>Latest Import Batch</h3>
       <p><b>Batch ID</b> {batch.id}</p>
-      <p><b>Status</b> {batch.status}</p>
+      <p><b>Status</b> {batch.status}{isStuck ? " · This import appears stuck." : ""}</p>
       <p><b>File</b> {batch.fileName ?? "Imported JSON"} · {batch.fileHash.slice(0, 12)}</p>
       <p><b>Started</b> {new Date(batch.startedAt).toLocaleString()}</p>
+      <p><b>Last updated</b> {new Date(batch.updatedAt).toLocaleString()}</p>
       {batch.completedAt ? <p><b>Completed</b> {new Date(batch.completedAt).toLocaleString()}</p> : null}
       <div className="record-list__actions">
         <button type="button" className="secondary-button" onClick={onRetryAttendance} disabled={retrying || batch.status === "running"}>
@@ -278,6 +280,8 @@ function CleanupPanel({
   onLoadPreview,
   backupConfirmed,
   setBackupConfirmed,
+  confirmationText,
+  setConfirmationText,
   includeEditedImportedRecords,
   setIncludeEditedImportedRecords,
   onCleanup,
@@ -289,16 +293,22 @@ function CleanupPanel({
   onLoadPreview: () => void;
   backupConfirmed: boolean;
   setBackupConfirmed: (value: boolean) => void;
+  confirmationText: string;
+  setConfirmationText: (value: string) => void;
   includeEditedImportedRecords: boolean;
   setIncludeEditedImportedRecords: (value: boolean) => void;
   onCleanup: () => void;
   cleaning: boolean;
 }) {
+  const isStuck = ["running", "in_progress"].includes(batch.status) && (Date.now() - new Date(batch.updatedAt).getTime()) > 10 * 60 * 1000;
+  const canSubmit = Boolean(preview && backupConfirmed && confirmationText === "CANCEL AND CLEAN IMPORT" && !cleaning);
   return (
     <section className="migration-issues">
-      <h3>Clean Failed Android Import</h3>
-      <p className="worker-action-error">This will remove failed Android import dump data. This cannot be undone without backup.</p>
+      <h3>Cancel and Clean This Import</h3>
+      <p className="worker-action-error">This will cancel the selected import and remove incomplete imported data created by this import batch. This cannot be undone without a database backup.</p>
       <p><b>Selected batch</b> {batch.id}</p>
+      <p><b>Status</b> {batch.status}{isStuck ? " · This import appears stuck." : ""}</p>
+      <p><b>Last updated</b> {new Date(batch.updatedAt).toLocaleString()}</p>
       <div className="record-list__actions">
         <button type="button" className="secondary-button" onClick={onLoadPreview} disabled={loadingPreview}>
           Preview Cleanup
@@ -306,10 +316,12 @@ function CleanupPanel({
       </div>
       {preview ? (
         <div>
+          <p><b>Import batch status</b> {preview.status}</p>
           <p><b>Import batches</b> {preview.importBatches} · <b>Open/failed batches</b> {preview.openImportBatches}</p>
           <p><b>Import failures</b> {preview.importFailures}</p>
           <p><b>Imported farms</b> {preview.importedFarms} · <b>Imported seasons</b> {preview.importedSeasons}</p>
           <p><b>Edited imported records</b> {preview.editedImportedRecords}</p>
+          <p><b>Edited operational records</b> {preview.editedOperationalRecords} · <b>Edited farms</b> {preview.editedFarms} · <b>Edited seasons</b> {preview.editedSeasons}</p>
           <h4>Operational dump by entity</h4>
           {!preview.operationalRecordsByEntity.length ? <p className="activity-empty">No matching imported operational dump records found.</p> : preview.operationalRecordsByEntity.map((item) => (
             <p key={item.entityType}><b>{item.entityType}</b> {item.count}</p>
@@ -324,9 +336,18 @@ function CleanupPanel({
         <input type="checkbox" checked={includeEditedImportedRecords} onChange={(event) => setIncludeEditedImportedRecords(event.target.checked)} />
         <span>Also remove imported records that were later edited.</span>
       </label>
+      <label>
+        <span>Type confirmation</span>
+        <input
+          type="text"
+          value={confirmationText}
+          onChange={(event) => setConfirmationText(event.target.value)}
+          placeholder="CANCEL AND CLEAN IMPORT"
+        />
+      </label>
       <div className="record-list__actions">
-        <button type="button" disabled={!preview || !backupConfirmed || cleaning} onClick={onCleanup}>
-          Clean Failed Import Dump
+        <button type="button" disabled={!canSubmit} onClick={onCleanup}>
+          Cancel and Clean This Import
         </button>
       </div>
     </section>
@@ -345,6 +366,7 @@ export function MigrationImport() {
   const [allowSummaryMismatch, setAllowSummaryMismatch] = useState(false);
   const [attendanceJobId, setAttendanceJobId] = useState("");
   const [cleanupBackupConfirmed, setCleanupBackupConfirmed] = useState(false);
+  const [cleanupConfirmationText, setCleanupConfirmationText] = useState("");
   const [cleanupIncludeEdited, setCleanupIncludeEdited] = useState(false);
   const workspaces = useQuery({
     queryKey: ["admin-workspaces"],
@@ -439,15 +461,16 @@ export function MigrationImport() {
     enabled: false,
   });
   const cleanFailedImport = useMutation({
-    mutationFn: (batchId: string) => cleanFailedMigrationImport(token!, {
+    mutationFn: (batchId: string) => cancelAndCleanMigrationImport(token!, {
       workspaceId,
       batchId,
-      confirmation: "CLEAN FAILED IMPORT",
+      confirmationText: "CANCEL AND CLEAN IMPORT",
       backupConfirmed: true,
       includeEditedImportedRecords: cleanupIncludeEdited,
     }),
     onSuccess: () => {
       setCleanupBackupConfirmed(false);
+      setCleanupConfirmationText("");
       refreshAfterImport();
       void cleanupPreview.refetch();
     },
@@ -603,6 +626,8 @@ export function MigrationImport() {
             onLoadPreview={() => { void cleanupPreview.refetch(); }}
             backupConfirmed={cleanupBackupConfirmed}
             setBackupConfirmed={setCleanupBackupConfirmed}
+            confirmationText={cleanupConfirmationText}
+            setConfirmationText={setCleanupConfirmationText}
             includeEditedImportedRecords={cleanupIncludeEdited}
             setIncludeEditedImportedRecords={setCleanupIncludeEdited}
             onCleanup={() => cleanFailedImport.mutate(latestBatch.id)}
@@ -621,14 +646,20 @@ export function MigrationImport() {
           <p className={cleanFailedImport.data.result.farmCleanupMessage ? "worker-action-error" : "positive"}>
             {cleanFailedImport.data.message}
           </p>
-          <p><b>Operational dump removed</b> {cleanFailedImport.data.result.operationalRecords}</p>
-          <p><b>Import failures removed</b> {cleanFailedImport.data.result.importFailures}</p>
-          <p><b>Import batches removed</b> {cleanFailedImport.data.result.importBatches}</p>
-          <p><b>Seasons hard-deleted</b> {cleanFailedImport.data.result.seasons}</p>
+          <p><b>Final batch status</b> {cleanFailedImport.data.result.batchStatus}</p>
+          <p><b>Operational dump removed</b> {cleanFailedImport.data.result.operationalRecordsRemoved}</p>
+          <p><b>Import failures removed</b> {cleanFailedImport.data.result.importFailuresRemoved}</p>
+          <p><b>Seasons hard-deleted</b> {cleanFailedImport.data.result.seasonsHardDeleted}</p>
+          <p><b>Seasons archived/soft-deleted</b> {cleanFailedImport.data.result.seasonsSoftDeleted}</p>
           <p><b>Farms hard-deleted</b> {cleanFailedImport.data.result.farmsHardDeleted}</p>
           <p><b>Farms soft-deleted</b> {cleanFailedImport.data.result.farmsSoftDeleted}</p>
           <p><b>Audit logs detached</b> {cleanFailedImport.data.result.auditLogsDetached}</p>
-          <p><b>Farms skipped</b> {cleanFailedImport.data.result.skippedFarms}</p>
+          <p><b>Edited operational records skipped</b> {cleanFailedImport.data.result.skippedEditedOperationalRecords}</p>
+          <p><b>Edited farms skipped</b> {cleanFailedImport.data.result.skippedEditedFarms}</p>
+          <p><b>Edited seasons skipped</b> {cleanFailedImport.data.result.skippedEditedSeasons}</p>
+          <p><b>Protected records skipped</b> {cleanFailedImport.data.result.skippedProtectedRecords}</p>
+          <p><b>Protected farm references</b> {cleanFailedImport.data.result.protectedFarmRefs}</p>
+          <p><b>Farm deletion requests still linked</b> {cleanFailedImport.data.result.farmDeletionRequestsRemaining}</p>
           {cleanFailedImport.data.result.contextMessage ? <p><b>Context repair</b> {cleanFailedImport.data.result.contextMessage}</p> : null}
         </section>
       ) : null}
