@@ -6,6 +6,15 @@ export class ApiError extends Error {
   }
 }
 
+export type HealthResponse = {
+  status: "ok" | "degraded";
+  database: string;
+  mode?: string;
+  gitCommit: string;
+  buildTime: string;
+  appVersion: string;
+};
+
 export type PlatformRole = "platform_admin" | "platform_support";
 export type WorkspaceRole = "workspace_owner" | "workspace_manager" | "supervisor" | "accountant" | "operator" | "viewer";
 export type WorkspaceModule = "dashboard" | "workforce" | "attendance" | "advances" | "expenses" | "sales" | "dispatch" | "inventory" | "accounts" | "reports" | "settings" | "team";
@@ -790,6 +799,7 @@ export const signup = (input: SignupRequest) =>
 
 export const logout = (token: string) => apiRequest<void>("/v1/auth/logout", { method: "POST" }, token);
 export const fetchSession = (token: string) => apiRequest<Session>("/v1/session", {}, token);
+export const fetchHealth = () => apiRequest<HealthResponse>("/health");
 export const fetchMe = (token: string) => apiRequest<{ user: AppUser }>("/v1/me", {}, token);
 export const updateMe = (token: string, input: UserProfileInput) =>
   apiRequest<{ user: AppUser }>("/v1/me", { method: "PATCH", body: JSON.stringify(input) }, token);

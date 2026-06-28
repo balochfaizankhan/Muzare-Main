@@ -430,10 +430,12 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       selectedRole: membership?.role ?? request.appUser.role,
       membershipPermissions: membership?.permissions ?? null,
       farmAccessMode: membership?.farmAccessMode ?? null,
-      submitRecords: hasPermission(request.appUser, "SUBMIT_RECORDS", parsed.data.workspaceId),
-      manageRecords: hasPermission(request.appUser, "MANAGE_RECORDS", parsed.data.workspaceId),
-      expensesCreate: hasModulePermission(request.appUser, parsed.data.workspaceId, "expenses", "create"),
-      expensesEdit: hasModulePermission(request.appUser, parsed.data.workspaceId, "expenses", "edit"),
+      effectivePermissions: {
+        submitRecords: hasPermission(request.appUser, "SUBMIT_RECORDS", parsed.data.workspaceId),
+        manageRecords: hasPermission(request.appUser, "MANAGE_RECORDS", parsed.data.workspaceId),
+        expensesCreate: hasModulePermission(request.appUser, parsed.data.workspaceId, "expenses", "create"),
+        expensesEdit: hasModulePermission(request.appUser, parsed.data.workspaceId, "expenses", "edit"),
+      },
     };
     if (!requireWorkspaceWrite(request.appUser, parsed.data.workspaceId)) {
       return forbiddenResponse(reply, "Workspace record submission permission is required.", {

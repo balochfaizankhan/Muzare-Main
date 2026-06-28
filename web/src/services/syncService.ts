@@ -128,6 +128,10 @@ function syncErrorDetails(error: unknown): SyncErrorDetails | null {
     : null;
 }
 
+function syncErrorCode(error: unknown) {
+  return syncErrorDetails(error)?.code;
+}
+
 function isStaleContextSyncError(error: unknown) {
   const code = syncErrorDetails(error)?.code;
   return code === "stale_workspace_context" || code === "stale_farm_context" || code === "stale_season_context";
@@ -363,6 +367,9 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
       const permissionDenied = isPermissionDeniedSyncError(error);
       const staleContext = isStaleContextSyncError(error);
       const details = syncErrorDetails(error);
+      const errorStatus = error instanceof ApiError ? error.status : undefined;
+      const errorCode = syncErrorCode(error);
+      const errorMessage = error instanceof Error ? error.message : "Unknown sync failure.";
       if (error instanceof Error && error.message.includes("PostgreSQL is the primary workspace database")) {
         if (mutation.operation === "delete") await tableFor(mutation.entity).delete((mutation.payload as LocalRecord).id);
         else await tableFor(mutation.entity).update((mutation.payload as LocalRecord).id, { pendingSync: false });
@@ -393,6 +400,10 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
             ? "pending"
             : "failed",
         lastError,
+        errorStatus,
+        errorCode,
+        errorMessage,
+        errorDetails: details,
         nextAttemptAt,
         lastAttemptedAt: new Date().toISOString(),
       });

@@ -35,6 +35,10 @@ export type PendingMutation = LocalRecord & {
   status?: "pending" | "syncing" | "failed" | "permission_denied" | "stale_context" | "resolved" | "discarded";
   retryable?: boolean;
   lastError?: string;
+  errorStatus?: number;
+  errorCode?: string;
+  errorMessage?: string;
+  errorDetails?: unknown;
   lastAttemptedAt?: string;
   resolvedAt?: string;
   workspaceId: string;

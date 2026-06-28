@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
+import { BuildDiagnostics } from "../../components/BuildDiagnostics";
 import { SubpageHeader } from "../../components/SubpageHeader";
 import { config } from "../../config";
 import {
@@ -241,6 +242,7 @@ export function Farms() {
         </section>}
         {isSettings && token && <UserProfileCard token={token} />}
         {isSettings && token && workspaceId && <WorkspaceProfileCard token={token} workspaceId={workspaceId} />}
+        {isSettings && <BuildDiagnostics compact />}
         {isSettings && <section className="settings-link-grid">
           <Link to="/workspace/settings/team"><UsersRound size={19} /><div><strong>{t("workspaceTeam.title")}</strong><span>{t("workspaceTeam.settingsCard")}</span></div></Link>
           <Link to="/workspace/settings/approvals"><ShieldCheck size={19} /><div><strong>{t("workspaceApprovals.title")}</strong><span>{t("workspaceApprovals.settingsCard")}</span></div></Link>

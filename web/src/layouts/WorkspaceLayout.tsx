@@ -168,6 +168,17 @@ export function WorkspaceLayout() {
                 {item.status === "permission_denied" ? <p className="sync-queue-item__error">{t("sync.permissionDeniedHint")}</p> : null}
                 {item.status === "stale_context" ? <p className="sync-queue-item__error">{t("sync.staleContextHint")}</p> : null}
                 {item.lastError ? <p className="sync-queue-item__error">{t("sync.lastError")}: {item.lastError}</p> : null}
+                {"errorStatus" in item && item.errorStatus ? <p>HTTP status: {item.errorStatus}</p> : null}
+                {"errorCode" in item && item.errorCode ? <p>Error code: {item.errorCode}</p> : null}
+                {"errorMessage" in item && item.errorMessage ? <p>Backend message: {item.errorMessage}</p> : null}
+                {"errorDetails" in item && item.errorDetails && typeof item.errorDetails === "object" ? <>
+                  {"selectedRole" in (item.errorDetails as Record<string, unknown>) ? <p>Selected role: {String((item.errorDetails as Record<string, unknown>).selectedRole ?? "-")}</p> : null}
+                  {"permissionKey" in (item.errorDetails as Record<string, unknown>) ? <p>Required permission: {String((item.errorDetails as Record<string, unknown>).permissionKey ?? "-")}</p> : null}
+                  {"farmAccessResult" in (item.errorDetails as Record<string, unknown>) ? <p>Context result: farm access {String((item.errorDetails as Record<string, unknown>).farmAccessResult)}</p> : null}
+                  {"code" in (item.errorDetails as Record<string, unknown>) ? <p>Context code: {String((item.errorDetails as Record<string, unknown>).code ?? "-")}</p> : null}
+                  {"effectivePermissions" in (item.errorDetails as Record<string, unknown>) ? <pre className="sync-queue-item__details">effectivePermissions: {JSON.stringify((item.errorDetails as Record<string, unknown>).effectivePermissions, null, 2)}</pre> : null}
+                  <pre className="sync-queue-item__details">details: {JSON.stringify(item.errorDetails, null, 2)}</pre>
+                </> : null}
                 <div className="sync-queue-item__actions">
                   {item.status !== "permission_denied" && item.status !== "stale_context" && <button type="button" onClick={() => void retrySyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.retryItem")}</button>}
                   {item.status === "stale_context" && <button type="button" onClick={() => void repairStaleSyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.repairStaleContext")}</button>}
