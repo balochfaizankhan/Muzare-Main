@@ -6,6 +6,7 @@ import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { expenseCategories, expenseSubcategories } from "../db/schema.js";
 import { hasPermission } from "../permissions.js";
+import type { TenantReferenceValidationError } from "../tenant-ownership.js";
 
 const workspaceParams = z.object({ workspaceId: z.string().uuid() });
 const subcategoryParams = workspaceParams.extend({ subcategoryId: z.string().uuid() });
@@ -46,6 +47,198 @@ export async function resolveExpenseCategory(workspaceId: string, categoryId?: u
     .where(and(isNull(expenseCategories.workspaceId), eq(expenseCategories.name, "Other"), isNull(expenseSubcategories.workspaceId), eq(expenseSubcategories.name, "Miscellaneous")))
     .limit(1);
   return fallback ?? null;
+}
+
+export async function validateExpenseCategoryReference(
+  workspaceId: string,
+  categoryId?: unknown,
+  subcategoryId?: unknown,
+): Promise<{ category: Awaited<ReturnType<typeof resolveExpenseCategory>>; error: TenantReferenceValidationError | null }> {
+  if (typeof categoryId !== "string" || !categoryId) {
+    return {
+      category: null,
+      error: {
+        code: "expense_category_missing",
+        entity: "expense category",
+        entityId: categoryId == null ? null : String(categoryId),
+        entityName: null,
+        workspaceId,
+        farmId: null,
+        seasonId: null,
+        expectedWorkspace: workspaceId,
+        actualWorkspace: null,
+        message: "Expense category is required.",
+      },
+    };
+  }
+  if (typeof subcategoryId !== "string" || !subcategoryId) {
+    return {
+      category: null,
+      error: {
+        code: "expense_subcategory_missing",
+        entity: "expense subcategory",
+        entityId: subcategoryId == null ? null : String(subcategoryId),
+        entityName: null,
+        workspaceId,
+        farmId: null,
+        seasonId: null,
+        expectedWorkspace: workspaceId,
+        actualWorkspace: null,
+        message: "Expense subcategory is required.",
+      },
+    };
+  }
+  const [subcategoryRecord] = await db.select({
+    id: expenseSubcategories.id,
+    name: expenseSubcategories.name,
+    workspaceId: expenseSubcategories.workspaceId,
+    categoryId: expenseSubcategories.categoryId,
+    active: expenseSubcategories.active,
+  }).from(expenseSubcategories).where(eq(expenseSubcategories.id, subcategoryId)).limit(1);
+  if (!subcategoryRecord) {
+    return {
+      category: null,
+      error: {
+        code: "expense_subcategory_not_found",
+        entity: "expense subcategory",
+        entityId: subcategoryId,
+        entityName: null,
+        workspaceId,
+        farmId: null,
+        seasonId: null,
+        expectedWorkspace: workspaceId,
+        actualWorkspace: null,
+        message: `Expense subcategory id ${subcategoryId} does not exist.`,
+      },
+    };
+  }
+  const [categoryRecord] = await db.select({
+    id: expenseCategories.id,
+    name: expenseCategories.name,
+    workspaceId: expenseCategories.workspaceId,
+    active: expenseCategories.active,
+  }).from(expenseCategories).where(eq(expenseCategories.id, categoryId)).limit(1);
+  if (!categoryRecord) {
+    return {
+      category: null,
+      error: {
+        code: "expense_category_not_found",
+        entity: "expense category",
+        entityId: categoryId,
+        entityName: null,
+        workspaceId,
+        farmId: null,
+        seasonId: null,
+        expectedWorkspace: workspaceId,
+        actualWorkspace: null,
+        message: `Expense category id ${categoryId} does not exist.`,
+      },
+    };
+  }
+  if (categoryRecord.workspaceId && categoryRecord.workspaceId !== workspaceId) {
+    return {
+      category: null,
+      error: {
+        code: "expense_category_workspace_mismatch",
+        entity: "expense category",
+        entityId: categoryId,
+        entityName: categoryRecord.name,
+        workspaceId,
+        farmId: null,
+        seasonId: null,
+        expectedWorkspace: workspaceId,
+        actualWorkspace: categoryRecord.workspaceId,
+        message: `Expense category '${categoryRecord.name}' belongs to another workspace.`,
+      },
+    };
+  }
+  if (subcategoryRecord.workspaceId && subcategoryRecord.workspaceId !== workspaceId) {
+    return {
+      category: null,
+      error: {
+        code: "expense_subcategory_workspace_mismatch",
+        entity: "expense subcategory",
+        entityId: subcategoryId,
+        entityName: subcategoryRecord.name,
+        workspaceId,
+        farmId: null,
+        seasonId: null,
+        expectedWorkspace: workspaceId,
+        actualWorkspace: subcategoryRecord.workspaceId,
+        message: `Expense subcategory '${subcategoryRecord.name}' belongs to another workspace.`,
+      },
+    };
+  }
+  if (!categoryRecord.active) {
+    return {
+      category: null,
+      error: {
+        code: "expense_category_inactive",
+        entity: "expense category",
+        entityId: categoryId,
+        entityName: categoryRecord.name,
+        workspaceId,
+        farmId: null,
+        seasonId: null,
+        expectedWorkspace: workspaceId,
+        actualWorkspace: categoryRecord.workspaceId ?? workspaceId,
+        message: `Expense category '${categoryRecord.name}' is inactive.`,
+      },
+    };
+  }
+  if (!subcategoryRecord.active) {
+    return {
+      category: null,
+      error: {
+        code: "expense_subcategory_inactive",
+        entity: "expense subcategory",
+        entityId: subcategoryId,
+        entityName: subcategoryRecord.name,
+        workspaceId,
+        farmId: null,
+        seasonId: null,
+        expectedWorkspace: workspaceId,
+        actualWorkspace: subcategoryRecord.workspaceId ?? workspaceId,
+        message: `Expense subcategory '${subcategoryRecord.name}' is inactive.`,
+      },
+    };
+  }
+  if (subcategoryRecord.categoryId !== categoryRecord.id) {
+    return {
+      category: null,
+      error: {
+        code: "expense_subcategory_category_mismatch",
+        entity: "expense subcategory",
+        entityId: subcategoryId,
+        entityName: subcategoryRecord.name,
+        workspaceId,
+        farmId: null,
+        seasonId: null,
+        expectedWorkspace: workspaceId,
+        actualWorkspace: subcategoryRecord.workspaceId ?? workspaceId,
+        message: `Expense subcategory '${subcategoryRecord.name}' does not belong to category '${categoryRecord.name}'.`,
+      },
+    };
+  }
+  const category = await resolveExpenseCategory(workspaceId, categoryId, subcategoryId);
+  if (!category) {
+    return {
+      category: null,
+      error: {
+        code: "expense_category_scope_mismatch",
+        entity: "expense category",
+        entityId: categoryId,
+        entityName: categoryRecord.name,
+        workspaceId,
+        farmId: null,
+        seasonId: null,
+        expectedWorkspace: workspaceId,
+        actualWorkspace: categoryRecord.workspaceId ?? workspaceId,
+        message: `Expense category '${categoryRecord.name}' does not belong to the selected workspace.`,
+      },
+    };
+  }
+  return { category, error: null };
 }
 
 export async function expenseCategoryRoutes(app: FastifyInstance): Promise<void> {

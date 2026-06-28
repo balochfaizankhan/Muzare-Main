@@ -6,8 +6,8 @@ import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { auditLogs, expenseVoucherSequences, operationalRecords, userSessions } from "../db/schema.js";
 import { hasModulePermission, hasPermission, type WorkspaceModule } from "../permissions.js";
-import { validateTenantReferences } from "../tenant-ownership.js";
-import { resolveExpenseCategory } from "./expense-categories.js";
+import { validateTenantReferences, validateTenantReferencesDetailed } from "../tenant-ownership.js";
+import { validateExpenseCategoryReference } from "./expense-categories.js";
 import { asPayloadRecord, resolveWorkspaceContext } from "./workspace-context.js";
 import { allowedFarmIdsForWorkspace, hasFarmAccess } from "../workspace-access.js";
 
@@ -177,6 +177,17 @@ function forbiddenResponse(
   details: Record<string, unknown>,
 ) {
   return reply.code(403).send({ message, details });
+}
+
+function voucherValidationError(
+  reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } },
+  message: string,
+  details: Record<string, unknown>,
+) {
+  return forbiddenResponse(reply, message, {
+    code: "voucher_reference_validation_failed",
+    ...details,
+  });
 }
 
 function requireWorkspaceWrite(user: AuthenticatedUser, workspaceId: string) {
@@ -556,7 +567,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     if (generalFarmExpense && parsed.data.seasonId) {
       return reply.code(400).send({ message: "General farm expenses must not specify a season." });
     }
-    const ownershipError = await validateTenantReferences(parsed.data.workspaceId, {
+    const ownershipError = await validateTenantReferencesDetailed(parsed.data.workspaceId, {
       farmId: parsed.data.farmId,
       seasonId: parsed.data.seasonId,
       accountId: parsed.data.record.accountId,
@@ -567,11 +578,19 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       labourerId: parsed.data.record.labourerId,
       groupId: parsed.data.record.groupId,
       vehicleId: parsed.data.record.vehicleId,
-      dateTypeIds: Array.isArray(parsed.data.record.items)
-        ? parsed.data.record.items.map((item: { dateTypeId?: unknown }) => item.dateTypeId)
+      dateTypeIds: dispatchPayload?.success
+        ? dispatchPayload.data.items.map((item) => item.dateTypeId)
         : undefined,
     });
-    if (ownershipError) return reply.code(403).send({ message: ownershipError });
+    if (ownershipError) {
+      if (localDevelopmentMode && parsed.data.entity === "voucher") {
+        console.log("VOUCHER_VALIDATION_CHAIN", {
+          stage: "tenant_references",
+          failed: ownershipError,
+        });
+      }
+      return forbiddenResponse(reply, ownershipError.message, ownershipError);
+    }
     if (dispatchPayload?.success) {
       const dateTypeIds = dispatchPayload.data.items.map((item) => item.dateTypeId);
       if (await inactiveDispatchReference(parsed.data.workspaceId, parsed.data.farmId!, parsed.data.seasonId!, "vehicle", [dispatchPayload.data.vehicleId])) {
@@ -581,10 +600,67 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         return reply.code(403).send({ message: "Select active date types from this workspace farm and season." });
       }
     }
-    const expenseCategory = parsed.data.entity === "voucher"
-      ? await resolveExpenseCategory(parsed.data.workspaceId, parsed.data.record.categoryId, parsed.data.record.subcategoryId)
-      : null;
-    if (parsed.data.entity === "voucher" && !expenseCategory) return reply.code(403).send({ message: "Expense category does not belong to the selected workspace." });
+    let expenseCategory: Awaited<ReturnType<typeof validateExpenseCategoryReference>>["category"] = null;
+    if (parsed.data.entity === "voucher") {
+      const voucherItems = Array.isArray(parsed.data.record.items) ? parsed.data.record.items as Array<Record<string, unknown>> : [];
+      if (localDevelopmentMode) {
+        console.log("VOUCHER_VALIDATION_CHAIN", {
+          stage: "start",
+          workspaceId: parsed.data.workspaceId,
+          farmId: parsed.data.farmId ?? null,
+          seasonId: parsed.data.seasonId ?? null,
+          voucherId: parsed.data.record.id,
+          accountId: parsed.data.record.accountId ?? null,
+          categoryId: parsed.data.record.categoryId ?? null,
+          subcategoryId: parsed.data.record.subcategoryId ?? null,
+          itemCount: voucherItems.length,
+        });
+      }
+      const accountValidation = await validateTenantReferencesDetailed(parsed.data.workspaceId, {
+        farmId: parsed.data.farmId,
+        seasonId: parsed.data.seasonId,
+        accountId: parsed.data.record.accountId,
+      });
+      if (accountValidation) {
+        if (localDevelopmentMode) console.log("VOUCHER_VALIDATION_CHAIN", { stage: "payment_account", failed: accountValidation });
+        return voucherValidationError(reply, accountValidation.message, accountValidation);
+      }
+      const categoryValidation = await validateExpenseCategoryReference(
+        parsed.data.workspaceId,
+        parsed.data.record.categoryId,
+        parsed.data.record.subcategoryId,
+      );
+      if (categoryValidation.error) {
+        if (localDevelopmentMode) console.log("VOUCHER_VALIDATION_CHAIN", { stage: "voucher_header_category", failed: categoryValidation.error });
+        return voucherValidationError(reply, categoryValidation.error.message, categoryValidation.error);
+      }
+      expenseCategory = categoryValidation.category;
+      for (const [index, item] of voucherItems.entries()) {
+        const itemCategory = await validateExpenseCategoryReference(
+          parsed.data.workspaceId,
+          item.categoryId,
+          item.subcategoryId,
+        );
+        if (itemCategory.error) {
+          const itemError = {
+            ...itemCategory.error,
+            code: itemCategory.error.code,
+            itemIndex: index,
+            itemId: typeof item.id === "string" ? item.id : null,
+            itemDescription: typeof item.description === "string" ? item.description : null,
+          };
+          if (localDevelopmentMode) console.log("VOUCHER_VALIDATION_CHAIN", { stage: "voucher_item_category", failed: itemError });
+          return voucherValidationError(reply, itemCategory.error.message, itemError);
+        }
+      }
+      if (localDevelopmentMode) {
+        console.log("VOUCHER_VALIDATION_CHAIN", {
+          stage: "completed",
+          voucherId: parsed.data.record.id,
+          validatedItems: voucherItems.length,
+        });
+      }
+    }
     let [existing] = await db.select().from(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, parsed.data.workspaceId),
       eq(operationalRecords.entityType, parsed.data.entity),
