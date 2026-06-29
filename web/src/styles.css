@@ -3259,11 +3259,51 @@ button {
   width: 100%;
 }
 
+.expense-voucher-form__number-display {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.expense-voucher-form__number-label {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
 .expense-voucher-form__number {
   color: var(--brand-primary);
   font-size: 0.92rem;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.expense-voucher-form__number-trigger {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 32px;
+  justify-content: center;
+  padding: 0;
+  transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
+  width: 32px;
+}
+
+.expense-voucher-form__number-trigger:hover,
+.expense-voucher-form__number-trigger:focus-visible {
+  background: color-mix(in srgb, var(--brand-primary) 8%, white);
+  border-color: var(--brand-primary);
+  color: var(--brand-primary);
+  outline: none;
 }
 
 .expense-voucher-form__top-row {
@@ -3271,6 +3311,30 @@ button {
   gap: 10px;
   grid-column: 1 / -1;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.expense-voucher-form__number-row {
+  grid-column: 1 / -1;
+}
+
+.expense-voucher-form__number-edit {
+  display: grid;
+  gap: 8px;
+}
+
+.expense-voucher-form__number-edit-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.expense-voucher-form__number-edit-row input {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.expense-voucher-form__number-reset {
+  flex: 0 0 auto;
 }
 
 .expense-voucher-form__notes {
@@ -3332,12 +3396,45 @@ button {
 
 .expense-voucher-detail-items {
   display: grid;
-  gap: 10px;
+  gap: 14px;
 }
 
 .expense-voucher-detail-item {
   display: grid;
-  gap: 4px;
+  gap: 14px;
+  padding: 16px;
+}
+
+.expense-voucher-detail-item__header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.expense-voucher-detail-item__header strong {
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+.expense-voucher-detail-item__header b {
+  color: var(--brand-primary);
+  font-size: 1rem;
+}
+
+.expense-voucher-detail-item__grid {
+  display: grid;
+  gap: 14px 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.expense-voucher-detail-item__grid div {
+  display: grid;
+  gap: 6px;
+}
+
+.expense-voucher-detail-item__description {
+  grid-column: 1 / -1;
 }
 
 .expense-voucher-detail-item p,
@@ -3367,6 +3464,28 @@ button {
 .receipt-detail-card h3 {
   color: var(--text-primary);
   font-size: .98rem;
+  margin: 0;
+}
+
+.receipt-detail-card__empty {
+  align-items: center;
+  background: var(--surface);
+  border: 1px dashed color-mix(in srgb, var(--border) 84%, white);
+  border-radius: 14px;
+  color: var(--text-secondary);
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  padding: 26px 18px;
+  text-align: center;
+}
+
+.receipt-detail-card__empty strong {
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+.receipt-detail-card__empty p {
   margin: 0;
 }
 
@@ -3460,6 +3579,11 @@ button {
 
 .receipt-detail-card article {
   grid-template-columns: 28px minmax(0, 1fr) repeat(4, auto);
+}
+
+.expense-voucher-detail-dialog .worker-dialog__body {
+  display: grid;
+  gap: 18px;
 }
 
 .receipt-scanner-backdrop {
@@ -4608,7 +4732,8 @@ button {
 
 .worker-dialog-backdrop {
   align-items: center;
-  background: rgba(2, 16, 30, 0.42);
+  backdrop-filter: blur(10px);
+  background: rgba(2, 16, 30, 0.5);
   display: flex;
   inset: 0;
   justify-content: center;
@@ -4619,43 +4744,114 @@ button {
 
 .worker-dialog {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 28px 70px rgba(2, 16, 30, 0.28);
+  border: 1px solid color-mix(in srgb, var(--border) 82%, white);
+  border-radius: 16px;
+  box-shadow: 0 26px 80px rgba(2, 16, 30, 0.24);
   display: flex;
   flex-direction: column;
-  max-height: 90vh;
-  max-width: 520px;
+  max-height: min(92vh, 980px);
+  max-width: 680px;
   overflow: hidden;
-  width: min(100%, 520px);
+  width: min(100%, 680px);
+}
+
+.worker-dialog--wide {
+  max-width: 920px;
+  width: min(100%, 920px);
 }
 
 .worker-dialog__header {
-  background: var(--surface-soft);
-  border-bottom: 1px solid var(--border);
+  align-items: flex-start;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface-soft) 84%, white) 0%, var(--surface) 100%);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 84%, white);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
   position: sticky;
   top: 0;
   z-index: 1;
-  padding: 22px 28px;
+  padding: 24px 28px 20px;
 }
 
 .worker-dialog__header h2 {
   color: var(--brand-primary);
-  font-size: 1.45rem;
-  line-height: 1.15;
+  font-size: 1.55rem;
+  line-height: 1.12;
   margin: 0;
+}
+
+.worker-dialog__title-stack {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.worker-dialog__eyebrow {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.worker-dialog__header-meta {
+  align-items: center;
+  color: var(--text-secondary);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.worker-dialog__header-actions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  margin-inline-start: auto;
+}
+
+.worker-dialog__action,
+.worker-dialog__header > button,
+.worker-dialog__icon-button {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid color-mix(in srgb, var(--border) 88%, white);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-weight: 700;
+  gap: 8px;
+  justify-content: center;
+  min-height: 40px;
+  min-width: 40px;
+  padding: 0 14px;
+  transition: border-color 150ms ease, color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.worker-dialog__action:hover,
+.worker-dialog__action:focus-visible,
+.worker-dialog__header > button:hover,
+.worker-dialog__header > button:focus-visible,
+.worker-dialog__icon-button:hover,
+.worker-dialog__icon-button:focus-visible {
+  background: color-mix(in srgb, var(--brand-primary) 8%, white);
+  border-color: color-mix(in srgb, var(--brand-primary) 24%, var(--border));
+  color: var(--brand-primary);
+  outline: none;
+  transform: translateY(-1px);
 }
 
 .worker-dialog__body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 26px 28px 22px;
+  padding: 24px 28px;
 }
 
 .worker-dialog__body h3 {
   color: var(--text-primary);
-  font-size: 1.02rem;
+  font-size: 1.05rem;
   margin: 0 0 16px;
 }
 
@@ -4697,23 +4893,83 @@ button {
   color: #dc3f3f;
 }
 
+.worker-stats--summary {
+  gap: 14px 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.worker-stats--summary div {
+  align-items: stretch;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--border) 84%, white);
+  border-radius: 14px;
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+}
+
+.worker-stats--summary dt,
+.expense-voucher-detail-item__grid dt {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.worker-stats--summary dd,
+.expense-voucher-detail-item__grid dd {
+  font-size: 1rem;
+  font-weight: 700;
+  margin: 0;
+  text-align: start;
+}
+
+.worker-dialog__surface {
+  background: color-mix(in srgb, var(--surface-soft) 72%, white);
+  border: 1px solid color-mix(in srgb, var(--border) 84%, white);
+  border-radius: 16px;
+  padding: 18px;
+}
+
+.worker-dialog__section-head {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.worker-dialog__section-head h3 {
+  margin: 0;
+}
+
+.worker-dialog__section-head span {
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
 .worker-dialog__footer {
   align-items: center;
-  background: var(--surface-soft);
-  border-top: 1px solid var(--border);
-  display: grid;
+  background: linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface-soft) 78%, white) 100%);
+  border-top: 1px solid color-mix(in srgb, var(--border) 84%, white);
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
-  grid-template-columns: 1fr 1fr auto;
-  padding: 14px 20px calc(14px + env(safe-area-inset-bottom, 0px));
+  justify-content: flex-end;
+  padding: 16px 20px calc(16px + env(safe-area-inset-bottom, 0px));
   position: sticky;
   bottom: 0;
   z-index: 1;
 }
 
 .worker-dialog__footer button {
-  border: 0;
+  border: 1px solid transparent;
+  border-radius: 12px;
   font-weight: 800;
   height: 48px;
+  padding: 0 18px;
 }
 
 .dispatch-master-dialog {
@@ -4819,7 +5075,8 @@ button {
 }
 
 .worker-dialog__link {
-  background: transparent;
+  background: var(--surface);
+  border-color: color-mix(in srgb, var(--border) 86%, white);
   color: var(--text-secondary);
 }
 
@@ -4828,11 +5085,20 @@ button {
 }
 
 .worker-dialog__close {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--border) 86%, white);
+  color: var(--text-secondary);
+}
+
+.worker-dialog__primary {
   background: var(--brand-primary);
-  border-radius: 999px;
   color: #fff;
-  min-width: 118px;
-  padding: 0 24px;
+}
+
+.worker-dialog__primary:hover,
+.worker-dialog__primary:focus-visible {
+  filter: brightness(1.02);
+  outline: none;
 }
 
 .empty-records {
@@ -5973,6 +6239,7 @@ button {
   }
 
   .worker-dialog__header {
+    flex-direction: column;
     padding: 18px 20px;
   }
 
@@ -5981,7 +6248,8 @@ button {
   }
 
   .worker-dialog__footer {
-    grid-template-columns: 1fr 1fr;
+    align-items: stretch;
+    flex-direction: column-reverse;
     padding: 12px;
   }
 
@@ -6005,10 +6273,26 @@ button {
     width: 100%;
   }
 
-  .worker-dialog__close {
-    grid-column: 1 / -1;
+  .worker-dialog__header-actions {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .worker-dialog__action {
+    flex: 1 1 auto;
+  }
+
+  .worker-dialog__footer button,
+  .worker-dialog__close,
+  .worker-dialog__link,
+  .worker-dialog__primary {
     min-width: 0;
     width: 100%;
+  }
+
+  .worker-stats--summary,
+  .expense-voucher-detail-item__grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .workforce-row {
@@ -7000,8 +7284,21 @@ button {
     flex-direction: column;
   }
 
+  .expense-voucher-form__number-display {
+    justify-content: flex-start;
+  }
+
   .expense-voucher-form__top-row {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .expense-voucher-form__number-edit-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .expense-voucher-form__number-reset {
+    width: 100%;
   }
 
   .expense-voucher-items__add--bottom {

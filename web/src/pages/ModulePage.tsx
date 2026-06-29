@@ -1502,8 +1502,14 @@ function ReceiptAttachmentList({ attachments, onOpen, onOpenOriginal, onDelete, 
   const hasSuggestions = Boolean(ocrResult && (Object.values(fields).some((value) => value !== undefined && value !== "") || ocrResult.lineItems.length));
   return (
     <section className="receipt-detail-card">
-      <h3>{t("expensesPage.receiptAttachment")}</h3>
-      {!attachments.length ? <p className="activity-empty">{t("expensesPage.missingReceipt")}</p> : attachments.map((item) => (
+      <div className="worker-dialog__section-head">
+        <h3>{t("expensesPage.receiptAttachment")}</h3>
+      </div>
+      {!attachments.length ? <div className="receipt-detail-card__empty">
+        <FileText size={28} />
+        <strong>{t("expensesPage.noReceiptAttached")}</strong>
+        <p>{t("expensesPage.noReceiptAttachedHint")}</p>
+      </div> : attachments.map((item) => (
         <article key={item.id}>
           <span>{item.fileType.startsWith("image/") ? <ImageIcon size={18} /> : <FileText size={18} />}</span>
           <div><strong>{item.fileName}</strong><small>{Math.round(item.fileSize / 1024)} KB · {item.fileType}{item.ocrStatus ? ` · OCR: ${item.ocrStatus}` : ""}</small></div>
@@ -2066,7 +2072,24 @@ function ExpensesModule() {
 
   return (
     <>
-      {(canCreateVouchers || (editingVoucher && canEditVouchers)) && <FormCard title={<span className="expense-voucher-form__card-title"><span>{editingVoucher ? t("expensesPage.editVoucher", { number: getVoucherDisplayNumber(editingVoucher) || editingVoucher.voucherNumber }) : t("expensesPage.newVoucher")}</span><span className="expense-voucher-form__number">{displayedNewVoucherNumber}</span></span>}>
+      {(canCreateVouchers || (editingVoucher && canEditVouchers)) && <FormCard title={<span className="expense-voucher-form__card-title"><span>{editingVoucher ? t("expensesPage.editVoucherAction") : t("expensesPage.newVoucher")}</span><span className="expense-voucher-form__number-display"><span className="expense-voucher-form__number-label">{t("expensesPage.voucherLabel")}</span><span className="expense-voucher-form__number">{displayedNewVoucherNumber}</span>{!editingVoucher && <button
+          type="button"
+          className="expense-voucher-form__number-trigger"
+          onClick={() => {
+            setCustomVoucherNumberEnabled((current) => {
+              if (current) {
+                setCustomVoucherNumber("");
+                return false;
+              }
+              setCustomVoucherNumber(nextLocalVoucherNumber());
+              return true;
+            });
+          }}
+          aria-label={customVoucherNumberEnabled ? t("expensesPage.cancelVoucherNumberEdit") : t("expensesPage.editVoucherNumber")}
+          title={customVoucherNumberEnabled ? t("expensesPage.cancelVoucherNumberEdit") : t("expensesPage.editVoucherNumber")}
+        >
+          <Pencil size={14} />
+        </button>}</span></span>}>
         {receiptCropTarget && <ReceiptCropReviewModal file={receiptCropTarget} onCancel={() => advanceReceiptCropQueue()} onAccept={advanceReceiptCropQueue} />}
         <form className="module-form inline-form expense-voucher-form" onSubmit={(event) => void submit(event)}>
           <div ref={voucherFormRef} />
@@ -2083,22 +2106,16 @@ function ExpensesModule() {
               </select>
             </label>
           </div>
-          {!editingVoucher && <div className="expense-voucher-form__number-row">
-            {!customVoucherNumberEnabled ? (
-              <button type="button" className="secondary-action" onClick={() => { setCustomVoucherNumberEnabled(true); setCustomVoucherNumber(nextLocalVoucherNumber()); }}>
-                Change Number
-              </button>
-            ) : (
+          {!editingVoucher && customVoucherNumberEnabled && <div className="expense-voucher-form__number-row">
               <label className="expense-voucher-form__number-edit">
-                <span>Voucher Number</span>
+                <span>{t("expensesPage.voucherNumberOverride")}</span>
                 <div className="expense-voucher-form__number-edit-row">
                   <input value={customVoucherNumber} onChange={(event) => setCustomVoucherNumber(event.target.value.toUpperCase())} placeholder={nextLocalVoucherNumber()} />
-                  <button type="button" className="secondary-action" onClick={() => { setCustomVoucherNumberEnabled(false); setCustomVoucherNumber(""); }}>
-                    Use Suggested
+                  <button type="button" className="secondary-action expense-voucher-form__number-reset" onClick={() => { setCustomVoucherNumberEnabled(false); setCustomVoucherNumber(""); }}>
+                    {t("expensesPage.useSuggestedVoucherNumber")}
                   </button>
                 </div>
               </label>
-            )}
           </div>}
           {!selectableExpenseAccounts.length && <p className="expense-voucher-form__warning">{t("expensesPage.noRealPaymentAccounts")}</p>}
           <label className="expense-voucher-form__notes">
@@ -2189,15 +2206,39 @@ function ExpensesModule() {
         actions={filteredVouchers.map((item) => <div className="record-list__actions" key={item.id}><button type="button" onClick={() => setSelectedVoucher(item)}>{t("expensesPage.viewDetails")}</button>{canEditVouchers && <button type="button" onClick={() => openEdit(item)}>{t("expensesPage.edit")}</button>}</div>)}
       />
       {selectedVoucher && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedVoucher(null)}>
-        <section className="worker-dialog" role="dialog" aria-modal="true" aria-label={t("expensesPage.voucherDetails")} onClick={(event) => event.stopPropagation()}>
-          <header className="worker-dialog__header"><h2>{t("expensesPage.voucherTitle", { number: getVoucherDisplayNumber(selectedVoucher) || selectedVoucher.voucherNumber })}</h2><button type="button" onClick={() => setSelectedVoucher(null)}><X size={18} /></button></header>
-          <div className="worker-dialog__body"><dl className="worker-stats">
-            <div><dt>{t("expensesPage.date")}</dt><dd>{selectedVoucher.date}</dd></div><div><dt>{t("expensesPage.amount")}</dt><dd>{money(selectedVoucher.amount)}</dd></div>
-            <div><dt>{t("expensesPage.paymentSource")}</dt><dd>{accounts.find((item) => item.id === selectedVoucher.accountId)?.name ?? t("expensesPage.unknownAccount")}</dd></div>
-            {selectedVoucher.notes && <div><dt>{t("expensesPage.notesOptional")}</dt><dd>{selectedVoucher.notes}</dd></div>}
-          </dl>
-          <div className="expense-voucher-detail-items">
-            <h3>{t("expensesPage.voucherItems")}</h3>
+        <section className="worker-dialog worker-dialog--wide expense-voucher-detail-dialog" role="dialog" aria-modal="true" aria-label={t("expensesPage.voucherDetails")} onClick={(event) => event.stopPropagation()}>
+          <header className="worker-dialog__header worker-dialog__header--detail">
+            <div className="worker-dialog__title-stack">
+              <span className="worker-dialog__eyebrow">{t("expensesPage.voucherDetails")}</span>
+              <h2>{t("expensesPage.voucherTitle", { number: getVoucherDisplayNumber(selectedVoucher) || selectedVoucher.voucherNumber })}</h2>
+              <div className="worker-dialog__header-meta">
+                <span>{shortDate(selectedVoucher.date)}</span>
+                {selectedVoucher.pendingSync ? <span className="status-badge status-badge--pending">{t("common.pending")}</span> : null}
+              </div>
+            </div>
+            <div className="worker-dialog__header-actions">
+              {canEditVouchers && <button className="worker-dialog__action" type="button" onClick={() => openEdit(selectedVoucher)}>
+                <Pencil size={16} />
+                <span>{t("expensesPage.editVoucherAction")}</span>
+              </button>}
+              <button className="worker-dialog__icon-button" type="button" aria-label={t("common.close")} onClick={() => setSelectedVoucher(null)}><X size={18} /></button>
+            </div>
+          </header>
+          <div className="worker-dialog__body">
+          <section className="worker-dialog__surface expense-voucher-detail__summary">
+            <dl className="worker-stats worker-stats--summary">
+              <div><dt>{t("expensesPage.date")}</dt><dd>{shortDate(selectedVoucher.date)}</dd></div>
+              <div><dt>{t("expensesPage.amount")}</dt><dd>{money(selectedVoucher.amount)}</dd></div>
+              <div><dt>{t("expensesPage.paymentSource")}</dt><dd>{accounts.find((item) => item.id === selectedVoucher.accountId)?.name ?? t("expensesPage.unknownAccount")}</dd></div>
+              {selectedVoucher.createdBy ? <div><dt>{t("expensesPage.recordedBy")}</dt><dd>{selectedVoucher.createdBy}</dd></div> : null}
+              {selectedVoucher.notes ? <div><dt>{t("expensesPage.reference")}</dt><dd>{selectedVoucher.notes}</dd></div> : null}
+            </dl>
+          </section>
+          <section className="expense-voucher-detail-items">
+            <div className="worker-dialog__section-head">
+              <h3>{t("expensesPage.voucherItems")}</h3>
+              <span>{(selectedVoucher.items?.length ?? 0) || 1}</span>
+            </div>
             {(selectedVoucher.items?.length ? selectedVoucher.items : [{
               id: `${selectedVoucher.id}:legacy`,
               category: selectedVoucher.category,
@@ -2206,14 +2247,19 @@ function ExpensesModule() {
               description: selectedVoucher.description,
             }]).map((item, index) => (
               <article className="expense-voucher-detail-item" key={item.id}>
-                <strong>{t("expensesPage.itemNumber", { number: index + 1 })}</strong>
-                <p>{translateExpenseCategory(item.category)} / {item.subcategory ? translateExpenseSubcategory(item.subcategory) : t("expensesPage.miscellaneous")}</p>
-                <p>{item.description}</p>
+                <div className="expense-voucher-detail-item__header">
+                  <strong>{t("expensesPage.itemNumber", { number: index + 1 })}</strong>
+                  <b>{money(item.amount)}</b>
+                </div>
+                <dl className="expense-voucher-detail-item__grid">
+                  <div><dt>{t("expensesPage.category")}</dt><dd>{translateExpenseCategory(item.category)}</dd></div>
+                  <div><dt>{t("expensesPage.subcategory")}</dt><dd>{item.subcategory ? translateExpenseSubcategory(item.subcategory) : t("expensesPage.miscellaneous")}</dd></div>
+                  <div className="expense-voucher-detail-item__description"><dt>{t("expensesPage.description")}</dt><dd>{item.description || "-"}</dd></div>
+                </dl>
                 {"remarks" in item && item.remarks ? <small>{item.remarks}</small> : null}
-                <b>{money(item.amount)}</b>
               </article>
             ))}
-          </div>
+          </section>
           <ReceiptAttachmentList
             attachments={detailAttachments}
             ocrResult={detailOcr}
@@ -2225,7 +2271,11 @@ function ExpensesModule() {
             onDelete={canDeleteVouchers && !attachmentBusy ? (item) => void removeReceipt(item) : undefined}
           />
           </div>
-          <footer className="worker-dialog__footer">{canEditVouchers && <button className="worker-dialog__link" type="button" onClick={() => openEdit(selectedVoucher)}>{t("expensesPage.editVoucherAction")}</button>}{canDeleteVouchers && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => void removeVoucher(selectedVoucher)}>{t("expensesPage.deleteVoucher")}</button>}<button className="worker-dialog__close" type="button" onClick={() => setSelectedVoucher(null)}>{t("expensesPage.close")}</button></footer>
+          <footer className="worker-dialog__footer">
+            <button className="worker-dialog__close" type="button" onClick={() => setSelectedVoucher(null)}>{t("expensesPage.close")}</button>
+            {canDeleteVouchers && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => void removeVoucher(selectedVoucher)}>{t("expensesPage.deleteVoucher")}</button>}
+            {canEditVouchers && <button className="worker-dialog__primary" type="button" onClick={() => openEdit(selectedVoucher)}>{t("expensesPage.editVoucherAction")}</button>}
+          </footer>
         </section>
       </div>}
     </>
