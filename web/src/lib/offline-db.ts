@@ -93,6 +93,8 @@ export type Account = LocalRecord & {
 
 export type Voucher = LocalRecord & {
   voucherNumber: string;
+  originalVoucherNumber?: string;
+  legacyVoucherNumber?: string;
   date: string;
   category: string;
   categoryId: string;

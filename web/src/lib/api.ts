@@ -627,6 +627,8 @@ export type ExpenseSearchFilters = {
 };
 export type ExpenseSearchRecord = {
   id: string; workspaceId: string; farmId: string; seasonId: string; voucherNumber: string; date: string;
+  originalVoucherNumber?: string;
+  legacyVoucherNumber?: string;
   category: string; categoryId: string; subcategory: string; subcategoryId: string; description: string; amount: number;
   accountId: string; accountName: string; notes?: string; createdAt: string; updatedAt: string;
 };

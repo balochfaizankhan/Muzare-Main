@@ -10,6 +10,7 @@ import { defaultTransactionGroupExpansion, groupAccountTransactions, type Accoun
 import { calculateAccountBalance } from "../../lib/accounting";
 import { formatMoney, formatNumber } from "../../lib/format";
 import { translateExpenseCategory, translateExpenseSubcategory, translateSaleType, translateSalesStatus } from "../../lib/systemTranslations";
+import { getVoucherDisplayNumber } from "../../lib/vouchers";
 import {
   buildPartnerLiabilityPositions,
   calculatePartnerLiabilityBalance,
@@ -127,11 +128,12 @@ type VoucherReportLine = {
 };
 
 const voucherReportItems = (voucher: Voucher): VoucherReportLine[] => {
+  const voucherNumber = getVoucherDisplayNumber(voucher) || voucher.voucherNumber;
   if (voucher.items?.length) {
     return voucher.items.map((item) => ({
       id: `${voucher.id}:${item.id}`,
       voucherId: voucher.id,
-      voucherNumber: voucher.voucherNumber,
+      voucherNumber,
       date: voucher.date,
       accountId: voucher.accountId,
       category: item.categoryName ?? item.category,
@@ -145,7 +147,7 @@ const voucherReportItems = (voucher: Voucher): VoucherReportLine[] => {
   return [{
     id: `${voucher.id}:legacy`,
     voucherId: voucher.id,
-    voucherNumber: voucher.voucherNumber,
+    voucherNumber,
     date: voucher.date,
     accountId: voucher.accountId,
     category: voucher.category,
@@ -605,7 +607,7 @@ export function Reports() {
       const lines = voucherReportItems(item);
       return (!accountId || item.accountId === accountId)
         && matches(item.date, [
-          item.voucherNumber,
+          getVoucherDisplayNumber(item) || item.voucherNumber,
           item.description,
           item.notes,
           accountName(item.accountId),
@@ -786,7 +788,7 @@ export function Reports() {
     for (const voucher of voucherRows) {
       const account = accountById.get(voucher.accountId);
       const isPartner = account?.type === "partner";
-      rows.push({ id: `voucher:${voucher.id}`, date: voucher.date, accountId: voucher.accountId, accountName: accountName(voucher.accountId), type: "voucher", typeLabel: t("reportsPage.voucherExpense"), reference: voucher.voucherNumber, description: voucher.description, debit: isPartner ? 0 : voucher.amount, credit: isPartner ? voucher.amount : 0, path: `/workspace/expenses?recordId=${voucher.id}`, classification: "voucher", partnerLiabilityGroup: isPartner ? "direct_expenses_paid" : undefined });
+      rows.push({ id: `voucher:${voucher.id}`, date: voucher.date, accountId: voucher.accountId, accountName: accountName(voucher.accountId), type: "voucher", typeLabel: t("reportsPage.voucherExpense"), reference: getVoucherDisplayNumber(voucher) || voucher.voucherNumber, description: voucher.description, debit: isPartner ? 0 : voucher.amount, credit: isPartner ? voucher.amount : 0, path: `/workspace/expenses?recordId=${voucher.id}`, classification: "voucher", partnerLiabilityGroup: isPartner ? "direct_expenses_paid" : undefined });
     }
     for (const advance of advanceRows) {
       const account = accountById.get(advance.accountId ?? "");
@@ -975,7 +977,7 @@ export function Reports() {
   };
   const exportExpenseLog = () => downloadCsv("expense-log.csv", [
     [t("reportsPage.voucher"), t("reportsPage.date"), t("reportsPage.description"), t("reportsPage.category"), t("reportsPage.account"), t("reportsPage.amount")],
-    ...voucherRows.flatMap((voucher) => voucherReportItems(voucher).map((item, index) => [index === 0 ? voucher.voucherNumber : "", index === 0 ? voucher.date : "", item.description, expenseLabel(item.category, item.subcategory), index === 0 ? accountName(voucher.accountId) : "", item.amount])),
+    ...voucherRows.flatMap((voucher) => voucherReportItems(voucher).map((item, index) => [index === 0 ? (getVoucherDisplayNumber(voucher) || voucher.voucherNumber) : "", index === 0 ? voucher.date : "", item.description, expenseLabel(item.category, item.subcategory), index === 0 ? accountName(voucher.accountId) : "", item.amount])),
   ]);
   const exportPartnerPosition = () => downloadCsv("partner-position.csv", [
     [t("reportsPage.partner"), t("reportsPage.openingBalance"), t("reportsPage.capitalInjected"), t("reportsPage.directExpensesPaid"), t("reportsPage.transfersOut"), t("reportsPage.transfersIn"), t("reportsPage.moneyReturned"), t("reportsPage.adjustments"), t("reportsPage.currentPartnerBalance")],
@@ -1263,7 +1265,7 @@ export function Reports() {
           <button className={views.expenditures === "log" ? "is-active" : ""} type="button" onClick={() => switchView("expenditures", "log")}>{t("reportsPage.log")}</button>
         </section>
         {views.expenditures === "summary" && <ReportShell title={t("reportsPage.expenseSummary")} rangeLabel={rangeLabel} sectionId="expense-summary" onPrint={() => printSection("expense-summary")} onExport={exportExpenseSummary}>
-          <Kpis values={[[t("reportsPage.totalExpenses"), money(voucherRows.reduce((sum, item) => sum + item.amount, 0))], [t("reportsPage.vouchers"), new Set(voucherRows.map((item) => item.voucherNumber)).size], [t("reportsPage.categories"), new Set(voucherReportLineRows.map((item) => item.category)).size], [t("reportsPage.account"), new Set(voucherRows.map((item) => item.accountId)).size]]} />
+          <Kpis values={[[t("reportsPage.totalExpenses"), money(voucherRows.reduce((sum, item) => sum + item.amount, 0))], [t("reportsPage.vouchers"), new Set(voucherRows.map((item) => getVoucherDisplayNumber(item) || item.voucherNumber)).size], [t("reportsPage.categories"), new Set(voucherReportLineRows.map((item) => item.category)).size], [t("reportsPage.account"), new Set(voucherRows.map((item) => item.accountId)).size]]} />
           <div className="reports-breakdowns">
             <div>
               <h3>{t("reportsPage.byCategory")}</h3>
@@ -1280,7 +1282,7 @@ export function Reports() {
           </div>
         </ReportShell>}
         {views.expenditures === "log" && <ReportShell title={t("reportsPage.expenseLog")} rangeLabel={rangeLabel} sectionId="expense-log" onPrint={() => printSection("expense-log")} onExport={exportExpenseLog}>
-          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.voucher"), t("reportsPage.date"), t("reportsPage.description"), t("reportsPage.category"), t("reportsPage.account"), t("reportsPage.amount")]} rows={voucherRows.map((item) => ({ id: item.id, title: item.voucherNumber, value: money(item.amount), meta: item.date, cells: [item.voucherNumber, item.date, (item.items?.length ?? 0) > 1 ? `${item.items?.[0]?.description ?? item.description} +${(item.items?.length ?? 1) - 1} ${t("expensesPage.moreItems")}` : item.description, (item.items?.length ?? 0) > 1 ? `${translateExpenseCategory(item.items?.[0]?.category ?? item.category)} / ${item.items?.[0]?.subcategory ? translateExpenseSubcategory(item.items[0].subcategory) : "-"}` : expenseLabel(item.category, item.subcategory), accountName(item.accountId), money(item.amount)], details: [...voucherReportItems(item).map((line, index) => [`${t("expensesPage.itemNumber", { number: index + 1 })}`, `${line.description} • ${expenseLabel(line.category, line.subcategory)} • ${money(line.amount)}`] as [string, ReactNode]), [t("reportsPage.account"), accountName(item.accountId)]], onOpen: () => navigate(`/workspace/expenses?recordId=${item.id}`) }))} />
+          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.voucher"), t("reportsPage.date"), t("reportsPage.description"), t("reportsPage.category"), t("reportsPage.account"), t("reportsPage.amount")]} rows={voucherRows.map((item) => ({ id: item.id, title: getVoucherDisplayNumber(item) || item.voucherNumber, value: money(item.amount), meta: item.date, cells: [getVoucherDisplayNumber(item) || item.voucherNumber, item.date, (item.items?.length ?? 0) > 1 ? `${item.items?.[0]?.description ?? item.description} +${(item.items?.length ?? 1) - 1} ${t("expensesPage.moreItems")}` : item.description, (item.items?.length ?? 0) > 1 ? `${translateExpenseCategory(item.items?.[0]?.category ?? item.category)} / ${item.items?.[0]?.subcategory ? translateExpenseSubcategory(item.items[0].subcategory) : "-"}` : expenseLabel(item.category, item.subcategory), accountName(item.accountId), money(item.amount)], details: [...voucherReportItems(item).map((line, index) => [`${t("expensesPage.itemNumber", { number: index + 1 })}`, `${line.description} • ${expenseLabel(line.category, line.subcategory)} • ${money(line.amount)}`] as [string, ReactNode]), [t("reportsPage.account"), accountName(item.accountId)]], onOpen: () => navigate(`/workspace/expenses?recordId=${item.id}`) }))} />
         </ReportShell>}
       </>}
 

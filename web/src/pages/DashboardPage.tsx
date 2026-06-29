@@ -28,6 +28,7 @@ import { formatDate, formatMoney } from "../lib/format";
 import { buildPartnerLiabilityPositions } from "../lib/partnerAccounting";
 import { ensureLocalAccounts, offlineDb, workspaceRecords } from "../lib/offline-db";
 import { hasPermission } from "../lib/permissions";
+import { getVoucherDisplayNumber } from "../lib/vouchers";
 import { useSyncState } from "../hooks/useSyncState";
 import { refreshOperationalData, syncNow } from "../services/syncService";
 
@@ -139,7 +140,7 @@ export function DashboardPage() {
         id: item.id,
         path: "/workspace/expenses",
         title: t("dashboard.expenseVoucher"),
-        detail: item.category,
+        detail: `${getVoucherDisplayNumber(item) || item.voucherNumber} · ${item.category}`,
         value: `-${money(item.amount)}`,
         createdAt: item.createdAt,
       })),

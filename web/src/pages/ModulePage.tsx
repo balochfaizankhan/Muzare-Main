@@ -28,6 +28,7 @@ import {
   type PartnerLiabilityLedgerGroupKey,
 } from "../lib/partnerAccounting";
 import { formatDate, formatMoney } from "../lib/format";
+import { getVoucherDisplayNumber, parseVoucherSequenceNumber } from "../lib/vouchers";
 import {
   compareLabourers,
   ensureLocalAccounts,
@@ -1615,7 +1616,7 @@ function ExpensesModule() {
       return voucher.items.map((item) => ({
         id: `${voucher.id}:${item.id}`,
         voucherId: voucher.id,
-        voucherNumber: voucher.voucherNumber,
+        voucherNumber: getVoucherDisplayNumber(voucher) || voucher.voucherNumber,
         date: voucher.date,
         accountId: voucher.accountId,
         notes: voucher.notes,
@@ -1631,7 +1632,7 @@ function ExpensesModule() {
     return [{
       id: `${voucher.id}:legacy`,
       voucherId: voucher.id,
-      voucherNumber: voucher.voucherNumber,
+      voucherNumber: getVoucherDisplayNumber(voucher) || voucher.voucherNumber,
       date: voucher.date,
       accountId: voucher.accountId,
       notes: voucher.notes,
@@ -1650,6 +1651,8 @@ function ExpensesModule() {
   const [notes, setNotes] = useState("");
   const [selectedVoucher, setSelectedVoucher] = useState<Voucher | null>(null);
   const [editingVoucher, setEditingVoucher] = useState<Voucher | null>(null);
+  const [customVoucherNumberEnabled, setCustomVoucherNumberEnabled] = useState(false);
+  const [customVoucherNumber, setCustomVoucherNumber] = useState("");
   const [pendingReceipts, setPendingReceipts] = useState<PendingReceipt[]>([]);
   const [, setReceiptCropQueue] = useState<File[]>([]);
   const [receiptCropTarget, setReceiptCropTarget] = useState<File | null>(null);
@@ -1674,6 +1677,8 @@ function ExpensesModule() {
   const resolvedExpenseAccountId = accountId || selectableExpenseAccounts[0]?.id || "";
   const resetForm = () => {
     setDate(today()); setVoucherItems([newVoucherItemDraft()]); setAccountId(""); setNotes("");
+    setCustomVoucherNumberEnabled(false);
+    setCustomVoucherNumber("");
     pendingReceipts.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl));
     setPendingReceipts([]);
     setReceiptError("");
@@ -1682,6 +1687,8 @@ function ExpensesModule() {
     setSelectedVoucher(null); setEditingVoucher(voucher); setDate(voucher.date);
     setVoucherItems(normalizeVoucherItems(voucher)); setAccountId(voucher.accountId);
     setNotes(voucher.notes ?? "");
+    setCustomVoucherNumberEnabled(false);
+    setCustomVoucherNumber("");
     setPendingReceipts([]);
     setReceiptError("");
     pendingEditFocusRef.current = true;
@@ -1699,11 +1706,16 @@ function ExpensesModule() {
   }, [editingVoucher, voucherItems]);
   const nextLocalVoucherNumber = () => {
     const highest = vouchers.reduce((max, item) => {
-      const match = /^V-(\d+)$/.exec(item.voucherNumber);
-      return match ? Math.max(max, Number(match[1])) : max;
+      const parsed = parseVoucherSequenceNumber(getVoucherDisplayNumber(item) || item.voucherNumber);
+      return parsed ? Math.max(max, parsed) : max;
     }, 0);
     return `V-${String(highest + 1).padStart(4, "0")}`;
   };
+  const displayedNewVoucherNumber = editingVoucher
+    ? getVoucherDisplayNumber(editingVoucher) || editingVoucher.voucherNumber
+    : customVoucherNumberEnabled && customVoucherNumber.trim()
+      ? customVoucherNumber.trim()
+      : nextLocalVoucherNumber();
   const addReceiptFiles = (files: FileList | null) => {
     if (!files) return;
     setReceiptError("");
@@ -1820,8 +1832,26 @@ function ExpensesModule() {
     if (!resolvedItems.length) return;
     const primaryItem = resolvedItems[0];
     const totalAmount = resolvedItems.reduce((sum, item) => sum + item.amount, 0);
+    const suggestedVoucherNumber = nextLocalVoucherNumber();
+    const suggestedVoucherSequence = parseVoucherSequenceNumber(suggestedVoucherNumber) ?? 0;
+    const manualVoucherNumber = customVoucherNumberEnabled ? customVoucherNumber.trim() : "";
+    if (!editingVoucher && manualVoucherNumber) {
+      const manualSequence = parseVoucherSequenceNumber(manualVoucherNumber);
+      if (!manualSequence) {
+        showToast("Voucher numbers must use the format V-0001.");
+        return;
+      }
+      if (manualSequence <= suggestedVoucherSequence) {
+        showToast(`Choose a voucher number higher than ${suggestedVoucherNumber}.`);
+        return;
+      }
+      if (vouchers.some((item) => (getVoucherDisplayNumber(item) || item.voucherNumber) === manualVoucherNumber)) {
+        showToast(`Voucher number ${manualVoucherNumber} already exists.`);
+        return;
+      }
+    }
     const record: Voucher = {
-      ...(editingVoucher ?? makeLocalRecord()), voucherNumber: editingVoucher?.voucherNumber ?? nextLocalVoucherNumber(), date,
+      ...(editingVoucher ?? makeLocalRecord()), voucherNumber: editingVoucher?.voucherNumber ?? (manualVoucherNumber || suggestedVoucherNumber), date,
       categoryId: primaryItem.categoryId,
       category: primaryItem.category,
       subcategoryId: primaryItem.subcategoryId ?? "",
@@ -1872,7 +1902,7 @@ function ExpensesModule() {
       && (!voucherSubcategory || lines.some((line) => line.subcategory === voucherSubcategory))
       && (!voucherAccountId || item.accountId === voucherAccountId)
       && (!normalizedSearch || [
-        item.voucherNumber, item.description, item.notes ?? "", item.category, item.subcategory, accountName,
+        getVoucherDisplayNumber(item) || item.voucherNumber, item.description, item.notes ?? "", item.category, item.subcategory, accountName,
         String(item.amount), item.date, shortDate,
         ...lines.flatMap((line) => [line.category, line.subcategory, line.description, line.remarks ?? "", String(line.amount)]),
       ].some((value) => value.toLowerCase().includes(normalizedSearch)));
@@ -2016,7 +2046,7 @@ function ExpensesModule() {
     finally { setAttachmentBusy(false); }
   };
   const removeVoucher = async (voucher: Voucher) => {
-    if (!canDeleteVouchers || !window.confirm(t("expensesPage.deleteVoucherConfirm", { number: voucher.voucherNumber }))) return;
+    if (!canDeleteVouchers || !window.confirm(t("expensesPage.deleteVoucherConfirm", { number: getVoucherDisplayNumber(voucher) || voucher.voucherNumber }))) return;
     await deleteOperationalRecord("voucher", voucher);
     setSelectedVoucher(null);
     setSearchParams((current) => { current.delete("recordId"); return current; });
@@ -2036,7 +2066,7 @@ function ExpensesModule() {
 
   return (
     <>
-      {(canCreateVouchers || (editingVoucher && canEditVouchers)) && <FormCard title={<span className="expense-voucher-form__card-title"><span>{editingVoucher ? t("expensesPage.editVoucher", { number: editingVoucher.voucherNumber }) : t("expensesPage.newVoucher")}</span><span className="expense-voucher-form__number">{editingVoucher?.voucherNumber ?? nextLocalVoucherNumber()}</span></span>}>
+      {(canCreateVouchers || (editingVoucher && canEditVouchers)) && <FormCard title={<span className="expense-voucher-form__card-title"><span>{editingVoucher ? t("expensesPage.editVoucher", { number: getVoucherDisplayNumber(editingVoucher) || editingVoucher.voucherNumber }) : t("expensesPage.newVoucher")}</span><span className="expense-voucher-form__number">{displayedNewVoucherNumber}</span></span>}>
         {receiptCropTarget && <ReceiptCropReviewModal file={receiptCropTarget} onCancel={() => advanceReceiptCropQueue()} onAccept={advanceReceiptCropQueue} />}
         <form className="module-form inline-form expense-voucher-form" onSubmit={(event) => void submit(event)}>
           <div ref={voucherFormRef} />
@@ -2053,6 +2083,23 @@ function ExpensesModule() {
               </select>
             </label>
           </div>
+          {!editingVoucher && <div className="expense-voucher-form__number-row">
+            {!customVoucherNumberEnabled ? (
+              <button type="button" className="secondary-action" onClick={() => { setCustomVoucherNumberEnabled(true); setCustomVoucherNumber(nextLocalVoucherNumber()); }}>
+                Change Number
+              </button>
+            ) : (
+              <label className="expense-voucher-form__number-edit">
+                <span>Voucher Number</span>
+                <div className="expense-voucher-form__number-edit-row">
+                  <input value={customVoucherNumber} onChange={(event) => setCustomVoucherNumber(event.target.value.toUpperCase())} placeholder={nextLocalVoucherNumber()} />
+                  <button type="button" className="secondary-action" onClick={() => { setCustomVoucherNumberEnabled(false); setCustomVoucherNumber(""); }}>
+                    Use Suggested
+                  </button>
+                </div>
+              </label>
+            )}
+          </div>}
           {!selectableExpenseAccounts.length && <p className="expense-voucher-form__warning">{t("expensesPage.noRealPaymentAccounts")}</p>}
           <label className="expense-voucher-form__notes">
             <span>{t("expensesPage.notesOptional")}</span>
@@ -2137,13 +2184,13 @@ function ExpensesModule() {
           const lines = voucherLinesFor(item);
           const summary = lines.length > 1 ? `${translateExpenseCategory(lines[0].category)} / ${lines[0].subcategory ? translateExpenseSubcategory(lines[0].subcategory) : t("expensesPage.miscellaneous")} +${lines.length - 1} ${t("expensesPage.moreItems")}` : `${translateExpenseCategory(item.category)} / ${item.subcategory ? translateExpenseSubcategory(item.subcategory) : t("expensesPage.miscellaneous")}`;
           const description = lines.length > 1 ? `${lines[0].description} +${lines.length - 1} ${t("expensesPage.moreItems")}` : item.description;
-          return [item.voucherNumber, item.date, summary, description, accountById.get(item.accountId) ?? t("expensesPage.unknownAccount"), money(item.amount)];
+          return [getVoucherDisplayNumber(item) || item.voucherNumber, item.date, summary, description, accountById.get(item.accountId) ?? t("expensesPage.unknownAccount"), money(item.amount)];
         })}
         actions={filteredVouchers.map((item) => <div className="record-list__actions" key={item.id}><button type="button" onClick={() => setSelectedVoucher(item)}>{t("expensesPage.viewDetails")}</button>{canEditVouchers && <button type="button" onClick={() => openEdit(item)}>{t("expensesPage.edit")}</button>}</div>)}
       />
       {selectedVoucher && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedVoucher(null)}>
         <section className="worker-dialog" role="dialog" aria-modal="true" aria-label={t("expensesPage.voucherDetails")} onClick={(event) => event.stopPropagation()}>
-          <header className="worker-dialog__header"><h2>{t("expensesPage.voucherTitle", { number: selectedVoucher.voucherNumber })}</h2><button type="button" onClick={() => setSelectedVoucher(null)}><X size={18} /></button></header>
+          <header className="worker-dialog__header"><h2>{t("expensesPage.voucherTitle", { number: getVoucherDisplayNumber(selectedVoucher) || selectedVoucher.voucherNumber })}</h2><button type="button" onClick={() => setSelectedVoucher(null)}><X size={18} /></button></header>
           <div className="worker-dialog__body"><dl className="worker-stats">
             <div><dt>{t("expensesPage.date")}</dt><dd>{selectedVoucher.date}</dd></div><div><dt>{t("expensesPage.amount")}</dt><dd>{money(selectedVoucher.amount)}</dd></div>
             <div><dt>{t("expensesPage.paymentSource")}</dt><dd>{accounts.find((item) => item.id === selectedVoucher.accountId)?.name ?? t("expensesPage.unknownAccount")}</dd></div>
@@ -3312,7 +3359,7 @@ function AccountsModule() {
         id: `voucher:${voucher.id}`,
         date: voucher.date,
         type: "voucher",
-        reference: voucher.voucherNumber,
+        reference: getVoucherDisplayNumber(voucher) || voucher.voucherNumber,
         description: `${voucher.category} / ${voucher.subcategory} - ${voucher.description}`,
         debit: selectedIsPartner ? 0 : voucher.amount,
         credit: selectedIsPartner ? voucher.amount : 0,

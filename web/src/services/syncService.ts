@@ -3,6 +3,7 @@ import { clearCachedData, offlineDb, setActiveFarmId, setActiveSeasonId, setActi
 import { canQueueOperationalMutation } from "../lib/permissions";
 import type { Table } from "dexie";
 import i18n from "../i18n";
+import { getVoucherDisplayNumber } from "../lib/vouchers";
 
 export type SyncStatus = "online" | "offline" | "pending" | "syncing" | "error";
 export type SyncStartupStage = "checkingSession" | "loadingWorkspace" | "loadingContext" | "syncingLatestRecords" | "ready";
@@ -103,7 +104,27 @@ async function cacheRecord(
   workspaceId: string | undefined = (record as Partial<LocalRecord>).workspaceId ?? context?.workspaceId,
 ) {
   if (!context) throw new Error(i18n.t("sync.workspaceSyncNotInitialized"));
-  await tableFor(entity).put({ ...record, workspaceId: workspaceId ?? context.workspaceId, farmId, seasonId, pendingSync } as LocalRecord);
+  const nextRecord = { ...record, workspaceId: workspaceId ?? context.workspaceId, farmId, seasonId, pendingSync } as LocalRecord;
+  const existing = await tableFor(entity).get(record.id);
+  if (existing) {
+    const localUpdated = Date.parse(existing.updatedAt);
+    const incomingUpdated = Date.parse(String(record.updatedAt ?? ""));
+    const localIsPending = Boolean(existing.pendingSync);
+    if (entity === "voucher" && localDebugEnabled) {
+      debugVoucherSync("cache-merge", {
+        recordId: record.id,
+        localUpdatedAt: existing.updatedAt,
+        incomingUpdatedAt: String(record.updatedAt ?? ""),
+        localPending: localIsPending,
+        localVoucherNumber: getVoucherDisplayNumber(existing as Record<string, unknown>),
+        incomingVoucherNumber: getVoucherDisplayNumber(record as Record<string, unknown>),
+      });
+    }
+    if (localIsPending && Number.isFinite(localUpdated) && Number.isFinite(incomingUpdated) && localUpdated > incomingUpdated) {
+      return;
+    }
+  }
+  await tableFor(entity).put(nextRecord);
 }
 
 function assertCanQueueMutation(entity: OperationalEntity, operation: "create" | "edit" | "delete") {

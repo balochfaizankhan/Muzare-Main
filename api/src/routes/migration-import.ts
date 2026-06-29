@@ -1246,13 +1246,16 @@ async function repairImportedVoucherNumbers(workspaceId: string): Promise<Vouche
       const repairedVoucherNumber = String(payload.originalVoucherNumber ?? "").trim()
         || String(payload.legacyVoucherNumber ?? "").trim();
       if (!repairedVoucherNumber) continue;
+      const repairedAt = new Date();
       const nextPayload = {
         ...payload,
         voucherNumber: repairedVoucherNumber,
+        updatedAt: repairedAt.toISOString(),
       };
       await tx.update(operationalRecords).set({
         payload: nextPayload,
-        updatedAt: new Date(),
+        clientUpdatedAt: repairedAt,
+        updatedAt: repairedAt,
       }).where(eq(operationalRecords.id, row.id));
       updatedVouchers.push({
         clientRecordId: row.clientRecordId,

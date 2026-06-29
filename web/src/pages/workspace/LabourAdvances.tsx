@@ -195,11 +195,6 @@ export function LabourAdvances() {
           <div><h2>{t("advancesPage.introTitle")}</h2><p>{t("advancesPage.introDescription")}</p></div>
           <span className="local-pill">{t("advancesPage.databaseSynchronized")}</span>
         </section>
-        <section className="advances-summary">
-          <article><span>{t("advancesPage.totalAdvances")}</span><strong>{money(total)}</strong></article>
-          <article><span>{t("advancesPage.transactions")}</span><strong>{filtered.length}</strong></article>
-          <article><span>{t("advancesPage.labourWithAdvances")}</span><strong>{labourCount}</strong></article>
-        </section>
         {canRecord && <section className="record-panel">
           <div className="advances-heading"><h2>{t("advancesPage.recordAdvance")}</h2><span>{t("advancesPage.recordAdvanceDescription")}</span></div>
           <form className="module-form advances-entry-form" onSubmit={(event) => void submit(event)}>
@@ -252,6 +247,11 @@ export function LabourAdvances() {
         </section>}
         <section className="record-panel">
           <div className="advances-heading"><h2>{t("advancesPage.advanceHistory")}</h2><span>{t("advancesPage.transactionCount", { count: filtered.length })}</span></div>
+          <section className="advances-summary">
+            <article><span>{t("advancesPage.totalAdvances")}</span><strong>{money(total)}</strong></article>
+            <article><span>{t("advancesPage.transactions")}</span><strong>{filtered.length}</strong></article>
+            <article><span>{t("advancesPage.labourWithAdvances")}</span><strong>{labourCount}</strong></article>
+          </section>
           <div className="advances-filters">
             <SearchInput placeholder={t("advancesPage.searchPlaceholder")} value={search} onChange={setSearch} />
             <div className="advances-filter-row">

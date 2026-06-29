@@ -234,24 +234,64 @@ function voucherScopeKey(farmId: string, seasonId?: string | null) {
   return seasonId ? `season:${seasonId}` : `farm:${farmId}:general`;
 }
 
+function parseVoucherSequenceNumber(value: string) {
+  const match = /^V-(\d+)$/i.exec(value.trim());
+  return match ? Number(match[1]) : null;
+}
+
 async function allocateVoucherNumber(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   workspaceId: string,
   farmId: string,
   seasonId: string | null | undefined,
+  requestedVoucherNumber?: string,
 ) {
-  const [sequence] = await tx.insert(expenseVoucherSequences).values({
-    workspaceId,
-    scopeKey: voucherScopeKey(farmId, seasonId),
-    lastNumber: 1,
-  }).onConflictDoUpdate({
-    target: [expenseVoucherSequences.workspaceId, expenseVoucherSequences.scopeKey],
-    set: {
-      lastNumber: sql`${expenseVoucherSequences.lastNumber} + 1`,
-      updatedAt: new Date(),
-    },
-  }).returning({ lastNumber: expenseVoucherSequences.lastNumber });
-  return `V-${String(sequence!.lastNumber).padStart(4, "0")}`;
+  const scopeKey = voucherScopeKey(farmId, seasonId);
+  const parsedRequestedNumber = requestedVoucherNumber ? parseVoucherSequenceNumber(requestedVoucherNumber) : null;
+  if (requestedVoucherNumber && !parsedRequestedNumber) {
+    throw new Error("Voucher numbers must use the format V-0001.");
+  }
+  const [current] = await tx.select({
+    lastNumber: expenseVoucherSequences.lastNumber,
+  }).from(expenseVoucherSequences).where(and(
+    eq(expenseVoucherSequences.workspaceId, workspaceId),
+    eq(expenseVoucherSequences.scopeKey, scopeKey),
+  )).limit(1);
+  const nextSuggested = (current?.lastNumber ?? 0) + 1;
+  if (parsedRequestedNumber && parsedRequestedNumber < nextSuggested) {
+    throw new Error(`Voucher numbers lower than V-${String(nextSuggested).padStart(4, "0")} are not allowed.`);
+  }
+  const finalNumber = parsedRequestedNumber ?? nextSuggested;
+  const voucherNumber = `V-${String(finalNumber).padStart(4, "0")}`;
+  const [existingVoucher] = await tx.select({ id: operationalRecords.id }).from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, workspaceId),
+    eq(operationalRecords.farmId, farmId),
+    seasonId ? eq(operationalRecords.seasonId, seasonId) : isNull(operationalRecords.seasonId),
+    eq(operationalRecords.entityType, "voucher"),
+    sql`${operationalRecords.payload}->>'deletedAt' IS NULL`,
+    sql`${operationalRecords.payload}->>'voucherNumber' = ${voucherNumber}`,
+  )).limit(1);
+  if (existingVoucher) {
+    throw new Error(`Voucher number ${voucherNumber} already exists.`);
+  }
+  const now = new Date();
+  if (current) {
+    await tx.update(expenseVoucherSequences).set({
+      lastNumber: finalNumber,
+      updatedAt: now,
+    }).where(and(
+      eq(expenseVoucherSequences.workspaceId, workspaceId),
+      eq(expenseVoucherSequences.scopeKey, scopeKey),
+    ));
+  } else {
+    await tx.insert(expenseVoucherSequences).values({
+      workspaceId,
+      scopeKey,
+      lastNumber: finalNumber,
+      updatedAt: now,
+    });
+  }
+  return voucherNumber;
 }
 
 async function inactiveDispatchReference(
@@ -753,33 +793,47 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       : existing && parsed.data.entity === "partnerEntry"
         ? { ...payload, createdBy: existing.payload.createdBy, updatedBy: request.appUser.id, deletedAt: null, deletedBy: null, deletionReason: null }
         : payload;
-    const [saved] = existing
-      ? parsed.data.entity === "partnerEntry"
-        ? await db.transaction(async (tx) => {
-            const updated = await tx.update(operationalRecords).set({ ...values, payload: updatedPayload })
-              .where(eq(operationalRecords.id, existing.id)).returning();
-            await tx.insert(auditLogs).values({
-              workspaceId: parsed.data.workspaceId, userId: request.appUser!.id, farmId: parsed.data.farmId,
-              action: "partner_ledger_updated", entityType: parsed.data.entity, entityId: existing.id,
-              details: { clientRecordId: parsed.data.record.id, before: existing.payload, after: updated[0]!.payload },
-            });
-            return updated;
-          })
-        : await db.update(operationalRecords).set({ ...values, payload: updatedPayload })
-          .where(eq(operationalRecords.id, existing.id)).returning()
-      : await db.transaction(async (tx) => {
-          const createdPayload = parsed.data.entity === "voucher"
-            ? {
-                ...payload,
-                voucherNumber: await allocateVoucherNumber(tx, parsed.data.workspaceId, parsed.data.farmId!, parsed.data.seasonId),
-                createdBy: request.appUser!.id,
-                updatedBy: request.appUser!.id,
-              }
-            : parsed.data.entity === "partnerEntry"
-              ? { ...payload, createdBy: request.appUser!.id, updatedBy: request.appUser!.id }
-            : payload;
-          return tx.insert(operationalRecords).values({ ...values, payload: createdPayload }).returning();
-        });
+    let saved;
+    try {
+      [saved] = existing
+        ? parsed.data.entity === "partnerEntry"
+          ? await db.transaction(async (tx) => {
+              const updated = await tx.update(operationalRecords).set({ ...values, payload: updatedPayload })
+                .where(eq(operationalRecords.id, existing.id)).returning();
+              await tx.insert(auditLogs).values({
+                workspaceId: parsed.data.workspaceId, userId: request.appUser!.id, farmId: parsed.data.farmId,
+                action: "partner_ledger_updated", entityType: parsed.data.entity, entityId: existing.id,
+                details: { clientRecordId: parsed.data.record.id, before: existing.payload, after: updated[0]!.payload },
+              });
+              return updated;
+            })
+          : await db.update(operationalRecords).set({ ...values, payload: updatedPayload })
+            .where(eq(operationalRecords.id, existing.id)).returning()
+        : await db.transaction(async (tx) => {
+            const createdPayload = parsed.data.entity === "voucher"
+              ? {
+                  ...payload,
+                  voucherNumber: await allocateVoucherNumber(
+                    tx,
+                    parsed.data.workspaceId,
+                    parsed.data.farmId!,
+                    parsed.data.seasonId,
+                    typeof payload.voucherNumber === "string" ? payload.voucherNumber : undefined,
+                  ),
+                  createdBy: request.appUser!.id,
+                  updatedBy: request.appUser!.id,
+                }
+              : parsed.data.entity === "partnerEntry"
+                ? { ...payload, createdBy: request.appUser!.id, updatedBy: request.appUser!.id }
+              : payload;
+            return tx.insert(operationalRecords).values({ ...values, payload: createdPayload }).returning();
+          });
+    } catch (error) {
+      if (error instanceof Error && parsed.data.entity === "voucher") {
+        return reply.code(400).send({ message: error.message });
+      }
+      throw error;
+    }
     if (existing && parsed.data.entity === "voucher") {
       await db.insert(auditLogs).values({
         workspaceId: parsed.data.workspaceId, userId: request.appUser.id, farmId: parsed.data.farmId,
