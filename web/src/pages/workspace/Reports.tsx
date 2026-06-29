@@ -1430,7 +1430,7 @@ export function Reports() {
       </>}
 
       {selectedSaleRecord && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedSaleRecord(null)}>
-        <section className="worker-dialog account-ledger-dialog" role="dialog" aria-modal="true" aria-label={t("reportsPage.salesDetailTitle")} onClick={(event) => event.stopPropagation()}>
+        <section className="worker-dialog worker-dialog--record-detail account-ledger-dialog" role="dialog" aria-modal="true" aria-label={t("reportsPage.salesDetailTitle")} onClick={(event) => event.stopPropagation()}>
           <header className="worker-dialog__header">
             <h2>{t("reportsPage.salesDetailTitle")}</h2>
             <button type="button" onClick={() => setSelectedSaleRecord(null)}><X size={18} /></button>
@@ -1470,7 +1470,7 @@ export function Reports() {
       </div>}
 
       {selectedDispatchRecord && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedDispatchRecord(null)}>
-        <section className="worker-dialog account-ledger-dialog" role="dialog" aria-modal="true" aria-label={t("reportsPage.dispatchDetailTitle")} onClick={(event) => event.stopPropagation()}>
+        <section className="worker-dialog worker-dialog--record-detail account-ledger-dialog" role="dialog" aria-modal="true" aria-label={t("reportsPage.dispatchDetailTitle")} onClick={(event) => event.stopPropagation()}>
           <header className="worker-dialog__header">
             <h2>{t("reportsPage.dispatchDetailTitle")}</h2>
             <button type="button" onClick={() => setSelectedDispatchRecord(null)}><X size={18} /></button>

@@ -308,7 +308,7 @@ function AdvanceDetails({ advance, labourer, accountName, canManage, canDelete, 
   advance: Advance; labourer?: Labourer; accountName?: string; canManage: boolean; canDelete: boolean; onClose: () => void; onEdit: () => void; onDelete: () => void;
 }) {
   const { t } = useTranslation();
-  return <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}><section className="worker-dialog" role="dialog" aria-modal="true" aria-label={t("advancesPage.detailsTitle")} onClick={(event) => event.stopPropagation()}>
+  return <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}><section className="worker-dialog worker-dialog--record-detail" role="dialog" aria-modal="true" aria-label={t("advancesPage.detailsTitle")} onClick={(event) => event.stopPropagation()}>
     <header className="worker-dialog__header"><h2>{t("advancesPage.detailsTitle")}</h2></header>
     <div className="worker-dialog__body"><dl className="worker-stats">
       <div><dt>{t("advancesPage.date")}</dt><dd>{advance.date}</dd></div><div><dt>{t("advancesPage.labour")}</dt><dd>{labourer?.name ?? t("advancesPage.labour")}</dd></div>
