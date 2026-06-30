@@ -7748,12 +7748,11 @@ button {
 .print-summary { display: none; }
 .register-table-wrap { max-width: 100%; overflow-x: auto; }
 .attendance-register-table { border-collapse: collapse; font-size: .68rem; min-width: max-content; width: 100%; }
-.attendance-register-table th, .attendance-register-table td { border: 1px solid #cbd7ce; min-width: 34px; padding: 4px 5px; text-align: center; }
-.attendance-register-table thead th { background: #f3f4f6; color: var(--text-primary); font-weight: 800; }
+.attendance-register-table th, .attendance-register-table td { border: 1px solid #d7e0d7; box-sizing: border-box; min-width: 34px; padding: 6px 8px; text-align: center; }
+.attendance-register-table thead th { background: #f3f4f6; color: var(--text-primary); font-weight: 800; position: sticky; top: 0; z-index: 2; }
 .attendance-register-table tbody th { background: #f6f9f4; min-width: 142px; text-align: start; }
-.attendance-register-table tfoot th { background: #f8fafc; color: var(--text-primary); font-weight: 850; }
-.register-status b { display: block; }
-.register-status small { display: block; font-size: .52rem; font-weight: 750; margin-top: 2px; white-space: nowrap; }
+.attendance-register-table tfoot th, .attendance-register-table tfoot td { background: #f8fafc; color: var(--text-primary); font-weight: 850; }
+.register-status { font-weight: 800; }
 .register-status--present { background: #dff2d7; color: #176c2f; }
 .register-status--half_day { background: #fff1bd; color: #8b5a00; }
 .register-status--absent { background: #ffe0dd; color: #b42318; }
@@ -8604,7 +8603,16 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 .attendance-register-report th:first-child,
 .attendance-register-report td:first-child { left: 0; position: sticky; text-align: start; z-index: 1; }
 .attendance-register-report thead th:first-child,
-.attendance-register-report tbody th:first-child { background: var(--surface); }
+.attendance-register-report tbody th:first-child,
+.attendance-register-report tfoot th:first-child { background: var(--surface); }
+@media (max-width: 720px) {
+  .attendance-register-table th,
+  .attendance-register-table td,
+  .attendance-register-report th,
+  .attendance-register-report td { padding: 5px 6px; }
+  .attendance-register-table tbody th,
+  .attendance-register-report tbody th { min-width: 124px; }
+}
 .attendance-import-footer { background: var(--surface); border-top: 1px solid var(--border); bottom: 0; display: flex; gap: 8px; justify-content: flex-end; padding: 11px 14px calc(11px + env(safe-area-inset-bottom, 0px)); position: sticky; z-index: 2; }
 .attendance-import-footer button:first-child { background: var(--surface); border-color: var(--border); color: var(--text-secondary); }
 
@@ -9033,4 +9041,8 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .attendance-register-report td { font-size: 5.5px; line-height: 1.08; padding: 2px; word-break: break-word; }
   .attendance-register-report th:first-child,
   .attendance-register-report td:first-child { position: static; width: 96px; }
+  .attendance-register-report .register-status--present,
+  .attendance-register-report .register-status--half_day,
+  .attendance-register-report .register-status--absent,
+  .attendance-register-report .register-status--empty { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
