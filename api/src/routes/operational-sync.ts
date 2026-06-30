@@ -239,6 +239,47 @@ function parseVoucherSequenceNumber(value: string) {
   return match ? Number(match[1]) : null;
 }
 
+function normalizeVoucherNumber(value: string) {
+  const parsed = parseVoucherSequenceNumber(value);
+  return parsed ? `V-${String(parsed).padStart(4, "0")}` : null;
+}
+
+function duplicateVoucherNumberDetails(workspaceId: string, voucherNumber: string, existingRecordId?: string | null) {
+  return {
+    code: "duplicate_voucher_number",
+    entity: "voucher",
+    entityId: existingRecordId ?? null,
+    entityName: voucherNumber,
+    workspaceId,
+    expectedWorkspace: workspaceId,
+    actualWorkspace: workspaceId,
+  };
+}
+
+async function findExistingVoucherByNumber(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  workspaceId: string,
+  voucherNumber: string,
+  excludeClientRecordId?: string,
+) {
+  const filters = [
+    eq(operationalRecords.workspaceId, workspaceId),
+    eq(operationalRecords.entityType, "voucher"),
+    sql`${operationalRecords.payload}->>'deletedAt' IS NULL`,
+    or(
+      sql`coalesce(${operationalRecords.payload}->>'voucherNumber', '') = ${voucherNumber}`,
+      sql`coalesce(${operationalRecords.payload}->>'originalVoucherNumber', '') = ${voucherNumber}`,
+      sql`coalesce(${operationalRecords.payload}->>'legacyVoucherNumber', '') = ${voucherNumber}`,
+    ),
+  ];
+  if (excludeClientRecordId) filters.push(sql`${operationalRecords.clientRecordId} <> ${excludeClientRecordId}`);
+  const [existingVoucher] = await tx.select({
+    id: operationalRecords.id,
+    clientRecordId: operationalRecords.clientRecordId,
+  }).from(operationalRecords).where(and(...filters)).limit(1);
+  return existingVoucher ?? null;
+}
+
 async function allocateVoucherNumber(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   workspaceId: string,
@@ -247,8 +288,9 @@ async function allocateVoucherNumber(
   requestedVoucherNumber?: string,
 ) {
   const scopeKey = voucherScopeKey(farmId, seasonId);
-  const parsedRequestedNumber = requestedVoucherNumber ? parseVoucherSequenceNumber(requestedVoucherNumber) : null;
-  if (requestedVoucherNumber && !parsedRequestedNumber) {
+  const normalizedRequestedVoucherNumber = requestedVoucherNumber ? normalizeVoucherNumber(requestedVoucherNumber) : null;
+  const parsedRequestedNumber = normalizedRequestedVoucherNumber ? parseVoucherSequenceNumber(normalizedRequestedVoucherNumber) : null;
+  if (requestedVoucherNumber && !normalizedRequestedVoucherNumber) {
     throw new Error("Voucher numbers must use the format V-0001.");
   }
   const [current] = await tx.select({
@@ -258,26 +300,18 @@ async function allocateVoucherNumber(
     eq(expenseVoucherSequences.scopeKey, scopeKey),
   )).limit(1);
   const nextSuggested = (current?.lastNumber ?? 0) + 1;
-  if (parsedRequestedNumber && parsedRequestedNumber < nextSuggested) {
-    throw new Error(`Voucher numbers lower than V-${String(nextSuggested).padStart(4, "0")} are not allowed.`);
-  }
   const finalNumber = parsedRequestedNumber ?? nextSuggested;
-  const voucherNumber = `V-${String(finalNumber).padStart(4, "0")}`;
-  const [existingVoucher] = await tx.select({ id: operationalRecords.id }).from(operationalRecords).where(and(
-    eq(operationalRecords.workspaceId, workspaceId),
-    eq(operationalRecords.farmId, farmId),
-    seasonId ? eq(operationalRecords.seasonId, seasonId) : isNull(operationalRecords.seasonId),
-    eq(operationalRecords.entityType, "voucher"),
-    sql`${operationalRecords.payload}->>'deletedAt' IS NULL`,
-    sql`${operationalRecords.payload}->>'voucherNumber' = ${voucherNumber}`,
-  )).limit(1);
+  const voucherNumber = normalizedRequestedVoucherNumber ?? `V-${String(finalNumber).padStart(4, "0")}`;
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${workspaceId}), hashtext(${voucherNumber}))`);
+  const existingVoucher = await findExistingVoucherByNumber(tx, workspaceId, voucherNumber);
   if (existingVoucher) {
     throw new Error(`Voucher number ${voucherNumber} already exists.`);
   }
   const now = new Date();
+  const nextSequenceNumber = Math.max(current?.lastNumber ?? 0, finalNumber);
   if (current) {
     await tx.update(expenseVoucherSequences).set({
-      lastNumber: finalNumber,
+      lastNumber: nextSequenceNumber,
       updatedAt: now,
     }).where(and(
       eq(expenseVoucherSequences.workspaceId, workspaceId),
@@ -287,7 +321,7 @@ async function allocateVoucherNumber(
     await tx.insert(expenseVoucherSequences).values({
       workspaceId,
       scopeKey,
-      lastNumber: finalNumber,
+      lastNumber: nextSequenceNumber,
       updatedAt: now,
     });
   }
@@ -458,6 +492,69 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         : selected.contextWarning,
       malformedRecordsSkipped,
       records: visibleRecords,
+    };
+  });
+
+  app.get("/v1/workspace/:workspaceId/voucher-number-availability", { preHandler: requireUser }, async (request, reply) => {
+    if (!request.appUser) return reply;
+    const parsed = z.object({
+      workspaceId: z.string().uuid(),
+      voucherNumber: z.string().trim().min(1),
+      recordId: z.string().optional(),
+    }).safeParse({
+      ...(request.params as Record<string, unknown>),
+      ...(request.query as Record<string, unknown>),
+    });
+    if (!parsed.success) return reply.code(400).send({ message: "Voucher number is required." });
+    if (request.appUser.workspaceId !== parsed.data.workspaceId) {
+      return forbiddenResponse(reply, "Select this workspace before validating voucher numbers.", {
+        code: "stale_workspace_context",
+        requestWorkspaceId: parsed.data.workspaceId,
+        activeWorkspaceId: request.appUser.workspaceId,
+      });
+    }
+    if (!request.appUser.memberships.some((item) => item.active && item.workspaceId === parsed.data.workspaceId)) {
+      return reply.code(403).send({ message: "Workspace membership is required." });
+    }
+    if (!hasModulePermission(request.appUser, parsed.data.workspaceId, "expenses", "create")
+      && !hasModulePermission(request.appUser, parsed.data.workspaceId, "expenses", "edit")) {
+      return forbiddenResponse(reply, "Module create permission is required.", {
+        code: "missing_module_permission",
+        permissionKey: "expenses.create",
+        entityType: "voucher",
+        requestWorkspaceId: parsed.data.workspaceId,
+      });
+    }
+    const normalized = normalizeVoucherNumber(parsed.data.voucherNumber);
+    if (!normalized) {
+      return reply.code(400).send({
+        message: "Voucher numbers must use the format V-0001.",
+        details: { code: "invalid_voucher_number", voucherNumber: parsed.data.voucherNumber },
+      });
+    }
+    const existingVoucher = await db.transaction(async (tx) => findExistingVoucherByNumber(
+      tx,
+      parsed.data.workspaceId,
+      normalized,
+      parsed.data.recordId,
+    ));
+    const records = await db.select({
+      payload: operationalRecords.payload,
+    }).from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, parsed.data.workspaceId),
+      eq(operationalRecords.entityType, "voucher"),
+      sql`${operationalRecords.payload}->>'deletedAt' IS NULL`,
+    ));
+    const highest = records.reduce((max, record) => {
+      const value = typeof record.payload.voucherNumber === "string" ? record.payload.voucherNumber : "";
+      const parsedNumber = parseVoucherSequenceNumber(value);
+      return parsedNumber ? Math.max(max, parsedNumber) : max;
+    }, 0);
+    return {
+      voucherNumber: normalized,
+      available: !existingVoucher,
+      existingRecordId: existingVoucher?.clientRecordId ?? null,
+      suggestedNextVoucherNumber: `V-${String(highest + 1).padStart(4, "0")}`,
     };
   });
 
@@ -830,6 +927,15 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
           });
     } catch (error) {
       if (error instanceof Error && parsed.data.entity === "voucher") {
+        const duplicateMatch = /^Voucher number (V-\d+) already exists\.$/i.exec(error.message);
+        if (duplicateMatch) {
+          const duplicateVoucherNumber = duplicateMatch[1] ?? "V-0000";
+          return reply.code(409).send({
+            code: "duplicate_voucher_number",
+            message: `Voucher number ${duplicateVoucherNumber} already exists.`,
+            details: duplicateVoucherNumberDetails(parsed.data.workspaceId, duplicateVoucherNumber),
+          });
+        }
         return reply.code(400).send({ message: error.message });
       }
       throw error;

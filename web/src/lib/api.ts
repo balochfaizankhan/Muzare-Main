@@ -632,6 +632,12 @@ export type ExpenseSearchRecord = {
   category: string; categoryId: string; subcategory: string; subcategoryId: string; description: string; amount: number;
   accountId: string; accountName: string; notes?: string; createdAt: string; updatedAt: string;
 };
+export type VoucherNumberValidation = {
+  voucherNumber: string;
+  available: boolean;
+  existingRecordId?: string | null;
+  suggestedNextVoucherNumber: string;
+};
 export type AttendanceReportFilters = {
   farmId: string; seasonId: string; from: string; to: string; labourId?: string; labourIds?: string[]; status?: AttendanceReportStatus;
 };
@@ -981,6 +987,11 @@ export const rejectSignup = (token: string, userId: string) =>
   apiRequest<void>("/v1/admin/approvals/reject", { method: "POST", body: JSON.stringify({ userId }) }, token);
 export const saveOperationalRecord = (token: string, input: OperationalRecordEnvelope) =>
   apiRequest<{ record: OperationalRecordEnvelope["record"]; conflict: boolean }>("/v1/workspace/operational-records", { method: "POST", body: JSON.stringify(input) }, token, { debugLabel: `operational-record-save:${input.entity}` });
+export const validateVoucherNumber = (token: string, workspaceId: string, input: { voucherNumber: string; recordId?: string }) => {
+  const query = new URLSearchParams({ voucherNumber: input.voucherNumber });
+  if (input.recordId) query.set("recordId", input.recordId);
+  return apiRequest<VoucherNumberValidation>(`/v1/workspace/${workspaceId}/voucher-number-availability?${query.toString()}`, {}, token, { debugLabel: "voucher-number-validate" });
+};
 export const deleteOperationalRecord = (token: string, input: Omit<OperationalRecordEnvelope, "record"> & { recordId: string; reason?: string }) =>
   apiRequest<void>("/v1/workspace/operational-records", { method: "DELETE", body: JSON.stringify(input) }, token, { debugLabel: `operational-record-delete:${input.entity}` });
 export const fetchOperationalRecords = (token: string, workspaceId: string) =>

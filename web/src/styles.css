@@ -3348,8 +3348,22 @@ button {
   min-width: 0;
 }
 
+.expense-voucher-form__number-input.is-invalid {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 30%, transparent);
+}
+
 .expense-voucher-form__number-reset {
   flex: 0 0 auto;
+}
+
+.expense-voucher-form__number-feedback {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.expense-voucher-form__number-feedback.is-error {
+  color: var(--danger);
 }
 
 .expense-voucher-form__notes {

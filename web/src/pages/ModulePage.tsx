@@ -12,7 +12,7 @@ import { useSyncState } from "../hooks/useSyncState";
 import { calculateAccountBalance } from "../lib/accounting";
 import { defaultTransactionGroupExpansion, groupAccountTransactions, type AccountTransactionGroupKey } from "../lib/accountTransactionGroups";
 import { attendanceStatusKey, buildAttendanceStatusMap, previousLocalDateKey, todayLocalDateKey } from "../lib/attendanceStatus";
-import { confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteExpenseAttachment, deleteOrDeactivateLabour, extractExpenseReceipt, fetchExpenseAttachments, fetchExpenseCategories, fetchLabourDeletionPreview, openExpenseAttachment, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, uploadExpenseAttachment, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type ExpenseAttachment, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type ExpenseOcrSuggestion, type ExpenseSearchRecord, type LabourDeletionPreview } from "../lib/api";
+import { ApiError, confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteExpenseAttachment, deleteOrDeactivateLabour, extractExpenseReceipt, fetchExpenseAttachments, fetchExpenseCategories, fetchLabourDeletionPreview, openExpenseAttachment, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, uploadExpenseAttachment, validateVoucherNumber, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type ExpenseAttachment, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type ExpenseOcrSuggestion, type ExpenseSearchRecord, type LabourDeletionPreview } from "../lib/api";
 import { buildDispatchAvailability, dispatchCartons, dispatchItemKey, resolveSaleType, saleProduceLabel, soldQuantityByDispatchItem } from "../lib/dispatch-sales";
 import { canCreate, canDelete, canEdit, hasPermission } from "../lib/permissions";
 import { translateExpenseCategory, translateExpenseSubcategory, translatePaymentType, translateSaleType, translateSalesStatus } from "../lib/systemTranslations";
@@ -28,7 +28,7 @@ import {
   type PartnerLiabilityLedgerGroupKey,
 } from "../lib/partnerAccounting";
 import { formatDate, formatMoney } from "../lib/format";
-import { getVoucherDisplayNumber, parseVoucherSequenceNumber } from "../lib/vouchers";
+import { getVoucherDisplayNumber, normalizeVoucherNumber, parseVoucherSequenceNumber } from "../lib/vouchers";
 import {
   compareLabourers,
   ensureLocalAccounts,
@@ -1658,6 +1658,11 @@ function ExpensesModule() {
   const [editingVoucher, setEditingVoucher] = useState<Voucher | null>(null);
   const [customVoucherNumberEnabled, setCustomVoucherNumberEnabled] = useState(false);
   const [customVoucherNumber, setCustomVoucherNumber] = useState("");
+  const [voucherNumberValidation, setVoucherNumberValidation] = useState<{
+    status: "idle" | "checking" | "valid" | "duplicate" | "invalid" | "offline";
+    message: string;
+    normalized?: string;
+  }>({ status: "idle", message: "" });
   const [pendingReceipts, setPendingReceipts] = useState<PendingReceipt[]>([]);
   const [, setReceiptCropQueue] = useState<File[]>([]);
   const [receiptCropTarget, setReceiptCropTarget] = useState<File | null>(null);
@@ -1684,6 +1689,7 @@ function ExpensesModule() {
     setDate(today()); setVoucherItems([newVoucherItemDraft()]); setAccountId(""); setNotes("");
     setCustomVoucherNumberEnabled(false);
     setCustomVoucherNumber("");
+    setVoucherNumberValidation({ status: "idle", message: "" });
     pendingReceipts.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl));
     setPendingReceipts([]);
     setReceiptError("");
@@ -1694,6 +1700,7 @@ function ExpensesModule() {
     setNotes(voucher.notes ?? "");
     setCustomVoucherNumberEnabled(false);
     setCustomVoucherNumber("");
+    setVoucherNumberValidation({ status: "idle", message: "" });
     setPendingReceipts([]);
     setReceiptError("");
     pendingEditFocusRef.current = true;
@@ -1721,6 +1728,107 @@ function ExpensesModule() {
     : customVoucherNumberEnabled && customVoucherNumber.trim()
       ? customVoucherNumber.trim()
       : nextLocalVoucherNumber();
+  const validateVoucherNumberDraft = useCallback(async (value: string) => {
+    const trimmedValue = value.trim();
+    if (!trimmedValue) return { status: "idle" as const, message: "" };
+    const normalizedValue = normalizeVoucherNumber(trimmedValue);
+    if (!normalizedValue) {
+      return {
+        status: "invalid" as const,
+        message: t("expensesPage.voucherNumberFormatError"),
+      };
+    }
+    const [cachedWorkspaceVouchers, pendingVoucherMutations] = await Promise.all([
+      workspaceId ? offlineDb.vouchers.where("workspaceId").equals(workspaceId).toArray() : Promise.resolve([] as Voucher[]),
+      workspaceId ? offlineDb.pendingMutations.where("workspaceId").equals(workspaceId).and((mutation) =>
+        mutation.entity === "voucher"
+        && mutation.operation !== "delete"
+        && mutation.status !== "resolved"
+        && mutation.status !== "discarded").toArray() : Promise.resolve([]),
+    ]);
+    const duplicateCachedVoucher = cachedWorkspaceVouchers.some((item) =>
+      item.id !== editingVoucher?.id
+      && (getVoucherDisplayNumber(item) || item.voucherNumber) === normalizedValue);
+    const duplicatePendingVoucher = pendingVoucherMutations.some((mutation) => {
+      const payload = mutation.payload as Partial<Voucher>;
+      return payload.id !== editingVoucher?.id
+        && (getVoucherDisplayNumber(payload as Record<string, unknown>) || payload.voucherNumber) === normalizedValue;
+    });
+    if (duplicateCachedVoucher || duplicatePendingVoucher) {
+      return {
+        status: "duplicate" as const,
+        message: t("expensesPage.voucherNumberDuplicate", { number: normalizedValue }),
+        normalized: normalizedValue,
+      };
+    }
+    if (!navigator.onLine || !token || !workspaceId) {
+      return {
+        status: "offline" as const,
+        message: t("expensesPage.voucherNumberValidatedOffline"),
+        normalized: normalizedValue,
+      };
+    }
+    try {
+      const result = await validateVoucherNumber(token, workspaceId, { voucherNumber: normalizedValue, recordId: editingVoucher?.id });
+      if (!result.available) {
+        return {
+          status: "duplicate" as const,
+          message: t("expensesPage.voucherNumberDuplicate", { number: result.voucherNumber }),
+          normalized: result.voucherNumber,
+        };
+      }
+      return {
+        status: "valid" as const,
+        message: "",
+        normalized: result.voucherNumber,
+      };
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        return {
+          status: "duplicate" as const,
+          message: error.message,
+          normalized: normalizedValue,
+        };
+      }
+      if (error instanceof ApiError && error.status === 400) {
+        return {
+          status: "invalid" as const,
+          message: error.message,
+          normalized: normalizedValue,
+        };
+      }
+      return {
+        status: "offline" as const,
+        message: t("expensesPage.voucherNumberValidatedOffline"),
+        normalized: normalizedValue,
+      };
+    }
+  }, [editingVoucher?.id, t, token, workspaceId]);
+  useEffect(() => {
+    if (editingVoucher || !customVoucherNumberEnabled) {
+      setVoucherNumberValidation({ status: "idle", message: "" });
+      return;
+    }
+    const trimmedValue = customVoucherNumber.trim();
+    if (!trimmedValue) {
+      setVoucherNumberValidation({ status: "idle", message: "" });
+      return;
+    }
+    let cancelled = false;
+    setVoucherNumberValidation((current) => ({ ...current, status: "checking", message: t("expensesPage.voucherNumberChecking") }));
+    const handle = window.setTimeout(() => {
+      void validateVoucherNumberDraft(trimmedValue).then((result) => {
+        if (cancelled) return;
+        setVoucherNumberValidation(result);
+      });
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [customVoucherNumber, customVoucherNumberEnabled, editingVoucher, t, validateVoucherNumberDraft]);
+  const voucherNumberSaveBlocked = !editingVoucher && customVoucherNumberEnabled
+    && (voucherNumberValidation.status === "checking" || voucherNumberValidation.status === "duplicate" || voucherNumberValidation.status === "invalid");
   const addReceiptFiles = (files: FileList | null) => {
     if (!files) return;
     setReceiptError("");
@@ -1838,25 +1946,20 @@ function ExpensesModule() {
     const primaryItem = resolvedItems[0];
     const totalAmount = resolvedItems.reduce((sum, item) => sum + item.amount, 0);
     const suggestedVoucherNumber = nextLocalVoucherNumber();
-    const suggestedVoucherSequence = parseVoucherSequenceNumber(suggestedVoucherNumber) ?? 0;
     const manualVoucherNumber = customVoucherNumberEnabled ? customVoucherNumber.trim() : "";
-    if (!editingVoucher && manualVoucherNumber) {
-      const manualSequence = parseVoucherSequenceNumber(manualVoucherNumber);
-      if (!manualSequence) {
-        showToast("Voucher numbers must use the format V-0001.");
+    let nextVoucherNumber = suggestedVoucherNumber;
+    if (!editingVoucher) {
+      const validation = await validateVoucherNumberDraft(manualVoucherNumber || suggestedVoucherNumber);
+      setVoucherNumberValidation(validation);
+      if (validation.normalized && manualVoucherNumber) setCustomVoucherNumber(validation.normalized);
+      if (validation.status === "duplicate" || validation.status === "invalid") {
+        showToast(validation.message);
         return;
       }
-      if (manualSequence <= suggestedVoucherSequence) {
-        showToast(`Choose a voucher number higher than ${suggestedVoucherNumber}.`);
-        return;
-      }
-      if (vouchers.some((item) => (getVoucherDisplayNumber(item) || item.voucherNumber) === manualVoucherNumber)) {
-        showToast(`Voucher number ${manualVoucherNumber} already exists.`);
-        return;
-      }
+      nextVoucherNumber = validation.normalized ?? normalizeVoucherNumber(manualVoucherNumber || suggestedVoucherNumber) ?? suggestedVoucherNumber;
     }
     const record: Voucher = {
-      ...(editingVoucher ?? makeLocalRecord()), voucherNumber: editingVoucher?.voucherNumber ?? (manualVoucherNumber || suggestedVoucherNumber), date,
+      ...(editingVoucher ?? makeLocalRecord()), voucherNumber: editingVoucher?.voucherNumber ?? nextVoucherNumber, date,
       categoryId: primaryItem.categoryId,
       category: primaryItem.category,
       subcategoryId: primaryItem.subcategoryId ?? "",
@@ -2109,11 +2212,22 @@ function ExpensesModule() {
               <label className="expense-voucher-form__number-edit">
                 <span>{t("expensesPage.voucherNumberOverride")}</span>
                 <div className="expense-voucher-form__number-edit-row">
-                  <input value={customVoucherNumber} onChange={(event) => setCustomVoucherNumber(event.target.value.toUpperCase())} placeholder={nextLocalVoucherNumber()} />
+                  <input
+                    className={voucherNumberValidation.status === "duplicate" || voucherNumberValidation.status === "invalid" ? "expense-voucher-form__number-input is-invalid" : "expense-voucher-form__number-input"}
+                    value={customVoucherNumber}
+                    onChange={(event) => setCustomVoucherNumber(event.target.value.toUpperCase())}
+                    onBlur={() => {
+                      const normalized = normalizeVoucherNumber(customVoucherNumber);
+                      if (normalized) setCustomVoucherNumber(normalized);
+                    }}
+                    placeholder={nextLocalVoucherNumber()}
+                    aria-invalid={voucherNumberValidation.status === "duplicate" || voucherNumberValidation.status === "invalid"}
+                  />
                   <button type="button" className="secondary-action expense-voucher-form__number-reset" onClick={() => { setCustomVoucherNumberEnabled(false); setCustomVoucherNumber(""); }}>
                     {t("expensesPage.useSuggestedVoucherNumber")}
                   </button>
                 </div>
+                {voucherNumberValidation.message ? <small className={voucherNumberValidation.status === "duplicate" || voucherNumberValidation.status === "invalid" ? "expense-voucher-form__number-feedback is-error" : "expense-voucher-form__number-feedback"}>{voucherNumberValidation.message}</small> : null}
               </label>
           </div>}
           {!selectableExpenseAccounts.length && <p className="expense-voucher-form__warning">{t("expensesPage.noRealPaymentAccounts")}</p>}
@@ -2158,7 +2272,7 @@ function ExpensesModule() {
           </div>
           <ReceiptAttachmentPicker pending={pendingReceipts} onFiles={addReceiptFiles} onRemove={removePendingReceipt} />
           {receiptError && <p className="worker-action-error">{receiptError}</p>}
-          <button type="submit" disabled={!selectableExpenseAccounts.length}>{editingVoucher ? t("expensesPage.updateVoucher") : t("expensesPage.saveVoucher")}</button>
+          <button type="submit" disabled={!selectableExpenseAccounts.length || voucherNumberSaveBlocked}>{editingVoucher ? t("expensesPage.updateVoucher") : t("expensesPage.saveVoucher")}</button>
           {editingVoucher && <button type="button" onClick={() => { pendingEditFocusRef.current = false; setEditingVoucher(null); resetForm(); }}>{t("expensesPage.cancelEdit")}</button>}
         </form>
       </FormCard>}

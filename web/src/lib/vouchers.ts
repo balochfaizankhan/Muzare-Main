@@ -19,3 +19,7 @@ export function parseVoucherSequenceNumber(value: string) {
   return match ? Number(match[1]) : null;
 }
 
+export function normalizeVoucherNumber(value: string) {
+  const parsed = parseVoucherSequenceNumber(value);
+  return parsed ? `V-${String(parsed).padStart(4, "0")}` : null;
+}
