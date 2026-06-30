@@ -4,8 +4,9 @@ import { ChevronDown, ChevronUp, Database, FileJson, UploadCloud } from "lucide-
 import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
 import { ImportVisibilityAuditPanel } from "../../components/ImportVisibilityAuditPanel";
-import { cancelAndCleanMigrationImport, downloadMigrationImportFailures, fetchActiveMigrationImportJob, fetchAdminWorkspaces, fetchMigrationImportBatches, fetchMigrationImportCleanupPreview, fetchMigrationImportHistory, fetchMigrationImportJobStatus, fetchMigrationImportProgress, importMigrationData, repairDeletedFarmSeasonState, repairDuplicateImportedAccounts, repairImportedVoucherNumbers, repairMigrationImportVisibility, validateMigrationImport, type MigrationImportBatchRecord, type MigrationImportHistoryRecord, type MigrationImportIssue, type MigrationImportJobDetail, type MigrationImportLogEntry, type MigrationImportProgress, type MigrationImportSummary } from "../../lib/api";
+import { cancelAndCleanMigrationImport, downloadMigrationImportFailures, fetchActiveMigrationImportJob, fetchAdminWorkspaces, fetchMigrationImportBatches, fetchMigrationImportCleanupPreview, fetchMigrationImportHistory, fetchMigrationImportJobStatus, fetchMigrationImportProgress, fetchWorkspaceImportContextRepairPreview, importMigrationData, repairDeletedFarmSeasonState, repairDuplicateImportedAccounts, repairImportedVoucherNumbers, repairMigrationImportVisibility, repairWorkspaceImportContext, validateMigrationImport, type MigrationImportBatchRecord, type MigrationImportHistoryRecord, type MigrationImportIssue, type MigrationImportJobDetail, type MigrationImportLogEntry, type MigrationImportProgress, type MigrationImportSummary, type WorkspaceImportContextPreview } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
+import { clearCachedData } from "../../lib/offline-db";
 
 type StepStatus = "done" | "running" | "waiting" | "failed";
 
@@ -355,6 +356,53 @@ function HistoryTable({
   );
 }
 
+function ImportContextRepairPreviewCard({
+  preview,
+  backupConfirmed,
+  onBackupConfirmed,
+  repairResult,
+}: {
+  preview: WorkspaceImportContextPreview;
+  backupConfirmed: boolean;
+  onBackupConfirmed: (value: boolean) => void;
+  repairResult: { repairedByEntity: Array<{ entityType: string; count: number }>; duplicateActiveVoucherNumbersAfter: Array<{ voucherNumber: string }>; voucherNumberMismatchesAfter: number } | null;
+}) {
+  return (
+    <section className="migration-callout">
+      <div className="admin-section-heading">
+        <div>
+          <h3>Repair Workspace Import Context</h3>
+          <p>Preview the canonical farm/season remap before changing imported records.</p>
+        </div>
+      </div>
+      <div className="migration-result-grid">
+        <article><span>Canonical farm</span><strong>{preview.canonicalFarm ? `${preview.canonicalFarm.name}` : "None"}</strong></article>
+        <article><span>Canonical season</span><strong>{preview.canonicalSeason ? `${preview.canonicalSeason.name}` : "Will create fallback"}</strong></article>
+        <article><span>Old farms found</span><strong>{preview.oldFarms.length}</strong></article>
+        <article><span>Old seasons found</span><strong>{preview.oldSeasons.length}</strong></article>
+        <article><span>Voucher mismatches before</span><strong>{preview.voucherNumberMismatchesBefore}</strong></article>
+        <article><span>Deleted vouchers excluded</span><strong>{preview.deletedRecordsExcludedCount}</strong></article>
+      </div>
+      {preview.recordsRemapPreview.length ? (
+        <div className="attendance-import-table-wrap">
+          <table className="attendance-import-table">
+            <thead><tr><th>Entity</th><th>Records to remap</th></tr></thead>
+            <tbody>{preview.recordsRemapPreview.map((row) => <tr key={row.entityType}><td>{row.entityType}</td><td>{row.count}</td></tr>)}</tbody>
+          </table>
+        </div>
+      ) : <p>No imported operational records need farm/season remapping.</p>}
+      {preview.oldFarms.length ? <p className="migration-context"><b>Old farms:</b> {preview.oldFarms.map((farm) => `${farm.name} [${farm.reasons.join(", ")}]`).join(" • ")}</p> : null}
+      {preview.oldSeasons.length ? <p className="migration-context"><b>Old seasons:</b> {preview.oldSeasons.map((season) => `${season.name} [${season.reasons.join(", ")}]`).join(" • ")}</p> : null}
+      {preview.duplicateActiveVoucherNumbersProjected.length ? <p className="worker-action-error">Projected duplicate active voucher numbers after remap: {preview.duplicateActiveVoucherNumbersProjected.map((group) => group.voucherNumber).join(", ")}. These will be left for manual resolution.</p> : null}
+      <label className="inline-checkbox">
+        <input type="checkbox" checked={backupConfirmed} onChange={(event) => onBackupConfirmed(event.target.checked)} />
+        <span>I have created a database backup/export before repairing workspace import context.</span>
+      </label>
+      {repairResult ? <p className="positive">Repaired by entity: {repairResult.repairedByEntity.map((row) => `${row.entityType} ${row.count}`).join(" • ") || "0"}. Voucher mismatches after repair: {repairResult.voucherNumberMismatchesAfter}. Duplicate active voucher numbers after repair: {repairResult.duplicateActiveVoucherNumbersAfter.length}.</p> : null}
+    </section>
+  );
+}
+
 export function MigrationImport() {
   const { token } = useAuth();
   const queryClient = useQueryClient();
@@ -368,6 +416,7 @@ export function MigrationImport() {
   const [selectedHistoryBatchId, setSelectedHistoryBatchId] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [visibilityAuditOpen, setVisibilityAuditOpen] = useState(false);
+  const [importContextBackupConfirmed, setImportContextBackupConfirmed] = useState(false);
   const [cleanupBackupConfirmed, setCleanupBackupConfirmed] = useState(false);
   const [cleanupConfirmationText, setCleanupConfirmationText] = useState("");
   const [cleanupIncludeEdited, setCleanupIncludeEdited] = useState(false);
@@ -441,6 +490,21 @@ export function MigrationImport() {
       refreshAfterImport();
       window.dispatchEvent(new Event("muzare-data-refresh"));
       window.dispatchEvent(new Event("muzare-local-data-change"));
+    },
+  });
+  const importContextPreview = useQuery({
+    queryKey: ["admin-migration-import-repair-workspace-context-preview", workspaceId],
+    queryFn: () => fetchWorkspaceImportContextRepairPreview(token!, workspaceId),
+    enabled: false,
+  });
+  const repairImportContext = useMutation({
+    mutationFn: () => repairWorkspaceImportContext(token!, { workspaceId, backupConfirmed: true }),
+    onSuccess: async () => {
+      await clearCachedData();
+      refreshAfterImport();
+      window.dispatchEvent(new Event("muzare-data-refresh"));
+      window.dispatchEvent(new Event("muzare-local-data-change"));
+      void importContextPreview.refetch();
     },
   });
   const cleanupPreview = useQuery({
@@ -526,6 +590,7 @@ export function MigrationImport() {
     repairVisibility.reset();
     repairDeletedState.reset();
     repairDuplicateAccounts.reset();
+    repairImportContext.reset();
     if (!file) return;
     setFileName(file.name);
     if (!file.name.toLowerCase().endsWith(".json")) {
@@ -721,6 +786,12 @@ export function MigrationImport() {
         {advancedOpen ? (
           <div className="migration-advanced-body">
             <div className="record-list__actions">
+              <button type="button" className="secondary-button" disabled={!token || !workspaceId || importContextPreview.isFetching || blockingOperation} onClick={() => { void importContextPreview.refetch(); }}>
+                Preview Repair Workspace Import Context
+              </button>
+              <button type="button" className="secondary-button" disabled={!token || !workspaceId || !importContextBackupConfirmed || repairImportContext.isPending || blockingOperation} onClick={() => repairImportContext.mutate()}>
+                Repair Workspace Import Context
+              </button>
               <button type="button" className="secondary-button" disabled={!token || !workspaceId || repairVisibility.isPending || blockingOperation} onClick={() => repairVisibility.mutate()}>
                 Repair Previous Import Visibility
               </button>
@@ -737,10 +808,19 @@ export function MigrationImport() {
                 Run Visibility Audit
               </button>
             </div>
+            {importContextPreview.data?.preview ? <ImportContextRepairPreviewCard
+              preview={importContextPreview.data.preview}
+              backupConfirmed={importContextBackupConfirmed}
+              onBackupConfirmed={setImportContextBackupConfirmed}
+              repairResult={repairImportContext.data ?? null}
+            /> : null}
+            {repairImportContext.data ? <p className="positive">{repairImportContext.data.message} Remapped records: {repairImportContext.data.repairedOperationalRecords}. Voucher mismatches after repair: {repairImportContext.data.voucherNumberMismatchesAfter}. Duplicate active voucher numbers after repair: {repairImportContext.data.duplicateActiveVoucherNumbersAfter.length}.</p> : null}
             {repairVisibility.data ? <p className="positive">{repairVisibility.data.message} Repaired records: {repairVisibility.data.repairedRecords}.</p> : null}
             {repairDeletedState.data ? <p className="positive">{repairDeletedState.data.message} Farms deactivated: {repairDeletedState.data.farmsDeactivated}. Seasons deactivated: {repairDeletedState.data.seasonsDeactivated}.</p> : null}
             {repairDuplicateAccounts.data ? <p className="positive">{repairDuplicateAccounts.data.message} Duplicate groups before: {repairDuplicateAccounts.data.duplicateGroupsBefore}. Child records remapped: {repairDuplicateAccounts.data.childRecordsRemapped}. Duplicate accounts removed: {repairDuplicateAccounts.data.duplicateAccountsRemoved}.</p> : null}
             {repairVoucherNumbers.data ? <p className="positive">{repairVoucherNumbers.data.message} Updated vouchers: {repairVoucherNumbers.data.vouchersUpdated}. Mismatches before: {repairVoucherNumbers.data.mismatchesBefore}. Mismatches after: {repairVoucherNumbers.data.mismatchesAfter}.</p> : null}
+            {importContextPreview.error ? <p className="worker-action-error">{importContextPreview.error instanceof Error ? importContextPreview.error.message : "Workspace import context preview failed."}</p> : null}
+            {repairImportContext.error ? <p className="worker-action-error">{repairImportContext.error instanceof Error ? repairImportContext.error.message : "Workspace import context repair failed."}</p> : null}
             {repairVisibility.error ? <p className="worker-action-error">{repairVisibility.error instanceof Error ? repairVisibility.error.message : "Visibility repair failed."}</p> : null}
             {repairDeletedState.error ? <p className="worker-action-error">{repairDeletedState.error instanceof Error ? repairDeletedState.error.message : "Deleted farm/season repair failed."}</p> : null}
             {repairDuplicateAccounts.error ? <p className="worker-action-error">{repairDuplicateAccounts.error instanceof Error ? repairDuplicateAccounts.error.message : "Duplicate account repair failed."}</p> : null}

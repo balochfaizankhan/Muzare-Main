@@ -1757,13 +1757,15 @@ function ExpensesModule() {
         message: t("expensesPage.voucherNumberFormatError"),
       };
     }
+    const currentFarmId = getActiveFarmId() ?? undefined;
     const [cachedWorkspaceVouchers, pendingVoucherMutations] = await Promise.all([
-      workspaceId ? offlineDb.vouchers.where("workspaceId").equals(workspaceId).toArray().then((rows) => getActiveVouchers(rows)) : Promise.resolve([] as Voucher[]),
+      workspaceId ? offlineDb.vouchers.where("workspaceId").equals(workspaceId).toArray().then((rows) => getActiveVouchers(rows).filter((item) => item.farmId === currentFarmId)) : Promise.resolve([] as Voucher[]),
       workspaceId ? offlineDb.pendingMutations.where("workspaceId").equals(workspaceId).and((mutation) =>
         mutation.entity === "voucher"
         && mutation.operation !== "delete"
         && mutation.status !== "resolved"
-        && mutation.status !== "discarded").toArray() : Promise.resolve([]),
+        && mutation.status !== "discarded"
+        && mutation.farmId === currentFarmId).toArray() : Promise.resolve([]),
     ]);
     const duplicateCachedVoucher = cachedWorkspaceVouchers.some((item) =>
       item.id !== editingVoucher?.id
@@ -1788,7 +1790,7 @@ function ExpensesModule() {
       };
     }
     try {
-      const result = await validateVoucherNumber(token, workspaceId, { voucherNumber: normalizedValue, recordId: editingVoucher?.id });
+      const result = await validateVoucherNumber(token, workspaceId, { voucherNumber: normalizedValue, recordId: editingVoucher?.id, farmId: currentFarmId });
       if (!result.available) {
         return {
           status: "duplicate" as const,

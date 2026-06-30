@@ -14,9 +14,7 @@ export function isImportedVoucherPayload(payload: Record<string, unknown>, sourc
   return sourceType === "expense"
     || clean(payload.source_type) === "expense"
     || clean(payload.sourceType) === "expense"
-    || clean(payload.oldExpenseId).length > 0
-    || clean(payload.originalVoucherNumber).length > 0
-    || clean(payload.legacyVoucherNumber).length > 0;
+    || clean(payload.oldExpenseId).length > 0;
 }
 
 export function hasExplicitVoucherNumberEdit(payload: Record<string, unknown>): boolean {

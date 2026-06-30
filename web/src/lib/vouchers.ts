@@ -20,9 +20,7 @@ export function canonicalImportedVoucherNumber(voucher: VoucherLike) {
 }
 
 export function isImportedVoucher(voucher: VoucherLike) {
-  return cleanVoucherNumber(voucher.originalVoucherNumber).length > 0
-    || cleanVoucherNumber(voucher.legacyVoucherNumber).length > 0
-    || cleanVoucherNumber(voucher.oldExpenseId).length > 0
+  return cleanVoucherNumber(voucher.oldExpenseId).length > 0
     || cleanVoucherNumber(voucher.sourceType) === "expense"
     || cleanVoucherNumber(voucher.source_type) === "expense";
 }

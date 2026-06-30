@@ -272,11 +272,13 @@ function duplicateVoucherNumberDetails(workspaceId: string, voucherNumber: strin
 async function findExistingVoucherByNumber(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   workspaceId: string,
+  farmId: string,
   voucherNumber: string,
   excludeClientRecordId?: string,
 ) {
   const filters = [
     eq(operationalRecords.workspaceId, workspaceId),
+    eq(operationalRecords.farmId, farmId),
     eq(operationalRecords.entityType, "voucher"),
     activeOperationalPayloadSql(operationalRecords.payload),
     sql`coalesce(${operationalRecords.payload}->>'voucherNumber', '') = ${voucherNumber}`,
@@ -333,11 +335,13 @@ async function bumpVoucherSequence(
 async function reserveVoucherNumber(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   workspaceId: string,
+  farmId: string,
   voucherNumber: string,
   excludeClientRecordId?: string,
 ) {
-  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${workspaceId}), hashtext(${voucherNumber}))`);
-  const existingVoucher = await findExistingVoucherByNumber(tx, workspaceId, voucherNumber, excludeClientRecordId);
+  const scopeKey = `${workspaceId}:${farmId}`;
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${scopeKey}), hashtext(${voucherNumber}))`);
+  const existingVoucher = await findExistingVoucherByNumber(tx, workspaceId, farmId, voucherNumber, excludeClientRecordId);
   if (existingVoucher) {
     throw new Error(`Voucher number ${voucherNumber} already exists.`);
   }
@@ -365,7 +369,7 @@ async function allocateVoucherNumber(
   const nextSuggested = (current?.lastNumber ?? 0) + 1;
   const finalNumber = parsedRequestedNumber ?? nextSuggested;
   const voucherNumber = normalizedRequestedVoucherNumber ?? `V-${String(finalNumber).padStart(4, "0")}`;
-  await reserveVoucherNumber(tx, workspaceId, voucherNumber);
+  await reserveVoucherNumber(tx, workspaceId, farmId, voucherNumber);
   await bumpVoucherSequence(tx, workspaceId, farmId, seasonId, voucherNumber);
   return voucherNumber;
 }
@@ -548,6 +552,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       workspaceId: z.string().uuid(),
       voucherNumber: z.string().trim().min(1),
       recordId: z.string().optional(),
+      farmId: z.string().uuid().optional(),
     }).safeParse({
       ...(request.params as Record<string, unknown>),
       ...(request.query as Record<string, unknown>),
@@ -572,6 +577,28 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         requestWorkspaceId: parsed.data.workspaceId,
       });
     }
+    if (!request.sessionId) {
+      return forbiddenResponse(reply, "Session context is required before validating voucher numbers.", {
+        code: "missing_session_context",
+        requestWorkspaceId: parsed.data.workspaceId,
+      });
+    }
+    const [session] = await db.select({ activeFarmId: userSessions.activeFarmId })
+      .from(userSessions).where(eq(userSessions.id, request.sessionId)).limit(1);
+    const validationFarmId = parsed.data.farmId ?? session?.activeFarmId ?? null;
+    if (!validationFarmId) {
+      return forbiddenResponse(reply, "Select an active farm before validating voucher numbers.", {
+        code: "stale_farm_context",
+        requestWorkspaceId: parsed.data.workspaceId,
+      });
+    }
+    if (!hasFarmAccess(request.appUser, parsed.data.workspaceId, validationFarmId)) {
+      return forbiddenResponse(reply, "You do not have access to this farm.", {
+        code: "farm_access_denied",
+        requestWorkspaceId: parsed.data.workspaceId,
+        farmId: validationFarmId,
+      });
+    }
     const normalized = normalizeVoucherNumber(parsed.data.voucherNumber);
     if (!normalized) {
       return reply.code(400).send({
@@ -582,6 +609,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     const existingVoucher = await db.transaction(async (tx) => findExistingVoucherByNumber(
       tx,
       parsed.data.workspaceId,
+      validationFarmId,
       normalized,
       parsed.data.recordId,
     ));
@@ -589,6 +617,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       payload: operationalRecords.payload,
     }).from(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, parsed.data.workspaceId),
+      eq(operationalRecords.farmId, validationFarmId),
       eq(operationalRecords.entityType, "voucher"),
       activeOperationalPayloadSql(operationalRecords.payload),
     ));
@@ -970,7 +999,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
               });
               const voucherNumber = normalizedVoucher.resolvedVoucherNumber;
               if (!voucherNumber) throw new Error("Voucher number is required.");
-              await reserveVoucherNumber(tx, parsed.data.workspaceId, voucherNumber, existing.clientRecordId);
+              await reserveVoucherNumber(tx, parsed.data.workspaceId, parsed.data.farmId!, voucherNumber, existing.clientRecordId);
               await bumpVoucherSequence(tx, parsed.data.workspaceId, parsed.data.farmId!, parsed.data.seasonId, voucherNumber);
               if (localDevelopmentMode && normalizedVoucher.importedVoucher && !normalizedVoucher.explicitVoucherNumberEdit && normalizedRequestedVoucherNumber && normalizedVoucher.canonicalNumber && normalizedRequestedVoucherNumber !== normalizedVoucher.canonicalNumber) {
                 console.warn("IMPORTED_VOUCHER_NUMBER_WRITE_BLOCKED", {

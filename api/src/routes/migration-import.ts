@@ -9,6 +9,7 @@ import { auditLogs, expenseCategories, expenseSubcategories, farmDeletionRequest
 import { visibleFarmWhere } from "../farm-visibility.js";
 import { activeOperationalPayloadSql } from "../operational-record-state.js";
 import { canonicalImportedVoucherNumber } from "../lib/import-voucher-numbers.js";
+import { previewWorkspaceImportContextRepair, repairWorkspaceImportContext } from "../lib/workspace-import-context.js";
 import { repairDeletedFarmSeasonState, repairWorkspaceContext, resolveWorkspaceContext } from "./workspace-context.js";
 
 const requiredArrays = [
@@ -95,6 +96,10 @@ const cancelAndCleanActionSchema = z.object({
 const batchListQuerySchema = z.object({ workspaceId: z.string().uuid() });
 const progressQuerySchema = z.object({ batchId: z.string().uuid() });
 const voucherWriterAuditQuerySchema = z.object({ workspaceId: z.string().uuid() });
+const importContextRepairSchema = z.object({
+  workspaceId: z.string().uuid(),
+  backupConfirmed: z.literal(true),
+});
 
 function normalizeImportedName(value: unknown) {
   return String(value ?? "")
@@ -4569,6 +4574,35 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
       message: result.mismatchesBefore
         ? "Imported voucher numbers were repaired."
         : "No imported voucher number mismatches were found.",
+    };
+  });
+
+  app.get("/v1/admin/migration-import/repair-workspace-context/preview", { preHandler: requirePermission("CREATE_WORKSPACE") }, async (request, reply) => {
+    const parsed = repairSchema.safeParse(request.query);
+    if (!parsed.success) return reply.code(400).send({ message: "A workspaceId is required." });
+    if (localDevelopmentMode) return reply.code(409).send({ message: "Local memory mode cannot preview workspace import repair. Configure a dev database first." });
+    return {
+      preview: await previewWorkspaceImportContextRepair(parsed.data.workspaceId, request.sessionId),
+    };
+  });
+
+  app.post("/v1/admin/migration-import/repair-workspace-context", { preHandler: requirePermission("CREATE_WORKSPACE") }, async (request, reply) => {
+    const parsed = importContextRepairSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ message: "Workspace ID and backup confirmation are required." });
+    if (localDevelopmentMode) return reply.code(409).send({ message: "Local memory mode cannot repair workspace import context. Configure a dev database first." });
+    const actorUserId = request.appUser?.id;
+    if (!actorUserId) return reply.code(403).send({ message: "Admin user is required." });
+    const result = await repairWorkspaceImportContext({
+      workspaceId: parsed.data.workspaceId,
+      actorUserId,
+      backupConfirmed: parsed.data.backupConfirmed,
+      sessionId: request.sessionId,
+    });
+    return {
+      ...result,
+      message: result.repairedOperationalRecords
+        ? "Workspace import context repaired successfully."
+        : "Workspace import context was already consistent.",
     };
   });
 }

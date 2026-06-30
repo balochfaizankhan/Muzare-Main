@@ -23,11 +23,13 @@ test("canonicalImportedVoucherNumber returns an empty string when no usable vouc
 test("resolveVoucherPayloadForWrite keeps canonical Android voucher number when stale cache retries without explicit edit", () => {
   const result = resolveVoucherPayloadForWrite({
     incomingPayload: {
+      source_type: "expense",
       voucherNumber: "V-0132",
       originalVoucherNumber: "V-0141",
       legacyVoucherNumber: "V-0141",
     },
     existingPayload: {
+      source_type: "expense",
       voucherNumber: "V-0141",
       originalVoucherNumber: "V-0141",
       legacyVoucherNumber: "V-0141",
@@ -43,12 +45,14 @@ test("resolveVoucherPayloadForWrite keeps canonical Android voucher number when 
 test("resolveVoucherPayloadForWrite allows explicit imported voucher renumber edits", () => {
   const result = resolveVoucherPayloadForWrite({
     incomingPayload: {
+      source_type: "expense",
       voucherNumber: "V-0200",
       originalVoucherNumber: "V-0141",
       legacyVoucherNumber: "V-0141",
       allowVoucherNumberEdit: true,
     },
     existingPayload: {
+      source_type: "expense",
       voucherNumber: "V-0141",
       originalVoucherNumber: "V-0141",
       legacyVoucherNumber: "V-0141",

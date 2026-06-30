@@ -474,6 +474,39 @@ export type ImportedVoucherNumberRepairResult = {
   }>;
   message: string;
 };
+export type WorkspaceImportContextDuplicateVoucher = {
+  voucherNumber: string;
+  recordIds: string[];
+  dates: string[];
+  amounts: number[];
+  accounts: string[];
+  statuses: string[];
+  imported: boolean[];
+  oldExpenseIds: string[];
+};
+export type WorkspaceImportContextPreview = {
+  workspaceId: string;
+  canonicalFarm: { id: string; name: string; activeRecordCount: number; selectionReason: string } | null;
+  canonicalSeason: { id: string; name: string; activeRecordCount: number; selectionReason: string } | null;
+  oldFarms: Array<{ id: string; name: string; active: boolean; deletedAt: string | null; reasons: string[]; oldAndroidId: string | null; sourceFileHash: string | null; importBatchId: string | null }>;
+  oldSeasons: Array<{ id: string; farmId: string; name: string; status: string; active: boolean; reasons: string[]; oldAndroidId: string | null; sourceFileHash: string | null; importBatchId: string | null }>;
+  recordsRemapPreview: Array<{ entityType: string; count: number }>;
+  voucherNumberMismatchesBefore: number;
+  duplicateActiveVoucherNumbersBefore: WorkspaceImportContextDuplicateVoucher[];
+  duplicateActiveVoucherNumbersProjected: WorkspaceImportContextDuplicateVoucher[];
+  deletedRecordsExcludedCount: number;
+};
+export type WorkspaceImportContextRepairResult = WorkspaceImportContextPreview & {
+  createdFallbackSeason: boolean;
+  repairedOperationalRecords: number;
+  repairedByEntity: Array<{ entityType: string; count: number }>;
+  voucherNumberMismatchesAfter: number;
+  duplicateActiveVoucherNumbersAfter: WorkspaceImportContextDuplicateVoucher[];
+  farmsArchived: number;
+  seasonsArchived: number;
+  sessionsUpdated: number;
+  message: string;
+};
 export type AccountingDiagnosticsRecord = {
   id: string;
   farmId: string | null;
@@ -1013,6 +1046,10 @@ export const repairDuplicateImportedAccounts = (token: string, input: { workspac
   apiRequest<DuplicateImportedAccountsRepairResult>("/v1/admin/migration-import/repair-duplicate-accounts", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 60_000, debugLabel: "migration-import-repair-duplicate-accounts" });
 export const repairImportedVoucherNumbers = (token: string, input: { workspaceId: string }) =>
   apiRequest<ImportedVoucherNumberRepairResult>("/v1/admin/migration-import/repair-voucher-numbers", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 60_000, debugLabel: "migration-import-repair-voucher-numbers" });
+export const fetchWorkspaceImportContextRepairPreview = (token: string, workspaceId: string) =>
+  apiRequest<{ preview: WorkspaceImportContextPreview }>(`/v1/admin/migration-import/repair-workspace-context/preview?workspaceId=${encodeURIComponent(workspaceId)}`, {}, token, { timeoutMs: 60_000, debugLabel: "migration-import-repair-workspace-context-preview" });
+export const repairWorkspaceImportContext = (token: string, input: { workspaceId: string; backupConfirmed: true }) =>
+  apiRequest<WorkspaceImportContextRepairResult>("/v1/admin/migration-import/repair-workspace-context", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 120_000, debugLabel: "migration-import-repair-workspace-context" });
 export const fetchMigrationImportCleanupPreview = (token: string, workspaceId: string, batchId: string) =>
   apiRequest<{ preview: MigrationImportCleanupPreview }>(`/v1/admin/migration-import/cleanup-preview?workspaceId=${encodeURIComponent(workspaceId)}&batchId=${encodeURIComponent(batchId)}`, {}, token, { timeoutMs: 30_000, debugLabel: "migration-import-cleanup-preview" });
 export const fetchAccountingDiagnostics = (token: string, input: { workspaceId: string; farmId?: string; seasonId?: string }) => {
@@ -1055,9 +1092,10 @@ export const rejectSignup = (token: string, userId: string) =>
   apiRequest<void>("/v1/admin/approvals/reject", { method: "POST", body: JSON.stringify({ userId }) }, token);
 export const saveOperationalRecord = (token: string, input: OperationalRecordEnvelope) =>
   apiRequest<{ record: OperationalRecordEnvelope["record"]; conflict: boolean }>("/v1/workspace/operational-records", { method: "POST", body: JSON.stringify(input) }, token, { debugLabel: `operational-record-save:${input.entity}` });
-export const validateVoucherNumber = (token: string, workspaceId: string, input: { voucherNumber: string; recordId?: string }) => {
+export const validateVoucherNumber = (token: string, workspaceId: string, input: { voucherNumber: string; recordId?: string; farmId?: string }) => {
   const query = new URLSearchParams({ voucherNumber: input.voucherNumber });
   if (input.recordId) query.set("recordId", input.recordId);
+  if (input.farmId) query.set("farmId", input.farmId);
   return apiRequest<VoucherNumberValidation>(`/v1/workspace/${workspaceId}/voucher-number-availability?${query.toString()}`, {}, token, { debugLabel: "voucher-number-validate" });
 };
 export const deleteOperationalRecord = (token: string, input: Omit<OperationalRecordEnvelope, "record"> & { recordId: string; reason?: string }) =>
