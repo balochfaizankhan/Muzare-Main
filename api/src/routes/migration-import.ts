@@ -7,6 +7,7 @@ import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { auditLogs, expenseCategories, expenseSubcategories, farmDeletionRequests, farms, importBatches, importFailures, operationalRecords, seasons, userSessions, workspaces } from "../db/schema.js";
 import { visibleFarmWhere } from "../farm-visibility.js";
+import { activeOperationalPayloadSql } from "../operational-record-state.js";
 import { canonicalImportedVoucherNumber } from "../lib/import-voucher-numbers.js";
 import { repairDeletedFarmSeasonState, repairWorkspaceContext, resolveWorkspaceContext } from "./workspace-context.js";
 
@@ -93,6 +94,7 @@ const cancelAndCleanActionSchema = z.object({
 });
 const batchListQuerySchema = z.object({ workspaceId: z.string().uuid() });
 const progressQuerySchema = z.object({ batchId: z.string().uuid() });
+const voucherWriterAuditQuerySchema = z.object({ workspaceId: z.string().uuid() });
 
 function normalizeImportedName(value: unknown) {
   return String(value ?? "")
@@ -1250,6 +1252,7 @@ async function repairImportedVoucherNumbers(workspaceId: string): Promise<Vouche
       const nextPayload = {
         ...payload,
         voucherNumber: repairedVoucherNumber,
+        voucherNumberEdited: false,
         updatedAt: repairedAt.toISOString(),
       };
       await tx.update(operationalRecords).set({
@@ -4451,6 +4454,54 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
         activeSeasonName: activeSeason.name,
       };
     });
+
+  app.get("/v1/admin/voucher-number-writers/audit", { preHandler: requirePermission("CREATE_WORKSPACE") }, async (request, reply) => {
+    const parsed = voucherWriterAuditQuerySchema.safeParse(request.query);
+    if (!parsed.success) return reply.code(400).send({ message: "A workspaceId is required." });
+    const rows = await db.select({
+      id: operationalRecords.id,
+      clientRecordId: operationalRecords.clientRecordId,
+      sourceType: operationalRecords.sourceType,
+      importBatchId: operationalRecords.importBatchId,
+      sourceFileHash: operationalRecords.sourceFileHash,
+      payload: operationalRecords.payload,
+      updatedAt: operationalRecords.updatedAt,
+      clientUpdatedAt: operationalRecords.clientUpdatedAt,
+    }).from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, parsed.data.workspaceId),
+      eq(operationalRecords.entityType, "voucher"),
+      activeOperationalPayloadSql(operationalRecords.payload),
+      or(
+        eq(operationalRecords.sourceType, sourceTypeFor("expenses")),
+        sql`nullif(trim(coalesce(${operationalRecords.payload}->>'originalVoucherNumber', '')), '') IS NOT NULL`,
+        sql`nullif(trim(coalesce(${operationalRecords.payload}->>'legacyVoucherNumber', '')), '') IS NOT NULL`
+      ),
+    ));
+    const mismatches = rows.flatMap((row) => {
+      const payload = row.payload as Record<string, unknown>;
+      const canonicalNumber = canonicalImportedVoucherNumber(payload);
+      const storedVoucherNumber = String(payload.voucherNumber ?? "").trim();
+      if (!canonicalNumber || storedVoucherNumber === canonicalNumber || payload.voucherNumberEdited === true) return [];
+      return [{
+        clientRecordId: row.clientRecordId,
+        sourceType: row.sourceType,
+        importBatchId: row.importBatchId,
+        sourceFileHash: row.sourceFileHash,
+        storedVoucherNumber,
+        canonicalNumber,
+        originalVoucherNumber: String(payload.originalVoucherNumber ?? "").trim() || null,
+        legacyVoucherNumber: String(payload.legacyVoucherNumber ?? "").trim() || null,
+        voucherNumberEdited: payload.voucherNumberEdited === true,
+        updatedAt: row.updatedAt.toISOString(),
+        clientUpdatedAt: row.clientUpdatedAt.toISOString(),
+      }];
+    });
+    return {
+      workspaceId: parsed.data.workspaceId,
+      mismatches,
+      mismatchCount: mismatches.length,
+    };
+  });
 
     if (!result) return reply.code(404).send({ message: "No imported farm was found for this workspace." });
     return { ...result, message: "Imported farm and season are active. Imported records with missing or invalid season links were repaired." };

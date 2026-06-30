@@ -3,7 +3,7 @@ import { clearCachedData, offlineDb, setActiveFarmId, setActiveSeasonId, setActi
 import { canQueueOperationalMutation } from "../lib/permissions";
 import type { Table } from "dexie";
 import i18n from "../i18n";
-import { getVoucherDisplayNumber, normalizeVoucherNumber } from "../lib/vouchers";
+import { canonicalizeImportedVoucherRecord, getVoucherDisplayNumber, normalizeVoucherNumber } from "../lib/vouchers";
 import { getActiveVouchers } from "../lib/voucherCollections";
 
 export type SyncStatus = "online" | "offline" | "pending" | "syncing" | "error";
@@ -70,6 +70,10 @@ function debugVoucherSync(stage: string, detail: Record<string, unknown>) {
   console.log(`[voucher-sync] ${stage}`, detail);
 }
 
+function normalizeVoucherRecordForSync<T extends Record<string, unknown>>(record: T): T {
+  return canonicalizeImportedVoucherRecord(record);
+}
+
 function tableFor(entity: OperationalEntity) {
   return tables[entity] as unknown as Table<LocalRecord, string>;
 }
@@ -105,7 +109,8 @@ async function cacheRecord(
   workspaceId: string | undefined = (record as Partial<LocalRecord>).workspaceId ?? context?.workspaceId,
 ) {
   if (!context) throw new Error(i18n.t("sync.workspaceSyncNotInitialized"));
-  const nextRecord = { ...record, workspaceId: workspaceId ?? context.workspaceId, farmId, seasonId, pendingSync } as LocalRecord;
+  const normalizedRecord = entity === "voucher" ? normalizeVoucherRecordForSync(record as Record<string, unknown>) : record;
+  const nextRecord = { ...normalizedRecord, workspaceId: workspaceId ?? context.workspaceId, farmId, seasonId, pendingSync } as LocalRecord;
   const existing = await tableFor(entity).get(record.id);
   if (existing) {
     const localUpdated = Date.parse(existing.updatedAt);
@@ -208,14 +213,15 @@ async function refreshSyncState(next: Partial<SyncState> = {}) {
 export async function queueOfflineRecord(entity: OperationalEntity, record: LocalRecord, operation: "create" | "edit" = "create"): Promise<void> {
   if (!context) throw new Error(i18n.t("sync.workspaceSyncNotInitialized"));
   assertCanQueueMutation(entity, operation);
+  const normalizedRecord = entity === "voucher" ? normalizeVoucherRecordForSync(record as Record<string, unknown>) as LocalRecord : record;
   const recordWorkspaceId = record.workspaceId || context.workspaceId;
-  const recordFarmId = record.farmId ?? context.farmId;
-  const recordSeasonId = record.seasonId ?? context.seasonId;
-  await cacheRecord(entity, { ...record, workspaceId: recordWorkspaceId, farmId: recordFarmId, seasonId: recordSeasonId }, true, recordFarmId, recordSeasonId, recordWorkspaceId);
+  const recordFarmId = normalizedRecord.farmId ?? context.farmId;
+  const recordSeasonId = normalizedRecord.seasonId ?? context.seasonId;
+  await cacheRecord(entity, { ...normalizedRecord, workspaceId: recordWorkspaceId, farmId: recordFarmId, seasonId: recordSeasonId }, true, recordFarmId, recordSeasonId, recordWorkspaceId);
   const queuedAt = new Date().toISOString();
   const mutation: PendingMutation = {
-    id: `${recordWorkspaceId}:${entity}:${record.id}`, entity, operation: operation === "edit" ? "update" : operation, payload: { ...record, workspaceId: recordWorkspaceId, farmId: recordFarmId, seasonId: recordSeasonId }, attempts: 0,
-    clientMutationId: `${recordWorkspaceId}:${entity}:${record.id}`,
+    id: `${recordWorkspaceId}:${entity}:${normalizedRecord.id}`, entity, operation: operation === "edit" ? "update" : operation, payload: { ...normalizedRecord, workspaceId: recordWorkspaceId, farmId: recordFarmId, seasonId: recordSeasonId }, attempts: 0,
+    clientMutationId: `${recordWorkspaceId}:${entity}:${normalizedRecord.id}`,
     status: "pending",
     retryable: true,
     workspaceId: recordWorkspaceId, farmId: recordFarmId, seasonId: recordSeasonId,
@@ -224,12 +230,12 @@ export async function queueOfflineRecord(entity: OperationalEntity, record: Loca
   await offlineDb.pendingMutations.put(mutation);
   if (entity === "voucher") {
     debugVoucherSync("queued", {
-      operation,
-      mutationId: mutation.id,
-      clientRecordId: record.id,
-      workspaceId: recordWorkspaceId,
-      farmId: recordFarmId,
-      seasonId: recordSeasonId,
+        operation,
+        mutationId: mutation.id,
+        clientRecordId: normalizedRecord.id,
+        workspaceId: recordWorkspaceId,
+        farmId: recordFarmId,
+        seasonId: recordSeasonId,
     });
   }
   await refreshSyncState({ status: navigator.onLine ? "pending" : "offline" });
@@ -467,7 +473,8 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
 }
 
 function normalizeRecord(record: OperationalRecordEnvelope["record"]) {
-  return { ...record, updatedAt: record.updatedAt || record.createdAt };
+  const normalizedRecord = normalizeVoucherRecordForSync(record);
+  return { ...normalizedRecord, updatedAt: normalizedRecord.updatedAt || normalizedRecord.createdAt };
 }
 
 export async function syncNow() {
@@ -551,7 +558,17 @@ export async function getSyncQueueItems() {
 export async function retrySyncQueueItem(mutationId: string) {
   const item = await offlineDb.pendingMutations.get(mutationId);
   if (item?.entity === "voucher" && item.operation !== "delete" && context) {
-    const payload = item.payload as Partial<LocalRecord> & { voucherNumber?: string };
+    const normalizedPayload = normalizeVoucherRecordForSync(item.payload as Record<string, unknown>) as Partial<LocalRecord> & { voucherNumber?: string };
+    if (JSON.stringify(normalizedPayload) !== JSON.stringify(item.payload)) {
+      await offlineDb.pendingMutations.update(mutationId, {
+        payload: normalizedPayload,
+        updatedAt: new Date().toISOString(),
+      });
+      if (typeof normalizedPayload.id === "string") {
+        await tableFor(item.entity).update(normalizedPayload.id, normalizedPayload as LocalRecord);
+      }
+    }
+    const payload = normalizedPayload;
     const rawVoucherNumber = typeof payload.voucherNumber === "string" ? payload.voucherNumber.trim() : "";
     const normalizedVoucherNumber = normalizeVoucherNumber(rawVoucherNumber);
     if (!normalizedVoucherNumber) {

@@ -6,6 +6,14 @@ import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { auditLogs, expenseVoucherSequences, operationalRecords, userSessions } from "../db/schema.js";
 import { activeOperationalPayloadSql, isDeletedOperationalPayload } from "../operational-record-state.js";
+import {
+  canonicalImportedVoucherNumber,
+  hasExplicitVoucherNumberEdit,
+  isImportedVoucherPayload,
+  resolveVoucherPayloadForWrite,
+  stripVoucherNumberControlFields,
+  wasImportedVoucherNumberEdited,
+} from "../lib/import-voucher-numbers.js";
 import { hasModulePermission, hasPermission, type WorkspaceModule } from "../permissions.js";
 import { validateTenantReferences, validateTenantReferencesDetailed } from "../tenant-ownership.js";
 import { validateExpenseCategoryReference } from "./expense-categories.js";
@@ -189,6 +197,10 @@ function voucherValidationError(
     code: "voucher_reference_validation_failed",
     ...details,
   });
+}
+
+function cleanText(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
 function requireWorkspaceWrite(user: AuthenticatedUser, workspaceId: string) {
@@ -950,18 +962,28 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       [saved] = existing
         ? parsed.data.entity === "voucher"
           ? await db.transaction(async (tx) => {
-              const voucherNumber = normalizedRequestedVoucherNumber
-                ?? (typeof existing.payload.voucherNumber === "string" ? existing.payload.voucherNumber : "");
+              const normalizedVoucher = resolveVoucherPayloadForWrite({
+                incomingPayload: payload,
+                existingPayload: existing.payload,
+                sourceType: existing.sourceType,
+                requestedVoucherNumber: normalizedRequestedVoucherNumber,
+              });
+              const voucherNumber = normalizedVoucher.resolvedVoucherNumber;
               if (!voucherNumber) throw new Error("Voucher number is required.");
               await reserveVoucherNumber(tx, parsed.data.workspaceId, voucherNumber, existing.clientRecordId);
               await bumpVoucherSequence(tx, parsed.data.workspaceId, parsed.data.farmId!, parsed.data.seasonId, voucherNumber);
+              if (localDevelopmentMode && normalizedVoucher.importedVoucher && !normalizedVoucher.explicitVoucherNumberEdit && normalizedRequestedVoucherNumber && normalizedVoucher.canonicalNumber && normalizedRequestedVoucherNumber !== normalizedVoucher.canonicalNumber) {
+                console.warn("IMPORTED_VOUCHER_NUMBER_WRITE_BLOCKED", {
+                  voucherId: existing.clientRecordId,
+                  requestedVoucherNumber: normalizedRequestedVoucherNumber,
+                  canonicalVoucherNumber: normalizedVoucher.canonicalNumber,
+                  sourceType: existing.sourceType,
+                });
+              }
               const nextPayload = {
-                ...payload,
-                voucherNumber,
+                ...normalizedVoucher.nextPayload,
                 createdBy: existing.payload.createdBy ?? request.appUser!.id,
                 updatedBy: request.appUser!.id,
-                originalVoucherNumber: payload.originalVoucherNumber ?? existing.payload.originalVoucherNumber,
-                legacyVoucherNumber: payload.legacyVoucherNumber ?? existing.payload.legacyVoucherNumber,
               };
               return tx.update(operationalRecords).set({ ...values, payload: nextPayload })
                 .where(eq(operationalRecords.id, existing.id)).returning();
@@ -979,23 +1001,32 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
             })
           : await db.update(operationalRecords).set({ ...values, payload: updatedPayload })
             .where(eq(operationalRecords.id, existing.id)).returning()
-        : await db.transaction(async (tx) => {
-            const createdPayload = parsed.data.entity === "voucher"
-              ? {
-                  ...payload,
-                  voucherNumber: await allocateVoucherNumber(
-                    tx,
-                    parsed.data.workspaceId,
-                    parsed.data.farmId!,
-                    parsed.data.seasonId,
-                    typeof payload.voucherNumber === "string" ? payload.voucherNumber : undefined,
-                  ),
-                  createdBy: request.appUser!.id,
-                  updatedBy: request.appUser!.id,
-                }
-              : parsed.data.entity === "partnerEntry"
-                ? { ...payload, createdBy: request.appUser!.id, updatedBy: request.appUser!.id }
-              : payload;
+          : await db.transaction(async (tx) => {
+            let createdPayload: Record<string, unknown>;
+            if (parsed.data.entity === "voucher") {
+                  const normalizedVoucher = resolveVoucherPayloadForWrite({
+                    incomingPayload: payload,
+                    existingPayload: null,
+                    sourceType: cleanText(payload.sourceType) || cleanText(payload.source_type) || null,
+                    requestedVoucherNumber: normalizedRequestedVoucherNumber,
+                  });
+              createdPayload = {
+                ...normalizedVoucher.nextPayload,
+                voucherNumber: await allocateVoucherNumber(
+                  tx,
+                  parsed.data.workspaceId,
+                  parsed.data.farmId!,
+                  parsed.data.seasonId,
+                  normalizedVoucher.resolvedVoucherNumber || undefined,
+                ),
+                createdBy: request.appUser!.id,
+                updatedBy: request.appUser!.id,
+              };
+            } else if (parsed.data.entity === "partnerEntry") {
+              createdPayload = { ...payload, createdBy: request.appUser!.id, updatedBy: request.appUser!.id };
+            } else {
+              createdPayload = payload;
+            }
             return tx.insert(operationalRecords).values({ ...values, payload: createdPayload }).returning();
           });
     } catch (error) {

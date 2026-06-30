@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { canonicalImportedVoucherNumber } from "../src/lib/import-voucher-numbers.js";
+import { canonicalImportedVoucherNumber, resolveVoucherPayloadForWrite } from "../src/lib/import-voucher-numbers.js";
 
 test("canonicalImportedVoucherNumber prefers Android original voucher numbers over stale generated values", () => {
   assert.equal(canonicalImportedVoucherNumber({
@@ -18,4 +18,46 @@ test("canonicalImportedVoucherNumber falls back to the stored voucher number whe
 
 test("canonicalImportedVoucherNumber returns an empty string when no usable voucher number exists", () => {
   assert.equal(canonicalImportedVoucherNumber({ voucherNumber: "   " }), "");
+});
+
+test("resolveVoucherPayloadForWrite keeps canonical Android voucher number when stale cache retries without explicit edit", () => {
+  const result = resolveVoucherPayloadForWrite({
+    incomingPayload: {
+      voucherNumber: "V-0132",
+      originalVoucherNumber: "V-0141",
+      legacyVoucherNumber: "V-0141",
+    },
+    existingPayload: {
+      voucherNumber: "V-0141",
+      originalVoucherNumber: "V-0141",
+      legacyVoucherNumber: "V-0141",
+    },
+    sourceType: "expense",
+    requestedVoucherNumber: "V-0132",
+  });
+  assert.equal(result.resolvedVoucherNumber, "V-0141");
+  assert.equal(result.nextPayload.voucherNumber, "V-0141");
+  assert.equal(result.nextPayload.voucherNumberEdited, false);
+});
+
+test("resolveVoucherPayloadForWrite allows explicit imported voucher renumber edits", () => {
+  const result = resolveVoucherPayloadForWrite({
+    incomingPayload: {
+      voucherNumber: "V-0200",
+      originalVoucherNumber: "V-0141",
+      legacyVoucherNumber: "V-0141",
+      allowVoucherNumberEdit: true,
+    },
+    existingPayload: {
+      voucherNumber: "V-0141",
+      originalVoucherNumber: "V-0141",
+      legacyVoucherNumber: "V-0141",
+    },
+    sourceType: "expense",
+    requestedVoucherNumber: "V-0200",
+  });
+  assert.equal(result.resolvedVoucherNumber, "V-0200");
+  assert.equal(result.nextPayload.voucherNumber, "V-0200");
+  assert.equal(result.nextPayload.originalVoucherNumber, "V-0141");
+  assert.equal(result.nextPayload.voucherNumberEdited, true);
 });

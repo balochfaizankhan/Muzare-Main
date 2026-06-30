@@ -1995,6 +1995,8 @@ function ExpensesModule() {
     const nextVoucherNumber = validation.normalized
       ?? normalizeVoucherNumber(manualVoucherNumber || suggestedVoucherNumber)
       ?? suggestedVoucherNumber;
+    const existingDisplayedVoucherNumber = editingVoucher ? (getVoucherDisplayNumber(editingVoucher) || editingVoucher.voucherNumber) : "";
+    const explicitVoucherNumberEdit = Boolean(editingVoucher && nextVoucherNumber !== existingDisplayedVoucherNumber);
     const record: Voucher = {
       ...(editingVoucher ?? makeLocalRecord()), voucherNumber: nextVoucherNumber, date,
       categoryId: primaryItem.categoryId,
@@ -2006,6 +2008,8 @@ function ExpensesModule() {
       accountId: resolvedExpenseAccountId,
       notes: notes.trim() || undefined,
       items: resolvedItems,
+      allowVoucherNumberEdit: explicitVoucherNumberEdit || undefined,
+      voucherNumberEdited: explicitVoucherNumberEdit ? true : (editingVoucher?.voucherNumberEdited ?? undefined),
     };
     await persistOperationalRecord("voucher", record);
     await uploadPendingReceipts(record.id);
@@ -2052,6 +2056,7 @@ function ExpensesModule() {
       voucherNumber: item.voucherNumber,
       originalVoucherNumber: item.originalVoucherNumber,
       legacyVoucherNumber: item.legacyVoucherNumber,
+      voucherNumberEdited: "voucherNumberEdited" in item ? item.voucherNumberEdited === true : undefined,
       date: item.date,
       category: item.category,
       categoryId: item.categoryId,

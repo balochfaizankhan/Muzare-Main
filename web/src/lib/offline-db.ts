@@ -96,6 +96,8 @@ export type Voucher = LocalRecord & {
   voucherNumber: string;
   originalVoucherNumber?: string;
   legacyVoucherNumber?: string;
+  voucherNumberEdited?: boolean;
+  allowVoucherNumberEdit?: boolean;
   date: string;
   category: string;
   categoryId: string;
