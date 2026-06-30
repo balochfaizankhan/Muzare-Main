@@ -1508,7 +1508,6 @@ function ReceiptAttachmentList({ attachments, onOpen, onOpenOriginal, onDelete, 
       {!attachments.length ? <div className="receipt-detail-card__empty">
         <FileText size={28} />
         <strong>{t("expensesPage.noReceiptAttached")}</strong>
-        <p>{t("expensesPage.noReceiptAttachedHint")}</p>
       </div> : attachments.map((item) => (
         <article key={item.id}>
           <span>{item.fileType.startsWith("image/") ? <ImageIcon size={18} /> : <FileText size={18} />}</span>
@@ -2209,17 +2208,14 @@ function ExpensesModule() {
         <section className="worker-dialog worker-dialog--wide worker-dialog--record-detail expense-voucher-detail-dialog" role="dialog" aria-modal="true" aria-label={t("expensesPage.voucherDetails")} onClick={(event) => event.stopPropagation()}>
           <header className="worker-dialog__header worker-dialog__header--detail">
             <div className="worker-dialog__title-stack">
-              <span className="worker-dialog__eyebrow">{t("expensesPage.voucherDetails")}</span>
-              <h2>{t("expensesPage.voucherTitle", { number: getVoucherDisplayNumber(selectedVoucher) || selectedVoucher.voucherNumber })}</h2>
+              <h2>{getVoucherDisplayNumber(selectedVoucher) || selectedVoucher.voucherNumber}</h2>
               <div className="worker-dialog__header-meta">
                 <span>{shortDate(selectedVoucher.date)}</span>
-                {selectedVoucher.pendingSync ? <span className="status-badge status-badge--pending">{t("common.pending")}</span> : null}
               </div>
             </div>
             <div className="worker-dialog__header-actions">
-              {canEditVouchers && <button className="worker-dialog__action" type="button" onClick={() => openEdit(selectedVoucher)}>
+              {canEditVouchers && <button className="worker-dialog__action worker-dialog__icon-button" type="button" aria-label={t("expensesPage.editVoucherAction")} title={t("expensesPage.editVoucherAction")} onClick={() => openEdit(selectedVoucher)}>
                 <Pencil size={16} />
-                <span>{t("expensesPage.editVoucherAction")}</span>
               </button>}
               <button className="worker-dialog__icon-button" type="button" aria-label={t("common.close")} onClick={() => setSelectedVoucher(null)}><X size={18} /></button>
             </div>
@@ -2230,7 +2226,6 @@ function ExpensesModule() {
               <div><dt>{t("expensesPage.date")}</dt><dd>{shortDate(selectedVoucher.date)}</dd></div>
               <div><dt>{t("expensesPage.amount")}</dt><dd>{money(selectedVoucher.amount)}</dd></div>
               <div><dt>{t("expensesPage.paymentSource")}</dt><dd>{accounts.find((item) => item.id === selectedVoucher.accountId)?.name ?? t("expensesPage.unknownAccount")}</dd></div>
-              {selectedVoucher.createdBy ? <div><dt>{t("expensesPage.recordedBy")}</dt><dd>{selectedVoucher.createdBy}</dd></div> : null}
               {selectedVoucher.notes ? <div><dt>{t("expensesPage.reference")}</dt><dd>{selectedVoucher.notes}</dd></div> : null}
             </dl>
           </section>
@@ -2276,8 +2271,8 @@ function ExpensesModule() {
           />
           </div>
           <footer className="worker-dialog__footer">
-            <button className="worker-dialog__close" type="button" onClick={() => setSelectedVoucher(null)}>{t("expensesPage.close")}</button>
             {canDeleteVouchers && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => void removeVoucher(selectedVoucher)}>{t("expensesPage.deleteVoucher")}</button>}
+            <button className="worker-dialog__close" type="button" onClick={() => setSelectedVoucher(null)}>{t("expensesPage.close")}</button>
             {canEditVouchers && <button className="worker-dialog__primary" type="button" onClick={() => openEdit(selectedVoucher)}>{t("expensesPage.editVoucherAction")}</button>}
           </footer>
         </section>

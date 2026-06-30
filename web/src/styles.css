@@ -3396,13 +3396,13 @@ button {
 
 .expense-voucher-detail-items {
   display: grid;
-  gap: 14px;
+  gap: 10px;
 }
 
 .expense-voucher-detail-item {
   display: grid;
-  gap: 14px;
-  padding: 16px;
+  gap: 10px;
+  padding: 12px 14px;
 }
 
 .expense-voucher-detail-item__header {
@@ -3414,17 +3414,17 @@ button {
 
 .expense-voucher-detail-item__header strong {
   color: var(--text-primary);
-  font-size: 1rem;
+  font-size: 0.96rem;
 }
 
 .expense-voucher-detail-item__header b {
   color: var(--brand-primary);
-  font-size: 1rem;
+  font-size: 0.96rem;
 }
 
 .expense-voucher-detail-item__grid {
   display: grid;
-  gap: 14px 16px;
+  gap: 10px 12px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -3447,11 +3447,11 @@ button {
 .receipt-attachment-card,
 .receipt-detail-card {
   background: var(--surface-soft);
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--border) 72%, white);
   border-radius: 14px;
   display: grid;
-  gap: 12px;
-  padding: 14px;
+  gap: 10px;
+  padding: 12px;
 }
 
 .receipt-attachment-card header {
@@ -3470,13 +3470,13 @@ button {
 .receipt-detail-card__empty {
   align-items: center;
   background: var(--surface);
-  border: 1px dashed color-mix(in srgb, var(--border) 84%, white);
+  border: 1px dashed color-mix(in srgb, var(--border) 68%, white);
   border-radius: 14px;
   color: var(--text-secondary);
   display: grid;
-  gap: 8px;
+  gap: 6px;
   justify-items: center;
-  padding: 26px 18px;
+  padding: 10px 12px;
   text-align: center;
 }
 
@@ -3583,16 +3583,24 @@ button {
 
 .expense-voucher-detail-dialog .worker-dialog__body {
   display: grid;
-  gap: 18px;
+  gap: 12px;
+  overflow: hidden;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
 }
 
 .expense-voucher-detail__total {
   align-items: center;
-  border-top: 1px solid color-mix(in srgb, var(--border) 84%, white);
+  border-top: 1px solid color-mix(in srgb, var(--border) 62%, white);
   display: flex;
   font-weight: 700;
   justify-content: space-between;
-  padding-top: 14px;
+  padding-top: 10px;
+}
+
+.expense-voucher-detail-dialog .expense-voucher-detail-items {
+  min-height: 0;
+  overflow-y: auto;
+  padding-inline-end: 2px;
 }
 
 .expense-voucher-detail__total strong {
@@ -4819,7 +4827,7 @@ button {
 .worker-dialog__header-actions {
   align-items: center;
   display: flex;
-  gap: 10px;
+  gap: 8px;
   margin-inline-start: auto;
 }
 
@@ -4837,10 +4845,28 @@ button {
   font-weight: 700;
   gap: 8px;
   justify-content: center;
-  min-height: 40px;
-  min-width: 40px;
-  padding: 0 14px;
+  min-height: 38px;
+  min-width: 38px;
+  padding: 0 12px;
   transition: border-color 150ms ease, color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.worker-dialog__header--detail {
+  padding: 18px 22px 14px;
+}
+
+.worker-dialog--record-detail .worker-dialog__header h2 {
+  font-size: 1.28rem;
+  line-height: 1.1;
+}
+
+.worker-dialog--record-detail .worker-dialog__title-stack {
+  gap: 4px;
+}
+
+.worker-dialog--record-detail .worker-dialog__header-meta {
+  font-size: 0.84rem;
+  gap: 6px;
 }
 
 .worker-dialog__action:hover,
@@ -4908,18 +4934,18 @@ button {
 }
 
 .worker-stats--summary {
-  gap: 14px 18px;
+  gap: 10px 12px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .worker-stats--summary div {
   align-items: stretch;
   background: var(--surface);
-  border: 1px solid color-mix(in srgb, var(--border) 84%, white);
-  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, white);
+  border-radius: 12px;
   display: grid;
-  gap: 6px;
-  padding: 14px 16px;
+  gap: 4px;
+  padding: 11px 13px;
 }
 
 .worker-stats--summary dt,
@@ -4941,9 +4967,9 @@ button {
 
 .worker-dialog__surface {
   background: color-mix(in srgb, var(--surface-soft) 72%, white);
-  border: 1px solid color-mix(in srgb, var(--border) 84%, white);
+  border: 1px solid color-mix(in srgb, var(--border) 72%, white);
   border-radius: 16px;
-  padding: 18px;
+  padding: 14px;
 }
 
 .worker-dialog__section-head {
@@ -4967,12 +4993,12 @@ button {
 .worker-dialog__footer {
   align-items: center;
   background: linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface-soft) 78%, white) 100%);
-  border-top: 1px solid color-mix(in srgb, var(--border) 84%, white);
+  border-top: 1px solid color-mix(in srgb, var(--border) 72%, white);
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   justify-content: flex-end;
-  padding: 16px 20px calc(16px + env(safe-area-inset-bottom, 0px));
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
   position: sticky;
   bottom: 0;
   z-index: 1;
@@ -4982,7 +5008,7 @@ button {
   border: 1px solid transparent;
   border-radius: 12px;
   font-weight: 800;
-  height: 48px;
+  height: 44px;
   padding: 0 18px;
 }
 
@@ -8710,11 +8736,11 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
     align-items: flex-start;
     flex-direction: row;
     gap: 10px;
-    padding: 14px 16px 12px;
+    padding: 12px 14px 10px;
   }
 
   .worker-dialog--record-detail .worker-dialog__header h2 {
-    font-size: 1.08rem;
+    font-size: 1rem;
     line-height: 1.2;
   }
 
@@ -8741,12 +8767,14 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .worker-dialog--record-detail .worker-dialog__action,
   .worker-dialog--record-detail .worker-dialog__icon-button,
   .worker-dialog--record-detail .worker-dialog__header > button {
-    min-height: 36px;
+    min-height: 34px;
+    min-width: 34px;
+    padding: 0 10px;
   }
 
   .worker-dialog--record-detail .worker-dialog__body {
-    gap: 12px;
-    padding: 12px 16px 14px;
+    gap: 10px;
+    padding: 10px 14px 12px;
   }
 
   .worker-dialog--record-detail .worker-stats {
@@ -8768,13 +8796,13 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .expense-voucher-detail-dialog .worker-dialog__surface {
     background: transparent;
     border: 0;
-    border-bottom: 1px solid color-mix(in srgb, var(--border) 84%, white);
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 62%, white);
     border-radius: 0;
-    padding: 0 0 10px;
+    padding: 0 0 8px;
   }
 
   .expense-voucher-detail-dialog .worker-stats--summary {
-    gap: 8px 10px;
+    gap: 7px 8px;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -8782,7 +8810,7 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
     background: color-mix(in srgb, var(--surface-soft) 72%, white);
     border: 0;
     border-radius: 10px;
-    padding: 10px 12px;
+    padding: 8px 10px;
   }
 
   .expense-voucher-detail-dialog .worker-dialog__section-head {
@@ -8800,10 +8828,10 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .expense-voucher-detail-item {
     background: transparent;
     border: 0;
-    border-bottom: 1px solid color-mix(in srgb, var(--border) 84%, white);
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, white);
     border-radius: 0;
-    gap: 6px;
-    padding: 10px 0;
+    gap: 4px;
+    padding: 7px 0;
   }
 
   .expense-voucher-detail-item__header {
@@ -8841,9 +8869,9 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 
   .expense-voucher-detail-item__description dd {
     color: var(--text-secondary);
-    font-size: 0.84rem;
+    font-size: 0.81rem;
     font-weight: 500;
-    line-height: 1.4;
+    line-height: 1.28;
   }
 
   .expense-voucher-detail-item small {
@@ -8852,16 +8880,16 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   }
 
   .expense-voucher-detail__total {
-    padding-top: 10px;
+    padding-top: 7px;
   }
 
   .receipt-detail-card {
     background: transparent;
     border: 0;
-    border-top: 1px solid color-mix(in srgb, var(--border) 84%, white);
+    border-top: 1px solid color-mix(in srgb, var(--border) 60%, white);
     border-radius: 0;
-    gap: 8px;
-    padding: 10px 0 0;
+    gap: 6px;
+    padding: 7px 0 0;
   }
 
   .receipt-detail-card__empty {
@@ -8904,7 +8932,8 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 
   .worker-dialog--record-detail .worker-dialog__footer {
     gap: 8px;
-    padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+    flex-direction: column;
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
   }
 
   .worker-dialog--record-detail .worker-dialog__close,
@@ -8914,6 +8943,19 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
     color: var(--text-secondary);
     height: auto;
     padding: 4px 0;
+  }
+
+  .worker-dialog--record-detail .worker-dialog__link--danger {
+    color: #dc3f3f;
+    order: 2;
+  }
+
+  .worker-dialog--record-detail .worker-dialog__primary {
+    order: 1;
+  }
+
+  .worker-dialog--record-detail .worker-dialog__close {
+    order: 3;
   }
 
   .worker-dialog--record-detail .worker-dialog__primary {
