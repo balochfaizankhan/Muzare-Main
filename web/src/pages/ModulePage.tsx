@@ -1548,8 +1548,8 @@ function ExpensesModule() {
   const { t } = useTranslation();
   const { token, user, sessionRefreshing } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const load = useCallback(async () => (await workspaceRecords(offlineDb.vouchers, { includeGeneralFarmRecords: true })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
-  const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts), []);
+  const load = useCallback(async () => (await workspaceRecords(offlineDb.vouchers, { includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
+  const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }), []);
   const [vouchers, refresh] = useData(load);
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
   const [date, setDate] = useState(today());
@@ -1662,7 +1662,18 @@ function ExpensesModule() {
     status: "idle" | "checking" | "valid" | "duplicate" | "invalid" | "offline";
     message: string;
     normalized?: string;
+    blockingVoucher?: {
+      id: string;
+      voucherNumber: string;
+      date: string;
+      amount: number;
+      description: string;
+      source: "imported" | "pwa";
+      oldExpenseId?: string | null;
+    } | null;
   }>({ status: "idle", message: "" });
+  const [showDeletedVouchers, setShowDeletedVouchers] = useState(false);
+  const [showImportedVouchers, setShowImportedVouchers] = useState(true);
   const [pendingReceipts, setPendingReceipts] = useState<PendingReceipt[]>([]);
   const [, setReceiptCropQueue] = useState<File[]>([]);
   const [receiptCropTarget, setReceiptCropTarget] = useState<File | null>(null);
@@ -1777,6 +1788,17 @@ function ExpensesModule() {
           status: "duplicate" as const,
           message: t("expensesPage.voucherNumberDuplicate", { number: result.voucherNumber }),
           normalized: result.voucherNumber,
+          blockingVoucher: result.blockingVoucher
+            ? {
+              id: result.blockingVoucher.id,
+              voucherNumber: result.blockingVoucher.voucherNumber,
+              date: result.blockingVoucher.date,
+              amount: result.blockingVoucher.amount,
+              description: result.blockingVoucher.description,
+              source: result.blockingVoucher.source,
+              oldExpenseId: result.blockingVoucher.oldExpenseId,
+            }
+            : null,
         };
       }
       return {
@@ -1989,10 +2011,12 @@ function ExpensesModule() {
     return () => window.clearTimeout(timer);
   }, [voucherSearch]);
   const voucherSearchQuery = useQuery({
-    queryKey: ["expense-search", workspaceId, farmId, seasonId, debouncedVoucherSearch, voucherFrom, voucherTo, voucherCategory, voucherSubcategory, voucherAccountId],
+    queryKey: ["expense-search", workspaceId, farmId, seasonId, debouncedVoucherSearch, voucherFrom, voucherTo, voucherCategory, voucherSubcategory, voucherAccountId, showDeletedVouchers, showImportedVouchers],
     queryFn: () => searchExpenses(token!, workspaceId, {
       farmId: farmId!, seasonId: seasonId!, search: debouncedVoucherSearch || undefined, from: voucherFrom || undefined, to: voucherTo || undefined,
       category: voucherCategory || undefined, subcategory: voucherSubcategory || undefined, accountId: voucherAccountId || undefined,
+      includeDeleted: showDeletedVouchers,
+      includeImported: showImportedVouchers,
     }),
     enabled: Boolean(token && workspaceId && farmId && seasonId && navigator.onLine),
   });
@@ -2003,12 +2027,52 @@ function ExpensesModule() {
     .filter((line) => !voucherCategory || line.category === voucherCategory)
     .map((line) => line.subcategory)
     .filter(Boolean))].sort(), [voucherCategory, voucherLinesFor, vouchers]);
+  function toVoucherRecord(item: Voucher | ExpenseSearchRecord): Voucher {
+    if ("pendingSync" in item) return item;
+    return {
+      id: item.id,
+      workspaceId: item.workspaceId,
+      farmId: item.farmId,
+      seasonId: item.seasonId,
+      pendingSync: false,
+      deletedAt: item.deletedAt ?? undefined,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+      voucherNumber: item.voucherNumber,
+      originalVoucherNumber: item.originalVoucherNumber,
+      legacyVoucherNumber: item.legacyVoucherNumber,
+      date: item.date,
+      category: item.category,
+      categoryId: item.categoryId,
+      subcategory: item.subcategory,
+      subcategoryId: item.subcategoryId,
+      description: item.description,
+      amount: item.amount,
+      accountId: item.accountId,
+      notes: item.notes,
+      items: Array.isArray(item.items)
+        ? item.items.map((line, index) => ({
+            id: typeof line.id === "string" ? line.id : `${item.id}:item:${index}`,
+            category: typeof line.category === "string" ? line.category : item.category,
+            categoryName: typeof line.categoryName === "string" ? line.categoryName : undefined,
+            categoryId: typeof line.categoryId === "string" ? line.categoryId : item.categoryId,
+            subcategory: typeof line.subcategory === "string" ? line.subcategory : item.subcategory,
+            subcategoryName: typeof line.subcategoryName === "string" ? line.subcategoryName : undefined,
+            subcategoryId: typeof line.subcategoryId === "string" ? line.subcategoryId : item.subcategoryId,
+            amount: typeof line.amount === "number" ? line.amount : Number(line.amount ?? item.amount) || 0,
+            description: typeof line.description === "string" ? line.description : item.description,
+            remarks: typeof line.remarks === "string" ? line.remarks : undefined,
+            oldExpenseItemId: typeof line.oldExpenseItemId === "string" || typeof line.oldExpenseItemId === "number" ? line.oldExpenseItemId : undefined,
+          }))
+        : undefined,
+    };
+  }
   const matchesVoucher = useCallback((item: Voucher | ExpenseSearchRecord) => {
     const accountName = accountById.get(item.accountId)
       ?? ("accountName" in item && typeof item.accountName === "string" ? item.accountName : "");
     const normalizedSearch = voucherSearch.trim().toLowerCase();
     const shortDate = item.date.length >= 10 ? `${item.date.slice(5, 7)}/${item.date.slice(8, 10)}` : item.date;
-    const lines = voucherLinesFor(item);
+    const lines = voucherLinesFor(toVoucherRecord(item));
     return (!voucherFrom || item.date >= voucherFrom)
       && (!voucherTo || item.date <= voucherTo)
       && (!voucherCategory || lines.some((line) => line.category === voucherCategory))
@@ -2026,15 +2090,16 @@ function ExpensesModule() {
       ? (() => {
           const mergedMap = new Map<string, Voucher | ExpenseSearchRecord>(serverRecords.map((record) => [record.id, record]));
           vouchers.forEach((item) => {
+            if (!showDeletedVouchers && item.deletedAt) return;
             const existing = mergedMap.get(item.id);
             if (!item.pendingSync) return;
             if (!existing || item.updatedAt > existing.updatedAt) mergedMap.set(item.id, item);
           });
           return [...mergedMap.values()];
         })()
-      : vouchers;
+      : vouchers.filter((item) => showDeletedVouchers || !item.deletedAt);
     return (merged as Voucher[]).filter((item) => matchesVoucher(item)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }, [matchesVoucher, voucherSearchQuery.data, vouchers]);
+  }, [matchesVoucher, showDeletedVouchers, voucherSearchQuery.data, vouchers]);
   const voucherLineItems = useMemo(() => filteredVouchers.flatMap((item) => voucherLinesFor(item)), [filteredVouchers, voucherLinesFor]);
   const total = filteredVouchers.reduce((sum, item) => sum + item.amount, 0);
   const grouped = [...voucherLineItems.reduce((map, item) => {
@@ -2233,6 +2298,26 @@ function ExpensesModule() {
                   </button>}
                 </div>
                 {voucherNumberValidation.message ? <small className={voucherNumberValidation.status === "duplicate" || voucherNumberValidation.status === "invalid" ? "expense-voucher-form__number-feedback is-error" : "expense-voucher-form__number-feedback"}>{voucherNumberValidation.message}</small> : null}
+                {voucherNumberValidation.status === "duplicate" && voucherNumberValidation.blockingVoucher ? <div className="expense-voucher-form__blocking-voucher">
+                  <small>{voucherNumberValidation.blockingVoucher.source === "imported" ? t("expensesPage.blockingImportedVoucher") : t("expensesPage.blockingVoucher")}: {voucherNumberValidation.blockingVoucher.voucherNumber} · {voucherNumberValidation.blockingVoucher.date} · {money(voucherNumberValidation.blockingVoucher.amount)}</small>
+                  <small>{voucherNumberValidation.blockingVoucher.description || "-"}</small>
+                  <button
+                    type="button"
+                    className="secondary-action"
+                    onClick={() => {
+                      const record = filteredVouchers.find((item) => item.id === voucherNumberValidation.blockingVoucher?.id);
+                      if (record) {
+                        setSelectedVoucher(toVoucherRecord(record));
+                        return;
+                      }
+                      setVoucherSearch(voucherNumberValidation.blockingVoucher?.voucherNumber ?? "");
+                      setDebouncedVoucherSearch(voucherNumberValidation.blockingVoucher?.voucherNumber ?? "");
+                      showToast(t("expensesPage.blockingVoucherHiddenHint"));
+                    }}
+                  >
+                    {t("expensesPage.openBlockingVoucher")}
+                  </button>
+                </div> : null}
               </label>
           </div>}
           {!selectableExpenseAccounts.length && <p className="expense-voucher-form__warning">{t("expensesPage.noRealPaymentAccounts")}</p>}
@@ -2304,6 +2389,8 @@ function ExpensesModule() {
         </div>
         <div className="expense-search-meta">
           <small>{hasActiveFilters ? t("expensesPage.showingCurrentFilters") : t("expensesPage.showingSeasonScope")}</small>
+          <label className="partner-ledger-show-deleted"><input checked={showDeletedVouchers} type="checkbox" onChange={(event) => setShowDeletedVouchers(event.target.checked)} /> {t("expensesPage.showDeletedVouchers")}</label>
+          <label className="partner-ledger-show-deleted"><input checked={showImportedVouchers} type="checkbox" onChange={(event) => setShowImportedVouchers(event.target.checked)} /> {t("expensesPage.showImportedVouchers")}</label>
           {hasActiveFilters && <button type="button" onClick={clearFilters}>{t("expensesPage.clearFilters")}</button>}
         </div>
         {voucherSearchQuery.isFetching && <small>{t("expensesPage.refreshingMatches")}</small>}

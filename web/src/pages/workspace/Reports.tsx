@@ -420,9 +420,9 @@ export function Reports() {
     void Promise.all([
       workspaceRecords(offlineDb.labourers),
       workspaceRecords(offlineDb.attendance),
-      workspaceRecords(offlineDb.vouchers, { includeGeneralFarmRecords: true }),
+      workspaceRecords(offlineDb.vouchers, { includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }),
       workspaceRecords(offlineDb.advances),
-      workspaceRecords(offlineDb.accounts),
+      workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }),
       workspaceRecords(offlineDb.partnerEntries),
       workspaceRecords(offlineDb.sales),
       workspaceRecords(offlineDb.dispatches),

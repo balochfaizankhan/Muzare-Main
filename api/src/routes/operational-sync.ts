@@ -272,6 +272,11 @@ async function findExistingVoucherByNumber(
   const [existingVoucher] = await tx.select({
     id: operationalRecords.id,
     clientRecordId: operationalRecords.clientRecordId,
+    workspaceId: operationalRecords.workspaceId,
+    farmId: operationalRecords.farmId,
+    seasonId: operationalRecords.seasonId,
+    sourceType: operationalRecords.sourceType,
+    payload: operationalRecords.payload,
   }).from(operationalRecords).where(and(...filters)).limit(1);
   return existingVoucher ?? null;
 }
@@ -485,7 +490,12 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         eq(operationalRecords.workspaceId, parsed.data.workspaceId),
         eq(operationalRecords.farmId, selected.activeFarmId),
         selected.activeSeasonId
-          ? or(eq(operationalRecords.seasonId, selected.activeSeasonId), isNull(operationalRecords.seasonId))
+          ? or(
+            eq(operationalRecords.seasonId, selected.activeSeasonId),
+            isNull(operationalRecords.seasonId),
+            and(eq(operationalRecords.entityType, "voucher"), eq(operationalRecords.sourceType, "expense")),
+            and(eq(operationalRecords.entityType, "account"), eq(operationalRecords.sourceType, "account")),
+          )
           : isNull(operationalRecords.seasonId),
       ))
       .orderBy(desc(operationalRecords.updatedAt));
@@ -578,6 +588,19 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       voucherNumber: normalized,
       available: !existingVoucher,
       existingRecordId: existingVoucher?.clientRecordId ?? null,
+      blockingVoucher: existingVoucher ? {
+        id: existingVoucher.clientRecordId,
+        workspaceId: existingVoucher.workspaceId,
+        farmId: existingVoucher.farmId,
+        seasonId: existingVoucher.seasonId,
+        voucherNumber: typeof existingVoucher.payload.voucherNumber === "string" ? existingVoucher.payload.voucherNumber : normalized,
+        date: typeof existingVoucher.payload.date === "string" ? existingVoucher.payload.date : "",
+        amount: typeof existingVoucher.payload.amount === "number" ? existingVoucher.payload.amount : Number(existingVoucher.payload.amount ?? 0),
+        description: typeof existingVoucher.payload.description === "string" ? existingVoucher.payload.description : "",
+        deletedAt: typeof existingVoucher.payload.deletedAt === "string" ? existingVoucher.payload.deletedAt : null,
+        source: existingVoucher.sourceType === "expense" || typeof existingVoucher.payload.oldExpenseId === "string" ? "imported" : "pwa",
+        oldExpenseId: typeof existingVoucher.payload.oldExpenseId === "string" ? existingVoucher.payload.oldExpenseId : null,
+      } : null,
       suggestedNextVoucherNumber: `V-${String(highest + 1).padStart(4, "0")}`,
     };
   });

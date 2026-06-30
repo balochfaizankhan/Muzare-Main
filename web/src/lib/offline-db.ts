@@ -11,6 +11,20 @@ export type LocalRecord = {
   pendingSync?: boolean;
 };
 
+function isImportedExpenseRecord(record: LocalRecord & Record<string, unknown>) {
+  return record.sourceType === "expense"
+    || record.source_type === "expense"
+    || typeof record.oldExpenseId === "string"
+    || (typeof record.originalVoucherNumber === "string" && record.originalVoucherNumber.trim().length > 0);
+}
+
+function isImportedAccountRecord(record: LocalRecord & Record<string, unknown>) {
+  return record.sourceType === "account"
+    || record.source_type === "account"
+    || typeof record.old_android_id === "string"
+    || typeof record.oldAndroidId === "string";
+}
+
 export type PendingMutation = LocalRecord & {
   entity:
     | "labourer"
@@ -422,11 +436,18 @@ export function getActiveSeasonId() {
   return activeSeasonId;
 }
 
-export async function workspaceRecords<T extends LocalRecord>(table: EntityTable<T, "id">, options: { includeDeleted?: boolean; includeGeneralFarmRecords?: boolean } = {}) {
+export async function workspaceRecords<T extends LocalRecord>(table: EntityTable<T, "id">, options: { includeDeleted?: boolean; includeGeneralFarmRecords?: boolean; includeImportedAcrossSeasons?: boolean } = {}) {
   if (!activeFarmId || !activeSeasonId) return [];
   return table.where("workspaceId").equals(getActiveWorkspaceId())
     .filter((record) => record.farmId === activeFarmId
-      && (record.seasonId === activeSeasonId || (Boolean(options.includeGeneralFarmRecords) && record.seasonId === null))
+      && (
+        record.seasonId === activeSeasonId
+        || (Boolean(options.includeGeneralFarmRecords) && record.seasonId === null)
+        || (Boolean(options.includeImportedAcrossSeasons) && (
+          isImportedExpenseRecord(record as LocalRecord & Record<string, unknown>)
+          || isImportedAccountRecord(record as LocalRecord & Record<string, unknown>)
+        ))
+      )
       && (Boolean(options.includeDeleted) || !record.deletedAt)).toArray();
 }
 

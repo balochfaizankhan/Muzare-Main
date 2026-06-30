@@ -19,9 +19,13 @@ const querySchema = z.object({
   category: z.string().trim().max(100).optional(),
   subcategory: z.string().trim().max(100).optional(),
   accountId: z.string().min(1).max(255).optional(),
+  includeDeleted: z.coerce.boolean().optional(),
+  includeImported: z.coerce.boolean().optional(),
 });
 
 type AccountPayload = { name?: unknown };
+const importedExpenseSourceType = "expense";
+const importedAccountSourceType = "account";
 
 function hasWorkspace(request: FastifyRequest, workspaceId: string) {
   return request.appUser?.workspaceId === workspaceId
@@ -59,12 +63,26 @@ export async function expenseSearchRoutes(app: FastifyInstance): Promise<void> {
     if (ownershipError) return reply.code(403).send({ message: ownershipError });
 
     const term = query.data.search ? `%${query.data.search.toLowerCase()}%` : null;
+    const includeDeleted = Boolean(query.data.includeDeleted);
+    const includeImported = query.data.includeImported !== false;
+    const importedVoucherScope = and(
+      eq(operationalRecords.sourceType, importedExpenseSourceType),
+      eq(operationalRecords.farmId, query.data.farmId),
+    );
+    const importedAccountScope = and(
+      eq(operationalRecords.sourceType, importedAccountSourceType),
+      eq(operationalRecords.farmId, query.data.farmId),
+    );
     const records = await db.select().from(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, params.data.workspaceId),
       eq(operationalRecords.farmId, query.data.farmId),
-      or(eq(operationalRecords.seasonId, query.data.seasonId), isNull(operationalRecords.seasonId)),
+      or(
+        eq(operationalRecords.seasonId, query.data.seasonId),
+        isNull(operationalRecords.seasonId),
+        includeImported ? importedVoucherScope : undefined,
+      ),
       eq(operationalRecords.entityType, "voucher"),
-      sql`${operationalRecords.payload}->>'deletedAt' is null`,
+      includeDeleted ? undefined : sql`${operationalRecords.payload}->>'deletedAt' is null`,
       query.data.from ? gte(sql`${operationalRecords.payload}->>'date'`, query.data.from) : undefined,
       query.data.to ? lte(sql`${operationalRecords.payload}->>'date'`, query.data.to) : undefined,
       query.data.category ? sql`(
@@ -107,7 +125,11 @@ export async function expenseSearchRoutes(app: FastifyInstance): Promise<void> {
           from operational_records account
           where account.workspace_id = ${operationalRecords.workspaceId}
             and account.farm_id = ${operationalRecords.farmId}
-            and account.season_id = ${operationalRecords.seasonId}
+            and (
+              account.season_id = ${operationalRecords.seasonId}
+              or account.season_id is null
+              or ${includeImported} = true and account.source_type = ${importedAccountSourceType}
+            )
             and account.entity_type = 'account'
             and account.client_record_id = ${operationalRecords.payload}->>'accountId'
             and lower(coalesce(account.payload->>'name', '')) like ${term}
@@ -117,7 +139,11 @@ export async function expenseSearchRoutes(app: FastifyInstance): Promise<void> {
     const accounts = await db.select().from(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, params.data.workspaceId),
       eq(operationalRecords.farmId, query.data.farmId),
-      eq(operationalRecords.seasonId, query.data.seasonId),
+      or(
+        eq(operationalRecords.seasonId, query.data.seasonId),
+        isNull(operationalRecords.seasonId),
+        includeImported ? importedAccountScope : undefined,
+      ),
       eq(operationalRecords.entityType, "account"),
     ));
     const accountById = new Map(accounts.map((record) => {
@@ -134,6 +160,11 @@ export async function expenseSearchRoutes(app: FastifyInstance): Promise<void> {
         accountName: accountById.get(String(record.payload.accountId ?? "")) ?? "",
         createdAt: String(record.payload.createdAt ?? record.createdAt.toISOString()),
         updatedAt: record.clientUpdatedAt.toISOString(),
+        deletedAt: typeof record.payload.deletedAt === "string" ? record.payload.deletedAt : null,
+        sourceType: record.sourceType,
+        isImported: record.sourceType === importedExpenseSourceType || typeof record.payload.oldExpenseId === "string",
+        oldExpenseId: typeof record.payload.oldExpenseId === "string" ? record.payload.oldExpenseId : null,
+        items: Array.isArray(record.payload.items) ? record.payload.items : undefined,
       })),
     };
   });

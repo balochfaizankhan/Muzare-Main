@@ -624,6 +624,8 @@ export type AdvanceReportData = {
 export type ExpenseSearchFilters = {
   farmId: string; seasonId: string; search?: string; from?: string; to?: string;
   category?: string; subcategory?: string; accountId?: string;
+  includeDeleted?: boolean;
+  includeImported?: boolean;
 };
 export type ExpenseSearchRecord = {
   id: string; workspaceId: string; farmId: string; seasonId: string; voucherNumber: string; date: string;
@@ -631,11 +633,29 @@ export type ExpenseSearchRecord = {
   legacyVoucherNumber?: string;
   category: string; categoryId: string; subcategory: string; subcategoryId: string; description: string; amount: number;
   accountId: string; accountName: string; notes?: string; createdAt: string; updatedAt: string;
+  deletedAt?: string | null;
+  sourceType?: string | null;
+  isImported?: boolean;
+  oldExpenseId?: string | null;
+  items?: Array<Record<string, unknown>>;
 };
 export type VoucherNumberValidation = {
   voucherNumber: string;
   available: boolean;
   existingRecordId?: string | null;
+  blockingVoucher?: {
+    id: string;
+    workspaceId: string;
+    farmId: string | null;
+    seasonId: string | null;
+    voucherNumber: string;
+    date: string;
+    amount: number;
+    description: string;
+    deletedAt?: string | null;
+    source: "imported" | "pwa";
+    oldExpenseId?: string | null;
+  } | null;
   suggestedNextVoucherNumber: string;
 };
 export type AttendanceReportFilters = {
@@ -1029,6 +1049,8 @@ export const searchExpenses = (token: string, workspaceId: string, filters: Expe
   if (filters.category) query.set("category", filters.category);
   if (filters.subcategory) query.set("subcategory", filters.subcategory);
   if (filters.accountId) query.set("accountId", filters.accountId);
+  if (typeof filters.includeDeleted === "boolean") query.set("includeDeleted", String(filters.includeDeleted));
+  if (typeof filters.includeImported === "boolean") query.set("includeImported", String(filters.includeImported));
   return apiRequest<{ records: ExpenseSearchRecord[] }>(`/v1/workspace/${workspaceId}/expenses/search?${query.toString()}`, {}, token);
 };
 export const createExpenseSubcategory = (token: string, workspaceId: string, input: { categoryId: string; name: string }) =>
