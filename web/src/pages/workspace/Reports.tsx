@@ -12,6 +12,7 @@ import { formatMoney, formatNumber } from "../../lib/format";
 import { translateExpenseCategory, translateExpenseSubcategory, translateSaleType, translateSalesStatus } from "../../lib/systemTranslations";
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
 import { getVoucherDisplayNumber } from "../../lib/vouchers";
+import { getActiveVouchers, loadWorkspaceVouchers } from "../../lib/voucherCollections";
 import {
   buildPartnerLiabilityPositions,
   calculatePartnerLiabilityBalance,
@@ -421,7 +422,7 @@ export function Reports() {
     void Promise.all([
       workspaceRecords(offlineDb.labourers),
       workspaceRecords(offlineDb.attendance),
-      workspaceRecords(offlineDb.vouchers, { includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }),
+      loadWorkspaceVouchers({ includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }),
       workspaceRecords(offlineDb.advances),
       workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }),
       workspaceRecords(offlineDb.partnerEntries),
@@ -611,9 +612,9 @@ export function Reports() {
       return { labourer, records, total, outstanding: payable - total };
     })
     .filter((item) => item.records.length > 0), [advanceRows, attendanceSummary, labourers]);
+  const activeVouchers = useMemo(() => getActiveVouchers(vouchers), [vouchers]);
 
-  const voucherBaseRows = useMemo(() => vouchers
-    .filter((item) => isActiveOperationalRecord(item))
+  const voucherBaseRows = useMemo(() => activeVouchers
     .filter((item) => {
       const lines = voucherReportItems(item);
       return (!accountId || item.accountId === accountId)
@@ -625,7 +626,7 @@ export function Reports() {
           ...lines.flatMap((line) => [line.category, line.subcategory, line.description, line.remarks ?? "", String(line.amount)]),
         ], item.amount);
     }),
-  [accountId, accountName, matches, vouchers]);
+  [accountId, accountName, activeVouchers, matches]);
   const voucherRows = useMemo(() => voucherBaseRows
     .filter((item) => {
       const lines = voucherReportItems(item);

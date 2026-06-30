@@ -4,6 +4,7 @@ import { canQueueOperationalMutation } from "../lib/permissions";
 import type { Table } from "dexie";
 import i18n from "../i18n";
 import { getVoucherDisplayNumber, normalizeVoucherNumber } from "../lib/vouchers";
+import { getActiveVouchers } from "../lib/voucherCollections";
 
 export type SyncStatus = "online" | "offline" | "pending" | "syncing" | "error";
 export type SyncStartupStage = "checkingSession" | "loadingWorkspace" | "loadingContext" | "syncingLatestRecords" | "ready";
@@ -568,7 +569,7 @@ export async function retrySyncQueueItem(mutationId: string) {
       return;
     }
     const [cachedWorkspaceVouchers, pendingVoucherMutations] = await Promise.all([
-      offlineDb.vouchers.where("workspaceId").equals(context.workspaceId).toArray(),
+      offlineDb.vouchers.where("workspaceId").equals(context.workspaceId).toArray().then((rows) => getActiveVouchers(rows)),
       offlineDb.pendingMutations.where("workspaceId").equals(context.workspaceId).and((mutation) =>
         mutation.id !== mutationId
         && mutation.entity === "voucher"

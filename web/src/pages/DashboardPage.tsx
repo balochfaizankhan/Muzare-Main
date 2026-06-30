@@ -29,6 +29,7 @@ import { buildPartnerLiabilityPositions } from "../lib/partnerAccounting";
 import { ensureLocalAccounts, offlineDb, workspaceRecords } from "../lib/offline-db";
 import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { hasPermission } from "../lib/permissions";
+import { loadWorkspaceVouchers } from "../lib/voucherCollections";
 import { getVoucherDisplayNumber } from "../lib/vouchers";
 import { useSyncState } from "../hooks/useSyncState";
 import { refreshOperationalData, syncNow } from "../services/syncService";
@@ -107,7 +108,7 @@ export function DashboardPage() {
       workspaceRecords(offlineDb.attendance),
       workspaceRecords(offlineDb.dispatches),
       workspaceRecords(offlineDb.sales),
-      workspaceRecords(offlineDb.vouchers, { includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }),
+      loadWorkspaceVouchers({ includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }),
       workspaceRecords(offlineDb.partnerEntries),
       workspaceRecords(offlineDb.advances),
       workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }),
@@ -115,7 +116,7 @@ export function DashboardPage() {
     const activeAttendance = attendance.filter(isActiveOperationalRecord);
     const activeDispatches = dispatches.filter(isActiveOperationalRecord);
     const activeSales = sales.filter(isActiveOperationalRecord);
-    const activeVouchers = vouchers.filter(isActiveOperationalRecord);
+    const activeVouchers = vouchers;
     const activeEntries = entries.filter(isActiveOperationalRecord);
     const activeAdvances = advances.filter(isActiveOperationalRecord);
     const activeAccounts = accounts.filter(isActiveOperationalRecord);

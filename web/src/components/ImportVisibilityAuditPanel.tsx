@@ -5,6 +5,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { fetchImportVisibilityAudit } from "../lib/api";
 import { offlineDb } from "../lib/offline-db";
 import { isActiveOperationalRecord } from "../lib/operationalRecords";
+import { getActiveVouchers } from "../lib/voucherCollections";
 import { useSyncState } from "../hooks/useSyncState";
 
 type Props = {
@@ -43,7 +44,7 @@ async function countClientData(workspaceId: string, farmId: string | null, seaso
   const labourers = filterScoped(labourersAll).filter((row) => row.active !== false).length;
   const attendance = filterScoped(attendanceAll).length;
   const advances = filterScoped(advancesAll).length;
-  const vouchers = filterScoped(vouchersAll, { includeGeneralFarmRecords: true }).length;
+  const vouchers = getActiveVouchers(filterScoped(vouchersAll, { includeGeneralFarmRecords: true })).length;
   const sales = filterScoped(salesAll).length;
   const dispatches = filterScoped(dispatchesAll).length;
   const accounts = filterScoped(accountsAll).length;

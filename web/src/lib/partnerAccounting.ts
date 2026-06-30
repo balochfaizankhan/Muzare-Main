@@ -1,5 +1,6 @@
 import type { Account, Advance, PartnerEntry, Sale, Voucher } from "./offline-db";
 import { isActiveOperationalRecord } from "./operationalRecords";
+import { getActiveVouchers } from "./voucherCollections";
 
 export type PartnerLiabilityPosition = {
   account: Account | null;
@@ -112,6 +113,7 @@ export function partnerAccountBalanceEffect(
   allAccounts: Account[],
 ) {
   if (account.type !== "partner") return 0;
+  const activeVouchers = getActiveVouchers(vouchers);
   const capitalInjected = entries
     .filter((entry) => isActiveOperationalRecord(entry) && entry.type === "contribution" && resolvePartnerAccountId(entry, allAccounts) === account.id)
     .reduce((sum, entry) => sum + entry.amount, 0);
@@ -127,8 +129,8 @@ export function partnerAccountBalanceEffect(
   const entryAdjustments = entries
     .filter((entry) => isActiveOperationalRecord(entry) && entry.type === "adjustment" && resolvePartnerAccountId(entry, allAccounts) === account.id)
     .reduce((sum, entry) => sum + partnerAdjustmentEffect(entry), 0);
-  const directVoucherExpensesPaid = vouchers
-    .filter((voucher) => isActiveOperationalRecord(voucher) && voucher.accountId === account.id)
+  const directVoucherExpensesPaid = activeVouchers
+    .filter((voucher) => voucher.accountId === account.id)
     .reduce((sum, voucher) => sum + voucher.amount, 0);
   const directLabourAdvancesPaid = advances
     .filter((advance) => isActiveOperationalRecord(advance) && advance.accountId === account.id)
@@ -153,6 +155,7 @@ export function buildPartnerLiabilityPositions(
   entries: PartnerEntry[],
   sales: Sale[] = [],
 ) {
+  const activeVouchers = getActiveVouchers(vouchers);
   const partnerAccounts = accounts.filter((account) => account.type === "partner");
   const positions = new Map<string, PartnerLiabilityPosition>();
   const ensure = (key: string, name: string, account: Account | null) => {
@@ -201,7 +204,7 @@ export function buildPartnerLiabilityPositions(
     if (entry.type === "adjustment") position.adjustments += partnerAdjustmentEffect(entry);
   }
 
-  for (const voucher of vouchers.filter((item) => isActiveOperationalRecord(item))) {
+  for (const voucher of activeVouchers) {
     const account = partnerAccounts.find((item) => item.id === voucher.accountId);
     if (!account) continue;
     const position = ensure(account.id, account.name, account);

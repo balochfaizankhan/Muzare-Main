@@ -30,6 +30,7 @@ import {
 import { formatDate, formatMoney } from "../lib/format";
 import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { getVoucherDisplayNumber, normalizeVoucherNumber, parseVoucherSequenceNumber } from "../lib/vouchers";
+import { getActiveVouchers, getAllVouchers, loadWorkspaceVouchers } from "../lib/voucherCollections";
 import {
   compareLabourers,
   ensureLocalAccounts,
@@ -1549,7 +1550,7 @@ function ExpensesModule() {
   const { t } = useTranslation();
   const { token, user, sessionRefreshing } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const load = useCallback(async () => (await workspaceRecords(offlineDb.vouchers, { includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
+  const load = useCallback(async () => (await loadWorkspaceVouchers({ mode: "all", includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }), []);
   const [vouchers, refresh] = useData(load);
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
@@ -1757,7 +1758,7 @@ function ExpensesModule() {
       };
     }
     const [cachedWorkspaceVouchers, pendingVoucherMutations] = await Promise.all([
-      workspaceId ? offlineDb.vouchers.where("workspaceId").equals(workspaceId).toArray() : Promise.resolve([] as Voucher[]),
+      workspaceId ? offlineDb.vouchers.where("workspaceId").equals(workspaceId).toArray().then((rows) => getActiveVouchers(rows)) : Promise.resolve([] as Voucher[]),
       workspaceId ? offlineDb.pendingMutations.where("workspaceId").equals(workspaceId).and((mutation) =>
         mutation.entity === "voucher"
         && mutation.operation !== "delete"
@@ -2030,12 +2031,13 @@ function ExpensesModule() {
     enabled: Boolean(token && workspaceId && farmId && seasonId && navigator.onLine),
   });
   const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account.name])), [accounts]);
-  const voucherCategories = useMemo(() => [...new Set(vouchers.flatMap((voucher) => voucherLinesFor(voucher).map((line) => line.category)).filter(Boolean))].sort(), [voucherLinesFor, vouchers]);
-  const voucherSubcategories = useMemo(() => [...new Set(vouchers
+  const visibleVoucherSource = useMemo(() => getAllVouchers(vouchers, { includeDeleted: showDeletedVouchers }), [showDeletedVouchers, vouchers]);
+  const voucherCategories = useMemo(() => [...new Set(visibleVoucherSource.flatMap((voucher) => voucherLinesFor(voucher).map((line) => line.category)).filter(Boolean))].sort(), [visibleVoucherSource, voucherLinesFor]);
+  const voucherSubcategories = useMemo(() => [...new Set(visibleVoucherSource
     .flatMap((voucher) => voucherLinesFor(voucher))
     .filter((line) => !voucherCategory || line.category === voucherCategory)
     .map((line) => line.subcategory)
-    .filter(Boolean))].sort(), [voucherCategory, voucherLinesFor, vouchers]);
+    .filter(Boolean))].sort(), [visibleVoucherSource, voucherCategory, voucherLinesFor]);
   function toVoucherRecord(item: Voucher | ExpenseSearchRecord): Voucher {
     if ("pendingSync" in item) return item;
     return {
@@ -2099,16 +2101,20 @@ function ExpensesModule() {
       ? (() => {
           const mergedMap = new Map<string, Voucher | ExpenseSearchRecord>(serverRecords.map((record) => [record.id, record]));
           vouchers.forEach((item) => {
-            if (!showDeletedVouchers && !isActiveOperationalRecord(item)) return;
+            if (!showDeletedVouchers && getAllVouchers([item]).length === 0) return;
             const existing = mergedMap.get(item.id);
             if (!item.pendingSync) return;
             if (!existing || item.updatedAt > existing.updatedAt) mergedMap.set(item.id, item);
           });
           return [...mergedMap.values()];
         })()
-      : vouchers.filter((item) => showDeletedVouchers || isActiveOperationalRecord(item));
-    return (merged as Voucher[]).filter((item) => matchesVoucher(item)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }, [matchesVoucher, showDeletedVouchers, voucherSearchQuery.data, vouchers]);
+      : visibleVoucherSource;
+    return merged
+      .filter((item) => getAllVouchers([item], { includeDeleted: showDeletedVouchers }).length > 0)
+      .map((item) => toVoucherRecord(item))
+      .filter((item) => matchesVoucher(item))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }, [matchesVoucher, showDeletedVouchers, visibleVoucherSource, voucherSearchQuery.data, vouchers]);
   const voucherLineItems = useMemo(() => filteredVouchers.flatMap((item) => voucherLinesFor(item)), [filteredVouchers, voucherLinesFor]);
   const total = filteredVouchers.reduce((sum, item) => sum + item.amount, 0);
   const grouped = [...voucherLineItems.reduce((map, item) => {
@@ -2137,8 +2143,9 @@ function ExpensesModule() {
     const recordId = searchParams.get("recordId");
     if (!recordId) return;
     const voucher = vouchers.find((item) => item.id === recordId);
+    if (voucher && getAllVouchers([voucher], { includeDeleted: showDeletedVouchers }).length === 0) return;
     if (voucher) setSelectedVoucher(voucher);
-  }, [searchParams, vouchers]);
+  }, [searchParams, showDeletedVouchers, vouchers]);
   useEffect(() => {
     void loadVoucherAttachments(selectedVoucher);
   }, [loadVoucherAttachments, selectedVoucher]);
@@ -3257,7 +3264,7 @@ function PartnerLedgerModule() {
   const load = useCallback(async () => (await workspaceRecords(offlineDb.partnerEntries, { includeDeleted: showDeleted })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [showDeleted]);
   const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }), []);
   const loadAdvances = useCallback(() => workspaceRecords(offlineDb.advances), []);
-  const loadVouchers = useCallback(() => workspaceRecords(offlineDb.vouchers, { includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }), []);
+  const loadVouchers = useCallback(() => loadWorkspaceVouchers({ includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }), []);
   const loadSales = useCallback(() => workspaceRecords(offlineDb.sales), []);
   const [entries, refresh] = useData(load);
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
@@ -3542,7 +3549,7 @@ function AccountsModule() {
   const canCreateAccounts = Boolean(!sessionRefreshing && user && workspaceId && canCreate(user, "accounts", workspaceId));
   const navigate = useNavigate();
   const loadAccounts = useCallback(async () => (await workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true })).sort((a, b) => a.createdAt.localeCompare(b.createdAt)), []);
-  const loadVouchers = useCallback(() => workspaceRecords(offlineDb.vouchers, { includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }), []);
+  const loadVouchers = useCallback(() => loadWorkspaceVouchers({ includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }), []);
   const loadSales = useCallback(() => workspaceRecords(offlineDb.sales), []);
   const loadEntries = useCallback(() => workspaceRecords(offlineDb.partnerEntries), []);
   const loadAdvances = useCallback(() => workspaceRecords(offlineDb.advances), []);
@@ -3573,7 +3580,7 @@ function AccountsModule() {
     await refresh();
   };
   const activeSales = sales.filter((item) => isActiveOperationalRecord(item));
-  const activeVouchers = vouchers.filter((item) => isActiveOperationalRecord(item));
+  const activeVouchers = getActiveVouchers(vouchers);
   const activeEntries = entries.filter((item) => isActiveOperationalRecord(item));
   const activeAdvances = advances.filter((item) => isActiveOperationalRecord(item));
   const balance = (account: Account) => calculateAccountBalance(account, activeSales, activeVouchers, activeAdvances, activeEntries);
