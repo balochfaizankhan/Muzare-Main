@@ -2232,6 +2232,21 @@ button {
   margin: 0;
 }
 
+.app-route-fallback {
+  padding-inline: 20px;
+}
+
+.app-route-fallback__card {
+  max-width: 420px;
+  width: min(100%, 420px);
+}
+
+.app-route-fallback__actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 4px;
+}
+
 .app-startup-screen__spinner {
   animation: spin 0.8s linear infinite;
   border: 3px solid var(--border);

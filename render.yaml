@@ -1,4 +1,22 @@
 services:
+  - type: static
+    name: muzare-web
+    rootDir: web
+    buildCommand: npm install && npm run build
+    publishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: VITE_API_URL
+        sync: false
+      - key: VITE_ENABLE_INVENTORY
+        sync: false
+      - key: VITE_FEATURE_FARM_MAP
+        sync: false
   - type: web
     name: muzare-api
     runtime: node
