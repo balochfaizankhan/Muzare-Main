@@ -5,6 +5,7 @@ import { requireUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { operationalRecords, userSessions } from "../db/schema.js";
+import { activeOperationalPayloadSql } from "../operational-record-state.js";
 import { hasModulePermission } from "../permissions.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
 import { requireFarmAccess } from "../workspace-access.js";
@@ -82,7 +83,7 @@ export async function expenseSearchRoutes(app: FastifyInstance): Promise<void> {
         includeImported ? importedVoucherScope : undefined,
       ),
       eq(operationalRecords.entityType, "voucher"),
-      includeDeleted ? undefined : sql`${operationalRecords.payload}->>'deletedAt' is null`,
+      includeDeleted ? undefined : activeOperationalPayloadSql(operationalRecords.payload),
       query.data.from ? gte(sql`${operationalRecords.payload}->>'date'`, query.data.from) : undefined,
       query.data.to ? lte(sql`${operationalRecords.payload}->>'date'`, query.data.to) : undefined,
       query.data.category ? sql`(
@@ -145,6 +146,7 @@ export async function expenseSearchRoutes(app: FastifyInstance): Promise<void> {
         includeImported ? importedAccountScope : undefined,
       ),
       eq(operationalRecords.entityType, "account"),
+      activeOperationalPayloadSql(operationalRecords.payload),
     ));
     const accountById = new Map(accounts.map((record) => {
       const payload = record.payload as AccountPayload;

@@ -1,4 +1,5 @@
 import Dexie, { type EntityTable } from "dexie";
+import { isActiveOperationalRecord, isImportedAccountRecord, isImportedVoucherRecord } from "./operationalRecords";
 
 export type LocalRecord = {
   id: string;
@@ -10,20 +11,6 @@ export type LocalRecord = {
   deletedAt?: string | null;
   pendingSync?: boolean;
 };
-
-function isImportedExpenseRecord(record: LocalRecord & Record<string, unknown>) {
-  return record.sourceType === "expense"
-    || record.source_type === "expense"
-    || typeof record.oldExpenseId === "string"
-    || (typeof record.originalVoucherNumber === "string" && record.originalVoucherNumber.trim().length > 0);
-}
-
-function isImportedAccountRecord(record: LocalRecord & Record<string, unknown>) {
-  return record.sourceType === "account"
-    || record.source_type === "account"
-    || typeof record.old_android_id === "string"
-    || typeof record.oldAndroidId === "string";
-}
 
 export type PendingMutation = LocalRecord & {
   entity:
@@ -444,11 +431,11 @@ export async function workspaceRecords<T extends LocalRecord>(table: EntityTable
         record.seasonId === activeSeasonId
         || (Boolean(options.includeGeneralFarmRecords) && record.seasonId === null)
         || (Boolean(options.includeImportedAcrossSeasons) && (
-          isImportedExpenseRecord(record as LocalRecord & Record<string, unknown>)
+          isImportedVoucherRecord(record as LocalRecord & Record<string, unknown>)
           || isImportedAccountRecord(record as LocalRecord & Record<string, unknown>)
         ))
       )
-      && (Boolean(options.includeDeleted) || !record.deletedAt)).toArray();
+      && (Boolean(options.includeDeleted) || isActiveOperationalRecord(record as LocalRecord & Record<string, unknown>))).toArray();
 }
 
 export function labourSortValue(labourer: Pick<Labourer, "sortOrder" | "androidSortOrder" | "originalIndex" | "createdAt">) {

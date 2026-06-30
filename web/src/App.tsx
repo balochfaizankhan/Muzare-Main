@@ -22,6 +22,7 @@ const Settings = lazy(async () => ({ default: (await import("./pages/admin/Setti
 const Users = lazy(async () => ({ default: (await import("./pages/admin/Users")).Users }));
 const Workspaces = lazy(async () => ({ default: (await import("./pages/admin/Workspaces")).Workspaces }));
 const MigrationImport = lazy(async () => ({ default: (await import("./pages/admin/MigrationImport")).MigrationImport }));
+const AccountingDiagnostics = lazy(async () => ({ default: (await import("./pages/admin/AccountingDiagnostics")).AccountingDiagnostics }));
 const Attendance = lazy(async () => ({ default: (await import("./pages/workspace/Attendance")).Attendance }));
 const Dispatch = lazy(async () => ({ default: (await import("./pages/workspace/Dispatch")).Dispatch }));
 const Expenses = lazy(async () => ({ default: (await import("./pages/workspace/Expenses")).Expenses }));
@@ -119,6 +120,7 @@ export default function App() {
       <Route path="billing" element={routeElement(<Billing />, "Loading billing")} />
       <Route path="audit-logs" element={routeElement(<AuditLogs />, "Loading audit logs")} />
       <Route path="migration-import" element={routeElement(<MigrationImport />, "Loading migration import")} />
+      <Route path="accounting-diagnostics" element={routeElement(<AccountingDiagnostics />, "Loading accounting diagnostics")} />
       <Route path="imports/:jobId" element={routeElement(<MigrationImport />, "Loading import history")} />
       <Route path="reports" element={routeElement(<AdminSection title={t("layout.reports")} description={t("adminSections.reportsDescription")} emptyDescription={t("adminSections.reportsDescription")} />, "Loading reports")} />
       <Route path="settings" element={routeElement(<Settings />, "Loading settings")} />

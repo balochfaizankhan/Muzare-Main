@@ -1436,6 +1436,9 @@ const extraResources = {
       adminMigration: {
         title: "Migration Import",
       },
+      adminAccounting: {
+        title: "Accounting Diagnostics",
+      },
       moduleDescriptions: {
         workforce: "Attendance, wages, advances, and labour registers.",
         expenses: "Vouchers, invoices, categories, and expense reporting.",
@@ -2590,6 +2593,9 @@ const extraResources = {
       adminMigration: {
         title: "استيراد الترحيل",
       },
+      adminAccounting: {
+        title: "تشخيص المحاسبة",
+      },
       moduleDescriptions: {
         workforce: "الحضور والأجور والسلف وسجلات العمال.",
         expenses: "السندات والفواتير والتصنيفات وتقارير المصروفات.",
@@ -3731,6 +3737,9 @@ const extraResources = {
       },
       adminMigration: {
         title: "مائیگریشن امپورٹ",
+      },
+      adminAccounting: {
+        title: "اکاؤنٹنگ ڈائگناسٹکس",
       },
       moduleDescriptions: {
         workforce: "حاضری، اجرت، ایڈوانس اور مزدور رجسٹرز۔",

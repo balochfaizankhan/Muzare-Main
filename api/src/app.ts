@@ -24,6 +24,7 @@ import { expenseSearchRoutes } from "./routes/expense-search.js";
 import { expenseAttachmentRoutes } from "./routes/expense-attachments.js";
 import { farmOperationRoutes } from "./routes/farm-operations.js";
 import { migrationImportRoutes } from "./routes/migration-import.js";
+import { accountingDiagnosticsRoutes } from "./routes/accounting-diagnostics.js";
 
 export async function buildApp() {
   const app = Fastify({ logger: true });
@@ -76,6 +77,7 @@ export async function buildApp() {
   await app.register(expenseAttachmentRoutes);
   await app.register(farmOperationRoutes);
   await app.register(migrationImportRoutes);
+  await app.register(accountingDiagnosticsRoutes);
 
   return app;
 }

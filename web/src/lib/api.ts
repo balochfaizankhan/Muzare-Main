@@ -474,6 +474,48 @@ export type ImportedVoucherNumberRepairResult = {
   }>;
   message: string;
 };
+export type AccountingDiagnosticsRecord = {
+  id: string;
+  farmId: string | null;
+  seasonId: string | null;
+  sourceType: string | null;
+  imported: boolean;
+  deleted: boolean;
+  visibleInSelectedScope: boolean;
+  voucherNumber: string;
+  date: string;
+  amount: number;
+  description: string;
+  deletedAt: string | null;
+  originalVoucherNumber: string | null;
+  legacyVoucherNumber: string | null;
+  oldExpenseId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+export type AccountingDiagnostics = {
+  workspaceId: string;
+  scope: { farmId: string | null; seasonId: string | null };
+  voucherStats: {
+    active: number;
+    importedActive: number;
+    deleted: number;
+    visibleInSelectedScope: number;
+    hiddenFromSelectedScope: number;
+    hiddenImportedFromSelectedScope: number;
+  };
+  duplicateVoucherGroups: Array<{
+    voucherNumber: string;
+    count: number;
+    recordIds: string[];
+    farms: string[];
+    seasons: string[];
+    sources: string[];
+  }>;
+  hiddenActiveVouchers: AccountingDiagnosticsRecord[];
+  hiddenImportedVouchers: AccountingDiagnosticsRecord[];
+  deletedVouchers: AccountingDiagnosticsRecord[];
+};
 export type MigrationImportCleanupPreview = {
   batchId: string;
   fileHash: string;
@@ -973,6 +1015,12 @@ export const repairImportedVoucherNumbers = (token: string, input: { workspaceId
   apiRequest<ImportedVoucherNumberRepairResult>("/v1/admin/migration-import/repair-voucher-numbers", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 60_000, debugLabel: "migration-import-repair-voucher-numbers" });
 export const fetchMigrationImportCleanupPreview = (token: string, workspaceId: string, batchId: string) =>
   apiRequest<{ preview: MigrationImportCleanupPreview }>(`/v1/admin/migration-import/cleanup-preview?workspaceId=${encodeURIComponent(workspaceId)}&batchId=${encodeURIComponent(batchId)}`, {}, token, { timeoutMs: 30_000, debugLabel: "migration-import-cleanup-preview" });
+export const fetchAccountingDiagnostics = (token: string, input: { workspaceId: string; farmId?: string; seasonId?: string }) => {
+  const query = new URLSearchParams({ workspaceId: input.workspaceId });
+  if (input.farmId) query.set("farmId", input.farmId);
+  if (input.seasonId) query.set("seasonId", input.seasonId);
+  return apiRequest<AccountingDiagnostics>(`/v1/admin/accounting-diagnostics?${query.toString()}`, {}, token, { timeoutMs: 30_000, debugLabel: "accounting-diagnostics" });
+};
 export const cleanFailedMigrationImport = (token: string, input: {
   workspaceId: string;
   batchId: string;

@@ -5,6 +5,7 @@ import { requireUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { farms, operationalRecords, seasons, userSessions } from "../db/schema.js";
+import { isDeletedOperationalPayload } from "../operational-record-state.js";
 import { hasPermission } from "../permissions.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
 import { hasFarmAccess } from "../workspace-access.js";
@@ -91,7 +92,7 @@ export async function advanceReportRoutes(app: FastifyInstance): Promise<void> {
     ));
     const records = advanceRecords.flatMap((record) => {
       const payload = record.payload as AdvancePayload;
-      if (payload.deletedAt) return [];
+      if (isDeletedOperationalPayload(payload)) return [];
       if (typeof payload.labourerId !== "string" || typeof payload.date !== "string") return [];
       if (payload.date < from || payload.date > to) return [];
       if (selectedLabourIds.size > 0 && !selectedLabourIds.has(payload.labourerId)) return [];

@@ -13,6 +13,7 @@ const nav = [
   ["/admin/approvals", "adminApprovals.title", UserRoundPlus],
   ["/admin/suspended", "common.suspended", ShieldAlert],
   ["/admin/migration-import", "adminMigration.title", DatabaseBackup],
+  ["/admin/accounting-diagnostics", "adminAccounting.title", FileClock],
   ["/admin/audit-logs", "layout.auditLogs", FileClock],
   ["/admin/settings", "layout.settings", Settings],
 ] as const;

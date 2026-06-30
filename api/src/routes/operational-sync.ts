@@ -5,6 +5,7 @@ import { requireUser, type AuthenticatedUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { auditLogs, expenseVoucherSequences, operationalRecords, userSessions } from "../db/schema.js";
+import { activeOperationalPayloadSql, isDeletedOperationalPayload } from "../operational-record-state.js";
 import { hasModulePermission, hasPermission, type WorkspaceModule } from "../permissions.js";
 import { validateTenantReferences, validateTenantReferencesDetailed } from "../tenant-ownership.js";
 import { validateExpenseCategoryReference } from "./expense-categories.js";
@@ -265,7 +266,7 @@ async function findExistingVoucherByNumber(
   const filters = [
     eq(operationalRecords.workspaceId, workspaceId),
     eq(operationalRecords.entityType, "voucher"),
-    sql`${operationalRecords.payload}->>'deletedAt' IS NULL`,
+    activeOperationalPayloadSql(operationalRecords.payload),
     sql`coalesce(${operationalRecords.payload}->>'voucherNumber', '') = ${voucherNumber}`,
   ];
   if (excludeClientRecordId) filters.push(sql`${operationalRecords.clientRecordId} <> ${excludeClientRecordId}`);
@@ -373,7 +374,7 @@ async function inactiveDispatchReference(
       eq(operationalRecords.entityType, entityType),
       inArray(operationalRecords.clientRecordId, ids),
     ));
-  return records.length !== ids.length || records.some((record) => record.payload.active === false || record.payload.deletedAt);
+  return records.length !== ids.length || records.some((record) => record.payload.active === false || isDeletedOperationalPayload(record.payload));
 }
 
 async function dispatchMasterIsUsed(
@@ -389,7 +390,7 @@ async function dispatchMasterIsUsed(
     eq(operationalRecords.seasonId, seasonId),
     eq(operationalRecords.entityType, "dispatch"),
   ));
-  return dispatches.some(({ payload }) => !payload.deletedAt && (entity === "vehicle"
+  return dispatches.some(({ payload }) => !isDeletedOperationalPayload(payload) && (entity === "vehicle"
     ? payload.vehicleId === recordId
     : Array.isArray(payload.items) && payload.items.some((item: { dateTypeId?: unknown }) => item.dateTypeId === recordId)));
 }
@@ -424,7 +425,7 @@ async function validateLinkedDispatchSale({
       eq(operationalRecords.clientRecordId, dispatchId),
     ))
     .limit(1);
-  if (!dispatch || dispatch.payload.deletedAt) return "Select an active dispatch record before recording a sale.";
+  if (!dispatch || isDeletedOperationalPayload(dispatch.payload)) return "Select an active dispatch record before recording a sale.";
   if (typeof dispatch.payload.date === "string" && saleDate < dispatch.payload.date) {
     return "Sale date cannot be earlier than the dispatch date.";
   }
@@ -445,7 +446,7 @@ async function validateLinkedDispatchSale({
       eq(operationalRecords.entityType, "sale"),
     ));
   const alreadySold = existingSales.reduce((sum, sale) => {
-    if (sale.clientRecordId === existingRecordId || sale.payload.deletedAt) return sum;
+    if (sale.clientRecordId === existingRecordId || isDeletedOperationalPayload(sale.payload)) return sum;
     return sale.payload.dispatchId === dispatchId && sale.payload.dispatchItemId === dispatchItemId
       ? sum + Number(sale.payload.quantity ?? 0)
       : sum;
@@ -577,7 +578,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     }).from(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, parsed.data.workspaceId),
       eq(operationalRecords.entityType, "voucher"),
-      sql`${operationalRecords.payload}->>'deletedAt' IS NULL`,
+      activeOperationalPayloadSql(operationalRecords.payload),
     ));
     const highest = records.reduce((max, record) => {
       const value = typeof record.payload.voucherNumber === "string" ? record.payload.voucherNumber : "";
@@ -897,7 +898,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     if (existing && parsed.data.entity === "partnerEntry" && !hasPermission(request.appUser, "MANAGE_RECORDS", parsed.data.workspaceId)) {
       return reply.code(403).send({ message: "Workspace record management permission is required to update partner ledger entries." });
     }
-    if (existing && ["partnerEntry", "advance", "voucher"].includes(parsed.data.entity) && existing.payload.deletedAt) {
+    if (existing && ["partnerEntry", "advance", "voucher"].includes(parsed.data.entity) && isDeletedOperationalPayload(existing.payload)) {
       return reply.code(409).send({ message: "Deleted financial records cannot be edited." });
     }
     if (parsed.data.entity === "sale") {
@@ -1089,7 +1090,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         }
         return reply.code(204).send();
       }
-      if (entry.payload.deletedAt) return reply.code(204).send();
+      if (isDeletedOperationalPayload(entry.payload)) return reply.code(204).send();
       const deletedAt = new Date();
       const deletionReason = parsed.data.reason ?? "";
       const payload = { ...entry.payload, deletedAt: deletedAt.toISOString(), deletedBy: request.appUser.id, deletionReason };

@@ -27,6 +27,7 @@ import { fetchBootstrap, repairWorkspaceContextRequest } from "../lib/api";
 import { formatDate, formatMoney } from "../lib/format";
 import { buildPartnerLiabilityPositions } from "../lib/partnerAccounting";
 import { ensureLocalAccounts, offlineDb, workspaceRecords } from "../lib/offline-db";
+import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { hasPermission } from "../lib/permissions";
 import { getVoucherDisplayNumber } from "../lib/vouchers";
 import { useSyncState } from "../hooks/useSyncState";
@@ -106,29 +107,36 @@ export function DashboardPage() {
       workspaceRecords(offlineDb.attendance),
       workspaceRecords(offlineDb.dispatches),
       workspaceRecords(offlineDb.sales),
-      workspaceRecords(offlineDb.vouchers, { includeGeneralFarmRecords: true }),
+      workspaceRecords(offlineDb.vouchers, { includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }),
       workspaceRecords(offlineDb.partnerEntries),
       workspaceRecords(offlineDb.advances),
-      workspaceRecords(offlineDb.accounts),
+      workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }),
     ]);
+    const activeAttendance = attendance.filter(isActiveOperationalRecord);
+    const activeDispatches = dispatches.filter(isActiveOperationalRecord);
+    const activeSales = sales.filter(isActiveOperationalRecord);
+    const activeVouchers = vouchers.filter(isActiveOperationalRecord);
+    const activeEntries = entries.filter(isActiveOperationalRecord);
+    const activeAdvances = advances.filter(isActiveOperationalRecord);
+    const activeAccounts = accounts.filter(isActiveOperationalRecord);
     const date = today();
-    const totalSales = sales.reduce((sum, item) => sum + item.amount, 0);
-    const labourAdvances = advances.reduce((sum, item) => sum + item.amount, 0);
-    const totalExpenses = vouchers.reduce((sum, item) => sum + item.amount, 0) + labourAdvances;
-    const partnerBalance = buildPartnerLiabilityPositions(accounts, vouchers, advances, entries, sales)
+    const totalSales = activeSales.reduce((sum, item) => sum + item.amount, 0);
+    const labourAdvances = activeAdvances.reduce((sum, item) => sum + item.amount, 0);
+    const totalExpenses = activeVouchers.reduce((sum, item) => sum + item.amount, 0) + labourAdvances;
+    const partnerBalance = buildPartnerLiabilityPositions(activeAccounts, activeVouchers, activeAdvances, activeEntries, activeSales)
       .reduce((sum, item) => sum + item.currentPartnerBalance, 0);
     setTotals({
-      presentToday: attendance.filter((item) => item.date === date && item.status === "present").length,
-      cartonsToday: dispatches.filter((item) => item.date === date).reduce((sum, item) => sum + (item.items?.reduce((itemSum, entry) => itemSum + entry.cartons, 0) ?? item.cartons ?? 0), 0),
+      presentToday: activeAttendance.filter((item) => item.date === date && item.status === "present").length,
+      cartonsToday: activeDispatches.filter((item) => item.date === date).reduce((sum, item) => sum + (item.items?.reduce((itemSum, entry) => itemSum + entry.cartons, 0) ?? item.cartons ?? 0), 0),
       totalSales,
       labourAdvances,
       totalExpenses,
-      netPosition: calculateAvailableBalance(accounts, sales, vouchers, advances, entries),
+      netPosition: calculateAvailableBalance(activeAccounts, activeSales, activeVouchers, activeAdvances, activeEntries),
       partnerBalance,
     });
 
     const recent: Activity[] = [
-      ...sales.map((item) => ({
+      ...activeSales.map((item) => ({
         id: item.id,
         path: "/workspace/sales",
         title: t("dashboard.saleRecorded"),
@@ -136,7 +144,7 @@ export function DashboardPage() {
         value: money(item.amount),
         createdAt: item.createdAt,
       })),
-      ...vouchers.map((item) => ({
+      ...activeVouchers.map((item) => ({
         id: item.id,
         path: "/workspace/expenses",
         title: t("dashboard.expenseVoucher"),
@@ -144,7 +152,7 @@ export function DashboardPage() {
         value: `-${money(item.amount)}`,
         createdAt: item.createdAt,
       })),
-      ...dispatches.map((item) => ({
+      ...activeDispatches.map((item) => ({
         id: item.id,
         path: "/workspace/dispatch",
         title: t("dashboard.dispatchRecorded"),
@@ -152,7 +160,7 @@ export function DashboardPage() {
         value: `${item.items?.reduce((sum, entry) => sum + entry.cartons, 0) ?? item.cartons ?? 0} cartons`,
         createdAt: item.createdAt,
       })),
-      ...entries.map((item) => ({
+      ...activeEntries.map((item) => ({
         id: item.id,
         path: "/workspace/partner-ledger",
         title: item.type === "contribution" ? t("dashboard.partnerContribution") : item.type === "withdrawal" ? t("dashboard.partnerWithdrawal") : t("dashboard.partnerSettlement"),
@@ -160,7 +168,7 @@ export function DashboardPage() {
         value: `${item.type === "withdrawal" ? "-" : ""}${money(item.amount)}`,
         createdAt: item.createdAt,
       })),
-      ...advances.map((item) => ({
+      ...activeAdvances.map((item) => ({
         id: item.id,
         path: "/workspace/labour-advances",
         title: t("dashboard.labourAdvancePaid"),

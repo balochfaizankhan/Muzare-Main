@@ -1,4 +1,5 @@
 import type { Account, Advance, PartnerEntry, Sale, Voucher } from "./offline-db";
+import { isActiveOperationalRecord } from "./operationalRecords";
 
 export type PartnerLiabilityPosition = {
   account: Account | null;
@@ -112,28 +113,28 @@ export function partnerAccountBalanceEffect(
 ) {
   if (account.type !== "partner") return 0;
   const capitalInjected = entries
-    .filter((entry) => !entry.deletedAt && entry.type === "contribution" && resolvePartnerAccountId(entry, allAccounts) === account.id)
+    .filter((entry) => isActiveOperationalRecord(entry) && entry.type === "contribution" && resolvePartnerAccountId(entry, allAccounts) === account.id)
     .reduce((sum, entry) => sum + entry.amount, 0);
   const moneyReturned = entries
-    .filter((entry) => !entry.deletedAt && entry.type === "withdrawal" && resolvePartnerAccountId(entry, allAccounts) === account.id)
+    .filter((entry) => isActiveOperationalRecord(entry) && entry.type === "withdrawal" && resolvePartnerAccountId(entry, allAccounts) === account.id)
     .reduce((sum, entry) => sum + entry.amount, 0);
   const transfersIn = entries
-    .filter((entry) => !entry.deletedAt && entry.type === "settlement" && entry.toAccountId === account.id)
+    .filter((entry) => isActiveOperationalRecord(entry) && entry.type === "settlement" && entry.toAccountId === account.id)
     .reduce((sum, entry) => sum + entry.amount, 0);
   const transfersOut = entries
-    .filter((entry) => !entry.deletedAt && entry.type === "settlement" && entry.fromAccountId === account.id)
+    .filter((entry) => isActiveOperationalRecord(entry) && entry.type === "settlement" && entry.fromAccountId === account.id)
     .reduce((sum, entry) => sum + entry.amount, 0);
   const entryAdjustments = entries
-    .filter((entry) => !entry.deletedAt && entry.type === "adjustment" && resolvePartnerAccountId(entry, allAccounts) === account.id)
+    .filter((entry) => isActiveOperationalRecord(entry) && entry.type === "adjustment" && resolvePartnerAccountId(entry, allAccounts) === account.id)
     .reduce((sum, entry) => sum + partnerAdjustmentEffect(entry), 0);
   const directVoucherExpensesPaid = vouchers
-    .filter((voucher) => voucher.accountId === account.id)
+    .filter((voucher) => isActiveOperationalRecord(voucher) && voucher.accountId === account.id)
     .reduce((sum, voucher) => sum + voucher.amount, 0);
   const directLabourAdvancesPaid = advances
-    .filter((advance) => advance.accountId === account.id)
+    .filter((advance) => isActiveOperationalRecord(advance) && advance.accountId === account.id)
     .reduce((sum, advance) => sum + advance.amount, 0);
   const adjustments = sales
-    .filter((sale) => sale.accountId === account.id)
+    .filter((sale) => isActiveOperationalRecord(sale) && sale.accountId === account.id)
     .reduce((sum, sale) => sum - sale.amount, 0);
   return capitalInjected
     + directVoucherExpensesPaid
@@ -177,7 +178,7 @@ export function buildPartnerLiabilityPositions(
 
   for (const account of partnerAccounts) ensure(account.id, account.name, account);
 
-  for (const entry of entries.filter((item) => !item.deletedAt)) {
+  for (const entry of entries.filter((item) => isActiveOperationalRecord(item))) {
     if (entry.type === "settlement") {
       if (entry.fromAccountId) ensure(entry.fromAccountId, accounts.find((account) => account.id === entry.fromAccountId)?.name ?? entry.fromPartner ?? "-", accounts.find((account) => account.id === entry.fromAccountId) ?? null).transfersOut += entry.amount;
       if (entry.toAccountId) ensure(entry.toAccountId, accounts.find((account) => account.id === entry.toAccountId)?.name ?? entry.toPartner ?? "-", accounts.find((account) => account.id === entry.toAccountId) ?? null).transfersIn += entry.amount;
@@ -200,7 +201,7 @@ export function buildPartnerLiabilityPositions(
     if (entry.type === "adjustment") position.adjustments += partnerAdjustmentEffect(entry);
   }
 
-  for (const voucher of vouchers) {
+  for (const voucher of vouchers.filter((item) => isActiveOperationalRecord(item))) {
     const account = partnerAccounts.find((item) => item.id === voucher.accountId);
     if (!account) continue;
     const position = ensure(account.id, account.name, account);
@@ -208,7 +209,7 @@ export function buildPartnerLiabilityPositions(
     position.directExpensesPaid += voucher.amount;
   }
 
-  for (const advance of advances) {
+  for (const advance of advances.filter((item) => isActiveOperationalRecord(item))) {
     const account = partnerAccounts.find((item) => item.id === advance.accountId);
     if (!account) continue;
     const position = ensure(account.id, account.name, account);
@@ -216,7 +217,7 @@ export function buildPartnerLiabilityPositions(
     position.directExpensesPaid += advance.amount;
   }
 
-  for (const sale of sales) {
+  for (const sale of sales.filter((item) => isActiveOperationalRecord(item))) {
     const account = partnerAccounts.find((item) => item.id === sale.accountId);
     if (!account) continue;
     const position = ensure(account.id, account.name, account);

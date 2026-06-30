@@ -1,4 +1,5 @@
 import type { DateType, Dispatch, Sale } from "./offline-db";
+import { isActiveOperationalRecord } from "./operationalRecords";
 
 export type DispatchAvailability = {
   dispatch: Dispatch;
@@ -30,7 +31,7 @@ export const resolveSaleType = (sale: Pick<Sale, "saleType" | "dispatchId">) =>
 export function soldQuantityByDispatchItem(sales: Sale[]) {
   const sold = new Map<string, number>();
   for (const sale of sales) {
-    if (sale.deletedAt) continue;
+    if (!isActiveOperationalRecord(sale)) continue;
     const key = saleDispatchKey(sale);
     if (!key) continue;
     sold.set(key, (sold.get(key) ?? 0) + Number(sale.quantity || 0));
@@ -49,7 +50,7 @@ export function buildDispatchAvailability(
   const rows: DispatchAvailability[] = [];
 
   for (const dispatch of dispatches) {
-    if (dispatch.deletedAt) continue;
+    if (!isActiveOperationalRecord(dispatch)) continue;
     const items = dispatch.items ?? [];
     for (const item of items) {
       const key = dispatchItemKey(dispatch.id, item.id);

@@ -10,6 +10,7 @@ import { defaultTransactionGroupExpansion, groupAccountTransactions, type Accoun
 import { calculateAccountBalance } from "../../lib/accounting";
 import { formatMoney, formatNumber } from "../../lib/format";
 import { translateExpenseCategory, translateExpenseSubcategory, translateSaleType, translateSalesStatus } from "../../lib/systemTranslations";
+import { isActiveOperationalRecord } from "../../lib/operationalRecords";
 import { getVoucherDisplayNumber } from "../../lib/vouchers";
 import {
   buildPartnerLiabilityPositions,
@@ -612,6 +613,7 @@ export function Reports() {
     .filter((item) => item.records.length > 0), [advanceRows, attendanceSummary, labourers]);
 
   const voucherBaseRows = useMemo(() => vouchers
+    .filter((item) => isActiveOperationalRecord(item))
     .filter((item) => {
       const lines = voucherReportItems(item);
       return (!accountId || item.accountId === accountId)
@@ -652,18 +654,19 @@ export function Reports() {
   }, [subcategory, voucherSubcategories]);
 
   const partnerRows = entries
-    .filter((item) => !item.deletedAt
+    .filter((item) => isActiveOperationalRecord(item)
       && (!accountId || item.accountId === accountId || item.fromAccountId === accountId || item.toAccountId === accountId)
       && matches(item.date, [item.partnerName, item.fromPartner, item.toPartner, item.type, item.notes], item.amount))
     .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
   const saleRows = sales
-    .filter((item) => (!accountId || item.accountId === accountId)
+    .filter((item) => isActiveOperationalRecord(item)
+      && (!accountId || item.accountId === accountId)
       && (!saleTypeFilter || saleTypeFilter === "all" || resolveSaleType(item) === saleTypeFilter)
       && matches(item.date, [item.buyerName, item.invoiceNumber, saleProduceLabel(item), saleTypeLabel(item), item.dispatchDate, item.vehicleNumber, accountName(item.accountId), item.paymentDate], item.amount))
     .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
   const salesByDispatchKey = useMemo(() => {
     const map = new Map<string, Sale[]>();
-    for (const sale of sales.filter((item) => !item.deletedAt && item.dispatchId && item.dispatchItemId)) {
+    for (const sale of sales.filter((item) => isActiveOperationalRecord(item) && item.dispatchId && item.dispatchItemId)) {
       const key = `${sale.dispatchId}:${sale.dispatchItemId}`;
       const current = map.get(key) ?? [];
       current.push(sale);
@@ -672,7 +675,7 @@ export function Reports() {
     return map;
   }, [sales]);
   const salesReportRows = useMemo(() => sales
-    .filter((item) => !item.deletedAt)
+    .filter((item) => isActiveOperationalRecord(item))
     .map((sale) => {
       const record: SalesReportRecord = {
         sale,
@@ -722,10 +725,10 @@ export function Reports() {
     })
     .sort((a, b) => b.sale.date.localeCompare(a.sale.date) || b.sale.createdAt.localeCompare(a.sale.createdAt)), [accountName, buyerFilter, from, max, matches, min, paymentStatusFilter, productFilter, saleTypeFilter, sales, salesDateType, t, to]);
   const dispatchReportRows = useMemo(() => dispatches
-    .filter((item) => !item.deletedAt)
+    .filter((item) => isActiveOperationalRecord(item))
     .flatMap((dispatch) => (dispatch.items ?? []).map((dispatchItem) => {
       const key = `${dispatch.id}:${dispatchItem.id}`;
-      const linkedSales = (salesByDispatchKey.get(key) ?? []).filter((sale) => !sale.deletedAt).sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+      const linkedSales = (salesByDispatchKey.get(key) ?? []).filter((sale) => isActiveOperationalRecord(sale)).sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
       const soldQuantity = linkedSales.reduce((sum, sale) => sum + sale.quantity, 0);
       const quantity = dispatchItem.cartons;
       return {

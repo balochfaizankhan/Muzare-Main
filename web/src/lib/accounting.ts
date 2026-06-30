@@ -1,4 +1,5 @@
 import type { Account, Advance, PartnerEntry, Sale, Voucher } from "./offline-db";
+import { isActiveOperationalRecord } from "./operationalRecords";
 import { isPartnerAccount, partnerAccountBalanceEffect } from "./partnerAccounting";
 
 export function partnerSettlementEffect(entry: PartnerEntry, accountId: string): number {
@@ -23,10 +24,10 @@ export function calculateAccountBalance(
   entries: PartnerEntry[],
 ): number {
   if (account.type === "partner") return partnerAccountBalanceEffect(account, sales, vouchers, advances, entries, [account]);
-  return sales.filter((record) => record.accountId === account.id).reduce((sum, record) => sum + record.amount, 0)
-    - vouchers.filter((record) => record.accountId === account.id).reduce((sum, record) => sum + record.amount, 0)
-    - advances.filter((record) => record.accountId === account.id).reduce((sum, record) => sum + record.amount, 0)
-    + entries.reduce((sum, record) => sum + partnerEntryAccountEffect(record, account), 0);
+  return sales.filter((record) => isActiveOperationalRecord(record) && record.accountId === account.id).reduce((sum, record) => sum + record.amount, 0)
+    - vouchers.filter((record) => isActiveOperationalRecord(record) && record.accountId === account.id).reduce((sum, record) => sum + record.amount, 0)
+    - advances.filter((record) => isActiveOperationalRecord(record) && record.accountId === account.id).reduce((sum, record) => sum + record.amount, 0)
+    + entries.filter((record) => isActiveOperationalRecord(record)).reduce((sum, record) => sum + partnerEntryAccountEffect(record, account), 0);
 }
 
 export function calculateAvailableBalance(

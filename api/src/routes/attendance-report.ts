@@ -5,6 +5,7 @@ import { requireUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { farms, operationalRecords, seasons, userSessions } from "../db/schema.js";
+import { isDeletedOperationalPayload } from "../operational-record-state.js";
 import { hasPermission } from "../permissions.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
 import { hasFarmAccess } from "../workspace-access.js";
@@ -90,7 +91,7 @@ export async function attendanceReportRoutes(app: FastifyInstance): Promise<void
     ));
     const records = attendanceRecords.flatMap((record) => {
       const payload = record.payload as AttendancePayload;
-      if (typeof payload.labourerId !== "string" || typeof payload.date !== "string"
+      if (isDeletedOperationalPayload(payload) || typeof payload.labourerId !== "string" || typeof payload.date !== "string"
         || !["present", "half_day", "absent"].includes(String(payload.status))
         || payload.date < from || payload.date > to
         || (selectedLabourIds.size > 0 && !selectedLabourIds.has(payload.labourerId))
@@ -110,7 +111,7 @@ export async function attendanceReportRoutes(app: FastifyInstance): Promise<void
     ));
     const advances = advanceRecords.flatMap((record) => {
       const payload = record.payload as AdvancePayload;
-      if (payload.deletedAt || typeof payload.labourerId !== "string" || typeof payload.date !== "string"
+      if (isDeletedOperationalPayload(payload) || typeof payload.labourerId !== "string" || typeof payload.date !== "string"
         || payload.date < from || payload.date > to || (selectedLabourIds.size > 0 && !selectedLabourIds.has(payload.labourerId))) return [];
       const labourer = labourById.get(payload.labourerId);
       if (!labourer) return [];

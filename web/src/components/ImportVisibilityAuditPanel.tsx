@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth/AuthProvider";
 import { fetchImportVisibilityAudit } from "../lib/api";
 import { offlineDb } from "../lib/offline-db";
+import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { useSyncState } from "../hooks/useSyncState";
 
 type Props = {
@@ -27,7 +28,7 @@ async function countClientData(workspaceId: string, farmId: string | null, seaso
     rows.filter((row) => row.workspaceId === workspaceId
       && (!farmId || row.farmId === farmId)
       && (!seasonId || row.seasonId === seasonId || (Boolean(options?.includeGeneralFarmRecords) && row.seasonId == null))
-      && !row.deletedAt);
+      && isActiveOperationalRecord(row));
 
   const [labourersAll, attendanceAll, advancesAll, vouchersAll, salesAll, dispatchesAll, accountsAll] = await Promise.all([
     offlineDb.labourers.where("workspaceId").equals(workspaceId).toArray(),

@@ -28,6 +28,7 @@ import {
   type PartnerLiabilityLedgerGroupKey,
 } from "../lib/partnerAccounting";
 import { formatDate, formatMoney } from "../lib/format";
+import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { getVoucherDisplayNumber, normalizeVoucherNumber, parseVoucherSequenceNumber } from "../lib/vouchers";
 import {
   compareLabourers,
@@ -149,7 +150,7 @@ function WorkforceModule({
   const loadGroups = useCallback(async () => (await workspaceRecords(offlineDb.labourGroups)).sort((a, b) => a.name.localeCompare(b.name)), []);
   const loadAttendance = useCallback(async () => (await workspaceRecords(offlineDb.attendance)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadAdvances = useCallback(async () => (await workspaceRecords(offlineDb.advances)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
-  const loadAccounts = useCallback(async () => (await workspaceRecords(offlineDb.accounts)).sort((a, b) => a.name.localeCompare(b.name)), []);
+  const loadAccounts = useCallback(async () => (await workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true })).sort((a, b) => a.name.localeCompare(b.name)), []);
   const loadProductionEntries = useCallback(async () => (await workspaceRecords(offlineDb.productionEntries)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadPayments = useCallback(async () => (await workspaceRecords(offlineDb.labourPayments)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const [labourers, refreshLabourers] = useData(loadLabourers);
@@ -1664,10 +1665,14 @@ function ExpensesModule() {
     normalized?: string;
     blockingVoucher?: {
       id: string;
+      workspaceId: string;
+      farmId: string | null;
+      seasonId: string | null;
       voucherNumber: string;
       date: string;
       amount: number;
       description: string;
+      deletedAt?: string | null;
       source: "imported" | "pwa";
       oldExpenseId?: string | null;
     } | null;
@@ -1791,10 +1796,14 @@ function ExpensesModule() {
           blockingVoucher: result.blockingVoucher
             ? {
               id: result.blockingVoucher.id,
+              workspaceId: result.blockingVoucher.workspaceId,
+              farmId: result.blockingVoucher.farmId,
+              seasonId: result.blockingVoucher.seasonId,
               voucherNumber: result.blockingVoucher.voucherNumber,
               date: result.blockingVoucher.date,
               amount: result.blockingVoucher.amount,
               description: result.blockingVoucher.description,
+              deletedAt: result.blockingVoucher.deletedAt,
               source: result.blockingVoucher.source,
               oldExpenseId: result.blockingVoucher.oldExpenseId,
             }
@@ -2090,14 +2099,14 @@ function ExpensesModule() {
       ? (() => {
           const mergedMap = new Map<string, Voucher | ExpenseSearchRecord>(serverRecords.map((record) => [record.id, record]));
           vouchers.forEach((item) => {
-            if (!showDeletedVouchers && item.deletedAt) return;
+            if (!showDeletedVouchers && !isActiveOperationalRecord(item)) return;
             const existing = mergedMap.get(item.id);
             if (!item.pendingSync) return;
             if (!existing || item.updatedAt > existing.updatedAt) mergedMap.set(item.id, item);
           });
           return [...mergedMap.values()];
         })()
-      : vouchers.filter((item) => showDeletedVouchers || !item.deletedAt);
+      : vouchers.filter((item) => showDeletedVouchers || isActiveOperationalRecord(item));
     return (merged as Voucher[]).filter((item) => matchesVoucher(item)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }, [matchesVoucher, showDeletedVouchers, voucherSearchQuery.data, vouchers]);
   const voucherLineItems = useMemo(() => filteredVouchers.flatMap((item) => voucherLinesFor(item)), [filteredVouchers, voucherLinesFor]);
@@ -2301,6 +2310,9 @@ function ExpensesModule() {
                 {voucherNumberValidation.status === "duplicate" && voucherNumberValidation.blockingVoucher ? <div className="expense-voucher-form__blocking-voucher">
                   <small>{voucherNumberValidation.blockingVoucher.source === "imported" ? t("expensesPage.blockingImportedVoucher") : t("expensesPage.blockingVoucher")}: {voucherNumberValidation.blockingVoucher.voucherNumber} · {voucherNumberValidation.blockingVoucher.date} · {money(voucherNumberValidation.blockingVoucher.amount)}</small>
                   <small>{voucherNumberValidation.blockingVoucher.description || "-"}</small>
+                  <small>ID: {voucherNumberValidation.blockingVoucher.id}</small>
+                  <small>Workspace: {voucherNumberValidation.blockingVoucher.workspaceId} · Farm: {voucherNumberValidation.blockingVoucher.farmId ?? "-"} · Season: {voucherNumberValidation.blockingVoucher.seasonId ?? "-"}</small>
+                  <small>{voucherNumberValidation.blockingVoucher.deletedAt ? `Deleted: ${voucherNumberValidation.blockingVoucher.deletedAt}` : "Deleted: active"}</small>
                   <button
                     type="button"
                     className="secondary-action"
@@ -2800,7 +2812,7 @@ function SalesModule() {
   const canDeleteSales = Boolean(!sessionRefreshing && user && workspaceId && canDelete(user, "sales", workspaceId));
   const [searchParams, setSearchParams] = useSearchParams();
   const load = useCallback(async () => (await workspaceRecords(offlineDb.sales)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
-  const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts), []);
+  const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }), []);
   const loadDispatches = useCallback(async () => (await workspaceRecords(offlineDb.dispatches)).sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)), []);
   const loadVehicles = useCallback(() => workspaceRecords(offlineDb.vehicles), []);
   const loadDateTypes = useCallback(() => workspaceRecords(offlineDb.dateTypes), []);
@@ -3243,9 +3255,9 @@ function PartnerLedgerModule() {
   const canDeleteEntries = Boolean(!sessionRefreshing && user && workspaceId && canDelete(user, "accounts", workspaceId));
   const [showDeleted, setShowDeleted] = useState(false);
   const load = useCallback(async () => (await workspaceRecords(offlineDb.partnerEntries, { includeDeleted: showDeleted })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [showDeleted]);
-  const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts), []);
+  const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }), []);
   const loadAdvances = useCallback(() => workspaceRecords(offlineDb.advances), []);
-  const loadVouchers = useCallback(() => workspaceRecords(offlineDb.vouchers, { includeGeneralFarmRecords: true }), []);
+  const loadVouchers = useCallback(() => workspaceRecords(offlineDb.vouchers, { includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }), []);
   const loadSales = useCallback(() => workspaceRecords(offlineDb.sales), []);
   const [entries, refresh] = useData(load);
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
@@ -3367,8 +3379,8 @@ function PartnerLedgerModule() {
       setSaving(false);
     }
   };
-  const visibleEntries = entries.filter((item) => (showDeleted || !item.deletedAt) && (entryFilter === "all" || item.type === entryFilter));
-  const activeEntries = entries.filter((item) => !item.deletedAt);
+  const visibleEntries = entries.filter((item) => (showDeleted || isActiveOperationalRecord(item)) && (entryFilter === "all" || item.type === entryFilter));
+  const activeEntries = entries.filter((item) => isActiveOperationalRecord(item));
   const accountName = (id?: string) => id ? accounts.find((account) => account.id === id)?.name ?? t("expensesPage.unknownAccount") : "-";
   const partnerPositions = useMemo(
     () => buildPartnerLiabilityPositions(accounts, vouchers, advances, activeEntries, sales),
@@ -3486,8 +3498,8 @@ function PartnerLedgerModule() {
         actions={visibleEntries.map((item) => (
           <div className="record-list__actions" key={`actions-${item.id}`}>
             <button type="button" onClick={() => setViewing(item)}>{t("partnerLedgerPage.view")}</button>
-            {canEditEntries && !item.deletedAt && <button type="button" onClick={() => edit(item)}>{t("partnerLedgerPage.edit")}</button>}
-            {canDeleteEntries && !item.deletedAt && <button className="danger-button" type="button" onClick={() => { setDeleting(item); setDeletionReason(""); }}>{t("partnerLedgerPage.delete")}</button>}
+            {canEditEntries && isActiveOperationalRecord(item) && <button type="button" onClick={() => edit(item)}>{t("partnerLedgerPage.edit")}</button>}
+            {canDeleteEntries && isActiveOperationalRecord(item) && <button className="danger-button" type="button" onClick={() => { setDeleting(item); setDeletionReason(""); }}>{t("partnerLedgerPage.delete")}</button>}
           </div>
         ))}
       />
@@ -3529,8 +3541,8 @@ function AccountsModule() {
   const workspaceId = user?.workspaceId ?? "";
   const canCreateAccounts = Boolean(!sessionRefreshing && user && workspaceId && canCreate(user, "accounts", workspaceId));
   const navigate = useNavigate();
-  const loadAccounts = useCallback(async () => (await workspaceRecords(offlineDb.accounts)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)), []);
-  const loadVouchers = useCallback(() => workspaceRecords(offlineDb.vouchers, { includeGeneralFarmRecords: true }), []);
+  const loadAccounts = useCallback(async () => (await workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true })).sort((a, b) => a.createdAt.localeCompare(b.createdAt)), []);
+  const loadVouchers = useCallback(() => workspaceRecords(offlineDb.vouchers, { includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }), []);
   const loadSales = useCallback(() => workspaceRecords(offlineDb.sales), []);
   const loadEntries = useCallback(() => workspaceRecords(offlineDb.partnerEntries), []);
   const loadAdvances = useCallback(() => workspaceRecords(offlineDb.advances), []);
@@ -3560,9 +3572,13 @@ function AccountsModule() {
     setName("");
     await refresh();
   };
-  const balance = (account: Account) => calculateAccountBalance(account, sales, vouchers, advances, entries);
-  const totalAdvances = advances.reduce((sum, item) => sum + item.amount, 0);
-  const totalVoucherExpenses = vouchers.reduce((sum, item) => sum + item.amount, 0);
+  const activeSales = sales.filter((item) => isActiveOperationalRecord(item));
+  const activeVouchers = vouchers.filter((item) => isActiveOperationalRecord(item));
+  const activeEntries = entries.filter((item) => isActiveOperationalRecord(item));
+  const activeAdvances = advances.filter((item) => isActiveOperationalRecord(item));
+  const balance = (account: Account) => calculateAccountBalance(account, activeSales, activeVouchers, activeAdvances, activeEntries);
+  const totalAdvances = activeAdvances.reduce((sum, item) => sum + item.amount, 0);
+  const totalVoucherExpenses = activeVouchers.reduce((sum, item) => sum + item.amount, 0);
   const selectedAccount = selectedAccountId ? accounts.find((item) => item.id === selectedAccountId) ?? null : null;
   const ledgerGroupTitle = useCallback((groupKey: AccountTransactionGroupKey) => ({
     expenses: t("accountsPage.groupExpenses"),
@@ -3594,7 +3610,7 @@ function AccountsModule() {
     if (!selectedAccount) return [];
     const rows: AccountLedgerRow[] = [];
     const selectedIsPartner = selectedAccount.type === "partner";
-    for (const sale of sales.filter((item) => item.accountId === selectedAccount.id)) {
+    for (const sale of activeSales.filter((item) => item.accountId === selectedAccount.id)) {
       rows.push({
         id: `sale:${sale.id}`,
         date: sale.date,
@@ -3609,7 +3625,7 @@ function AccountsModule() {
         partnerLiabilityGroup: selectedIsPartner ? "adjustments" : undefined,
       });
     }
-    for (const voucher of vouchers.filter((item) => item.accountId === selectedAccount.id)) {
+    for (const voucher of activeVouchers.filter((item) => item.accountId === selectedAccount.id)) {
       rows.push({
         id: `voucher:${voucher.id}`,
         date: voucher.date,
@@ -3624,7 +3640,7 @@ function AccountsModule() {
         partnerLiabilityGroup: selectedIsPartner ? "direct_expenses_paid" : undefined,
       });
     }
-    for (const advance of advances.filter((item) => item.accountId === selectedAccount.id)) {
+    for (const advance of activeAdvances.filter((item) => item.accountId === selectedAccount.id)) {
       rows.push({
         id: `advance:${advance.id}`,
         date: advance.date,
@@ -3639,7 +3655,7 @@ function AccountsModule() {
         partnerLiabilityGroup: selectedIsPartner ? "direct_expenses_paid" : undefined,
       });
     }
-    for (const entry of entries.filter((item) => !item.deletedAt)) {
+    for (const entry of activeEntries) {
       const resolvedPartnerAccountId = resolvePartnerAccountId(entry, accounts);
       if (entry.type === "contribution" && ((selectedIsPartner && resolvedPartnerAccountId === selectedAccount.id) || (!selectedIsPartner && entry.accountId === selectedAccount.id))) {
         rows.push({
@@ -3714,7 +3730,7 @@ function AccountsModule() {
       running += row.credit - row.debit;
       return { ...row, runningBalance: running };
     });
-  }, [advances, entries, sales, selectedAccount, t, vouchers]);
+  }, [activeAdvances, activeEntries, activeSales, activeVouchers, accounts, selectedAccount, t]);
   const filteredLedgerRows = useMemo(() => {
     const term = ledgerSearch.trim().toLowerCase();
     const minAmount = ledgerMinAmount ? Number(ledgerMinAmount) : null;
@@ -3979,7 +3995,7 @@ function AccountsModule() {
       </section>
       <Summary
         label={t("accountsPage.netOperatingPosition")}
-        value={money(sales.reduce((sum, item) => sum + item.amount, 0) - totalVoucherExpenses - totalAdvances)}
+        value={money(activeSales.reduce((sum, item) => sum + item.amount, 0) - totalVoucherExpenses - totalAdvances)}
       />
       {selectedAccount && <div className="worker-dialog-backdrop worker-action-backdrop" role="presentation" onClick={() => setSelectedAccountId(null)}>
         <section className="worker-action-dialog account-ledger-dialog" role="dialog" aria-modal="true" aria-label={t("accountsPage.accountLedgerDetails")} onClick={(event) => event.stopPropagation()}>
