@@ -1,9 +1,9 @@
-import { ApiError, deleteOperationalRecord as deleteOperationalRecordFromApi, fetchBootstrap, fetchOperationalRecords, saveOperationalRecord, type OperationalEntity, type OperationalRecordEnvelope } from "../lib/api";
+import { ApiError, deleteOperationalRecord as deleteOperationalRecordFromApi, fetchBootstrap, fetchOperationalRecords, saveOperationalRecord, validateVoucherNumber, type OperationalEntity, type OperationalRecordEnvelope } from "../lib/api";
 import { clearCachedData, offlineDb, setActiveFarmId, setActiveSeasonId, setActiveWorkspaceId, type LocalRecord, type PendingMutation } from "../lib/offline-db";
 import { canQueueOperationalMutation } from "../lib/permissions";
 import type { Table } from "dexie";
 import i18n from "../i18n";
-import { getVoucherDisplayNumber } from "../lib/vouchers";
+import { getVoucherDisplayNumber, normalizeVoucherNumber } from "../lib/vouchers";
 
 export type SyncStatus = "online" | "offline" | "pending" | "syncing" | "error";
 export type SyncStartupStage = "checkingSession" | "loadingWorkspace" | "loadingContext" | "syncingLatestRecords" | "ready";
@@ -549,6 +549,94 @@ export async function getSyncQueueItems() {
 
 export async function retrySyncQueueItem(mutationId: string) {
   const item = await offlineDb.pendingMutations.get(mutationId);
+  if (item?.entity === "voucher" && item.operation !== "delete" && context) {
+    const payload = item.payload as Partial<LocalRecord> & { voucherNumber?: string };
+    const rawVoucherNumber = typeof payload.voucherNumber === "string" ? payload.voucherNumber.trim() : "";
+    const normalizedVoucherNumber = normalizeVoucherNumber(rawVoucherNumber);
+    if (!normalizedVoucherNumber) {
+      const lastError = i18n.t("expensesPage.voucherNumberFormatError");
+      await offlineDb.pendingMutations.update(mutationId, {
+        retryable: false,
+        status: "failed",
+        lastError,
+        errorCode: "invalid_voucher_number",
+        errorMessage: lastError,
+        lastAttemptedAt: new Date().toISOString(),
+      });
+      await refreshSyncState({ status: "error" });
+      notify(lastError);
+      return;
+    }
+    const [cachedWorkspaceVouchers, pendingVoucherMutations] = await Promise.all([
+      offlineDb.vouchers.where("workspaceId").equals(context.workspaceId).toArray(),
+      offlineDb.pendingMutations.where("workspaceId").equals(context.workspaceId).and((mutation) =>
+        mutation.id !== mutationId
+        && mutation.entity === "voucher"
+        && mutation.operation !== "delete"
+        && mutation.status !== "resolved"
+        && mutation.status !== "discarded").toArray(),
+    ]);
+    const duplicateCachedVoucher = cachedWorkspaceVouchers.some((record) =>
+      record.id !== payload.id
+      && (getVoucherDisplayNumber(record) || record.voucherNumber) === normalizedVoucherNumber);
+    const duplicatePendingVoucher = pendingVoucherMutations.some((mutation) => {
+      const candidate = mutation.payload as Partial<LocalRecord> & { voucherNumber?: string };
+      return candidate.id !== payload.id
+        && (getVoucherDisplayNumber(candidate) || candidate.voucherNumber) === normalizedVoucherNumber;
+    });
+    if (duplicateCachedVoucher || duplicatePendingVoucher) {
+      const lastError = i18n.t("expensesPage.voucherNumberDuplicate", { number: normalizedVoucherNumber });
+      await offlineDb.pendingMutations.update(mutationId, {
+        retryable: false,
+        status: "failed",
+        lastError,
+        errorCode: "duplicate_voucher_number",
+        errorMessage: lastError,
+        lastAttemptedAt: new Date().toISOString(),
+      });
+      await refreshSyncState({ status: "error" });
+      notify(lastError);
+      return;
+    }
+    if (navigator.onLine) {
+      try {
+        const result = await validateVoucherNumber(context.token, context.workspaceId, {
+          voucherNumber: normalizedVoucherNumber,
+          recordId: typeof payload.id === "string" ? payload.id : undefined,
+        });
+        if (!result.available) {
+          const lastError = i18n.t("expensesPage.voucherNumberDuplicate", { number: result.voucherNumber });
+          await offlineDb.pendingMutations.update(mutationId, {
+            retryable: false,
+            status: "failed",
+            lastError,
+            errorCode: "duplicate_voucher_number",
+            errorMessage: lastError,
+            lastAttemptedAt: new Date().toISOString(),
+          });
+          await refreshSyncState({ status: "error" });
+          notify(lastError);
+          return;
+        }
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 409) {
+          const lastError = error.message;
+          await offlineDb.pendingMutations.update(mutationId, {
+            retryable: false,
+            status: "failed",
+            lastError,
+            errorStatus: error.status,
+            errorCode: "duplicate_voucher_number",
+            errorMessage: lastError,
+            lastAttemptedAt: new Date().toISOString(),
+          });
+          await refreshSyncState({ status: "error" });
+          notify(lastError);
+          return;
+        }
+      }
+    }
+  }
   if (item && item.operation !== "delete") {
     await tableFor(item.entity).update((item.payload as LocalRecord).id, { pendingSync: true });
   }

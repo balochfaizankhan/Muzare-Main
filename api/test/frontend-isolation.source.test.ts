@@ -95,6 +95,20 @@ test("operational writes queue locally before background sync", async () => {
   assert.match(sync, /if \(latest\?\.updatedAt !== mutation\.updatedAt\) continue;/);
 });
 
+test("voucher display and retry logic preserve explicit voucher numbers instead of restoring audit numbers or auto-renumbering", async () => {
+  const vouchers = await source("web/src/lib/vouchers.ts");
+  const sync = await source("web/src/services/syncService.ts");
+  const modulePage = await source("web/src/pages/ModulePage.tsx");
+  const route = await source("api/src/routes/operational-sync.ts");
+  assert.match(vouchers, /return cleanVoucherNumber\(voucher\.voucherNumber\)\s+\|\|\s+cleanVoucherNumber\(voucher\.originalVoucherNumber\)\s+\|\|\s+cleanVoucherNumber\(voucher\.legacyVoucherNumber\);/);
+  assert.match(sync, /const rawVoucherNumber = typeof payload\.voucherNumber === "string" \? payload\.voucherNumber\.trim\(\) : "";/);
+  assert.match(sync, /validateVoucherNumber\(context\.token, context\.workspaceId, \{/);
+  assert.match(modulePage, /setCustomVoucherNumberEnabled\(true\);[\s\S]*setCustomVoucherNumber\(getVoucherDisplayNumber\(voucher\) \|\| voucher\.voucherNumber\);/);
+  assert.match(modulePage, /voucherNumber: nextVoucherNumber,/);
+  assert.match(route, /sql`coalesce\(\$\{operationalRecords\.payload\}->>'voucherNumber', ''\) = \$\{voucherNumber\}`/);
+  assert.match(route, /voucherNumber,\s+createdBy: existing\.payload\.createdBy \?\? request\.appUser!\.id,\s+updatedBy: request\.appUser!\.id,/);
+});
+
 test("CORS uses ALLOWED_ORIGINS and Sync Now backs off without uploading an empty queue", async () => {
   const config = await source("api/src/config.ts");
   const app = await source("api/src/app.ts");

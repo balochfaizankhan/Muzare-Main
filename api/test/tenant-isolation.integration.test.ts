@@ -409,6 +409,15 @@ const createAccount = async (tenant: typeof alpha, name: string) => {
   assert.equal((await request(tenant.token, "POST", "/v1/workspace/operational-records", envelope(tenant, "account", id, { name, type: "cash" }))).statusCode, 200);
   return id;
 };
+const firstExpenseCategorySelection = async (tenant: typeof alpha) => {
+  const response = await request(tenant.token, "GET", `/v1/workspace/${tenant.workspaceId}/expense-categories`);
+  assert.equal(response.statusCode, 200);
+  const category = response.json().categories[0];
+  assert.ok(category);
+  const subcategory = category.subcategories[0];
+  assert.ok(subcategory);
+  return { categoryId: category.id as string, subcategoryId: subcategory.id as string };
+};
 const financialRecord = (tenant: typeof alpha, entity: "sale" | "voucher", record: Record<string, unknown> = {}) => ({
   date: "2026-06-01", amount: 100, accountId: `${tenant.seasonId}:local-cash`,
   ...(entity === "sale" ? { buyerName: "Buyer", produceType: "Produce", quantity: 10, unitPrice: 10 } : { description: "Expense" }),
@@ -1406,10 +1415,12 @@ test("workspace owner permissions resolve to full voucher create even when dupli
 
 test("workspace owner can sync voucher create with null permissions and season mismatch returns stale_context details", async () => {
   const accountId = await createAccount(alpha, "Owner Voucher Create Cash");
+  const categorySelection = await firstExpenseCategorySelection(alpha);
 
   const voucherAttempt = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", randomUUID(), {
     ...financialRecord(alpha, "voucher"),
     accountId,
+    ...categorySelection,
   }));
   assert.equal(voucherAttempt.statusCode, 200);
 
@@ -1417,11 +1428,40 @@ test("workspace owner can sync voucher create with null permissions and season m
     ...envelope(alpha, "voucher", randomUUID(), {
       ...financialRecord(alpha, "voucher"),
       accountId,
+      ...categorySelection,
     }),
     seasonId: alphaSecondary.seasonId,
   });
   assert.equal(staleSeasonAttempt.statusCode, 403);
   assert.equal(staleSeasonAttempt.json().details?.code, "stale_season_context");
+});
+
+test("voucher uniqueness uses current voucherNumber only, not original or legacy audit fields", async () => {
+  const accountId = await createAccount(alpha, "Voucher Audit Scope Cash");
+  const categorySelection = await firstExpenseCategorySelection(alpha);
+  const firstVoucherId = randomUUID();
+  const secondVoucherId = randomUUID();
+
+  const firstCreate = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", firstVoucherId, {
+    ...financialRecord(alpha, "voucher"),
+    accountId,
+    ...categorySelection,
+    voucherNumber: "V-0141",
+    originalVoucherNumber: "V-0500",
+    legacyVoucherNumber: "V-0500",
+  }));
+  assert.equal(firstCreate.statusCode, 200);
+
+  const secondCreate = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", secondVoucherId, {
+    ...financialRecord(alpha, "voucher"),
+    accountId,
+    ...categorySelection,
+    voucherNumber: "V-0500",
+    originalVoucherNumber: "V-0999",
+    legacyVoucherNumber: "V-0999",
+  }));
+  assert.equal(secondCreate.statusCode, 200);
+  assert.equal(secondCreate.json().record.voucherNumber, "V-0500");
 });
 
 test("custom module permissions block expense history APIs even when workspace membership exists", async () => {

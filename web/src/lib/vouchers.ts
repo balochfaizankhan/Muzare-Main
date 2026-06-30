@@ -9,8 +9,8 @@ function cleanVoucherNumber(value: unknown) {
 }
 
 export function getVoucherDisplayNumber(voucher: VoucherLike) {
-  return cleanVoucherNumber(voucher.originalVoucherNumber)
-    || cleanVoucherNumber(voucher.voucherNumber)
+  return cleanVoucherNumber(voucher.voucherNumber)
+    || cleanVoucherNumber(voucher.originalVoucherNumber)
     || cleanVoucherNumber(voucher.legacyVoucherNumber);
 }
 

@@ -1698,8 +1698,8 @@ function ExpensesModule() {
     setSelectedVoucher(null); setEditingVoucher(voucher); setDate(voucher.date);
     setVoucherItems(normalizeVoucherItems(voucher)); setAccountId(voucher.accountId);
     setNotes(voucher.notes ?? "");
-    setCustomVoucherNumberEnabled(false);
-    setCustomVoucherNumber("");
+    setCustomVoucherNumberEnabled(true);
+    setCustomVoucherNumber(getVoucherDisplayNumber(voucher) || voucher.voucherNumber);
     setVoucherNumberValidation({ status: "idle", message: "" });
     setPendingReceipts([]);
     setReceiptError("");
@@ -1724,7 +1724,9 @@ function ExpensesModule() {
     return `V-${String(highest + 1).padStart(4, "0")}`;
   };
   const displayedNewVoucherNumber = editingVoucher
-    ? getVoucherDisplayNumber(editingVoucher) || editingVoucher.voucherNumber
+    ? customVoucherNumberEnabled && customVoucherNumber.trim()
+      ? customVoucherNumber.trim()
+      : getVoucherDisplayNumber(editingVoucher) || editingVoucher.voucherNumber
     : customVoucherNumberEnabled && customVoucherNumber.trim()
       ? customVoucherNumber.trim()
       : nextLocalVoucherNumber();
@@ -1805,7 +1807,7 @@ function ExpensesModule() {
     }
   }, [editingVoucher?.id, t, token, workspaceId]);
   useEffect(() => {
-    if (editingVoucher || !customVoucherNumberEnabled) {
+    if (!customVoucherNumberEnabled) {
       setVoucherNumberValidation({ status: "idle", message: "" });
       return;
     }
@@ -1827,7 +1829,7 @@ function ExpensesModule() {
       window.clearTimeout(handle);
     };
   }, [customVoucherNumber, customVoucherNumberEnabled, editingVoucher, t, validateVoucherNumberDraft]);
-  const voucherNumberSaveBlocked = !editingVoucher && customVoucherNumberEnabled
+  const voucherNumberSaveBlocked = customVoucherNumberEnabled
     && (voucherNumberValidation.status === "checking" || voucherNumberValidation.status === "duplicate" || voucherNumberValidation.status === "invalid");
   const addReceiptFiles = (files: FileList | null) => {
     if (!files) return;
@@ -1946,20 +1948,23 @@ function ExpensesModule() {
     const primaryItem = resolvedItems[0];
     const totalAmount = resolvedItems.reduce((sum, item) => sum + item.amount, 0);
     const suggestedVoucherNumber = nextLocalVoucherNumber();
-    const manualVoucherNumber = customVoucherNumberEnabled ? customVoucherNumber.trim() : "";
-    let nextVoucherNumber = suggestedVoucherNumber;
-    if (!editingVoucher) {
-      const validation = await validateVoucherNumberDraft(manualVoucherNumber || suggestedVoucherNumber);
-      setVoucherNumberValidation(validation);
-      if (validation.normalized && manualVoucherNumber) setCustomVoucherNumber(validation.normalized);
-      if (validation.status === "duplicate" || validation.status === "invalid") {
-        showToast(validation.message);
-        return;
-      }
-      nextVoucherNumber = validation.normalized ?? normalizeVoucherNumber(manualVoucherNumber || suggestedVoucherNumber) ?? suggestedVoucherNumber;
+    const manualVoucherNumber = customVoucherNumberEnabled
+      ? customVoucherNumber.trim()
+      : editingVoucher
+        ? getVoucherDisplayNumber(editingVoucher) || editingVoucher.voucherNumber
+        : suggestedVoucherNumber;
+    const validation = await validateVoucherNumberDraft(manualVoucherNumber || suggestedVoucherNumber);
+    setVoucherNumberValidation(validation);
+    if (validation.normalized && customVoucherNumberEnabled) setCustomVoucherNumber(validation.normalized);
+    if (validation.status === "duplicate" || validation.status === "invalid") {
+      showToast(validation.message);
+      return;
     }
+    const nextVoucherNumber = validation.normalized
+      ?? normalizeVoucherNumber(manualVoucherNumber || suggestedVoucherNumber)
+      ?? suggestedVoucherNumber;
     const record: Voucher = {
-      ...(editingVoucher ?? makeLocalRecord()), voucherNumber: editingVoucher?.voucherNumber ?? nextVoucherNumber, date,
+      ...(editingVoucher ?? makeLocalRecord()), voucherNumber: nextVoucherNumber, date,
       categoryId: primaryItem.categoryId,
       category: primaryItem.category,
       subcategoryId: primaryItem.subcategoryId ?? "",
@@ -2208,7 +2213,7 @@ function ExpensesModule() {
               </select>
             </label>
           </div>
-          {!editingVoucher && customVoucherNumberEnabled && <div className="expense-voucher-form__number-row">
+          {customVoucherNumberEnabled && <div className="expense-voucher-form__number-row">
               <label className="expense-voucher-form__number-edit">
                 <span>{t("expensesPage.voucherNumberOverride")}</span>
                 <div className="expense-voucher-form__number-edit-row">
@@ -2220,12 +2225,12 @@ function ExpensesModule() {
                       const normalized = normalizeVoucherNumber(customVoucherNumber);
                       if (normalized) setCustomVoucherNumber(normalized);
                     }}
-                    placeholder={nextLocalVoucherNumber()}
+                    placeholder={editingVoucher ? (getVoucherDisplayNumber(editingVoucher) || editingVoucher.voucherNumber) : nextLocalVoucherNumber()}
                     aria-invalid={voucherNumberValidation.status === "duplicate" || voucherNumberValidation.status === "invalid"}
                   />
-                  <button type="button" className="secondary-action expense-voucher-form__number-reset" onClick={() => { setCustomVoucherNumberEnabled(false); setCustomVoucherNumber(""); }}>
+                  {!editingVoucher && <button type="button" className="secondary-action expense-voucher-form__number-reset" onClick={() => { setCustomVoucherNumberEnabled(false); setCustomVoucherNumber(""); }}>
                     {t("expensesPage.useSuggestedVoucherNumber")}
-                  </button>
+                  </button>}
                 </div>
                 {voucherNumberValidation.message ? <small className={voucherNumberValidation.status === "duplicate" || voucherNumberValidation.status === "invalid" ? "expense-voucher-form__number-feedback is-error" : "expense-voucher-form__number-feedback"}>{voucherNumberValidation.message}</small> : null}
               </label>

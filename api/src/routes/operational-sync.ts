@@ -266,11 +266,7 @@ async function findExistingVoucherByNumber(
     eq(operationalRecords.workspaceId, workspaceId),
     eq(operationalRecords.entityType, "voucher"),
     sql`${operationalRecords.payload}->>'deletedAt' IS NULL`,
-    or(
-      sql`coalesce(${operationalRecords.payload}->>'voucherNumber', '') = ${voucherNumber}`,
-      sql`coalesce(${operationalRecords.payload}->>'originalVoucherNumber', '') = ${voucherNumber}`,
-      sql`coalesce(${operationalRecords.payload}->>'legacyVoucherNumber', '') = ${voucherNumber}`,
-    ),
+    sql`coalesce(${operationalRecords.payload}->>'voucherNumber', '') = ${voucherNumber}`,
   ];
   if (excludeClientRecordId) filters.push(sql`${operationalRecords.clientRecordId} <> ${excludeClientRecordId}`);
   const [existingVoucher] = await tx.select({
@@ -280,35 +276,24 @@ async function findExistingVoucherByNumber(
   return existingVoucher ?? null;
 }
 
-async function allocateVoucherNumber(
+async function bumpVoucherSequence(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   workspaceId: string,
   farmId: string,
   seasonId: string | null | undefined,
-  requestedVoucherNumber?: string,
+  voucherNumber: string,
 ) {
+  const parsedNumber = parseVoucherSequenceNumber(voucherNumber);
+  if (!parsedNumber) throw new Error("Voucher numbers must use the format V-0001.");
   const scopeKey = voucherScopeKey(farmId, seasonId);
-  const normalizedRequestedVoucherNumber = requestedVoucherNumber ? normalizeVoucherNumber(requestedVoucherNumber) : null;
-  const parsedRequestedNumber = normalizedRequestedVoucherNumber ? parseVoucherSequenceNumber(normalizedRequestedVoucherNumber) : null;
-  if (requestedVoucherNumber && !normalizedRequestedVoucherNumber) {
-    throw new Error("Voucher numbers must use the format V-0001.");
-  }
   const [current] = await tx.select({
     lastNumber: expenseVoucherSequences.lastNumber,
   }).from(expenseVoucherSequences).where(and(
     eq(expenseVoucherSequences.workspaceId, workspaceId),
     eq(expenseVoucherSequences.scopeKey, scopeKey),
   )).limit(1);
-  const nextSuggested = (current?.lastNumber ?? 0) + 1;
-  const finalNumber = parsedRequestedNumber ?? nextSuggested;
-  const voucherNumber = normalizedRequestedVoucherNumber ?? `V-${String(finalNumber).padStart(4, "0")}`;
-  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${workspaceId}), hashtext(${voucherNumber}))`);
-  const existingVoucher = await findExistingVoucherByNumber(tx, workspaceId, voucherNumber);
-  if (existingVoucher) {
-    throw new Error(`Voucher number ${voucherNumber} already exists.`);
-  }
+  const nextSequenceNumber = Math.max(current?.lastNumber ?? 0, parsedNumber);
   const now = new Date();
-  const nextSequenceNumber = Math.max(current?.lastNumber ?? 0, finalNumber);
   if (current) {
     await tx.update(expenseVoucherSequences).set({
       lastNumber: nextSequenceNumber,
@@ -325,6 +310,45 @@ async function allocateVoucherNumber(
       updatedAt: now,
     });
   }
+}
+
+async function reserveVoucherNumber(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  workspaceId: string,
+  voucherNumber: string,
+  excludeClientRecordId?: string,
+) {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${workspaceId}), hashtext(${voucherNumber}))`);
+  const existingVoucher = await findExistingVoucherByNumber(tx, workspaceId, voucherNumber, excludeClientRecordId);
+  if (existingVoucher) {
+    throw new Error(`Voucher number ${voucherNumber} already exists.`);
+  }
+}
+
+async function allocateVoucherNumber(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  workspaceId: string,
+  farmId: string,
+  seasonId: string | null | undefined,
+  requestedVoucherNumber?: string,
+) {
+  const normalizedRequestedVoucherNumber = requestedVoucherNumber ? normalizeVoucherNumber(requestedVoucherNumber) : null;
+  const parsedRequestedNumber = normalizedRequestedVoucherNumber ? parseVoucherSequenceNumber(normalizedRequestedVoucherNumber) : null;
+  if (requestedVoucherNumber && !normalizedRequestedVoucherNumber) {
+    throw new Error("Voucher numbers must use the format V-0001.");
+  }
+  const scopeKey = voucherScopeKey(farmId, seasonId);
+  const [current] = await tx.select({
+    lastNumber: expenseVoucherSequences.lastNumber,
+  }).from(expenseVoucherSequences).where(and(
+    eq(expenseVoucherSequences.workspaceId, workspaceId),
+    eq(expenseVoucherSequences.scopeKey, scopeKey),
+  )).limit(1);
+  const nextSuggested = (current?.lastNumber ?? 0) + 1;
+  const finalNumber = parsedRequestedNumber ?? nextSuggested;
+  const voucherNumber = normalizedRequestedVoucherNumber ?? `V-${String(finalNumber).padStart(4, "0")}`;
+  await reserveVoucherNumber(tx, workspaceId, voucherNumber);
+  await bumpVoucherSequence(tx, workspaceId, farmId, seasonId, voucherNumber);
   return voucherNumber;
 }
 
@@ -880,20 +904,45 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       });
     }
     const payload = expenseCategory ? { ...parsed.data.record, ...expenseCategory } : parsed.data.record;
+    const normalizedRequestedVoucherNumber = parsed.data.entity === "voucher" && typeof payload.voucherNumber === "string"
+      ? normalizeVoucherNumber(payload.voucherNumber)
+      : null;
+    if (parsed.data.entity === "voucher" && typeof payload.voucherNumber === "string" && !normalizedRequestedVoucherNumber) {
+      return reply.code(400).send({
+        message: "Voucher numbers must use the format V-0001.",
+        details: { code: "invalid_voucher_number", voucherNumber: payload.voucherNumber },
+      });
+    }
     const values = {
       workspaceId: parsed.data.workspaceId, farmId: parsed.data.farmId, seasonId: parsed.data.seasonId,
       clientRecordId: existing?.clientRecordId ?? parsed.data.record.id, entityType: parsed.data.entity, payload,
       recordedBy: request.appUser.id, clientUpdatedAt, updatedAt: new Date(),
     };
-    const updatedPayload = existing && parsed.data.entity === "voucher"
-      ? { ...payload, voucherNumber: existing.payload.voucherNumber, createdBy: existing.payload.createdBy, updatedBy: request.appUser.id }
-      : existing && parsed.data.entity === "partnerEntry"
+    const updatedPayload = existing && parsed.data.entity === "partnerEntry"
         ? { ...payload, createdBy: existing.payload.createdBy, updatedBy: request.appUser.id, deletedAt: null, deletedBy: null, deletionReason: null }
         : payload;
     let saved;
     try {
       [saved] = existing
-        ? parsed.data.entity === "partnerEntry"
+        ? parsed.data.entity === "voucher"
+          ? await db.transaction(async (tx) => {
+              const voucherNumber = normalizedRequestedVoucherNumber
+                ?? (typeof existing.payload.voucherNumber === "string" ? existing.payload.voucherNumber : "");
+              if (!voucherNumber) throw new Error("Voucher number is required.");
+              await reserveVoucherNumber(tx, parsed.data.workspaceId, voucherNumber, existing.clientRecordId);
+              await bumpVoucherSequence(tx, parsed.data.workspaceId, parsed.data.farmId!, parsed.data.seasonId, voucherNumber);
+              const nextPayload = {
+                ...payload,
+                voucherNumber,
+                createdBy: existing.payload.createdBy ?? request.appUser!.id,
+                updatedBy: request.appUser!.id,
+                originalVoucherNumber: payload.originalVoucherNumber ?? existing.payload.originalVoucherNumber,
+                legacyVoucherNumber: payload.legacyVoucherNumber ?? existing.payload.legacyVoucherNumber,
+              };
+              return tx.update(operationalRecords).set({ ...values, payload: nextPayload })
+                .where(eq(operationalRecords.id, existing.id)).returning();
+            })
+          : parsed.data.entity === "partnerEntry"
           ? await db.transaction(async (tx) => {
               const updated = await tx.update(operationalRecords).set({ ...values, payload: updatedPayload })
                 .where(eq(operationalRecords.id, existing.id)).returning();
