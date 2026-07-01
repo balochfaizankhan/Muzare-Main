@@ -43,7 +43,7 @@ type SyncErrorDetails = {
 const tables = {
   labourer: offlineDb.labourers, labourGroup: offlineDb.labourGroups, attendance: offlineDb.attendance, account: offlineDb.accounts,
   vehicle: offlineDb.vehicles, dateType: offlineDb.dateTypes, dispatch: offlineDb.dispatches, sale: offlineDb.sales, voucher: offlineDb.vouchers, partnerEntry: offlineDb.partnerEntries,
-  advance: offlineDb.advances, labourWageSettlement: offlineDb.labourWageSettlements, wageRate: offlineDb.wageRates, labourPayment: offlineDb.labourPayments, productionEntry: offlineDb.productionEntries, inventoryEntry: offlineDb.inventoryEntries,
+  advance: offlineDb.advances, labourEarning: offlineDb.labourEarnings, labourWageSettlement: offlineDb.labourWageSettlements, wageRate: offlineDb.wageRates, labourPayment: offlineDb.labourPayments, productionEntry: offlineDb.productionEntries, inventoryEntry: offlineDb.inventoryEntries,
 } as const;
 
 function emit(next: Partial<SyncState> = {}) {

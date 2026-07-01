@@ -35,6 +35,7 @@ const entities = [
   "attendance",
   "account",
   "advance",
+  "labourEarning",
   "labourWageSettlement",
   "wageRate",
   "labourPayment",
@@ -156,6 +157,18 @@ const financialPayloadSchemas = {
     date: dateSchema, amount: positiveAmountSchema, accountId: z.string().min(1),
     source: z.enum(["manual", "attendance_csv_import", "old_android_csv"]).optional(),
   }).passthrough(),
+  labourEarning: z.object({
+    labourerId: z.string().min(1),
+    earningDate: dateSchema,
+    amount: positiveAmountSchema,
+    earningType: z.enum(["lump_sum", "task", "bonus", "incentive", "adjustment", "other"]),
+    description: z.string().trim().min(1),
+    notes: z.string().trim().optional(),
+    status: z.enum(["pending_settlement", "settled", "voided"]).optional(),
+    linkedSettlementId: z.string().min(1).optional().nullable(),
+    linkedVoucherId: z.string().min(1).optional().nullable(),
+    settlementDate: dateSchema.optional().nullable(),
+  }).passthrough(),
   labourWageSettlement: z.object({
     settlementNumber: z.string().trim().min(1),
     linkedVoucherId: z.string().min(1),
@@ -257,6 +270,7 @@ function entityModule(entity: typeof entities[number]): WorkspaceModule {
   if (["labourer", "labourGroup", "labourPayment", "productionEntry"].includes(entity)) return "workforce";
   if (entity === "attendance") return "attendance";
   if (entity === "advance") return "advances";
+  if (entity === "labourEarning") return "wages";
   if (entity === "labourWageSettlement") return "wages";
   if (entity === "wageRate") return "wages";
   if (entity === "voucher") return "expenses";
@@ -269,6 +283,7 @@ function entityModule(entity: typeof entities[number]): WorkspaceModule {
 const seasonRequiredEntities = new Set<typeof entities[number]>([
   "attendance",
   "advance",
+  "labourEarning",
   "labourWageSettlement",
   "wageRate",
   "labourPayment",

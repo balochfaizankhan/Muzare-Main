@@ -2,6 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { operationalRecords } from "../db/schema.js";
 import { isDeletedOperationalPayload } from "../operational-record-state.js";
+import { listLabourEarnings } from "./labour-earnings.js";
 import { calculateStatusWage, listWageRateRows, resolveApplicableWageRate } from "./wage-rates.js";
 
 type DbClient = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -15,6 +16,8 @@ export type LabourWageSettlementPayload = {
   toDate: string;
   settlementDate: string;
   attendanceWages: number;
+  pendingLabourEarnings: number;
+  totalEarned: number;
   advancesPaid: number;
   settledAdvanceAmount: number;
   expenseAmount: number;
@@ -49,6 +52,8 @@ export function normalizeSettlementPayload(payload: Record<string, unknown>): La
     toDate: typeof payload.toDate === "string" ? payload.toDate : "",
     settlementDate: typeof payload.settlementDate === "string" ? payload.settlementDate : "",
     attendanceWages: Number(payload.attendanceWages ?? 0),
+    pendingLabourEarnings: Number(payload.pendingLabourEarnings ?? 0),
+    totalEarned: Number(payload.totalEarned ?? (Number(payload.attendanceWages ?? 0) + Number(payload.pendingLabourEarnings ?? 0))),
     advancesPaid: Number(payload.advancesPaid ?? 0),
     settledAdvanceAmount: Number(payload.settledAdvanceAmount ?? 0),
     expenseAmount: Number(payload.expenseAmount ?? 0),
@@ -69,13 +74,16 @@ export function settlementRangesOverlap(fromA: string, toA: string, fromB: strin
   return fromA <= toB && fromB <= toA;
 }
 
-export function calculateLabourWageSettlementTotals(attendanceWages: number, advancesPaid: number) {
-  const settledAdvanceAmount = Math.min(attendanceWages, advancesPaid);
-  const carryForwardAdvance = Math.max(advancesPaid - attendanceWages, 0);
-  const payableBalance = Math.max(attendanceWages - advancesPaid, 0);
-  const expenseAmount = attendanceWages;
+export function calculateLabourWageSettlementTotals(attendanceWages: number, pendingLabourEarnings: number, advancesPaid: number) {
+  const totalEarned = attendanceWages + pendingLabourEarnings;
+  const settledAdvanceAmount = Math.min(totalEarned, advancesPaid);
+  const carryForwardAdvance = Math.max(advancesPaid - totalEarned, 0);
+  const payableBalance = Math.max(totalEarned - advancesPaid, 0);
+  const expenseAmount = totalEarned;
   return {
     attendanceWages,
+    pendingLabourEarnings,
+    totalEarned,
     advancesPaid,
     settledAdvanceAmount,
     expenseAmount,
@@ -155,7 +163,7 @@ export async function previewLabourWageSettlement(
   toDate: string,
   settlementDate: string,
 ) {
-  const [attendanceRows, advanceRows, labourRows, wageRates, existingSettlements] = await Promise.all([
+  const [attendanceRows, advanceRows, labourRows, wageRates, earningRows, existingSettlements] = await Promise.all([
     tx.select({
       clientRecordId: operationalRecords.clientRecordId,
       payload: operationalRecords.payload,
@@ -183,6 +191,7 @@ export async function previewLabourWageSettlement(
       eq(operationalRecords.entityType, "labourer"),
     )),
     listWageRateRows(tx, workspaceId, farmId, seasonId),
+    listLabourEarnings(tx, workspaceId, farmId, seasonId),
     findOverlappingLabourWageSettlements(tx, workspaceId, farmId, seasonId, fromDate, toDate),
   ]);
 
@@ -216,6 +225,22 @@ export async function previewLabourWageSettlement(
     attendanceWages += calculateStatusWage(status as "present" | "half_day" | "absent", rate?.payload ?? null);
   }
 
+  const includedEarnings = earningRows
+    .filter((row) =>
+      row.payload.status === "pending_settlement"
+      && !isDeletedOperationalPayload(row.payload)
+      && row.payload.earningDate <= settlementDate)
+    .map((row) => ({
+      id: row.clientRecordId,
+      labourerId: row.payload.labourerId,
+      labourName: labourById.get(row.payload.labourerId)?.name ?? "Labourer",
+      earningDate: row.payload.earningDate,
+      earningType: row.payload.earningType,
+      description: row.payload.description,
+      amount: row.payload.amount,
+    }));
+  const pendingLabourEarnings = includedEarnings.reduce((sum, row) => sum + row.amount, 0);
+
   const advancesUpToSettlementDate = advanceRows.reduce((sum, row) => {
     const payload = row.payload as AdvancePayload;
     if (isDeletedOperationalPayload(payload as Record<string, unknown>)) return sum;
@@ -228,7 +253,7 @@ export async function previewLabourWageSettlement(
     return sum + row.payload.settledAdvanceAmount;
   }, 0);
   const advancesPaid = Math.max(advancesUpToSettlementDate - previouslySettledAdvances, 0);
-  const totals = calculateLabourWageSettlementTotals(attendanceWages, advancesPaid);
+  const totals = calculateLabourWageSettlementTotals(attendanceWages, pendingLabourEarnings, advancesPaid);
 
   return {
     ...totals,
@@ -236,6 +261,7 @@ export async function previewLabourWageSettlement(
     rawAdvancesUpToSettlementDate: advancesUpToSettlementDate,
     previouslySettledAdvances,
     settlementDate,
+    includedEarnings,
     unresolvedRows,
     overlappingSettlements: existingSettlements.map((row) => ({
       id: row.clientRecordId,

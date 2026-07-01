@@ -15,6 +15,7 @@ import { hasModulePermission } from "../lib/permissions";
 const nav = [
   ["/workspace/dashboard", "layout.dashboard", LayoutDashboard, "dashboard"],
   ["/workspace/attendance", "layout.attendance", CalendarCheck, "attendance"],
+  ["/workspace/labour-earnings", "layout.labourEarnings", WalletCards, "wages"],
   ["/workspace/wage-rates", "layout.wages", WalletCards, "wages"],
   ["/workspace/wage-settlements", "layout.wageSettlement", WalletCards, "wages"],
   ["/workspace/sales", "layout.sales", ShoppingBasket, "sales"],

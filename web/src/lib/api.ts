@@ -634,6 +634,7 @@ export type OperationalEntity =
   | "attendance"
   | "account"
   | "advance"
+  | "labourEarning"
   | "labourWageSettlement"
   | "wageRate"
   | "labourPayment"
@@ -800,6 +801,8 @@ export type LabourWageSettlementRecord = {
   toDate: string;
   settlementDate: string;
   attendanceWages: number;
+  pendingLabourEarnings: number;
+  totalEarned: number;
   advancesPaid: number;
   settledAdvanceAmount: number;
   expenseAmount: number;
@@ -846,6 +849,8 @@ export type LabourWageSettlementLinkedVoucher = {
 };
 export type LabourWageSettlementPreview = {
   attendanceWages: number;
+  pendingLabourEarnings: number;
+  totalEarned: number;
   advancesPaid: number;
   advancesAvailableUpToSettlementDate: number;
   rawAdvancesUpToSettlementDate: number;
@@ -855,6 +860,15 @@ export type LabourWageSettlementPreview = {
   expenseAmount: number;
   carryForwardAdvance: number;
   payableBalance: number;
+  includedEarnings: Array<{
+    id: string;
+    labourerId: string;
+    labourName: string;
+    earningDate: string;
+    earningType: string;
+    description: string;
+    amount: number;
+  }>;
   unresolvedRows: Array<{ labourerId: string; labourName: string; date: string; status: string }>;
   overlappingSettlements: Array<{
     id: string;

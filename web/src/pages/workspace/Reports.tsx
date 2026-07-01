@@ -9,6 +9,7 @@ import { SubpageHeader } from "../../components/SubpageHeader";
 import { defaultTransactionGroupExpansion, groupAccountTransactions, type AccountTransactionGroupKey } from "../../lib/accountTransactionGroups";
 import { calculateAccountBalance } from "../../lib/accounting";
 import { formatMoney, formatNumber } from "../../lib/format";
+import { labourEarningTypeLabel, sumLabourEarnings } from "../../lib/labourEarnings";
 import { getActiveLabourWageSettlements, getCashAffectingVouchers, outstandingLabourAdvances, totalSettledAdvances } from "../../lib/labourWageSettlements";
 import { translateExpenseCategory, translateExpenseSubcategory, translateSaleType, translateSalesStatus } from "../../lib/systemTranslations";
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
@@ -34,6 +35,7 @@ import {
   type Attendance,
   type Dispatch,
   type Labourer,
+  type LabourEarning,
   type PartnerEntry,
   type Sale,
   type Voucher,
@@ -44,7 +46,7 @@ import { compareWageRates, getWageRateStatus, normalizeHalfDayRate, summarizeAtt
 import { deleteOperationalRecord } from "../../services/syncService";
 import i18n from "../../i18n";
 
-type Report = "attendance" | "advances" | "wage-rates" | "expenditures" | "sales" | "dispatch" | "partner-position" | "account-ledger";
+type Report = "attendance" | "advances" | "labour-earnings" | "wage-rates" | "expenditures" | "sales" | "dispatch" | "partner-position" | "account-ledger";
 type SortOrder = "desc" | "asc";
 type SalesDateType = "saleDate" | "dispatchDate" | "deliveryDate" | "paymentDate" | "createdDate";
 type DispatchDateType = "dispatchDate" | "saleDate" | "createdDate";
@@ -52,6 +54,7 @@ type SalesTypeFilter = "all" | "dispatch_sale" | "farm_direct_sale";
 type ReportViewState = {
   attendance: "register" | "summary";
   advances: "summary" | "log";
+  "labour-earnings": "list";
   "wage-rates": "list";
   expenditures: "summary" | "log";
   sales: "list";
@@ -86,10 +89,11 @@ type AccountLedgerReportRow = {
   partnerLiabilityGroup?: PartnerLiabilityLedgerGroupKey;
 };
 
-const reportOptions: Report[] = ["attendance", "advances", "wage-rates", "expenditures", "sales", "dispatch", "partner-position", "account-ledger"];
+const reportOptions: Report[] = ["attendance", "advances", "labour-earnings", "wage-rates", "expenditures", "sales", "dispatch", "partner-position", "account-ledger"];
 const defaultViews: ReportViewState = {
   attendance: "register",
   advances: "summary",
+  "labour-earnings": "list",
   "wage-rates": "list",
   expenditures: "summary",
   sales: "list",
@@ -410,6 +414,7 @@ export function Reports() {
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
   const [advances, setAdvances] = useState<Advance[]>([]);
+  const [labourEarnings, setLabourEarnings] = useState<LabourEarning[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [wageRates, setWageRates] = useState<WageRate[]>([]);
   const [labourWageSettlements, setLabourWageSettlements] = useState<LabourWageSettlement[]>([]);
@@ -432,17 +437,19 @@ export function Reports() {
       workspaceRecords(offlineDb.attendance),
       loadWorkspaceVouchers({ includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }),
       workspaceRecords(offlineDb.advances),
+      workspaceRecords(offlineDb.labourEarnings, { includeDeleted: true }),
       workspaceRecords(offlineDb.labourWageSettlements),
       workspaceRecords(offlineDb.wageRates, { includeDeleted: true }),
       workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }),
       workspaceRecords(offlineDb.partnerEntries),
       workspaceRecords(offlineDb.sales),
       workspaceRecords(offlineDb.dispatches),
-    ]).then(([nextLabourers, nextAttendance, nextVouchers, nextAdvances, nextSettlements, nextWageRates, nextAccounts, nextEntries, nextSales, nextDispatches]) => {
+    ]).then(([nextLabourers, nextAttendance, nextVouchers, nextAdvances, nextLabourEarnings, nextSettlements, nextWageRates, nextAccounts, nextEntries, nextSales, nextDispatches]) => {
       setLabourers(nextLabourers.sort(compareLabourers));
       setAttendance(nextAttendance);
       setVouchers(nextVouchers);
       setAdvances(nextAdvances);
+      setLabourEarnings(nextLabourEarnings);
       setLabourWageSettlements(nextSettlements);
       setWageRates(nextWageRates);
       setAccounts(nextAccounts);
@@ -547,7 +554,7 @@ export function Reports() {
     setTo(todayKey());
   };
 
-  const labourFilterActive = (report === "attendance" || report === "advances" || report === "wage-rates") && selectedLabourerIds.length > 0;
+  const labourFilterActive = (report === "attendance" || report === "advances" || report === "labour-earnings" || report === "wage-rates") && selectedLabourerIds.length > 0;
   const filtered = Boolean(search || from || to || accountId || groupFilter || labourFilterActive || category || subcategory || status || amountMin || amountMax || buyerFilter || productFilter || vehicleFilter || paymentStatusFilter);
   const switchReport = (next: Report) => {
     setReport(next);
@@ -642,6 +649,33 @@ export function Reports() {
       return { labourer, records, total, outstanding: payable - total };
     })
     .filter((item) => item.records.length > 0), [advanceRows, attendanceSummary, labourers]);
+  const labourEarningRows = useMemo(() => labourEarnings
+    .filter((item) => {
+      const labourer = labourById.get(item.labourerId);
+      const normalizedStatus = item.status === "pending_settlement" ? "pending" : item.status;
+      return matchesGroup(labourer)
+        && matchesLabourFilter(item.labourerId)
+        && (!status || normalizedStatus === status)
+        && (!category || item.earningType === category)
+        && matches(item.earningDate, [labourName(item.labourerId), labourer?.group, item.description, item.notes, item.earningType], item.amount);
+    })
+    .sort((a, b) => b.earningDate.localeCompare(a.earningDate) || b.updatedAt.localeCompare(a.updatedAt)), [category, labourById, labourEarnings, labourName, matches, selectedLabourerIds, status]);
+  const labourEarningTypes = useMemo(
+    () => [...new Set(labourEarningRows.map((item) => item.earningType))].sort(),
+    [labourEarningRows],
+  );
+  const labourEarningPending = useMemo(
+    () => labourEarningRows.filter((item) => isActiveOperationalRecord(item) && item.status === "pending_settlement"),
+    [labourEarningRows],
+  );
+  const labourEarningSettled = useMemo(
+    () => labourEarningRows.filter((item) => isActiveOperationalRecord(item) && item.status === "settled"),
+    [labourEarningRows],
+  );
+  const labourEarningVoided = useMemo(
+    () => labourEarningRows.filter((item) => !isActiveOperationalRecord(item) || item.status === "voided"),
+    [labourEarningRows],
+  );
   const activeSettlements = useMemo(
     () => getActiveLabourWageSettlements(labourWageSettlements)
       .filter((settlement) => !from || settlement.settlementDate >= from)
@@ -1031,6 +1065,18 @@ export function Reports() {
     [t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.amount"), t("reportsPage.account"), t("reportsPage.description"), t("reportsPage.reference")],
     ...advanceRows.map((item) => [item.date, labourName(item.labourerId), item.amount, accountName(item.accountId), item.notes || "-", item.id.slice(0, 8)]),
   ]);
+  const exportLabourEarnings = () => downloadCsv("labour-earnings.csv", [
+    [t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.type"), t("reportsPage.description"), t("reportsPage.amount"), t("reportsPage.status"), t("reportsPage.reference")],
+    ...labourEarningRows.map((item) => [
+      item.earningDate,
+      labourName(item.labourerId),
+      labourEarningTypeLabel(item.earningType),
+      item.description,
+      item.amount,
+      item.status,
+      item.linkedSettlementId ?? "-",
+    ]),
+  ]);
   const exportExpenseSummary = () => {
     const categoryTotals = [...new Set(voucherReportLineRows.map((item) => item.category))].map((name) => [translateExpenseCategory(name), voucherReportLineRows.filter((item) => item.category === name).reduce((sum, item) => sum + item.amount, 0)]);
     const accountTotals = [...new Set(voucherReportLineRows.map((item) => accountName(item.accountId)))].map((name) => [name, voucherReportLineRows.filter((item) => accountName(item.accountId) === name).reduce((sum, item) => sum + item.amount, 0)]);
@@ -1151,7 +1197,7 @@ export function Reports() {
               : (["dispatchDate", "saleDate", "createdDate"] as DispatchDateType[]).map((item) => <option key={item} value={item}>{t(`reportsPage.dispatchDateTypes.${item}`)}</option>)}
           </ClearableSelect>}
 
-          {(report === "attendance" || report === "wage-rates") && <>
+          {(report === "attendance" || report === "labour-earnings" || report === "wage-rates") && <>
             <ClearableSelect aria-label={t("reportsPage.group")} value={groupFilter} onChange={setGroupFilter}>
               <option value="">{t("reportsPage.allGroups")}</option>
               {labourGroups.map((group) => <option key={group} value={group}>{group}</option>)}
@@ -1170,6 +1216,20 @@ export function Reports() {
               <option value="half_day">{t("reportsPage.halfDay")}</option>
               <option value="absent">{t("reportsPage.absent")}</option>
             </ClearableSelect>}
+            {report === "labour-earnings" && <>
+              <ClearableSelect aria-label={t("reportsPage.type")} value={category} onChange={setCategory}>
+                <option value="">{t("reportsPage.allTypes")}</option>
+                {labourEarningTypes.map((item) => <option key={item} value={item}>{labourEarningTypeLabel(item)}</option>)}
+              </ClearableSelect>
+              <ClearableSelect aria-label={t("reportsPage.status")} value={status} onChange={setStatus}>
+                <option value="">{t("reportsPage.allStatuses")}</option>
+                <option value="pending">Pending Settlement</option>
+                <option value="settled">Settled</option>
+                <option value="voided">Voided</option>
+              </ClearableSelect>
+              <input aria-label={t("reportsPage.minimumAmount")} inputMode="decimal" placeholder={t("reportsPage.minimumAmount")} value={amountMin} onChange={(event) => setAmountMin(event.target.value)} />
+              <input aria-label={t("reportsPage.maximumAmount")} inputMode="decimal" placeholder={t("reportsPage.maximumAmount")} value={amountMax} onChange={(event) => setAmountMax(event.target.value)} />
+            </>}
           </>}
 
           {report === "advances" && <>
@@ -1423,6 +1483,40 @@ export function Reports() {
           <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.amount"), t("reportsPage.account"), t("reportsPage.description"), t("reportsPage.reference")]} rows={advanceRows.map((item) => ({ id: item.id, title: labourName(item.labourerId), value: money(item.amount), meta: item.date, cells: [item.date, labourName(item.labourerId), money(item.amount), accountName(item.accountId), item.notes || "-", item.id.slice(0, 8)], details: [[t("reportsPage.account"), accountName(item.accountId)], [t("reportsPage.notes"), item.notes || "-"]], onOpen: () => navigate(`/workspace/labour-advances?recordId=${item.id}`) }))} />
         </ReportShell>}
       </>}
+
+      {report === "labour-earnings" && <ReportShell title="Labour Earnings Report" rangeLabel={rangeLabel} sectionId="labour-earnings" onPrint={() => printSection("labour-earnings")} onExport={exportLabourEarnings}>
+        <Kpis values={[
+          ["Pending earnings", money(sumLabourEarnings(labourEarningPending))],
+          ["Settled earnings", money(sumLabourEarnings(labourEarningSettled))],
+          ["Voided earnings", money(sumLabourEarnings(labourEarningVoided))],
+          ["Entries", labourEarningRows.length],
+        ]} />
+        <ReportTable
+          empty={t("reportsPage.noRecords")}
+          columns={[t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.type"), t("reportsPage.description"), t("reportsPage.amount"), t("reportsPage.status"), t("reportsPage.reference")]}
+          rows={labourEarningRows.map((item) => ({
+            id: item.id,
+            title: labourName(item.labourerId),
+            value: money(item.amount),
+            meta: `${item.earningDate} · ${labourEarningTypeLabel(item.earningType)}`,
+            cells: [
+              item.earningDate,
+              labourName(item.labourerId),
+              labourEarningTypeLabel(item.earningType),
+              item.description,
+              money(item.amount),
+              item.status === "pending_settlement" ? "Pending Settlement" : item.status === "settled" ? "Settled" : "Voided",
+              item.linkedSettlementId ?? "-",
+            ],
+            details: [
+              [t("reportsPage.notes"), item.notes || "-"],
+              [t("reportsPage.reference"), item.linkedSettlementId ?? "-"],
+              [t("reportsPage.status"), item.status],
+            ],
+            onOpen: () => navigate("/workspace/labour-earnings"),
+          }))}
+        />
+      </ReportShell>}
 
       {report === "wage-rates" && <ReportShell title={t("wageRatesPage.reportTitle")} rangeLabel={rangeLabel} sectionId="wage-rates" onPrint={() => printSection("wage-rates")} onExport={() => downloadCsv("wage-rates.csv", [
         [t("reportsPage.labour"), t("wageRatesPage.effectiveFrom"), t("wageRatesPage.effectiveTo"), t("wageRatesPage.dailyRate"), t("wageRatesPage.halfDayRate"), t("common.status")],

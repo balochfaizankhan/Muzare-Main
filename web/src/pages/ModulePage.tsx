@@ -28,6 +28,7 @@ import {
   type PartnerLiabilityLedgerGroupKey,
 } from "../lib/partnerAccounting";
 import { formatDate, formatMoney } from "../lib/format";
+import { buildLabourEarningsProfileSummary } from "../lib/labourEarnings";
 import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { getVoucherDisplayNumber, normalizeVoucherNumber, parseVoucherSequenceNumber } from "../lib/vouchers";
 import { getActiveVouchers, getAllVouchers, loadWorkspaceVouchers } from "../lib/voucherCollections";
@@ -152,16 +153,20 @@ function WorkforceModule({
   const loadGroups = useCallback(async () => (await workspaceRecords(offlineDb.labourGroups)).sort((a, b) => a.name.localeCompare(b.name)), []);
   const loadAttendance = useCallback(async () => (await workspaceRecords(offlineDb.attendance)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadAdvances = useCallback(async () => (await workspaceRecords(offlineDb.advances)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
+  const loadLabourEarnings = useCallback(async () => (await workspaceRecords(offlineDb.labourEarnings, { includeDeleted: true })).sort((a, b) => b.earningDate.localeCompare(a.earningDate) || b.updatedAt.localeCompare(a.updatedAt)), []);
   const loadAccounts = useCallback(async () => (await workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true })).sort((a, b) => a.name.localeCompare(b.name)), []);
   const loadWageRates = useCallback(async () => (await workspaceRecords(offlineDb.wageRates, { includeDeleted: true })).sort(compareWageRates), []);
+  const loadLabourWageSettlements = useCallback(async () => (await workspaceRecords(offlineDb.labourWageSettlements, { includeDeleted: true })).sort((a, b) => b.settlementDate.localeCompare(a.settlementDate) || b.updatedAt.localeCompare(a.updatedAt)), []);
   const loadProductionEntries = useCallback(async () => (await workspaceRecords(offlineDb.productionEntries)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadPayments = useCallback(async () => (await workspaceRecords(offlineDb.labourPayments)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const [labourers, refreshLabourers] = useData(loadLabourers);
   const [groups, refreshGroups] = useData(loadGroups);
   const [attendance, refreshAttendance, setAttendance] = useData(loadAttendance);
   const [advances, refreshAdvances, setAdvances] = useData(loadAdvances);
+  const [labourEarnings] = useData(loadLabourEarnings);
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
   const [wageRates] = useData(loadWageRates);
+  const [labourWageSettlements] = useData(loadLabourWageSettlements);
   const [productionEntries, refreshProductionEntries, setProductionEntries] = useData(loadProductionEntries);
   const [payments, refreshPayments, setPayments] = useData(loadPayments);
   const nextLabourSortOrder = useMemo(
@@ -276,6 +281,16 @@ function WorkforceModule({
   const upcomingWageRate = selectedLabourRates.find((rate) => getWageRateStatus(rate, today()) === "upcoming") ?? null;
   const selectedAttendanceSummary = selectedLabourer
     ? summarizeAttendanceWages(selectedLabourer.id, selectedAttendance, wageRates)
+    : null;
+  const selectedLabourLedgerSummary = selectedLabourer
+    ? buildLabourEarningsProfileSummary({
+      labourerId: selectedLabourer.id,
+      attendance: selectedAttendance,
+      wageRates,
+      earnings: labourEarnings,
+      advances,
+      settlements: labourWageSettlements,
+    })
     : null;
   const presentCount = selectedAttendanceSummary?.present ?? 0;
   const halfDayCount = selectedAttendanceSummary?.halfDay ?? 0;
@@ -567,17 +582,58 @@ function WorkforceModule({
                 <div><dt>{t("wageRatesPage.currentRate")}</dt><dd>{currentWageRate ? money(currentWageRate.dailyRate) : t("wageRatesPage.noCurrentRate")}</dd></div>
                 <div><dt>{t("wageRatesPage.halfDayRate")}</dt><dd>{currentWageRate ? money(normalizeHalfDayRate(currentWageRate)) : "-"}</dd></div>
                 <div><dt>{t("reportsPage.payableDays")}</dt><dd>{selectedAttendanceSummary ? selectedAttendanceSummary.payable : "-"}</dd></div>
-                <div><dt>{t("reportsPage.total")}</dt><dd className="positive">{money(totalEarnings)}</dd></div>
+                <div><dt>{t("wageRatesPage.attendanceWageTotal")}</dt><dd>{money(attendanceEarnings)}</dd></div>
+                <div><dt>Pending labour earnings</dt><dd>{money(selectedLabourLedgerSummary?.totalPendingEarnings ?? 0)}</dd></div>
+                <div><dt>Total earned</dt><dd className="positive">{money(selectedLabourLedgerSummary?.totalEarned ?? totalEarnings)}</dd></div>
                 <div><dt>{t("advancesPage.recordAdvance")}</dt><dd className={advanceAmount > 0 ? "negative" : ""}>{money(advanceAmount)}</dd></div>
                 <div><dt>{t("workforcePage.paymentsLabel")}</dt><dd className={paidAmount > 0 ? "negative" : ""}>{money(paidAmount)}</dd></div>
+                <div><dt>Estimated payable</dt><dd className={(selectedLabourLedgerSummary?.estimatedPayable ?? netBalance) < 0 ? "negative" : "positive"}>{money(selectedLabourLedgerSummary?.estimatedPayable ?? Math.max(netBalance, 0))}</dd></div>
+                <div><dt>Carry forward advance</dt><dd className={(selectedLabourLedgerSummary?.carryForwardAdvance ?? 0) > 0 ? "negative" : ""}>{money(selectedLabourLedgerSummary?.carryForwardAdvance ?? 0)}</dd></div>
                 <div><dt>{t("workforcePage.netBalanceLabel")}</dt><dd className={netBalance < 0 ? "negative" : "positive"}>{money(netBalance)}</dd></div>
-                <div><dt>{t("wageRatesPage.attendanceWageTotal")}</dt><dd>{money(attendanceEarnings)}</dd></div>
               </dl>
               {selectedAttendanceSummary?.missingRateDates.length ? (
                 <p className="form-error">
                   {t("wageRatesPage.missingRateProfileWarning", { count: selectedAttendanceSummary.missingRateDates.length })}
                 </p>
               ) : null}
+              {selectedLabourLedgerSummary && <>
+                <h3>Earnings Summary</h3>
+                <dl className="worker-stats">
+                  <div><dt>Attendance wages</dt><dd>{money(selectedLabourLedgerSummary.attendanceSummary.totalWage)}</dd></div>
+                  <div><dt>Pending labour earnings</dt><dd>{money(selectedLabourLedgerSummary.totalPendingEarnings)}</dd></div>
+                  <div><dt>Total earned</dt><dd>{money(selectedLabourLedgerSummary.totalEarned)}</dd></div>
+                  <div><dt>Advances paid</dt><dd>{money(selectedLabourLedgerSummary.advancesPaid)}</dd></div>
+                  <div><dt>Estimated payable</dt><dd>{money(selectedLabourLedgerSummary.estimatedPayable)}</dd></div>
+                  <div><dt>Carry forward advance</dt><dd>{money(selectedLabourLedgerSummary.carryForwardAdvance)}</dd></div>
+                </dl>
+                <h3>Pending Labour Earnings</h3>
+                {!selectedLabourLedgerSummary.pendingEarnings.length ? <p className="empty-records">No pending labour earnings for this labourer.</p> : (
+                  <div className="attendance-import-table-wrap report-wide-table">
+                    <table className="report-data-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Type</th>
+                          <th>Description</th>
+                          <th>Amount</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedLabourLedgerSummary.pendingEarnings.map((earning) => (
+                          <tr key={earning.id}>
+                            <td>{earning.earningDate}</td>
+                            <td>{earning.earningType.replaceAll("_", " ")}</td>
+                            <td>{earning.description}</td>
+                            <td>{money(earning.amount)}</td>
+                            <td>Pending settlement</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>}
               {(selectedLabourRates.length > 0 || upcomingWageRate) && <>
                 <h3>{t("wageRatesPage.history")}</h3>
                 <dl className="worker-stats">

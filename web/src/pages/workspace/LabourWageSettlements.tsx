@@ -76,6 +76,8 @@ export function LabourWageSettlements() {
         toDate: settlement.toDate,
         settlementDate: settlement.settlementDate,
         attendanceWages: settlement.attendanceWages,
+        pendingLabourEarnings: settlement.pendingLabourEarnings,
+        totalEarned: settlement.totalEarned,
         advancesPaid: settlement.advancesPaid,
         settledAdvanceAmount: settlement.settledAdvanceAmount,
         expenseAmount: settlement.expenseAmount,
@@ -222,6 +224,8 @@ export function LabourWageSettlements() {
         toDate: response.settlement.toDate,
         settlementDate: response.settlement.settlementDate,
         attendanceWages: response.settlement.attendanceWages,
+        pendingLabourEarnings: response.settlement.pendingLabourEarnings,
+        totalEarned: response.settlement.totalEarned,
         advancesPaid: response.settlement.advancesPaid,
         settledAdvanceAmount: response.settlement.settledAdvanceAmount,
         expenseAmount: response.settlement.expenseAmount,
@@ -324,6 +328,8 @@ export function LabourWageSettlements() {
           {!summary ? <p className="context-message">Run a preview to calculate period wages, settled advances, carry-forward, and payable balance.</p> : <>
             <div className="reports-kpis">
               <article><span>Attendance wages</span><strong>{money(summary.attendanceWages)}</strong></article>
+              <article><span>Pending labour earnings</span><strong>{money(summary.pendingLabourEarnings)}</strong></article>
+              <article><span>Total earned</span><strong>{money(summary.totalEarned)}</strong></article>
               <article><span>Advances available up to settlement date</span><strong>{money(summary.advancesAvailableUpToSettlementDate)}</strong></article>
               <article><span>Expense amount</span><strong>{money(summary.expenseAmount)}</strong></article>
               <article><span>Settled advances</span><strong>{money(summary.settledAdvanceAmount)}</strong></article>
@@ -348,6 +354,10 @@ export function LabourWageSettlements() {
                 {summary.overlappingSettlements.map((row) => <li key={row.id}>{row.settlementNumber} covers {row.fromDate} to {row.toDate} and is still {row.status}.</li>)}
               </ul>
             </div>}
+            {summary.includedEarnings.length > 0 && <div className="reports-summary-list">
+              <article><span>Included labour earnings</span><strong>{summary.includedEarnings.length}</strong></article>
+              <article><span>Ledger total</span><strong>{money(summary.includedEarnings.reduce((sum, item) => sum + item.amount, 0))}</strong></article>
+            </div>}
           </>}
         </section>
 
@@ -363,6 +373,7 @@ export function LabourWageSettlements() {
                   <tr>
                     <th>Settlement</th>
                     <th>Period</th>
+                    <th>Total earned</th>
                     <th>Expense amount</th>
                     <th>Settled advances</th>
                     <th>Carry forward</th>
@@ -378,6 +389,7 @@ export function LabourWageSettlements() {
                       <tr key={settlement.id}>
                         <td><strong>{settlement.settlementNumber}</strong></td>
                         <td>{settlement.fromDate} to {settlement.toDate}</td>
+                        <td>{money(settlement.totalEarned)}</td>
                         <td>{money(settlement.expenseAmount)}</td>
                         <td>{money(settlement.settledAdvanceAmount)}</td>
                         <td>{money(settlement.carryForwardAdvance)}</td>

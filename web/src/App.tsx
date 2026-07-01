@@ -28,6 +28,7 @@ const Dispatch = lazy(async () => ({ default: (await import("./pages/workspace/D
 const Expenses = lazy(async () => ({ default: (await import("./pages/workspace/Expenses")).Expenses }));
 const Inventory = lazy(async () => ({ default: (await import("./pages/workspace/Inventory")).Inventory }));
 const LabourAdvances = lazy(async () => ({ default: (await import("./pages/workspace/LabourAdvances")).LabourAdvances }));
+const LabourEarnings = lazy(async () => ({ default: (await import("./pages/workspace/LabourEarnings")).LabourEarnings }));
 const LabourWageSettlements = lazy(async () => ({ default: (await import("./pages/workspace/LabourWageSettlements")).LabourWageSettlements }));
 const WageRates = lazy(async () => ({ default: (await import("./pages/workspace/WageRates")).WageRates }));
 const Reports = lazy(async () => ({ default: (await import("./pages/workspace/Reports")).Reports }));
@@ -132,6 +133,7 @@ export default function App() {
       <Route path="dashboard" element={routeElement(<WorkspaceDashboard />, "Loading dashboard")} />
       <Route path="attendance" element={routeElement(<Attendance />, "Loading attendance")} />
       <Route path="advances" element={routeElement(<LabourAdvances />, "Loading advances")} />
+      <Route path="labour-earnings" element={routeElement(<LabourEarnings />, "Loading labour earnings")} />
       <Route path="wage-rates" element={routeElement(<WageRates />, "Loading wage rates")} />
       <Route path="wage-settlements" element={routeElement(<LabourWageSettlements />, "Loading labour wage settlements")} />
       <Route path="sales" element={routeElement(<Sales />, "Loading sales")} />
@@ -153,7 +155,7 @@ export default function App() {
       <Route path="accounts" element={routeElement(<ModulePage module="accounts" />, "Loading accounts")} />
       <Route path="partner-ledger" element={routeElement(<ModulePage module="partnerLedger" />, "Loading partner ledger")} />
     </Route>
-    {["workforce", "advances", "wage-rates", "wage-settlements", "expenses", "sales", "dispatch", "inventory", "accounts", "partner-ledger", "farms", "seasons"].map((path) =>
+    {["workforce", "advances", "labour-earnings", "wage-rates", "wage-settlements", "expenses", "sales", "dispatch", "inventory", "accounts", "partner-ledger", "farms", "seasons"].map((path) =>
       <Route key={path} path={`/${path}`} element={<Navigate to={`/workspace/${path === "workforce" ? "attendance" : path}`} replace />} />,
     )}
     <Route path="*" element={<RequireAuth><NotFoundPage /></RequireAuth>} />
