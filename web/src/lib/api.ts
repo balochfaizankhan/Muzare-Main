@@ -634,6 +634,7 @@ export type OperationalEntity =
   | "attendance"
   | "account"
   | "advance"
+  | "labourWageSettlement"
   | "wageRate"
   | "labourPayment"
   | "productionEntry"
@@ -692,6 +693,19 @@ export type AdvanceReportData = {
   records: AdvanceReportRecord[];
   summaries: AdvanceReportSummary[];
   grandTotal: number;
+  settledAdvances?: number;
+  outstandingAdvances?: number;
+  settlementReferences?: Array<{
+    id: string;
+    settlementNumber: string;
+    settlementDate: string;
+    fromDate: string;
+    toDate: string;
+    settledAdvanceAmount: number;
+    expenseAmount: number;
+    linkedVoucherId: string;
+    linkedVoucherNumber: string;
+  }>;
   metadata: {
     farmName: string;
     seasonName: string;
@@ -769,6 +783,88 @@ export type WageRateCalculateResult = {
     missingRateDates: string[];
   }>;
   unresolved: Array<{ labourerId: string; labourName: string; date: string; status: AttendanceReportStatus }>;
+};
+export type LabourWageSettlementRecord = {
+  id: string;
+  settlementNumber: string;
+  linkedVoucherId: string;
+  linkedVoucherNumber: string;
+  linkedAccountId: string;
+  fromDate: string;
+  toDate: string;
+  settlementDate: string;
+  attendanceWages: number;
+  advancesPaid: number;
+  settledAdvanceAmount: number;
+  expenseAmount: number;
+  carryForwardAdvance: number;
+  payableBalance: number;
+  notes?: string;
+  status: "posted" | "voided";
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+  voidedAt?: string | null;
+  voidedBy?: string | null;
+  voidReason?: string | null;
+};
+export type LabourWageSettlementLinkedVoucher = {
+  id: string;
+  voucherNumber: string;
+  originalVoucherNumber?: string;
+  legacyVoucherNumber?: string;
+  voucherNumberEdited?: boolean;
+  allowVoucherNumberEdit?: boolean;
+  date: string;
+  category: string;
+  categoryId: string;
+  subcategory: string;
+  subcategoryId: string;
+  description: string;
+  amount: number;
+  accountId: string;
+  notes?: string;
+  createdBy?: string;
+  updatedBy?: string;
+  items?: Array<{
+    id: string;
+    category: string;
+    categoryId: string;
+    subcategory?: string;
+    subcategoryId?: string;
+    amount: number;
+    description: string;
+  }>;
+  createdAt: string;
+  updatedAt: string;
+};
+export type LabourWageSettlementPreview = {
+  attendanceWages: number;
+  advancesPaid: number;
+  settledAdvanceAmount: number;
+  expenseAmount: number;
+  carryForwardAdvance: number;
+  payableBalance: number;
+  unresolvedRows: Array<{ labourerId: string; labourName: string; date: string; status: string }>;
+  overlappingSettlements: Array<{
+    id: string;
+    settlementNumber: string;
+    fromDate: string;
+    toDate: string;
+    settlementDate: string;
+    expenseAmount: number;
+    settledAdvanceAmount: number;
+    status: "posted" | "voided";
+  }>;
+};
+export type LabourWageSettlementCreateInput = {
+  farmId: string;
+  seasonId: string;
+  fromDate: string;
+  toDate: string;
+  settlementDate: string;
+  accountId: string;
+  notes?: string;
 };
 export type ExpenseSearchRecord = {
   id: string; workspaceId: string; farmId: string; seasonId: string; voucherNumber: string; date: string;
@@ -1233,6 +1329,38 @@ export const calculateWageRates = (
   if (filters.labourIds?.length) query.set("labourIds", filters.labourIds.join(","));
   return apiRequest<WageRateCalculateResult>(`/v1/workspace/${workspaceId}/wage-rates/calculate?${query.toString()}`, {}, token);
 };
+export const fetchLabourWageSettlements = (
+  token: string,
+  workspaceId: string,
+  filters: { farmId: string; seasonId: string },
+) => {
+  const query = new URLSearchParams({ farmId: filters.farmId, seasonId: filters.seasonId });
+  return apiRequest<{ settlements: LabourWageSettlementRecord[]; diagnostics: Record<string, number> }>(
+    `/v1/workspace/${workspaceId}/labour-wage-settlements?${query.toString()}`,
+    {},
+    token,
+  );
+};
+export const previewLabourWageSettlement = (
+  token: string,
+  workspaceId: string,
+  input: { farmId: string; seasonId: string; fromDate: string; toDate: string },
+) => apiRequest<{ valid: boolean; preview: LabourWageSettlementPreview }>(
+  `/v1/workspace/${workspaceId}/labour-wage-settlements/preview`,
+  { method: "POST", body: JSON.stringify(input) },
+  token,
+  { timeoutMs: 60_000, debugLabel: "labour-wage-settlement-preview" },
+);
+export const createLabourWageSettlement = (
+  token: string,
+  workspaceId: string,
+  input: LabourWageSettlementCreateInput,
+) => apiRequest<{ settlement: LabourWageSettlementRecord; voucher: LabourWageSettlementLinkedVoucher }>(
+  `/v1/workspace/${workspaceId}/labour-wage-settlements`,
+  { method: "POST", body: JSON.stringify(input) },
+  token,
+  { timeoutMs: 60_000, debugLabel: "labour-wage-settlement-create" },
+);
 export const fetchExpenseCategories = (token: string, workspaceId: string) =>
   apiRequest<{ categories: ExpenseCategory[] }>(`/v1/workspace/${workspaceId}/expense-categories`, {}, token);
 export const searchExpenses = (token: string, workspaceId: string, filters: ExpenseSearchFilters) => {

@@ -15,6 +15,14 @@ import {
   wasImportedVoucherNumberEdited,
 } from "../lib/import-voucher-numbers.js";
 import { findWageRateOverlaps, normalizeWageRatePayload } from "../lib/wage-rates.js";
+import {
+  allocateVoucherNumber,
+  bumpVoucherSequence,
+  duplicateVoucherNumberDetails,
+  findExistingVoucherByNumber,
+  normalizeVoucherNumber,
+  reserveVoucherNumber,
+} from "../lib/voucher-numbers.js";
 import { hasModulePermission, hasPermission, type WorkspaceModule } from "../permissions.js";
 import { validateTenantReferences, validateTenantReferencesDetailed } from "../tenant-ownership.js";
 import { validateExpenseCategoryReference } from "./expense-categories.js";
@@ -27,6 +35,7 @@ const entities = [
   "attendance",
   "account",
   "advance",
+  "labourWageSettlement",
   "wageRate",
   "labourPayment",
   "productionEntry",
@@ -147,6 +156,23 @@ const financialPayloadSchemas = {
     date: dateSchema, amount: positiveAmountSchema, accountId: z.string().min(1),
     source: z.enum(["manual", "attendance_csv_import", "old_android_csv"]).optional(),
   }).passthrough(),
+  labourWageSettlement: z.object({
+    settlementNumber: z.string().trim().min(1),
+    linkedVoucherId: z.string().min(1),
+    linkedVoucherNumber: z.string().trim().min(1),
+    linkedAccountId: z.string().min(1),
+    fromDate: dateSchema,
+    toDate: dateSchema,
+    settlementDate: dateSchema,
+    attendanceWages: z.coerce.number().nonnegative(),
+    advancesPaid: z.coerce.number().nonnegative(),
+    settledAdvanceAmount: z.coerce.number().nonnegative(),
+    expenseAmount: z.coerce.number().nonnegative(),
+    carryForwardAdvance: z.coerce.number().nonnegative(),
+    payableBalance: z.coerce.number().nonnegative(),
+    status: z.enum(["posted", "voided"]).optional(),
+    notes: z.string().trim().optional(),
+  }).passthrough(),
   wageRate: z.object({
     labourerId: z.string().min(1).optional(),
     labourId: z.string().min(1).optional(),
@@ -231,6 +257,7 @@ function entityModule(entity: typeof entities[number]): WorkspaceModule {
   if (["labourer", "labourGroup", "labourPayment", "productionEntry"].includes(entity)) return "workforce";
   if (entity === "attendance") return "attendance";
   if (entity === "advance") return "advances";
+  if (entity === "labourWageSettlement") return "wages";
   if (entity === "wageRate") return "wages";
   if (entity === "voucher") return "expenses";
   if (entity === "sale") return "sales";
@@ -242,6 +269,7 @@ function entityModule(entity: typeof entities[number]): WorkspaceModule {
 const seasonRequiredEntities = new Set<typeof entities[number]>([
   "attendance",
   "advance",
+  "labourWageSettlement",
   "wageRate",
   "labourPayment",
   "productionEntry",
@@ -261,135 +289,9 @@ async function sessionContext(sessionId?: string) {
   return session ?? null;
 }
 
-function voucherScopeKey(farmId: string, seasonId?: string | null) {
-  return seasonId ? `season:${seasonId}` : `farm:${farmId}:general`;
-}
-
 function parseVoucherSequenceNumber(value: string) {
   const match = /^V-(\d+)$/i.exec(value.trim());
   return match ? Number(match[1]) : null;
-}
-
-function normalizeVoucherNumber(value: string) {
-  const parsed = parseVoucherSequenceNumber(value);
-  return parsed ? `V-${String(parsed).padStart(4, "0")}` : null;
-}
-
-function duplicateVoucherNumberDetails(workspaceId: string, voucherNumber: string, existingRecordId?: string | null) {
-  return {
-    code: "duplicate_voucher_number",
-    entity: "voucher",
-    entityId: existingRecordId ?? null,
-    entityName: voucherNumber,
-    workspaceId,
-    expectedWorkspace: workspaceId,
-    actualWorkspace: workspaceId,
-  };
-}
-
-async function findExistingVoucherByNumber(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
-  workspaceId: string,
-  farmId: string,
-  voucherNumber: string,
-  excludeClientRecordId?: string,
-) {
-  const filters = [
-    eq(operationalRecords.workspaceId, workspaceId),
-    eq(operationalRecords.farmId, farmId),
-    eq(operationalRecords.entityType, "voucher"),
-    activeOperationalPayloadSql(operationalRecords.payload),
-    sql`coalesce(${operationalRecords.payload}->>'voucherNumber', '') = ${voucherNumber}`,
-  ];
-  if (excludeClientRecordId) filters.push(sql`${operationalRecords.clientRecordId} <> ${excludeClientRecordId}`);
-  const [existingVoucher] = await tx.select({
-    id: operationalRecords.id,
-    clientRecordId: operationalRecords.clientRecordId,
-    workspaceId: operationalRecords.workspaceId,
-    farmId: operationalRecords.farmId,
-    seasonId: operationalRecords.seasonId,
-    sourceType: operationalRecords.sourceType,
-    payload: operationalRecords.payload,
-  }).from(operationalRecords).where(and(...filters)).limit(1);
-  return existingVoucher ?? null;
-}
-
-async function bumpVoucherSequence(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
-  workspaceId: string,
-  farmId: string,
-  seasonId: string | null | undefined,
-  voucherNumber: string,
-) {
-  const parsedNumber = parseVoucherSequenceNumber(voucherNumber);
-  if (!parsedNumber) throw new Error("Voucher numbers must use the format V-0001.");
-  const scopeKey = voucherScopeKey(farmId, seasonId);
-  const [current] = await tx.select({
-    lastNumber: expenseVoucherSequences.lastNumber,
-  }).from(expenseVoucherSequences).where(and(
-    eq(expenseVoucherSequences.workspaceId, workspaceId),
-    eq(expenseVoucherSequences.scopeKey, scopeKey),
-  )).limit(1);
-  const nextSequenceNumber = Math.max(current?.lastNumber ?? 0, parsedNumber);
-  const now = new Date();
-  if (current) {
-    await tx.update(expenseVoucherSequences).set({
-      lastNumber: nextSequenceNumber,
-      updatedAt: now,
-    }).where(and(
-      eq(expenseVoucherSequences.workspaceId, workspaceId),
-      eq(expenseVoucherSequences.scopeKey, scopeKey),
-    ));
-  } else {
-    await tx.insert(expenseVoucherSequences).values({
-      workspaceId,
-      scopeKey,
-      lastNumber: nextSequenceNumber,
-      updatedAt: now,
-    });
-  }
-}
-
-async function reserveVoucherNumber(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
-  workspaceId: string,
-  farmId: string,
-  voucherNumber: string,
-  excludeClientRecordId?: string,
-) {
-  const scopeKey = `${workspaceId}:${farmId}`;
-  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${scopeKey}), hashtext(${voucherNumber}))`);
-  const existingVoucher = await findExistingVoucherByNumber(tx, workspaceId, farmId, voucherNumber, excludeClientRecordId);
-  if (existingVoucher) {
-    throw new Error(`Voucher number ${voucherNumber} already exists.`);
-  }
-}
-
-async function allocateVoucherNumber(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
-  workspaceId: string,
-  farmId: string,
-  seasonId: string | null | undefined,
-  requestedVoucherNumber?: string,
-) {
-  const normalizedRequestedVoucherNumber = requestedVoucherNumber ? normalizeVoucherNumber(requestedVoucherNumber) : null;
-  const parsedRequestedNumber = normalizedRequestedVoucherNumber ? parseVoucherSequenceNumber(normalizedRequestedVoucherNumber) : null;
-  if (requestedVoucherNumber && !normalizedRequestedVoucherNumber) {
-    throw new Error("Voucher numbers must use the format V-0001.");
-  }
-  const scopeKey = voucherScopeKey(farmId, seasonId);
-  const [current] = await tx.select({
-    lastNumber: expenseVoucherSequences.lastNumber,
-  }).from(expenseVoucherSequences).where(and(
-    eq(expenseVoucherSequences.workspaceId, workspaceId),
-    eq(expenseVoucherSequences.scopeKey, scopeKey),
-  )).limit(1);
-  const nextSuggested = (current?.lastNumber ?? 0) + 1;
-  const finalNumber = parsedRequestedNumber ?? nextSuggested;
-  const voucherNumber = normalizedRequestedVoucherNumber ?? `V-${String(finalNumber).padStart(4, "0")}`;
-  await reserveVoucherNumber(tx, workspaceId, farmId, voucherNumber);
-  await bumpVoucherSequence(tx, workspaceId, farmId, seasonId, voucherNumber);
-  return voucherNumber;
 }
 
 async function inactiveDispatchReference(

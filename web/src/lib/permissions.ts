@@ -104,6 +104,7 @@ export function moduleForOperationalEntity(entity: OperationalEntity): Workspace
   if (["labourer", "labourGroup", "labourPayment", "productionEntry"].includes(entity)) return "workforce";
   if (entity === "attendance") return "attendance";
   if (entity === "advance") return "advances";
+  if (entity === "labourWageSettlement") return "wages";
   if (entity === "wageRate") return "wages";
   if (entity === "voucher") return "expenses";
   if (entity === "sale") return "sales";

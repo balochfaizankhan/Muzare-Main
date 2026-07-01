@@ -9,6 +9,7 @@ import { SubpageHeader } from "../../components/SubpageHeader";
 import { defaultTransactionGroupExpansion, groupAccountTransactions, type AccountTransactionGroupKey } from "../../lib/accountTransactionGroups";
 import { calculateAccountBalance } from "../../lib/accounting";
 import { formatMoney, formatNumber } from "../../lib/format";
+import { getActiveLabourWageSettlements, getCashAffectingVouchers, outstandingLabourAdvances, totalSettledAdvances } from "../../lib/labourWageSettlements";
 import { translateExpenseCategory, translateExpenseSubcategory, translateSaleType, translateSalesStatus } from "../../lib/systemTranslations";
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
 import { getVoucherDisplayNumber } from "../../lib/vouchers";
@@ -36,6 +37,7 @@ import {
   type PartnerEntry,
   type Sale,
   type Voucher,
+  type LabourWageSettlement,
   type WageRate,
 } from "../../lib/offline-db";
 import { compareWageRates, getWageRateStatus, normalizeHalfDayRate, summarizeAttendanceWages } from "../../lib/wageRates";
@@ -410,6 +412,7 @@ export function Reports() {
   const [advances, setAdvances] = useState<Advance[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [wageRates, setWageRates] = useState<WageRate[]>([]);
+  const [labourWageSettlements, setLabourWageSettlements] = useState<LabourWageSettlement[]>([]);
   const [entries, setEntries] = useState<PartnerEntry[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
   const [dispatches, setDispatches] = useState<Dispatch[]>([]);
@@ -429,16 +432,18 @@ export function Reports() {
       workspaceRecords(offlineDb.attendance),
       loadWorkspaceVouchers({ includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }),
       workspaceRecords(offlineDb.advances),
+      workspaceRecords(offlineDb.labourWageSettlements),
       workspaceRecords(offlineDb.wageRates, { includeDeleted: true }),
       workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }),
       workspaceRecords(offlineDb.partnerEntries),
       workspaceRecords(offlineDb.sales),
       workspaceRecords(offlineDb.dispatches),
-    ]).then(([nextLabourers, nextAttendance, nextVouchers, nextAdvances, nextWageRates, nextAccounts, nextEntries, nextSales, nextDispatches]) => {
+    ]).then(([nextLabourers, nextAttendance, nextVouchers, nextAdvances, nextSettlements, nextWageRates, nextAccounts, nextEntries, nextSales, nextDispatches]) => {
       setLabourers(nextLabourers.sort(compareLabourers));
       setAttendance(nextAttendance);
       setVouchers(nextVouchers);
       setAdvances(nextAdvances);
+      setLabourWageSettlements(nextSettlements);
       setWageRates(nextWageRates);
       setAccounts(nextAccounts);
       setEntries(nextEntries);
@@ -638,7 +643,16 @@ export function Reports() {
       return { labourer, records, total, outstanding: payable - total };
     })
     .filter((item) => item.records.length > 0), [advanceRows, attendanceSummary, labourers]);
+  const activeSettlements = useMemo(
+    () => getActiveLabourWageSettlements(labourWageSettlements)
+      .filter((settlement) => !from || settlement.settlementDate >= from)
+      .filter((settlement) => !to || settlement.settlementDate <= to),
+    [from, labourWageSettlements, to],
+  );
+  const settledAdvancesTotal = useMemo(() => totalSettledAdvances(activeSettlements), [activeSettlements]);
+  const outstandingAdvancePool = useMemo(() => outstandingLabourAdvances(advanceRows, activeSettlements), [activeSettlements, advanceRows]);
   const activeVouchers = useMemo(() => getActiveVouchers(vouchers), [vouchers]);
+  const cashAffectingVouchers = useMemo(() => getCashAffectingVouchers(activeVouchers), [activeVouchers]);
 
   const voucherBaseRows = useMemo(() => activeVouchers
     .filter((item) => {
@@ -796,7 +810,7 @@ export function Reports() {
   const positions = useMemo(() => accounts
     .filter((account) => !accountId || account.id === accountId)
     .map((account) => {
-      const voucherExpenses = voucherRows.filter((item) => item.accountId === account.id).reduce((sum, item) => sum + item.amount, 0);
+      const voucherExpenses = cashAffectingVouchers.filter((item) => item.accountId === account.id).reduce((sum, item) => sum + item.amount, 0);
       const labourAdvances = advanceRows.filter((item) => item.accountId === account.id).reduce((sum, item) => sum + item.amount, 0);
       const contributions = partnerRows.filter((item) => item.type === "contribution" && item.accountId === account.id).reduce((sum, item) => sum + item.amount, 0);
       const withdrawals = partnerRows.filter((item) => item.type === "withdrawal" && item.accountId === account.id).reduce((sum, item) => sum + item.amount, 0);
@@ -812,19 +826,19 @@ export function Reports() {
         settlementsSent,
         settlementsReceived,
         salesReceived,
-        net: calculateAccountBalance(account, saleRows, voucherRows, advanceRows, partnerRows),
+        net: calculateAccountBalance(account, saleRows, cashAffectingVouchers, advanceRows, partnerRows),
       };
-    }), [accountId, accounts, advanceRows, partnerRows, saleRows, voucherRows]);
+    }), [accountId, accounts, advanceRows, cashAffectingVouchers, partnerRows, saleRows]);
   const partnerLiabilityPositions = useMemo(
-    () => buildPartnerLiabilityPositions(accounts, voucherRows, advanceRows, partnerRows, saleRows)
+    () => buildPartnerLiabilityPositions(accounts, cashAffectingVouchers, advanceRows, partnerRows, saleRows)
       .filter((item) => !accountId || item.account?.id === accountId),
-    [accountId, accounts, voucherRows, advanceRows, partnerRows, saleRows],
+    [accountId, accounts, cashAffectingVouchers, advanceRows, partnerRows, saleRows],
   );
   const selectedAccountRecord = accountId ? accounts.find((item) => item.id === accountId) ?? null : null;
 
   const accountLedgerRows = useMemo(() => {
     const rows: Array<Omit<AccountLedgerReportRow, "running">> = [];
-    for (const voucher of voucherRows) {
+    for (const voucher of cashAffectingVouchers) {
       const account = accountById.get(voucher.accountId);
       const isPartner = account?.type === "partner";
       rows.push({ id: `voucher:${voucher.id}`, date: voucher.date, accountId: voucher.accountId, accountName: accountName(voucher.accountId), type: "voucher", typeLabel: t("reportsPage.voucherExpense"), reference: getVoucherDisplayNumber(voucher) || voucher.voucherNumber, description: voucher.description, debit: isPartner ? 0 : voucher.amount, credit: isPartner ? voucher.amount : 0, path: `/workspace/expenses?recordId=${voucher.id}`, classification: "voucher", partnerLiabilityGroup: isPartner ? "direct_expenses_paid" : undefined });
@@ -874,7 +888,7 @@ export function Reports() {
         running.set(item.accountId, next);
         return { ...item, running: next, accountName: item.accountName || accountName(item.accountId) };
       });
-  }, [accountId, accountName, advanceRows, labourName, partnerRows, saleRows, t, voucherRows]);
+  }, [accountId, accountName, accountById, accounts, advanceRows, cashAffectingVouchers, labourName, partnerRows, saleRows, t]);
   const groupedAccountLedgerRows = useMemo(() => groupAccountTransactions(accountLedgerRows), [accountLedgerRows]);
   const groupedPartnerLedgerRows = useMemo(
     () => selectedAccountRecord?.type === "partner" ? groupPartnerLiabilityTransactions(accountLedgerRows) : [],
@@ -1376,7 +1390,22 @@ export function Reports() {
           <button className={views.advances === "log" ? "is-active" : ""} type="button" onClick={() => switchView("advances", "log")}>{t("reportsPage.log")}</button>
         </section>
         {views.advances === "summary" && <ReportShell title={t("reportsPage.advanceSummary")} rangeLabel={rangeLabel} sectionId="advance-summary" onPrint={() => printSection("advance-summary")} onExport={exportAdvanceSummary}>
-          <Kpis values={[[t("reportsPage.totalAdvances"), money(advanceRows.reduce((sum, item) => sum + item.amount, 0))], [t("reportsPage.transactions"), advanceRows.length], [t("reportsPage.labour"), advanceSummary.length]]} />
+          <Kpis values={[
+            [t("reportsPage.totalAdvances"), money(advanceRows.reduce((sum, item) => sum + item.amount, 0))],
+            [t("reportsPage.transactions"), advanceRows.length],
+            [t("reportsPage.labour"), advanceSummary.length],
+            ["Settled advances", money(settledAdvancesTotal)],
+            ["Outstanding advances", money(outstandingAdvancePool)],
+            ["Settlements posted", activeSettlements.length],
+          ]} />
+          {activeSettlements.length > 0 && <div className="reports-summary-list">
+            {activeSettlements.map((settlement) => (
+              <article key={settlement.id}>
+                <span>{settlement.settlementNumber} • {settlement.fromDate} to {settlement.toDate}</span>
+                <strong>{money(settlement.settledAdvanceAmount)}</strong>
+              </article>
+            ))}
+          </div>}
           <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.labour"), t("reportsPage.transactions"), t("reportsPage.total"), t("reportsPage.netBalance")]} rows={advanceSummary.map((item) => ({ id: item.labourer.id, title: item.labourer.name, value: money(item.total), meta: `${item.records.length} ${t("reportsPage.transactions")}`, cells: [item.labourer.name, item.records.length, money(item.total), money(item.outstanding)], details: [[t("reportsPage.account"), [...new Set(item.records.map((record) => accountName(record.accountId)))].join(", ")], [t("reportsPage.status"), item.labourer.active === false ? t("reportsPage.inactive") : t("reportsPage.active")]] }))} />
         </ReportShell>}
         {views.advances === "log" && <ReportShell title={t("reportsPage.advanceLog")} rangeLabel={rangeLabel} sectionId="advance-log" onPrint={() => printSection("advance-log")} onExport={exportAdvanceLog}>

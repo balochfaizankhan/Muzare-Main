@@ -19,6 +19,7 @@ export type PendingMutation = LocalRecord & {
     | "attendance"
     | "account"
     | "advance"
+    | "labourWageSettlement"
     | "wageRate"
     | "labourPayment"
     | "productionEntry"
@@ -233,6 +234,28 @@ export type WageRate = LocalRecord & {
   createdBy?: string;
 };
 
+export type LabourWageSettlement = LocalRecord & {
+  settlementNumber: string;
+  linkedVoucherId: string;
+  linkedVoucherNumber: string;
+  linkedAccountId: string;
+  fromDate: string;
+  toDate: string;
+  settlementDate: string;
+  attendanceWages: number;
+  advancesPaid: number;
+  settledAdvanceAmount: number;
+  expenseAmount: number;
+  carryForwardAdvance: number;
+  payableBalance: number;
+  notes?: string;
+  status: "posted" | "voided";
+  createdBy?: string;
+  voidedAt?: string | null;
+  voidedBy?: string | null;
+  voidReason?: string | null;
+};
+
 export type LabourGroup = LocalRecord & {
   name: string;
   active?: boolean;
@@ -276,6 +299,7 @@ export const offlineDb = new Dexie("muzare-offline") as Dexie & {
   sales: EntityTable<Sale, "id">;
   partnerEntries: EntityTable<PartnerEntry, "id">;
   advances: EntityTable<Advance, "id">;
+  labourWageSettlements: EntityTable<LabourWageSettlement, "id">;
   wageRates: EntityTable<WageRate, "id">;
   productionEntries: EntityTable<ProductionEntry, "id">;
   labourPayments: EntityTable<LabourPayment, "id">;
@@ -424,6 +448,27 @@ offlineDb.version(9).stores({
   sales: "id, workspaceId, farmId, seasonId, date, buyerName, accountId, createdAt, updatedAt, pendingSync",
   partnerEntries: "id, workspaceId, farmId, seasonId, date, partnerName, accountId, createdAt, updatedAt, pendingSync",
   advances: "id, workspaceId, farmId, seasonId, date, labourerId, createdAt, updatedAt, pendingSync",
+  labourWageSettlements: "id, workspaceId, farmId, seasonId, settlementDate, fromDate, toDate, settlementNumber, status, createdAt, updatedAt, pendingSync",
+  wageRates: "id, workspaceId, farmId, seasonId, labourerId, effectiveFrom, effectiveTo, active, createdAt, updatedAt, pendingSync",
+  productionEntries: "id, workspaceId, farmId, seasonId, labourerId, date, productionUnit, createdAt, updatedAt, pendingSync",
+  labourPayments: "id, workspaceId, farmId, seasonId, labourerId, date, createdAt, updatedAt, pendingSync",
+  inventoryEntries: "id, workspaceId, farmId, seasonId, date, itemName, createdAt, updatedAt, pendingSync",
+});
+
+offlineDb.version(10).stores({
+  pendingMutations: "id, workspaceId, farmId, seasonId, entity, operation, createdAt",
+  labourers: "id, workspaceId, farmId, seasonId, name, groupId, createdAt, updatedAt, pendingSync",
+  labourGroups: "id, workspaceId, farmId, seasonId, name, active, createdAt, updatedAt, pendingSync",
+  attendance: "id, workspaceId, farmId, seasonId, labourerId, date, status, createdAt, updatedAt, pendingSync",
+  accounts: "id, workspaceId, farmId, seasonId, name, type, createdAt, updatedAt, pendingSync",
+  vouchers: "id, workspaceId, farmId, seasonId, date, category, accountId, createdAt, updatedAt, pendingSync",
+  vehicles: "id, workspaceId, farmId, seasonId, number, active, createdAt, updatedAt, pendingSync",
+  dateTypes: "id, workspaceId, farmId, seasonId, name, active, createdAt, updatedAt, pendingSync",
+  dispatches: "id, workspaceId, farmId, seasonId, date, vehicleId, createdAt, updatedAt, pendingSync",
+  sales: "id, workspaceId, farmId, seasonId, date, buyerName, accountId, createdAt, updatedAt, pendingSync",
+  partnerEntries: "id, workspaceId, farmId, seasonId, date, partnerName, accountId, createdAt, updatedAt, pendingSync",
+  advances: "id, workspaceId, farmId, seasonId, date, labourerId, createdAt, updatedAt, pendingSync",
+  labourWageSettlements: "id, workspaceId, farmId, seasonId, settlementDate, fromDate, toDate, settlementNumber, status, createdAt, updatedAt, pendingSync",
   wageRates: "id, workspaceId, farmId, seasonId, labourerId, effectiveFrom, effectiveTo, active, createdAt, updatedAt, pendingSync",
   productionEntries: "id, workspaceId, farmId, seasonId, labourerId, date, productionUnit, createdAt, updatedAt, pendingSync",
   labourPayments: "id, workspaceId, farmId, seasonId, labourerId, date, createdAt, updatedAt, pendingSync",

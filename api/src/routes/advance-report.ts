@@ -6,6 +6,7 @@ import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { farms, operationalRecords, seasons, userSessions } from "../db/schema.js";
 import { isDeletedOperationalPayload } from "../operational-record-state.js";
+import { listLabourWageSettlements } from "../lib/labour-wage-settlements.js";
 import { hasPermission } from "../permissions.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
 import { hasFarmAccess } from "../workspace-access.js";
@@ -84,12 +85,15 @@ export async function advanceReportRoutes(app: FastifyInstance): Promise<void> {
       return [record.clientRecordId, typeof payload.name === "string" ? payload.name : "Account"] as const;
     }));
 
-    const advanceRecords = await db.select().from(operationalRecords).where(and(
-      eq(operationalRecords.workspaceId, workspaceId),
-      eq(operationalRecords.farmId, farmId),
-      eq(operationalRecords.seasonId, seasonId),
-      eq(operationalRecords.entityType, "advance"),
-    ));
+    const [advanceRecords, settlements] = await db.transaction(async (tx) => Promise.all([
+      tx.select().from(operationalRecords).where(and(
+        eq(operationalRecords.workspaceId, workspaceId),
+        eq(operationalRecords.farmId, farmId),
+        eq(operationalRecords.seasonId, seasonId),
+        eq(operationalRecords.entityType, "advance"),
+      )),
+      listLabourWageSettlements(tx, workspaceId, farmId, seasonId),
+    ]));
     const records = advanceRecords.flatMap((record) => {
       const payload = record.payload as AdvancePayload;
       if (isDeletedOperationalPayload(payload)) return [];
@@ -120,10 +124,28 @@ export async function advanceReportRoutes(app: FastifyInstance): Promise<void> {
     }
     const summaries = [...grouped.values()].sort((a, b) => a.labourName.localeCompare(b.labourName));
     const grandTotal = summaries.reduce((sum, item) => sum + item.total, 0);
+    const settlementReferences = settlements
+      .filter((row) => !isDeletedOperationalPayload(row.payload) && row.payload.status !== "voided")
+      .filter((row) => row.payload.settlementDate >= from && row.payload.settlementDate <= to)
+      .map((row) => ({
+        id: row.clientRecordId,
+        settlementNumber: row.payload.settlementNumber,
+        settlementDate: row.payload.settlementDate,
+        settledAdvanceAmount: row.payload.settledAdvanceAmount,
+        expenseAmount: row.payload.expenseAmount,
+        linkedVoucherId: row.payload.linkedVoucherId,
+        linkedVoucherNumber: row.payload.linkedVoucherNumber,
+      }))
+      .sort((left, right) => left.settlementDate.localeCompare(right.settlementDate) || left.settlementNumber.localeCompare(right.settlementNumber));
+    const settledAdvances = settlementReferences.reduce((sum, item) => sum + item.settledAdvanceAmount, 0);
+    const outstandingAdvances = Math.max(grandTotal - settledAdvances, 0);
     return {
       records,
       summaries,
       grandTotal,
+      settledAdvances,
+      outstandingAdvances,
+      settlementReferences,
       metadata: {
         farmName: farm?.name ?? "Farm",
         seasonName: season?.name ?? "Season",

@@ -16,6 +16,7 @@ const nav = [
   ["/workspace/dashboard", "layout.dashboard", LayoutDashboard, "dashboard"],
   ["/workspace/attendance", "layout.attendance", CalendarCheck, "attendance"],
   ["/workspace/wage-rates", "layout.wages", WalletCards, "wages"],
+  ["/workspace/wage-settlements", "layout.wageSettlement", WalletCards, "wages"],
   ["/workspace/sales", "layout.sales", ShoppingBasket, "sales"],
   ["/workspace/expenses", "layout.expenses", ReceiptText, "expenses"],
   ["/workspace/advances", "layout.advances", HandCoins, "advances"],

@@ -25,6 +25,7 @@ import { config } from "../config";
 import { calculateAvailableBalance } from "../lib/accounting";
 import { fetchBootstrap, repairWorkspaceContextRequest } from "../lib/api";
 import { formatDate, formatMoney } from "../lib/format";
+import { getActiveLabourWageSettlements, getCashAffectingVouchers, outstandingLabourAdvances } from "../lib/labourWageSettlements";
 import { buildPartnerLiabilityPositions } from "../lib/partnerAccounting";
 import { ensureLocalAccounts, offlineDb, workspaceRecords } from "../lib/offline-db";
 import { isActiveOperationalRecord } from "../lib/operationalRecords";
@@ -104,7 +105,7 @@ export function DashboardPage() {
 
   const loadLocalDashboard = useCallback(async () => {
     await ensureLocalAccounts();
-    const [attendance, dispatches, sales, vouchers, entries, advances, accounts] = await Promise.all([
+    const [attendance, dispatches, sales, vouchers, entries, advances, accounts, settlements] = await Promise.all([
       workspaceRecords(offlineDb.attendance),
       workspaceRecords(offlineDb.dispatches),
       workspaceRecords(offlineDb.sales),
@@ -112,19 +113,22 @@ export function DashboardPage() {
       workspaceRecords(offlineDb.partnerEntries),
       workspaceRecords(offlineDb.advances),
       workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }),
+      workspaceRecords(offlineDb.labourWageSettlements),
     ]);
     const activeAttendance = attendance.filter(isActiveOperationalRecord);
     const activeDispatches = dispatches.filter(isActiveOperationalRecord);
     const activeSales = sales.filter(isActiveOperationalRecord);
     const activeVouchers = vouchers;
+    const cashAffectingVouchers = getCashAffectingVouchers(activeVouchers);
     const activeEntries = entries.filter(isActiveOperationalRecord);
     const activeAdvances = advances.filter(isActiveOperationalRecord);
+    const activeSettlements = getActiveLabourWageSettlements(settlements);
     const activeAccounts = accounts.filter(isActiveOperationalRecord);
     const date = today();
     const totalSales = activeSales.reduce((sum, item) => sum + item.amount, 0);
-    const labourAdvances = activeAdvances.reduce((sum, item) => sum + item.amount, 0);
+    const labourAdvances = outstandingLabourAdvances(activeAdvances, activeSettlements);
     const totalExpenses = activeVouchers.reduce((sum, item) => sum + item.amount, 0) + labourAdvances;
-    const partnerBalance = buildPartnerLiabilityPositions(activeAccounts, activeVouchers, activeAdvances, activeEntries, activeSales)
+    const partnerBalance = buildPartnerLiabilityPositions(activeAccounts, cashAffectingVouchers, activeAdvances, activeEntries, activeSales)
       .reduce((sum, item) => sum + item.currentPartnerBalance, 0);
     setTotals({
       presentToday: activeAttendance.filter((item) => item.date === date && item.status === "present").length,
@@ -132,7 +136,7 @@ export function DashboardPage() {
       totalSales,
       labourAdvances,
       totalExpenses,
-      netPosition: calculateAvailableBalance(activeAccounts, activeSales, activeVouchers, activeAdvances, activeEntries),
+      netPosition: calculateAvailableBalance(activeAccounts, activeSales, cashAffectingVouchers, activeAdvances, activeEntries),
       partnerBalance,
     });
 

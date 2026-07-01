@@ -2542,6 +2542,18 @@ button {
 .settings-link-grid strong, .team-card strong { color: var(--text-primary); }
 .team-invite-form { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .team-list { display: grid; gap: 9px; }
+.wage-settlement-form {
+  gap: 14px;
+}
+.wage-settlement-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.wage-settlement-actions .secondary-action,
+.wage-settlement-actions button[type="submit"] {
+  min-height: 42px;
+}
 .team-card__actions { display: flex !important; flex-shrink: 0; }
 .team-card button, .invite-share button { align-items: center; display: inline-flex; gap: 5px; }
 .team-farm-assignment-list { border: 1px solid var(--border); border-radius: 10px; display: grid; gap: 8px; max-height: 180px; overflow-y: auto; padding: 10px 12px; }
