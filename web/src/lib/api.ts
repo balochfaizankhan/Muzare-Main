@@ -721,6 +721,7 @@ export type ExpenseSearchFilters = {
   category?: string; subcategory?: string; accountId?: string;
   includeDeleted?: boolean;
   includeImported?: boolean;
+  includeSettlementVouchers?: boolean;
 };
 export type WageRateType = "daily" | "half_day" | "monthly" | "custom";
 export type WageRateRecord = {
@@ -824,6 +825,10 @@ export type LabourWageSettlementLinkedVoucher = {
   legacyVoucherNumber?: string;
   voucherNumberEdited?: boolean;
   allowVoucherNumberEdit?: boolean;
+  settlementId?: string;
+  settlementNumber?: string;
+  voucherPurpose?: string;
+  nonCashSettlement?: boolean;
   date: string;
   category: string;
   categoryId: string;
@@ -894,6 +899,10 @@ export type ExpenseSearchRecord = {
   id: string; workspaceId: string; farmId: string; seasonId: string; voucherNumber: string; date: string;
   originalVoucherNumber?: string;
   legacyVoucherNumber?: string;
+  settlementId?: string | null;
+  settlementNumber?: string | null;
+  voucherPurpose?: string | null;
+  nonCashSettlement?: boolean;
   category: string; categoryId: string; subcategory: string; subcategoryId: string; description: string; amount: number;
   accountId: string; accountName: string; notes?: string; createdAt: string; updatedAt: string;
   deletedAt?: string | null;
@@ -1397,6 +1406,7 @@ export const searchExpenses = (token: string, workspaceId: string, filters: Expe
   if (filters.accountId) query.set("accountId", filters.accountId);
   if (typeof filters.includeDeleted === "boolean") query.set("includeDeleted", String(filters.includeDeleted));
   if (typeof filters.includeImported === "boolean") query.set("includeImported", String(filters.includeImported));
+  if (typeof filters.includeSettlementVouchers === "boolean") query.set("includeSettlementVouchers", String(filters.includeSettlementVouchers));
   return apiRequest<{ records: ExpenseSearchRecord[] }>(`/v1/workspace/${workspaceId}/expenses/search?${query.toString()}`, {}, token);
 };
 export const createExpenseSubcategory = (token: string, workspaceId: string, input: { categoryId: string; name: string }) =>

@@ -30,7 +30,7 @@ import { buildPartnerLiabilityPositions } from "../lib/partnerAccounting";
 import { ensureLocalAccounts, offlineDb, workspaceRecords } from "../lib/offline-db";
 import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { hasPermission } from "../lib/permissions";
-import { loadWorkspaceVouchers } from "../lib/voucherCollections";
+import { getVisibleVouchers, loadWorkspaceVouchers } from "../lib/voucherCollections";
 import { getVoucherDisplayNumber } from "../lib/vouchers";
 import { useSyncState } from "../hooks/useSyncState";
 import { refreshOperationalData, syncNow } from "../services/syncService";
@@ -119,6 +119,7 @@ export function DashboardPage() {
     const activeDispatches = dispatches.filter(isActiveOperationalRecord);
     const activeSales = sales.filter(isActiveOperationalRecord);
     const activeVouchers = vouchers;
+    const generalExpenseVouchers = getVisibleVouchers(activeVouchers, { visibility: "general-expenses" });
     const cashAffectingVouchers = getCashAffectingVouchers(activeVouchers);
     const activeEntries = entries.filter(isActiveOperationalRecord);
     const activeAdvances = advances.filter(isActiveOperationalRecord);
@@ -149,7 +150,7 @@ export function DashboardPage() {
         value: money(item.amount),
         createdAt: item.createdAt,
       })),
-      ...activeVouchers.map((item) => ({
+      ...generalExpenseVouchers.map((item) => ({
         id: item.id,
         path: "/workspace/expenses",
         title: t("dashboard.expenseVoucher"),

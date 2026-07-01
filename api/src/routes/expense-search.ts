@@ -22,6 +22,7 @@ const querySchema = z.object({
   accountId: z.string().min(1).max(255).optional(),
   includeDeleted: z.coerce.boolean().optional(),
   includeImported: z.coerce.boolean().optional(),
+  includeSettlementVouchers: z.coerce.boolean().optional(),
 });
 
 type AccountPayload = { name?: unknown };
@@ -66,6 +67,7 @@ export async function expenseSearchRoutes(app: FastifyInstance): Promise<void> {
     const term = query.data.search ? `%${query.data.search.toLowerCase()}%` : null;
     const includeDeleted = Boolean(query.data.includeDeleted);
     const includeImported = query.data.includeImported !== false;
+    const includeSettlementVouchers = query.data.includeSettlementVouchers === true;
     const importedVoucherScope = and(
       eq(operationalRecords.sourceType, importedExpenseSourceType),
       eq(operationalRecords.farmId, query.data.farmId),
@@ -84,6 +86,7 @@ export async function expenseSearchRoutes(app: FastifyInstance): Promise<void> {
       ),
       eq(operationalRecords.entityType, "voucher"),
       includeDeleted ? undefined : activeOperationalPayloadSql(operationalRecords.payload),
+      includeSettlementVouchers ? undefined : sql`coalesce(${operationalRecords.payload}->>'voucherPurpose', '') <> 'labour_wage_settlement'`,
       query.data.from ? gte(sql`${operationalRecords.payload}->>'date'`, query.data.from) : undefined,
       query.data.to ? lte(sql`${operationalRecords.payload}->>'date'`, query.data.to) : undefined,
       query.data.category ? sql`(
@@ -166,6 +169,10 @@ export async function expenseSearchRoutes(app: FastifyInstance): Promise<void> {
         sourceType: record.sourceType,
         isImported: record.sourceType === importedExpenseSourceType || typeof record.payload.oldExpenseId === "string",
         oldExpenseId: typeof record.payload.oldExpenseId === "string" ? record.payload.oldExpenseId : null,
+        settlementId: typeof record.payload.settlementId === "string" ? record.payload.settlementId : null,
+        settlementNumber: typeof record.payload.settlementNumber === "string" ? record.payload.settlementNumber : null,
+        voucherPurpose: typeof record.payload.voucherPurpose === "string" ? record.payload.voucherPurpose : null,
+        nonCashSettlement: record.payload.nonCashSettlement === true,
         items: Array.isArray(record.payload.items) ? record.payload.items : undefined,
       })),
     };

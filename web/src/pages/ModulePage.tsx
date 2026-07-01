@@ -29,9 +29,10 @@ import {
 } from "../lib/partnerAccounting";
 import { formatDate, formatMoney } from "../lib/format";
 import { buildLabourEarningsProfileSummary } from "../lib/labourEarnings";
+import { isLabourWageSettlementVoucher } from "../lib/labourWageSettlements";
 import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { getVoucherDisplayNumber, normalizeVoucherNumber, parseVoucherSequenceNumber } from "../lib/vouchers";
-import { getActiveVouchers, getAllVouchers, loadWorkspaceVouchers } from "../lib/voucherCollections";
+import { getActiveVouchers, getVisibleVouchers, loadWorkspaceVouchers } from "../lib/voucherCollections";
 import { compareWageRates, getWageRateStatus, normalizeHalfDayRate, summarizeAttendanceWages } from "../lib/wageRates";
 import {
   compareLabourers,
@@ -1636,7 +1637,12 @@ function ExpensesModule() {
   const { t } = useTranslation();
   const { token, user, sessionRefreshing } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const load = useCallback(async () => (await loadWorkspaceVouchers({ mode: "all", includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
+  const load = useCallback(async () => (await loadWorkspaceVouchers({
+    mode: "all",
+    visibility: "all",
+    includeGeneralFarmRecords: true,
+    includeImportedAcrossSeasons: true,
+  })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }), []);
   const [vouchers, refresh] = useData(load);
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
@@ -1770,6 +1776,7 @@ function ExpensesModule() {
   }>({ status: "idle", message: "" });
   const [showDeletedVouchers, setShowDeletedVouchers] = useState(false);
   const [showImportedVouchers, setShowImportedVouchers] = useState(true);
+  const [showSettlementVouchers, setShowSettlementVouchers] = useState(searchParams.get("showSettlementVouchers") === "true");
   const [pendingReceipts, setPendingReceipts] = useState<PendingReceipt[]>([]);
   const [, setReceiptCropQueue] = useState<File[]>([]);
   const [receiptCropTarget, setReceiptCropTarget] = useState<File | null>(null);
@@ -2150,17 +2157,21 @@ function ExpensesModule() {
     return () => window.clearTimeout(timer);
   }, [voucherSearch]);
   const voucherSearchQuery = useQuery({
-    queryKey: ["expense-search", workspaceId, farmId, seasonId, debouncedVoucherSearch, voucherFrom, voucherTo, voucherCategory, voucherSubcategory, voucherAccountId, showDeletedVouchers, showImportedVouchers],
+    queryKey: ["expense-search", workspaceId, farmId, seasonId, debouncedVoucherSearch, voucherFrom, voucherTo, voucherCategory, voucherSubcategory, voucherAccountId, showDeletedVouchers, showImportedVouchers, showSettlementVouchers],
     queryFn: () => searchExpenses(token!, workspaceId, {
       farmId: farmId!, seasonId: seasonId!, search: debouncedVoucherSearch || undefined, from: voucherFrom || undefined, to: voucherTo || undefined,
       category: voucherCategory || undefined, subcategory: voucherSubcategory || undefined, accountId: voucherAccountId || undefined,
       includeDeleted: showDeletedVouchers,
       includeImported: showImportedVouchers,
+      includeSettlementVouchers: showSettlementVouchers,
     }),
     enabled: Boolean(token && workspaceId && farmId && seasonId && navigator.onLine),
   });
   const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account.name])), [accounts]);
-  const visibleVoucherSource = useMemo(() => getAllVouchers(vouchers, { includeDeleted: showDeletedVouchers }), [showDeletedVouchers, vouchers]);
+  const visibleVoucherSource = useMemo(() => getVisibleVouchers(vouchers, {
+    includeDeleted: showDeletedVouchers,
+    visibility: showSettlementVouchers ? "all" : "general-expenses",
+  }), [showDeletedVouchers, showSettlementVouchers, vouchers]);
   const voucherCategories = useMemo(() => [...new Set(visibleVoucherSource.flatMap((voucher) => voucherLinesFor(voucher).map((line) => line.category)).filter(Boolean))].sort(), [visibleVoucherSource, voucherLinesFor]);
   const voucherSubcategories = useMemo(() => [...new Set(visibleVoucherSource
     .flatMap((voucher) => voucherLinesFor(voucher))
@@ -2206,6 +2217,10 @@ function ExpensesModule() {
             oldExpenseItemId: typeof line.oldExpenseItemId === "string" || typeof line.oldExpenseItemId === "number" ? line.oldExpenseItemId : undefined,
           }))
         : undefined,
+      settlementId: "settlementId" in item ? item.settlementId ?? undefined : undefined,
+      settlementNumber: "settlementNumber" in item ? item.settlementNumber ?? undefined : undefined,
+      voucherPurpose: "voucherPurpose" in item ? item.voucherPurpose ?? undefined : undefined,
+      nonCashSettlement: "nonCashSettlement" in item ? item.nonCashSettlement === true : undefined,
     };
   }
   const matchesVoucher = useCallback((item: Voucher | ExpenseSearchRecord) => {
@@ -2231,7 +2246,7 @@ function ExpensesModule() {
       ? (() => {
           const mergedMap = new Map<string, Voucher | ExpenseSearchRecord>(serverRecords.map((record) => [record.id, record]));
           vouchers.forEach((item) => {
-            if (!showDeletedVouchers && getAllVouchers([item]).length === 0) return;
+            if (!showDeletedVouchers && getVisibleVouchers([item], { visibility: showSettlementVouchers ? "all" : "general-expenses" }).length === 0) return;
             const existing = mergedMap.get(item.id);
             if (!item.pendingSync) return;
             if (!existing || item.updatedAt > existing.updatedAt) mergedMap.set(item.id, item);
@@ -2240,11 +2255,14 @@ function ExpensesModule() {
         })()
       : visibleVoucherSource;
     return merged
-      .filter((item) => getAllVouchers([item], { includeDeleted: showDeletedVouchers }).length > 0)
+      .filter((item) => getVisibleVouchers([item], {
+        includeDeleted: showDeletedVouchers,
+        visibility: showSettlementVouchers ? "all" : "general-expenses",
+      }).length > 0)
       .map((item) => toVoucherRecord(item))
       .filter((item) => matchesVoucher(item))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }, [matchesVoucher, showDeletedVouchers, visibleVoucherSource, voucherSearchQuery.data, vouchers]);
+  }, [matchesVoucher, showDeletedVouchers, showSettlementVouchers, visibleVoucherSource, voucherSearchQuery.data, vouchers]);
   const voucherLineItems = useMemo(() => filteredVouchers.flatMap((item) => voucherLinesFor(item)), [filteredVouchers, voucherLinesFor]);
   const total = filteredVouchers.reduce((sum, item) => sum + item.amount, 0);
   const grouped = [...voucherLineItems.reduce((map, item) => {
@@ -2273,9 +2291,18 @@ function ExpensesModule() {
     const recordId = searchParams.get("recordId");
     if (!recordId) return;
     const voucher = vouchers.find((item) => item.id === recordId);
-    if (voucher && getAllVouchers([voucher], { includeDeleted: showDeletedVouchers }).length === 0) return;
+    if (voucher && getVisibleVouchers([voucher], {
+      includeDeleted: showDeletedVouchers,
+      visibility: showSettlementVouchers ? "all" : "general-expenses",
+    }).length === 0) return;
     if (voucher) setSelectedVoucher(voucher);
-  }, [searchParams, showDeletedVouchers, vouchers]);
+  }, [searchParams, showDeletedVouchers, showSettlementVouchers, vouchers]);
+  useEffect(() => {
+    const forceShowSettlements = searchParams.get("showSettlementVouchers") === "true";
+    if (forceShowSettlements !== showSettlementVouchers) {
+      setShowSettlementVouchers(forceShowSettlements);
+    }
+  }, [searchParams, showSettlementVouchers]);
   useEffect(() => {
     void loadVoucherAttachments(selectedVoucher);
   }, [loadVoucherAttachments, selectedVoucher]);
@@ -2540,6 +2567,7 @@ function ExpensesModule() {
           <small>{hasActiveFilters ? t("expensesPage.showingCurrentFilters") : t("expensesPage.showingSeasonScope")}</small>
           <label className="partner-ledger-show-deleted"><input checked={showDeletedVouchers} type="checkbox" onChange={(event) => setShowDeletedVouchers(event.target.checked)} /> {t("expensesPage.showDeletedVouchers")}</label>
           <label className="partner-ledger-show-deleted"><input checked={showImportedVouchers} type="checkbox" onChange={(event) => setShowImportedVouchers(event.target.checked)} /> {t("expensesPage.showImportedVouchers")}</label>
+          <label className="partner-ledger-show-deleted"><input checked={showSettlementVouchers} type="checkbox" onChange={(event) => setShowSettlementVouchers(event.target.checked)} /> Show auto-generated settlement vouchers</label>
           {hasActiveFilters && <button type="button" onClick={clearFilters}>{t("expensesPage.clearFilters")}</button>}
         </div>
         {voucherSearchQuery.isFetching && <small>{t("expensesPage.refreshingMatches")}</small>}
@@ -3763,6 +3791,7 @@ function AccountsModule() {
       });
     }
     for (const voucher of activeVouchers.filter((item) => item.accountId === selectedAccount.id)) {
+      const settlementVoucher = isLabourWageSettlementVoucher(voucher);
       rows.push({
         id: `voucher:${voucher.id}`,
         date: voucher.date,
@@ -3773,7 +3802,7 @@ function AccountsModule() {
         credit: selectedIsPartner ? voucher.amount : 0,
         source: "expenses",
         sourceId: voucher.id,
-        classification: "voucher",
+        classification: settlementVoucher ? "labour_wage_settlement_voucher" : "voucher",
         partnerLiabilityGroup: selectedIsPartner ? "direct_expenses_paid" : undefined,
       });
     }
@@ -4068,6 +4097,10 @@ function AccountsModule() {
     if (farmId) query.set("farmId", farmId);
     if (seasonId) query.set("seasonId", seasonId);
     if (row.sourceId) query.set("recordId", row.sourceId);
+    if (row.source === "expenses" && row.classification === "labour_wage_settlement_voucher") {
+      navigate(`/workspace/wage-settlements?${query.toString()}`);
+      return;
+    }
     if (row.source === "expenses") navigate(`/workspace/expenses?${query.toString()}`);
     if (row.source === "sales") navigate(`/workspace/sales?${query.toString()}`);
     if (row.source === "labour_advances") navigate(`/workspace/labour-advances?${query.toString()}`);

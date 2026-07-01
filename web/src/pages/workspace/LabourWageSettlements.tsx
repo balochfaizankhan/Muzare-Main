@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { Search, Printer, Download, X, ExternalLink } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
@@ -40,6 +41,10 @@ export function LabourWageSettlements() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [registerSearch, setRegisterSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | LabourWageSettlement["status"]>("all");
+  const [paymentAccountFilter, setPaymentAccountFilter] = useState("all");
+  const [selectedSettlement, setSelectedSettlement] = useState<LabourWageSettlement | null>(null);
 
   const onlineRequired = !navigator.onLine;
   const linkedVoucherById = useMemo(() => new Map(vouchers.map((voucher) => [voucher.id, voucher])), [vouchers]);
@@ -195,6 +200,10 @@ export function LabourWageSettlements() {
         legacyVoucherNumber: response.voucher.legacyVoucherNumber,
         voucherNumberEdited: response.voucher.voucherNumberEdited,
         allowVoucherNumberEdit: response.voucher.allowVoucherNumberEdit,
+        settlementId: response.voucher.settlementId,
+        settlementNumber: response.voucher.settlementNumber,
+        voucherPurpose: response.voucher.voucherPurpose,
+        nonCashSettlement: response.voucher.nonCashSettlement,
         date: response.voucher.date,
         category: response.voucher.category,
         categoryId: response.voucher.categoryId,
@@ -254,6 +263,89 @@ export function LabourWageSettlements() {
   };
 
   const summary = preview.status === "ready" ? preview.data : null;
+  const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
+  const registerRows = useMemo(() => {
+    const term = registerSearch.trim().toLowerCase();
+    return settlements.filter((settlement) => {
+      const linkedVoucher = linkedVoucherById.get(settlement.linkedVoucherId);
+      const accountName = accountById.get(settlement.linkedAccountId)?.name ?? "";
+      return (statusFilter === "all" || settlement.status === statusFilter)
+        && (paymentAccountFilter === "all" || settlement.linkedAccountId === paymentAccountFilter)
+        && (!term || [
+          settlement.settlementNumber,
+          settlement.settlementDate,
+          settlement.fromDate,
+          settlement.toDate,
+          settlement.notes ?? "",
+          linkedVoucher ? getVoucherDisplayNumber(linkedVoucher) || linkedVoucher.voucherNumber : settlement.linkedVoucherNumber,
+          accountName,
+          String(settlement.totalEarned),
+          String(settlement.expenseAmount),
+          String(settlement.settledAdvanceAmount),
+        ].some((value) => value.toLowerCase().includes(term)));
+    });
+  }, [accountById, linkedVoucherById, paymentAccountFilter, registerSearch, settlements, statusFilter]);
+  const registerTotals = useMemo(() => registerRows.reduce((totals, settlement) => ({
+    attendanceWages: totals.attendanceWages + settlement.attendanceWages,
+    labourEarnings: totals.labourEarnings + settlement.pendingLabourEarnings,
+    totalWageExpense: totals.totalWageExpense + settlement.expenseAmount,
+    advancesSettled: totals.advancesSettled + settlement.settledAdvanceAmount,
+    carryForward: totals.carryForward + settlement.carryForwardAdvance,
+    cashPaid: totals.cashPaid + settlement.payableBalance,
+  }), {
+    attendanceWages: 0,
+    labourEarnings: 0,
+    totalWageExpense: 0,
+    advancesSettled: 0,
+    carryForward: 0,
+    cashPaid: 0,
+  }), [registerRows]);
+  const exportRegister = () => {
+    const header = [
+      "Settlement No.",
+      "Settlement Date",
+      "Period",
+      "Attendance Wages",
+      "Labour Earnings",
+      "Total Wage Expense",
+      "Advances Settled",
+      "Carry-forward Advance",
+      "Cash Paid",
+      "Payment Account",
+      "Generated Voucher Number",
+      "Status",
+    ];
+    const rows = registerRows.map((settlement) => {
+      const linkedVoucher = linkedVoucherById.get(settlement.linkedVoucherId);
+      const linkedVoucherNumber = linkedVoucher ? getVoucherDisplayNumber(linkedVoucher) || linkedVoucher.voucherNumber : settlement.linkedVoucherNumber;
+      return [
+        settlement.settlementNumber,
+        settlement.settlementDate,
+        `${settlement.fromDate} to ${settlement.toDate}`,
+        settlement.attendanceWages,
+        settlement.pendingLabourEarnings,
+        settlement.expenseAmount,
+        settlement.settledAdvanceAmount,
+        settlement.carryForwardAdvance,
+        settlement.payableBalance,
+        accountById.get(settlement.linkedAccountId)?.name ?? "",
+        linkedVoucherNumber ?? "",
+        settlement.status,
+      ];
+    });
+    const csv = [header, ...rows]
+      .map((row) => row.map((value) => `"${String(value ?? "").replaceAll("\"", "\"\"")}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `labour-wage-settlements-${activeFarmId ?? "farm"}-${activeSeasonId ?? "season"}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="dashboard-page">
@@ -363,51 +455,135 @@ export function LabourWageSettlements() {
 
         <section className="record-panel">
           <div className="advances-heading">
-            <h2>Settlement history</h2>
-            <span>{historyLoading ? "Refreshing history..." : `${settlements.length} settlements in this farm and season`}</span>
+            <div>
+              <h2>Labour settlement register</h2>
+              <span>{historyLoading ? "Refreshing register..." : `${settlements.length} settlements in this farm and season`}</span>
+            </div>
+            <div className="module-inline-actions">
+              <button type="button" className="secondary-action" onClick={() => window.print()}><Printer size={16} /> Print</button>
+              <button type="button" className="secondary-action" onClick={exportRegister}><Download size={16} /> Export CSV</button>
+            </div>
           </div>
           {!settlements.length ? <p className="context-message">No wage settlements have been posted for this farm and season yet.</p> : (
+            <>
+              <div className="reports-kpis">
+                <article><span>Attendance wages</span><strong>{money(registerTotals.attendanceWages)}</strong></article>
+                <article><span>Labour earnings</span><strong>{money(registerTotals.labourEarnings)}</strong></article>
+                <article><span>Total wage expense</span><strong>{money(registerTotals.totalWageExpense)}</strong></article>
+                <article><span>Advances settled</span><strong>{money(registerTotals.advancesSettled)}</strong></article>
+                <article><span>Carry-forward advance</span><strong>{money(registerTotals.carryForward)}</strong></article>
+                <article><span>Cash paid</span><strong>{money(registerTotals.cashPaid)}</strong></article>
+              </div>
+              <div className="report-toolbar">
+                <label className="search-input">
+                  <Search size={16} />
+                  <input
+                    type="search"
+                    placeholder="Search settlement number, voucher, notes, or account"
+                    value={registerSearch}
+                    onChange={(event) => setRegisterSearch(event.target.value)}
+                  />
+                </label>
+                <label>
+                  <span>Status</span>
+                  <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}>
+                    <option value="all">All</option>
+                    <option value="posted">Posted</option>
+                    <option value="voided">Voided</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Payment account</span>
+                  <select value={paymentAccountFilter} onChange={(event) => setPaymentAccountFilter(event.target.value)}>
+                    <option value="all">All accounts</option>
+                    {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+                  </select>
+                </label>
+              </div>
             <div className="attendance-import-table-wrap report-wide-table">
               <table className="report-data-table">
                 <thead>
                   <tr>
-                    <th>Settlement</th>
-                    <th>Period</th>
-                    <th>Total earned</th>
-                    <th>Expense amount</th>
-                    <th>Settled advances</th>
-                    <th>Carry forward</th>
-                    <th>Linked voucher</th>
+                    <th>Settlement No.</th>
+                    <th>Settlement date</th>
+                    <th>Settlement period</th>
+                    <th>Attendance wages</th>
+                    <th>Labour earnings</th>
+                    <th>Total wage expense</th>
+                    <th>Advances settled</th>
+                    <th>Carry-forward advance</th>
+                    <th>Cash paid</th>
+                    <th>Payment account</th>
+                    <th>Generated voucher</th>
                     <th>Status</th>
-                    <th>Created</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {settlements.map((settlement) => {
+                  {registerRows.map((settlement) => {
                     const linkedVoucher = linkedVoucherById.get(settlement.linkedVoucherId);
+                    const linkedVoucherNumber = linkedVoucher
+                      ? getVoucherDisplayNumber(linkedVoucher) || linkedVoucher.voucherNumber
+                      : settlement.linkedVoucherNumber;
                     return (
                       <tr key={settlement.id}>
-                        <td><strong>{settlement.settlementNumber}</strong></td>
+                        <td><button type="button" className="worker-dialog__link" onClick={() => setSelectedSettlement(settlement)}>{settlement.settlementNumber}</button></td>
+                        <td>{settlement.settlementDate}</td>
                         <td>{settlement.fromDate} to {settlement.toDate}</td>
-                        <td>{money(settlement.totalEarned)}</td>
+                        <td>{money(settlement.attendanceWages)}</td>
+                        <td>{money(settlement.pendingLabourEarnings)}</td>
                         <td>{money(settlement.expenseAmount)}</td>
                         <td>{money(settlement.settledAdvanceAmount)}</td>
                         <td>{money(settlement.carryForwardAdvance)}</td>
+                        <td>{money(settlement.payableBalance)}</td>
+                        <td>{accountById.get(settlement.linkedAccountId)?.name ?? "-"}</td>
                         <td>
                           {linkedVoucher
-                            ? <button type="button" className="worker-dialog__link" onClick={() => navigate(`/workspace/expenses?recordId=${linkedVoucher.id}`)}>{getVoucherDisplayNumber(linkedVoucher) || linkedVoucher.voucherNumber}</button>
-                            : settlement.linkedVoucherNumber || "-"}
+                            ? <button type="button" className="worker-dialog__link" onClick={() => navigate(`/workspace/expenses?recordId=${linkedVoucher.id}&showSettlementVouchers=true`)}>{linkedVoucherNumber}</button>
+                            : linkedVoucherNumber || "-"}
                         </td>
                         <td>{settlement.status}</td>
-                        <td>{settlement.createdAt.slice(0, 10)}</td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </section>
+        {selectedSettlement ? (() => {
+          const linkedVoucher = linkedVoucherById.get(selectedSettlement.linkedVoucherId);
+          return (
+            <div className="worker-dialog-backdrop worker-action-backdrop" role="presentation" onClick={() => setSelectedSettlement(null)}>
+              <section className="worker-action-dialog account-ledger-dialog" role="dialog" aria-modal="true" aria-label="Labour settlement details" onClick={(event) => event.stopPropagation()}>
+                <header>
+                  <div>
+                    <h2>{selectedSettlement.settlementNumber}</h2>
+                    <p>{selectedSettlement.fromDate} to {selectedSettlement.toDate}</p>
+                  </div>
+                  <button aria-label={t("common.close")} type="button" onClick={() => setSelectedSettlement(null)}><X size={18} /></button>
+                </header>
+                <div className="worker-action-form">
+                  <div className="reports-kpis">
+                    <article><span>Settlement date</span><strong>{selectedSettlement.settlementDate}</strong></article>
+                    <article><span>Attendance wages</span><strong>{money(selectedSettlement.attendanceWages)}</strong></article>
+                    <article><span>Labour earnings</span><strong>{money(selectedSettlement.pendingLabourEarnings)}</strong></article>
+                    <article><span>Total wage expense</span><strong>{money(selectedSettlement.expenseAmount)}</strong></article>
+                    <article><span>Advances applied</span><strong>{money(selectedSettlement.settledAdvanceAmount)}</strong></article>
+                    <article><span>Carry-forward advance</span><strong>{money(selectedSettlement.carryForwardAdvance)}</strong></article>
+                    <article><span>Cash paid</span><strong>{money(selectedSettlement.payableBalance)}</strong></article>
+                    <article><span>Payment account</span><strong>{accountById.get(selectedSettlement.linkedAccountId)?.name ?? "-"}</strong></article>
+                  </div>
+                  {selectedSettlement.notes ? <p className="context-message">{selectedSettlement.notes}</p> : null}
+                  <footer className="worker-action-footer">
+                    <button type="button" onClick={() => setSelectedSettlement(null)}>Close</button>
+                    {linkedVoucher ? <button type="button" onClick={() => navigate(`/workspace/expenses?recordId=${linkedVoucher.id}&showSettlementVouchers=true`)}>View Generated Voucher <ExternalLink size={16} /></button> : null}
+                  </footer>
+                </div>
+              </section>
+            </div>
+          );
+        })() : null}
       </main>
     </div>
   );

@@ -14,7 +14,7 @@ import { getActiveLabourWageSettlements, getCashAffectingVouchers, outstandingLa
 import { translateExpenseCategory, translateExpenseSubcategory, translateSaleType, translateSalesStatus } from "../../lib/systemTranslations";
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
 import { getVoucherDisplayNumber } from "../../lib/vouchers";
-import { getActiveVouchers, loadWorkspaceVouchers } from "../../lib/voucherCollections";
+import { getActiveVouchers, getVisibleVouchers, loadWorkspaceVouchers } from "../../lib/voucherCollections";
 import {
   buildPartnerLiabilityPositions,
   calculatePartnerLiabilityBalance,
@@ -685,9 +685,10 @@ export function Reports() {
   const settledAdvancesTotal = useMemo(() => totalSettledAdvances(activeSettlements), [activeSettlements]);
   const outstandingAdvancePool = useMemo(() => outstandingLabourAdvances(advanceRows, activeSettlements), [activeSettlements, advanceRows]);
   const activeVouchers = useMemo(() => getActiveVouchers(vouchers), [vouchers]);
+  const generalExpenseVouchers = useMemo(() => getVisibleVouchers(activeVouchers, { visibility: "general-expenses" }), [activeVouchers]);
   const cashAffectingVouchers = useMemo(() => getCashAffectingVouchers(activeVouchers), [activeVouchers]);
 
-  const voucherBaseRows = useMemo(() => activeVouchers
+  const voucherBaseRows = useMemo(() => generalExpenseVouchers
     .filter((item) => {
       const lines = voucherReportItems(item);
       return (!accountId || item.accountId === accountId)
@@ -699,7 +700,7 @@ export function Reports() {
           ...lines.flatMap((line) => [line.category, line.subcategory, line.description, line.remarks ?? "", String(line.amount)]),
         ], item.amount);
     }),
-  [accountId, accountName, activeVouchers, matches]);
+  [accountId, accountName, generalExpenseVouchers, matches]);
   const voucherRows = useMemo(() => voucherBaseRows
     .filter((item) => {
       const lines = voucherReportItems(item);
