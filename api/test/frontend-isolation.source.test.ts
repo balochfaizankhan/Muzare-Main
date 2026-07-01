@@ -89,6 +89,19 @@ test("attendance reports scope cached tenant data and selected date range", asyn
   assert.match(reports, /matches\(item\.date, \[labourName\(item\.labourerId\), labourer\?\.group, item\.status\]\)/);
 });
 
+test("wage rate management is wired through shared permissions, sync storage, and reports", async () => {
+  const apiPermissions = await source("api/src/permissions.ts");
+  const syncRoute = await source("api/src/routes/operational-sync.ts");
+  const syncService = await source("web/src/services/syncService.ts");
+  const reports = await source("web/src/pages/workspace/Reports.tsx");
+  const wageRatesPage = await source("web/src/pages/workspace/WageRates.tsx");
+  assert.match(apiPermissions, /"wages"/);
+  assert.match(syncRoute, /"wageRate"/);
+  assert.match(syncService, /wageRate: offlineDb\.wageRates/);
+  assert.match(reports, /report === "wage-rates"/);
+  assert.match(wageRatesPage, /bulkEntry/);
+});
+
 test("operational writes queue locally before background sync", async () => {
   const sync = await source("web/src/services/syncService.ts");
   assert.match(sync, /const existing = await tableFor\(entity\)\.get\(record\.id\);[\s\S]*const operation = existing \? "edit" : "create";[\s\S]*await queueOfflineRecord\(entity, nextRecord, operation\);\s+if \(navigator\.onLine\) void syncPendingRecords\(\);/);

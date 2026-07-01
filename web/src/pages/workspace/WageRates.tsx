@@ -1,0 +1,327 @@
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
+import { SearchInput } from "../../components/SearchInput";
+import { SubpageHeader } from "../../components/SubpageHeader";
+import { bulkUpsertWageRates, fetchWageRates, validateWageRateOverlap, type WageRateBulkRowInput } from "../../lib/api";
+import { compareLabourers, getActiveFarmId, getActiveSeasonId, offlineDb, workspaceRecords, type Labourer, type WageRate } from "../../lib/offline-db";
+import { canCreate, canEdit } from "../../lib/permissions";
+import { formatMoney } from "../../lib/format";
+import { compareWageRates, getWageRateStatus, normalizeHalfDayRate } from "../../lib/wageRates";
+import { useAuth } from "../../auth/AuthProvider";
+
+const today = () => new Date().toISOString().slice(0, 10);
+const money = formatMoney;
+
+type RowDraft = {
+  dailyRate: string;
+  halfDayRate: string;
+  rateType: WageRate["rateType"];
+  notes: string;
+};
+
+const emptyDraft: RowDraft = {
+  dailyRate: "",
+  halfDayRate: "",
+  rateType: "daily",
+  notes: "",
+};
+
+export function WageRates() {
+  const { t } = useTranslation();
+  const { token, user } = useAuth();
+  const workspaceId = user?.workspaceId ?? "";
+  const [labourers, setLabourers] = useState<Labourer[]>([]);
+  const [rates, setRates] = useState<WageRate[]>([]);
+  const [search, setSearch] = useState("");
+  const [effectiveFrom, setEffectiveFrom] = useState(today());
+  const [effectiveTo, setEffectiveTo] = useState("");
+  const [bulkDailyRate, setBulkDailyRate] = useState("");
+  const [bulkHalfDayRate, setBulkHalfDayRate] = useState("");
+  const [bulkRateType, setBulkRateType] = useState<WageRate["rateType"]>("daily");
+  const [bulkNotes, setBulkNotes] = useState("");
+  const [closePrevious, setClosePrevious] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [overlapSummary, setOverlapSummary] = useState<string>("");
+  const canManage = Boolean(user && workspaceId && (canCreate(user, "wages", workspaceId) || canEdit(user, "wages", workspaceId)));
+  const activeFarmId = getActiveFarmId();
+  const activeSeasonId = getActiveSeasonId();
+
+  const refresh = useCallback(async () => {
+    const nextLabourers = await workspaceRecords(offlineDb.labourers);
+    setLabourers(nextLabourers.sort(compareLabourers));
+    if (!activeFarmId || !activeSeasonId) {
+      setRates([]);
+      return;
+    }
+    if (token && workspaceId && navigator.onLine) {
+      try {
+        const response = await fetchWageRates(token, workspaceId, {
+          farmId: activeFarmId!,
+          seasonId: activeSeasonId!,
+          includeInactive: true,
+        });
+        await offlineDb.wageRates.bulkPut(response.rates.map((rate) => ({ ...rate, pendingSync: false })));
+      } catch {
+        // keep cache
+      }
+    }
+    const nextRates = await workspaceRecords(offlineDb.wageRates, { includeDeleted: true });
+    setRates(nextRates.sort(compareWageRates));
+  }, [activeFarmId, activeSeasonId, token, workspaceId]);
+
+  useEffect(() => {
+    void refresh();
+    const handle = () => void refresh();
+    window.addEventListener("muzare-data-refresh", handle);
+    window.addEventListener("muzare-local-data-change", handle);
+    return () => {
+      window.removeEventListener("muzare-data-refresh", handle);
+      window.removeEventListener("muzare-local-data-change", handle);
+    };
+  }, [refresh]);
+
+  const todayKey = today();
+  const filteredLabourers = useMemo(() => labourers.filter((labourer) => {
+    const term = search.trim().toLowerCase();
+    return !term || labourer.name.toLowerCase().includes(term) || labourer.group.toLowerCase().includes(term);
+  }), [labourers, search]);
+  const ratesByLabourer = useMemo(() => {
+    const map = new Map<string, WageRate[]>();
+    for (const rate of rates) {
+      const current = map.get(rate.labourerId) ?? [];
+      current.push(rate);
+      map.set(rate.labourerId, current);
+    }
+    return map;
+  }, [rates]);
+  const currentRates = useMemo(() => labourers.flatMap((labourer) => {
+    const current = (ratesByLabourer.get(labourer.id) ?? [])
+      .filter((rate) => getWageRateStatus(rate, todayKey) === "active")
+      .sort(compareWageRates)[0];
+    return current ? [{ labourer, rate: current }] : [];
+  }), [labourers, ratesByLabourer, todayKey]);
+
+  const toggleLabour = (labourerId: string) => {
+    setSelectedIds((current) => current.includes(labourerId)
+      ? current.filter((item) => item !== labourerId)
+      : [...current, labourerId]);
+  };
+
+  const applyBulkToSelected = () => {
+    setDrafts((current) => Object.fromEntries([
+      ...Object.entries(current),
+      ...selectedIds.map((labourerId) => [labourerId, {
+        dailyRate: bulkDailyRate,
+        halfDayRate: bulkHalfDayRate,
+        rateType: bulkRateType,
+        notes: bulkNotes,
+      } satisfies RowDraft]),
+    ]));
+  };
+
+  const updateDraft = (labourerId: string, update: Partial<RowDraft>) => {
+    setDrafts((current) => ({
+      ...current,
+      [labourerId]: { ...(current[labourerId] ?? emptyDraft), ...update },
+    }));
+  };
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setError("");
+    setSuccess("");
+    setOverlapSummary("");
+    if (!canManage) {
+      setError(t("common.viewOnlyAccess"));
+      return;
+    }
+    if (!activeFarmId || !activeSeasonId) {
+      setError(t("farmsPage.noActiveSeason"));
+      return;
+    }
+    if (!navigator.onLine) {
+      setError(t("wageRatesPage.onlineRequired"));
+      return;
+    }
+    const rows: WageRateBulkRowInput[] = selectedIds.flatMap((labourerId) => {
+      const draft = drafts[labourerId];
+      const dailyRate = Number(draft?.dailyRate ?? "");
+      if (!Number.isFinite(dailyRate) || dailyRate < 0) return [];
+      const halfDayRate = draft?.halfDayRate ? Number(draft.halfDayRate) : undefined;
+      return [{
+        labourerId,
+        dailyRate,
+        halfDayRate,
+        rateType: draft?.rateType ?? bulkRateType,
+        notes: draft?.notes ?? bulkNotes,
+      }];
+    });
+    if (!rows.length) {
+      setError(t("wageRatesPage.noSelectedRates"));
+      return;
+    }
+    setSaving(true);
+    try {
+        const preview = await validateWageRateOverlap(token!, workspaceId, {
+        farmId: activeFarmId!,
+        seasonId: activeSeasonId!,
+        effectiveFrom,
+        effectiveTo: effectiveTo || null,
+        rows,
+      });
+      if (!preview.valid && !closePrevious) {
+        setOverlapSummary(preview.overlaps.map((item) => `${item.labourName ?? item.labourerId}: ${item.overlaps.length}`).join(" · "));
+        setError(t("wageRatesPage.overlapDetected"));
+        return;
+      }
+      const response = await bulkUpsertWageRates(token!, workspaceId, {
+        farmId: activeFarmId!,
+        seasonId: activeSeasonId!,
+        effectiveFrom,
+        effectiveTo: effectiveTo || null,
+        rateType: bulkRateType,
+        notes: bulkNotes,
+        closePrevious,
+        rows,
+      });
+      await offlineDb.wageRates.bulkPut(response.rates.map((rate) => ({ ...rate, pendingSync: false })));
+      setSuccess(t("wageRatesPage.savedSuccess", { count: response.rates.length }));
+      setSelectedIds([]);
+      setDrafts({});
+      window.dispatchEvent(new Event("muzare-local-data-change"));
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : t("wageRatesPage.saveFailed"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="dashboard-page">
+      <SubpageHeader title={t("wageRatesPage.title")} />
+      <main className="subpage module-workspace">
+        <section className="workspace-intro">
+          <div>
+            <h2>{t("wageRatesPage.heading")}</h2>
+            <p>{t("wageRatesPage.description")}</p>
+          </div>
+        </section>
+
+        <section className="record-panel">
+          <div className="advances-heading">
+            <h2>{t("wageRatesPage.currentRates")}</h2>
+            <span>{t("wageRatesPage.activeRateCount", { count: currentRates.length })}</span>
+          </div>
+          {!currentRates.length ? <p className="context-message">{t("wageRatesPage.noCurrentRates")}</p> : (
+            <div className="team-list">
+              {currentRates.map(({ labourer, rate }) => (
+                <article key={`${labourer.id}:${rate.id}`} className="team-card">
+                  <div>
+                    <strong>{labourer.name}</strong>
+                    <span>{labourer.group || "-"}</span>
+                    <small>{t("wageRatesPage.effectiveRange", { from: rate.effectiveFrom, to: rate.effectiveTo || t("common.current") })}</small>
+                  </div>
+                  <div>
+                    <strong>{money(rate.dailyRate)}</strong>
+                    <small>{t("wageRatesPage.halfDayRate")}: {money(normalizeHalfDayRate(rate))}</small>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="record-panel">
+          <div className="advances-heading">
+            <h2>{t("wageRatesPage.bulkEntry")}</h2>
+            <span>{t("wageRatesPage.bulkEntryDescription")}</span>
+          </div>
+          <form className="module-form wage-rates-form" onSubmit={(event) => void submit(event)}>
+            <div className="advances-filter-row">
+              <label className="advances-filter-field"><span>{t("wageRatesPage.effectiveFrom")}</span><input required type="date" value={effectiveFrom} onChange={(event) => setEffectiveFrom(event.target.value)} /></label>
+              <label className="advances-filter-field"><span>{t("wageRatesPage.effectiveTo")}</span><input type="date" value={effectiveTo} onChange={(event) => setEffectiveTo(event.target.value)} /></label>
+              <label className="advances-filter-field"><span>{t("wageRatesPage.rateType")}</span><select value={bulkRateType} onChange={(event) => setBulkRateType(event.target.value as WageRate["rateType"])}><option value="daily">{t("wageRatesPage.dailyRateType")}</option><option value="half_day">{t("wageRatesPage.halfDayRateType")}</option><option value="monthly">{t("wageRatesPage.monthlyRateType")}</option><option value="custom">{t("wageRatesPage.customRateType")}</option></select></label>
+            </div>
+            <div className="advances-filter-row">
+              <label className="advances-filter-field"><span>{t("wageRatesPage.dailyRate")}</span><input inputMode="decimal" type="number" min="0" step="0.01" value={bulkDailyRate} onChange={(event) => setBulkDailyRate(event.target.value)} /></label>
+              <label className="advances-filter-field"><span>{t("wageRatesPage.halfDayRate")}</span><input inputMode="decimal" type="number" min="0" step="0.01" value={bulkHalfDayRate} onChange={(event) => setBulkHalfDayRate(event.target.value)} /></label>
+              <label className="advances-filter-field advances-filter-field--full"><span>{t("wageRatesPage.notes")}</span><input value={bulkNotes} onChange={(event) => setBulkNotes(event.target.value)} /></label>
+            </div>
+            <div className="permission-dialog__meta">
+              <label className="compact-checkbox"><input type="checkbox" checked={closePrevious} onChange={(event) => setClosePrevious(event.target.checked)} />{t("wageRatesPage.closePrevious")}</label>
+              <button className="secondary-action" type="button" onClick={applyBulkToSelected}>{t("wageRatesPage.applyBulkRate")}</button>
+            </div>
+            <SearchInput placeholder={t("wageRatesPage.searchLabour")} value={search} onChange={setSearch} />
+            <div className="team-list">
+              {filteredLabourers.map((labourer) => {
+                const draft = drafts[labourer.id] ?? emptyDraft;
+                const latestRate = (ratesByLabourer.get(labourer.id) ?? []).sort(compareWageRates)[0];
+                return (
+                  <article key={labourer.id} className="team-card">
+                    <div>
+                      <label className="compact-checkbox">
+                        <input type="checkbox" checked={selectedIds.includes(labourer.id)} onChange={() => toggleLabour(labourer.id)} />
+                        <strong>{labourer.name}</strong>
+                      </label>
+                      <span>{labourer.group || "-"}</span>
+                      <small>{latestRate ? `${t("wageRatesPage.currentRate")}: ${money(latestRate.dailyRate)}` : t("wageRatesPage.noCurrentRate")}</small>
+                    </div>
+                    <div className="wage-rate-entry-grid">
+                      <input aria-label={`${labourer.name} ${t("wageRatesPage.dailyRate")}`} inputMode="decimal" type="number" min="0" step="0.01" value={draft.dailyRate} onChange={(event) => updateDraft(labourer.id, { dailyRate: event.target.value })} placeholder={t("wageRatesPage.dailyRate")} />
+                      <input aria-label={`${labourer.name} ${t("wageRatesPage.halfDayRate")}`} inputMode="decimal" type="number" min="0" step="0.01" value={draft.halfDayRate} onChange={(event) => updateDraft(labourer.id, { halfDayRate: event.target.value })} placeholder={t("wageRatesPage.halfDayRate")} />
+                      <input aria-label={`${labourer.name} ${t("wageRatesPage.notes")}`} value={draft.notes} onChange={(event) => updateDraft(labourer.id, { notes: event.target.value })} placeholder={t("wageRatesPage.notes")} />
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+            {overlapSummary ? <p className="form-error">{overlapSummary}</p> : null}
+            {error ? <p className="form-error">{error}</p> : null}
+            {success ? <p className="context-message">{success}</p> : null}
+            <button disabled={saving || !canManage} type="submit">{saving ? t("advancesPage.saving") : t("wageRatesPage.saveRates")}</button>
+          </form>
+        </section>
+
+        <section className="record-panel">
+          <div className="advances-heading">
+            <h2>{t("wageRatesPage.history")}</h2>
+            <span>{t("wageRatesPage.historyDescription")}</span>
+          </div>
+          {!rates.length ? <p className="context-message">{t("wageRatesPage.noHistory")}</p> : (
+            <div className="attendance-import-table-wrap report-wide-table">
+              <table className="report-data-table">
+                <thead>
+                  <tr>
+                    <th>{t("reportsPage.labour")}</th>
+                    <th>{t("wageRatesPage.effectiveFrom")}</th>
+                    <th>{t("wageRatesPage.effectiveTo")}</th>
+                    <th>{t("wageRatesPage.dailyRate")}</th>
+                    <th>{t("wageRatesPage.halfDayRate")}</th>
+                    <th>{t("common.status")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rates.map((rate) => (
+                    <tr key={rate.id}>
+                      <td>{labourers.find((labourer) => labourer.id === rate.labourerId)?.name ?? rate.labourerId}</td>
+                      <td>{rate.effectiveFrom}</td>
+                      <td>{rate.effectiveTo || "-"}</td>
+                      <td>{money(rate.dailyRate)}</td>
+                      <td>{money(normalizeHalfDayRate(rate))}</td>
+                      <td>{t(`wageRatesPage.status.${getWageRateStatus(rate, todayKey)}`)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      </main>
+    </div>
+  );
+}

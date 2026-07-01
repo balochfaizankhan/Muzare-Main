@@ -202,6 +202,139 @@ test("attendance can be cleared idempotently only inside the active tenant conte
   assert.equal((await request(alpha.token, "GET", reportPath)).json().records.some((record: { id: string }) => record.id === attendanceId), false);
 });
 
+test("wage rates block overlapping ranges unless the previous rate is explicitly closed", async () => {
+  const labourerId = randomUUID();
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", labourerId, {
+    name: "Rate Worker",
+    group: "General",
+    dailyWage: 90,
+  }))).statusCode, 200);
+
+  const firstRate = await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/wage-rates/bulk`, {
+    farmId: alpha.farmId,
+    seasonId: alpha.seasonId,
+    effectiveFrom: "2026-06-01",
+    effectiveTo: "2026-06-15",
+    rows: [{ labourerId, dailyRate: 50 }],
+  });
+  assert.equal(firstRate.statusCode, 200);
+
+  const overlapPreview = await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/wage-rates/validate-overlap`, {
+    farmId: alpha.farmId,
+    seasonId: alpha.seasonId,
+    effectiveFrom: "2026-06-10",
+    effectiveTo: "2026-06-20",
+    rows: [{ labourerId, dailyRate: 55 }],
+  });
+  assert.equal(overlapPreview.statusCode, 200);
+  assert.equal(overlapPreview.json().valid, false);
+  assert.equal(overlapPreview.json().overlaps.length, 1);
+
+  const blocked = await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/wage-rates/bulk`, {
+    farmId: alpha.farmId,
+    seasonId: alpha.seasonId,
+    effectiveFrom: "2026-06-10",
+    effectiveTo: "2026-06-20",
+    rows: [{ labourerId, dailyRate: 55 }],
+  });
+  assert.equal(blocked.statusCode, 409);
+  assert.match(String(blocked.json().message), /overlap/i);
+
+  const closedPrevious = await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/wage-rates/bulk`, {
+    farmId: alpha.farmId,
+    seasonId: alpha.seasonId,
+    effectiveFrom: "2026-06-16",
+    effectiveTo: "2026-06-30",
+    closePrevious: true,
+    rows: [{ labourerId, dailyRate: 60 }],
+  });
+  assert.equal(closedPrevious.statusCode, 200);
+
+  const rates = await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/wage-rates?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}&labourerId=${labourerId}&includeInactive=true`);
+  assert.equal(rates.statusCode, 200);
+  assert.equal(rates.json().rates.length, 2);
+});
+
+test("wage calculation applies the correct rate by attendance date and flags missing rates", async () => {
+  const labourerId = randomUUID();
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", labourerId, {
+    name: "Calculation Worker",
+    group: "General",
+    dailyWage: 90,
+  }))).statusCode, 200);
+
+  assert.equal((await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/wage-rates/bulk`, {
+    farmId: alpha.farmId,
+    seasonId: alpha.seasonId,
+    effectiveFrom: "2026-06-01",
+    effectiveTo: "2026-06-15",
+    rows: [{ labourerId, dailyRate: 50 }],
+  })).statusCode, 200);
+
+  assert.equal((await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/wage-rates/bulk`, {
+    farmId: alpha.farmId,
+    seasonId: alpha.seasonId,
+    effectiveFrom: "2026-06-16",
+    effectiveTo: "2026-06-30",
+    closePrevious: true,
+    rows: [{ labourerId, dailyRate: 60, halfDayRate: 35 }],
+  })).statusCode, 200);
+
+  const attendanceRows = [
+    { id: randomUUID(), date: "2026-06-10", status: "present" },
+    { id: randomUUID(), date: "2026-06-20", status: "present" },
+    { id: randomUUID(), date: "2026-06-21", status: "half_day" },
+    { id: randomUUID(), date: "2026-07-01", status: "present" },
+  ];
+  for (const row of attendanceRows) {
+    assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "attendance", row.id, {
+      labourerId,
+      date: row.date,
+      status: row.status,
+    }))).statusCode, 200);
+  }
+
+  const response = await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/wage-rates/calculate?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}&from=2026-06-01&to=2026-07-01&labourIds=${labourerId}`);
+  assert.equal(response.statusCode, 200);
+  const body = response.json();
+  assert.equal(body.rows.length, 1);
+  assert.equal(body.rows[0].presentDays, 3);
+  assert.equal(body.rows[0].halfDays, 1);
+  assert.equal(body.rows[0].payableDays, 3.5);
+  assert.equal(body.rows[0].totalWage, 145);
+  assert.deepEqual(body.rows[0].missingRateDates, ["2026-07-01"]);
+  assert.equal(body.unresolved.length, 1);
+  assert.equal(body.unresolved[0].date, "2026-07-01");
+});
+
+test("viewers can read wage rates but cannot bulk edit them", async () => {
+  const labourerId = randomUUID();
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", labourerId, {
+    name: "Viewer Worker",
+    group: "General",
+    dailyWage: 75,
+  }))).statusCode, 200);
+
+  assert.equal((await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/wage-rates/bulk`, {
+    farmId: alpha.farmId,
+    seasonId: alpha.seasonId,
+    effectiveFrom: "2026-06-01",
+    rows: [{ labourerId, dailyRate: 42 }],
+  })).statusCode, 200);
+
+  const list = await request(viewer.token, "GET", `/v1/workspace/${alpha.workspaceId}/wage-rates?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}`);
+  assert.equal(list.statusCode, 200);
+  assert.ok(Array.isArray(list.json().rates));
+
+  const blocked = await request(viewer.token, "POST", `/v1/workspace/${alpha.workspaceId}/wage-rates/bulk`, {
+    farmId: alpha.farmId,
+    seasonId: alpha.seasonId,
+    effectiveFrom: "2026-06-15",
+    rows: [{ labourerId, dailyRate: 45 }],
+  });
+  assert.equal(blocked.statusCode, 403);
+});
+
 test("dispatch masters are tenant scoped and used masters remain protected", async () => {
   const alphaVehicleId = randomUUID();
   const bravoVehicleId = randomUUID();

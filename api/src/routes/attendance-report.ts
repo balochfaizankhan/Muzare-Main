@@ -5,6 +5,7 @@ import { requireUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { farms, operationalRecords, seasons, userSessions } from "../db/schema.js";
+import { calculateStatusWage, listWageRateRows, resolveApplicableWageRate } from "../lib/wage-rates.js";
 import { isDeletedOperationalPayload } from "../operational-record-state.js";
 import { hasPermission } from "../permissions.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
@@ -83,6 +84,7 @@ export async function attendanceReportRoutes(app: FastifyInstance): Promise<void
       return reply.code(403).send({ message: "One or more labour filters do not belong to the selected workspace farm." });
     }
 
+    const wageRates = await db.transaction((tx) => listWageRateRows(tx, workspaceId, farmId, seasonId));
     const attendanceRecords = await db.select().from(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, workspaceId),
       eq(operationalRecords.farmId, farmId),
@@ -98,9 +100,15 @@ export async function attendanceReportRoutes(app: FastifyInstance): Promise<void
         || (status && payload.status !== status)) return [];
       const labourer = labourById.get(payload.labourerId);
       if (!labourer) return [];
+      const appliedRate = resolveApplicableWageRate(wageRates, labourer.id, payload.date);
       return [{
         id: record.clientRecordId, labourerId: labourer.id, labourName: labourer.name,
-        dailyWage: labourer.dailyWage, date: payload.date, status: payload.status as "present" | "half_day" | "absent",
+        dailyWage: labourer.dailyWage,
+        appliedDailyRate: appliedRate?.payload.dailyRate ?? labourer.dailyWage,
+        appliedHalfDayRate: appliedRate?.payload.halfDayRate ?? labourer.dailyWage / 2,
+        rateRecordId: appliedRate?.clientRecordId ?? null,
+        date: payload.date,
+        status: payload.status as "present" | "half_day" | "absent",
       }];
     }).sort((a, b) => a.date.localeCompare(b.date) || a.labourName.localeCompare(b.labourName));
     const advanceRecords = await db.select().from(operationalRecords).where(and(
@@ -126,7 +134,23 @@ export async function attendanceReportRoutes(app: FastifyInstance): Promise<void
         const halfDays = labourAttendance.filter((record) => record.status === "half_day").length;
         const absentDays = labourAttendance.filter((record) => record.status === "absent").length;
         const payableDays = presentDays + halfDays * 0.5;
-        return { ...labourer, presentDays, halfDays, absentDays, payableDays, totalWage: payableDays * labourer.dailyWage, records: labourAttendance };
+        const totalWage = labourAttendance.reduce((sum, record) => sum + calculateStatusWage(record.status, {
+          dailyRate: record.appliedDailyRate ?? labourer.dailyWage,
+          halfDayRate: record.appliedHalfDayRate ?? labourer.dailyWage / 2,
+        }), 0);
+        const distinctRates = [...new Set(labourAttendance
+          .map((record) => Number(record.appliedDailyRate ?? labourer.dailyWage))
+          .filter((value) => Number.isFinite(value)))];
+        return {
+          ...labourer,
+          presentDays,
+          halfDays,
+          absentDays,
+          payableDays,
+          totalWage,
+          wageRateDisplay: distinctRates.length <= 1 ? `${distinctRates[0] ?? labourer.dailyWage}` : "Mixed",
+          records: labourAttendance,
+        };
       })
       .filter((summary) => summary.records.length > 0);
     return {

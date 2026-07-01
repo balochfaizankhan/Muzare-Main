@@ -21,7 +21,7 @@ import {
 } from "../../lib/api";
 import { roleModulePermissions } from "../../lib/permissions";
 
-const modules: WorkspaceModule[] = ["dashboard", "workforce", "attendance", "advances", "expenses", "sales", "dispatch", "inventory", "accounts", "reports", "settings", "team"];
+const modules: WorkspaceModule[] = ["dashboard", "workforce", "attendance", "advances", "wages", "expenses", "sales", "dispatch", "inventory", "accounts", "reports", "settings", "team"];
 const actions: WorkspaceModuleAction[] = ["view", "create", "edit", "delete", "approve", "export"];
 const roles: WorkspaceRole[] = ["workspace_owner", "workspace_manager", "supervisor", "accountant", "operator", "viewer"];
 const blankInvite = { email: "", phone: "", role: "viewer" as WorkspaceRole, farmAccessMode: "all" as FarmAccessMode, farmIds: [] as string[] };

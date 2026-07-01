@@ -36,11 +36,13 @@ import {
   type PartnerEntry,
   type Sale,
   type Voucher,
+  type WageRate,
 } from "../../lib/offline-db";
+import { compareWageRates, getWageRateStatus, normalizeHalfDayRate, summarizeAttendanceWages } from "../../lib/wageRates";
 import { deleteOperationalRecord } from "../../services/syncService";
 import i18n from "../../i18n";
 
-type Report = "attendance" | "advances" | "expenditures" | "sales" | "dispatch" | "partner-position" | "account-ledger";
+type Report = "attendance" | "advances" | "wage-rates" | "expenditures" | "sales" | "dispatch" | "partner-position" | "account-ledger";
 type SortOrder = "desc" | "asc";
 type SalesDateType = "saleDate" | "dispatchDate" | "deliveryDate" | "paymentDate" | "createdDate";
 type DispatchDateType = "dispatchDate" | "saleDate" | "createdDate";
@@ -48,6 +50,7 @@ type SalesTypeFilter = "all" | "dispatch_sale" | "farm_direct_sale";
 type ReportViewState = {
   attendance: "register" | "summary";
   advances: "summary" | "log";
+  "wage-rates": "list";
   expenditures: "summary" | "log";
   sales: "list";
   dispatch: "list";
@@ -81,10 +84,11 @@ type AccountLedgerReportRow = {
   partnerLiabilityGroup?: PartnerLiabilityLedgerGroupKey;
 };
 
-const reportOptions: Report[] = ["attendance", "advances", "expenditures", "sales", "dispatch", "partner-position", "account-ledger"];
+const reportOptions: Report[] = ["attendance", "advances", "wage-rates", "expenditures", "sales", "dispatch", "partner-position", "account-ledger"];
 const defaultViews: ReportViewState = {
   attendance: "register",
   advances: "summary",
+  "wage-rates": "list",
   expenditures: "summary",
   sales: "list",
   dispatch: "list",
@@ -405,6 +409,7 @@ export function Reports() {
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
   const [advances, setAdvances] = useState<Advance[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [wageRates, setWageRates] = useState<WageRate[]>([]);
   const [entries, setEntries] = useState<PartnerEntry[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
   const [dispatches, setDispatches] = useState<Dispatch[]>([]);
@@ -424,15 +429,17 @@ export function Reports() {
       workspaceRecords(offlineDb.attendance),
       loadWorkspaceVouchers({ includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }),
       workspaceRecords(offlineDb.advances),
+      workspaceRecords(offlineDb.wageRates, { includeDeleted: true }),
       workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }),
       workspaceRecords(offlineDb.partnerEntries),
       workspaceRecords(offlineDb.sales),
       workspaceRecords(offlineDb.dispatches),
-    ]).then(([nextLabourers, nextAttendance, nextVouchers, nextAdvances, nextAccounts, nextEntries, nextSales, nextDispatches]) => {
+    ]).then(([nextLabourers, nextAttendance, nextVouchers, nextAdvances, nextWageRates, nextAccounts, nextEntries, nextSales, nextDispatches]) => {
       setLabourers(nextLabourers.sort(compareLabourers));
       setAttendance(nextAttendance);
       setVouchers(nextVouchers);
       setAdvances(nextAdvances);
+      setWageRates(nextWageRates);
       setAccounts(nextAccounts);
       setEntries(nextEntries);
       setSales(nextSales);
@@ -535,7 +542,7 @@ export function Reports() {
     setTo(todayKey());
   };
 
-  const labourFilterActive = (report === "attendance" || report === "advances") && selectedLabourerIds.length > 0;
+  const labourFilterActive = (report === "attendance" || report === "advances" || report === "wage-rates") && selectedLabourerIds.length > 0;
   const filtered = Boolean(search || from || to || accountId || groupFilter || labourFilterActive || category || subcategory || status || amountMin || amountMax || buyerFilter || productFilter || vehicleFilter || paymentStatusFilter);
   const switchReport = (next: Report) => {
     setReport(next);
@@ -576,14 +583,33 @@ export function Reports() {
     .filter((labourer) => matchesGroup(labourer))
     .filter((labourer) => matchesLabourFilter(labourer.id))
     .map((labourer) => {
-      const records = attendanceRows.filter((item) => item.labourerId === labourer.id);
-      const present = records.filter((item) => item.status === "present").length;
-      const halfDay = records.filter((item) => item.status === "half_day").length;
-      const absent = records.filter((item) => item.status === "absent").length;
-      const payable = present + halfDay * 0.5;
-      return { labourer, records, present, halfDay, absent, payable, wage: payable * labourer.dailyWage };
+      const summary = summarizeAttendanceWages(
+        labourer.id,
+        attendanceRows.filter((item) => item.labourerId === labourer.id),
+        wageRates,
+        labourer.dailyWage,
+      );
+      return {
+        labourer,
+        records: summary.records,
+        present: summary.present,
+        halfDay: summary.halfDay,
+        absent: summary.absent,
+        payable: summary.payable,
+        wage: summary.totalWage,
+        wageRateLabel: summary.wageRateLabel,
+        missingRateDates: summary.missingRateDates,
+      };
     })
-    .filter((item) => item.records.length > 0), [attendanceRows, labourers]);
+    .filter((item) => item.records.length > 0), [attendanceRows, labourers, wageRates]);
+  const wageRateReportRows = useMemo(() => wageRates
+    .filter((rate) => {
+      const labourer = labourById.get(rate.labourerId);
+      return matchesGroup(labourer)
+        && matchesLabourFilter(rate.labourerId)
+        && matches(rate.effectiveFrom, [labourer?.name, labourer?.group, rate.notes, rate.rateType, getWageRateStatus(rate, todayKey())]);
+    })
+    .sort(compareWageRates), [labourById, matches, selectedLabourerIds, wageRates]);
   const attendanceDates = useMemo(() => buildDateColumns(from, to, attendanceRows), [attendanceRows, from, to]);
   const attendanceDateTotals = useMemo(
     () => attendanceDates.map((date) => attendanceSummary.reduce(
@@ -965,7 +991,7 @@ export function Reports() {
         item.halfDay,
         formatNumber(item.payable),
         ...attendanceDates.map((date) => attendanceMark(item.records.find((record) => record.date === date)?.status)),
-        item.labourer.dailyWage,
+        item.wageRateLabel,
         item.wage,
       ]),
       [
@@ -1112,7 +1138,7 @@ export function Reports() {
               : (["dispatchDate", "saleDate", "createdDate"] as DispatchDateType[]).map((item) => <option key={item} value={item}>{t(`reportsPage.dispatchDateTypes.${item}`)}</option>)}
           </ClearableSelect>}
 
-          {report === "attendance" && <>
+          {(report === "attendance" || report === "wage-rates") && <>
             <ClearableSelect aria-label={t("reportsPage.group")} value={groupFilter} onChange={setGroupFilter}>
               <option value="">{t("reportsPage.allGroups")}</option>
               {labourGroups.map((group) => <option key={group} value={group}>{group}</option>)}
@@ -1125,7 +1151,7 @@ export function Reports() {
               onChange={setSelectedLabourerIds}
               placeholder={t("common.searchLabour")}
             />
-            {views.attendance === "summary" && <ClearableSelect aria-label={t("reportsPage.status")} value={status} onChange={setStatus}>
+            {report === "attendance" && views.attendance === "summary" && <ClearableSelect aria-label={t("reportsPage.status")} value={status} onChange={setStatus}>
               <option value="">{t("reportsPage.allStatuses")}</option>
               <option value="present">{t("reportsPage.present")}</option>
               <option value="half_day">{t("reportsPage.halfDay")}</option>
@@ -1267,7 +1293,7 @@ export function Reports() {
                         </td>
                       );
                     })}
-                    <td>{money(item.labourer.dailyWage)}</td>
+                    <td>{item.wageRateLabel === "Mixed" ? t("reportsPage.mixedRates") : money(Number(item.wageRateLabel ?? item.labourer.dailyWage))}</td>
                     <td>{money(item.wage)}</td>
                   </tr>)}
                 </tbody>
@@ -1320,7 +1346,7 @@ export function Reports() {
                       </td>
                     );
                   })}
-                  <td>{money(item.labourer.dailyWage)}</td>
+                  <td>{item.wageRateLabel === "Mixed" ? t("reportsPage.mixedRates") : money(Number(item.wageRateLabel ?? item.labourer.dailyWage))}</td>
                   <td>{money(item.wage)}</td>
                 </tr>)}
               </tbody>
@@ -1357,6 +1383,39 @@ export function Reports() {
           <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.amount"), t("reportsPage.account"), t("reportsPage.description"), t("reportsPage.reference")]} rows={advanceRows.map((item) => ({ id: item.id, title: labourName(item.labourerId), value: money(item.amount), meta: item.date, cells: [item.date, labourName(item.labourerId), money(item.amount), accountName(item.accountId), item.notes || "-", item.id.slice(0, 8)], details: [[t("reportsPage.account"), accountName(item.accountId)], [t("reportsPage.notes"), item.notes || "-"]], onOpen: () => navigate(`/workspace/labour-advances?recordId=${item.id}`) }))} />
         </ReportShell>}
       </>}
+
+      {report === "wage-rates" && <ReportShell title={t("wageRatesPage.reportTitle")} rangeLabel={rangeLabel} sectionId="wage-rates" onPrint={() => printSection("wage-rates")} onExport={() => downloadCsv("wage-rates.csv", [
+        [t("reportsPage.labour"), t("wageRatesPage.effectiveFrom"), t("wageRatesPage.effectiveTo"), t("wageRatesPage.dailyRate"), t("wageRatesPage.halfDayRate"), t("common.status")],
+        ...wageRateReportRows.map((rate) => [
+          labourName(rate.labourerId),
+          rate.effectiveFrom,
+          rate.effectiveTo || "",
+          rate.dailyRate,
+          normalizeHalfDayRate(rate),
+          t(`wageRatesPage.status.${getWageRateStatus(rate, todayKey())}`),
+        ]),
+      ])}>
+        <Kpis values={[[t("reportsPage.labour"), new Set(wageRateReportRows.map((rate) => rate.labourerId)).size], [t("wageRatesPage.activeRates"), wageRateReportRows.filter((rate) => getWageRateStatus(rate, todayKey()) === "active").length], [t("wageRatesPage.upcomingRates"), wageRateReportRows.filter((rate) => getWageRateStatus(rate, todayKey()) === "upcoming").length]]} />
+        <ReportTable
+          empty={t("wageRatesPage.noHistory")}
+          columns={[t("reportsPage.labour"), t("wageRatesPage.effectiveFrom"), t("wageRatesPage.effectiveTo"), t("wageRatesPage.dailyRate"), t("wageRatesPage.halfDayRate"), t("common.status")]}
+          rows={wageRateReportRows.map((rate) => ({
+            id: rate.id,
+            title: labourName(rate.labourerId),
+            value: money(rate.dailyRate),
+            meta: `${t("wageRatesPage.halfDayRate")}: ${money(normalizeHalfDayRate(rate))}`,
+            cells: [
+              labourName(rate.labourerId),
+              rate.effectiveFrom,
+              rate.effectiveTo || "-",
+              money(rate.dailyRate),
+              money(normalizeHalfDayRate(rate)),
+              t(`wageRatesPage.status.${getWageRateStatus(rate, todayKey())}`),
+            ],
+            details: [[t("wageRatesPage.rateType"), rate.rateType], [t("reportsPage.notes"), rate.notes || "-"]],
+          }))}
+        />
+      </ReportShell>}
 
       {report === "expenditures" && <>
         <section className="record-panel reports-subtabs">

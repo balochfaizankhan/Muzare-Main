@@ -31,6 +31,7 @@ import { formatDate, formatMoney } from "../lib/format";
 import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { getVoucherDisplayNumber, normalizeVoucherNumber, parseVoucherSequenceNumber } from "../lib/vouchers";
 import { getActiveVouchers, getAllVouchers, loadWorkspaceVouchers } from "../lib/voucherCollections";
+import { compareWageRates, getWageRateStatus, normalizeHalfDayRate } from "../lib/wageRates";
 import {
   compareLabourers,
   ensureLocalAccounts,
@@ -152,6 +153,7 @@ function WorkforceModule({
   const loadAttendance = useCallback(async () => (await workspaceRecords(offlineDb.attendance)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadAdvances = useCallback(async () => (await workspaceRecords(offlineDb.advances)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadAccounts = useCallback(async () => (await workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true })).sort((a, b) => a.name.localeCompare(b.name)), []);
+  const loadWageRates = useCallback(async () => (await workspaceRecords(offlineDb.wageRates, { includeDeleted: true })).sort(compareWageRates), []);
   const loadProductionEntries = useCallback(async () => (await workspaceRecords(offlineDb.productionEntries)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadPayments = useCallback(async () => (await workspaceRecords(offlineDb.labourPayments)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const [labourers, refreshLabourers] = useData(loadLabourers);
@@ -159,6 +161,7 @@ function WorkforceModule({
   const [attendance, refreshAttendance, setAttendance] = useData(loadAttendance);
   const [advances, refreshAdvances, setAdvances] = useData(loadAdvances);
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
+  const [wageRates] = useData(loadWageRates);
   const [productionEntries, refreshProductionEntries, setProductionEntries] = useData(loadProductionEntries);
   const [payments, refreshPayments, setPayments] = useData(loadPayments);
   const nextLabourSortOrder = useMemo(
@@ -266,6 +269,11 @@ function WorkforceModule({
   const selectedAttendance = selectedLabourer
     ? attendance.filter((entry) => entry.labourerId === selectedLabourer.id)
     : [];
+  const selectedLabourRates = selectedLabourer
+    ? wageRates.filter((rate) => rate.labourerId === selectedLabourer.id)
+    : [];
+  const currentWageRate = selectedLabourRates.find((rate) => getWageRateStatus(rate, today()) === "active") ?? null;
+  const upcomingWageRate = selectedLabourRates.find((rate) => getWageRateStatus(rate, today()) === "upcoming") ?? null;
   const presentCount = selectedAttendance.filter((entry) => entry.status === "present").length;
   const halfDayCount = selectedAttendance.filter((entry) => entry.status === "half_day").length;
   const absentCount = selectedAttendance.filter((entry) => entry.status === "absent").length;
@@ -553,11 +561,23 @@ function WorkforceModule({
               <h3>{t("workforcePage.financialOverview")}</h3>
               <dl className="worker-stats">
                 <div><dt>{t("workforcePage.paymentSummary")}</dt><dd>{labourPaymentSummary(selectedLabourer)}</dd></div>
+                <div><dt>{t("wageRatesPage.currentRate")}</dt><dd>{currentWageRate ? money(currentWageRate.dailyRate) : t("wageRatesPage.noCurrentRate")}</dd></div>
+                <div><dt>{t("wageRatesPage.halfDayRate")}</dt><dd>{currentWageRate ? money(normalizeHalfDayRate(currentWageRate)) : "-"}</dd></div>
                 <div><dt>{t("reportsPage.total")}</dt><dd className="positive">{money(totalEarnings)}</dd></div>
                 <div><dt>{t("advancesPage.recordAdvance")}</dt><dd className={advanceAmount > 0 ? "negative" : ""}>{money(advanceAmount)}</dd></div>
                 <div><dt>{t("workforcePage.paymentsLabel")}</dt><dd className={paidAmount > 0 ? "negative" : ""}>{money(paidAmount)}</dd></div>
                 <div><dt>{t("workforcePage.netBalanceLabel")}</dt><dd className={netBalance < 0 ? "negative" : "positive"}>{money(netBalance)}</dd></div>
               </dl>
+              {(selectedLabourRates.length > 0 || upcomingWageRate) && <>
+                <h3>{t("wageRatesPage.history")}</h3>
+                <dl className="worker-stats">
+                  {upcomingWageRate && <div><dt>{t("wageRatesPage.nextScheduledRate")}</dt><dd>{money(upcomingWageRate.dailyRate)} · {upcomingWageRate.effectiveFrom}</dd></div>}
+                  {selectedLabourRates.slice(0, 4).map((rate) => <div key={rate.id}>
+                    <dt>{rate.effectiveFrom}{rate.effectiveTo ? ` - ${rate.effectiveTo}` : ""}</dt>
+                    <dd>{money(rate.dailyRate)} / {money(normalizeHalfDayRate(rate))}</dd>
+                  </div>)}
+                </dl>
+              </>}
             </div>
             <footer className="worker-dialog__footer">
               {canManageLabour && <button className="worker-dialog__link" type="button" onClick={() => { setActionLabourer(selectedLabourer); setLabourAction("update"); }}>{t("common.edit")}</button>}

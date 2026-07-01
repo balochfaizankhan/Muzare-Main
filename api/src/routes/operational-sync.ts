@@ -14,6 +14,7 @@ import {
   stripVoucherNumberControlFields,
   wasImportedVoucherNumberEdited,
 } from "../lib/import-voucher-numbers.js";
+import { findWageRateOverlaps, normalizeWageRatePayload } from "../lib/wage-rates.js";
 import { hasModulePermission, hasPermission, type WorkspaceModule } from "../permissions.js";
 import { validateTenantReferences, validateTenantReferencesDetailed } from "../tenant-ownership.js";
 import { validateExpenseCategoryReference } from "./expense-categories.js";
@@ -26,6 +27,7 @@ const entities = [
   "attendance",
   "account",
   "advance",
+  "wageRate",
   "labourPayment",
   "productionEntry",
   "vehicle",
@@ -145,6 +147,20 @@ const financialPayloadSchemas = {
     date: dateSchema, amount: positiveAmountSchema, accountId: z.string().min(1),
     source: z.enum(["manual", "attendance_csv_import", "old_android_csv"]).optional(),
   }).passthrough(),
+  wageRate: z.object({
+    labourerId: z.string().min(1).optional(),
+    labourId: z.string().min(1).optional(),
+    rateType: z.enum(["daily", "half_day", "monthly", "custom"]).optional(),
+    dailyRate: z.coerce.number().nonnegative(),
+    halfDayRate: z.coerce.number().nonnegative().optional(),
+    effectiveFrom: dateSchema,
+    effectiveTo: dateSchema.optional().nullable(),
+    notes: z.string().trim().optional(),
+    active: z.boolean().optional(),
+  }).refine((record) => Boolean(record.labourerId || record.labourId), {
+    message: "A labour reference is required.",
+    path: ["labourerId"],
+  }).passthrough(),
   productionEntry: z.object({
     date: dateSchema, amount: positiveAmountSchema, units: positiveAmountSchema, unitRate: positiveAmountSchema,
   }).passthrough(),
@@ -215,6 +231,7 @@ function entityModule(entity: typeof entities[number]): WorkspaceModule {
   if (["labourer", "labourGroup", "labourPayment", "productionEntry"].includes(entity)) return "workforce";
   if (entity === "attendance") return "attendance";
   if (entity === "advance") return "advances";
+  if (entity === "wageRate") return "wages";
   if (entity === "voucher") return "expenses";
   if (entity === "sale") return "sales";
   if (["dispatch", "vehicle", "dateType"].includes(entity)) return "dispatch";
@@ -225,6 +242,7 @@ function entityModule(entity: typeof entities[number]): WorkspaceModule {
 const seasonRequiredEntities = new Set<typeof entities[number]>([
   "attendance",
   "advance",
+  "wageRate",
   "labourPayment",
   "productionEntry",
   "vehicle",
@@ -801,7 +819,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       fromAccountId: parsed.data.record.fromAccountId,
       toAccountId: parsed.data.record.toAccountId,
       ledgerId: parsed.data.record.ledgerId,
-      labourerId: parsed.data.record.labourerId,
+      labourerId: parsed.data.record.labourerId ?? parsed.data.record.labourId,
       groupId: parsed.data.record.groupId,
       vehicleId: parsed.data.record.vehicleId,
       dateTypeIds: dispatchPayload?.success
@@ -968,15 +986,46 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         details: { clientRecordId: parsed.data.record.id, clientUpdatedAt: parsed.data.record.updatedAt, databaseUpdatedAt: existing.clientUpdatedAt.toISOString() },
       });
     }
-    const payload = expenseCategory ? { ...parsed.data.record, ...expenseCategory } : parsed.data.record;
-    const normalizedRequestedVoucherNumber = parsed.data.entity === "voucher" && typeof payload.voucherNumber === "string"
-      ? normalizeVoucherNumber(payload.voucherNumber)
+    const payloadRecord = expenseCategory ? { ...parsed.data.record, ...expenseCategory } : parsed.data.record;
+    const wageRatePayload = parsed.data.entity === "wageRate"
+      ? normalizeWageRatePayload(parsed.data.record as Record<string, unknown>)
       : null;
-    if (parsed.data.entity === "voucher" && typeof payload.voucherNumber === "string" && !normalizedRequestedVoucherNumber) {
+    const payload = wageRatePayload ?? payloadRecord;
+    const normalizedRequestedVoucherNumber = parsed.data.entity === "voucher" && typeof payloadRecord.voucherNumber === "string"
+      ? normalizeVoucherNumber(payloadRecord.voucherNumber)
+      : null;
+    if (parsed.data.entity === "voucher" && typeof payloadRecord.voucherNumber === "string" && !normalizedRequestedVoucherNumber) {
       return reply.code(400).send({
         message: "Voucher numbers must use the format V-0001.",
-        details: { code: "invalid_voucher_number", voucherNumber: payload.voucherNumber },
+        details: { code: "invalid_voucher_number", voucherNumber: payloadRecord.voucherNumber },
       });
+    }
+    if (wageRatePayload) {
+      const overlaps = await db.transaction((tx) => findWageRateOverlaps(tx, {
+        workspaceId: parsed.data.workspaceId,
+        farmId: parsed.data.farmId!,
+        seasonId: parsed.data.seasonId!,
+        labourerId: wageRatePayload.labourerId,
+        effectiveFrom: wageRatePayload.effectiveFrom,
+        effectiveTo: wageRatePayload.effectiveTo,
+        excludeClientRecordId: existing?.clientRecordId ?? null,
+      }));
+      if (overlaps.length) {
+        return reply.code(409).send({
+          message: "Wage rate overlaps an existing active rate for this labourer.",
+          details: {
+            code: "wage_rate_overlap",
+            labourerId: wageRatePayload.labourerId,
+            overlaps: overlaps.map((item) => ({
+              id: item.clientRecordId,
+              effectiveFrom: item.payload.effectiveFrom,
+              effectiveTo: item.payload.effectiveTo,
+              dailyRate: item.payload.dailyRate,
+              halfDayRate: item.payload.halfDayRate,
+            })),
+          },
+        });
+      }
     }
     const values = {
       workspaceId: parsed.data.workspaceId, farmId: parsed.data.farmId, seasonId: parsed.data.seasonId,
@@ -1034,9 +1083,9 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
             let createdPayload: Record<string, unknown>;
             if (parsed.data.entity === "voucher") {
                   const normalizedVoucher = resolveVoucherPayloadForWrite({
-                    incomingPayload: payload,
+                    incomingPayload: payloadRecord,
                     existingPayload: null,
-                    sourceType: cleanText(payload.sourceType) || cleanText(payload.source_type) || null,
+                    sourceType: cleanText(payloadRecord.sourceType) || cleanText(payloadRecord.source_type) || null,
                     requestedVoucherNumber: normalizedRequestedVoucherNumber,
                   });
               createdPayload = {

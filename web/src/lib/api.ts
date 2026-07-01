@@ -17,7 +17,7 @@ export type HealthResponse = {
 
 export type PlatformRole = "platform_admin" | "platform_support";
 export type WorkspaceRole = "workspace_owner" | "workspace_manager" | "supervisor" | "accountant" | "operator" | "viewer";
-export type WorkspaceModule = "dashboard" | "workforce" | "attendance" | "advances" | "expenses" | "sales" | "dispatch" | "inventory" | "accounts" | "reports" | "settings" | "team";
+export type WorkspaceModule = "dashboard" | "workforce" | "attendance" | "advances" | "wages" | "expenses" | "sales" | "dispatch" | "inventory" | "accounts" | "reports" | "settings" | "team";
 export type WorkspaceModuleAction = "view" | "create" | "edit" | "delete" | "approve" | "export";
 export type WorkspaceModulePermissions = Partial<Record<WorkspaceModule, Partial<Record<WorkspaceModuleAction, boolean>>>>;
 export type FarmAccessMode = "all" | "assigned";
@@ -634,6 +634,7 @@ export type OperationalEntity =
   | "attendance"
   | "account"
   | "advance"
+  | "wageRate"
   | "labourPayment"
   | "productionEntry"
   | "vehicle"
@@ -668,10 +669,14 @@ export type WorkspaceContextRepairResult = {
 export type AttendanceReportStatus = "present" | "half_day" | "absent";
 export type AttendanceReportRecord = {
   id: string; labourerId: string; labourName: string; dailyWage: number; date: string; status: AttendanceReportStatus;
+  appliedDailyRate?: number;
+  appliedHalfDayRate?: number;
+  rateRecordId?: string | null;
 };
 export type AttendanceReportSummary = {
   id: string; name: string; dailyWage: number; presentDays: number; halfDays: number; absentDays: number;
   payableDays: number; totalWage: number; records: AttendanceReportRecord[];
+  wageRateDisplay?: string;
 };
 export type AttendanceReportAdvance = { id: string; labourerId: string; date: string; amount: number };
 export type AttendanceReportData = {
@@ -701,6 +706,69 @@ export type ExpenseSearchFilters = {
   category?: string; subcategory?: string; accountId?: string;
   includeDeleted?: boolean;
   includeImported?: boolean;
+};
+export type WageRateType = "daily" | "half_day" | "monthly" | "custom";
+export type WageRateRecord = {
+  id: string;
+  workspaceId: string;
+  farmId: string;
+  seasonId: string;
+  labourerId: string;
+  labourId?: string;
+  rateType: WageRateType;
+  dailyRate: number;
+  halfDayRate: number;
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  notes?: string;
+  active: boolean;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+};
+export type WageRateBulkRowInput = {
+  id?: string;
+  labourerId: string;
+  rateType?: WageRateType;
+  dailyRate: number;
+  halfDayRate?: number;
+  notes?: string;
+  active?: boolean;
+};
+export type WageRateBulkUpsertInput = {
+  farmId: string;
+  seasonId: string;
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  rateType?: WageRateType;
+  notes?: string;
+  closePrevious?: boolean;
+  rows: WageRateBulkRowInput[];
+};
+export type WageRateOverlapPreview = {
+  labourerId: string;
+  labourName?: string;
+  overlaps: Array<{
+    id: string;
+    effectiveFrom: string;
+    effectiveTo?: string | null;
+    dailyRate: number;
+    halfDayRate: number;
+  }>;
+};
+export type WageRateCalculateResult = {
+  rows: Array<{
+    labourerId: string;
+    labourName: string;
+    presentDays: number;
+    halfDays: number;
+    absentDays: number;
+    payableDays: number;
+    totalWage: number;
+    missingRateDates: string[];
+  }>;
+  unresolved: Array<{ labourerId: string; labourName: string; date: string; status: AttendanceReportStatus }>;
 };
 export type ExpenseSearchRecord = {
   id: string; workspaceId: string; farmId: string; seasonId: string; voucherNumber: string; date: string;
@@ -1124,6 +1192,46 @@ export const fetchAdvanceReport = (token: string, workspaceId: string, filters: 
   });
   if (filters.labourIds?.length) query.set("labourIds", filters.labourIds.join(","));
   return apiRequest<AdvanceReportData>(`/v1/workspace/${workspaceId}/advance/report?${query.toString()}`, {}, token);
+};
+export const fetchWageRates = (
+  token: string,
+  workspaceId: string,
+  filters: { farmId: string; seasonId: string; labourerId?: string; includeInactive?: boolean },
+) => {
+  const query = new URLSearchParams({ farmId: filters.farmId, seasonId: filters.seasonId });
+  if (filters.labourerId) query.set("labourerId", filters.labourerId);
+  if (typeof filters.includeInactive === "boolean") query.set("includeInactive", String(filters.includeInactive));
+  return apiRequest<{ rates: WageRateRecord[] }>(`/v1/workspace/${workspaceId}/wage-rates?${query.toString()}`, {}, token);
+};
+export const validateWageRateOverlap = (
+  token: string,
+  workspaceId: string,
+  input: { farmId: string; seasonId: string; effectiveFrom: string; effectiveTo?: string | null; rows: WageRateBulkRowInput[] },
+) => apiRequest<{ valid: boolean; overlaps: WageRateOverlapPreview[] }>(
+  `/v1/workspace/${workspaceId}/wage-rates/validate-overlap`,
+  { method: "POST", body: JSON.stringify(input) },
+  token,
+);
+export const bulkUpsertWageRates = (token: string, workspaceId: string, input: WageRateBulkUpsertInput) =>
+  apiRequest<{ rates: WageRateRecord[] }>(
+    `/v1/workspace/${workspaceId}/wage-rates/bulk`,
+    { method: "POST", body: JSON.stringify(input) },
+    token,
+    { timeoutMs: 60_000, debugLabel: "wage-rates-bulk-upsert" },
+  );
+export const calculateWageRates = (
+  token: string,
+  workspaceId: string,
+  filters: { farmId: string; seasonId: string; from: string; to: string; labourIds?: string[] },
+) => {
+  const query = new URLSearchParams({
+    farmId: filters.farmId,
+    seasonId: filters.seasonId,
+    from: filters.from,
+    to: filters.to,
+  });
+  if (filters.labourIds?.length) query.set("labourIds", filters.labourIds.join(","));
+  return apiRequest<WageRateCalculateResult>(`/v1/workspace/${workspaceId}/wage-rates/calculate?${query.toString()}`, {}, token);
 };
 export const fetchExpenseCategories = (token: string, workspaceId: string) =>
   apiRequest<{ categories: ExpenseCategory[] }>(`/v1/workspace/${workspaceId}/expense-categories`, {}, token);
