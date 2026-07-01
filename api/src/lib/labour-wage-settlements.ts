@@ -153,6 +153,7 @@ export async function previewLabourWageSettlement(
   seasonId: string,
   fromDate: string,
   toDate: string,
+  settlementDate: string,
 ) {
   const [attendanceRows, advanceRows, labourRows, wageRates, existingSettlements] = await Promise.all([
     tx.select({
@@ -215,17 +216,26 @@ export async function previewLabourWageSettlement(
     attendanceWages += calculateStatusWage(status as "present" | "half_day" | "absent", rate?.payload ?? null);
   }
 
-  const advancesPaid = advanceRows.reduce((sum, row) => {
+  const advancesUpToSettlementDate = advanceRows.reduce((sum, row) => {
     const payload = row.payload as AdvancePayload;
     if (isDeletedOperationalPayload(payload as Record<string, unknown>)) return sum;
-    if (typeof payload.date !== "string" || payload.date < fromDate || payload.date > toDate) return sum;
+    if (typeof payload.date !== "string" || payload.date > settlementDate) return sum;
     return sum + Number(payload.amount ?? 0);
   }, 0);
 
+  const previouslySettledAdvances = existingSettlements.reduce((sum, row) => {
+    if (row.payload.settlementDate > settlementDate) return sum;
+    return sum + row.payload.settledAdvanceAmount;
+  }, 0);
+  const advancesPaid = Math.max(advancesUpToSettlementDate - previouslySettledAdvances, 0);
   const totals = calculateLabourWageSettlementTotals(attendanceWages, advancesPaid);
 
   return {
     ...totals,
+    advancesAvailableUpToSettlementDate: advancesPaid,
+    rawAdvancesUpToSettlementDate: advancesUpToSettlementDate,
+    previouslySettledAdvances,
+    settlementDate,
     unresolvedRows,
     overlappingSettlements: existingSettlements.map((row) => ({
       id: row.clientRecordId,

@@ -139,6 +139,7 @@ export function LabourWageSettlements() {
         seasonId: activeSeasonId,
         fromDate,
         toDate,
+        settlementDate,
       });
       setPreview({ status: "ready", data: response.preview });
     } catch (caught) {
@@ -323,11 +324,17 @@ export function LabourWageSettlements() {
           {!summary ? <p className="context-message">Run a preview to calculate period wages, settled advances, carry-forward, and payable balance.</p> : <>
             <div className="reports-kpis">
               <article><span>Attendance wages</span><strong>{money(summary.attendanceWages)}</strong></article>
-              <article><span>Advances paid</span><strong>{money(summary.advancesPaid)}</strong></article>
+              <article><span>Advances available up to settlement date</span><strong>{money(summary.advancesAvailableUpToSettlementDate)}</strong></article>
               <article><span>Expense amount</span><strong>{money(summary.expenseAmount)}</strong></article>
               <article><span>Settled advances</span><strong>{money(summary.settledAdvanceAmount)}</strong></article>
               <article><span>Carry-forward advance</span><strong>{money(summary.carryForwardAdvance)}</strong></article>
               <article><span>Payable balance</span><strong>{money(summary.payableBalance)}</strong></article>
+            </div>
+            <div className="reports-summary-list">
+              <article><span>Wage period</span><strong>{fromDate} to {toDate}</strong></article>
+              <article><span>Advances considered until</span><strong>{summary.settlementDate}</strong></article>
+              <article><span>Total advances up to settlement date</span><strong>{money(summary.rawAdvancesUpToSettlementDate)}</strong></article>
+              <article><span>Previously settled advances</span><strong>{money(summary.previouslySettledAdvances)}</strong></article>
             </div>
             {summary.unresolvedRows.length > 0 && <div className="worker-action-warning">
               <strong>Missing wage rates</strong>

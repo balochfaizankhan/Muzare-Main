@@ -28,3 +28,14 @@ test("calculateLabourWageSettlementTotals leaves a payable balance when wages ex
     payableBalance: 400,
   });
 });
+
+test("calculateLabourWageSettlementTotals keeps wage expense tied to the period while carrying extra advances forward", () => {
+  assert.deepEqual(calculateLabourWageSettlementTotals(900, 1200), {
+    attendanceWages: 900,
+    advancesPaid: 1200,
+    settledAdvanceAmount: 900,
+    expenseAmount: 900,
+    carryForwardAdvance: 300,
+    payableBalance: 0,
+  });
+});

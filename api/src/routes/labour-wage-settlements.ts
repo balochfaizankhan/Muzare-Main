@@ -23,10 +23,10 @@ const baseSchema = z.object({
   seasonId: z.string().uuid(),
   fromDate: z.string().date(),
   toDate: z.string().date(),
+  settlementDate: z.string().date(),
 });
 const previewSchema = baseSchema;
 const createSchema = baseSchema.extend({
-  settlementDate: z.string().date(),
   accountId: z.string().min(1),
   notes: z.string().trim().max(500).optional(),
 });
@@ -139,7 +139,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
       return reply.code(400).send({ message: "A valid labour settlement preview request is required." });
     }
     const { workspaceId } = params.data;
-    const { farmId, seasonId, fromDate, toDate } = parsed.data;
+    const { farmId, seasonId, fromDate, toDate, settlementDate } = parsed.data;
     if (request.appUser.workspaceId !== workspaceId) return reply.code(403).send({ message: "Select this workspace before previewing labour settlements." });
     if (!hasModulePermission(request.appUser, workspaceId, "wages", "view")) return reply.code(403).send({ message: "Workspace wage settlement view permission is required." });
     if (!hasFarmAccess(request.appUser, workspaceId, farmId)) return reply.code(403).send({ message: "You do not have access to this farm." });
@@ -148,7 +148,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
     }
     const ownershipError = await validateTenantReferences(workspaceId, { farmId, seasonId });
     if (ownershipError) return reply.code(403).send({ message: ownershipError });
-    const preview = await db.transaction((tx) => previewLabourWageSettlement(tx, workspaceId, farmId, seasonId, fromDate, toDate));
+    const preview = await db.transaction((tx) => previewLabourWageSettlement(tx, workspaceId, farmId, seasonId, fromDate, toDate, settlementDate));
     return { preview, valid: preview.unresolvedRows.length === 0 && preview.overlappingSettlements.length === 0 };
   });
 
@@ -175,7 +175,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
     const category = await resolveSettlementCategory(workspaceId);
     if (!category) return reply.code(400).send({ message: "A default expense category for labour wage settlements could not be resolved." });
 
-    const preview = await db.transaction((tx) => previewLabourWageSettlement(tx, workspaceId, farmId, seasonId, fromDate, toDate));
+    const preview = await db.transaction((tx) => previewLabourWageSettlement(tx, workspaceId, farmId, seasonId, fromDate, toDate, settlementDate));
     if (preview.unresolvedRows.length) {
       return reply.code(409).send({
         message: "Attendance wages cannot be settled until missing wage rates are fixed.",

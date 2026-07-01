@@ -841,6 +841,10 @@ export type LabourWageSettlementLinkedVoucher = {
 export type LabourWageSettlementPreview = {
   attendanceWages: number;
   advancesPaid: number;
+  advancesAvailableUpToSettlementDate: number;
+  rawAdvancesUpToSettlementDate: number;
+  previouslySettledAdvances: number;
+  settlementDate: string;
   settledAdvanceAmount: number;
   expenseAmount: number;
   carryForwardAdvance: number;
@@ -1344,7 +1348,7 @@ export const fetchLabourWageSettlements = (
 export const previewLabourWageSettlement = (
   token: string,
   workspaceId: string,
-  input: { farmId: string; seasonId: string; fromDate: string; toDate: string },
+  input: { farmId: string; seasonId: string; fromDate: string; toDate: string; settlementDate: string },
 ) => apiRequest<{ valid: boolean; preview: LabourWageSettlementPreview }>(
   `/v1/workspace/${workspaceId}/labour-wage-settlements/preview`,
   { method: "POST", body: JSON.stringify(input) },
