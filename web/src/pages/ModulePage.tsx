@@ -1556,6 +1556,8 @@ function ExpensesModule() {
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
   const [date, setDate] = useState(today());
   const workspaceId = user?.workspaceId ?? "";
+  const farmId = getActiveFarmId();
+  const seasonId = getActiveSeasonId();
   const categories = useQuery({ queryKey: ["expense-categories", workspaceId], queryFn: () => fetchExpenseCategories(token!, workspaceId), enabled: Boolean(token && workspaceId) });
   type VoucherItemDraft = {
     id: string;
@@ -1655,6 +1657,8 @@ function ExpensesModule() {
   const [customName, setCustomName] = useState("");
   const [voucherItems, setVoucherItems] = useState<VoucherItemDraft[]>([newVoucherItemDraft()]);
   const [accountId, setAccountId] = useState("");
+  const [expenseSessionDate, setExpenseSessionDate] = useState(today());
+  const [expenseSessionAccountId, setExpenseSessionAccountId] = useState("");
   const [notes, setNotes] = useState("");
   const [selectedVoucher, setSelectedVoucher] = useState<Voucher | null>(null);
   const [editingVoucher, setEditingVoucher] = useState<Voucher | null>(null);
@@ -1702,8 +1706,12 @@ function ExpensesModule() {
   const isSyntheticLocalAccount = useCallback((value?: string) => Boolean(value?.includes(":local-")), []);
   const selectableExpenseAccounts = useMemo(() => accounts.filter((account) => !isSyntheticLocalAccount(account.id)), [accounts, isSyntheticLocalAccount]);
   const resolvedExpenseAccountId = accountId || selectableExpenseAccounts[0]?.id || "";
-  const resetForm = () => {
-    setDate(today()); setVoucherItems([newVoucherItemDraft()]); setAccountId(""); setNotes("");
+  const resetForm = (options?: { preserveSessionDefaults?: boolean }) => {
+    const preserveSessionDefaults = options?.preserveSessionDefaults !== false;
+    setDate(preserveSessionDefaults ? expenseSessionDate : today());
+    setVoucherItems([newVoucherItemDraft()]);
+    setAccountId(preserveSessionDefaults ? expenseSessionAccountId : "");
+    setNotes("");
     setCustomVoucherNumberEnabled(false);
     setCustomVoucherNumber("");
     setVoucherNumberValidation({ status: "idle", message: "" });
@@ -1711,6 +1719,35 @@ function ExpensesModule() {
     setPendingReceipts([]);
     setReceiptError("");
   };
+  useEffect(() => {
+    const nextDate = today();
+    setExpenseSessionDate(nextDate);
+    setExpenseSessionAccountId("");
+    setDate(nextDate);
+    setAccountId("");
+    setVoucherItems([newVoucherItemDraft()]);
+    setNotes("");
+    setCustomVoucherNumberEnabled(false);
+    setCustomVoucherNumber("");
+    setVoucherNumberValidation({ status: "idle", message: "" });
+    pendingReceipts.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl));
+    setPendingReceipts([]);
+    setReceiptError("");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId, farmId, seasonId]);
+  useEffect(() => {
+    setExpenseSessionDate(date);
+  }, [date]);
+  useEffect(() => {
+    if (accountId) setExpenseSessionAccountId(accountId);
+  }, [accountId]);
+  useEffect(() => {
+    if (!expenseSessionAccountId) return;
+    if (selectableExpenseAccounts.some((account) => account.id === expenseSessionAccountId)) return;
+    setExpenseSessionAccountId("");
+    if (accountId === expenseSessionAccountId) setAccountId("");
+    showToast("Previously selected payment account is no longer available.");
+  }, [accountId, expenseSessionAccountId, selectableExpenseAccounts, t]);
   const openEdit = (voucher: Voucher) => {
     setSelectedVoucher(null); setEditingVoucher(voucher); setDate(voucher.date);
     setVoucherItems(normalizeVoucherItems(voucher)); setAccountId(voucher.accountId);
@@ -2016,12 +2053,12 @@ function ExpensesModule() {
     await persistOperationalRecord("voucher", record);
     await uploadPendingReceipts(record.id);
     showToast(editingVoucher ? t("expensesPage.voucherUpdated") : t("expensesPage.voucherSaved"));
+    setExpenseSessionDate(date);
+    setExpenseSessionAccountId(resolvedExpenseAccountId);
     setEditingVoucher(null);
-    resetForm();
+    resetForm({ preserveSessionDefaults: true });
     await refresh();
   };
-  const farmId = getActiveFarmId();
-  const seasonId = getActiveSeasonId();
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedVoucherSearch(voucherSearch.trim()), 275);
     return () => window.clearTimeout(timer);

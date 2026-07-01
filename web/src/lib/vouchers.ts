@@ -26,15 +26,11 @@ export function isImportedVoucher(voucher: VoucherLike) {
 }
 
 export function getVoucherDisplayNumber(voucher: VoucherLike) {
-  if (voucher.voucherNumberEdited === true) {
-    return cleanVoucherNumber(voucher.voucherNumber)
-      || canonicalImportedVoucherNumber(voucher);
-  }
-  if (isImportedVoucher(voucher)) {
-    return canonicalImportedVoucherNumber(voucher);
-  }
+  const originalVoucherNumber = cleanVoucherNumber(voucher.originalVoucherNumber);
+  if (originalVoucherNumber && voucher.voucherNumberEdited !== true) return originalVoucherNumber;
   return cleanVoucherNumber(voucher.voucherNumber)
-    || canonicalImportedVoucherNumber(voucher);
+    || originalVoucherNumber
+    || cleanVoucherNumber(voucher.legacyVoucherNumber);
 }
 
 export function canonicalizeImportedVoucherRecord<T extends VoucherLike>(voucher: T): T {
