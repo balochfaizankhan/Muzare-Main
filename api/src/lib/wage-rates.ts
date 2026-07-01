@@ -15,6 +15,12 @@ export type WageRatePayload = {
   effectiveTo?: string | null;
   notes?: string;
   active: boolean;
+  changeReason?: string;
+  adjustedAt?: string;
+  adjustedBy?: string;
+  supersededAt?: string | null;
+  supersededBy?: string | null;
+  supersededByRateId?: string | null;
   createdBy?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -60,6 +66,12 @@ export function normalizeWageRatePayload(payload: Record<string, unknown>): Wage
     effectiveTo: cleanText(payload.effectiveTo) || null,
     notes: cleanText(payload.notes) || undefined,
     active: payload.active !== false,
+    changeReason: cleanText(payload.changeReason) || undefined,
+    adjustedAt: cleanText(payload.adjustedAt) || undefined,
+    adjustedBy: cleanText(payload.adjustedBy) || undefined,
+    supersededAt: cleanText(payload.supersededAt) || null,
+    supersededBy: cleanText(payload.supersededBy) || null,
+    supersededByRateId: cleanText(payload.supersededByRateId) || null,
     createdBy: cleanText(payload.createdBy) || undefined,
     createdAt: cleanText(payload.createdAt) || undefined,
     updatedAt: cleanText(payload.updatedAt) || undefined,
@@ -81,6 +93,12 @@ export function rangesOverlap(
 export function previousDate(date: string) {
   const cursor = new Date(`${date}T00:00:00Z`);
   cursor.setUTCDate(cursor.getUTCDate() - 1);
+  return cursor.toISOString().slice(0, 10);
+}
+
+export function nextDate(date: string) {
+  const cursor = new Date(`${date}T00:00:00Z`);
+  cursor.setUTCDate(cursor.getUTCDate() + 1);
   return cursor.toISOString().slice(0, 10);
 }
 
@@ -162,4 +180,120 @@ export function calculateStatusWage(
   if (status === "present") return rate.dailyRate;
   if (status === "half_day") return rate.halfDayRate;
   return 0;
+}
+
+export type WageRateReplacementMutation =
+  | {
+    kind: "update";
+    rowId: string;
+    clientRecordId: string;
+    payload: WageRatePayload;
+  }
+  | {
+    kind: "insert";
+    clientRecordId: string;
+    payload: WageRatePayload;
+  };
+
+function withAdjustmentAudit(
+  payload: WageRatePayload,
+  actorUserId: string,
+  timestamp: string,
+  reason: string | undefined,
+  supersededByRateId: string,
+) {
+  return {
+    ...payload,
+    changeReason: reason || payload.changeReason,
+    adjustedAt: timestamp,
+    adjustedBy: actorUserId,
+    supersededAt: timestamp,
+    supersededBy: actorUserId,
+    supersededByRateId,
+    updatedAt: timestamp,
+  } satisfies WageRatePayload;
+}
+
+export function buildWageRateReplacementMutations(args: {
+  overlaps: WageRateRow[];
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  actorUserId: string;
+  timestamp: string;
+  replacementRateId: string;
+  reason?: string;
+}) {
+  const mutations: WageRateReplacementMutation[] = [];
+  const replacementEnd = args.effectiveTo && args.effectiveTo.length ? args.effectiveTo : null;
+  const replacementEndCursor = replacementEnd ?? "9999-12-31";
+
+  for (const overlap of args.overlaps) {
+    const existingFrom = overlap.payload.effectiveFrom;
+    const existingEnd = overlap.payload.effectiveTo && overlap.payload.effectiveTo.length ? overlap.payload.effectiveTo : null;
+    const existingEndCursor = existingEnd ?? "9999-12-31";
+
+    if (existingFrom < args.effectiveFrom && existingEndCursor > replacementEndCursor && replacementEnd) {
+      mutations.push({
+        kind: "update",
+        rowId: overlap.id,
+        clientRecordId: overlap.clientRecordId,
+        payload: withAdjustmentAudit({
+          ...overlap.payload,
+          effectiveTo: previousDate(args.effectiveFrom),
+        }, args.actorUserId, args.timestamp, args.reason, args.replacementRateId),
+      });
+      mutations.push({
+        kind: "insert",
+        clientRecordId: crypto.randomUUID(),
+        payload: {
+          ...withAdjustmentAudit(overlap.payload, args.actorUserId, args.timestamp, args.reason, args.replacementRateId),
+          effectiveFrom: nextDate(replacementEnd),
+          effectiveTo: existingEnd,
+          deletedAt: null,
+          active: overlap.payload.active !== false,
+          createdAt: args.timestamp,
+        },
+      });
+      continue;
+    }
+
+    if (existingFrom < args.effectiveFrom && existingEndCursor >= args.effectiveFrom) {
+      mutations.push({
+        kind: "update",
+        rowId: overlap.id,
+        clientRecordId: overlap.clientRecordId,
+        payload: withAdjustmentAudit({
+          ...overlap.payload,
+          effectiveTo: previousDate(args.effectiveFrom),
+        }, args.actorUserId, args.timestamp, args.reason, args.replacementRateId),
+      });
+      continue;
+    }
+
+    if (replacementEnd && existingFrom <= replacementEnd && existingEndCursor > replacementEndCursor) {
+      mutations.push({
+        kind: "update",
+        rowId: overlap.id,
+        clientRecordId: overlap.clientRecordId,
+        payload: withAdjustmentAudit({
+          ...overlap.payload,
+          effectiveFrom: nextDate(replacementEnd),
+        }, args.actorUserId, args.timestamp, args.reason, args.replacementRateId),
+      });
+      continue;
+    }
+
+    mutations.push({
+      kind: "update",
+      rowId: overlap.id,
+      clientRecordId: overlap.clientRecordId,
+      payload: withAdjustmentAudit({
+        ...overlap.payload,
+        active: false,
+        deletedAt: args.timestamp,
+      }, args.actorUserId, args.timestamp, args.reason, args.replacementRateId),
+    });
+  }
+
+  return mutations;
 }

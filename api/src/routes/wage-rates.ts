@@ -5,6 +5,7 @@ import { requireUser } from "../auth.js";
 import { db } from "../db/client.js";
 import { operationalRecords, userSessions } from "../db/schema.js";
 import {
+  buildWageRateReplacementMutations,
   calculateStatusWage,
   findWageRateOverlaps,
   listWageRateRows,
@@ -48,6 +49,8 @@ const bulkUpsertSchema = z.object({
   rateType: z.enum(["daily", "half_day", "monthly", "custom"]).optional(),
   notes: z.string().trim().max(500).optional(),
   closePrevious: z.boolean().optional(),
+  replaceExisting: z.boolean().optional(),
+  changeReason: z.string().trim().max(500).optional(),
   rows: z.array(wageRateRowSchema).min(1),
 });
 
@@ -56,6 +59,7 @@ const overlapValidationSchema = z.object({
   seasonId: z.string().uuid(),
   effectiveFrom: z.string().date(),
   effectiveTo: z.string().date().nullable().optional(),
+  replaceExisting: z.boolean().optional(),
   rows: z.array(wageRateRowSchema).min(1),
 });
 
@@ -133,8 +137,45 @@ export async function wageRateRoutes(app: FastifyInstance): Promise<void> {
     }
     const ownershipError = await validateTenantReferences(workspaceId, { farmId, seasonId });
     if (ownershipError) return reply.code(403).send({ message: ownershipError });
+    const [labourRows, attendanceRows] = await Promise.all([
+      db.select({
+        id: operationalRecords.clientRecordId,
+        payload: operationalRecords.payload,
+      }).from(operationalRecords).where(and(
+        eq(operationalRecords.workspaceId, workspaceId),
+        eq(operationalRecords.farmId, farmId),
+        eq(operationalRecords.entityType, "labourer"),
+      )),
+      db.select({
+        payload: operationalRecords.payload,
+      }).from(operationalRecords).where(and(
+        eq(operationalRecords.workspaceId, workspaceId),
+        eq(operationalRecords.farmId, farmId),
+        eq(operationalRecords.seasonId, seasonId),
+        eq(operationalRecords.entityType, "attendance"),
+      )),
+    ]);
+    const labourNames = new Map(labourRows.map((row) => [row.id, String((row.payload as Record<string, unknown>).name ?? "Labourer")]));
+    const attendanceCounts = new Map<string, number>();
+    for (const row of attendanceRows) {
+      const payload = row.payload as Record<string, unknown>;
+      if (isDeletedOperationalPayload(payload)) continue;
+      const labourerId = normalizeLabourerId(payload);
+      const date = String(payload.date ?? "");
+      const status = String(payload.status ?? "");
+      if (!labourerId || !date || date < effectiveFrom || (effectiveTo && date > effectiveTo)) continue;
+      if (!["present", "half_day", "absent"].includes(status)) continue;
+      attendanceCounts.set(labourerId, (attendanceCounts.get(labourerId) ?? 0) + 1);
+    }
     const overlaps = await db.transaction(async (tx) => {
-      const result: Array<{ labourerId: string; overlaps: Array<{ id: string; effectiveFrom: string; effectiveTo?: string | null; dailyRate: number; halfDayRate: number }> }> = [];
+      const result: Array<{
+        labourerId: string;
+        labourName?: string;
+        affectedFrom: string;
+        affectedTo?: string | null;
+        affectedAttendanceCount: number;
+        overlaps: Array<{ id: string; effectiveFrom: string; effectiveTo?: string | null; dailyRate: number; halfDayRate: number; notes?: string }>;
+      }> = [];
       for (const row of rows) {
         const existing = await findWageRateOverlaps(tx, {
           workspaceId,
@@ -148,12 +189,17 @@ export async function wageRateRoutes(app: FastifyInstance): Promise<void> {
         if (!existing.length) continue;
         result.push({
           labourerId: row.labourerId,
+          labourName: labourNames.get(row.labourerId),
+          affectedFrom: effectiveFrom,
+          affectedTo: effectiveTo ?? null,
+          affectedAttendanceCount: attendanceCounts.get(row.labourerId) ?? 0,
           overlaps: existing.map((item) => ({
             id: item.clientRecordId,
             effectiveFrom: item.payload.effectiveFrom,
             effectiveTo: item.payload.effectiveTo,
             dailyRate: item.payload.dailyRate,
             halfDayRate: item.payload.halfDayRate,
+            notes: item.payload.notes,
           })),
         });
       }
@@ -172,13 +218,16 @@ export async function wageRateRoutes(app: FastifyInstance): Promise<void> {
     if (!hasModulePermission(request.appUser, workspaceId, "wages", "create") && !hasModulePermission(request.appUser, workspaceId, "wages", "edit")) {
       return reply.code(403).send(editForbidden());
     }
-    const { farmId, seasonId, effectiveFrom, effectiveTo, rateType, notes, closePrevious, rows } = parsed.data;
+    const { farmId, seasonId, effectiveFrom, effectiveTo, rateType, notes, closePrevious, replaceExisting, changeReason, rows } = parsed.data;
     if (!hasFarmAccess(request.appUser, workspaceId, farmId)) return reply.code(403).send({ message: "You do not have access to this farm." });
     if (!(await validateContext(request.sessionId, workspaceId, farmId, seasonId))) {
       return reply.code(403).send({ message: "Select this farm and season before saving wage rates." });
     }
     const ownershipError = await validateTenantReferences(workspaceId, { farmId, seasonId });
     if (ownershipError) return reply.code(403).send({ message: ownershipError });
+    if (replaceExisting && !changeReason?.trim()) {
+      return reply.code(400).send({ message: "Provide a reason before replacing an existing wage rate period." });
+    }
     const timestamp = new Date();
     try {
       const savedRates = await db.transaction(async (tx) => {
@@ -197,23 +246,64 @@ export async function wageRateRoutes(app: FastifyInstance): Promise<void> {
             excludeClientRecordId: row.id ?? null,
           });
           if (overlaps.length) {
-            if (!closePrevious) {
+            if (!closePrevious && !replaceExisting) {
               throw new Error(`Wage rate overlap detected for labour ${labourerId}.`);
             }
-            for (const overlap of overlaps) {
-              if (overlap.payload.effectiveFrom >= effectiveFrom) {
-                throw new Error(`Existing wage rate for labour ${labourerId} must be adjusted manually before this range can start.`);
+            if (replaceExisting) {
+              const replacementRateId = row.id ?? crypto.randomUUID();
+              const mutations = buildWageRateReplacementMutations({
+                overlaps,
+                effectiveFrom,
+                effectiveTo,
+                actorUserId: request.appUser!.id,
+                timestamp: timestamp.toISOString(),
+                replacementRateId,
+                reason: changeReason,
+              });
+              for (const mutation of mutations) {
+                if (mutation.kind === "update") {
+                  await tx.update(operationalRecords).set({
+                    payload: mutation.payload,
+                    clientUpdatedAt: timestamp,
+                    updatedAt: timestamp,
+                  }).where(eq(operationalRecords.id, mutation.rowId));
+                  continue;
+                }
+                await tx.insert(operationalRecords).values({
+                  workspaceId,
+                  farmId,
+                  seasonId,
+                  clientRecordId: mutation.clientRecordId,
+                  entityType: "wageRate",
+                  payload: {
+                    ...mutation.payload,
+                    id: mutation.clientRecordId,
+                    createdAt: mutation.payload.createdAt ?? timestamp.toISOString(),
+                    updatedAt: timestamp.toISOString(),
+                  },
+                  recordedBy: request.appUser!.id,
+                  clientUpdatedAt: timestamp,
+                  updatedAt: timestamp,
+                  createdAt: timestamp,
+                });
               }
-              const nextPayload = {
-                ...overlap.payload,
-                effectiveTo: previousDate(effectiveFrom),
-                updatedAt: timestamp.toISOString(),
-              };
-              await tx.update(operationalRecords).set({
-                payload: nextPayload,
-                clientUpdatedAt: timestamp,
-                updatedAt: timestamp,
-              }).where(eq(operationalRecords.id, overlap.id));
+              row.id = replacementRateId;
+            } else {
+              for (const overlap of overlaps) {
+                if (overlap.payload.effectiveFrom >= effectiveFrom) {
+                  throw new Error(`Existing wage rate for labour ${labourerId} must be adjusted manually before this range can start.`);
+                }
+                const nextPayload = {
+                  ...overlap.payload,
+                  effectiveTo: previousDate(effectiveFrom),
+                  updatedAt: timestamp.toISOString(),
+                };
+                await tx.update(operationalRecords).set({
+                  payload: nextPayload,
+                  clientUpdatedAt: timestamp,
+                  updatedAt: timestamp,
+                }).where(eq(operationalRecords.id, overlap.id));
+              }
             }
           }
           const payload = normalizeWageRatePayload({
@@ -227,6 +317,9 @@ export async function wageRateRoutes(app: FastifyInstance): Promise<void> {
             effectiveTo,
             notes: row.notes ?? notes,
             active: row.active ?? true,
+            changeReason,
+            adjustedAt: changeReason ? timestamp.toISOString() : undefined,
+            adjustedBy: changeReason ? request.appUser!.id : undefined,
             createdBy: request.appUser!.id,
             createdAt: timestamp.toISOString(),
             updatedAt: timestamp.toISOString(),

@@ -42,7 +42,7 @@ export function resolveApplicableWageRate(rates: WageRate[], labourerId: string,
 
 export function wageForAttendanceStatus(status: Attendance["status"], rate: WageRate | null, fallbackDailyRate = 0) {
   const dailyRate = rate?.dailyRate ?? fallbackDailyRate;
-  const halfDayRate = rate ? normalizeHalfDayRate(rate) : fallbackDailyRate / 2;
+  const halfDayRate = rate ? normalizeHalfDayRate(rate) : fallbackDailyRate > 0 ? fallbackDailyRate / 2 : 0;
   if (status === "present") return dailyRate;
   if (status === "half_day") return halfDayRate;
   return 0;
@@ -50,7 +50,7 @@ export function wageForAttendanceStatus(status: Attendance["status"], rate: Wage
 
 export function wageRateDisplay(rate: WageRate | null, fallbackDailyRate = 0) {
   const dailyRate = rate?.dailyRate ?? fallbackDailyRate;
-  const halfDayRate = rate ? normalizeHalfDayRate(rate) : fallbackDailyRate / 2;
+  const halfDayRate = rate ? normalizeHalfDayRate(rate) : fallbackDailyRate > 0 ? fallbackDailyRate / 2 : 0;
   return { dailyRate, halfDayRate };
 }
 
@@ -65,13 +65,18 @@ export function summarizeAttendanceWages(
   const halfDay = records.filter((item) => item.status === "half_day").length;
   const absent = records.filter((item) => item.status === "absent").length;
   const payable = present + halfDay * 0.5;
-  const totalWage = records.reduce((sum, record) => sum + wageForAttendanceStatus(record.status, resolveApplicableWageRate(rates, labourerId, record.date), fallbackDailyRate), 0);
+  const appliedRates = records.map((record) => ({
+    record,
+    rate: resolveApplicableWageRate(rates, labourerId, record.date),
+  }));
+  const totalWage = appliedRates.reduce((sum, item) => sum + wageForAttendanceStatus(item.record.status, item.rate, fallbackDailyRate), 0);
   const missingRateDates = records
     .filter((record) => record.status !== "absent" && !resolveApplicableWageRate(rates, labourerId, record.date))
     .map((record) => record.date);
-  const distinctDailyRates = [...new Set(records
-    .map((record) => wageRateDisplay(resolveApplicableWageRate(rates, labourerId, record.date), fallbackDailyRate).dailyRate)
-    .filter((value) => Number.isFinite(value)))];
+  const distinctDailyRates = [...new Set(appliedRates
+    .filter((item) => item.rate || fallbackDailyRate > 0)
+    .map((item) => wageRateDisplay(item.rate, fallbackDailyRate).dailyRate)
+    .filter((value) => Number.isFinite(value) && value > 0))];
   return {
     records,
     present,
@@ -80,6 +85,6 @@ export function summarizeAttendanceWages(
     payable,
     totalWage,
     missingRateDates,
-    wageRateLabel: distinctDailyRates.length <= 1 ? String(distinctDailyRates[0] ?? fallbackDailyRate) : "Mixed",
+    wageRateLabel: distinctDailyRates.length === 0 ? null : distinctDailyRates.length === 1 ? String(distinctDailyRates[0]) : "Mixed",
   };
 }

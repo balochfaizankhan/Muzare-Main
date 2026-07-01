@@ -31,7 +31,7 @@ import { formatDate, formatMoney } from "../lib/format";
 import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { getVoucherDisplayNumber, normalizeVoucherNumber, parseVoucherSequenceNumber } from "../lib/vouchers";
 import { getActiveVouchers, getAllVouchers, loadWorkspaceVouchers } from "../lib/voucherCollections";
-import { compareWageRates, getWageRateStatus, normalizeHalfDayRate } from "../lib/wageRates";
+import { compareWageRates, getWageRateStatus, normalizeHalfDayRate, summarizeAttendanceWages } from "../lib/wageRates";
 import {
   compareLabourers,
   ensureLocalAccounts,
@@ -274,15 +274,18 @@ function WorkforceModule({
     : [];
   const currentWageRate = selectedLabourRates.find((rate) => getWageRateStatus(rate, today()) === "active") ?? null;
   const upcomingWageRate = selectedLabourRates.find((rate) => getWageRateStatus(rate, today()) === "upcoming") ?? null;
-  const presentCount = selectedAttendance.filter((entry) => entry.status === "present").length;
-  const halfDayCount = selectedAttendance.filter((entry) => entry.status === "half_day").length;
-  const absentCount = selectedAttendance.filter((entry) => entry.status === "absent").length;
+  const selectedAttendanceSummary = selectedLabourer
+    ? summarizeAttendanceWages(selectedLabourer.id, selectedAttendance, wageRates)
+    : null;
+  const presentCount = selectedAttendanceSummary?.present ?? 0;
+  const halfDayCount = selectedAttendanceSummary?.halfDay ?? 0;
+  const absentCount = selectedAttendanceSummary?.absent ?? 0;
   const productionEarnings = selectedLabourer
     ? productionEntries.filter((entry) => entry.labourerId === selectedLabourer.id).reduce((sum, entry) => sum + entry.amount, 0)
     : 0;
   const monthlyEarnings = selectedLabourer?.paymentType === "monthly_salary" ? (selectedLabourer.monthlySalary ?? 0) : 0;
   const contractEarnings = selectedLabourer?.paymentType === "contract_lump_sum" ? (selectedLabourer.contractAmount ?? 0) : 0;
-  const attendanceEarnings = selectedLabourer ? (presentCount + halfDayCount * 0.5) * selectedLabourer.dailyWage : 0;
+  const attendanceEarnings = selectedAttendanceSummary?.totalWage ?? 0;
   const totalEarnings = selectedLabourer?.paymentType === "production_based"
     ? productionEarnings
     : selectedLabourer?.paymentType === "monthly_salary"
@@ -563,11 +566,18 @@ function WorkforceModule({
                 <div><dt>{t("workforcePage.paymentSummary")}</dt><dd>{labourPaymentSummary(selectedLabourer)}</dd></div>
                 <div><dt>{t("wageRatesPage.currentRate")}</dt><dd>{currentWageRate ? money(currentWageRate.dailyRate) : t("wageRatesPage.noCurrentRate")}</dd></div>
                 <div><dt>{t("wageRatesPage.halfDayRate")}</dt><dd>{currentWageRate ? money(normalizeHalfDayRate(currentWageRate)) : "-"}</dd></div>
+                <div><dt>{t("reportsPage.payableDays")}</dt><dd>{selectedAttendanceSummary ? selectedAttendanceSummary.payable : "-"}</dd></div>
                 <div><dt>{t("reportsPage.total")}</dt><dd className="positive">{money(totalEarnings)}</dd></div>
                 <div><dt>{t("advancesPage.recordAdvance")}</dt><dd className={advanceAmount > 0 ? "negative" : ""}>{money(advanceAmount)}</dd></div>
                 <div><dt>{t("workforcePage.paymentsLabel")}</dt><dd className={paidAmount > 0 ? "negative" : ""}>{money(paidAmount)}</dd></div>
                 <div><dt>{t("workforcePage.netBalanceLabel")}</dt><dd className={netBalance < 0 ? "negative" : "positive"}>{money(netBalance)}</dd></div>
+                <div><dt>{t("wageRatesPage.attendanceWageTotal")}</dt><dd>{money(attendanceEarnings)}</dd></div>
               </dl>
+              {selectedAttendanceSummary?.missingRateDates.length ? (
+                <p className="form-error">
+                  {t("wageRatesPage.missingRateProfileWarning", { count: selectedAttendanceSummary.missingRateDates.length })}
+                </p>
+              ) : null}
               {(selectedLabourRates.length > 0 || upcomingWageRate) && <>
                 <h3>{t("wageRatesPage.history")}</h3>
                 <dl className="worker-stats">

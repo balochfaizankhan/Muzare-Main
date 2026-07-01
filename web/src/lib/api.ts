@@ -758,17 +758,23 @@ export type WageRateBulkUpsertInput = {
   rateType?: WageRateType;
   notes?: string;
   closePrevious?: boolean;
+  replaceExisting?: boolean;
+  changeReason?: string;
   rows: WageRateBulkRowInput[];
 };
 export type WageRateOverlapPreview = {
   labourerId: string;
   labourName?: string;
+  affectedFrom: string;
+  affectedTo?: string | null;
+  affectedAttendanceCount: number;
   overlaps: Array<{
     id: string;
     effectiveFrom: string;
     effectiveTo?: string | null;
     dailyRate: number;
     halfDayRate: number;
+    notes?: string;
   }>;
 };
 export type WageRateCalculateResult = {

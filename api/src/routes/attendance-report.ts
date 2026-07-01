@@ -104,8 +104,8 @@ export async function attendanceReportRoutes(app: FastifyInstance): Promise<void
       return [{
         id: record.clientRecordId, labourerId: labourer.id, labourName: labourer.name,
         dailyWage: labourer.dailyWage,
-        appliedDailyRate: appliedRate?.payload.dailyRate ?? labourer.dailyWage,
-        appliedHalfDayRate: appliedRate?.payload.halfDayRate ?? labourer.dailyWage / 2,
+        appliedDailyRate: appliedRate?.payload.dailyRate,
+        appliedHalfDayRate: appliedRate?.payload.halfDayRate,
         rateRecordId: appliedRate?.clientRecordId ?? null,
         date: payload.date,
         status: payload.status as "present" | "half_day" | "absent",
@@ -134,13 +134,16 @@ export async function attendanceReportRoutes(app: FastifyInstance): Promise<void
         const halfDays = labourAttendance.filter((record) => record.status === "half_day").length;
         const absentDays = labourAttendance.filter((record) => record.status === "absent").length;
         const payableDays = presentDays + halfDays * 0.5;
+        const missingRateDates = labourAttendance
+          .filter((record) => record.status !== "absent" && !record.rateRecordId)
+          .map((record) => record.date);
         const totalWage = labourAttendance.reduce((sum, record) => sum + calculateStatusWage(record.status, {
-          dailyRate: record.appliedDailyRate ?? labourer.dailyWage,
-          halfDayRate: record.appliedHalfDayRate ?? labourer.dailyWage / 2,
+          dailyRate: record.appliedDailyRate ?? 0,
+          halfDayRate: record.appliedHalfDayRate ?? 0,
         }), 0);
         const distinctRates = [...new Set(labourAttendance
-          .map((record) => Number(record.appliedDailyRate ?? labourer.dailyWage))
-          .filter((value) => Number.isFinite(value)))];
+          .map((record) => Number(record.appliedDailyRate))
+          .filter((value) => Number.isFinite(value) && value > 0))];
         return {
           ...labourer,
           presentDays,
@@ -148,7 +151,8 @@ export async function attendanceReportRoutes(app: FastifyInstance): Promise<void
           absentDays,
           payableDays,
           totalWage,
-          wageRateDisplay: distinctRates.length <= 1 ? `${distinctRates[0] ?? labourer.dailyWage}` : "Mixed",
+          wageRateDisplay: distinctRates.length === 0 ? null : distinctRates.length === 1 ? `${distinctRates[0]}` : "Mixed",
+          missingRateDates,
           records: labourAttendance,
         };
       })

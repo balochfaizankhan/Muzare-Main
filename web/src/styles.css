@@ -2554,6 +2554,114 @@ button {
 .wage-settlement-actions button[type="submit"] {
   min-height: 42px;
 }
+.wage-rates-form {
+  gap: 14px;
+}
+.wage-rates-toolbar {
+  align-items: end;
+}
+.wage-rates-edit-banner,
+.wage-rates-selection-bar,
+.wage-rates-submit-bar,
+.wage-rate-overlap-card {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.wage-rates-edit-banner,
+.wage-rates-selection-bar,
+.wage-rates-submit-bar,
+.wage-rate-overlap-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+.wage-rates-edit-banner div,
+.wage-rates-selection-bar div,
+.wage-rates-submit-bar span {
+  min-width: 0;
+}
+.wage-rates-edit-banner span,
+.wage-rates-selection-bar span,
+.wage-rates-submit-bar span,
+.wage-rate-overlap-card small {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+.wage-rates-selection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.wage-rate-labour-list,
+.wage-rate-overlap-list {
+  display: grid;
+  gap: 10px;
+}
+.wage-rate-labour-row {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.6fr);
+  padding: 12px 14px;
+}
+.wage-rate-labour-row.is-selected {
+  border-color: color-mix(in srgb, var(--brand-primary) 42%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--brand-primary) 22%, transparent);
+}
+.wage-rate-labour-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.wage-rate-labour-main span,
+.wage-rate-labour-main small {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+.wage-rate-labour-toggle {
+  align-items: center;
+  gap: 8px;
+}
+.wage-rate-labour-toggle input[type="checkbox"] {
+  block-size: 16px;
+  inline-size: 16px;
+}
+.wage-rate-entry-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.wage-rate-entry-grid input {
+  min-width: 0;
+}
+.wage-rate-overlap-card {
+  display: grid;
+  gap: 8px;
+}
+.wage-rate-overlap-card ul {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wage-rate-overlap-card li {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+.wage-rates-submit-bar {
+  bottom: 12px;
+  position: sticky;
+  z-index: 2;
+}
 .team-card__actions { display: flex !important; flex-shrink: 0; }
 .team-card button, .invite-share button { align-items: center; display: inline-flex; gap: 5px; }
 .team-farm-assignment-list { border: 1px solid var(--border); border-radius: 10px; display: grid; gap: 8px; max-height: 180px; overflow-y: auto; padding: 10px 12px; }
@@ -2635,6 +2743,29 @@ button {
 .workspace-intro p {
   color: var(--text-secondary);
   margin: 0;
+}
+
+@media (max-width: 860px) {
+  .wage-rate-labour-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .wage-rate-entry-grid {
+    grid-template-columns: 1fr;
+  }
+  .wage-rates-edit-banner,
+  .wage-rates-selection-bar,
+  .wage-rates-submit-bar,
+  .wage-rate-overlap-head {
+    align-items: start;
+    flex-direction: column;
+  }
+  .wage-rates-submit-bar button,
+  .wage-rates-selection-actions {
+    width: 100%;
+  }
 }
 
 .local-pill {

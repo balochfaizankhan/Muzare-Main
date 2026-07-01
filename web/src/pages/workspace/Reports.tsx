@@ -592,7 +592,6 @@ export function Reports() {
         labourer.id,
         attendanceRows.filter((item) => item.labourerId === labourer.id),
         wageRates,
-        labourer.dailyWage,
       );
       return {
         labourer,
@@ -1307,7 +1306,13 @@ export function Reports() {
                         </td>
                       );
                     })}
-                    <td>{item.wageRateLabel === "Mixed" ? t("reportsPage.mixedRates") : money(Number(item.wageRateLabel ?? item.labourer.dailyWage))}</td>
+                    <td>{item.missingRateDates.length > 0
+                      ? t("wageRatesPage.missingRateWarning")
+                      : item.wageRateLabel === "Mixed"
+                        ? t("reportsPage.mixedRates")
+                        : item.wageRateLabel
+                          ? money(Number(item.wageRateLabel))
+                          : t("wageRatesPage.noCurrentRate")}</td>
                     <td>{money(item.wage)}</td>
                   </tr>)}
                 </tbody>
@@ -1360,7 +1365,13 @@ export function Reports() {
                       </td>
                     );
                   })}
-                  <td>{item.wageRateLabel === "Mixed" ? t("reportsPage.mixedRates") : money(Number(item.wageRateLabel ?? item.labourer.dailyWage))}</td>
+                  <td>{item.missingRateDates.length > 0
+                    ? t("wageRatesPage.missingRateWarning")
+                    : item.wageRateLabel === "Mixed"
+                      ? t("reportsPage.mixedRates")
+                      : item.wageRateLabel
+                        ? money(Number(item.wageRateLabel))
+                        : t("wageRatesPage.noCurrentRate")}</td>
                   <td>{money(item.wage)}</td>
                 </tr>)}
               </tbody>
