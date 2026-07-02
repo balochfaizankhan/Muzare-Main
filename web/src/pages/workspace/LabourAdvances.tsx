@@ -90,6 +90,10 @@ export function LabourAdvances() {
     const recordId = searchParams.get("recordId");
     if (recordId) setSelected(advances.find((advance) => advance.id === recordId) ?? null);
   }, [advances, searchParams]);
+  useEffect(() => {
+    const labourId = searchParams.get("labourId");
+    if (labourId) setSelectedLabourerIds([labourId]);
+  }, [searchParams]);
 
   const labourById = useMemo(() => new Map(labourers.map((labourer) => [labourer.id, labourer])), [labourers]);
   const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account.name])), [accounts]);

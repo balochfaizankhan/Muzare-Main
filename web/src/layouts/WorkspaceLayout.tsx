@@ -1,4 +1,4 @@
-import { BarChart3, BookOpenText, Boxes, CalendarCheck, CloudUpload, HandCoins, LayoutDashboard, LogOut, PackageOpen, ReceiptText, RefreshCw, Satellite, Settings, ShoppingBasket, Users, WalletCards } from "lucide-react";
+import { BarChart3, BookOpenText, Boxes, CloudUpload, LayoutDashboard, LogOut, PackageOpen, ReceiptText, RefreshCw, Satellite, Settings, ShoppingBasket, Users, WalletCards } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink, Outlet } from "react-router-dom";
@@ -14,18 +14,14 @@ import { hasModulePermission } from "../lib/permissions";
 
 const nav = [
   ["/workspace/dashboard", "layout.dashboard", LayoutDashboard, "dashboard"],
-  ["/workspace/attendance", "layout.attendance", CalendarCheck, "attendance"],
-  ["/workspace/labour-earnings", "layout.labourEarnings", WalletCards, "wages"],
-  ["/workspace/wage-rates", "layout.wages", WalletCards, "wages"],
-  ["/workspace/wage-settlements", "layout.wageSettlement", WalletCards, "wages"],
+  ["/workspace/workforce/labour", "layout.workforce", Users, "workforce"],
+  ["/workspace/labour-payments/overview", "layout.labourPayments", WalletCards, "wages"],
   ["/workspace/sales", "layout.sales", ShoppingBasket, "sales"],
   ["/workspace/expenses", "layout.expenses", ReceiptText, "expenses"],
-  ["/workspace/advances", "layout.advances", HandCoins, "advances"],
   ["/workspace/dispatch", "layout.dispatch", PackageOpen, "dispatch"],
   ["/workspace/inventory", "layout.inventory", Boxes, "inventory"],
   ["/workspace/operations-map", "operationsMap", Satellite, "dashboard"],
   ["/workspace/reports", "layout.reports", BarChart3, "reports"],
-  ["/workspace/team", "layout.workforce", Users, "workforce"],
   ["/workspace/accounts", "layout.accounts", BookOpenText, "accounts"],
   ["/workspace/settings", "layout.settings", Settings, "settings"],
 ] as const;

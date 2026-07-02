@@ -9191,6 +9191,122 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   :root { color-scheme: light; }
 }
 
+.workforce-shell-intro {
+  margin-bottom: 0;
+}
+
+.workforce-shell-intro--nested {
+  margin-top: 0;
+}
+
+.workforce-shell-panel {
+  margin-top: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.workforce-shell-panel--nested {
+  margin-top: 1rem;
+}
+
+.workforce-shell-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .75rem;
+  padding: 1rem 1.1rem;
+}
+
+.workforce-shell-tabs--secondary {
+  padding-top: .85rem;
+}
+
+.workforce-shell-tab {
+  align-items: center;
+  background: #f5f7f2;
+  border: 1px solid rgba(16, 24, 40, .08);
+  border-radius: 999px;
+  color: #35572f;
+  display: inline-flex;
+  font-weight: 600;
+  min-width: 0;
+  padding: .7rem 1rem;
+  text-decoration: none;
+}
+
+.workforce-shell-tab.is-active {
+  background: rgba(74, 124, 52, .12);
+  border-color: rgba(74, 124, 52, .28);
+  color: #21421e;
+}
+
+.workforce-shell-content {
+  min-width: 0;
+}
+
+.labour-payments-overview-grid,
+.labour-payments-quick-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.labour-payments-quick-card {
+  align-items: flex-start;
+  background: #fff;
+  border: 1px solid rgba(16, 24, 40, .08);
+  border-radius: 18px;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: .5rem;
+  min-width: 0;
+  padding: 1rem;
+  text-align: left;
+}
+
+.labour-payments-quick-card strong {
+  color: #18351b;
+}
+
+.labour-payments-quick-card span {
+  color: #5a6a59;
+  font-size: .92rem;
+}
+
+.labour-payments-quick-card small {
+  align-items: center;
+  color: #3d6d34;
+  display: inline-flex;
+  gap: .35rem;
+  font-weight: 600;
+}
+
+.labour-payments-overview-columns {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+@media (max-width: 767px) {
+  .workforce-shell-tabs {
+    gap: .5rem;
+    padding: .85rem;
+  }
+
+  .workforce-shell-tab {
+    flex: 1 1 calc(50% - .5rem);
+    font-size: .92rem;
+    justify-content: center;
+    padding: .7rem .8rem;
+  }
+
+  .labour-payments-quick-grid,
+  .labour-payments-overview-grid,
+  .labour-payments-overview-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 @media print {
   @page { size: A4 landscape; margin: 5mm; }
   body * { visibility: hidden; }

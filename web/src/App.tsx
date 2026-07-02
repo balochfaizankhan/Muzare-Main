@@ -30,7 +30,13 @@ const Inventory = lazy(async () => ({ default: (await import("./pages/workspace/
 const LabourAdvances = lazy(async () => ({ default: (await import("./pages/workspace/LabourAdvances")).LabourAdvances }));
 const LabourEarnings = lazy(async () => ({ default: (await import("./pages/workspace/LabourEarnings")).LabourEarnings }));
 const LabourWageSettlements = lazy(async () => ({ default: (await import("./pages/workspace/LabourWageSettlements")).LabourWageSettlements }));
+const LabourPaymentsReportsHub = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).LabourPaymentsReportsHub }));
+const LabourPaymentsSectionLayout = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).LabourPaymentsSectionLayout }));
+const LabourPaymentsOverview = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).LabourPaymentsOverview }));
+const DirectLabourPaymentsPage = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).DirectLabourPaymentsPage }));
 const WageRates = lazy(async () => ({ default: (await import("./pages/workspace/WageRates")).WageRates }));
+const WorkforceReportsHub = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).WorkforceReportsHub }));
+const WorkforceSectionLayout = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).WorkforceSectionLayout }));
 const Reports = lazy(async () => ({ default: (await import("./pages/workspace/Reports")).Reports }));
 const Sales = lazy(async () => ({ default: (await import("./pages/workspace/Sales")).Sales }));
 const WorkspaceDashboard = lazy(async () => ({ default: (await import("./pages/workspace/WorkspaceDashboard")).WorkspaceDashboard }));
@@ -131,20 +137,39 @@ export default function App() {
     </Route>
     <Route path="/workspace" element={<RequireWorkspace>{routeElement(<WorkspaceLayout />, "Loading workspace shell")}</RequireWorkspace>}>
       <Route path="dashboard" element={routeElement(<WorkspaceDashboard />, "Loading dashboard")} />
-      <Route path="attendance" element={routeElement(<Attendance />, "Loading attendance")} />
-      <Route path="advances" element={routeElement(<LabourAdvances />, "Loading advances")} />
-      <Route path="labour-earnings" element={routeElement(<LabourEarnings />, "Loading labour earnings")} />
-      <Route path="wage-rates" element={routeElement(<WageRates />, "Loading wage rates")} />
-      <Route path="wage-settlements" element={routeElement(<LabourWageSettlements />, "Loading labour wage settlements")} />
+      <Route path="workforce" element={routeElement(<WorkforceSectionLayout />, "Loading workforce")}>
+        <Route index element={<Navigate to="labour" replace />} />
+        <Route path="labour" element={routeElement(<ModulePage module="workforce" />, "Loading labour")} />
+        <Route path="attendance" element={routeElement(<Attendance />, "Loading attendance")} />
+        <Route path="reports" element={routeElement(<WorkforceReportsHub />, "Loading workforce reports")} />
+        <Route path="labour-payments" element={<Navigate to="/workspace/labour-payments/overview" replace />} />
+      </Route>
+      <Route path="labour-payments" element={routeElement(<LabourPaymentsSectionLayout />, "Loading labour payments")}>
+        <Route index element={<Navigate to="overview" replace />} />
+        <Route path="overview" element={routeElement(<LabourPaymentsOverview />, "Loading labour payments overview")} />
+        <Route path="advances" element={routeElement(<LabourAdvances />, "Loading advances")} />
+        <Route path="wage-rates" element={routeElement(<WageRates />, "Loading wage rates")} />
+        <Route path="earnings" element={routeElement(<LabourEarnings />, "Loading labour work")} />
+        <Route path="labour-work" element={<Navigate to="/workspace/labour-payments/earnings" replace />} />
+        <Route path="direct-payments" element={routeElement(<DirectLabourPaymentsPage />, "Loading direct payments")} />
+        <Route path="settlements" element={routeElement(<LabourWageSettlements />, "Loading wage settlements")} />
+        <Route path="settlement" element={<Navigate to="/workspace/labour-payments/settlements" replace />} />
+        <Route path="reports" element={routeElement(<LabourPaymentsReportsHub />, "Loading labour payment reports")} />
+      </Route>
       <Route path="sales" element={routeElement(<Sales />, "Loading sales")} />
       <Route path="expenses" element={routeElement(<Expenses />, "Loading expenses")} />
       <Route path="dispatch" element={routeElement(<Dispatch />, "Loading dispatch")} />
       <Route path="inventory" element={routeElement(<Inventory />, "Loading inventory")} />
-      <Route path="labour-advances" element={routeElement(<LabourAdvances />, "Loading advances")} />
+      <Route path="attendance" element={<Navigate to="/workspace/workforce/attendance" replace />} />
+      <Route path="advances" element={<Navigate to="/workspace/labour-payments/advances" replace />} />
+      <Route path="labour-advances" element={<Navigate to="/workspace/labour-payments/advances" replace />} />
+      <Route path="labour-earnings" element={<Navigate to="/workspace/labour-payments/earnings" replace />} />
+      <Route path="wage-rates" element={<Navigate to="/workspace/labour-payments/wage-rates" replace />} />
+      <Route path="wage-settlements" element={<Navigate to="/workspace/labour-payments/settlements" replace />} />
       <Route path="reports" element={routeElement(<Reports />, "Loading reports")} />
       <Route path="operations-map" element={config.featureFarmMap ? routeElement(<FarmOperationsMap mode="live" />, "Loading operations map") : <FarmMapDisabledRedirect />} />
       <Route path="map-builder" element={config.featureFarmMap ? routeElement(<FarmOperationsMap mode="builder" />, "Loading map builder") : <FarmMapDisabledRedirect />} />
-      <Route path="team" element={routeElement(<ModulePage module="workforce" />, "Loading workforce")} />
+      <Route path="team" element={<Navigate to="/workspace/workforce/labour" replace />} />
       <Route path="settings" element={routeElement(<Farms />, "Loading workspace settings")} />
       <Route path="settings/team" element={routeElement(<WorkspaceTeam />, "Loading workspace team")} />
       <Route path="settings/approvals" element={routeElement(<WorkspaceApprovals />, "Loading approvals")} />
@@ -156,7 +181,7 @@ export default function App() {
       <Route path="partner-ledger" element={routeElement(<ModulePage module="partnerLedger" />, "Loading partner ledger")} />
     </Route>
     {["workforce", "advances", "labour-earnings", "wage-rates", "wage-settlements", "expenses", "sales", "dispatch", "inventory", "accounts", "partner-ledger", "farms", "seasons"].map((path) =>
-      <Route key={path} path={`/${path}`} element={<Navigate to={`/workspace/${path === "workforce" ? "attendance" : path}`} replace />} />,
+      <Route key={path} path={`/${path}`} element={<Navigate to={`/workspace/${path === "workforce" ? "workforce/labour" : path}`} replace />} />,
     )}
     <Route path="*" element={<RequireAuth><NotFoundPage /></RequireAuth>} />
   </Routes>;

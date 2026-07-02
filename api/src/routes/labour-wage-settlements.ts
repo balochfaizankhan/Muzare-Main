@@ -207,7 +207,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         const settlementNumber = await allocateSettlementNumber(tx, workspaceId, farmId);
         const voucherId = crypto.randomUUID();
         const voucherNumber = await allocateVoucherNumber(tx, workspaceId, farmId, seasonId);
-        const description = `Labour wage settlement: ${fromDate} to ${toDate}`;
+        const description = `Labour wage settlement: ${fromDate} to ${toDate} (attendance wages + labour work)`;
         const voucherPayload = {
           id: voucherId,
           date: settlementDate,
@@ -222,6 +222,12 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           amount: preview.expenseAmount,
           accountId,
           notes: notes?.trim() || "",
+          attendanceWages: preview.attendanceWages,
+          labourWork: preview.pendingLabourEarnings,
+          totalLabourCost: preview.totalEarned,
+          advancesAvailableUpToSettlementDate: preview.advancesPaid,
+          appliedAdvances: preview.settledAdvanceAmount,
+          cashPaid: preview.payableBalance,
           createdBy: request.appUser!.id,
           updatedBy: request.appUser!.id,
           settlementId,
@@ -251,12 +257,17 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           settlementDate,
           attendanceWages: preview.attendanceWages,
           pendingLabourEarnings: preview.pendingLabourEarnings,
+          labourWork: preview.pendingLabourEarnings,
           totalEarned: preview.totalEarned,
+          totalLabourCost: preview.totalEarned,
           advancesPaid: preview.advancesPaid,
+          advancesAvailableUpToSettlementDate: preview.advancesPaid,
           settledAdvanceAmount: preview.settledAdvanceAmount,
+          appliedAdvances: preview.settledAdvanceAmount,
           expenseAmount: preview.expenseAmount,
           carryForwardAdvance: preview.carryForwardAdvance,
           payableBalance: preview.payableBalance,
+          cashPayable: preview.payableBalance,
           notes: notes?.trim() || "",
           status: "posted",
           createdBy: request.appUser!.id,

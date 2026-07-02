@@ -17,12 +17,17 @@ export type LabourWageSettlementPayload = {
   settlementDate: string;
   attendanceWages: number;
   pendingLabourEarnings: number;
+  labourWork?: number;
   totalEarned: number;
+  totalLabourCost?: number;
   advancesPaid: number;
+  advancesAvailableUpToSettlementDate?: number;
   settledAdvanceAmount: number;
+  appliedAdvances?: number;
   expenseAmount: number;
   carryForwardAdvance: number;
   payableBalance: number;
+  cashPayable?: number;
   notes?: string;
   status: "posted" | "voided";
   createdBy?: string;
@@ -43,6 +48,14 @@ function parseSettlementSequenceNumber(value: string) {
 }
 
 export function normalizeSettlementPayload(payload: Record<string, unknown>): LabourWageSettlementPayload {
+  const attendanceWages = Number(payload.attendanceWages ?? 0);
+  const pendingLabourEarnings = Number(payload.pendingLabourEarnings ?? payload.labourWork ?? 0);
+  const totalEarned = Number(payload.totalEarned ?? payload.totalLabourCost ?? (attendanceWages + pendingLabourEarnings));
+  const advancesPaid = Number(payload.advancesPaid ?? payload.advancesAvailableUpToSettlementDate ?? 0);
+  const settledAdvanceAmount = Number(payload.settledAdvanceAmount ?? payload.appliedAdvances ?? 0);
+  const expenseAmount = Number(payload.expenseAmount ?? totalEarned);
+  const carryForwardAdvance = Number(payload.carryForwardAdvance ?? 0);
+  const payableBalance = Number(payload.payableBalance ?? payload.cashPayable ?? 0);
   return {
     settlementNumber: typeof payload.settlementNumber === "string" ? payload.settlementNumber : "LW-0001",
     linkedVoucherId: typeof payload.linkedVoucherId === "string" ? payload.linkedVoucherId : "",
@@ -51,14 +64,19 @@ export function normalizeSettlementPayload(payload: Record<string, unknown>): La
     fromDate: typeof payload.fromDate === "string" ? payload.fromDate : "",
     toDate: typeof payload.toDate === "string" ? payload.toDate : "",
     settlementDate: typeof payload.settlementDate === "string" ? payload.settlementDate : "",
-    attendanceWages: Number(payload.attendanceWages ?? 0),
-    pendingLabourEarnings: Number(payload.pendingLabourEarnings ?? 0),
-    totalEarned: Number(payload.totalEarned ?? (Number(payload.attendanceWages ?? 0) + Number(payload.pendingLabourEarnings ?? 0))),
-    advancesPaid: Number(payload.advancesPaid ?? 0),
-    settledAdvanceAmount: Number(payload.settledAdvanceAmount ?? 0),
-    expenseAmount: Number(payload.expenseAmount ?? 0),
-    carryForwardAdvance: Number(payload.carryForwardAdvance ?? 0),
-    payableBalance: Number(payload.payableBalance ?? 0),
+    attendanceWages,
+    pendingLabourEarnings,
+    labourWork: pendingLabourEarnings,
+    totalEarned,
+    totalLabourCost: totalEarned,
+    advancesPaid,
+    advancesAvailableUpToSettlementDate: advancesPaid,
+    settledAdvanceAmount,
+    appliedAdvances: settledAdvanceAmount,
+    expenseAmount,
+    carryForwardAdvance,
+    payableBalance,
+    cashPayable: payableBalance,
     notes: typeof payload.notes === "string" ? payload.notes : "",
     status: payload.status === "voided" ? "voided" : "posted",
     createdBy: typeof payload.createdBy === "string" ? payload.createdBy : undefined,

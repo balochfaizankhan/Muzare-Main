@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router-dom";
 import { SearchInput } from "../../components/SearchInput";
 import { SubpageHeader } from "../../components/SubpageHeader";
 import { bulkUpsertWageRates, fetchWageRates, validateWageRateOverlap, type WageRateBulkRowInput, type WageRateOverlapPreview } from "../../lib/api";
@@ -28,6 +29,7 @@ const emptyDraft: RowDraft = {
 
 export function WageRates() {
   const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
   const { token, user } = useAuth();
   const workspaceId = user?.workspaceId ?? "";
   const [labourers, setLabourers] = useState<Labourer[]>([]);
@@ -87,6 +89,11 @@ export function WageRates() {
       window.removeEventListener("muzare-local-data-change", handle);
     };
   }, [refresh]);
+  useEffect(() => {
+    const labourId = searchParams.get("labourId") ?? "";
+    if (!labourId) return;
+    setSelectedIds([labourId]);
+  }, [searchParams]);
 
   const todayKey = today();
   const filteredLabourers = useMemo(() => labourers.filter((labourer) => {

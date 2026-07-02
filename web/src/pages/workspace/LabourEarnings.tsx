@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router-dom";
 import { SearchInput } from "../../components/SearchInput";
 import { SubpageHeader } from "../../components/SubpageHeader";
 import { formatMoney } from "../../lib/format";
@@ -15,6 +16,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 export function LabourEarnings() {
   const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const workspaceId = user?.workspaceId ?? "";
   const activeFarmId = getActiveFarmId();
@@ -56,6 +58,12 @@ export function LabourEarnings() {
       window.removeEventListener("muzare-local-data-change", refresh);
     };
   }, []);
+  useEffect(() => {
+    const labourId = searchParams.get("labourId") ?? "";
+    if (!labourId) return;
+    setSelectedLabourerId(labourId);
+    setLabourerId(labourId);
+  }, [searchParams]);
 
   const labourById = useMemo(() => new Map(labourers.map((labourer) => [labourer.id, labourer])), [labourers]);
   const filtered = useMemo(() => earnings.filter((earning) => {
@@ -110,7 +118,7 @@ export function LabourEarnings() {
       setAmount("");
       setDescription("");
       setNotes("");
-      setSuccess("Labour earning recorded. It will be included in the next wage settlement.");
+      setSuccess("Labour work recorded. It will be included in the next wage settlement.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to record this labour earning.");
     } finally {
@@ -121,7 +129,7 @@ export function LabourEarnings() {
   const voidPendingEarning = async (earning: LabourEarning) => {
     if (!canManage) return;
     if (earning.status === "settled") {
-      setError("Settled labour earnings must be reversed through settlement or adjustment workflow.");
+      setError("Settled labour work must be reversed through settlement or adjustment workflow.");
       return;
     }
     await persistOperationalRecord("labourEarning", {
@@ -134,19 +142,19 @@ export function LabourEarnings() {
 
   return (
     <div className="dashboard-page">
-      <SubpageHeader title="Labour Earnings" />
+      <SubpageHeader title="Labour Work" />
       <main className="subpage module-workspace">
         <section className="workspace-intro">
           <div>
-            <h2>Labour Earnings Ledger</h2>
-            <p>Record non-attendance labour earnings as pending liabilities, then settle them later with wage settlement and one linked expense voucher.</p>
+            <h2>Labour Work Ledger</h2>
+            <p>Record non-attendance labour work as pending labour cost, then settle it later with wage settlement and one linked accounting voucher.</p>
           </div>
         </section>
 
         <section className="record-panel">
           <div className="advances-heading">
-            <h2>Record earning</h2>
-            <span>These entries do not touch cash or accounts until settlement.</span>
+            <h2>Record labour work</h2>
+            <span>These entries do not touch cash, accounts, or partner ledgers until settlement.</span>
           </div>
           <form className="module-form" onSubmit={(event) => void submit(event)}>
             <div className="advances-filter-row">
@@ -161,17 +169,17 @@ export function LabourEarnings() {
             <label className="advances-filter-field advances-filter-field--full"><span>Notes</span><input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional notes" /></label>
             {error ? <p className="form-error">{error}</p> : null}
             {success ? <p className="context-message">{success}</p> : null}
-            <button disabled={!canManage || saving} type="submit">{saving ? "Saving..." : "Record labour earning"}</button>
+            <button disabled={!canManage || saving} type="submit">{saving ? "Saving..." : "Record labour work"}</button>
           </form>
         </section>
 
         <section className="record-panel">
           <div className="advances-heading">
-            <h2>Recent earnings</h2>
+            <h2>Labour work ledger</h2>
             <span>{filtered.length} entries</span>
           </div>
           <div className="advances-filter-grid">
-            <SearchInput placeholder="Search labour earnings" value={search} onChange={setSearch} />
+            <SearchInput placeholder="Search labour work" value={search} onChange={setSearch} />
             <label className="advances-filter-field"><span>Labour</span><select value={selectedLabourerId} onChange={(event) => setSelectedLabourerId(event.target.value)}><option value="">All labour</option>{labourers.map((labourer) => <option key={labourer.id} value={labourer.id}>{labourer.name}</option>)}</select></label>
             <label className="advances-filter-field"><span>Status</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">All status</option><option value="pending_settlement">Pending Settlement</option><option value="settled">Settled</option><option value="voided">Voided</option></select></label>
             <label className="advances-filter-field"><span>Type</span><select value={earningType} onChange={(event) => setEarningType(event.target.value as LabourEarning["earningType"] | "")}><option value="">All types</option>{["lump_sum", "task", "bonus", "incentive", "adjustment", "other"].map((type) => <option key={type} value={type}>{labourEarningTypeLabel(type as LabourEarning["earningType"])}</option>)}</select></label>
@@ -179,11 +187,11 @@ export function LabourEarnings() {
             <label className="advances-filter-field"><span>To</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
           </div>
           <div className="reports-kpis">
-            <article><span>Pending earnings</span><strong>{money(sumLabourEarnings(pending))}</strong></article>
-            <article><span>Settled earnings</span><strong>{money(sumLabourEarnings(settled))}</strong></article>
-            <article><span>Voided earnings</span><strong>{money(sumLabourEarnings(voided))}</strong></article>
+            <article><span>Pending labour work</span><strong>{money(sumLabourEarnings(pending))}</strong></article>
+            <article><span>Settled labour work</span><strong>{money(sumLabourEarnings(settled))}</strong></article>
+            <article><span>Voided labour work</span><strong>{money(sumLabourEarnings(voided))}</strong></article>
           </div>
-          {!filtered.length ? <p className="context-message">No labour earnings match this filter yet.</p> : (
+          {!filtered.length ? <p className="context-message">No labour work entries match this filter yet.</p> : (
             <div className="attendance-import-table-wrap report-wide-table">
               <table className="report-data-table">
                 <thead>

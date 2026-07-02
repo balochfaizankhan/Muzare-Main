@@ -1485,11 +1485,11 @@ export function Reports() {
         </ReportShell>}
       </>}
 
-      {report === "labour-earnings" && <ReportShell title="Labour Earnings Report" rangeLabel={rangeLabel} sectionId="labour-earnings" onPrint={() => printSection("labour-earnings")} onExport={exportLabourEarnings}>
+      {report === "labour-earnings" && <ReportShell title="Labour Work Report" rangeLabel={rangeLabel} sectionId="labour-earnings" onPrint={() => printSection("labour-earnings")} onExport={exportLabourEarnings}>
         <Kpis values={[
-          ["Pending earnings", money(sumLabourEarnings(labourEarningPending))],
-          ["Settled earnings", money(sumLabourEarnings(labourEarningSettled))],
-          ["Voided earnings", money(sumLabourEarnings(labourEarningVoided))],
+          ["Pending labour work", money(sumLabourEarnings(labourEarningPending))],
+          ["Settled labour work", money(sumLabourEarnings(labourEarningSettled))],
+          ["Voided labour work", money(sumLabourEarnings(labourEarningVoided))],
           ["Entries", labourEarningRows.length],
         ]} />
         <ReportTable
@@ -1514,7 +1514,7 @@ export function Reports() {
               [t("reportsPage.reference"), item.linkedSettlementId ?? "-"],
               [t("reportsPage.status"), item.status],
             ],
-            onOpen: () => navigate("/workspace/labour-earnings"),
+            onOpen: () => navigate("/workspace/labour-payments/earnings"),
           }))}
         />
       </ReportShell>}

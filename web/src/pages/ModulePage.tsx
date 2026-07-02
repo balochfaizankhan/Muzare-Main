@@ -14,7 +14,7 @@ import { defaultTransactionGroupExpansion, groupAccountTransactions, type Accoun
 import { attendanceStatusKey, buildAttendanceStatusMap, previousLocalDateKey, todayLocalDateKey } from "../lib/attendanceStatus";
 import { ApiError, confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteExpenseAttachment, deleteOrDeactivateLabour, extractExpenseReceipt, fetchExpenseAttachments, fetchExpenseCategories, fetchLabourDeletionPreview, openExpenseAttachment, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, uploadExpenseAttachment, validateVoucherNumber, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type ExpenseAttachment, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type ExpenseOcrSuggestion, type ExpenseSearchRecord, type LabourDeletionPreview } from "../lib/api";
 import { buildDispatchAvailability, dispatchCartons, dispatchItemKey, resolveSaleType, saleProduceLabel, soldQuantityByDispatchItem } from "../lib/dispatch-sales";
-import { canCreate, canDelete, canEdit, hasPermission } from "../lib/permissions";
+import { canCreate, canDelete, canEdit, hasModulePermission, hasPermission } from "../lib/permissions";
 import { translateExpenseCategory, translateExpenseSubcategory, translatePaymentType, translateSaleType, translateSalesStatus } from "../lib/systemTranslations";
 import {
   buildPartnerLiabilityPositions,
@@ -148,6 +148,7 @@ function WorkforceModule({
   onAdvanceClose?: () => void;
 }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { token, user, sessionRefreshing } = useAuth();
   const sync = useSyncState();
   const loadLabourers = useCallback(async () => (await workspaceRecords(offlineDb.labourers)).sort(compareLabourers), []);
@@ -402,7 +403,7 @@ function WorkforceModule({
             {canWriteAttendance && <button className="workforce-mark-attendance" type="button" onClick={() => setShowAttendanceEntry(true)}>{t("workforcePage.markAttendance")}</button>}
           <div className="workforce-toolbar">
             {canManageLabour && <button type="button" onClick={() => setShowAddLabour(true)}>{t("workforcePage.addLabour")}</button>}
-            {canAddAdvance && <button type="button" onClick={() => setShowAdvanceEntry(true)}>{t("layout.advances")}</button>}
+            {user?.workspaceId && hasModulePermission(user, "workforce", "view", user.workspaceId) && <button type="button" onClick={() => navigate("/workspace/labour-payments/overview")}>Labour Payments</button>}
             {canManageLabour && <button type="button" onClick={() => setShowAddGroup(true)}>{t("workforcePage.groups")}</button>}
           </div>
         </div>
@@ -584,8 +585,8 @@ function WorkforceModule({
                 <div><dt>{t("wageRatesPage.halfDayRate")}</dt><dd>{currentWageRate ? money(normalizeHalfDayRate(currentWageRate)) : "-"}</dd></div>
                 <div><dt>{t("reportsPage.payableDays")}</dt><dd>{selectedAttendanceSummary ? selectedAttendanceSummary.payable : "-"}</dd></div>
                 <div><dt>{t("wageRatesPage.attendanceWageTotal")}</dt><dd>{money(attendanceEarnings)}</dd></div>
-                <div><dt>Pending labour earnings</dt><dd>{money(selectedLabourLedgerSummary?.totalPendingEarnings ?? 0)}</dd></div>
-                <div><dt>Total earned</dt><dd className="positive">{money(selectedLabourLedgerSummary?.totalEarned ?? totalEarnings)}</dd></div>
+                <div><dt>Labour work</dt><dd>{money(selectedLabourLedgerSummary?.totalPendingEarnings ?? 0)}</dd></div>
+                <div><dt>Estimated earnings</dt><dd className="positive">{money(selectedLabourLedgerSummary?.totalEarned ?? totalEarnings)}</dd></div>
                 <div><dt>{t("advancesPage.recordAdvance")}</dt><dd className={advanceAmount > 0 ? "negative" : ""}>{money(advanceAmount)}</dd></div>
                 <div><dt>{t("workforcePage.paymentsLabel")}</dt><dd className={paidAmount > 0 ? "negative" : ""}>{money(paidAmount)}</dd></div>
                 <div><dt>Estimated payable</dt><dd className={(selectedLabourLedgerSummary?.estimatedPayable ?? netBalance) < 0 ? "negative" : "positive"}>{money(selectedLabourLedgerSummary?.estimatedPayable ?? Math.max(netBalance, 0))}</dd></div>
@@ -598,17 +599,17 @@ function WorkforceModule({
                 </p>
               ) : null}
               {selectedLabourLedgerSummary && <>
-                <h3>Earnings Summary</h3>
+                <h3>Estimated Earnings Summary</h3>
                 <dl className="worker-stats">
                   <div><dt>Attendance wages</dt><dd>{money(selectedLabourLedgerSummary.attendanceSummary.totalWage)}</dd></div>
-                  <div><dt>Pending labour earnings</dt><dd>{money(selectedLabourLedgerSummary.totalPendingEarnings)}</dd></div>
-                  <div><dt>Total earned</dt><dd>{money(selectedLabourLedgerSummary.totalEarned)}</dd></div>
+                  <div><dt>Labour work</dt><dd>{money(selectedLabourLedgerSummary.totalPendingEarnings)}</dd></div>
+                  <div><dt>Estimated earnings</dt><dd>{money(selectedLabourLedgerSummary.totalEarned)}</dd></div>
                   <div><dt>Advances paid</dt><dd>{money(selectedLabourLedgerSummary.advancesPaid)}</dd></div>
                   <div><dt>Estimated payable</dt><dd>{money(selectedLabourLedgerSummary.estimatedPayable)}</dd></div>
                   <div><dt>Carry forward advance</dt><dd>{money(selectedLabourLedgerSummary.carryForwardAdvance)}</dd></div>
                 </dl>
-                <h3>Pending Labour Earnings</h3>
-                {!selectedLabourLedgerSummary.pendingEarnings.length ? <p className="empty-records">No pending labour earnings for this labourer.</p> : (
+                <h3>Labour Work</h3>
+                {!selectedLabourLedgerSummary.pendingEarnings.length ? <p className="empty-records">No pending labour work for this labourer.</p> : (
                   <div className="attendance-import-table-wrap report-wide-table">
                     <table className="report-data-table">
                       <thead>
@@ -648,9 +649,9 @@ function WorkforceModule({
             </div>
             <footer className="worker-dialog__footer">
               {canManageLabour && <button className="worker-dialog__link" type="button" onClick={() => { setActionLabourer(selectedLabourer); setLabourAction("update"); }}>{t("common.edit")}</button>}
-              {canAddAdvance && <button className="worker-dialog__link" type="button" onClick={() => { setActionLabourer(selectedLabourer); setLabourAction("advance"); }}>{t("advancesPage.recordAdvance")}</button>}
-              {canAddAdvance && selectedLabourer.paymentType === "production_based" && <button className="worker-dialog__link" type="button" onClick={() => { setActionLabourer(selectedLabourer); setLabourAction("production"); }}>{t("workforcePage.recordProduction")}</button>}
-              {canAddAdvance && <button className="worker-dialog__link" type="button" onClick={() => { setActionLabourer(selectedLabourer); setLabourAction("payment"); }}>{t("workforcePage.paymentAction")}</button>}
+              {user?.workspaceId && hasModulePermission(user, "workforce", "view", user.workspaceId) && (
+                <button className="worker-dialog__link" type="button" onClick={() => navigate(`/workspace/labour-payments/overview?labourId=${encodeURIComponent(selectedLabourer.id)}`)}>Labour Payments</button>
+              )}
               {canManageLabour && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => {
                 if (!navigator.onLine || sync.pendingCount > 0) showToast(t("errors.syncPendingBeforeDeactivate"));
                 else {

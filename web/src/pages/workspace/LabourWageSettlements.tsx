@@ -252,7 +252,7 @@ export function LabourWageSettlements() {
       });
       setPreview({ status: "idle", data: null });
       setNotes("");
-      setSuccess(`Settlement ${response.settlement.settlementNumber} posted. Voucher ${response.voucher.voucherNumber} was created for labour wages.`);
+      setSuccess(`Settlement ${response.settlement.settlementNumber} posted. Voucher ${response.voucher.voucherNumber} was created for attendance wages and labour work.`);
       window.dispatchEvent(new Event("muzare-local-data-change"));
       await syncFromServer();
     } catch (caught) {
@@ -287,16 +287,16 @@ export function LabourWageSettlements() {
   }, [accountById, linkedVoucherById, paymentAccountFilter, registerSearch, settlements, statusFilter]);
   const registerTotals = useMemo(() => registerRows.reduce((totals, settlement) => ({
     attendanceWages: totals.attendanceWages + settlement.attendanceWages,
-    labourEarnings: totals.labourEarnings + settlement.pendingLabourEarnings,
-    totalWageExpense: totals.totalWageExpense + settlement.expenseAmount,
-    advancesSettled: totals.advancesSettled + settlement.settledAdvanceAmount,
+    labourWork: totals.labourWork + settlement.pendingLabourEarnings,
+    totalLabourCost: totals.totalLabourCost + settlement.expenseAmount,
+    appliedAdvances: totals.appliedAdvances + settlement.settledAdvanceAmount,
     carryForward: totals.carryForward + settlement.carryForwardAdvance,
     cashPaid: totals.cashPaid + settlement.payableBalance,
   }), {
     attendanceWages: 0,
-    labourEarnings: 0,
-    totalWageExpense: 0,
-    advancesSettled: 0,
+    labourWork: 0,
+    totalLabourCost: 0,
+    appliedAdvances: 0,
     carryForward: 0,
     cashPaid: 0,
   }), [registerRows]);
@@ -306,9 +306,9 @@ export function LabourWageSettlements() {
       "Settlement Date",
       "Period",
       "Attendance Wages",
-      "Labour Earnings",
-      "Total Wage Expense",
-      "Advances Settled",
+      "Labour Work",
+      "Total Labour Cost",
+      "Applied Advances",
       "Carry-forward Advance",
       "Cash Paid",
       "Payment Account",
@@ -420,13 +420,13 @@ export function LabourWageSettlements() {
           {!summary ? <p className="context-message">Run a preview to calculate period wages, settled advances, carry-forward, and payable balance.</p> : <>
             <div className="reports-kpis">
               <article><span>Attendance wages</span><strong>{money(summary.attendanceWages)}</strong></article>
-              <article><span>Pending labour earnings</span><strong>{money(summary.pendingLabourEarnings)}</strong></article>
-              <article><span>Total earned</span><strong>{money(summary.totalEarned)}</strong></article>
+              <article><span>Labour work</span><strong>{money(summary.pendingLabourEarnings)}</strong></article>
+              <article><span>Total labour cost</span><strong>{money(summary.totalEarned)}</strong></article>
               <article><span>Advances available up to settlement date</span><strong>{money(summary.advancesAvailableUpToSettlementDate)}</strong></article>
-              <article><span>Expense amount</span><strong>{money(summary.expenseAmount)}</strong></article>
-              <article><span>Settled advances</span><strong>{money(summary.settledAdvanceAmount)}</strong></article>
+              <article><span>Settlement voucher amount</span><strong>{money(summary.expenseAmount)}</strong></article>
+              <article><span>Applied advances</span><strong>{money(summary.settledAdvanceAmount)}</strong></article>
               <article><span>Carry-forward advance</span><strong>{money(summary.carryForwardAdvance)}</strong></article>
-              <article><span>Payable balance</span><strong>{money(summary.payableBalance)}</strong></article>
+              <article><span>Remaining cash payable</span><strong>{money(summary.payableBalance)}</strong></article>
             </div>
             <div className="reports-summary-list">
               <article><span>Wage period</span><strong>{fromDate} to {toDate}</strong></article>
@@ -447,7 +447,7 @@ export function LabourWageSettlements() {
               </ul>
             </div>}
             {summary.includedEarnings.length > 0 && <div className="reports-summary-list">
-              <article><span>Included labour earnings</span><strong>{summary.includedEarnings.length}</strong></article>
+              <article><span>Included labour work rows</span><strong>{summary.includedEarnings.length}</strong></article>
               <article><span>Ledger total</span><strong>{money(summary.includedEarnings.reduce((sum, item) => sum + item.amount, 0))}</strong></article>
             </div>}
           </>}
@@ -468,9 +468,9 @@ export function LabourWageSettlements() {
             <>
               <div className="reports-kpis">
                 <article><span>Attendance wages</span><strong>{money(registerTotals.attendanceWages)}</strong></article>
-                <article><span>Labour earnings</span><strong>{money(registerTotals.labourEarnings)}</strong></article>
-                <article><span>Total wage expense</span><strong>{money(registerTotals.totalWageExpense)}</strong></article>
-                <article><span>Advances settled</span><strong>{money(registerTotals.advancesSettled)}</strong></article>
+                <article><span>Labour work</span><strong>{money(registerTotals.labourWork)}</strong></article>
+                <article><span>Total labour cost</span><strong>{money(registerTotals.totalLabourCost)}</strong></article>
+                <article><span>Applied advances</span><strong>{money(registerTotals.appliedAdvances)}</strong></article>
                 <article><span>Carry-forward advance</span><strong>{money(registerTotals.carryForward)}</strong></article>
                 <article><span>Cash paid</span><strong>{money(registerTotals.cashPaid)}</strong></article>
               </div>
@@ -508,9 +508,9 @@ export function LabourWageSettlements() {
                     <th>Settlement date</th>
                     <th>Settlement period</th>
                     <th>Attendance wages</th>
-                    <th>Labour earnings</th>
-                    <th>Total wage expense</th>
-                    <th>Advances settled</th>
+                    <th>Labour work</th>
+                    <th>Total labour cost</th>
+                    <th>Applied advances</th>
                     <th>Carry-forward advance</th>
                     <th>Cash paid</th>
                     <th>Payment account</th>
@@ -567,8 +567,8 @@ export function LabourWageSettlements() {
                   <div className="reports-kpis">
                     <article><span>Settlement date</span><strong>{selectedSettlement.settlementDate}</strong></article>
                     <article><span>Attendance wages</span><strong>{money(selectedSettlement.attendanceWages)}</strong></article>
-                    <article><span>Labour earnings</span><strong>{money(selectedSettlement.pendingLabourEarnings)}</strong></article>
-                    <article><span>Total wage expense</span><strong>{money(selectedSettlement.expenseAmount)}</strong></article>
+                    <article><span>Labour work</span><strong>{money(selectedSettlement.pendingLabourEarnings)}</strong></article>
+                    <article><span>Total labour cost</span><strong>{money(selectedSettlement.expenseAmount)}</strong></article>
                     <article><span>Advances applied</span><strong>{money(selectedSettlement.settledAdvanceAmount)}</strong></article>
                     <article><span>Carry-forward advance</span><strong>{money(selectedSettlement.carryForwardAdvance)}</strong></article>
                     <article><span>Cash paid</span><strong>{money(selectedSettlement.payableBalance)}</strong></article>
