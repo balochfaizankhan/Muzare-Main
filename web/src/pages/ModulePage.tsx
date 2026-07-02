@@ -2171,7 +2171,7 @@ function ExpensesModule() {
     queryKey: ["expense-search", workspaceId, farmId, seasonId, debouncedVoucherSearch, voucherFrom, voucherTo, voucherCategory, voucherSubcategory, voucherAccountId, showDeletedVouchers, showImportedVouchers, showSettlementVouchers],
     queryFn: () => searchExpenses(token!, workspaceId, {
       farmId: farmId!, seasonId: seasonId!, search: debouncedVoucherSearch || undefined, from: voucherFrom || undefined, to: voucherTo || undefined,
-      category: voucherCategory || undefined, subcategory: voucherSubcategory || undefined, accountId: voucherAccountId || undefined,
+      accountId: voucherAccountId || undefined,
       includeDeleted: showDeletedVouchers,
       includeImported: showImportedVouchers,
       includeSettlementVouchers: showSettlementVouchers,

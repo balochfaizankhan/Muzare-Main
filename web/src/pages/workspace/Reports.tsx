@@ -1606,7 +1606,26 @@ export function Reports() {
           </div>
         </ReportShell>}
         {views.expenditures === "log" && <ReportShell title={t("reportsPage.expenseLog")} rangeLabel={rangeLabel} sectionId="expense-log" onPrint={() => printSection("expense-log")} onExport={exportExpenseLog}>
-          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.voucher"), t("reportsPage.date"), t("reportsPage.description"), t("reportsPage.category"), t("reportsPage.account"), t("reportsPage.amount")]} rows={voucherRows.map((item) => ({ id: item.id, title: getVoucherDisplayNumber(item) || item.voucherNumber, value: money(item.amount), meta: item.date, cells: [getVoucherDisplayNumber(item) || item.voucherNumber, item.date, (item.items?.length ?? 0) > 1 ? `${item.items?.[0]?.description ?? item.description} +${(item.items?.length ?? 1) - 1} ${t("expensesPage.moreItems")}` : item.description, (item.items?.length ?? 0) > 1 ? `${translateExpenseCategory(item.items?.[0]?.category ?? item.category)} / ${item.items?.[0]?.subcategory ? translateExpenseSubcategory(item.items[0].subcategory) : "-"}` : expenseLabel(item.category, item.subcategory), accountName(item.accountId), money(item.amount)], details: [...voucherReportItems(item).map((line, index) => [`${t("expensesPage.itemNumber", { number: index + 1 })}`, `${line.description} • ${expenseLabel(line.category, line.subcategory)} • ${money(line.amount)}`] as [string, ReactNode]), [t("reportsPage.account"), accountName(item.accountId)]], onOpen: () => navigate(`/workspace/expenses?recordId=${item.id}`) }))} />
+          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.voucher"), t("reportsPage.date"), t("reportsPage.description"), t("reportsPage.category"), t("reportsPage.account"), t("reportsPage.amount")]} rows={voucherRows.map((item) => {
+            const lines = voucherReportItems(item);
+            const firstLine = lines[0];
+            return {
+              id: item.id,
+              title: getVoucherDisplayNumber(item) || item.voucherNumber,
+              value: money(item.amount),
+              meta: item.date,
+              cells: [
+                getVoucherDisplayNumber(item) || item.voucherNumber,
+                item.date,
+                lines.length > 1 ? `${firstLine?.description ?? item.description} +${lines.length - 1} ${t("expensesPage.moreItems")}` : item.description,
+                firstLine ? expenseLabel(firstLine.category, firstLine.subcategory) : expenseLabel(item.category, item.subcategory),
+                accountName(item.accountId),
+                money(item.amount),
+              ],
+              details: [...lines.map((line, index) => [`${t("expensesPage.itemNumber", { number: index + 1 })}`, `${line.description} • ${expenseLabel(line.category, line.subcategory)} • ${money(line.amount)}`] as [string, ReactNode]), [t("reportsPage.account"), accountName(item.accountId)]],
+              onOpen: () => navigate(`/workspace/expenses?recordId=${item.id}`),
+            };
+          })} />
         </ReportShell>}
       </>}
 
