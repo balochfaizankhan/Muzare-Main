@@ -12,6 +12,7 @@ import { useSyncState } from "../hooks/useSyncState";
 import { calculateAccountBalance } from "../lib/accounting";
 import { defaultTransactionGroupExpansion, groupAccountTransactions, type AccountTransactionGroupKey } from "../lib/accountTransactionGroups";
 import { attendanceStatusKey, buildAttendanceStatusMap, previousLocalDateKey, todayLocalDateKey } from "../lib/attendanceStatus";
+import { getCanonicalExpenseCategory, getExpenseAccountingGroup } from "../lib/expenseCategories";
 import { ApiError, confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteExpenseAttachment, deleteOrDeactivateLabour, extractExpenseReceipt, fetchExpenseAttachments, fetchExpenseCategories, fetchLabourDeletionPreview, openExpenseAttachment, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, uploadExpenseAttachment, validateVoucherNumber, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type ExpenseAttachment, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type ExpenseOcrSuggestion, type ExpenseSearchRecord, type LabourDeletionPreview } from "../lib/api";
 import { buildDispatchAvailability, dispatchCartons, dispatchItemKey, resolveSaleType, saleProduceLabel, soldQuantityByDispatchItem } from "../lib/dispatch-sales";
 import { canCreate, canDelete, canEdit, hasModulePermission, hasPermission } from "../lib/permissions";
@@ -1723,7 +1724,7 @@ function ExpensesModule() {
         accountId: voucher.accountId,
         notes: voucher.notes,
         amount: item.amount,
-        category: item.categoryName ?? item.category,
+        category: getCanonicalExpenseCategory(item.categoryName ?? item.category),
         categoryId: item.categoryId,
         subcategory: item.subcategoryName ?? item.subcategory ?? "",
         subcategoryId: item.subcategoryId ?? "",
@@ -1739,7 +1740,7 @@ function ExpensesModule() {
       accountId: voucher.accountId,
       notes: voucher.notes,
       amount: voucher.amount,
-      category: voucher.category,
+      category: getCanonicalExpenseCategory(voucher.category),
       categoryId: voucher.categoryId,
       subcategory: voucher.subcategory,
       subcategoryId: voucher.subcategoryId,
@@ -2554,7 +2555,7 @@ function ExpensesModule() {
           </fieldset>
           <div className="expense-filter-grid">
             <label className="expense-filter-field"><span>{t("expensesPage.category")}</span><ClearableSelect aria-label={t("expensesPage.category")} value={voucherCategory} onChange={(value) => { setVoucherCategory(value); setVoucherSubcategory(""); }}>
-              <option value="">{t("expensesPage.allCategories")}</option>{voucherCategories.map((item) => <option key={item} value={item}>{translateExpenseCategory(item)}</option>)}
+              <option value="">{t("expensesPage.allCategories")}</option>{voucherCategories.map((item) => <option key={item} value={item}>{item}</option>)}
             </ClearableSelect></label>
             <label className="expense-filter-field"><span>{t("expensesPage.subcategory")}</span><ClearableSelect aria-label={t("expensesPage.subcategory")} value={voucherSubcategory} onChange={setVoucherSubcategory}>
               <option value="">{t("expensesPage.allSubcategories")}</option>{[...new Set(voucherSubcategories)].map((name) => <option key={name} value={name}>{translateExpenseSubcategory(name)}</option>)}
@@ -2576,13 +2577,13 @@ function ExpensesModule() {
         {voucherSearchQuery.isError && <small>{t("expensesPage.apiRefreshFailed")}</small>}
       </section>
       <Summary value={money(total)} label={hasActiveFilters ? t("expensesPage.totalCurrentFilters") : t("expensesPage.totalCurrentSeason")} />
-      <section className="record-panel"><h2>{t("expensesPage.expensesByCategory")}</h2>{!grouped.length ? <Empty>{t("expensesPage.noExpenseTotals")}</Empty> : <div className="expense-category-report">{grouped.map(([category, items]) => { const categoryTotal = [...items.values()].reduce((sum, amount) => sum + amount, 0); return <article key={category}><header><h3>{translateExpenseCategory(category)}</h3><strong>{money(categoryTotal)}</strong></header>{[...items].map(([subcategory, amount]) => <p key={subcategory}><span>{subcategory === "Miscellaneous" ? t("expensesPage.miscellaneous") : translateExpenseSubcategory(subcategory)}</span><strong>{money(amount)}</strong></p>)}<b>{t("expensesPage.categoryTotal")} <span>{money(categoryTotal)}</span></b></article>; })}</div>}</section>
+      <section className="record-panel"><h2>{t("expensesPage.expensesByCategory")}</h2>{!grouped.length ? <Empty>{t("expensesPage.noExpenseTotals")}</Empty> : <div className="expense-category-report">{grouped.map(([category, items]) => { const categoryTotal = [...items.values()].reduce((sum, amount) => sum + amount, 0); return <article key={category}><header><div><h3>{category}</h3><small>{getExpenseAccountingGroup(category)}</small></div><strong>{money(categoryTotal)}</strong></header>{[...items].map(([subcategory, amount]) => <p key={subcategory}><span>{subcategory === "Miscellaneous" ? t("expensesPage.miscellaneous") : translateExpenseSubcategory(subcategory)}</span><strong>{money(amount)}</strong></p>)}<b>{t("expensesPage.categoryTotal")} <span>{money(categoryTotal)}</span></b></article>; })}</div>}</section>
       {canManage && <section className="record-panel"><h2>{t("expensesPage.customSubcategories")}</h2><form className="module-form compact-form" onSubmit={(event) => void addCustom(event)}><select required value={customCategoryId} onChange={(event) => setCustomCategoryId(event.target.value)}><option value="">{t("expensesPage.selectCategory")}</option>{categories.data?.categories.map((item) => <option key={item.id} value={item.id}>{translateExpenseCategory(item.name)}</option>)}</select><input required placeholder={t("expensesPage.newSubcategory")} value={customName} onChange={(event) => setCustomName(event.target.value)} /><button type="submit">{t("expensesPage.addSubcategory")}</button></form><div className="custom-subcategory-list">{categories.data?.categories.flatMap((item) => item.subcategories.filter((subcategory) => !subcategory.isSystem).map((subcategory) => <span key={subcategory.id}>{translateExpenseCategory(item.name)} / {subcategory.name}<button type="button" onClick={() => { const name = window.prompt(t("expensesPage.renameCustomSubcategory"), subcategory.name); if (token && name?.trim()) void updateExpenseSubcategory(token, workspaceId, subcategory.id, { name: name.trim() }).then(() => categories.refetch()); }}>{t("expensesPage.edit")}</button><button type="button" onClick={() => token && void updateExpenseSubcategory(token, workspaceId, subcategory.id, { active: false }).then(() => categories.refetch())}>{t("expensesPage.disable")}</button></span>))}</div></section>}
       <RecordTable
         empty={t("expensesPage.noExpensesFound")}
         rows={filteredVouchers.map((item) => {
           const lines = voucherLinesFor(item);
-          const summary = lines.length > 1 ? `${translateExpenseCategory(lines[0].category)} / ${lines[0].subcategory ? translateExpenseSubcategory(lines[0].subcategory) : t("expensesPage.miscellaneous")} +${lines.length - 1} ${t("expensesPage.moreItems")}` : `${translateExpenseCategory(item.category)} / ${item.subcategory ? translateExpenseSubcategory(item.subcategory) : t("expensesPage.miscellaneous")}`;
+          const summary = lines.length > 1 ? `${lines[0].category} / ${lines[0].subcategory ? translateExpenseSubcategory(lines[0].subcategory) : t("expensesPage.miscellaneous")} +${lines.length - 1} ${t("expensesPage.moreItems")}` : `${getCanonicalExpenseCategory(item.category)} / ${item.subcategory ? translateExpenseSubcategory(item.subcategory) : t("expensesPage.miscellaneous")}`;
           const description = lines.length > 1 ? `${lines[0].description} +${lines.length - 1} ${t("expensesPage.moreItems")}` : item.description;
           return [getVoucherDisplayNumber(item) || item.voucherNumber, item.date, summary, description, accountById.get(item.accountId) ?? t("expensesPage.unknownAccount"), money(item.amount)];
         })}
@@ -2627,7 +2628,7 @@ function ExpensesModule() {
             }]).map((item, index) => (
               <article className="expense-voucher-detail-item" key={item.id}>
                 <div className="expense-voucher-detail-item__header">
-                  <strong>{translateExpenseCategory(item.category)} / {item.subcategory ? translateExpenseSubcategory(item.subcategory) : t("expensesPage.miscellaneous")}</strong>
+                  <strong>{getCanonicalExpenseCategory(item.category)} / {item.subcategory ? translateExpenseSubcategory(item.subcategory) : t("expensesPage.miscellaneous")}</strong>
                   <b>{money(item.amount)}</b>
                 </div>
                 <dl className="expense-voucher-detail-item__grid">
@@ -3635,9 +3636,9 @@ function PartnerLedgerModule() {
       <section className="record-panel">
         <h2>{t("partnerLedgerPage.partnerPosition")}</h2>
         {!partnerPositions.length ? <Empty>{t("partnerLedgerPage.noPartnerPositions")}</Empty> : <div className="partner-position-table">
-          <div className="partner-position-row partner-position-row--header"><span>{t("partnerLedgerPage.partner")}</span><span>{t("partnerLedgerPage.openingBalance")}</span><span>{t("partnerLedgerPage.capitalInjected")}</span><span>{t("partnerLedgerPage.directExpensesPaid")}</span><span>{t("partnerLedgerPage.transfersOut")}</span><span>{t("partnerLedgerPage.transfersIn")}</span><span>{t("partnerLedgerPage.moneyReturned")}</span><span>{t("partnerLedgerPage.adjustments")}</span><span>{t("partnerLedgerPage.currentPartnerBalance")}</span></div>
+          <div className="partner-position-row partner-position-row--header"><span>{t("partnerLedgerPage.partner")}</span><span>{t("partnerLedgerPage.openingBalance")}</span><span>{t("partnerLedgerPage.capitalInjected")}</span><span>Purchase Vouchers</span><span>Labour Advances</span><span>Labour Settlements</span><span>{t("partnerLedgerPage.currentPartnerBalance")}</span></div>
           {partnerPositions.map((item) => <div className="partner-position-row" key={item.name}>
-            <strong>{item.name}</strong><span>{money(item.openingBalance)}</span><span>{money(item.capitalInjected)}</span><span>{money(item.directExpensesPaid)}</span><span>{money(item.transfersOut)}</span><span>{money(item.transfersIn)}</span><span>{money(item.moneyReturned)}</span><span>{money(item.adjustments)}</span><b>{money(item.currentPartnerBalance)}</b>
+            <strong>{item.name}</strong><span>{money(item.openingBalance)}</span><span>{money(item.capitalInjected)}</span><span>{money(item.purchaseVouchersPaid)}</span><span>{money(item.labourAdvancesPaid)}</span><span>{money(item.labourWageSettlements)}</span><b>{money(item.currentPartnerBalance)}</b>
           </div>)}
         </div>}
         {!!partnerPositions.length && <div className="partner-position-cards">
@@ -3646,11 +3647,12 @@ function PartnerLedgerModule() {
             <p>{getPartnerBalanceState(item.currentPartnerBalance) === "partner_holds_business_money" ? t("partnerLedgerPage.partnerHoldsBusinessMoney") : t("partnerLedgerPage.farmOwesPartner")}</p>
             <div><span>{t("partnerLedgerPage.openingBalance")}</span><strong>{money(item.openingBalance)}</strong></div>
             <div><span>{t("partnerLedgerPage.capitalInjected")}</span><strong>{money(item.capitalInjected)}</strong></div>
-            <div><span>{t("partnerLedgerPage.directExpensesPaid")}</span><strong>{money(item.directExpensesPaid)}</strong></div>
+            <div><span>Purchase Vouchers</span><strong>{money(item.purchaseVouchersPaid)}</strong></div>
+            <div><span>Labour Advances Paid</span><strong>{money(item.labourAdvancesPaid)}</strong></div>
+            <div><span>Labour Wage Settlements</span><strong>{money(item.labourWageSettlements)}</strong></div>
+            <div><span>Total Labour Advances Paid</span><strong>{money(item.totalLabourAdvancesPaid)}</strong></div>
             <div><span>{t("partnerLedgerPage.transfersOut")}</span><strong>{money(item.transfersOut)}</strong></div>
             <div><span>{t("partnerLedgerPage.transfersIn")}</span><strong>{money(item.transfersIn)}</strong></div>
-            <div><span>{t("partnerLedgerPage.moneyReturned")}</span><strong>{money(item.moneyReturned)}</strong></div>
-            <div><span>{t("partnerLedgerPage.adjustments")}</span><strong>{money(item.adjustments)}</strong></div>
           </article>)}
         </div>}
       </section>
@@ -3765,7 +3767,9 @@ function AccountsModule() {
   ), [t]);
   const partnerLiabilityGroupTitle = useCallback((groupKey: PartnerLiabilityLedgerGroupKey) => ({
     capital_injected: t("accountsPage.capitalInjected"),
-    direct_expenses_paid: t("accountsPage.directExpensesPaid"),
+    purchase_vouchers_paid: "Purchase vouchers paid",
+    labour_advances_paid: "Labour advances paid",
+    labour_wage_settlements: "Labour wage settlements",
     transfers_in: t("accountsPage.transfersIn"),
     transfers_out: t("accountsPage.transfersOut"),
     money_returned: t("accountsPage.moneyReturned"),
@@ -3798,13 +3802,13 @@ function AccountsModule() {
         date: voucher.date,
         type: "voucher",
         reference: getVoucherDisplayNumber(voucher) || voucher.voucherNumber,
-        description: `${voucher.category} / ${voucher.subcategory} - ${voucher.description}`,
+        description: `${getCanonicalExpenseCategory(voucher.category)} / ${voucher.subcategory} - ${voucher.description}`,
         debit: selectedIsPartner ? 0 : voucher.amount,
         credit: selectedIsPartner ? voucher.amount : 0,
         source: "expenses",
         sourceId: voucher.id,
         classification: settlementVoucher ? "labour_wage_settlement_voucher" : "voucher",
-        partnerLiabilityGroup: selectedIsPartner ? "direct_expenses_paid" : undefined,
+        partnerLiabilityGroup: selectedIsPartner ? (settlementVoucher ? "labour_wage_settlements" : "purchase_vouchers_paid") : undefined,
       });
     }
     for (const advance of activeAdvances.filter((item) => item.accountId === selectedAccount.id)) {
@@ -3819,7 +3823,7 @@ function AccountsModule() {
         source: "labour_advances",
         sourceId: advance.id,
         classification: "advance",
-        partnerLiabilityGroup: selectedIsPartner ? "direct_expenses_paid" : undefined,
+        partnerLiabilityGroup: selectedIsPartner ? "labour_advances_paid" : undefined,
       });
     }
     for (const entry of activeEntries) {
@@ -3927,8 +3931,9 @@ function AccountsModule() {
   const rawPartnerLedgerBreakdown = useMemo(() => {
     const byType = {
       capitalInjected: 0,
-      directVoucherExpensesPaid: 0,
-      directLabourAdvancesPaid: 0,
+      purchaseVouchersPaid: 0,
+      labourAdvancesPaid: 0,
+      labourWageSettlements: 0,
       directExpensesPaid: 0,
       transfersIn: 0,
       transfersOut: 0,
@@ -3938,9 +3943,10 @@ function AccountsModule() {
     if (selectedAccount?.type !== "partner") return { ...byType, netBalance: 0 };
     for (const row of filteredLedgerRows) {
       if (row.partnerLiabilityGroup === "capital_injected") byType.capitalInjected += row.credit;
-      if (row.type === "voucher") byType.directVoucherExpensesPaid += row.credit;
-      if (row.type === "advance") byType.directLabourAdvancesPaid += row.credit;
-      if (row.partnerLiabilityGroup === "direct_expenses_paid") byType.directExpensesPaid += row.credit - row.debit;
+      if (row.partnerLiabilityGroup === "purchase_vouchers_paid") byType.purchaseVouchersPaid += row.credit - row.debit;
+      if (row.partnerLiabilityGroup === "labour_advances_paid") byType.labourAdvancesPaid += row.credit - row.debit;
+      if (row.partnerLiabilityGroup === "labour_wage_settlements") byType.labourWageSettlements += row.credit - row.debit;
+      if (row.partnerLiabilityGroup === "purchase_vouchers_paid" || row.partnerLiabilityGroup === "labour_advances_paid" || row.partnerLiabilityGroup === "labour_wage_settlements") byType.directExpensesPaid += row.credit - row.debit;
       if (row.partnerLiabilityGroup === "transfers_in") byType.transfersIn += Math.max(row.debit, row.credit);
       if (row.partnerLiabilityGroup === "transfers_out") byType.transfersOut += Math.max(row.debit, row.credit);
       if (row.partnerLiabilityGroup === "money_returned") byType.moneyReturned += row.debit;
@@ -3960,8 +3966,9 @@ function AccountsModule() {
     const overview = {
       openingBalance: 0,
       capitalInjected: 0,
-      directVoucherExpensesPaid: 0,
-      directLabourAdvancesPaid: 0,
+      purchaseVouchersPaid: 0,
+      labourAdvancesPaid: 0,
+      labourWageSettlements: 0,
       directExpensesPaid: 0,
       transfersIn: 0,
       transfersOut: 0,
@@ -3971,9 +3978,10 @@ function AccountsModule() {
     if (selectedAccount?.type !== "partner") return { ...overview, netBalance: 0 };
     for (const row of ledgerRows) {
       if (row.partnerLiabilityGroup === "capital_injected") overview.capitalInjected += row.credit;
-      if (row.type === "voucher") overview.directVoucherExpensesPaid += row.credit;
-      if (row.type === "advance") overview.directLabourAdvancesPaid += row.credit;
-      if (row.partnerLiabilityGroup === "direct_expenses_paid") overview.directExpensesPaid += row.credit - row.debit;
+      if (row.partnerLiabilityGroup === "purchase_vouchers_paid") overview.purchaseVouchersPaid += row.credit - row.debit;
+      if (row.partnerLiabilityGroup === "labour_advances_paid") overview.labourAdvancesPaid += row.credit - row.debit;
+      if (row.partnerLiabilityGroup === "labour_wage_settlements") overview.labourWageSettlements += row.credit - row.debit;
+      if (row.partnerLiabilityGroup === "purchase_vouchers_paid" || row.partnerLiabilityGroup === "labour_advances_paid" || row.partnerLiabilityGroup === "labour_wage_settlements") overview.directExpensesPaid += row.credit - row.debit;
       if (row.partnerLiabilityGroup === "transfers_in") overview.transfersIn += Math.max(row.debit, row.credit);
       if (row.partnerLiabilityGroup === "transfers_out") overview.transfersOut += Math.max(row.debit, row.credit);
       if (row.partnerLiabilityGroup === "money_returned") overview.moneyReturned += row.debit;
@@ -4018,7 +4026,7 @@ function AccountsModule() {
     if (selectedAccount?.type !== "partner") return { ...summary, netBalance: 0 };
     for (const group of partnerLedgerGroups) {
       if (group.groupKey === "capital_injected") summary.capitalInjected += group.totalAmount;
-      if (group.groupKey === "direct_expenses_paid") summary.directExpensesPaid += group.totalAmount;
+      if (group.groupKey === "purchase_vouchers_paid" || group.groupKey === "labour_advances_paid" || group.groupKey === "labour_wage_settlements") summary.directExpensesPaid += group.totalAmount;
       if (group.groupKey === "transfers_in") summary.transfersIn += Math.abs(group.totalAmount);
       if (group.groupKey === "transfers_out") summary.transfersOut += Math.abs(group.totalAmount);
       if (group.groupKey === "money_returned") summary.moneyReturned += -group.totalAmount;
@@ -4069,8 +4077,9 @@ function AccountsModule() {
   const partnerLedgerOverviewView = isSelectedPartner
     ? rawPartnerLedgerOverview as {
         capitalInjected: number;
-        directVoucherExpensesPaid: number;
-        directLabourAdvancesPaid: number;
+        purchaseVouchersPaid: number;
+        labourAdvancesPaid: number;
+        labourWageSettlements: number;
         directExpensesPaid: number;
         transfersIn: number;
         transfersOut: number;
@@ -4180,8 +4189,9 @@ function AccountsModule() {
                 <article className="account-ledger-breakdown__expenses-card">
                   <strong>{t("accountsPage.directExpensesPaid")}</strong>
                   <b>{money(partnerLedgerOverviewView.directExpensesPaid)}</b>
-                  <small>{t("accountsPage.directVoucherExpensesPaid")}: {money(partnerLedgerOverviewView.directVoucherExpensesPaid)}</small>
-                  <small>{t("accountsPage.directLabourAdvancesPaid")}: {money(partnerLedgerOverviewView.directLabourAdvancesPaid)}</small>
+                  <small>Purchase vouchers: {money(partnerLedgerOverviewView.purchaseVouchersPaid)}</small>
+                  <small>Labour advances: {money(partnerLedgerOverviewView.labourAdvancesPaid)}</small>
+                  <small>Labour settlements: {money(partnerLedgerOverviewView.labourWageSettlements)}</small>
                 </article>
                 <article><strong>{t("accountsPage.transfersOut")}</strong><span>{money(partnerLedgerOverviewView.transfersOut)}</span></article>
                 <article><strong>{t("accountsPage.transfersIn")}</strong><span>{money(partnerLedgerOverviewView.transfersIn)}</span></article>

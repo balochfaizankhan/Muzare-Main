@@ -1,6 +1,7 @@
 import type { Account, Advance, PartnerEntry, Sale, Voucher } from "./offline-db";
 import { isActiveOperationalRecord } from "./operationalRecords";
 import { getActiveVouchers } from "./voucherCollections";
+import { isLabourWageSettlementVoucher } from "./labourWageSettlements";
 
 export type PartnerLiabilityPosition = {
   account: Account | null;
@@ -9,8 +10,11 @@ export type PartnerLiabilityPosition = {
   openingBalance: number;
   capitalInjected: number;
   directExpensesPaid: number;
-  directVoucherExpensesPaid: number;
-  directLabourAdvancesPaid: number;
+  purchaseVouchersPaid: number;
+  labourAdvancesPaid: number;
+  labourWageSettlements: number;
+  totalLabourAdvancesPaid: number;
+  outstandingLabourAdvances: number;
   transfersIn: number;
   transfersOut: number;
   moneyReturned: number;
@@ -23,7 +27,9 @@ export type PartnerBalanceState = "farm_owes_partner" | "partner_holds_business_
 
 export type PartnerLiabilityLedgerGroupKey =
   | "capital_injected"
-  | "direct_expenses_paid"
+  | "purchase_vouchers_paid"
+  | "labour_advances_paid"
+  | "labour_wage_settlements"
   | "transfers_in"
   | "transfers_out"
   | "money_returned"
@@ -49,7 +55,9 @@ export type PartnerLiabilityLedgerGroup<T extends PartnerLiabilityGroupableTrans
 
 export const partnerLiabilityGroupOrder: PartnerLiabilityLedgerGroupKey[] = [
   "capital_injected",
-  "direct_expenses_paid",
+  "purchase_vouchers_paid",
+  "labour_advances_paid",
+  "labour_wage_settlements",
   "transfers_in",
   "transfers_out",
   "money_returned",
@@ -59,7 +67,9 @@ export const partnerLiabilityGroupOrder: PartnerLiabilityLedgerGroupKey[] = [
 
 export const defaultPartnerLiabilityGroupExpansion = (): Record<PartnerLiabilityLedgerGroupKey, boolean> => ({
   capital_injected: true,
-  direct_expenses_paid: true,
+  purchase_vouchers_paid: true,
+  labour_advances_paid: true,
+  labour_wage_settlements: true,
   transfers_in: true,
   transfers_out: true,
   money_returned: true,
@@ -154,6 +164,7 @@ export function buildPartnerLiabilityPositions(
   advances: Advance[],
   entries: PartnerEntry[],
   sales: Sale[] = [],
+  _settlements: Array<{ settledAdvanceAmount: number; status?: string | null; deletedAt?: string | null }> = [],
 ) {
   const activeVouchers = getActiveVouchers(vouchers);
   const partnerAccounts = accounts.filter((account) => account.type === "partner");
@@ -166,8 +177,11 @@ export function buildPartnerLiabilityPositions(
       openingBalance: 0,
       capitalInjected: 0,
       directExpensesPaid: 0,
-      directVoucherExpensesPaid: 0,
-      directLabourAdvancesPaid: 0,
+      purchaseVouchersPaid: 0,
+      labourAdvancesPaid: 0,
+      labourWageSettlements: 0,
+      totalLabourAdvancesPaid: 0,
+      outstandingLabourAdvances: 0,
       transfersIn: 0,
       transfersOut: 0,
       moneyReturned: 0,
@@ -208,7 +222,11 @@ export function buildPartnerLiabilityPositions(
     const account = partnerAccounts.find((item) => item.id === voucher.accountId);
     if (!account) continue;
     const position = ensure(account.id, account.name, account);
-    position.directVoucherExpensesPaid += voucher.amount;
+    if (isLabourWageSettlementVoucher(voucher)) {
+      position.labourWageSettlements += voucher.amount;
+    } else {
+      position.purchaseVouchersPaid += voucher.amount;
+    }
     position.directExpensesPaid += voucher.amount;
   }
 
@@ -216,7 +234,8 @@ export function buildPartnerLiabilityPositions(
     const account = partnerAccounts.find((item) => item.id === advance.accountId);
     if (!account) continue;
     const position = ensure(account.id, account.name, account);
-    position.directLabourAdvancesPaid += advance.amount;
+    position.labourAdvancesPaid += advance.amount;
+    position.totalLabourAdvancesPaid += advance.amount;
     position.directExpensesPaid += advance.amount;
   }
 
@@ -232,6 +251,7 @@ export function buildPartnerLiabilityPositions(
       const currentPartnerBalance = calculatePartnerLiabilityBalance(position);
       return {
         ...position,
+        outstandingLabourAdvances: 0,
         currentPartnerBalance,
         reconciliationDelta: currentPartnerBalance - calculatePartnerLiabilityBalance(position),
       };

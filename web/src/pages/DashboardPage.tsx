@@ -24,6 +24,7 @@ import { ImportVisibilityAuditPanel } from "../components/ImportVisibilityAuditP
 import { config } from "../config";
 import { calculateAvailableBalance } from "../lib/accounting";
 import { fetchBootstrap, repairWorkspaceContextRequest } from "../lib/api";
+import { getCanonicalExpenseCategory } from "../lib/expenseCategories";
 import { formatDate, formatMoney } from "../lib/format";
 import { getActiveLabourWageSettlements, getCashAffectingVouchers, outstandingLabourAdvances } from "../lib/labourWageSettlements";
 import { buildPartnerLiabilityPositions } from "../lib/partnerAccounting";
@@ -128,8 +129,8 @@ export function DashboardPage() {
     const date = today();
     const totalSales = activeSales.reduce((sum, item) => sum + item.amount, 0);
     const labourAdvances = outstandingLabourAdvances(activeAdvances, activeSettlements);
-    const totalExpenses = activeVouchers.reduce((sum, item) => sum + item.amount, 0) + labourAdvances;
-    const partnerBalance = buildPartnerLiabilityPositions(activeAccounts, cashAffectingVouchers, activeAdvances, activeEntries, activeSales)
+    const totalExpenses = generalExpenseVouchers.reduce((sum, item) => sum + item.amount, 0);
+    const partnerBalance = buildPartnerLiabilityPositions(activeAccounts, cashAffectingVouchers, activeAdvances, activeEntries, activeSales, activeSettlements)
       .reduce((sum, item) => sum + item.currentPartnerBalance, 0);
     setTotals({
       presentToday: activeAttendance.filter((item) => item.date === date && item.status === "present").length,
@@ -154,7 +155,7 @@ export function DashboardPage() {
         id: item.id,
         path: "/workspace/expenses",
         title: t("dashboard.expenseVoucher"),
-        detail: `${getVoucherDisplayNumber(item) || item.voucherNumber} · ${item.category}`,
+        detail: `${getVoucherDisplayNumber(item) || item.voucherNumber} · ${getCanonicalExpenseCategory(item.category)}`,
         value: `-${money(item.amount)}`,
         createdAt: item.createdAt,
       })),
@@ -215,7 +216,7 @@ export function DashboardPage() {
     { label: t("dashboard.presentToday"), value: String(totals.presentToday), icon: UsersRound, path: "/workspace/attendance", tone: "green" },
     { label: t("dashboard.cartonsToday"), value: String(totals.cartonsToday), icon: PackageOpen, path: "/workspace/dispatch", tone: "navy" },
     { label: t("dashboard.totalSales"), value: money(totals.totalSales), icon: TrendingUp, path: "/workspace/sales", tone: "green" },
-    { label: t("dashboard.totalExpenses"), value: money(totals.totalExpenses), icon: BanknoteArrowDown, path: "/workspace/reports?report=combined-expenses", tone: "red" },
+    { label: t("dashboard.totalExpenses"), value: money(totals.totalExpenses), icon: BanknoteArrowDown, path: "/workspace/reports?report=expenditures", tone: "red" },
     { label: t("dashboard.labourAdvances"), value: money(totals.labourAdvances), icon: UsersRound, path: "/workspace/labour-advances", tone: "red" },
     { label: t("dashboard.availableBalance"), value: money(totals.netPosition), icon: Wallet, path: "/workspace/accounts", tone: "navy" },
     { label: t("dashboard.partnerBalance"), value: money(totals.partnerBalance), icon: CircleDollarSign, path: "/workspace/partner-ledger", tone: "blue" },

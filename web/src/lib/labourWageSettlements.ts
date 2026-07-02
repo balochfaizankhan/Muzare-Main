@@ -37,7 +37,7 @@ export function getGeneralExpenseVouchers<T extends SettlementVoucherLike>(vouch
 }
 
 export function getCashAffectingVouchers(vouchers: Voucher[]) {
-  return getGeneralExpenseVouchers(vouchers);
+  return vouchers.filter((voucher) => isActiveOperationalRecord(voucher));
 }
 
 export function totalSettledAdvances(settlements: LabourWageSettlement[]) {
