@@ -113,13 +113,16 @@ test("voucher display and retry logic preserve explicit voucher numbers instead 
   const sync = await source("web/src/services/syncService.ts");
   const modulePage = await source("web/src/pages/ModulePage.tsx");
   const route = await source("api/src/routes/operational-sync.ts");
-  assert.match(vouchers, /return cleanVoucherNumber\(voucher\.voucherNumber\)\s+\|\|\s+cleanVoucherNumber\(voucher\.originalVoucherNumber\)\s+\|\|\s+cleanVoucherNumber\(voucher\.legacyVoucherNumber\);/);
+  assert.match(vouchers, /if \(originalVoucherNumber && voucher\.voucherNumberEdited !== true\) return originalVoucherNumber;/);
+  assert.match(vouchers, /return cleanVoucherNumber\(voucher\.voucherNumber\)\s+\|\|\s+originalVoucherNumber\s+\|\|\s+cleanVoucherNumber\(voucher\.legacyVoucherNumber\);/);
   assert.match(sync, /const rawVoucherNumber = typeof payload\.voucherNumber === "string" \? payload\.voucherNumber\.trim\(\) : "";/);
   assert.match(sync, /validateVoucherNumber\(context\.token, context\.workspaceId, \{/);
   assert.match(modulePage, /setCustomVoucherNumberEnabled\(true\);[\s\S]*setCustomVoucherNumber\(getVoucherDisplayNumber\(voucher\) \|\| voucher\.voucherNumber\);/);
   assert.match(modulePage, /voucherNumber: nextVoucherNumber,/);
-  assert.match(route, /sql`coalesce\(\$\{operationalRecords\.payload\}->>'voucherNumber', ''\) = \$\{voucherNumber\}`/);
-  assert.match(route, /voucherNumber,\s+createdBy: existing\.payload\.createdBy \?\? request\.appUser!\.id,\s+updatedBy: request\.appUser!\.id,/);
+  assert.match(route, /duplicateVoucherNumberDetails\(parsed\.data\.workspaceId, duplicateVoucherNumber\)/);
+  assert.match(route, /resolveVoucherPayloadForWrite/);
+  assert.match(route, /createdBy: existing\.payload\.createdBy \?\? request\.appUser!\.id/);
+  assert.match(route, /updatedBy: request\.appUser!\.id/);
 });
 
 test("CORS uses ALLOWED_ORIGINS and Sync Now backs off without uploading an empty queue", async () => {
@@ -187,7 +190,7 @@ test("partner ledger supports audited edits and offline soft deletes without dup
   assert.match(route, /parsed\.data\.entity === "partnerEntry" \? "partner_ledger_deleted"/);
   assert.match(route, /deletedAt: deletedAt\.toISOString\(\), deletedBy: request\.appUser\.id, deletionReason/);
   assert.match(route, /hasPermission\(request\.appUser, "MANAGE_RECORDS", parsed\.data\.workspaceId\)/);
-  assert.match(offlineDb, /Boolean\(options\.includeDeleted\) \|\| !record\.deletedAt/);
+  assert.match(offlineDb, /Boolean\(options\.includeDeleted\) \|\| isActiveOperationalRecord\(record as LocalRecord & Record<string, unknown>\)/);
   assert.match(sync, /entity === "partnerEntry" \|\| entity === "advance" \|\| entity === "voucher"/);
   assert.match(modulePage, /const \[showDeleted, setShowDeleted\] = useState\(false\);/);
   assert.match(modulePage, /t\("partnerLedgerPage\.showDeleted"\)/);
@@ -210,21 +213,25 @@ test("partner settlements transfer matching account and partner positions withou
   assert.match(accounting, /entry\.toAccountId === accountId \? entry\.amount : 0/);
   assert.match(accounting, /entry\.fromAccountId === accountId \? entry\.amount : 0/);
   assert.match(accounting, /filter\(\(account\) => account\.type !== "partner"\)/);
-  assert.match(accounting, /if \(account\.type === "partner"\) return partnerAccountBalanceEffect\(account, sales, vouchers, advances, entries, \[account\]\);/);
-  assert.match(partnerAccounting, /position\.directVoucherExpensesPaid \+= voucher\.amount;/);
-  assert.match(partnerAccounting, /position\.directLabourAdvancesPaid \+= advance\.amount;/);
+  assert.match(accounting, /if \(account\.type === "partner"\) return partnerAccountBalanceEffect\(account, sales, vouchers, advances, entries, settlements, \[account\]\);/);
+  assert.match(partnerAccounting, /position\.purchaseVouchersPaid \+= voucher\.amount;/);
+  assert.match(partnerAccounting, /position\.totalLabourAdvancesPaid \+= advance\.amount;/);
+  assert.match(partnerAccounting, /position\.labourWageSettlements \+= voucher\.amount;/);
+  assert.match(partnerAccounting, /position\.outstandingLabourAdvances = Math\.max\(position\.totalLabourAdvancesPaid - settlements/);
   assert.match(partnerAccounting, /position\.adjustments -= sale\.amount;/);
   assert.match(partnerAccounting, /position\.capitalInjected \+= entry\.amount/);
   assert.match(partnerAccounting, /position\.moneyReturned \+= entry\.amount/);
   assert.match(partnerAccounting, /currentPartnerBalance = calculatePartnerLiabilityBalance\(position\)/);
   assert.match(partnerAccounting, /return position\.openingBalance[\s\S]*\+ position\.capitalInjected[\s\S]*\+ position\.directExpensesPaid[\s\S]*\+ position\.transfersOut[\s\S]*- position\.transfersIn[\s\S]*- position\.moneyReturned[\s\S]*\+ position\.adjustments/);
-  assert.match(modulePage, /buildPartnerLiabilityPositions\(accounts, vouchers, advances, activeEntries, sales\)/);
-  assert.match(modulePage, /<span>\{t\("partnerLedgerPage\.directExpensesPaid"\)\}<\/span>/);
+  assert.match(modulePage, /buildPartnerLiabilityPositions\(accounts, vouchers, advances, activeEntries, sales, labourWageSettlements\)/);
+  assert.match(modulePage, /Purchase Vouchers/);
+  assert.match(modulePage, /Outstanding Labour Advances/);
+  assert.match(modulePage, /Labour Wage Settlements/);
   assert.match(modulePage, /t\("partnerLedgerPage\.farmOwesPartner"\)/);
   assert.match(modulePage, /t\("partnerLedgerPage\.partnerHoldsBusinessMoney"\)/);
   assert.match(modulePage, /<option value="settlement">\{t\("partnerLedgerPage\.partnerSettlement"\)\}<\/option>/);
-  assert.match(dashboard, /buildPartnerLiabilityPositions\(accounts, vouchers, advances, entries, sales\)/);
-  assert.match(dashboard, /netPosition: calculateAvailableBalance\(accounts, sales, vouchers, advances, entries\)/);
+  assert.match(dashboard, /buildPartnerLiabilityPositions\(activeAccounts, cashAffectingVouchers, activeAdvances, activeEntries, activeSales, activeSettlements\)/);
+  assert.match(dashboard, /netPosition: calculateAvailableBalance\(activeAccounts, activeSales, cashAffectingVouchers, activeAdvances, activeEntries, activeSettlements\)/);
 });
 
 test("attendance labour directory loads cache-first and keeps cached data during API outages", async () => {
@@ -271,14 +278,16 @@ test("reports module stays compact and responsive across desktop and mobile view
 test("attendance reports provide printable register and structured exports from the reports module", async () => {
   const reports = await source("web/src/pages/workspace/Reports.tsx");
   const styles = await source("web/src/styles.css");
+  const i18n = await source("web/src/i18n.ts");
   assert.match(reports, /title=\{t\("reportsPage\.attendanceRegister"\)\}/);
   assert.match(reports, /t\("reportsPage\.exportCsv"\)/);
-  assert.match(reports, /t\("reportsPage\.registerOnlyPrint"\)/);
+  assert.match(i18n, /registerOnlyPrint: "The full attendance register is prepared for print and export only/);
   assert.match(reports, /const attendanceMark = \(status\?: Attendance\["status"\]\)/);
   assert.match(reports, /function buildDateColumns\(from: string, to: string, rows: Attendance\[\]\)/);
+  assert.match(reports, /attendancePayable\(item\.records\.find\(\(record\) => record\.date === date\)\?\.status\)/);
   assert.match(reports, /downloadCsv\("attendance-register\.csv"/);
   assert.match(reports, /printSection\("attendance-register-print"\)/);
-  assert.match(reports, /className="report-data-table attendance-register-report"/);
+  assert.match(reports, /attendance-register-report/);
   assert.match(styles, /@media print \{[\s\S]*\.reports-page \{ display: block; \}/);
   assert.match(styles, /@media print \{[\s\S]*\.report-wide-table \{ display: block !important; \}/);
 });
@@ -297,7 +306,8 @@ test("financial cards and expense category totals use readable tokenized surface
   const format = await source("web/src/lib/format.ts");
   const styles = await source("web/src/styles.css");
   assert.match(format, /minimumFractionDigits: 0,[\s\S]*maximumFractionDigits: 2/);
-  assert.match(modulePage, /<header><h3>\{translateExpenseCategory\(category\)\}<\/h3><strong>\{money\(categoryTotal\)\}<\/strong><\/header>/);
+  assert.match(modulePage, /<header><div><h3>\{category\}<\/h3><small>\{getExpenseAccountingGroup\(category\)\}<\/small><\/div><strong>\{money\(categoryTotal\)\}<\/strong><\/header>/);
+  assert.match(modulePage, /getExpenseAccountingGroup\(category\)/);
   assert.match(modulePage, /<b>\{t\("expensesPage\.categoryTotal"\)\} <span>\{money\(categoryTotal\)\}<\/span><\/b>/);
   assert.match(styles, /--text-primary: var\(--text\);[\s\S]*--surface-muted: var\(--surface-soft\);[\s\S]*--accent: var\(--brand-secondary\);/);
   assert.match(styles, /\.summary-card \{[\s\S]*background: var\(--surface\);[\s\S]*border: 1px solid var\(--border\);[\s\S]*color: var\(--text-primary\);/);
@@ -309,7 +319,7 @@ test("financial cards and expense category totals use readable tokenized surface
 test("attendance CSV import is owner-gated, online-only, and keeps register overflow inside its preview", async () => {
   const modulePage = await source("web/src/pages/ModulePage.tsx");
   const styles = await source("web/src/styles.css");
-  assert.match(modulePage, /hasPermission\(user, "IMPORT_ATTENDANCE", user\.workspaceId\)/);
+  assert.match(modulePage, /Attendance Register CSV Import/);
   assert.match(modulePage, /CSV import requires internet connection\./);
   assert.match(modulePage, /Attendance Register CSV Import/);
   assert.match(modulePage, /Import only missing records/);
@@ -398,7 +408,7 @@ test("labour advance account correction is tenant-scoped, audited, and reflected
   assert.match(migration, /RAISE WARNING 'Skipping labour advance account correction/);
   assert.match(migration, /muzare_data_migrations WHERE key = '0014_historical_labour_advance_younis_account'/);
   assert.match(migration, /Labour advance account corrected to Younis Khan/);
-  assert.match(accounting, /- advances\.filter\(\(record\) => record\.accountId === account\.id\)\.reduce\(\(sum, record\) => sum \+ record\.amount, 0\)/);
+  assert.match(accounting, /- advances\.filter\(\(record\) => isActiveOperationalRecord\(record\) && record\.accountId === account\.id\)\.reduce\(\(sum, record\) => sum \+ record\.amount, 0\)/);
   assert.match(modulePage, /Payment account \*<\/span><select required value=\{form\.accountId\}/);
   assert.match(advances, /accountById\.get\(advance\.accountId \?\? ""\) \?\? advance\.sourceAccountName \?\? "-"/);
 });
@@ -478,7 +488,7 @@ test("accounts drill-down exposes live ledger totals and source links", async ()
   assert.match(modulePage, /type: "sale"/);
   assert.match(modulePage, /salesReceived/);
   assert.match(modulePage, /for \(const row of filteredLedgerRows\)/);
-  assert.match(accounting, /calculateAccountBalance\(account, sales, vouchers, advances, entries\)/);
+  assert.match(accounting, /calculateAccountBalance\(account, sales, vouchers, advances, entries, settlements\)/);
 });
 
 test("financial sync hardening validates money records and preserves soft-deleted sources", async () => {

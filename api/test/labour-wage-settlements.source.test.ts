@@ -8,34 +8,40 @@ test("settlementRangesOverlap detects overlapping inclusive date ranges", () => 
 });
 
 test("calculateLabourWageSettlementTotals carries forward excess advances conservatively", () => {
-  assert.deepEqual(calculateLabourWageSettlementTotals(1100, 1400), {
+  assert.deepEqual(calculateLabourWageSettlementTotals(1100, 200, 1400), {
     attendanceWages: 1100,
+    pendingLabourEarnings: 200,
+    totalEarned: 1300,
     advancesPaid: 1400,
-    settledAdvanceAmount: 1100,
-    expenseAmount: 1100,
-    carryForwardAdvance: 300,
+    settledAdvanceAmount: 1300,
+    expenseAmount: 1300,
+    carryForwardAdvance: 100,
     payableBalance: 0,
   });
 });
 
-test("calculateLabourWageSettlementTotals leaves a payable balance when wages exceed advances", () => {
-  assert.deepEqual(calculateLabourWageSettlementTotals(1100, 700), {
+test("calculateLabourWageSettlementTotals leaves a payable balance when total labour cost exceeds advances", () => {
+  assert.deepEqual(calculateLabourWageSettlementTotals(1100, 250, 700), {
     attendanceWages: 1100,
+    pendingLabourEarnings: 250,
+    totalEarned: 1350,
     advancesPaid: 700,
     settledAdvanceAmount: 700,
-    expenseAmount: 1100,
+    expenseAmount: 1350,
     carryForwardAdvance: 0,
-    payableBalance: 400,
+    payableBalance: 650,
   });
 });
 
-test("calculateLabourWageSettlementTotals keeps wage expense tied to the period while carrying extra advances forward", () => {
-  assert.deepEqual(calculateLabourWageSettlementTotals(900, 1200), {
+test("calculateLabourWageSettlementTotals recognizes attendance plus labour work as the wage expense", () => {
+  assert.deepEqual(calculateLabourWageSettlementTotals(900, 300, 1200), {
     attendanceWages: 900,
+    pendingLabourEarnings: 300,
+    totalEarned: 1200,
     advancesPaid: 1200,
-    settledAdvanceAmount: 900,
-    expenseAmount: 900,
-    carryForwardAdvance: 300,
+    settledAdvanceAmount: 1200,
+    expenseAmount: 1200,
+    carryForwardAdvance: 0,
     payableBalance: 0,
   });
 });
