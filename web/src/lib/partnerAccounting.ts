@@ -1,4 +1,4 @@
-import type { Account, Advance, PartnerEntry, Sale, Voucher } from "./offline-db";
+import type { Account, Advance, LabourWageSettlement, PartnerEntry, Sale, Voucher } from "./offline-db";
 import { isActiveOperationalRecord } from "./operationalRecords";
 import { getActiveVouchers } from "./voucherCollections";
 import { isLabourWageSettlementVoucher } from "./labourWageSettlements";
@@ -120,6 +120,7 @@ export function partnerAccountBalanceEffect(
   vouchers: Voucher[],
   advances: Advance[],
   entries: PartnerEntry[],
+  settlements: LabourWageSettlement[],
   allAccounts: Account[],
 ) {
   if (account.type !== "partner") return 0;
@@ -145,12 +146,15 @@ export function partnerAccountBalanceEffect(
   const directLabourAdvancesPaid = advances
     .filter((advance) => isActiveOperationalRecord(advance) && advance.accountId === account.id)
     .reduce((sum, advance) => sum + advance.amount, 0);
+  const settledAdvancesApplied = settlements
+    .filter((settlement) => isActiveOperationalRecord(settlement) && settlement.linkedAccountId === account.id)
+    .reduce((sum, settlement) => sum + settlement.settledAdvanceAmount, 0);
   const adjustments = sales
     .filter((sale) => isActiveOperationalRecord(sale) && sale.accountId === account.id)
     .reduce((sum, sale) => sum - sale.amount, 0);
   return capitalInjected
     + directVoucherExpensesPaid
-    + directLabourAdvancesPaid
+    + Math.max(directLabourAdvancesPaid - settledAdvancesApplied, 0)
     + transfersOut
     - transfersIn
     - moneyReturned
@@ -164,7 +168,7 @@ export function buildPartnerLiabilityPositions(
   advances: Advance[],
   entries: PartnerEntry[],
   sales: Sale[] = [],
-  _settlements: Array<{ settledAdvanceAmount: number; status?: string | null; deletedAt?: string | null }> = [],
+  settlements: Array<Pick<LabourWageSettlement, "linkedAccountId" | "settledAdvanceAmount" | "status" | "deletedAt">> = [],
 ) {
   const activeVouchers = getActiveVouchers(vouchers);
   const partnerAccounts = accounts.filter((account) => account.type === "partner");
@@ -234,9 +238,15 @@ export function buildPartnerLiabilityPositions(
     const account = partnerAccounts.find((item) => item.id === advance.accountId);
     if (!account) continue;
     const position = ensure(account.id, account.name, account);
-    position.labourAdvancesPaid += advance.amount;
     position.totalLabourAdvancesPaid += advance.amount;
-    position.directExpensesPaid += advance.amount;
+  }
+
+  for (const position of positions.values()) {
+    position.outstandingLabourAdvances = Math.max(position.totalLabourAdvancesPaid - settlements
+      .filter((item) => isActiveOperationalRecord(item) && item.linkedAccountId === position.account?.id)
+      .reduce((sum, item) => sum + item.settledAdvanceAmount, 0), 0);
+    position.labourAdvancesPaid = position.outstandingLabourAdvances;
+    position.directExpensesPaid = position.purchaseVouchersPaid + position.labourWageSettlements + position.outstandingLabourAdvances;
   }
 
   for (const sale of sales.filter((item) => isActiveOperationalRecord(item))) {
@@ -251,7 +261,6 @@ export function buildPartnerLiabilityPositions(
       const currentPartnerBalance = calculatePartnerLiabilityBalance(position);
       return {
         ...position,
-        outstandingLabourAdvances: 0,
         currentPartnerBalance,
         reconciliationDelta: currentPartnerBalance - calculatePartnerLiabilityBalance(position),
       };

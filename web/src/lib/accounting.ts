@@ -1,4 +1,4 @@
-import type { Account, Advance, PartnerEntry, Sale, Voucher } from "./offline-db";
+import type { Account, Advance, LabourWageSettlement, PartnerEntry, Sale, Voucher } from "./offline-db";
 import { isActiveOperationalRecord } from "./operationalRecords";
 import { isPartnerAccount, partnerAccountBalanceEffect } from "./partnerAccounting";
 import { getActiveVouchers } from "./voucherCollections";
@@ -24,8 +24,9 @@ export function calculateAccountBalance(
   vouchers: Voucher[],
   advances: Advance[],
   entries: PartnerEntry[],
+  settlements: LabourWageSettlement[] = [],
 ): number {
-  if (account.type === "partner") return partnerAccountBalanceEffect(account, sales, vouchers, advances, entries, [account]);
+  if (account.type === "partner") return partnerAccountBalanceEffect(account, sales, vouchers, advances, entries, settlements, [account]);
   const activeVouchers = getCashAffectingVouchers(getActiveVouchers(vouchers));
   return sales.filter((record) => isActiveOperationalRecord(record) && record.accountId === account.id).reduce((sum, record) => sum + record.amount, 0)
     - activeVouchers.filter((record) => record.accountId === account.id).reduce((sum, record) => sum + record.amount, 0)
@@ -39,8 +40,9 @@ export function calculateAvailableBalance(
   vouchers: Voucher[],
   advances: Advance[],
   entries: PartnerEntry[],
+  settlements: LabourWageSettlement[] = [],
 ): number {
   return accounts
     .filter((account) => account.type !== "partner")
-    .reduce((sum, account) => sum + calculateAccountBalance(account, sales, vouchers, advances, entries), 0);
+    .reduce((sum, account) => sum + calculateAccountBalance(account, sales, vouchers, advances, entries, settlements), 0);
 }

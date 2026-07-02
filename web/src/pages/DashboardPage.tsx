@@ -138,7 +138,7 @@ export function DashboardPage() {
       totalSales,
       labourAdvances,
       totalExpenses,
-      netPosition: calculateAvailableBalance(activeAccounts, activeSales, cashAffectingVouchers, activeAdvances, activeEntries),
+      netPosition: calculateAvailableBalance(activeAccounts, activeSales, cashAffectingVouchers, activeAdvances, activeEntries, activeSettlements),
       partnerBalance,
     });
 

@@ -3426,11 +3426,13 @@ function PartnerLedgerModule() {
   const loadAdvances = useCallback(() => workspaceRecords(offlineDb.advances), []);
   const loadVouchers = useCallback(() => loadWorkspaceVouchers({ includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }), []);
   const loadSales = useCallback(() => workspaceRecords(offlineDb.sales), []);
+  const loadLabourWageSettlements = useCallback(() => workspaceRecords(offlineDb.labourWageSettlements), []);
   const [entries, refresh] = useData(load);
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
   const [advances] = useData(loadAdvances);
   const [vouchers] = useData(loadVouchers);
   const [sales] = useData(loadSales);
+  const [labourWageSettlements] = useData(loadLabourWageSettlements);
   const [date, setDate] = useState(today());
   const [partnerName, setPartnerName] = useState("");
   const [partnerAccountId, setPartnerAccountId] = useState("");
@@ -3550,8 +3552,8 @@ function PartnerLedgerModule() {
   const activeEntries = entries.filter((item) => isActiveOperationalRecord(item));
   const accountName = (id?: string) => id ? accounts.find((account) => account.id === id)?.name ?? t("expensesPage.unknownAccount") : "-";
   const partnerPositions = useMemo(
-    () => buildPartnerLiabilityPositions(accounts, vouchers, advances, activeEntries, sales),
-    [accounts, vouchers, advances, activeEntries, sales],
+    () => buildPartnerLiabilityPositions(accounts, vouchers, advances, activeEntries, sales, labourWageSettlements),
+    [accounts, vouchers, advances, activeEntries, sales, labourWageSettlements],
   );
   const balance = partnerPositions.reduce((sum, item) => sum + item.currentPartnerBalance, 0);
   const runningBalances = (() => {
@@ -3636,9 +3638,9 @@ function PartnerLedgerModule() {
       <section className="record-panel">
         <h2>{t("partnerLedgerPage.partnerPosition")}</h2>
         {!partnerPositions.length ? <Empty>{t("partnerLedgerPage.noPartnerPositions")}</Empty> : <div className="partner-position-table">
-          <div className="partner-position-row partner-position-row--header"><span>{t("partnerLedgerPage.partner")}</span><span>{t("partnerLedgerPage.openingBalance")}</span><span>{t("partnerLedgerPage.capitalInjected")}</span><span>Purchase Vouchers</span><span>Labour Advances</span><span>Labour Settlements</span><span>{t("partnerLedgerPage.currentPartnerBalance")}</span></div>
+          <div className="partner-position-row partner-position-row--header"><span>{t("partnerLedgerPage.partner")}</span><span>{t("partnerLedgerPage.openingBalance")}</span><span>{t("partnerLedgerPage.capitalInjected")}</span><span>Purchase Vouchers</span><span>Outstanding Labour Advances</span><span>Labour Settlements</span><span>{t("partnerLedgerPage.currentPartnerBalance")}</span></div>
           {partnerPositions.map((item) => <div className="partner-position-row" key={item.name}>
-            <strong>{item.name}</strong><span>{money(item.openingBalance)}</span><span>{money(item.capitalInjected)}</span><span>{money(item.purchaseVouchersPaid)}</span><span>{money(item.labourAdvancesPaid)}</span><span>{money(item.labourWageSettlements)}</span><b>{money(item.currentPartnerBalance)}</b>
+            <strong>{item.name}</strong><span>{money(item.openingBalance)}</span><span>{money(item.capitalInjected)}</span><span>{money(item.purchaseVouchersPaid)}</span><span>{money(item.outstandingLabourAdvances)}</span><span>{money(item.labourWageSettlements)}</span><b>{money(item.currentPartnerBalance)}</b>
           </div>)}
         </div>}
         {!!partnerPositions.length && <div className="partner-position-cards">
@@ -3648,9 +3650,10 @@ function PartnerLedgerModule() {
             <div><span>{t("partnerLedgerPage.openingBalance")}</span><strong>{money(item.openingBalance)}</strong></div>
             <div><span>{t("partnerLedgerPage.capitalInjected")}</span><strong>{money(item.capitalInjected)}</strong></div>
             <div><span>Purchase Vouchers</span><strong>{money(item.purchaseVouchersPaid)}</strong></div>
-            <div><span>Labour Advances Paid</span><strong>{money(item.labourAdvancesPaid)}</strong></div>
+            <div><span>Total labour advances paid</span><strong>{money(item.totalLabourAdvancesPaid)}</strong></div>
+            <div><span>Less: settled through wage settlements</span><strong>{money(Math.max(item.totalLabourAdvancesPaid - item.outstandingLabourAdvances, 0))}</strong></div>
+            <div><span>Outstanding Labour Advances</span><strong>{money(item.outstandingLabourAdvances)}</strong></div>
             <div><span>Labour Wage Settlements</span><strong>{money(item.labourWageSettlements)}</strong></div>
-            <div><span>Total Labour Advances Paid</span><strong>{money(item.totalLabourAdvancesPaid)}</strong></div>
             <div><span>{t("partnerLedgerPage.transfersOut")}</span><strong>{money(item.transfersOut)}</strong></div>
             <div><span>{t("partnerLedgerPage.transfersIn")}</span><strong>{money(item.transfersIn)}</strong></div>
           </article>)}
@@ -3714,11 +3717,13 @@ function AccountsModule() {
   const loadSales = useCallback(() => workspaceRecords(offlineDb.sales), []);
   const loadEntries = useCallback(() => workspaceRecords(offlineDb.partnerEntries), []);
   const loadAdvances = useCallback(() => workspaceRecords(offlineDb.advances), []);
+  const loadLabourWageSettlements = useCallback(() => workspaceRecords(offlineDb.labourWageSettlements), []);
   const [accounts, refresh] = useData(loadAccounts, ensureLocalAccounts);
   const [vouchers] = useData(loadVouchers);
   const [sales] = useData(loadSales);
   const [entries] = useData(loadEntries);
   const [advances] = useData(loadAdvances);
+  const [labourWageSettlements] = useData(loadLabourWageSettlements);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [ledgerSearch, setLedgerSearch] = useState("");
   const [ledgerType, setLedgerType] = useState<"all" | "sale" | "voucher" | "advance" | "settlement_sent" | "settlement_received" | "contribution" | "withdrawal" | "adjustment">("all");
@@ -3744,7 +3749,8 @@ function AccountsModule() {
   const activeVouchers = getActiveVouchers(vouchers);
   const activeEntries = entries.filter((item) => isActiveOperationalRecord(item));
   const activeAdvances = advances.filter((item) => isActiveOperationalRecord(item));
-  const balance = (account: Account) => calculateAccountBalance(account, activeSales, activeVouchers, activeAdvances, activeEntries);
+  const activeLabourWageSettlements = labourWageSettlements.filter((item) => isActiveOperationalRecord(item));
+  const balance = (account: Account) => calculateAccountBalance(account, activeSales, activeVouchers, activeAdvances, activeEntries, activeLabourWageSettlements);
   const totalAdvances = activeAdvances.reduce((sum, item) => sum + item.amount, 0);
   const totalVoucherExpenses = activeVouchers.reduce((sum, item) => sum + item.amount, 0);
   const selectedAccount = selectedAccountId ? accounts.find((item) => item.id === selectedAccountId) ?? null : null;
@@ -3946,12 +3952,16 @@ function AccountsModule() {
       if (row.partnerLiabilityGroup === "purchase_vouchers_paid") byType.purchaseVouchersPaid += row.credit - row.debit;
       if (row.partnerLiabilityGroup === "labour_advances_paid") byType.labourAdvancesPaid += row.credit - row.debit;
       if (row.partnerLiabilityGroup === "labour_wage_settlements") byType.labourWageSettlements += row.credit - row.debit;
-      if (row.partnerLiabilityGroup === "purchase_vouchers_paid" || row.partnerLiabilityGroup === "labour_advances_paid" || row.partnerLiabilityGroup === "labour_wage_settlements") byType.directExpensesPaid += row.credit - row.debit;
       if (row.partnerLiabilityGroup === "transfers_in") byType.transfersIn += Math.max(row.debit, row.credit);
       if (row.partnerLiabilityGroup === "transfers_out") byType.transfersOut += Math.max(row.debit, row.credit);
       if (row.partnerLiabilityGroup === "money_returned") byType.moneyReturned += row.debit;
       if (row.partnerLiabilityGroup === "adjustments") byType.adjustments += row.credit - row.debit;
     }
+    const settledAdvances = activeLabourWageSettlements
+      .filter((settlement) => settlement.linkedAccountId === selectedAccount.id)
+      .reduce((sum, settlement) => sum + settlement.settledAdvanceAmount, 0);
+    const outstandingLabourAdvances = Math.max(byType.labourAdvancesPaid - settledAdvances, 0);
+    byType.directExpensesPaid = byType.purchaseVouchersPaid + byType.labourWageSettlements + outstandingLabourAdvances;
     return {
       ...byType,
       netBalance: byType.capitalInjected
@@ -3961,7 +3971,7 @@ function AccountsModule() {
         - byType.moneyReturned
         + byType.adjustments,
     };
-  }, [filteredLedgerRows, selectedAccount]);
+  }, [activeLabourWageSettlements, filteredLedgerRows, selectedAccount]);
   const rawPartnerLedgerOverview = useMemo(() => {
     const overview = {
       openingBalance: 0,
@@ -3981,17 +3991,21 @@ function AccountsModule() {
       if (row.partnerLiabilityGroup === "purchase_vouchers_paid") overview.purchaseVouchersPaid += row.credit - row.debit;
       if (row.partnerLiabilityGroup === "labour_advances_paid") overview.labourAdvancesPaid += row.credit - row.debit;
       if (row.partnerLiabilityGroup === "labour_wage_settlements") overview.labourWageSettlements += row.credit - row.debit;
-      if (row.partnerLiabilityGroup === "purchase_vouchers_paid" || row.partnerLiabilityGroup === "labour_advances_paid" || row.partnerLiabilityGroup === "labour_wage_settlements") overview.directExpensesPaid += row.credit - row.debit;
       if (row.partnerLiabilityGroup === "transfers_in") overview.transfersIn += Math.max(row.debit, row.credit);
       if (row.partnerLiabilityGroup === "transfers_out") overview.transfersOut += Math.max(row.debit, row.credit);
       if (row.partnerLiabilityGroup === "money_returned") overview.moneyReturned += row.debit;
       if (row.partnerLiabilityGroup === "adjustments") overview.adjustments += row.credit - row.debit;
     }
+    const settledAdvances = activeLabourWageSettlements
+      .filter((settlement) => settlement.linkedAccountId === selectedAccount.id)
+      .reduce((sum, settlement) => sum + settlement.settledAdvanceAmount, 0);
+    const outstandingLabourAdvances = Math.max(overview.labourAdvancesPaid - settledAdvances, 0);
+    overview.directExpensesPaid = overview.purchaseVouchersPaid + overview.labourWageSettlements + outstandingLabourAdvances;
     return {
       ...overview,
       netBalance: calculatePartnerLiabilityBalance(overview),
     };
-  }, [ledgerRows, selectedAccount]);
+  }, [activeLabourWageSettlements, ledgerRows, selectedAccount]);
   const rawStandardLedgerBreakdown = useMemo(() => {
     const byType = {
       salesReceived: 0, voucherExpensesPaid: 0, labourAdvancesPaid: 0,
@@ -4026,7 +4040,13 @@ function AccountsModule() {
     if (selectedAccount?.type !== "partner") return { ...summary, netBalance: 0 };
     for (const group of partnerLedgerGroups) {
       if (group.groupKey === "capital_injected") summary.capitalInjected += group.totalAmount;
-      if (group.groupKey === "purchase_vouchers_paid" || group.groupKey === "labour_advances_paid" || group.groupKey === "labour_wage_settlements") summary.directExpensesPaid += group.totalAmount;
+      if (group.groupKey === "purchase_vouchers_paid" || group.groupKey === "labour_wage_settlements") summary.directExpensesPaid += group.totalAmount;
+      if (group.groupKey === "labour_advances_paid") {
+        const settledAdvances = activeLabourWageSettlements
+          .filter((settlement) => settlement.linkedAccountId === selectedAccount.id)
+          .reduce((sum, settlement) => sum + settlement.settledAdvanceAmount, 0);
+        summary.directExpensesPaid += Math.max(group.totalAmount - settledAdvances, 0);
+      }
       if (group.groupKey === "transfers_in") summary.transfersIn += Math.abs(group.totalAmount);
       if (group.groupKey === "transfers_out") summary.transfersOut += Math.abs(group.totalAmount);
       if (group.groupKey === "money_returned") summary.moneyReturned += -group.totalAmount;
@@ -4036,7 +4056,7 @@ function AccountsModule() {
       ...summary,
       netBalance: summary.capitalInjected + summary.directExpensesPaid + summary.transfersOut - summary.transfersIn - summary.moneyReturned + summary.adjustments,
     };
-  }, [partnerLedgerGroups, selectedAccount]);
+  }, [activeLabourWageSettlements, partnerLedgerGroups, selectedAccount]);
   const rawStandardLedgerSummary = useMemo(() => {
     const summary = {
       expenses: 0,

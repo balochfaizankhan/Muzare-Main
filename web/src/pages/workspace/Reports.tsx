@@ -863,9 +863,9 @@ export function Reports() {
         settlementsSent,
         settlementsReceived,
         salesReceived,
-        net: calculateAccountBalance(account, saleRows, cashAffectingVouchers, advanceRows, partnerRows),
+        net: calculateAccountBalance(account, saleRows, cashAffectingVouchers, advanceRows, partnerRows, activeSettlements),
       };
-    }), [accountId, accounts, advanceRows, cashAffectingVouchers, partnerRows, saleRows]);
+    }), [accountId, accounts, activeSettlements, advanceRows, cashAffectingVouchers, partnerRows, saleRows]);
   const partnerLiabilityPositions = useMemo(
     () => buildPartnerLiabilityPositions(accounts, cashAffectingVouchers, advanceRows, partnerRows, saleRows, activeSettlements)
       .filter((item) => !accountId || item.account?.id === accountId),
@@ -960,8 +960,12 @@ export function Reports() {
     if (selectedAccountRecord?.type !== "partner") return { ...summary, netBalance: 0 };
     for (const group of groupedPartnerLedgerRows) {
       if (group.groupKey === "capital_injected") summary.capitalInjected += group.totalAmount;
-      if (group.groupKey === "purchase_vouchers_paid" || group.groupKey === "labour_advances_paid" || group.groupKey === "labour_wage_settlements") {
-        summary.directExpensesPaid += group.totalAmount;
+      if (group.groupKey === "purchase_vouchers_paid" || group.groupKey === "labour_wage_settlements") summary.directExpensesPaid += group.totalAmount;
+      if (group.groupKey === "labour_advances_paid") {
+        const settledAdvances = activeSettlements
+          .filter((settlement) => settlement.linkedAccountId === selectedAccountRecord.id)
+          .reduce((sum, settlement) => sum + settlement.settledAdvanceAmount, 0);
+        summary.directExpensesPaid += Math.max(group.totalAmount - settledAdvances, 0);
       }
       if (group.groupKey === "transfers_in") summary.transfersIn += Math.abs(group.totalAmount);
       if (group.groupKey === "transfers_out") summary.transfersOut += Math.abs(group.totalAmount);
@@ -972,7 +976,7 @@ export function Reports() {
       ...summary,
       netBalance: summary.capitalInjected + summary.directExpensesPaid + summary.transfersOut - summary.transfersIn - summary.moneyReturned + summary.adjustments,
     };
-  }, [groupedPartnerLedgerRows, selectedAccountRecord]);
+  }, [activeSettlements, groupedPartnerLedgerRows, selectedAccountRecord]);
   const rawStandardAccountLedgerSummary = useMemo(() => {
     const summary = { expenses: 0, advances: 0, settlements: 0, income: 0, other: 0 };
     for (const group of groupedAccountLedgerRows) {
@@ -1009,17 +1013,21 @@ export function Reports() {
       if (row.partnerLiabilityGroup === "purchase_vouchers_paid") overview.purchaseVouchersPaid += row.credit - row.debit;
       if (row.partnerLiabilityGroup === "labour_advances_paid") overview.labourAdvancesPaid += row.credit - row.debit;
       if (row.partnerLiabilityGroup === "labour_wage_settlements") overview.labourWageSettlements += row.credit - row.debit;
-      if (row.partnerLiabilityGroup === "purchase_vouchers_paid" || row.partnerLiabilityGroup === "labour_advances_paid" || row.partnerLiabilityGroup === "labour_wage_settlements") overview.directExpensesPaid += row.credit - row.debit;
       if (row.partnerLiabilityGroup === "transfers_in") overview.transfersIn += Math.max(row.debit, row.credit);
       if (row.partnerLiabilityGroup === "transfers_out") overview.transfersOut += Math.max(row.debit, row.credit);
       if (row.partnerLiabilityGroup === "money_returned") overview.moneyReturned += row.debit;
       if (row.partnerLiabilityGroup === "adjustments") overview.adjustments += row.credit - row.debit;
     }
+    const settledAdvances = activeSettlements
+      .filter((settlement) => settlement.linkedAccountId === selectedAccountRecord.id)
+      .reduce((sum, settlement) => sum + settlement.settledAdvanceAmount, 0);
+    const outstandingLabourAdvances = Math.max(overview.labourAdvancesPaid - settledAdvances, 0);
+    overview.directExpensesPaid = overview.purchaseVouchersPaid + overview.labourWageSettlements + outstandingLabourAdvances;
     return {
       ...overview,
       netBalance: calculatePartnerLiabilityBalance(overview),
     };
-  }, [accountLedgerRows, selectedAccountRecord]);
+  }, [accountLedgerRows, activeSettlements, selectedAccountRecord]);
   const partnerAccountLedgerOverviewView = isPartnerLedgerReport
     ? rawPartnerAccountLedgerOverview as {
         capitalInjected: number;
@@ -1121,8 +1129,8 @@ export function Reports() {
     ...voucherRows.flatMap((voucher) => voucherReportItems(voucher).map((item, index) => [index === 0 ? (getVoucherDisplayNumber(voucher) || voucher.voucherNumber) : "", index === 0 ? voucher.date : "", item.description, expenseLabel(item.category, item.subcategory), index === 0 ? accountName(voucher.accountId) : "", item.amount])),
   ]);
   const exportPartnerPosition = () => downloadCsv("partner-position.csv", [
-    [t("reportsPage.partner"), t("reportsPage.openingBalance"), t("reportsPage.capitalInjected"), "Purchase vouchers", "Labour advances", "Labour settlements", t("reportsPage.transfersOut"), t("reportsPage.transfersIn"), t("reportsPage.moneyReturned"), t("reportsPage.adjustments"), t("reportsPage.currentPartnerBalance")],
-    ...partnerLiabilityPositions.map((item) => [item.name, item.openingBalance, item.capitalInjected, item.purchaseVouchersPaid, item.labourAdvancesPaid, item.labourWageSettlements, item.transfersOut, item.transfersIn, item.moneyReturned, item.adjustments, item.currentPartnerBalance]),
+    [t("reportsPage.partner"), t("reportsPage.openingBalance"), t("reportsPage.capitalInjected"), "Purchase vouchers", "Total labour advances paid", "Settled through wage settlements", "Outstanding labour advances", "Labour settlements", t("reportsPage.transfersOut"), t("reportsPage.transfersIn"), t("reportsPage.moneyReturned"), t("reportsPage.adjustments"), t("reportsPage.currentPartnerBalance")],
+    ...partnerLiabilityPositions.map((item) => [item.name, item.openingBalance, item.capitalInjected, item.purchaseVouchersPaid, item.totalLabourAdvancesPaid, Math.max(item.totalLabourAdvancesPaid - item.outstandingLabourAdvances, 0), item.outstandingLabourAdvances, item.labourWageSettlements, item.transfersOut, item.transfersIn, item.moneyReturned, item.adjustments, item.currentPartnerBalance]),
   ]);
   const exportPartnerLedger = () => downloadCsv("partner-ledger.csv", [
     [t("reportsPage.date"), t("reportsPage.partner"), t("reportsPage.type"), t("reportsPage.amount"), t("reportsPage.notes")],
@@ -1653,7 +1661,7 @@ export function Reports() {
           <button className={views["partner-position"] === "ledger" ? "is-active" : ""} type="button" onClick={() => switchView("partner-position", "ledger")}>{t("reportsPage.ledger")}</button>
         </section>
         {views["partner-position"] === "position" && <ReportShell title={t("reportsPage.partnerPositionTitle")} rangeLabel={rangeLabel} sectionId="partner-position" onPrint={() => printSection("partner-position")} onExport={exportPartnerPosition}>
-          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.partner"), t("reportsPage.capitalInjected"), "Purchase vouchers", "Labour advances", "Labour settlements", t("reportsPage.currentPartnerBalance")]} rows={partnerLiabilityPositions.map((item) => ({ id: item.key, title: item.name, value: money(item.currentPartnerBalance), meta: getPartnerBalanceState(item.currentPartnerBalance) === "partner_holds_business_money" ? t("reportsPage.partnerHoldsBusinessMoney") : t("reportsPage.farmOwesPartner"), cells: [item.name, money(item.capitalInjected), money(item.purchaseVouchersPaid), money(item.labourAdvancesPaid), money(item.labourWageSettlements), money(item.currentPartnerBalance)], details: [[t("reportsPage.openingBalance"), money(item.openingBalance)], [t("reportsPage.adjustments"), money(item.adjustments)], ["Total labour advances paid", money(item.totalLabourAdvancesPaid)], [t("reportsPage.transfersOut"), money(item.transfersOut)], [t("reportsPage.transfersIn"), money(item.transfersIn)], [t("reportsPage.moneyReturned"), money(item.moneyReturned)]] }))} />
+          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.partner"), t("reportsPage.capitalInjected"), "Purchase vouchers", "Outstanding labour advances", "Labour settlements", t("reportsPage.currentPartnerBalance")]} rows={partnerLiabilityPositions.map((item) => ({ id: item.key, title: item.name, value: money(item.currentPartnerBalance), meta: getPartnerBalanceState(item.currentPartnerBalance) === "partner_holds_business_money" ? t("reportsPage.partnerHoldsBusinessMoney") : t("reportsPage.farmOwesPartner"), cells: [item.name, money(item.capitalInjected), money(item.purchaseVouchersPaid), money(item.outstandingLabourAdvances), money(item.labourWageSettlements), money(item.currentPartnerBalance)], details: [[t("reportsPage.openingBalance"), money(item.openingBalance)], [t("reportsPage.adjustments"), money(item.adjustments)], ["Total labour advances paid", money(item.totalLabourAdvancesPaid)], ["Less: settled through wage settlements", money(Math.max(item.totalLabourAdvancesPaid - item.outstandingLabourAdvances, 0))], ["Outstanding labour advances", money(item.outstandingLabourAdvances)], [t("reportsPage.transfersOut"), money(item.transfersOut)], [t("reportsPage.transfersIn"), money(item.transfersIn)], [t("reportsPage.moneyReturned"), money(item.moneyReturned)]] }))} />
         </ReportShell>}
         {views["partner-position"] === "ledger" && <ReportShell title={t("reportsPage.partnerLedger")} rangeLabel={rangeLabel} sectionId="partner-ledger" onPrint={() => printSection("partner-ledger")} onExport={exportPartnerLedger}>
           <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.partner"), t("reportsPage.type"), t("reportsPage.amount"), t("reportsPage.notes")]} rows={partnerRows.map((item) => ({ id: item.id, title: item.partnerName ?? `${item.fromPartner ?? "-"} → ${item.toPartner ?? "-"}`, value: money(item.amount), meta: item.date, cells: [item.date, item.partnerName ?? `${item.fromPartner ?? "-"} → ${item.toPartner ?? "-"}`, item.type, money(item.amount), item.notes || "-"], details: [[t("reportsPage.type"), item.type], [t("reportsPage.notes"), item.notes || "-"]], onOpen: () => navigate(`/workspace/partner-ledger?recordId=${item.id}`) }))} />
