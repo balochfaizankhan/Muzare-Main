@@ -36,16 +36,27 @@ export async function findExistingVoucherByNumber(
   workspaceId: string,
   farmId: string,
   voucherNumber: string,
-  excludeClientRecordId?: string,
+  excludeRecordId?: string,
 ) {
   const filters = [
     eq(operationalRecords.workspaceId, workspaceId),
     eq(operationalRecords.farmId, farmId),
     eq(operationalRecords.entityType, "voucher"),
     activeOperationalPayloadSql(operationalRecords.payload),
-    sql`coalesce(${operationalRecords.payload}->>'voucherNumber', '') = ${voucherNumber}`,
+    sql`coalesce(
+      case
+        when coalesce(${operationalRecords.payload}->>'originalVoucherNumber', '') <> ''
+          and coalesce(${operationalRecords.payload}->>'voucherNumberEdited', 'false') <> 'true'
+          then ${operationalRecords.payload}->>'originalVoucherNumber'
+        else ${operationalRecords.payload}->>'voucherNumber'
+      end,
+      ''
+    ) = ${voucherNumber}`,
   ];
-  if (excludeClientRecordId) filters.push(sql`${operationalRecords.clientRecordId} <> ${excludeClientRecordId}`);
+  if (excludeRecordId) {
+    filters.push(sql`${operationalRecords.clientRecordId} <> ${excludeRecordId}`);
+    filters.push(sql`${operationalRecords.id}::text <> ${excludeRecordId}`);
+  }
   const [existingVoucher] = await tx.select({
     id: operationalRecords.id,
     clientRecordId: operationalRecords.clientRecordId,

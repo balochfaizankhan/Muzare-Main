@@ -481,6 +481,46 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     };
   });
 
+  app.get("/v1/workspace/:workspaceId/operational-records/:recordId", { preHandler: requireUser }, async (request, reply) => {
+    if (!request.appUser) return reply;
+    const parsed = z.object({
+      workspaceId: z.string().uuid(),
+      recordId: z.string().min(1),
+    }).safeParse(request.params);
+    if (!parsed.success) return reply.code(400).send({ message: "A valid operational record id is required." });
+    if (!request.appUser.memberships.some((item) => item.active && item.workspaceId === parsed.data.workspaceId)) {
+      return reply.code(403).send({ message: "Workspace membership is required." });
+    }
+    const idMatchesUuid = z.string().uuid().safeParse(parsed.data.recordId).success;
+    const identityFilter = idMatchesUuid
+      ? or(eq(operationalRecords.id, parsed.data.recordId), eq(operationalRecords.clientRecordId, parsed.data.recordId))
+      : eq(operationalRecords.clientRecordId, parsed.data.recordId);
+    const [entry] = await db.select().from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, parsed.data.workspaceId),
+      identityFilter,
+    )).limit(1);
+    if (!entry) return reply.code(404).send({ message: "Operational record not found." });
+    if (!hasModulePermission(request.appUser, parsed.data.workspaceId, entityModule(entry.entityType as typeof entities[number]), "view")) {
+      return reply.code(403).send({ message: "You do not have permission to view this record." });
+    }
+    if (entry.farmId && !hasFarmAccess(request.appUser, parsed.data.workspaceId, entry.farmId)) {
+      return forbiddenResponse(reply, "You do not have access to this farm.", {
+        code: "farm_access_denied",
+        requestWorkspaceId: parsed.data.workspaceId,
+        farmId: entry.farmId,
+      });
+    }
+    const payload = asPayloadRecord(entry.payload);
+    if (!payload) return reply.code(422).send({ message: "Operational record payload is malformed." });
+    return {
+      workspaceId: entry.workspaceId,
+      farmId: entry.farmId,
+      seasonId: entry.seasonId,
+      entity: entry.entityType,
+      record: { ...payload, id: entry.clientRecordId, updatedAt: entry.clientUpdatedAt.toISOString() },
+    };
+  });
+
   app.get("/v1/workspace/:workspaceId/voucher-number-availability", { preHandler: requireUser }, async (request, reply) => {
     if (!request.appUser) return reply;
     const parsed = z.object({
@@ -566,17 +606,21 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       available: !existingVoucher,
       existingRecordId: existingVoucher?.clientRecordId ?? null,
       blockingVoucher: existingVoucher ? {
-        id: existingVoucher.clientRecordId,
+        id: existingVoucher.id,
+        clientRecordId: existingVoucher.clientRecordId,
         workspaceId: existingVoucher.workspaceId,
         farmId: existingVoucher.farmId,
         seasonId: existingVoucher.seasonId,
         voucherNumber: typeof existingVoucher.payload.voucherNumber === "string" ? existingVoucher.payload.voucherNumber : normalized,
+        originalVoucherNumber: typeof existingVoucher.payload.originalVoucherNumber === "string" ? existingVoucher.payload.originalVoucherNumber : null,
+        legacyVoucherNumber: typeof existingVoucher.payload.legacyVoucherNumber === "string" ? existingVoucher.payload.legacyVoucherNumber : null,
+        voucherNumberEdited: existingVoucher.payload.voucherNumberEdited === true,
         date: typeof existingVoucher.payload.date === "string" ? existingVoucher.payload.date : "",
         amount: typeof existingVoucher.payload.amount === "number" ? existingVoucher.payload.amount : Number(existingVoucher.payload.amount ?? 0),
         description: typeof existingVoucher.payload.description === "string" ? existingVoucher.payload.description : "",
         deletedAt: typeof existingVoucher.payload.deletedAt === "string" ? existingVoucher.payload.deletedAt : null,
-        source: existingVoucher.sourceType === "expense" || typeof existingVoucher.payload.oldExpenseId === "string" ? "imported" : "pwa",
-        oldExpenseId: typeof existingVoucher.payload.oldExpenseId === "string" ? existingVoucher.payload.oldExpenseId : null,
+        source: existingVoucher.sourceType === "expense" || typeof existingVoucher.payload.oldExpenseId === "string" || typeof existingVoucher.payload.oldExpenseId === "number" ? "imported" : "pwa",
+        oldExpenseId: typeof existingVoucher.payload.oldExpenseId === "string" || typeof existingVoucher.payload.oldExpenseId === "number" ? String(existingVoucher.payload.oldExpenseId) : null,
       } : null,
       suggestedNextVoucherNumber: `V-${String(highest + 1).padStart(4, "0")}`,
     };

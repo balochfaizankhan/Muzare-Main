@@ -13,7 +13,7 @@ import { calculateAccountBalance } from "../lib/accounting";
 import { defaultTransactionGroupExpansion, groupAccountTransactions, type AccountTransactionGroupKey } from "../lib/accountTransactionGroups";
 import { attendanceStatusKey, buildAttendanceStatusMap, previousLocalDateKey, todayLocalDateKey } from "../lib/attendanceStatus";
 import { getCanonicalExpenseCategory, getExpenseAccountingGroup } from "../lib/expenseCategories";
-import { ApiError, confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteExpenseAttachment, deleteOrDeactivateLabour, extractExpenseReceipt, fetchExpenseAttachments, fetchExpenseCategories, fetchLabourDeletionPreview, openExpenseAttachment, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, uploadExpenseAttachment, validateVoucherNumber, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type ExpenseAttachment, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type ExpenseOcrSuggestion, type ExpenseSearchRecord, type LabourDeletionPreview } from "../lib/api";
+import { ApiError, confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteExpenseAttachment, deleteOrDeactivateLabour, extractExpenseReceipt, fetchExpenseAttachments, fetchExpenseCategories, fetchLabourDeletionPreview, fetchOperationalRecord, openExpenseAttachment, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, uploadExpenseAttachment, validateVoucherNumber, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type ExpenseAttachment, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type ExpenseOcrSuggestion, type ExpenseSearchRecord, type LabourDeletionPreview } from "../lib/api";
 import { buildDispatchAvailability, dispatchCartons, dispatchItemKey, resolveSaleType, saleProduceLabel, soldQuantityByDispatchItem } from "../lib/dispatch-sales";
 import { canCreate, canDelete, canEdit, hasModulePermission, hasPermission } from "../lib/permissions";
 import { translateExpenseCategory, translateExpenseSubcategory, translatePaymentType, translateSaleType, translateSalesStatus } from "../lib/systemTranslations";
@@ -1764,10 +1764,14 @@ function ExpensesModule() {
     normalized?: string;
     blockingVoucher?: {
       id: string;
+      clientRecordId: string;
       workspaceId: string;
       farmId: string | null;
       seasonId: string | null;
       voucherNumber: string;
+      originalVoucherNumber?: string | null;
+      legacyVoucherNumber?: string | null;
+      voucherNumberEdited?: boolean;
       date: string;
       amount: number;
       description: string;
@@ -1776,6 +1780,7 @@ function ExpensesModule() {
       oldExpenseId?: string | null;
     } | null;
   }>({ status: "idle", message: "" });
+  const [openingBlockingVoucher, setOpeningBlockingVoucher] = useState(false);
   const [showDeletedVouchers, setShowDeletedVouchers] = useState(false);
   const [showImportedVouchers, setShowImportedVouchers] = useState(true);
   const [showSettlementVouchers, setShowSettlementVouchers] = useState(searchParams.get("showSettlementVouchers") === "true");
@@ -1931,10 +1936,14 @@ function ExpensesModule() {
           blockingVoucher: result.blockingVoucher
             ? {
               id: result.blockingVoucher.id,
+              clientRecordId: result.blockingVoucher.clientRecordId,
               workspaceId: result.blockingVoucher.workspaceId,
               farmId: result.blockingVoucher.farmId,
               seasonId: result.blockingVoucher.seasonId,
               voucherNumber: result.blockingVoucher.voucherNumber,
+              originalVoucherNumber: result.blockingVoucher.originalVoucherNumber,
+              legacyVoucherNumber: result.blockingVoucher.legacyVoucherNumber,
+              voucherNumberEdited: result.blockingVoucher.voucherNumberEdited,
               date: result.blockingVoucher.date,
               amount: result.blockingVoucher.amount,
               description: result.blockingVoucher.description,
@@ -2225,6 +2234,54 @@ function ExpensesModule() {
       nonCashSettlement: "nonCashSettlement" in item ? item.nonCashSettlement === true : undefined,
     };
   }
+  const openBlockingVoucher = useCallback(async () => {
+    const blocker = voucherNumberValidation.blockingVoucher;
+    if (!blocker || !workspaceId || !token) return;
+    setOpeningBlockingVoucher(true);
+    try {
+      const localRecord = vouchers.find((item) => item.id === blocker.clientRecordId || item.id === blocker.id)
+        ?? visibleVoucherSource.find((item) => item.id === blocker.clientRecordId || item.id === blocker.id);
+      if (localRecord) {
+        const opened = toVoucherRecord(localRecord);
+        if (import.meta.env.DEV) {
+          console.debug("OPEN_BLOCKING_VOUCHER", {
+            editedRecordId: editingVoucher?.id ?? null,
+            blockingRecordId: blocker.id,
+            blockingClientRecordId: blocker.clientRecordId,
+            openedRecordId: opened.id,
+            blockingVoucherNumber: getVoucherDisplayNumber(blocker) || blocker.voucherNumber,
+            openedVoucherNumber: getVoucherDisplayNumber(opened) || opened.voucherNumber,
+          });
+        }
+        setSelectedVoucher(opened);
+        return;
+      }
+      const fetched = await fetchOperationalRecord(token, workspaceId, blocker.id);
+      if (fetched.entity !== "voucher") throw new Error("Blocking record is not an expense voucher.");
+      const opened = {
+        ...(fetched.record as unknown as Voucher),
+        workspaceId: fetched.workspaceId,
+        farmId: fetched.farmId ?? blocker.farmId ?? "",
+        seasonId: fetched.seasonId ?? blocker.seasonId ?? "",
+        pendingSync: false,
+      };
+      if (import.meta.env.DEV) {
+        console.debug("OPEN_BLOCKING_VOUCHER", {
+          editedRecordId: editingVoucher?.id ?? null,
+          blockingRecordId: blocker.id,
+          blockingClientRecordId: blocker.clientRecordId,
+          openedRecordId: opened.id,
+          blockingVoucherNumber: getVoucherDisplayNumber(blocker) || blocker.voucherNumber,
+          openedVoucherNumber: getVoucherDisplayNumber(opened) || opened.voucherNumber,
+        });
+      }
+      setSelectedVoucher(opened);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : t("expensesPage.blockingVoucherHiddenHint"));
+    } finally {
+      setOpeningBlockingVoucher(false);
+    }
+  }, [editingVoucher?.id, t, token, visibleVoucherSource, voucherNumberValidation.blockingVoucher, vouchers, workspaceId]);
   const matchesVoucher = useCallback((item: Voucher | ExpenseSearchRecord) => {
     const accountName = accountById.get(item.accountId)
       ?? ("accountName" in item && typeof item.accountName === "string" ? item.accountName : "");
@@ -2474,26 +2531,18 @@ function ExpensesModule() {
                 </div>
                 {voucherNumberValidation.message ? <small className={voucherNumberValidation.status === "duplicate" || voucherNumberValidation.status === "invalid" ? "expense-voucher-form__number-feedback is-error" : "expense-voucher-form__number-feedback"}>{voucherNumberValidation.message}</small> : null}
                 {voucherNumberValidation.status === "duplicate" && voucherNumberValidation.blockingVoucher ? <div className="expense-voucher-form__blocking-voucher">
-                  <small>{voucherNumberValidation.blockingVoucher.source === "imported" ? t("expensesPage.blockingImportedVoucher") : t("expensesPage.blockingVoucher")}: {voucherNumberValidation.blockingVoucher.voucherNumber} · {voucherNumberValidation.blockingVoucher.date} · {money(voucherNumberValidation.blockingVoucher.amount)}</small>
+                  <small>{voucherNumberValidation.blockingVoucher.source === "imported" ? t("expensesPage.blockingImportedVoucher") : t("expensesPage.blockingVoucher")}: {getVoucherDisplayNumber(voucherNumberValidation.blockingVoucher) || voucherNumberValidation.blockingVoucher.voucherNumber} · {voucherNumberValidation.blockingVoucher.date} · {money(voucherNumberValidation.blockingVoucher.amount)}</small>
                   <small>{voucherNumberValidation.blockingVoucher.description || "-"}</small>
-                  <small>ID: {voucherNumberValidation.blockingVoucher.id}</small>
+                  <small>ID: {voucherNumberValidation.blockingVoucher.id} · Client: {voucherNumberValidation.blockingVoucher.clientRecordId}</small>
                   <small>Workspace: {voucherNumberValidation.blockingVoucher.workspaceId} · Farm: {voucherNumberValidation.blockingVoucher.farmId ?? "-"} · Season: {voucherNumberValidation.blockingVoucher.seasonId ?? "-"}</small>
                   <small>{voucherNumberValidation.blockingVoucher.deletedAt ? `Deleted: ${voucherNumberValidation.blockingVoucher.deletedAt}` : "Deleted: active"}</small>
                   <button
                     type="button"
                     className="secondary-action"
-                    onClick={() => {
-                      const record = filteredVouchers.find((item) => item.id === voucherNumberValidation.blockingVoucher?.id);
-                      if (record) {
-                        setSelectedVoucher(toVoucherRecord(record));
-                        return;
-                      }
-                      setVoucherSearch(voucherNumberValidation.blockingVoucher?.voucherNumber ?? "");
-                      setDebouncedVoucherSearch(voucherNumberValidation.blockingVoucher?.voucherNumber ?? "");
-                      showToast(t("expensesPage.blockingVoucherHiddenHint"));
-                    }}
+                    disabled={openingBlockingVoucher}
+                    onClick={() => { void openBlockingVoucher(); }}
                   >
-                    {t("expensesPage.openBlockingVoucher")}
+                    {openingBlockingVoucher ? t("common.loading") : t("expensesPage.openBlockingVoucher")}
                   </button>
                 </div> : null}
               </label>

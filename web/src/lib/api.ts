@@ -917,10 +917,14 @@ export type VoucherNumberValidation = {
   existingRecordId?: string | null;
   blockingVoucher?: {
     id: string;
+    clientRecordId: string;
     workspaceId: string;
     farmId: string | null;
     seasonId: string | null;
     voucherNumber: string;
+    originalVoucherNumber?: string | null;
+    legacyVoucherNumber?: string | null;
+    voucherNumberEdited?: boolean;
     date: string;
     amount: number;
     description: string;
@@ -1299,6 +1303,8 @@ export const deleteOperationalRecord = (token: string, input: Omit<OperationalRe
   apiRequest<void>("/v1/workspace/operational-records", { method: "DELETE", body: JSON.stringify(input) }, token, { debugLabel: `operational-record-delete:${input.entity}` });
 export const fetchOperationalRecords = (token: string, workspaceId: string) =>
   apiRequest<OperationalSnapshot>(`/v1/workspace/${workspaceId}/operational-records`, {}, token);
+export const fetchOperationalRecord = (token: string, workspaceId: string, recordId: string) =>
+  apiRequest<OperationalRecordEnvelope>(`/v1/workspace/${workspaceId}/operational-records/${encodeURIComponent(recordId)}`, {}, token, { debugLabel: "operational-record-fetch" });
 export type LabourDeletionPreview = { labourId: string; labourName: string; linkedRecordCount: number; action: "deactivate" | "delete" };
 export const fetchLabourDeletionPreview = (token: string, workspaceId: string, labourId: string) =>
   apiRequest<LabourDeletionPreview>(`/api/workspaces/${workspaceId}/labour/${labourId}/deletion-preview`, {}, token);
