@@ -150,6 +150,9 @@ export function AccountingReconciliationDebugView({ mode }: { mode: DebugMode })
   const debugContext = tracePayload?.debugContext as Record<string, unknown> | undefined;
   const selectedContext = tracePayload?.selectedContext as Record<string, unknown> | undefined;
   const filtersApplied = tracePayload?.filtersApplied as Record<string, unknown> | undefined;
+  const permissionMode = debugContext?.permissionMode as string | undefined;
+  const permissionPassed = debugContext?.permissionPassed as boolean | undefined;
+  const permissionReason = debugContext?.reason as string | undefined;
 
   const canRunTrace = runtime.isDebugEnabled && Boolean(token) && Boolean(workspaceId) && Boolean(selectedAccountId || accountSearch.trim());
 
@@ -249,6 +252,14 @@ export function AccountingReconciliationDebugView({ mode }: { mode: DebugMode })
           {" | "}
           {selectedAccount ? `Account: ${selectedAccount.name} (${selectedAccount.id})` : "Account: not selected"}
         </p>
+
+        {(permissionMode || typeof permissionPassed === "boolean") && (
+          <div className="build-diagnostics__grid">
+            <article><span>Permission mode</span><strong>{permissionMode ?? "-"}</strong></article>
+            <article><span>Permission passed</span><strong>{permissionPassed ? "yes" : "no"}</strong></article>
+            <article><span>Permission reason</span><strong>{permissionReason ?? "-"}</strong></article>
+          </div>
+        )}
 
         {trace.error ? <p className="error">{trace.error instanceof Error ? trace.error.message : "Unable to load reconciliation trace."}</p> : null}
         {trace.data ? (

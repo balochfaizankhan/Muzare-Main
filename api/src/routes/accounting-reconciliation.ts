@@ -610,9 +610,6 @@ export async function accountingReconciliationRoutes(app: FastifyInstance): Prom
     if (!appUser) {
       return reply.code(401).send({ message: "Authentication token is required." });
     }
-    if (!hasPermission(appUser, "VIEW_REPORTS", appUser.workspaceId ?? undefined)) {
-      return reply.code(403).send({ message: "Workspace report permission is required." });
-    }
     const parsed = querySchema.safeParse(request.query);
     if (!parsed.success) {
       return reply.code(400).send({ message: "accountName is required." });
@@ -626,11 +623,43 @@ export async function accountingReconciliationRoutes(app: FastifyInstance): Prom
     if (!parsed.data.accountName && !parsed.data.accountId) {
       return reply.code(400).send({ message: "Select an account name or account id." });
     }
-    if (!isPlatformAdmin && currentWorkspaceId && requestWorkspaceId !== currentWorkspaceId) {
-      return reply.code(403).send({ message: "Workspace selection does not match the authenticated session." });
+    const permissionMode = isPlatformAdmin ? "platform_admin_override" : "workspace_report_permission";
+    let permissionPassed = false;
+    let permissionFailureReason: string | null = null;
+    if (isPlatformAdmin) {
+      permissionPassed = true;
+    } else if (currentWorkspaceId && requestWorkspaceId !== currentWorkspaceId) {
+      permissionFailureReason = "Workspace selection does not match the authenticated session.";
+    } else if (!hasPermission(appUser, "VIEW_REPORTS", requestWorkspaceId)) {
+      permissionFailureReason = "Workspace report permission is required.";
+    } else {
+      permissionPassed = true;
+    }
+    if (!permissionPassed) {
+      return reply.code(403).send({
+        message: permissionFailureReason ?? "Workspace report permission is required.",
+        debugContext: {
+          authType: appUser.platformRole ?? "workspace_user",
+          isPlatformAdmin,
+          workspaceId: requestWorkspaceId,
+          permissionMode,
+          permissionPassed,
+          reason: permissionFailureReason ?? "Workspace report permission is required.",
+        },
+      });
     }
     if (parsed.data.workspaceId && !isPlatformAdmin && parsed.data.workspaceId !== appUser.workspaceId) {
-      return reply.code(403).send({ message: "Only platform admins can override the workspace for this trace." });
+      return reply.code(403).send({
+        message: "Only platform admins can override the workspace for this trace.",
+        debugContext: {
+          authType: appUser.platformRole ?? "workspace_user",
+          isPlatformAdmin,
+          workspaceId: requestWorkspaceId,
+          permissionMode,
+          permissionPassed: false,
+          reason: "Only platform admins can override the workspace for this trace.",
+        },
+      });
     }
 
     const session = !isPlatformAdmin && request.sessionId
@@ -664,12 +693,16 @@ export async function accountingReconciliationRoutes(app: FastifyInstance): Prom
       ...trace,
       debugContext: {
         currentUserId: appUser.id,
+        authType: appUser.platformRole ?? "workspace_user",
         currentAuthType: appUser.platformRole ?? "workspace_user",
+        isPlatformAdmin,
         currentWorkspaceId,
         currentFarmId: session?.activeFarmId ?? null,
         currentSeasonId: session?.activeSeasonId ?? null,
         sessionBacked,
         workspaceContextBacked: Boolean(currentWorkspaceId && selectedFarmId && selectedSeasonId),
+        permissionMode,
+        permissionPassed,
         requestedWorkspaceId: parsed.data.workspaceId ?? null,
         requestedFarmId: parsed.data.farmId ?? null,
         requestedSeasonId: parsed.data.seasonId ?? null,
@@ -677,6 +710,7 @@ export async function accountingReconciliationRoutes(app: FastifyInstance): Prom
         resolvedFarmId: selectedFarmId,
         resolvedSeasonId: selectedSeasonId,
         canOverrideWorkspace: isPlatformAdmin,
+        permissionFailureReason,
       },
     };
   });

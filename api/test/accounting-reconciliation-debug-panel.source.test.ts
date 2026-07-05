@@ -31,6 +31,8 @@ test("temporary reconciliation debug route is gated and linked from settings", (
   assert.ok(source.includes("queryFn: () => fetchAccountingReconciliationTrace(token!, {"));
   assert.ok(source.includes("JSON.stringify({"));
   assert.ok(source.includes("selectedContext"));
+  assert.ok(source.includes("permissionMode"));
+  assert.ok(source.includes("permissionPassed"));
   assert.ok(appSource.includes("accounting-reconciliation-debug"));
   assert.ok(appSource.includes("/debug/accounting-reconciliation"));
   assert.ok(settingsSource.includes("Accounting Reconciliation Trace"));
