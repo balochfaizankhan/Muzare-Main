@@ -1416,7 +1416,7 @@ export const createLabourWageSettlement = (
   token: string,
   workspaceId: string,
   input: LabourWageSettlementCreateInput,
-) => apiRequest<{ settlement: LabourWageSettlementRecord; voucher: LabourWageSettlementLinkedVoucher }>(
+) => apiRequest<{ settlement: LabourWageSettlementRecord }>(
   `/v1/workspace/${workspaceId}/labour-wage-settlements`,
   { method: "POST", body: JSON.stringify(input) },
   token,

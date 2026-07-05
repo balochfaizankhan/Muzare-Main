@@ -9,6 +9,7 @@ import { auditLogs, expenseCategories, expenseSubcategories, farmDeletionRequest
 import { visibleFarmWhere } from "../farm-visibility.js";
 import { activeOperationalPayloadSql } from "../operational-record-state.js";
 import { canonicalImportedVoucherNumber } from "../lib/import-voucher-numbers.js";
+import { normalExpenseVoucherWhereSql, recalculateExpenseVoucherSequences } from "../lib/voucher-numbers.js";
 import { previewWorkspaceImportContextRepair, repairWorkspaceImportContext } from "../lib/workspace-import-context.js";
 import { repairDeletedFarmSeasonState, repairWorkspaceContext, resolveWorkspaceContext } from "./workspace-context.js";
 
@@ -1245,9 +1246,9 @@ async function repairImportedVoucherNumbers(workspaceId: string): Promise<Vouche
       const settlementNumber = String(payload.settlementNumber ?? "").trim();
       const isSettlementVoucher = payload.voucherPurpose === "labour_wage_settlement" || payload.nonCashSettlement === true;
       if (isSettlementVoucher) {
-        return currentVoucherNumber !== settlementNumber
-          || String(payload.originalVoucherNumber ?? "").trim().length > 0
-          || String(payload.legacyVoucherNumber ?? "").trim().length > 0;
+        return payload.ignoredForExpenseVoucherNumbering !== true
+          || payload.deletedAt == null
+          || payload.deletionReason !== "Removed legacy labour settlement V voucher; LW settlement is accounting reference.";
       }
       const originalVoucherNumber = String(payload.originalVoucherNumber ?? "").trim();
       const legacyVoucherNumber = String(payload.legacyVoucherNumber ?? "").trim();
@@ -1261,7 +1262,7 @@ async function repairImportedVoucherNumbers(workspaceId: string): Promise<Vouche
       const previousVoucherNumber = String(payload.voucherNumber ?? "").trim();
       const isSettlementVoucher = payload.voucherPurpose === "labour_wage_settlement" || payload.nonCashSettlement === true;
       const repairedVoucherNumber = isSettlementVoucher
-        ? String(payload.settlementNumber ?? "").trim()
+        ? String(payload.settlementNumber ?? "").trim() || previousVoucherNumber
         : String(payload.originalVoucherNumber ?? "").trim()
           || String(payload.legacyVoucherNumber ?? "").trim();
       if (!repairedVoucherNumber) continue;
@@ -1271,8 +1272,10 @@ async function repairImportedVoucherNumbers(workspaceId: string): Promise<Vouche
             const { originalVoucherNumber: _originalVoucherNumber, legacyVoucherNumber: _legacyVoucherNumber, ...restPayload } = payload;
             return {
               ...restPayload,
-              voucherNumber: repairedVoucherNumber,
-              voucherNumberEdited: false,
+              deletedAt: typeof payload.deletedAt === "string" && payload.deletedAt ? payload.deletedAt : repairedAt.toISOString(),
+              deletedBy: typeof payload.deletedBy === "string" && payload.deletedBy ? payload.deletedBy : null,
+              ignoredForExpenseVoucherNumbering: true,
+              deletionReason: "Removed legacy labour settlement V voucher; LW settlement is accounting reference.",
               updatedAt: repairedAt.toISOString(),
             };
           })()
@@ -1319,6 +1322,8 @@ async function repairImportedVoucherNumbers(workspaceId: string): Promise<Vouche
       }).where(eq(operationalRecords.id, row.id));
     }
 
+    await recalculateExpenseVoucherSequences(tx, workspaceId);
+
     const afterRows = await tx.select({
       payload: operationalRecords.payload,
     }).from(operationalRecords).where(and(
@@ -1333,6 +1338,7 @@ async function repairImportedVoucherNumbers(workspaceId: string): Promise<Vouche
         sql`coalesce(${operationalRecords.payload}->>'voucherPurpose', '') = 'labour_wage_settlement'`,
         sql`coalesce(${operationalRecords.payload}->>'nonCashSettlement', 'false') = 'true'`
       ),
+      normalExpenseVoucherWhereSql(),
     ));
 
     const mismatchesAfter = afterRows.filter((row) => {

@@ -50,7 +50,12 @@ test("calculateLabourWageSettlementTotals recognizes attendance plus labour work
 test("labour wage settlements use settlement numbering instead of reserving expense voucher numbers", () => {
   const source = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
   assert.ok(!source.includes('import { allocateVoucherNumber } from "../lib/voucher-numbers.js";'));
-  assert.ok(source.includes("voucherNumber: settlementNumber"));
+  assert.ok(!source.includes("voucherPurpose: \"labour_wage_settlement\""));
+  assert.ok(!source.includes("nonCashSettlement: true"));
+  assert.ok(!source.includes("voucherPayload"));
+  assert.ok(!source.includes("const voucherId ="));
+  assert.ok(!source.includes("clientRecordId: voucherId"));
+  assert.ok(source.includes('linkedVoucherId: ""'));
   assert.ok(source.includes("linkedVoucherNumber: settlementNumber"));
 });
 
@@ -74,6 +79,7 @@ test("labour wage settlements resolve canonical payment accounts and accept lega
   assert.ok(partnerAccounting.includes("getLabourWageSettlementLedgerAmount"));
   assert.ok(accounting.includes("resolveLabourWageSettlementAccountId"));
   assert.ok(pageSource.includes("Settlement account"));
+  assert.ok(pageSource.includes("Accounting reference"));
 });
 
 test("labour wage settlements repair missing accounting transactions through the settlement id", () => {

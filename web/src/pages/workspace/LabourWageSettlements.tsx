@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { Search, Printer, Download, X, ExternalLink } from "lucide-react";
+import { Search, Printer, Download, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
 import { createLabourWageSettlement, deleteLabourWageSettlement, fetchLabourWageSettlementPaymentAccounts, fetchLabourWageSettlements, previewLabourWageSettlement, repairLabourWageSettlementAccounting, type LabourWageSettlementPaymentAccount, type LabourWageSettlementPreview } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
-import { getActiveFarmId, getActiveSeasonId, offlineDb, workspaceRecords, type Account, type LabourWageSettlement, type Voucher } from "../../lib/offline-db";
+import { getActiveFarmId, getActiveSeasonId, offlineDb, workspaceRecords, type Account, type LabourWageSettlement } from "../../lib/offline-db";
 import { canCreate } from "../../lib/permissions";
-import { getVoucherDisplayNumber } from "../../lib/vouchers";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const money = formatMoney;
@@ -20,7 +19,6 @@ type PreviewState =
 
 export function LabourWageSettlements() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { token, user } = useAuth();
   const workspaceId = user?.workspaceId ?? "";
@@ -31,7 +29,6 @@ export function LabourWageSettlements() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [paymentAccounts, setPaymentAccounts] = useState<LabourWageSettlementPaymentAccount[]>([]);
   const [settlements, setSettlements] = useState<LabourWageSettlement[]>([]);
-  const [vouchers, setVouchers] = useState<Voucher[]>([]);
   const [settlementDate, setSettlementDate] = useState(today());
   const [fromDate, setFromDate] = useState(`${today().slice(0, 8)}01`);
   const [toDate, setToDate] = useState(today());
@@ -51,17 +48,14 @@ export function LabourWageSettlements() {
   const [deletingSettlementId, setDeletingSettlementId] = useState<string | null>(null);
 
   const onlineRequired = !navigator.onLine;
-  const linkedVoucherById = useMemo(() => new Map(vouchers.map((voucher) => [voucher.id, voucher])), [vouchers]);
 
   const refresh = useCallback(async () => {
-    const [cachedAccounts, cachedSettlements, cachedVouchers] = await Promise.all([
+    const [cachedAccounts, cachedSettlements] = await Promise.all([
       workspaceRecords(offlineDb.accounts),
       workspaceRecords(offlineDb.labourWageSettlements),
-      workspaceRecords(offlineDb.vouchers),
     ]);
     setAccounts(cachedAccounts.filter((account) => account.type === "cash" || account.type === "bank" || account.type === "partner"));
     setSettlements(cachedSettlements.sort((left, right) => right.settlementDate.localeCompare(left.settlementDate) || right.updatedAt.localeCompare(left.updatedAt)));
-    setVouchers(cachedVouchers);
   }, []);
 
   const syncFromServer = useCallback(async () => {
@@ -215,44 +209,14 @@ export function LabourWageSettlements() {
         accountId,
         notes: notes.trim() || undefined,
       });
-      await offlineDb.vouchers.put({
-        id: response.voucher.id,
-        workspaceId,
-        farmId: activeFarmId,
-        seasonId: activeSeasonId,
-        voucherNumber: response.voucher.voucherNumber,
-        originalVoucherNumber: response.voucher.originalVoucherNumber,
-        legacyVoucherNumber: response.voucher.legacyVoucherNumber,
-        voucherNumberEdited: response.voucher.voucherNumberEdited,
-        allowVoucherNumberEdit: response.voucher.allowVoucherNumberEdit,
-        settlementId: response.voucher.settlementId,
-        settlementNumber: response.voucher.settlementNumber,
-        voucherPurpose: response.voucher.voucherPurpose,
-        nonCashSettlement: response.voucher.nonCashSettlement,
-        date: response.voucher.date,
-        category: response.voucher.category,
-        categoryId: response.voucher.categoryId,
-        subcategory: response.voucher.subcategory,
-        subcategoryId: response.voucher.subcategoryId,
-        description: response.voucher.description,
-        amount: response.voucher.amount,
-        accountId: response.voucher.accountId,
-        notes: response.voucher.notes,
-        items: response.voucher.items,
-        createdBy: response.voucher.createdBy,
-        updatedBy: response.voucher.updatedBy,
-        createdAt: response.voucher.createdAt,
-        updatedAt: response.voucher.updatedAt,
-        pendingSync: false,
-      });
       await offlineDb.labourWageSettlements.put({
         id: response.settlement.id,
         workspaceId,
         farmId: activeFarmId,
         seasonId: activeSeasonId,
         settlementNumber: response.settlement.settlementNumber,
-        linkedVoucherId: response.settlement.linkedVoucherId,
-        linkedVoucherNumber: response.settlement.linkedVoucherNumber,
+        linkedVoucherId: response.settlement.linkedVoucherId || "",
+        linkedVoucherNumber: response.settlement.linkedVoucherNumber || response.settlement.settlementNumber,
         linkedAccountId: response.settlement.linkedAccountId,
         fromDate: response.settlement.fromDate,
         toDate: response.settlement.toDate,
@@ -281,7 +245,7 @@ export function LabourWageSettlements() {
       });
       setPreview({ status: "idle", data: null });
       setNotes("");
-      setSuccess(`Settlement ${response.settlement.settlementNumber} posted. The linked accounting record now uses ${response.settlement.settlementNumber} as its reference.`);
+      setSuccess(`Settlement ${response.settlement.settlementNumber} posted. Accounting reference: ${response.settlement.settlementNumber}.`);
       window.dispatchEvent(new Event("muzare-local-data-change"));
       await syncFromServer();
     } catch (caught) {
@@ -333,12 +297,6 @@ export function LabourWageSettlements() {
         deletedBy: user?.id ?? null,
         updatedAt: deletedAt,
       });
-      if (response.linkedVoucherId) {
-        await offlineDb.vouchers.update(response.linkedVoucherId, {
-          deletedAt,
-          updatedAt: deletedAt,
-        });
-      }
       setDeletingSettlement(null);
       setSelectedSettlement((current) => current?.id === settlement.id ? null : current);
       setSuccess(`Settlement ${response.settlementNumber} deleted. Its advances are available for reposting.`);
@@ -353,7 +311,6 @@ export function LabourWageSettlements() {
   const registerRows = useMemo(() => {
     const term = registerSearch.trim().toLowerCase();
     return settlements.filter((settlement) => {
-      const linkedVoucher = linkedVoucherById.get(settlement.linkedVoucherId);
       const accountName = settlementPaymentAccountById.get(settlement.linkedAccountId)?.name ?? accountById.get(settlement.linkedAccountId)?.name ?? "";
       return (statusFilter === "all" || settlementStatus(settlement) === statusFilter)
         && (paymentAccountFilter === "all" || settlement.linkedAccountId === paymentAccountFilter)
@@ -363,14 +320,14 @@ export function LabourWageSettlements() {
           settlement.fromDate,
           settlement.toDate,
           settlement.notes ?? "",
-          linkedVoucher ? getVoucherDisplayNumber(linkedVoucher) || linkedVoucher.voucherNumber : settlement.linkedVoucherNumber,
+          settlement.settlementNumber,
           accountName,
           String(settlement.totalEarned),
           String(settlement.expenseAmount),
           String(settlement.settledAdvanceAmount),
         ].some((value) => value.toLowerCase().includes(term)));
     });
-  }, [accountById, linkedVoucherById, paymentAccountFilter, registerSearch, settlementPaymentAccountById, settlementStatus, settlements, statusFilter]);
+  }, [accountById, paymentAccountFilter, registerSearch, settlementPaymentAccountById, settlementStatus, settlements, statusFilter]);
   const registerTotals = useMemo(() => registerRows.reduce((totals, settlement) => ({
     attendanceWages: totals.attendanceWages + settlement.attendanceWages,
     labourWork: totals.labourWork + settlement.pendingLabourEarnings,
@@ -398,12 +355,10 @@ export function LabourWageSettlements() {
       "Carry-forward Advance",
       "Cash Paid",
       "Payment Account",
-      "Generated Voucher Number",
+      "Accounting Reference",
       "Status",
     ];
     const rows = registerRows.map((settlement) => {
-      const linkedVoucher = linkedVoucherById.get(settlement.linkedVoucherId);
-      const linkedVoucherNumber = linkedVoucher ? getVoucherDisplayNumber(linkedVoucher) || linkedVoucher.voucherNumber : settlement.linkedVoucherNumber;
       return [
         settlement.settlementNumber,
         settlement.settlementDate,
@@ -415,7 +370,7 @@ export function LabourWageSettlements() {
         settlement.carryForwardAdvance,
         settlement.payableBalance,
         settlementPaymentAccountById.get(settlement.linkedAccountId)?.name ?? accountById.get(settlement.linkedAccountId)?.name ?? "",
-        linkedVoucherNumber ?? "",
+        settlement.settlementNumber,
         settlement.status,
       ];
     });
@@ -563,7 +518,7 @@ export function LabourWageSettlements() {
                   <Search size={16} />
                   <input
                     type="search"
-                    placeholder="Search settlement number, voucher, notes, or account"
+                    placeholder="Search settlement number, notes, or account"
                     value={registerSearch}
                     onChange={(event) => setRegisterSearch(event.target.value)}
                   />
@@ -599,17 +554,13 @@ export function LabourWageSettlements() {
                     <th>Carry-forward advance</th>
                     <th>Cash paid</th>
                     <th>Payment account</th>
-                    <th>Generated voucher</th>
+                    <th>Accounting reference</th>
                     <th>Status</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {registerRows.map((settlement) => {
-                    const linkedVoucher = linkedVoucherById.get(settlement.linkedVoucherId);
-                    const linkedVoucherNumber = linkedVoucher
-                      ? getVoucherDisplayNumber(linkedVoucher) || linkedVoucher.voucherNumber
-                      : settlement.linkedVoucherNumber;
                     return (
                       <tr key={settlement.id}>
                         <td><button type="button" className="worker-dialog__link" onClick={() => setSelectedSettlement(settlement)}>{settlement.settlementNumber}</button></td>
@@ -622,7 +573,7 @@ export function LabourWageSettlements() {
                         <td>{money(settlement.carryForwardAdvance)}</td>
                         <td>{money(settlement.payableBalance)}</td>
                         <td>{settlementPaymentAccountById.get(settlement.linkedAccountId)?.name ?? accountById.get(settlement.linkedAccountId)?.name ?? "-"}</td>
-                        <td>{linkedVoucherNumber || settlement.settlementNumber}</td>
+                        <td>{settlement.settlementNumber}</td>
                         <td>{settlementStatus(settlement).replaceAll("_", " ")}</td>
                         <td>
                           <div className="stacked-inline-actions">
@@ -667,7 +618,6 @@ export function LabourWageSettlements() {
           )}
         </section>
         {selectedSettlement ? (() => {
-          const linkedVoucher = linkedVoucherById.get(selectedSettlement.linkedVoucherId);
           return (
             <div className="worker-dialog-backdrop worker-action-backdrop" role="presentation" onClick={() => setSelectedSettlement(null)}>
               <section className="worker-action-dialog account-ledger-dialog" role="dialog" aria-modal="true" aria-label="Labour settlement details" onClick={(event) => event.stopPropagation()}>
@@ -688,6 +638,7 @@ export function LabourWageSettlements() {
                     <article><span>Carry-forward advance</span><strong>{money(selectedSettlement.carryForwardAdvance)}</strong></article>
                     <article><span>Cash paid</span><strong>{money(selectedSettlement.payableBalance)}</strong></article>
                     <article><span>Payment account</span><strong>{settlementPaymentAccountById.get(selectedSettlement.linkedAccountId)?.name ?? accountById.get(selectedSettlement.linkedAccountId)?.name ?? "-"}</strong></article>
+                    <article><span>Accounting reference</span><strong>{selectedSettlement.settlementNumber}</strong></article>
                   </div>
                   {selectedSettlement.notes ? <p className="context-message">{selectedSettlement.notes}</p> : null}
                   {settlementStatus(selectedSettlement) === "accounting_missing" ? (
@@ -718,7 +669,6 @@ export function LabourWageSettlements() {
                         {deletingSettlementId === selectedSettlement.id ? "Deleting..." : "Delete settlement"}
                       </button>
                     ) : null}
-                    {linkedVoucher ? <button type="button" onClick={() => navigate(`/workspace/expenses?recordId=${linkedVoucher.id}&showSettlementVouchers=true`)}>View Generated Voucher <ExternalLink size={16} /></button> : null}
                   </footer>
                 </div>
               </section>

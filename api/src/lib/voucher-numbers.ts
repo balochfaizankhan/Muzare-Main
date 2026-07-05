@@ -33,7 +33,8 @@ export function duplicateVoucherNumberDetails(workspaceId: string, voucherNumber
 
 export function normalExpenseVoucherWhereSql(payloadColumn = operationalRecords.payload) {
   return sql`coalesce(${payloadColumn}->>'voucherPurpose', '') <> 'labour_wage_settlement'
-    and coalesce(${payloadColumn}->>'nonCashSettlement', 'false') <> 'true'`;
+    and coalesce(${payloadColumn}->>'nonCashSettlement', 'false') <> 'true'
+    and coalesce(${payloadColumn}->>'ignoredForExpenseVoucherNumbering', 'false') <> 'true'`;
 }
 
 export async function findExistingVoucherByNumber(
@@ -151,4 +152,53 @@ export async function allocateVoucherNumber(
   await reserveVoucherNumber(tx, workspaceId, farmId, voucherNumber);
   await bumpVoucherSequence(tx, workspaceId, farmId, seasonId, voucherNumber);
   return voucherNumber;
+}
+
+export async function recalculateExpenseVoucherSequences(tx: DbClient, workspaceId: string) {
+  const voucherRows = await tx.select({
+    farmId: operationalRecords.farmId,
+    seasonId: operationalRecords.seasonId,
+    payload: operationalRecords.payload,
+  }).from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, workspaceId),
+    eq(operationalRecords.entityType, "voucher"),
+    activeOperationalPayloadSql(operationalRecords.payload),
+    normalExpenseVoucherWhereSql(),
+  ));
+  const nextByScope = new Map<string, number>();
+  for (const row of voucherRows) {
+    const payload = row.payload as Record<string, unknown>;
+    const parsed = parseVoucherSequenceNumber(String(payload.voucherNumber ?? ""));
+    if (!parsed) continue;
+    if (!row.farmId) continue;
+    const scopeKey = voucherScopeKey(row.farmId, row.seasonId);
+    nextByScope.set(scopeKey, Math.max(nextByScope.get(scopeKey) ?? 0, parsed));
+  }
+
+  const existingRows = await tx.select({
+    workspaceId: expenseVoucherSequences.workspaceId,
+    scopeKey: expenseVoucherSequences.scopeKey,
+  }).from(expenseVoucherSequences).where(eq(expenseVoucherSequences.workspaceId, workspaceId));
+  const now = new Date();
+  const existingByScope = new Set(existingRows.map((row) => row.scopeKey));
+
+  for (const row of existingRows) {
+    await tx.update(expenseVoucherSequences).set({
+      lastNumber: nextByScope.get(row.scopeKey) ?? 0,
+      updatedAt: now,
+    }).where(and(
+      eq(expenseVoucherSequences.workspaceId, row.workspaceId),
+      eq(expenseVoucherSequences.scopeKey, row.scopeKey),
+    ));
+  }
+
+  for (const [scopeKey, lastNumber] of nextByScope) {
+    if (existingByScope.has(scopeKey)) continue;
+    await tx.insert(expenseVoucherSequences).values({
+      workspaceId,
+      scopeKey,
+      lastNumber,
+      updatedAt: now,
+    });
+  }
 }

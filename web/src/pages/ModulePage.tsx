@@ -3900,7 +3900,7 @@ function AccountsModule() {
         credit: selectedIsPartner ? getLabourWageSettlementLedgerAmount(settlement) : 0,
         source: "expenses",
         sourceId: settlement.id,
-        classification: "labour_wage_settlement_voucher",
+        classification: "labour_wage_settlement",
         partnerLiabilityGroup: selectedIsPartner ? "labour_wage_settlements" : undefined,
       });
     }
@@ -4214,7 +4214,7 @@ function AccountsModule() {
     if (farmId) query.set("farmId", farmId);
     if (seasonId) query.set("seasonId", seasonId);
     if (row.sourceId) query.set("recordId", row.sourceId);
-    if (row.source === "expenses" && row.classification === "labour_wage_settlement_voucher") {
+    if (row.source === "expenses" && row.classification === "labour_wage_settlement") {
       navigate(`/workspace/wage-settlements?${query.toString()}`);
       return;
     }

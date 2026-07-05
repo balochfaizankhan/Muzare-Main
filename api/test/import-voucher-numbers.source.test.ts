@@ -72,5 +72,7 @@ test("normal expense voucher duplicate checks ignore labour wage settlement vouc
   const syncRouteSource = readFileSync(new URL("../src/routes/operational-sync.ts", import.meta.url), "utf8");
   assert.ok(voucherNumberSource.includes("voucherPurpose', '') <> 'labour_wage_settlement'"));
   assert.ok(voucherNumberSource.includes("nonCashSettlement', 'false') <> 'true'"));
+  assert.ok(voucherNumberSource.includes("ignoredForExpenseVoucherNumbering', 'false') <> 'true'"));
+  assert.ok(voucherNumberSource.includes("recalculateExpenseVoucherSequences"));
   assert.ok(syncRouteSource.includes("normalExpenseVoucherWhereSql()"));
 });

@@ -321,6 +321,9 @@ test("labour settlement form loads canonical payment account uuids and shows LW 
   assert.match(api, /fetchLabourWageSettlementPaymentAccounts/);
   assert.match(settlementPage, /fetchLabourWageSettlementPaymentAccounts\(token, workspaceId, activeFarmId\)/);
   assert.match(settlementPage, /Settlement accounting is posted under the LW settlement number\./);
+  assert.match(settlementPage, /Accounting reference/);
+  assert.match(settlementPage, /placeholder="Search settlement number, notes, or account"/);
+  assert.doesNotMatch(settlementPage, /Generated voucher|View Generated Voucher/);
   assert.doesNotMatch(settlementPage, /Settlement and voucher are posted together in one transaction\./);
 });
 

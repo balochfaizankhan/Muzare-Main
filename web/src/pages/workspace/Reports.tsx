@@ -891,7 +891,7 @@ export function Reports() {
         debit: isPartner ? 0 : voucher.amount,
         credit: isPartner ? voucher.amount : 0,
         path: settlementVoucher ? `/workspace/wage-settlements?recordId=${voucher.settlementId ?? voucher.id}` : `/workspace/expenses?recordId=${voucher.id}`,
-        classification: settlementVoucher ? "labour_wage_settlement_voucher" : "voucher",
+        classification: settlementVoucher ? "labour_wage_settlement" : "voucher",
         partnerLiabilityGroup: isPartner ? (settlementVoucher ? "labour_wage_settlements" : "purchase_vouchers_paid") : undefined,
       });
     }
