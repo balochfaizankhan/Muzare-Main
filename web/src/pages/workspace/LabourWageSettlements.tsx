@@ -191,7 +191,7 @@ export function LabourWageSettlements() {
       return;
     }
     if (!token || !workspaceId || !activeFarmId || !activeSeasonId || !accountId) {
-      setError("Select an active farm, season, and payment account before creating a settlement.");
+      setError("Select an active farm, season, and settlement account before creating a settlement.");
       return;
     }
     if (preview.status !== "ready") {
@@ -471,9 +471,9 @@ export function LabourWageSettlements() {
             </div>
             <div className="advances-filter-row">
               <label className="advances-filter-field">
-                <span>Payment / expense account</span>
+                <span>Settlement account</span>
                 <select required value={accountId} onChange={(event) => setAccountId(event.target.value)}>
-                  <option value="">Select account</option>
+                  <option value="">Select settlement account</option>
                   {paymentAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
                 </select>
               </label>

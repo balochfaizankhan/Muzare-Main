@@ -57,18 +57,27 @@ test("labour wage settlements use settlement numbering instead of reserving expe
 test("labour wage settlements resolve canonical payment accounts and accept legacy android account ids", () => {
   const source = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
   const libSource = readFileSync(new URL("../src/lib/labour-wage-settlements.ts", import.meta.url), "utf8");
+  const pageSource = readFileSync(new URL("../../web/src/pages/workspace/LabourWageSettlements.tsx", import.meta.url), "utf8");
   assert.ok(source.includes('"/v1/workspace/:workspaceId/labour-wage-settlements/payment-accounts"'));
   assert.ok(source.includes("resolveCanonicalPaymentAccountId"));
-  assert.ok(source.includes("Payment account is not mapped. Please remap/import accounts."));
+  assert.ok(source.includes("validateLabourSettlementPaymentAccount"));
+  assert.doesNotMatch(source, /validateTenantReferencesDetailed/);
+  assert.ok(libSource.includes("Payment account is not mapped. Please repair imported accounts."));
   assert.ok(libSource.includes("legacyAndroidAccountId"));
   assert.ok(libSource.includes("oldAndroidId"));
+  assert.ok(libSource.includes("from(accounts)"));
+  assert.ok(pageSource.includes("Settlement account"));
 });
 
 test("labour wage settlements repair missing accounting transactions through the settlement id", () => {
   const source = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
+  const libSource = readFileSync(new URL("../src/lib/labour-wage-settlements.ts", import.meta.url), "utf8");
   assert.ok(source.includes('"/v1/workspace/:workspaceId/labour-wage-settlements/:settlementId/repair-accounting"'));
   assert.ok(source.includes("repairPostedSettlementAccounting"));
   assert.ok(source.includes('action: "labour_wage_settlement_accounting_repaired"'));
+  assert.ok(libSource.includes('source: "settlement"'));
+  assert.ok(libSource.includes('sourceType: "labour_wage_settlement"'));
+  assert.ok(libSource.includes("referenceId: settlementRecord.clientRecordId"));
 });
 
 test("deleted labour settlements stay deleted in normalization and accounting status", () => {

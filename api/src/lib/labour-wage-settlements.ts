@@ -3,7 +3,10 @@ import { db } from "../db/client.js";
 import { accountTransactions, accounts, farms, operationalRecords } from "../db/schema.js";
 import { isDeletedOperationalPayload } from "../operational-record-state.js";
 import { listLabourEarnings } from "./labour-earnings.js";
+import { validateLabourSettlementPaymentAccount, type LabourSettlementAccount } from "./labour-settlement-account-validation.js";
 import { calculateStatusWage, listWageRateRows, resolveApplicableWageRate } from "./wage-rates.js";
+
+export { validateLabourSettlementPaymentAccount } from "./labour-settlement-account-validation.js";
 
 type DbClient = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -56,12 +59,13 @@ type LabourPayload = { name?: unknown };
 type AttendancePayload = { labourerId?: unknown; labourId?: unknown; date?: unknown; status?: unknown };
 type AdvancePayload = { date?: unknown; amount?: unknown };
 type CanonicalPaymentAccount = {
-  id: string;
-  farmId: string;
-  name: string;
-  accountType: string;
-  oldAndroidId: string | null;
-  sourceType: string | null;
+  id: LabourSettlementAccount["id"];
+  farmId: LabourSettlementAccount["farmId"];
+  name: LabourSettlementAccount["name"];
+  accountType: LabourSettlementAccount["accountType"];
+  active: LabourSettlementAccount["active"];
+  oldAndroidId: LabourSettlementAccount["oldAndroidId"];
+  sourceType: LabourSettlementAccount["sourceType"];
 };
 
 function isUuid(value: string) {
@@ -189,6 +193,7 @@ export async function listCanonicalPaymentAccounts(
     farmId: accounts.farmId,
     name: accounts.name,
     accountType: accounts.accountType,
+    active: accounts.active,
     oldAndroidId: accounts.oldAndroidId,
     sourceType: accounts.sourceType,
   }).from(accounts)
@@ -205,7 +210,7 @@ export async function listCanonicalPaymentAccounts(
 
 export async function resolveCanonicalPaymentAccountId(
   tx: DbClient,
-  workspaceId: string,
+  _workspaceId: string,
   farmId: string,
   accountId: string,
 ) {
@@ -215,18 +220,14 @@ export async function resolveCanonicalPaymentAccountId(
     farmId: accounts.farmId,
     name: accounts.name,
     accountType: accounts.accountType,
+    active: accounts.active,
     oldAndroidId: accounts.oldAndroidId,
     sourceType: accounts.sourceType,
   } as const;
 
   if (isUuid(trimmed)) {
     const [account] = await tx.select(selectFields).from(accounts)
-      .innerJoin(farms, and(eq(farms.id, accounts.farmId), eq(farms.workspaceId, workspaceId)))
-      .where(and(
-        eq(accounts.active, true),
-        eq(accounts.id, trimmed),
-        eq(accounts.farmId, farmId),
-      ))
+      .where(eq(accounts.id, trimmed))
       .limit(1);
     return account ?? null;
   }
@@ -235,11 +236,7 @@ export async function resolveCanonicalPaymentAccountId(
   if (!legacyId) return null;
 
   const matches = await tx.select(selectFields).from(accounts)
-    .innerJoin(farms, and(eq(farms.id, accounts.farmId), eq(farms.workspaceId, workspaceId)))
-    .where(and(
-      eq(accounts.active, true),
-      eq(accounts.oldAndroidId, legacyId),
-    ));
+    .where(eq(accounts.oldAndroidId, legacyId));
   if (!matches.length) return null;
   const farmMatches = matches.filter((account: CanonicalPaymentAccount) => account.farmId === farmId);
   if (farmMatches.length === 1) return farmMatches[0] ?? null;
@@ -341,12 +338,16 @@ export async function repairPostedSettlementAccounting(
       amount: payload.expenseAmount,
     } satisfies SettlementAccountingRepairResult;
   }
+  if (!settlementRecord.farmId || !settlementRecord.seasonId) {
+    throw new Error(`Settlement ${payload.settlementNumber} is missing farm or season context.`);
+  }
   const resolvedAccount = await resolveCanonicalPaymentAccountId(
     tx,
     settlementRecord.workspaceId,
-    settlementRecord.farmId ?? "",
+    settlementRecord.farmId,
     payload.linkedAccountId,
   );
+  const accountValidation = validateLabourSettlementPaymentAccount(resolvedAccount, settlementRecord.farmId);
   const accountId = resolvedAccount?.id ?? payload.linkedAccountId;
   const accountType = resolvedAccount?.accountType ?? null;
   if (resolvedAccount && resolvedAccount.id !== payload.linkedAccountId) {
@@ -365,6 +366,9 @@ export async function repairPostedSettlementAccounting(
   if (!resolvedAccount) {
     throw new Error(`Settlement ${payload.settlementNumber} cannot be reposted because its payment account no longer exists.`);
   }
+  if (!accountValidation.valid) {
+    throw new Error(accountValidation.message ?? `Settlement ${payload.settlementNumber} cannot be reposted because its payment account is invalid.`);
+  }
   const existing = await tx.select({
     id: accountTransactions.id,
   }).from(accountTransactions).where(and(
@@ -372,10 +376,6 @@ export async function repairPostedSettlementAccounting(
     eq(accountTransactions.source, "settlement"),
     eq(accountTransactions.sourceType, "labour_wage_settlement"),
   ));
-
-  if (!settlementRecord.farmId || !settlementRecord.seasonId) {
-    throw new Error(`Settlement ${payload.settlementNumber} is missing farm or season context.`);
-  }
 
   if (existing.length) {
     const [first] = existing;

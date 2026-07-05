@@ -8,7 +8,7 @@ import { listLabourEarnings, normalizeLabourEarningPayload } from "../lib/labour
 import { isDeletedOperationalPayload } from "../operational-record-state.js";
 import { hasFarmAccess } from "../workspace-access.js";
 import { hasModulePermission } from "../permissions.js";
-import { validateTenantReferences, validateTenantReferencesDetailed } from "../tenant-ownership.js";
+import { validateTenantReferences } from "../tenant-ownership.js";
 import {
   allocateSettlementNumber,
   listCanonicalPaymentAccounts,
@@ -17,6 +17,7 @@ import {
   previewLabourWageSettlement,
   repairPostedSettlementAccounting,
   resolveCanonicalPaymentAccountId,
+  validateLabourSettlementPaymentAccount,
   settlementAccountingStatus,
   settlementAccountingTransactionCounts,
   settlementRangesOverlap,
@@ -68,6 +69,12 @@ async function resolveSettlementCategory(workspaceId: string) {
     .orderBy(asc(expenseSubcategories.sortOrder))
     .limit(1);
   return wages ?? await resolveExpenseCategory(workspaceId);
+}
+
+function logSettlementAccountValidation(request: { log: { info: (...args: unknown[]) => void } }, details: Record<string, unknown>) {
+  if (process.env.NODE_ENV !== "production") {
+    request.log.info({ ...details, context: "labour_settlement_payment_account_validation" }, "labour settlement payment account validation");
+  }
 }
 
 export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<void> {
@@ -238,18 +245,37 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
     }
     try {
       const result = await db.transaction(async (tx) => {
-        const resolvedAccount = await resolveCanonicalPaymentAccountId(tx, workspaceId, farmId, accountId);
-        if (!resolvedAccount) {
-          throw new Error("Payment account is not mapped. Please remap/import accounts.");
-        }
-        const accountError = await validateTenantReferencesDetailed(workspaceId, {
-          farmId,
-          seasonId,
-          accountId: resolvedAccount.id,
+        logSettlementAccountValidation(request, {
+          paymentAccountId: accountId,
+          selectedFarmId: farmId,
+          selectedSeasonId: seasonId,
         });
-        if (accountError) {
-          throw new Error(accountError.message);
+        const resolvedAccount = await resolveCanonicalPaymentAccountId(tx, workspaceId, farmId, accountId);
+        logSettlementAccountValidation(request, {
+          paymentAccountId: accountId,
+          selectedFarmId: farmId,
+          selectedSeasonId: seasonId,
+          accountRowFound: Boolean(resolvedAccount),
+          accountFarmId: resolvedAccount?.farmId ?? null,
+          accountType: resolvedAccount?.accountType ?? null,
+          accountActive: resolvedAccount?.active ?? null,
+          accountSourceType: resolvedAccount?.sourceType ?? null,
+        });
+        const accountValidation = validateLabourSettlementPaymentAccount(resolvedAccount, farmId);
+        if (!accountValidation.valid) {
+          logSettlementAccountValidation(request, {
+            paymentAccountId: accountId,
+            selectedFarmId: farmId,
+            selectedSeasonId: seasonId,
+            validationReason: accountValidation.reason,
+            validationMessage: accountValidation.message,
+          });
+          throw new Error(accountValidation.message ?? "Payment account validation failed.");
         }
+        if (!resolvedAccount) {
+          throw new Error("Payment account is not mapped. Please repair imported accounts.");
+        }
+        const account = resolvedAccount;
         const createdAt = new Date();
         const settlementId = crypto.randomUUID();
         const settlementNumber = await allocateSettlementNumber(tx, workspaceId, farmId);
@@ -265,8 +291,8 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           subcategory: category.subcategory,
           description,
           amount: preview.expenseAmount,
-          accountId: resolvedAccount.id,
-          accountName: resolvedAccount.name,
+          accountId: account.id,
+          accountName: account.name,
           notes: notes?.trim() || "",
           attendanceWages: preview.attendanceWages,
           labourWork: preview.pendingLabourEarnings,
@@ -297,8 +323,8 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           settlementNumber,
           linkedVoucherId: voucherId,
           linkedVoucherNumber: settlementNumber,
-          linkedAccountId: resolvedAccount.id,
-          linkedAccountName: resolvedAccount.name,
+          linkedAccountId: account.id,
+          linkedAccountName: account.name,
           fromDate,
           toDate,
           settlementDate,
