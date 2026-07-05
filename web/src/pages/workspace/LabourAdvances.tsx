@@ -7,7 +7,6 @@ import { ClearableSelect } from "../../components/ClearableSelect";
 import { LabourMultiSelectFilter } from "../../components/LabourMultiSelectFilter";
 import { LabourSelectCombobox } from "../../components/LabourSelectCombobox";
 import { SearchInput } from "../../components/SearchInput";
-import { SubpageHeader } from "../../components/SubpageHeader";
 import { todayLocalDateKey } from "../../lib/attendanceStatus";
 import { formatMoney } from "../../lib/format";
 import { canCreate, canDelete, canEdit } from "../../lib/permissions";
@@ -192,10 +191,8 @@ export function LabourAdvances() {
   };
 
   return (
-    <div className="dashboard-page">
-      <SubpageHeader title={t("advancesPage.title")} />
-      <main className="subpage module-workspace advances-register">
-        <section className="workspace-intro">
+    <>
+        <section className="record-panel workforce-shell-intro workforce-shell-intro--nested">
           <div><h2>{t("advancesPage.introTitle")}</h2><p>{t("advancesPage.introDescription")}</p></div>
           <span className="local-pill">{t("advancesPage.databaseSynchronized")}</span>
         </section>
@@ -303,8 +300,7 @@ export function LabourAdvances() {
           await persistOperationalRecord("advance", record);
           setSelected(record); setEditing(false); await refresh();
         }} />}
-      </main>
-    </div>
+    </>
   );
 }
 

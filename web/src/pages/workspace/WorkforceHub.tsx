@@ -53,7 +53,7 @@ function WorkforceShell({
   return (
     <div className="dashboard-page">
       {!compactMobileHeader ? <SubpageHeader title={title} /> : null}
-      <main className="subpage module-workspace">
+      <main className={`subpage module-workspace workforce-shell-main${compactMobileHeader ? " workforce-shell-main--labour-payments" : ""}`}>
         {compactMobileHeader ? (
           <section className="labour-payments-mobile-header" aria-label={`${title} overview`}>
             <Link className="labour-payments-mobile-header__back" to="/workspace/workforce/labour" aria-label="Back to workforce">
@@ -86,7 +86,9 @@ function WorkforceShell({
             ))}
           </nav>
         </section>
-        {children}
+        <div className="workforce-shell-content">
+          {children}
+        </div>
       </main>
     </div>
   );

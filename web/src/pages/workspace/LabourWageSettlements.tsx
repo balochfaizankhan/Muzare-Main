@@ -3,7 +3,6 @@ import { Search, Printer, Download, X, ExternalLink } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
-import { SubpageHeader } from "../../components/SubpageHeader";
 import { createLabourWageSettlement, fetchLabourWageSettlements, previewLabourWageSettlement, type LabourWageSettlementPreview } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 import { getActiveFarmId, getActiveSeasonId, offlineDb, workspaceRecords, type Account, type LabourWageSettlement, type Voucher } from "../../lib/offline-db";
@@ -348,10 +347,8 @@ export function LabourWageSettlements() {
   };
 
   return (
-    <div className="dashboard-page">
-      <SubpageHeader title="Labour Wage Settlement" />
-      <main className="subpage module-workspace">
-        <section className="workspace-intro">
+    <>
+        <section className="record-panel workforce-shell-intro workforce-shell-intro--nested">
           <div>
             <h2>Close Wage Period</h2>
             <p>
@@ -365,7 +362,7 @@ export function LabourWageSettlements() {
           <p className="context-message">Select an active farm and season before creating a labour wage settlement.</p>
         </section>}
 
-        <section className="record-panel">
+        <section className="record-panel labour-settlement-form-panel">
           <div className="advances-heading">
             <h2>Create settlement</h2>
             <span>Settlement and voucher are posted together in one transaction.</span>
@@ -412,7 +409,7 @@ export function LabourWageSettlements() {
           </form>
         </section>
 
-        <section className="record-panel">
+        <section className="record-panel labour-settlement-preview-panel">
           <div className="advances-heading">
             <h2>Settlement preview</h2>
             <span>Advances stay immutable. Settlement offsets them for accounting and creates one wage expense voucher.</span>
@@ -453,8 +450,8 @@ export function LabourWageSettlements() {
           </>}
         </section>
 
-        <section className="record-panel">
-          <div className="advances-heading">
+        <section className="record-panel labour-settlement-register-panel">
+          <div className="advances-heading labour-settlement-register-header">
             <div>
               <h2>Labour settlement register</h2>
               <span>{historyLoading ? "Refreshing register..." : `${settlements.length} settlements in this farm and season`}</span>
@@ -474,8 +471,8 @@ export function LabourWageSettlements() {
                 <article><span>Carry-forward advance</span><strong>{money(registerTotals.carryForward)}</strong></article>
                 <article><span>Cash paid</span><strong>{money(registerTotals.cashPaid)}</strong></article>
               </div>
-              <div className="report-toolbar">
-                <label className="search-input">
+              <div className="report-toolbar labour-settlement-register-toolbar">
+                <label className="search-input labour-settlement-register-search">
                   <Search size={16} />
                   <input
                     type="search"
@@ -484,7 +481,7 @@ export function LabourWageSettlements() {
                     onChange={(event) => setRegisterSearch(event.target.value)}
                   />
                 </label>
-                <label>
+                <label className="advances-filter-field labour-settlement-filter-field">
                   <span>Status</span>
                   <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}>
                     <option value="all">All</option>
@@ -492,7 +489,7 @@ export function LabourWageSettlements() {
                     <option value="voided">Voided</option>
                   </select>
                 </label>
-                <label>
+                <label className="advances-filter-field labour-settlement-filter-field">
                   <span>Payment account</span>
                   <select value={paymentAccountFilter} onChange={(event) => setPaymentAccountFilter(event.target.value)}>
                     <option value="all">All accounts</option>
@@ -500,7 +497,7 @@ export function LabourWageSettlements() {
                   </select>
                 </label>
               </div>
-            <div className="attendance-import-table-wrap report-wide-table">
+            <div className="attendance-import-table-wrap report-wide-table labour-settlement-table-wrap">
               <table className="report-data-table">
                 <thead>
                   <tr>
@@ -584,7 +581,6 @@ export function LabourWageSettlements() {
             </div>
           );
         })() : null}
-      </main>
-    </div>
+    </>
   );
 }

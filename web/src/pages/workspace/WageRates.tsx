@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { SearchInput } from "../../components/SearchInput";
-import { SubpageHeader } from "../../components/SubpageHeader";
 import { bulkUpsertWageRates, fetchWageRates, validateWageRateOverlap, type WageRateBulkRowInput, type WageRateOverlapPreview } from "../../lib/api";
 import { compareLabourers, getActiveFarmId, getActiveSeasonId, offlineDb, workspaceRecords, type Labourer, type WageRate } from "../../lib/offline-db";
 import { canCreate, canEdit } from "../../lib/permissions";
@@ -269,10 +268,8 @@ export function WageRates() {
   };
 
   return (
-    <div className="dashboard-page">
-      <SubpageHeader title={t("wageRatesPage.title")} />
-      <main className="subpage module-workspace">
-        <section className="workspace-intro">
+    <>
+        <section className="record-panel workforce-shell-intro workforce-shell-intro--nested">
           <div>
             <h2>{t("wageRatesPage.heading")}</h2>
             <p>{t("wageRatesPage.description")}</p>
@@ -443,7 +440,6 @@ export function WageRates() {
             </div>
           )}
         </section>
-      </main>
-    </div>
+    </>
   );
 }

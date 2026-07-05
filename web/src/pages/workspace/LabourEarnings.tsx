@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { SearchInput } from "../../components/SearchInput";
-import { SubpageHeader } from "../../components/SubpageHeader";
 import { formatMoney } from "../../lib/format";
 import { labourEarningTypeLabel, sumLabourEarnings } from "../../lib/labourEarnings";
 import { canCreate } from "../../lib/permissions";
@@ -141,10 +140,8 @@ export function LabourEarnings() {
   };
 
   return (
-    <div className="dashboard-page">
-      <SubpageHeader title="Labour Work" />
-      <main className="subpage module-workspace">
-        <section className="workspace-intro">
+    <>
+        <section className="record-panel workforce-shell-intro workforce-shell-intro--nested">
           <div>
             <h2>Labour Work Ledger</h2>
             <p>Record non-attendance labour work as pending labour cost, then settle it later with wage settlement and one linked accounting voucher.</p>
@@ -224,7 +221,6 @@ export function LabourEarnings() {
             </div>
           )}
         </section>
-      </main>
-    </div>
+    </>
   );
 }

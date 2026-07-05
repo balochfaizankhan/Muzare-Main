@@ -2721,7 +2721,9 @@ button {
 
 .module-workspace {
   gap: 16px;
-  max-width: 1040px;
+  max-width: 1180px;
+  min-width: 0;
+  width: 100%;
 }
 
 .workspace-intro {
@@ -9284,16 +9286,29 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 
 .workforce-shell-intro {
   margin-bottom: 0;
+  width: 100%;
 }
 
 .workforce-shell-intro--nested {
   margin-top: 0;
 }
 
+.workforce-shell-main {
+  max-width: 1280px;
+  min-width: 0;
+  width: 100%;
+}
+
+.workforce-shell-main--labour-payments {
+  max-width: 1280px;
+}
+
 .workforce-shell-panel {
   margin-top: 0;
+  min-width: 0;
   padding: 0;
   overflow: hidden;
+  width: 100%;
 }
 
 .workforce-shell-panel--nested {
@@ -9340,6 +9355,7 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 
 .workforce-shell-content {
   min-width: 0;
+  width: 100%;
 }
 
 .labour-payments-overview-grid,
@@ -9392,6 +9408,58 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 
 .labour-payments-mobile-header__status {
   max-width: none;
+}
+
+.labour-settlement-form-panel,
+.labour-settlement-preview-panel,
+.labour-settlement-register-panel {
+  min-width: 0;
+  width: 100%;
+}
+
+.labour-settlement-register-header {
+  align-items: center;
+  gap: 12px;
+}
+
+.labour-settlement-register-header .module-inline-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.labour-settlement-register-toolbar {
+  align-items: end;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 2fr) repeat(2, minmax(180px, 1fr));
+}
+
+.labour-settlement-register-search,
+.labour-settlement-filter-field {
+  min-width: 0;
+}
+
+.labour-settlement-filter-field select,
+.labour-settlement-register-search input {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-primary);
+  font: inherit;
+  min-height: 42px;
+  padding: 0 12px;
+  width: 100%;
+}
+
+.labour-settlement-table-wrap {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.labour-settlement-table-wrap .report-data-table {
+  min-width: 1080px;
 }
 
 .labour-payments-hero-card {
@@ -9660,6 +9728,10 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
     position: sticky;
     top: 8px;
     z-index: 4;
+  }
+
+  .labour-settlement-register-toolbar {
+    grid-template-columns: 1fr;
   }
 }
 
