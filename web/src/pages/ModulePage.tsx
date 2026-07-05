@@ -31,7 +31,7 @@ import {
 } from "../lib/partnerAccounting";
 import { formatDate, formatMoney } from "../lib/format";
 import { buildLabourEarningsProfileSummary } from "../lib/labourEarnings";
-import { getLabourSettlementAccountingSnapshot, getLabourWageSettlementLedgerAmount, isLabourWageSettlementVoucher, resolveLabourWageSettlementAccountId } from "../lib/labourWageSettlements";
+import { getLabourSettlementAccountingSnapshot, getLabourWageSettlementCashPaidAmount, getLabourWageSettlementNonCashAppliedAmount, isLabourWageSettlementVoucher, resolveLabourWageSettlementAccountId } from "../lib/labourWageSettlements";
 import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { getVoucherDisplayNumber, normalizeVoucherNumber, parseVoucherSequenceNumber } from "../lib/vouchers";
 import { getActiveVouchers, getVisibleVouchers, loadWorkspaceVouchers } from "../lib/voucherCollections";
@@ -3890,14 +3890,16 @@ function AccountsModule() {
       });
     }
     for (const settlement of activeLabourWageSettlements.filter((item) => resolveLabourWageSettlementAccountId(item) === selectedAccount.id)) {
+      const nonCashApplied = getLabourWageSettlementNonCashAppliedAmount(settlement);
+      const cashPaid = getLabourWageSettlementCashPaidAmount(settlement);
       rows.push({
         id: `labour-settlement:${settlement.id}`,
         date: settlement.settlementDate,
         type: "voucher",
         reference: settlement.settlementNumber,
         description: `Labour wage settlement ${settlement.fromDate} to ${settlement.toDate}`,
-        debit: selectedIsPartner ? 0 : settlement.expenseAmount,
-        credit: selectedIsPartner ? getLabourWageSettlementLedgerAmount(settlement) : 0,
+        debit: selectedIsPartner ? 0 : cashPaid,
+        credit: selectedIsPartner ? nonCashApplied : 0,
         source: "expenses",
         sourceId: settlement.id,
         classification: "labour_wage_settlement",

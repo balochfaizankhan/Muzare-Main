@@ -11,7 +11,7 @@ import { calculateAccountBalance } from "../../lib/accounting";
 import { getCanonicalExpenseCategory } from "../../lib/expenseCategories";
 import { formatMoney, formatNumber } from "../../lib/format";
 import { labourEarningTypeLabel, sumLabourEarnings } from "../../lib/labourEarnings";
-import { getActiveLabourWageSettlements, getCashAffectingVouchers, getLabourSettlementAccountingSnapshot, isLabourWageSettlementVoucher, outstandingLabourAdvances, totalSettledAdvances } from "../../lib/labourWageSettlements";
+import { getActiveLabourWageSettlements, getCashAffectingVouchers, getLabourSettlementAccountingSnapshot, getLabourWageSettlementCashPaidAmount, getLabourWageSettlementNonCashAppliedAmount, isLabourWageSettlementVoucher, outstandingLabourAdvances, totalSettledAdvances } from "../../lib/labourWageSettlements";
 import { translateExpenseCategory, translateExpenseSubcategory, translateSaleType, translateSalesStatus } from "../../lib/systemTranslations";
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
 import { getVoucherDisplayNumber } from "../../lib/vouchers";
@@ -879,6 +879,11 @@ export function Reports() {
       const account = accountById.get(voucher.accountId);
       const isPartner = account?.type === "partner";
       const settlementVoucher = isLabourWageSettlementVoucher(voucher);
+      const settlementRecord = settlementVoucher
+        ? activeSettlements.find((item) => item.id === voucher.settlementId || item.id === voucher.id)
+        : null;
+      const nonCashApplied = settlementRecord ? getLabourWageSettlementNonCashAppliedAmount(settlementRecord) : 0;
+      const cashPaid = settlementRecord ? getLabourWageSettlementCashPaidAmount(settlementRecord) : 0;
       rows.push({
         id: `voucher:${voucher.id}`,
         date: voucher.date,
@@ -886,10 +891,10 @@ export function Reports() {
         accountName: accountName(voucher.accountId),
         type: "voucher",
         typeLabel: settlementVoucher ? "Labour Wage Settlement" : t("reportsPage.voucherExpense"),
-        reference: getVoucherDisplayNumber(voucher) || voucher.voucherNumber,
+        reference: settlementVoucher ? (settlementRecord?.settlementNumber ?? getVoucherDisplayNumber(voucher) ?? voucher.voucherNumber) : (getVoucherDisplayNumber(voucher) || voucher.voucherNumber),
         description: voucher.description,
-        debit: isPartner ? 0 : voucher.amount,
-        credit: isPartner ? voucher.amount : 0,
+        debit: isPartner ? 0 : cashPaid,
+        credit: isPartner ? nonCashApplied : 0,
         path: settlementVoucher ? `/workspace/wage-settlements?recordId=${voucher.settlementId ?? voucher.id}` : `/workspace/expenses?recordId=${voucher.id}`,
         classification: settlementVoucher ? "labour_wage_settlement" : "voucher",
         partnerLiabilityGroup: isPartner ? (settlementVoucher ? "labour_wage_settlements" : "purchase_vouchers_paid") : undefined,

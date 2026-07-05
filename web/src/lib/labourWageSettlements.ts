@@ -56,6 +56,14 @@ export function getLabourWageSettlementAdvanceOffset(settlement: SettlementAccou
   return Number(settlement.settledAdvanceAmount ?? 0);
 }
 
+export function getLabourWageSettlementCashPaidAmount(settlement: SettlementAccountLike & { payableBalance?: number; cashPayable?: number; cashPaid?: number; expenseAmount?: number; settledAdvanceAmount?: number }) {
+  return Number(settlement.cashPaid ?? settlement.payableBalance ?? settlement.cashPayable ?? Math.max(Number(settlement.expenseAmount ?? 0) - Number(settlement.settledAdvanceAmount ?? 0), 0));
+}
+
+export function getLabourWageSettlementNonCashAppliedAmount(settlement: SettlementAccountLike & { settledAdvanceAmount?: number }) {
+  return Number(settlement.settledAdvanceAmount ?? 0);
+}
+
 export function getLabourSettlementAccountingSnapshot(
   advances: Advance[],
   settlements: LabourWageSettlement[],
@@ -69,9 +77,11 @@ export function getLabourSettlementAccountingSnapshot(
     .filter((advance) => isActiveOperationalRecord(advance) && advance.accountId === accountId)
     .reduce((sum, advance) => sum + advance.amount, 0);
   const labourWageSettlements = activeSettlements
-    .reduce((sum, settlement) => sum + getLabourWageSettlementLedgerAmount(settlement), 0);
+    .reduce((sum, settlement) => sum + getLabourWageSettlementNonCashAppliedAmount(settlement), 0);
   const settledThroughWageSettlements = activeSettlements
     .reduce((sum, settlement) => sum + getLabourWageSettlementAdvanceOffset(settlement), 0);
+  const labourSettlementCashPaid = activeSettlements
+    .reduce((sum, settlement) => sum + getLabourWageSettlementCashPaidAmount(settlement), 0);
   const outstandingLabourAdvances = Math.max(totalLabourAdvancesPaid - settledThroughWageSettlements, 0);
   return {
     activeSettlements,
@@ -79,6 +89,7 @@ export function getLabourSettlementAccountingSnapshot(
     settledThroughWageSettlements,
     outstandingLabourAdvances,
     labourWageSettlements,
+    labourSettlementCashPaid,
   };
 }
 

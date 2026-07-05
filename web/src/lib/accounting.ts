@@ -2,7 +2,7 @@ import type { Account, Advance, LabourWageSettlement, PartnerEntry, Sale, Vouche
 import { isActiveOperationalRecord } from "./operationalRecords";
 import { isPartnerAccount, partnerAccountBalanceEffect } from "./partnerAccounting";
 import { getActiveVouchers } from "./voucherCollections";
-import { getActiveLabourWageSettlements, getLabourWageSettlementLedgerAmount, isLabourWageSettlementVoucher, resolveLabourWageSettlementAccountId } from "./labourWageSettlements";
+import { getActiveLabourWageSettlements, getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher, resolveLabourWageSettlementAccountId } from "./labourWageSettlements";
 
 export function partnerSettlementEffect(entry: PartnerEntry, accountId: string): number {
   if (entry.type !== "settlement") return 0;
@@ -30,7 +30,7 @@ export function calculateAccountBalance(
   const activeVouchers = getActiveVouchers(vouchers).filter((record) => !isLabourWageSettlementVoucher(record));
   const activeSettlements = getActiveLabourWageSettlements(settlements)
     .filter((record) => resolveLabourWageSettlementAccountId(record) === account.id)
-    .reduce((sum, record) => sum + getLabourWageSettlementLedgerAmount(record), 0);
+    .reduce((sum, record) => sum + getLabourWageSettlementCashPaidAmount(record), 0);
   return sales.filter((record) => isActiveOperationalRecord(record) && record.accountId === account.id).reduce((sum, record) => sum + record.amount, 0)
     - activeVouchers.filter((record) => record.accountId === account.id).reduce((sum, record) => sum + record.amount, 0)
     - activeSettlements

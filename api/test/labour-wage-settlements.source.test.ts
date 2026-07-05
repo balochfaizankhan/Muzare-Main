@@ -76,7 +76,10 @@ test("labour wage settlements resolve canonical payment accounts and accept lega
   assert.ok(libSource.includes("accountingStatus !== \"accounting_missing\""));
   assert.ok(libSource.includes("resolveLabourWageSettlementAccountId"));
   assert.ok(partnerAccounting.includes("resolveLabourWageSettlementAccountId"));
-  assert.ok(partnerAccounting.includes("getLabourWageSettlementLedgerAmount"));
+  assert.ok(libSource.includes("getLabourWageSettlementCashPaidAmount"));
+  assert.ok(libSource.includes("getLabourWageSettlementNonCashAppliedAmount"));
+  assert.ok(partnerAccounting.includes("getLabourSettlementAccountingSnapshot"));
+  assert.ok(partnerAccounting.includes("settlementSnapshot.labourSettlementCashPaid"));
   assert.ok(accounting.includes("resolveLabourWageSettlementAccountId"));
   assert.ok(pageSource.includes("Settlement account"));
   assert.ok(pageSource.includes("Accounting reference"));
