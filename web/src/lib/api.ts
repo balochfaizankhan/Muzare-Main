@@ -1276,8 +1276,21 @@ export const fetchAccountingDiagnostics = (token: string, input: { workspaceId: 
   if (input.seasonId) query.set("seasonId", input.seasonId);
   return apiRequest<AccountingDiagnostics>(`/v1/admin/accounting-diagnostics?${query.toString()}`, {}, token, { timeoutMs: 30_000, debugLabel: "accounting-diagnostics" });
 };
-export const fetchAccountingReconciliationTrace = (token: string, accountName: string) =>
-  apiRequest<AccountingReconciliationTrace>(`/v1/debug/accounting-reconciliation?accountName=${encodeURIComponent(accountName)}`, {}, token, { timeoutMs: 30_000, debugLabel: "accounting-reconciliation-trace" });
+export const fetchAccountingReconciliationTrace = (
+  token: string,
+  input: { accountName: string; workspaceId?: string; farmId?: string; seasonId?: string },
+) => {
+  const query = new URLSearchParams({ accountName: input.accountName });
+  if (input.workspaceId) query.set("workspaceId", input.workspaceId);
+  if (input.farmId) query.set("farmId", input.farmId);
+  if (input.seasonId) query.set("seasonId", input.seasonId);
+  return apiRequest<AccountingReconciliationTrace>(
+    `/v1/debug/accounting-reconciliation?${query.toString()}`,
+    {},
+    token,
+    { timeoutMs: 30_000, debugLabel: "accounting-reconciliation-trace" },
+  );
+};
 export const cleanFailedMigrationImport = (token: string, input: {
   workspaceId: string;
   batchId: string;

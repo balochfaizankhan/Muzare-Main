@@ -12,6 +12,9 @@ import { validateTenantReferences } from "../tenant-ownership.js";
 
 const querySchema = z.object({
   accountName: z.string().trim().min(1),
+  workspaceId: z.string().uuid().optional(),
+  farmId: z.string().uuid().optional(),
+  seasonId: z.string().uuid().optional(),
 });
 
 type AccountRow = {
@@ -530,36 +533,72 @@ export async function accountingReconciliationRoutes(app: FastifyInstance): Prom
     if (process.env.NODE_ENV === "production" && process.env.RENDER_GIT_BRANCH !== "dev") {
       return reply.code(404).send({ message: "Not found." });
     }
-    if (!request.appUser?.workspaceId || !request.sessionId) {
-      return reply.code(401).send({ message: "A database-backed session is required." });
+    const appUser = request.appUser;
+    if (!appUser) {
+      return reply.code(401).send({ message: "Authentication token is required." });
     }
-    if (!hasPermission(request.appUser, "VIEW_REPORTS", request.appUser.workspaceId)) {
+    if (!hasPermission(appUser, "VIEW_REPORTS", appUser.workspaceId ?? undefined)) {
       return reply.code(403).send({ message: "Workspace report permission is required." });
     }
     const parsed = querySchema.safeParse(request.query);
     if (!parsed.success) {
       return reply.code(400).send({ message: "accountName is required." });
     }
-
-    const [session] = await db.select({
-      activeFarmId: userSessions.activeFarmId,
-      activeSeasonId: userSessions.activeSeasonId,
-    }).from(userSessions).where(eq(userSessions.id, request.sessionId)).limit(1);
-    if (!session?.activeFarmId || !session.activeSeasonId) {
-      return reply.code(400).send({ message: "Select a farm and season before requesting a reconciliation trace." });
+    const isPlatformAdmin = appUser.platformRole === "platform_admin";
+    const currentWorkspaceId = appUser.workspaceId ?? null;
+    const requestWorkspaceId = parsed.data.workspaceId ?? currentWorkspaceId;
+    if (!requestWorkspaceId) {
+      return reply.code(400).send({ message: "Select a workspace/farm/season first, or provide workspaceId as platform admin." });
     }
-    const ownershipError = await validateTenantReferences(request.appUser.workspaceId, {
-      farmId: session.activeFarmId,
-      seasonId: session.activeSeasonId,
+    if (appUser.workspaceId && requestWorkspaceId !== appUser.workspaceId) {
+      return reply.code(403).send({ message: "Workspace selection does not match the authenticated session." });
+    }
+    if (parsed.data.workspaceId && !isPlatformAdmin && parsed.data.workspaceId !== appUser.workspaceId) {
+      return reply.code(403).send({ message: "Only platform admins can override the workspace for this trace." });
+    }
+
+    const session = request.sessionId
+      ? await db.select({
+        activeFarmId: userSessions.activeFarmId,
+        activeSeasonId: userSessions.activeSeasonId,
+      }).from(userSessions).where(eq(userSessions.id, request.sessionId)).limit(1).then(([row]) => row ?? null)
+      : null;
+    const selectedFarmId = parsed.data.farmId ?? session?.activeFarmId ?? null;
+    const selectedSeasonId = parsed.data.seasonId ?? session?.activeSeasonId ?? null;
+    const sessionBacked = Boolean(request.sessionId);
+    if (!selectedFarmId || !selectedSeasonId) {
+      return reply.code(400).send({ message: "Select a workspace/farm/season first, or provide workspaceId as platform admin." });
+    }
+    const ownershipError = await validateTenantReferences(requestWorkspaceId, {
+      farmId: selectedFarmId,
+      seasonId: selectedSeasonId,
     });
     if (ownershipError) return reply.code(403).send({ message: ownershipError });
 
     const trace = await buildAccountingReconciliationTrace(
       parsed.data.accountName,
-      request.appUser.workspaceId,
-      session.activeFarmId,
-      session.activeSeasonId,
+      requestWorkspaceId,
+      selectedFarmId,
+      selectedSeasonId,
     );
-    return trace;
+    return {
+      ...trace,
+      debugContext: {
+        currentUserId: appUser.id,
+        currentAuthType: appUser.platformRole ?? "workspace_user",
+        currentWorkspaceId,
+        currentFarmId: session?.activeFarmId ?? null,
+        currentSeasonId: session?.activeSeasonId ?? null,
+        sessionBacked,
+        workspaceContextBacked: Boolean(session?.activeFarmId && session?.activeSeasonId),
+        requestedWorkspaceId: parsed.data.workspaceId ?? null,
+        requestedFarmId: parsed.data.farmId ?? null,
+        requestedSeasonId: parsed.data.seasonId ?? null,
+        resolvedWorkspaceId: requestWorkspaceId,
+        resolvedFarmId: selectedFarmId,
+        resolvedSeasonId: selectedSeasonId,
+        canOverrideWorkspace: isPlatformAdmin,
+      },
+    };
   });
 }

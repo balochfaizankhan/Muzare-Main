@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Leaf, LogOut, Map, MapPin, Pencil, Plus, Satellite, ShieldCheck, Trash2, UserRound, UsersRound, XCircle } from "lucide-react";
+import { CheckCircle2, FileClock, Leaf, LogOut, Map, MapPin, Pencil, Plus, Satellite, ShieldCheck, Trash2, UserRound, UsersRound, XCircle } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
@@ -247,6 +247,7 @@ export function Farms() {
           <Link to="/workspace/settings/team"><UsersRound size={19} /><div><strong>{t("workspaceTeam.title")}</strong><span>{t("workspaceTeam.settingsCard")}</span></div></Link>
           <Link to="/workspace/settings/approvals"><ShieldCheck size={19} /><div><strong>{t("workspaceApprovals.title")}</strong><span>{t("workspaceApprovals.settingsCard")}</span></div></Link>
           <Link to="/workspace/seasons"><Leaf size={19} /><div><strong>{t("seasonsPage.title")}</strong><span>{t("seasonsPage.managementDescription")}</span></div></Link>
+          <Link to="/debug/accounting-reconciliation"><FileClock size={19} /><div><strong>Accounting Reconciliation Trace</strong><span>Inspect labour settlement reconciliation</span></div></Link>
         </section>}
         <section className="workspace-intro">
           <div><h2>{t("farmsPage.managementTitle")}</h2><p>{t("farmsPage.managementDescription")}</p></div>

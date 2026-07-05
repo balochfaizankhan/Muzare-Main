@@ -24,6 +24,7 @@ const Workspaces = lazy(async () => ({ default: (await import("./pages/admin/Wor
 const MigrationImport = lazy(async () => ({ default: (await import("./pages/admin/MigrationImport")).MigrationImport }));
 const AccountingDiagnostics = lazy(async () => ({ default: (await import("./pages/admin/AccountingDiagnostics")).AccountingDiagnostics }));
 const AccountingReconciliationDebug = lazy(async () => ({ default: (await import("./pages/admin/AccountingReconciliationDebug")).AccountingReconciliationDebug }));
+const WorkspaceAccountingReconciliationDebug = lazy(async () => ({ default: (await import("./pages/workspace/AccountingReconciliationDebug")).AccountingReconciliationDebug }));
 const Attendance = lazy(async () => ({ default: (await import("./pages/workspace/Attendance")).Attendance }));
 const Dispatch = lazy(async () => ({ default: (await import("./pages/workspace/Dispatch")).Dispatch }));
 const Expenses = lazy(async () => ({ default: (await import("./pages/workspace/Expenses")).Expenses }));
@@ -182,7 +183,7 @@ export default function App() {
       <Route path="accounts" element={routeElement(<ModulePage module="accounts" />, "Loading accounts")} />
       <Route path="partner-ledger" element={routeElement(<ModulePage module="partnerLedger" />, "Loading partner ledger")} />
     </Route>
-    <Route path="/debug/accounting-reconciliation" element={<RequirePlatform>{routeElement(<AccountingReconciliationDebug />, "Loading accounting reconciliation trace")}</RequirePlatform>} />
+    <Route path="/debug/accounting-reconciliation" element={<RequireAuth>{routeElement(<WorkspaceAccountingReconciliationDebug />, "Loading accounting reconciliation trace")}</RequireAuth>} />
     {["workforce", "advances", "labour-earnings", "wage-rates", "wage-settlements", "expenses", "sales", "dispatch", "inventory", "accounts", "partner-ledger", "farms", "seasons"].map((path) =>
       <Route key={path} path={`/${path}`} element={<Navigate to={`/workspace/${path === "workforce" ? "workforce/labour" : path}`} replace />} />,
     )}
