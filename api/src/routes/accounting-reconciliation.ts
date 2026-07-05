@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq, ilike, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { buildInfo } from "../build-info.js";
 import { requireUser } from "../auth.js";
@@ -11,7 +11,8 @@ import { normalizeSettlementPayload } from "../lib/labour-wage-settlements.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
 
 const querySchema = z.object({
-  accountName: z.string().trim().min(1),
+  accountName: z.string().trim().optional(),
+  accountId: z.string().uuid().optional(),
   workspaceId: z.string().uuid().optional(),
   farmId: z.string().uuid().optional(),
   seasonId: z.string().uuid().optional(),
@@ -33,6 +34,8 @@ type AdvanceRow = {
   date: string;
   amount: number;
   accountId: string | null;
+  farmId: string | null;
+  seasonId: string | null;
   sourceAccountName: string | null;
   deleted: boolean;
 };
@@ -51,6 +54,9 @@ type SettlementRow = {
   settledAdvanceAmount: number;
   cashPaid: number;
   carryForwardAdvance: number;
+  farmId: string | null;
+  seasonId: string | null;
+  farmName: string | null;
   createdAt: string;
   updatedAt: string;
   postedAt: string | null;
@@ -72,6 +78,8 @@ type TransactionRow = {
   type: string;
   amount: number;
   transactionDate: string;
+  farmId: string | null;
+  seasonId: string | null;
   remarks: string | null;
 };
 
@@ -137,6 +145,10 @@ function settlementExclusionReason(input: {
   settlementAccountId: string | null;
   transactionAccountIds: string[];
   selectedAccountId: string;
+  farmFilterApplied: boolean;
+  seasonFilterApplied: boolean;
+  farmMatches: boolean;
+  seasonMatches: boolean;
 }) {
   const {
     status,
@@ -151,6 +163,8 @@ function settlementExclusionReason(input: {
   if (status === "deleted") return "Settlement is deleted.";
   if (status === "voided") return "Settlement is voided.";
   if (accountingStatus === "accounting_missing") return "Accounting entries are missing.";
+  if (!input.farmMatches && input.farmFilterApplied) return "Settlement is excluded by the selected farm filter.";
+  if (!input.seasonMatches && input.seasonFilterApplied) return "Settlement is excluded by the selected season filter.";
   if (!settlementAccountId && transactionAccountIds.includes(selectedAccountId)) {
     return "Settlement row is missing a settlement account link, but the accounting row points to the selected account.";
   }
@@ -191,37 +205,47 @@ function buildPartnerSnapshot(args: {
     fromAccountId: string | null;
     toAccountId: string | null;
     accountId: string | null;
+    farmId: string | null;
+    seasonId: string | null;
   }>;
-  sales: Array<{ accountId: string | null; amount: number }>;
+  sales: Array<{ accountId: string | null; amount: number; farmId: string | null; seasonId: string | null }>;
   useTransactionFallback: boolean;
+  farmId?: string | null;
+  seasonId?: string | null;
 }) {
-  const { selectedAccountId, advances, settlements, vouchers, partnerEntries, sales, useTransactionFallback } = args;
+  const { selectedAccountId, advances, settlements, vouchers, partnerEntries, sales, useTransactionFallback, farmId, seasonId } = args;
+  const farmMatches = (rowFarmId: string | null) => !farmId || rowFarmId === farmId;
+  const seasonMatches = (rowSeasonId: string | null) => !seasonId || rowSeasonId === seasonId;
   const purchaseVouchersPaid = vouchers
     .filter((voucher) => voucher.accountId === selectedAccountId && !voucher.isLabourWageSettlementVoucher)
     .reduce((sum, voucher) => sum + voucher.amount, 0);
   const businessFundsGiven = partnerEntries
-    .filter((entry) => entry.type === "settlement" && entry.fromAccountId === selectedAccountId)
+    .filter((entry) => entry.type === "settlement" && entry.fromAccountId === selectedAccountId && farmMatches(entry.farmId) && seasonMatches(entry.seasonId))
     .reduce((sum, entry) => sum + entry.amount, 0);
   const businessFundsReceived = partnerEntries
-    .filter((entry) => entry.type === "settlement" && entry.toAccountId === selectedAccountId)
+    .filter((entry) => entry.type === "settlement" && entry.toAccountId === selectedAccountId && farmMatches(entry.farmId) && seasonMatches(entry.seasonId))
     .reduce((sum, entry) => sum + entry.amount, 0);
   const moneyReturned = partnerEntries
     .filter((entry) => entry.type === "withdrawal")
-    .filter((entry) => entry.partnerAccountId === selectedAccountId || entry.accountId === selectedAccountId)
+    .filter((entry) => (entry.partnerAccountId === selectedAccountId || entry.accountId === selectedAccountId) && farmMatches(entry.farmId) && seasonMatches(entry.seasonId))
     .reduce((sum, entry) => sum + entry.amount, 0);
   const capitalInjected = partnerEntries
     .filter((entry) => entry.type === "contribution")
-    .filter((entry) => entry.partnerAccountId === selectedAccountId || entry.accountId === selectedAccountId)
+    .filter((entry) => (entry.partnerAccountId === selectedAccountId || entry.accountId === selectedAccountId) && farmMatches(entry.farmId) && seasonMatches(entry.seasonId))
     .reduce((sum, entry) => sum + entry.amount, 0);
   const adjustments = partnerEntries
     .filter((entry) => entry.type === "adjustment")
-    .filter((entry) => entry.partnerAccountId === selectedAccountId || entry.accountId === selectedAccountId)
+    .filter((entry) => (entry.partnerAccountId === selectedAccountId || entry.accountId === selectedAccountId) && farmMatches(entry.farmId) && seasonMatches(entry.seasonId))
     .reduce((sum, entry) => sum + entry.amount, 0)
-    - sales.filter((sale) => sale.accountId === selectedAccountId).reduce((sum, sale) => sum + sale.amount, 0);
+    - sales.filter((sale) => sale.accountId === selectedAccountId && farmMatches(sale.farmId) && seasonMatches(sale.seasonId)).reduce((sum, sale) => sum + sale.amount, 0);
   const totalLabourAdvancesPaid = advances
-    .filter((advance) => advance.accountId === selectedAccountId && !advance.deleted)
+    .filter((advance) => advance.accountId === selectedAccountId && !advance.deleted && farmMatches(advance.farmId) && seasonMatches(advance.seasonId))
     .reduce((sum, advance) => sum + advance.amount, 0);
-  const settlementSnapshot = includedSettlementSnapshot(settlements, selectedAccountId, useTransactionFallback);
+  const settlementSnapshot = includedSettlementSnapshot(
+    settlements.filter((row) => farmMatches(row.farmId) && seasonMatches(row.seasonId)),
+    selectedAccountId,
+    useTransactionFallback,
+  );
   const labourAdvancesSettledThroughWageSettlements = settlementSnapshot.labourSettlementNonCashApplied;
   const labourSettlementNonCashApplied = settlementSnapshot.labourSettlementNonCashApplied;
   const labourSettlementCashPaid = settlementSnapshot.labourSettlementCashPaid;
@@ -249,8 +273,22 @@ function buildPartnerSnapshot(args: {
   } satisfies PartnerSnapshot;
 }
 
-export async function buildAccountingReconciliationTrace(accountName: string, workspaceId: string, farmId: string, seasonId: string) {
+export async function buildAccountingReconciliationTrace(input: {
+  workspaceId: string;
+  accountName?: string;
+  accountId?: string;
+  farmId?: string | null;
+  seasonId?: string | null;
+}) {
+  const {
+    workspaceId,
+    accountName = "",
+    accountId,
+    farmId = null,
+    seasonId = null,
+  } = input;
   return db.transaction(async (tx) => {
+    const accountSearch = accountName.trim().toLowerCase();
     const matchingAccounts = await tx.select({
       id: accounts.id,
       farmId: accounts.farmId,
@@ -262,10 +300,18 @@ export async function buildAccountingReconciliationTrace(accountName: string, wo
       sourceType: accounts.sourceType,
     }).from(accounts).innerJoin(farms, eq(farms.id, accounts.farmId)).where(and(
       eq(farms.workspaceId, workspaceId),
-      sql`lower(btrim(${accounts.name})) = lower(btrim(${accountName}))`,
+      accountId
+        ? eq(accounts.id, accountId)
+        : accountSearch
+          ? or(
+            ilike(accounts.name, `%${accountSearch}%`),
+            ilike(sql`${accounts.id}::text`, `%${accountSearch}%`),
+            ilike(sql`COALESCE(${accounts.oldAndroidId}::text, '')`, `%${accountSearch}%`),
+          )
+          : undefined,
     )).orderBy(accounts.name);
 
-    const selectedAccount = matchingAccounts.find((row) => row.farmId === farmId) ?? matchingAccounts[0] ?? null;
+    const selectedAccount = (accountId ? matchingAccounts.find((row) => row.id === accountId) : matchingAccounts.find((row) => row.farmId === farmId)) ?? matchingAccounts[0] ?? null;
     if (!selectedAccount) {
       return {
         buildInfo,
@@ -273,63 +319,60 @@ export async function buildAccountingReconciliationTrace(accountName: string, wo
         farmId,
         seasonId,
         accountName,
+        accountId: accountId ?? null,
         account: null,
         matchingAccounts,
         message: "No account matched the requested name in this workspace.",
       };
     }
 
-    const session = {
-      activeFarmId: farmId,
-      activeSeasonId: seasonId,
-    };
-
     const advanceRecords = await tx.select({
       id: operationalRecords.clientRecordId,
+      farmId: operationalRecords.farmId,
+      seasonId: operationalRecords.seasonId,
       createdAt: operationalRecords.createdAt,
       updatedAt: operationalRecords.updatedAt,
       payload: operationalRecords.payload,
     }).from(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, workspaceId),
-      eq(operationalRecords.farmId, farmId),
-      eq(operationalRecords.seasonId, seasonId),
       eq(operationalRecords.entityType, "advance"),
     ));
     const voucherRecords = await tx.select({
+      farmId: operationalRecords.farmId,
+      seasonId: operationalRecords.seasonId,
       payload: operationalRecords.payload,
     }).from(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, workspaceId),
-      eq(operationalRecords.farmId, farmId),
-      eq(operationalRecords.seasonId, seasonId),
       eq(operationalRecords.entityType, "voucher"),
     ));
     const partnerEntryRecords = await tx.select({
       id: operationalRecords.clientRecordId,
+      farmId: operationalRecords.farmId,
+      seasonId: operationalRecords.seasonId,
       payload: operationalRecords.payload,
     }).from(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, workspaceId),
-      eq(operationalRecords.farmId, farmId),
-      eq(operationalRecords.seasonId, seasonId),
       eq(operationalRecords.entityType, "partnerEntry"),
     ));
     const saleRecords = await tx.select({
       id: operationalRecords.clientRecordId,
+      farmId: operationalRecords.farmId,
+      seasonId: operationalRecords.seasonId,
       payload: operationalRecords.payload,
     }).from(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, workspaceId),
-      eq(operationalRecords.farmId, farmId),
-      eq(operationalRecords.seasonId, seasonId),
       eq(operationalRecords.entityType, "sale"),
     ));
     const settlementRecords = await tx.select({
       id: operationalRecords.clientRecordId,
+      farmId: operationalRecords.farmId,
+      seasonId: operationalRecords.seasonId,
+      farmName: farms.name,
       createdAt: operationalRecords.createdAt,
       updatedAt: operationalRecords.updatedAt,
       payload: operationalRecords.payload,
-    }).from(operationalRecords).where(and(
+    }).from(operationalRecords).innerJoin(farms, eq(farms.id, operationalRecords.farmId)).where(and(
       eq(operationalRecords.workspaceId, workspaceId),
-      eq(operationalRecords.farmId, farmId),
-      eq(operationalRecords.seasonId, seasonId),
       eq(operationalRecords.entityType, "labourWageSettlement"),
     ));
     const transactionRecords = await tx.select({
@@ -340,10 +383,10 @@ export async function buildAccountingReconciliationTrace(accountName: string, wo
       type: accountTransactions.type,
       amount: accountTransactions.amount,
       transactionDate: accountTransactions.transactionDate,
+      farmId: accountTransactions.farmId,
+      seasonId: accountTransactions.seasonId,
       remarks: accountTransactions.remarks,
     }).from(accountTransactions).where(and(
-      eq(accountTransactions.farmId, farmId),
-      eq(accountTransactions.seasonId, seasonId),
       or(
         eq(accountTransactions.source, "settlement"),
         eq(accountTransactions.sourceType, "labour_wage_settlement"),
@@ -353,23 +396,25 @@ export async function buildAccountingReconciliationTrace(accountName: string, wo
     const advances = advanceRecords.map((row) => {
       const payload = row.payload as Record<string, unknown>;
       const deleted = isDeletedOperationalPayload(payload);
-      return {
-        id: row.id,
-        date: typeof payload.date === "string" ? payload.date : "",
-        amount: numberValue(payload.amount),
-        accountId: firstString(payload.accountId),
-        sourceAccountName: firstString(payload.sourceAccountName),
-        deleted,
-      } satisfies AdvanceRow;
-    });
+        return {
+          id: row.id,
+          date: typeof payload.date === "string" ? payload.date : "",
+          amount: numberValue(payload.amount),
+          accountId: firstString(payload.accountId),
+          farmId: row.farmId,
+          seasonId: row.seasonId,
+          sourceAccountName: firstString(payload.sourceAccountName),
+          deleted,
+        } satisfies AdvanceRow;
+      });
 
     const vouchers = voucherRecords.map((row) => {
       const payload = row.payload as Record<string, unknown>;
-      return {
-        accountId: firstString(payload.accountId) ?? "",
-        amount: numberValue(payload.totalAmount ?? payload.amount),
-        isLabourWageSettlementVoucher: isLabourWageSettlementVoucherPayload(payload),
-      };
+        return {
+          accountId: firstString(payload.accountId) ?? "",
+          amount: numberValue(payload.totalAmount ?? payload.amount),
+          isLabourWageSettlementVoucher: isLabourWageSettlementVoucherPayload(payload),
+        };
     });
 
     const partnerEntries = partnerEntryRecords.map((row) => {
@@ -381,6 +426,8 @@ export async function buildAccountingReconciliationTrace(accountName: string, wo
         fromAccountId: firstString(payload.fromAccountId),
         toAccountId: firstString(payload.toAccountId),
         accountId: firstString(payload.accountId),
+        farmId: row.farmId,
+        seasonId: row.seasonId,
       };
     });
 
@@ -389,6 +436,8 @@ export async function buildAccountingReconciliationTrace(accountName: string, wo
       return {
         accountId: firstString(payload.accountId),
         amount: numberValue(payload.amount),
+        farmId: row.farmId,
+        seasonId: row.seasonId,
       };
     });
 
@@ -398,47 +447,55 @@ export async function buildAccountingReconciliationTrace(accountName: string, wo
       const current = transactionBySettlementId.get(row.referenceId) ?? [];
       current.push({
         referenceId: row.referenceId,
-        accountId: row.accountId,
-        source: row.source,
-        sourceType: row.sourceType,
-        type: row.type,
-        amount: numberValue(row.amount),
-        transactionDate: row.transactionDate,
-        remarks: row.remarks,
-      });
-      transactionBySettlementId.set(row.referenceId, current);
-    }
+          accountId: row.accountId,
+          source: row.source,
+          sourceType: row.sourceType,
+          type: row.type,
+          amount: numberValue(row.amount),
+          transactionDate: row.transactionDate,
+          farmId: row.farmId,
+          seasonId: row.seasonId,
+          remarks: row.remarks,
+        });
+        transactionBySettlementId.set(row.referenceId, current);
+      }
 
-    const settlementRows = settlementRecords.map((row) => {
-      const payload = row.payload as Record<string, unknown>;
-      const accountId = resolveSettlementAccountId(payload);
-      const transactionRows = transactionBySettlementId.get(row.id) ?? [];
+      const settlementRows = settlementRecords.map((row) => {
+        const payload = row.payload as Record<string, unknown>;
+        const accountId = resolveSettlementAccountId(payload);
+        const transactionRows = transactionBySettlementId.get(row.id) ?? [];
       const transactionAccountIds = [...new Set(transactionRows.map((entry) => entry.accountId))];
       const transactionRemarks = transactionRows.map((entry) => entry.remarks ?? "");
       const accountingEntries = transactionRows.length;
-      const normalizedPayload = normalizeSettlementPayload(payload);
-      const status = normalizedPayload.status;
-      const accountingStatus = settlementAccountingStatus(status, accountingEntries);
-      const currentHelperIncluded = accountingStatus === "posted" && accountId === selectedAccount.id;
-      const sourceOfTruthIncluded = accountingStatus === "posted" && (accountId === selectedAccount.id || transactionAccountIds.includes(selectedAccount.id));
-      const totalLabourCost = numberValue(normalizedPayload.totalLabourCost ?? normalizedPayload.totalEarned);
-      const advancesApplied = numberValue(normalizedPayload.advancesPaid ?? normalizedPayload.advancesAvailableUpToSettlementDate);
-      const settledAdvanceAmount = numberValue(normalizedPayload.settledAdvanceAmount ?? normalizedPayload.appliedAdvances);
-      const cashPaid = numberValue(payload.cashPaid ?? normalizedPayload.payableBalance ?? normalizedPayload.cashPayable);
-      const carryForwardAdvance = numberValue(normalizedPayload.carryForwardAdvance);
+        const normalizedPayload = normalizeSettlementPayload(payload);
+        const status = normalizedPayload.status;
+        const accountingStatus = settlementAccountingStatus(status, accountingEntries);
+        const farmMatches = !farmId || row.farmId === farmId;
+        const seasonMatches = !seasonId || row.seasonId === seasonId;
+        const currentHelperIncluded = accountingStatus === "posted" && accountId === selectedAccount.id && farmMatches && seasonMatches;
+        const sourceOfTruthIncluded = accountingStatus === "posted" && (accountId === selectedAccount.id || transactionAccountIds.includes(selectedAccount.id)) && farmMatches && seasonMatches;
+        const totalLabourCost = numberValue(normalizedPayload.totalLabourCost ?? normalizedPayload.totalEarned);
+        const advancesApplied = numberValue(normalizedPayload.advancesPaid ?? normalizedPayload.advancesAvailableUpToSettlementDate);
+        const settledAdvanceAmount = numberValue(normalizedPayload.settledAdvanceAmount ?? normalizedPayload.appliedAdvances);
+        const cashPaid = numberValue(payload.cashPaid ?? normalizedPayload.payableBalance ?? normalizedPayload.cashPayable);
+        const carryForwardAdvance = numberValue(normalizedPayload.carryForwardAdvance);
       const excludedReason = settlementExclusionReason({
         status,
-        accountingStatus,
-        currentHelperIncluded,
-        sourceOfTruthIncluded,
-        settlementAccountId: accountId,
-        transactionAccountIds,
-        selectedAccountId: selectedAccount.id,
-      });
-      return {
-        id: row.id,
-        settlementNumber: normalizedPayload.settlementNumber,
-        status,
+          accountingStatus,
+          currentHelperIncluded,
+          sourceOfTruthIncluded,
+          settlementAccountId: accountId,
+          transactionAccountIds,
+          selectedAccountId: selectedAccount.id,
+          farmFilterApplied: Boolean(farmId),
+          seasonFilterApplied: Boolean(seasonId),
+          farmMatches,
+          seasonMatches,
+        });
+        return {
+          id: row.id,
+          settlementNumber: normalizedPayload.settlementNumber,
+          status,
         linkedAccountId: firstString(payload.linkedAccountId),
         paymentAccountId: firstString(payload.paymentAccountId),
         accountId: firstString(payload.accountId),
@@ -448,9 +505,12 @@ export async function buildAccountingReconciliationTrace(accountName: string, wo
         advancesApplied,
         settledAdvanceAmount,
         cashPaid,
-        carryForwardAdvance,
-        createdAt: row.createdAt.toISOString(),
-        updatedAt: row.updatedAt.toISOString(),
+          carryForwardAdvance,
+          farmId: row.farmId,
+          seasonId: row.seasonId,
+          farmName: row.farmName,
+          createdAt: row.createdAt.toISOString(),
+          updatedAt: row.updatedAt.toISOString(),
         postedAt: firstString(payload.postedAt, payload.accountedAt, row.updatedAt.toISOString()),
         voidedAt: firstString(payload.voidedAt),
         reversedAt: firstString(payload.reversedAt),
@@ -464,67 +524,80 @@ export async function buildAccountingReconciliationTrace(accountName: string, wo
         sourceOfTruthIncluded,
         excludedReason,
       };
-    }).filter((row) =>
-      row.currentHelperIncluded
-      || row.sourceOfTruthIncluded
-      || row.excludedReason !== "Settlement row is not linked to the selected account."
-    );
+      }).filter((row) =>
+        row.currentHelperIncluded
+        || row.sourceOfTruthIncluded
+        || row.excludedReason !== "Settlement row is not linked to the selected account."
+      );
 
-    const helperSnapshot = buildPartnerSnapshot({
-      selectedAccountId: selectedAccount.id,
-      advances,
-      settlements: settlementRows,
-      vouchers,
-      partnerEntries,
-      sales,
-      useTransactionFallback: false,
-    });
-    const sourceOfTruthSnapshot = buildPartnerSnapshot({
-      selectedAccountId: selectedAccount.id,
-      advances,
-      settlements: settlementRows,
-      vouchers,
-      partnerEntries,
-      sales,
-      useTransactionFallback: true,
-    });
+      const helperSnapshot = buildPartnerSnapshot({
+        selectedAccountId: selectedAccount.id,
+        advances,
+        settlements: settlementRows,
+        vouchers,
+        partnerEntries,
+        sales,
+        useTransactionFallback: false,
+        farmId,
+        seasonId,
+      });
+      const sourceOfTruthSnapshot = buildPartnerSnapshot({
+        selectedAccountId: selectedAccount.id,
+        advances,
+        settlements: settlementRows,
+        vouchers,
+        partnerEntries,
+        sales,
+        useTransactionFallback: true,
+        farmId,
+        seasonId,
+      });
 
-    return {
-      buildInfo,
-      workspaceId,
-      farmId,
-      seasonId,
-      session: {
-        activeFarmId: session?.activeFarmId ?? farmId,
-        activeSeasonId: session?.activeSeasonId ?? seasonId,
-      },
-      accountName,
-      account: selectedAccount,
-      matchingAccounts,
-      advances: {
-        rowsFound: advances.length,
-        rows: advances.map((row) => ({
-          ...row,
-          includedById: row.accountId === selectedAccount.id && !row.deleted,
-          includedByName: row.sourceAccountName ? lowerTrim(row.sourceAccountName) === lowerTrim(selectedAccount.name) : false,
+      return {
+        buildInfo,
+        workspaceId,
+        farmId,
+        seasonId,
+        selectedContext: {
+          workspaceId,
+          farmId,
+          seasonId,
+        },
+        filtersApplied: {
+          farmId: Boolean(farmId),
+          seasonId: Boolean(seasonId),
+        },
+        accountName,
+        accountId: accountId ?? null,
+        account: selectedAccount,
+        matchingAccounts,
+        advances: {
+          rowsFound: advances.length,
+          rows: advances.map((row) => ({
+            ...row,
+            includedById: row.accountId === selectedAccount.id && !row.deleted,
+            includedByName: row.sourceAccountName ? lowerTrim(row.sourceAccountName) === lowerTrim(selectedAccount.name) : false,
+          })),
+        },
+        labourWageSettlements: {
+          rowsFound: settlementRows.length,
+          rowsBeforeFilters: settlementRows.length,
+          rowsAfterFilters: settlementRows.filter((row) => (!farmId || row.farmId === farmId) && (!seasonId || row.seasonId === seasonId)).length,
+          rows: settlementRows,
+          filteredRows: settlementRows.filter((row) => (!farmId || row.farmId === farmId) && (!seasonId || row.seasonId === seasonId)),
+          helperSnapshot,
+          sourceOfTruthSnapshot,
+          mismatch: helperSnapshot.labourAdvancesSettledThroughWageSettlements !== sourceOfTruthSnapshot.labourAdvancesSettledThroughWageSettlements
+            || helperSnapshot.outstandingLabourAdvances !== sourceOfTruthSnapshot.outstandingLabourAdvances,
+        },
+        partnerStatusValues: sourceOfTruthSnapshot,
+        currentHelperValues: helperSnapshot,
+        exclusions: settlementRows.filter((row) => !row.currentHelperIncluded && !row.sourceOfTruthIncluded).map((row) => ({
+          settlementId: row.id,
+          settlementNumber: row.settlementNumber,
+          reason: row.excludedReason,
         })),
-      },
-      labourWageSettlements: {
-        rowsFound: settlementRows.length,
-        rows: settlementRows,
-        helperSnapshot,
-        sourceOfTruthSnapshot,
-        mismatch: helperSnapshot.labourAdvancesSettledThroughWageSettlements !== sourceOfTruthSnapshot.labourAdvancesSettledThroughWageSettlements
-          || helperSnapshot.outstandingLabourAdvances !== sourceOfTruthSnapshot.outstandingLabourAdvances,
-      },
-      partnerStatusValues: sourceOfTruthSnapshot,
-      currentHelperValues: helperSnapshot,
-      exclusions: settlementRows.filter((row) => !row.currentHelperIncluded && !row.sourceOfTruthIncluded).map((row) => ({
-        settlementId: row.id,
-        settlementNumber: row.settlementNumber,
-        reason: row.excludedReason,
-      })),
-    };
+      };
   });
 }
 
@@ -550,37 +623,43 @@ export async function accountingReconciliationRoutes(app: FastifyInstance): Prom
     if (!requestWorkspaceId) {
       return reply.code(400).send({ message: "Select a workspace/farm/season first, or provide workspaceId as platform admin." });
     }
-    if (appUser.workspaceId && requestWorkspaceId !== appUser.workspaceId) {
+    if (!parsed.data.accountName && !parsed.data.accountId) {
+      return reply.code(400).send({ message: "Select an account name or account id." });
+    }
+    if (!isPlatformAdmin && currentWorkspaceId && requestWorkspaceId !== currentWorkspaceId) {
       return reply.code(403).send({ message: "Workspace selection does not match the authenticated session." });
     }
     if (parsed.data.workspaceId && !isPlatformAdmin && parsed.data.workspaceId !== appUser.workspaceId) {
       return reply.code(403).send({ message: "Only platform admins can override the workspace for this trace." });
     }
 
-    const session = request.sessionId
+    const session = !isPlatformAdmin && request.sessionId
       ? await db.select({
         activeFarmId: userSessions.activeFarmId,
         activeSeasonId: userSessions.activeSeasonId,
       }).from(userSessions).where(eq(userSessions.id, request.sessionId)).limit(1).then(([row]) => row ?? null)
       : null;
-    const selectedFarmId = parsed.data.farmId ?? session?.activeFarmId ?? null;
-    const selectedSeasonId = parsed.data.seasonId ?? session?.activeSeasonId ?? null;
-    const sessionBacked = Boolean(request.sessionId);
-    if (!selectedFarmId || !selectedSeasonId) {
+    const selectedFarmId = parsed.data.farmId ?? (isPlatformAdmin ? null : session?.activeFarmId ?? null);
+    const selectedSeasonId = parsed.data.seasonId ?? (isPlatformAdmin ? null : session?.activeSeasonId ?? null);
+    const sessionBacked = Boolean(request.sessionId && !isPlatformAdmin);
+    if (!selectedFarmId && !selectedSeasonId && !requestWorkspaceId) {
       return reply.code(400).send({ message: "Select a workspace/farm/season first, or provide workspaceId as platform admin." });
     }
-    const ownershipError = await validateTenantReferences(requestWorkspaceId, {
-      farmId: selectedFarmId,
-      seasonId: selectedSeasonId,
-    });
-    if (ownershipError) return reply.code(403).send({ message: ownershipError });
+    if (selectedFarmId || selectedSeasonId) {
+      const ownershipError = await validateTenantReferences(requestWorkspaceId, {
+        farmId: selectedFarmId ?? undefined,
+        seasonId: selectedSeasonId ?? undefined,
+      });
+      if (ownershipError) return reply.code(403).send({ message: ownershipError });
+    }
 
-    const trace = await buildAccountingReconciliationTrace(
-      parsed.data.accountName,
-      requestWorkspaceId,
-      selectedFarmId,
-      selectedSeasonId,
-    );
+    const trace = await buildAccountingReconciliationTrace({
+      workspaceId: requestWorkspaceId,
+      accountName: parsed.data.accountName ?? "",
+      accountId: parsed.data.accountId,
+      farmId: selectedFarmId ?? undefined,
+      seasonId: selectedSeasonId ?? undefined,
+    });
     return {
       ...trace,
       debugContext: {
@@ -590,7 +669,7 @@ export async function accountingReconciliationRoutes(app: FastifyInstance): Prom
         currentFarmId: session?.activeFarmId ?? null,
         currentSeasonId: session?.activeSeasonId ?? null,
         sessionBacked,
-        workspaceContextBacked: Boolean(session?.activeFarmId && session?.activeSeasonId),
+        workspaceContextBacked: Boolean(currentWorkspaceId && selectedFarmId && selectedSeasonId),
         requestedWorkspaceId: parsed.data.workspaceId ?? null,
         requestedFarmId: parsed.data.farmId ?? null,
         requestedSeasonId: parsed.data.seasonId ?? null,

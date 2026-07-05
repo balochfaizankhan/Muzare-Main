@@ -16,6 +16,16 @@ export type HealthResponse = {
 };
 
 export type AccountingReconciliationTrace = Record<string, unknown>;
+export type AccountingReconciliationAccountOption = {
+  id: string;
+  farmId: string;
+  farmName: string;
+  name: string;
+  accountType: string;
+  active: boolean;
+  oldAndroidId: string | null;
+  sourceType: string | null;
+};
 
 export type PlatformRole = "platform_admin" | "platform_support";
 export type WorkspaceRole = "workspace_owner" | "workspace_manager" | "supervisor" | "accountant" | "operator" | "viewer";
@@ -1206,6 +1216,8 @@ export const fetchAdminOverview = (token: string) => apiRequest<AdminDashboardDa
 export const fetchAdminWorkspaces = (token: string) => apiRequest<{ workspaces: AdminWorkspace[] }>("/v1/admin/workspaces", {}, token);
 export const fetchAdminWorkspace = (token: string, workspaceId: string) =>
   apiRequest<{ workspace: AdminWorkspaceDetail | null }>(`/v1/admin/workspaces/${workspaceId}`, {}, token);
+export const fetchAdminWorkspaceSeasons = (token: string, workspaceId: string, farmId: string) =>
+  apiRequest<{ seasons: Season[]; activeSeasonId: string | null }>(`/v1/admin/workspaces/${workspaceId}/farms/${farmId}/seasons`, {}, token);
 export const fetchAdminFarms = (token: string) =>
   apiRequest<{ farms: AdminFarmSummary[]; deletionRequests: AdminFarmDeletionRequest[] }>("/v1/admin/farms", {}, token);
 export const fetchAdminFarmDeletionRequests = (token: string) =>
@@ -1278,9 +1290,11 @@ export const fetchAccountingDiagnostics = (token: string, input: { workspaceId: 
 };
 export const fetchAccountingReconciliationTrace = (
   token: string,
-  input: { accountName: string; workspaceId?: string; farmId?: string; seasonId?: string },
+  input: { accountName?: string; accountId?: string; workspaceId?: string; farmId?: string; seasonId?: string },
 ) => {
-  const query = new URLSearchParams({ accountName: input.accountName });
+  const query = new URLSearchParams();
+  if (input.accountName) query.set("accountName", input.accountName);
+  if (input.accountId) query.set("accountId", input.accountId);
   if (input.workspaceId) query.set("workspaceId", input.workspaceId);
   if (input.farmId) query.set("farmId", input.farmId);
   if (input.seasonId) query.set("seasonId", input.seasonId);
@@ -1290,6 +1304,17 @@ export const fetchAccountingReconciliationTrace = (
     token,
     { timeoutMs: 30_000, debugLabel: "accounting-reconciliation-trace" },
   );
+};
+export const fetchWorkspaceAccounts = (
+  token: string,
+  workspaceId: string,
+  input: { search?: string; farmId?: string; accountId?: string },
+) => {
+  const query = new URLSearchParams();
+  if (input.search) query.set("search", input.search);
+  if (input.farmId) query.set("farmId", input.farmId);
+  if (input.accountId) query.set("accountId", input.accountId);
+  return apiRequest<{ accounts: AccountingReconciliationAccountOption[] }>(`/v1/workspace/${workspaceId}/accounts?${query.toString()}`, {}, token);
 };
 export const cleanFailedMigrationImport = (token: string, input: {
   workspaceId: string;
