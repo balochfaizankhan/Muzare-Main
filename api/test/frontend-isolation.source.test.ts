@@ -118,6 +118,12 @@ test("voucher display and retry logic preserve explicit voucher numbers instead 
   assert.match(sync, /const rawVoucherNumber = typeof payload\.voucherNumber === "string" \? payload\.voucherNumber\.trim\(\) : "";/);
   assert.match(sync, /validateVoucherNumber\(context\.token, context\.workspaceId, \{/);
   assert.match(modulePage, /setCustomVoucherNumberEnabled\(true\);[\s\S]*setCustomVoucherNumber\(getVoucherDisplayNumber\(voucher\) \|\| voucher\.voucherNumber\);/);
+  assert.match(modulePage, /const \[savingVoucher, setSavingVoucher\] = useState\(false\);/);
+  assert.match(modulePage, /const voucherSubmitLockRef = useRef\(false\);/);
+  assert.match(modulePage, /const pendingVoucherRecordIdRef = useRef<string \| null>\(null\);/);
+  assert.match(modulePage, /if \(voucherSubmitLockRef\.current\) return;/);
+  assert.match(modulePage, /makeLocalRecord\(pendingVoucherRecordIdRef\.current \?\? undefined\)/);
+  assert.match(modulePage, /Saving\.\.\./);
   assert.match(modulePage, /voucherNumber: nextVoucherNumber,/);
   assert.match(route, /duplicateVoucherNumberDetails\(parsed\.data\.workspaceId, duplicateVoucherNumber\)/);
   assert.match(route, /resolveVoucherPayloadForWrite/);

@@ -592,10 +592,10 @@ export async function clearCachedData() {
   await Promise.all(offlineDb.tables.map((table) => table.clear()));
 }
 
-export function makeLocalRecord() {
+export function makeLocalRecord(id?: string) {
   const now = new Date().toISOString();
   if (!activeFarmId || !activeSeasonId) throw new Error("Select an active farm and season before entering records.");
-  return { id: crypto.randomUUID(), workspaceId: getActiveWorkspaceId(), farmId: activeFarmId, seasonId: activeSeasonId, createdAt: now, updatedAt: now, pendingSync: false };
+  return { id: id ?? crypto.randomUUID(), workspaceId: getActiveWorkspaceId(), farmId: activeFarmId, seasonId: activeSeasonId, createdAt: now, updatedAt: now, pendingSync: false };
 }
 
 export async function ensureLocalAccounts() {

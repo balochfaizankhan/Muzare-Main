@@ -1759,6 +1759,7 @@ function ExpensesModule() {
   const [editingVoucher, setEditingVoucher] = useState<Voucher | null>(null);
   const [customVoucherNumberEnabled, setCustomVoucherNumberEnabled] = useState(false);
   const [customVoucherNumber, setCustomVoucherNumber] = useState("");
+  const [savingVoucher, setSavingVoucher] = useState(false);
   const [voucherNumberValidation, setVoucherNumberValidation] = useState<{
     status: "idle" | "checking" | "valid" | "duplicate" | "invalid" | "offline";
     message: string;
@@ -1789,6 +1790,7 @@ function ExpensesModule() {
   const [, setReceiptCropQueue] = useState<File[]>([]);
   const [receiptCropTarget, setReceiptCropTarget] = useState<File | null>(null);
   const [receiptError, setReceiptError] = useState("");
+  const [expenseVoucherError, setExpenseVoucherError] = useState("");
   const [detailAttachments, setDetailAttachments] = useState<ExpenseAttachment[]>([]);
   const [detailOcr, setDetailOcr] = useState<ExpenseOcrSuggestion | null>(null);
   const [attachmentBusy, setAttachmentBusy] = useState(false);
@@ -1803,6 +1805,8 @@ function ExpensesModule() {
   const voucherDateRef = useRef<HTMLInputElement | null>(null);
   const voucherItemCategoryRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const pendingEditFocusRef = useRef(false);
+  const voucherSubmitLockRef = useRef(false);
+  const pendingVoucherRecordIdRef = useRef<string | null>(null);
   const showToast = (message: string) => window.dispatchEvent(new CustomEvent("muzare-toast", { detail: message }));
   const isSyntheticLocalAccount = useCallback((value?: string) => Boolean(value?.includes(":local-")), []);
   const selectableExpenseAccounts = useMemo(() => accounts.filter((account) => !isSyntheticLocalAccount(account.id)), [accounts, isSyntheticLocalAccount]);
@@ -1819,6 +1823,10 @@ function ExpensesModule() {
     pendingReceipts.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl));
     setPendingReceipts([]);
     setReceiptError("");
+    setExpenseVoucherError("");
+    setSavingVoucher(false);
+    voucherSubmitLockRef.current = false;
+    pendingVoucherRecordIdRef.current = null;
   };
   useEffect(() => {
     const nextDate = today();
@@ -1834,6 +1842,10 @@ function ExpensesModule() {
     pendingReceipts.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl));
     setPendingReceipts([]);
     setReceiptError("");
+    setExpenseVoucherError("");
+    setSavingVoucher(false);
+    voucherSubmitLockRef.current = false;
+    pendingVoucherRecordIdRef.current = null;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, farmId, seasonId]);
   useEffect(() => {
@@ -2094,75 +2106,90 @@ function ExpensesModule() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!(editingVoucher ? canEditVouchers : canCreateVouchers)) {
-      showToast(t("common.viewOnlyAccess"));
-      return;
+    if (voucherSubmitLockRef.current) return;
+    voucherSubmitLockRef.current = true;
+    setSavingVoucher(true);
+    setExpenseVoucherError("");
+    try {
+      if (!(editingVoucher ? canEditVouchers : canCreateVouchers)) {
+        showToast(t("common.viewOnlyAccess"));
+        return;
+      }
+      if (!resolvedExpenseAccountId || isSyntheticLocalAccount(resolvedExpenseAccountId)) {
+        showToast(t("expensesPage.selectRealPaymentAccount"));
+        return;
+      }
+      const resolvedItems: VoucherItem[] = [];
+      for (const item of voucherItems) {
+        const category = categories.data?.categories.find((entry) => entry.id === item.categoryId);
+        const subcategory = category?.subcategories.find((entry) => entry.id === item.subcategoryId);
+        const parsedAmount = Number(item.amount);
+        if (!category || !subcategory || !item.description.trim() || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+          return;
+        }
+        resolvedItems.push({
+          id: item.id,
+          categoryId: category.id,
+          category: category.name,
+          subcategoryId: subcategory.id,
+          subcategory: subcategory.name,
+          amount: parsedAmount,
+          description: item.description.trim(),
+          remarks: item.remarks.trim() || undefined,
+          oldExpenseItemId: item.oldExpenseItemId,
+        });
+      }
+      if (!resolvedItems.length) return;
+      const primaryItem = resolvedItems[0];
+      const totalAmount = resolvedItems.reduce((sum, item) => sum + item.amount, 0);
+      const suggestedVoucherNumber = nextLocalVoucherNumber();
+      const manualVoucherNumber = customVoucherNumberEnabled
+        ? customVoucherNumber.trim()
+        : editingVoucher
+          ? getVoucherDisplayNumber(editingVoucher) || editingVoucher.voucherNumber
+          : suggestedVoucherNumber;
+      const validation = await validateVoucherNumberDraft(manualVoucherNumber || suggestedVoucherNumber);
+      setVoucherNumberValidation(validation);
+      if (validation.normalized && customVoucherNumberEnabled) setCustomVoucherNumber(validation.normalized);
+      if (validation.status === "duplicate" || validation.status === "invalid") {
+        showToast(validation.message);
+        return;
+      }
+      const nextVoucherNumber = validation.normalized
+        ?? normalizeVoucherNumber(manualVoucherNumber || suggestedVoucherNumber)
+        ?? suggestedVoucherNumber;
+      const existingDisplayedVoucherNumber = editingVoucher ? (getVoucherDisplayNumber(editingVoucher) || editingVoucher.voucherNumber) : "";
+      const explicitVoucherNumberEdit = Boolean(editingVoucher && nextVoucherNumber !== existingDisplayedVoucherNumber);
+      const record: Voucher = {
+        ...(editingVoucher ?? makeLocalRecord(pendingVoucherRecordIdRef.current ?? undefined)), voucherNumber: nextVoucherNumber, date,
+        categoryId: primaryItem.categoryId,
+        category: primaryItem.category,
+        subcategoryId: primaryItem.subcategoryId ?? "",
+        subcategory: primaryItem.subcategory ?? "",
+        description: resolvedItems.length === 1 ? primaryItem.description : `${primaryItem.description} +${resolvedItems.length - 1} ${t("expensesPage.moreItems")}`,
+        amount: totalAmount,
+        accountId: resolvedExpenseAccountId,
+        notes: notes.trim() || undefined,
+        items: resolvedItems,
+        allowVoucherNumberEdit: explicitVoucherNumberEdit || undefined,
+        voucherNumberEdited: explicitVoucherNumberEdit ? true : (editingVoucher?.voucherNumberEdited ?? undefined),
+      };
+      if (!editingVoucher && !pendingVoucherRecordIdRef.current) pendingVoucherRecordIdRef.current = record.id;
+      await persistOperationalRecord("voucher", record);
+      await uploadPendingReceipts(record.id);
+      showToast(editingVoucher ? t("expensesPage.voucherUpdated") : t("expensesPage.voucherSaved"));
+      setExpenseSessionDate(date);
+      setExpenseSessionAccountId(resolvedExpenseAccountId);
+      setEditingVoucher(null);
+      pendingVoucherRecordIdRef.current = null;
+      resetForm({ preserveSessionDefaults: true });
+      await refresh();
+    } catch (caught) {
+      setExpenseVoucherError(caught instanceof Error ? caught.message : "Unable to save voucher.");
+    } finally {
+      voucherSubmitLockRef.current = false;
+      setSavingVoucher(false);
     }
-    if (!resolvedExpenseAccountId || isSyntheticLocalAccount(resolvedExpenseAccountId)) {
-      showToast(t("expensesPage.selectRealPaymentAccount"));
-      return;
-    }
-    const resolvedItems: VoucherItem[] = [];
-    for (const item of voucherItems) {
-      const category = categories.data?.categories.find((entry) => entry.id === item.categoryId);
-      const subcategory = category?.subcategories.find((entry) => entry.id === item.subcategoryId);
-      const parsedAmount = Number(item.amount);
-      if (!category || !subcategory || !item.description.trim() || !Number.isFinite(parsedAmount) || parsedAmount <= 0) return;
-      resolvedItems.push({
-        id: item.id,
-        categoryId: category.id,
-        category: category.name,
-        subcategoryId: subcategory.id,
-        subcategory: subcategory.name,
-        amount: parsedAmount,
-        description: item.description.trim(),
-        remarks: item.remarks.trim() || undefined,
-        oldExpenseItemId: item.oldExpenseItemId,
-      });
-    }
-    if (!resolvedItems.length) return;
-    const primaryItem = resolvedItems[0];
-    const totalAmount = resolvedItems.reduce((sum, item) => sum + item.amount, 0);
-    const suggestedVoucherNumber = nextLocalVoucherNumber();
-    const manualVoucherNumber = customVoucherNumberEnabled
-      ? customVoucherNumber.trim()
-      : editingVoucher
-        ? getVoucherDisplayNumber(editingVoucher) || editingVoucher.voucherNumber
-        : suggestedVoucherNumber;
-    const validation = await validateVoucherNumberDraft(manualVoucherNumber || suggestedVoucherNumber);
-    setVoucherNumberValidation(validation);
-    if (validation.normalized && customVoucherNumberEnabled) setCustomVoucherNumber(validation.normalized);
-    if (validation.status === "duplicate" || validation.status === "invalid") {
-      showToast(validation.message);
-      return;
-    }
-    const nextVoucherNumber = validation.normalized
-      ?? normalizeVoucherNumber(manualVoucherNumber || suggestedVoucherNumber)
-      ?? suggestedVoucherNumber;
-    const existingDisplayedVoucherNumber = editingVoucher ? (getVoucherDisplayNumber(editingVoucher) || editingVoucher.voucherNumber) : "";
-    const explicitVoucherNumberEdit = Boolean(editingVoucher && nextVoucherNumber !== existingDisplayedVoucherNumber);
-    const record: Voucher = {
-      ...(editingVoucher ?? makeLocalRecord()), voucherNumber: nextVoucherNumber, date,
-      categoryId: primaryItem.categoryId,
-      category: primaryItem.category,
-      subcategoryId: primaryItem.subcategoryId ?? "",
-      subcategory: primaryItem.subcategory ?? "",
-      description: resolvedItems.length === 1 ? primaryItem.description : `${primaryItem.description} +${resolvedItems.length - 1} ${t("expensesPage.moreItems")}`,
-      amount: totalAmount,
-      accountId: resolvedExpenseAccountId,
-      notes: notes.trim() || undefined,
-      items: resolvedItems,
-      allowVoucherNumberEdit: explicitVoucherNumberEdit || undefined,
-      voucherNumberEdited: explicitVoucherNumberEdit ? true : (editingVoucher?.voucherNumberEdited ?? undefined),
-    };
-    await persistOperationalRecord("voucher", record);
-    await uploadPendingReceipts(record.id);
-    showToast(editingVoucher ? t("expensesPage.voucherUpdated") : t("expensesPage.voucherSaved"));
-    setExpenseSessionDate(date);
-    setExpenseSessionAccountId(resolvedExpenseAccountId);
-    setEditingVoucher(null);
-    resetForm({ preserveSessionDefaults: true });
-    await refresh();
   };
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedVoucherSearch(voucherSearch.trim()), 275);
@@ -2498,6 +2525,7 @@ function ExpensesModule() {
         {receiptCropTarget && <ReceiptCropReviewModal file={receiptCropTarget} onCancel={() => advanceReceiptCropQueue()} onAccept={advanceReceiptCropQueue} />}
         <form className="module-form inline-form expense-voucher-form" onSubmit={(event) => void submit(event)}>
           <div ref={voucherFormRef} />
+          <fieldset disabled={savingVoucher} aria-busy={savingVoucher} className="expense-voucher-form__fieldset">
           <div className="expense-voucher-form__top-row">
             <label>
               <span>{t("expensesPage.date")}</span>
@@ -2590,8 +2618,12 @@ function ExpensesModule() {
           </div>
           <ReceiptAttachmentPicker pending={pendingReceipts} onFiles={addReceiptFiles} onRemove={removePendingReceipt} />
           {receiptError && <p className="worker-action-error">{receiptError}</p>}
-          <button type="submit" disabled={!selectableExpenseAccounts.length || voucherNumberSaveBlocked}>{editingVoucher ? t("expensesPage.updateVoucher") : t("expensesPage.saveVoucher")}</button>
-          {editingVoucher && <button type="button" onClick={() => { pendingEditFocusRef.current = false; setEditingVoucher(null); resetForm(); }}>{t("expensesPage.cancelEdit")}</button>}
+          {expenseVoucherError && <p className="worker-action-error">{expenseVoucherError}</p>}
+          <div className="expense-voucher-form__actions">
+            <button type="submit" disabled={savingVoucher || !selectableExpenseAccounts.length || voucherNumberSaveBlocked}>{savingVoucher ? "Saving..." : (editingVoucher ? t("expensesPage.updateVoucher") : t("expensesPage.saveVoucher"))}</button>
+            {editingVoucher && <button type="button" disabled={savingVoucher} onClick={() => { pendingEditFocusRef.current = false; setEditingVoucher(null); resetForm(); }}>{t("expensesPage.cancelEdit")}</button>}
+          </div>
+          </fieldset>
         </form>
       </FormCard>}
       <section className="record-panel expense-search-panel">
