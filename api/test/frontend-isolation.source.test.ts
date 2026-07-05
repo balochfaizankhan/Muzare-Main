@@ -226,7 +226,11 @@ test("partner settlements transfer matching account and partner positions withou
   assert.match(partnerAccounting, /return position\.openingBalance[\s\S]*\+ position\.capitalInjected[\s\S]*\+ position\.directExpensesPaid[\s\S]*\+ position\.transfersOut[\s\S]*- position\.transfersIn[\s\S]*- position\.moneyReturned[\s\S]*\+ position\.adjustments/);
   assert.match(modulePage, /buildPartnerLiabilityPositions\(accounts, vouchers, advances, activeEntries, sales, labourWageSettlements\)/);
   assert.match(modulePage, /Purchase Vouchers/);
-  assert.match(modulePage, /Business Funds Net/);
+  assert.doesNotMatch(modulePage, /Business Funds Net/);
+  assert.doesNotMatch(modulePage, /partnerLedgerPage\.openingBalance/);
+  assert.doesNotMatch(modulePage, /partnerLedgerPage\.capitalInjected/);
+  assert.match(modulePage, /Funds Given/);
+  assert.match(modulePage, /Funds Received/);
   assert.match(modulePage, /Outstanding Labour Advances/);
   assert.match(modulePage, /Labour Wage Settlements/);
   assert.match(modulePage, /t\("partnerLedgerPage\.farmOwesPartner"\)/);
