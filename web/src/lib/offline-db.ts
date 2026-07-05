@@ -257,6 +257,8 @@ export type LabourWageSettlement = LocalRecord & {
   payableBalance: number;
   notes?: string;
   status: "posted" | "voided";
+  accountingStatus?: "draft" | "posted" | "accounting_missing" | "voided";
+  accountingMessage?: string | null;
   createdBy?: string;
   voidedAt?: string | null;
   voidedBy?: string | null;

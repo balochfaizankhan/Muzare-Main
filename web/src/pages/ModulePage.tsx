@@ -3852,6 +3852,7 @@ function AccountsModule() {
     }
     for (const voucher of activeVouchers.filter((item) => item.accountId === selectedAccount.id)) {
       const settlementVoucher = isLabourWageSettlementVoucher(voucher);
+      if (settlementVoucher) continue;
       rows.push({
         id: `voucher:${voucher.id}`,
         date: voucher.date,
@@ -3862,8 +3863,23 @@ function AccountsModule() {
         credit: selectedIsPartner ? voucher.amount : 0,
         source: "expenses",
         sourceId: voucher.id,
-        classification: settlementVoucher ? "labour_wage_settlement_voucher" : "voucher",
-        partnerLiabilityGroup: selectedIsPartner ? (settlementVoucher ? "labour_wage_settlements" : "purchase_vouchers_paid") : undefined,
+        classification: "voucher",
+        partnerLiabilityGroup: selectedIsPartner ? "purchase_vouchers_paid" : undefined,
+      });
+    }
+    for (const settlement of activeLabourWageSettlements.filter((item) => item.linkedAccountId === selectedAccount.id)) {
+      rows.push({
+        id: `labour-settlement:${settlement.id}`,
+        date: settlement.settlementDate,
+        type: "voucher",
+        reference: settlement.settlementNumber,
+        description: `Labour wage settlement ${settlement.fromDate} to ${settlement.toDate}`,
+        debit: selectedIsPartner ? 0 : settlement.expenseAmount,
+        credit: selectedIsPartner ? settlement.expenseAmount : 0,
+        source: "expenses",
+        sourceId: settlement.id,
+        classification: "labour_wage_settlement_voucher",
+        partnerLiabilityGroup: selectedIsPartner ? "labour_wage_settlements" : undefined,
       });
     }
     for (const advance of activeAdvances.filter((item) => item.accountId === selectedAccount.id)) {

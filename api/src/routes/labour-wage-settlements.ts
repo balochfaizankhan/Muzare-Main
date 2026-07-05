@@ -3,7 +3,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { requireUser } from "../auth.js";
 import { db } from "../db/client.js";
-import { expenseCategories, expenseSubcategories, operationalRecords, userSessions } from "../db/schema.js";
+import { auditLogs, expenseCategories, expenseSubcategories, operationalRecords, userSessions } from "../db/schema.js";
 import { listLabourEarnings, normalizeLabourEarningPayload } from "../lib/labour-earnings.js";
 import { isDeletedOperationalPayload } from "../operational-record-state.js";
 import { hasFarmAccess } from "../workspace-access.js";
@@ -12,7 +12,11 @@ import { validateTenantReferences, validateTenantReferencesDetailed } from "../t
 import {
   allocateSettlementNumber,
   listLabourWageSettlements,
+  normalizeSettlementPayload,
   previewLabourWageSettlement,
+  repairPostedSettlementAccounting,
+  settlementAccountingStatus,
+  settlementAccountingTransactionCounts,
   settlementRangesOverlap,
 } from "../lib/labour-wage-settlements.js";
 import { resolveExpenseCategory } from "./expense-categories.js";
@@ -29,6 +33,10 @@ const previewSchema = baseSchema;
 const createSchema = baseSchema.extend({
   accountId: z.string().min(1),
   notes: z.string().trim().max(500).optional(),
+});
+const settlementParamsSchema = z.object({
+  workspaceId: z.string().uuid(),
+  settlementId: z.string().uuid(),
 });
 
 async function validateContext(sessionId: string | undefined, workspaceId: string, farmId: string, seasonId: string) {
@@ -92,9 +100,19 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         eq(operationalRecords.entityType, "voucher"),
       ));
       const voucherById = new Map(vouchers.map((voucher) => [voucher.clientRecordId, voucher.payload as Record<string, unknown>]));
+      const transactionCountBySettlementId = await settlementAccountingTransactionCounts(
+        tx,
+        settlements.map((row) => row.clientRecordId),
+      );
       const rows = settlements.map((row) => ({
         id: row.clientRecordId,
         ...row.payload,
+        accountingStatus: settlementAccountingStatus(row.payload, transactionCountBySettlementId.get(row.clientRecordId) ?? 0),
+        accountingMessage: row.payload.status === "voided"
+          ? "Settlement is voided."
+          : (transactionCountBySettlementId.get(row.clientRecordId) ?? 0) > 0
+            ? null
+            : "Accounting entries missing. Repost accounting.",
         updatedAt: row.clientUpdatedAt.toISOString(),
       })).sort((left, right) => right.settlementDate.localeCompare(left.settlementDate) || right.updatedAt.localeCompare(left.updatedAt));
       const activeRows = rows.filter((row) => row.status !== "voided" && !isDeletedOperationalPayload(row));
@@ -120,6 +138,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           const linked = voucherById.get(row.linkedVoucherId);
           return row.linkedVoucherId && (!linked || linked.settlementId !== row.id);
         }).length,
+        postedWithoutAccounting: rows.filter((row) => row.accountingStatus === "accounting_missing").length,
         voidedSettlementsWithActiveVoucher: rows.filter((row) => {
           const linked = voucherById.get(row.linkedVoucherId);
           return row.status === "voided" && linked && !isDeletedOperationalPayload(linked);
@@ -265,7 +284,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           payableBalance: preview.payableBalance,
           cashPayable: preview.payableBalance,
           notes: notes?.trim() || "",
-          status: "posted",
+          status: "posted" as const,
           createdBy: request.appUser!.id,
           createdAt: createdAt.toISOString(),
           updatedAt: createdAt.toISOString(),
@@ -315,8 +334,18 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
             updatedAt: createdAt,
           }).where(eq(operationalRecords.id, earning.id));
         }
+        const settlementRecord = {
+          id: settlementId,
+          clientRecordId: settlementId,
+          workspaceId,
+          farmId,
+          seasonId,
+          clientUpdatedAt: createdAt,
+          payload: settlementPayload,
+        };
+        await repairPostedSettlementAccounting(tx, settlementRecord, request.appUser!.id);
         return {
-          settlement: { ...settlementPayload, id: settlementId },
+          settlement: { ...settlementPayload, id: settlementId, accountingStatus: "posted" as const, accountingMessage: null },
           voucher: { ...voucherPayload, id: voucherId },
         };
       });
@@ -327,5 +356,58 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
       }
       throw error;
     }
+  });
+
+  app.post("/v1/workspace/:workspaceId/labour-wage-settlements/:settlementId/repair-accounting", { preHandler: requireUser }, async (request, reply) => {
+    if (!request.appUser || !request.sessionId) return reply.code(401).send({ message: "A valid session is required." });
+    const params = settlementParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ message: "A valid settlement repair request is required." });
+    const { workspaceId, settlementId } = params.data;
+    if (request.appUser.workspaceId !== workspaceId) return reply.code(403).send({ message: "Select this workspace before repairing labour settlements." });
+    if (!hasModulePermission(request.appUser, workspaceId, "wages", "edit")) return reply.code(403).send({ message: "Workspace wage settlement edit permission is required." });
+    const settlements = await db.select({
+      id: operationalRecords.id,
+      clientRecordId: operationalRecords.clientRecordId,
+      workspaceId: operationalRecords.workspaceId,
+      farmId: operationalRecords.farmId,
+      seasonId: operationalRecords.seasonId,
+      clientUpdatedAt: operationalRecords.clientUpdatedAt,
+      payload: operationalRecords.payload,
+    }).from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, workspaceId),
+      eq(operationalRecords.entityType, "labourWageSettlement"),
+      eq(operationalRecords.clientRecordId, settlementId),
+    )).limit(1);
+    const settlement = settlements[0];
+    if (!settlement) return reply.code(404).send({ message: "Labour settlement not found." });
+    if (!settlement.farmId || !settlement.seasonId) {
+      return reply.code(400).send({ message: "Labour settlement is missing farm or season context." });
+    }
+    if (!hasFarmAccess(request.appUser, workspaceId, settlement.farmId)) {
+      return reply.code(403).send({ message: "You do not have access to this farm." });
+    }
+    if (!(await validateContext(request.sessionId, workspaceId, settlement.farmId, settlement.seasonId))) {
+      return reply.code(403).send({ message: "Select this farm and season before repairing labour settlement accounting." });
+    }
+    const ownershipError = await validateTenantReferences(workspaceId, { farmId: settlement.farmId, seasonId: settlement.seasonId });
+    if (ownershipError) return reply.code(403).send({ message: ownershipError });
+
+    const result = await db.transaction(async (tx) => {
+      const repair = await repairPostedSettlementAccounting(tx, {
+        ...settlement,
+        payload: normalizeSettlementPayload(settlement.payload as Record<string, unknown>),
+      }, request.appUser!.id);
+      await tx.insert(auditLogs).values({
+        workspaceId,
+        userId: request.appUser!.id,
+        farmId: settlement.farmId,
+        action: "labour_wage_settlement_accounting_repaired",
+        entityType: "labourWageSettlement",
+        entityId: settlement.id,
+        details: repair,
+      });
+      return repair;
+    });
+    return result;
   });
 }

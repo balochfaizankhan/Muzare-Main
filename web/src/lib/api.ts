@@ -811,6 +811,8 @@ export type LabourWageSettlementRecord = {
   payableBalance: number;
   notes?: string;
   status: "posted" | "voided";
+  accountingStatus?: "draft" | "posted" | "accounting_missing" | "voided";
+  accountingMessage?: string | null;
   createdBy?: string;
   createdAt: string;
   updatedAt: string;
@@ -1399,6 +1401,24 @@ export const createLabourWageSettlement = (
   { method: "POST", body: JSON.stringify(input) },
   token,
   { timeoutMs: 60_000, debugLabel: "labour-wage-settlement-create" },
+);
+export const repairLabourWageSettlementAccounting = (
+  token: string,
+  workspaceId: string,
+  settlementId: string,
+) => apiRequest<{
+  settlementId: string;
+  settlementNumber: string;
+  accountingStatus: "posted" | "accounting_missing" | "voided";
+  createdTransactions: number;
+  existingTransactions: number;
+  accountId: string;
+  amount: number;
+}>(
+  `/v1/workspace/${workspaceId}/labour-wage-settlements/${settlementId}/repair-accounting`,
+  { method: "POST" },
+  token,
+  { timeoutMs: 60_000, debugLabel: "labour-wage-settlement-repair-accounting" },
 );
 export const fetchExpenseCategories = (token: string, workspaceId: string) =>
   apiRequest<{ categories: ExpenseCategory[] }>(`/v1/workspace/${workspaceId}/expense-categories`, {}, token);

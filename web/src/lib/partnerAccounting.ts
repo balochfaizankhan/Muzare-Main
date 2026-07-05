@@ -1,7 +1,7 @@
 import type { Account, Advance, LabourWageSettlement, PartnerEntry, Sale, Voucher } from "./offline-db";
 import { isActiveOperationalRecord } from "./operationalRecords";
 import { getActiveVouchers } from "./voucherCollections";
-import { isLabourWageSettlementVoucher } from "./labourWageSettlements";
+import { getActiveLabourWageSettlements, isLabourWageSettlementVoucher } from "./labourWageSettlements";
 
 export type PartnerLiabilityPosition = {
   account: Account | null;
@@ -125,6 +125,7 @@ export function partnerAccountBalanceEffect(
 ) {
   if (account.type !== "partner") return 0;
   const activeVouchers = getActiveVouchers(vouchers);
+  const activeSettlements = getActiveLabourWageSettlements(settlements as LabourWageSettlement[]);
   const capitalInjected = entries
     .filter((entry) => isActiveOperationalRecord(entry) && entry.type === "contribution" && resolvePartnerAccountId(entry, allAccounts) === account.id)
     .reduce((sum, entry) => sum + entry.amount, 0);
@@ -141,19 +142,24 @@ export function partnerAccountBalanceEffect(
     .filter((entry) => isActiveOperationalRecord(entry) && entry.type === "adjustment" && resolvePartnerAccountId(entry, allAccounts) === account.id)
     .reduce((sum, entry) => sum + partnerAdjustmentEffect(entry), 0);
   const directVoucherExpensesPaid = activeVouchers
+    .filter((voucher) => !isLabourWageSettlementVoucher(voucher))
     .filter((voucher) => voucher.accountId === account.id)
     .reduce((sum, voucher) => sum + voucher.amount, 0);
+  const labourSettlementExpenses = activeSettlements
+    .filter((settlement) => settlement.linkedAccountId === account.id)
+    .reduce((sum, settlement) => sum + settlement.expenseAmount, 0);
   const directLabourAdvancesPaid = advances
     .filter((advance) => isActiveOperationalRecord(advance) && advance.accountId === account.id)
     .reduce((sum, advance) => sum + advance.amount, 0);
-  const settledAdvancesApplied = settlements
-    .filter((settlement) => isActiveOperationalRecord(settlement) && settlement.linkedAccountId === account.id)
+  const settledAdvancesApplied = activeSettlements
+    .filter((settlement) => settlement.linkedAccountId === account.id)
     .reduce((sum, settlement) => sum + settlement.settledAdvanceAmount, 0);
   const adjustments = sales
     .filter((sale) => isActiveOperationalRecord(sale) && sale.accountId === account.id)
     .reduce((sum, sale) => sum - sale.amount, 0);
   return capitalInjected
     + directVoucherExpensesPaid
+    + labourSettlementExpenses
     + Math.max(directLabourAdvancesPaid - settledAdvancesApplied, 0)
     + transfersOut
     - transfersIn
@@ -171,6 +177,7 @@ export function buildPartnerLiabilityPositions(
   settlements: Array<Pick<LabourWageSettlement, "linkedAccountId" | "settledAdvanceAmount" | "status" | "deletedAt">> = [],
 ) {
   const activeVouchers = getActiveVouchers(vouchers);
+  const activeSettlements = getActiveLabourWageSettlements(settlements as LabourWageSettlement[]);
   const partnerAccounts = accounts.filter((account) => account.type === "partner");
   const positions = new Map<string, PartnerLiabilityPosition>();
   const ensure = (key: string, name: string, account: Account | null) => {
@@ -226,11 +233,8 @@ export function buildPartnerLiabilityPositions(
     const account = partnerAccounts.find((item) => item.id === voucher.accountId);
     if (!account) continue;
     const position = ensure(account.id, account.name, account);
-    if (isLabourWageSettlementVoucher(voucher)) {
-      position.labourWageSettlements += voucher.amount;
-    } else {
-      position.purchaseVouchersPaid += voucher.amount;
-    }
+    if (isLabourWageSettlementVoucher(voucher)) continue;
+    position.purchaseVouchersPaid += voucher.amount;
     position.directExpensesPaid += voucher.amount;
   }
 
@@ -239,6 +243,13 @@ export function buildPartnerLiabilityPositions(
     if (!account) continue;
     const position = ensure(account.id, account.name, account);
     position.totalLabourAdvancesPaid += advance.amount;
+  }
+
+  for (const settlement of activeSettlements) {
+    const account = partnerAccounts.find((item) => item.id === settlement.linkedAccountId);
+    if (!account) continue;
+    const position = ensure(account.id, account.name, account);
+    position.labourWageSettlements += settlement.expenseAmount;
   }
 
   for (const position of positions.values()) {

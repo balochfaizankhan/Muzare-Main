@@ -1,6 +1,6 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { operationalRecords } from "../db/schema.js";
+import { accountTransactions, accounts, operationalRecords } from "../db/schema.js";
 import { isDeletedOperationalPayload } from "../operational-record-state.js";
 import { listLabourEarnings } from "./labour-earnings.js";
 import { calculateStatusWage, listWageRateRows, resolveApplicableWageRate } from "./wage-rates.js";
@@ -36,6 +36,18 @@ export type LabourWageSettlementPayload = {
   voidedAt?: string | null;
   voidedBy?: string | null;
   voidReason?: string | null;
+  accountingStatus?: "draft" | "posted" | "accounting_missing" | "voided";
+  accountingMessage?: string | null;
+};
+
+export type SettlementAccountingRepairResult = {
+  settlementId: string;
+  settlementNumber: string;
+  accountingStatus: "posted" | "accounting_missing" | "voided";
+  createdTransactions: number;
+  existingTransactions: number;
+  accountId: string;
+  amount: number;
 };
 
 type LabourPayload = { name?: unknown };
@@ -85,6 +97,14 @@ export function normalizeSettlementPayload(payload: Record<string, unknown>): La
     voidedAt: typeof payload.voidedAt === "string" ? payload.voidedAt : null,
     voidedBy: typeof payload.voidedBy === "string" ? payload.voidedBy : null,
     voidReason: typeof payload.voidReason === "string" ? payload.voidReason : null,
+    accountingStatus: payload.accountingStatus === "accounting_missing"
+      ? "accounting_missing"
+      : payload.accountingStatus === "draft"
+        ? "draft"
+        : payload.status === "voided"
+          ? "voided"
+          : "posted",
+    accountingMessage: typeof payload.accountingMessage === "string" ? payload.accountingMessage : null,
   };
 }
 
@@ -170,6 +190,124 @@ export async function allocateSettlementNumber(
     return Math.max(max, current ?? 0);
   }, 0) + 1;
   return `LW-${String(next).padStart(4, "0")}`;
+}
+
+export async function settlementAccountingTransactionCounts(
+  tx: DbClient,
+  settlementIds: string[],
+) {
+  if (!settlementIds.length) return new Map<string, number>();
+  const rows = await tx.select({
+    referenceId: accountTransactions.referenceId,
+    count: sql<number>`count(*)::int`,
+  }).from(accountTransactions).where(and(
+    inArray(accountTransactions.referenceId, settlementIds),
+    eq(accountTransactions.source, "settlement"),
+    eq(accountTransactions.sourceType, "labour_wage_settlement"),
+  )).groupBy(accountTransactions.referenceId);
+  return new Map(rows.map((row) => [row.referenceId ?? "", row.count]));
+}
+
+export function settlementAccountingStatus(
+  settlement: Pick<LabourWageSettlementPayload, "status">,
+  transactionCount: number,
+) {
+  if (settlement.status === "voided") return "voided" as const;
+  return transactionCount > 0 ? "posted" as const : "accounting_missing" as const;
+}
+
+export async function repairPostedSettlementAccounting(
+  tx: DbClient,
+  settlementRecord: Awaited<ReturnType<typeof listLabourWageSettlements>>[number],
+  actorUserId: string,
+) {
+  const payload = settlementRecord.payload;
+  if (payload.status === "voided") {
+    return {
+      settlementId: settlementRecord.clientRecordId,
+      settlementNumber: payload.settlementNumber,
+      accountingStatus: "voided",
+      createdTransactions: 0,
+      existingTransactions: 0,
+      accountId: payload.linkedAccountId,
+      amount: payload.expenseAmount,
+    } satisfies SettlementAccountingRepairResult;
+  }
+  const [accountRow] = await tx.select({
+    id: accounts.id,
+    accountType: accounts.accountType,
+  }).from(accounts).where(eq(accounts.id, payload.linkedAccountId)).limit(1);
+  if (!accountRow) {
+    throw new Error(`Settlement ${payload.settlementNumber} cannot be reposted because its payment account no longer exists.`);
+  }
+  const existing = await tx.select({
+    id: accountTransactions.id,
+  }).from(accountTransactions).where(and(
+    eq(accountTransactions.referenceId, settlementRecord.clientRecordId),
+    eq(accountTransactions.source, "settlement"),
+    eq(accountTransactions.sourceType, "labour_wage_settlement"),
+  ));
+
+  if (!settlementRecord.farmId || !settlementRecord.seasonId) {
+    throw new Error(`Settlement ${payload.settlementNumber} is missing farm or season context.`);
+  }
+
+  if (existing.length) {
+    const [first] = existing;
+    await tx.update(accountTransactions).set({
+      farmId: settlementRecord.farmId,
+      seasonId: settlementRecord.seasonId,
+      accountId: payload.linkedAccountId,
+      type: accountRow.accountType === "partner" ? "credit" : "debit",
+      amount: String(payload.expenseAmount),
+      transactionDate: payload.settlementDate,
+      remarks: `Labour Wage Settlement ${payload.settlementNumber}`,
+      createdBy: actorUserId,
+      sourceType: "labour_wage_settlement",
+    }).where(eq(accountTransactions.id, first!.id));
+    if (existing.length > 1) {
+      await tx.delete(accountTransactions).where(and(
+        eq(accountTransactions.referenceId, settlementRecord.clientRecordId),
+        eq(accountTransactions.source, "settlement"),
+        eq(accountTransactions.sourceType, "labour_wage_settlement"),
+        sql`${accountTransactions.id} <> ${first!.id}`,
+      ));
+    }
+    return {
+      settlementId: settlementRecord.clientRecordId,
+      settlementNumber: payload.settlementNumber,
+      accountingStatus: "posted",
+      createdTransactions: 0,
+      existingTransactions: existing.length,
+      accountId: payload.linkedAccountId,
+      amount: payload.expenseAmount,
+    } satisfies SettlementAccountingRepairResult;
+  }
+
+  const insertValues: typeof accountTransactions.$inferInsert = {
+    farmId: settlementRecord.farmId,
+    seasonId: settlementRecord.seasonId,
+    accountId: payload.linkedAccountId,
+    source: "settlement",
+    sourceType: "labour_wage_settlement",
+    referenceId: settlementRecord.clientRecordId,
+    type: accountRow.accountType === "partner" ? "credit" : "debit",
+    amount: String(payload.expenseAmount),
+    transactionDate: payload.settlementDate,
+    remarks: `Labour Wage Settlement ${payload.settlementNumber}`,
+    createdBy: actorUserId,
+  };
+  await tx.insert(accountTransactions).values(insertValues);
+
+  return {
+    settlementId: settlementRecord.clientRecordId,
+    settlementNumber: payload.settlementNumber,
+    accountingStatus: "posted",
+    createdTransactions: 1,
+    existingTransactions: 0,
+    accountId: payload.linkedAccountId,
+    amount: payload.expenseAmount,
+  } satisfies SettlementAccountingRepairResult;
 }
 
 export async function previewLabourWageSettlement(

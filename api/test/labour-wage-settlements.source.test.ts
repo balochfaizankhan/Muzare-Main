@@ -53,3 +53,17 @@ test("labour wage settlements use settlement numbering instead of reserving expe
   assert.ok(source.includes("voucherNumber: settlementNumber"));
   assert.ok(source.includes("linkedVoucherNumber: settlementNumber"));
 });
+
+test("labour wage settlements repair missing accounting transactions through the settlement id", () => {
+  const source = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
+  assert.ok(source.includes('"/v1/workspace/:workspaceId/labour-wage-settlements/:settlementId/repair-accounting"'));
+  assert.ok(source.includes("repairPostedSettlementAccounting"));
+  assert.ok(source.includes('action: "labour_wage_settlement_accounting_repaired"'));
+});
+
+test("linked labour settlement vouchers cannot be deleted through operational sync", () => {
+  const source = readFileSync(new URL("../src/routes/operational-sync.ts", import.meta.url), "utf8");
+  assert.ok(source.includes('payload.voucherPurpose === "labour_wage_settlement"'));
+  assert.ok(source.includes('payload.nonCashSettlement === true'));
+  assert.ok(source.includes("Void or reverse the settlement instead."));
+});

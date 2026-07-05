@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Search, Printer, Download, X, ExternalLink } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
-import { createLabourWageSettlement, fetchLabourWageSettlements, previewLabourWageSettlement, type LabourWageSettlementPreview } from "../../lib/api";
+import { createLabourWageSettlement, fetchLabourWageSettlements, previewLabourWageSettlement, repairLabourWageSettlementAccounting, type LabourWageSettlementPreview } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 import { getActiveFarmId, getActiveSeasonId, offlineDb, workspaceRecords, type Account, type LabourWageSettlement, type Voucher } from "../../lib/offline-db";
 import { canCreate } from "../../lib/permissions";
@@ -21,6 +21,7 @@ type PreviewState =
 export function LabourWageSettlements() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { token, user } = useAuth();
   const workspaceId = user?.workspaceId ?? "";
   const activeFarmId = getActiveFarmId();
@@ -41,9 +42,10 @@ export function LabourWageSettlements() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [registerSearch, setRegisterSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | LabourWageSettlement["status"]>("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "posted" | "voided" | "accounting_missing">("all");
   const [paymentAccountFilter, setPaymentAccountFilter] = useState("all");
   const [selectedSettlement, setSelectedSettlement] = useState<LabourWageSettlement | null>(null);
+  const [repairingSettlementId, setRepairingSettlementId] = useState<string | null>(null);
 
   const onlineRequired = !navigator.onLine;
   const linkedVoucherById = useMemo(() => new Map(vouchers.map((voucher) => [voucher.id, voucher])), [vouchers]);
@@ -89,6 +91,8 @@ export function LabourWageSettlements() {
         payableBalance: settlement.payableBalance,
         notes: settlement.notes,
         status: settlement.status,
+        accountingStatus: settlement.accountingStatus,
+        accountingMessage: settlement.accountingMessage ?? null,
         createdBy: settlement.createdBy,
         createdAt: settlement.createdAt,
         updatedAt: settlement.updatedAt,
@@ -126,6 +130,17 @@ export function LabourWageSettlements() {
       setAccountId(accounts.find((account) => account.type === "cash" || account.type === "bank")?.id ?? accounts[0]?.id ?? "");
     }
   }, [accountId, accounts]);
+
+  useEffect(() => {
+    const recordId = searchParams.get("recordId");
+    if (!recordId || !settlements.length) return;
+    const match = settlements.find((settlement) => settlement.id === recordId);
+    if (!match) return;
+    setSelectedSettlement(match);
+    const next = new URLSearchParams(searchParams);
+    next.delete("recordId");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, settlements]);
 
   const previewSettlement = async () => {
     if (!token || !workspaceId || !activeFarmId || !activeSeasonId) {
@@ -241,6 +256,8 @@ export function LabourWageSettlements() {
         payableBalance: response.settlement.payableBalance,
         notes: response.settlement.notes,
         status: response.settlement.status,
+        accountingStatus: response.settlement.accountingStatus,
+        accountingMessage: response.settlement.accountingMessage ?? null,
         createdBy: response.settlement.createdBy,
         createdAt: response.settlement.createdAt,
         updatedAt: response.settlement.updatedAt,
@@ -263,12 +280,34 @@ export function LabourWageSettlements() {
 
   const summary = preview.status === "ready" ? preview.data : null;
   const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
+  const settlementStatus = useCallback((settlement: LabourWageSettlement) => settlement.accountingStatus ?? settlement.status, []);
+  const repairAccounting = useCallback(async (settlement: LabourWageSettlement) => {
+    if (!token || !workspaceId) return;
+    setRepairingSettlementId(settlement.id);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await repairLabourWageSettlementAccounting(token, workspaceId, settlement.id);
+      await offlineDb.labourWageSettlements.update(settlement.id, {
+        accountingStatus: response.accountingStatus,
+        accountingMessage: response.accountingStatus === "posted" ? null : "Accounting entries missing. Repost accounting.",
+        updatedAt: new Date().toISOString(),
+      });
+      setSuccess(`Accounting repaired for ${response.settlementNumber}.`);
+      window.dispatchEvent(new Event("muzare-local-data-change"));
+      await syncFromServer();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to repair settlement accounting.");
+    } finally {
+      setRepairingSettlementId(null);
+    }
+  }, [syncFromServer, token, workspaceId]);
   const registerRows = useMemo(() => {
     const term = registerSearch.trim().toLowerCase();
     return settlements.filter((settlement) => {
       const linkedVoucher = linkedVoucherById.get(settlement.linkedVoucherId);
       const accountName = accountById.get(settlement.linkedAccountId)?.name ?? "";
-      return (statusFilter === "all" || settlement.status === statusFilter)
+      return (statusFilter === "all" || settlementStatus(settlement) === statusFilter)
         && (paymentAccountFilter === "all" || settlement.linkedAccountId === paymentAccountFilter)
         && (!term || [
           settlement.settlementNumber,
@@ -283,7 +322,7 @@ export function LabourWageSettlements() {
           String(settlement.settledAdvanceAmount),
         ].some((value) => value.toLowerCase().includes(term)));
     });
-  }, [accountById, linkedVoucherById, paymentAccountFilter, registerSearch, settlements, statusFilter]);
+  }, [accountById, linkedVoucherById, paymentAccountFilter, registerSearch, settlementStatus, settlements, statusFilter]);
   const registerTotals = useMemo(() => registerRows.reduce((totals, settlement) => ({
     attendanceWages: totals.attendanceWages + settlement.attendanceWages,
     labourWork: totals.labourWork + settlement.pendingLabourEarnings,
@@ -486,6 +525,7 @@ export function LabourWageSettlements() {
                   <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}>
                     <option value="all">All</option>
                     <option value="posted">Posted</option>
+                    <option value="accounting_missing">Accounting missing</option>
                     <option value="voided">Voided</option>
                   </select>
                 </label>
@@ -533,12 +573,22 @@ export function LabourWageSettlements() {
                         <td>{money(settlement.carryForwardAdvance)}</td>
                         <td>{money(settlement.payableBalance)}</td>
                         <td>{accountById.get(settlement.linkedAccountId)?.name ?? "-"}</td>
+                        <td>{linkedVoucherNumber || settlement.settlementNumber}</td>
                         <td>
-                          {linkedVoucher
-                            ? <button type="button" className="worker-dialog__link" onClick={() => navigate(`/workspace/expenses?recordId=${linkedVoucher.id}&showSettlementVouchers=true`)}>{linkedVoucherNumber}</button>
-                            : linkedVoucherNumber || "-"}
+                          <div className="stacked-inline-actions">
+                            <span>{settlementStatus(settlement).replaceAll("_", " ")}</span>
+                            {settlementStatus(settlement) === "accounting_missing" ? (
+                              <button
+                                type="button"
+                                className="secondary-action"
+                                disabled={repairingSettlementId === settlement.id}
+                                onClick={() => void repairAccounting(settlement)}
+                              >
+                                {repairingSettlementId === settlement.id ? "Repairing..." : "Repair accounting"}
+                              </button>
+                            ) : null}
+                          </div>
                         </td>
-                        <td>{settlement.status}</td>
                       </tr>
                     );
                   })}
@@ -572,8 +622,24 @@ export function LabourWageSettlements() {
                     <article><span>Payment account</span><strong>{accountById.get(selectedSettlement.linkedAccountId)?.name ?? "-"}</strong></article>
                   </div>
                   {selectedSettlement.notes ? <p className="context-message">{selectedSettlement.notes}</p> : null}
+                  {settlementStatus(selectedSettlement) === "accounting_missing" ? (
+                    <div className="worker-action-warning">
+                      <strong>Accounting entries missing.</strong>
+                      <p>{selectedSettlement.accountingMessage ?? "Repost accounting to restore this settlement in the accounts ledger."}</p>
+                    </div>
+                  ) : null}
                   <footer className="worker-action-footer">
                     <button type="button" onClick={() => setSelectedSettlement(null)}>Close</button>
+                    {settlementStatus(selectedSettlement) === "accounting_missing" ? (
+                      <button
+                        type="button"
+                        className="secondary-action"
+                        disabled={repairingSettlementId === selectedSettlement.id}
+                        onClick={() => void repairAccounting(selectedSettlement)}
+                      >
+                        {repairingSettlementId === selectedSettlement.id ? "Repairing..." : "Repair accounting"}
+                      </button>
+                    ) : null}
                     {linkedVoucher ? <button type="button" onClick={() => navigate(`/workspace/expenses?recordId=${linkedVoucher.id}&showSettlementVouchers=true`)}>View Generated Voucher <ExternalLink size={16} /></button> : null}
                   </footer>
                 </div>

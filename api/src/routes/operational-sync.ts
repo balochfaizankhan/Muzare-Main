@@ -1162,6 +1162,20 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         }
         return reply.code(204).send();
       }
+      if (parsed.data.entity === "voucher") {
+        const payload = entry.payload as Record<string, unknown>;
+        const settlementNumber = typeof payload.settlementNumber === "string" ? payload.settlementNumber : "this labour settlement";
+        if (
+          payload.voucherPurpose === "labour_wage_settlement"
+          || payload.nonCashSettlement === true
+          || typeof payload.settlementId === "string"
+        ) {
+          return reply.code(409).send({
+            code: "linked_labour_settlement_voucher",
+            message: `This is linked to Labour Settlement ${settlementNumber}. Void or reverse the settlement instead.`,
+          });
+        }
+      }
       if (isDeletedOperationalPayload(entry.payload)) return reply.code(204).send();
       const deletedAt = new Date();
       const deletionReason = parsed.data.reason ?? "";
