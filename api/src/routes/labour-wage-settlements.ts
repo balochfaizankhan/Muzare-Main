@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { requireUser } from "../auth.js";
 import { db } from "../db/client.js";
-import { auditLogs, operationalRecords, userSessions } from "../db/schema.js";
+import { accountTransactions, auditLogs, operationalRecords, userSessions } from "../db/schema.js";
 import { listLabourEarnings, normalizeLabourEarningPayload } from "../lib/labour-earnings.js";
 import { isDeletedOperationalPayload } from "../operational-record-state.js";
 import { hasFarmAccess } from "../workspace-access.js";
@@ -40,6 +40,14 @@ const settlementParamsSchema = z.object({
   workspaceId: z.string().uuid(),
   settlementId: z.string().uuid(),
 });
+const updateSchema = z.object({
+  fromDate: z.string().date().optional(),
+  toDate: z.string().date().optional(),
+  settlementDate: z.string().date().optional(),
+  accountId: z.string().min(1).optional(),
+  notes: z.string().trim().max(500).optional().nullable(),
+  voidReason: z.string().trim().max(500).optional().nullable(),
+});
 
 async function validateContext(sessionId: string | undefined, workspaceId: string, farmId: string, seasonId: string) {
   const [session] = await db.select({
@@ -47,6 +55,23 @@ async function validateContext(sessionId: string | undefined, workspaceId: strin
     activeSeasonId: userSessions.activeSeasonId,
   }).from(userSessions).where(and(eq(userSessions.id, sessionId ?? ""), eq(userSessions.workspaceId, workspaceId))).limit(1);
   return session?.activeFarmId === farmId && session.activeSeasonId === seasonId;
+}
+
+async function loadSettlementRow(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], workspaceId: string, settlementId: string) {
+  const settlements = await tx.select({
+    id: operationalRecords.id,
+    clientRecordId: operationalRecords.clientRecordId,
+    workspaceId: operationalRecords.workspaceId,
+    farmId: operationalRecords.farmId,
+    seasonId: operationalRecords.seasonId,
+    clientUpdatedAt: operationalRecords.clientUpdatedAt,
+    payload: operationalRecords.payload,
+  }).from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, workspaceId),
+    eq(operationalRecords.entityType, "labourWageSettlement"),
+    eq(operationalRecords.clientRecordId, settlementId),
+  )).limit(1);
+  return settlements[0] ?? null;
 }
 
 function logSettlementAccountValidation(request: { log: { info: (...args: unknown[]) => void } }, details: Record<string, unknown>) {
@@ -161,6 +186,45 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
       return { rows, diagnostics };
     });
     return { settlements: rows, diagnostics };
+  });
+
+  app.get("/v1/workspace/:workspaceId/labour-wage-settlements/:settlementId", { preHandler: requireUser }, async (request, reply) => {
+    if (!request.appUser || !request.sessionId) return reply.code(401).send({ message: "A valid session is required." });
+    const params = settlementParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ message: "A valid settlement request is required." });
+    const { workspaceId, settlementId } = params.data;
+    if (request.appUser.workspaceId !== workspaceId) return reply.code(403).send({ message: "Select this workspace before loading labour settlements." });
+    if (!hasModulePermission(request.appUser, workspaceId, "wages", "view")) return reply.code(403).send({ message: "Workspace wage settlement view permission is required." });
+    const settlement = await db.transaction(async (tx) => loadSettlementRow(tx, workspaceId, settlementId));
+    if (!settlement) return reply.code(404).send({ message: "Labour settlement not found." });
+    if (!settlement.farmId || !settlement.seasonId) return reply.code(400).send({ message: "Labour settlement is missing farm or season context." });
+    if (!hasFarmAccess(request.appUser, workspaceId, settlement.farmId)) return reply.code(403).send({ message: "You do not have access to this farm." });
+    if (!(await validateContext(request.sessionId, workspaceId, settlement.farmId, settlement.seasonId))) {
+      return reply.code(403).send({ message: "Select this farm and season before loading labour settlements." });
+    }
+    const ownershipError = await validateTenantReferences(workspaceId, { farmId: settlement.farmId, seasonId: settlement.seasonId });
+    if (ownershipError) return reply.code(403).send({ message: ownershipError });
+    const accountingEntries = await db.transaction((tx) => settlementAccountingTransactionCounts(tx, [settlementId])).then((result) => result.get(settlementId) ?? 0);
+    const payload = normalizeSettlementPayload(settlement.payload as Record<string, unknown>);
+    return {
+      settlement: {
+        ...payload,
+        id: settlement.clientRecordId,
+        workspaceId,
+        farmId: settlement.farmId,
+        seasonId: settlement.seasonId,
+        accountingStatus: settlementAccountingStatus(payload, accountingEntries),
+        accountingMessage: payload.status === "deleted"
+          ? "Settlement deleted."
+          : payload.status === "voided"
+            ? "Settlement is voided."
+            : accountingEntries > 0
+              ? null
+              : "Accounting entries missing. Repost accounting.",
+        updatedAt: settlement.clientUpdatedAt.toISOString(),
+        accountingEntries,
+      },
+    };
   });
 
   app.post("/v1/workspace/:workspaceId/labour-wage-settlements/preview", { preHandler: requireUser }, async (request, reply) => {
@@ -388,6 +452,319 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
       });
       return repair;
     });
+    return result;
+  });
+
+  app.patch("/v1/workspace/:workspaceId/labour-wage-settlements/:settlementId", { preHandler: requireUser }, async (request, reply) => {
+    if (!request.appUser || !request.sessionId) return reply.code(401).send({ message: "A valid session is required." });
+    const params = settlementParamsSchema.safeParse(request.params);
+    const parsed = updateSchema.safeParse(request.body);
+    if (!params.success || !parsed.success) return reply.code(400).send({ message: "A valid settlement update request is required." });
+    const { workspaceId, settlementId } = params.data;
+    if (request.appUser.workspaceId !== workspaceId) return reply.code(403).send({ message: "Select this workspace before updating labour settlements." });
+    if (!hasModulePermission(request.appUser, workspaceId, "wages", "edit")) return reply.code(403).send({ message: "Workspace wage settlement edit permission is required." });
+
+    const settlement = await db.transaction(async (tx) => loadSettlementRow(tx, workspaceId, settlementId));
+    if (!settlement) return reply.code(404).send({ message: "Labour settlement not found." });
+    if (!settlement.farmId || !settlement.seasonId) return reply.code(400).send({ message: "Labour settlement is missing farm or season context." });
+    if (!hasFarmAccess(request.appUser, workspaceId, settlement.farmId)) return reply.code(403).send({ message: "You do not have access to this farm." });
+    if (!(await validateContext(request.sessionId, workspaceId, settlement.farmId, settlement.seasonId))) {
+      return reply.code(403).send({ message: "Select this farm and season before updating labour settlements." });
+    }
+    const ownershipError = await validateTenantReferences(workspaceId, { farmId: settlement.farmId, seasonId: settlement.seasonId });
+    if (ownershipError) return reply.code(403).send({ message: ownershipError });
+
+    const payload = normalizeSettlementPayload(settlement.payload as Record<string, unknown>);
+    if (payload.status === "deleted") return reply.code(409).send({ message: "Deleted settlements cannot be updated." });
+    if (payload.status === "voided") return reply.code(409).send({ message: "Voided settlements cannot be updated. Create a new settlement instead." });
+
+    const nextFromDate = parsed.data.fromDate ?? payload.fromDate;
+    const nextToDate = parsed.data.toDate ?? payload.toDate;
+    const nextSettlementDate = parsed.data.settlementDate ?? payload.settlementDate;
+    const nextAccountId = parsed.data.accountId ?? payload.linkedAccountId;
+    const nextNotes = parsed.data.notes === undefined ? payload.notes : (parsed.data.notes ?? "");
+    const financialChanges = nextFromDate !== payload.fromDate
+      || nextToDate !== payload.toDate
+      || nextSettlementDate !== payload.settlementDate
+      || nextAccountId !== payload.linkedAccountId;
+
+    const transactionCount = await db.transaction((tx) => settlementAccountingTransactionCounts(tx, [settlementId])).then((result) => result.get(settlementId) ?? 0);
+    const hasHealthyAccounting = transactionCount > 0 && settlementAccountingStatus(payload, transactionCount) === "posted";
+    if (financialChanges && hasHealthyAccounting) {
+      return reply.code(409).send({ message: "Posted accounting settlements must be voided/reversed before changing settlement dates or account." });
+    }
+
+    const updatedAt = new Date();
+    const nextPayloadBase = {
+      ...payload,
+      fromDate: nextFromDate,
+      toDate: nextToDate,
+      settlementDate: nextSettlementDate,
+      notes: nextNotes ?? "",
+      updatedAt: updatedAt.toISOString(),
+    };
+
+    const result = await db.transaction(async (tx) => {
+      let resolvedAccount = null;
+      if (financialChanges) {
+        resolvedAccount = await resolveCanonicalPaymentAccountId(tx, workspaceId, settlement.farmId!, nextAccountId);
+        const accountValidation = validateLabourSettlementPaymentAccount(resolvedAccount, settlement.farmId!);
+        if (!accountValidation.valid) throw new Error(accountValidation.message ?? "Payment account validation failed.");
+        if (!resolvedAccount) throw new Error("Payment account is not mapped. Please repair imported accounts.");
+        const preview = await previewLabourWageSettlement(tx, workspaceId, settlement.farmId!, settlement.seasonId!, nextFromDate, nextToDate, nextSettlementDate, settlement.clientRecordId);
+        if (preview.unresolvedRows.length) {
+          throw new Error("Attendance wages cannot be settled until missing wage rates are fixed.");
+        }
+        const overlaps = preview.overlappingSettlements.filter((item) => item.id !== settlement.clientRecordId);
+        if (overlaps.length) {
+          throw new Error("An active labour wage settlement already exists for an overlapping date range.");
+        }
+        const nextTotals = {
+          attendanceWages: preview.attendanceWages,
+          pendingLabourEarnings: preview.pendingLabourEarnings,
+          totalEarned: preview.totalEarned,
+          advancesPaid: preview.advancesPaid,
+          settledAdvanceAmount: preview.settledAdvanceAmount,
+          expenseAmount: preview.expenseAmount,
+          carryForwardAdvance: preview.carryForwardAdvance,
+          payableBalance: preview.payableBalance,
+        };
+        const nextPayload = {
+          ...nextPayloadBase,
+          linkedAccountId: resolvedAccount.id,
+          linkedAccountName: resolvedAccount.name,
+          attendanceWages: nextTotals.attendanceWages,
+          pendingLabourEarnings: nextTotals.pendingLabourEarnings,
+          labourWork: nextTotals.pendingLabourEarnings,
+          totalEarned: nextTotals.totalEarned,
+          totalLabourCost: nextTotals.totalEarned,
+          advancesPaid: nextTotals.advancesPaid,
+          advancesAvailableUpToSettlementDate: nextTotals.advancesPaid,
+          settledAdvanceAmount: nextTotals.settledAdvanceAmount,
+          appliedAdvances: nextTotals.settledAdvanceAmount,
+          expenseAmount: nextTotals.expenseAmount,
+          carryForwardAdvance: nextTotals.carryForwardAdvance,
+          payableBalance: nextTotals.payableBalance,
+          cashPayable: nextTotals.payableBalance,
+        };
+        await tx.update(operationalRecords).set({
+          payload: nextPayload,
+          clientUpdatedAt: updatedAt,
+          updatedAt,
+          recordedBy: request.appUser!.id,
+        }).where(eq(operationalRecords.id, settlement.id));
+        const earningsToSettle = await listLabourEarnings(tx, workspaceId, settlement.farmId!, settlement.seasonId!);
+        const includedEarningIds = new Set(preview.includedEarnings.map((item) => item.id));
+        for (const earning of earningsToSettle) {
+          if (!includedEarningIds.has(earning.clientRecordId)) continue;
+          const nextEarningPayload = {
+            ...normalizeLabourEarningPayload(earning.payload as Record<string, unknown>),
+            status: "settled",
+            linkedSettlementId: settlement.clientRecordId,
+            settlementDate: nextSettlementDate,
+            updatedBy: request.appUser!.id,
+            updatedAt: updatedAt.toISOString(),
+          };
+          await tx.update(operationalRecords).set({
+            payload: nextEarningPayload,
+            clientUpdatedAt: updatedAt,
+            updatedAt,
+          }).where(eq(operationalRecords.id, earning.id));
+        }
+        await tx.insert(auditLogs).values({
+          workspaceId,
+          userId: request.appUser!.id,
+          farmId: settlement.farmId,
+          action: "labour_wage_settlement_updated",
+          entityType: "labourWageSettlement",
+          entityId: settlement.id,
+          details: { before: payload, after: nextPayload, financialChanges: true },
+        });
+        return {
+          settlementId,
+          settlementNumber: payload.settlementNumber,
+          accountingEntries: transactionCount,
+          settlement: {
+            ...nextPayload,
+            id: settlement.clientRecordId,
+            workspaceId,
+            farmId: settlement.farmId,
+            seasonId: settlement.seasonId,
+            accountingStatus: transactionCount > 0 ? "posted" as const : "accounting_missing" as const,
+            accountingMessage: transactionCount > 0 ? null : "Accounting entries missing. Repost accounting.",
+            updatedAt: updatedAt.toISOString(),
+          },
+        };
+      }
+
+      const nextPayload = {
+        ...nextPayloadBase,
+        ...(parsed.data.notes !== undefined ? { notes: nextNotes ?? "" } : {}),
+      };
+      await tx.update(operationalRecords).set({
+        payload: nextPayload,
+        clientUpdatedAt: updatedAt,
+        updatedAt,
+        recordedBy: request.appUser!.id,
+      }).where(eq(operationalRecords.id, settlement.id));
+      await tx.insert(auditLogs).values({
+        workspaceId,
+        userId: request.appUser!.id,
+        farmId: settlement.farmId,
+        action: "labour_wage_settlement_updated",
+        entityType: "labourWageSettlement",
+        entityId: settlement.id,
+        details: { before: payload, after: nextPayload, financialChanges: false },
+      });
+      return {
+        settlementId,
+        settlementNumber: payload.settlementNumber,
+        accountingEntries: transactionCount,
+        settlement: {
+          ...nextPayload,
+          id: settlement.clientRecordId,
+          workspaceId,
+          farmId: settlement.farmId,
+          seasonId: settlement.seasonId,
+          accountingStatus: settlementAccountingStatus(payload, transactionCount),
+          accountingMessage: transactionCount > 0 ? null : "Accounting entries missing. Repost accounting.",
+          updatedAt: updatedAt.toISOString(),
+        },
+      };
+    });
+
+    return result;
+  });
+
+  app.post("/v1/workspace/:workspaceId/labour-wage-settlements/:settlementId/void", { preHandler: requireUser }, async (request, reply) => {
+    if (!request.appUser || !request.sessionId) return reply.code(401).send({ message: "A valid session is required." });
+    const params = settlementParamsSchema.safeParse(request.params);
+    const parsed = z.object({ voidReason: z.string().trim().max(500).optional() }).safeParse(request.body ?? {});
+    if (!params.success || !parsed.success) return reply.code(400).send({ message: "A valid settlement void request is required." });
+    const { workspaceId, settlementId } = params.data;
+    if (request.appUser.workspaceId !== workspaceId) return reply.code(403).send({ message: "Select this workspace before voiding labour settlements." });
+    if (!hasModulePermission(request.appUser, workspaceId, "wages", "edit")) return reply.code(403).send({ message: "Workspace wage settlement edit permission is required." });
+
+    const settlement = await db.transaction(async (tx) => loadSettlementRow(tx, workspaceId, settlementId));
+    if (!settlement) return reply.code(404).send({ message: "Labour settlement not found." });
+    if (!settlement.farmId || !settlement.seasonId) return reply.code(400).send({ message: "Labour settlement is missing farm or season context." });
+    if (!hasFarmAccess(request.appUser, workspaceId, settlement.farmId)) return reply.code(403).send({ message: "You do not have access to this farm." });
+    if (!(await validateContext(request.sessionId, workspaceId, settlement.farmId, settlement.seasonId))) {
+      return reply.code(403).send({ message: "Select this farm and season before voiding labour settlements." });
+    }
+    const ownershipError = await validateTenantReferences(workspaceId, { farmId: settlement.farmId, seasonId: settlement.seasonId });
+    if (ownershipError) return reply.code(403).send({ message: ownershipError });
+
+    const payload = normalizeSettlementPayload(settlement.payload as Record<string, unknown>);
+    if (payload.status === "deleted") return reply.code(409).send({ message: "Deleted settlements cannot be voided." });
+    if (payload.status === "voided") {
+      return {
+        settlementId,
+        settlementNumber: payload.settlementNumber,
+        status: "voided" as const,
+        voidedAt: payload.voidedAt,
+        voidedBy: payload.voidedBy,
+        voidReason: payload.voidReason,
+      };
+    }
+
+    const transactionCount = await db.transaction((tx) => settlementAccountingTransactionCounts(tx, [settlementId])).then((result) => result.get(settlementId) ?? 0);
+    if (transactionCount === 0) {
+      return reply.code(409).send({ message: "This settlement has no accounting entries to reverse. Delete the settlement instead." });
+    }
+
+    const voidedAt = new Date();
+    const voidedIso = voidedAt.toISOString();
+    const voidReason = parsed.data.voidReason?.trim() || "Voided settlement";
+    const result = await db.transaction(async (tx) => {
+      const accountingRows = await tx.select({
+        id: accountTransactions.id,
+        accountId: accountTransactions.accountId,
+        type: accountTransactions.type,
+        amount: accountTransactions.amount,
+        transactionDate: accountTransactions.transactionDate,
+        remarks: accountTransactions.remarks,
+      }).from(accountTransactions).where(and(
+        eq(accountTransactions.referenceId, settlementId),
+        eq(accountTransactions.source, "settlement"),
+        eq(accountTransactions.sourceType, "labour_wage_settlement"),
+      ));
+      const originalTransaction = accountingRows.find((row) => typeof row.remarks !== "string" || !row.remarks.startsWith("Reversal of Labour Wage Settlement"))
+        ?? accountingRows[0];
+      const reversalAlreadyExists = accountingRows.some((row) => typeof row.remarks === "string" && row.remarks.startsWith("Reversal of Labour Wage Settlement"));
+      if (originalTransaction && !reversalAlreadyExists) {
+        await tx.insert(accountTransactions).values({
+          farmId: settlement.farmId!,
+          seasonId: settlement.seasonId!,
+          accountId: originalTransaction.accountId,
+          source: "settlement",
+          sourceType: "labour_wage_settlement",
+          referenceId: settlementId,
+          type: originalTransaction.type === "credit" ? "debit" : "credit",
+          amount: originalTransaction.amount,
+          transactionDate: payload.settlementDate,
+          remarks: `Reversal of Labour Wage Settlement ${payload.settlementNumber}`,
+          createdBy: request.appUser!.id,
+        });
+      }
+      const nextPayload = {
+        ...payload,
+        status: "voided" as const,
+        voidedAt: voidedIso,
+        voidedBy: request.appUser!.id,
+        voidReason,
+        updatedAt: voidedIso,
+        accountingStatus: "voided" as const,
+        accountingMessage: "Settlement has been voided.",
+      };
+      await tx.update(operationalRecords).set({
+        payload: nextPayload,
+        clientUpdatedAt: voidedAt,
+        updatedAt: voidedAt,
+        recordedBy: request.appUser!.id,
+      }).where(eq(operationalRecords.id, settlement.id));
+      const earningsToReopen = await listLabourEarnings(tx, workspaceId, settlement.farmId!, settlement.seasonId!);
+      for (const earning of earningsToReopen) {
+        if (earning.payload.linkedSettlementId !== settlementId) continue;
+        const nextEarningPayload = {
+          ...normalizeLabourEarningPayload(earning.payload as Record<string, unknown>),
+          status: "pending_settlement" as const,
+          linkedSettlementId: null,
+          settlementDate: null,
+          updatedBy: request.appUser!.id,
+          updatedAt: voidedIso,
+        };
+        await tx.update(operationalRecords).set({
+          payload: nextEarningPayload,
+          clientUpdatedAt: voidedAt,
+          updatedAt: voidedAt,
+        }).where(eq(operationalRecords.id, earning.id));
+      }
+      await tx.insert(auditLogs).values({
+        workspaceId,
+        userId: request.appUser!.id,
+        farmId: settlement.farmId,
+        action: "labour_wage_settlement_voided",
+        entityType: "labourWageSettlement",
+        entityId: settlement.id,
+        details: {
+          settlementId,
+          settlementNumber: payload.settlementNumber,
+          accountingEntries: transactionCount,
+          voidReason,
+        },
+      });
+      return {
+        settlementId,
+        settlementNumber: payload.settlementNumber,
+        status: "voided" as const,
+        voidedAt: voidedIso,
+        voidedBy: request.appUser!.id,
+        voidReason,
+        accountingEntries: transactionCount,
+      };
+    });
+
     return result;
   });
 

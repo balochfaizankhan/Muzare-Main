@@ -822,6 +822,9 @@ export type LabourWageSettlementRecord = {
   voidedBy?: string | null;
   voidReason?: string | null;
 };
+export type LabourWageSettlementDetail = LabourWageSettlementRecord & {
+  accountingEntries?: number;
+};
 export type LabourWageSettlementPaymentAccount = {
   id: string;
   farmId: string;
@@ -1412,6 +1415,16 @@ export const previewLabourWageSettlement = (
   token,
   { timeoutMs: 60_000, debugLabel: "labour-wage-settlement-preview" },
 );
+export const fetchLabourWageSettlement = (
+  token: string,
+  workspaceId: string,
+  settlementId: string,
+) => apiRequest<{ settlement: LabourWageSettlementDetail }>(
+  `/v1/workspace/${workspaceId}/labour-wage-settlements/${settlementId}`,
+  {},
+  token,
+  { timeoutMs: 30_000, debugLabel: "labour-wage-settlement-detail" },
+);
 export const createLabourWageSettlement = (
   token: string,
   workspaceId: string,
@@ -1421,6 +1434,42 @@ export const createLabourWageSettlement = (
   { method: "POST", body: JSON.stringify(input) },
   token,
   { timeoutMs: 60_000, debugLabel: "labour-wage-settlement-create" },
+);
+export const updateLabourWageSettlement = (
+  token: string,
+  workspaceId: string,
+  settlementId: string,
+  input: {
+    fromDate?: string;
+    toDate?: string;
+    settlementDate?: string;
+    accountId?: string;
+    notes?: string | null;
+  },
+) => apiRequest<{ settlement: LabourWageSettlementDetail; accountingEntries: number }>(
+  `/v1/workspace/${workspaceId}/labour-wage-settlements/${settlementId}`,
+  { method: "PATCH", body: JSON.stringify(input) },
+  token,
+  { timeoutMs: 60_000, debugLabel: "labour-wage-settlement-update" },
+);
+export const voidLabourWageSettlement = (
+  token: string,
+  workspaceId: string,
+  settlementId: string,
+  input: { voidReason?: string },
+) => apiRequest<{
+  settlementId: string;
+  settlementNumber: string;
+  status: "voided";
+  voidedAt: string;
+  voidedBy: string;
+  voidReason: string;
+  accountingEntries: number;
+}>(
+  `/v1/workspace/${workspaceId}/labour-wage-settlements/${settlementId}/void`,
+  { method: "POST", body: JSON.stringify(input) },
+  token,
+  { timeoutMs: 60_000, debugLabel: "labour-wage-settlement-void" },
 );
 export const repairLabourWageSettlementAccounting = (
   token: string,

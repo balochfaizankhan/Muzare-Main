@@ -3,7 +3,7 @@ import { Search, Printer, Download, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
-import { createLabourWageSettlement, deleteLabourWageSettlement, fetchLabourWageSettlementPaymentAccounts, fetchLabourWageSettlements, previewLabourWageSettlement, repairLabourWageSettlementAccounting, type LabourWageSettlementPaymentAccount, type LabourWageSettlementPreview } from "../../lib/api";
+import { createLabourWageSettlement, deleteLabourWageSettlement, fetchLabourWageSettlement, fetchLabourWageSettlementPaymentAccounts, fetchLabourWageSettlements, previewLabourWageSettlement, repairLabourWageSettlementAccounting, updateLabourWageSettlement, voidLabourWageSettlement, type LabourWageSettlementDetail, type LabourWageSettlementPaymentAccount, type LabourWageSettlementPreview } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 import { getActiveFarmId, getActiveSeasonId, offlineDb, workspaceRecords, type Account, type LabourWageSettlement } from "../../lib/offline-db";
 import { canCreate } from "../../lib/permissions";
@@ -37,15 +37,22 @@ export function LabourWageSettlements() {
   const [preview, setPreview] = useState<PreviewState>({ status: "idle", data: null });
   const [historyLoading, setHistoryLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [savingSettlementId, setSavingSettlementId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [registerSearch, setRegisterSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "posted" | "voided" | "accounting_missing">("all");
   const [paymentAccountFilter, setPaymentAccountFilter] = useState("all");
-  const [selectedSettlement, setSelectedSettlement] = useState<LabourWageSettlement | null>(null);
+  const [selectedSettlement, setSelectedSettlement] = useState<LabourWageSettlementDetail | null>(null);
+  const [selectedSettlementMode, setSelectedSettlementMode] = useState<"view" | "edit">("view");
+  const [selectedSettlementLoading, setSelectedSettlementLoading] = useState(false);
+  const [editForm, setEditForm] = useState({ fromDate: "", toDate: "", settlementDate: "", accountId: "", notes: "" });
   const [repairingSettlementId, setRepairingSettlementId] = useState<string | null>(null);
   const [deletingSettlement, setDeletingSettlement] = useState<LabourWageSettlement | null>(null);
   const [deletingSettlementId, setDeletingSettlementId] = useState<string | null>(null);
+  const [voidingSettlement, setVoidingSettlement] = useState<LabourWageSettlementDetail | null>(null);
+  const [voidingSettlementId, setVoidingSettlementId] = useState<string | null>(null);
+  const [voidReason, setVoidReason] = useState("");
 
   const onlineRequired = !navigator.onLine;
 
@@ -129,6 +136,25 @@ export function LabourWageSettlements() {
   }, [syncFromServer]);
 
   useEffect(() => {
+    if (!token || !workspaceId || !selectedSettlement?.id || !navigator.onLine) return;
+    let cancelled = false;
+    setSelectedSettlementLoading(true);
+    void fetchLabourWageSettlement(token, workspaceId, selectedSettlement.id)
+      .then((response) => {
+        if (!cancelled) setSelectedSettlement(response.settlement);
+      })
+      .catch(() => {
+        // keep cached details if the network refresh fails
+      })
+      .finally(() => {
+        if (!cancelled) setSelectedSettlementLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSettlement?.id, token, workspaceId]);
+
+  useEffect(() => {
     if (!accountId && accounts.length) {
       setAccountId(paymentAccounts.find((account) => account.accountType === "cash" || account.accountType === "bank")?.id
         ?? paymentAccounts[0]?.id
@@ -142,6 +168,7 @@ export function LabourWageSettlements() {
     const match = settlements.find((settlement) => settlement.id === recordId);
     if (!match) return;
     setSelectedSettlement(match);
+    setSelectedSettlementMode("view");
     const next = new URLSearchParams(searchParams);
     next.delete("recordId");
     setSearchParams(next, { replace: true });
@@ -259,8 +286,31 @@ export function LabourWageSettlements() {
   const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
   const settlementPaymentAccountById = useMemo(() => new Map(paymentAccounts.map((account) => [account.id, account])), [paymentAccounts]);
   const settlementStatus = useCallback((settlement: LabourWageSettlement) => settlement.accountingStatus ?? settlement.status, []);
-  const canDeleteSettlement = useCallback((settlement: LabourWageSettlement) => settlementStatus(settlement) === "accounting_missing", [settlementStatus]);
-  const repairAccounting = useCallback(async (settlement: LabourWageSettlement) => {
+  const canEditSettlement = useCallback((settlement: Pick<LabourWageSettlementDetail, "status" | "accountingStatus">) => settlement.status !== "deleted" && settlement.status !== "voided" && settlement.accountingStatus !== "posted", []);
+  const canDeleteSettlement = useCallback((settlement: Pick<LabourWageSettlementDetail, "status" | "accountingStatus">) => settlement.status !== "deleted" && settlement.status !== "voided" && settlement.accountingStatus !== "posted", []);
+  const canVoidSettlement = useCallback((settlement: Pick<LabourWageSettlementDetail, "status" | "accountingStatus">) => settlement.status === "posted" && settlement.accountingStatus === "posted", []);
+  const openSettlement = useCallback((settlement: LabourWageSettlement | LabourWageSettlementDetail, mode: "view" | "edit" = "view") => {
+    setSelectedSettlement(settlement);
+    setSelectedSettlementMode(mode);
+    setVoidReason("");
+    if (mode === "edit") {
+      setEditForm({
+        fromDate: settlement.fromDate,
+        toDate: settlement.toDate,
+        settlementDate: settlement.settlementDate,
+        accountId: settlement.linkedAccountId,
+        notes: settlement.notes ?? "",
+      });
+    }
+  }, []);
+  const closeSettlement = useCallback(() => {
+    setSelectedSettlement(null);
+    setSelectedSettlementMode("view");
+    setSelectedSettlementLoading(false);
+    setVoidReason("");
+    setEditForm({ fromDate: "", toDate: "", settlementDate: "", accountId: "", notes: "" });
+  }, []);
+  const repairAccounting = useCallback(async (settlement: Pick<LabourWageSettlementDetail, "id" | "settlementNumber">) => {
     if (!token || !workspaceId) return;
     setRepairingSettlementId(settlement.id);
     setError("");
@@ -281,6 +331,89 @@ export function LabourWageSettlements() {
       setRepairingSettlementId(null);
     }
   }, [syncFromServer, token, workspaceId]);
+  const saveSettlement = useCallback(async () => {
+    if (!token || !workspaceId || !selectedSettlement) return;
+    setSavingSettlementId(selectedSettlement.id);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await updateLabourWageSettlement(token, workspaceId, selectedSettlement.id, {
+        fromDate: editForm.fromDate,
+        toDate: editForm.toDate,
+        settlementDate: editForm.settlementDate,
+        accountId: editForm.accountId,
+        notes: editForm.notes.trim() || null,
+      });
+      await offlineDb.labourWageSettlements.update(selectedSettlement.id, {
+        settlementNumber: response.settlement.settlementNumber,
+        linkedVoucherId: response.settlement.linkedVoucherId,
+        linkedVoucherNumber: response.settlement.linkedVoucherNumber,
+        linkedAccountId: response.settlement.linkedAccountId,
+        fromDate: response.settlement.fromDate,
+        toDate: response.settlement.toDate,
+        settlementDate: response.settlement.settlementDate,
+        attendanceWages: response.settlement.attendanceWages,
+        pendingLabourEarnings: response.settlement.pendingLabourEarnings,
+        totalEarned: response.settlement.totalEarned,
+        advancesPaid: response.settlement.advancesPaid,
+        settledAdvanceAmount: response.settlement.settledAdvanceAmount,
+        expenseAmount: response.settlement.expenseAmount,
+        carryForwardAdvance: response.settlement.carryForwardAdvance,
+        payableBalance: response.settlement.payableBalance,
+        notes: response.settlement.notes,
+        status: response.settlement.status,
+        accountingStatus: response.settlement.accountingStatus,
+        accountingMessage: response.settlement.accountingMessage ?? null,
+        createdBy: response.settlement.createdBy,
+        createdAt: response.settlement.createdAt,
+        updatedAt: response.settlement.updatedAt,
+        deletedAt: response.settlement.deletedAt ?? null,
+        deletedBy: response.settlement.deletedBy ?? null,
+        voidedAt: response.settlement.voidedAt ?? null,
+        voidedBy: response.settlement.voidedBy ?? null,
+        voidReason: response.settlement.voidReason ?? null,
+        pendingSync: false,
+      });
+      setSelectedSettlement(response.settlement);
+      setSelectedSettlementMode("view");
+      setSuccess(`Settlement ${response.settlement.settlementNumber} updated.`);
+      window.dispatchEvent(new Event("muzare-local-data-change"));
+      await syncFromServer();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to update this settlement.");
+    } finally {
+      setSavingSettlementId(null);
+    }
+  }, [editForm.accountId, editForm.fromDate, editForm.notes, editForm.settlementDate, editForm.toDate, selectedSettlement, syncFromServer, token, workspaceId]);
+  const voidSettlement = useCallback(async () => {
+    if (!token || !workspaceId || !voidingSettlement) return;
+    setVoidingSettlementId(voidingSettlement.id);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await voidLabourWageSettlement(token, workspaceId, voidingSettlement.id, {
+        voidReason: voidReason.trim() || undefined,
+      });
+      await offlineDb.labourWageSettlements.update(voidingSettlement.id, {
+        status: "voided",
+        accountingStatus: "voided",
+        accountingMessage: "Settlement has been voided.",
+        voidedAt: response.voidedAt,
+        voidedBy: response.voidedBy,
+        voidReason: response.voidReason,
+        updatedAt: response.voidedAt,
+      });
+      setVoidingSettlement(null);
+      closeSettlement();
+      setSuccess(`Settlement ${response.settlementNumber} voided and reversed.`);
+      window.dispatchEvent(new Event("muzare-local-data-change"));
+      await syncFromServer();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to void this settlement.");
+    } finally {
+      setVoidingSettlementId(null);
+    }
+  }, [closeSettlement, syncFromServer, token, voidReason, voidingSettlement, workspaceId]);
   const deleteSettlement = useCallback(async (settlement: LabourWageSettlement) => {
     if (!token || !workspaceId) return;
     setDeletingSettlementId(settlement.id);
@@ -298,7 +431,7 @@ export function LabourWageSettlements() {
         updatedAt: deletedAt,
       });
       setDeletingSettlement(null);
-      setSelectedSettlement((current) => current?.id === settlement.id ? null : current);
+      if (selectedSettlement?.id === settlement.id) closeSettlement();
       setSuccess(`Settlement ${response.settlementNumber} deleted. Its advances are available for reposting.`);
       window.dispatchEvent(new Event("muzare-local-data-change"));
       await syncFromServer();
@@ -307,7 +440,7 @@ export function LabourWageSettlements() {
     } finally {
       setDeletingSettlementId(null);
     }
-  }, [syncFromServer, token, user?.id, workspaceId]);
+  }, [closeSettlement, selectedSettlement?.id, syncFromServer, token, user?.id, workspaceId]);
   const registerRows = useMemo(() => {
     const term = registerSearch.trim().toLowerCase();
     return settlements.filter((settlement) => {
@@ -563,7 +696,7 @@ export function LabourWageSettlements() {
                   {registerRows.map((settlement) => {
                     return (
                       <tr key={settlement.id}>
-                        <td><button type="button" className="worker-dialog__link" onClick={() => setSelectedSettlement(settlement)}>{settlement.settlementNumber}</button></td>
+                        <td><button type="button" className="worker-dialog__link" onClick={() => openSettlement(settlement)}>{settlement.settlementNumber}</button></td>
                         <td>{settlement.settlementDate}</td>
                         <td>{settlement.fromDate} to {settlement.toDate}</td>
                         <td>{money(settlement.attendanceWages)}</td>
@@ -577,16 +710,9 @@ export function LabourWageSettlements() {
                         <td>{settlementStatus(settlement).replaceAll("_", " ")}</td>
                         <td>
                           <div className="stacked-inline-actions">
-                            <button type="button" className="secondary-action" onClick={() => setSelectedSettlement(settlement)}>View</button>
-                            {settlementStatus(settlement) === "accounting_missing" ? (
-                              <button
-                                type="button"
-                                className="secondary-action"
-                                disabled={repairingSettlementId === settlement.id}
-                                onClick={() => void repairAccounting(settlement)}
-                              >
-                                {repairingSettlementId === settlement.id ? "Repairing..." : "Repair accounting"}
-                              </button>
+                            <button type="button" className="secondary-action" onClick={() => openSettlement(settlement)}>View</button>
+                            {canEditSettlement(settlement) ? (
+                              <button type="button" className="secondary-action" onClick={() => openSettlement(settlement, "edit")}>Edit / Update</button>
                             ) : null}
                             {canDeleteSettlement(settlement) ? (
                               <button
@@ -597,13 +723,28 @@ export function LabourWageSettlements() {
                               >
                                 {deletingSettlementId === settlement.id ? "Deleting..." : "Delete settlement"}
                               </button>
-                            ) : settlement.status === "posted" ? (
+                            ) : null}
+                            {canVoidSettlement(settlement) ? (
                               <button
                                 type="button"
                                 className="secondary-action"
-                                onClick={() => setError("This settlement has accounting entries. Use Void/Reverse instead.")}
+                                disabled={voidingSettlementId === settlement.id}
+                                onClick={() => {
+                                  setVoidingSettlement(settlement);
+                                  setVoidReason("");
+                                }}
                               >
-                                Void / Reverse
+                                {voidingSettlementId === settlement.id ? "Voiding..." : "Void / Reverse settlement"}
+                              </button>
+                            ) : null}
+                            {settlementStatus(settlement) === "accounting_missing" ? (
+                              <button
+                                type="button"
+                                className="secondary-action"
+                                disabled={repairingSettlementId === settlement.id}
+                                onClick={() => void repairAccounting(settlement)}
+                              >
+                                {repairingSettlementId === settlement.id ? "Repairing..." : "Repair accounting"}
                               </button>
                             ) : null}
                           </div>
@@ -619,56 +760,140 @@ export function LabourWageSettlements() {
         </section>
         {selectedSettlement ? (() => {
           return (
-            <div className="worker-dialog-backdrop worker-action-backdrop" role="presentation" onClick={() => setSelectedSettlement(null)}>
+            <div className="worker-dialog-backdrop worker-action-backdrop" role="presentation" onClick={closeSettlement}>
               <section className="worker-action-dialog account-ledger-dialog" role="dialog" aria-modal="true" aria-label="Labour settlement details" onClick={(event) => event.stopPropagation()}>
                 <header>
                   <div>
                     <h2>{selectedSettlement.settlementNumber}</h2>
                     <p>{selectedSettlement.fromDate} to {selectedSettlement.toDate}</p>
                   </div>
-                  <button aria-label={t("common.close")} type="button" onClick={() => setSelectedSettlement(null)}><X size={18} /></button>
+                  <button aria-label={t("common.close")} type="button" onClick={closeSettlement}><X size={18} /></button>
                 </header>
                 <div className="worker-action-form">
-                  <div className="reports-kpis">
-                    <article><span>Settlement date</span><strong>{selectedSettlement.settlementDate}</strong></article>
-                    <article><span>Attendance wages</span><strong>{money(selectedSettlement.attendanceWages)}</strong></article>
-                    <article><span>Labour work</span><strong>{money(selectedSettlement.pendingLabourEarnings)}</strong></article>
-                    <article><span>Total labour cost</span><strong>{money(selectedSettlement.expenseAmount)}</strong></article>
-                    <article><span>Advances applied</span><strong>{money(selectedSettlement.settledAdvanceAmount)}</strong></article>
-                    <article><span>Carry-forward advance</span><strong>{money(selectedSettlement.carryForwardAdvance)}</strong></article>
-                    <article><span>Cash paid</span><strong>{money(selectedSettlement.payableBalance)}</strong></article>
-                    <article><span>Payment account</span><strong>{settlementPaymentAccountById.get(selectedSettlement.linkedAccountId)?.name ?? accountById.get(selectedSettlement.linkedAccountId)?.name ?? "-"}</strong></article>
-                    <article><span>Accounting reference</span><strong>{selectedSettlement.settlementNumber}</strong></article>
-                  </div>
-                  {selectedSettlement.notes ? <p className="context-message">{selectedSettlement.notes}</p> : null}
-                  {settlementStatus(selectedSettlement) === "accounting_missing" ? (
-                    <div className="worker-action-warning">
-                      <strong>Accounting entries missing.</strong>
-                      <p>{selectedSettlement.accountingMessage ?? "Repost accounting to restore this settlement in the accounts ledger."}</p>
-                    </div>
-                  ) : null}
+                  {selectedSettlementMode === "edit" ? (
+                    <>
+                      <div className="advances-filter-row">
+                        <label className="advances-filter-field">
+                          <span>From date</span>
+                          <input required type="date" value={editForm.fromDate} onChange={(event) => setEditForm((current) => ({ ...current, fromDate: event.target.value }))} />
+                        </label>
+                        <label className="advances-filter-field">
+                          <span>To date</span>
+                          <input required type="date" value={editForm.toDate} onChange={(event) => setEditForm((current) => ({ ...current, toDate: event.target.value }))} />
+                        </label>
+                        <label className="advances-filter-field">
+                          <span>Settlement date</span>
+                          <input required type="date" value={editForm.settlementDate} onChange={(event) => setEditForm((current) => ({ ...current, settlementDate: event.target.value }))} />
+                        </label>
+                      </div>
+                      <div className="advances-filter-row">
+                        <label className="advances-filter-field">
+                          <span>Settlement account</span>
+                          <select required value={editForm.accountId} onChange={(event) => setEditForm((current) => ({ ...current, accountId: event.target.value }))}>
+                            <option value="">Select settlement account</option>
+                            {paymentAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+                          </select>
+                        </label>
+                        <label className="advances-filter-field advances-filter-field--full">
+                          <span>Notes</span>
+                          <input value={editForm.notes} onChange={(event) => setEditForm((current) => ({ ...current, notes: event.target.value }))} placeholder="Optional settlement notes or reference" />
+                        </label>
+                      </div>
+                      <p className="context-message">Editing is only allowed before posted accounting is healthy, or for notes-only changes.</p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="reports-kpis">
+                        <article><span>Settlement date</span><strong>{selectedSettlement.settlementDate}</strong></article>
+                        <article><span>Attendance wages</span><strong>{money(selectedSettlement.attendanceWages)}</strong></article>
+                        <article><span>Labour work</span><strong>{money(selectedSettlement.pendingLabourEarnings)}</strong></article>
+                        <article><span>Total labour cost</span><strong>{money(selectedSettlement.expenseAmount)}</strong></article>
+                        <article><span>Advances applied</span><strong>{money(selectedSettlement.settledAdvanceAmount)}</strong></article>
+                        <article><span>Carry-forward advance</span><strong>{money(selectedSettlement.carryForwardAdvance)}</strong></article>
+                        <article><span>Cash paid</span><strong>{money(selectedSettlement.payableBalance)}</strong></article>
+                        <article><span>Payment account</span><strong>{settlementPaymentAccountById.get(selectedSettlement.linkedAccountId)?.name ?? accountById.get(selectedSettlement.linkedAccountId)?.name ?? "-"}</strong></article>
+                        <article><span>Accounting reference</span><strong>{selectedSettlement.settlementNumber}</strong></article>
+                      </div>
+                      {selectedSettlement.notes ? <p className="context-message">{selectedSettlement.notes}</p> : null}
+                      {selectedSettlement.accountingStatus === "accounting_missing" ? (
+                        <div className="worker-action-warning">
+                          <strong>Accounting entries missing.</strong>
+                          <p>{selectedSettlement.accountingMessage ?? "Repost accounting to restore this settlement in the accounts ledger."}</p>
+                        </div>
+                      ) : null}
+                      {selectedSettlement.accountingStatus === "posted" ? (
+                        <div className="worker-action-warning">
+                          <strong>Accounting is posted.</strong>
+                          <p>This settlement can be viewed or voided, but not edited directly.</p>
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                  {selectedSettlementLoading ? <p className="context-message">Refreshing settlement details...</p> : null}
                   <footer className="worker-action-footer">
-                    <button type="button" onClick={() => setSelectedSettlement(null)}>Close</button>
-                    {settlementStatus(selectedSettlement) === "accounting_missing" ? (
-                      <button
-                        type="button"
-                        className="secondary-action"
-                        disabled={repairingSettlementId === selectedSettlement.id}
-                        onClick={() => void repairAccounting(selectedSettlement)}
-                      >
-                        {repairingSettlementId === selectedSettlement.id ? "Repairing..." : "Repair accounting"}
-                      </button>
-                    ) : null}
-                    {canDeleteSettlement(selectedSettlement) ? (
-                      <button
-                        type="button"
-                        className="danger-button"
-                        disabled={deletingSettlementId === selectedSettlement.id}
-                        onClick={() => setDeletingSettlement(selectedSettlement)}
-                      >
-                        {deletingSettlementId === selectedSettlement.id ? "Deleting..." : "Delete settlement"}
-                      </button>
-                    ) : null}
+                    {selectedSettlementMode === "edit" ? (
+                      <>
+                        <button type="button" onClick={() => { setSelectedSettlementMode("view"); }}>
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary-action"
+                          disabled={savingSettlementId === selectedSettlement.id}
+                          onClick={() => void saveSettlement()}
+                        >
+                          {savingSettlementId === selectedSettlement.id ? "Updating..." : "Update settlement"}
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button type="button" onClick={closeSettlement}>Close</button>
+                        {selectedSettlement.accountingStatus === "accounting_missing" ? (
+                          <button
+                            type="button"
+                            className="secondary-action"
+                            disabled={repairingSettlementId === selectedSettlement.id}
+                            onClick={() => void repairAccounting(selectedSettlement)}
+                          >
+                            {repairingSettlementId === selectedSettlement.id ? "Repairing..." : "Repair accounting"}
+                          </button>
+                        ) : null}
+                        {canEditSettlement(selectedSettlement) ? (
+                          <button type="button" className="secondary-action" onClick={() => {
+                            setSelectedSettlementMode("edit");
+                            setEditForm({
+                              fromDate: selectedSettlement.fromDate,
+                              toDate: selectedSettlement.toDate,
+                              settlementDate: selectedSettlement.settlementDate,
+                              accountId: selectedSettlement.linkedAccountId,
+                              notes: selectedSettlement.notes ?? "",
+                            });
+                          }}>
+                            Edit / Update
+                          </button>
+                        ) : null}
+                        {canDeleteSettlement(selectedSettlement) ? (
+                          <button
+                            type="button"
+                            className="danger-button"
+                            disabled={deletingSettlementId === selectedSettlement.id}
+                            onClick={() => setDeletingSettlement(selectedSettlement as unknown as LabourWageSettlement)}
+                          >
+                            {deletingSettlementId === selectedSettlement.id ? "Deleting..." : "Delete settlement"}
+                          </button>
+                        ) : null}
+                        {canVoidSettlement(selectedSettlement) ? (
+                          <button
+                            type="button"
+                            className="secondary-action"
+                            disabled={voidingSettlementId === selectedSettlement.id}
+                            onClick={() => setVoidingSettlement(selectedSettlement)}
+                          >
+                            {voidingSettlementId === selectedSettlement.id ? "Voiding..." : "Void / Reverse settlement"}
+                          </button>
+                        ) : null}
+                      </>
+                    )}
                   </footer>
                 </div>
               </section>
@@ -694,6 +919,35 @@ export function LabourWageSettlements() {
                   <button type="button" onClick={() => setDeletingSettlement(null)} disabled={Boolean(deletingSettlementId)}>Cancel</button>
                   <button type="button" className="danger-button" onClick={() => void deleteSettlement(deletingSettlement)} disabled={Boolean(deletingSettlementId)}>
                     {deletingSettlementId ? "Deleting..." : "Delete settlement"}
+                  </button>
+                </footer>
+              </div>
+            </section>
+          </div>
+        ) : null}
+        {voidingSettlement ? (
+          <div className="worker-dialog-backdrop worker-action-backdrop" role="presentation" onClick={() => voidingSettlementId ? undefined : setVoidingSettlement(null)}>
+            <section className="worker-action-dialog account-ledger-dialog" role="dialog" aria-modal="true" aria-label="Void settlement confirmation" onClick={(event) => event.stopPropagation()}>
+              <header>
+                <div>
+                  <h2>Void settlement</h2>
+                  <p>{voidingSettlement.settlementNumber}</p>
+                </div>
+                <button aria-label={t("common.close")} type="button" onClick={() => voidingSettlementId ? undefined : setVoidingSettlement(null)}><X size={18} /></button>
+              </header>
+              <div className="worker-action-form">
+                <div className="worker-action-warning">
+                  <strong>Void settlement {voidingSettlement.settlementNumber}?</strong>
+                  <p>This will reverse accounting entries and preserve the audit trail.</p>
+                </div>
+                <label className="advances-filter-field advances-filter-field--full">
+                  <span>Void reason</span>
+                  <input value={voidReason} onChange={(event) => setVoidReason(event.target.value)} placeholder="Optional void reason" />
+                </label>
+                <footer className="worker-action-footer">
+                  <button type="button" onClick={() => setVoidingSettlement(null)} disabled={Boolean(voidingSettlementId)}>Cancel</button>
+                  <button type="button" className="secondary-action" onClick={() => void voidSettlement()} disabled={Boolean(voidingSettlementId)}>
+                    {voidingSettlementId ? "Voiding..." : "Void / Reverse settlement"}
                   </button>
                 </footer>
               </div>

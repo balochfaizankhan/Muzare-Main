@@ -443,6 +443,7 @@ export async function previewLabourWageSettlement(
   fromDate: string,
   toDate: string,
   settlementDate: string,
+  excludeSettlementId?: string,
 ) {
   const [attendanceRows, advanceRows, labourRows, wageRates, earningRows, allSettlements] = await Promise.all([
     tx.select({
@@ -475,7 +476,7 @@ export async function previewLabourWageSettlement(
     listLabourEarnings(tx, workspaceId, farmId, seasonId),
     listLabourWageSettlements(tx, workspaceId, farmId, seasonId),
   ]);
-  const activeSettlements = allSettlements.filter((row) => !isDeletedOperationalPayload(row.payload) && row.payload.status !== "voided");
+  const activeSettlements = allSettlements.filter((row) => !isDeletedOperationalPayload(row.payload) && row.payload.status !== "voided" && row.clientRecordId !== excludeSettlementId);
   const existingSettlements = activeSettlements.filter((row) =>
     settlementRangesOverlap(row.payload.fromDate, row.payload.toDate, fromDate, toDate));
 

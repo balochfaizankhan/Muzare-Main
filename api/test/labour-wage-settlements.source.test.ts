@@ -85,9 +85,13 @@ test("labour wage settlements resolve canonical payment accounts and accept lega
 test("labour wage settlements repair missing accounting transactions through the settlement id", () => {
   const source = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
   const libSource = readFileSync(new URL("../src/lib/labour-wage-settlements.ts", import.meta.url), "utf8");
+  assert.ok(source.includes('"/v1/workspace/:workspaceId/labour-wage-settlements/:settlementId"'));
   assert.ok(source.includes('"/v1/workspace/:workspaceId/labour-wage-settlements/:settlementId/repair-accounting"'));
+  assert.ok(source.includes('"/v1/workspace/:workspaceId/labour-wage-settlements/:settlementId/void"'));
   assert.ok(source.includes("repairPostedSettlementAccounting"));
   assert.ok(source.includes('action: "labour_wage_settlement_accounting_repaired"'));
+  assert.ok(source.includes('action: "labour_wage_settlement_updated"'));
+  assert.ok(source.includes('action: "labour_wage_settlement_voided"'));
   assert.ok(libSource.includes('source: "settlement"'));
   assert.ok(libSource.includes('sourceType: "labour_wage_settlement"'));
   assert.ok(libSource.includes("referenceId: settlementRecord.clientRecordId"));

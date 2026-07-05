@@ -319,9 +319,15 @@ test("labour settlement form loads canonical payment account uuids and shows LW 
   const settlementPage = await source("web/src/pages/workspace/LabourWageSettlements.tsx");
   const api = await source("web/src/lib/api.ts");
   assert.match(api, /fetchLabourWageSettlementPaymentAccounts/);
+  assert.match(api, /fetchLabourWageSettlement/);
+  assert.match(api, /updateLabourWageSettlement/);
+  assert.match(api, /voidLabourWageSettlement/);
   assert.match(settlementPage, /fetchLabourWageSettlementPaymentAccounts\(token, workspaceId, activeFarmId\)/);
   assert.match(settlementPage, /Settlement accounting is posted under the LW settlement number\./);
   assert.match(settlementPage, /Accounting reference/);
+  assert.match(settlementPage, /Edit \/ Update/);
+  assert.match(settlementPage, /Void \/ Reverse settlement/);
+  assert.match(settlementPage, /Delete settlement/);
   assert.match(settlementPage, /placeholder="Search settlement number, notes, or account"/);
   assert.doesNotMatch(settlementPage, /Generated voucher|View Generated Voucher/);
   assert.doesNotMatch(settlementPage, /Settlement and voucher are posted together in one transaction\./);
