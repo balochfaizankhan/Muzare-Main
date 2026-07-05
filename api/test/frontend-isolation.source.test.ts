@@ -251,10 +251,18 @@ test("attendance labour directory loads cache-first and keeps cached data during
 test("mobile styles contain page overflow and keep navigation scrollable", async () => {
   const modulePage = await source("web/src/pages/ModulePage.tsx");
   const styles = await source("web/src/styles.css");
+  const layout = await source("web/src/layouts/WorkspaceLayout.tsx");
   assert.match(styles, /html,\s*body \{[\s\S]*overflow-x: hidden;/);
   assert.match(styles, /#root \{[\s\S]*overflow-x: clip;/);
   assert.match(styles, /\.app-sidebar \{[\s\S]*overflow-x: auto;/);
   assert.match(styles, /\.shell-header \.toolbar__actions \{[\s\S]*flex-wrap: wrap;/);
+  assert.match(layout, /<nav className="app-sidebar__desktop-nav">/);
+  assert.match(layout, /<nav className="app-mobile-bottom-nav"/);
+  assert.doesNotMatch(layout, /<nav className="app-sidebar__mobile-nav"/);
+  assert.match(styles, /@media \(max-width: 767px\) \{/);
+  assert.match(styles, /@media \(min-width: 768px\) \{/);
+  assert.match(styles, /\.app-mobile-sheet-backdrop \{[\s\S]*background: rgba\(2, 16, 30, 0\.35\);[\s\S]*position: fixed;/);
+  assert.match(styles, /\.app-mobile-sheet \{[\s\S]*background: var\(--surface\);[\s\S]*opacity: 1;/);
   assert.match(modulePage, /className="partner-position-cards"/);
   assert.match(styles, /\.partner-position-cards \{ display: none; \}/);
   assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*\.partner-position-table \{\s*display: none;[\s\S]*\.partner-position-cards \{\s*display: grid;/);

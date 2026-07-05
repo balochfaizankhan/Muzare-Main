@@ -15,7 +15,6 @@ import {
   previewLabourWageSettlement,
   settlementRangesOverlap,
 } from "../lib/labour-wage-settlements.js";
-import { allocateVoucherNumber } from "../lib/voucher-numbers.js";
 import { resolveExpenseCategory } from "./expense-categories.js";
 
 const paramsSchema = z.object({ workspaceId: z.string().uuid() });
@@ -206,14 +205,11 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         const settlementId = crypto.randomUUID();
         const settlementNumber = await allocateSettlementNumber(tx, workspaceId, farmId);
         const voucherId = crypto.randomUUID();
-        const voucherNumber = await allocateVoucherNumber(tx, workspaceId, farmId, seasonId);
         const description = `Labour wage settlement: ${fromDate} to ${toDate} (attendance wages + labour work)`;
         const voucherPayload = {
           id: voucherId,
           date: settlementDate,
-          voucherNumber,
-          originalVoucherNumber: voucherNumber,
-          legacyVoucherNumber: voucherNumber,
+          voucherNumber: settlementNumber,
           categoryId: category.categoryId,
           category: category.category,
           subcategoryId: category.subcategoryId,
@@ -250,7 +246,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           id: settlementId,
           settlementNumber,
           linkedVoucherId: voucherId,
-          linkedVoucherNumber: voucherNumber,
+          linkedVoucherNumber: settlementNumber,
           linkedAccountId: accountId,
           fromDate,
           toDate,

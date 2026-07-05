@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { canonicalImportedVoucherNumber, resolveVoucherPayloadForWrite } from "../src/lib/import-voucher-numbers.js";
 
@@ -64,4 +65,12 @@ test("resolveVoucherPayloadForWrite allows explicit imported voucher renumber ed
   assert.equal(result.nextPayload.voucherNumber, "V-0200");
   assert.equal(result.nextPayload.originalVoucherNumber, "V-0141");
   assert.equal(result.nextPayload.voucherNumberEdited, true);
+});
+
+test("normal expense voucher duplicate checks ignore labour wage settlement vouchers", () => {
+  const voucherNumberSource = readFileSync(new URL("../src/lib/voucher-numbers.ts", import.meta.url), "utf8");
+  const syncRouteSource = readFileSync(new URL("../src/routes/operational-sync.ts", import.meta.url), "utf8");
+  assert.ok(voucherNumberSource.includes("voucherPurpose', '') <> 'labour_wage_settlement'"));
+  assert.ok(voucherNumberSource.includes("nonCashSettlement', 'false') <> 'true'"));
+  assert.ok(syncRouteSource.includes("normalExpenseVoucherWhereSql()"));
 });

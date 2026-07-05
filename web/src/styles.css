@@ -6634,6 +6634,10 @@ button {
   display: none;
 }
 
+.app-mobile-bottom-nav {
+  display: none;
+}
+
 .app-shell__body {
   max-width: 100%;
   min-width: 0;
@@ -6773,10 +6777,18 @@ button {
 }
 
 .app-mobile-sheet-backdrop {
+  align-items: stretch;
+  background: rgba(2, 16, 30, 0.35);
+  backdrop-filter: blur(8px);
+  inset: 0;
+  justify-content: flex-end;
+  position: fixed;
   z-index: 125;
 }
 
 .app-mobile-sheet {
+  background: var(--surface);
+  opacity: 1;
   max-width: 420px;
 }
 
@@ -7273,28 +7285,12 @@ button {
   text-decoration: none;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 767px) {
   .app-shell {
     display: block;
   }
 
   .app-sidebar {
-    background: rgba(250, 252, 247, 0.98);
-    bottom: 0;
-    box-shadow: 0 -8px 22px rgba(15, 23, 42, 0.12);
-    inset-inline: 0;
-    min-height: 0;
-    overflow-x: clip;
-    overflow-y: hidden;
-    overscroll-behavior-inline: contain;
-    padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
-    position: fixed;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
-    z-index: 80;
-  }
-
-  .app-sidebar::-webkit-scrollbar {
     display: none;
   }
 
@@ -7307,15 +7303,31 @@ button {
     display: none;
   }
 
-  .app-sidebar__mobile-nav {
+  .app-mobile-bottom-nav {
     display: flex;
+    background: rgba(250, 252, 247, 0.98);
+    bottom: 0;
+    box-shadow: 0 -8px 22px rgba(15, 23, 42, 0.12);
     gap: 6px;
+    inset-inline: 0;
     min-width: 100%;
+    overflow-x: clip;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
+    position: fixed;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
     width: 100%;
+    z-index: 80;
   }
 
-  .app-sidebar__mobile-nav a,
-  .app-sidebar__mobile-action {
+  .app-mobile-bottom-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .app-mobile-bottom-nav a,
+  .app-mobile-bottom-nav__action {
     align-items: center;
     background: transparent;
     border: 0;
@@ -7334,14 +7346,14 @@ button {
     text-decoration: none;
   }
 
-  .app-sidebar__mobile-nav a.active,
-  .app-sidebar__mobile-action.active {
+  .app-mobile-bottom-nav a.active,
+  .app-mobile-bottom-nav__action.active {
     background: rgba(74, 124, 52, 0.12);
     color: #21421e;
   }
 
-  .app-sidebar__mobile-nav a svg,
-  .app-sidebar__mobile-action svg {
+  .app-mobile-bottom-nav a svg,
+  .app-mobile-bottom-nav__action svg {
     height: 18px;
     width: 18px;
   }
@@ -9213,6 +9225,13 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .worker-dialog--record-detail .worker-dialog__primary {
     border-radius: 12px;
     height: 46px;
+  }
+}
+
+@media (min-width: 768px) {
+  .app-mobile-bottom-nav,
+  .app-mobile-sheet-backdrop {
+    display: none;
   }
 }
 

@@ -1233,13 +1233,22 @@ async function repairImportedVoucherNumbers(workspaceId: string): Promise<Vouche
         eq(operationalRecords.sourceType, sourceTypeFor("expenses")),
         sql`${operationalRecords.payload}->>'source_type' = ${sourceTypeFor("expenses")}`,
         sql`nullif(trim(coalesce(${operationalRecords.payload}->>'originalVoucherNumber', '')), '') IS NOT NULL`,
-        sql`nullif(trim(coalesce(${operationalRecords.payload}->>'legacyVoucherNumber', '')), '') IS NOT NULL`
+        sql`nullif(trim(coalesce(${operationalRecords.payload}->>'legacyVoucherNumber', '')), '') IS NOT NULL`,
+        sql`coalesce(${operationalRecords.payload}->>'voucherPurpose', '') = 'labour_wage_settlement'`,
+        sql`coalesce(${operationalRecords.payload}->>'nonCashSettlement', 'false') = 'true'`
       ),
     ));
 
     const mismatchedRows = voucherRows.filter((row) => {
       const payload = row.payload as Record<string, unknown>;
       const currentVoucherNumber = String(payload.voucherNumber ?? "").trim();
+      const settlementNumber = String(payload.settlementNumber ?? "").trim();
+      const isSettlementVoucher = payload.voucherPurpose === "labour_wage_settlement" || payload.nonCashSettlement === true;
+      if (isSettlementVoucher) {
+        return currentVoucherNumber !== settlementNumber
+          || String(payload.originalVoucherNumber ?? "").trim().length > 0
+          || String(payload.legacyVoucherNumber ?? "").trim().length > 0;
+      }
       const originalVoucherNumber = String(payload.originalVoucherNumber ?? "").trim();
       const legacyVoucherNumber = String(payload.legacyVoucherNumber ?? "").trim();
       const repairedVoucherNumber = originalVoucherNumber || legacyVoucherNumber;
@@ -1250,16 +1259,29 @@ async function repairImportedVoucherNumbers(workspaceId: string): Promise<Vouche
     for (const row of mismatchedRows) {
       const payload = row.payload as Record<string, unknown>;
       const previousVoucherNumber = String(payload.voucherNumber ?? "").trim();
-      const repairedVoucherNumber = String(payload.originalVoucherNumber ?? "").trim()
-        || String(payload.legacyVoucherNumber ?? "").trim();
+      const isSettlementVoucher = payload.voucherPurpose === "labour_wage_settlement" || payload.nonCashSettlement === true;
+      const repairedVoucherNumber = isSettlementVoucher
+        ? String(payload.settlementNumber ?? "").trim()
+        : String(payload.originalVoucherNumber ?? "").trim()
+          || String(payload.legacyVoucherNumber ?? "").trim();
       if (!repairedVoucherNumber) continue;
       const repairedAt = new Date();
-      const nextPayload = {
-        ...payload,
-        voucherNumber: repairedVoucherNumber,
-        voucherNumberEdited: false,
-        updatedAt: repairedAt.toISOString(),
-      };
+      const nextPayload = isSettlementVoucher
+        ? (() => {
+            const { originalVoucherNumber: _originalVoucherNumber, legacyVoucherNumber: _legacyVoucherNumber, ...restPayload } = payload;
+            return {
+              ...restPayload,
+              voucherNumber: repairedVoucherNumber,
+              voucherNumberEdited: false,
+              updatedAt: repairedAt.toISOString(),
+            };
+          })()
+        : {
+            ...payload,
+            voucherNumber: repairedVoucherNumber,
+            voucherNumberEdited: false,
+            updatedAt: repairedAt.toISOString(),
+          };
       await tx.update(operationalRecords).set({
         payload: nextPayload,
         clientUpdatedAt: repairedAt,
@@ -1273,6 +1295,30 @@ async function repairImportedVoucherNumbers(workspaceId: string): Promise<Vouche
       });
     }
 
+    const settlementRows = await tx.select({
+      id: operationalRecords.id,
+      payload: operationalRecords.payload,
+    }).from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, workspaceId),
+      eq(operationalRecords.entityType, "labourWageSettlement"),
+      sql`${operationalRecords.payload}->>'deletedAt' IS NULL`,
+    ));
+    for (const row of settlementRows) {
+      const payload = row.payload as Record<string, unknown>;
+      const settlementNumber = String(payload.settlementNumber ?? "").trim();
+      if (!settlementNumber || String(payload.linkedVoucherNumber ?? "").trim() === settlementNumber) continue;
+      const repairedAt = new Date();
+      await tx.update(operationalRecords).set({
+        payload: {
+          ...payload,
+          linkedVoucherNumber: settlementNumber,
+          updatedAt: repairedAt.toISOString(),
+        },
+        clientUpdatedAt: repairedAt,
+        updatedAt: repairedAt,
+      }).where(eq(operationalRecords.id, row.id));
+    }
+
     const afterRows = await tx.select({
       payload: operationalRecords.payload,
     }).from(operationalRecords).where(and(
@@ -1283,13 +1329,22 @@ async function repairImportedVoucherNumbers(workspaceId: string): Promise<Vouche
         eq(operationalRecords.sourceType, sourceTypeFor("expenses")),
         sql`${operationalRecords.payload}->>'source_type' = ${sourceTypeFor("expenses")}`,
         sql`nullif(trim(coalesce(${operationalRecords.payload}->>'originalVoucherNumber', '')), '') IS NOT NULL`,
-        sql`nullif(trim(coalesce(${operationalRecords.payload}->>'legacyVoucherNumber', '')), '') IS NOT NULL`
+        sql`nullif(trim(coalesce(${operationalRecords.payload}->>'legacyVoucherNumber', '')), '') IS NOT NULL`,
+        sql`coalesce(${operationalRecords.payload}->>'voucherPurpose', '') = 'labour_wage_settlement'`,
+        sql`coalesce(${operationalRecords.payload}->>'nonCashSettlement', 'false') = 'true'`
       ),
     ));
 
     const mismatchesAfter = afterRows.filter((row) => {
       const payload = row.payload as Record<string, unknown>;
       const currentVoucherNumber = String(payload.voucherNumber ?? "").trim();
+      const settlementNumber = String(payload.settlementNumber ?? "").trim();
+      const isSettlementVoucher = payload.voucherPurpose === "labour_wage_settlement" || payload.nonCashSettlement === true;
+      if (isSettlementVoucher) {
+        return currentVoucherNumber !== settlementNumber
+          || String(payload.originalVoucherNumber ?? "").trim().length > 0
+          || String(payload.legacyVoucherNumber ?? "").trim().length > 0;
+      }
       const repairedVoucherNumber = String(payload.originalVoucherNumber ?? "").trim()
         || String(payload.legacyVoucherNumber ?? "").trim();
       return Boolean(repairedVoucherNumber) && currentVoucherNumber !== repairedVoucherNumber;

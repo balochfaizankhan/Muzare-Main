@@ -252,7 +252,7 @@ export function LabourWageSettlements() {
       });
       setPreview({ status: "idle", data: null });
       setNotes("");
-      setSuccess(`Settlement ${response.settlement.settlementNumber} posted. Voucher ${response.voucher.voucherNumber} was created for attendance wages and labour work.`);
+      setSuccess(`Settlement ${response.settlement.settlementNumber} posted. The linked accounting record now uses ${response.settlement.settlementNumber} as its reference.`);
       window.dispatchEvent(new Event("muzare-local-data-change"));
       await syncFromServer();
     } catch (caught) {

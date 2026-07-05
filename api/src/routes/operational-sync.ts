@@ -20,6 +20,7 @@ import {
   bumpVoucherSequence,
   duplicateVoucherNumberDetails,
   findExistingVoucherByNumber,
+  normalExpenseVoucherWhereSql,
   normalizeVoucherNumber,
   reserveVoucherNumber,
 } from "../lib/voucher-numbers.js";
@@ -595,6 +596,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       eq(operationalRecords.farmId, validationFarmId),
       eq(operationalRecords.entityType, "voucher"),
       activeOperationalPayloadSql(operationalRecords.payload),
+      normalExpenseVoucherWhereSql(),
     ));
     const highest = records.reduce((max, record) => {
       const value = typeof record.payload.voucherNumber === "string" ? record.payload.voucherNumber : "";

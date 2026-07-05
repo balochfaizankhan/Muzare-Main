@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { calculateLabourWageSettlementTotals, settlementRangesOverlap } from "../src/lib/labour-wage-settlements.js";
 
@@ -44,4 +45,11 @@ test("calculateLabourWageSettlementTotals recognizes attendance plus labour work
     carryForwardAdvance: 0,
     payableBalance: 0,
   });
+});
+
+test("labour wage settlements use settlement numbering instead of reserving expense voucher numbers", () => {
+  const source = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
+  assert.ok(!source.includes('import { allocateVoucherNumber } from "../lib/voucher-numbers.js";'));
+  assert.ok(source.includes("voucherNumber: settlementNumber"));
+  assert.ok(source.includes("linkedVoucherNumber: settlementNumber"));
 });

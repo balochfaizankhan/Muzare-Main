@@ -128,31 +128,6 @@ export function WorkspaceLayout() {
         <Brand compact />
         <span className="shell-label">{user?.workspaceName ?? t("layout.workspace")}</span>
         <nav className="app-sidebar__desktop-nav">{filteredNav.map(([to, label, Icon]) => <NavLink to={to} key={to}><Icon size={17} />{t(label)}</NavLink>)}</nav>
-        <nav className="app-sidebar__mobile-nav" aria-label="Primary mobile navigation">
-          {mobilePrimaryNav.map((item) => {
-            if ("to" in item) {
-              const Icon = item.icon;
-              const routeTo = item.to;
-              return <NavLink to={routeTo} key={routeTo} end={routeTo === "/workspace/dashboard"}><Icon size={18} /><span>{item.label}</span></NavLink>;
-            }
-            const Icon = item.icon;
-            const active = item.action === "more"
-              ? mobileMoreLinks.some(([to]) => location.pathname.startsWith(to))
-              : mobileSheet === item.action;
-            return (
-              <button
-                key={item.action}
-                type="button"
-                className={`app-sidebar__mobile-action${active ? " active" : ""}`}
-                onClick={() => setMobileSheet((current) => current === item.action ? null : item.action)}
-                aria-expanded={mobileSheet === item.action}
-              >
-                <Icon size={18} />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
-        </nav>
       </aside>
       <div className="app-shell__body">
         <header className="shell-header">
@@ -264,6 +239,31 @@ export function WorkspaceLayout() {
         <Outlet />
         {toast && <div className="saas-toast" role="status">{toast}</div>}
       </div>
+      <nav className="app-mobile-bottom-nav" aria-label="Primary mobile navigation">
+        {mobilePrimaryNav.map((item) => {
+          if ("to" in item) {
+            const Icon = item.icon;
+            const routeTo = item.to;
+            return <NavLink to={routeTo} key={routeTo} end={routeTo === "/workspace/dashboard"}><Icon size={18} /><span>{item.label}</span></NavLink>;
+          }
+          const Icon = item.icon;
+          const active = item.action === "more"
+            ? mobileMoreLinks.some(([to]) => location.pathname.startsWith(to))
+            : mobileSheet === item.action;
+          return (
+            <button
+              key={item.action}
+              type="button"
+              className={`app-mobile-bottom-nav__action${active ? " active" : ""}`}
+              onClick={() => setMobileSheet((current) => current === item.action ? null : item.action)}
+              aria-expanded={mobileSheet === item.action}
+            >
+              <Icon size={18} />
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
+      </nav>
     </div>
   );
 }

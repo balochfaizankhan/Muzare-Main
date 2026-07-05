@@ -31,6 +31,11 @@ export function duplicateVoucherNumberDetails(workspaceId: string, voucherNumber
   };
 }
 
+export function normalExpenseVoucherWhereSql(payloadColumn = operationalRecords.payload) {
+  return sql`coalesce(${payloadColumn}->>'voucherPurpose', '') <> 'labour_wage_settlement'
+    and coalesce(${payloadColumn}->>'nonCashSettlement', 'false') <> 'true'`;
+}
+
 export async function findExistingVoucherByNumber(
   tx: DbClient,
   workspaceId: string,
@@ -43,6 +48,7 @@ export async function findExistingVoucherByNumber(
     eq(operationalRecords.farmId, farmId),
     eq(operationalRecords.entityType, "voucher"),
     activeOperationalPayloadSql(operationalRecords.payload),
+    normalExpenseVoucherWhereSql(),
     sql`coalesce(
       case
         when coalesce(${operationalRecords.payload}->>'originalVoucherNumber', '') <> ''
