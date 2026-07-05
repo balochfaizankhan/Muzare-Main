@@ -810,12 +810,14 @@ export type LabourWageSettlementRecord = {
   carryForwardAdvance: number;
   payableBalance: number;
   notes?: string;
-  status: "posted" | "voided";
-  accountingStatus?: "draft" | "posted" | "accounting_missing" | "voided";
+  status: "posted" | "voided" | "deleted";
+  accountingStatus?: "draft" | "posted" | "accounting_missing" | "voided" | "deleted";
   accountingMessage?: string | null;
   createdBy?: string;
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string | null;
+  deletedBy?: string | null;
   voidedAt?: string | null;
   voidedBy?: string | null;
   voidReason?: string | null;
@@ -1409,7 +1411,7 @@ export const repairLabourWageSettlementAccounting = (
 ) => apiRequest<{
   settlementId: string;
   settlementNumber: string;
-  accountingStatus: "posted" | "accounting_missing" | "voided";
+  accountingStatus: "posted" | "accounting_missing" | "voided" | "deleted";
   createdTransactions: number;
   existingTransactions: number;
   accountId: string;
@@ -1419,6 +1421,23 @@ export const repairLabourWageSettlementAccounting = (
   { method: "POST" },
   token,
   { timeoutMs: 60_000, debugLabel: "labour-wage-settlement-repair-accounting" },
+);
+export const deleteLabourWageSettlement = (
+  token: string,
+  workspaceId: string,
+  settlementId: string,
+) => apiRequest<{
+  settlementId: string;
+  settlementNumber: string;
+  status: "deleted";
+  linkedVoucherId: string;
+  linkedVoucherNumber: string;
+  accountingEntries: number;
+}>(
+  `/v1/workspace/${workspaceId}/labour-wage-settlements/${settlementId}`,
+  { method: "DELETE" },
+  token,
+  { timeoutMs: 60_000, debugLabel: "labour-wage-settlement-delete" },
 );
 export const fetchExpenseCategories = (token: string, workspaceId: string) =>
   apiRequest<{ categories: ExpenseCategory[] }>(`/v1/workspace/${workspaceId}/expense-categories`, {}, token);

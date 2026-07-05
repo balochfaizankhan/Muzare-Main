@@ -108,7 +108,9 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         id: row.clientRecordId,
         ...row.payload,
         accountingStatus: settlementAccountingStatus(row.payload, transactionCountBySettlementId.get(row.clientRecordId) ?? 0),
-        accountingMessage: row.payload.status === "voided"
+        accountingMessage: row.payload.status === "deleted"
+          ? "Settlement deleted."
+          : row.payload.status === "voided"
           ? "Settlement is voided."
           : (transactionCountBySettlementId.get(row.clientRecordId) ?? 0) > 0
             ? null
@@ -408,6 +410,146 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
       });
       return repair;
     });
+    return result;
+  });
+
+  app.delete("/v1/workspace/:workspaceId/labour-wage-settlements/:settlementId", { preHandler: requireUser }, async (request, reply) => {
+    if (!request.appUser || !request.sessionId) return reply.code(401).send({ message: "A valid session is required." });
+    const params = settlementParamsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ message: "A valid settlement delete request is required." });
+    const { workspaceId, settlementId } = params.data;
+    if (request.appUser.workspaceId !== workspaceId) return reply.code(403).send({ message: "Select this workspace before deleting labour settlements." });
+    if (!hasModulePermission(request.appUser, workspaceId, "wages", "delete")) return reply.code(403).send({ message: "Workspace wage settlement delete permission is required." });
+
+    const settlements = await db.select({
+      id: operationalRecords.id,
+      clientRecordId: operationalRecords.clientRecordId,
+      workspaceId: operationalRecords.workspaceId,
+      farmId: operationalRecords.farmId,
+      seasonId: operationalRecords.seasonId,
+      clientUpdatedAt: operationalRecords.clientUpdatedAt,
+      payload: operationalRecords.payload,
+    }).from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, workspaceId),
+      eq(operationalRecords.entityType, "labourWageSettlement"),
+      eq(operationalRecords.clientRecordId, settlementId),
+    )).limit(1);
+    const settlement = settlements[0];
+    if (!settlement) return reply.code(404).send({ message: "Labour settlement not found." });
+
+    const payload = normalizeSettlementPayload(settlement.payload as Record<string, unknown>);
+    if (!settlement.farmId || !settlement.seasonId) {
+      return reply.code(400).send({ message: "Labour settlement is missing farm or season context." });
+    }
+    if (!hasFarmAccess(request.appUser, workspaceId, settlement.farmId)) {
+      return reply.code(403).send({ message: "You do not have access to this farm." });
+    }
+    if (!(await validateContext(request.sessionId, workspaceId, settlement.farmId, settlement.seasonId))) {
+      return reply.code(403).send({ message: "Select this farm and season before deleting labour settlements." });
+    }
+    const ownershipError = await validateTenantReferences(workspaceId, { farmId: settlement.farmId, seasonId: settlement.seasonId });
+    if (ownershipError) return reply.code(403).send({ message: ownershipError });
+
+    if (payload.status === "deleted" || isDeletedOperationalPayload(payload)) {
+      return {
+        settlementId,
+        settlementNumber: payload.settlementNumber,
+        status: "deleted" as const,
+        linkedVoucherId: payload.linkedVoucherId,
+        linkedVoucherNumber: payload.linkedVoucherNumber,
+        accountingEntries: 0,
+      };
+    }
+
+    const transactionCounts = await db.transaction((tx) => settlementAccountingTransactionCounts(tx, [settlementId]));
+    const accountingEntries = transactionCounts.get(settlementId) ?? 0;
+    const canDelete = accountingEntries === 0 || settlementAccountingStatus(payload, accountingEntries) === "accounting_missing";
+    if (!canDelete) {
+      return reply.code(409).send({
+        message: "This settlement has accounting entries. Use Void/Reverse instead.",
+        details: {
+          code: "settlement_accounting_exists",
+          settlementId,
+          settlementNumber: payload.settlementNumber,
+          accountingEntries,
+        },
+      });
+    }
+
+    const deletedAt = new Date();
+    const deletedIso = deletedAt.toISOString();
+    const result = await db.transaction(async (tx) => {
+      const nextSettlementPayload = {
+        ...payload,
+        status: "deleted" as const,
+        deletedAt: deletedIso,
+        deletedBy: request.appUser!.id,
+        updatedAt: deletedIso,
+        accountingStatus: "deleted" as const,
+        accountingMessage: "Settlement deleted before accounting was posted.",
+      };
+      await tx.update(operationalRecords).set({
+        payload: nextSettlementPayload,
+        clientUpdatedAt: deletedAt,
+        updatedAt: deletedAt,
+        recordedBy: request.appUser!.id,
+      }).where(eq(operationalRecords.id, settlement.id));
+
+      if (payload.linkedVoucherId) {
+        const vouchers = await tx.select({
+          id: operationalRecords.id,
+          payload: operationalRecords.payload,
+        }).from(operationalRecords).where(and(
+          eq(operationalRecords.workspaceId, workspaceId),
+          eq(operationalRecords.entityType, "voucher"),
+          eq(operationalRecords.clientRecordId, payload.linkedVoucherId),
+        )).limit(1);
+        const linkedVoucher = vouchers[0];
+        if (linkedVoucher) {
+          const linkedPayload = linkedVoucher.payload as Record<string, unknown>;
+          const nextVoucherPayload = {
+            ...linkedPayload,
+            status: "deleted",
+            deletedAt: typeof linkedPayload.deletedAt === "string" && linkedPayload.deletedAt ? linkedPayload.deletedAt : deletedIso,
+            deletedBy: request.appUser!.id,
+            updatedAt: deletedIso,
+          };
+          await tx.update(operationalRecords).set({
+            payload: nextVoucherPayload,
+            clientUpdatedAt: deletedAt,
+            updatedAt: deletedAt,
+            recordedBy: request.appUser!.id,
+          }).where(eq(operationalRecords.id, linkedVoucher.id));
+        }
+      }
+
+      await tx.insert(auditLogs).values({
+        workspaceId,
+        userId: request.appUser!.id,
+        farmId: settlement.farmId,
+        action: "labour_wage_settlement_deleted",
+        entityType: "labourWageSettlement",
+        entityId: settlement.id,
+        details: {
+          settlementId,
+          settlementNumber: payload.settlementNumber,
+          linkedVoucherId: payload.linkedVoucherId,
+          linkedVoucherNumber: payload.linkedVoucherNumber,
+          accountingEntries,
+          reason: "deleted before accounting was posted",
+        },
+      });
+
+      return {
+        settlementId,
+        settlementNumber: payload.settlementNumber,
+        status: "deleted" as const,
+        linkedVoucherId: payload.linkedVoucherId,
+        linkedVoucherNumber: payload.linkedVoucherNumber,
+        accountingEntries,
+      };
+    });
+
     return result;
   });
 }

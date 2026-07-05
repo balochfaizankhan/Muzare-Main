@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { calculateLabourWageSettlementTotals, settlementRangesOverlap } from "../src/lib/labour-wage-settlements.js";
+import { calculateLabourWageSettlementTotals, normalizeSettlementPayload, settlementAccountingStatus, settlementRangesOverlap } from "../src/lib/labour-wage-settlements.js";
 
 test("settlementRangesOverlap detects overlapping inclusive date ranges", () => {
   assert.equal(settlementRangesOverlap("2026-06-01", "2026-06-15", "2026-06-15", "2026-06-30"), true);
@@ -59,6 +59,33 @@ test("labour wage settlements repair missing accounting transactions through the
   assert.ok(source.includes('"/v1/workspace/:workspaceId/labour-wage-settlements/:settlementId/repair-accounting"'));
   assert.ok(source.includes("repairPostedSettlementAccounting"));
   assert.ok(source.includes('action: "labour_wage_settlement_accounting_repaired"'));
+});
+
+test("deleted labour settlements stay deleted in normalization and accounting status", () => {
+  const payload = normalizeSettlementPayload({
+    settlementNumber: "LW-0001",
+    linkedVoucherId: "voucher-1",
+    linkedVoucherNumber: "LW-0001",
+    linkedAccountId: "account-1",
+    fromDate: "2026-06-01",
+    toDate: "2026-06-30",
+    settlementDate: "2026-07-01",
+    expenseAmount: 250,
+    status: "deleted",
+    deletedAt: "2026-07-05T10:00:00.000Z",
+    deletedBy: "user-1",
+  });
+  assert.equal(payload.status, "deleted");
+  assert.equal(payload.deletedAt, "2026-07-05T10:00:00.000Z");
+  assert.equal(settlementAccountingStatus(payload, 0), "deleted");
+});
+
+test("labour wage settlements can be deleted safely only through the settlement register flow", () => {
+  const source = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
+  assert.ok(source.includes('app.delete("/v1/workspace/:workspaceId/labour-wage-settlements/:settlementId"'));
+  assert.ok(source.includes("This settlement has accounting entries. Use Void/Reverse instead."));
+  assert.ok(source.includes('action: "labour_wage_settlement_deleted"'));
+  assert.ok(source.includes('status: "deleted" as const'));
 });
 
 test("linked labour settlement vouchers cannot be deleted through operational sync", () => {

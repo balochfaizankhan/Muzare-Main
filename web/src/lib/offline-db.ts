@@ -256,10 +256,11 @@ export type LabourWageSettlement = LocalRecord & {
   carryForwardAdvance: number;
   payableBalance: number;
   notes?: string;
-  status: "posted" | "voided";
-  accountingStatus?: "draft" | "posted" | "accounting_missing" | "voided";
+  status: "posted" | "voided" | "deleted";
+  accountingStatus?: "draft" | "posted" | "accounting_missing" | "voided" | "deleted";
   accountingMessage?: string | null;
   createdBy?: string;
+  deletedBy?: string | null;
   voidedAt?: string | null;
   voidedBy?: string | null;
   voidReason?: string | null;

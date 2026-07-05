@@ -29,21 +29,23 @@ export type LabourWageSettlementPayload = {
   payableBalance: number;
   cashPayable?: number;
   notes?: string;
-  status: "posted" | "voided";
+  status: "posted" | "voided" | "deleted";
   createdBy?: string;
   createdAt?: string;
   updatedAt?: string;
   voidedAt?: string | null;
   voidedBy?: string | null;
   voidReason?: string | null;
-  accountingStatus?: "draft" | "posted" | "accounting_missing" | "voided";
+  accountingStatus?: "draft" | "posted" | "accounting_missing" | "voided" | "deleted";
   accountingMessage?: string | null;
+  deletedAt?: string | null;
+  deletedBy?: string | null;
 };
 
 export type SettlementAccountingRepairResult = {
   settlementId: string;
   settlementNumber: string;
-  accountingStatus: "posted" | "accounting_missing" | "voided";
+  accountingStatus: "posted" | "accounting_missing" | "voided" | "deleted";
   createdTransactions: number;
   existingTransactions: number;
   accountId: string;
@@ -90,10 +92,12 @@ export function normalizeSettlementPayload(payload: Record<string, unknown>): La
     payableBalance,
     cashPayable: payableBalance,
     notes: typeof payload.notes === "string" ? payload.notes : "",
-    status: payload.status === "voided" ? "voided" : "posted",
+    status: payload.status === "voided" ? "voided" : payload.status === "deleted" ? "deleted" : "posted",
     createdBy: typeof payload.createdBy === "string" ? payload.createdBy : undefined,
     createdAt: typeof payload.createdAt === "string" ? payload.createdAt : undefined,
     updatedAt: typeof payload.updatedAt === "string" ? payload.updatedAt : undefined,
+    deletedAt: typeof payload.deletedAt === "string" ? payload.deletedAt : null,
+    deletedBy: typeof payload.deletedBy === "string" ? payload.deletedBy : null,
     voidedAt: typeof payload.voidedAt === "string" ? payload.voidedAt : null,
     voidedBy: typeof payload.voidedBy === "string" ? payload.voidedBy : null,
     voidReason: typeof payload.voidReason === "string" ? payload.voidReason : null,
@@ -101,6 +105,8 @@ export function normalizeSettlementPayload(payload: Record<string, unknown>): La
       ? "accounting_missing"
       : payload.accountingStatus === "draft"
         ? "draft"
+        : payload.status === "deleted"
+          ? "deleted"
         : payload.status === "voided"
           ? "voided"
           : "posted",
@@ -212,6 +218,7 @@ export function settlementAccountingStatus(
   settlement: Pick<LabourWageSettlementPayload, "status">,
   transactionCount: number,
 ) {
+  if (settlement.status === "deleted") return "deleted" as const;
   if (settlement.status === "voided") return "voided" as const;
   return transactionCount > 0 ? "posted" as const : "accounting_missing" as const;
 }
@@ -222,6 +229,17 @@ export async function repairPostedSettlementAccounting(
   actorUserId: string,
 ) {
   const payload = settlementRecord.payload;
+  if (payload.status === "deleted" || isDeletedOperationalPayload(payload)) {
+    return {
+      settlementId: settlementRecord.clientRecordId,
+      settlementNumber: payload.settlementNumber,
+      accountingStatus: "deleted",
+      createdTransactions: 0,
+      existingTransactions: 0,
+      accountId: payload.linkedAccountId,
+      amount: payload.expenseAmount,
+    } satisfies SettlementAccountingRepairResult;
+  }
   if (payload.status === "voided") {
     return {
       settlementId: settlementRecord.clientRecordId,
@@ -319,7 +337,7 @@ export async function previewLabourWageSettlement(
   toDate: string,
   settlementDate: string,
 ) {
-  const [attendanceRows, advanceRows, labourRows, wageRates, earningRows, existingSettlements] = await Promise.all([
+  const [attendanceRows, advanceRows, labourRows, wageRates, earningRows, allSettlements] = await Promise.all([
     tx.select({
       clientRecordId: operationalRecords.clientRecordId,
       payload: operationalRecords.payload,
@@ -348,8 +366,11 @@ export async function previewLabourWageSettlement(
     )),
     listWageRateRows(tx, workspaceId, farmId, seasonId),
     listLabourEarnings(tx, workspaceId, farmId, seasonId),
-    findOverlappingLabourWageSettlements(tx, workspaceId, farmId, seasonId, fromDate, toDate),
+    listLabourWageSettlements(tx, workspaceId, farmId, seasonId),
   ]);
+  const activeSettlements = allSettlements.filter((row) => !isDeletedOperationalPayload(row.payload) && row.payload.status !== "voided");
+  const existingSettlements = activeSettlements.filter((row) =>
+    settlementRangesOverlap(row.payload.fromDate, row.payload.toDate, fromDate, toDate));
 
   const labourById = new Map(labourRows.map((row) => {
     const payload = row.payload as LabourPayload;
@@ -404,7 +425,7 @@ export async function previewLabourWageSettlement(
     return sum + Number(payload.amount ?? 0);
   }, 0);
 
-  const previouslySettledAdvances = existingSettlements.reduce((sum, row) => {
+  const previouslySettledAdvances = activeSettlements.reduce((sum, row) => {
     if (row.payload.settlementDate > settlementDate) return sum;
     return sum + row.payload.settledAdvanceAmount;
   }, 0);

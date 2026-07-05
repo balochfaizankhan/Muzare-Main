@@ -3,7 +3,7 @@ import { Search, Printer, Download, X, ExternalLink } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
-import { createLabourWageSettlement, fetchLabourWageSettlements, previewLabourWageSettlement, repairLabourWageSettlementAccounting, type LabourWageSettlementPreview } from "../../lib/api";
+import { createLabourWageSettlement, deleteLabourWageSettlement, fetchLabourWageSettlements, previewLabourWageSettlement, repairLabourWageSettlementAccounting, type LabourWageSettlementPreview } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 import { getActiveFarmId, getActiveSeasonId, offlineDb, workspaceRecords, type Account, type LabourWageSettlement, type Voucher } from "../../lib/offline-db";
 import { canCreate } from "../../lib/permissions";
@@ -46,6 +46,8 @@ export function LabourWageSettlements() {
   const [paymentAccountFilter, setPaymentAccountFilter] = useState("all");
   const [selectedSettlement, setSelectedSettlement] = useState<LabourWageSettlement | null>(null);
   const [repairingSettlementId, setRepairingSettlementId] = useState<string | null>(null);
+  const [deletingSettlement, setDeletingSettlement] = useState<LabourWageSettlement | null>(null);
+  const [deletingSettlementId, setDeletingSettlementId] = useState<string | null>(null);
 
   const onlineRequired = !navigator.onLine;
   const linkedVoucherById = useMemo(() => new Map(vouchers.map((voucher) => [voucher.id, voucher])), [vouchers]);
@@ -96,6 +98,8 @@ export function LabourWageSettlements() {
         createdBy: settlement.createdBy,
         createdAt: settlement.createdAt,
         updatedAt: settlement.updatedAt,
+        deletedAt: settlement.deletedAt ?? null,
+        deletedBy: settlement.deletedBy ?? null,
         voidedAt: settlement.voidedAt ?? null,
         voidedBy: settlement.voidedBy ?? null,
         voidReason: settlement.voidReason ?? null,
@@ -261,6 +265,8 @@ export function LabourWageSettlements() {
         createdBy: response.settlement.createdBy,
         createdAt: response.settlement.createdAt,
         updatedAt: response.settlement.updatedAt,
+        deletedAt: response.settlement.deletedAt ?? null,
+        deletedBy: response.settlement.deletedBy ?? null,
         voidedAt: response.settlement.voidedAt ?? null,
         voidedBy: response.settlement.voidedBy ?? null,
         voidReason: response.settlement.voidReason ?? null,
@@ -281,6 +287,7 @@ export function LabourWageSettlements() {
   const summary = preview.status === "ready" ? preview.data : null;
   const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
   const settlementStatus = useCallback((settlement: LabourWageSettlement) => settlement.accountingStatus ?? settlement.status, []);
+  const canDeleteSettlement = useCallback((settlement: LabourWageSettlement) => settlementStatus(settlement) === "accounting_missing", [settlementStatus]);
   const repairAccounting = useCallback(async (settlement: LabourWageSettlement) => {
     if (!token || !workspaceId) return;
     setRepairingSettlementId(settlement.id);
@@ -302,6 +309,39 @@ export function LabourWageSettlements() {
       setRepairingSettlementId(null);
     }
   }, [syncFromServer, token, workspaceId]);
+  const deleteSettlement = useCallback(async (settlement: LabourWageSettlement) => {
+    if (!token || !workspaceId) return;
+    setDeletingSettlementId(settlement.id);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await deleteLabourWageSettlement(token, workspaceId, settlement.id);
+      const deletedAt = new Date().toISOString();
+      await offlineDb.labourWageSettlements.update(settlement.id, {
+        status: "deleted",
+        accountingStatus: "deleted",
+        accountingMessage: "Settlement deleted before accounting was posted.",
+        deletedAt,
+        deletedBy: user?.id ?? null,
+        updatedAt: deletedAt,
+      });
+      if (response.linkedVoucherId) {
+        await offlineDb.vouchers.update(response.linkedVoucherId, {
+          deletedAt,
+          updatedAt: deletedAt,
+        });
+      }
+      setDeletingSettlement(null);
+      setSelectedSettlement((current) => current?.id === settlement.id ? null : current);
+      setSuccess(`Settlement ${response.settlementNumber} deleted. Its advances are available for reposting.`);
+      window.dispatchEvent(new Event("muzare-local-data-change"));
+      await syncFromServer();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to delete this settlement.");
+    } finally {
+      setDeletingSettlementId(null);
+    }
+  }, [syncFromServer, token, user?.id, workspaceId]);
   const registerRows = useMemo(() => {
     const term = registerSearch.trim().toLowerCase();
     return settlements.filter((settlement) => {
@@ -553,6 +593,7 @@ export function LabourWageSettlements() {
                     <th>Payment account</th>
                     <th>Generated voucher</th>
                     <th>Status</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -574,9 +615,10 @@ export function LabourWageSettlements() {
                         <td>{money(settlement.payableBalance)}</td>
                         <td>{accountById.get(settlement.linkedAccountId)?.name ?? "-"}</td>
                         <td>{linkedVoucherNumber || settlement.settlementNumber}</td>
+                        <td>{settlementStatus(settlement).replaceAll("_", " ")}</td>
                         <td>
                           <div className="stacked-inline-actions">
-                            <span>{settlementStatus(settlement).replaceAll("_", " ")}</span>
+                            <button type="button" className="secondary-action" onClick={() => setSelectedSettlement(settlement)}>View</button>
                             {settlementStatus(settlement) === "accounting_missing" ? (
                               <button
                                 type="button"
@@ -585,6 +627,24 @@ export function LabourWageSettlements() {
                                 onClick={() => void repairAccounting(settlement)}
                               >
                                 {repairingSettlementId === settlement.id ? "Repairing..." : "Repair accounting"}
+                              </button>
+                            ) : null}
+                            {canDeleteSettlement(settlement) ? (
+                              <button
+                                type="button"
+                                className="danger-button"
+                                disabled={deletingSettlementId === settlement.id}
+                                onClick={() => setDeletingSettlement(settlement)}
+                              >
+                                {deletingSettlementId === settlement.id ? "Deleting..." : "Delete settlement"}
+                              </button>
+                            ) : settlement.status === "posted" ? (
+                              <button
+                                type="button"
+                                className="secondary-action"
+                                onClick={() => setError("This settlement has accounting entries. Use Void/Reverse instead.")}
+                              >
+                                Void / Reverse
                               </button>
                             ) : null}
                           </div>
@@ -640,6 +700,16 @@ export function LabourWageSettlements() {
                         {repairingSettlementId === selectedSettlement.id ? "Repairing..." : "Repair accounting"}
                       </button>
                     ) : null}
+                    {canDeleteSettlement(selectedSettlement) ? (
+                      <button
+                        type="button"
+                        className="danger-button"
+                        disabled={deletingSettlementId === selectedSettlement.id}
+                        onClick={() => setDeletingSettlement(selectedSettlement)}
+                      >
+                        {deletingSettlementId === selectedSettlement.id ? "Deleting..." : "Delete settlement"}
+                      </button>
+                    ) : null}
                     {linkedVoucher ? <button type="button" onClick={() => navigate(`/workspace/expenses?recordId=${linkedVoucher.id}&showSettlementVouchers=true`)}>View Generated Voucher <ExternalLink size={16} /></button> : null}
                   </footer>
                 </div>
@@ -647,6 +717,31 @@ export function LabourWageSettlements() {
             </div>
           );
         })() : null}
+        {deletingSettlement ? (
+          <div className="worker-dialog-backdrop worker-action-backdrop" role="presentation" onClick={() => deletingSettlementId ? undefined : setDeletingSettlement(null)}>
+            <section className="worker-action-dialog account-ledger-dialog" role="dialog" aria-modal="true" aria-label="Delete settlement confirmation" onClick={(event) => event.stopPropagation()}>
+              <header>
+                <div>
+                  <h2>Delete settlement</h2>
+                  <p>{deletingSettlement.settlementNumber}</p>
+                </div>
+                <button aria-label={t("common.close")} type="button" onClick={() => deletingSettlementId ? undefined : setDeletingSettlement(null)}><X size={18} /></button>
+              </header>
+              <div className="worker-action-form">
+                <div className="worker-action-warning">
+                  <strong>Delete settlement {deletingSettlement.settlementNumber}?</strong>
+                  <p>This will remove the settlement record and release its advances for reposting. No accounting entries were found.</p>
+                </div>
+                <footer className="worker-action-footer">
+                  <button type="button" onClick={() => setDeletingSettlement(null)} disabled={Boolean(deletingSettlementId)}>Cancel</button>
+                  <button type="button" className="danger-button" onClick={() => void deleteSettlement(deletingSettlement)} disabled={Boolean(deletingSettlementId)}>
+                    {deletingSettlementId ? "Deleting..." : "Delete settlement"}
+                  </button>
+                </footer>
+              </div>
+            </section>
+          </div>
+        ) : null}
     </>
   );
 }
