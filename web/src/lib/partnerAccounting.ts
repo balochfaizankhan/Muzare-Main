@@ -1,7 +1,7 @@
 import type { Account, Advance, LabourWageSettlement, PartnerEntry, Sale, Voucher } from "./offline-db";
 import { isActiveOperationalRecord } from "./operationalRecords";
 import { getActiveVouchers } from "./voucherCollections";
-import { getActiveLabourWageSettlements, isLabourWageSettlementVoucher } from "./labourWageSettlements";
+import { getActiveLabourWageSettlements, getLabourWageSettlementLedgerAmount, resolveLabourWageSettlementAccountId, isLabourWageSettlementVoucher } from "./labourWageSettlements";
 
 export type PartnerLiabilityPosition = {
   account: Account | null;
@@ -147,13 +147,13 @@ export function partnerAccountBalanceEffect(
     .filter((voucher) => voucher.accountId === account.id)
     .reduce((sum, voucher) => sum + voucher.amount, 0);
   const labourSettlementExpenses = activeSettlements
-    .filter((settlement) => settlement.linkedAccountId === account.id)
-    .reduce((sum, settlement) => sum + settlement.expenseAmount, 0);
+    .filter((settlement) => resolveLabourWageSettlementAccountId(settlement) === account.id)
+    .reduce((sum, settlement) => sum + getLabourWageSettlementLedgerAmount(settlement), 0);
   const directLabourAdvancesPaid = advances
     .filter((advance) => isActiveOperationalRecord(advance) && advance.accountId === account.id)
     .reduce((sum, advance) => sum + advance.amount, 0);
   const settledAdvancesApplied = activeSettlements
-    .filter((settlement) => settlement.linkedAccountId === account.id)
+    .filter((settlement) => resolveLabourWageSettlementAccountId(settlement) === account.id)
     .reduce((sum, settlement) => sum + settlement.settledAdvanceAmount, 0);
   const adjustments = sales
     .filter((sale) => isActiveOperationalRecord(sale) && sale.accountId === account.id)
@@ -175,7 +175,7 @@ export function buildPartnerLiabilityPositions(
   advances: Advance[],
   entries: PartnerEntry[],
   sales: Sale[] = [],
-  settlements: Array<Pick<LabourWageSettlement, "linkedAccountId" | "settledAdvanceAmount" | "status" | "deletedAt">> = [],
+  settlements: Array<Pick<LabourWageSettlement, "linkedAccountId" | "settledAdvanceAmount" | "status" | "deletedAt" | "accountingStatus">> = [],
 ) {
   const activeVouchers = getActiveVouchers(vouchers);
   const activeSettlements = getActiveLabourWageSettlements(settlements as LabourWageSettlement[]);
@@ -248,16 +248,17 @@ export function buildPartnerLiabilityPositions(
   }
 
   for (const settlement of activeSettlements) {
-    const account = partnerAccounts.find((item) => item.id === settlement.linkedAccountId);
+    const settlementAccountId = resolveLabourWageSettlementAccountId(settlement);
+    const account = partnerAccounts.find((item) => item.id === settlementAccountId);
     if (!account) continue;
     const position = ensure(account.id, account.name, account);
-    position.labourWageSettlements += settlement.expenseAmount;
+    position.labourWageSettlements += getLabourWageSettlementLedgerAmount(settlement);
   }
 
   for (const position of positions.values()) {
     position.businessFundsNet = position.transfersOut - position.transfersIn;
     position.outstandingLabourAdvances = Math.max(position.totalLabourAdvancesPaid - settlements
-      .filter((item) => isActiveOperationalRecord(item) && item.linkedAccountId === position.account?.id)
+      .filter((item) => isActiveOperationalRecord(item) && item.accountingStatus !== "accounting_missing" && resolveLabourWageSettlementAccountId(item) === position.account?.id)
       .reduce((sum, item) => sum + item.settledAdvanceAmount, 0), 0);
     position.labourAdvancesPaid = position.outstandingLabourAdvances;
     position.directExpensesPaid = position.purchaseVouchersPaid + position.labourWageSettlements + position.outstandingLabourAdvances;

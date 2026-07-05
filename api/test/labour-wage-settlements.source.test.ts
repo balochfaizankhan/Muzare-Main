@@ -58,6 +58,8 @@ test("labour wage settlements resolve canonical payment accounts and accept lega
   const source = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
   const libSource = readFileSync(new URL("../src/lib/labour-wage-settlements.ts", import.meta.url), "utf8");
   const pageSource = readFileSync(new URL("../../web/src/pages/workspace/LabourWageSettlements.tsx", import.meta.url), "utf8");
+  const partnerAccounting = readFileSync(new URL("../../web/src/lib/partnerAccounting.ts", import.meta.url), "utf8");
+  const accounting = readFileSync(new URL("../../web/src/lib/accounting.ts", import.meta.url), "utf8");
   assert.ok(source.includes('"/v1/workspace/:workspaceId/labour-wage-settlements/payment-accounts"'));
   assert.ok(source.includes("resolveCanonicalPaymentAccountId"));
   assert.ok(source.includes("validateLabourSettlementPaymentAccount"));
@@ -66,6 +68,11 @@ test("labour wage settlements resolve canonical payment accounts and accept lega
   assert.ok(libSource.includes("legacyAndroidAccountId"));
   assert.ok(libSource.includes("oldAndroidId"));
   assert.ok(libSource.includes("from(accounts)"));
+  assert.ok(libSource.includes("accountingStatus !== \"accounting_missing\""));
+  assert.ok(libSource.includes("resolveLabourWageSettlementAccountId"));
+  assert.ok(partnerAccounting.includes("resolveLabourWageSettlementAccountId"));
+  assert.ok(partnerAccounting.includes("getLabourWageSettlementLedgerAmount"));
+  assert.ok(accounting.includes("resolveLabourWageSettlementAccountId"));
   assert.ok(pageSource.includes("Settlement account"));
 });
 
@@ -78,6 +85,7 @@ test("labour wage settlements repair missing accounting transactions through the
   assert.ok(libSource.includes('source: "settlement"'));
   assert.ok(libSource.includes('sourceType: "labour_wage_settlement"'));
   assert.ok(libSource.includes("referenceId: settlementRecord.clientRecordId"));
+  assert.ok(libSource.includes("accountingStatus !== \"accounting_missing\""));
 });
 
 test("deleted labour settlements stay deleted in normalization and accounting status", () => {

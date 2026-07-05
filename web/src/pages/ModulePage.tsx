@@ -31,7 +31,7 @@ import {
 } from "../lib/partnerAccounting";
 import { formatDate, formatMoney } from "../lib/format";
 import { buildLabourEarningsProfileSummary } from "../lib/labourEarnings";
-import { isLabourWageSettlementVoucher } from "../lib/labourWageSettlements";
+import { getLabourWageSettlementLedgerAmount, isLabourWageSettlementVoucher, resolveLabourWageSettlementAccountId } from "../lib/labourWageSettlements";
 import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { getVoucherDisplayNumber, normalizeVoucherNumber, parseVoucherSequenceNumber } from "../lib/vouchers";
 import { getActiveVouchers, getVisibleVouchers, loadWorkspaceVouchers } from "../lib/voucherCollections";
@@ -3889,7 +3889,7 @@ function AccountsModule() {
         partnerLiabilityGroup: selectedIsPartner ? "purchase_vouchers_paid" : undefined,
       });
     }
-    for (const settlement of activeLabourWageSettlements.filter((item) => item.linkedAccountId === selectedAccount.id)) {
+    for (const settlement of activeLabourWageSettlements.filter((item) => resolveLabourWageSettlementAccountId(item) === selectedAccount.id)) {
       rows.push({
         id: `labour-settlement:${settlement.id}`,
         date: settlement.settlementDate,
@@ -3897,7 +3897,7 @@ function AccountsModule() {
         reference: settlement.settlementNumber,
         description: `Labour wage settlement ${settlement.fromDate} to ${settlement.toDate}`,
         debit: selectedIsPartner ? 0 : settlement.expenseAmount,
-        credit: selectedIsPartner ? settlement.expenseAmount : 0,
+        credit: selectedIsPartner ? getLabourWageSettlementLedgerAmount(settlement) : 0,
         source: "expenses",
         sourceId: settlement.id,
         classification: "labour_wage_settlement_voucher",
@@ -4045,7 +4045,7 @@ function AccountsModule() {
       if (row.partnerLiabilityGroup === "adjustments") byType.adjustments += row.credit - row.debit;
     }
     const settledAdvances = activeLabourWageSettlements
-      .filter((settlement) => settlement.linkedAccountId === selectedAccount.id)
+      .filter((settlement) => resolveLabourWageSettlementAccountId(settlement) === selectedAccount.id)
       .reduce((sum, settlement) => sum + settlement.settledAdvanceAmount, 0);
     const outstandingLabourAdvances = Math.max(byType.labourAdvancesPaid - settledAdvances, 0);
     byType.directExpensesPaid = byType.purchaseVouchersPaid + byType.labourWageSettlements + outstandingLabourAdvances;
@@ -4084,7 +4084,7 @@ function AccountsModule() {
       if (row.partnerLiabilityGroup === "adjustments") overview.adjustments += row.credit - row.debit;
     }
     const settledAdvances = activeLabourWageSettlements
-      .filter((settlement) => settlement.linkedAccountId === selectedAccount.id)
+      .filter((settlement) => resolveLabourWageSettlementAccountId(settlement) === selectedAccount.id)
       .reduce((sum, settlement) => sum + settlement.settledAdvanceAmount, 0);
     const outstandingLabourAdvances = Math.max(overview.labourAdvancesPaid - settledAdvances, 0);
     overview.directExpensesPaid = overview.purchaseVouchersPaid + overview.labourWageSettlements + outstandingLabourAdvances;
@@ -4130,7 +4130,7 @@ function AccountsModule() {
       if (group.groupKey === "purchase_vouchers_paid" || group.groupKey === "labour_wage_settlements") summary.directExpensesPaid += group.totalAmount;
       if (group.groupKey === "labour_advances_paid") {
         const settledAdvances = activeLabourWageSettlements
-          .filter((settlement) => settlement.linkedAccountId === selectedAccount.id)
+          .filter((settlement) => resolveLabourWageSettlementAccountId(settlement) === selectedAccount.id)
           .reduce((sum, settlement) => sum + settlement.settledAdvanceAmount, 0);
         summary.directExpensesPaid += Math.max(group.totalAmount - settledAdvances, 0);
       }

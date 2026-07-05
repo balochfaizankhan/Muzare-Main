@@ -10,12 +10,39 @@ export type SettlementVoucherLike = {
   status?: unknown;
 };
 
+export type SettlementAccountLike = {
+  linkedAccountId?: unknown;
+  paymentAccountId?: unknown;
+  accountId?: unknown;
+  status?: unknown;
+  accountingStatus?: unknown;
+  deletedAt?: unknown;
+};
+
+function accountIdFromSettlementField(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+export function resolveLabourWageSettlementAccountId(settlement: SettlementAccountLike | null | undefined) {
+  if (!settlement) return null;
+  return accountIdFromSettlementField(settlement.linkedAccountId)
+    ?? accountIdFromSettlementField(settlement.paymentAccountId)
+    ?? accountIdFromSettlementField(settlement.accountId);
+}
+
 export function isPostedLabourWageSettlement(settlement: LabourWageSettlement | null | undefined) {
-  return Boolean(settlement && isActiveOperationalRecord(settlement) && settlement.status === "posted");
+  return Boolean(settlement
+    && isActiveOperationalRecord(settlement)
+    && settlement.status === "posted"
+    && settlement.accountingStatus !== "accounting_missing");
 }
 
 export function getActiveLabourWageSettlements(settlements: LabourWageSettlement[]) {
   return settlements.filter(isPostedLabourWageSettlement);
+}
+
+export function getLabourWageSettlementLedgerAmount(settlement: SettlementAccountLike & { settledAdvanceAmount?: number; expenseAmount?: number }) {
+  return Number(settlement.expenseAmount ?? settlement.settledAdvanceAmount ?? 0);
 }
 
 export function isLabourWageSettlementVoucher(voucher: SettlementVoucherLike | null | undefined) {

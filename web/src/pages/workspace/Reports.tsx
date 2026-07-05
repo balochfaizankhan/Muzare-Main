@@ -11,7 +11,7 @@ import { calculateAccountBalance } from "../../lib/accounting";
 import { getCanonicalExpenseCategory } from "../../lib/expenseCategories";
 import { formatMoney, formatNumber } from "../../lib/format";
 import { labourEarningTypeLabel, sumLabourEarnings } from "../../lib/labourEarnings";
-import { getActiveLabourWageSettlements, getCashAffectingVouchers, isLabourWageSettlementVoucher, outstandingLabourAdvances, totalSettledAdvances } from "../../lib/labourWageSettlements";
+import { getActiveLabourWageSettlements, getCashAffectingVouchers, isLabourWageSettlementVoucher, outstandingLabourAdvances, resolveLabourWageSettlementAccountId, totalSettledAdvances } from "../../lib/labourWageSettlements";
 import { translateExpenseCategory, translateExpenseSubcategory, translateSaleType, translateSalesStatus } from "../../lib/systemTranslations";
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
 import { getVoucherDisplayNumber } from "../../lib/vouchers";
@@ -963,7 +963,7 @@ export function Reports() {
       if (group.groupKey === "purchase_vouchers_paid" || group.groupKey === "labour_wage_settlements") summary.directExpensesPaid += group.totalAmount;
       if (group.groupKey === "labour_advances_paid") {
         const settledAdvances = activeSettlements
-          .filter((settlement) => settlement.linkedAccountId === selectedAccountRecord.id)
+          .filter((settlement) => resolveLabourWageSettlementAccountId(settlement) === selectedAccountRecord.id)
           .reduce((sum, settlement) => sum + settlement.settledAdvanceAmount, 0);
         summary.directExpensesPaid += Math.max(group.totalAmount - settledAdvances, 0);
       }
@@ -1019,7 +1019,7 @@ export function Reports() {
       if (row.partnerLiabilityGroup === "adjustments") overview.adjustments += row.credit - row.debit;
     }
     const settledAdvances = activeSettlements
-      .filter((settlement) => settlement.linkedAccountId === selectedAccountRecord.id)
+      .filter((settlement) => resolveLabourWageSettlementAccountId(settlement) === selectedAccountRecord.id)
       .reduce((sum, settlement) => sum + settlement.settledAdvanceAmount, 0);
     const outstandingLabourAdvances = Math.max(overview.labourAdvancesPaid - settledAdvances, 0);
     overview.directExpensesPaid = overview.purchaseVouchersPaid + overview.labourWageSettlements + outstandingLabourAdvances;
