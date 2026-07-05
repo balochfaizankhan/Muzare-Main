@@ -1,7 +1,7 @@
-import { BarChart3, BookOpenText, Boxes, CloudUpload, LayoutDashboard, LogOut, PackageOpen, ReceiptText, RefreshCw, Satellite, Settings, ShoppingBasket, Users, WalletCards } from "lucide-react";
+import { BarChart3, BookOpenText, Boxes, CloudUpload, HandCoins, LayoutDashboard, LogOut, MoreHorizontal, PackageOpen, Plus, ReceiptText, RefreshCw, Satellite, Settings, ShoppingBasket, Users, WalletCards, X, type LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { Brand } from "../components/Brand";
 import { LanguageSwitch } from "../components/LanguageSwitch";
@@ -26,13 +26,19 @@ const nav = [
   ["/workspace/settings", "layout.settings", Settings, "settings"],
 ] as const;
 
+type MobileNavLink = { to: string; label: string; icon: LucideIcon };
+type MobileNavAction = { action: "add" | "more"; label: string; icon: LucideIcon };
+
 export function WorkspaceLayout() {
   const { t } = useTranslation();
   const { user, token, logout, switchWorkspace } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const sync = useSyncState();
   const [toast, setToast] = useState<string | null>(null);
   const [queueOpen, setQueueOpen] = useState(false);
   const [queueItems, setQueueItems] = useState<PendingMutation[]>([]);
+  const [mobileSheet, setMobileSheet] = useState<null | "add" | "more">(null);
   useEffect(() => {
     setActiveWorkspaceId(user?.workspaceId ?? null);
   }, [user?.workspaceId]);
@@ -72,6 +78,9 @@ export function WorkspaceLayout() {
       window.removeEventListener("muzare-data-refresh", refreshQueue);
     };
   }, []);
+  useEffect(() => {
+    setMobileSheet(null);
+  }, [location.pathname, location.search]);
   const statusText = sync.status === "offline"
     ? t("layout.workingOffline")
     : sync.status === "syncing"
@@ -81,8 +90,27 @@ export function WorkspaceLayout() {
         : sync.pendingCount
           ? t("layout.changesWaiting", { count: sync.pendingCount })
           : t("layout.synced");
-  const startupVisible = sync.startupInProgress || Boolean(sync.message && sync.startupStage && sync.startupStage !== "ready");
+  const startupVisible = sync.startupInProgress;
   const queueNeedsAttention = (sync.pendingCount ?? 0) > 0 || (sync.failedCount ?? 0) > 0;
+  const filteredNav = nav
+    .filter(([to]) => config.featureFarmMap || to !== "/workspace/operations-map")
+    .filter(([to]) => config.featureInventory || to !== "/workspace/inventory")
+    .filter(([, , , module]) => !user || hasModulePermission(user, module, "view"));
+  const mobilePrimaryNav: Array<MobileNavLink | MobileNavAction> = [
+    { to: "/workspace/dashboard", label: t("layout.dashboard"), icon: LayoutDashboard },
+    { to: "/workspace/workforce/labour", label: t("layout.workforce"), icon: Users },
+    { action: "add" as const, label: "Add", icon: Plus },
+    { to: "/workspace/reports", label: t("layout.reports"), icon: BarChart3 },
+    { action: "more" as const, label: "More", icon: MoreHorizontal },
+  ];
+  const mobileMoreLinks = filteredNav.filter(([to]) => !["/workspace/dashboard", "/workspace/workforce/labour", "/workspace/reports"].includes(to));
+  const mobileAddLinks = [
+    { to: "/workspace/workforce/attendance", label: "Attendance", icon: Users, allowed: !user || hasModulePermission(user, "attendance", "create") },
+    { to: "/workspace/expenses", label: "Expense Voucher", icon: ReceiptText, allowed: !user || hasModulePermission(user, "expenses", "create") },
+    { to: "/workspace/labour-payments/advances", label: "Labour Advance", icon: HandCoins, allowed: !user || hasModulePermission(user, "advances", "create") },
+    { to: "/workspace/labour-payments/earnings", label: "Labour Work", icon: WalletCards, allowed: !user || hasModulePermission(user, "wages", "create") },
+    { to: "/workspace/labour-payments/settlements", label: "Settlement", icon: BookOpenText, allowed: !user || hasModulePermission(user, "wages", "create") },
+  ].filter((item) => item.allowed);
   const queueStatusLabel = (status?: PendingMutation["status"]) => {
     switch (status ?? "pending") {
       case "syncing": return t("sync.statusSyncing");
@@ -99,11 +127,32 @@ export function WorkspaceLayout() {
       <aside className="app-sidebar">
         <Brand compact />
         <span className="shell-label">{user?.workspaceName ?? t("layout.workspace")}</span>
-        <nav>{nav
-          .filter(([to]) => config.featureFarmMap || to !== "/workspace/operations-map")
-          .filter(([to]) => config.featureInventory || to !== "/workspace/inventory")
-          .filter(([, , , module]) => !user || hasModulePermission(user, module, "view"))
-          .map(([to, label, Icon]) => <NavLink to={to} key={to}><Icon size={17} />{t(label)}</NavLink>)}</nav>
+        <nav className="app-sidebar__desktop-nav">{filteredNav.map(([to, label, Icon]) => <NavLink to={to} key={to}><Icon size={17} />{t(label)}</NavLink>)}</nav>
+        <nav className="app-sidebar__mobile-nav" aria-label="Primary mobile navigation">
+          {mobilePrimaryNav.map((item) => {
+            if ("to" in item) {
+              const Icon = item.icon;
+              const routeTo = item.to;
+              return <NavLink to={routeTo} key={routeTo} end={routeTo === "/workspace/dashboard"}><Icon size={18} /><span>{item.label}</span></NavLink>;
+            }
+            const Icon = item.icon;
+            const active = item.action === "more"
+              ? mobileMoreLinks.some(([to]) => location.pathname.startsWith(to))
+              : mobileSheet === item.action;
+            return (
+              <button
+                key={item.action}
+                type="button"
+                className={`app-sidebar__mobile-action${active ? " active" : ""}`}
+                onClick={() => setMobileSheet((current) => current === item.action ? null : item.action)}
+                aria-expanded={mobileSheet === item.action}
+              >
+                <Icon size={18} />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
       </aside>
       <div className="app-shell__body">
         <header className="shell-header">
@@ -188,6 +237,30 @@ export function WorkspaceLayout() {
             ))}
           </div>}
         </section>}
+        {mobileSheet && (
+          <div className="worker-action-backdrop app-mobile-sheet-backdrop" role="presentation" onClick={() => setMobileSheet(null)}>
+            <section className="worker-action-dialog app-mobile-sheet" role="dialog" aria-modal="true" aria-label={mobileSheet === "add" ? "Quick add" : "More modules"} onClick={(event) => event.stopPropagation()}>
+              <header>
+                <div>
+                  <h2>{mobileSheet === "add" ? "Quick Add" : "More"}</h2>
+                  <p>{mobileSheet === "add" ? "Jump straight into the next record." : "Open the rest of your workspace modules."}</p>
+                </div>
+                <button type="button" onClick={() => setMobileSheet(null)} aria-label={t("common.close")}><X size={18} /></button>
+              </header>
+              <div className="app-mobile-sheet__content">
+                {(mobileSheet === "add" ? mobileAddLinks : mobileMoreLinks.map(([to, label, Icon]) => ({ to, label: t(label), icon: Icon }))).map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button key={item.to} type="button" className="app-mobile-sheet__link" onClick={() => { setMobileSheet(null); navigate(item.to); }}>
+                      <Icon size={18} />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          </div>
+        )}
         <Outlet />
         {toast && <div className="saas-toast" role="status">{toast}</div>}
       </div>
