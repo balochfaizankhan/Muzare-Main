@@ -11,10 +11,12 @@ import { hasModulePermission } from "../permissions.js";
 import { validateTenantReferences, validateTenantReferencesDetailed } from "../tenant-ownership.js";
 import {
   allocateSettlementNumber,
+  listCanonicalPaymentAccounts,
   listLabourWageSettlements,
   normalizeSettlementPayload,
   previewLabourWageSettlement,
   repairPostedSettlementAccounting,
+  resolveCanonicalPaymentAccountId,
   settlementAccountingStatus,
   settlementAccountingTransactionCounts,
   settlementRangesOverlap,
@@ -69,6 +71,22 @@ async function resolveSettlementCategory(workspaceId: string) {
 }
 
 export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<void> {
+  app.get("/v1/workspace/:workspaceId/labour-wage-settlements/payment-accounts", { preHandler: requireUser }, async (request, reply) => {
+    if (!request.appUser || !request.sessionId) return reply.code(401).send({ message: "A valid session is required." });
+    const params = paramsSchema.safeParse(request.params);
+    const query = z.object({ farmId: z.string().uuid() }).safeParse(request.query);
+    if (!params.success || !query.success) return reply.code(400).send({ message: "A valid payment account request is required." });
+    const { workspaceId } = params.data;
+    const { farmId } = query.data;
+    if (request.appUser.workspaceId !== workspaceId) return reply.code(403).send({ message: "Select this workspace before loading settlement payment accounts." });
+    if (!hasModulePermission(request.appUser, workspaceId, "wages", "view")) return reply.code(403).send({ message: "Workspace wage settlement view permission is required." });
+    if (!hasFarmAccess(request.appUser, workspaceId, farmId)) return reply.code(403).send({ message: "You do not have access to this farm." });
+    const ownershipError = await validateTenantReferences(workspaceId, { farmId });
+    if (ownershipError) return reply.code(403).send({ message: ownershipError });
+    const accounts = await db.transaction((tx) => listCanonicalPaymentAccounts(tx, workspaceId, farmId));
+    return { accounts };
+  });
+
   app.get("/v1/workspace/:workspaceId/labour-wage-settlements", { preHandler: requireUser }, async (request, reply) => {
     if (!request.appUser || !request.sessionId) return reply.code(401).send({ message: "A valid session is required." });
     const params = paramsSchema.safeParse(request.params);
@@ -198,8 +216,6 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
     }
     const ownershipError = await validateTenantReferences(workspaceId, { farmId, seasonId });
     if (ownershipError) return reply.code(403).send({ message: ownershipError });
-    const accountError = await validateTenantReferencesDetailed(workspaceId, { farmId, seasonId, accountId });
-    if (accountError) return reply.code(403).send({ message: accountError.message, details: accountError });
 
     const category = await resolveSettlementCategory(workspaceId);
     if (!category) return reply.code(400).send({ message: "A default expense category for labour wage settlements could not be resolved." });
@@ -222,6 +238,18 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
     }
     try {
       const result = await db.transaction(async (tx) => {
+        const resolvedAccount = await resolveCanonicalPaymentAccountId(tx, workspaceId, farmId, accountId);
+        if (!resolvedAccount) {
+          throw new Error("Payment account is not mapped. Please remap/import accounts.");
+        }
+        const accountError = await validateTenantReferencesDetailed(workspaceId, {
+          farmId,
+          seasonId,
+          accountId: resolvedAccount.id,
+        });
+        if (accountError) {
+          throw new Error(accountError.message);
+        }
         const createdAt = new Date();
         const settlementId = crypto.randomUUID();
         const settlementNumber = await allocateSettlementNumber(tx, workspaceId, farmId);
@@ -237,7 +265,8 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           subcategory: category.subcategory,
           description,
           amount: preview.expenseAmount,
-          accountId,
+          accountId: resolvedAccount.id,
+          accountName: resolvedAccount.name,
           notes: notes?.trim() || "",
           attendanceWages: preview.attendanceWages,
           labourWork: preview.pendingLabourEarnings,
@@ -268,7 +297,8 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           settlementNumber,
           linkedVoucherId: voucherId,
           linkedVoucherNumber: settlementNumber,
-          linkedAccountId: accountId,
+          linkedAccountId: resolvedAccount.id,
+          linkedAccountName: resolvedAccount.name,
           fromDate,
           toDate,
           settlementDate,

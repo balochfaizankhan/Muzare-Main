@@ -822,6 +822,14 @@ export type LabourWageSettlementRecord = {
   voidedBy?: string | null;
   voidReason?: string | null;
 };
+export type LabourWageSettlementPaymentAccount = {
+  id: string;
+  farmId: string;
+  name: string;
+  accountType: "cash" | "bank" | "partner" | string;
+  oldAndroidId?: string | null;
+  sourceType?: string | null;
+};
 export type LabourWageSettlementLinkedVoucher = {
   id: string;
   voucherNumber: string;
@@ -1384,6 +1392,16 @@ export const fetchLabourWageSettlements = (
     token,
   );
 };
+export const fetchLabourWageSettlementPaymentAccounts = (
+  token: string,
+  workspaceId: string,
+  farmId: string,
+) => apiRequest<{ accounts: LabourWageSettlementPaymentAccount[] }>(
+  `/v1/workspace/${workspaceId}/labour-wage-settlements/payment-accounts?farmId=${encodeURIComponent(farmId)}`,
+  {},
+  token,
+  { timeoutMs: 30_000, debugLabel: "labour-wage-settlement-payment-accounts" },
+);
 export const previewLabourWageSettlement = (
   token: string,
   workspaceId: string,

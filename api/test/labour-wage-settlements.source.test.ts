@@ -54,6 +54,16 @@ test("labour wage settlements use settlement numbering instead of reserving expe
   assert.ok(source.includes("linkedVoucherNumber: settlementNumber"));
 });
 
+test("labour wage settlements resolve canonical payment accounts and accept legacy android account ids", () => {
+  const source = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
+  const libSource = readFileSync(new URL("../src/lib/labour-wage-settlements.ts", import.meta.url), "utf8");
+  assert.ok(source.includes('"/v1/workspace/:workspaceId/labour-wage-settlements/payment-accounts"'));
+  assert.ok(source.includes("resolveCanonicalPaymentAccountId"));
+  assert.ok(source.includes("Payment account is not mapped. Please remap/import accounts."));
+  assert.ok(libSource.includes("legacyAndroidAccountId"));
+  assert.ok(libSource.includes("oldAndroidId"));
+});
+
 test("labour wage settlements repair missing accounting transactions through the settlement id", () => {
   const source = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
   assert.ok(source.includes('"/v1/workspace/:workspaceId/labour-wage-settlements/:settlementId/repair-accounting"'));

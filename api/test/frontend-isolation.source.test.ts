@@ -315,6 +315,15 @@ test("expense entry uses dependent searchable category selectors and grouped tot
   assert.match(modulePage, /MANAGE_EXPENSE_CATEGORIES/);
 });
 
+test("labour settlement form loads canonical payment account uuids and shows LW accounting copy", async () => {
+  const settlementPage = await source("web/src/pages/workspace/LabourWageSettlements.tsx");
+  const api = await source("web/src/lib/api.ts");
+  assert.match(api, /fetchLabourWageSettlementPaymentAccounts/);
+  assert.match(settlementPage, /fetchLabourWageSettlementPaymentAccounts\(token, workspaceId, activeFarmId\)/);
+  assert.match(settlementPage, /Settlement accounting is posted under the LW settlement number\./);
+  assert.doesNotMatch(settlementPage, /Settlement and voucher are posted together in one transaction\./);
+});
+
 test("financial cards and expense category totals use readable tokenized surfaces and compact money", async () => {
   const modulePage = await source("web/src/pages/ModulePage.tsx");
   const format = await source("web/src/lib/format.ts");

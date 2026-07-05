@@ -1,6 +1,6 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { accountTransactions, accounts, operationalRecords } from "../db/schema.js";
+import { accountTransactions, accounts, farms, operationalRecords } from "../db/schema.js";
 import { isDeletedOperationalPayload } from "../operational-record-state.js";
 import { listLabourEarnings } from "./labour-earnings.js";
 import { calculateStatusWage, listWageRateRows, resolveApplicableWageRate } from "./wage-rates.js";
@@ -55,6 +55,23 @@ export type SettlementAccountingRepairResult = {
 type LabourPayload = { name?: unknown };
 type AttendancePayload = { labourerId?: unknown; labourId?: unknown; date?: unknown; status?: unknown };
 type AdvancePayload = { date?: unknown; amount?: unknown };
+type CanonicalPaymentAccount = {
+  id: string;
+  farmId: string;
+  name: string;
+  accountType: string;
+  oldAndroidId: string | null;
+  sourceType: string | null;
+};
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function legacyAndroidAccountId(value: string) {
+  const match = /^android:[^:]+:account:(.+)$/i.exec(value.trim());
+  return match?.[1]?.trim() || null;
+}
 
 function parseSettlementSequenceNumber(value: string) {
   const match = /^LW-(\d+)$/i.exec(value.trim());
@@ -162,6 +179,79 @@ export async function listLabourWageSettlements(
   }));
 }
 
+export async function listCanonicalPaymentAccounts(
+  tx: DbClient,
+  workspaceId: string,
+  farmId: string,
+) {
+  return tx.select({
+    id: accounts.id,
+    farmId: accounts.farmId,
+    name: accounts.name,
+    accountType: accounts.accountType,
+    oldAndroidId: accounts.oldAndroidId,
+    sourceType: accounts.sourceType,
+  }).from(accounts)
+    .innerJoin(farms, and(eq(farms.id, accounts.farmId), eq(farms.workspaceId, workspaceId)))
+    .where(and(
+      eq(accounts.farmId, farmId),
+      eq(accounts.active, true),
+    ))
+    .orderBy(
+      asc(sql`case ${accounts.accountType} when 'cash' then 0 when 'bank' then 1 when 'partner' then 2 else 9 end`),
+      asc(accounts.name),
+    );
+}
+
+export async function resolveCanonicalPaymentAccountId(
+  tx: DbClient,
+  workspaceId: string,
+  farmId: string,
+  accountId: string,
+) {
+  const trimmed = accountId.trim();
+  const selectFields = {
+    id: accounts.id,
+    farmId: accounts.farmId,
+    name: accounts.name,
+    accountType: accounts.accountType,
+    oldAndroidId: accounts.oldAndroidId,
+    sourceType: accounts.sourceType,
+  } as const;
+
+  if (isUuid(trimmed)) {
+    const [account] = await tx.select(selectFields).from(accounts)
+      .innerJoin(farms, and(eq(farms.id, accounts.farmId), eq(farms.workspaceId, workspaceId)))
+      .where(and(
+        eq(accounts.active, true),
+        eq(accounts.id, trimmed),
+        eq(accounts.farmId, farmId),
+      ))
+      .limit(1);
+    return account ?? null;
+  }
+
+  const legacyId = legacyAndroidAccountId(trimmed);
+  if (!legacyId) return null;
+
+  const matches = await tx.select(selectFields).from(accounts)
+    .innerJoin(farms, and(eq(farms.id, accounts.farmId), eq(farms.workspaceId, workspaceId)))
+    .where(and(
+      eq(accounts.active, true),
+      eq(accounts.oldAndroidId, legacyId),
+    ));
+  if (!matches.length) return null;
+  const farmMatches = matches.filter((account: CanonicalPaymentAccount) => account.farmId === farmId);
+  if (farmMatches.length === 1) return farmMatches[0] ?? null;
+  if (farmMatches.length > 1) {
+    throw new Error("Payment account is mapped more than once in this farm. Please repair imported accounts before posting labour settlements.");
+  }
+  if (matches.length === 1) {
+    throw new Error("Payment account is mapped to another farm. Please remap/import accounts for this farm.");
+  }
+  throw new Error("Payment account is not mapped uniquely. Please remap/import accounts.");
+}
+
 export async function findOverlappingLabourWageSettlements(
   tx: DbClient,
   workspaceId: string,
@@ -251,11 +341,28 @@ export async function repairPostedSettlementAccounting(
       amount: payload.expenseAmount,
     } satisfies SettlementAccountingRepairResult;
   }
-  const [accountRow] = await tx.select({
-    id: accounts.id,
-    accountType: accounts.accountType,
-  }).from(accounts).where(eq(accounts.id, payload.linkedAccountId)).limit(1);
-  if (!accountRow) {
+  const resolvedAccount = await resolveCanonicalPaymentAccountId(
+    tx,
+    settlementRecord.workspaceId,
+    settlementRecord.farmId ?? "",
+    payload.linkedAccountId,
+  );
+  const accountId = resolvedAccount?.id ?? payload.linkedAccountId;
+  const accountType = resolvedAccount?.accountType ?? null;
+  if (resolvedAccount && resolvedAccount.id !== payload.linkedAccountId) {
+    const updatedPayload = {
+      ...payload,
+      linkedAccountId: resolvedAccount.id,
+      linkedAccountName: resolvedAccount.name,
+      updatedAt: new Date().toISOString(),
+    };
+    await tx.update(operationalRecords).set({
+      payload: updatedPayload,
+      updatedAt: new Date(),
+    }).where(eq(operationalRecords.id, settlementRecord.id));
+    settlementRecord.payload = normalizeSettlementPayload(updatedPayload);
+  }
+  if (!resolvedAccount) {
     throw new Error(`Settlement ${payload.settlementNumber} cannot be reposted because its payment account no longer exists.`);
   }
   const existing = await tx.select({
@@ -275,8 +382,8 @@ export async function repairPostedSettlementAccounting(
     await tx.update(accountTransactions).set({
       farmId: settlementRecord.farmId,
       seasonId: settlementRecord.seasonId,
-      accountId: payload.linkedAccountId,
-      type: accountRow.accountType === "partner" ? "credit" : "debit",
+      accountId,
+      type: accountType === "partner" ? "credit" : "debit",
       amount: String(payload.expenseAmount),
       transactionDate: payload.settlementDate,
       remarks: `Labour Wage Settlement ${payload.settlementNumber}`,
@@ -305,11 +412,11 @@ export async function repairPostedSettlementAccounting(
   const insertValues: typeof accountTransactions.$inferInsert = {
     farmId: settlementRecord.farmId,
     seasonId: settlementRecord.seasonId,
-    accountId: payload.linkedAccountId,
+    accountId,
     source: "settlement",
     sourceType: "labour_wage_settlement",
     referenceId: settlementRecord.clientRecordId,
-    type: accountRow.accountType === "partner" ? "credit" : "debit",
+    type: accountType === "partner" ? "credit" : "debit",
     amount: String(payload.expenseAmount),
     transactionDate: payload.settlementDate,
     remarks: `Labour Wage Settlement ${payload.settlementNumber}`,
