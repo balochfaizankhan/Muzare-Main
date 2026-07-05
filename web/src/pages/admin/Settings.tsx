@@ -1,5 +1,6 @@
 import { AdminSection } from "./AdminSection";
 import { BuildDiagnostics } from "../../components/BuildDiagnostics";
+import { AccountingReconciliationDebugPanel } from "../../components/AccountingReconciliationDebugPanel";
 export function Settings() {
   return <>
     <AdminSection
@@ -10,6 +11,7 @@ export function Settings() {
     />
     <main className="shell-page">
       <BuildDiagnostics />
+      <AccountingReconciliationDebugPanel />
     </main>
   </>;
 }

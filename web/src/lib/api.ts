@@ -15,6 +15,8 @@ export type HealthResponse = {
   appVersion: string;
 };
 
+export type AccountingReconciliationTrace = Record<string, unknown>;
+
 export type PlatformRole = "platform_admin" | "platform_support";
 export type WorkspaceRole = "workspace_owner" | "workspace_manager" | "supervisor" | "accountant" | "operator" | "viewer";
 export type WorkspaceModule = "dashboard" | "workforce" | "attendance" | "advances" | "wages" | "expenses" | "sales" | "dispatch" | "inventory" | "accounts" | "reports" | "settings" | "team";
@@ -1274,6 +1276,8 @@ export const fetchAccountingDiagnostics = (token: string, input: { workspaceId: 
   if (input.seasonId) query.set("seasonId", input.seasonId);
   return apiRequest<AccountingDiagnostics>(`/v1/admin/accounting-diagnostics?${query.toString()}`, {}, token, { timeoutMs: 30_000, debugLabel: "accounting-diagnostics" });
 };
+export const fetchAccountingReconciliationTrace = (token: string, accountName: string) =>
+  apiRequest<AccountingReconciliationTrace>(`/v1/debug/accounting-reconciliation?accountName=${encodeURIComponent(accountName)}`, {}, token, { timeoutMs: 30_000, debugLabel: "accounting-reconciliation-trace" });
 export const cleanFailedMigrationImport = (token: string, input: {
   workspaceId: string;
   batchId: string;
