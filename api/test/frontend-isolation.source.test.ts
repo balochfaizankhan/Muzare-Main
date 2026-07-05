@@ -214,11 +214,15 @@ test("partner settlements transfer matching account and partner positions withou
   assert.match(accounting, /entry\.fromAccountId === accountId \? entry\.amount : 0/);
   assert.match(accounting, /filter\(\(account\) => account\.type !== "partner"\)/);
   assert.match(accounting, /if \(account\.type === "partner"\) return partnerAccountBalanceEffect\(account, sales, vouchers, advances, entries, settlements, \[account\]\);/);
+  assert.match(partnerAccounting, /getLabourSettlementAccountingSnapshot\(advances, settlements, account\.id\)/);
+  assert.match(partnerAccounting, /settlementSnapshot\.labourWageSettlements/);
+  assert.match(partnerAccounting, /settlementSnapshot\.outstandingLabourAdvances/);
   assert.match(partnerAccounting, /position\.purchaseVouchersPaid \+= voucher\.amount;/);
-  assert.match(partnerAccounting, /position\.totalLabourAdvancesPaid \+= advance\.amount;/);
-  assert.match(partnerAccounting, /position\.labourWageSettlements \+= settlement\.expenseAmount;/);
+  assert.match(partnerAccounting, /position\.totalLabourAdvancesPaid \+= settlementSnapshot\.totalLabourAdvancesPaid;/);
+  assert.match(partnerAccounting, /position\.labourWageSettlements \+= settlementSnapshot\.labourWageSettlements;/);
   assert.match(partnerAccounting, /position\.businessFundsNet = position\.transfersOut - position\.transfersIn;/);
-  assert.match(partnerAccounting, /position\.outstandingLabourAdvances = Math\.max\(position\.totalLabourAdvancesPaid - settlements/);
+  assert.match(partnerAccounting, /position\.labourAdvancesPaid = position\.totalLabourAdvancesPaid;/);
+  assert.match(partnerAccounting, /position\.outstandingLabourAdvances = settlementSnapshot\.outstandingLabourAdvances;/);
   assert.match(partnerAccounting, /position\.adjustments -= sale\.amount;/);
   assert.match(partnerAccounting, /position\.capitalInjected \+= entry\.amount/);
   assert.match(partnerAccounting, /position\.moneyReturned \+= entry\.amount/);
@@ -236,6 +240,8 @@ test("partner settlements transfer matching account and partner positions withou
   assert.match(modulePage, /t\("partnerLedgerPage\.farmOwesPartner"\)/);
   assert.match(modulePage, /t\("partnerLedgerPage\.partnerHoldsBusinessMoney"\)/);
   assert.match(modulePage, /<option value="settlement">\{t\("partnerLedgerPage\.partnerSettlement"\)\}<\/option>/);
+  assert.match(modulePage, /getLabourSettlementAccountingSnapshot\(activeAdvances, activeLabourWageSettlements, selectedAccount\.id\)/);
+  assert.match(modulePage, /outstandingLabourAdvances/);
   assert.match(dashboard, /buildPartnerLiabilityPositions\(activeAccounts, cashAffectingVouchers, activeAdvances, activeEntries, activeSales, activeSettlements\)/);
   assert.match(dashboard, /netPosition: calculateAvailableBalance\(activeAccounts, activeSales, cashAffectingVouchers, activeAdvances, activeEntries, activeSettlements\)/);
 });

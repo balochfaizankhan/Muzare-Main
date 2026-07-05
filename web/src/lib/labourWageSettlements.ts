@@ -37,12 +37,49 @@ export function isPostedLabourWageSettlement(settlement: LabourWageSettlement | 
     && settlement.accountingStatus !== "accounting_missing");
 }
 
+export function isActiveSettlementForPartnerAccounting(settlement: LabourWageSettlement | null | undefined) {
+  return Boolean(settlement
+    && isActiveOperationalRecord(settlement)
+    && settlement.status === "posted"
+    && settlement.accountingStatus !== "accounting_missing");
+}
+
 export function getActiveLabourWageSettlements(settlements: LabourWageSettlement[]) {
   return settlements.filter(isPostedLabourWageSettlement);
 }
 
 export function getLabourWageSettlementLedgerAmount(settlement: SettlementAccountLike & { settledAdvanceAmount?: number; expenseAmount?: number }) {
   return Number(settlement.expenseAmount ?? settlement.settledAdvanceAmount ?? 0);
+}
+
+export function getLabourWageSettlementAdvanceOffset(settlement: SettlementAccountLike & { settledAdvanceAmount?: number }) {
+  return Number(settlement.settledAdvanceAmount ?? 0);
+}
+
+export function getLabourSettlementAccountingSnapshot(
+  advances: Advance[],
+  settlements: LabourWageSettlement[],
+  accountId: string,
+) {
+  const activeSettlements = settlements.filter((settlement) =>
+    isActiveSettlementForPartnerAccounting(settlement)
+    && resolveLabourWageSettlementAccountId(settlement) === accountId,
+  );
+  const totalLabourAdvancesPaid = advances
+    .filter((advance) => isActiveOperationalRecord(advance) && advance.accountId === accountId)
+    .reduce((sum, advance) => sum + advance.amount, 0);
+  const labourWageSettlements = activeSettlements
+    .reduce((sum, settlement) => sum + getLabourWageSettlementLedgerAmount(settlement), 0);
+  const settledThroughWageSettlements = activeSettlements
+    .reduce((sum, settlement) => sum + getLabourWageSettlementAdvanceOffset(settlement), 0);
+  const outstandingLabourAdvances = Math.max(totalLabourAdvancesPaid - settledThroughWageSettlements, 0);
+  return {
+    activeSettlements,
+    totalLabourAdvancesPaid,
+    settledThroughWageSettlements,
+    outstandingLabourAdvances,
+    labourWageSettlements,
+  };
 }
 
 export function isLabourWageSettlementVoucher(voucher: SettlementVoucherLike | null | undefined) {

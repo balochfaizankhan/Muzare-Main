@@ -11,7 +11,7 @@ import { calculateAccountBalance } from "../../lib/accounting";
 import { getCanonicalExpenseCategory } from "../../lib/expenseCategories";
 import { formatMoney, formatNumber } from "../../lib/format";
 import { labourEarningTypeLabel, sumLabourEarnings } from "../../lib/labourEarnings";
-import { getActiveLabourWageSettlements, getCashAffectingVouchers, isLabourWageSettlementVoucher, outstandingLabourAdvances, resolveLabourWageSettlementAccountId, totalSettledAdvances } from "../../lib/labourWageSettlements";
+import { getActiveLabourWageSettlements, getCashAffectingVouchers, getLabourSettlementAccountingSnapshot, isLabourWageSettlementVoucher, outstandingLabourAdvances, totalSettledAdvances } from "../../lib/labourWageSettlements";
 import { translateExpenseCategory, translateExpenseSubcategory, translateSaleType, translateSalesStatus } from "../../lib/systemTranslations";
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
 import { getVoucherDisplayNumber } from "../../lib/vouchers";
@@ -958,15 +958,11 @@ export function Reports() {
       adjustments: 0,
     };
     if (selectedAccountRecord?.type !== "partner") return { ...summary, netBalance: 0 };
+    const settlementSnapshot = getLabourSettlementAccountingSnapshot(advanceRows, activeSettlements, selectedAccountRecord.id);
     for (const group of groupedPartnerLedgerRows) {
       if (group.groupKey === "capital_injected") summary.capitalInjected += group.totalAmount;
       if (group.groupKey === "purchase_vouchers_paid" || group.groupKey === "labour_wage_settlements") summary.directExpensesPaid += group.totalAmount;
-      if (group.groupKey === "labour_advances_paid") {
-        const settledAdvances = activeSettlements
-          .filter((settlement) => resolveLabourWageSettlementAccountId(settlement) === selectedAccountRecord.id)
-          .reduce((sum, settlement) => sum + settlement.settledAdvanceAmount, 0);
-        summary.directExpensesPaid += Math.max(group.totalAmount - settledAdvances, 0);
-      }
+      if (group.groupKey === "labour_advances_paid") summary.directExpensesPaid += settlementSnapshot.outstandingLabourAdvances;
       if (group.groupKey === "transfers_in") summary.transfersIn += Math.abs(group.totalAmount);
       if (group.groupKey === "transfers_out") summary.transfersOut += Math.abs(group.totalAmount);
       if (group.groupKey === "money_returned") summary.moneyReturned += -group.totalAmount;
@@ -976,7 +972,7 @@ export function Reports() {
       ...summary,
       netBalance: summary.capitalInjected + summary.directExpensesPaid + summary.transfersOut - summary.transfersIn - summary.moneyReturned + summary.adjustments,
     };
-  }, [activeSettlements, groupedPartnerLedgerRows, selectedAccountRecord]);
+  }, [activeSettlements, advanceRows, groupedPartnerLedgerRows, selectedAccountRecord]);
   const rawStandardAccountLedgerSummary = useMemo(() => {
     const summary = { expenses: 0, advances: 0, settlements: 0, income: 0, other: 0 };
     for (const group of groupedAccountLedgerRows) {
@@ -1018,16 +1014,14 @@ export function Reports() {
       if (row.partnerLiabilityGroup === "money_returned") overview.moneyReturned += row.debit;
       if (row.partnerLiabilityGroup === "adjustments") overview.adjustments += row.credit - row.debit;
     }
-    const settledAdvances = activeSettlements
-      .filter((settlement) => resolveLabourWageSettlementAccountId(settlement) === selectedAccountRecord.id)
-      .reduce((sum, settlement) => sum + settlement.settledAdvanceAmount, 0);
-    const outstandingLabourAdvances = Math.max(overview.labourAdvancesPaid - settledAdvances, 0);
-    overview.directExpensesPaid = overview.purchaseVouchersPaid + overview.labourWageSettlements + outstandingLabourAdvances;
+    const settlementSnapshot = getLabourSettlementAccountingSnapshot(advanceRows, activeSettlements, selectedAccountRecord.id);
+    overview.labourAdvancesPaid = settlementSnapshot.totalLabourAdvancesPaid;
+    overview.directExpensesPaid = overview.purchaseVouchersPaid + overview.labourWageSettlements + settlementSnapshot.outstandingLabourAdvances;
     return {
       ...overview,
       netBalance: calculatePartnerLiabilityBalance(overview),
     };
-  }, [accountLedgerRows, activeSettlements, selectedAccountRecord]);
+  }, [accountLedgerRows, activeSettlements, advanceRows, selectedAccountRecord]);
   const partnerAccountLedgerOverviewView = isPartnerLedgerReport
     ? rawPartnerAccountLedgerOverview as {
         capitalInjected: number;

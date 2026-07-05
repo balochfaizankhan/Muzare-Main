@@ -1,7 +1,7 @@
 import type { Account, Advance, LabourWageSettlement, PartnerEntry, Sale, Voucher } from "./offline-db";
 import { isActiveOperationalRecord } from "./operationalRecords";
 import { getActiveVouchers } from "./voucherCollections";
-import { getActiveLabourWageSettlements, getLabourWageSettlementLedgerAmount, resolveLabourWageSettlementAccountId, isLabourWageSettlementVoucher } from "./labourWageSettlements";
+import { getLabourSettlementAccountingSnapshot, isLabourWageSettlementVoucher } from "./labourWageSettlements";
 
 export type PartnerLiabilityPosition = {
   account: Account | null;
@@ -126,7 +126,6 @@ export function partnerAccountBalanceEffect(
 ) {
   if (account.type !== "partner") return 0;
   const activeVouchers = getActiveVouchers(vouchers);
-  const activeSettlements = getActiveLabourWageSettlements(settlements as LabourWageSettlement[]);
   const capitalInjected = entries
     .filter((entry) => isActiveOperationalRecord(entry) && entry.type === "contribution" && resolvePartnerAccountId(entry, allAccounts) === account.id)
     .reduce((sum, entry) => sum + entry.amount, 0);
@@ -146,22 +145,14 @@ export function partnerAccountBalanceEffect(
     .filter((voucher) => !isLabourWageSettlementVoucher(voucher))
     .filter((voucher) => voucher.accountId === account.id)
     .reduce((sum, voucher) => sum + voucher.amount, 0);
-  const labourSettlementExpenses = activeSettlements
-    .filter((settlement) => resolveLabourWageSettlementAccountId(settlement) === account.id)
-    .reduce((sum, settlement) => sum + getLabourWageSettlementLedgerAmount(settlement), 0);
-  const directLabourAdvancesPaid = advances
-    .filter((advance) => isActiveOperationalRecord(advance) && advance.accountId === account.id)
-    .reduce((sum, advance) => sum + advance.amount, 0);
-  const settledAdvancesApplied = activeSettlements
-    .filter((settlement) => resolveLabourWageSettlementAccountId(settlement) === account.id)
-    .reduce((sum, settlement) => sum + settlement.settledAdvanceAmount, 0);
+  const settlementSnapshot = getLabourSettlementAccountingSnapshot(advances, settlements, account.id);
   const adjustments = sales
     .filter((sale) => isActiveOperationalRecord(sale) && sale.accountId === account.id)
     .reduce((sum, sale) => sum - sale.amount, 0);
   return capitalInjected
     + directVoucherExpensesPaid
-    + labourSettlementExpenses
-    + Math.max(directLabourAdvancesPaid - settledAdvancesApplied, 0)
+    + settlementSnapshot.labourWageSettlements
+    + settlementSnapshot.outstandingLabourAdvances
     + transfersOut
     - transfersIn
     - moneyReturned
@@ -178,7 +169,6 @@ export function buildPartnerLiabilityPositions(
   settlements: Array<Pick<LabourWageSettlement, "linkedAccountId" | "settledAdvanceAmount" | "status" | "deletedAt" | "accountingStatus">> = [],
 ) {
   const activeVouchers = getActiveVouchers(vouchers);
-  const activeSettlements = getActiveLabourWageSettlements(settlements as LabourWageSettlement[]);
   const partnerAccounts = accounts.filter((account) => account.type === "partner");
   const positions = new Map<string, PartnerLiabilityPosition>();
   const ensure = (key: string, name: string, account: Account | null) => {
@@ -240,27 +230,17 @@ export function buildPartnerLiabilityPositions(
     position.directExpensesPaid += voucher.amount;
   }
 
-  for (const advance of advances.filter((item) => isActiveOperationalRecord(item))) {
-    const account = partnerAccounts.find((item) => item.id === advance.accountId);
-    if (!account) continue;
+  for (const account of partnerAccounts) {
+    const settlementSnapshot = getLabourSettlementAccountingSnapshot(advances, settlements as LabourWageSettlement[], account.id);
     const position = ensure(account.id, account.name, account);
-    position.totalLabourAdvancesPaid += advance.amount;
-  }
-
-  for (const settlement of activeSettlements) {
-    const settlementAccountId = resolveLabourWageSettlementAccountId(settlement);
-    const account = partnerAccounts.find((item) => item.id === settlementAccountId);
-    if (!account) continue;
-    const position = ensure(account.id, account.name, account);
-    position.labourWageSettlements += getLabourWageSettlementLedgerAmount(settlement);
+    position.totalLabourAdvancesPaid += settlementSnapshot.totalLabourAdvancesPaid;
+    position.labourWageSettlements += settlementSnapshot.labourWageSettlements;
+    position.outstandingLabourAdvances = settlementSnapshot.outstandingLabourAdvances;
   }
 
   for (const position of positions.values()) {
     position.businessFundsNet = position.transfersOut - position.transfersIn;
-    position.outstandingLabourAdvances = Math.max(position.totalLabourAdvancesPaid - settlements
-      .filter((item) => isActiveOperationalRecord(item) && item.accountingStatus !== "accounting_missing" && resolveLabourWageSettlementAccountId(item) === position.account?.id)
-      .reduce((sum, item) => sum + item.settledAdvanceAmount, 0), 0);
-    position.labourAdvancesPaid = position.outstandingLabourAdvances;
+    position.labourAdvancesPaid = position.totalLabourAdvancesPaid;
     position.directExpensesPaid = position.purchaseVouchersPaid + position.labourWageSettlements + position.outstandingLabourAdvances;
   }
 
