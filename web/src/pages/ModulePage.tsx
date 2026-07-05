@@ -26,6 +26,7 @@ import {
   groupPartnerLiabilityTransactions,
   partnerAdjustmentEffect,
   resolvePartnerAccountId,
+  type PartnerLiabilityPosition,
   type PartnerLiabilityLedgerGroupKey,
 } from "../lib/partnerAccounting";
 import { formatDate, formatMoney } from "../lib/format";
@@ -3496,6 +3497,7 @@ function PartnerLedgerModule() {
   const [adjustmentDirection, setAdjustmentDirection] = useState<NonNullable<PartnerEntry["adjustmentDirection"]>>("increase");
   const [editing, setEditing] = useState<PartnerEntry | null>(null);
   const [viewing, setViewing] = useState<PartnerEntry | null>(null);
+  const [selectedPartnerPosition, setSelectedPartnerPosition] = useState<PartnerLiabilityPosition | null>(null);
   const [deleting, setDeleting] = useState<PartnerEntry | null>(null);
   const [deletionReason, setDeletionReason] = useState("");
   const [saving, setSaving] = useState(false);
@@ -3687,24 +3689,26 @@ function PartnerLedgerModule() {
       <section className="record-panel">
         <h2>{t("partnerLedgerPage.partnerPosition")}</h2>
         {!partnerPositions.length ? <Empty>{t("partnerLedgerPage.noPartnerPositions")}</Empty> : <div className="partner-position-table">
-          <div className="partner-position-row partner-position-row--header"><span>{t("partnerLedgerPage.partner")}</span><span>{t("partnerLedgerPage.openingBalance")}</span><span>{t("partnerLedgerPage.capitalInjected")}</span><span>Purchase Vouchers</span><span>Outstanding Labour Advances</span><span>Labour Settlements</span><span>{t("partnerLedgerPage.currentPartnerBalance")}</span></div>
-          {partnerPositions.map((item) => <div className="partner-position-row" key={item.name}>
-            <strong>{item.name}</strong><span>{money(item.openingBalance)}</span><span>{money(item.capitalInjected)}</span><span>{money(item.purchaseVouchersPaid)}</span><span>{money(item.outstandingLabourAdvances)}</span><span>{money(item.labourWageSettlements)}</span><b>{money(item.currentPartnerBalance)}</b>
-          </div>)}
+          <div className="partner-position-row partner-position-row--header"><span>{t("partnerLedgerPage.partner")}</span><span>{t("partnerLedgerPage.openingBalance")}</span><span>{t("partnerLedgerPage.capitalInjected")}</span><span>Purchase Vouchers</span><span>Business Funds Net</span><span>Outstanding Labour Advances</span><span>Labour Settlements</span><span>{t("partnerLedgerPage.currentPartnerBalance")}</span></div>
+          {partnerPositions.map((item) => <button type="button" className="partner-position-row partner-position-row--interactive" key={item.name} onClick={() => setSelectedPartnerPosition(item)}>
+            <strong>{item.name}</strong><span>{money(item.openingBalance)}</span><span>{money(item.capitalInjected)}</span><span>{money(item.purchaseVouchersPaid)}</span><span>{money(item.businessFundsNet)}</span><span>{money(item.outstandingLabourAdvances)}</span><span>{money(item.labourWageSettlements)}</span><b>{money(item.currentPartnerBalance)}</b>
+          </button>)}
         </div>}
         {!!partnerPositions.length && <div className="partner-position-cards">
           {partnerPositions.map((item) => <article key={`mobile-${item.name}`}>
-            <header><strong>{item.name}</strong><b>{money(item.currentPartnerBalance)}</b></header>
+            <header><button type="button" className="worker-dialog__link" onClick={() => setSelectedPartnerPosition(item)}><strong>{item.name}</strong></button><b>{money(item.currentPartnerBalance)}</b></header>
             <p>{getPartnerBalanceState(item.currentPartnerBalance) === "partner_holds_business_money" ? t("partnerLedgerPage.partnerHoldsBusinessMoney") : t("partnerLedgerPage.farmOwesPartner")}</p>
             <div><span>{t("partnerLedgerPage.openingBalance")}</span><strong>{money(item.openingBalance)}</strong></div>
             <div><span>{t("partnerLedgerPage.capitalInjected")}</span><strong>{money(item.capitalInjected)}</strong></div>
             <div><span>Purchase Vouchers</span><strong>{money(item.purchaseVouchersPaid)}</strong></div>
+            <div><span>Business Funds Net</span><strong>{money(item.businessFundsNet)}</strong></div>
             <div><span>Total labour advances paid</span><strong>{money(item.totalLabourAdvancesPaid)}</strong></div>
             <div><span>Less: settled through wage settlements</span><strong>{money(Math.max(item.totalLabourAdvancesPaid - item.outstandingLabourAdvances, 0))}</strong></div>
             <div><span>Outstanding Labour Advances</span><strong>{money(item.outstandingLabourAdvances)}</strong></div>
             <div><span>Labour Wage Settlements</span><strong>{money(item.labourWageSettlements)}</strong></div>
             <div><span>{t("partnerLedgerPage.transfersOut")}</span><strong>{money(item.transfersOut)}</strong></div>
             <div><span>{t("partnerLedgerPage.transfersIn")}</span><strong>{money(item.transfersIn)}</strong></div>
+            <div><span>Reconciliation</span><strong>{`Purchase vouchers ${money(item.purchaseVouchersPaid)} + Outstanding labour advances ${money(item.outstandingLabourAdvances)} + Business funds net ${money(item.businessFundsNet)} + Capital injection ${money(item.capitalInjected)} = ${money(item.currentPartnerBalance)}`}</strong></div>
           </article>)}
         </div>}
       </section>
@@ -3723,6 +3727,30 @@ function PartnerLedgerModule() {
           </div>
         ))}
       />
+      {selectedPartnerPosition && (
+        <div className="worker-dialog-backdrop worker-action-backdrop">
+          <section className="worker-action-dialog">
+            <header><h2>{selectedPartnerPosition.name}</h2><button aria-label={t("common.close")} type="button" onClick={() => setSelectedPartnerPosition(null)}><X size={19} /></button></header>
+            <div className="worker-action-form partner-ledger-details">
+              <p><strong>{t("partnerLedgerPage.openingBalance")}</strong><span>{money(selectedPartnerPosition.openingBalance)}</span></p>
+              <p><strong>{t("partnerLedgerPage.capitalInjected")}</strong><span>{money(selectedPartnerPosition.capitalInjected)}</span></p>
+              <p><strong>Purchase Vouchers</strong><span>{money(selectedPartnerPosition.purchaseVouchersPaid)}</span></p>
+              <p><strong>Business Funds Given</strong><span>{money(selectedPartnerPosition.transfersOut)}</span></p>
+              <p><strong>Business Funds Received</strong><span>{money(selectedPartnerPosition.transfersIn)}</span></p>
+              <p><strong>Business Funds Net</strong><span>{money(selectedPartnerPosition.businessFundsNet)}</span></p>
+              <p><strong>Total labour advances paid</strong><span>{money(selectedPartnerPosition.totalLabourAdvancesPaid)}</span></p>
+              <p><strong>Less: settled through wage settlements</strong><span>{money(Math.max(selectedPartnerPosition.totalLabourAdvancesPaid - selectedPartnerPosition.outstandingLabourAdvances, 0))}</span></p>
+              <p><strong>Outstanding Labour Advances</strong><span>{money(selectedPartnerPosition.outstandingLabourAdvances)}</span></p>
+              <p><strong>Labour Settlements</strong><span>{money(selectedPartnerPosition.labourWageSettlements)}</span></p>
+              <p><strong>{t("partnerLedgerPage.moneyReturned")}</strong><span>{money(selectedPartnerPosition.moneyReturned)}</span></p>
+              <p><strong>{t("partnerLedgerPage.adjustments")}</strong><span>{money(selectedPartnerPosition.adjustments)}</span></p>
+              <p><strong>{t("partnerLedgerPage.farmOwesPartner")}</strong><span>{money(selectedPartnerPosition.currentPartnerBalance)}</span></p>
+              <p><strong>Reconciliation</strong><span>{`${money(selectedPartnerPosition.openingBalance)} + ${money(selectedPartnerPosition.capitalInjected)} + ${money(selectedPartnerPosition.purchaseVouchersPaid)} + ${money(selectedPartnerPosition.businessFundsNet)} + ${money(selectedPartnerPosition.outstandingLabourAdvances)} + ${money(selectedPartnerPosition.labourWageSettlements)} - ${money(selectedPartnerPosition.moneyReturned)} ${selectedPartnerPosition.adjustments >= 0 ? "+" : "-"} ${money(Math.abs(selectedPartnerPosition.adjustments))}`}</span></p>
+              <footer><button type="button" onClick={() => setSelectedPartnerPosition(null)}>{t("partnerLedgerPage.close")}</button></footer>
+            </div>
+          </section>
+        </div>
+      )}
       {viewing && (
         <div className="worker-dialog-backdrop worker-action-backdrop">
           <section className="worker-action-dialog">

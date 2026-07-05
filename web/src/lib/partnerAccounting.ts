@@ -11,6 +11,7 @@ export type PartnerLiabilityPosition = {
   capitalInjected: number;
   directExpensesPaid: number;
   purchaseVouchersPaid: number;
+  businessFundsNet: number;
   labourAdvancesPaid: number;
   labourWageSettlements: number;
   totalLabourAdvancesPaid: number;
@@ -189,6 +190,7 @@ export function buildPartnerLiabilityPositions(
       capitalInjected: 0,
       directExpensesPaid: 0,
       purchaseVouchersPaid: 0,
+      businessFundsNet: 0,
       labourAdvancesPaid: 0,
       labourWageSettlements: 0,
       totalLabourAdvancesPaid: 0,
@@ -253,6 +255,7 @@ export function buildPartnerLiabilityPositions(
   }
 
   for (const position of positions.values()) {
+    position.businessFundsNet = position.transfersOut - position.transfersIn;
     position.outstandingLabourAdvances = Math.max(position.totalLabourAdvancesPaid - settlements
       .filter((item) => isActiveOperationalRecord(item) && item.linkedAccountId === position.account?.id)
       .reduce((sum, item) => sum + item.settledAdvanceAmount, 0), 0);

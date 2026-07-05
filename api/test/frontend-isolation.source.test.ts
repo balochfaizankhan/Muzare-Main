@@ -216,7 +216,8 @@ test("partner settlements transfer matching account and partner positions withou
   assert.match(accounting, /if \(account\.type === "partner"\) return partnerAccountBalanceEffect\(account, sales, vouchers, advances, entries, settlements, \[account\]\);/);
   assert.match(partnerAccounting, /position\.purchaseVouchersPaid \+= voucher\.amount;/);
   assert.match(partnerAccounting, /position\.totalLabourAdvancesPaid \+= advance\.amount;/);
-  assert.match(partnerAccounting, /position\.labourWageSettlements \+= voucher\.amount;/);
+  assert.match(partnerAccounting, /position\.labourWageSettlements \+= settlement\.expenseAmount;/);
+  assert.match(partnerAccounting, /position\.businessFundsNet = position\.transfersOut - position\.transfersIn;/);
   assert.match(partnerAccounting, /position\.outstandingLabourAdvances = Math\.max\(position\.totalLabourAdvancesPaid - settlements/);
   assert.match(partnerAccounting, /position\.adjustments -= sale\.amount;/);
   assert.match(partnerAccounting, /position\.capitalInjected \+= entry\.amount/);
@@ -225,6 +226,7 @@ test("partner settlements transfer matching account and partner positions withou
   assert.match(partnerAccounting, /return position\.openingBalance[\s\S]*\+ position\.capitalInjected[\s\S]*\+ position\.directExpensesPaid[\s\S]*\+ position\.transfersOut[\s\S]*- position\.transfersIn[\s\S]*- position\.moneyReturned[\s\S]*\+ position\.adjustments/);
   assert.match(modulePage, /buildPartnerLiabilityPositions\(accounts, vouchers, advances, activeEntries, sales, labourWageSettlements\)/);
   assert.match(modulePage, /Purchase Vouchers/);
+  assert.match(modulePage, /Business Funds Net/);
   assert.match(modulePage, /Outstanding Labour Advances/);
   assert.match(modulePage, /Labour Wage Settlements/);
   assert.match(modulePage, /t\("partnerLedgerPage\.farmOwesPartner"\)/);
