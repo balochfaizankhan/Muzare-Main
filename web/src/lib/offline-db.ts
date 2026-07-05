@@ -93,6 +93,8 @@ export type Attendance = LocalRecord & {
 export type Account = LocalRecord & {
   name: string;
   type: "cash" | "bank" | "partner";
+  oldAndroidId?: string;
+  sourceType?: string;
 };
 
 export type Voucher = LocalRecord & {

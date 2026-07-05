@@ -43,6 +43,7 @@ import {
   type LabourWageSettlement,
   type WageRate,
 } from "../../lib/offline-db";
+import { buildAccountIdentityLookup, resolveCanonicalAccountId } from "../../lib/accountIdentity";
 import { compareWageRates, getWageRateStatus, normalizeHalfDayRate, summarizeAttendanceWages } from "../../lib/wageRates";
 import { deleteOperationalRecord } from "../../services/syncService";
 import i18n from "../../i18n";
@@ -474,7 +475,11 @@ export function Reports() {
 
   const labourById = useMemo(() => new Map(labourers.map((labourer) => [labourer.id, labourer])), [labourers]);
   const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
-  const accountName = (id?: string) => accountById.get(id ?? "")?.name ?? t("reportsPage.unknownAccount");
+  const accountLookup = useMemo(() => buildAccountIdentityLookup(accounts), [accounts]);
+  const accountName = (id?: string) => {
+    const resolvedId = resolveCanonicalAccountId(id ?? null, accountLookup);
+    return (resolvedId ? accountById.get(resolvedId) : accountById.get(id ?? ""))?.name ?? t("reportsPage.unknownAccount");
+  };
   const labourName = (id: string) => labourById.get(id)?.name ?? t("reportsPage.unknownLabour");
   const ledgerGroupTitle = (groupKey: AccountTransactionGroupKey) => ({
     expenses: t("reportsPage.groupExpenses"),
@@ -638,7 +643,7 @@ export function Reports() {
       const labourer = labourById.get(item.labourerId);
       return matchesGroup(labourer)
         && matchesLabourFilter(item.labourerId)
-        && (!accountId || item.accountId === accountId)
+        && (!accountId || resolveCanonicalAccountId(item.accountId, accountLookup) === accountId)
         && matches(item.date, [labourName(item.labourerId), labourer?.group, accountName(item.accountId), item.notes, item.sourceAccountName], item.amount);
     })
     .sort((a, b) => advanceSort === "desc" ? b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt) : a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt)), [accountId, accountName, advanceSort, advances, labourById, labourName, matches, selectedLabourerIds]);
@@ -847,13 +852,13 @@ export function Reports() {
   const positions = useMemo(() => accounts
     .filter((account) => !accountId || account.id === accountId)
     .map((account) => {
-      const voucherExpenses = cashAffectingVouchers.filter((item) => item.accountId === account.id).reduce((sum, item) => sum + item.amount, 0);
-      const labourAdvances = advanceRows.filter((item) => item.accountId === account.id).reduce((sum, item) => sum + item.amount, 0);
-      const contributions = partnerRows.filter((item) => item.type === "contribution" && item.accountId === account.id).reduce((sum, item) => sum + item.amount, 0);
-      const withdrawals = partnerRows.filter((item) => item.type === "withdrawal" && item.accountId === account.id).reduce((sum, item) => sum + item.amount, 0);
-      const settlementsSent = partnerRows.filter((item) => item.type === "settlement" && item.fromAccountId === account.id).reduce((sum, item) => sum + item.amount, 0);
-      const settlementsReceived = partnerRows.filter((item) => item.type === "settlement" && item.toAccountId === account.id).reduce((sum, item) => sum + item.amount, 0);
-      const salesReceived = saleRows.filter((item) => item.accountId === account.id).reduce((sum, item) => sum + item.amount, 0);
+      const voucherExpenses = cashAffectingVouchers.filter((item) => resolveCanonicalAccountId(item.accountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
+      const labourAdvances = advanceRows.filter((item) => resolveCanonicalAccountId(item.accountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
+      const contributions = partnerRows.filter((item) => item.type === "contribution" && resolveCanonicalAccountId(item.accountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
+      const withdrawals = partnerRows.filter((item) => item.type === "withdrawal" && resolveCanonicalAccountId(item.accountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
+      const settlementsSent = partnerRows.filter((item) => item.type === "settlement" && resolveCanonicalAccountId(item.fromAccountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
+      const settlementsReceived = partnerRows.filter((item) => item.type === "settlement" && resolveCanonicalAccountId(item.toAccountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
+      const salesReceived = saleRows.filter((item) => resolveCanonicalAccountId(item.accountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
       return {
         account,
         voucherExpenses,
@@ -863,7 +868,7 @@ export function Reports() {
         settlementsSent,
         settlementsReceived,
         salesReceived,
-        net: calculateAccountBalance(account, saleRows, cashAffectingVouchers, advanceRows, partnerRows, activeSettlements),
+        net: calculateAccountBalance(account, saleRows, cashAffectingVouchers, advanceRows, partnerRows, activeSettlements, accounts),
       };
     }), [accountId, accounts, activeSettlements, advanceRows, cashAffectingVouchers, partnerRows, saleRows]);
   const partnerLiabilityPositions = useMemo(
@@ -876,7 +881,7 @@ export function Reports() {
   const accountLedgerRows = useMemo(() => {
     const rows: Array<Omit<AccountLedgerReportRow, "running">> = [];
     for (const voucher of cashAffectingVouchers) {
-      const account = accountById.get(voucher.accountId);
+    const account = accountById.get(resolveCanonicalAccountId(voucher.accountId, accountLookup) ?? voucher.accountId);
       const isPartner = account?.type === "partner";
       const settlementVoucher = isLabourWageSettlementVoucher(voucher);
       const settlementRecord = settlementVoucher
@@ -901,24 +906,24 @@ export function Reports() {
       });
     }
     for (const advance of advanceRows) {
-      const account = accountById.get(advance.accountId ?? "");
+      const account = accountById.get(resolveCanonicalAccountId(advance.accountId, accountLookup) ?? "");
       const isPartner = account?.type === "partner";
-      rows.push({ id: `advance:${advance.id}`, date: advance.date, accountId: advance.accountId ?? "", accountName: accountName(advance.accountId), type: "advance", typeLabel: t("reportsPage.labourAdvance"), reference: advance.id.slice(0, 8), description: `${labourName(advance.labourerId)}${advance.notes ? ` - ${advance.notes}` : ""}`, debit: isPartner ? 0 : advance.amount, credit: isPartner ? advance.amount : 0, path: `/workspace/labour-advances?recordId=${advance.id}`, classification: "advance", partnerLiabilityGroup: isPartner ? "labour_advances_paid" : undefined });
+      rows.push({ id: `advance:${advance.id}`, date: advance.date, accountId: resolveCanonicalAccountId(advance.accountId, accountLookup) ?? advance.accountId ?? "", accountName: accountName(advance.accountId), type: "advance", typeLabel: t("reportsPage.labourAdvance"), reference: advance.id.slice(0, 8), description: `${labourName(advance.labourerId)}${advance.notes ? ` - ${advance.notes}` : ""}`, debit: isPartner ? 0 : advance.amount, credit: isPartner ? advance.amount : 0, path: `/workspace/labour-advances?recordId=${advance.id}`, classification: "advance", partnerLiabilityGroup: isPartner ? "labour_advances_paid" : undefined });
     }
     for (const sale of saleRows) rows.push({
       id: `sale:${sale.id}`,
       date: sale.date,
-      accountId: sale.accountId ?? "",
+      accountId: resolveCanonicalAccountId(sale.accountId, accountLookup) ?? sale.accountId ?? "",
       accountName: accountName(sale.accountId),
-      type: accountById.get(sale.accountId ?? "")?.type === "partner" ? "adjustment" : "sale",
-      typeLabel: accountById.get(sale.accountId ?? "")?.type === "partner" ? t("reportsPage.adjustment") : t("reportsPage.sale"),
+      type: accountById.get(resolveCanonicalAccountId(sale.accountId, accountLookup) ?? "")?.type === "partner" ? "adjustment" : "sale",
+      typeLabel: accountById.get(resolveCanonicalAccountId(sale.accountId, accountLookup) ?? "")?.type === "partner" ? t("reportsPage.adjustment") : t("reportsPage.sale"),
       reference: sale.dispatchDate ? `DSP ${sale.dispatchDate}` : sale.id.slice(0, 8),
       description: `${sale.buyerName ?? t("reportsPage.unassignedBuyer")} - ${saleProduceLabel(sale)}${sale.vehicleNumber ? ` - ${sale.vehicleNumber}` : ""}`,
-      debit: accountById.get(sale.accountId ?? "")?.type === "partner" ? sale.amount : 0,
-      credit: accountById.get(sale.accountId ?? "")?.type === "partner" ? 0 : sale.amount,
+      debit: accountById.get(resolveCanonicalAccountId(sale.accountId, accountLookup) ?? "")?.type === "partner" ? sale.amount : 0,
+      credit: accountById.get(resolveCanonicalAccountId(sale.accountId, accountLookup) ?? "")?.type === "partner" ? 0 : sale.amount,
       path: `/workspace/sales?recordId=${sale.id}`,
-      classification: accountById.get(sale.accountId ?? "")?.type === "partner" ? "adjustment" : "sale",
-      partnerLiabilityGroup: accountById.get(sale.accountId ?? "")?.type === "partner" ? "adjustments" : undefined,
+      classification: accountById.get(resolveCanonicalAccountId(sale.accountId, accountLookup) ?? "")?.type === "partner" ? "adjustment" : "sale",
+      partnerLiabilityGroup: accountById.get(resolveCanonicalAccountId(sale.accountId, accountLookup) ?? "")?.type === "partner" ? "adjustments" : undefined,
     });
     for (const entry of partnerRows) {
       if (entry.type === "contribution" || entry.type === "withdrawal") {
@@ -928,12 +933,12 @@ export function Reports() {
           rows.push({ id: `partner:${entry.id}:partner`, date: entry.date, accountId: partnerAccountId, accountName: accountName(partnerAccountId), type: entry.type, typeLabel: entry.type === "contribution" ? t("reportsPage.capitalInjected") : t("reportsPage.moneyReturned"), reference: entry.id.slice(0, 8), description: `${entry.partnerName ?? accountName(partnerAccountId)}${entry.notes ? ` - ${entry.notes}` : ""}`, debit: entry.type === "withdrawal" ? entry.amount : 0, credit: entry.type === "contribution" ? entry.amount : 0, path: `/workspace/partner-ledger?recordId=${entry.id}`, classification: entry.type, counterparty: accountName(entry.accountId), partnerLiabilityGroup: entry.type === "contribution" ? "capital_injected" : "money_returned" });
         }
         if (entry.accountId && accountById.get(entry.accountId)?.type !== "partner") {
-          rows.push({ id: `partner:${entry.id}:cash`, date: entry.date, accountId: entry.accountId, accountName: accountName(entry.accountId), type: entry.type, typeLabel: entry.type === "contribution" ? t("reportsPage.contribution") : t("reportsPage.withdrawal"), reference: entry.id.slice(0, 8), description: `${entry.partnerName ?? partnerAccount?.name ?? "-"}${entry.notes ? ` - ${entry.notes}` : ""}`, debit: entry.type === "withdrawal" ? entry.amount : 0, credit: entry.type === "contribution" ? entry.amount : 0, path: `/workspace/partner-ledger?recordId=${entry.id}`, classification: entry.type });
+          rows.push({ id: `partner:${entry.id}:cash`, date: entry.date, accountId: resolveCanonicalAccountId(entry.accountId, accountLookup) ?? entry.accountId ?? "", accountName: accountName(entry.accountId), type: entry.type, typeLabel: entry.type === "contribution" ? t("reportsPage.contribution") : t("reportsPage.withdrawal"), reference: entry.id.slice(0, 8), description: `${entry.partnerName ?? partnerAccount?.name ?? "-"}${entry.notes ? ` - ${entry.notes}` : ""}`, debit: entry.type === "withdrawal" ? entry.amount : 0, credit: entry.type === "contribution" ? entry.amount : 0, path: `/workspace/partner-ledger?recordId=${entry.id}`, classification: entry.type });
         }
       }
       if (entry.type === "settlement") {
-        rows.push({ id: `settlement:${entry.id}:sent`, date: entry.date, accountId: entry.fromAccountId ?? "", accountName: accountName(entry.fromAccountId), type: "settlement_sent", typeLabel: t("reportsPage.settlementSent"), reference: entry.id.slice(0, 8), description: `${entry.fromPartner ?? "-"} → ${entry.toPartner ?? "-"}`, debit: accountById.get(entry.fromAccountId ?? "")?.type === "partner" ? 0 : entry.amount, credit: accountById.get(entry.fromAccountId ?? "")?.type === "partner" ? entry.amount : 0, path: `/workspace/partner-ledger?recordId=${entry.id}`, classification: "settlement_sent", counterparty: entry.toPartner, partnerLiabilityGroup: accountById.get(entry.fromAccountId ?? "")?.type === "partner" ? "transfers_out" : undefined });
-        rows.push({ id: `settlement:${entry.id}:received`, date: entry.date, accountId: entry.toAccountId ?? "", accountName: accountName(entry.toAccountId), type: "settlement_received", typeLabel: t("reportsPage.settlementReceived"), reference: entry.id.slice(0, 8), description: `${entry.fromPartner ?? "-"} → ${entry.toPartner ?? "-"}`, debit: accountById.get(entry.toAccountId ?? "")?.type === "partner" ? entry.amount : 0, credit: accountById.get(entry.toAccountId ?? "")?.type === "partner" ? 0 : entry.amount, path: `/workspace/partner-ledger?recordId=${entry.id}`, classification: "settlement_received", counterparty: entry.fromPartner, partnerLiabilityGroup: accountById.get(entry.toAccountId ?? "")?.type === "partner" ? "transfers_in" : undefined });
+        rows.push({ id: `settlement:${entry.id}:sent`, date: entry.date, accountId: resolveCanonicalAccountId(entry.fromAccountId, accountLookup) ?? entry.fromAccountId ?? "", accountName: accountName(entry.fromAccountId), type: "settlement_sent", typeLabel: t("reportsPage.settlementSent"), reference: entry.id.slice(0, 8), description: `${entry.fromPartner ?? "-"} → ${entry.toPartner ?? "-"}`, debit: accountById.get(resolveCanonicalAccountId(entry.fromAccountId, accountLookup) ?? "")?.type === "partner" ? 0 : entry.amount, credit: accountById.get(resolveCanonicalAccountId(entry.fromAccountId, accountLookup) ?? "")?.type === "partner" ? entry.amount : 0, path: `/workspace/partner-ledger?recordId=${entry.id}`, classification: "settlement_sent", counterparty: entry.toPartner, partnerLiabilityGroup: accountById.get(resolveCanonicalAccountId(entry.fromAccountId, accountLookup) ?? "")?.type === "partner" ? "transfers_out" : undefined });
+        rows.push({ id: `settlement:${entry.id}:received`, date: entry.date, accountId: resolveCanonicalAccountId(entry.toAccountId, accountLookup) ?? entry.toAccountId ?? "", accountName: accountName(entry.toAccountId), type: "settlement_received", typeLabel: t("reportsPage.settlementReceived"), reference: entry.id.slice(0, 8), description: `${entry.fromPartner ?? "-"} → ${entry.toPartner ?? "-"}`, debit: accountById.get(resolveCanonicalAccountId(entry.toAccountId, accountLookup) ?? "")?.type === "partner" ? entry.amount : 0, credit: accountById.get(resolveCanonicalAccountId(entry.toAccountId, accountLookup) ?? "")?.type === "partner" ? 0 : entry.amount, path: `/workspace/partner-ledger?recordId=${entry.id}`, classification: "settlement_received", counterparty: entry.fromPartner, partnerLiabilityGroup: accountById.get(resolveCanonicalAccountId(entry.toAccountId, accountLookup) ?? "")?.type === "partner" ? "transfers_in" : undefined });
       }
     }
     const running = new Map<string, number>();
@@ -963,7 +968,7 @@ export function Reports() {
       adjustments: 0,
     };
     if (selectedAccountRecord?.type !== "partner") return { ...summary, netBalance: 0 };
-    const settlementSnapshot = getLabourSettlementAccountingSnapshot(advanceRows, activeSettlements, selectedAccountRecord.id);
+    const settlementSnapshot = getLabourSettlementAccountingSnapshot(advanceRows, activeSettlements, selectedAccountRecord.id, accounts);
     for (const group of groupedPartnerLedgerRows) {
       if (group.groupKey === "capital_injected") summary.capitalInjected += group.totalAmount;
       if (group.groupKey === "purchase_vouchers_paid" || group.groupKey === "labour_wage_settlements") summary.directExpensesPaid += group.totalAmount;
@@ -1019,7 +1024,7 @@ export function Reports() {
       if (row.partnerLiabilityGroup === "money_returned") overview.moneyReturned += row.debit;
       if (row.partnerLiabilityGroup === "adjustments") overview.adjustments += row.credit - row.debit;
     }
-    const settlementSnapshot = getLabourSettlementAccountingSnapshot(advanceRows, activeSettlements, selectedAccountRecord.id);
+    const settlementSnapshot = getLabourSettlementAccountingSnapshot(advanceRows, activeSettlements, selectedAccountRecord.id, accounts);
     overview.labourAdvancesPaid = settlementSnapshot.totalLabourAdvancesPaid;
     overview.directExpensesPaid = overview.purchaseVouchersPaid + overview.labourWageSettlements + settlementSnapshot.outstandingLabourAdvances;
     return {

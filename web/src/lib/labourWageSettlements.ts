@@ -1,5 +1,6 @@
 import type { Advance, LabourWageSettlement, Voucher } from "./offline-db";
 import { isActiveOperationalRecord } from "./operationalRecords";
+import { buildAccountIdentityLookup, resolveAccountIdentity, resolveCanonicalAccountId, type AccountIdentityLike } from "./accountIdentity";
 
 export type SettlementVoucherLike = {
   deletedAt?: string | null;
@@ -17,6 +18,22 @@ export type SettlementAccountLike = {
   status?: unknown;
   accountingStatus?: unknown;
   deletedAt?: unknown;
+};
+
+export type LabourSettlementAccountingDiagnostics = {
+  accountId: string;
+  totalAdvanceRows: number;
+  advanceRowsMatchedByCanonicalId: number;
+  advanceRowsMatchedByAlias: number;
+  advanceRowsMatchedByNameFallback: number;
+  advanceRowsUnmatchedNonDeleted: number;
+  settlementRowsIncluded: number;
+  settlementRowsExcluded: number;
+  settlementRowsMatchedByCanonicalId: number;
+  settlementRowsMatchedByAlias: number;
+  settlementRowsMatchedByNameFallback: number;
+  settlementRowsUnmatchedNonDeleted: number;
+  needsAccountMappingRepair: boolean;
 };
 
 function accountIdFromSettlementField(value: unknown) {
@@ -68,13 +85,24 @@ export function getLabourSettlementAccountingSnapshot(
   advances: Advance[],
   settlements: LabourWageSettlement[],
   accountId: string,
+  accounts: AccountIdentityLike[] = [],
 ) {
+  const accountLookup = buildAccountIdentityLookup(accounts);
   const activeSettlements = settlements.filter((settlement) =>
     isActiveSettlementForPartnerAccounting(settlement)
-    && resolveLabourWageSettlementAccountId(settlement) === accountId,
+    && resolveCanonicalAccountId(resolveLabourWageSettlementAccountId(settlement), accountLookup) === accountId,
   );
-  const totalLabourAdvancesPaid = advances
-    .filter((advance) => isActiveOperationalRecord(advance) && advance.accountId === accountId)
+  const advanceDiagnostics = advances.map((advance) => {
+    const resolved = resolveAccountIdentity(advance.accountId ?? null, accountLookup, advance.sourceAccountName ?? null);
+    return {
+      ...advance,
+      resolvedAccountId: resolved.canonicalAccountId,
+      matchedBy: resolved.matchedBy,
+      needsAccountMappingRepair: resolved.needsAccountMappingRepair,
+    };
+  });
+  const totalLabourAdvancesPaid = advanceDiagnostics
+    .filter((advance) => isActiveOperationalRecord(advance) && advance.resolvedAccountId === accountId)
     .reduce((sum, advance) => sum + advance.amount, 0);
   const labourWageSettlements = activeSettlements
     .reduce((sum, settlement) => sum + getLabourWageSettlementNonCashAppliedAmount(settlement), 0);
@@ -83,13 +111,34 @@ export function getLabourSettlementAccountingSnapshot(
   const labourSettlementCashPaid = activeSettlements
     .reduce((sum, settlement) => sum + getLabourWageSettlementCashPaidAmount(settlement), 0);
   const outstandingLabourAdvances = Math.max(totalLabourAdvancesPaid - settledThroughWageSettlements, 0);
+  const diagnostics: LabourSettlementAccountingDiagnostics = {
+    accountId,
+    totalAdvanceRows: advances.length,
+    advanceRowsMatchedByCanonicalId: advanceDiagnostics.filter((advance) => isActiveOperationalRecord(advance) && advance.accountId === accountId).length,
+    advanceRowsMatchedByAlias: advanceDiagnostics.filter((advance) => isActiveOperationalRecord(advance) && advance.accountId !== accountId && advance.resolvedAccountId === accountId && advance.matchedBy === "alias").length,
+    advanceRowsMatchedByNameFallback: advanceDiagnostics.filter((advance) => isActiveOperationalRecord(advance) && advance.resolvedAccountId === accountId && advance.matchedBy === "name_fallback").length,
+    advanceRowsUnmatchedNonDeleted: advanceDiagnostics.filter((advance) => isActiveOperationalRecord(advance) && !advance.resolvedAccountId).length,
+    settlementRowsIncluded: activeSettlements.length,
+    settlementRowsExcluded: settlements.length - activeSettlements.length,
+    settlementRowsMatchedByCanonicalId: activeSettlements.filter((settlement) => resolveLabourWageSettlementAccountId(settlement) === accountId).length,
+    settlementRowsMatchedByAlias: activeSettlements.filter((settlement) => {
+      const resolved = resolveCanonicalAccountId(resolveLabourWageSettlementAccountId(settlement), accountLookup);
+      return resolved === accountId && resolveLabourWageSettlementAccountId(settlement) !== accountId;
+    }).length,
+    settlementRowsMatchedByNameFallback: 0,
+    settlementRowsUnmatchedNonDeleted: settlements.filter((settlement) => isActiveSettlementForPartnerAccounting(settlement) && resolveCanonicalAccountId(resolveLabourWageSettlementAccountId(settlement), accountLookup) !== accountId).length,
+    needsAccountMappingRepair: advanceDiagnostics.some((advance) => isActiveOperationalRecord(advance) && advance.resolvedAccountId === accountId && advance.matchedBy === "name_fallback"),
+  };
   return {
     activeSettlements,
     totalLabourAdvancesPaid,
+    labourAdvancesSettledThroughWageSettlements: settledThroughWageSettlements,
     settledThroughWageSettlements,
     outstandingLabourAdvances,
     labourWageSettlements,
+    labourSettlementNonCashApplied: labourWageSettlements,
     labourSettlementCashPaid,
+    diagnostics,
   };
 }
 

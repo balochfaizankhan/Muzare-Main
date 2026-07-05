@@ -2,6 +2,7 @@ import type { Account, Advance, LabourWageSettlement, PartnerEntry, Sale, Vouche
 import { isActiveOperationalRecord } from "./operationalRecords";
 import { getActiveVouchers } from "./voucherCollections";
 import { getLabourSettlementAccountingSnapshot, isLabourWageSettlementVoucher } from "./labourWageSettlements";
+import { buildAccountIdentityLookup, resolveCanonicalAccountId } from "./accountIdentity";
 
 export type PartnerLiabilityPosition = {
   account: Account | null;
@@ -108,7 +109,9 @@ export function partnerLiabilityGroupDisplayTotal(groupKey: PartnerLiabilityLedg
 export const isPartnerAccount = (account?: Account | null) => account?.type === "partner";
 
 export function resolvePartnerAccountId(entry: Pick<PartnerEntry, "partnerAccountId" | "partnerName">, accounts: Account[]) {
-  if (entry.partnerAccountId && accounts.some((account) => account.id === entry.partnerAccountId && account.type === "partner")) return entry.partnerAccountId;
+  const lookup = buildAccountIdentityLookup(accounts);
+  const resolved = resolveCanonicalAccountId(entry.partnerAccountId ?? null, lookup);
+  if (resolved && lookup.byId.get(resolved)?.type === "partner") return resolved;
   const name = entry.partnerName?.trim();
   if (!name) return undefined;
   const matches = accounts.filter((account) => account.type === "partner" && normalized(account.name) === normalized(name));
@@ -125,6 +128,7 @@ export function partnerAccountBalanceEffect(
   allAccounts: Account[],
 ) {
   if (account.type !== "partner") return 0;
+  const accountLookup = buildAccountIdentityLookup(allAccounts);
   const activeVouchers = getActiveVouchers(vouchers);
   const capitalInjected = entries
     .filter((entry) => isActiveOperationalRecord(entry) && entry.type === "contribution" && resolvePartnerAccountId(entry, allAccounts) === account.id)
@@ -143,11 +147,11 @@ export function partnerAccountBalanceEffect(
     .reduce((sum, entry) => sum + partnerAdjustmentEffect(entry), 0);
   const directVoucherExpensesPaid = activeVouchers
     .filter((voucher) => !isLabourWageSettlementVoucher(voucher))
-    .filter((voucher) => voucher.accountId === account.id)
+    .filter((voucher) => resolveCanonicalAccountId(voucher.accountId, accountLookup) === account.id)
     .reduce((sum, voucher) => sum + voucher.amount, 0);
-  const settlementSnapshot = getLabourSettlementAccountingSnapshot(advances, settlements, account.id);
+  const settlementSnapshot = getLabourSettlementAccountingSnapshot(advances, settlements, account.id, allAccounts);
   const adjustments = sales
-    .filter((sale) => isActiveOperationalRecord(sale) && sale.accountId === account.id)
+    .filter((sale) => isActiveOperationalRecord(sale) && resolveCanonicalAccountId(sale.accountId, accountLookup) === account.id)
     .reduce((sum, sale) => sum - sale.amount, 0);
   return capitalInjected
     + directVoucherExpensesPaid
@@ -170,6 +174,7 @@ export function buildPartnerLiabilityPositions(
 ) {
   const activeVouchers = getActiveVouchers(vouchers);
   const partnerAccounts = accounts.filter((account) => account.type === "partner");
+  const accountLookup = buildAccountIdentityLookup(accounts);
   const positions = new Map<string, PartnerLiabilityPosition>();
   const ensure = (key: string, name: string, account: Account | null) => {
     const current = positions.get(key) ?? {
@@ -200,8 +205,10 @@ export function buildPartnerLiabilityPositions(
 
   for (const entry of entries.filter((item) => isActiveOperationalRecord(item))) {
     if (entry.type === "settlement") {
-      if (entry.fromAccountId) ensure(entry.fromAccountId, accounts.find((account) => account.id === entry.fromAccountId)?.name ?? entry.fromPartner ?? "-", accounts.find((account) => account.id === entry.fromAccountId) ?? null).transfersOut += entry.amount;
-      if (entry.toAccountId) ensure(entry.toAccountId, accounts.find((account) => account.id === entry.toAccountId)?.name ?? entry.toPartner ?? "-", accounts.find((account) => account.id === entry.toAccountId) ?? null).transfersIn += entry.amount;
+      const resolvedFromId = resolveCanonicalAccountId(entry.fromAccountId, accountLookup);
+      const resolvedToId = resolveCanonicalAccountId(entry.toAccountId, accountLookup);
+      if (resolvedFromId) ensure(resolvedFromId, accounts.find((account) => account.id === resolvedFromId)?.name ?? entry.fromPartner ?? "-", accounts.find((account) => account.id === resolvedFromId) ?? null).transfersOut += entry.amount;
+      if (resolvedToId) ensure(resolvedToId, accounts.find((account) => account.id === resolvedToId)?.name ?? entry.toPartner ?? "-", accounts.find((account) => account.id === resolvedToId) ?? null).transfersIn += entry.amount;
       continue;
     }
     const resolvedId = resolvePartnerAccountId(entry, accounts);
@@ -222,7 +229,8 @@ export function buildPartnerLiabilityPositions(
   }
 
   for (const voucher of activeVouchers) {
-    const account = partnerAccounts.find((item) => item.id === voucher.accountId);
+    const accountId = resolveCanonicalAccountId(voucher.accountId, accountLookup);
+    const account = accountId ? partnerAccounts.find((item) => item.id === accountId) : null;
     if (!account) continue;
     const position = ensure(account.id, account.name, account);
     if (isLabourWageSettlementVoucher(voucher)) continue;
@@ -231,7 +239,7 @@ export function buildPartnerLiabilityPositions(
   }
 
   for (const account of partnerAccounts) {
-    const settlementSnapshot = getLabourSettlementAccountingSnapshot(advances, settlements as LabourWageSettlement[], account.id);
+    const settlementSnapshot = getLabourSettlementAccountingSnapshot(advances, settlements as LabourWageSettlement[], account.id, accounts);
     const position = ensure(account.id, account.name, account);
     position.totalLabourAdvancesPaid += settlementSnapshot.totalLabourAdvancesPaid;
     position.labourWageSettlements += settlementSnapshot.labourWageSettlements;
@@ -245,7 +253,8 @@ export function buildPartnerLiabilityPositions(
   }
 
   for (const sale of sales.filter((item) => isActiveOperationalRecord(item))) {
-    const account = partnerAccounts.find((item) => item.id === sale.accountId);
+    const accountId = resolveCanonicalAccountId(sale.accountId, accountLookup);
+    const account = accountId ? partnerAccounts.find((item) => item.id === accountId) : null;
     if (!account) continue;
     const position = ensure(account.id, account.name, account);
     position.adjustments -= sale.amount;

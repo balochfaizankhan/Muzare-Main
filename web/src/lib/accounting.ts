@@ -3,6 +3,7 @@ import { isActiveOperationalRecord } from "./operationalRecords";
 import { isPartnerAccount, partnerAccountBalanceEffect } from "./partnerAccounting";
 import { getActiveVouchers } from "./voucherCollections";
 import { getActiveLabourWageSettlements, getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher, resolveLabourWageSettlementAccountId } from "./labourWageSettlements";
+import { buildAccountIdentityLookup, resolveCanonicalAccountId } from "./accountIdentity";
 
 export function partnerSettlementEffect(entry: PartnerEntry, accountId: string): number {
   if (entry.type !== "settlement") return 0;
@@ -25,16 +26,18 @@ export function calculateAccountBalance(
   advances: Advance[],
   entries: PartnerEntry[],
   settlements: LabourWageSettlement[] = [],
+  allAccounts: Account[] = [account],
 ): number {
-  if (account.type === "partner") return partnerAccountBalanceEffect(account, sales, vouchers, advances, entries, settlements, [account]);
+  if (account.type === "partner") return partnerAccountBalanceEffect(account, sales, vouchers, advances, entries, settlements, allAccounts);
+  const lookup = buildAccountIdentityLookup(allAccounts);
   const activeVouchers = getActiveVouchers(vouchers).filter((record) => !isLabourWageSettlementVoucher(record));
   const activeSettlements = getActiveLabourWageSettlements(settlements)
-    .filter((record) => resolveLabourWageSettlementAccountId(record) === account.id)
+    .filter((record) => resolveCanonicalAccountId(resolveLabourWageSettlementAccountId(record), lookup) === account.id)
     .reduce((sum, record) => sum + getLabourWageSettlementCashPaidAmount(record), 0);
-  return sales.filter((record) => isActiveOperationalRecord(record) && record.accountId === account.id).reduce((sum, record) => sum + record.amount, 0)
-    - activeVouchers.filter((record) => record.accountId === account.id).reduce((sum, record) => sum + record.amount, 0)
+  return sales.filter((record) => isActiveOperationalRecord(record) && resolveCanonicalAccountId(record.accountId, lookup) === account.id).reduce((sum, record) => sum + record.amount, 0)
+    - activeVouchers.filter((record) => resolveCanonicalAccountId(record.accountId, lookup) === account.id).reduce((sum, record) => sum + record.amount, 0)
     - activeSettlements
-    - advances.filter((record) => isActiveOperationalRecord(record) && record.accountId === account.id).reduce((sum, record) => sum + record.amount, 0)
+    - advances.filter((record) => isActiveOperationalRecord(record) && resolveCanonicalAccountId(record.accountId, lookup) === account.id).reduce((sum, record) => sum + record.amount, 0)
     + entries.filter((record) => isActiveOperationalRecord(record)).reduce((sum, record) => sum + partnerEntryAccountEffect(record, account), 0);
 }
 
@@ -48,5 +51,5 @@ export function calculateAvailableBalance(
 ): number {
   return accounts
     .filter((account) => account.type !== "partner")
-    .reduce((sum, account) => sum + calculateAccountBalance(account, sales, vouchers, advances, entries, settlements), 0);
+    .reduce((sum, account) => sum + calculateAccountBalance(account, sales, vouchers, advances, entries, settlements, accounts), 0);
 }
