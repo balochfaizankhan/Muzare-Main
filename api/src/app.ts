@@ -25,6 +25,7 @@ import { expenseAttachmentRoutes } from "./routes/expense-attachments.js";
 import { farmOperationRoutes } from "./routes/farm-operations.js";
 import { migrationImportRoutes } from "./routes/migration-import.js";
 import { accountingDiagnosticsRoutes } from "./routes/accounting-diagnostics.js";
+import { accountingReconciliationRoutes } from "./routes/accounting-reconciliation.js";
 import { wageRateRoutes } from "./routes/wage-rates.js";
 import { labourWageSettlementRoutes } from "./routes/labour-wage-settlements.js";
 
@@ -82,6 +83,7 @@ export async function buildApp() {
   await app.register(farmOperationRoutes);
   await app.register(migrationImportRoutes);
   await app.register(accountingDiagnosticsRoutes);
+  await app.register(accountingReconciliationRoutes);
 
   return app;
 }

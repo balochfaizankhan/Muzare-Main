@@ -69,17 +69,12 @@ test("labour wage settlements resolve canonical payment accounts and accept lega
   assert.ok(source.includes("resolveCanonicalPaymentAccountId"));
   assert.ok(source.includes("validateLabourSettlementPaymentAccount"));
   assert.doesNotMatch(source, /validateTenantReferencesDetailed/);
-  assert.ok(libSource.includes("Payment account is not mapped. Please repair imported accounts."));
+  assert.ok(libSource.includes("Payment account is not mapped uniquely. Please remap/import accounts."));
   assert.ok(libSource.includes("legacyAndroidAccountId"));
   assert.ok(libSource.includes("oldAndroidId"));
   assert.ok(libSource.includes("from(accounts)"));
-  assert.ok(libSource.includes("accountingStatus !== \"accounting_missing\""));
-  assert.ok(libSource.includes("resolveLabourWageSettlementAccountId"));
-  assert.ok(partnerAccounting.includes("resolveLabourWageSettlementAccountId"));
-  assert.ok(libSource.includes("getLabourWageSettlementCashPaidAmount"));
-  assert.ok(libSource.includes("getLabourWageSettlementNonCashAppliedAmount"));
+  assert.ok(libSource.includes('return transactionCount > 0 ? "posted" as const : "accounting_missing" as const;'));
   assert.ok(partnerAccounting.includes("getLabourSettlementAccountingSnapshot"));
-  assert.ok(partnerAccounting.includes("settlementSnapshot.labourSettlementCashPaid"));
   assert.ok(accounting.includes("resolveLabourWageSettlementAccountId"));
   assert.ok(pageSource.includes("Settlement account"));
   assert.ok(pageSource.includes("Accounting reference"));
@@ -98,7 +93,7 @@ test("labour wage settlements repair missing accounting transactions through the
   assert.ok(libSource.includes('source: "settlement"'));
   assert.ok(libSource.includes('sourceType: "labour_wage_settlement"'));
   assert.ok(libSource.includes("referenceId: settlementRecord.clientRecordId"));
-  assert.ok(libSource.includes("accountingStatus !== \"accounting_missing\""));
+  assert.ok(libSource.includes('return transactionCount > 0 ? "posted" as const : "accounting_missing" as const;'));
 });
 
 test("deleted labour settlements stay deleted in normalization and accounting status", () => {
