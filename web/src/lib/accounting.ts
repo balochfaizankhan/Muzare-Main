@@ -31,15 +31,20 @@ export function calculateAccountBalance(
 ): number {
   if (account.type === "partner") return partnerAccountBalanceEffect(account, sales, vouchers, advances, entries, settlements, allAccounts, options);
   const lookup = buildAccountIdentityLookup(allAccounts);
+  const farmId = options.farmId ?? null;
+  const seasonId = options.seasonId ?? null;
+  const farmMatches = (rowFarmId: string | null) => !farmId || rowFarmId === farmId || rowFarmId === null;
+  const seasonMatches = (rowSeasonId: string | null) => !seasonId || rowSeasonId === seasonId || rowSeasonId === null;
   const activeVouchers = getActiveVouchers(vouchers).filter((record) => !isLabourWageSettlementVoucher(record));
   const activeSettlements = getActiveLabourWageSettlements(settlements)
     .filter((record) => resolveCanonicalAccountId(resolveLabourWageSettlementAccountId(record), lookup) === account.id)
+    .filter((record) => farmMatches(record.farmId ?? null) && seasonMatches(record.seasonId ?? null))
     .reduce((sum, record) => sum + getLabourWageSettlementCashPaidAmount(record), 0);
-  return sales.filter((record) => isActiveOperationalRecord(record) && resolveCanonicalAccountId(record.accountId, lookup) === account.id).reduce((sum, record) => sum + record.amount, 0)
-    - activeVouchers.filter((record) => resolveCanonicalAccountId(record.accountId, lookup) === account.id).reduce((sum, record) => sum + record.amount, 0)
+  return sales.filter((record) => isActiveOperationalRecord(record) && resolveCanonicalAccountId(record.accountId, lookup) === account.id && farmMatches(record.farmId ?? null) && seasonMatches(record.seasonId ?? null)).reduce((sum, record) => sum + record.amount, 0)
+    - activeVouchers.filter((record) => resolveCanonicalAccountId(record.accountId, lookup) === account.id && farmMatches(record.farmId ?? null) && seasonMatches(record.seasonId ?? null)).reduce((sum, record) => sum + record.amount, 0)
     - activeSettlements
-    - advances.filter((record) => isActiveOperationalRecord(record) && resolveCanonicalAccountId(record.accountId, lookup) === account.id).reduce((sum, record) => sum + record.amount, 0)
-    + entries.filter((record) => isActiveOperationalRecord(record)).reduce((sum, record) => sum + partnerEntryAccountEffect(record, account), 0);
+    - advances.filter((record) => isActiveOperationalRecord(record) && resolveCanonicalAccountId(record.accountId, lookup) === account.id && farmMatches(record.farmId ?? null) && seasonMatches(record.seasonId ?? null)).reduce((sum, record) => sum + record.amount, 0)
+    + entries.filter((record) => isActiveOperationalRecord(record) && farmMatches(record.farmId ?? null) && seasonMatches(record.seasonId ?? null)).reduce((sum, record) => sum + partnerEntryAccountEffect(record, account), 0);
 }
 
 export function calculateAvailableBalance(

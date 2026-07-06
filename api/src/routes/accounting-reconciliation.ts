@@ -160,8 +160,8 @@ function buildPartnerSnapshot(args: {
   seasonId?: string | null;
 }) {
   const { selectedAccountId, accountLookup, advances, settlements, vouchers, partnerEntries, sales, farmId, seasonId } = args;
-  const farmMatches = (rowFarmId: string | null) => !farmId || rowFarmId === farmId;
-  const seasonMatches = (rowSeasonId: string | null) => !seasonId || rowSeasonId === seasonId;
+  const farmMatches = (rowFarmId: string | null) => !farmId || rowFarmId === farmId || rowFarmId === null;
+  const seasonMatches = (rowSeasonId: string | null) => !seasonId || rowSeasonId === seasonId || rowSeasonId === null;
   const purchaseVouchersPaid = vouchers
     .filter((voucher) => !voucher.isLabourWageSettlementVoucher && resolveCanonicalAccountId(voucher.accountId, accountLookup) === selectedAccountId)
     .reduce((sum, voucher) => sum + voucher.amount, 0);
@@ -448,8 +448,8 @@ export async function buildAccountingReconciliationTrace(input: {
       const normalizedPayload = normalizeSettlementPayload(payload);
       const status = normalizedPayload.status;
       const accountingStatus = settlementAccountingStatus(status, accountingEntries);
-      const farmMatches = !farmId || row.farmId === farmId;
-      const seasonMatches = !seasonId || row.seasonId === seasonId;
+      const farmMatches = !farmId || row.farmId === farmId || row.farmId === null;
+      const seasonMatches = !seasonId || row.seasonId === seasonId || row.seasonId === null;
       const currentHelperIncluded = accountingStatus === "posted" && settlementResolved.canonicalAccountId === selectedAccount.id && farmMatches && seasonMatches;
       const sourceOfTruthIncluded = accountingStatus === "posted" && (settlementResolved.canonicalAccountId === selectedAccount.id || transactionResolvedAccountIds.includes(selectedAccount.id)) && farmMatches && seasonMatches;
       const totalLabourCost = numberValue(normalizedPayload.totalLabourCost ?? normalizedPayload.totalEarned);

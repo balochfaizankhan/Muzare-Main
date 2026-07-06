@@ -238,8 +238,8 @@ export function getPartnerAccountingSnapshot(
   const accountLookup = buildAccountIdentityLookup(allAccounts);
   const farmId = options.farmId ?? null;
   const seasonId = options.seasonId ?? null;
-  const farmMatches = (rowFarmId: string | null) => !farmId || rowFarmId === farmId;
-  const seasonMatches = (rowSeasonId: string | null) => !seasonId || rowSeasonId === seasonId;
+  const farmMatches = (rowFarmId: string | null) => !farmId || rowFarmId === farmId || rowFarmId === null;
+  const seasonMatches = (rowSeasonId: string | null) => !seasonId || rowSeasonId === seasonId || rowSeasonId === null;
   const purchaseVouchers = getActiveVouchers(vouchers).map((voucher) => {
     const resolvedPaymentAccountId = resolveCanonicalAccountId(voucher.accountId, accountLookup);
     const included = !isLabourWageSettlementVoucher(voucher) && resolvedPaymentAccountId === account.id;

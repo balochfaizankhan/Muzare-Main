@@ -36,6 +36,11 @@ export type LabourSettlementAccountingDiagnostics = {
   needsAccountMappingRepair: boolean;
 };
 
+type AccountingScopeOptions = {
+  farmId?: string | null;
+  seasonId?: string | null;
+};
+
 function accountIdFromSettlementField(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
@@ -86,12 +91,17 @@ export function getLabourSettlementAccountingSnapshot(
   settlements: LabourWageSettlement[],
   accountId: string,
   accounts: AccountIdentityLike[] = [],
+  options: AccountingScopeOptions = {},
 ) {
   const accountLookup = buildAccountIdentityLookup(accounts);
+  const farmId = options.farmId ?? null;
+  const seasonId = options.seasonId ?? null;
+  const farmMatches = (rowFarmId: string | null) => !farmId || rowFarmId === farmId || rowFarmId === null;
+  const seasonMatches = (rowSeasonId: string | null) => !seasonId || rowSeasonId === seasonId || rowSeasonId === null;
   const activeSettlements = settlements.filter((settlement) =>
     isActiveSettlementForPartnerAccounting(settlement)
     && resolveCanonicalAccountId(resolveLabourWageSettlementAccountId(settlement), accountLookup) === accountId,
-  );
+  ).filter((settlement) => farmMatches((settlement as LabourWageSettlement).farmId ?? null) && seasonMatches((settlement as LabourWageSettlement).seasonId ?? null));
   const advanceDiagnostics = advances.map((advance) => {
     const resolved = resolveAccountIdentity(advance.accountId ?? null, accountLookup, advance.sourceAccountName ?? null);
     return {
@@ -102,7 +112,7 @@ export function getLabourSettlementAccountingSnapshot(
     };
   });
   const totalLabourAdvancesPaid = advanceDiagnostics
-    .filter((advance) => isActiveOperationalRecord(advance) && advance.resolvedAccountId === accountId)
+    .filter((advance) => isActiveOperationalRecord(advance) && advance.resolvedAccountId === accountId && farmMatches(advance.farmId ?? null) && seasonMatches(advance.seasonId ?? null))
     .reduce((sum, advance) => sum + advance.amount, 0);
   const labourWageSettlements = activeSettlements
     .reduce((sum, settlement) => sum + getLabourWageSettlementNonCashAppliedAmount(settlement), 0);
@@ -114,9 +124,9 @@ export function getLabourSettlementAccountingSnapshot(
   const diagnostics: LabourSettlementAccountingDiagnostics = {
     accountId,
     totalAdvanceRows: advances.length,
-    advanceRowsMatchedByCanonicalId: advanceDiagnostics.filter((advance) => isActiveOperationalRecord(advance) && advance.accountId === accountId).length,
-    advanceRowsMatchedByAlias: advanceDiagnostics.filter((advance) => isActiveOperationalRecord(advance) && advance.accountId !== accountId && advance.resolvedAccountId === accountId && advance.matchedBy === "alias").length,
-    advanceRowsMatchedByNameFallback: advanceDiagnostics.filter((advance) => isActiveOperationalRecord(advance) && advance.resolvedAccountId === accountId && advance.matchedBy === "name_fallback").length,
+    advanceRowsMatchedByCanonicalId: advanceDiagnostics.filter((advance) => isActiveOperationalRecord(advance) && advance.accountId === accountId && farmMatches(advance.farmId ?? null) && seasonMatches(advance.seasonId ?? null)).length,
+    advanceRowsMatchedByAlias: advanceDiagnostics.filter((advance) => isActiveOperationalRecord(advance) && advance.accountId !== accountId && advance.resolvedAccountId === accountId && advance.matchedBy === "alias" && farmMatches(advance.farmId ?? null) && seasonMatches(advance.seasonId ?? null)).length,
+    advanceRowsMatchedByNameFallback: advanceDiagnostics.filter((advance) => isActiveOperationalRecord(advance) && advance.resolvedAccountId === accountId && advance.matchedBy === "name_fallback" && farmMatches(advance.farmId ?? null) && seasonMatches(advance.seasonId ?? null)).length,
     advanceRowsUnmatchedNonDeleted: advanceDiagnostics.filter((advance) => isActiveOperationalRecord(advance) && !advance.resolvedAccountId).length,
     settlementRowsIncluded: activeSettlements.length,
     settlementRowsExcluded: settlements.length - activeSettlements.length,
@@ -126,8 +136,8 @@ export function getLabourSettlementAccountingSnapshot(
       return resolved === accountId && resolveLabourWageSettlementAccountId(settlement) !== accountId;
     }).length,
     settlementRowsMatchedByNameFallback: 0,
-    settlementRowsUnmatchedNonDeleted: settlements.filter((settlement) => isActiveSettlementForPartnerAccounting(settlement) && resolveCanonicalAccountId(resolveLabourWageSettlementAccountId(settlement), accountLookup) !== accountId).length,
-    needsAccountMappingRepair: advanceDiagnostics.some((advance) => isActiveOperationalRecord(advance) && advance.resolvedAccountId === accountId && advance.matchedBy === "name_fallback"),
+    settlementRowsUnmatchedNonDeleted: settlements.filter((settlement) => isActiveSettlementForPartnerAccounting(settlement) && resolveCanonicalAccountId(resolveLabourWageSettlementAccountId(settlement), accountLookup) !== accountId && farmMatches((settlement as LabourWageSettlement).farmId ?? null) && seasonMatches((settlement as LabourWageSettlement).seasonId ?? null)).length,
+    needsAccountMappingRepair: advanceDiagnostics.some((advance) => isActiveOperationalRecord(advance) && advance.resolvedAccountId === accountId && advance.matchedBy === "name_fallback" && farmMatches(advance.farmId ?? null) && seasonMatches(advance.seasonId ?? null)),
   };
   return {
     activeSettlements,
@@ -164,11 +174,21 @@ export function getCashAffectingVouchers(vouchers: Voucher[]) {
   return vouchers.filter((voucher) => isActiveOperationalRecord(voucher));
 }
 
-export function totalSettledAdvances(settlements: LabourWageSettlement[]) {
-  return getActiveLabourWageSettlements(settlements).reduce((sum, settlement) => sum + settlement.settledAdvanceAmount, 0);
+export function totalSettledAdvances(settlements: LabourWageSettlement[], options: AccountingScopeOptions = {}) {
+  const farmId = options.farmId ?? null;
+  const seasonId = options.seasonId ?? null;
+  const farmMatches = (rowFarmId: string | null) => !farmId || rowFarmId === farmId || rowFarmId === null;
+  const seasonMatches = (rowSeasonId: string | null) => !seasonId || rowSeasonId === seasonId || rowSeasonId === null;
+  return getActiveLabourWageSettlements(settlements)
+    .filter((settlement) => farmMatches(settlement.farmId ?? null) && seasonMatches(settlement.seasonId ?? null))
+    .reduce((sum, settlement) => sum + settlement.settledAdvanceAmount, 0);
 }
 
-export function outstandingLabourAdvances(advances: Advance[], settlements: LabourWageSettlement[]) {
-  const totalAdvances = advances.filter(isActiveOperationalRecord).reduce((sum, advance) => sum + advance.amount, 0);
-  return Math.max(totalAdvances - totalSettledAdvances(settlements), 0);
+export function outstandingLabourAdvances(advances: Advance[], settlements: LabourWageSettlement[], options: AccountingScopeOptions = {}) {
+  const farmId = options.farmId ?? null;
+  const seasonId = options.seasonId ?? null;
+  const farmMatches = (rowFarmId: string | null) => !farmId || rowFarmId === farmId || rowFarmId === null;
+  const seasonMatches = (rowSeasonId: string | null) => !seasonId || rowSeasonId === seasonId || rowSeasonId === null;
+  const totalAdvances = advances.filter((advance) => isActiveOperationalRecord(advance) && farmMatches(advance.farmId ?? null) && seasonMatches(advance.seasonId ?? null)).reduce((sum, advance) => sum + advance.amount, 0);
+  return Math.max(totalAdvances - totalSettledAdvances(settlements, options), 0);
 }

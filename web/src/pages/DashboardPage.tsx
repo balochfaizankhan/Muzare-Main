@@ -130,7 +130,7 @@ export function DashboardPage() {
     const seasonId = sync.seasonId ?? null;
     const date = today();
     const totalSales = activeSales.reduce((sum, item) => sum + item.amount, 0);
-    const labourAdvances = outstandingLabourAdvances(activeAdvances, activeSettlements);
+    const labourAdvances = outstandingLabourAdvances(activeAdvances, activeSettlements, { farmId, seasonId });
     const totalExpenses = generalExpenseVouchers.reduce((sum, item) => sum + item.amount, 0);
     const partnerBalance = buildPartnerLiabilityPositions(activeAccounts, cashAffectingVouchers, activeAdvances, activeEntries, activeSales, activeSettlements, { farmId, seasonId })
       .reduce((sum, item) => sum + item.currentPartnerBalance, 0);
