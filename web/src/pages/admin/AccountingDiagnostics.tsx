@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useAuth } from "../../auth/AuthProvider";
+import { AccountingDiagnosticsConsole } from "../../components/AccountingDiagnosticsConsole";
 import { SubpageHeader } from "../../components/SubpageHeader";
 import { fetchAccountingDiagnostics, fetchAdminWorkspaces } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
@@ -56,6 +57,8 @@ export function AccountingDiagnostics() {
       {diagnostics.error && <section className="record-panel"><p className="error">{diagnostics.error instanceof Error ? diagnostics.error.message : "Unable to load accounting diagnostics."}</p></section>}
 
       {diagnostics.data && <>
+        <AccountingDiagnosticsConsole initialWorkspaceId={workspaceId} />
+
         <section className="record-panel">
           <h2>Voucher Integrity Summary</h2>
           <div className="record-list">
