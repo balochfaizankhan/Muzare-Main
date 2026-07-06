@@ -197,7 +197,6 @@ function buildPartnerSnapshot(args: {
     + businessFundsGiven
     - businessFundsReceived
     - moneyReturned
-    + labourSettlementNonCashApplied
     + outstandingLabourAdvances
     + adjustments;
   return {

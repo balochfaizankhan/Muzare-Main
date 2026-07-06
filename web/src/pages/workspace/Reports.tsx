@@ -971,7 +971,7 @@ export function Reports() {
     const settlementSnapshot = getLabourSettlementAccountingSnapshot(advanceRows, activeSettlements, selectedAccountRecord.id, accounts);
     for (const group of groupedPartnerLedgerRows) {
       if (group.groupKey === "capital_injected") summary.capitalInjected += group.totalAmount;
-      if (group.groupKey === "purchase_vouchers_paid" || group.groupKey === "labour_wage_settlements") summary.directExpensesPaid += group.totalAmount;
+      if (group.groupKey === "purchase_vouchers_paid") summary.directExpensesPaid += group.totalAmount;
       if (group.groupKey === "labour_advances_paid") summary.directExpensesPaid += settlementSnapshot.outstandingLabourAdvances;
       if (group.groupKey === "transfers_in") summary.transfersIn += Math.abs(group.totalAmount);
       if (group.groupKey === "transfers_out") summary.transfersOut += Math.abs(group.totalAmount);
@@ -1026,7 +1026,7 @@ export function Reports() {
     }
     const settlementSnapshot = getLabourSettlementAccountingSnapshot(advanceRows, activeSettlements, selectedAccountRecord.id, accounts);
     overview.labourAdvancesPaid = settlementSnapshot.totalLabourAdvancesPaid;
-    overview.directExpensesPaid = overview.purchaseVouchersPaid + overview.labourWageSettlements + settlementSnapshot.outstandingLabourAdvances;
+    overview.directExpensesPaid = overview.purchaseVouchersPaid + settlementSnapshot.outstandingLabourAdvances;
     return {
       ...overview,
       netBalance: calculatePartnerLiabilityBalance(overview),

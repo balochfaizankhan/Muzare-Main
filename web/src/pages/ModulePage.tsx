@@ -3746,7 +3746,7 @@ function PartnerLedgerModule() {
             <div><span>Less: settled through wage settlements</span><strong>{money(Math.max(item.totalLabourAdvancesPaid - item.outstandingLabourAdvances, 0))}</strong></div>
             <div><span>Outstanding Labour Advances</span><strong>{money(item.outstandingLabourAdvances)}</strong></div>
             <div><span>Labour Wage Settlements</span><strong>{money(item.labourWageSettlements)}</strong></div>
-            <div><span>Reconciliation</span><strong>{`Purchase vouchers ${money(item.purchaseVouchersPaid)} + Funds given ${money(item.transfersOut)} - Funds received ${money(item.transfersIn)} + Outstanding labour advances ${money(item.outstandingLabourAdvances)} + Labour settlements ${money(item.labourWageSettlements)} = ${money(item.currentPartnerBalance)}`}</strong></div>
+            <div><span>Reconciliation</span><strong>{`Purchase vouchers ${money(item.purchaseVouchersPaid)} + Funds given ${money(item.transfersOut)} - Funds received ${money(item.transfersIn)} + Outstanding labour advances ${money(item.outstandingLabourAdvances)} = ${money(item.currentPartnerBalance)}`}</strong></div>
           </article>)}
         </div>}
       </section>
@@ -3780,7 +3780,7 @@ function PartnerLedgerModule() {
               <p><strong>{t("partnerLedgerPage.moneyReturned")}</strong><span>{money(selectedPartnerPosition.moneyReturned)}</span></p>
               <p><strong>{t("partnerLedgerPage.adjustments")}</strong><span>{money(selectedPartnerPosition.adjustments)}</span></p>
               <p><strong>{t("partnerLedgerPage.farmOwesPartner")}</strong><span>{money(selectedPartnerPosition.currentPartnerBalance)}</span></p>
-              <p><strong>Reconciliation</strong><span>{`Purchase vouchers ${money(selectedPartnerPosition.purchaseVouchersPaid)} + Funds given ${money(selectedPartnerPosition.transfersOut)} - Funds received ${money(selectedPartnerPosition.transfersIn)} + Outstanding labour advances ${money(selectedPartnerPosition.outstandingLabourAdvances)} + Labour settlements ${money(selectedPartnerPosition.labourWageSettlements)} ${selectedPartnerPosition.moneyReturned ? `- Money returned ${money(selectedPartnerPosition.moneyReturned)} ` : ""}${selectedPartnerPosition.adjustments ? `${selectedPartnerPosition.adjustments >= 0 ? "+" : "-"} Adjustments ${money(Math.abs(selectedPartnerPosition.adjustments))} ` : ""}= ${money(selectedPartnerPosition.currentPartnerBalance)}`}</span></p>
+              <p><strong>Reconciliation</strong><span>{`Purchase vouchers ${money(selectedPartnerPosition.purchaseVouchersPaid)} + Funds given ${money(selectedPartnerPosition.transfersOut)} - Funds received ${money(selectedPartnerPosition.transfersIn)} + Outstanding labour advances ${money(selectedPartnerPosition.outstandingLabourAdvances)} ${selectedPartnerPosition.moneyReturned ? `- Money returned ${money(selectedPartnerPosition.moneyReturned)} ` : ""}${selectedPartnerPosition.adjustments ? `${selectedPartnerPosition.adjustments >= 0 ? "+" : "-"} Adjustments ${money(Math.abs(selectedPartnerPosition.adjustments))} ` : ""}= ${money(selectedPartnerPosition.currentPartnerBalance)}`}</span></p>
               <footer><button type="button" onClick={() => setSelectedPartnerPosition(null)}>{t("partnerLedgerPage.close")}</button></footer>
             </div>
           </section>
@@ -4092,7 +4092,7 @@ function AccountsModule() {
     }
     const settlementSnapshot = getLabourSettlementAccountingSnapshot(activeAdvances, activeLabourWageSettlements, selectedAccount.id, accounts);
     byType.labourAdvancesPaid = settlementSnapshot.totalLabourAdvancesPaid;
-    byType.directExpensesPaid = byType.purchaseVouchersPaid + byType.labourWageSettlements + settlementSnapshot.outstandingLabourAdvances;
+    byType.directExpensesPaid = byType.purchaseVouchersPaid + settlementSnapshot.outstandingLabourAdvances;
     return {
       ...byType,
       netBalance: byType.capitalInjected
@@ -4129,7 +4129,7 @@ function AccountsModule() {
     }
     const settlementSnapshot = getLabourSettlementAccountingSnapshot(activeAdvances, activeLabourWageSettlements, selectedAccount.id, accounts);
     overview.labourAdvancesPaid = settlementSnapshot.totalLabourAdvancesPaid;
-    overview.directExpensesPaid = overview.purchaseVouchersPaid + overview.labourWageSettlements + settlementSnapshot.outstandingLabourAdvances;
+    overview.directExpensesPaid = overview.purchaseVouchersPaid + settlementSnapshot.outstandingLabourAdvances;
     return {
       ...overview,
       netBalance: calculatePartnerLiabilityBalance(overview),

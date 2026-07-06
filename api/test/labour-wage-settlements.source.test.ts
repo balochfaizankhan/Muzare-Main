@@ -96,6 +96,21 @@ test("labour wage settlements repair missing accounting transactions through the
   assert.ok(libSource.includes('return transactionCount > 0 ? "posted" as const : "accounting_missing" as const;'));
 });
 
+test("non-cash labour settlement stays out of the positive farm owes partner formula", () => {
+  const apiSource = readFileSync(new URL("../src/routes/accounting-reconciliation.ts", import.meta.url), "utf8");
+  const webPartnerAccounting = readFileSync(new URL("../../web/src/lib/partnerAccounting.ts", import.meta.url), "utf8");
+  const webModulePage = readFileSync(new URL("../../web/src/pages/ModulePage.tsx", import.meta.url), "utf8");
+  const webReports = readFileSync(new URL("../../web/src/pages/workspace/Reports.tsx", import.meta.url), "utf8");
+  assert.ok(!apiSource.includes("+ labourSettlementNonCashApplied"));
+  assert.ok(!webPartnerAccounting.includes("+ settlementSnapshot.labourWageSettlements"));
+  assert.ok(webPartnerAccounting.includes("position.directExpensesPaid = position.purchaseVouchersPaid + position.outstandingLabourAdvances;"));
+  assert.ok(webModulePage.includes("byType.directExpensesPaid = byType.purchaseVouchersPaid + settlementSnapshot.outstandingLabourAdvances;"));
+  assert.ok(webModulePage.includes("overview.directExpensesPaid = overview.purchaseVouchersPaid + settlementSnapshot.outstandingLabourAdvances;"));
+  assert.ok(webReports.includes("summary.directExpensesPaid += group.totalAmount;"));
+  assert.ok(webReports.includes('if (group.groupKey === "purchase_vouchers_paid") summary.directExpensesPaid += group.totalAmount;'));
+  assert.ok(webReports.includes("overview.directExpensesPaid = overview.purchaseVouchersPaid + settlementSnapshot.outstandingLabourAdvances;"));
+});
+
 test("deleted labour settlements stay deleted in normalization and accounting status", () => {
   const payload = normalizeSettlementPayload({
     settlementNumber: "LW-0001",

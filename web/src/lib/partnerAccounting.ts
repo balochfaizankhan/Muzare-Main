@@ -155,7 +155,6 @@ export function partnerAccountBalanceEffect(
     .reduce((sum, sale) => sum - sale.amount, 0);
   return capitalInjected
     + directVoucherExpensesPaid
-    + settlementSnapshot.labourWageSettlements
     + settlementSnapshot.outstandingLabourAdvances
     + transfersOut
     - transfersIn
@@ -249,7 +248,7 @@ export function buildPartnerLiabilityPositions(
   for (const position of positions.values()) {
     position.businessFundsNet = position.transfersOut - position.transfersIn;
     position.labourAdvancesPaid = position.totalLabourAdvancesPaid;
-    position.directExpensesPaid = position.purchaseVouchersPaid + position.labourWageSettlements + position.outstandingLabourAdvances;
+    position.directExpensesPaid = position.purchaseVouchersPaid + position.outstandingLabourAdvances;
   }
 
   for (const sale of sales.filter((item) => isActiveOperationalRecord(item))) {
