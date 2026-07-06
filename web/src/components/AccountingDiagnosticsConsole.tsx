@@ -145,6 +145,19 @@ export function AccountingDiagnosticsConsole({ initialWorkspaceId = "" }: { init
     ? accounts.data?.accounts.find((item) => item.id === selectedAccountId) ?? null
     : accounts.data?.accounts.find((item) => item.name.toLowerCase() === accountSearch.trim().toLowerCase()) ?? null;
 
+  useEffect(() => {
+    if (!matchedAccount) return;
+    if (!farmId && matchedAccount.farmId) {
+      setFarmId(matchedAccount.farmId);
+    }
+  }, [farmId, matchedAccount]);
+
+  useEffect(() => {
+    if (!farmId || seasonId) return;
+    const activeSeason = farmQuery.data?.seasons?.find((item) => item.status === "active") ?? farmQuery.data?.seasons?.[0] ?? null;
+    if (activeSeason) setSeasonId(activeSeason.id);
+  }, [farmId, farmQuery.data?.seasons, seasonId]);
+
   const trace = useQuery({
     queryKey: ["accounting-diagnostics-trace", workspaceId, farmId, seasonId, selectedAccountId, accountSearch],
     enabled: false,
@@ -162,6 +175,8 @@ export function AccountingDiagnosticsConsole({ initialWorkspaceId = "" }: { init
   const tracePartnerStatusValues = (tracePayload?.partnerStatusValues ?? null) as Snapshot | null;
 
   const canRunTrace = Boolean(token && workspaceId && (selectedAccountId || accountSearch.trim()));
+  const auditAllFarms = !farmId;
+  const auditAllSeasons = !seasonId;
 
   const runAudit = async () => {
     if (!token) return;
@@ -271,6 +286,7 @@ export function AccountingDiagnosticsConsole({ initialWorkspaceId = "" }: { init
           <article><span>Selected season</span><strong>{seasonId ? labelWithId(selectedSeason?.name, seasonId) : "All seasons"}</strong></article>
           <article><span>Selected account</span><strong>{matchedAccount ? labelWithId(matchedAccount.name, matchedAccount.id) : "Not selected"}</strong></article>
         </div>
+        {auditAllFarms || auditAllSeasons ? <p className="context-message">You are auditing {auditAllFarms ? "all farms" : "the selected farm"} / {auditAllSeasons ? "all seasons" : "the selected season"}.</p> : null}
         <div className="worker-action-form">
           <label>
             <span>Workspace</span>

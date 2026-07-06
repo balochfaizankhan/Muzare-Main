@@ -27,8 +27,9 @@ export function calculateAccountBalance(
   entries: PartnerEntry[],
   settlements: LabourWageSettlement[] = [],
   allAccounts: Account[] = [account],
+  options: { farmId?: string | null; seasonId?: string | null } = {},
 ): number {
-  if (account.type === "partner") return partnerAccountBalanceEffect(account, sales, vouchers, advances, entries, settlements, allAccounts);
+  if (account.type === "partner") return partnerAccountBalanceEffect(account, sales, vouchers, advances, entries, settlements, allAccounts, options);
   const lookup = buildAccountIdentityLookup(allAccounts);
   const activeVouchers = getActiveVouchers(vouchers).filter((record) => !isLabourWageSettlementVoucher(record));
   const activeSettlements = getActiveLabourWageSettlements(settlements)

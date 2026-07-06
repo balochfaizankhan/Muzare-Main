@@ -3501,6 +3501,8 @@ function PartnerLedgerModule() {
   const { user, sessionRefreshing } = useAuth();
   const [searchParams] = useSearchParams();
   const workspaceId = user?.workspaceId ?? "";
+  const farmId = getActiveFarmId();
+  const seasonId = getActiveSeasonId();
   const canCreateEntries = Boolean(!sessionRefreshing && user && workspaceId && canCreate(user, "accounts", workspaceId));
   const canEditEntries = Boolean(!sessionRefreshing && user && workspaceId && canEdit(user, "accounts", workspaceId));
   const canDeleteEntries = Boolean(!sessionRefreshing && user && workspaceId && canDelete(user, "accounts", workspaceId));
@@ -3643,8 +3645,8 @@ function PartnerLedgerModule() {
       : id ? accounts.find((account) => account.id === id)?.name ?? t("expensesPage.unknownAccount") : "-";
   };
   const partnerPositions = useMemo(
-    () => buildPartnerLiabilityPositions(accounts, vouchers, advances, activeEntries, sales, labourWageSettlements),
-    [accounts, vouchers, advances, activeEntries, sales, labourWageSettlements],
+    () => buildPartnerLiabilityPositions(accounts, vouchers, advances, activeEntries, sales, labourWageSettlements, { farmId, seasonId }),
+    [accounts, advances, activeEntries, farmId, labourWageSettlements, sales, seasonId, vouchers],
   );
   const balance = partnerPositions.reduce((sum, item) => sum + item.currentPartnerBalance, 0);
   const runningBalances = (() => {
@@ -3823,6 +3825,8 @@ function AccountsModule() {
   const { t } = useTranslation();
   const { user, sessionRefreshing } = useAuth();
   const workspaceId = user?.workspaceId ?? "";
+  const farmId = getActiveFarmId();
+  const seasonId = getActiveSeasonId();
   const canCreateAccounts = Boolean(!sessionRefreshing && user && workspaceId && canCreate(user, "accounts", workspaceId));
   const navigate = useNavigate();
   const loadAccounts = useCallback(async () => (await workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true })).sort((a, b) => a.createdAt.localeCompare(b.createdAt)), []);
@@ -3863,15 +3867,15 @@ function AccountsModule() {
   const activeEntries = entries.filter((item) => isActiveOperationalRecord(item));
   const activeAdvances = advances.filter((item) => isActiveOperationalRecord(item));
   const activeLabourWageSettlements = labourWageSettlements.filter((item) => isActiveOperationalRecord(item));
-  const balance = (account: Account) => calculateAccountBalance(account, activeSales, activeVouchers, activeAdvances, activeEntries, activeLabourWageSettlements, accounts);
+  const balance = (account: Account) => calculateAccountBalance(account, activeSales, activeVouchers, activeAdvances, activeEntries, activeLabourWageSettlements, accounts, { farmId, seasonId });
   const totalAdvances = activeAdvances.reduce((sum, item) => sum + item.amount, 0);
   const totalVoucherExpenses = activeVouchers.reduce((sum, item) => sum + item.amount, 0);
   const selectedAccount = selectedAccountId ? accounts.find((item) => item.id === selectedAccountId) ?? null : null;
   const selectedPartnerSnapshot = useMemo(
     () => selectedAccount?.type === "partner"
-      ? getPartnerAccountingSnapshot(selectedAccount, sales, vouchers, advances, activeEntries, labourWageSettlements, accounts)
+      ? getPartnerAccountingSnapshot(selectedAccount, sales, vouchers, advances, activeEntries, labourWageSettlements, accounts, { farmId, seasonId })
       : null,
-    [accounts, activeEntries, advances, labourWageSettlements, sales, selectedAccount, vouchers],
+    [accounts, activeEntries, advances, farmId, labourWageSettlements, sales, seasonId, selectedAccount, vouchers],
   );
   const ledgerGroupTitle = useCallback((groupKey: AccountTransactionGroupKey) => ({
     expenses: t("accountsPage.groupExpenses"),

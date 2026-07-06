@@ -126,11 +126,13 @@ export function DashboardPage() {
     const activeAdvances = advances.filter(isActiveOperationalRecord);
     const activeSettlements = getActiveLabourWageSettlements(settlements);
     const activeAccounts = accounts.filter(isActiveOperationalRecord);
+    const farmId = sync.farmId ?? null;
+    const seasonId = sync.seasonId ?? null;
     const date = today();
     const totalSales = activeSales.reduce((sum, item) => sum + item.amount, 0);
     const labourAdvances = outstandingLabourAdvances(activeAdvances, activeSettlements);
     const totalExpenses = generalExpenseVouchers.reduce((sum, item) => sum + item.amount, 0);
-    const partnerBalance = buildPartnerLiabilityPositions(activeAccounts, cashAffectingVouchers, activeAdvances, activeEntries, activeSales, activeSettlements)
+    const partnerBalance = buildPartnerLiabilityPositions(activeAccounts, cashAffectingVouchers, activeAdvances, activeEntries, activeSales, activeSettlements, { farmId, seasonId })
       .reduce((sum, item) => sum + item.currentPartnerBalance, 0);
     setTotals({
       presentToday: activeAttendance.filter((item) => item.date === date && item.status === "present").length,

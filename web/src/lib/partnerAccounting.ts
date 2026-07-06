@@ -430,9 +430,10 @@ export function partnerAccountBalanceEffect(
   entries: PartnerEntry[],
   settlements: LabourWageSettlement[],
   allAccounts: Account[],
+  options: { farmId?: string | null; seasonId?: string | null } = {},
 ) {
   if (account.type !== "partner") return 0;
-  const snapshot = getPartnerAccountingSnapshot(account, sales, vouchers, advances, entries, settlements, allAccounts);
+  const snapshot = getPartnerAccountingSnapshot(account, sales, vouchers, advances, entries, settlements, allAccounts, options);
   return snapshot.currentPartnerBalance;
 }
 
@@ -443,6 +444,7 @@ export function buildPartnerLiabilityPositions(
   entries: PartnerEntry[],
   sales: Sale[] = [],
   settlements: Array<Pick<LabourWageSettlement, "linkedAccountId" | "settledAdvanceAmount" | "status" | "deletedAt" | "accountingStatus">> = [],
+  options: { farmId?: string | null; seasonId?: string | null } = {},
 ) {
   const partnerAccounts = accounts.filter((account) => account.type === "partner");
   const positions = new Map<string, PartnerLiabilityPosition>();
@@ -475,7 +477,7 @@ export function buildPartnerLiabilityPositions(
 
   for (const account of partnerAccounts) ensure(account.id, account.name, account);
   for (const account of partnerAccounts) {
-    const snapshot = getPartnerAccountingSnapshot(account, sales, vouchers, advances, entries, settlements as LabourWageSettlement[], accounts);
+    const snapshot = getPartnerAccountingSnapshot(account, sales, vouchers, advances, entries, settlements as LabourWageSettlement[], accounts, options);
     const position = ensure(account.id, account.name, account);
     position.capitalInjected = snapshot.capitalInjected;
     position.directExpensesPaid = snapshot.directExpensesPaid;
