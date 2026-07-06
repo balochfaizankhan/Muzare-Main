@@ -2,6 +2,7 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { accountTransactions, accounts, farms, operationalRecords } from "../db/schema.js";
 import { isDeletedOperationalPayload } from "../operational-record-state.js";
+import { normalizeLegacyAndroidAccountId } from "./account-identity.js";
 import { listLabourEarnings } from "./labour-earnings.js";
 import { validateLabourSettlementPaymentAccount, type LabourSettlementAccount } from "./labour-settlement-account-validation.js";
 import { calculateStatusWage, listWageRateRows, resolveApplicableWageRate } from "./wage-rates.js";
@@ -70,11 +71,6 @@ type CanonicalPaymentAccount = {
 
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
-function legacyAndroidAccountId(value: string) {
-  const match = /^android:[^:]+:account:(.+)$/i.exec(value.trim());
-  return match?.[1]?.trim() || null;
 }
 
 function parseSettlementSequenceNumber(value: string) {
@@ -232,7 +228,7 @@ export async function resolveCanonicalPaymentAccountId(
     return account ?? null;
   }
 
-  const legacyId = legacyAndroidAccountId(trimmed);
+  const legacyId = normalizeLegacyAndroidAccountId(trimmed);
   if (!legacyId) return null;
 
   const matches = await tx.select(selectFields).from(accounts)

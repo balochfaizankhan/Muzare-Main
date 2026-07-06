@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { and, eq, ilike, or, sql } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { z } from "zod";
 import { buildInfo } from "../build-info.js";
 import { requireUser } from "../auth.js";
@@ -7,6 +7,7 @@ import { hasPermission } from "../permissions.js";
 import { db } from "../db/client.js";
 import { accountTransactions, accounts, farms, operationalRecords, userSessions } from "../db/schema.js";
 import { isDeletedOperationalPayload } from "../operational-record-state.js";
+import { buildAccountIdentityLookup, resolveAccountIdentity, resolveCanonicalAccountId, type AccountIdentityLookup } from "../lib/account-identity.js";
 import { normalizeSettlementPayload } from "../lib/labour-wage-settlements.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
 
@@ -38,6 +39,15 @@ type AdvanceRow = {
   seasonId: string | null;
   sourceAccountName: string | null;
   deleted: boolean;
+  resolvedAccountId: string | null;
+  matchedBy: string;
+  needsAccountMappingRepair: boolean;
+  includedByCanonicalId: boolean;
+  includedByAlias: boolean;
+  includedByNameFallback: boolean;
+  excludedReason: string | null;
+  currentHelperIncluded: boolean;
+  sourceOfTruthIncluded: boolean;
 };
 
 type SettlementRow = {
@@ -67,7 +77,17 @@ type SettlementRow = {
   linkedVoucherId: string | null;
   accountingEntries: number;
   transactionAccountIds: string[];
+  transactionResolvedAccountIds: string[];
   transactionRemarks: string[];
+  resolvedAccountId: string | null;
+  matchedBy: string;
+  needsAccountMappingRepair: boolean;
+  includedByCanonicalId: boolean;
+  includedByAlias: boolean;
+  includedByNameFallback: boolean;
+  excludedReason: string | null;
+  currentHelperIncluded: boolean;
+  sourceOfTruthIncluded: boolean;
 };
 
 type TransactionRow = {
@@ -113,88 +133,15 @@ function numberValue(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function isLabourWageSettlementVoucherPayload(payload: Record<string, unknown>) {
-  return Boolean(
-    payload.settlementId
-    || payload.voucherPurpose === "labour_wage_settlement"
-    || payload.nonCashSettlement === true,
-  );
-}
-
-function resolveSettlementAccountId(payload: Record<string, unknown>) {
-  return firstString(
-    payload.linkedAccountId,
-    payload.paymentAccountId,
-    payload.accountId,
-    payload.partnerAccountId,
-    payload.labourAccountId,
-  );
-}
-
 function settlementAccountingStatus(status: string, accountingEntries: number) {
   if (status === "deleted") return "deleted";
   if (status === "voided") return "voided";
   return accountingEntries > 0 ? "posted" : "accounting_missing";
 }
 
-function settlementExclusionReason(input: {
-  status: string;
-  accountingStatus: string;
-  currentHelperIncluded: boolean;
-  sourceOfTruthIncluded: boolean;
-  settlementAccountId: string | null;
-  transactionAccountIds: string[];
-  selectedAccountId: string;
-  farmFilterApplied: boolean;
-  seasonFilterApplied: boolean;
-  farmMatches: boolean;
-  seasonMatches: boolean;
-}) {
-  const {
-    status,
-    accountingStatus,
-    currentHelperIncluded,
-    sourceOfTruthIncluded,
-    settlementAccountId,
-    transactionAccountIds,
-    selectedAccountId,
-  } = input;
-  if (currentHelperIncluded || sourceOfTruthIncluded) return null;
-  if (status === "deleted") return "Settlement is deleted.";
-  if (status === "voided") return "Settlement is voided.";
-  if (accountingStatus === "accounting_missing") return "Accounting entries are missing.";
-  if (!input.farmMatches && input.farmFilterApplied) return "Settlement is excluded by the selected farm filter.";
-  if (!input.seasonMatches && input.seasonFilterApplied) return "Settlement is excluded by the selected season filter.";
-  if (!settlementAccountId && transactionAccountIds.includes(selectedAccountId)) {
-    return "Settlement row is missing a settlement account link, but the accounting row points to the selected account.";
-  }
-  if (settlementAccountId && settlementAccountId !== selectedAccountId && transactionAccountIds.includes(selectedAccountId)) {
-    return "Settlement account on the row does not match the accounting row.";
-  }
-  if (!settlementAccountId && !transactionAccountIds.includes(selectedAccountId)) {
-    return "Settlement row is not linked to the selected account.";
-  }
-  return "Settlement was excluded by reconciliation filters.";
-}
-
-function includedSettlementSnapshot(
-  settlements: SettlementRow[],
-  selectedAccountId: string,
-  useTransactionFallback: boolean,
-) {
-  const active = settlements.filter((row) => row.status === "posted" && row.accountingEntries > 0);
-  const included = active.filter((row) => {
-    const settlementAccountId = row.linkedAccountId ?? row.paymentAccountId ?? row.accountId ?? row.partnerAccountId ?? row.labourAccountId;
-    if (settlementAccountId === selectedAccountId) return true;
-    return useTransactionFallback && row.transactionAccountIds.includes(selectedAccountId);
-  });
-  const labourSettlementNonCashApplied = included.reduce((sum, row) => sum + row.settledAdvanceAmount, 0);
-  const labourSettlementCashPaid = included.reduce((sum, row) => sum + row.cashPaid, 0);
-  return { included, labourSettlementNonCashApplied, labourSettlementCashPaid };
-}
-
 function buildPartnerSnapshot(args: {
   selectedAccountId: string;
+  accountLookup: AccountIdentityLookup;
   advances: AdvanceRow[];
   settlements: SettlementRow[];
   vouchers: Array<{ accountId: string; amount: number; isLabourWageSettlementVoucher: boolean }>;
@@ -209,46 +156,41 @@ function buildPartnerSnapshot(args: {
     seasonId: string | null;
   }>;
   sales: Array<{ accountId: string | null; amount: number; farmId: string | null; seasonId: string | null }>;
-  useTransactionFallback: boolean;
   farmId?: string | null;
   seasonId?: string | null;
 }) {
-  const { selectedAccountId, advances, settlements, vouchers, partnerEntries, sales, useTransactionFallback, farmId, seasonId } = args;
+  const { selectedAccountId, accountLookup, advances, settlements, vouchers, partnerEntries, sales, farmId, seasonId } = args;
   const farmMatches = (rowFarmId: string | null) => !farmId || rowFarmId === farmId;
   const seasonMatches = (rowSeasonId: string | null) => !seasonId || rowSeasonId === seasonId;
   const purchaseVouchersPaid = vouchers
-    .filter((voucher) => voucher.accountId === selectedAccountId && !voucher.isLabourWageSettlementVoucher)
+    .filter((voucher) => !voucher.isLabourWageSettlementVoucher && resolveCanonicalAccountId(voucher.accountId, accountLookup) === selectedAccountId)
     .reduce((sum, voucher) => sum + voucher.amount, 0);
   const businessFundsGiven = partnerEntries
-    .filter((entry) => entry.type === "settlement" && entry.fromAccountId === selectedAccountId && farmMatches(entry.farmId) && seasonMatches(entry.seasonId))
+    .filter((entry) => entry.type === "settlement" && resolveCanonicalAccountId(entry.fromAccountId, accountLookup) === selectedAccountId && farmMatches(entry.farmId) && seasonMatches(entry.seasonId))
     .reduce((sum, entry) => sum + entry.amount, 0);
   const businessFundsReceived = partnerEntries
-    .filter((entry) => entry.type === "settlement" && entry.toAccountId === selectedAccountId && farmMatches(entry.farmId) && seasonMatches(entry.seasonId))
+    .filter((entry) => entry.type === "settlement" && resolveCanonicalAccountId(entry.toAccountId, accountLookup) === selectedAccountId && farmMatches(entry.farmId) && seasonMatches(entry.seasonId))
     .reduce((sum, entry) => sum + entry.amount, 0);
   const moneyReturned = partnerEntries
     .filter((entry) => entry.type === "withdrawal")
-    .filter((entry) => (entry.partnerAccountId === selectedAccountId || entry.accountId === selectedAccountId) && farmMatches(entry.farmId) && seasonMatches(entry.seasonId))
+    .filter((entry) => (resolveCanonicalAccountId(entry.partnerAccountId, accountLookup) === selectedAccountId || resolveCanonicalAccountId(entry.accountId, accountLookup) === selectedAccountId) && farmMatches(entry.farmId) && seasonMatches(entry.seasonId))
     .reduce((sum, entry) => sum + entry.amount, 0);
   const capitalInjected = partnerEntries
     .filter((entry) => entry.type === "contribution")
-    .filter((entry) => (entry.partnerAccountId === selectedAccountId || entry.accountId === selectedAccountId) && farmMatches(entry.farmId) && seasonMatches(entry.seasonId))
+    .filter((entry) => (resolveCanonicalAccountId(entry.partnerAccountId, accountLookup) === selectedAccountId || resolveCanonicalAccountId(entry.accountId, accountLookup) === selectedAccountId) && farmMatches(entry.farmId) && seasonMatches(entry.seasonId))
     .reduce((sum, entry) => sum + entry.amount, 0);
   const adjustments = partnerEntries
     .filter((entry) => entry.type === "adjustment")
-    .filter((entry) => (entry.partnerAccountId === selectedAccountId || entry.accountId === selectedAccountId) && farmMatches(entry.farmId) && seasonMatches(entry.seasonId))
+    .filter((entry) => (resolveCanonicalAccountId(entry.partnerAccountId, accountLookup) === selectedAccountId || resolveCanonicalAccountId(entry.accountId, accountLookup) === selectedAccountId) && farmMatches(entry.farmId) && seasonMatches(entry.seasonId))
     .reduce((sum, entry) => sum + entry.amount, 0)
-    - sales.filter((sale) => sale.accountId === selectedAccountId && farmMatches(sale.farmId) && seasonMatches(sale.seasonId)).reduce((sum, sale) => sum + sale.amount, 0);
+    - sales.filter((sale) => resolveCanonicalAccountId(sale.accountId, accountLookup) === selectedAccountId && farmMatches(sale.farmId) && seasonMatches(sale.seasonId)).reduce((sum, sale) => sum + sale.amount, 0);
   const totalLabourAdvancesPaid = advances
-    .filter((advance) => advance.accountId === selectedAccountId && !advance.deleted && farmMatches(advance.farmId) && seasonMatches(advance.seasonId))
+    .filter((advance) => advance.resolvedAccountId === selectedAccountId && !advance.deleted && farmMatches(advance.farmId) && seasonMatches(advance.seasonId))
     .reduce((sum, advance) => sum + advance.amount, 0);
-  const settlementSnapshot = includedSettlementSnapshot(
-    settlements.filter((row) => farmMatches(row.farmId) && seasonMatches(row.seasonId)),
-    selectedAccountId,
-    useTransactionFallback,
-  );
-  const labourAdvancesSettledThroughWageSettlements = settlementSnapshot.labourSettlementNonCashApplied;
-  const labourSettlementNonCashApplied = settlementSnapshot.labourSettlementNonCashApplied;
-  const labourSettlementCashPaid = settlementSnapshot.labourSettlementCashPaid;
+  const settlementRows = settlements.filter((row) => (row.resolvedAccountId === selectedAccountId || row.transactionResolvedAccountIds.includes(selectedAccountId)) && farmMatches(row.farmId) && seasonMatches(row.seasonId));
+  const labourAdvancesSettledThroughWageSettlements = settlementRows.reduce((sum, row) => sum + row.settledAdvanceAmount, 0);
+  const labourSettlementNonCashApplied = labourAdvancesSettledThroughWageSettlements;
+  const labourSettlementCashPaid = settlementRows.reduce((sum, row) => sum + row.cashPaid, 0);
   const outstandingLabourAdvances = Math.max(totalLabourAdvancesPaid - labourAdvancesSettledThroughWageSettlements, 0);
   const farmOwesPartner = capitalInjected
     + purchaseVouchersPaid
@@ -289,7 +231,7 @@ export async function buildAccountingReconciliationTrace(input: {
   } = input;
   return db.transaction(async (tx) => {
     const accountSearch = accountName.trim().toLowerCase();
-    const matchingAccounts = await tx.select({
+    const workspaceAccounts = await tx.select({
       id: accounts.id,
       farmId: accounts.farmId,
       farmName: farms.name,
@@ -298,20 +240,21 @@ export async function buildAccountingReconciliationTrace(input: {
       active: accounts.active,
       oldAndroidId: accounts.oldAndroidId,
       sourceType: accounts.sourceType,
-    }).from(accounts).innerJoin(farms, eq(farms.id, accounts.farmId)).where(and(
-      eq(farms.workspaceId, workspaceId),
-      accountId
-        ? eq(accounts.id, accountId)
-        : accountSearch
-          ? or(
-            ilike(accounts.name, `%${accountSearch}%`),
-            ilike(sql`${accounts.id}::text`, `%${accountSearch}%`),
-            ilike(sql`COALESCE(${accounts.oldAndroidId}::text, '')`, `%${accountSearch}%`),
-          )
-          : undefined,
-    )).orderBy(accounts.name);
+    }).from(accounts).innerJoin(farms, eq(farms.id, accounts.farmId)).where(eq(farms.workspaceId, workspaceId)).orderBy(accounts.name);
 
-    const selectedAccount = (accountId ? matchingAccounts.find((row) => row.id === accountId) : matchingAccounts.find((row) => row.farmId === farmId)) ?? matchingAccounts[0] ?? null;
+    const matchingAccounts = workspaceAccounts.filter((row) => {
+      if (accountId) return row.id === accountId || row.oldAndroidId === accountId;
+      if (!accountSearch) return true;
+      return lowerTrim(row.name).includes(accountSearch)
+        || lowerTrim(row.id).includes(accountSearch)
+        || lowerTrim(row.oldAndroidId ?? "").includes(accountSearch)
+        || lowerTrim(row.farmName).includes(accountSearch);
+    });
+
+    const accountLookup = buildAccountIdentityLookup(workspaceAccounts);
+    const selectedAccount = (accountId
+      ? matchingAccounts.find((row) => row.id === accountId || row.oldAndroidId === accountId)
+      : matchingAccounts.find((row) => row.farmId === farmId)) ?? matchingAccounts[0] ?? null;
     if (!selectedAccount) {
       return {
         buildInfo,
@@ -396,25 +339,51 @@ export async function buildAccountingReconciliationTrace(input: {
     const advances = advanceRecords.map((row) => {
       const payload = row.payload as Record<string, unknown>;
       const deleted = isDeletedOperationalPayload(payload);
-        return {
-          id: row.id,
-          date: typeof payload.date === "string" ? payload.date : "",
-          amount: numberValue(payload.amount),
-          accountId: firstString(payload.accountId),
-          farmId: row.farmId,
-          seasonId: row.seasonId,
-          sourceAccountName: firstString(payload.sourceAccountName),
-          deleted,
-        } satisfies AdvanceRow;
-      });
+      const rawAccountId = firstString(payload.accountId);
+      const sourceAccountName = firstString(payload.sourceAccountName);
+      const resolved = resolveAccountIdentity(rawAccountId, accountLookup, sourceAccountName);
+      const includedByCanonicalId = !deleted && resolved.canonicalAccountId === selectedAccount.id && resolved.matchedBy === "canonical";
+      const includedByAlias = !deleted && resolved.canonicalAccountId === selectedAccount.id && resolved.matchedBy === "alias";
+      const includedByNameFallback = !deleted && resolved.canonicalAccountId === selectedAccount.id && resolved.matchedBy === "name_fallback";
+      const excludedReason = deleted
+        ? "Advance is deleted."
+        : !resolved.canonicalAccountId
+          ? "Advance account is unmapped."
+          : resolved.canonicalAccountId !== selectedAccount.id
+            ? "Advance belongs to another account."
+            : null;
+      return {
+        id: row.id,
+        date: typeof payload.date === "string" ? payload.date : "",
+        amount: numberValue(payload.amount),
+        accountId: rawAccountId,
+        farmId: row.farmId,
+        seasonId: row.seasonId,
+        sourceAccountName,
+        deleted,
+        resolvedAccountId: resolved.canonicalAccountId,
+        matchedBy: resolved.matchedBy,
+        needsAccountMappingRepair: resolved.needsAccountMappingRepair,
+        includedByCanonicalId,
+        includedByAlias,
+        includedByNameFallback,
+        excludedReason,
+        currentHelperIncluded: includedByCanonicalId || includedByAlias || includedByNameFallback,
+        sourceOfTruthIncluded: includedByCanonicalId || includedByAlias || includedByNameFallback,
+      } satisfies AdvanceRow;
+    });
 
     const vouchers = voucherRecords.map((row) => {
       const payload = row.payload as Record<string, unknown>;
-        return {
-          accountId: firstString(payload.accountId) ?? "",
-          amount: numberValue(payload.totalAmount ?? payload.amount),
-          isLabourWageSettlementVoucher: isLabourWageSettlementVoucherPayload(payload),
-        };
+      return {
+        accountId: firstString(payload.accountId) ?? "",
+        amount: numberValue(payload.totalAmount ?? payload.amount),
+        isLabourWageSettlementVoucher: Boolean(
+          payload.settlementId
+          || payload.voucherPurpose === "labour_wage_settlement"
+          || payload.nonCashSettlement === true,
+        ),
+      };
     });
 
     const partnerEntries = partnerEntryRecords.map((row) => {
@@ -447,55 +416,73 @@ export async function buildAccountingReconciliationTrace(input: {
       const current = transactionBySettlementId.get(row.referenceId) ?? [];
       current.push({
         referenceId: row.referenceId,
-          accountId: row.accountId,
-          source: row.source,
-          sourceType: row.sourceType,
-          type: row.type,
-          amount: numberValue(row.amount),
-          transactionDate: row.transactionDate,
-          farmId: row.farmId,
-          seasonId: row.seasonId,
-          remarks: row.remarks,
-        });
-        transactionBySettlementId.set(row.referenceId, current);
-      }
+        accountId: row.accountId,
+        source: row.source,
+        sourceType: row.sourceType,
+        type: row.type,
+        amount: numberValue(row.amount),
+        transactionDate: row.transactionDate,
+        farmId: row.farmId,
+        seasonId: row.seasonId,
+        remarks: row.remarks,
+      });
+      transactionBySettlementId.set(row.referenceId, current);
+    }
 
-      const settlementRows = settlementRecords.map((row) => {
-        const payload = row.payload as Record<string, unknown>;
-        const accountId = resolveSettlementAccountId(payload);
-        const transactionRows = transactionBySettlementId.get(row.id) ?? [];
+    const settlementRows = settlementRecords.map((row) => {
+      const payload = row.payload as Record<string, unknown>;
+      const settlementAccountValue = firstString(
+        payload.linkedAccountId,
+        payload.paymentAccountId,
+        payload.accountId,
+        payload.partnerAccountId,
+        payload.labourAccountId,
+      );
+      const settlementResolved = resolveAccountIdentity(settlementAccountValue, accountLookup, firstString(payload.linkedAccountName, payload.paymentAccountName, payload.accountName, payload.partnerName));
+      const transactionRows = transactionBySettlementId.get(row.id) ?? [];
       const transactionAccountIds = [...new Set(transactionRows.map((entry) => entry.accountId))];
+      const transactionResolvedAccountIds = [...new Set(transactionRows
+        .map((entry) => resolveCanonicalAccountId(entry.accountId, accountLookup))
+        .filter((value): value is string => Boolean(value)))];
       const transactionRemarks = transactionRows.map((entry) => entry.remarks ?? "");
       const accountingEntries = transactionRows.length;
-        const normalizedPayload = normalizeSettlementPayload(payload);
-        const status = normalizedPayload.status;
-        const accountingStatus = settlementAccountingStatus(status, accountingEntries);
-        const farmMatches = !farmId || row.farmId === farmId;
-        const seasonMatches = !seasonId || row.seasonId === seasonId;
-        const currentHelperIncluded = accountingStatus === "posted" && accountId === selectedAccount.id && farmMatches && seasonMatches;
-        const sourceOfTruthIncluded = accountingStatus === "posted" && (accountId === selectedAccount.id || transactionAccountIds.includes(selectedAccount.id)) && farmMatches && seasonMatches;
-        const totalLabourCost = numberValue(normalizedPayload.totalLabourCost ?? normalizedPayload.totalEarned);
-        const advancesApplied = numberValue(normalizedPayload.advancesPaid ?? normalizedPayload.advancesAvailableUpToSettlementDate);
-        const settledAdvanceAmount = numberValue(normalizedPayload.settledAdvanceAmount ?? normalizedPayload.appliedAdvances);
-        const cashPaid = numberValue(payload.cashPaid ?? normalizedPayload.payableBalance ?? normalizedPayload.cashPayable);
-        const carryForwardAdvance = numberValue(normalizedPayload.carryForwardAdvance);
-      const excludedReason = settlementExclusionReason({
+      const normalizedPayload = normalizeSettlementPayload(payload);
+      const status = normalizedPayload.status;
+      const accountingStatus = settlementAccountingStatus(status, accountingEntries);
+      const farmMatches = !farmId || row.farmId === farmId;
+      const seasonMatches = !seasonId || row.seasonId === seasonId;
+      const currentHelperIncluded = accountingStatus === "posted" && settlementResolved.canonicalAccountId === selectedAccount.id && farmMatches && seasonMatches;
+      const sourceOfTruthIncluded = accountingStatus === "posted" && (settlementResolved.canonicalAccountId === selectedAccount.id || transactionResolvedAccountIds.includes(selectedAccount.id)) && farmMatches && seasonMatches;
+      const totalLabourCost = numberValue(normalizedPayload.totalLabourCost ?? normalizedPayload.totalEarned);
+      const advancesApplied = numberValue(normalizedPayload.advancesPaid ?? normalizedPayload.advancesAvailableUpToSettlementDate);
+      const settledAdvanceAmount = numberValue(normalizedPayload.settledAdvanceAmount ?? normalizedPayload.appliedAdvances);
+      const cashPaid = numberValue(payload.cashPaid ?? normalizedPayload.payableBalance ?? normalizedPayload.cashPayable);
+      const carryForwardAdvance = numberValue(normalizedPayload.carryForwardAdvance);
+      const excludedReason = (() => {
+        if (currentHelperIncluded || sourceOfTruthIncluded) return null;
+        if (status === "deleted") return "Settlement is deleted.";
+        if (status === "voided") return "Settlement is voided.";
+        if (accountingStatus === "accounting_missing") return "Accounting entries are missing.";
+        if (!farmMatches && farmId) return "Settlement is excluded by the selected farm filter.";
+        if (!seasonMatches && seasonId) return "Settlement is excluded by the selected season filter.";
+        if (!settlementResolved.canonicalAccountId && transactionResolvedAccountIds.includes(selectedAccount.id)) {
+          return "Settlement row is missing a settlement account link, but the accounting row points to the selected account.";
+        }
+        if (settlementResolved.canonicalAccountId && settlementResolved.canonicalAccountId !== selectedAccount.id && transactionResolvedAccountIds.includes(selectedAccount.id)) {
+          return "Settlement account on the row does not match the accounting row.";
+        }
+        if (!settlementResolved.canonicalAccountId && !transactionResolvedAccountIds.includes(selectedAccount.id)) {
+          return "Settlement row is not linked to the selected account.";
+        }
+        return "Settlement was excluded by reconciliation filters.";
+      })();
+      const includedByCanonicalId = currentHelperIncluded && settlementResolved.matchedBy === "canonical";
+      const includedByAlias = currentHelperIncluded && settlementResolved.matchedBy === "alias";
+      const includedByNameFallback = currentHelperIncluded && settlementResolved.matchedBy === "name_fallback";
+      return {
+        id: row.id,
+        settlementNumber: normalizedPayload.settlementNumber,
         status,
-          accountingStatus,
-          currentHelperIncluded,
-          sourceOfTruthIncluded,
-          settlementAccountId: accountId,
-          transactionAccountIds,
-          selectedAccountId: selectedAccount.id,
-          farmFilterApplied: Boolean(farmId),
-          seasonFilterApplied: Boolean(seasonId),
-          farmMatches,
-          seasonMatches,
-        });
-        return {
-          id: row.id,
-          settlementNumber: normalizedPayload.settlementNumber,
-          status,
         linkedAccountId: firstString(payload.linkedAccountId),
         paymentAccountId: firstString(payload.paymentAccountId),
         accountId: firstString(payload.accountId),
@@ -505,12 +492,12 @@ export async function buildAccountingReconciliationTrace(input: {
         advancesApplied,
         settledAdvanceAmount,
         cashPaid,
-          carryForwardAdvance,
-          farmId: row.farmId,
-          seasonId: row.seasonId,
-          farmName: row.farmName,
-          createdAt: row.createdAt.toISOString(),
-          updatedAt: row.updatedAt.toISOString(),
+        carryForwardAdvance,
+        farmId: row.farmId,
+        seasonId: row.seasonId,
+        farmName: row.farmName,
+        createdAt: row.createdAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString(),
         postedAt: firstString(payload.postedAt, payload.accountedAt, row.updatedAt.toISOString()),
         voidedAt: firstString(payload.voidedAt),
         reversedAt: firstString(payload.reversedAt),
@@ -519,39 +506,42 @@ export async function buildAccountingReconciliationTrace(input: {
         linkedVoucherId: firstString(payload.linkedVoucherId),
         accountingEntries,
         transactionAccountIds,
+        transactionResolvedAccountIds,
         transactionRemarks,
+        resolvedAccountId: settlementResolved.canonicalAccountId,
+        matchedBy: settlementResolved.matchedBy,
+        needsAccountMappingRepair: settlementResolved.needsAccountMappingRepair,
+        includedByCanonicalId,
+        includedByAlias,
+        includedByNameFallback,
+        excludedReason,
         currentHelperIncluded,
         sourceOfTruthIncluded,
-        excludedReason,
-      };
-      }).filter((row) =>
-        row.currentHelperIncluded
-        || row.sourceOfTruthIncluded
-        || row.excludedReason !== "Settlement row is not linked to the selected account."
-      );
+      } satisfies SettlementRow;
+    });
 
-      const helperSnapshot = buildPartnerSnapshot({
-        selectedAccountId: selectedAccount.id,
-        advances,
-        settlements: settlementRows,
-        vouchers,
-        partnerEntries,
-        sales,
-        useTransactionFallback: false,
-        farmId,
-        seasonId,
-      });
-      const sourceOfTruthSnapshot = buildPartnerSnapshot({
-        selectedAccountId: selectedAccount.id,
-        advances,
-        settlements: settlementRows,
-        vouchers,
-        partnerEntries,
-        sales,
-        useTransactionFallback: true,
-        farmId,
-        seasonId,
-      });
+    const helperSnapshot = buildPartnerSnapshot({
+      selectedAccountId: selectedAccount.id,
+      accountLookup,
+      advances,
+      settlements: settlementRows,
+      vouchers,
+      partnerEntries,
+      sales,
+      farmId,
+      seasonId,
+    });
+    const sourceOfTruthSnapshot = buildPartnerSnapshot({
+      selectedAccountId: selectedAccount.id,
+      accountLookup,
+      advances,
+      settlements: settlementRows,
+      vouchers,
+      partnerEntries,
+      sales,
+      farmId,
+      seasonId,
+    });
 
       return {
         buildInfo,
@@ -573,11 +563,7 @@ export async function buildAccountingReconciliationTrace(input: {
         matchingAccounts,
         advances: {
           rowsFound: advances.length,
-          rows: advances.map((row) => ({
-            ...row,
-            includedById: row.accountId === selectedAccount.id && !row.deleted,
-            includedByName: row.sourceAccountName ? lowerTrim(row.sourceAccountName) === lowerTrim(selectedAccount.name) : false,
-          })),
+          rows: advances,
         },
         labourWageSettlements: {
           rowsFound: settlementRows.length,
