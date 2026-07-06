@@ -3,6 +3,7 @@ import { and, eq, or } from "drizzle-orm";
 import { z } from "zod";
 import { buildInfo } from "../build-info.js";
 import { requireUser } from "../auth.js";
+import { localDevelopmentMode } from "../config.js";
 import { hasPermission } from "../permissions.js";
 import { db } from "../db/client.js";
 import { accountTransactions, accounts, farms, operationalRecords, userSessions } from "../db/schema.js";
@@ -59,6 +60,9 @@ type SettlementRow = {
   accountId: string | null;
   partnerAccountId: string | null;
   labourAccountId: string | null;
+  fromPartnerId: string | null;
+  toPartnerId: string | null;
+  partnerId: string | null;
   totalLabourCost: number;
   advancesApplied: number;
   settledAdvanceAmount: number;
@@ -103,6 +107,14 @@ type TransactionRow = {
   remarks: string | null;
 };
 
+type TransferAccountResolution = {
+  canonicalAccountId: string | null;
+  matchedBy: string;
+  needsAccountMappingRepair: boolean;
+  sourceField: string | null;
+  rawValue: string | null;
+};
+
 type PartnerSnapshot = {
   purchaseVouchersPaid: number;
   businessFundsGiven: number;
@@ -128,6 +140,37 @@ function firstString(...values: Array<unknown>) {
   return null;
 }
 
+function resolvePartnerTransferAccountIdentity(
+  entry: Record<string, unknown>,
+  side: "from" | "to",
+  accountLookup: AccountIdentityLookup,
+): TransferAccountResolution {
+  const keys = side === "from"
+    ? ["fromAccountId", "fromPartnerId", "partnerId", "partnerAccountId", "accountId"]
+    : ["toAccountId", "toPartnerId", "partnerId", "partnerAccountId", "accountId"];
+  for (const key of keys) {
+    const rawValue = firstString(entry[key]);
+    if (!rawValue) continue;
+    const resolved = resolveAccountIdentity(rawValue, accountLookup, firstString(entry.partnerName, entry.fromPartner, entry.toPartner));
+    if (resolved.canonicalAccountId) {
+      return {
+        canonicalAccountId: resolved.canonicalAccountId,
+        matchedBy: resolved.matchedBy,
+        needsAccountMappingRepair: resolved.needsAccountMappingRepair,
+        sourceField: key,
+        rawValue,
+      };
+    }
+  }
+  return {
+    canonicalAccountId: null,
+    matchedBy: "unmatched",
+    needsAccountMappingRepair: false,
+    sourceField: null,
+    rawValue: null,
+  };
+}
+
 function numberValue(value: unknown) {
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -151,6 +194,9 @@ function buildPartnerSnapshot(args: {
     partnerAccountId: string | null;
     fromAccountId: string | null;
     toAccountId: string | null;
+    fromPartnerId: string | null;
+    toPartnerId: string | null;
+    partnerId: string | null;
     accountId: string | null;
     farmId: string | null;
     seasonId: string | null;
@@ -166,10 +212,10 @@ function buildPartnerSnapshot(args: {
     .filter((voucher) => !voucher.isLabourWageSettlementVoucher && resolveCanonicalAccountId(voucher.accountId, accountLookup) === selectedAccountId)
     .reduce((sum, voucher) => sum + voucher.amount, 0);
   const businessFundsGiven = partnerEntries
-    .filter((entry) => entry.type === "settlement" && resolveCanonicalAccountId(entry.fromAccountId, accountLookup) === selectedAccountId && farmMatches(entry.farmId) && seasonMatches(entry.seasonId))
+    .filter((entry) => entry.type === "settlement" && resolvePartnerTransferAccountIdentity(entry as Record<string, unknown>, "from", accountLookup).canonicalAccountId === selectedAccountId && farmMatches(entry.farmId) && seasonMatches(entry.seasonId))
     .reduce((sum, entry) => sum + entry.amount, 0);
   const businessFundsReceived = partnerEntries
-    .filter((entry) => entry.type === "settlement" && resolveCanonicalAccountId(entry.toAccountId, accountLookup) === selectedAccountId && farmMatches(entry.farmId) && seasonMatches(entry.seasonId))
+    .filter((entry) => entry.type === "settlement" && resolvePartnerTransferAccountIdentity(entry as Record<string, unknown>, "to", accountLookup).canonicalAccountId === selectedAccountId && farmMatches(entry.farmId) && seasonMatches(entry.seasonId))
     .reduce((sum, entry) => sum + entry.amount, 0);
   const moneyReturned = partnerEntries
     .filter((entry) => entry.type === "withdrawal")
@@ -192,13 +238,13 @@ function buildPartnerSnapshot(args: {
   const labourSettlementNonCashApplied = labourAdvancesSettledThroughWageSettlements;
   const labourSettlementCashPaid = settlementRows.reduce((sum, row) => sum + row.cashPaid, 0);
   const outstandingLabourAdvances = Math.max(totalLabourAdvancesPaid - labourAdvancesSettledThroughWageSettlements, 0);
-  const farmOwesPartner = capitalInjected
-    + purchaseVouchersPaid
+  const farmOwesPartner = purchaseVouchersPaid
     + businessFundsGiven
     - businessFundsReceived
-    - moneyReturned
     + outstandingLabourAdvances
-    + adjustments;
+    + labourSettlementCashPaid
+    + adjustments
+    - moneyReturned;
   return {
     purchaseVouchersPaid,
     businessFundsGiven,
@@ -393,6 +439,9 @@ export async function buildAccountingReconciliationTrace(input: {
         partnerAccountId: firstString(payload.partnerAccountId),
         fromAccountId: firstString(payload.fromAccountId),
         toAccountId: firstString(payload.toAccountId),
+        fromPartnerId: firstString(payload.fromPartnerId),
+        toPartnerId: firstString(payload.toPartnerId),
+        partnerId: firstString(payload.partnerId),
         accountId: firstString(payload.accountId),
         farmId: row.farmId,
         seasonId: row.seasonId,
@@ -487,6 +536,9 @@ export async function buildAccountingReconciliationTrace(input: {
         accountId: firstString(payload.accountId),
         partnerAccountId: firstString(payload.partnerAccountId),
         labourAccountId: firstString(payload.labourAccountId),
+        fromPartnerId: firstString(payload.fromPartnerId),
+        toPartnerId: firstString(payload.toPartnerId),
+        partnerId: firstString(payload.partnerId),
         totalLabourCost,
         advancesApplied,
         settledAdvanceAmount,
@@ -541,6 +593,57 @@ export async function buildAccountingReconciliationTrace(input: {
       farmId,
       seasonId,
     });
+
+    if (localDevelopmentMode) {
+      for (const row of partnerEntries) {
+        console.log("ACCOUNTING_RECONCILIATION_PARTNER_ROW", {
+          id: row.fromAccountId ?? row.toAccountId ?? row.accountId ?? row.partnerAccountId ?? row.partnerId ?? row.type,
+          type: row.type,
+          fromAccountId: row.fromAccountId,
+          toAccountId: row.toAccountId,
+          fromPartnerId: row.fromPartnerId,
+          toPartnerId: row.toPartnerId,
+          partnerId: row.partnerId,
+          amount: row.amount,
+          farmId: row.farmId,
+          seasonId: row.seasonId,
+          included: resolvePartnerTransferAccountIdentity(row as Record<string, unknown>, "from", accountLookup).canonicalAccountId === selectedAccount.id
+            || resolvePartnerTransferAccountIdentity(row as Record<string, unknown>, "to", accountLookup).canonicalAccountId === selectedAccount.id,
+          excludedReason: resolvePartnerTransferAccountIdentity(row as Record<string, unknown>, "from", accountLookup).canonicalAccountId === selectedAccount.id
+            || resolvePartnerTransferAccountIdentity(row as Record<string, unknown>, "to", accountLookup).canonicalAccountId === selectedAccount.id
+            ? null
+            : "Settlement is not linked to the selected account.",
+        });
+      }
+      for (const row of advances) {
+        console.log("ACCOUNTING_RECONCILIATION_ADVANCE_ROW", {
+          id: row.id,
+          type: "advance",
+          accountId: row.accountId,
+          sourceAccountName: row.sourceAccountName,
+          amount: row.amount,
+          farmId: row.farmId,
+          seasonId: row.seasonId,
+          included: row.resolvedAccountId === selectedAccount.id && !row.deleted,
+          excludedReason: row.resolvedAccountId === selectedAccount.id && !row.deleted ? null : row.excludedReason,
+        });
+      }
+      for (const row of settlementRows) {
+        console.log("ACCOUNTING_RECONCILIATION_SETTLEMENT_ROW", {
+          id: row.id,
+          settlementNumber: row.settlementNumber,
+          type: "labour_wage_settlement",
+          linkedAccountId: row.linkedAccountId,
+          paymentAccountId: row.paymentAccountId,
+          partnerId: row.partnerId,
+          amount: row.settledAdvanceAmount,
+          farmId: row.farmId,
+          seasonId: row.seasonId,
+          included: row.currentHelperIncluded,
+          excludedReason: row.excludedReason,
+        });
+      }
+    }
 
       return {
         buildInfo,

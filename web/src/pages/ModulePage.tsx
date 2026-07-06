@@ -27,6 +27,7 @@ import {
   groupPartnerLiabilityTransactions,
   partnerAdjustmentEffect,
   resolvePartnerAccountId,
+  resolvePartnerTransferAccountIdentity,
   type PartnerLiabilityPosition,
   type PartnerLiabilityLedgerGroupKey,
 } from "../lib/partnerAccounting";
@@ -3658,8 +3659,8 @@ function PartnerLedgerModule() {
     };
     for (const entry of [...activeEntries].sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt))) {
       if (entry.type === "settlement") {
-        const fromAccountId = resolveCanonicalAccountId(entry.fromAccountId, accountLookup) ?? entry.fromAccountId ?? "";
-        const toAccountId = resolveCanonicalAccountId(entry.toAccountId, accountLookup) ?? entry.toAccountId ?? "";
+        const fromAccountId = resolvePartnerTransferAccountIdentity(entry as Record<string, unknown>, "from", accountLookup).canonicalAccountId ?? entry.fromAccountId ?? "";
+        const toAccountId = resolvePartnerTransferAccountIdentity(entry as Record<string, unknown>, "to", accountLookup).canonicalAccountId ?? entry.toAccountId ?? "";
         if (!fromAccountId || !toAccountId) {
           labels.set(entry.id, t("partnerLedgerPage.unresolvedSettlementAccountMapping")); continue;
         }
@@ -4009,8 +4010,8 @@ function AccountsModule() {
         });
       }
       if (entry.type === "settlement") {
-        const fromAccountId = resolveCanonicalAccountId(entry.fromAccountId, accountLookup);
-        const toAccountId = resolveCanonicalAccountId(entry.toAccountId, accountLookup);
+        const fromAccountId = resolvePartnerTransferAccountIdentity(entry as Record<string, unknown>, "from", accountLookup).canonicalAccountId;
+        const toAccountId = resolvePartnerTransferAccountIdentity(entry as Record<string, unknown>, "to", accountLookup).canonicalAccountId;
         if (fromAccountId === selectedAccount.id) {
           rows.push({
             id: `partner:${entry.id}:sent`,

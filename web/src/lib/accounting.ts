@@ -1,18 +1,20 @@
 import type { Account, Advance, LabourWageSettlement, PartnerEntry, Sale, Voucher } from "./offline-db";
 import { isActiveOperationalRecord } from "./operationalRecords";
-import { isPartnerAccount, partnerAccountBalanceEffect } from "./partnerAccounting";
+import { isPartnerAccount, partnerAccountBalanceEffect, resolvePartnerTransferAccountIdentity } from "./partnerAccounting";
 import { getActiveVouchers } from "./voucherCollections";
 import { getActiveLabourWageSettlements, getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher, resolveLabourWageSettlementAccountId } from "./labourWageSettlements";
-import { buildAccountIdentityLookup, resolveCanonicalAccountId } from "./accountIdentity";
+import { buildAccountIdentityLookup, resolveCanonicalAccountId, type AccountIdentityLookup } from "./accountIdentity";
 
-export function partnerSettlementEffect(entry: PartnerEntry, accountId: string): number {
+export function partnerSettlementEffect(entry: PartnerEntry, accountId: string, accountLookup: AccountIdentityLookup): number {
   if (entry.type !== "settlement") return 0;
-  return (entry.toAccountId === accountId ? entry.amount : 0)
-    - (entry.fromAccountId === accountId ? entry.amount : 0);
+  const fromAccountId = resolvePartnerTransferAccountIdentity(entry as Record<string, unknown>, "from", accountLookup).canonicalAccountId ?? entry.fromAccountId ?? null;
+  const toAccountId = resolvePartnerTransferAccountIdentity(entry as Record<string, unknown>, "to", accountLookup).canonicalAccountId ?? entry.toAccountId ?? null;
+  return (toAccountId === accountId ? entry.amount : 0)
+    - (fromAccountId === accountId ? entry.amount : 0);
 }
 
-export function partnerEntryAccountEffect(entry: PartnerEntry, account: Account): number {
-  if (entry.type === "settlement") return partnerSettlementEffect(entry, account.id);
+export function partnerEntryAccountEffect(entry: PartnerEntry, account: Account, accountLookup?: AccountIdentityLookup): number {
+  if (entry.type === "settlement") return partnerSettlementEffect(entry, account.id, accountLookup ?? buildAccountIdentityLookup([account]));
   if (entry.type === "adjustment") return 0;
   if (isPartnerAccount(account)) return 0;
   if (entry.accountId !== account.id) return 0;
@@ -44,7 +46,7 @@ export function calculateAccountBalance(
     - activeVouchers.filter((record) => resolveCanonicalAccountId(record.accountId, lookup) === account.id && farmMatches(record.farmId ?? null) && seasonMatches(record.seasonId ?? null)).reduce((sum, record) => sum + record.amount, 0)
     - activeSettlements
     - advances.filter((record) => isActiveOperationalRecord(record) && resolveCanonicalAccountId(record.accountId, lookup) === account.id && farmMatches(record.farmId ?? null) && seasonMatches(record.seasonId ?? null)).reduce((sum, record) => sum + record.amount, 0)
-    + entries.filter((record) => isActiveOperationalRecord(record) && farmMatches(record.farmId ?? null) && seasonMatches(record.seasonId ?? null)).reduce((sum, record) => sum + partnerEntryAccountEffect(record, account), 0);
+    + entries.filter((record) => isActiveOperationalRecord(record) && farmMatches(record.farmId ?? null) && seasonMatches(record.seasonId ?? null)).reduce((sum, record) => sum + partnerEntryAccountEffect(record, account, lookup), 0);
 }
 
 export function calculateAvailableBalance(
