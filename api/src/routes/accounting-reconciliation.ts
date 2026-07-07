@@ -234,7 +234,7 @@ function buildPartnerSnapshot(args: {
     .filter((advance) => advance.resolvedAccountId === selectedAccountId && !advance.deleted && farmMatches(advance.farmId) && seasonMatches(advance.seasonId))
     .reduce((sum, advance) => sum + advance.amount, 0);
   const settlementRows = settlements.filter((row) => (row.resolvedAccountId === selectedAccountId || row.transactionResolvedAccountIds.includes(selectedAccountId)) && farmMatches(row.farmId) && seasonMatches(row.seasonId));
-  const labourAdvancesSettledThroughWageSettlements = settlementRows.reduce((sum, row) => sum + row.settledAdvanceAmount, 0);
+  const labourAdvancesSettledThroughWageSettlements = settlementRows.reduce((sum, row) => sum + row.advancesApplied, 0);
   const labourSettlementNonCashApplied = labourAdvancesSettledThroughWageSettlements;
   const labourSettlementCashPaid = settlementRows.reduce((sum, row) => sum + row.cashPaid, 0);
   const outstandingLabourAdvances = Math.max(totalLabourAdvancesPaid - labourAdvancesSettledThroughWageSettlements, 0);
@@ -501,8 +501,8 @@ export async function buildAccountingReconciliationTrace(input: {
       const currentHelperIncluded = accountingStatus === "posted" && settlementResolved.canonicalAccountId === selectedAccount.id && farmMatches && seasonMatches;
       const sourceOfTruthIncluded = accountingStatus === "posted" && (settlementResolved.canonicalAccountId === selectedAccount.id || transactionResolvedAccountIds.includes(selectedAccount.id)) && farmMatches && seasonMatches;
       const totalLabourCost = numberValue(normalizedPayload.totalLabourCost ?? normalizedPayload.totalEarned);
-      const advancesApplied = numberValue(normalizedPayload.advancesPaid ?? normalizedPayload.advancesAvailableUpToSettlementDate);
-      const settledAdvanceAmount = numberValue(normalizedPayload.settledAdvanceAmount ?? normalizedPayload.appliedAdvances);
+      const advancesApplied = numberValue(normalizedPayload.appliedAdvances ?? normalizedPayload.settledAdvanceAmount ?? normalizedPayload.advancesPaid ?? normalizedPayload.advancesAvailableUpToSettlementDate);
+      const settledAdvanceAmount = numberValue(normalizedPayload.settledAdvanceAmount ?? normalizedPayload.appliedAdvances ?? normalizedPayload.advancesPaid);
       const cashPaid = numberValue(payload.cashPaid ?? normalizedPayload.payableBalance ?? normalizedPayload.cashPayable);
       const carryForwardAdvance = numberValue(normalizedPayload.carryForwardAdvance);
       const excludedReason = (() => {
@@ -635,7 +635,7 @@ export async function buildAccountingReconciliationTrace(input: {
           linkedAccountId: row.linkedAccountId,
           paymentAccountId: row.paymentAccountId,
           partnerId: row.partnerId,
-          amount: row.settledAdvanceAmount,
+          amount: row.advancesApplied,
           farmId: row.farmId,
           seasonId: row.seasonId,
           included: row.currentHelperIncluded,

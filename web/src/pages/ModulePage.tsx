@@ -33,7 +33,7 @@ import {
 } from "../lib/partnerAccounting";
 import { formatDate, formatMoney } from "../lib/format";
 import { buildLabourEarningsProfileSummary } from "../lib/labourEarnings";
-import { getLabourWageSettlementCashPaidAmount, getLabourWageSettlementNonCashAppliedAmount, isLabourWageSettlementVoucher, resolveLabourWageSettlementAccountId } from "../lib/labourWageSettlements";
+import { getLabourWageSettlementAdvanceOffset, getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher, resolveLabourWageSettlementAccountIdentity } from "../lib/labourWageSettlements";
 import { buildAccountIdentityLookup, resolveCanonicalAccountId } from "../lib/accountIdentity";
 import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { getVoucherDisplayNumber, normalizeVoucherNumber, parseVoucherSequenceNumber } from "../lib/vouchers";
@@ -85,6 +85,7 @@ type AccountLedgerRow = {
   description: string;
   debit: number;
   credit: number;
+  accountId?: string;
   source: "sales" | "expenses" | "labour_advances" | "partner_ledger";
   sourceId: string;
   counterparty?: string;
@@ -3734,9 +3735,9 @@ function PartnerLedgerModule() {
       <section className="record-panel">
         <h2>{t("partnerLedgerPage.partnerPosition")}</h2>
         {!partnerPositions.length ? <Empty>{t("partnerLedgerPage.noPartnerPositions")}</Empty> : <div className="partner-position-table">
-          <div className="partner-position-row partner-position-row--header"><span>{t("partnerLedgerPage.partner")}</span><span>Purchase Vouchers</span><span>Funds Given</span><span>Funds Received</span><span>Outstanding Labour Advances</span><span>Labour Settlements Cash Paid</span><span>{t("partnerLedgerPage.currentPartnerBalance")}</span></div>
+          <div className="partner-position-row partner-position-row--header"><span>{t("partnerLedgerPage.partner")}</span><span>Purchase Vouchers</span><span>Funds Given</span><span>Funds Received</span><span>Outstanding Labour Advances</span><span>{t("partnerLedgerPage.currentPartnerBalance")}</span></div>
           {partnerPositions.map((item) => <button type="button" className="partner-position-row partner-position-row--interactive" key={item.name} onClick={() => setSelectedPartnerPosition(item)}>
-            <strong>{item.name}</strong><span>{money(item.purchaseVouchersPaid)}</span><span>{money(item.transfersOut)}</span><span>{money(item.transfersIn)}</span><span>{money(item.outstandingLabourAdvances)}</span><span>{money(item.labourSettlementCashPaid)}</span><b>{money(item.currentPartnerBalance)}</b>
+            <strong>{item.name}</strong><span>{money(item.purchaseVouchersPaid)}</span><span>{money(item.transfersOut)}</span><span>{money(item.transfersIn)}</span><span>{money(item.outstandingLabourAdvances)}</span><b>{money(item.currentPartnerBalance)}</b>
           </button>)}
         </div>}
         {!!partnerPositions.length && <div className="partner-position-cards">
@@ -3749,7 +3750,6 @@ function PartnerLedgerModule() {
             <div><span>Total labour advances paid</span><strong>{money(item.totalLabourAdvancesPaid)}</strong></div>
             <div><span>Less: settled through wage settlements</span><strong>{money(item.labourSettlementNonCashApplied)}</strong></div>
             <div><span>Outstanding Labour Advances</span><strong>{money(item.outstandingLabourAdvances)}</strong></div>
-            <div><span>Labour Settlements Cash Paid</span><strong>{money(item.labourSettlementCashPaid)}</strong></div>
             <div><span>Reconciliation</span><strong>{`Purchase vouchers ${money(item.purchaseVouchersPaid)} + Funds given ${money(item.transfersOut)} - Funds received ${money(item.transfersIn)} + Total labour advances paid ${money(item.totalLabourAdvancesPaid)} = ${money(item.currentPartnerBalance)}`}</strong></div>
           </article>)}
         </div>}
@@ -3884,8 +3884,9 @@ function AccountsModule() {
     income: t("accountsPage.groupIncome"),
     other: t("accountsPage.groupOther"),
   }[groupKey]), [t]);
-  const ledgerTypeLabel = useCallback((row: Pick<AccountLedgerRow, "type">) => (
-    row.type === "sale" ? t("accountsPage.saleCredit")
+  const ledgerTypeLabel = useCallback((row: Pick<AccountLedgerRow, "type" | "classification">) => (
+    row.classification === "labour_wage_settlement" ? "Wage settlement advance applied"
+      : row.type === "sale" ? t("accountsPage.saleCredit")
       : row.type === "voucher" ? t("accountsPage.voucherExpense")
         : row.type === "advance" ? t("accountsPage.labourAdvance")
           : row.type === "settlement_sent" ? t("accountsPage.settlementSent")
@@ -3942,21 +3943,28 @@ function AccountsModule() {
         partnerLiabilityGroup: selectedIsPartner ? "purchase_vouchers_paid" : undefined,
       });
     }
-    for (const settlement of activeLabourWageSettlements.filter((item) => resolveLabourWageSettlementAccountId(item) && resolveCanonicalAccountId(resolveLabourWageSettlementAccountId(item), accountLookup) === selectedAccount.id)) {
-      const nonCashApplied = getLabourWageSettlementNonCashAppliedAmount(settlement);
+    for (const settlement of activeLabourWageSettlements.filter((item) => {
+      const settlementAccount = resolveLabourWageSettlementAccountIdentity(item, accountLookup).canonicalAccountId;
+      const settlementFarmMatches = !farmId || item.farmId === farmId || item.farmId === null;
+      const settlementSeasonMatches = !seasonId || item.seasonId === seasonId || item.seasonId === null;
+      return settlementAccount === selectedAccount.id && settlementFarmMatches && settlementSeasonMatches;
+    })) {
+      const nonCashApplied = getLabourWageSettlementAdvanceOffset(settlement);
       const cashPaid = getLabourWageSettlementCashPaidAmount(settlement);
+      const settlementAccountResolution = resolveLabourWageSettlementAccountIdentity(settlement, accountLookup);
       rows.push({
         id: `labour-settlement:${settlement.id}`,
         date: settlement.settlementDate,
         type: "voucher",
         reference: settlement.settlementNumber,
-        description: `Labour wage settlement ${settlement.fromDate} to ${settlement.toDate}`,
+        description: `Wage settlement advance applied ${settlement.settlementNumber}`,
         debit: selectedIsPartner ? 0 : cashPaid,
         credit: selectedIsPartner ? nonCashApplied : 0,
         source: "expenses",
         sourceId: settlement.id,
         classification: "labour_wage_settlement",
         partnerLiabilityGroup: selectedIsPartner ? "labour_wage_settlements" : undefined,
+        accountId: settlementAccountResolution.canonicalAccountId ?? settlement.linkedAccountId ?? selectedAccount.id,
       });
     }
     for (const advance of activeAdvances.filter((item) => resolveCanonicalAccountId(item.accountId, accountLookup) === selectedAccount.id)) {

@@ -1,6 +1,6 @@
 import type { Advance, LabourWageSettlement, Voucher } from "./offline-db";
 import { isActiveOperationalRecord } from "./operationalRecords";
-import { buildAccountIdentityLookup, resolveAccountIdentity, resolveCanonicalAccountId, type AccountIdentityLike } from "./accountIdentity";
+import { buildAccountIdentityLookup, resolveAccountIdentity, resolveCanonicalAccountId, type AccountIdentityLike, type AccountIdentityLookup, type AccountIdentityResolution } from "./accountIdentity";
 
 export type SettlementVoucherLike = {
   deletedAt?: string | null;
@@ -15,9 +15,16 @@ export type SettlementAccountLike = {
   linkedAccountId?: unknown;
   paymentAccountId?: unknown;
   accountId?: unknown;
+  partnerAccountId?: unknown;
+  resolvedAccountId?: unknown;
   status?: unknown;
   accountingStatus?: unknown;
   deletedAt?: unknown;
+};
+
+export type SettlementAccountResolution = AccountIdentityResolution & {
+  sourceField: string | null;
+  rawValue: string | null;
 };
 
 export type LabourSettlementAccountingDiagnostics = {
@@ -49,7 +56,39 @@ export function resolveLabourWageSettlementAccountId(settlement: SettlementAccou
   if (!settlement) return null;
   return accountIdFromSettlementField(settlement.linkedAccountId)
     ?? accountIdFromSettlementField(settlement.paymentAccountId)
-    ?? accountIdFromSettlementField(settlement.accountId);
+    ?? accountIdFromSettlementField(settlement.accountId)
+    ?? accountIdFromSettlementField(settlement.partnerAccountId)
+    ?? accountIdFromSettlementField(settlement.resolvedAccountId);
+}
+
+export function resolveLabourWageSettlementAccountIdentity(
+  settlement: SettlementAccountLike | null | undefined,
+  accounts: AccountIdentityLike[] | AccountIdentityLookup,
+): SettlementAccountResolution {
+  const lookup = Array.isArray(accounts) ? buildAccountIdentityLookup(accounts) : accounts;
+  const fields: Array<[string, unknown]> = settlement ? [
+    ["linkedAccountId", settlement.linkedAccountId],
+    ["paymentAccountId", settlement.paymentAccountId],
+    ["accountId", settlement.accountId],
+    ["partnerAccountId", settlement.partnerAccountId],
+    ["resolvedAccountId", settlement.resolvedAccountId],
+  ] : [];
+  for (const [sourceField, value] of fields) {
+    const rawValue = accountIdFromSettlementField(value);
+    if (!rawValue) continue;
+    const resolved = resolveAccountIdentity(rawValue, lookup);
+    if (resolved.canonicalAccountId) {
+      return { ...resolved, sourceField, rawValue };
+    }
+  }
+  return {
+    canonicalAccountId: null,
+    matchedBy: "unmatched",
+    matchedAccount: null,
+    needsAccountMappingRepair: Boolean(settlement && fields.some(([, value]) => accountIdFromSettlementField(value))),
+    sourceField: null,
+    rawValue: null,
+  };
 }
 
 export function isPostedLabourWageSettlement(settlement: LabourWageSettlement | null | undefined) {
@@ -74,16 +113,17 @@ export function getLabourWageSettlementLedgerAmount(settlement: SettlementAccoun
   return Number(settlement.expenseAmount ?? settlement.settledAdvanceAmount ?? 0);
 }
 
-export function getLabourWageSettlementAdvanceOffset(settlement: SettlementAccountLike & { settledAdvanceAmount?: number }) {
-  return Number(settlement.settledAdvanceAmount ?? 0);
+export function getLabourWageSettlementAdvanceOffset(settlement: SettlementAccountLike & { advancesApplied?: number; appliedAdvances?: number; settledAdvanceAmount?: number }) {
+  return Number(settlement.advancesApplied ?? settlement.appliedAdvances ?? settlement.settledAdvanceAmount ?? 0);
 }
 
-export function getLabourWageSettlementCashPaidAmount(settlement: SettlementAccountLike & { payableBalance?: number; cashPayable?: number; cashPaid?: number; expenseAmount?: number; settledAdvanceAmount?: number }) {
-  return Number(settlement.cashPaid ?? settlement.payableBalance ?? settlement.cashPayable ?? Math.max(Number(settlement.expenseAmount ?? 0) - Number(settlement.settledAdvanceAmount ?? 0), 0));
+export function getLabourWageSettlementCashPaidAmount(settlement: SettlementAccountLike & { payableBalance?: number; cashPayable?: number; cashPaid?: number; expenseAmount?: number; advancesApplied?: number; appliedAdvances?: number; settledAdvanceAmount?: number }) {
+  const applied = Number(settlement.advancesApplied ?? settlement.appliedAdvances ?? settlement.settledAdvanceAmount ?? 0);
+  return Number(settlement.cashPaid ?? settlement.payableBalance ?? settlement.cashPayable ?? Math.max(Number(settlement.expenseAmount ?? 0) - applied, 0));
 }
 
-export function getLabourWageSettlementNonCashAppliedAmount(settlement: SettlementAccountLike & { settledAdvanceAmount?: number }) {
-  return Number(settlement.settledAdvanceAmount ?? 0);
+export function getLabourWageSettlementNonCashAppliedAmount(settlement: SettlementAccountLike & { advancesApplied?: number; appliedAdvances?: number; settledAdvanceAmount?: number }) {
+  return Number(settlement.advancesApplied ?? settlement.appliedAdvances ?? settlement.settledAdvanceAmount ?? 0);
 }
 
 export function getLabourSettlementAccountingSnapshot(
@@ -181,7 +221,7 @@ export function totalSettledAdvances(settlements: LabourWageSettlement[], option
   const seasonMatches = (rowSeasonId: string | null) => !seasonId || rowSeasonId === seasonId || rowSeasonId === null;
   return getActiveLabourWageSettlements(settlements)
     .filter((settlement) => farmMatches(settlement.farmId ?? null) && seasonMatches(settlement.seasonId ?? null))
-    .reduce((sum, settlement) => sum + settlement.settledAdvanceAmount, 0);
+    .reduce((sum, settlement) => sum + getLabourWageSettlementAdvanceOffset(settlement), 0);
 }
 
 export function outstandingLabourAdvances(advances: Advance[], settlements: LabourWageSettlement[], options: AccountingScopeOptions = {}) {

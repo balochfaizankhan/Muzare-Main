@@ -1,7 +1,7 @@
 import type { Account, Advance, LabourWageSettlement, PartnerEntry, Sale, Voucher } from "./offline-db";
 import { isActiveOperationalRecord } from "./operationalRecords";
 import { getActiveVouchers } from "./voucherCollections";
-import { getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher, resolveLabourWageSettlementAccountId } from "./labourWageSettlements";
+import { getLabourWageSettlementAdvanceOffset, getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher, resolveLabourWageSettlementAccountIdentity } from "./labourWageSettlements";
 import { buildAccountIdentityLookup, resolveAccountIdentity, resolveCanonicalAccountId, type AccountIdentityLookup, type AccountIdentityLike, type AccountIdentityResolution } from "./accountIdentity";
 
 export type PartnerLiabilityPosition = {
@@ -389,7 +389,8 @@ export function getPartnerAccountingSnapshot(
   });
   const settlementRows = settlements.map((settlement) => {
     const flags = settlementStatusFlags(settlement);
-    const resolvedAccountId = resolveCanonicalAccountId(resolveLabourWageSettlementAccountId(settlement as unknown as { linkedAccountId?: unknown; paymentAccountId?: unknown; accountId?: unknown }) ?? null, accountLookup);
+    const settlementResolution = resolveLabourWageSettlementAccountIdentity(settlement as unknown as { linkedAccountId?: unknown; paymentAccountId?: unknown; accountId?: unknown; partnerAccountId?: unknown; resolvedAccountId?: unknown }, accountLookup);
+    const resolvedAccountId = settlementResolution.canonicalAccountId;
     const included = isActiveOperationalRecord(settlement) && settlement.status === "posted" && !flags.deleted && !flags.voided && resolvedAccountId === account.id;
     return {
       settlementId: settlement.id,
@@ -400,8 +401,8 @@ export function getPartnerAccountingSnapshot(
       voided: flags.voided,
       reversed: flags.reversed,
       totalLabourCost: settlement.totalEarned,
-      advancesApplied: settlement.advancesPaid,
-      settledAdvanceAmount: settlement.settledAdvanceAmount,
+      advancesApplied: getLabourWageSettlementAdvanceOffset(settlement as unknown as { advancesApplied?: number; settledAdvanceAmount?: number }),
+      settledAdvanceAmount: getLabourWageSettlementAdvanceOffset(settlement as unknown as { advancesApplied?: number; settledAdvanceAmount?: number }),
       cashPaid: getLabourWageSettlementCashPaidAmount(settlement),
       carryForwardAdvance: settlement.carryForwardAdvance,
       accountId: settlement.linkedAccountId,
@@ -409,9 +410,9 @@ export function getPartnerAccountingSnapshot(
       farmId: settlement.farmId ?? null,
       seasonId: settlement.seasonId ?? null,
       included,
-      includedByCanonicalId: included && settlement.status === "posted" && resolvedAccountId === account.id,
-      includedByAlias: false,
-      includedByNameFallback: false,
+      includedByCanonicalId: included && settlementResolution.matchedBy === "canonical",
+      includedByAlias: included && settlementResolution.matchedBy === "alias",
+      includedByNameFallback: included && settlementResolution.matchedBy === "name_fallback",
       excludedReason: included ? null : "Settlement is deleted, voided, or not linked to the selected account.",
     };
   });
@@ -460,7 +461,7 @@ export function getPartnerAccountingSnapshot(
         linkedAccountId: row.accountId,
         paymentAccountId: row.accountId,
         partnerId: row.accountId,
-        amount: row.settledAdvanceAmount,
+        amount: row.advancesApplied,
         farmId: row.farmId,
         seasonId: row.seasonId,
         included: row.included,
@@ -473,7 +474,7 @@ export function getPartnerAccountingSnapshot(
     }
   }
   const totalLabourAdvancesPaid = advanceRows.filter((row) => row.included).reduce((sum, row) => sum + row.amount, 0);
-  const labourAdvancesSettledThroughWageSettlements = settlementRows.filter((row) => row.included).reduce((sum, row) => sum + row.settledAdvanceAmount, 0);
+  const labourAdvancesSettledThroughWageSettlements = settlementRows.filter((row) => row.included).reduce((sum, row) => sum + row.advancesApplied, 0);
   const outstandingLabourAdvances = Math.max(0, totalLabourAdvancesPaid - labourAdvancesSettledThroughWageSettlements);
   const labourSettlementCashPaid = settlementRows.filter((row) => row.included && row.cashPaid > 0).reduce((sum, row) => sum + row.cashPaid, 0);
   const labourSettlementNonCashApplied = labourAdvancesSettledThroughWageSettlements;

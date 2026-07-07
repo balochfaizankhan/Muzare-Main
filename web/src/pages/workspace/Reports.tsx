@@ -11,7 +11,7 @@ import { calculateAccountBalance } from "../../lib/accounting";
 import { getCanonicalExpenseCategory } from "../../lib/expenseCategories";
 import { formatMoney, formatNumber } from "../../lib/format";
 import { labourEarningTypeLabel, sumLabourEarnings } from "../../lib/labourEarnings";
-import { getActiveLabourWageSettlements, getCashAffectingVouchers, getLabourWageSettlementCashPaidAmount, getLabourWageSettlementNonCashAppliedAmount, isLabourWageSettlementVoucher, outstandingLabourAdvances, totalSettledAdvances } from "../../lib/labourWageSettlements";
+import { getActiveLabourWageSettlements, getCashAffectingVouchers, getLabourWageSettlementAdvanceOffset, getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher, outstandingLabourAdvances, totalSettledAdvances } from "../../lib/labourWageSettlements";
 import { translateExpenseCategory, translateExpenseSubcategory, translateSaleType, translateSalesStatus } from "../../lib/systemTranslations";
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
 import { getVoucherDisplayNumber } from "../../lib/vouchers";
@@ -895,7 +895,7 @@ export function Reports() {
       const settlementRecord = settlementVoucher
         ? activeSettlements.find((item) => item.id === voucher.settlementId || item.id === voucher.id)
         : null;
-      const nonCashApplied = settlementRecord ? getLabourWageSettlementNonCashAppliedAmount(settlementRecord) : 0;
+      const nonCashApplied = settlementRecord ? getLabourWageSettlementAdvanceOffset(settlementRecord) : 0;
       const cashPaid = settlementRecord ? getLabourWageSettlementCashPaidAmount(settlementRecord) : 0;
       rows.push({
         id: `voucher:${voucher.id}`,
@@ -903,7 +903,7 @@ export function Reports() {
         accountId: voucher.accountId,
         accountName: accountName(voucher.accountId),
         type: "voucher",
-        typeLabel: settlementVoucher ? "Labour Wage Settlement" : t("reportsPage.voucherExpense"),
+        typeLabel: settlementVoucher ? "Wage settlement advance applied" : t("reportsPage.voucherExpense"),
         reference: settlementVoucher ? (settlementRecord?.settlementNumber ?? getVoucherDisplayNumber(voucher) ?? voucher.voucherNumber) : (getVoucherDisplayNumber(voucher) || voucher.voucherNumber),
         description: voucher.description,
         debit: isPartner ? 0 : cashPaid,
