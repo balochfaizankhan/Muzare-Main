@@ -59,13 +59,18 @@ type Activity = {
 
 const today = () => new Date().toISOString().slice(0, 10);
 const money = formatMoney;
-const moneyPrecise = (amount: number) => new Intl.NumberFormat(undefined, {
+const moneyWhole = (amount: number) => new Intl.NumberFormat(undefined, {
   style: "currency",
   currency: "SAR",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
+  maximumFractionDigits: 0,
 }).format(amount);
 const capitalize = (value: string) => value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+const formatActivityDate = (value: string) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? value
+    : new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(date);
+};
 const formatShortRange = (start: string, end: string) => {
   const startDate = new Date(start);
   const endDate = new Date(end);
@@ -164,12 +169,12 @@ export function DashboardPage() {
         .slice()
         .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
         .slice(0, 2)
-        .map((item) => ({
+          .map((item) => ({
           id: `attendance:${item.id}`,
           path: "/workspace/workforce/attendance",
           title: "Attendance marked",
           detail: `${labourerById.get(item.labourerId)?.name ?? "Labour"} · ${capitalize(item.status)}`,
-          value: item.date,
+          value: formatActivityDate(item.date),
           createdAt: item.createdAt,
           icon: UsersRound,
           tone: "green" as const,
@@ -278,16 +283,12 @@ export function DashboardPage() {
     ? "Needs attention"
     : !hasFarm || !hasSeason
       ? "Setup required"
-      : totals.presentToday > 0 || totals.dispatchesToday > 0 || totals.cartonsToday > 0
-        ? "Excellent"
-        : "Steady";
+      : "Ready";
   const heroStatusCopy = sync.pendingCount
     ? `${sync.pendingCount} record${sync.pendingCount === 1 ? "" : "s"} waiting to sync.`
     : !hasFarm || !hasSeason
       ? "Select a farm and season to unlock the full overview."
-      : totals.presentToday > 0 || totals.dispatchesToday > 0 || totals.cartonsToday > 0
-        ? "All key activities are on track for today."
-        : "The workspace is ready for the day.";
+      : "Workspace is synced and ready for today.";
   const heroSyncLabel = sync.pendingCount === 0 && sync.status !== "offline"
     ? "Synced"
     : sync.lastSyncTime
@@ -297,7 +298,7 @@ export function DashboardPage() {
   const summaryCards = [
     {
       label: "Cash Balance",
-      value: moneyPrecise(totals.netPosition),
+      value: moneyWhole(totals.netPosition),
       icon: Wallet,
       path: "/workspace/accounts",
       tone: totals.netPosition >= 0 ? "green" : "orange",
@@ -305,7 +306,7 @@ export function DashboardPage() {
     },
     {
       label: "Total Expenses",
-      value: moneyPrecise(totals.totalExpenses),
+      value: moneyWhole(totals.totalExpenses),
       icon: BanknoteArrowDown,
       path: "/workspace/reports?report=expenditures",
       tone: "orange",
@@ -313,7 +314,7 @@ export function DashboardPage() {
     },
     {
       label: "Labour Advances",
-      value: moneyPrecise(totals.labourAdvances),
+      value: moneyWhole(totals.labourAdvances),
       icon: HandCoins,
       path: "/workspace/labour-payments/advances",
       tone: "purple",
@@ -447,23 +448,22 @@ export function DashboardPage() {
             <div className="dashboard-hero-card__copy">
               <span className="dashboard-hero-card__eyebrow">Today's Farm Pulse</span>
               <h2>Farm Overview</h2>
-              <p className="dashboard-hero-card__status-label">Operations Health</p>
-              <strong>{heroStatus}</strong>
+              <p className="dashboard-hero-card__status-label">Operations Health: {heroStatus}</p>
               <span>{heroStatusCopy}</span>
             </div>
             <div className="dashboard-hero-card__stats">
               <article className="dashboard-hero-card__stat">
                 <UsersRound size={18} />
                 <div>
-                  <span>Attendance today</span>
-                  <strong>{totals.attendanceMarkedToday} labour</strong>
+                  <span>Attendance</span>
+                  <strong>{totals.attendanceMarkedToday} labour today</strong>
                 </div>
               </article>
               <article className="dashboard-hero-card__stat">
                 <PackageOpen size={18} />
                 <div>
-                  <span>Dispatches today</span>
-                  <strong>{totals.dispatchesToday}</strong>
+                  <span>Dispatches</span>
+                  <strong>{totals.dispatchesToday} today</strong>
                 </div>
               </article>
             </div>
@@ -490,10 +490,7 @@ export function DashboardPage() {
 
         <section className="dashboard-quick-section">
           <div className="dashboard-section-heading">
-            <div>
-              <h2>Quick Actions</h2>
-              <p>Fast access to the workflows used most often in the field.</p>
-            </div>
+            <h2>Quick Actions</h2>
           </div>
           <div className="dashboard-quick-grid">
             {quickActions.map(({ to, icon: Icon, title }) => (
@@ -532,7 +529,7 @@ export function DashboardPage() {
                         </div>
                         <div className="dashboard-activity-item__meta">
                           <strong>{activity.value}</strong>
-                          <small>{activity.createdAt.includes("T") ? new Date(activity.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : activity.createdAt}</small>
+                          <small>{activity.createdAt.includes("T") ? new Date(activity.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : formatActivityDate(activity.createdAt)}</small>
                         </div>
                       </Link>
                     );

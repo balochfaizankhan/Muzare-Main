@@ -1758,6 +1758,12 @@ button {
   z-index: 1;
 }
 
+.dashboard-mobile-header__status .dashboard-home__sync-chip {
+  font-size: 0.68rem;
+  min-height: 26px;
+  padding-inline: 9px;
+}
+
 .dashboard-mobile-header__actions {
   align-items: center;
   display: flex;
@@ -1977,8 +1983,8 @@ button {
   color: var(--text);
   display: grid;
   gap: 6px;
-  min-height: 124px;
-  padding: 12px;
+  min-height: 114px;
+  padding: 11px;
   text-decoration: none;
 }
 
@@ -2045,6 +2051,10 @@ button {
   justify-content: space-between;
 }
 
+.dashboard-section-heading > h2 {
+  margin-right: auto;
+}
+
 .dashboard-section-heading h2 {
   color: var(--text-primary);
   font-size: 1rem;
@@ -2087,7 +2097,7 @@ button {
   color: var(--text-primary);
   display: grid;
   gap: 5px;
-  min-height: 88px;
+  min-height: 84px;
   padding: 12px;
   text-decoration: none;
 }
@@ -2122,7 +2132,7 @@ button {
   box-shadow: var(--shadow-soft);
   display: grid;
   gap: 12px;
-  padding: 16px;
+  padding: 15px;
 }
 
 .dashboard-activity-list {
@@ -2138,7 +2148,7 @@ button {
   gap: 10px;
   grid-template-columns: auto minmax(0, 1fr) auto;
   min-width: 0;
-  padding: 10px 11px;
+  padding: 9px 10px;
   text-decoration: none;
 }
 
@@ -7955,14 +7965,14 @@ button {
     color: var(--text-secondary);
     flex-direction: column;
     flex: 1 1 0;
-    font-size: 0.64rem;
+    font-size: 0.63rem;
     font-weight: 700;
-    gap: 3px;
+    gap: 2px;
     justify-content: center;
-    line-height: 1.1;
-    min-height: 54px;
+    line-height: 1.05;
+    min-height: 51px;
     min-width: 0;
-    padding: 5px 3px;
+    padding: 4px 3px;
     text-decoration: none;
   }
 
@@ -7970,14 +7980,15 @@ button {
   .app-mobile-bottom-nav__action.active {
     background: rgba(74, 124, 52, 0.1);
     color: #21421e;
+    transform: translateY(-1px);
   }
 
   .app-mobile-bottom-nav__action--add {
     background: linear-gradient(180deg, #14532d 0%, #0f4b2b 100%);
     box-shadow: 0 12px 20px rgba(15, 75, 43, 0.22);
     color: #fff;
-    margin-top: -10px;
-    min-height: 60px;
+    margin-top: -8px;
+    min-height: 56px;
   }
 
   .app-mobile-bottom-nav__action--add.active {
@@ -8006,8 +8017,8 @@ button {
   }
 
   .dashboard-mobile-header__logo {
-    height: 42px;
-    width: 42px;
+    height: 40px;
+    width: 40px;
   }
 
   .dashboard-mobile-header__copy strong {
@@ -8074,12 +8085,12 @@ button {
   }
 
   .dashboard-kpi-card {
-    min-height: 118px;
-    padding: 11px;
+    min-height: 112px;
+    padding: 10px;
   }
 
   .dashboard-activity-card {
-    padding: 14px;
+    padding: 13px;
   }
 
   .dashboard-activity-list {
@@ -8087,7 +8098,7 @@ button {
   }
 
   .dashboard-activity-item {
-    padding: 9px 10px;
+    padding: 8px 9px;
   }
 
   .shell-header {
@@ -8189,10 +8200,13 @@ button {
   .app-mobile-sheet {
     border-bottom-left-radius: 0;
     border-bottom-right-radius: 0;
-    border-top-left-radius: 22px;
-    border-top-right-radius: 22px;
+    border-top-left-radius: 24px;
+    border-top-right-radius: 24px;
+    align-self: flex-end;
+    display: flex;
+    flex-direction: column;
     margin-top: auto;
-    max-height: 72vh;
+    max-height: calc(70vh + env(safe-area-inset-bottom, 0px));
     max-width: none;
     width: 100%;
   }
@@ -8238,7 +8252,7 @@ button {
 
   .app-mobile-sheet__content {
     gap: 8px;
-    padding: 12px 14px 14px;
+    padding: 12px 14px calc(14px + env(safe-area-inset-bottom, 0px));
   }
 
   .sync-queue-panel__header {
@@ -9718,7 +9732,15 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .attendance-import-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .attendance-import-match-list article { grid-template-columns: minmax(0, 1fr); }
   .worker-action-backdrop { align-items: flex-end; padding: 0; }
-  .worker-action-dialog { border-bottom-left-radius: 0; border-bottom-right-radius: 0; max-height: 96vh; max-width: none; width: 100%; }
+  .worker-action-dialog {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    border-top-left-radius: 24px;
+    border-top-right-radius: 24px;
+    max-height: 96vh;
+    max-width: none;
+    width: 100%;
+  }
   .worker-dialog { border-bottom-left-radius: 0; border-bottom-right-radius: 0; max-height: 96vh; max-width: none; width: 100%; }
   .advances-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .advances-summary article { padding: 9px; }
