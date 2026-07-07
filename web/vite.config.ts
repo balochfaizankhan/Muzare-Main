@@ -40,7 +40,12 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["muzare-logo.png", "muzare-logo.jpg", "pwa-192.png", "pwa-512.png"],
+      includeAssets: [
+        "assets/muzare-logo.png",
+        "assets/pwa-192.png",
+        "assets/pwa-512.png",
+        "assets/apple-touch-icon.png",
+      ],
       manifest: {
         name: "Muzare - Smart Farm Operations",
         short_name: "Muzare",
@@ -52,13 +57,13 @@ export default defineConfig({
         scope: "/",
         icons: [
           {
-            src: "/pwa-192.png",
+            src: "/assets/pwa-192.png",
             sizes: "192x192",
             type: "image/png",
             purpose: "any",
           },
           {
-            src: "/pwa-512.png",
+            src: "/assets/pwa-512.png",
             sizes: "512x512",
             type: "image/png",
             purpose: "any maskable",

@@ -343,9 +343,8 @@ export function DashboardPage() {
       <main className="dashboard dashboard--wide dashboard-home">
         <section className="dashboard-mobile-header">
           <div className="dashboard-mobile-header__brand">
-            <img className="dashboard-mobile-header__logo" src="/muzare-logo.png" alt="Muzare" />
+            <img className="dashboard-mobile-header__logo" src="/assets/muzare-logo.png" alt="Muzare" />
             <div className="dashboard-mobile-header__copy">
-              <strong>Muzare</strong>
               <span>{t("dashboardPage.welcome", { name: displayName })}</span>
               <small>{user?.workspaceName ?? t("layout.workspace")}</small>
             </div>

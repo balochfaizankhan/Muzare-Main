@@ -135,11 +135,7 @@ export function AcceptInvitationPage() {
     <main className="login-page">
       <section className="login-hero" aria-label={t("workspaceTeam.acceptTitle")}>
         <div className="login-brand-lockup">
-          <span className="auth-logo" role="img" aria-label="Muzare" />
-          <div>
-            <strong>Muzare</strong>
-            <span>مزارع</span>
-          </div>
+          <img className="auth-logo" src="/assets/muzare-logo.png" alt="Muzare" />
         </div>
         <div className="login-hero__copy">
           <span className="auth-kicker">{t("workspaceTeam.inviteKicker")}</span>
@@ -151,7 +147,7 @@ export function AcceptInvitationPage() {
       <section className="login-panel" aria-label={t("workspaceTeam.acceptTitle")}>
         <section className="login-card invite-card">
           <div className="login-card__header">
-            <span className="auth-logo" role="img" aria-label="Muzare" />
+            <img className="auth-logo" src="/assets/muzare-logo.png" alt="Muzare" />
             <div>
               <h2>{t("workspaceTeam.acceptTitle")}</h2>
               <p>{t("workspaceTeam.acceptPanelDescription")}</p>

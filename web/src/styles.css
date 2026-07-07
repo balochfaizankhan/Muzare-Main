@@ -802,8 +802,9 @@ button {
 .brand__logo {
   display: block;
   height: auto;
-  max-width: min(108px, calc(100vw - 220px));
-  width: 96px;
+  max-width: min(124px, calc(100vw - 220px));
+  object-fit: contain;
+  width: auto;
 }
 
 .brand__tagline {
@@ -819,8 +820,7 @@ button {
 }
 
 .brand--compact .brand__logo {
-  max-width: 64px;
-  width: 64px;
+  max-width: 68px;
 }
 
 .language-switch {
@@ -902,13 +902,13 @@ button {
 }
 
 .auth-logo {
-  background: #fff url("/pwa-192.png") center / contain no-repeat;
   border: 1px solid rgba(5, 35, 63, 0.08);
   border-radius: 8px;
   display: block;
   flex-shrink: 0;
   height: 76px;
   max-width: 76px;
+  object-fit: contain;
   padding: 4px;
   width: 76px;
 }
@@ -1720,7 +1720,8 @@ button {
   display: block;
   flex-shrink: 0;
   height: 42px;
-  width: 42px;
+  object-fit: contain;
+  width: auto;
 }
 
 .dashboard-mobile-header__copy {
@@ -7416,19 +7417,31 @@ button {
 }
 
 .app-mobile-sheet-backdrop {
-  align-items: stretch;
+  align-items: flex-end;
   background: rgba(2, 16, 30, 0.35);
   backdrop-filter: blur(8px);
+  display: flex;
   inset: 0;
-  justify-content: flex-end;
+  justify-content: center;
+  padding: env(safe-area-inset-top, 0px) 0 0;
   position: fixed;
   z-index: 125;
 }
 
 .app-mobile-sheet {
   background: var(--surface);
+  border-radius: 28px 28px 0 0;
+  box-shadow: 0 -18px 48px rgba(8, 31, 23, 0.18);
+  display: flex;
+  flex-direction: column;
   opacity: 1;
-  max-width: 420px;
+  margin: 0 auto;
+  max-height: calc(100dvh - env(safe-area-inset-top, 0px));
+  max-width: 640px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+  width: min(100%, 640px);
 }
 
 .app-mobile-sheet > header p {
@@ -8028,7 +8041,7 @@ button {
 
   .dashboard-mobile-header__logo {
     height: 38px;
-    width: 38px;
+    width: auto;
   }
 
   .dashboard-mobile-header__copy strong {
@@ -8210,15 +8223,11 @@ button {
   .app-mobile-sheet {
     border-bottom-left-radius: 0;
     border-bottom-right-radius: 0;
-    border-top-left-radius: 24px;
-    border-top-right-radius: 24px;
-    align-self: flex-end;
-    display: flex;
-    flex-direction: column;
-    margin-top: auto;
-    max-height: calc(70vh + env(safe-area-inset-bottom, 0px));
-    max-width: none;
-    width: 100%;
+    border-top-left-radius: 28px;
+    border-top-right-radius: 28px;
+    max-height: calc(100dvh - env(safe-area-inset-top, 0px));
+    max-width: min(640px, 100%);
+    width: min(100%, 640px);
   }
 
   .app-mobile-sheet__content--grid {
