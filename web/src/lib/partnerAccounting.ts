@@ -496,8 +496,7 @@ export function getPartnerAccountingSnapshot(
   const farmOwesPartner = purchaseVouchersPaid
     + fundsGiven
     - fundsReceived
-    + outstandingLabourAdvances
-    + labourSettlementCashPaid
+    + totalLabourAdvancesPaid
     + adjustment
     - moneyReturned;
 
@@ -522,7 +521,7 @@ export function getPartnerAccountingSnapshot(
     name: account.name,
     openingBalance: 0,
     capitalInjected,
-    directExpensesPaid: purchaseVouchersPaid + outstandingLabourAdvances,
+    directExpensesPaid: purchaseVouchersPaid + totalLabourAdvancesPaid,
     purchaseVouchersPaid,
     businessFundsNet: fundsGiven - fundsReceived,
     labourAdvancesPaid: totalLabourAdvancesPaid,

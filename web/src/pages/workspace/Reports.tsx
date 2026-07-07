@@ -982,7 +982,7 @@ export function Reports() {
     for (const group of groupedPartnerLedgerRows) {
       if (group.groupKey === "capital_injected") summary.capitalInjected += group.totalAmount;
       if (group.groupKey === "purchase_vouchers_paid") summary.directExpensesPaid += group.totalAmount;
-      if (group.groupKey === "labour_advances_paid") summary.directExpensesPaid += settlementSnapshot?.outstandingLabourAdvances ?? 0;
+      if (group.groupKey === "labour_advances_paid") summary.directExpensesPaid += settlementSnapshot?.totalLabourAdvancesPaid ?? 0;
       if (group.groupKey === "transfers_in") summary.transfersIn += Math.abs(group.totalAmount);
       if (group.groupKey === "transfers_out") summary.transfersOut += Math.abs(group.totalAmount);
       if (group.groupKey === "money_returned") summary.moneyReturned += -group.totalAmount;
@@ -1043,7 +1043,7 @@ export function Reports() {
     overview.labourWageSettlements = settlementSnapshot?.labourWageSettlements ?? overview.labourWageSettlements;
     overview.labourSettlementCashPaid = settlementSnapshot?.labourSettlementCashPaid ?? overview.labourSettlementCashPaid;
     overview.labourSettlementNonCashApplied = settlementSnapshot?.labourSettlementNonCashApplied ?? overview.labourSettlementNonCashApplied;
-    overview.directExpensesPaid = overview.purchaseVouchersPaid + (settlementSnapshot?.outstandingLabourAdvances ?? 0);
+    overview.directExpensesPaid = overview.purchaseVouchersPaid + (settlementSnapshot?.totalLabourAdvancesPaid ?? overview.labourAdvancesPaid);
     return {
       ...overview,
       netBalance: settlementSnapshot?.farmOwesPartner ?? calculatePartnerLiabilityBalance(overview),
@@ -1735,8 +1735,7 @@ export function Reports() {
                   <strong>{t("reportsPage.directExpensesPaid")}</strong>
                   <b>{money(partnerAccountLedgerOverviewView.directExpensesPaid)}</b>
                   <small>Purchase vouchers: {money(partnerAccountLedgerOverviewView.purchaseVouchersPaid)}</small>
-                  <small>Labour advances: {money(partnerAccountLedgerOverviewView.outstandingLabourAdvances)}</small>
-                  <small>Labour settlements cash paid: {money(partnerAccountLedgerOverviewView.labourSettlementCashPaid)}</small>
+                  <small>Labour advances: {money(partnerAccountLedgerOverviewView.labourAdvancesPaid)}</small>
                 </article>
                 <article><strong>{t("reportsPage.transfersOut")}</strong><span>{money(partnerAccountLedgerOverviewView.transfersOut)}</span></article>
                 <article><strong>{t("reportsPage.transfersIn")}</strong><span>{money(partnerAccountLedgerOverviewView.transfersIn)}</span></article>

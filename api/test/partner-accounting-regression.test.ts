@@ -149,6 +149,6 @@ test("partner accounting snapshot keeps legacy null-scoped business funds and la
   assert.equal(snapshot.outstandingLabourAdvances, 7701);
   assert.equal(snapshot.labourSettlementCashPaid, 0);
   assert.equal(snapshot.labourSettlementNonCashApplied, 135042);
-  assert.equal(snapshot.directExpensesPaid, 53453.5);
-  assert.equal(snapshot.farmOwesPartner, 30841);
+  assert.equal(snapshot.directExpensesPaid, 188495.5);
+  assert.equal(snapshot.farmOwesPartner, 211635.5);
 });

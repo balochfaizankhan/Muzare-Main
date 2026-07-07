@@ -241,8 +241,7 @@ function buildPartnerSnapshot(args: {
   const farmOwesPartner = purchaseVouchersPaid
     + businessFundsGiven
     - businessFundsReceived
-    + outstandingLabourAdvances
-    + labourSettlementCashPaid
+    + totalLabourAdvancesPaid
     + adjustments
     - moneyReturned;
   return {
