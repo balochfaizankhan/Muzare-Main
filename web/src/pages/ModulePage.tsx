@@ -85,6 +85,7 @@ type AccountLedgerRow = {
   description: string;
   debit: number;
   credit: number;
+  memoAmount?: number;
   accountId?: string;
   source: "sales" | "expenses" | "labour_advances" | "partner_ledger";
   sourceId: string;
@@ -3651,6 +3652,26 @@ function PartnerLedgerModule() {
     [accounts, advances, activeEntries, farmId, labourWageSettlements, sales, seasonId, vouchers],
   );
   const balance = partnerPositions.reduce((sum, item) => sum + item.currentPartnerBalance, 0);
+  const selectedPartnerPositionLabourSettlements = useMemo(() => {
+    const selectedPartnerAccountId = selectedPartnerPosition?.account?.id ?? null;
+    if (!selectedPartnerAccountId) return [];
+    return labourWageSettlements
+      .filter((settlement) => isActiveOperationalRecord(settlement) && settlement.status === "posted" && settlement.accountingStatus !== "accounting_missing")
+      .filter((settlement) => {
+        const resolution = resolveLabourWageSettlementAccountIdentity(settlement, accountLookup);
+        const settlementFarmMatches = !farmId || settlement.farmId === farmId || settlement.farmId === null;
+        const settlementSeasonMatches = !seasonId || settlement.seasonId === seasonId || settlement.seasonId === null;
+        return resolution.canonicalAccountId === selectedPartnerAccountId && settlementFarmMatches && settlementSeasonMatches;
+      })
+      .map((settlement) => ({
+        id: settlement.id,
+        reference: settlement.settlementNumber,
+        advancesApplied: getLabourWageSettlementAdvanceOffset(settlement),
+        cashPaid: getLabourWageSettlementCashPaidAmount(settlement),
+        date: settlement.settlementDate,
+      }))
+      .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+  }, [accountLookup, farmId, labourWageSettlements, seasonId, selectedPartnerPosition?.account?.id]);
   const runningBalances = (() => {
     const balances = new Map<string, { name: string; amount: number }>();
     const labels = new Map<string, string>();
@@ -3777,9 +3798,24 @@ function PartnerLedgerModule() {
               <p><strong>Purchase Vouchers</strong><span>{money(selectedPartnerPosition.purchaseVouchersPaid)}</span></p>
               <p><strong>Funds Given</strong><span>{money(selectedPartnerPosition.transfersOut)}</span></p>
               <p><strong>Funds Received</strong><span>{money(selectedPartnerPosition.transfersIn)}</span></p>
-              <p><strong>Total labour advances paid</strong><span>{money(selectedPartnerPosition.totalLabourAdvancesPaid)}</span></p>
-              <p><strong>Less: settled through wage settlements</strong><span>{money(selectedPartnerPosition.labourSettlementNonCashApplied)}</span></p>
-              <p><strong>Outstanding Labour Advances</strong><span>{money(selectedPartnerPosition.outstandingLabourAdvances)}</span></p>
+              <section className="partner-ledger-details__subsection">
+                <h3>Labour Advance Status</h3>
+                <p><strong>Total advances paid</strong><span>{money(selectedPartnerPosition.totalLabourAdvancesPaid)}</span></p>
+                <p><strong>Settled through wage settlements</strong><span>{money(selectedPartnerPosition.labourSettlementNonCashApplied)}</span></p>
+                <p><strong>Outstanding labour advances</strong><span>{money(selectedPartnerPosition.outstandingLabourAdvances)}</span></p>
+                {selectedPartnerPositionLabourSettlements.length > 0 && <div className="partner-ledger-details__memo-list">
+                  {selectedPartnerPositionLabourSettlements.map((settlement) => (
+                    <article key={settlement.id} className="partner-ledger-details__memo-item">
+                      <strong>{settlement.reference}</strong>
+                      <span>Type: Wage settlement advance applied</span>
+                      <span>Advances applied: {money(settlement.advancesApplied)}</span>
+                      <span>Cash paid: {money(settlement.cashPaid)}</span>
+                      <span>Effect: reduces labour outstanding advances</span>
+                      <span>Effect on Farm Owes Partner: none</span>
+                    </article>
+                  ))}
+                </div>}
+              </section>
               <p><strong>{t("partnerLedgerPage.moneyReturned")}</strong><span>{money(selectedPartnerPosition.moneyReturned)}</span></p>
               <p><strong>{t("partnerLedgerPage.adjustments")}</strong><span>{money(selectedPartnerPosition.adjustments)}</span></p>
               <p><strong>{t("partnerLedgerPage.farmOwesPartner")}</strong><span>{money(selectedPartnerPosition.currentPartnerBalance)}</span></p>
@@ -3885,7 +3921,7 @@ function AccountsModule() {
     other: t("accountsPage.groupOther"),
   }[groupKey]), [t]);
   const ledgerTypeLabel = useCallback((row: Pick<AccountLedgerRow, "type" | "classification">) => (
-    row.classification === "labour_wage_settlement" ? "Wage settlement advance applied"
+    row.classification === "labour_wage_settlement_memo" ? "Non-cash labour advance settlement"
       : row.type === "sale" ? t("accountsPage.saleCredit")
       : row.type === "voucher" ? t("accountsPage.voucherExpense")
         : row.type === "advance" ? t("accountsPage.labourAdvance")
@@ -3957,13 +3993,14 @@ function AccountsModule() {
         date: settlement.settlementDate,
         type: "voucher",
         reference: settlement.settlementNumber,
-        description: `Wage settlement advance applied ${settlement.settlementNumber}`,
-        debit: selectedIsPartner ? 0 : cashPaid,
-        credit: selectedIsPartner ? nonCashApplied : 0,
+        description: `Non-cash labour advance settlement — advances applied ${money(nonCashApplied)}${cashPaid ? `, cash paid ${money(cashPaid)}` : ""}`,
+        debit: 0,
+        credit: 0,
+        memoAmount: nonCashApplied,
         source: "expenses",
         sourceId: settlement.id,
-        classification: "labour_wage_settlement",
-        partnerLiabilityGroup: selectedIsPartner ? "labour_wage_settlements" : undefined,
+        classification: "labour_wage_settlement_memo",
+        partnerLiabilityGroup: undefined,
         accountId: settlementAccountResolution.canonicalAccountId ?? settlement.linkedAccountId ?? selectedAccount.id,
       });
     }
@@ -4452,8 +4489,8 @@ function AccountsModule() {
                             <td>{ledgerTypeLabel(row)}</td>
                             <td>{row.reference}</td>
                             <td>{row.description}{row.counterparty ? ` (${row.counterparty})` : ""}</td>
-                            <td>{row.debit ? money(row.debit) : "-"}</td>
-                            <td>{row.credit ? money(row.credit) : "-"}</td>
+                            <td>{row.memoAmount !== undefined ? "-" : (row.debit ? money(row.debit) : "-")}</td>
+                            <td>{row.memoAmount !== undefined ? money(row.memoAmount) : (row.credit ? money(row.credit) : "-")}</td>
                             <td>{money(row.runningBalance ?? 0)}</td>
                             <td><button type="button" onClick={() => openSource(row)}>{t("accountsPage.open")}</button></td>
                           </tr>)}
@@ -4462,15 +4499,16 @@ function AccountsModule() {
                     </div>
                     <div className="report-mobile-cards">
                       {group.transactions.map((row) => <article className="report-mobile-card" key={`mobile-${row.id}`}>
-                        <header><strong>{row.reference}</strong><b>{row.credit ? `+${money(row.credit)}` : `-${money(row.debit)}`}</b></header>
+                        <header><strong>{row.reference}</strong><b>{row.memoAmount !== undefined ? money(row.memoAmount) : (row.credit ? `+${money(row.credit)}` : `-${money(row.debit)}`)}</b></header>
                         <span>{row.date} | {ledgerTypeLabel(row)}</span>
                         <p>{row.description}{row.counterparty ? ` (${row.counterparty})` : ""}</p>
                         <div className="report-mobile-card__balance"><span>{t("accountsPage.runningBalance")}</span><strong>{money(row.runningBalance ?? 0)}</strong></div>
                         <details>
                           <summary>{t("accountsPage.viewDetails")}</summary>
                           <dl>
-                            <div><dt>{t("accountsPage.debit")}</dt><dd>{row.debit ? money(row.debit) : "-"}</dd></div>
-                            <div><dt>{t("accountsPage.credit")}</dt><dd>{row.credit ? money(row.credit) : "-"}</dd></div>
+                            <div><dt>{t("accountsPage.debit")}</dt><dd>{row.memoAmount !== undefined ? "-" : (row.debit ? money(row.debit) : "-")}</dd></div>
+                            <div><dt>{t("accountsPage.credit")}</dt><dd>{row.memoAmount !== undefined ? money(row.memoAmount) : (row.credit ? money(row.credit) : "-")}</dd></div>
+                            {row.memoAmount !== undefined && <div><dt>Memo</dt><dd>Non-cash labour advance settlement</dd></div>}
                           </dl>
                           <button type="button" onClick={() => openSource(row)}>{t("accountsPage.open")}</button>
                         </details>
@@ -4498,8 +4536,8 @@ function AccountsModule() {
                             <td>{ledgerTypeLabel(row)}</td>
                             <td>{row.reference}</td>
                             <td>{row.description}{row.counterparty ? ` (${row.counterparty})` : ""}</td>
-                            <td>{row.debit ? money(row.debit) : "-"}</td>
-                            <td>{row.credit ? money(row.credit) : "-"}</td>
+                            <td>{row.memoAmount !== undefined ? "-" : (row.debit ? money(row.debit) : "-")}</td>
+                            <td>{row.memoAmount !== undefined ? money(row.memoAmount) : (row.credit ? money(row.credit) : "-")}</td>
                             <td>{money(row.runningBalance ?? 0)}</td>
                             <td><button type="button" onClick={() => openSource(row)}>{t("accountsPage.open")}</button></td>
                           </tr>)}
@@ -4508,15 +4546,16 @@ function AccountsModule() {
                     </div>
                     <div className="report-mobile-cards">
                       {group.transactions.map((row) => <article className="report-mobile-card" key={`mobile-${row.id}`}>
-                        <header><strong>{row.reference}</strong><b>{row.credit ? `+${money(row.credit)}` : `-${money(row.debit)}`}</b></header>
+                        <header><strong>{row.reference}</strong><b>{row.memoAmount !== undefined ? money(row.memoAmount) : (row.credit ? `+${money(row.credit)}` : `-${money(row.debit)}`)}</b></header>
                         <span>{row.date} | {ledgerTypeLabel(row)}</span>
                         <p>{row.description}{row.counterparty ? ` (${row.counterparty})` : ""}</p>
                         <div className="report-mobile-card__balance"><span>{t("accountsPage.runningBalance")}</span><strong>{money(row.runningBalance ?? 0)}</strong></div>
                         <details>
                           <summary>{t("accountsPage.viewDetails")}</summary>
                           <dl>
-                            <div><dt>{t("accountsPage.debit")}</dt><dd>{row.debit ? money(row.debit) : "-"}</dd></div>
-                            <div><dt>{t("accountsPage.credit")}</dt><dd>{row.credit ? money(row.credit) : "-"}</dd></div>
+                            <div><dt>{t("accountsPage.debit")}</dt><dd>{row.memoAmount !== undefined ? "-" : (row.debit ? money(row.debit) : "-")}</dd></div>
+                            <div><dt>{t("accountsPage.credit")}</dt><dd>{row.memoAmount !== undefined ? money(row.memoAmount) : (row.credit ? money(row.credit) : "-" )}</dd></div>
+                            {row.memoAmount !== undefined && <div><dt>Memo</dt><dd>Non-cash labour advance settlement</dd></div>}
                           </dl>
                           <button type="button" onClick={() => openSource(row)}>{t("accountsPage.openSource")}</button>
                         </details>

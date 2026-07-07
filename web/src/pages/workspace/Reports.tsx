@@ -86,6 +86,7 @@ type AccountLedgerReportRow = {
   description: string;
   debit: number;
   credit: number;
+  memoAmount?: number;
   running: number;
   path: string;
   classification?: string;
@@ -903,14 +904,15 @@ export function Reports() {
         accountId: voucher.accountId,
         accountName: accountName(voucher.accountId),
         type: "voucher",
-        typeLabel: settlementVoucher ? "Wage settlement advance applied" : t("reportsPage.voucherExpense"),
+        typeLabel: settlementVoucher ? "Non-cash labour advance settlement" : t("reportsPage.voucherExpense"),
         reference: settlementVoucher ? (settlementRecord?.settlementNumber ?? getVoucherDisplayNumber(voucher) ?? voucher.voucherNumber) : (getVoucherDisplayNumber(voucher) || voucher.voucherNumber),
-        description: voucher.description,
-        debit: isPartner ? 0 : cashPaid,
-        credit: isPartner ? nonCashApplied : 0,
+        description: settlementVoucher ? `Non-cash labour advance settlement — advances applied ${money(nonCashApplied)}${cashPaid ? `, cash paid ${money(cashPaid)}` : ""}` : voucher.description,
+        debit: 0,
+        credit: 0,
+        memoAmount: settlementVoucher ? nonCashApplied : undefined,
         path: settlementVoucher ? `/workspace/wage-settlements?recordId=${voucher.settlementId ?? voucher.id}` : `/workspace/expenses?recordId=${voucher.id}`,
-        classification: settlementVoucher ? "labour_wage_settlement" : "voucher",
-        partnerLiabilityGroup: isPartner ? (settlementVoucher ? "labour_wage_settlements" : "purchase_vouchers_paid") : undefined,
+        classification: settlementVoucher ? "labour_wage_settlement_memo" : "voucher",
+        partnerLiabilityGroup: isPartner ? (settlementVoucher ? undefined : "purchase_vouchers_paid") : undefined,
       });
     }
     for (const advance of advanceRows) {
@@ -1704,7 +1706,7 @@ export function Reports() {
           <button className={views["partner-position"] === "ledger" ? "is-active" : ""} type="button" onClick={() => switchView("partner-position", "ledger")}>{t("reportsPage.ledger")}</button>
         </section>
         {views["partner-position"] === "position" && <ReportShell title={t("reportsPage.partnerPositionTitle")} rangeLabel={rangeLabel} sectionId="partner-position" onPrint={() => printSection("partner-position")} onExport={exportPartnerPosition}>
-          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.partner"), "Purchase vouchers", "Funds given", "Funds received", "Outstanding labour advances", "Labour settlements cash paid", t("reportsPage.currentPartnerBalance")]} rows={partnerLiabilityPositions.map((item) => ({ id: item.key, title: item.name, value: money(item.currentPartnerBalance), meta: getPartnerBalanceState(item.currentPartnerBalance) === "partner_holds_business_money" ? t("reportsPage.partnerHoldsBusinessMoney") : t("reportsPage.farmOwesPartner"), cells: [item.name, money(item.purchaseVouchersPaid), money(item.transfersOut), money(item.transfersIn), money(item.outstandingLabourAdvances), money(item.labourSettlementCashPaid), money(item.currentPartnerBalance)], details: [[t("reportsPage.adjustments"), money(item.adjustments)], ["Funds given", money(item.transfersOut)], ["Funds received", money(item.transfersIn)], ["Total labour advances paid", money(item.totalLabourAdvancesPaid)], ["Less: settled through wage settlements", money(item.labourSettlementNonCashApplied)], ["Outstanding labour advances", money(item.outstandingLabourAdvances)], ["Labour settlements cash paid", money(item.labourSettlementCashPaid)], [t("reportsPage.moneyReturned"), money(item.moneyReturned)]] }))} />
+          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.partner"), "Purchase vouchers", "Funds given", "Funds received", "Outstanding labour advances", t("reportsPage.currentPartnerBalance")]} rows={partnerLiabilityPositions.map((item) => ({ id: item.key, title: item.name, value: money(item.currentPartnerBalance), meta: getPartnerBalanceState(item.currentPartnerBalance) === "partner_holds_business_money" ? t("reportsPage.partnerHoldsBusinessMoney") : t("reportsPage.farmOwesPartner"), cells: [item.name, money(item.purchaseVouchersPaid), money(item.transfersOut), money(item.transfersIn), money(item.outstandingLabourAdvances), money(item.currentPartnerBalance)], details: [[t("reportsPage.adjustments"), money(item.adjustments)], ["Funds given", money(item.transfersOut)], ["Funds received", money(item.transfersIn)], ["Total labour advances paid", money(item.totalLabourAdvancesPaid)], ["Less: settled through wage settlements", money(item.labourSettlementNonCashApplied)], ["Outstanding labour advances", money(item.outstandingLabourAdvances)], [t("reportsPage.moneyReturned"), money(item.moneyReturned)]] }))} />
         </ReportShell>}
         {views["partner-position"] === "ledger" && <ReportShell title={t("reportsPage.partnerLedger")} rangeLabel={rangeLabel} sectionId="partner-ledger" onPrint={() => printSection("partner-ledger")} onExport={exportPartnerLedger}>
           <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.partner"), t("reportsPage.type"), t("reportsPage.amount"), t("reportsPage.notes")]} rows={partnerRows.map((item) => ({ id: item.id, title: item.partnerName ?? `${item.fromPartner ?? "-"} → ${item.toPartner ?? "-"}`, value: money(item.amount), meta: item.date, cells: [item.date, item.partnerName ?? `${item.fromPartner ?? "-"} → ${item.toPartner ?? "-"}`, item.type, money(item.amount), item.notes || "-"], details: [[t("reportsPage.type"), item.type], [t("reportsPage.notes"), item.notes || "-"]], onOpen: () => navigate(`/workspace/partner-ledger?recordId=${item.id}`) }))} />
@@ -1777,7 +1779,7 @@ export function Reports() {
                   <span className="account-transaction-group__title">{expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}{partnerLiabilityGroupTitle(group.groupKey)}</span>
                   <span className="account-transaction-group__meta"><strong>{money(partnerLiabilityGroupDisplayTotal(group.groupKey, group.totalAmount))}</strong><small>{t("reportsPage.transactionCount", { count: group.count })}</small></span>
                 </button>
-                {expanded && <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.account"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.debit"), t("reportsPage.credit"), t("reportsPage.runningBalance")]} rows={group.transactions.map((item) => ({ id: item.id, title: item.reference, value: item.credit ? `+${money(item.credit)}` : `-${money(item.debit)}`, meta: `${item.date} | ${item.accountName}`, cells: [item.date, item.accountName, item.typeLabel, item.reference, item.debit ? money(item.debit) : "-", item.credit ? money(item.credit) : "-", money(item.running)], details: [[t("reportsPage.description"), item.description], [t("reportsPage.runningBalance"), money(item.running)]], onOpen: () => navigate(item.path) }))} />}
+                {expanded && <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.account"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.debit"), t("reportsPage.credit"), t("reportsPage.runningBalance")]} rows={group.transactions.map((item) => ({ id: item.id, title: item.reference, value: item.memoAmount !== undefined ? money(item.memoAmount) : (item.credit ? `+${money(item.credit)}` : `-${money(item.debit)}`), meta: `${item.date} | ${item.accountName}`, cells: [item.date, item.accountName, item.typeLabel, item.reference, item.memoAmount !== undefined ? "-" : (item.debit ? money(item.debit) : "-"), item.memoAmount !== undefined ? money(item.memoAmount) : (item.credit ? money(item.credit) : "-"), money(item.running)], details: [[t("reportsPage.description"), item.description], [t("reportsPage.runningBalance"), money(item.running)], ...(item.memoAmount !== undefined ? [["Memo", "Non-cash labour advance settlement"] as [string, ReactNode]] : [])], onOpen: () => navigate(item.path) }))} />}
               </section>;
             })}
           </div>)
@@ -1789,7 +1791,7 @@ export function Reports() {
                   <span className="account-transaction-group__title">{expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}{ledgerGroupTitle(group.groupKey)}</span>
                   <span className="account-transaction-group__meta"><strong>{money(group.totalAmount)}</strong><small>{t("reportsPage.transactionCount", { count: group.count })}</small></span>
                 </button>
-                {expanded && <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.account"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.debit"), t("reportsPage.credit"), t("reportsPage.runningBalance")]} rows={group.transactions.map((item) => ({ id: item.id, title: item.reference, value: item.credit ? `+${money(item.credit)}` : `-${money(item.debit)}`, meta: `${item.date} | ${item.accountName}`, cells: [item.date, item.accountName, item.typeLabel, item.reference, item.debit ? money(item.debit) : "-", item.credit ? money(item.credit) : "-", money(item.running)], details: [[t("reportsPage.description"), item.description], [t("reportsPage.runningBalance"), money(item.running)]], onOpen: () => navigate(item.path) }))} />}
+                {expanded && <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.account"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.debit"), t("reportsPage.credit"), t("reportsPage.runningBalance")]} rows={group.transactions.map((item) => ({ id: item.id, title: item.reference, value: item.memoAmount !== undefined ? money(item.memoAmount) : (item.credit ? `+${money(item.credit)}` : `-${money(item.debit)}`), meta: `${item.date} | ${item.accountName}`, cells: [item.date, item.accountName, item.typeLabel, item.reference, item.memoAmount !== undefined ? "-" : (item.debit ? money(item.debit) : "-"), item.memoAmount !== undefined ? money(item.memoAmount) : (item.credit ? money(item.credit) : "-"), money(item.running)], details: [[t("reportsPage.description"), item.description], [t("reportsPage.runningBalance"), money(item.running)], ...(item.memoAmount !== undefined ? [["Memo", "Non-cash labour advance settlement"] as [string, ReactNode]] : [])], onOpen: () => navigate(item.path) }))} />}
               </section>;
             })}
           </div>)}
