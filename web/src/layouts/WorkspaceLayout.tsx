@@ -1,4 +1,4 @@
-import { BarChart3, BookOpenText, Boxes, CloudUpload, HandCoins, LayoutDashboard, LogOut, MoreHorizontal, PackageOpen, Plus, ReceiptText, RefreshCw, Satellite, Settings, ShoppingBasket, Users, WalletCards, X, type LucideIcon } from "lucide-react";
+import { BarChart3, BookOpenText, Boxes, ClipboardList, CloudUpload, HandCoins, LayoutDashboard, LogOut, MoreHorizontal, PackageOpen, Plus, ReceiptText, RefreshCw, Satellite, Settings, ShoppingBasket, Users, WalletCards, X, type LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -97,19 +97,31 @@ export function WorkspaceLayout() {
     .filter(([to]) => config.featureInventory || to !== "/workspace/inventory")
     .filter(([, , , module]) => !user || hasModulePermission(user, module, "view"));
   const mobilePrimaryNav: Array<MobileNavLink | MobileNavAction> = [
-    { to: "/workspace/dashboard", label: t("layout.dashboard"), icon: LayoutDashboard },
-    { to: "/workspace/workforce/labour", label: t("layout.workforce"), icon: Users },
+    { to: "/workspace/dashboard", label: "Home", icon: LayoutDashboard },
+    { to: "/workspace/workforce/labour", label: "Records", icon: ClipboardList },
     { action: "add" as const, label: "Add", icon: Plus },
-    { to: "/workspace/reports", label: t("layout.reports"), icon: BarChart3 },
+    { to: "/workspace/reports", label: "Reports", icon: BarChart3 },
     { action: "more" as const, label: "More", icon: MoreHorizontal },
   ];
-  const mobileMoreLinks = filteredNav.filter(([to]) => !["/workspace/dashboard", "/workspace/workforce/labour", "/workspace/reports"].includes(to));
+  const quickAddRoutes = [
+    "/workspace/dashboard",
+    "/workspace/workforce/labour",
+    "/workspace/reports",
+    "/workspace/workforce/attendance",
+    "/workspace/labour-payments/advances",
+    "/workspace/expenses",
+    "/workspace/dispatch",
+    "/workspace/sales",
+    "/workspace/operations-map",
+  ];
+  const mobileMoreLinks = filteredNav.filter(([to]) => !quickAddRoutes.includes(to));
   const mobileAddLinks = [
-    { to: "/workspace/workforce/attendance", label: "Attendance", icon: Users, allowed: !user || hasModulePermission(user, "attendance", "create") },
-    { to: "/workspace/expenses", label: "Expense Voucher", icon: ReceiptText, allowed: !user || hasModulePermission(user, "expenses", "create") },
-    { to: "/workspace/labour-payments/advances", label: "Labour Advance", icon: HandCoins, allowed: !user || hasModulePermission(user, "advances", "create") },
-    { to: "/workspace/labour-payments/earnings", label: "Labour Work", icon: WalletCards, allowed: !user || hasModulePermission(user, "wages", "create") },
-    { to: "/workspace/labour-payments/settlements", label: "Settlement", icon: BookOpenText, allowed: !user || hasModulePermission(user, "wages", "create") },
+    { to: "/workspace/workforce/attendance", label: "Mark Attendance", icon: Users, allowed: !user || hasModulePermission(user, "attendance", "create") },
+    { to: "/workspace/labour-payments/advances", label: "Record Advance", icon: HandCoins, allowed: !user || hasModulePermission(user, "advances", "create") },
+    { to: "/workspace/expenses", label: "Add Expense", icon: ReceiptText, allowed: !user || hasModulePermission(user, "expenses", "create") },
+    { to: "/workspace/dispatch", label: "New Dispatch", icon: PackageOpen, allowed: !user || hasModulePermission(user, "dispatch", "create") },
+    { to: "/workspace/sales", label: "Record Sale", icon: ShoppingBasket, allowed: !user || hasModulePermission(user, "sales", "create") },
+    { to: "/workspace/operations-map", label: "Operational Entry", icon: Satellite, allowed: config.featureFarmMap },
   ].filter((item) => item.allowed);
   const queueStatusLabel = (status?: PendingMutation["status"]) => {
     switch (status ?? "pending") {
@@ -217,12 +229,12 @@ export function WorkspaceLayout() {
             <section className="worker-action-dialog app-mobile-sheet" role="dialog" aria-modal="true" aria-label={mobileSheet === "add" ? "Quick add" : "More modules"} onClick={(event) => event.stopPropagation()}>
               <header>
                 <div>
-                  <h2>{mobileSheet === "add" ? "Quick Add" : "More"}</h2>
-                  <p>{mobileSheet === "add" ? "Jump straight into the next record." : "Open the rest of your workspace modules."}</p>
+                  <h2>{mobileSheet === "add" ? "Create New" : "More"}</h2>
+                  <p>{mobileSheet === "add" ? "Choose what you want to record" : "Open the rest of your workspace modules."}</p>
                 </div>
                 <button type="button" onClick={() => setMobileSheet(null)} aria-label={t("common.close")}><X size={18} /></button>
               </header>
-              <div className="app-mobile-sheet__content">
+              <div className={`app-mobile-sheet__content${mobileSheet === "add" ? " app-mobile-sheet__content--grid" : ""}`}>
                 {(mobileSheet === "add" ? mobileAddLinks : mobileMoreLinks.map(([to, label, Icon]) => ({ to, label: t(label), icon: Icon }))).map((item) => {
                   const Icon = item.icon;
                   return (
@@ -254,11 +266,11 @@ export function WorkspaceLayout() {
             <button
               key={item.action}
               type="button"
-              className={`app-mobile-bottom-nav__action${active ? " active" : ""}`}
+              className={`app-mobile-bottom-nav__action${item.action === "add" ? " app-mobile-bottom-nav__action--add" : ""}${active ? " active" : ""}`}
               onClick={() => setMobileSheet((current) => current === item.action ? null : item.action)}
               aria-expanded={mobileSheet === item.action}
             >
-              <Icon size={18} />
+              {item.action === "add" && mobileSheet === "add" ? <X size={18} /> : <Icon size={18} />}
               <span>{item.label}</span>
             </button>
           );

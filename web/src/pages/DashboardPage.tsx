@@ -1,15 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowRight,
+  Bell,
   BanknoteArrowDown,
-  BookOpenText,
   CalendarRange,
-  CircleDollarSign,
+  CircleUserRound,
   CloudUpload,
+  ClipboardList,
+  ChevronRight,
+  HandCoins,
   Leaf,
+  ReceiptText,
   PackageOpen,
   ShoppingBasket,
-  TrendingUp,
   UsersRound,
   Wallet,
   Wifi,
@@ -21,7 +23,6 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { ImportVisibilityAuditPanel } from "../components/ImportVisibilityAuditPanel";
-import { config } from "../config";
 import { calculateAvailableBalance } from "../lib/accounting";
 import { fetchBootstrap, repairWorkspaceContextRequest } from "../lib/api";
 import { getCanonicalExpenseCategory } from "../lib/expenseCategories";
@@ -38,6 +39,8 @@ import { refreshOperationalData, syncNow } from "../services/syncService";
 
 type DashboardTotals = {
   presentToday: number;
+  attendanceMarkedToday: number;
+  dispatchesToday: number;
   cartonsToday: number;
   totalSales: number;
   labourAdvances: number;
@@ -53,24 +56,14 @@ type Activity = {
   detail: string;
   value: string;
   createdAt: string;
-};
-
-const modules: Array<{
-  key: string;
-  path: string;
   icon: LucideIcon;
-  detailKey: string;
-}> = [
-  { key: "workforce", path: "/workspace/team", icon: UsersRound, detailKey: "dashboard.workforceDetail" },
-  { key: "expenses", path: "/workspace/expenses", icon: BanknoteArrowDown, detailKey: "dashboard.expensesDetail" },
-  { key: "sales", path: "/workspace/sales", icon: ShoppingBasket, detailKey: "dashboard.salesDetail" },
-  { key: "dispatch", path: "/workspace/dispatch", icon: PackageOpen, detailKey: "dashboard.dispatchDetail" },
-  { key: "accounts", path: "/workspace/accounts", icon: BookOpenText, detailKey: "dashboard.accountsDetail" },
-  { key: "partnerLedger", path: "/workspace/partner-ledger", icon: Leaf, detailKey: "dashboard.partnerLedgerDetail" },
-];
+  tone?: "green" | "orange" | "blue" | "purple" | "slate";
+};
 
 const today = () => new Date().toISOString().slice(0, 10);
 const money = formatMoney;
+const capitalize = (value: string) => value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+
 export function DashboardPage() {
   const { t } = useTranslation();
   const { user, token } = useAuth();
@@ -78,6 +71,8 @@ export function DashboardPage() {
   const client = useQueryClient();
   const [totals, setTotals] = useState<DashboardTotals>({
     presentToday: 0,
+    attendanceMarkedToday: 0,
+    dispatchesToday: 0,
     cartonsToday: 0,
     totalSales: 0,
     labourAdvances: 0,
@@ -106,7 +101,8 @@ export function DashboardPage() {
 
   const loadLocalDashboard = useCallback(async () => {
     await ensureLocalAccounts();
-    const [attendance, dispatches, sales, vouchers, entries, advances, accounts, settlements] = await Promise.all([
+    const [labourers, attendance, dispatches, sales, vouchers, entries, advances, accounts, settlements] = await Promise.all([
+      workspaceRecords(offlineDb.labourers),
       workspaceRecords(offlineDb.attendance),
       workspaceRecords(offlineDb.dispatches),
       workspaceRecords(offlineDb.sales),
@@ -126,17 +122,25 @@ export function DashboardPage() {
     const activeAdvances = advances.filter(isActiveOperationalRecord);
     const activeSettlements = getActiveLabourWageSettlements(settlements);
     const activeAccounts = accounts.filter(isActiveOperationalRecord);
+    const activeLabourers = labourers.filter(isActiveOperationalRecord);
     const farmId = sync.farmId ?? null;
     const seasonId = sync.seasonId ?? null;
     const date = today();
+    const labourerById = new Map(activeLabourers.map((item) => [item.id, item]));
     const totalSales = activeSales.reduce((sum, item) => sum + item.amount, 0);
     const labourAdvances = outstandingLabourAdvances(activeAdvances, activeSettlements, { farmId, seasonId });
     const totalExpenses = generalExpenseVouchers.reduce((sum, item) => sum + item.amount, 0);
     const partnerBalance = buildPartnerLiabilityPositions(activeAccounts, cashAffectingVouchers, activeAdvances, activeEntries, activeSales, activeSettlements, { farmId, seasonId })
       .reduce((sum, item) => sum + item.currentPartnerBalance, 0);
+    const attendanceMarkedToday = activeAttendance.filter((item) => item.date === date).length;
+    const presentToday = activeAttendance.filter((item) => item.date === date && item.status === "present").length;
+    const dispatchesToday = activeDispatches.filter((item) => item.date === date).length;
+    const cartonsToday = activeDispatches.filter((item) => item.date === date).reduce((sum, item) => sum + (item.items?.reduce((itemSum, entry) => itemSum + entry.cartons, 0) ?? item.cartons ?? 0), 0);
     setTotals({
-      presentToday: activeAttendance.filter((item) => item.date === date && item.status === "present").length,
-      cartonsToday: activeDispatches.filter((item) => item.date === date).reduce((sum, item) => sum + (item.items?.reduce((itemSum, entry) => itemSum + entry.cartons, 0) ?? item.cartons ?? 0), 0),
+      presentToday,
+      attendanceMarkedToday,
+      dispatchesToday,
+      cartonsToday,
       totalSales,
       labourAdvances,
       totalExpenses,
@@ -145,50 +149,94 @@ export function DashboardPage() {
     });
 
     const recent: Activity[] = [
-      ...activeSales.map((item) => ({
-        id: item.id,
-        path: "/workspace/sales",
-        title: t("dashboard.saleRecorded"),
-        detail: item.buyerName ?? "-",
-        value: money(item.amount),
-        createdAt: item.createdAt,
-      })),
-      ...generalExpenseVouchers.map((item) => ({
-        id: item.id,
-        path: "/workspace/expenses",
-        title: t("dashboard.expenseVoucher"),
-        detail: `${getVoucherDisplayNumber(item) || item.voucherNumber} · ${getCanonicalExpenseCategory(item.category)}`,
-        value: `-${money(item.amount)}`,
-        createdAt: item.createdAt,
-      })),
-      ...activeDispatches.map((item) => ({
-        id: item.id,
-        path: "/workspace/dispatch",
-        title: t("dashboard.dispatchRecorded"),
-        detail: item.vehicleNumber ?? t("dashboard.savedVehicle"),
-        value: `${item.items?.reduce((sum, entry) => sum + entry.cartons, 0) ?? item.cartons ?? 0} cartons`,
-        createdAt: item.createdAt,
-      })),
-      ...activeEntries.map((item) => ({
-        id: item.id,
-        path: "/workspace/partner-ledger",
-        title: item.type === "contribution" ? t("dashboard.partnerContribution") : item.type === "withdrawal" ? t("dashboard.partnerWithdrawal") : t("dashboard.partnerSettlement"),
-        detail: item.type === "settlement" ? `${item.fromPartner} to ${item.toPartner}` : item.partnerName ?? "-",
-        value: `${item.type === "withdrawal" ? "-" : ""}${money(item.amount)}`,
-        createdAt: item.createdAt,
-      })),
-      ...activeAdvances.map((item) => ({
-        id: item.id,
-        path: "/workspace/labour-advances",
-        title: t("dashboard.labourAdvancePaid"),
-        detail: t("dashboard.cashOutflow"),
-        value: `-${money(item.amount)}`,
-        createdAt: item.createdAt,
-      })),
+      ...activeAttendance
+        .slice()
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .slice(0, 2)
+        .map((item) => ({
+          id: `attendance:${item.id}`,
+          path: "/workspace/workforce/attendance",
+          title: "Attendance marked",
+          detail: `${labourerById.get(item.labourerId)?.name ?? "Labour"} · ${capitalize(item.status)}`,
+          value: item.date,
+          createdAt: item.createdAt,
+          icon: UsersRound,
+          tone: "green" as const,
+        })),
+      ...generalExpenseVouchers
+        .slice()
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .slice(0, 1)
+        .map((item) => ({
+          id: `expense:${item.id}`,
+          path: "/workspace/expenses",
+          title: "Expense recorded",
+          detail: `${getVoucherDisplayNumber(item) || item.voucherNumber} · ${getCanonicalExpenseCategory(item.category)}`,
+          value: `-${money(item.amount)}`,
+          createdAt: item.createdAt,
+          icon: ReceiptText,
+          tone: "orange" as const,
+        })),
+      ...activeAdvances
+        .slice()
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .slice(0, 1)
+        .map((item) => ({
+          id: `advance:${item.id}`,
+          path: "/workspace/labour-advances",
+          title: "Labour advance paid",
+          detail: `${labourerById.get(item.labourerId)?.name ?? "Labour"}${item.paymentMethod ? ` · ${item.paymentMethod}` : ""}`,
+          value: `-${money(item.amount)}`,
+          createdAt: item.createdAt,
+          icon: HandCoins,
+          tone: "purple" as const,
+        })),
+      ...activeSettlements
+        .slice()
+        .sort((left, right) => right.settlementDate.localeCompare(left.settlementDate) || right.createdAt.localeCompare(left.createdAt))
+        .slice(0, 1)
+        .map((item) => ({
+          id: `settlement:${item.id}`,
+          path: "/workspace/labour-payments/settlements",
+          title: "Wage settlement posted",
+          detail: `${item.fromDate} to ${item.toDate}`,
+          value: money(item.expenseAmount),
+          createdAt: item.createdAt,
+          icon: ClipboardList,
+          tone: "blue" as const,
+        })),
+      ...activeDispatches
+        .slice()
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .slice(0, 1)
+        .map((item) => ({
+          id: `dispatch:${item.id}`,
+          path: "/workspace/dispatch",
+          title: "Dispatch completed",
+          detail: item.vehicleNumber ?? item.destination ?? "Dispatch",
+          value: `${item.items?.reduce((sum, entry) => sum + entry.cartons, 0) ?? item.cartons ?? 0} cartons`,
+          createdAt: item.createdAt,
+          icon: PackageOpen,
+          tone: "blue" as const,
+        })),
+      ...activeSales
+        .slice()
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .slice(0, 1)
+        .map((item) => ({
+          id: `sale:${item.id}`,
+          path: "/workspace/sales",
+          title: "Sale recorded",
+          detail: item.buyerName ?? item.produceType,
+          value: money(item.amount),
+          createdAt: item.createdAt,
+          icon: ShoppingBasket,
+          tone: "green" as const,
+        })),
     ];
     recent.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
     setActivities(recent.slice(0, 5));
-  }, []);
+  }, [sync.farmId, sync.seasonId, t]);
 
   useEffect(() => {
     void loadLocalDashboard();
@@ -213,47 +261,114 @@ export function DashboardPage() {
   const hasOtherWorkspaces = (user?.memberships.filter((membership) => membership.active).length ?? 0) > 1;
   const StatusIcon = sync.status === "offline" ? WifiOff : Wifi;
   const displayName = user?.displayName || user?.email || t("common.dashboard");
+  const selectedFarmLabel = farm?.name ?? t("dashboardPage.noFarmAvailable");
+  const selectedSeasonLabel = season?.name ?? (hasFarm ? t("noSeason") : t("dashboardPage.noSeasonUntilFarm"));
+  const heroStatus = sync.pendingCount
+    ? "Needs attention"
+    : !hasFarm || !hasSeason
+      ? "Setup required"
+      : totals.presentToday > 0 || totals.dispatchesToday > 0 || totals.cartonsToday > 0
+        ? "Excellent"
+        : "Steady";
+  const heroStatusCopy = sync.pendingCount
+    ? `${sync.pendingCount} record${sync.pendingCount === 1 ? "" : "s"} waiting to sync.`
+    : !hasFarm || !hasSeason
+      ? "Select a farm and season to unlock the full overview."
+      : totals.presentToday > 0 || totals.dispatchesToday > 0 || totals.cartonsToday > 0
+        ? "All key activities are on track for today."
+        : "The workspace is ready for the day.";
+  const heroSyncLabel = sync.pendingCount === 0 && sync.status !== "offline"
+    ? "Synced"
+    : sync.lastSyncTime
+      ? `Updated ${new Date(sync.lastSyncTime).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+      : "Updated today";
 
   const summaryCards = [
-    { label: t("dashboard.presentToday"), value: String(totals.presentToday), icon: UsersRound, path: "/workspace/attendance", tone: "green" },
-    { label: t("dashboard.cartonsToday"), value: String(totals.cartonsToday), icon: PackageOpen, path: "/workspace/dispatch", tone: "navy" },
-    { label: t("dashboard.totalSales"), value: money(totals.totalSales), icon: TrendingUp, path: "/workspace/sales", tone: "green" },
-    { label: t("dashboard.totalExpenses"), value: money(totals.totalExpenses), icon: BanknoteArrowDown, path: "/workspace/reports?report=expenditures", tone: "red" },
-    { label: t("dashboard.labourAdvances"), value: money(totals.labourAdvances), icon: UsersRound, path: "/workspace/labour-advances", tone: "red" },
-    { label: t("dashboard.availableBalance"), value: money(totals.netPosition), icon: Wallet, path: "/workspace/accounts", tone: "navy" },
-    { label: t("dashboard.partnerBalance"), value: money(totals.partnerBalance), icon: CircleDollarSign, path: "/workspace/partner-ledger", tone: "blue" },
+    {
+      label: "Cash Balance",
+      value: money(totals.netPosition),
+      icon: Wallet,
+      path: "/workspace/accounts",
+      tone: totals.netPosition >= 0 ? "green" : "orange",
+      detail: hasOperationalContext ? "Available cash position" : "Requires a farm and season",
+    },
+    {
+      label: "Total Expenses",
+      value: money(totals.totalExpenses),
+      icon: BanknoteArrowDown,
+      path: "/workspace/reports?report=expenditures",
+      tone: "orange",
+      detail: "This season",
+    },
+    {
+      label: "Labour Advances",
+      value: money(totals.labourAdvances),
+      icon: HandCoins,
+      path: "/workspace/labour-payments/advances",
+      tone: "purple",
+      detail: "Outstanding balance",
+    },
+    {
+      label: "Dispatches",
+      value: String(totals.dispatchesToday),
+      icon: PackageOpen,
+      path: "/workspace/dispatch",
+      tone: "blue",
+      detail: `${totals.cartonsToday} cartons today`,
+    },
+  ];
+
+  const quickActions = [
+    { to: "/workspace/workforce/attendance", icon: UsersRound, title: "Attendance", detail: "Mark labour presence" },
+    { to: "/workspace/labour-payments/advances", icon: HandCoins, title: "Advances", detail: "Record labour cash" },
+    { to: "/workspace/expenses", icon: ReceiptText, title: "Expenses", detail: "Add a voucher" },
+    { to: "/workspace/dispatch", icon: PackageOpen, title: "Dispatch", detail: "Create a dispatch" },
+    { to: "/workspace/reports", icon: ClipboardList, title: "Reports", detail: "Review summaries" },
   ];
 
   return (
     <div className="dashboard-page professional-dashboard">
-      <main className="dashboard dashboard--wide">
-        <section className="dashboard-hero">
-          <div className="dashboard-hero__intro">
-            <span className="eyebrow">{t("dashboardPage.operationsOverview")}</span>
-            <h1>{t("dashboardPage.welcome", { name: displayName })}</h1>
-            <p>{formatDate(new Date(), { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
-            {user?.workspaceName && <p className="workspace-label">{user.workspaceName}</p>}
+      <main className="dashboard dashboard--wide dashboard-home">
+        <section className="dashboard-mobile-header">
+          <div className="dashboard-mobile-header__brand">
+            <img className="dashboard-mobile-header__logo" src="/muzare-logo.png" alt="Muzare" />
+            <div className="dashboard-mobile-header__copy">
+              <strong>Muzare</strong>
+              <span>Manage smarter, grow better.</span>
+              <small>{user?.workspaceName ?? t("layout.workspace")}</small>
+            </div>
           </div>
-          <div className="context-actions">
-            <Link className="context-chip" to="/workspace/farms">
-              <Leaf size={18} />
-              <span>{t("currentFarm")}</span>
-              <strong>{farm?.name ?? t("dashboardPage.noFarmAvailable")}</strong>
+          <div className="dashboard-mobile-header__actions">
+            <Link className="dashboard-mobile-header__icon" to="/workspace/reports" aria-label="Notifications">
+              <Bell size={18} />
+              {sync.pendingCount > 0 && <span className="dashboard-mobile-header__badge">{sync.pendingCount}</span>}
             </Link>
-            <Link className="context-chip" to="/workspace/seasons">
-              <CalendarRange size={18} />
-              <span>{t("currentSeason")}</span>
-              <strong>{season?.name ?? (hasFarm ? t("noSeason") : t("dashboardPage.noSeasonUntilFarm"))}</strong>
+            <Link className="dashboard-mobile-header__icon" to="/workspace/settings" aria-label="Profile">
+              <CircleUserRound size={18} />
             </Link>
           </div>
         </section>
+
+        <section className="dashboard-home__meta">
+          <div className="dashboard-home__title">
+            <span className="eyebrow eyebrow--dark">{t("dashboardPage.operationsOverview")}</span>
+            <h1>{t("dashboardPage.welcome", { name: displayName })}</h1>
+            <p>{formatDate(new Date(), { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
+          </div>
+          <div className="dashboard-home__sync">
+            <span className={`dashboard-home__sync-chip dashboard-home__sync-chip--${sync.status}`}>
+              <StatusIcon size={14} />
+              {heroSyncLabel}
+            </span>
+            <span className="dashboard-home__sync-note">{sync.status === "offline" ? t("layout.workingOffline") : t("layout.synced")}</span>
+          </div>
+        </section>
+
         {query.isError && user?.workspaceId && (
-          <section className="panel">
-            <div className="panel-heading">
-              <div>
-                <h2>{t("common.dashboard")}</h2>
-                <p>Workspace context needs repair</p>
-              </div>
+          <section className="dashboard-alert-card">
+            <div>
+              <strong>{t("common.dashboard")}</strong>
+              <p>Workspace context needs repair</p>
             </div>
             <p className="error">{query.error.message}</p>
             <div className="farm-actions">
@@ -266,7 +381,7 @@ export function DashboardPage() {
           </section>
         )}
         {!query.isError && query.data?.contextWarning && (
-          <section className="panel">
+          <section className="dashboard-alert-card">
             <p className={query.data.needsRepair ? "error" : "context-message"}>{query.data.contextWarning}</p>
             {user?.workspaceId && (
               <div className="farm-actions">
@@ -291,69 +406,127 @@ export function DashboardPage() {
         {!hasFarm && noAccessibleFarms && <p className="context-message">{t("dashboardPage.noAccessibleFarmMessage")}</p>}
         {hasFarm && !hasSeason && <p className="context-message">{t("dashboardPage.noActiveSeason")}</p>}
 
-        <section className="dashboard-columns">
-          <div className="dashboard-main">
-            <section className="panel">
-              <div className="panel-heading">
-                <div>
-                  <h2>{t("operations")}</h2>
-                  <p>{t("dashboard.openModule")}</p>
-                </div>
-              </div>
-              <div className="operation-grid">
-                {modules
-                  .filter(({ path }) => config.featureFarmMap || path !== "/workspace/operations-map")
-                  .filter(({ key }) => config.featureInventory || key !== "inventory")
-                  .map(({ key, path, detailKey, icon: Icon }) => hasOperationalContext ? (
-                    <Link className="operation-card" key={key} to={path}>
-                      <Icon size={22} />
-                      <div>
-                        <strong>{t(key)}</strong>
-                        <span>{t(detailKey)}</span>
-                      </div>
-                      <ArrowRight size={16} />
-                    </Link>
-                  ) : (
-                    <div className="operation-card operation-card--disabled" key={key} aria-disabled="true">
-                      <Icon size={22} />
-                      <div>
-                        <strong>{t(key)}</strong>
-                        <span>{t("dashboardPage.moduleLockedUntilFarmSeason")}</span>
-                      </div>
-                      <ArrowRight size={16} />
-                    </div>
-                  ))}
-              </div>
-            </section>
+        <section className="dashboard-context-grid" aria-label="Current workspace context">
+          <Link className="dashboard-context-card" to="/workspace/farms">
+            <Leaf size={18} />
+            <div>
+              <span>{t("currentFarm")}</span>
+              <strong>{selectedFarmLabel}</strong>
+            </div>
+            <ChevronRight size={16} />
+          </Link>
+          <Link className="dashboard-context-card" to="/workspace/seasons">
+            <CalendarRange size={18} />
+            <div>
+              <span>{t("currentSeason")}</span>
+              <strong>{selectedSeasonLabel}</strong>
+            </div>
+            <ChevronRight size={16} />
+          </Link>
+        </section>
 
-            <section>
-              <div className="section-title-row">
-                <div>
-                  <h2>{t("dashboardPage.todayAtGlance")}</h2>
-                  <p>{t("dashboardPage.localFigures")}</p>
-                </div>
-              </div>
-              <section className="summary-grid" aria-label={t("dashboard.operationalSummary")}>
-                {summaryCards.map(({ label, value, path, icon: Icon, tone }) => hasOperationalContext ? (
-                  <Link className={`metric-card metric-card--${tone}`} to={path} key={label}>
-                    <div className="metric-card__icon"><Icon size={20} /></div>
-                    <span>{label}</span>
-                    <strong>{value}</strong>
-                  </Link>
-                ) : (
-                  <div className={`metric-card metric-card--${tone} metric-card--disabled`} key={label} aria-disabled="true">
-                    <div className="metric-card__icon"><Icon size={20} /></div>
-                    <span>{label}</span>
-                    <strong>--</strong>
-                  </div>
-                ))}
-              </section>
-            </section>
+        <section className="dashboard-hero-card">
+          <div className="dashboard-hero-card__badge">{heroSyncLabel}</div>
+          <div className="dashboard-hero-card__content">
+            <div className="dashboard-hero-card__copy">
+              <span className="dashboard-hero-card__eyebrow">Today's Farm Pulse</span>
+              <h2>Farm Overview</h2>
+              <p className="dashboard-hero-card__status-label">Operations Health</p>
+              <strong>{heroStatus}</strong>
+              <span>{heroStatusCopy}</span>
+            </div>
+            <div className="dashboard-hero-card__stats">
+              <article>
+                <UsersRound size={18} />
+                <span>Attendance Marked</span>
+                <strong>{totals.attendanceMarkedToday} labour today</strong>
+              </article>
+              <article>
+                <PackageOpen size={18} />
+                <span>Dispatches</span>
+                <strong>{totals.dispatchesToday} today</strong>
+              </article>
+            </div>
+          </div>
+          <div className="dashboard-hero-card__actions">
+            <Link className="dashboard-hero-card__button" to="/workspace/reports">View Details</Link>
+          </div>
+        </section>
 
-            {user?.workspaceId ? <ImportVisibilityAuditPanel workspaceId={user.workspaceId} title="Visibility Audit" /> : null}
+        <section className="dashboard-kpi-grid" aria-label="Key performance indicators">
+          {summaryCards.map(({ label, value, path, icon: Icon, tone, detail }) => hasOperationalContext ? (
+            <Link className={`dashboard-kpi-card dashboard-kpi-card--${tone}`} to={path} key={label}>
+              <div className="dashboard-kpi-card__icon"><Icon size={18} /></div>
+              <span>{label}</span>
+              <strong>{value}</strong>
+              <small>{detail}</small>
+            </Link>
+          ) : (
+            <div className={`dashboard-kpi-card dashboard-kpi-card--${tone} dashboard-kpi-card--disabled`} key={label} aria-disabled="true">
+              <div className="dashboard-kpi-card__icon"><Icon size={18} /></div>
+              <span>{label}</span>
+              <strong>--</strong>
+              <small>{detail}</small>
+            </div>
+          ))}
+        </section>
+
+        <section className="dashboard-quick-section">
+          <div className="dashboard-section-heading">
+            <div>
+              <h2>Quick Actions</h2>
+              <p>Fast access to the workflows used most often in the field.</p>
+            </div>
+          </div>
+          <div className="dashboard-quick-grid">
+            {quickActions.map(({ to, icon: Icon, title, detail }) => (
+              <Link key={to} to={to} className="dashboard-quick-card">
+                <Icon size={18} />
+                <strong>{title}</strong>
+                <span>{detail}</span>
+              </Link>
+            ))}
+          </div>
+        </section>
+
+        <section className="dashboard-home__grid">
+          <div className="dashboard-home__main">
+            <section className="dashboard-activity-card" id="recent-activity">
+              <div className="dashboard-section-heading dashboard-section-heading--split">
+                <div>
+                  <h2>{t("dashboard.recentActivity")}</h2>
+                  <p>{activities.length ? "Recent operational records from the current workspace." : "Activity will appear here as soon as records are saved."}</p>
+                </div>
+                <Link className="dashboard-section-link" to="/workspace/reports">View all</Link>
+              </div>
+              {activities.length === 0 ? (
+                <p className="activity-empty">{t("dashboard.noActivity")}</p>
+              ) : (
+                <div className="dashboard-activity-list">
+                  {activities.map((activity) => {
+                    const Icon = activity.icon;
+                    return (
+                      <Link to={activity.path} className="dashboard-activity-item" key={activity.id}>
+                        <div className={`dashboard-activity-item__icon dashboard-activity-item__icon--${activity.tone ?? "slate"}`}>
+                          <Icon size={16} />
+                        </div>
+                        <div className="dashboard-activity-item__copy">
+                          <strong>{activity.title}</strong>
+                          <span>{activity.detail}</span>
+                        </div>
+                        <div className="dashboard-activity-item__meta">
+                          <strong>{activity.value}</strong>
+                          <small>{new Date(activity.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</small>
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
           </div>
 
-          <aside className="dashboard-side">
+          <aside className="dashboard-home__side">
             <section className="panel status-panel">
               <div className="status-line">
                 <StatusIcon size={19} />
@@ -372,30 +545,7 @@ export function DashboardPage() {
                 </div>
               </div>
             </section>
-
-            <section className="panel activity-panel">
-              <div className="panel-heading">
-                <div>
-                  <h2>{t("dashboard.recentActivity")}</h2>
-                  <p>{t("dashboard.entriesMade")}</p>
-                </div>
-              </div>
-              {activities.length === 0 ? (
-                <p className="activity-empty">{t("dashboard.noActivity")}</p>
-              ) : (
-                <div className="activity-list">
-                  {activities.map((activity) => (
-                    <Link to={activity.path} className="activity-item" key={`${activity.path}-${activity.id}`}>
-                      <div>
-                        <strong>{activity.title}</strong>
-                        <span>{activity.detail}</span>
-                      </div>
-                      <b>{activity.value}</b>
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </section>
+            {user?.workspaceId ? <ImportVisibilityAuditPanel workspaceId={user.workspaceId} title="Visibility Audit" /> : null}
           </aside>
         </section>
       </main>
