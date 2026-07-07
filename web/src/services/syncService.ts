@@ -100,6 +100,95 @@ function applyOperationalContext(token: string, workspaceId: string, farmId?: st
   window.dispatchEvent(new Event("muzare-local-data-change"));
 }
 
+function isDateTypeMutation(mutation: PendingMutation) {
+  return mutation.entity === "dateType";
+}
+
+function mutationMatchesActiveContext(mutation: PendingMutation) {
+  if (!context) return false;
+  if (mutation.workspaceId !== context.workspaceId) return false;
+  if (mutation.farmId !== context.farmId) return false;
+  if (isDateTypeMutation(mutation)) return true;
+  return mutation.seasonId === context.seasonId;
+}
+
+function normalizeDateTypePayload(payload: unknown, fallback: { workspaceId: string; farmId?: string | null }) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  const record = payload as Record<string, unknown>;
+  const normalized: Record<string, unknown> = { ...record };
+  normalized.workspaceId = fallback.workspaceId;
+  normalized.farmId = fallback.farmId ?? record.farmId ?? null;
+  normalized.seasonId = null;
+  return normalized;
+}
+
+async function repairDateTypeQueueItems() {
+  const activeContext = context;
+  if (!activeContext) return;
+  const items = await offlineDb.pendingMutations
+    .where("workspaceId").equals(activeContext.workspaceId)
+    .and((item) => item.entity === "dateType")
+    .toArray();
+  if (!items.length) return;
+
+  const retainedByName = new Map<string, string>();
+  const existingByName = new Map<string, string>();
+  const localDateTypes = await offlineDb.dateTypes
+    .where("workspaceId").equals(activeContext.workspaceId)
+    .filter((record) => record.farmId === activeContext.farmId)
+    .toArray();
+  for (const record of localDateTypes) {
+    const normalizedName = record.name.trim().toLowerCase();
+    if (!normalizedName || record.pendingSync) continue;
+    existingByName.set(normalizedName, record.id);
+  }
+  for (const item of items.sort((left, right) => left.createdAt.localeCompare(right.createdAt))) {
+    const payload = normalizeDateTypePayload(item.payload, { workspaceId: activeContext.workspaceId, farmId: item.farmId ?? activeContext.farmId });
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) continue;
+    const payloadRecord = payload as Record<string, unknown>;
+    const normalizedName = typeof payloadRecord.name === "string" ? payloadRecord.name.trim().toLowerCase() : "";
+    const payloadId = typeof payloadRecord.id === "string" ? payloadRecord.id : item.id;
+    const keepId = normalizedName && (existingByName.get(normalizedName) ?? retainedByName.get(normalizedName));
+    const duplicateCreate = item.operation === "create" && normalizedName && retainedByName.has(normalizedName);
+    const mergedPayload = { ...payloadRecord, id: keepId ?? payloadId, seasonId: null };
+
+    if (duplicateCreate && keepId) {
+      await offlineDb.pendingMutations.update(item.id, {
+        status: "resolved",
+        retryable: false,
+        resolvedAt: new Date().toISOString(),
+        lastError: undefined,
+        payload: mergedPayload,
+        seasonId: null,
+      });
+      continue;
+    }
+    retainedByName.set(normalizedName, keepId ?? payloadId);
+    await tableFor("dateType").put({
+      ...(await tableFor("dateType").get(keepId ?? payloadId) ?? {}),
+      ...payloadRecord,
+      id: keepId ?? payloadId,
+      workspaceId: activeContext.workspaceId,
+      farmId: activeContext.farmId,
+      seasonId: null,
+      pendingSync: true,
+    } as LocalRecord);
+    await offlineDb.pendingMutations.update(item.id, {
+      payload: mergedPayload,
+      workspaceId: activeContext.workspaceId,
+      farmId: activeContext.farmId,
+      seasonId: null,
+      attempts: 0,
+      retryable: true,
+      status: "pending",
+      nextAttemptAt: undefined,
+      lastError: undefined,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+  await refreshSyncState({ status: navigator.onLine ? "pending" : "offline" });
+}
+
 async function cacheRecord(
   entity: OperationalEntity,
   record: OperationalRecordEnvelope["record"],
@@ -195,7 +284,7 @@ function formatStaleContextMessage(details: SyncErrorDetails | null) {
 async function getContextMutations() {
   return context
     ? offlineDb.pendingMutations.where("workspaceId").equals(context.workspaceId)
-      .filter((mutation) => mutation.farmId === context!.farmId && mutation.seasonId === context!.seasonId)
+      .filter((mutation) => mutationMatchesActiveContext(mutation))
       .toArray()
     : [];
 }
@@ -216,7 +305,7 @@ export async function queueOfflineRecord(entity: OperationalEntity, record: Loca
   const normalizedRecord = entity === "voucher" ? normalizeVoucherRecordForSync(record as Record<string, unknown>) as LocalRecord : record;
   const recordWorkspaceId = record.workspaceId || context.workspaceId;
   const recordFarmId = normalizedRecord.farmId ?? context.farmId;
-  const recordSeasonId = normalizedRecord.seasonId ?? context.seasonId;
+  const recordSeasonId = entity === "dateType" ? null : (normalizedRecord.seasonId ?? context.seasonId);
   await cacheRecord(entity, { ...normalizedRecord, workspaceId: recordWorkspaceId, farmId: recordFarmId, seasonId: recordSeasonId }, true, recordFarmId, recordSeasonId, recordWorkspaceId);
   const queuedAt = new Date().toISOString();
   const mutation: PendingMutation = {
@@ -260,13 +349,14 @@ export async function deleteOperationalRecord(entity: OperationalEntity, record:
   const payload = softDelete ? { ...record, deletedAt: queuedAt, updatedAt: queuedAt, pendingSync: true } : { ...record, updatedAt: queuedAt, pendingSync: true };
   if (softDelete) await tableFor(entity).put(payload);
   else await tableFor(entity).delete(record.id);
+  const recordSeasonId = entity === "dateType" ? null : (record.seasonId ?? context.seasonId);
   await offlineDb.pendingMutations.put({
     id: `${context.workspaceId}:${entity}:${record.id}`, entity, operation: "delete",
     payload, attempts: 0,
     clientMutationId: `${context.workspaceId}:${entity}:${record.id}`,
     status: "pending",
     retryable: true,
-    workspaceId: context.workspaceId, farmId: record.farmId ?? context.farmId, seasonId: record.seasonId ?? context.seasonId,
+    workspaceId: context.workspaceId, farmId: record.farmId ?? context.farmId, seasonId: recordSeasonId,
     createdAt: queuedAt, updatedAt: queuedAt,
   });
   await refreshSyncState({ status: navigator.onLine ? "pending" : "offline" });
@@ -292,8 +382,7 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
   emit({ status: "syncing" });
   let synced = 0;
   const pendingRecords = (await offlineDb.pendingMutations.where("workspaceId").equals(context.workspaceId).sortBy("createdAt"))
-    .filter((mutation) => mutation.farmId === context!.farmId
-      && mutation.seasonId === context!.seasonId
+    .filter((mutation) => mutationMatchesActiveContext(mutation)
       && (mutation.status ?? "pending") !== "resolved"
       && (mutation.status ?? "pending") !== "discarded");
   let hadPermanentFailures = false;
@@ -304,7 +393,7 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
     if (
       (payloadScope.workspaceId && payloadScope.workspaceId !== mutation.workspaceId)
       || ((payloadScope.farmId ?? null) !== (mutation.farmId ?? null))
-      || ((payloadScope.seasonId ?? null) !== (mutation.seasonId ?? null))
+      || (!isDateTypeMutation(mutation) && ((payloadScope.seasonId ?? null) !== (mutation.seasonId ?? null)))
     ) {
       const lastError = i18n.t("sync.staleQueueItemScopeMismatch");
       await offlineDb.pendingMutations.update(mutation.id, {
@@ -343,6 +432,45 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
           operation: mutation.operation,
           attempts: mutation.attempts,
         });
+      }
+      if (isDateTypeMutation(mutation)) {
+        const dateTypePayload = normalizeDateTypePayload(mutation.payload, { workspaceId: context.workspaceId, farmId: mutation.farmId ?? context.farmId }) as LocalRecord;
+        await offlineDb.pendingMutations.update(mutation.id, {
+          status: "syncing",
+          lastAttemptedAt: new Date().toISOString(),
+          lastError: undefined,
+        });
+        if (mutation.operation === "delete") {
+          await deleteOperationalRecordFromApi(context.token, {
+            workspaceId: context.workspaceId,
+            farmId: mutation.farmId || context.farmId,
+            seasonId: null,
+            entity: mutation.entity,
+            recordId: dateTypePayload.id,
+            reason: (mutation.payload as { deletionReason?: string }).deletionReason,
+          });
+          const latest = await offlineDb.pendingMutations.get(mutation.id);
+          if (latest?.updatedAt !== mutation.updatedAt) continue;
+          await tableFor(mutation.entity).delete(dateTypePayload.id);
+          await offlineDb.pendingMutations.delete(mutation.id);
+          window.dispatchEvent(new Event("muzare-local-data-change"));
+          synced += 1;
+          continue;
+        }
+        const response = await saveOperationalRecord(context.token, {
+          workspaceId: context.workspaceId,
+          farmId: mutation.farmId || context.farmId,
+          seasonId: null,
+          entity: mutation.entity,
+          record: normalizeRecord(dateTypePayload as OperationalRecordEnvelope["record"]),
+        });
+        const latest = await offlineDb.pendingMutations.get(mutation.id);
+        if (latest?.updatedAt !== mutation.updatedAt) continue;
+        await cacheRecord(mutation.entity, response.record, false, mutation.farmId, null);
+        await offlineDb.pendingMutations.delete(mutation.id);
+        window.dispatchEvent(new Event("muzare-local-data-change"));
+        synced += 1;
+        continue;
       }
       await offlineDb.pendingMutations.update(mutation.id, {
         status: "syncing",
@@ -543,8 +671,7 @@ async function pruneSynchronizedCache(records: OperationalRecordEnvelope[]) {
 
 export async function getPendingCount() {
   return context ? offlineDb.pendingMutations.where("workspaceId").equals(context.workspaceId)
-    .filter((mutation) => mutation.farmId === context!.farmId
-      && mutation.seasonId === context!.seasonId
+    .filter((mutation) => mutationMatchesActiveContext(mutation)
       && (mutation.status ?? "pending") !== "resolved"
       && (mutation.status ?? "pending") !== "discarded"
       && (mutation.retryable ?? true)).count() : 0;
@@ -557,6 +684,9 @@ export async function getSyncQueueItems() {
 
 export async function retrySyncQueueItem(mutationId: string) {
   const item = await offlineDb.pendingMutations.get(mutationId);
+  if (item?.entity === "dateType") {
+    await repairDateTypeQueueItems();
+  }
   if (item?.entity === "voucher" && item.operation !== "delete" && context) {
     const normalizedPayload = normalizeVoucherRecordForSync(item.payload as Record<string, unknown>) as Partial<LocalRecord> & { voucherNumber?: string };
     if (JSON.stringify(normalizedPayload) !== JSON.stringify(item.payload)) {
@@ -732,6 +862,7 @@ export async function startSyncService(token: string, workspaceId: string) {
         dataSource: "cache",
       });
       window.dispatchEvent(new Event("muzare-data-refresh"));
+      await repairDateTypeQueueItems();
       emitStartup("syncingLatestRecords", navigator.onLine ? i18n.t("sync.syncingLatestRecords") : i18n.t("sync.offlineReady"));
       await refreshOperationalData({ notifySuccess: false });
       await syncPendingRecords();
@@ -756,6 +887,11 @@ export async function repairStaleSyncQueueItem(mutationId: string) {
   if (!context) throw new Error(i18n.t("sync.workspaceSyncNotInitialized"));
   const item = await offlineDb.pendingMutations.get(mutationId);
   if (!item) return;
+  if (item.entity === "dateType") {
+    await repairDateTypeQueueItems();
+    if (navigator.onLine) await syncPendingRecords({ force: true });
+    return;
+  }
   const payload = item.payload as LocalRecord;
   const repairedPayload = {
     ...payload,

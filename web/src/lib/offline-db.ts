@@ -582,6 +582,13 @@ export async function workspaceRecords<T extends LocalRecord>(table: EntityTable
       && (Boolean(options.includeDeleted) || isActiveOperationalRecord(record as LocalRecord & Record<string, unknown>))).toArray();
 }
 
+export async function workspaceConfigRecords<T extends LocalRecord>(table: EntityTable<T, "id">, options: { includeDeleted?: boolean } = {}) {
+  if (!activeFarmId) return [];
+  return table.where("workspaceId").equals(getActiveWorkspaceId())
+    .filter((record) => record.farmId === activeFarmId
+      && (Boolean(options.includeDeleted) || isActiveOperationalRecord(record as LocalRecord & Record<string, unknown>))).toArray();
+}
+
 export function labourSortValue(labourer: Pick<Labourer, "sortOrder" | "androidSortOrder" | "originalIndex" | "createdAt">) {
   if (typeof labourer.sortOrder === "number" && Number.isFinite(labourer.sortOrder)) return labourer.sortOrder;
   if (typeof labourer.androidSortOrder === "number" && Number.isFinite(labourer.androidSortOrder)) return labourer.androidSortOrder;
@@ -623,6 +630,12 @@ export function makeLocalRecord(id?: string) {
   const now = new Date().toISOString();
   if (!activeFarmId || !activeSeasonId) throw new Error("Select an active farm and season before entering records.");
   return { id: id ?? crypto.randomUUID(), workspaceId: getActiveWorkspaceId(), farmId: activeFarmId, seasonId: activeSeasonId, createdAt: now, updatedAt: now, pendingSync: false };
+}
+
+export function makeConfigRecord(id?: string) {
+  const now = new Date().toISOString();
+  if (!activeFarmId) throw new Error("Select an active farm before entering records.");
+  return { id: id ?? crypto.randomUUID(), workspaceId: getActiveWorkspaceId(), farmId: activeFarmId, seasonId: null, createdAt: now, updatedAt: now, pendingSync: false };
 }
 
 export async function ensureLocalAccounts() {

@@ -78,7 +78,7 @@ const financialDeleteSchema = z.object({
 const operationalDeleteSchema = z.object({
   workspaceId: z.string().uuid(),
   farmId: z.string().uuid(),
-  seasonId: z.string().uuid(),
+  seasonId: z.string().uuid().nullable().optional(),
   entity: z.enum(["dispatch", "vehicle", "dateType"]),
   recordId: z.string().min(1),
   reason: z.string().trim().max(500).optional(),
@@ -290,7 +290,6 @@ const seasonRequiredEntities = new Set<typeof entities[number]>([
   "labourPayment",
   "productionEntry",
   "vehicle",
-  "dateType",
   "dispatch",
   "sale",
   "voucher",
@@ -313,35 +312,37 @@ function parseVoucherSequenceNumber(value: string) {
 async function inactiveDispatchReference(
   workspaceId: string,
   farmId: string,
-  seasonId: string,
+  seasonId: string | null,
   entityType: "vehicle" | "dateType",
   ids: string[],
 ) {
   if (!ids.length) return false;
+  const conditions = [
+    eq(operationalRecords.workspaceId, workspaceId),
+    eq(operationalRecords.farmId, farmId),
+    eq(operationalRecords.entityType, entityType),
+    inArray(operationalRecords.clientRecordId, ids),
+  ];
+  if (seasonId) conditions.push(eq(operationalRecords.seasonId, seasonId));
   const records = await db.select({ clientRecordId: operationalRecords.clientRecordId, payload: operationalRecords.payload })
-    .from(operationalRecords).where(and(
-      eq(operationalRecords.workspaceId, workspaceId),
-      eq(operationalRecords.farmId, farmId),
-      eq(operationalRecords.seasonId, seasonId),
-      eq(operationalRecords.entityType, entityType),
-      inArray(operationalRecords.clientRecordId, ids),
-    ));
+    .from(operationalRecords).where(and(...conditions));
   return records.length !== ids.length || records.some((record) => record.payload.active === false || isDeletedOperationalPayload(record.payload));
 }
 
 async function dispatchMasterIsUsed(
   workspaceId: string,
   farmId: string,
-  seasonId: string,
+  seasonId: string | null,
   entity: "vehicle" | "dateType",
   recordId: string,
 ) {
-  const dispatches = await db.select({ payload: operationalRecords.payload }).from(operationalRecords).where(and(
+  const conditions = [
     eq(operationalRecords.workspaceId, workspaceId),
     eq(operationalRecords.farmId, farmId),
-    eq(operationalRecords.seasonId, seasonId),
     eq(operationalRecords.entityType, "dispatch"),
-  ));
+  ];
+  if (seasonId) conditions.push(eq(operationalRecords.seasonId, seasonId));
+  const dispatches = await db.select({ payload: operationalRecords.payload }).from(operationalRecords).where(and(...conditions));
   return dispatches.some(({ payload }) => !isDeletedOperationalPayload(payload) && (entity === "vehicle"
     ? payload.vehicleId === recordId
     : Array.isArray(payload.items) && payload.items.some((item: { dateTypeId?: unknown }) => item.dateTypeId === recordId)));
@@ -722,6 +723,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     }
     const selected = await sessionContext(request.sessionId);
     const generalFarmExpense = parsed.data.entity === "voucher" && parsed.data.record.generalFarmExpense === true;
+    const requestSeasonId = parsed.data.entity === "dateType" ? null : (parsed.data.seasonId ?? null);
     const requiresSeason = seasonRequiredEntities.has(parsed.data.entity) && !generalFarmExpense;
     if (localDevelopmentMode && parsed.data.entity === "voucher") {
       console.log("VOUCHER_SYNC_PERMISSION_DECISION", {
@@ -761,22 +763,22 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         ...permissionDebug,
       });
     }
-    if (requiresSeason && (!selected.activeSeasonId || parsed.data.seasonId !== selected.activeSeasonId)) {
+    if (requiresSeason && (!selected.activeSeasonId || requestSeasonId !== selected.activeSeasonId)) {
       return forbiddenResponse(reply, "Select an active season before submitting operational records.", {
         code: "stale_season_context",
         requestWorkspaceId: parsed.data.workspaceId,
-        requestSeasonId: parsed.data.seasonId ?? null,
+        requestSeasonId,
         activeSeasonId: selected?.activeSeasonId ?? null,
         farmAccessResult: true,
         ...permissionDebug,
       });
     }
-    if (generalFarmExpense && parsed.data.seasonId) {
+    if (generalFarmExpense && requestSeasonId) {
       return reply.code(400).send({ message: "General farm expenses must not specify a season." });
     }
     const ownershipError = await validateTenantReferencesDetailed(parsed.data.workspaceId, {
       farmId: parsed.data.farmId,
-      seasonId: parsed.data.seasonId,
+      seasonId: parsed.data.entity === "dateType" ? undefined : requestSeasonId,
       accountId: parsed.data.record.accountId,
       partnerAccountId: parsed.data.record.partnerAccountId,
       fromAccountId: parsed.data.record.fromAccountId,
@@ -800,10 +802,10 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     }
     if (dispatchPayload?.success) {
       const dateTypeIds = dispatchPayload.data.items.map((item) => item.dateTypeId);
-      if (await inactiveDispatchReference(parsed.data.workspaceId, parsed.data.farmId!, parsed.data.seasonId!, "vehicle", [dispatchPayload.data.vehicleId])) {
+      if (await inactiveDispatchReference(parsed.data.workspaceId, parsed.data.farmId!, requestSeasonId, "vehicle", [dispatchPayload.data.vehicleId])) {
         return reply.code(403).send({ message: "Select an active vehicle from this workspace farm and season." });
       }
-      if (await inactiveDispatchReference(parsed.data.workspaceId, parsed.data.farmId!, parsed.data.seasonId!, "dateType", dateTypeIds)) {
+      if (await inactiveDispatchReference(parsed.data.workspaceId, parsed.data.farmId!, requestSeasonId, "dateType", dateTypeIds)) {
         return reply.code(403).send({ message: "Select active date types from this workspace farm and season." });
       }
     }
@@ -825,7 +827,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       }
       const accountValidation = await validateTenantReferencesDetailed(parsed.data.workspaceId, {
         farmId: parsed.data.farmId,
-        seasonId: parsed.data.seasonId,
+        seasonId: requestSeasonId,
         accountId: parsed.data.record.accountId,
       });
       if (accountValidation) {
@@ -878,13 +880,13 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       [existing] = await db.select().from(operationalRecords).where(and(
         eq(operationalRecords.workspaceId, parsed.data.workspaceId),
         eq(operationalRecords.farmId, parsed.data.farmId!),
-        eq(operationalRecords.seasonId, parsed.data.seasonId!),
+        requestSeasonId ? eq(operationalRecords.seasonId, requestSeasonId) : isNull(operationalRecords.seasonId),
         eq(operationalRecords.entityType, "attendance"),
         sql`${operationalRecords.payload}->>'labourerId' = ${parsed.data.record.labourerId}`,
         sql`${operationalRecords.payload}->>'date' = ${parsed.data.record.date}`,
       )).limit(1);
     }
-    if (existing && (existing.farmId !== (parsed.data.farmId ?? null) || existing.seasonId !== (parsed.data.seasonId ?? null))) {
+    if (existing && (existing.farmId !== (parsed.data.farmId ?? null) || (parsed.data.entity !== "dateType" && existing.seasonId !== requestSeasonId))) {
       return reply.code(403).send({ message: "Operational record does not belong to the selected farm and season." });
     }
     if (!existing && !hasModulePermission(request.appUser, parsed.data.workspaceId, entityModule(parsed.data.entity), "create")) {
@@ -927,7 +929,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       const saleLinkError = await validateLinkedDispatchSale({
         workspaceId: parsed.data.workspaceId,
         farmId: parsed.data.farmId!,
-        seasonId: parsed.data.seasonId!,
+        seasonId: requestSeasonId ?? parsed.data.seasonId!,
         record: parsed.data.record,
         existingRecordId: existing?.clientRecordId,
       });
@@ -991,7 +993,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       }
     }
     const values = {
-      workspaceId: parsed.data.workspaceId, farmId: parsed.data.farmId, seasonId: parsed.data.seasonId,
+      workspaceId: parsed.data.workspaceId, farmId: parsed.data.farmId, seasonId: requestSeasonId,
       clientRecordId: existing?.clientRecordId ?? parsed.data.record.id, entityType: parsed.data.entity, payload,
       recordedBy: request.appUser.id, clientUpdatedAt, updatedAt: new Date(),
     };
@@ -1012,7 +1014,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
               const voucherNumber = normalizedVoucher.resolvedVoucherNumber;
               if (!voucherNumber) throw new Error("Voucher number is required.");
               await reserveVoucherNumber(tx, parsed.data.workspaceId, parsed.data.farmId!, voucherNumber, existing.clientRecordId);
-              await bumpVoucherSequence(tx, parsed.data.workspaceId, parsed.data.farmId!, parsed.data.seasonId, voucherNumber);
+              await bumpVoucherSequence(tx, parsed.data.workspaceId, parsed.data.farmId!, requestSeasonId, voucherNumber);
               if (localDevelopmentMode && normalizedVoucher.importedVoucher && !normalizedVoucher.explicitVoucherNumberEdit && normalizedRequestedVoucherNumber && normalizedVoucher.canonicalNumber && normalizedRequestedVoucherNumber !== normalizedVoucher.canonicalNumber) {
                 console.warn("IMPORTED_VOUCHER_NUMBER_WRITE_BLOCKED", {
                   voucherId: existing.clientRecordId,
@@ -1057,7 +1059,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
                   tx,
                   parsed.data.workspaceId,
                   parsed.data.farmId!,
-                  parsed.data.seasonId,
+                  requestSeasonId,
                   normalizedVoucher.resolvedVoucherNumber || undefined,
                 ),
                 createdBy: request.appUser!.id,
@@ -1126,29 +1128,33 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     if (!selected?.activeFarmId || parsed.data.farmId !== selected.activeFarmId) {
       return reply.code(403).send({ message: "Select the active farm before deleting records." });
     }
-    const generalFarmExpenseDelete = parsed.data.entity === "voucher" && parsed.data.seasonId === null;
-    if (!generalFarmExpenseDelete && (!selected.activeSeasonId || parsed.data.seasonId !== selected.activeSeasonId)) {
+    const requestSeasonId = parsed.data.entity === "dateType" ? null : (parsed.data.seasonId ?? null);
+    const generalFarmExpenseDelete = parsed.data.entity === "voucher" && requestSeasonId === null;
+    if (parsed.data.entity !== "dateType" && !generalFarmExpenseDelete && (!selected.activeSeasonId || requestSeasonId !== selected.activeSeasonId)) {
       return reply.code(403).send({ message: "Select an active season before deleting records." });
     }
     const ownershipError = await validateTenantReferences(parsed.data.workspaceId, {
       farmId: parsed.data.farmId,
-      seasonId: parsed.data.seasonId,
+      seasonId: parsed.data.entity === "dateType" ? undefined : requestSeasonId,
     });
     if (ownershipError) return reply.code(403).send({ message: ownershipError });
     if (parsed.data.entity !== "attendance") {
       if (!hasPermission(request.appUser, "MANAGE_RECORDS", parsed.data.workspaceId)) {
         return reply.code(403).send({ message: "Workspace record management permission is required to delete financial records." });
       }
+      const seasonCondition = parsed.data.entity === "dateType"
+        ? undefined
+        : (requestSeasonId ? eq(operationalRecords.seasonId, requestSeasonId) : isNull(operationalRecords.seasonId));
       const [entry] = await db.select().from(operationalRecords).where(and(
         eq(operationalRecords.workspaceId, parsed.data.workspaceId),
         eq(operationalRecords.farmId, parsed.data.farmId),
-        parsed.data.seasonId ? eq(operationalRecords.seasonId, parsed.data.seasonId) : isNull(operationalRecords.seasonId),
         eq(operationalRecords.entityType, parsed.data.entity),
         eq(operationalRecords.clientRecordId, parsed.data.recordId),
+        seasonCondition,
       )).limit(1);
       if (!entry) return reply.code(204).send();
       if ((parsed.data.entity === "vehicle" || parsed.data.entity === "dateType")
-        && await dispatchMasterIsUsed(parsed.data.workspaceId, parsed.data.farmId, parsed.data.seasonId, parsed.data.entity, parsed.data.recordId)) {
+        && await dispatchMasterIsUsed(parsed.data.workspaceId, parsed.data.farmId, parsed.data.entity === "dateType" ? null : requestSeasonId, parsed.data.entity, parsed.data.recordId)) {
         return reply.code(409).send({ message: `${parsed.data.entity === "vehicle" ? "Vehicle" : "Date type"} cannot be deleted because it is used by a dispatch.` });
       }
       if (parsed.data.entity === "dispatch" || parsed.data.entity === "vehicle" || parsed.data.entity === "dateType") {
@@ -1194,7 +1200,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     const [deleted] = await db.delete(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, parsed.data.workspaceId),
       eq(operationalRecords.farmId, parsed.data.farmId),
-      eq(operationalRecords.seasonId, parsed.data.seasonId),
+      eq(operationalRecords.seasonId, requestSeasonId!),
       eq(operationalRecords.entityType, parsed.data.entity),
       eq(operationalRecords.clientRecordId, parsed.data.recordId),
     )).returning({ id: operationalRecords.id });

@@ -134,6 +134,11 @@ export function WorkspaceLayout() {
       default: return t("sync.statusPending");
     }
   };
+  const formatQueueDateTime = (value?: string | null) => {
+    if (!value) return "-";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  };
   return (
     <div className={`app-shell${isDashboardHome ? " app-shell--dashboard-home" : ""}`}>
       <aside className="app-sidebar">
@@ -189,31 +194,33 @@ export function WorkspaceLayout() {
             {queueItems.map((item) => (
               <article key={item.id} className={`sync-queue-item sync-queue-item--${item.status ?? "pending"}`}>
                 <div className="sync-queue-item__meta">
-                  <strong>{item.entity} · {item.operation}</strong>
-                  <span>{queueStatusLabel(item.status)}</span>
+                  <strong>{item.entity === "dateType" ? "Date Type could not sync" : `${item.entity} · ${item.operation}`}</strong>
+                  <span>{item.entity === "dateType" ? "This setting could not sync because of an old app context." : queueStatusLabel(item.status)}</span>
                 </div>
-                <p>{t("sync.queueItemId")}: {item.id}</p>
-                <p>Client record: {typeof (item.payload as { id?: unknown })?.id === "string" ? (item.payload as { id: string }).id : "-"}</p>
-                <p>Workspace: {item.workspaceId}</p>
-                <p>Farm: {item.farmId ?? "-"}</p>
-                <p>Season: {item.seasonId ?? "-"}</p>
-                <p>{t("sync.createdAt")}: {new Date(item.createdAt).toLocaleString()}</p>
-                <p>{t("sync.retryCount")}: {item.attempts}</p>
-                {item.lastAttemptedAt ? <p>{t("sync.lastAttemptedAt")}: {new Date(item.lastAttemptedAt).toLocaleString()}</p> : null}
+                <div className="sync-queue-item__facts">
+                  <p><span>Type</span><strong>{item.entity === "dateType" ? "Date Type" : item.entity}</strong></p>
+                  <p><span>Action</span><strong>{item.operation === "update" ? "Update" : item.operation === "delete" ? "Delete" : "Create"}</strong></p>
+                  <p><span>Created</span><strong>{formatQueueDateTime(item.createdAt)}</strong></p>
+                  <p><span>Last attempted</span><strong>{formatQueueDateTime(item.lastAttemptedAt)}</strong></p>
+                  <p><span>Retry count</span><strong>{item.attempts}</strong></p>
+                </div>
                 {item.status === "permission_denied" ? <p className="sync-queue-item__error">{t("sync.permissionDeniedHint")}</p> : null}
                 {item.status === "stale_context" ? <p className="sync-queue-item__error">{t("sync.staleContextHint")}</p> : null}
                 {item.lastError ? <p className="sync-queue-item__error">{t("sync.lastError")}: {item.lastError}</p> : null}
-                {"errorStatus" in item && item.errorStatus ? <p>HTTP status: {item.errorStatus}</p> : null}
-                {"errorCode" in item && item.errorCode ? <p>Error code: {item.errorCode}</p> : null}
-                {"errorMessage" in item && item.errorMessage ? <p>Backend message: {item.errorMessage}</p> : null}
-                {"errorDetails" in item && item.errorDetails && typeof item.errorDetails === "object" ? <>
-                  {"selectedRole" in (item.errorDetails as Record<string, unknown>) ? <p>Selected role: {String((item.errorDetails as Record<string, unknown>).selectedRole ?? "-")}</p> : null}
-                  {"permissionKey" in (item.errorDetails as Record<string, unknown>) ? <p>Required permission: {String((item.errorDetails as Record<string, unknown>).permissionKey ?? "-")}</p> : null}
-                  {"farmAccessResult" in (item.errorDetails as Record<string, unknown>) ? <p>Context result: farm access {String((item.errorDetails as Record<string, unknown>).farmAccessResult)}</p> : null}
-                  {"code" in (item.errorDetails as Record<string, unknown>) ? <p>Context code: {String((item.errorDetails as Record<string, unknown>).code ?? "-")}</p> : null}
-                  {"effectivePermissions" in (item.errorDetails as Record<string, unknown>) ? <pre className="sync-queue-item__details">effectivePermissions: {JSON.stringify((item.errorDetails as Record<string, unknown>).effectivePermissions, null, 2)}</pre> : null}
-                  <pre className="sync-queue-item__details">details: {JSON.stringify(item.errorDetails, null, 2)}</pre>
-                </> : null}
+                <details className="sync-queue-item__technical">
+                  <summary>Technical details</summary>
+                  <div className="sync-queue-item__technical-body">
+                    <p>Queue item: <code>{item.id}</code></p>
+                    <p>Client record: <code>{typeof (item.payload as { id?: unknown })?.id === "string" ? (item.payload as { id: string }).id : "-"}</code></p>
+                    <p>Workspace: <code>{item.workspaceId}</code></p>
+                    <p>Farm: <code>{item.farmId ?? "-"}</code></p>
+                    <p>Season: <code>{item.seasonId ?? "-"}</code></p>
+                    {"errorStatus" in item && item.errorStatus ? <p>HTTP status: <code>{item.errorStatus}</code></p> : null}
+                    {"errorCode" in item && item.errorCode ? <p>Error code: <code>{item.errorCode}</code></p> : null}
+                    {"errorMessage" in item && item.errorMessage ? <p>Backend message: <code>{item.errorMessage}</code></p> : null}
+                    {"errorDetails" in item && item.errorDetails && typeof item.errorDetails === "object" ? <pre className="sync-queue-item__details">details: {JSON.stringify(item.errorDetails, null, 2)}</pre> : null}
+                  </div>
+                </details>
                 <div className="sync-queue-item__actions">
                   {item.status !== "permission_denied" && item.status !== "stale_context" && <button type="button" onClick={() => void retrySyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.retryItem")}</button>}
                   {item.status === "stale_context" && <button type="button" onClick={() => void repairStaleSyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.repairStaleContext")}</button>}

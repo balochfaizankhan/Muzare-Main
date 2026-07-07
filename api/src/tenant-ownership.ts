@@ -367,7 +367,7 @@ export async function validateTenantReferencesDetailed(workspaceId: string, refe
       const dateTypeError = await validateOperationalEntityReference({
         workspaceId,
         farmId: references.farmId,
-        seasonId: references.seasonId,
+        seasonId: undefined,
         clientRecordId: dateTypeId,
         entity: "date type",
         entityTypes: ["dateType"],

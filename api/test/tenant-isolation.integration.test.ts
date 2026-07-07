@@ -370,6 +370,38 @@ test("dispatch masters are tenant scoped and used masters remain protected", asy
   })).statusCode, 204);
 });
 
+test("date types can create and delete without an active season", async () => {
+  const [session] = await db.select({ activeSeasonId: userSessions.activeSeasonId }).from(userSessions)
+    .where(eq(userSessions.userId, alpha.userId)).limit(1);
+  await db.update(userSessions).set({ activeSeasonId: null }).where(eq(userSessions.userId, alpha.userId));
+  const dateTypeId = randomUUID();
+  try {
+    const bootstrap = await request(alpha.token, "GET", "/v1/bootstrap");
+    assert.equal(bootstrap.statusCode, 200);
+    assert.equal(bootstrap.json().activeSeasonId, null);
+
+    const create = await request(alpha.token, "POST", "/v1/workspace/operational-records", {
+      workspaceId: alpha.workspaceId,
+      farmId: alpha.farmId,
+      seasonId: null,
+      entity: "dateType",
+      record: { id: dateTypeId, createdAt: now, updatedAt: now, name: "Mabroom", active: true },
+    });
+    assert.equal(create.statusCode, 200);
+
+    const deletion = await request(alpha.token, "DELETE", "/v1/workspace/operational-records", {
+      workspaceId: alpha.workspaceId,
+      farmId: alpha.farmId,
+      seasonId: null,
+      entity: "dateType",
+      recordId: dateTypeId,
+    });
+    assert.equal(deletion.statusCode, 204);
+  } finally {
+    await db.update(userSessions).set({ activeSeasonId: session?.activeSeasonId ?? alpha.seasonId }).where(eq(userSessions.userId, alpha.userId));
+  }
+});
+
 test("dispatch-linked sales enforce remaining cartons and active dispatch references", async () => {
   const accountId = await createAccount(alpha, "Dispatch Sale Cash");
   const vehicleId = randomUUID();

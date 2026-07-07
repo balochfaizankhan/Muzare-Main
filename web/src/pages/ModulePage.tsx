@@ -46,8 +46,10 @@ import {
   getActiveWorkspaceId,
   getActiveFarmId,
   getActiveSeasonId,
+  makeConfigRecord,
   makeLocalRecord,
   offlineDb,
+  workspaceConfigRecords,
   workspaceRecords,
   type Account,
   type Advance,
@@ -2787,7 +2789,7 @@ function DispatchModule() {
   const canManageMasters = canEditDispatch;
   const load = useCallback(async () => (await workspaceRecords(offlineDb.dispatches)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadVehicles = useCallback(() => workspaceRecords(offlineDb.vehicles), []);
-  const loadDateTypes = useCallback(() => workspaceRecords(offlineDb.dateTypes), []);
+  const loadDateTypes = useCallback(() => workspaceConfigRecords(offlineDb.dateTypes), []);
   const loadSales = useCallback(() => workspaceRecords(offlineDb.sales), []);
   const [records, refresh] = useData(load);
   const [vehicles, refreshVehicles] = useData(loadVehicles);
@@ -3011,7 +3013,7 @@ function DispatchDateTypeManager({ dateTypes, dispatches, onClose, onRefresh }: 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (dateTypes.some((item) => item.id !== editing?.id && item.name.trim().toLowerCase() === name.trim().toLowerCase())) return setError(t("dispatchPage.dateTypeExists"));
-    await persistOperationalRecord("dateType", { ...(editing ?? makeLocalRecord()), name: name.trim(), notes: notes.trim(), active });
+    await persistOperationalRecord("dateType", { ...(editing ?? makeConfigRecord()), name: name.trim(), notes: notes.trim(), active });
     reset(); await onRefresh();
   };
   const remove = async (item: DateType) => {
@@ -3019,7 +3021,7 @@ function DispatchDateTypeManager({ dateTypes, dispatches, onClose, onRefresh }: 
     if (window.confirm(t("dispatchPage.deleteDateTypeConfirm", { name: item.name }))) { await deleteOperationalRecord("dateType", item); await onRefresh(); }
   };
   const toggleActive = async (item: DateType) => {
-    await persistOperationalRecord("dateType", { ...item, active: !item.active });
+    await persistOperationalRecord("dateType", { ...item, active: !item.active, seasonId: null });
     await onRefresh();
   };
   return (
@@ -3074,7 +3076,7 @@ function SalesModule() {
   const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }), []);
   const loadDispatches = useCallback(async () => (await workspaceRecords(offlineDb.dispatches)).sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)), []);
   const loadVehicles = useCallback(() => workspaceRecords(offlineDb.vehicles), []);
-  const loadDateTypes = useCallback(() => workspaceRecords(offlineDb.dateTypes), []);
+  const loadDateTypes = useCallback(() => workspaceConfigRecords(offlineDb.dateTypes), []);
   const [sales, refresh] = useData(load);
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
   const [dispatches] = useData(loadDispatches);

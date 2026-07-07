@@ -24,10 +24,7 @@ function pickFarm(records: FarmRow[], preferredId: string | null | undefined) {
 }
 
 function pickSeason(records: SeasonRow[], preferredId: string | null | undefined) {
-  return (preferredId ? records.find((season) => season.id === preferredId && season.status === "active") : null)
-    ?? records.find((season) => season.status === "active")
-    ?? records.find((season) => season.status !== "archived")
-    ?? null;
+  return preferredId ? records.find((season) => season.id === preferredId && season.status === "active") ?? null : null;
 }
 
 async function validFarms(workspaceId: string, allowedFarmIds?: string[] | null) {
@@ -325,7 +322,9 @@ export async function repairWorkspaceContext(workspaceId: string, actorUserId: s
       .where(and(eq(seasons.workspaceId, workspaceId), eq(seasons.farmId, targetFarm.id)))
       .orderBy(desc(seasons.startsOn));
 
-    let targetSeason = pickSeason(existingSeasons, null);
+    let targetSeason = existingSeasons.find((season) => season.status === "active")
+      ?? existingSeasons.find((season) => season.status !== "archived")
+      ?? null;
     const importYear = new Date().getFullYear();
     if (!targetSeason) {
       const [createdSeason] = await tx.insert(seasons).values({
