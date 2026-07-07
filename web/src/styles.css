@@ -1719,8 +1719,8 @@ button {
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
   display: block;
   flex-shrink: 0;
-  height: 46px;
-  width: 46px;
+  height: 42px;
+  width: 42px;
 }
 
 .dashboard-mobile-header__copy {
@@ -1759,6 +1759,9 @@ button {
 }
 
 .dashboard-mobile-header__status .dashboard-home__sync-chip {
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #fff;
   font-size: 0.68rem;
   min-height: 26px;
   padding-inline: 9px;
@@ -1945,10 +1948,16 @@ button {
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 16px;
   display: grid;
-  gap: 4px;
+  gap: 6px;
   grid-template-columns: auto minmax(0, 1fr);
   padding: 10px 12px;
   min-height: 66px;
+}
+
+.dashboard-hero-card__stat div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
 }
 
 .dashboard-hero-card__stats svg {
@@ -7981,6 +7990,7 @@ button {
     background: rgba(74, 124, 52, 0.1);
     color: #21421e;
     transform: translateY(-1px);
+    padding-inline: 2px;
   }
 
   .app-mobile-bottom-nav__action--add {
@@ -7988,7 +7998,7 @@ button {
     box-shadow: 0 12px 20px rgba(15, 75, 43, 0.22);
     color: #fff;
     margin-top: -8px;
-    min-height: 56px;
+    min-height: 54px;
   }
 
   .app-mobile-bottom-nav__action--add.active {
@@ -8017,8 +8027,8 @@ button {
   }
 
   .dashboard-mobile-header__logo {
-    height: 40px;
-    width: 40px;
+    height: 38px;
+    width: 38px;
   }
 
   .dashboard-mobile-header__copy strong {
