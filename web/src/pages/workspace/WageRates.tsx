@@ -3,11 +3,12 @@ import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { SearchInput } from "../../components/SearchInput";
 import { bulkUpsertWageRates, fetchWageRates, validateWageRateOverlap, type WageRateBulkRowInput, type WageRateOverlapPreview } from "../../lib/api";
-import { compareLabourers, getActiveFarmId, getActiveSeasonId, offlineDb, workspaceRecords, type Labourer, type WageRate } from "../../lib/offline-db";
+import { getActiveFarmId, getActiveSeasonId, offlineDb, workspaceRecords, type Labourer, type WageRate } from "../../lib/offline-db";
 import { canCreate, canEdit } from "../../lib/permissions";
 import { formatMoney } from "../../lib/format";
 import { compareWageRates, getWageRateStatus, normalizeHalfDayRate } from "../../lib/wageRates";
 import { useAuth } from "../../auth/AuthProvider";
+import { getWorkerWorkingPeriod, isWorkerEligibleForWageRatePeriod, sortWorkersForDisplay } from "../../lib/workforceArchive";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const money = formatMoney;
@@ -57,7 +58,7 @@ export function WageRates() {
 
   const refresh = useCallback(async () => {
     const nextLabourers = await workspaceRecords(offlineDb.labourers);
-    setLabourers(nextLabourers.sort(compareLabourers));
+    setLabourers(sortWorkersForDisplay(nextLabourers, { includeArchived: false }));
     if (!activeFarmId || !activeSeasonId) {
       setRates([]);
       return;
@@ -95,10 +96,12 @@ export function WageRates() {
   }, [searchParams]);
 
   const todayKey = today();
-  const filteredLabourers = useMemo(() => labourers.filter((labourer) => {
+  const wageRangeTo = effectiveTo || effectiveFrom;
+  const filteredLabourers = useMemo(() => sortWorkersForDisplay(labourers.filter((labourer) => {
     const term = search.trim().toLowerCase();
-    return !term || labourer.name.toLowerCase().includes(term) || labourer.group.toLowerCase().includes(term);
-  }), [labourers, search]);
+    return isWorkerEligibleForWageRatePeriod(labourer, effectiveFrom, wageRangeTo)
+      && (!term || labourer.name.toLowerCase().includes(term) || labourer.group.toLowerCase().includes(term));
+  }), { includeArchived: false }), [effectiveFrom, labourers, search, wageRangeTo]);
   const ratesByLabourer = useMemo(() => {
     const map = new Map<string, WageRate[]>();
     for (const rate of rates) {
@@ -354,6 +357,7 @@ export function WageRates() {
               {filteredLabourers.map((labourer) => {
                 const draft = drafts[labourer.id] ?? emptyDraft;
                 const latestRate = (ratesByLabourer.get(labourer.id) ?? []).sort(compareWageRates)[0];
+                const workingPeriod = getWorkerWorkingPeriod(labourer);
                 return (
                   <article key={labourer.id} className={`wage-rate-labour-row${selectedIds.includes(labourer.id) ? " is-selected" : ""}`}>
                     <div className="wage-rate-labour-main">
@@ -363,6 +367,7 @@ export function WageRates() {
                       </label>
                       <span>{labourer.group || "-"}</span>
                       <small>{latestRate ? `${t("wageRatesPage.currentRate")}: ${money(latestRate.dailyRate)}` : t("wageRatesPage.noCurrentRate")}</small>
+                      <small>{workingPeriod.workerEnd ? `Left after ${workingPeriod.workerEnd}` : "Active for selected period"}</small>
                     </div>
                     <div className="wage-rate-entry-grid">
                       <input aria-label={`${labourer.name} ${t("wageRatesPage.dailyRate")}`} inputMode="decimal" type="number" min="0" step="0.01" value={draft.dailyRate} onChange={(event) => updateDraft(labourer.id, { dailyRate: event.target.value })} placeholder={t("wageRatesPage.dailyRate")} />

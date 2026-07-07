@@ -34,6 +34,8 @@ export const approvalStatus = pgEnum("approval_status", ["pending", "approved", 
 export const subscriptionStatus = pgEnum("subscription_status", ["trial", "active", "past_due", "suspended", "cancelled"]);
 export const seasonStatus = pgEnum("season_status", ["planned", "active", "closed", "archived"]);
 export const attendanceStatus = pgEnum("attendance_status", ["P", "H", "A"]);
+export const labourArchiveType = pgEnum("labour_archive_type", ["labour_period", "attendance", "advances_payments", "wage_settlement", "full_period"]);
+export const labourArchiveBatchStatus = pgEnum("labour_archive_batch_status", ["draft", "validated", "archived", "restored"]);
 export const transactionType = pgEnum("transaction_type", ["credit", "debit"]);
 export const transactionSource = pgEnum("transaction_source", [
   "opening",
@@ -568,6 +570,50 @@ export const operationalRecords = pgTable(
       columns: [table.workspaceId, table.farmId, table.seasonId],
       foreignColumns: [seasons.workspaceId, seasons.farmId, seasons.id],
       name: "operational_records_workspace_farm_season_fk",
+    }),
+  ],
+);
+
+export const labourPeriodArchiveBatches = pgTable(
+  "labour_period_archive_batches",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+    farmId: uuid("farm_id").references(() => farms.id).notNull(),
+    seasonId: uuid("season_id").references(() => seasons.id).notNull(),
+    archiveType: labourArchiveType("archive_type").notNull(),
+    archiveReason: text("archive_reason").notNull(),
+    attendanceFrom: date("attendance_from"),
+    attendanceTo: date("attendance_to"),
+    labourWorkFrom: date("labour_work_from"),
+    labourWorkTo: date("labour_work_to"),
+    advancesFrom: date("advances_from"),
+    advancesTo: date("advances_to"),
+    settlementFrom: date("settlement_from"),
+    settlementTo: date("settlement_to"),
+    status: labourArchiveBatchStatus("status").default("draft").notNull(),
+    metadata: jsonb("metadata").$type<Record<string, unknown> | null>(),
+    validationSummary: jsonb("validation_summary").$type<Record<string, unknown> | null>(),
+    createdBy: uuid("created_by").references(() => users.id).notNull(),
+    validatedAt: timestamp("validated_at", { withTimezone: true }),
+    validatedBy: uuid("validated_by").references(() => users.id),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    archivedBy: uuid("archived_by").references(() => users.id),
+    restoredAt: timestamp("restored_at", { withTimezone: true }),
+    restoredBy: uuid("restored_by").references(() => users.id),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("labour_period_archive_batches_workspace_uidx").on(table.workspaceId, table.id),
+    foreignKey({
+      columns: [table.workspaceId, table.farmId],
+      foreignColumns: [farms.workspaceId, farms.id],
+      name: "labour_period_archive_batches_workspace_farm_fk",
+    }),
+    foreignKey({
+      columns: [table.workspaceId, table.farmId, table.seasonId],
+      foreignColumns: [seasons.workspaceId, seasons.farmId, seasons.id],
+      name: "labour_period_archive_batches_workspace_farm_season_fk",
     }),
   ],
 );

@@ -755,6 +755,60 @@ export type WageRateRecord = {
   updatedAt: string;
   deletedAt?: string | null;
 };
+export type LabourArchiveType = "labour_period" | "attendance" | "advances_payments" | "wage_settlement" | "full_period";
+export type LabourArchiveBatchStatus = "draft" | "validated" | "archived" | "restored";
+export type LabourArchiveValidationIssue = {
+  code: string;
+  message: string;
+  count: number;
+};
+export type LabourArchivePreview = {
+  attendanceCount: number;
+  labourWorkCount: number;
+  advanceCount: number;
+  settlementCount: number;
+  voucherCount: number;
+  affectedLabourCount: number;
+  affectedAccounts: string[];
+  affectedPartners: string[];
+  ranges: Record<string, { from: string | null; to: string | null }>;
+};
+export type LabourArchiveValidation = {
+  blocking: boolean;
+  issues: LabourArchiveValidationIssue[];
+  pendingSyncCount: number;
+  lockedCount: number;
+  archivedCount: number;
+  accountingMismatchCount: number;
+};
+export type LabourArchiveBatch = {
+  id: string;
+  workspaceId: string;
+  farmId: string;
+  seasonId: string;
+  archiveType: LabourArchiveType;
+  archiveReason: string;
+  attendanceFrom: string | null;
+  attendanceTo: string | null;
+  labourWorkFrom: string | null;
+  labourWorkTo: string | null;
+  advancesFrom: string | null;
+  advancesTo: string | null;
+  settlementFrom: string | null;
+  settlementTo: string | null;
+  status: LabourArchiveBatchStatus;
+  metadata: Record<string, unknown> | null;
+  validationSummary: LabourArchiveValidation | null;
+  createdAt: string;
+  createdBy: string;
+  validatedAt: string | null;
+  validatedBy: string | null;
+  archivedAt: string | null;
+  archivedBy: string | null;
+  restoredAt: string | null;
+  restoredBy: string | null;
+  updatedAt: string;
+};
 export type WageRateBulkRowInput = {
   id?: string;
   labourerId: string;
@@ -1457,6 +1511,76 @@ export const previewLabourWageSettlement = (
   token,
   { timeoutMs: 60_000, debugLabel: "labour-wage-settlement-preview" },
 );
+export const fetchLabourArchiveBatches = (
+  token: string,
+  workspaceId: string,
+  filters: { farmId: string; seasonId: string },
+) => {
+  const query = new URLSearchParams({ farmId: filters.farmId, seasonId: filters.seasonId });
+  return apiRequest<{ batches: LabourArchiveBatch[] }>(`/v1/workspace/${workspaceId}/labour-period-archives?${query.toString()}`, {}, token);
+};
+export const previewLabourArchive = (
+  token: string,
+  workspaceId: string,
+  input: {
+    farmId: string;
+    seasonId: string;
+    archiveType: LabourArchiveType;
+    archiveReason: string;
+    attendanceFrom?: string;
+    attendanceTo?: string;
+    labourWorkFrom?: string;
+    labourWorkTo?: string;
+    advancesFrom?: string;
+    advancesTo?: string;
+    settlementFrom?: string;
+    settlementTo?: string;
+    metadata?: Record<string, unknown>;
+  },
+) => apiRequest<{ preview: LabourArchivePreview; validationSummary: LabourArchiveValidation; canArchive: boolean }>(
+  `/v1/workspace/${workspaceId}/labour-period-archives/preview`,
+  { method: "POST", body: JSON.stringify(input) },
+  token,
+  { timeoutMs: 60_000, debugLabel: "labour-archive-preview" },
+);
+export const validateLabourArchive = (
+  token: string,
+  workspaceId: string,
+  input: {
+    farmId: string;
+    seasonId: string;
+    archiveType: LabourArchiveType;
+    archiveReason: string;
+    attendanceFrom?: string;
+    attendanceTo?: string;
+    labourWorkFrom?: string;
+    labourWorkTo?: string;
+    advancesFrom?: string;
+    advancesTo?: string;
+    settlementFrom?: string;
+    settlementTo?: string;
+    metadata?: Record<string, unknown>;
+  },
+) => apiRequest<{ batch: LabourArchiveBatch; preview: LabourArchivePreview; validationSummary: LabourArchiveValidation }>(
+  `/v1/workspace/${workspaceId}/labour-period-archives/validate`,
+  { method: "POST", body: JSON.stringify(input) },
+  token,
+  { timeoutMs: 60_000, debugLabel: "labour-archive-validate" },
+);
+export const archiveLabourBatch = (token: string, workspaceId: string, batchId: string) =>
+  apiRequest<{ batchId: string; archivedCount: number; validationSummary: LabourArchiveValidation }>(
+    `/v1/workspace/${workspaceId}/labour-period-archives/${batchId}/archive`,
+    { method: "POST" },
+    token,
+    { timeoutMs: 60_000, debugLabel: "labour-archive-archive" },
+  );
+export const restoreLabourArchiveBatch = (token: string, workspaceId: string, batchId: string) =>
+  apiRequest<{ batchId: string; restoredCount: number }>(
+    `/v1/workspace/${workspaceId}/labour-period-archives/${batchId}/restore`,
+    { method: "POST", body: JSON.stringify({ confirmation: "RESTORE" }) },
+    token,
+    { timeoutMs: 60_000, debugLabel: "labour-archive-restore" },
+  );
 export const fetchLabourWageSettlement = (
   token: string,
   workspaceId: string,

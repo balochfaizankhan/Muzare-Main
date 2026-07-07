@@ -39,6 +39,7 @@ import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { getVoucherDisplayNumber, normalizeVoucherNumber, parseVoucherSequenceNumber } from "../lib/vouchers";
 import { getActiveVouchers, getVisibleVouchers, loadWorkspaceVouchers } from "../lib/voucherCollections";
 import { compareWageRates, getWageRateStatus, normalizeHalfDayRate, summarizeAttendanceWages } from "../lib/wageRates";
+import { getWorkerWorkingPeriod, isWorkerEligibleForAttendance, sortWorkersForDisplay } from "../lib/workforceArchive";
 import {
   compareLabourers,
   ensureLocalAccounts,
@@ -74,9 +75,8 @@ const shortDate = (value: string) => formatDate(value, { day: "numeric", month: 
 const readableSyncTime = (value: string | null) => value ? new Date(value).toLocaleString() : "Not synced yet";
 const paymentTypes = ["daily_wage", "production_based", "contract_lump_sum", "monthly_salary", "other"] as const;
 type PaymentType = typeof paymentTypes[number];
-const hasEndedBefore = (labourer: Labourer, date: string) => Boolean(labourer.endedOn && labourer.endedOn < date);
-const isInactiveOn = (labourer: Labourer, date: string) => labourer.active === false || hasEndedBefore(labourer, date);
-const canMarkAttendanceOn = (labourer: Labourer, date: string) => !isInactiveOn(labourer, date);
+const isInactiveOn = (labourer: Labourer, date: string) => !isWorkerEligibleForAttendance(labourer, date);
+const canMarkAttendanceOn = (labourer: Labourer, date: string) => isWorkerEligibleForAttendance(labourer, date);
 type AccountLedgerRow = {
   id: string;
   date: string;
@@ -258,19 +258,19 @@ function WorkforceModule({
       console.warn("Duplicate attendance records detected for labour/date. Showing the newest record deterministically.", duplicates);
     }
   }, [attendanceLookup.duplicates, yesterdayLookup.duplicates]);
-  const filteredLabourers = labourers.filter((labourer) => {
+  const filteredLabourers = sortWorkersForDisplay(labourers.filter((labourer) => {
     const status = attendanceByLabourer.get(attendanceStatusKey(labourer.id, date));
     const matchesActive = showInactiveLabour || canMarkAttendanceOn(labourer, date);
     const matchesStatus = attendanceFilter === "all" || status === attendanceFilter;
     const matchesSearch = labourer.name.toLowerCase().includes(attendanceSearch.trim().toLowerCase());
     const matchesGroup = groupFilterId === "all" || labourer.groupId === groupFilterId;
     return matchesActive && matchesStatus && matchesSearch && matchesGroup;
-  });
+  }), { includeArchived: false });
   const filteredLabourerIds = useMemo(() => filteredLabourers.map((item) => item.id), [filteredLabourers]);
   const presentToday = [...attendanceByLabourer.values()].filter((item) => item === "present").length;
   const halfDayToday = [...attendanceByLabourer.values()].filter((item) => item === "half_day").length;
   const absentToday = [...attendanceByLabourer.values()].filter((item) => item === "absent").length;
-  const filteredRegister = labourers.filter((labourer) => {
+  const filteredRegister = sortWorkersForDisplay(labourers.filter((labourer) => {
     const term = labourSearch.trim().toLowerCase();
     if (!term) return true;
     const status = labourer.active === false ? "inactive" : "active";
@@ -279,7 +279,7 @@ function WorkforceModule({
       || (labourer.group ?? "").toLowerCase().includes(term)
       || status.includes(term);
   }).filter((labourer) => (groupFilterId === "all" || labourer.groupId === groupFilterId)
-    && (paymentTypeFilter === "all" || (labourer.paymentType ?? "daily_wage") === paymentTypeFilter));
+    && (paymentTypeFilter === "all" || (labourer.paymentType ?? "daily_wage") === paymentTypeFilter)), { includeArchived: true });
   const selectedAttendance = selectedLabourer
     ? attendance.filter((entry) => entry.labourerId === selectedLabourer.id)
     : [];
@@ -452,8 +452,13 @@ function WorkforceModule({
                 <span className="workforce-row__body">
                   <strong>{labourer.name}</strong>
                   <span>{labourer.group} • {paymentTypeLabel(labourer.paymentType)}</span>
-                  <em className={isInactiveOn(labourer, today()) ? "status-inactive" : "status-active"}>{isInactiveOn(labourer, today()) ? t("common.inactive") : t("common.active")}</em>
-                  {labourer.endedOn && <small>{t("workforcePage.endDate")}: {labourer.endedOn}</small>}
+                  <em className={labourer.isArchived ? "status-archived" : isInactiveOn(labourer, today()) ? "status-inactive" : "status-active"}>
+                    {labourer.isArchived ? "Archived" : isInactiveOn(labourer, today()) ? t("common.inactive") : t("common.active")}
+                  </em>
+                  {(() => {
+                    const period = getWorkerWorkingPeriod(labourer);
+                    return period.workerEnd ? <small>{t("workforcePage.endDate")}: {period.workerEnd}</small> : null;
+                  })()}
                 </span>
                 <button className="workforce-row__action" type="button" onClick={(event) => {
                   event.preventDefault();
@@ -574,12 +579,12 @@ function WorkforceModule({
             <div className="worker-dialog__body">
               <h3>{t("workforcePage.attendanceStatistics")}</h3>
               <dl className="worker-stats">
-                <div><dt>{t("common.status")}</dt><dd className={selectedLabourer.active === false ? "negative" : "positive"}>{selectedLabourer.active === false ? t("common.inactive") : t("common.active")}</dd></div>
+                <div><dt>{t("common.status")}</dt><dd className={selectedLabourer.isArchived ? "negative" : selectedLabourer.active === false ? "negative" : "positive"}>{selectedLabourer.isArchived ? "Archived" : selectedLabourer.active === false ? t("common.inactive") : t("common.active")}</dd></div>
                 <div><dt>{t("workforcePage.paymentTypeLabel")}</dt><dd>{translatePaymentType(selectedLabourer.paymentType ?? "daily_wage")}</dd></div>
                 <div><dt>{t("workforcePage.paymentSummary")}</dt><dd>{labourPaymentSummary(selectedLabourer)}</dd></div>
                 <div><dt>{t("workforcePage.groupLabel")}</dt><dd>{selectedLabourer.group}</dd></div>
-                <div><dt>{t("workforcePage.joinDate")}</dt><dd>{selectedLabourer.joinedOn ?? selectedLabourer.createdAt.slice(0, 10)}</dd></div>
-                <div><dt>{t("workforcePage.endDate")}</dt><dd>{selectedLabourer.endedOn || "-"}</dd></div>
+                <div><dt>{t("workforcePage.joinDate")}</dt><dd>{getWorkerWorkingPeriod(selectedLabourer).workerStart}</dd></div>
+                <div><dt>{t("workforcePage.endDate")}</dt><dd>{getWorkerWorkingPeriod(selectedLabourer).workerEnd || "-"}</dd></div>
                 <div><dt>{t("workforcePage.present")}</dt><dd>{presentCount}</dd></div>
                 <div><dt>{t("workforcePage.halfDay")}</dt><dd>{halfDayCount}</dd></div>
                 <div><dt>{t("workforcePage.absent")}</dt><dd>{absentCount}</dd></div>

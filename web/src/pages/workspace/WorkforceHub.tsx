@@ -10,9 +10,10 @@ import { useSyncState } from "../../hooks/useSyncState";
 import { formatMoney } from "../../lib/format";
 import { getActiveLabourWageSettlements, outstandingLabourAdvances } from "../../lib/labourWageSettlements";
 import { canCreate, hasModulePermission } from "../../lib/permissions";
-import { compareLabourers, getActiveFarmId, getActiveSeasonId, makeLocalRecord, offlineDb, workspaceRecords, type LabourEarning, type LabourPayment, type LabourWageSettlement, type Labourer, type WageRate } from "../../lib/offline-db";
+import { getActiveFarmId, getActiveSeasonId, makeLocalRecord, offlineDb, workspaceRecords, type LabourEarning, type LabourPayment, type LabourWageSettlement, type Labourer, type WageRate } from "../../lib/offline-db";
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
 import { compareWageRates, getWageRateStatus } from "../../lib/wageRates";
+import { sortWorkersForDisplay } from "../../lib/workforceArchive";
 import { persistOperationalRecord } from "../../services/syncService";
 
 const money = formatMoney;
@@ -100,6 +101,7 @@ export function WorkforceSectionLayout() {
     { to: "/workspace/workforce/labour", label: "Labour" },
     { to: "/workspace/workforce/attendance", label: t("layout.attendance") },
     { to: "/workspace/workforce/reports", label: "Workforce Reports" },
+    { to: "/workspace/workforce/archive", label: "Archive Center" },
   ];
   return (
     <WorkforceShell
@@ -162,7 +164,7 @@ export function LabourPaymentsOverview() {
       workspaceRecords(offlineDb.labourWageSettlements, { includeDeleted: true }),
       workspaceRecords(offlineDb.advances),
     ]);
-    setLabourers(nextLabourers.sort(compareLabourers));
+    setLabourers(sortWorkersForDisplay(nextLabourers, { includeArchived: false }));
     setEarnings(nextEarnings);
     setPayments(nextPayments);
     setRates(nextRates.sort(compareWageRates));
@@ -345,7 +347,7 @@ export function DirectLabourPaymentsPage() {
       workspaceRecords(offlineDb.labourers, { includeDeleted: true }),
       workspaceRecords(offlineDb.labourPayments, { includeDeleted: true }),
     ]);
-    setLabourers(nextLabourers.sort(compareLabourers));
+    setLabourers(sortWorkersForDisplay(nextLabourers, { includeArchived: false }));
     setPayments(nextPayments.sort((left, right) => right.date.localeCompare(left.date) || right.updatedAt.localeCompare(left.updatedAt)));
   }, []);
 

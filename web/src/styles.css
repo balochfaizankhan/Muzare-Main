@@ -9768,3 +9768,203 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .attendance-register-report .register-status--absent,
   .attendance-register-report .register-status--empty { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+.archive-center-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.archive-center__notice {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.archive-center__notice--error {
+  border-color: rgba(240, 68, 56, 0.24);
+  color: #b42318;
+  background: rgba(254, 243, 242, 0.9);
+}
+
+.archive-center__notice--success {
+  border-color: rgba(18, 183, 106, 0.24);
+  color: #067647;
+  background: rgba(236, 253, 245, 0.9);
+}
+
+.archive-center__form,
+.archive-center__range-grid,
+.archive-center__summary-grid,
+.archive-center__history-grid,
+.archive-center__issues-list {
+  display: grid;
+  gap: 0.875rem;
+}
+
+.archive-center__range-grid,
+.archive-center__summary-grid {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.archive-center__card-header,
+.archive-center__history-header,
+.archive-center__batch-actions,
+.archive-center__batch-meta,
+.archive-center__detail-grid {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.archive-center__card-header h3,
+.archive-center__history-header h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.archive-center__card-header p,
+.archive-center__history-header p {
+  margin: 0.15rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
+.archive-center__grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.archive-center__field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.archive-center__field span,
+.archive-center__summary-card span,
+.archive-center__batch-meta span,
+.archive-center__issue span {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.archive-center__field--full {
+  grid-column: 1 / -1;
+}
+
+.archive-center__range-card,
+.archive-center__summary-card,
+.archive-center__batch-card,
+.archive-center__detail-card,
+.archive-center__issues-card {
+  min-height: 100%;
+}
+
+.archive-center__summary-card strong {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 1.65rem;
+}
+
+.archive-center__detail-grid {
+  flex-direction: column;
+}
+
+.archive-center__detail-grid strong,
+.archive-center__issue strong {
+  display: block;
+  margin-bottom: 0.2rem;
+}
+
+.archive-center__detail-grid p {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.archive-center__issues-list {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.archive-center__issue {
+  padding: 0.85rem 0.95rem;
+  border-radius: 16px;
+  background: rgba(16, 24, 40, 0.03);
+  border: 1px solid rgba(16, 24, 40, 0.08);
+}
+
+.archive-center__issue--subtle {
+  background: rgba(16, 24, 40, 0.02);
+}
+
+.archive-center__badge,
+.archive-center__warning,
+.archive-center__ok {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.35rem 0.65rem;
+  white-space: nowrap;
+}
+
+.archive-center__badge {
+  background: rgba(16, 24, 40, 0.06);
+  color: var(--text-primary);
+}
+
+.archive-center__badge--danger,
+.archive-center__warning {
+  background: rgba(240, 68, 56, 0.12);
+  color: #b42318;
+}
+
+.archive-center__ok {
+  background: rgba(18, 183, 106, 0.12);
+  color: #067647;
+}
+
+.archive-center__status {
+  margin-left: auto;
+}
+
+.archive-center__history-header {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.archive-center__history-grid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.archive-center__batch-card {
+  gap: 0.8rem;
+}
+
+.archive-center__batch-meta {
+  flex-wrap: wrap;
+  color: var(--text-muted);
+}
+
+.archive-center__batch-actions {
+  align-items: center;
+}
+
+.archive-center__footer-note {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+@media (max-width: 720px) {
+  .archive-center__card-header,
+  .archive-center__history-header,
+  .archive-center__batch-actions,
+  .archive-center__batch-meta {
+    flex-direction: column;
+  }
+}

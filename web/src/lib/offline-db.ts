@@ -9,6 +9,15 @@ export type LocalRecord = {
   createdAt: string;
   updatedAt: string;
   deletedAt?: string | null;
+  isArchived?: boolean;
+  archiveBatchId?: string | null;
+  archivedAt?: string | null;
+  archivedBy?: string | null;
+  archiveReason?: string | null;
+  isLocked?: boolean;
+  lockedAt?: string | null;
+  lockedBy?: string | null;
+  lockReason?: string | null;
   pendingSync?: boolean;
 };
 
@@ -82,6 +91,10 @@ export type Labourer = LocalRecord & {
   phone?: string;
   mobile?: string;
   notes?: string;
+  firstAttendanceDate?: string;
+  lastAttendanceDate?: string;
+  inactiveDate?: string;
+  leftDate?: string;
 };
 
 export type Attendance = LocalRecord & {
@@ -578,15 +591,22 @@ export function labourSortValue(labourer: Pick<Labourer, "sortOrder" | "androidS
 }
 
 export function compareLabourers(
-  left: Pick<Labourer, "id" | "name" | "sortOrder" | "androidSortOrder" | "originalIndex" | "createdAt">,
-  right: Pick<Labourer, "id" | "name" | "sortOrder" | "androidSortOrder" | "originalIndex" | "createdAt">,
+  left: Pick<Labourer, "id" | "name" | "sortOrder" | "androidSortOrder" | "originalIndex" | "createdAt" | "active" | "endedOn" | "isArchived">,
+  right: Pick<Labourer, "id" | "name" | "sortOrder" | "androidSortOrder" | "originalIndex" | "createdAt" | "active" | "endedOn" | "isArchived">,
 ) {
+  const statusRank = (worker: Pick<Labourer, "active" | "endedOn" | "isArchived">) => {
+    if (worker.isArchived) return 2;
+    if (worker.active === false || Boolean(worker.endedOn)) return 1;
+    return 0;
+  };
+  const statusDelta = statusRank(left) - statusRank(right);
+  if (statusDelta !== 0) return statusDelta;
+  const nameDelta = left.name.localeCompare(right.name);
+  if (nameDelta !== 0) return nameDelta;
   const sortDelta = labourSortValue(left) - labourSortValue(right);
   if (sortDelta !== 0) return sortDelta;
   const createdDelta = left.createdAt.localeCompare(right.createdAt);
   if (createdDelta !== 0) return createdDelta;
-  const nameDelta = left.name.localeCompare(right.name);
-  if (nameDelta !== 0) return nameDelta;
   return left.id.localeCompare(right.id);
 }
 
