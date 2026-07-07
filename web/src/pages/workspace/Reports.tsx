@@ -1016,6 +1016,7 @@ export function Reports() {
       capitalInjected: 0,
       purchaseVouchersPaid: 0,
       labourAdvancesPaid: 0,
+      outstandingLabourAdvances: 0,
       labourWageSettlements: 0,
       labourSettlementCashPaid: 0,
       labourSettlementNonCashApplied: 0,
@@ -1038,6 +1039,7 @@ export function Reports() {
     }
     const settlementSnapshot = selectedPartnerSnapshot;
     overview.labourAdvancesPaid = settlementSnapshot?.totalLabourAdvancesPaid ?? overview.labourAdvancesPaid;
+    overview.outstandingLabourAdvances = settlementSnapshot?.outstandingLabourAdvances ?? overview.outstandingLabourAdvances;
     overview.labourWageSettlements = settlementSnapshot?.labourWageSettlements ?? overview.labourWageSettlements;
     overview.labourSettlementCashPaid = settlementSnapshot?.labourSettlementCashPaid ?? overview.labourSettlementCashPaid;
     overview.labourSettlementNonCashApplied = settlementSnapshot?.labourSettlementNonCashApplied ?? overview.labourSettlementNonCashApplied;
@@ -1052,6 +1054,7 @@ export function Reports() {
         capitalInjected: number;
         purchaseVouchersPaid: number;
         labourAdvancesPaid: number;
+        outstandingLabourAdvances: number;
         labourWageSettlements: number;
         labourSettlementCashPaid: number;
         labourSettlementNonCashApplied: number;
@@ -1732,7 +1735,7 @@ export function Reports() {
                   <strong>{t("reportsPage.directExpensesPaid")}</strong>
                   <b>{money(partnerAccountLedgerOverviewView.directExpensesPaid)}</b>
                   <small>Purchase vouchers: {money(partnerAccountLedgerOverviewView.purchaseVouchersPaid)}</small>
-                  <small>Labour advances: {money(partnerAccountLedgerOverviewView.labourAdvancesPaid)}</small>
+                  <small>Labour advances: {money(partnerAccountLedgerOverviewView.outstandingLabourAdvances)}</small>
                   <small>Labour settlements cash paid: {money(partnerAccountLedgerOverviewView.labourSettlementCashPaid)}</small>
                 </article>
                 <article><strong>{t("reportsPage.transfersOut")}</strong><span>{money(partnerAccountLedgerOverviewView.transfersOut)}</span></article>
