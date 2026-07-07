@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { getHomePath } from "../lib/permissions";
 
-export function SubpageHeader({ title }: { title: string }) {
+export function SubpageHeader({ title, subtitle }: { title: string; subtitle?: string }) {
   const { t } = useTranslation();
   const { user } = useAuth();
 
@@ -14,7 +14,10 @@ export function SubpageHeader({ title }: { title: string }) {
         <ArrowLeft size={18} />
         <span>{t("common.dashboard")}</span>
       </Link>
-      <h1>{title}</h1>
+      <div className="subpage-toolbar__stack">
+        <h1>{title}</h1>
+        {subtitle && <p>{subtitle}</p>}
+      </div>
     </header>
   );
 }

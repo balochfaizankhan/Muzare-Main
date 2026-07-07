@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { CalendarDays, Camera, ChevronDown, ChevronRight, Eye, FileText, ImageIcon, MoreVertical, Paperclip, Pencil, RotateCw, Search, Trash2, UploadCloud, X } from "lucide-react";
+import { CalendarDays, Camera, ChevronDown, ChevronRight, Eye, FileText, ImageIcon, MoreVertical, Package, PackageCheck, PackageMinus, Paperclip, Pencil, RotateCw, Search, Tag, Trash2, Truck, UploadCloud, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -134,9 +134,9 @@ function Empty({ children }: { children: ReactNode }) {
   return <p className="empty-records">{children}</p>;
 }
 
-function FormCard({ title, children }: { title: ReactNode; children: ReactNode }) {
+function FormCard({ title, children, className }: { title: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <section className="record-panel">
+    <section className={className ? `record-panel ${className}` : "record-panel"}>
       <h2>{title}</h2>
       {children}
     </section>
@@ -2881,48 +2881,124 @@ function DispatchModule() {
   const totalDispatched = filteredRecords.reduce((sum, item) => sum + dispatchCartons(item), 0);
   const totalSold = filteredRecords.reduce((sum, item) => sum + soldCartonsForDispatch(item), 0);
   const totalRemaining = Math.max(totalDispatched - totalSold, 0);
+  const createDispatchTitle = editing ? t("dispatchPage.updateDispatch") : "Create New Dispatch";
+  const submitDispatchLabel = editing ? t("dispatchPage.updateDispatch") : "Create Dispatch";
 
   return (
     <>
-      <div className="dispatch-toolbar">
-        <div><h2>{t("dispatchPage.title")}</h2><p>{t("dispatchPage.description")}</p></div>
-        {canManageMasters && <div><button type="button" onClick={() => setShowVehicles(true)}>{t("dispatchPage.manageVehicles")}</button><button type="button" onClick={() => setShowDateTypes(true)}>{t("dispatchPage.manageTypes")}</button></div>}
-      </div>
-      {(canCreateDispatch || (editing && canEditDispatch)) && <FormCard title={editing ? t("dispatchPage.updateDispatch") : t("dispatchPage.newDispatch")}>
+      <section className="record-panel dispatch-overview-card">
+        <div className="dispatch-section-heading dispatch-section-heading--tight">
+          <div>
+            <h2>Dispatch Overview</h2>
+            <p>Live carton movement at a glance.</p>
+          </div>
+        </div>
+        <div className="dispatch-overview-card__metrics">
+          <article className="dispatch-overview-card__metric">
+            <Package size={18} />
+            <div>
+              <span>{t("dispatchPage.totalDispatchedCartons")}</span>
+              <strong>{totalDispatched}</strong>
+              <small>{t("dispatchPage.cartons")}</small>
+            </div>
+          </article>
+          <article className="dispatch-overview-card__metric">
+            <PackageCheck size={18} />
+            <div>
+              <span>{t("salesPage.soldCartons")}</span>
+              <strong>{totalSold}</strong>
+              <small>{t("dispatchPage.cartons")}</small>
+            </div>
+          </article>
+          <article className="dispatch-overview-card__metric">
+            <PackageMinus size={18} />
+            <div>
+              <span>{t("salesPage.remainingCartons")}</span>
+              <strong>{totalRemaining}</strong>
+              <small>{t("dispatchPage.cartons")}</small>
+            </div>
+          </article>
+        </div>
+      </section>
+      {canManageMasters && <div className="dispatch-support-actions">
+        <button type="button" onClick={() => setShowVehicles(true)}><Truck size={16} />{t("dispatchPage.manageVehicles")}</button>
+        <button type="button" onClick={() => setShowDateTypes(true)}><Tag size={16} />{t("dispatchPage.manageTypes")}</button>
+      </div>}
+      {(canCreateDispatch || (editing && canEditDispatch)) && <FormCard className="dispatch-form-card" title={createDispatchTitle}>
         <form className="module-form dispatch-form" onSubmit={(event) => void submit(event)}>
-          <label><span>{t("dispatchPage.dispatchDate")}</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
-          <label><span>{t("dispatchPage.vehicle")}</span><ClearableSelect required value={vehicleId} onChange={setVehicleId}><option value="">{t("dispatchPage.selectActiveVehicle")}</option>{activeVehicles.map((item) => <option key={item.id} value={item.id}>{item.number}{item.driverName ? ` - ${item.driverName}` : ""}</option>)}</ClearableSelect></label>
-          <label><span>{t("dispatchPage.notes")}</span><input placeholder={t("dispatchPage.optional")} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
+          <div className="dispatch-form__section dispatch-form__section--details">
+            <div className="dispatch-section-heading">
+              <div>
+                <h3>Dispatch Details</h3>
+                <p>Set the dispatch date, vehicle, and any notes.</p>
+              </div>
+            </div>
+            <label className="dispatch-form__field"><span>{t("dispatchPage.dispatchDate")}</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
+            <label className="dispatch-form__field"><span>{t("dispatchPage.vehicle")}</span><ClearableSelect required value={vehicleId} onChange={setVehicleId}><option value="">{t("dispatchPage.selectActiveVehicle")}</option>{activeVehicles.map((item) => <option key={item.id} value={item.id}>{item.number}{item.driverName ? ` - ${item.driverName}` : ""}</option>)}</ClearableSelect></label>
+            <label className="dispatch-form__field dispatch-form__field--full"><span>{t("dispatchPage.notes")}</span><input placeholder={t("dispatchPage.optional")} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
+          </div>
           <div className="dispatch-items">
-            <h3>{t("dispatchPage.dateTypesAndCartons")}</h3>
-            {items.map((item, index) => <div className="dispatch-item-row" key={item.id}>
-              <label><span>{t("dispatchPage.dateType", { index: index + 1 })}</span><ClearableSelect required value={item.dateTypeId} onChange={(value) => updateItem(item.id, "dateTypeId", value)}><option value="">{t("dispatchPage.selectType")}</option>{activeDateTypes.filter((type) => type.id === item.dateTypeId || !items.some((current) => current.id !== item.id && current.dateTypeId === type.id)).map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}</ClearableSelect></label>
-              <label><span>{t("dispatchPage.cartons")}</span><input required type="number" min="1" step="1" value={item.cartons} onChange={(event) => updateItem(item.id, "cartons", event.target.value)} /></label>
-              {items.length > 1 && <button className="danger-link" type="button" onClick={() => setItems((current) => current.filter((currentItem) => currentItem.id !== item.id))}>{t("dispatchPage.remove")}</button>}
-            </div>)}
-            <button className="secondary-action" type="button" onClick={() => setItems((current) => [...current, newDispatchItem()])}>{t("dispatchPage.addItem")}</button>
-            <strong>{t("dispatchPage.totalCartons", { count: items.reduce((sum, item) => sum + (Number(item.cartons) || 0), 0) })}</strong>
+            <div className="dispatch-section-heading">
+              <div>
+                <h3>Carton Entry</h3>
+                <p>Add one date type and carton count per line.</p>
+              </div>
+            </div>
+            <div className="dispatch-section-subhead">
+              <h4>Added Items</h4>
+              <p>Review each item before submitting the dispatch.</p>
+            </div>
+            <div className="dispatch-items__rows">
+              {items.map((item, index) => <article className="dispatch-item-row" key={item.id}>
+                <div className="dispatch-item-row__head">
+                  <span>Item {index + 1}</span>
+                  {items.length > 1 && <button className="danger-link" type="button" onClick={() => setItems((current) => current.filter((currentItem) => currentItem.id !== item.id))}>{t("dispatchPage.remove")}</button>}
+                </div>
+                <div className="dispatch-item-row__fields">
+                  <label><span>{t("dispatchPage.dateType", { index: index + 1 })}</span><ClearableSelect required value={item.dateTypeId} onChange={(value) => updateItem(item.id, "dateTypeId", value)}><option value="">{t("dispatchPage.selectType")}</option>{activeDateTypes.filter((type) => type.id === item.dateTypeId || !items.some((current) => current.id !== item.id && current.dateTypeId === type.id)).map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}</ClearableSelect></label>
+                  <label><span>{t("dispatchPage.cartons")}</span><input required type="number" min="1" step="1" value={item.cartons} onChange={(event) => updateItem(item.id, "cartons", event.target.value)} /></label>
+                </div>
+              </article>)}
+            </div>
+            <div className="dispatch-items__footer">
+              <button className="secondary-action" type="button" onClick={() => setItems((current) => [...current, newDispatchItem()])}>{t("dispatchPage.addItem")}</button>
+            </div>
+          </div>
+          <div className="dispatch-total-card">
+            <span>Total Cartons</span>
+            <strong>{items.reduce((sum, item) => sum + (Number(item.cartons) || 0), 0)}</strong>
           </div>
           {error && <p className="form-error">{error}</p>}
-          <div className="dispatch-form-actions"><button disabled={saving} type="submit">{saving ? t("advancesPage.saving") : editing ? t("dispatchPage.updateDispatch") : t("dispatchPage.newDispatch")}</button>{editing && <button className="secondary-action" type="button" onClick={reset}>{t("common.close")}</button>}</div>
+          <div className="dispatch-form-actions"><button disabled={saving} type="submit">{saving ? t("advancesPage.saving") : submitDispatchLabel}</button>{editing && <button className="secondary-action" type="button" onClick={reset}>{t("common.close")}</button>}</div>
         </form>
       </FormCard>}
-      <div className="summary-grid">
-        <Summary label={t("dispatchPage.totalDispatchedCartons")} value={String(totalDispatched)} />
-        <Summary label={t("salesPage.soldCartons")} value={String(totalSold)} />
-        <Summary label={t("salesPage.remainingCartons")} value={String(totalRemaining)} />
-      </div>
-      <section className="record-panel dispatch-summary">
-        <h2>{t("dispatchPage.dispatchSummary")}</h2>
+      <section className="record-panel dispatch-summary-panel">
+        <div className="dispatch-section-heading">
+          <div>
+            <h2>{t("dispatchPage.dispatchSummary")}</h2>
+            <p>Review dispatch totals by date, vehicle, and type.</p>
+          </div>
+        </div>
         <div className="dispatch-summary__filters"><label><span>{t("reports.dateFrom")}</span><input type="date" value={reportFrom} onChange={(event) => setReportFrom(event.target.value)} /></label><label><span>{t("reports.dateTo")}</span><input type="date" value={reportTo} onChange={(event) => setReportTo(event.target.value)} /></label></div>
-        <div className="dispatch-summary__groups"><div><h3>{t("dispatchPage.byVehicle")}</h3>{[...vehicleTotals].map(([name, total]) => <p key={name}><span>{name}</span><strong>{total} {t("dispatchPage.cartons")}</strong></p>)}</div><div><h3>{t("dispatchPage.byType")}</h3>{[...typeTotals].map(([name, total]) => <p key={name}><span>{name}</span><strong>{total} {t("dispatchPage.cartons")}</strong></p>)}</div></div>
+        <div className="dispatch-summary__groups">
+          <div className="dispatch-summary__group">
+            <h3>{t("dispatchPage.byVehicle")}</h3>
+            <p className="dispatch-summary__hint">View dispatch summary by vehicle</p>
+            {[...vehicleTotals].map(([name, total]) => <p key={name}><span>{name}</span><strong>{total} {t("dispatchPage.cartons")}</strong></p>)}
+          </div>
+          <div className="dispatch-summary__group">
+            <h3>{t("dispatchPage.byType")}</h3>
+            <p className="dispatch-summary__hint">View dispatch summary by type</p>
+            {[...typeTotals].map(([name, total]) => <p key={name}><span>{name}</span><strong>{total} {t("dispatchPage.cartons")}</strong></p>)}
+          </div>
+        </div>
       </section>
-      <section className="record-panel"><h2>{t("dispatchPage.dispatchRecords")}</h2>{!filteredRecords.length ? <Empty>{t("dispatchPage.noDispatches")}</Empty> : <div className="dispatch-list">{filteredRecords.map((record) => {
+      <section className="record-panel dispatch-records-panel"><div className="dispatch-section-heading"><div><h2>{t("dispatchPage.dispatchRecords")}</h2><p>Browse recent dispatches and carton breakdowns.</p></div></div>{!filteredRecords.length ? <Empty>{t("dispatchPage.noDispatches")}</Empty> : <div className="dispatch-list">{filteredRecords.map((record) => {
         const soldCartons = soldCartonsForDispatch(record);
         const remainingCartons = Math.max(dispatchCartons(record) - soldCartons, 0);
         const linkedSales = linkedSalesByDispatch.get(record.id) ?? 0;
         const typeCount = record.items?.length ?? (record.produceType ? 1 : 0);
-        return <article key={record.id}><header><div><strong>{dispatchSerialFor(record)}</strong><h3>{record.vehicleNumber ?? vehicleName(record.vehicleId)}</h3><p>{record.date} · {t("dispatchPage.typeCount", { count: typeCount })}</p></div><b>{dispatchCartons(record)} {t("dispatchPage.cartons")}</b></header><div className="dispatch-breakdown">{record.items?.map((item) => {
+        return <article key={record.id} className="dispatch-record-card"><header><div><strong>{dispatchSerialFor(record)}</strong><h3>{record.vehicleNumber ?? vehicleName(record.vehicleId)}</h3><p>{shortDate(record.date)} · {t("dispatchPage.typeCount", { count: typeCount })}</p></div><b>{dispatchCartons(record)} {t("dispatchPage.cartons")}</b></header><div className="dispatch-breakdown">{record.items?.map((item) => {
           const sold = soldByItem.get(dispatchItemKey(record.id, item.id)) ?? 0;
           const remaining = Math.max(item.cartons - sold, 0);
           return <span key={item.id}>{dateTypeName(item.dateTypeId, item.dateTypeName)}: {item.cartons} | {t("salesPage.soldCartons")} {sold} | {t("salesPage.remainingCartons")} {remaining}</span>;
@@ -4621,15 +4697,15 @@ export function ModulePage({
 
   return (
     <div className="dashboard-page">
-      <SubpageHeader title={moduleTitle} />
+      <SubpageHeader title={moduleTitle} subtitle={module === "dispatch" ? t("dispatchPage.description") : undefined} />
       <main className="subpage module-workspace">
-        <section className="workspace-intro">
+        {module !== "dispatch" && <section className="workspace-intro">
           <div>
             <h2>{moduleTitle}</h2>
             <p>{moduleDescription}</p>
           </div>
           <span className="local-pill">{t("layout.databaseSynced")}</span>
-        </section>
+        </section>}
         {module === "workforce" && <WorkforceModule
           openAttendanceOnLoad={workforceMode === "attendance"}
           openAdvanceOnLoad={workforceMode === "advance"}
