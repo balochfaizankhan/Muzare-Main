@@ -4,7 +4,6 @@ import {
   BanknoteArrowDown,
   CalendarRange,
   CircleUserRound,
-  CloudUpload,
   ClipboardList,
   ChevronRight,
   HandCoins,
@@ -22,7 +21,6 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
-import { ImportVisibilityAuditPanel } from "../components/ImportVisibilityAuditPanel";
 import { calculateAvailableBalance } from "../lib/accounting";
 import { fetchBootstrap, repairWorkspaceContextRequest } from "../lib/api";
 import { getCanonicalExpenseCategory } from "../lib/expenseCategories";
@@ -35,7 +33,6 @@ import { hasPermission } from "../lib/permissions";
 import { getVisibleVouchers, loadWorkspaceVouchers } from "../lib/voucherCollections";
 import { getVoucherDisplayNumber } from "../lib/vouchers";
 import { useSyncState } from "../hooks/useSyncState";
-import { refreshOperationalData, syncNow } from "../services/syncService";
 
 type DashboardTotals = {
   presentToday: number;
@@ -62,7 +59,21 @@ type Activity = {
 
 const today = () => new Date().toISOString().slice(0, 10);
 const money = formatMoney;
+const moneyPrecise = (amount: number) => new Intl.NumberFormat(undefined, {
+  style: "currency",
+  currency: "SAR",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+}).format(amount);
 const capitalize = (value: string) => value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+const formatShortRange = (start: string, end: string) => {
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  const sameYear = startDate.getFullYear() === endDate.getFullYear();
+  const shortFormatter = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+  const longFormatter = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return sameYear ? `${shortFormatter.format(startDate)} – ${longFormatter.format(endDate)}` : `${longFormatter.format(startDate)} – ${longFormatter.format(endDate)}`;
+};
 
 export function DashboardPage() {
   const { t } = useTranslation();
@@ -199,7 +210,7 @@ export function DashboardPage() {
           id: `settlement:${item.id}`,
           path: "/workspace/labour-payments/settlements",
           title: "Wage settlement posted",
-          detail: `${item.fromDate} to ${item.toDate}`,
+          detail: formatShortRange(item.fromDate, item.toDate),
           value: money(item.expenseAmount),
           createdAt: item.createdAt,
           icon: ClipboardList,
@@ -286,7 +297,7 @@ export function DashboardPage() {
   const summaryCards = [
     {
       label: "Cash Balance",
-      value: money(totals.netPosition),
+      value: moneyPrecise(totals.netPosition),
       icon: Wallet,
       path: "/workspace/accounts",
       tone: totals.netPosition >= 0 ? "green" : "orange",
@@ -294,7 +305,7 @@ export function DashboardPage() {
     },
     {
       label: "Total Expenses",
-      value: money(totals.totalExpenses),
+      value: moneyPrecise(totals.totalExpenses),
       icon: BanknoteArrowDown,
       path: "/workspace/reports?report=expenditures",
       tone: "orange",
@@ -302,7 +313,7 @@ export function DashboardPage() {
     },
     {
       label: "Labour Advances",
-      value: money(totals.labourAdvances),
+      value: moneyPrecise(totals.labourAdvances),
       icon: HandCoins,
       path: "/workspace/labour-payments/advances",
       tone: "purple",
@@ -319,11 +330,11 @@ export function DashboardPage() {
   ];
 
   const quickActions = [
-    { to: "/workspace/workforce/attendance", icon: UsersRound, title: "Attendance", detail: "Mark labour presence" },
-    { to: "/workspace/labour-payments/advances", icon: HandCoins, title: "Advances", detail: "Record labour cash" },
-    { to: "/workspace/expenses", icon: ReceiptText, title: "Expenses", detail: "Add a voucher" },
-    { to: "/workspace/dispatch", icon: PackageOpen, title: "Dispatch", detail: "Create a dispatch" },
-    { to: "/workspace/reports", icon: ClipboardList, title: "Reports", detail: "Review summaries" },
+    { to: "/workspace/workforce/attendance", icon: UsersRound, title: "Attendance" },
+    { to: "/workspace/labour-payments/advances", icon: HandCoins, title: "Advances" },
+    { to: "/workspace/expenses", icon: ReceiptText, title: "Expenses" },
+    { to: "/workspace/dispatch", icon: PackageOpen, title: "Dispatch" },
+    { to: "/workspace/reports", icon: ClipboardList, title: "Reports" },
   ];
 
   return (
@@ -334,18 +345,24 @@ export function DashboardPage() {
             <img className="dashboard-mobile-header__logo" src="/muzare-logo.png" alt="Muzare" />
             <div className="dashboard-mobile-header__copy">
               <strong>Muzare</strong>
-              <span>Manage smarter, grow better.</span>
+              <span>{t("dashboardPage.welcome", { name: displayName })}</span>
               <small>{user?.workspaceName ?? t("layout.workspace")}</small>
             </div>
           </div>
-          <div className="dashboard-mobile-header__actions">
-            <Link className="dashboard-mobile-header__icon" to="/workspace/reports" aria-label="Notifications">
-              <Bell size={18} />
-              {sync.pendingCount > 0 && <span className="dashboard-mobile-header__badge">{sync.pendingCount}</span>}
-            </Link>
-            <Link className="dashboard-mobile-header__icon" to="/workspace/settings" aria-label="Profile">
-              <CircleUserRound size={18} />
-            </Link>
+          <div className="dashboard-mobile-header__status">
+            <span className={`dashboard-home__sync-chip dashboard-home__sync-chip--${sync.status}`}>
+              <StatusIcon size={14} />
+              {heroSyncLabel}
+            </span>
+            <div className="dashboard-mobile-header__actions">
+              <Link className="dashboard-mobile-header__icon" to="/workspace/reports" aria-label="Notifications">
+                <Bell size={18} />
+                {sync.pendingCount > 0 && <span className="dashboard-mobile-header__badge">{sync.pendingCount}</span>}
+              </Link>
+              <Link className="dashboard-mobile-header__icon" to="/workspace/settings" aria-label="Profile">
+                <CircleUserRound size={18} />
+              </Link>
+            </div>
           </div>
         </section>
 
@@ -426,7 +443,6 @@ export function DashboardPage() {
         </section>
 
         <section className="dashboard-hero-card">
-          <div className="dashboard-hero-card__badge">{heroSyncLabel}</div>
           <div className="dashboard-hero-card__content">
             <div className="dashboard-hero-card__copy">
               <span className="dashboard-hero-card__eyebrow">Today's Farm Pulse</span>
@@ -436,20 +452,21 @@ export function DashboardPage() {
               <span>{heroStatusCopy}</span>
             </div>
             <div className="dashboard-hero-card__stats">
-              <article>
+              <article className="dashboard-hero-card__stat">
                 <UsersRound size={18} />
-                <span>Attendance Marked</span>
-                <strong>{totals.attendanceMarkedToday} labour today</strong>
+                <div>
+                  <span>Attendance today</span>
+                  <strong>{totals.attendanceMarkedToday} labour</strong>
+                </div>
               </article>
-              <article>
+              <article className="dashboard-hero-card__stat">
                 <PackageOpen size={18} />
-                <span>Dispatches</span>
-                <strong>{totals.dispatchesToday} today</strong>
+                <div>
+                  <span>Dispatches today</span>
+                  <strong>{totals.dispatchesToday}</strong>
+                </div>
               </article>
             </div>
-          </div>
-          <div className="dashboard-hero-card__actions">
-            <Link className="dashboard-hero-card__button" to="/workspace/reports">View Details</Link>
           </div>
         </section>
 
@@ -479,11 +496,10 @@ export function DashboardPage() {
             </div>
           </div>
           <div className="dashboard-quick-grid">
-            {quickActions.map(({ to, icon: Icon, title, detail }) => (
+            {quickActions.map(({ to, icon: Icon, title }) => (
               <Link key={to} to={to} className="dashboard-quick-card">
                 <Icon size={18} />
                 <strong>{title}</strong>
-                <span>{detail}</span>
               </Link>
             ))}
           </div>
@@ -497,7 +513,7 @@ export function DashboardPage() {
                   <h2>{t("dashboard.recentActivity")}</h2>
                   <p>{activities.length ? "Recent operational records from the current workspace." : "Activity will appear here as soon as records are saved."}</p>
                 </div>
-                <Link className="dashboard-section-link" to="/workspace/reports">View all</Link>
+            <Link className="dashboard-section-link" to="/workspace/reports"><span>View all</span><ChevronRight size={14} /></Link>
               </div>
               {activities.length === 0 ? (
                 <p className="activity-empty">{t("dashboard.noActivity")}</p>
@@ -516,7 +532,7 @@ export function DashboardPage() {
                         </div>
                         <div className="dashboard-activity-item__meta">
                           <strong>{activity.value}</strong>
-                          <small>{new Date(activity.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</small>
+                          <small>{activity.createdAt.includes("T") ? new Date(activity.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : activity.createdAt}</small>
                         </div>
                       </Link>
                     );
@@ -526,27 +542,6 @@ export function DashboardPage() {
             </section>
           </div>
 
-          <aside className="dashboard-home__side">
-            <section className="panel status-panel">
-              <div className="status-line">
-                <StatusIcon size={19} />
-                <div>
-                  <strong>{sync.status === "offline" ? t("layout.workingOffline") : sync.status === "syncing" ? t("layout.syncing") : sync.status === "error" ? t("layout.syncFailed") : t("layout.apiConnected")}</strong>
-                  <p>{sync.status === "offline" ? t("layout.offlineNotice") : t("layout.postgresPrimary")}</p>
-                </div>
-              </div>
-              <div className="sync-line">
-                <CloudUpload size={18} />
-                <div>
-                  <strong>{sync.pendingCount ? t("layout.databaseSyncPending") : t("layout.databaseSynced")}</strong>
-                  <p>{t("layout.pendingChanges", { count: sync.pendingCount })}</p>
-                  <p>{t("layout.lastSuccessfulSync", { value: sync.lastSyncTime ? new Date(sync.lastSyncTime).toLocaleString() : t("layout.notYetSynchronized") })}</p>
-                  <div className="sync-buttons"><button type="button" onClick={() => void refreshOperationalData()}>{t("layout.refreshData")}</button><button type="button" onClick={() => void syncNow()}>{t("layout.syncNow")}</button></div>
-                </div>
-              </div>
-            </section>
-            {user?.workspaceId ? <ImportVisibilityAuditPanel workspaceId={user.workspaceId} title="Visibility Audit" /> : null}
-          </aside>
         </section>
       </main>
     </div>

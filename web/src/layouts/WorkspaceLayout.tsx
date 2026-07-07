@@ -92,6 +92,7 @@ export function WorkspaceLayout() {
           : t("layout.synced");
   const startupVisible = sync.startupInProgress;
   const queueNeedsAttention = (sync.pendingCount ?? 0) > 0 || (sync.failedCount ?? 0) > 0;
+  const isDashboardHome = location.pathname === "/workspace/dashboard";
   const filteredNav = nav
     .filter(([to]) => config.featureFarmMap || to !== "/workspace/operations-map")
     .filter(([to]) => config.featureInventory || to !== "/workspace/inventory")
@@ -121,7 +122,6 @@ export function WorkspaceLayout() {
     { to: "/workspace/expenses", label: "Add Expense", icon: ReceiptText, allowed: !user || hasModulePermission(user, "expenses", "create") },
     { to: "/workspace/dispatch", label: "New Dispatch", icon: PackageOpen, allowed: !user || hasModulePermission(user, "dispatch", "create") },
     { to: "/workspace/sales", label: "Record Sale", icon: ShoppingBasket, allowed: !user || hasModulePermission(user, "sales", "create") },
-    { to: "/workspace/operations-map", label: "Operational Entry", icon: Satellite, allowed: config.featureFarmMap },
   ].filter((item) => item.allowed);
   const queueStatusLabel = (status?: PendingMutation["status"]) => {
     switch (status ?? "pending") {
@@ -135,7 +135,7 @@ export function WorkspaceLayout() {
     }
   };
   return (
-    <div className="app-shell">
+    <div className={`app-shell${isDashboardHome ? " app-shell--dashboard-home" : ""}`}>
       <aside className="app-sidebar">
         <Brand compact />
         <span className="shell-label">{user?.workspaceName ?? t("layout.workspace")}</span>
