@@ -267,6 +267,19 @@ test("attendance labour directory loads cache-first and keeps cached data during
   assert.match(modulePage, /t\("workforcePage\.lastSynced"\)[\s\S]*readableSyncTime\(sync\.lastSyncTime\)/);
 });
 
+test("archive feature removal leaves no active route, menu entry, or archive-center styling", async () => {
+  const app = await source("api/src/app.ts");
+  const appShell = await source("web/src/App.tsx");
+  const workforceHub = await source("web/src/pages/workspace/WorkforceHub.tsx");
+  const styles = await source("web/src/styles.css");
+  assert.doesNotMatch(app, /labourPeriodArchiveRoutes/);
+  assert.doesNotMatch(appShell, /ArchiveCenter/);
+  assert.doesNotMatch(appShell, /labour-period-archives/);
+  assert.doesNotMatch(workforceHub, /Archive Center/);
+  assert.doesNotMatch(workforceHub, /\/workspace\/workforce\/archive/);
+  assert.doesNotMatch(styles, /archive-center__/);
+});
+
 test("mobile styles contain page overflow and keep navigation scrollable", async () => {
   const modulePage = await source("web/src/pages/ModulePage.tsx");
   const styles = await source("web/src/styles.css");

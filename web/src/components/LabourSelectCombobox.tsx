@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { SearchInput } from "./SearchInput";
-import { compareLabourers, type Labourer } from "../lib/offline-db";
+import type { Labourer } from "../lib/offline-db";
 
 type LabourSelectComboboxProps = {
   options: Labourer[];
@@ -130,14 +130,11 @@ export function LabourSelectCombobox({
     const term = normalize(deferredQuery);
     if (!term) return labourOptions;
     return labourOptions
-      .map((option) => ({ option, score: scoreLabourOption(option, term) }))
+      .map((option, index) => ({ option, score: scoreLabourOption(option, term), index }))
       .filter((entry) => entry.score >= 0)
       .sort((left, right) => {
         if (right.score !== left.score) return right.score - left.score;
-        return compareLabourers(
-          options.find((item) => item.id === left.option.id) ?? { id: left.option.id, name: left.option.name, createdAt: "" },
-          options.find((item) => item.id === right.option.id) ?? { id: right.option.id, name: right.option.name, createdAt: "" },
-        );
+        return left.index - right.index;
       })
       .map((entry) => entry.option);
   }, [deferredQuery, labourOptions, options]);

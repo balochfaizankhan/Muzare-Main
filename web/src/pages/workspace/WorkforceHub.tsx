@@ -13,7 +13,7 @@ import { canCreate, hasModulePermission } from "../../lib/permissions";
 import { getActiveFarmId, getActiveSeasonId, makeLocalRecord, offlineDb, workspaceRecords, type LabourEarning, type LabourPayment, type LabourWageSettlement, type Labourer, type WageRate } from "../../lib/offline-db";
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
 import { compareWageRates, getWageRateStatus } from "../../lib/wageRates";
-import { sortWorkersForDisplay } from "../../lib/workforceArchive";
+import { sortWorkersForDisplay } from "../../lib/workerEligibility";
 import { persistOperationalRecord } from "../../services/syncService";
 
 const money = formatMoney;
@@ -101,7 +101,6 @@ export function WorkforceSectionLayout() {
     { to: "/workspace/workforce/labour", label: "Labour" },
     { to: "/workspace/workforce/attendance", label: t("layout.attendance") },
     { to: "/workspace/workforce/reports", label: "Workforce Reports" },
-    { to: "/workspace/workforce/archive", label: "Archive Center" },
   ];
   return (
     <WorkforceShell

@@ -39,7 +39,7 @@ import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { getVoucherDisplayNumber, normalizeVoucherNumber, parseVoucherSequenceNumber } from "../lib/vouchers";
 import { getActiveVouchers, getVisibleVouchers, loadWorkspaceVouchers } from "../lib/voucherCollections";
 import { compareWageRates, getWageRateStatus, normalizeHalfDayRate, summarizeAttendanceWages } from "../lib/wageRates";
-import { getWorkerWorkingPeriod, isWorkerEligibleForAttendance, sortWorkersForDisplay } from "../lib/workforceArchive";
+import { getWorkerWorkingPeriod, isWorkerEligibleForAttendance, sortWorkersForDisplay } from "../lib/workerEligibility";
 import {
   compareLabourers,
   ensureLocalAccounts,

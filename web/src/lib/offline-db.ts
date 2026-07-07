@@ -595,15 +595,20 @@ export function compareLabourers(
   right: Pick<Labourer, "id" | "name" | "sortOrder" | "androidSortOrder" | "originalIndex" | "createdAt" | "active" | "endedOn" | "isArchived">,
 ) {
   const statusRank = (worker: Pick<Labourer, "active" | "endedOn" | "isArchived">) => {
-    if (worker.isArchived) return 2;
-    if (worker.active === false || Boolean(worker.endedOn)) return 1;
+    if (worker.active === false || Boolean(worker.endedOn) || worker.isArchived) return 1;
     return 0;
   };
   const statusDelta = statusRank(left) - statusRank(right);
   if (statusDelta !== 0) return statusDelta;
-  const nameDelta = left.name.localeCompare(right.name);
-  if (nameDelta !== 0) return nameDelta;
-  const sortDelta = labourSortValue(left) - labourSortValue(right);
+  const leftSort = typeof left.sortOrder === "number" ? left.sortOrder
+    : typeof left.androidSortOrder === "number" ? left.androidSortOrder
+      : typeof left.originalIndex === "number" ? left.originalIndex
+        : Date.parse(left.createdAt);
+  const rightSort = typeof right.sortOrder === "number" ? right.sortOrder
+    : typeof right.androidSortOrder === "number" ? right.androidSortOrder
+      : typeof right.originalIndex === "number" ? right.originalIndex
+        : Date.parse(right.createdAt);
+  const sortDelta = leftSort - rightSort;
   if (sortDelta !== 0) return sortDelta;
   const createdDelta = left.createdAt.localeCompare(right.createdAt);
   if (createdDelta !== 0) return createdDelta;

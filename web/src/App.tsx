@@ -36,7 +36,6 @@ const LabourPaymentsReportsHub = lazy(async () => ({ default: (await import("./p
 const LabourPaymentsSectionLayout = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).LabourPaymentsSectionLayout }));
 const LabourPaymentsOverview = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).LabourPaymentsOverview }));
 const DirectLabourPaymentsPage = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).DirectLabourPaymentsPage }));
-const ArchiveCenter = lazy(async () => ({ default: (await import("./pages/workspace/ArchiveCenter")).ArchiveCenter }));
 const WageRates = lazy(async () => ({ default: (await import("./pages/workspace/WageRates")).WageRates }));
 const WorkforceReportsHub = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).WorkforceReportsHub }));
 const WorkforceSectionLayout = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).WorkforceSectionLayout }));
@@ -146,7 +145,6 @@ export default function App() {
         <Route path="labour" element={routeElement(<ModulePage module="workforce" />, "Loading labour")} />
         <Route path="attendance" element={routeElement(<Attendance />, "Loading attendance")} />
         <Route path="reports" element={routeElement(<WorkforceReportsHub />, "Loading workforce reports")} />
-        <Route path="archive" element={routeElement(<ArchiveCenter />, "Loading archive center")} />
         <Route path="labour-payments" element={<Navigate to="/workspace/labour-payments/overview" replace />} />
       </Route>
       <Route path="labour-payments" element={routeElement(<LabourPaymentsSectionLayout />, "Loading labour payments")}>

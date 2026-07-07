@@ -1,7 +1,7 @@
 import { Check, ChevronDown, Search, X } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { compareLabourers, type Labourer } from "../lib/offline-db";
+import type { Labourer } from "../lib/offline-db";
 
 type LabourMultiSelectFilterProps = {
   options: Labourer[];
@@ -52,14 +52,14 @@ export function LabourMultiSelectFilter({
   const resolvedAriaLabel = ariaLabel ?? t("common.labour");
   const resolvedNoResults = noResultsLabel ?? t("common.noMatchingLabour");
 
-  const sortedOptions = useMemo(() => [...options].sort(compareLabourers), [options]);
+  const sortedOptions = useMemo(() => options.slice(), [options]);
   const filteredOptions = useMemo(() => {
     const term = normalize(deferredQuery);
     if (!term) return sortedOptions;
     return sortedOptions
-      .map((labourer) => ({ labourer, score: scoreLabour(labourer, term) }))
+      .map((labourer, index) => ({ labourer, score: scoreLabour(labourer, term), index }))
       .filter((item) => item.score >= 0)
-      .sort((left, right) => right.score - left.score || compareLabourers(left.labourer, right.labourer))
+      .sort((left, right) => right.score - left.score || left.index - right.index)
       .map((item) => item.labourer);
   }, [deferredQuery, sortedOptions]);
 

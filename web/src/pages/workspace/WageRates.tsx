@@ -8,7 +8,7 @@ import { canCreate, canEdit } from "../../lib/permissions";
 import { formatMoney } from "../../lib/format";
 import { compareWageRates, getWageRateStatus, normalizeHalfDayRate } from "../../lib/wageRates";
 import { useAuth } from "../../auth/AuthProvider";
-import { getWorkerWorkingPeriod, isWorkerEligibleForWageRatePeriod, sortWorkersForDisplay } from "../../lib/workforceArchive";
+import { getWorkerWorkingPeriod, isWorkerEligibleForWageRatePeriod, sortWorkersForDisplay } from "../../lib/workerEligibility";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const money = formatMoney;

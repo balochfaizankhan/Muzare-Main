@@ -1,6 +1,6 @@
 import type { Labourer } from "./offline-db";
 
-export type WorkerDisplayGroup = "active" | "inactive" | "archived";
+export type WorkerDisplayGroup = "active" | "inactive";
 
 export type WorkingPeriod = {
   workerStart: string;
@@ -8,8 +8,9 @@ export type WorkingPeriod = {
 };
 
 export type SortWorkersOptions = {
-  includeArchived?: boolean;
   includeInactive?: boolean;
+  includeArchived?: boolean;
+  sort?: "preserve" | "alphabetical" | "latest";
 };
 
 function normalizeDate(value?: string | null) {
@@ -37,23 +38,39 @@ export function getWorkerWorkingPeriod(worker: Pick<Labourer, "createdAt" | "joi
 }
 
 export function getWorkerDisplayGroup(worker: Pick<Labourer, "active" | "endedOn" | "isArchived">): WorkerDisplayGroup {
-  if (isArchivedWorker(worker)) return "archived";
+  if (isArchivedWorker(worker)) return "inactive";
   if (worker.active === false || Boolean(worker.endedOn)) return "inactive";
   return "active";
 }
 
-export function sortWorkersForDisplay<T extends Pick<Labourer, "name" | "createdAt" | "active" | "endedOn" | "isArchived">>(workers: T[], options: SortWorkersOptions = {}) {
+export function groupWorkersByStatusPreserveOrder<T extends Pick<Labourer, "active" | "endedOn" | "isArchived">>(workers: T[]) {
+  const active: T[] = [];
+  const inactive: T[] = [];
+  for (const worker of workers) {
+    if (getWorkerDisplayGroup(worker) === "active") active.push(worker);
+    else inactive.push(worker);
+  }
+  return [...active, ...inactive];
+}
+
+export function sortWorkersForDisplay<T extends Pick<Labourer, "name" | "createdAt" | "active" | "endedOn" | "isArchived" | "sortOrder" | "androidSortOrder" | "originalIndex">>(workers: T[], options: SortWorkersOptions = {}) {
   const filtered = options.includeArchived ? workers.slice() : workers.filter((worker) => !isArchivedWorker(worker));
-  const rank: Record<WorkerDisplayGroup, number> = { active: 0, inactive: 1, archived: 2 };
-  return filtered.sort((left, right) => {
-    const groupDelta = rank[getWorkerDisplayGroup(left)] - rank[getWorkerDisplayGroup(right)];
-    if (groupDelta !== 0) return groupDelta;
-    const nameDelta = left.name.localeCompare(right.name);
-    if (nameDelta !== 0) return nameDelta;
-    const createdDelta = left.createdAt.localeCompare(right.createdAt);
-    if (createdDelta !== 0) return createdDelta;
-    return 0;
-  });
+  const grouped = groupWorkersByStatusPreserveOrder(filtered);
+  if (options.sort === "alphabetical") return [...grouped].sort((left, right) => left.name.localeCompare(right.name));
+  if (options.sort === "latest") {
+    return [...grouped].sort((left, right) => {
+      const leftSort = typeof left.sortOrder === "number" ? left.sortOrder
+        : typeof left.androidSortOrder === "number" ? left.androidSortOrder
+          : typeof left.originalIndex === "number" ? left.originalIndex
+            : Date.parse(left.createdAt);
+      const rightSort = typeof right.sortOrder === "number" ? right.sortOrder
+        : typeof right.androidSortOrder === "number" ? right.androidSortOrder
+          : typeof right.originalIndex === "number" ? right.originalIndex
+            : Date.parse(right.createdAt);
+      return rightSort - leftSort;
+    });
+  }
+  return grouped;
 }
 
 export function isWorkerEligibleForAttendance(worker: Pick<Labourer, "createdAt" | "joinedOn" | "endedOn" | "firstAttendanceDate" | "lastAttendanceDate" | "inactiveDate" | "leftDate" | "isArchived">, selectedDate: string) {
