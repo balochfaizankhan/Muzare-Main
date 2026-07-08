@@ -78,14 +78,17 @@ function tableFor(entity: OperationalEntity) {
   return tables[entity] as unknown as Table<LocalRecord, string>;
 }
 
-function rememberOperationalContext(workspaceId: string, farmId?: string, seasonId?: string) {
-  if (!farmId || !seasonId) return;
-  localStorage.setItem(operationalContextKey(workspaceId), JSON.stringify({ farmId, seasonId }));
+function rememberOperationalContext(workspaceId: string, farmId?: string | null, seasonId?: string | null) {
+  if (!farmId) {
+    localStorage.removeItem(operationalContextKey(workspaceId));
+    return;
+  }
+  localStorage.setItem(operationalContextKey(workspaceId), JSON.stringify({ farmId, seasonId: seasonId ?? null }));
 }
 
 function restoreOperationalContext(workspaceId: string) {
   try {
-    return JSON.parse(localStorage.getItem(operationalContextKey(workspaceId)) ?? "null") as { farmId?: string; seasonId?: string } | null;
+    return JSON.parse(localStorage.getItem(operationalContextKey(workspaceId)) ?? "null") as { farmId?: string; seasonId?: string | null } | null;
   } catch {
     return null;
   }
@@ -260,24 +263,8 @@ function formatPermissionDeniedMessage(details: SyncErrorDetails | null) {
 
 function formatStaleContextMessage(details: SyncErrorDetails | null) {
   if (!details) return i18n.t("sync.staleWorkspaceContext");
-  if (details.code === "stale_workspace_context") {
-    return i18n.t("sync.staleWorkspaceContextDetail", {
-      active: details.activeWorkspaceId ?? "-",
-      request: details.requestWorkspaceId ?? "-",
-    });
-  }
-  if (details.code === "stale_farm_context") {
-    return i18n.t("sync.staleFarmContextDetail", {
-      active: details.activeFarmId ?? "-",
-      request: details.requestFarmId ?? "-",
-    });
-  }
-  if (details.code === "stale_season_context") {
-    return i18n.t("sync.staleSeasonContextDetail", {
-      active: details.activeSeasonId ?? "-",
-      request: details.requestSeasonId ?? "-",
-    });
-  }
+  if (details.code === "stale_workspace_context") return i18n.t("sync.staleWorkspaceContext");
+  if (details.code === "stale_farm_context" || details.code === "stale_season_context") return i18n.t("sync.staleContextHint");
   return i18n.t("sync.staleWorkspaceContext");
 }
 
@@ -840,7 +827,7 @@ export function subscribeSyncState(listener: (next: SyncState) => void) {
 
 export async function startSyncService(token: string, workspaceId: string) {
   const cached = restoreOperationalContext(workspaceId);
-  applyOperationalContext(token, workspaceId, cached?.farmId, cached?.seasonId);
+  applyOperationalContext(token, workspaceId, cached?.farmId ?? undefined, cached?.seasonId ?? undefined);
   emitStartup("loadingWorkspace", i18n.t("sync.loadingWorkspace"), {
     dataSource: "cache",
     lastSyncTime: getLastSyncTime(),
@@ -855,7 +842,7 @@ export async function startSyncService(token: string, workspaceId: string) {
       const farm = bootstrap.farms.find((item) => item.id === bootstrap.activeFarmId);
       const season = bootstrap.seasons.find((item) => item.id === bootstrap.activeSeasonId);
       applyOperationalContext(token, workspaceId, farm?.id, season?.id);
-      rememberOperationalContext(workspaceId, farm?.id, season?.id);
+      rememberOperationalContext(workspaceId, farm?.id ?? null, season?.id ?? null);
       emitStartup("loadingContext", i18n.t("sync.loadingFarmSeason"), {
         farmId: farm?.id,
         seasonId: season?.id,

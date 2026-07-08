@@ -370,7 +370,7 @@ test("dispatch masters are tenant scoped and used masters remain protected", asy
   })).statusCode, 204);
 });
 
-test("date types can create and delete without an active season", async () => {
+test("date types ignore stale season context when no active season is selected", async () => {
   const [session] = await db.select({ activeSeasonId: userSessions.activeSeasonId }).from(userSessions)
     .where(eq(userSessions.userId, alpha.userId)).limit(1);
   await db.update(userSessions).set({ activeSeasonId: null }).where(eq(userSessions.userId, alpha.userId));
@@ -383,7 +383,7 @@ test("date types can create and delete without an active season", async () => {
     const create = await request(alpha.token, "POST", "/v1/workspace/operational-records", {
       workspaceId: alpha.workspaceId,
       farmId: alpha.farmId,
-      seasonId: null,
+      seasonId: alpha.seasonId,
       entity: "dateType",
       record: { id: dateTypeId, createdAt: now, updatedAt: now, name: "Mabroom", active: true },
     });
@@ -392,7 +392,7 @@ test("date types can create and delete without an active season", async () => {
     const deletion = await request(alpha.token, "DELETE", "/v1/workspace/operational-records", {
       workspaceId: alpha.workspaceId,
       farmId: alpha.farmId,
-      seasonId: null,
+      seasonId: alpha.seasonId,
       entity: "dateType",
       recordId: dateTypeId,
     });

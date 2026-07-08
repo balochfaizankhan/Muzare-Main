@@ -259,12 +259,24 @@ function cleanText(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
-function requireWorkspaceWrite(user: AuthenticatedUser, workspaceId: string) {
+function canManageDateTypes(user: AuthenticatedUser, workspaceId: string) {
+  return hasPermission(user, "MANAGE_RECORDS", workspaceId)
+    || hasModulePermission(user, workspaceId, "dispatch", "edit");
+}
+
+function requireWorkspaceWrite(user: AuthenticatedUser, workspaceId: string, entity?: typeof entities[number]) {
+  if (entity === "dateType") return canManageDateTypes(user, workspaceId);
   return hasPermission(user, "SUBMIT_RECORDS", workspaceId);
 }
 
 function requireEntityWrite(user: AuthenticatedUser, workspaceId: string, entity: typeof entities[number]) {
+  if (entity === "dateType") return canManageDateTypes(user, workspaceId);
   return !["labourer", "account", "vehicle", "dateType"].includes(entity) || hasPermission(user, "MANAGE_RECORDS", workspaceId);
+}
+
+function requireEntityDelete(user: AuthenticatedUser, workspaceId: string, entity: typeof entities[number]) {
+  if (entity === "dateType") return canManageDateTypes(user, workspaceId) || hasModulePermission(user, workspaceId, "dispatch", "delete");
+  return hasModulePermission(user, workspaceId, entityModule(entity), "delete");
 }
 
 function entityModule(entity: typeof entities[number]): WorkspaceModule {
@@ -654,12 +666,14 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         manageRecords: hasPermission(request.appUser, "MANAGE_RECORDS", parsed.data.workspaceId),
         expensesCreate: hasModulePermission(request.appUser, parsed.data.workspaceId, "expenses", "create"),
         expensesEdit: hasModulePermission(request.appUser, parsed.data.workspaceId, "expenses", "edit"),
+        dispatchEdit: hasModulePermission(request.appUser, parsed.data.workspaceId, "dispatch", "edit"),
+        dispatchDelete: hasModulePermission(request.appUser, parsed.data.workspaceId, "dispatch", "delete"),
       },
     };
-    if (!requireWorkspaceWrite(request.appUser, parsed.data.workspaceId)) {
-      return forbiddenResponse(reply, "Workspace record submission permission is required.", {
+    if (!requireWorkspaceWrite(request.appUser, parsed.data.workspaceId, parsed.data.entity)) {
+      return forbiddenResponse(reply, parsed.data.entity === "dateType" ? "Dispatch settings management permission is required." : "Workspace record submission permission is required.", {
         code: "missing_workspace_permission",
-        permissionKey: "SUBMIT_RECORDS",
+        permissionKey: parsed.data.entity === "dateType" ? "dispatch.edit" : "SUBMIT_RECORDS",
         requestWorkspaceId: parsed.data.workspaceId,
         ...permissionDebug,
       });
@@ -667,7 +681,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     if (!requireEntityWrite(request.appUser, parsed.data.workspaceId, parsed.data.entity)) {
       return forbiddenResponse(reply, "Workspace record management permission is required.", {
         code: "missing_workspace_permission",
-        permissionKey: "MANAGE_RECORDS",
+        permissionKey: parsed.data.entity === "dateType" ? "dispatch.edit" : "MANAGE_RECORDS",
         requestWorkspaceId: parsed.data.workspaceId,
         entityType: parsed.data.entity,
         ...permissionDebug,
@@ -1101,13 +1115,13 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     if (!request.appUser) return reply;
     const parsed = deleteRecordSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ message: "A valid operational record deletion request is required." });
-    if (!requireWorkspaceWrite(request.appUser, parsed.data.workspaceId)) {
-      return reply.code(403).send({ message: "Workspace record submission permission is required." });
+    if (!requireWorkspaceWrite(request.appUser, parsed.data.workspaceId, parsed.data.entity)) {
+      return reply.code(403).send({ message: parsed.data.entity === "dateType" ? "Dispatch settings management permission is required." : "Workspace record submission permission is required." });
     }
     if (request.appUser.workspaceId !== parsed.data.workspaceId) {
       return reply.code(403).send({ message: "Select this workspace before deleting records." });
     }
-    if (!hasModulePermission(request.appUser, parsed.data.workspaceId, entityModule(parsed.data.entity), "delete")) {
+    if (!requireEntityDelete(request.appUser, parsed.data.workspaceId, parsed.data.entity)) {
       return reply.code(403).send({ message: "Module delete permission is required." });
     }
     if (localDevelopmentMode) {
@@ -1139,8 +1153,8 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     });
     if (ownershipError) return reply.code(403).send({ message: ownershipError });
     if (parsed.data.entity !== "attendance") {
-      if (!hasPermission(request.appUser, "MANAGE_RECORDS", parsed.data.workspaceId)) {
-        return reply.code(403).send({ message: "Workspace record management permission is required to delete financial records." });
+      if (parsed.data.entity === "dateType" ? !canManageDateTypes(request.appUser, parsed.data.workspaceId) : !hasPermission(request.appUser, "MANAGE_RECORDS", parsed.data.workspaceId)) {
+        return reply.code(403).send({ message: parsed.data.entity === "dateType" ? "Dispatch settings management permission is required." : "Workspace record management permission is required to delete financial records." });
       }
       const seasonCondition = parsed.data.entity === "dateType"
         ? undefined

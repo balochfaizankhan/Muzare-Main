@@ -42,7 +42,7 @@ test("workspace queries and IndexedDB records carry workspace ownership", async 
 test("sync queue uploads only records belonging to the active workspace farm and season", async () => {
   const sync = await source("web/src/services/syncService.ts");
   assert.match(sync, /pendingMutations\.where\("workspaceId"\)\.equals\(context\.workspaceId\)\.sortBy\("createdAt"\)/);
-  assert.match(sync, /mutation\.farmId === context!\.farmId && mutation\.seasonId === context!\.seasonId/);
+  assert.match(sync, /if \(mutation\.farmId !== context\.farmId\) return false;\s+if \(isDateTypeMutation\(mutation\)\) return true;\s+return mutation\.seasonId === context\.seasonId;/);
   assert.match(sync, /workspaceId: context\.workspaceId, farmId: mutation\.farmId/);
   assert.match(sync, /function isPermissionDeniedSyncError\(error: unknown\)/);
   assert.match(sync, /status: "stale_context"/);
@@ -61,6 +61,22 @@ test("farm and season switching scope browser records to the selected context", 
   assert.match(dashboard, /item\.id === query\.data\.activeSeasonId/);
   assert.match(sync, /item\.id === bootstrap\.activeFarmId/);
   assert.match(sync, /bootstrap\.activeSeasonId/);
+});
+
+test("Render static site rewrites direct frontend routes to the SPA entry point", async () => {
+  const render = await source("render.yaml");
+  const vite = await source("web/vite.config.ts");
+  assert.match(render, /type: static/);
+  assert.match(render, /staticPublishPath: dist/);
+  assert.match(render, /type: rewrite[\s\S]*source: "\/\*"[\s\S]*destination: "\/index\.html"/);
+  assert.doesNotMatch(vite, /base:\s*["']\/workspace\//);
+});
+
+test("backend bootstrap truth clears stale cached season context on the client", async () => {
+  const sync = await source("web/src/services/syncService.ts");
+  assert.match(sync, /localStorage\.removeItem\(operationalContextKey\(workspaceId\)\)/);
+  assert.match(sync, /JSON\.stringify\(\{ farmId, seasonId: seasonId \?\? null \}\)/);
+  assert.match(sync, /rememberOperationalContext\(workspaceId, farm\?\.id \?\? null, season\?\.id \?\? null\)/);
 });
 
 test("bootstrap and dashboard distinguish no farms from no access and hide owner recovery actions for viewers", async () => {
@@ -258,7 +274,7 @@ test("attendance labour directory loads cache-first and keeps cached data during
   const sync = await source("web/src/services/syncService.ts");
   const modulePage = await source("web/src/pages/ModulePage.tsx");
   assert.match(auth, /if \(!\(error instanceof ApiError && \[401, 403\]\.includes\(error\.status\)\) && cachedUser\(\)\) \{[\s\S]*setUser\(cachedUser\(\)\);[\s\S]*return;/);
-  assert.match(sync, /const cached = restoreOperationalContext\(workspaceId\);\s+applyOperationalContext\(token, workspaceId, cached\?\.farmId, cached\?\.seasonId\);/);
+  assert.match(sync, /const cached = restoreOperationalContext\(workspaceId\);\s+applyOperationalContext\(token, workspaceId, cached\?\.farmId \?\? undefined, cached\?\.seasonId \?\? undefined\);/);
   assert.match(sync, /dataSource: "cache"/);
   assert.match(sync, /await cacheRecord\(item\.entity, item\.record, false,[\s\S]*if \(result\.snapshotConfirmed && result\.farmId === context\.farmId && result\.seasonId === context\.seasonId\) \{\s+await pruneSynchronizedCache\(result\.records\);/);
   assert.match(sync, /item\.farmId === context!\.farmId && \(item\.seasonId === context!\.seasonId \|\| item\.seasonId == null\)/);

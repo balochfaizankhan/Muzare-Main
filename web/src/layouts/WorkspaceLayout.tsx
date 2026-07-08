@@ -191,14 +191,16 @@ export function WorkspaceLayout() {
             <button type="button" onClick={() => setQueueOpen(false)}>{t("common.close")}</button>
           </div>
           {!queueItems.length ? <p className="sync-queue-panel__empty">{t("sync.noQueueItems")}</p> : <div className="sync-queue-list">
-            {queueItems.map((item) => (
+            {queueItems.map((item) => {
+              const isDateTypeQueueItem = item.entity === "dateType";
+              return (
               <article key={item.id} className={`sync-queue-item sync-queue-item--${item.status ?? "pending"}`}>
                 <div className="sync-queue-item__meta">
-                  <strong>{item.entity === "dateType" ? "Date Type could not sync" : `${item.entity} · ${item.operation}`}</strong>
-                  <span>{item.entity === "dateType" ? "This setting could not sync because of an old app context." : queueStatusLabel(item.status)}</span>
+                  <strong>{isDateTypeQueueItem ? "Date Type could not sync" : `${item.entity} · ${item.operation}`}</strong>
+                  <span>{isDateTypeQueueItem ? "This setting could not sync because of an old app context." : queueStatusLabel(item.status)}</span>
                 </div>
                 <div className="sync-queue-item__facts">
-                  <p><span>Type</span><strong>{item.entity === "dateType" ? "Date Type" : item.entity}</strong></p>
+                  <p><span>Type</span><strong>{isDateTypeQueueItem ? "Date Type" : item.entity}</strong></p>
                   <p><span>Action</span><strong>{item.operation === "update" ? "Update" : item.operation === "delete" ? "Delete" : "Create"}</strong></p>
                   <p><span>Created</span><strong>{formatQueueDateTime(item.createdAt)}</strong></p>
                   <p><span>Last attempted</span><strong>{formatQueueDateTime(item.lastAttemptedAt)}</strong></p>
@@ -206,7 +208,6 @@ export function WorkspaceLayout() {
                 </div>
                 {item.status === "permission_denied" ? <p className="sync-queue-item__error">{t("sync.permissionDeniedHint")}</p> : null}
                 {item.status === "stale_context" ? <p className="sync-queue-item__error">{t("sync.staleContextHint")}</p> : null}
-                {item.lastError ? <p className="sync-queue-item__error">{t("sync.lastError")}: {item.lastError}</p> : null}
                 <details className="sync-queue-item__technical">
                   <summary>Technical details</summary>
                   <div className="sync-queue-item__technical-body">
@@ -217,18 +218,20 @@ export function WorkspaceLayout() {
                     <p>Season: <code>{item.seasonId ?? "-"}</code></p>
                     {"errorStatus" in item && item.errorStatus ? <p>HTTP status: <code>{item.errorStatus}</code></p> : null}
                     {"errorCode" in item && item.errorCode ? <p>Error code: <code>{item.errorCode}</code></p> : null}
+                    {item.lastError ? <p>Last error: <code>{item.lastError}</code></p> : null}
                     {"errorMessage" in item && item.errorMessage ? <p>Backend message: <code>{item.errorMessage}</code></p> : null}
                     {"errorDetails" in item && item.errorDetails && typeof item.errorDetails === "object" ? <pre className="sync-queue-item__details">details: {JSON.stringify(item.errorDetails, null, 2)}</pre> : null}
                   </div>
                 </details>
                 <div className="sync-queue-item__actions">
-                  {item.status !== "permission_denied" && item.status !== "stale_context" && <button type="button" onClick={() => void retrySyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.retryItem")}</button>}
-                  {item.status === "stale_context" && <button type="button" onClick={() => void repairStaleSyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.repairStaleContext")}</button>}
-                  <button type="button" onClick={() => void resolveSyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.markResolved")}</button>
+                  {(isDateTypeQueueItem || (item.status !== "permission_denied" && item.status !== "stale_context")) && <button type="button" onClick={() => void retrySyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.retryItem")}</button>}
+                  {(isDateTypeQueueItem || item.status === "stale_context") && <button type="button" onClick={() => void repairStaleSyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.repairStaleContext")}</button>}
+                  {!isDateTypeQueueItem && <button type="button" onClick={() => void resolveSyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.markResolved")}</button>}
                   <button type="button" onClick={() => void discardSyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{item.status === "permission_denied" ? t("sync.discardUnauthorizedChange") : t("sync.discardStaleItem")}</button>
                 </div>
               </article>
-            ))}
+            );
+            })}
           </div>}
         </section>}
         {mobileSheet && (
