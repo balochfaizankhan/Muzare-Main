@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: muzare-main-dev-frontend
+    name: muzare-main-dev
     runtime: static
     rootDir: web
     buildCommand: npm run build

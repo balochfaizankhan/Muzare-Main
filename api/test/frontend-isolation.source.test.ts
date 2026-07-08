@@ -66,10 +66,22 @@ test("farm and season switching scope browser records to the selected context", 
 test("Render static site rewrites direct frontend routes to the SPA entry point", async () => {
   const render = await source("render.yaml");
   const vite = await source("web/vite.config.ts");
-  assert.match(render, /type: web[\s\S]*name: muzare-main-dev-frontend[\s\S]*runtime: static/);
+  assert.match(render, /type: web[\s\S]*name: muzare-main-dev[\s\S]*runtime: static/);
   assert.match(render, /rootDir: web[\s\S]*buildCommand: npm run build[\s\S]*staticPublishPath: dist/);
   assert.match(render, /type: rewrite[\s\S]*source: "\/\*"[\s\S]*destination: "\/index\.html"/);
   assert.doesNotMatch(vite, /base:\s*["']\/workspace\//);
+});
+
+test("workspace context auto-selects a usable season for the current session only", async () => {
+  const context = await source("api/src/routes/workspace-context.ts");
+  const seasons = await source("api/src/routes/workspace-seasons.ts");
+  assert.match(context, /records\.find\(\(season\) => season\.status === "active" && usableSeason\(season\)\)/);
+  assert.match(context, /records\.find\(\(season\) => currentOpenSeason\(season\)\)/);
+  assert.match(context, /records\.find\(\(season\) => usableSeason\(season\)\)/);
+  assert.match(context, /missingSeasonSelection = Boolean\(seasonId && session\?\.activeSeasonId !== seasonId\)/);
+  assert.match(context, /where\(eq\(userSessions\.id, sessionId\)\)/);
+  assert.doesNotMatch(context, /Workspace context needs repair\. No usable season is selected for the active farm\./);
+  assert.match(seasons, /set\(\{ activeFarmId: farmId, activeSeasonId: seasonId \}\)\.where\(eq\(userSessions\.id, sessionId\)\)/);
 });
 
 test("backend bootstrap truth clears stale cached season context on the client", async () => {

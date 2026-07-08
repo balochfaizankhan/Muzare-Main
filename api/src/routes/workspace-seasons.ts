@@ -53,7 +53,7 @@ async function activateSeason(sessionId: string, workspaceId: string, farmId: st
       .where(and(eq(seasons.farmId, farmId), eq(seasons.status, "active"), ne(seasons.id, seasonId)));
     await tx.update(seasons).set({ status: "active", active: true, closed: false, actualEndsOn: null, updatedAt: new Date() })
       .where(eq(seasons.id, seasonId));
-    await tx.update(userSessions).set({ activeSeasonId: seasonId }).where(eq(userSessions.id, sessionId));
+    await tx.update(userSessions).set({ activeFarmId: farmId, activeSeasonId: seasonId }).where(eq(userSessions.id, sessionId));
     return season;
   });
 }

@@ -23,8 +23,31 @@ function pickFarm(records: FarmRow[], preferredId: string | null | undefined) {
   return (preferredId ? records.find((farm) => farm.id === preferredId) : null) ?? records[0] ?? null;
 }
 
+function seasonTime(value: unknown) {
+  const timestamp = Date.parse(String(value ?? ""));
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function usableSeason(season: SeasonRow) {
+  return season.status !== "archived";
+}
+
+function currentOpenSeason(season: SeasonRow, now = Date.now()) {
+  if (!usableSeason(season) || season.closed) return false;
+  const starts = seasonTime(season.startsOn);
+  const expectedEnds = seasonTime(season.expectedEndsOn);
+  const actualEnds = seasonTime(season.actualEndsOn);
+  const end = actualEnds ?? expectedEnds;
+  return (starts === null || starts <= now) && (end === null || end >= now);
+}
+
 function pickSeason(records: SeasonRow[], preferredId: string | null | undefined) {
-  return preferredId ? records.find((season) => season.id === preferredId && season.status === "active") ?? null : null;
+  const preferred = preferredId ? records.find((season) => season.id === preferredId && usableSeason(season)) ?? null : null;
+  if (preferred) return preferred;
+  return records.find((season) => season.status === "active" && usableSeason(season))
+    ?? records.find((season) => currentOpenSeason(season))
+    ?? records.find((season) => usableSeason(season))
+    ?? null;
 }
 
 async function validFarms(workspaceId: string, allowedFarmIds?: string[] | null) {
@@ -203,34 +226,26 @@ export async function resolveWorkspaceContext(
         : "assigned";
   const invalidFarm = Boolean(session?.activeFarmId && session.activeFarmId !== farmId);
   const invalidSeason = Boolean(session?.activeSeasonId && session.activeSeasonId !== seasonId);
+  const missingFarmSelection = Boolean(farmId && !session?.activeFarmId);
+  const missingSeasonSelection = Boolean(seasonId && session?.activeSeasonId !== seasonId);
 
-  if (sessionId && (invalidFarm || invalidSeason)) {
-    await db.update(userSessions).set({
-      activeFarmId: farmId,
-      activeSeasonId: seasonId,
-    }).where(eq(userSessions.id, sessionId));
-  } else if (sessionId && !session?.activeFarmId && farmId) {
+  if (sessionId && (invalidFarm || invalidSeason || missingFarmSelection || missingSeasonSelection)) {
     await db.update(userSessions).set({
       activeFarmId: farmId,
       activeSeasonId: seasonId,
     }).where(eq(userSessions.id, sessionId));
   }
 
-  const needsRepair = Boolean(farmId && seasonsForFarm.length > 0 && !seasonId)
-    || Boolean(!farmId && records.length > 0)
-    || invalidFarm
-    || invalidSeason;
+  const needsRepair = Boolean(!farmId && records.length > 0);
   const contextWarning = totalWorkspaceFarms === 0
     ? "No farm available. Create or restore a farm."
     : accessibleFarmCount === 0
       ? "You do not currently have access to any active farm in this workspace."
     : !farmId
-      ? "Workspace context needs repair. Select or repair an active farm."
+      ? "No active farm found. Create or select a farm to continue."
       : !seasonId
-        ? "Workspace context needs repair. No usable season is selected for the active farm."
-        : (invalidFarm || invalidSeason)
-          ? "Workspace context was repaired automatically."
-          : null;
+        ? "No active season found for this farm. Create or select a season to continue."
+        : null;
 
   return {
     farms: records,

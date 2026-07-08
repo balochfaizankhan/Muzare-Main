@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
   Bell,
   BanknoteArrowDown,
@@ -22,7 +22,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { calculateAvailableBalance } from "../lib/accounting";
-import { fetchBootstrap, repairWorkspaceContextRequest } from "../lib/api";
+import { fetchBootstrap } from "../lib/api";
 import { getCanonicalExpenseCategory } from "../lib/expenseCategories";
 import { formatDate, formatMoney } from "../lib/format";
 import { getActiveLabourWageSettlements, getCashAffectingVouchers, outstandingLabourAdvances } from "../lib/labourWageSettlements";
@@ -84,7 +84,6 @@ export function DashboardPage() {
   const { t } = useTranslation();
   const { user, token } = useAuth();
   const sync = useSyncState();
-  const client = useQueryClient();
   const [totals, setTotals] = useState<DashboardTotals>({
     presentToday: 0,
     attendanceMarkedToday: 0,
@@ -103,18 +102,6 @@ export function DashboardPage() {
     enabled: Boolean(user && token),
     retry: false,
   });
-  const repairContext = useMutation({
-    mutationFn: async () => repairWorkspaceContextRequest(token!, user!.workspaceId!),
-    onSuccess: async () => {
-      await Promise.all([
-        client.invalidateQueries({ queryKey: ["bootstrap", user?.workspaceId] }),
-        client.invalidateQueries({ queryKey: ["workspace-farms", user?.workspaceId] }),
-      ]);
-      window.dispatchEvent(new Event("muzare-farm-changed"));
-      window.dispatchEvent(new Event("muzare-season-changed"));
-    },
-  });
-
   const loadLocalDashboard = useCallback(async () => {
     await ensureLocalAccounts();
     const [labourers, attendance, dispatches, sales, vouchers, entries, advances, accounts, settlements] = await Promise.all([
@@ -385,34 +372,20 @@ export function DashboardPage() {
           <section className="dashboard-alert-card">
             <div>
               <strong>{t("common.dashboard")}</strong>
-              <p>Workspace context needs repair</p>
+              <p>Workspace context could not be refreshed. Please retry.</p>
             </div>
             <p className="error">{query.error.message}</p>
-            <div className="farm-actions">
-              <button type="button" onClick={() => repairContext.mutate()} disabled={repairContext.isPending}>
-                {repairContext.isPending ? "Repairing..." : "Repair workspace context"}
-              </button>
-            </div>
-            {repairContext.data ? <p className="positive">{repairContext.data.message}</p> : null}
-            {repairContext.error ? <p className="error">{repairContext.error.message}</p> : null}
           </section>
         )}
         {!query.isError && query.data?.contextWarning && (
           <section className="dashboard-alert-card">
-            <p className={query.data.needsRepair ? "error" : "context-message"}>{query.data.contextWarning}</p>
+            <p className="context-message">{query.isFetching ? "Loading workspace..." : query.data.contextWarning}</p>
             {user?.workspaceId && (
               <div className="farm-actions">
-                {query.data.needsRepair && (
-                  <button type="button" onClick={() => repairContext.mutate()} disabled={repairContext.isPending}>
-                    {repairContext.isPending ? "Repairing..." : "Repair workspace context"}
-                  </button>
-                )}
                 {!hasFarm && canManageFarms && <Link className="secondary-button" to="/workspace/farms?create=1">{t("dashboardPage.createNewFarm")}</Link>}
                 {!hasFarm && canManageFarms && <Link className="secondary-button" to="/workspace/farms?view=history">{t("dashboardPage.restoreSoftDeletedFarm")}</Link>}
               </div>
             )}
-            {repairContext.data ? <p className="positive">{repairContext.data.message}</p> : null}
-            {repairContext.error ? <p className="error">{repairContext.error.message}</p> : null}
           </section>
         )}
         {!hasFarm && noWorkspaceFarms && <p className="context-message">{canManageFarms
