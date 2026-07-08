@@ -2909,7 +2909,7 @@ function DispatchModule() {
           <article className="dispatch-overview-card__metric">
             <Package size={18} />
             <div>
-              <span>{t("dispatchPage.totalDispatchedCartons")}</span>
+              <span>Total Dispatched</span>
               <strong>{totalDispatched}</strong>
               <small>{t("dispatchPage.cartons")}</small>
             </div>
@@ -2917,7 +2917,7 @@ function DispatchModule() {
           <article className="dispatch-overview-card__metric">
             <PackageCheck size={18} />
             <div>
-              <span>{t("salesPage.soldCartons")}</span>
+              <span>Sold Cartons</span>
               <strong>{totalSold}</strong>
               <small>{t("dispatchPage.cartons")}</small>
             </div>
@@ -2925,7 +2925,7 @@ function DispatchModule() {
           <article className="dispatch-overview-card__metric">
             <PackageMinus size={18} />
             <div>
-              <span>{t("salesPage.remainingCartons")}</span>
+              <span>Remaining</span>
               <strong>{totalRemaining}</strong>
               <small>{t("dispatchPage.cartons")}</small>
             </div>
@@ -2933,13 +2933,13 @@ function DispatchModule() {
         </div>
       </section>
       {canManageMasters && <div className="dispatch-support-actions" aria-label="Dispatch settings">
-        <button type="button" onClick={() => setShowVehicles(true)}><Truck size={16} />{t("dispatchPage.manageVehicles")}</button>
-        <button type="button" onClick={() => setShowDateTypes(true)}><Tag size={16} />{t("dispatchPage.manageTypes")}</button>
+        <button type="button" onClick={() => setShowVehicles(true)}><Truck size={16} />Vehicles</button>
+        <button type="button" onClick={() => setShowDateTypes(true)}><Tag size={16} />Types</button>
       </div>}
       {(canCreateDispatch || (editing && canEditDispatch)) && <FormCard className="dispatch-form-card" title={createDispatchTitle}>
         <form className="module-form dispatch-form" onSubmit={(event) => void submit(event)}>
           <div className="dispatch-form__section dispatch-form__section--details">
-            <div className="dispatch-section-heading">
+            <div className="dispatch-section-heading dispatch-section-heading--simple">
               <div>
                 <h3>Dispatch Details</h3>
                 <p>Date, vehicle, and optional notes.</p>
@@ -2950,7 +2950,7 @@ function DispatchModule() {
             <label className="dispatch-form__field dispatch-form__field--full"><span>{t("dispatchPage.notes")}</span><input placeholder={t("dispatchPage.optional")} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
           </div>
           <div className="dispatch-carton-entry">
-            <div className="dispatch-section-heading">
+            <div className="dispatch-section-heading dispatch-section-heading--simple">
               <div>
                 <h3>Carton Entry</h3>
                 <p>Add one date type and carton count per row.</p>
@@ -2969,7 +2969,7 @@ function DispatchModule() {
               </article>)}
             </div>
             <div className="dispatch-items__footer">
-              <button className="secondary-action" type="button" onClick={() => setItems((current) => [...current, newDispatchItem()])}>{t("dispatchPage.addItem")}</button>
+              <button className="secondary-action dispatch-add-item-button" type="button" onClick={() => setItems((current) => [...current, newDispatchItem()])}>+ {t("dispatchPage.addItem")}</button>
             </div>
           </div>
           <div className="dispatch-added-items">
