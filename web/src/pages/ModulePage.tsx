@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { CalendarDays, Camera, ChevronDown, ChevronRight, Eye, FileText, ImageIcon, MoreVertical, Package, PackageCheck, PackageMinus, Paperclip, Pencil, RotateCw, Search, Tag, Trash2, Truck, UploadCloud, X } from "lucide-react";
+import { ArrowLeft, CalendarDays, Camera, ChevronDown, ChevronRight, Eye, FileText, ImageIcon, MoreVertical, Package, PackageCheck, PackageMinus, Paperclip, Pencil, RotateCw, Search, Tag, Trash2, Truck, UploadCloud, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -2781,6 +2781,7 @@ function nextDispatchSerial(records: Dispatch[], date: string, editing?: Dispatc
 
 function DispatchModule() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { user, sessionRefreshing } = useAuth();
   const workspaceId = user?.workspaceId ?? "";
   const canCreateDispatch = Boolean(!sessionRefreshing && user && workspaceId && canCreate(user, "dispatch", workspaceId));
@@ -2883,14 +2884,25 @@ function DispatchModule() {
   const totalRemaining = Math.max(totalDispatched - totalSold, 0);
   const createDispatchTitle = editing ? t("dispatchPage.updateDispatch") : "Create New Dispatch";
   const submitDispatchLabel = editing ? t("dispatchPage.updateDispatch") : "Create Dispatch";
+  const draftTotalCartons = items.reduce((sum, item) => sum + (Number(item.cartons) || 0), 0);
+  const validDraftItems = items.filter((item) => item.dateTypeId || item.cartons);
 
   return (
     <>
+      <header className="dispatch-page-header">
+        <button type="button" onClick={() => navigate(-1)} aria-label={t("common.back")}>
+          <ArrowLeft size={18} />
+        </button>
+        <div>
+          <h1>Dispatch</h1>
+          <p>Vehicle movement and produce carton dispatch</p>
+        </div>
+      </header>
       <section className="record-panel dispatch-overview-card">
         <div className="dispatch-section-heading dispatch-section-heading--tight">
           <div>
             <h2>Dispatch Overview</h2>
-            <p>Live carton movement at a glance.</p>
+            <p>Carton movement at a glance.</p>
           </div>
         </div>
         <div className="dispatch-overview-card__metrics">
@@ -2920,7 +2932,7 @@ function DispatchModule() {
           </article>
         </div>
       </section>
-      {canManageMasters && <div className="dispatch-support-actions">
+      {canManageMasters && <div className="dispatch-support-actions" aria-label="Dispatch settings">
         <button type="button" onClick={() => setShowVehicles(true)}><Truck size={16} />{t("dispatchPage.manageVehicles")}</button>
         <button type="button" onClick={() => setShowDateTypes(true)}><Tag size={16} />{t("dispatchPage.manageTypes")}</button>
       </div>}
@@ -2930,23 +2942,19 @@ function DispatchModule() {
             <div className="dispatch-section-heading">
               <div>
                 <h3>Dispatch Details</h3>
-                <p>Set the dispatch date, vehicle, and any notes.</p>
+                <p>Date, vehicle, and optional notes.</p>
               </div>
             </div>
             <label className="dispatch-form__field"><span>{t("dispatchPage.dispatchDate")}</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
             <label className="dispatch-form__field"><span>{t("dispatchPage.vehicle")}</span><ClearableSelect required value={vehicleId} onChange={setVehicleId}><option value="">{t("dispatchPage.selectActiveVehicle")}</option>{activeVehicles.map((item) => <option key={item.id} value={item.id}>{item.number}{item.driverName ? ` - ${item.driverName}` : ""}</option>)}</ClearableSelect></label>
             <label className="dispatch-form__field dispatch-form__field--full"><span>{t("dispatchPage.notes")}</span><input placeholder={t("dispatchPage.optional")} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
           </div>
-          <div className="dispatch-items">
+          <div className="dispatch-carton-entry">
             <div className="dispatch-section-heading">
               <div>
                 <h3>Carton Entry</h3>
-                <p>Add one date type and carton count per line.</p>
+                <p>Add one date type and carton count per row.</p>
               </div>
-            </div>
-            <div className="dispatch-section-subhead">
-              <h4>Added Items</h4>
-              <p>Review each item before submitting the dispatch.</p>
             </div>
             <div className="dispatch-items__rows">
               {items.map((item, index) => <article className="dispatch-item-row" key={item.id}>
@@ -2964,14 +2972,41 @@ function DispatchModule() {
               <button className="secondary-action" type="button" onClick={() => setItems((current) => [...current, newDispatchItem()])}>{t("dispatchPage.addItem")}</button>
             </div>
           </div>
+          <div className="dispatch-added-items">
+            <div className="dispatch-section-subhead">
+              <h4>Added Items</h4>
+              <p>Review the draft rows before submitting.</p>
+            </div>
+            {!validDraftItems.length ? <p className="dispatch-empty-note">No carton items added yet.</p> : <div className="dispatch-added-items__list">
+              {validDraftItems.map((item, index) => (
+                <div key={item.id} className="dispatch-added-items__row">
+                  <span>{dateTypeName(item.dateTypeId, `Item ${index + 1}`)}</span>
+                  <strong>{Number(item.cartons) || 0} {t("dispatchPage.cartons")}</strong>
+                </div>
+              ))}
+            </div>}
+          </div>
           <div className="dispatch-total-card">
             <span>Total Cartons</span>
-            <strong>{items.reduce((sum, item) => sum + (Number(item.cartons) || 0), 0)}</strong>
+            <strong>{draftTotalCartons}</strong>
           </div>
           {error && <p className="form-error">{error}</p>}
           <div className="dispatch-form-actions"><button disabled={saving} type="submit">{saving ? t("advancesPage.saving") : submitDispatchLabel}</button>{editing && <button className="secondary-action" type="button" onClick={reset}>{t("common.close")}</button>}</div>
         </form>
       </FormCard>}
+      <section className="record-panel dispatch-kpi-panel">
+        <div className="dispatch-section-heading">
+          <div>
+            <h2>Carton KPIs</h2>
+            <p>Filtered totals for this dispatch view.</p>
+          </div>
+        </div>
+        <div className="dispatch-kpi-grid">
+          <article><Package size={17} /><span>{t("dispatchPage.totalDispatchedCartons")}</span><strong>{totalDispatched}</strong><small>{t("dispatchPage.cartons")}</small></article>
+          <article><PackageCheck size={17} /><span>{t("salesPage.soldCartons")}</span><strong>{totalSold}</strong><small>{t("dispatchPage.cartons")}</small></article>
+          <article><PackageMinus size={17} /><span>{t("salesPage.remainingCartons")}</span><strong>{totalRemaining}</strong><small>{t("dispatchPage.cartons")}</small></article>
+        </div>
+      </section>
       <section className="record-panel dispatch-summary-panel">
         <div className="dispatch-section-heading">
           <div>
@@ -2984,12 +3019,12 @@ function DispatchModule() {
           <div className="dispatch-summary__group">
             <h3>{t("dispatchPage.byVehicle")}</h3>
             <p className="dispatch-summary__hint">View dispatch summary by vehicle</p>
-            {[...vehicleTotals].map(([name, total]) => <p key={name}><span>{name}</span><strong>{total} {t("dispatchPage.cartons")}</strong></p>)}
+            {[...vehicleTotals].length ? [...vehicleTotals].map(([name, total]) => <p key={name}><span>{name}</span><strong>{total} {t("dispatchPage.cartons")}</strong></p>) : <p className="dispatch-empty-note">No vehicle totals yet.</p>}
           </div>
           <div className="dispatch-summary__group">
             <h3>{t("dispatchPage.byType")}</h3>
             <p className="dispatch-summary__hint">View dispatch summary by type</p>
-            {[...typeTotals].map(([name, total]) => <p key={name}><span>{name}</span><strong>{total} {t("dispatchPage.cartons")}</strong></p>)}
+            {[...typeTotals].length ? [...typeTotals].map(([name, total]) => <p key={name}><span>{name}</span><strong>{total} {t("dispatchPage.cartons")}</strong></p>) : <p className="dispatch-empty-note">No type totals yet.</p>}
           </div>
         </div>
       </section>
