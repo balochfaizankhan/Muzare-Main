@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Bell,
   BanknoteArrowDown,
+  BookOpenText,
   CalendarRange,
   CircleUserRound,
   ClipboardList,
@@ -198,9 +199,10 @@ export function DashboardPage() {
 
   const quickActions = [
     { to: "/workspace/workforce/labour", icon: UsersRound, title: "Workforce" },
-    { to: "/workspace/labour-payments/advances", icon: HandCoins, title: "Advances" },
     { to: "/workspace/expenses", icon: ReceiptText, title: "Expenses" },
     { to: "/workspace/dispatch", icon: PackageOpen, title: "Dispatch" },
+    { to: "/workspace/partner-ledger", icon: BookOpenText, title: "Partner Ledger" },
+    { to: "/workspace/accounts", icon: Wallet, title: "Accounts" },
     { to: "/workspace/reports", icon: ClipboardList, title: "Reports" },
   ];
 
