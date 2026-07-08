@@ -11225,6 +11225,106 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   max-width: none;
 }
 
+.workforce-reports-panel {
+  gap: 12px;
+  padding: 14px;
+}
+
+.workforce-reports-header {
+  align-items: start;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.workforce-reports-header__back {
+  align-items: center;
+  background: linear-gradient(180deg, #ffffff, #f6faf3);
+  border: 1px solid rgba(16, 24, 40, 0.08);
+  border-radius: 12px;
+  color: #204f28;
+  display: inline-flex;
+  height: 38px;
+  justify-content: center;
+  width: 38px;
+}
+
+.workforce-reports-header__copy {
+  min-width: 0;
+}
+
+.workforce-reports-header__copy h2 {
+  color: #17371f;
+  font-size: 1.12rem;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.workforce-reports-header__copy span {
+  color: #5b6d5c;
+  display: block;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  margin-top: 4px;
+}
+
+.workforce-report-list {
+  display: grid;
+  gap: 10px;
+  padding-bottom: calc(var(--mobile-nav-height, 96px) + env(safe-area-inset-bottom) + 12px);
+}
+
+.workforce-report-row {
+  align-items: center;
+  background: linear-gradient(180deg, #ffffff, #f9fbf7);
+  border: 1px solid rgba(16, 24, 40, 0.06);
+  border-radius: 18px;
+  box-shadow: 0 10px 22px rgba(20, 38, 19, 0.05);
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-width: 0;
+  padding: 12px 13px;
+  text-align: left;
+}
+
+.workforce-report-row__icon {
+  align-items: center;
+  background: rgba(74, 124, 52, 0.12);
+  border-radius: 14px;
+  color: #2f6b31;
+  display: inline-flex;
+  height: 38px;
+  justify-content: center;
+  width: 38px;
+}
+
+.workforce-report-row__copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.workforce-report-row__copy strong {
+  color: #16321c;
+  font-size: 0.95rem;
+  line-height: 1.2;
+}
+
+.workforce-report-row__copy span {
+  color: #617061;
+  font-size: 0.79rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.workforce-report-row__chevron {
+  color: #819080;
+  flex-shrink: 0;
+}
+
 .labour-settlement-form-panel,
 .labour-settlement-preview-panel,
 .labour-settlement-register-panel {
@@ -11543,6 +11643,33 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
     position: sticky;
     top: 8px;
     z-index: 4;
+  }
+
+  .workforce-reports-panel {
+    padding: 13px;
+  }
+
+  .workforce-report-list {
+    gap: 8px;
+  }
+
+  .workforce-report-row {
+    gap: 10px;
+    padding: 10px 11px;
+  }
+
+  .workforce-report-row__icon {
+    border-radius: 12px;
+    height: 36px;
+    width: 36px;
+  }
+
+  .workforce-report-row__copy strong {
+    font-size: 0.92rem;
+  }
+
+  .workforce-report-row__copy span {
+    font-size: 0.77rem;
   }
 
   .labour-settlement-register-toolbar {

@@ -14,6 +14,7 @@ const moduleLabels: Record<WorkspaceActivityModule, string> = {
   sales: "Sales",
   accounts: "Accounts",
 };
+const MAX_EXPANDED_CHILDREN = 8;
 
 const todayKey = () => new Date().toISOString().slice(0, 10);
 
@@ -72,7 +73,7 @@ export function ActivityLog() {
   const [moduleFilter, setModuleFilter] = useState<"all" | WorkspaceActivityModule>("all");
   const [fromDate, setFromDate] = useState(shiftDateKey(-6));
   const [toDate, setToDate] = useState(todayKey());
-  const [expandedIds, setExpandedIds] = useState<string[]>([]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setActivities(await loadWorkspaceActivity());
@@ -102,8 +103,14 @@ export function ActivityLog() {
     [activities, moduleFilter, range.from, range.to],
   );
 
+  useEffect(() => {
+    if (expandedId && !filteredActivities.some((activity) => activity.id === expandedId)) {
+      setExpandedId(null);
+    }
+  }, [expandedId, filteredActivities]);
+
   const toggleExpanded = (id: string) => {
-    setExpandedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+    setExpandedId((current) => current === id ? null : id);
   };
 
   return (
@@ -170,8 +177,9 @@ export function ActivityLog() {
             <div className="activity-log-list">
               {filteredActivities.map((activity) => {
                 const expandable = Boolean(activity.expandable && activity.children?.length);
-                const expanded = expandedIds.includes(activity.id);
-                const visibleChildren = expanded ? (activity.children ?? []) : (activity.children ?? []).slice(0, 5);
+                const expanded = expandedId === activity.id;
+                const visibleChildren = expanded ? (activity.children ?? []).slice(0, MAX_EXPANDED_CHILDREN) : [];
+                const hiddenChildrenCount = Math.max((activity.children?.length ?? 0) - visibleChildren.length, 0);
                 return (
                   <article
                     className={`activity-log-item-shell${expandable ? " activity-log-item-shell--expandable" : ""}${expanded ? " is-open" : ""}`}
@@ -179,22 +187,30 @@ export function ActivityLog() {
                   >
                     {expandable ? (
                       <>
-                        <button type="button" className="dashboard-activity-item activity-log-item activity-log-item__toggle" onClick={() => toggleExpanded(activity.id)}>
+                        <button
+                          type="button"
+                          className="dashboard-activity-item activity-log-item activity-log-item__toggle"
+                          onClick={() => toggleExpanded(activity.id)}
+                          aria-expanded={expanded}
+                          aria-controls={`activity-details-${activity.id}`}
+                        >
                           <ActivitySummary activity={activity} expandable expanded={expanded} />
                         </button>
-                        <div className="activity-log-item__details">
-                          <div className="activity-log-item__detail-list">
-                            {visibleChildren.map((child) => (
-                              <article key={child.id} className="activity-log-item__detail-row">
-                                <strong>{child.title}</strong>
-                                <span>{child.detail ?? ""}</span>
-                                <small>{child.value ?? ""}</small>
-                              </article>
-                            ))}
+                        {expanded ? (
+                          <div className="activity-log-item__details" id={`activity-details-${activity.id}`}>
+                            <div className="activity-log-item__detail-list">
+                              {visibleChildren.map((child) => (
+                                <article key={child.id} className="activity-log-item__detail-row">
+                                  <strong>{child.title}</strong>
+                                  <span>{child.detail ?? ""}</span>
+                                  <small>{child.value ?? ""}</small>
+                                </article>
+                              ))}
+                            </div>
+                            {hiddenChildrenCount > 0 ? <p className="activity-log-item__more">+ {hiddenChildrenCount} more</p> : null}
+                            {activity.path ? <Link className="activity-log-item__open" to={activity.path}>Open {activity.moduleLabel}</Link> : null}
                           </div>
-                          {!expanded && (activity.children?.length ?? 0) > visibleChildren.length ? <p className="activity-log-item__more">+ {(activity.children?.length ?? 0) - visibleChildren.length} more</p> : null}
-                          {activity.path ? <Link className="activity-log-item__open" to={activity.path}>Open {activity.moduleLabel}</Link> : null}
-                        </div>
+                        ) : null}
                       </>
                     ) : activity.path ? (
                       <Link to={activity.path} className="dashboard-activity-item activity-log-item">

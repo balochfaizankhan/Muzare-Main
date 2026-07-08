@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { Activity, ArrowLeft, ArrowRight, CalendarCheck, CircleDollarSign, ClipboardList, HandCoins, ReceiptText, WalletCards } from "lucide-react";
+import { Activity, ArrowLeft, ArrowRight, CalendarCheck, ChevronRight, CircleDollarSign, ClipboardList, HandCoins, ReceiptText, WalletCards } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Link, NavLink, Outlet, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
@@ -469,21 +469,42 @@ export function DirectLabourPaymentsPage() {
   );
 }
 
-function WorkforceReportLinks({ title, description, links }: { title: string; description: string; links: Array<{ to: string; title: string; detail: string; icon: typeof CalendarCheck }> }) {
+function WorkforceReportLinks({
+  title,
+  description,
+  links,
+  compactRows = false,
+  backTo,
+}: {
+  title: string;
+  description: string;
+  links: Array<{ to: string; title: string; detail: string; icon: typeof CalendarCheck }>;
+  compactRows?: boolean;
+  backTo?: string;
+}) {
   const navigate = useNavigate();
   return (
-    <section className="record-panel">
-      <div className="advances-heading">
-        <h2>{title}</h2>
-        <span>{description}</span>
+    <section className={`record-panel${compactRows ? " workforce-reports-panel" : ""}`}>
+      <div className={compactRows ? "workforce-reports-header" : "advances-heading"}>
+        {compactRows && backTo ? (
+          <Link className="workforce-reports-header__back" to={backTo} aria-label="Back to workforce">
+            <ArrowLeft size={18} />
+          </Link>
+        ) : null}
+        <div className={compactRows ? "workforce-reports-header__copy" : undefined}>
+          <h2>{title}</h2>
+          <span>{description}</span>
+        </div>
       </div>
-      <div className="labour-payments-quick-grid">
+      <div className={compactRows ? "workforce-report-list" : "labour-payments-quick-grid"}>
         {links.map((link) => (
-          <button key={link.to} type="button" className="labour-payments-quick-card" onClick={() => navigate(link.to)}>
-            <link.icon size={18} />
-            <strong>{link.title}</strong>
-            <span>{link.detail}</span>
-            <small>Open <ArrowRight size={14} /></small>
+          <button key={link.to} type="button" className={compactRows ? "workforce-report-row" : "labour-payments-quick-card"} onClick={() => navigate(link.to)}>
+            <div className={compactRows ? "workforce-report-row__icon" : undefined}><link.icon size={18} /></div>
+            <div className={compactRows ? "workforce-report-row__copy" : undefined}>
+              <strong>{link.title}</strong>
+              <span>{link.detail}</span>
+            </div>
+            {compactRows ? <ChevronRight size={16} className="workforce-report-row__chevron" /> : null}
           </button>
         ))}
       </div>
@@ -495,12 +516,14 @@ export function WorkforceReportsHub() {
   return (
     <WorkforceReportLinks
       title="Workforce Reports"
-      description="Open workforce-focused reports without leaving the Workforce module."
+      description="Choose a workforce report to review"
+      compactRows
+      backTo="/workspace/workforce/labour"
       links={[
-        { to: "/workspace/reports?report=attendance", title: "Attendance Report", detail: "Attendance register, payable days, and totals.", icon: CalendarCheck },
-        { to: "/workspace/reports?report=advances", title: "Advance Report", detail: "Advance summary and log by labour, date, and amount.", icon: HandCoins },
-        { to: "/workspace/reports?report=wage-rates", title: "Wage Rate Report", detail: "Current, expired, and upcoming labour wage rates.", icon: WalletCards },
-        { to: "/workspace/reports?report=labour-earnings", title: "Labour Work Report", detail: "Pending and settled non-attendance labour earnings.", icon: ClipboardList },
+        { to: "/workspace/reports?report=attendance", title: "Attendance", detail: "Register, payable days, and totals", icon: CalendarCheck },
+        { to: "/workspace/reports?report=advances", title: "Advances", detail: "Summary and log by labour", icon: HandCoins },
+        { to: "/workspace/reports?report=wage-rates", title: "Wage Rates", detail: "Current, expired, and upcoming rates", icon: WalletCards },
+        { to: "/workspace/reports?report=labour-earnings", title: "Labour Work", detail: "Pending and settled earnings", icon: ClipboardList },
       ]}
     />
   );
