@@ -3014,16 +3014,14 @@ function DispatchModule() {
             <p>Review dispatch totals by date, vehicle, and type.</p>
           </div>
         </div>
-        <div className="dispatch-summary__filters"><label><span>{t("reports.dateFrom")}</span><input type="date" value={reportFrom} onChange={(event) => setReportFrom(event.target.value)} /></label><label><span>{t("reports.dateTo")}</span><input type="date" value={reportTo} onChange={(event) => setReportTo(event.target.value)} /></label></div>
+        <div className="dispatch-summary__filters"><label><span>From</span><input placeholder="Select date" type="date" value={reportFrom} onChange={(event) => setReportFrom(event.target.value)} /></label><label><span>To</span><input placeholder="Select date" type="date" value={reportTo} onChange={(event) => setReportTo(event.target.value)} /></label></div>
         <div className="dispatch-summary__groups">
           <div className="dispatch-summary__group">
             <h3>{t("dispatchPage.byVehicle")}</h3>
-            <p className="dispatch-summary__hint">View dispatch summary by vehicle</p>
             {[...vehicleTotals].length ? [...vehicleTotals].map(([name, total]) => <p key={name}><span>{name}</span><strong>{total} {t("dispatchPage.cartons")}</strong></p>) : <p className="dispatch-empty-note">No vehicle totals yet.</p>}
           </div>
           <div className="dispatch-summary__group">
             <h3>{t("dispatchPage.byType")}</h3>
-            <p className="dispatch-summary__hint">View dispatch summary by type</p>
             {[...typeTotals].length ? [...typeTotals].map(([name, total]) => <p key={name}><span>{name}</span><strong>{total} {t("dispatchPage.cartons")}</strong></p>) : <p className="dispatch-empty-note">No type totals yet.</p>}
           </div>
         </div>
@@ -4732,8 +4730,8 @@ export function ModulePage({
 
   return (
     <div className="dashboard-page">
-      <SubpageHeader title={moduleTitle} subtitle={module === "dispatch" ? t("dispatchPage.description") : undefined} />
-      <main className="subpage module-workspace">
+      {module !== "dispatch" && <SubpageHeader title={moduleTitle} />}
+      <main className={`subpage module-workspace${module === "dispatch" ? " module-workspace--dispatch" : ""}`}>
         {module !== "dispatch" && <section className="workspace-intro">
           <div>
             <h2>{moduleTitle}</h2>
