@@ -39,7 +39,7 @@ import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { getVoucherDisplayNumber, normalizeVoucherNumber, parseVoucherSequenceNumber } from "../lib/vouchers";
 import { getActiveVouchers, getVisibleVouchers, loadWorkspaceVouchers } from "../lib/voucherCollections";
 import { compareWageRates, getWageRateStatus, normalizeHalfDayRate, summarizeAttendanceWages } from "../lib/wageRates";
-import { getWorkerWorkingPeriod, isWorkerEligibleForAttendance, sortWorkersForDisplay } from "../lib/workerEligibility";
+import { getWorkerDisplayGroup, getWorkerWorkingPeriod, isWorkerEligibleForAttendance, sortWorkersForDisplay } from "../lib/workerEligibility";
 import {
   compareLabourers,
   ensureLocalAccounts,
@@ -77,7 +77,6 @@ const shortDate = (value: string) => formatDate(value, { day: "numeric", month: 
 const readableSyncTime = (value: string | null) => value ? new Date(value).toLocaleString() : "Not synced yet";
 const paymentTypes = ["daily_wage", "production_based", "contract_lump_sum", "monthly_salary", "other"] as const;
 type PaymentType = typeof paymentTypes[number];
-const isInactiveOn = (labourer: Labourer, date: string) => !isWorkerEligibleForAttendance(labourer, date);
 const canMarkAttendanceOn = (labourer: Labourer, date: string) => isWorkerEligibleForAttendance(labourer, date);
 type AccountLedgerRow = {
   id: string;
@@ -275,7 +274,7 @@ function WorkforceModule({
   const filteredRegister = sortWorkersForDisplay(labourers.filter((labourer) => {
     const term = labourSearch.trim().toLowerCase();
     if (!term) return true;
-    const status = labourer.active === false ? "inactive" : "active";
+    const status = labourer.isArchived ? "archived inactive" : getWorkerDisplayGroup(labourer);
     return labourer.name.toLowerCase().includes(term)
       || (labourer.phone ?? "").toLowerCase().includes(term)
       || (labourer.group ?? "").toLowerCase().includes(term)
@@ -400,13 +399,28 @@ function WorkforceModule({
     }, 80);
     return () => window.clearTimeout(handle);
   }, [showAttendanceEntry, newAttendanceLabourId, filteredLabourerIds]);
+  const labourerStatusDisplay = (labourer: Labourer) => {
+    if (labourer.isArchived) {
+      return { label: "Archived", chipClassName: "status-archived", detailClassName: "negative" };
+    }
+    if (getWorkerDisplayGroup(labourer) === "inactive") {
+      return { label: t("common.inactive"), chipClassName: "status-inactive", detailClassName: "negative" };
+    }
+    return { label: t("common.active"), chipClassName: "status-active", detailClassName: "positive" };
+  };
+  const selectedLabourerStatus = selectedLabourer ? labourerStatusDisplay(selectedLabourer) : null;
 
   return (
     <>
       <section className="record-panel">
         <header className="workforce-page-header">
-          <h2>{t("moduleTitles.workforce")}</h2>
-          <p>{t("moduleDescriptions.workforce")}</p>
+          <button className="workforce-page-header__back" type="button" aria-label="Back to dashboard" onClick={() => navigate(-1)}>
+            <ArrowLeft size={18} />
+          </button>
+          <div className="workforce-page-header__copy">
+            <h2>{t("moduleTitles.workforce")}</h2>
+            <p>{t("moduleDescriptions.workforce")}</p>
+          </div>
         </header>
         <div className="workforce-top-actions">
             {canWriteAttendance && <button className="workforce-mark-attendance" type="button" onClick={() => setShowAttendanceEntry(true)}>{t("workforcePage.markAttendance")}</button>}
@@ -446,30 +460,31 @@ function WorkforceModule({
         </div>}
         {!labourers.length ? <Empty>{t("workforcePage.noLabourRecorded")}</Empty> : !filteredRegister.length ? <Empty>{t("workforcePage.noLabourFound")}</Empty> : (
           <div className="record-list workforce-list">
-            {filteredRegister.map((labourer, index) => (
-              <article className="workforce-row" key={labourer.id} role="button" tabIndex={0} onClick={() => setSelectedLabourer(labourer)} onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") setSelectedLabourer(labourer);
-              }}>
-                <span className="workforce-row__index">{index + 1}</span>
-                <span className="workforce-row__body">
-                  <strong>{labourer.name}</strong>
-                  <span>{labourer.group} • {paymentTypeLabel(labourer.paymentType)}</span>
-                  <em className={labourer.isArchived ? "status-archived" : isInactiveOn(labourer, today()) ? "status-inactive" : "status-active"}>
-                    {labourer.isArchived ? "Archived" : isInactiveOn(labourer, today()) ? t("common.inactive") : t("common.active")}
-                  </em>
-                  {(() => {
-                    const period = getWorkerWorkingPeriod(labourer);
-                    return period.workerEnd ? <small>{t("workforcePage.endDate")}: {period.workerEnd}</small> : null;
-                  })()}
-                </span>
-                <button className="workforce-row__action" type="button" onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  setActionLabourer(labourer);
-                  setLabourAction("update");
-                }}>{t("common.update")}</button>
-              </article>
-            ))}
+            {filteredRegister.map((labourer, index) => {
+              const statusDisplay = labourerStatusDisplay(labourer);
+              return (
+                <article className="workforce-row" key={labourer.id} role="button" tabIndex={0} onClick={() => setSelectedLabourer(labourer)} onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") setSelectedLabourer(labourer);
+                }}>
+                  <span className="workforce-row__index">{index + 1}</span>
+                  <span className="workforce-row__body">
+                    <strong>{labourer.name}</strong>
+                    <span>{labourer.group} • {paymentTypeLabel(labourer.paymentType)}</span>
+                    <em className={statusDisplay.chipClassName}>{statusDisplay.label}</em>
+                    {(() => {
+                      const period = getWorkerWorkingPeriod(labourer);
+                      return period.workerEnd ? <small>{t("workforcePage.endDate")}: {period.workerEnd}</small> : null;
+                    })()}
+                  </span>
+                  <button className="workforce-row__action" type="button" onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setActionLabourer(labourer);
+                    setLabourAction("update");
+                  }}>{t("common.update")}</button>
+                </article>
+              );
+            })}
           </div>
         )}
       </section>
@@ -581,7 +596,7 @@ function WorkforceModule({
             <div className="worker-dialog__body">
               <h3>{t("workforcePage.attendanceStatistics")}</h3>
               <dl className="worker-stats">
-                <div><dt>{t("common.status")}</dt><dd className={selectedLabourer.isArchived ? "negative" : selectedLabourer.active === false ? "negative" : "positive"}>{selectedLabourer.isArchived ? "Archived" : selectedLabourer.active === false ? t("common.inactive") : t("common.active")}</dd></div>
+                <div><dt>{t("common.status")}</dt><dd className={selectedLabourerStatus?.detailClassName}>{selectedLabourerStatus?.label}</dd></div>
                 <div><dt>{t("workforcePage.paymentTypeLabel")}</dt><dd>{translatePaymentType(selectedLabourer.paymentType ?? "daily_wage")}</dd></div>
                 <div><dt>{t("workforcePage.paymentSummary")}</dt><dd>{labourPaymentSummary(selectedLabourer)}</dd></div>
                 <div><dt>{t("workforcePage.groupLabel")}</dt><dd>{selectedLabourer.group}</dd></div>
@@ -4727,12 +4742,13 @@ export function ModulePage({
   const moduleDescription = workforceMode === "advance"
     ? t("advancesPage.introDescription")
     : t(`moduleDescriptions.${module}`);
+  const showSharedModuleHeader = module !== "dispatch" && module !== "workforce";
 
   return (
     <div className="dashboard-page">
-      {module !== "dispatch" && <SubpageHeader title={moduleTitle} />}
-      <main className={`subpage module-workspace${module === "dispatch" ? " module-workspace--dispatch" : ""}`}>
-        {module !== "dispatch" && <section className="workspace-intro">
+      {showSharedModuleHeader && <SubpageHeader title={moduleTitle} />}
+      <main className={`subpage module-workspace${module === "dispatch" ? " module-workspace--dispatch" : ""}${module === "workforce" ? " module-workspace--workforce" : ""}`}>
+        {showSharedModuleHeader && <section className="workspace-intro">
           <div>
             <h2>{moduleTitle}</h2>
             <p>{moduleDescription}</p>
