@@ -3485,9 +3485,9 @@ button {
 
 .module-workspace--workforce {
   gap: 10px;
-  padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(132px + env(safe-area-inset-bottom, 0px));
   padding-top: 14px;
-  scroll-padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px));
+  scroll-padding-bottom: calc(132px + env(safe-area-inset-bottom, 0px));
 }
 
 .workspace-intro {
@@ -4832,9 +4832,9 @@ button {
 .workforce-page-header {
   align-items: center;
   display: grid;
-  gap: 10px;
+  gap: 9px;
   grid-template-columns: auto minmax(0, 1fr);
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   min-width: 0;
 }
 
@@ -4857,7 +4857,7 @@ button {
 
 .workforce-page-header h2 {
   color: var(--brand-primary);
-  font-size: 1.18rem;
+  font-size: 1.14rem;
   line-height: 1.15;
   margin: 0 0 3px;
 }
@@ -4871,52 +4871,54 @@ button {
 
 .workforce-top-actions {
   display: grid;
-  gap: 7px;
-  margin-bottom: 10px;
+  gap: 6px;
+  margin-bottom: 8px;
 }
 
 .workforce-mark-attendance {
   background: var(--brand-primary);
   border: 0;
-  border-radius: 10px;
+  border-radius: 12px;
   color: #fff;
-  font-size: .96rem;
+  font-size: .92rem;
   font-weight: 800;
-  height: 42px;
+  height: 44px;
   min-width: 160px;
-  width: auto;
+  width: 100%;
 }
 
 .workforce-toolbar {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: 7px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .workforce-toolbar button {
   background: #fff;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 12px;
   color: var(--brand-primary);
-  font-size: .86rem;
+  font-size: .82rem;
   font-weight: 750;
-  height: 38px;
-  padding: 0 11px;
+  height: 40px;
+  min-width: 0;
+  padding: 0 10px;
 }
 
 .workforce-list-header {
   align-items: center;
   display: flex;
-  gap: 8px;
+  gap: 7px;
   justify-content: space-between;
-  margin-bottom: 6px;
+  margin-bottom: 5px;
 }
 
 .workforce-list-header h2 {
   color: var(--brand-primary);
-  font-size: 1.18rem;
+  font-size: 1.02rem;
   line-height: 1.1;
   margin: 0;
+  white-space: nowrap;
 }
 
 .workforce-list-header__controls {
@@ -4929,7 +4931,7 @@ button {
 }
 
 .workforce-list-header__controls .search-input {
-  max-width: 260px;
+  max-width: none;
   min-width: 0;
   width: 100%;
 }
@@ -4939,7 +4941,7 @@ button {
   border: 1px solid var(--border);
   border-radius: 12px;
   color: var(--text);
-  height: 46px;
+  height: 42px;
   min-width: 0;
   width: 100%;
 }
@@ -4948,12 +4950,14 @@ button {
   align-items: center;
   background: transparent;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 10px;
   color: var(--brand-primary);
   display: inline-flex;
-  height: 40px;
+  flex: 0 0 38px;
+  height: 38px;
   justify-content: center;
-  width: 40px;
+  padding: 0;
+  width: 38px;
 }
 
 .workforce-filters {
@@ -4968,11 +4972,11 @@ button {
   color: var(--text);
   cursor: pointer;
   display: grid;
-  gap: 9px;
-  grid-template-columns: 38px minmax(0, 1fr) 76px;
-  min-height: 78px;
+  gap: 8px;
+  grid-template-columns: 34px minmax(0, 1fr) 72px;
+  min-height: 70px;
   opacity: 1;
-  padding: 10px 11px;
+  padding: 9px 10px;
   text-align: start;
   width: 100%;
 }
@@ -4989,15 +4993,15 @@ button {
   border-radius: 999px;
   color: #fff !important;
   display: flex;
-  flex: 0 0 36px;
+  flex: 0 0 32px;
   font-size: 12px;
   font-weight: 700;
-  height: 36px;
+  height: 32px;
   justify-content: center;
   line-height: 1;
   opacity: 1;
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
-  width: 36px;
+  width: 32px;
 }
 
 .workforce-row__body {
@@ -5008,9 +5012,9 @@ button {
 .workforce-row__body strong {
   color: var(--brand-primary);
   display: block;
-  font-size: .98rem;
+  font-size: .94rem;
   line-height: 1.15;
-  margin-bottom: 2px;
+  margin-bottom: 1px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5019,7 +5023,7 @@ button {
 .workforce-row__body span {
   color: var(--text-secondary);
   display: block;
-  font-size: 0.79rem;
+  font-size: 0.76rem;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5030,12 +5034,12 @@ button {
   align-items: center;
   border-radius: 12px;
   display: inline-flex;
-  font-size: .72rem;
+  font-size: .7rem;
   line-height: 1;
   font-style: normal;
   font-weight: 800;
-  margin-top: 4px;
-  padding: 4px 7px;
+  margin-top: 3px;
+  padding: 4px 6px;
 }
 
 .workforce-row__body small {
@@ -5068,6 +5072,19 @@ button {
   color: #9a3412;
 }
 
+.workforce-row--inactive .workforce-row__index,
+.workforce-row--archived .workforce-row__index {
+  background: #d7dee6;
+  border-color: #d7dee6;
+  color: #475569 !important;
+  text-shadow: none;
+}
+
+.workforce-row--inactive .workforce-row__body strong,
+.workforce-row--archived .workforce-row__body strong {
+  color: #334155;
+}
+
 .workforce-row__action {
   align-self: center;
   background: var(--brand-primary);
@@ -5075,13 +5092,20 @@ button {
   border-radius: 10px;
   color: #fff;
   flex: 0 0 auto;
-  font-size: 0.77rem;
+  font-size: 0.74rem;
   font-weight: 800;
-  height: 36px;
+  height: 34px;
   min-width: 0;
-  padding: 0 7px;
-  width: 76px;
+  padding: 0 6px;
+  width: 72px;
   white-space: nowrap;
+}
+
+.workforce-row--inactive .workforce-row__action,
+.workforce-row--archived .workforce-row__action {
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  color: #475569;
 }
 
 .workforce-reports-menu button {
@@ -7052,23 +7076,21 @@ button {
   }
 
   .workforce-top-actions {
-    gap: 7px;
-    margin-bottom: 9px;
+    gap: 6px;
+    margin-bottom: 8px;
   }
 
   .workforce-mark-attendance {
-    min-height: 42px;
+    min-height: 44px;
     width: 100%;
   }
 
   .workforce-toolbar {
-    display: grid;
-    gap: 7px;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .workforce-toolbar button {
-    height: 38px;
+    height: 40px;
     justify-content: center;
     width: 100%;
   }
@@ -7327,23 +7349,23 @@ button {
 
   .workforce-row {
     gap: 7px;
-    grid-template-columns: 34px minmax(0, 1fr) 68px;
-    min-height: 76px;
-    padding: 9px;
+    grid-template-columns: 32px minmax(0, 1fr) 66px;
+    min-height: 68px;
+    padding: 8px;
   }
 
   .workforce-row__index {
-    flex-basis: 34px;
+    flex-basis: 32px;
     font-size: 12px;
-    height: 34px;
-    width: 34px;
+    height: 32px;
+    width: 32px;
   }
 
   .workforce-row__action {
     height: 34px;
     min-width: 0;
-    padding: 0 5px;
-    width: 68px;
+    padding: 0 4px;
+    width: 66px;
   }
 
   .dispatch-master-dialog {
@@ -7365,24 +7387,24 @@ button {
 @media (max-width: 340px) {
   .workforce-row {
     gap: 6px;
-    grid-template-columns: 32px minmax(0, 1fr) 64px;
-    min-height: 74px;
+    grid-template-columns: 30px minmax(0, 1fr) 62px;
+    min-height: 66px;
     padding: 8px;
   }
 
   .workforce-row__index {
-    flex-basis: 32px;
-    font-size: 12px;
-    height: 32px;
-    width: 32px;
+    flex-basis: 30px;
+    font-size: 11px;
+    height: 30px;
+    width: 30px;
   }
 
   .workforce-row__action {
     font-size: .72rem;
-    height: 34px;
+    height: 32px;
     min-width: 0;
     padding: 0 4px;
-    width: 64px;
+    width: 62px;
   }
 }
 

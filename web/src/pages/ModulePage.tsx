@@ -427,6 +427,7 @@ function WorkforceModule({
           <div className="workforce-toolbar">
             {canManageLabour && <button type="button" onClick={() => setShowAddLabour(true)}>{t("workforcePage.addLabour")}</button>}
             {user?.workspaceId && hasModulePermission(user, "workforce", "view", user.workspaceId) && <button type="button" onClick={() => navigate("/workspace/labour-payments/overview")}>Labour Payments</button>}
+            <button type="button" onClick={() => navigate("/workspace/workforce/reports")}>Reports</button>
             {canManageLabour && <button type="button" onClick={() => setShowAddGroup(true)}>{t("workforcePage.groups")}</button>}
           </div>
         </div>
@@ -462,8 +463,9 @@ function WorkforceModule({
           <div className="record-list workforce-list">
             {filteredRegister.map((labourer, index) => {
               const statusDisplay = labourerStatusDisplay(labourer);
+              const workerGroup = labourer.isArchived ? "archived" : getWorkerDisplayGroup(labourer);
               return (
-                <article className="workforce-row" key={labourer.id} role="button" tabIndex={0} onClick={() => setSelectedLabourer(labourer)} onKeyDown={(event) => {
+                <article className={`workforce-row workforce-row--${workerGroup}`} key={labourer.id} role="button" tabIndex={0} onClick={() => setSelectedLabourer(labourer)} onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") setSelectedLabourer(labourer);
                 }}>
                   <span className="workforce-row__index">{index + 1}</span>

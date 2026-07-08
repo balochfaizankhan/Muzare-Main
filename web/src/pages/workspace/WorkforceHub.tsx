@@ -96,21 +96,7 @@ function WorkforceShell({
 }
 
 export function WorkforceSectionLayout() {
-  const { t } = useTranslation();
-  const tabs = [
-    { to: "/workspace/workforce/labour", label: "Labour" },
-    { to: "/workspace/workforce/attendance", label: t("layout.attendance") },
-    { to: "/workspace/workforce/reports", label: "Workforce Reports" },
-  ];
-  return (
-    <WorkforceShell
-      title="Workforce"
-      description="Manage labour, attendance, and workforce reporting from one operational workspace."
-      tabs={tabs}
-    >
-      <Outlet />
-    </WorkforceShell>
-  );
+  return <Outlet />;
 }
 
 export function LabourPaymentsSectionLayout() {
