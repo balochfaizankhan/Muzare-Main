@@ -318,7 +318,7 @@ export function DashboardPage() {
   ];
 
   const quickActions = [
-    { to: "/workspace/workforce/attendance", icon: UsersRound, title: "Attendance" },
+    { to: "/workspace/workforce/labour", icon: UsersRound, title: "Workforce" },
     { to: "/workspace/labour-payments/advances", icon: HandCoins, title: "Advances" },
     { to: "/workspace/expenses", icon: ReceiptText, title: "Expenses" },
     { to: "/workspace/dispatch", icon: PackageOpen, title: "Dispatch" },
