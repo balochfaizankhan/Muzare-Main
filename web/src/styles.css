@@ -2322,14 +2322,103 @@ button {
   gap: 8px;
 }
 
+.activity-log-item-shell {
+  display: grid;
+  gap: 0;
+}
+
 .activity-log-item {
   background: #fff;
   grid-template-columns: auto minmax(0, 1fr) auto auto;
   position: relative;
 }
 
+.activity-log-item__toggle {
+  background: #fff;
+  color: inherit;
+  cursor: pointer;
+  text-align: start;
+  width: 100%;
+}
+
 .activity-log-item__chevron {
   color: var(--text-secondary);
+  transition: transform 160ms ease;
+}
+
+.activity-log-item__chevron.is-open {
+  transform: rotate(180deg);
+}
+
+.activity-log-item__details {
+  border: 1px solid var(--border);
+  border-top: 0;
+  border-radius: 0 0 16px 16px;
+  margin-top: -1px;
+  padding: 0 10px 10px 52px;
+}
+
+.activity-log-item__detail-list {
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-top: 2px;
+}
+
+.activity-log-item__detail-row {
+  align-items: center;
+  background: #f9fbf7;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, white);
+  border-radius: 12px;
+  display: grid;
+  gap: 4px 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 8px 9px;
+}
+
+.activity-log-item__detail-row strong,
+.activity-log-item__detail-row span,
+.activity-log-item__detail-row small {
+  margin: 0;
+  min-width: 0;
+}
+
+.activity-log-item__detail-row strong {
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-log-item__detail-row span {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+
+.activity-log-item__detail-row small {
+  color: var(--text-primary);
+  font-size: 0.74rem;
+  font-weight: 700;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  text-align: end;
+}
+
+.activity-log-item__more {
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  margin: 8px 0 0;
+}
+
+.activity-log-item__open {
+  color: var(--brand-primary);
+  display: inline-flex;
+  font-size: 0.77rem;
+  font-weight: 800;
+  margin-top: 8px;
+  text-decoration: none;
 }
 
 .activity-log-item--static {
@@ -8383,6 +8472,29 @@ button {
 
   .dashboard-activity-item {
     padding: 8px 9px;
+  }
+
+  .activity-log-item {
+    gap: 8px;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .activity-log-item__chevron {
+    justify-self: end;
+  }
+
+  .activity-log-item__details {
+    padding: 0 9px 9px 45px;
+  }
+
+  .activity-log-item__detail-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .activity-log-item__detail-row small {
+    grid-column: auto;
+    grid-row: auto;
+    text-align: start;
   }
 
   .activity-log-date-row {

@@ -31,6 +31,13 @@ import { getVoucherDisplayNumber } from "./vouchers";
 
 export type WorkspaceActivityModule = "attendance" | "labour" | "expenses" | "dispatch" | "sales" | "accounts";
 
+export type WorkspaceActivityChild = {
+  id: string;
+  title: string;
+  detail?: string;
+  value?: string;
+};
+
 export type WorkspaceActivityItem = {
   id: string;
   module: WorkspaceActivityModule;
@@ -43,9 +50,18 @@ export type WorkspaceActivityItem = {
   activityDate: string;
   icon: LucideIcon;
   tone: "green" | "orange" | "blue" | "purple" | "slate";
+  children?: WorkspaceActivityChild[];
+  expandable?: boolean;
+};
+
+type RawWorkspaceActivity = Omit<WorkspaceActivityItem, "children" | "expandable"> & {
+  children?: WorkspaceActivityChild[];
+  groupWindowMinutes?: number;
 };
 
 const money = formatMoney;
+const ATTENDANCE_GROUP_WINDOW_MINUTES = 20;
+const LABOUR_BATCH_WINDOW_MINUTES = 5;
 
 const capitalize = (value: string) => value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 
@@ -62,6 +78,11 @@ const formatShortRange = (start: string, end: string) => {
 const resolveActivityTimestamp = (activityDate: string, createdAt: string) => {
   if (createdAt.includes("T")) return createdAt;
   return `${activityDate}T00:00:00`;
+};
+
+const parseTimestamp = (value: string) => {
+  const parsed = new Date(value).getTime();
+  return Number.isNaN(parsed) ? 0 : parsed;
 };
 
 const isToday = (value: Date) => {
@@ -85,10 +106,88 @@ const labourerName = (labourerById: Map<string, Labourer>, labourerId: string) =
 
 const accountName = (accountById: Map<string, Account>, accountId?: string | null) => accountId ? (accountById.get(accountId)?.name ?? "Account") : "Account";
 
-const getActiveLabourWageSettlementsForActivity = (settlements: LabourWageSettlement[]) =>
-  getActiveLabourWageSettlements(settlements);
-
 const getGeneralExpenseVouchers = (vouchers: Voucher[]) => getVisibleVouchers(vouchers, { visibility: "general-expenses" });
+
+const sameTimedBatch = (left: RawWorkspaceActivity, right: RawWorkspaceActivity) =>
+  left.module === right.module
+  && left.activityDate === right.activityDate
+  && left.groupWindowMinutes === right.groupWindowMinutes
+  && Math.abs(parseTimestamp(left.createdAt) - parseTimestamp(right.createdAt)) <= (left.groupWindowMinutes ?? 0) * 60_000;
+
+const attendanceSummary = (group: RawWorkspaceActivity[]) => {
+  const counts = new Map<string, number>();
+  group.forEach((item) => {
+    const key = item.value.toLowerCase();
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  });
+  const pieces = [...counts.entries()]
+    .sort((left, right) => right[1] - left[1])
+    .map(([label, count]) => `${count} ${label}`);
+  return pieces.join(" • ");
+};
+
+const uniqueLabourCount = (group: RawWorkspaceActivity[]) => new Set(group.map((item) => item.children?.[0]?.title ?? item.detail)).size;
+
+const groupAttendanceActivities = (items: RawWorkspaceActivity[]) => {
+  const ascending = items.slice().sort((left, right) => parseTimestamp(left.createdAt) - parseTimestamp(right.createdAt));
+  const groups: RawWorkspaceActivity[][] = [];
+  ascending.forEach((item) => {
+    const current = groups.at(-1);
+    if (current?.length && sameTimedBatch(current[current.length - 1], item)) {
+      current.push(item);
+      return;
+    }
+    groups.push([item]);
+  });
+  return groups.map((group) => {
+    if (group.length === 1) return group[0];
+    const latest = group[group.length - 1];
+    return {
+      ...latest,
+      id: `attendance-group:${group[0].id}:${group.length}`,
+      title: "Attendance marked",
+      detail: `${group.length} labour`,
+      value: attendanceSummary(group),
+      children: group.map((item) => ({
+        id: item.id,
+        title: item.children?.[0]?.title ?? item.detail,
+        detail: item.value,
+      })),
+      expandable: true,
+    };
+  });
+};
+
+const groupLabourBatchActivities = (items: RawWorkspaceActivity[], groupedTitle: string) => {
+  const ascending = items.slice().sort((left, right) => parseTimestamp(left.createdAt) - parseTimestamp(right.createdAt));
+  const groups: RawWorkspaceActivity[][] = [];
+  ascending.forEach((item) => {
+    const current = groups.at(-1);
+    if (current?.length && sameTimedBatch(current[current.length - 1], item)) {
+      current.push(item);
+      return;
+    }
+    groups.push([item]);
+  });
+  return groups.map((group) => {
+    if (group.length === 1) return group[0];
+    const latest = group[group.length - 1];
+    const total = group.reduce((sum, item) => sum + Number(item.value.replace(/[^\d.-]/g, "")), 0);
+    return {
+      ...latest,
+      id: `${latest.module}-group:${group[0].id}:${group.length}`,
+      title: groupedTitle,
+      detail: `${uniqueLabourCount(group)} labour`,
+      value: `-${money(Math.abs(total))}`,
+      children: group.map((item) => ({
+        id: item.id,
+        title: item.children?.[0]?.title ?? item.detail,
+        value: item.value,
+      })),
+      expandable: true,
+    };
+  });
+};
 
 export async function loadWorkspaceActivity(): Promise<WorkspaceActivityItem[]> {
   const [labourers, attendance, dispatches, sales, advances, payments, settlements, partnerEntries, accounts, vouchers] = await Promise.all([
@@ -109,53 +208,74 @@ export async function loadWorkspaceActivity(): Promise<WorkspaceActivityItem[]> 
   const activeSales = sales.filter(isActiveOperationalRecord);
   const activeAdvances = advances.filter(isActiveOperationalRecord);
   const activePayments = payments.filter(isActiveOperationalRecord);
-  const activeSettlements = getActiveLabourWageSettlementsForActivity(settlements);
+  const activeSettlements = getActiveLabourWageSettlements(settlements);
   const activePartnerEntries = partnerEntries.filter(isActiveOperationalRecord);
   const activeAccounts = accounts.filter(isActiveOperationalRecord);
   const generalExpenseVouchers = getGeneralExpenseVouchers(vouchers);
   const labourerById = new Map(labourers.filter(isActiveOperationalRecord).map((item) => [item.id, item]));
   const accountById = new Map(activeAccounts.map((item) => [item.id, item]));
 
-  const activities: WorkspaceActivityItem[] = [
-    ...activeAttendance.map((item: Attendance) => ({
-      id: `attendance:${item.id}`,
-      module: "attendance" as const,
-      moduleLabel: "Attendance",
-      path: "/workspace/workforce/attendance",
-      title: "Attendance marked",
-      detail: `${labourerName(labourerById, item.labourerId)} · ${item.date}`,
-      value: capitalize(item.status),
-      createdAt: resolveActivityTimestamp(item.date, item.createdAt),
-      activityDate: item.date,
-      icon: UsersRound,
-      tone: "green" as const,
-    })),
-    ...activeAdvances.map((item: Advance) => ({
-      id: `advance:${item.id}`,
-      module: "labour" as const,
-      moduleLabel: "Labour",
-      path: "/workspace/labour-payments/advances",
-      title: "Labour advance paid",
-      detail: `${labourerName(labourerById, item.labourerId)}${item.paymentMethod ? ` · ${item.paymentMethod}` : ""}`,
+  const attendanceActivities = groupAttendanceActivities(activeAttendance.map((item: Attendance) => ({
+    id: `attendance:${item.id}`,
+    module: "attendance" as const,
+    moduleLabel: "Attendance",
+    path: "/workspace/workforce/attendance",
+    title: "Attendance marked",
+    detail: `${labourerName(labourerById, item.labourerId)} · ${item.date}`,
+    value: capitalize(item.status),
+    createdAt: resolveActivityTimestamp(item.date, item.createdAt),
+    activityDate: item.date,
+    icon: UsersRound,
+    tone: "green" as const,
+    groupWindowMinutes: ATTENDANCE_GROUP_WINDOW_MINUTES,
+    children: [{
+      id: item.id,
+      title: labourerName(labourerById, item.labourerId),
+      detail: capitalize(item.status),
+    }],
+  })));
+
+  const advanceActivities = groupLabourBatchActivities(activeAdvances.map((item: Advance) => ({
+    id: `advance:${item.id}`,
+    module: "labour" as const,
+    moduleLabel: "Labour",
+    path: "/workspace/labour-payments/advances",
+    title: "Labour advance paid",
+    detail: `${labourerName(labourerById, item.labourerId)}${item.paymentMethod ? ` · ${item.paymentMethod}` : ""}`,
+    value: `-${money(item.amount)}`,
+    createdAt: resolveActivityTimestamp(item.date, item.createdAt),
+    activityDate: item.date,
+    icon: HandCoins,
+    tone: "purple" as const,
+    groupWindowMinutes: LABOUR_BATCH_WINDOW_MINUTES,
+    children: [{
+      id: item.id,
+      title: labourerName(labourerById, item.labourerId),
       value: `-${money(item.amount)}`,
-      createdAt: resolveActivityTimestamp(item.date, item.createdAt),
-      activityDate: item.date,
-      icon: HandCoins,
-      tone: "purple" as const,
-    })),
-    ...activePayments.map((item: LabourPayment) => ({
-      id: `labour-payment:${item.id}`,
-      module: "labour" as const,
-      moduleLabel: "Labour",
-      path: "/workspace/labour-payments/direct-payments",
-      title: "Direct labour payment",
-      detail: `${labourerName(labourerById, item.labourerId)}${item.paymentMethod ? ` · ${item.paymentMethod}` : ""}`,
+    }],
+  })), "Labour advances paid");
+
+  const paymentActivities = groupLabourBatchActivities(activePayments.map((item: LabourPayment) => ({
+    id: `labour-payment:${item.id}`,
+    module: "labour" as const,
+    moduleLabel: "Labour",
+    path: "/workspace/labour-payments/direct-payments",
+    title: "Labour payment posted",
+    detail: `${labourerName(labourerById, item.labourerId)}${item.paymentMethod ? ` · ${item.paymentMethod}` : ""}`,
+    value: `-${money(item.amount)}`,
+    createdAt: resolveActivityTimestamp(item.date, item.createdAt),
+    activityDate: item.date,
+    icon: Wallet,
+    tone: "purple" as const,
+    groupWindowMinutes: LABOUR_BATCH_WINDOW_MINUTES,
+    children: [{
+      id: item.id,
+      title: labourerName(labourerById, item.labourerId),
       value: `-${money(item.amount)}`,
-      createdAt: resolveActivityTimestamp(item.date, item.createdAt),
-      activityDate: item.date,
-      icon: Wallet,
-      tone: "purple" as const,
-    })),
+    }],
+  })), "Labour payments posted");
+
+  const individualActivities: WorkspaceActivityItem[] = [
     ...activeSettlements.map((item: LabourWageSettlement) => ({
       id: `settlement:${item.id}`,
       module: "labour" as const,
@@ -223,7 +343,8 @@ export async function loadWorkspaceActivity(): Promise<WorkspaceActivityItem[]> 
     })),
   ];
 
-  return activities.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  return [...attendanceActivities, ...advanceActivities, ...paymentActivities, ...individualActivities]
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
 export function formatWorkspaceActivityDateTime(value: string) {
