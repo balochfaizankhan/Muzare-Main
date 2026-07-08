@@ -66,8 +66,8 @@ test("farm and season switching scope browser records to the selected context", 
 test("Render static site rewrites direct frontend routes to the SPA entry point", async () => {
   const render = await source("render.yaml");
   const vite = await source("web/vite.config.ts");
-  assert.match(render, /type: web[\s\S]*name: muzare-web[\s\S]*runtime: static/);
-  assert.match(render, /staticPublishPath: web\/dist/);
+  assert.match(render, /type: web[\s\S]*name: muzare-main-dev-frontend[\s\S]*runtime: static/);
+  assert.match(render, /rootDir: web[\s\S]*buildCommand: npm run build[\s\S]*staticPublishPath: dist/);
   assert.match(render, /type: rewrite[\s\S]*source: "\/\*"[\s\S]*destination: "\/index\.html"/);
   assert.doesNotMatch(vite, /base:\s*["']\/workspace\//);
 });

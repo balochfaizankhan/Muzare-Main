@@ -1,10 +1,10 @@
 services:
   - type: web
-    name: muzare-web
+    name: muzare-main-dev-frontend
     runtime: static
     rootDir: web
-    buildCommand: npm install && npm run build
-    staticPublishPath: web/dist
+    buildCommand: npm run build
+    staticPublishPath: dist
     routes:
       - type: rewrite
         source: "/*"
