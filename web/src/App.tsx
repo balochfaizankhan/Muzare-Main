@@ -40,6 +40,7 @@ const WageRates = lazy(async () => ({ default: (await import("./pages/workspace/
 const WorkforceReportsHub = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).WorkforceReportsHub }));
 const WorkforceSectionLayout = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).WorkforceSectionLayout }));
 const Reports = lazy(async () => ({ default: (await import("./pages/workspace/Reports")).Reports }));
+const ActivityLog = lazy(async () => ({ default: (await import("./pages/workspace/ActivityLog")).ActivityLog }));
 const Sales = lazy(async () => ({ default: (await import("./pages/workspace/Sales")).Sales }));
 const WorkspaceDashboard = lazy(async () => ({ default: (await import("./pages/workspace/WorkspaceDashboard")).WorkspaceDashboard }));
 const Farms = lazy(async () => ({ default: (await import("./pages/workspace/Farms")).Farms }));
@@ -169,6 +170,7 @@ export default function App() {
       <Route path="labour-earnings" element={<Navigate to="/workspace/labour-payments/earnings" replace />} />
       <Route path="wage-rates" element={<Navigate to="/workspace/labour-payments/wage-rates" replace />} />
       <Route path="wage-settlements" element={<Navigate to="/workspace/labour-payments/settlements" replace />} />
+      <Route path="activity" element={routeElement(<ActivityLog />, "Loading activity log")} />
       <Route path="reports" element={routeElement(<Reports />, "Loading reports")} />
       <Route path="operations-map" element={config.featureFarmMap ? routeElement(<FarmOperationsMap mode="live" />, "Loading operations map") : <FarmMapDisabledRedirect />} />
       <Route path="map-builder" element={config.featureFarmMap ? routeElement(<FarmOperationsMap mode="builder" />, "Loading map builder") : <FarmMapDisabledRedirect />} />

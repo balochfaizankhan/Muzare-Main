@@ -10,12 +10,10 @@ import {
   Leaf,
   ReceiptText,
   PackageOpen,
-  ShoppingBasket,
   UsersRound,
   Wallet,
   Wifi,
   WifiOff,
-  type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -23,16 +21,15 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { calculateAvailableBalance } from "../lib/accounting";
 import { fetchBootstrap } from "../lib/api";
-import { getCanonicalExpenseCategory } from "../lib/expenseCategories";
-import { formatDate, formatMoney } from "../lib/format";
+import { formatDate } from "../lib/format";
 import { getActiveLabourWageSettlements, getCashAffectingVouchers, outstandingLabourAdvances } from "../lib/labourWageSettlements";
 import { buildPartnerLiabilityPositions } from "../lib/partnerAccounting";
 import { ensureLocalAccounts, offlineDb, workspaceRecords } from "../lib/offline-db";
 import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { hasPermission } from "../lib/permissions";
 import { getVisibleVouchers, loadWorkspaceVouchers } from "../lib/voucherCollections";
-import { getVoucherDisplayNumber } from "../lib/vouchers";
 import { useSyncState } from "../hooks/useSyncState";
+import { formatWorkspaceActivityDateTime, loadWorkspaceActivity, type WorkspaceActivityItem } from "../lib/workspaceActivity";
 
 type DashboardTotals = {
   presentToday: number;
@@ -46,39 +43,12 @@ type DashboardTotals = {
   partnerBalance: number;
 };
 
-type Activity = {
-  id: string;
-  path: string;
-  title: string;
-  detail: string;
-  value: string;
-  createdAt: string;
-  icon: LucideIcon;
-  tone?: "green" | "orange" | "blue" | "purple" | "slate";
-};
-
 const today = () => new Date().toISOString().slice(0, 10);
-const money = formatMoney;
 const moneyWhole = (amount: number) => new Intl.NumberFormat(undefined, {
   style: "currency",
   currency: "SAR",
   maximumFractionDigits: 0,
 }).format(amount);
-const capitalize = (value: string) => value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-const formatActivityDate = (value: string) => {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? value
-    : new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(date);
-};
-const formatShortRange = (start: string, end: string) => {
-  const startDate = new Date(start);
-  const endDate = new Date(end);
-  const sameYear = startDate.getFullYear() === endDate.getFullYear();
-  const shortFormatter = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
-  const longFormatter = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
-  return sameYear ? `${shortFormatter.format(startDate)} – ${longFormatter.format(endDate)}` : `${longFormatter.format(startDate)} – ${longFormatter.format(endDate)}`;
-};
 
 export function DashboardPage() {
   const { t } = useTranslation();
@@ -95,7 +65,7 @@ export function DashboardPage() {
     netPosition: 0,
     partnerBalance: 0,
   });
-  const [activities, setActivities] = useState<Activity[]>([]);
+  const [activities, setActivities] = useState<WorkspaceActivityItem[]>([]);
   const query = useQuery({
     queryKey: ["bootstrap", user?.workspaceId, sync.farmId, sync.seasonId],
     queryFn: () => fetchBootstrap(token!),
@@ -104,8 +74,7 @@ export function DashboardPage() {
   });
   const loadLocalDashboard = useCallback(async () => {
     await ensureLocalAccounts();
-    const [labourers, attendance, dispatches, sales, vouchers, entries, advances, accounts, settlements] = await Promise.all([
-      workspaceRecords(offlineDb.labourers),
+    const [attendance, dispatches, sales, vouchers, entries, advances, accounts, settlements, recentActivities] = await Promise.all([
       workspaceRecords(offlineDb.attendance),
       workspaceRecords(offlineDb.dispatches),
       workspaceRecords(offlineDb.sales),
@@ -114,6 +83,7 @@ export function DashboardPage() {
       workspaceRecords(offlineDb.advances),
       workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }),
       workspaceRecords(offlineDb.labourWageSettlements),
+      loadWorkspaceActivity(),
     ]);
     const activeAttendance = attendance.filter(isActiveOperationalRecord);
     const activeDispatches = dispatches.filter(isActiveOperationalRecord);
@@ -125,11 +95,9 @@ export function DashboardPage() {
     const activeAdvances = advances.filter(isActiveOperationalRecord);
     const activeSettlements = getActiveLabourWageSettlements(settlements);
     const activeAccounts = accounts.filter(isActiveOperationalRecord);
-    const activeLabourers = labourers.filter(isActiveOperationalRecord);
     const farmId = sync.farmId ?? null;
     const seasonId = sync.seasonId ?? null;
     const date = today();
-    const labourerById = new Map(activeLabourers.map((item) => [item.id, item]));
     const totalSales = activeSales.reduce((sum, item) => sum + item.amount, 0);
     const labourAdvances = outstandingLabourAdvances(activeAdvances, activeSettlements, { farmId, seasonId });
     const totalExpenses = generalExpenseVouchers.reduce((sum, item) => sum + item.amount, 0);
@@ -151,94 +119,7 @@ export function DashboardPage() {
       partnerBalance,
     });
 
-    const recent: Activity[] = [
-      ...activeAttendance
-        .slice()
-        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-        .slice(0, 2)
-          .map((item) => ({
-          id: `attendance:${item.id}`,
-          path: "/workspace/workforce/attendance",
-          title: "Attendance marked",
-          detail: `${labourerById.get(item.labourerId)?.name ?? "Labour"} · ${capitalize(item.status)}`,
-          value: formatActivityDate(item.date),
-          createdAt: item.createdAt,
-          icon: UsersRound,
-          tone: "green" as const,
-        })),
-      ...generalExpenseVouchers
-        .slice()
-        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-        .slice(0, 1)
-        .map((item) => ({
-          id: `expense:${item.id}`,
-          path: "/workspace/expenses",
-          title: "Expense recorded",
-          detail: `${getVoucherDisplayNumber(item) || item.voucherNumber} · ${getCanonicalExpenseCategory(item.category)}`,
-          value: `-${money(item.amount)}`,
-          createdAt: item.createdAt,
-          icon: ReceiptText,
-          tone: "orange" as const,
-        })),
-      ...activeAdvances
-        .slice()
-        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-        .slice(0, 1)
-        .map((item) => ({
-          id: `advance:${item.id}`,
-          path: "/workspace/labour-advances",
-          title: "Labour advance paid",
-          detail: `${labourerById.get(item.labourerId)?.name ?? "Labour"}${item.paymentMethod ? ` · ${item.paymentMethod}` : ""}`,
-          value: `-${money(item.amount)}`,
-          createdAt: item.createdAt,
-          icon: HandCoins,
-          tone: "purple" as const,
-        })),
-      ...activeSettlements
-        .slice()
-        .sort((left, right) => right.settlementDate.localeCompare(left.settlementDate) || right.createdAt.localeCompare(left.createdAt))
-        .slice(0, 1)
-        .map((item) => ({
-          id: `settlement:${item.id}`,
-          path: "/workspace/labour-payments/settlements",
-          title: "Wage settlement posted",
-          detail: formatShortRange(item.fromDate, item.toDate),
-          value: money(item.expenseAmount),
-          createdAt: item.createdAt,
-          icon: ClipboardList,
-          tone: "blue" as const,
-        })),
-      ...activeDispatches
-        .slice()
-        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-        .slice(0, 1)
-        .map((item) => ({
-          id: `dispatch:${item.id}`,
-          path: "/workspace/dispatch",
-          title: "Dispatch completed",
-          detail: item.vehicleNumber ?? item.destination ?? "Dispatch",
-          value: `${item.items?.reduce((sum, entry) => sum + entry.cartons, 0) ?? item.cartons ?? 0} cartons`,
-          createdAt: item.createdAt,
-          icon: PackageOpen,
-          tone: "blue" as const,
-        })),
-      ...activeSales
-        .slice()
-        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-        .slice(0, 1)
-        .map((item) => ({
-          id: `sale:${item.id}`,
-          path: "/workspace/sales",
-          title: "Sale recorded",
-          detail: item.buyerName ?? item.produceType,
-          value: money(item.amount),
-          createdAt: item.createdAt,
-          icon: ShoppingBasket,
-          tone: "green" as const,
-        })),
-    ];
-    recent.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-    setActivities(recent.slice(0, 5));
+    setActivities(recentActivities.slice(0, 5));
   }, [sync.farmId, sync.seasonId, t]);
 
   useEffect(() => {
@@ -482,7 +363,7 @@ export function DashboardPage() {
                   <h2>{t("dashboard.recentActivity")}</h2>
                   <p>{activities.length ? "Recent operational records from the current workspace." : "Activity will appear here as soon as records are saved."}</p>
                 </div>
-            <Link className="dashboard-section-link" to="/workspace/reports"><span>View all</span><ChevronRight size={14} /></Link>
+            <Link className="dashboard-section-link" to="/workspace/activity"><span>View all</span><ChevronRight size={14} /></Link>
               </div>
               {activities.length === 0 ? (
                 <p className="activity-empty">{t("dashboard.noActivity")}</p>
@@ -491,7 +372,7 @@ export function DashboardPage() {
                   {activities.map((activity) => {
                     const Icon = activity.icon;
                     return (
-                      <Link to={activity.path} className="dashboard-activity-item" key={activity.id}>
+                      <Link to={activity.path ?? "/workspace/activity"} className="dashboard-activity-item" key={activity.id}>
                         <div className={`dashboard-activity-item__icon dashboard-activity-item__icon--${activity.tone ?? "slate"}`}>
                           <Icon size={16} />
                         </div>
@@ -501,7 +382,7 @@ export function DashboardPage() {
                         </div>
                         <div className="dashboard-activity-item__meta">
                           <strong>{activity.value}</strong>
-                          <small>{activity.createdAt.includes("T") ? new Date(activity.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : formatActivityDate(activity.createdAt)}</small>
+                          <small>{formatWorkspaceActivityDateTime(activity.createdAt)}</small>
                         </div>
                       </Link>
                     );

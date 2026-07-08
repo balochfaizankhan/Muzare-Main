@@ -2231,6 +2231,111 @@ button {
   color: var(--text-secondary);
 }
 
+.activity-log-page {
+  gap: 12px;
+  padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px));
+  padding-top: 14px;
+  scroll-padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px));
+}
+
+.activity-log-card {
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow-soft);
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.activity-log-header h1 {
+  color: var(--brand-primary);
+  font-size: 1.18rem;
+  margin: 0 0 4px;
+}
+
+.activity-log-header p {
+  color: var(--text-secondary);
+  font-size: 0.86rem;
+  margin: 0;
+}
+
+.activity-log-filters {
+  display: grid;
+  gap: 10px;
+}
+
+.activity-log-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.activity-log-chip-row button {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 700;
+  min-height: 36px;
+  padding: 0 12px;
+}
+
+.activity-log-chip-row button.is-active {
+  background: #eef7ed;
+  border-color: color-mix(in srgb, var(--brand-primary) 42%, white);
+  color: var(--brand-primary);
+}
+
+.activity-log-date-row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.activity-log-date-row label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.activity-log-date-row span {
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.activity-log-date-row input {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text-primary);
+  height: 44px;
+  min-width: 0;
+  padding: 0 12px;
+  width: 100%;
+}
+
+.activity-log-list {
+  display: grid;
+  gap: 8px;
+}
+
+.activity-log-item {
+  background: #fff;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  position: relative;
+}
+
+.activity-log-item__chevron {
+  color: var(--text-secondary);
+}
+
+.activity-log-item--static {
+  cursor: default;
+}
+
 .dashboard-tech-panels {
   display: none;
 }
@@ -8256,6 +8361,10 @@ button {
 
   .dashboard-activity-item {
     padding: 8px 9px;
+  }
+
+  .activity-log-date-row {
+    gap: 8px;
   }
 
   .shell-header {
