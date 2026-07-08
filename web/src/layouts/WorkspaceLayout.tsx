@@ -1,6 +1,7 @@
 import { BarChart3, BookOpenText, Boxes, ClipboardList, CloudUpload, HandCoins, LayoutDashboard, LogOut, MoreHorizontal, PackageOpen, Plus, ReceiptText, RefreshCw, Satellite, Settings, ShoppingBasket, Users, WalletCards, X, type LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { Brand } from "../components/Brand";
@@ -8,6 +9,8 @@ import { LanguageSwitch } from "../components/LanguageSwitch";
 import { config } from "../config";
 import type { PendingMutation } from "../lib/offline-db";
 import { useSyncState } from "../hooks/useSyncState";
+import { fetchBootstrap } from "../lib/api";
+import { deriveWorkspaceDisplayStatus } from "../lib/workspaceStatus";
 import { discardSyncQueueItem, getSyncQueueItems, refreshOperationalData, repairStaleSyncQueueItem, resolveSyncQueueItem, retrySyncQueueItem, startSyncService, stopSyncService, syncNow } from "../services/syncService";
 import { setActiveWorkspaceId } from "../lib/offline-db";
 import { hasModulePermission } from "../lib/permissions";
@@ -39,6 +42,12 @@ export function WorkspaceLayout() {
   const [queueOpen, setQueueOpen] = useState(false);
   const [queueItems, setQueueItems] = useState<PendingMutation[]>([]);
   const [mobileSheet, setMobileSheet] = useState<null | "add" | "more">(null);
+  const bootstrap = useQuery({
+    queryKey: ["bootstrap", user?.workspaceId, sync.farmId, sync.seasonId],
+    queryFn: () => fetchBootstrap(token!),
+    enabled: Boolean(user && token),
+    retry: false,
+  });
   useEffect(() => {
     setActiveWorkspaceId(user?.workspaceId ?? null);
   }, [user?.workspaceId]);
@@ -81,15 +90,16 @@ export function WorkspaceLayout() {
   useEffect(() => {
     setMobileSheet(null);
   }, [location.pathname, location.search]);
-  const statusText = sync.status === "offline"
-    ? t("layout.workingOffline")
-    : sync.status === "syncing"
-      ? t("layout.syncing")
-      : sync.status === "error"
-        ? t("layout.syncFailed")
-        : sync.pendingCount
-          ? t("layout.changesWaiting", { count: sync.pendingCount })
-          : t("layout.synced");
+  const workspaceStatus = deriveWorkspaceDisplayStatus({
+    sync,
+    bootstrap: bootstrap.data,
+    bootstrapLoading: bootstrap.isLoading || (!bootstrap.data && bootstrap.isFetching),
+    bootstrapLoaded: bootstrap.isSuccess,
+    bootstrapErrored: bootstrap.isError,
+  });
+  const statusText = workspaceStatus.tone === "offline"
+    ? "Offline"
+    : workspaceStatus.label;
   const startupVisible = sync.startupInProgress;
   const queueNeedsAttention = (sync.pendingCount ?? 0) > 0 || (sync.failedCount ?? 0) > 0;
   const isDashboardHome = location.pathname === "/workspace/dashboard";
@@ -158,7 +168,7 @@ export function WorkspaceLayout() {
                   ))}
                 </select>
               )}
-              <button className={`sync-badge sync-badge--${sync.status}`} type="button" onClick={() => setQueueOpen((current) => !current)} aria-expanded={queueOpen} aria-label={t("sync.queueInspector")}>{statusText}</button>
+              <button className={`sync-badge sync-badge--${workspaceStatus.tone}`} type="button" onClick={() => setQueueOpen((current) => !current)} aria-expanded={queueOpen} aria-label={t("sync.queueInspector")}>{statusText}</button>
             </div>
           </div>
           <div className="toolbar__actions shell-header__controls">

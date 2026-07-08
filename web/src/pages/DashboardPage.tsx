@@ -30,6 +30,7 @@ import { hasPermission } from "../lib/permissions";
 import { getVisibleVouchers, loadWorkspaceVouchers } from "../lib/voucherCollections";
 import { useSyncState } from "../hooks/useSyncState";
 import { formatWorkspaceActivityDateTime, loadWorkspaceActivity, type WorkspaceActivityItem } from "../lib/workspaceActivity";
+import { deriveWorkspaceDisplayStatus } from "../lib/workspaceStatus";
 
 type DashboardTotals = {
   presentToday: number;
@@ -132,11 +133,17 @@ export function DashboardPage() {
     };
   }, [loadLocalDashboard]);
 
-  const farm = query.data?.farms.find((item) => item.id === query.data.activeFarmId);
-  const season = query.data?.seasons.find((item) => item.id === query.data.activeSeasonId);
-  const hasFarm = Boolean(farm);
-  const hasSeason = Boolean(season);
-  const hasOperationalContext = hasFarm && hasSeason;
+  const workspaceStatus = deriveWorkspaceDisplayStatus({
+    sync,
+    bootstrap: query.data,
+    bootstrapLoading: query.isLoading || (!query.data && query.isFetching),
+    bootstrapLoaded: query.isSuccess,
+    bootstrapErrored: query.isError,
+  });
+  const hasFarm = workspaceStatus.hasFarm;
+  const hasSeason = workspaceStatus.hasSeason;
+  const hasOperationalContext = workspaceStatus.hasOperationalContext;
+  const hydrationPending = workspaceStatus.hydrationPending;
   const canManageFarms = Boolean(user?.workspaceId && user && hasPermission(user, "MANAGE_FARMS", user.workspaceId));
   const workspaceFarmCount = query.data?.workspaceFarmCount ?? query.data?.farms.length ?? 0;
   const accessibleFarmCount = query.data?.accessibleFarmCount ?? query.data?.farms.length ?? 0;
@@ -145,23 +152,14 @@ export function DashboardPage() {
   const hasOtherWorkspaces = (user?.memberships.filter((membership) => membership.active).length ?? 0) > 1;
   const StatusIcon = sync.status === "offline" ? WifiOff : Wifi;
   const displayName = user?.displayName || user?.email || t("common.dashboard");
-  const selectedFarmLabel = farm?.name ?? t("dashboardPage.noFarmAvailable");
-  const selectedSeasonLabel = season?.name ?? (hasFarm ? t("noSeason") : t("dashboardPage.noSeasonUntilFarm"));
-  const heroStatus = sync.pendingCount
-    ? "Needs attention"
-    : !hasFarm || !hasSeason
-      ? "Setup required"
-      : "Ready";
-  const heroStatusCopy = sync.pendingCount
-    ? `${sync.pendingCount} record${sync.pendingCount === 1 ? "" : "s"} waiting to sync.`
-    : !hasFarm || !hasSeason
-      ? "Select a farm and season to unlock the full overview."
-      : "Workspace is synced and ready for today.";
-  const heroSyncLabel = sync.pendingCount === 0 && sync.status !== "offline"
-    ? "Synced"
-    : sync.lastSyncTime
-      ? `Updated ${new Date(sync.lastSyncTime).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
-      : "Updated today";
+  const selectedFarmLabel = workspaceStatus.selectedFarmLabel;
+  const selectedSeasonLabel = workspaceStatus.selectedSeasonLabel;
+  const heroStatus = workspaceStatus.heroStatus;
+  const heroStatusCopy = workspaceStatus.heroCopy;
+  const heroSyncLabel = workspaceStatus.label;
+  const syncNote = workspaceStatus.tone === "offline" ? t("layout.workingOffline") : workspaceStatus.note;
+  const attendanceTodayLabel = hydrationPending ? "--" : `${totals.attendanceMarkedToday} labour today`;
+  const dispatchTodayLabel = hydrationPending ? "--" : `${totals.dispatchesToday} today`;
 
   const summaryCards = [
     {
@@ -218,7 +216,7 @@ export function DashboardPage() {
             </div>
           </div>
           <div className="dashboard-mobile-header__status">
-            <span className={`dashboard-home__sync-chip dashboard-home__sync-chip--${sync.status}`}>
+            <span className={`dashboard-home__sync-chip dashboard-home__sync-chip--${workspaceStatus.tone}`}>
               <StatusIcon size={14} />
               {heroSyncLabel}
             </span>
@@ -241,11 +239,11 @@ export function DashboardPage() {
             <p>{formatDate(new Date(), { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
           </div>
           <div className="dashboard-home__sync">
-            <span className={`dashboard-home__sync-chip dashboard-home__sync-chip--${sync.status}`}>
+            <span className={`dashboard-home__sync-chip dashboard-home__sync-chip--${workspaceStatus.tone}`}>
               <StatusIcon size={14} />
               {heroSyncLabel}
             </span>
-            <span className="dashboard-home__sync-note">{sync.status === "offline" ? t("layout.workingOffline") : t("layout.synced")}</span>
+            <span className="dashboard-home__sync-note">{syncNote}</span>
           </div>
         </section>
 
@@ -258,7 +256,7 @@ export function DashboardPage() {
             <p className="error">{query.error.message}</p>
           </section>
         )}
-        {!query.isError && query.data?.contextWarning && (
+        {!query.isError && !hydrationPending && query.data?.contextWarning && (
           <section className="dashboard-alert-card">
             <p className="context-message">{query.isFetching ? "Loading workspace..." : query.data.contextWarning}</p>
             {user?.workspaceId && (
@@ -269,13 +267,13 @@ export function DashboardPage() {
             )}
           </section>
         )}
-        {!hasFarm && noWorkspaceFarms && <p className="context-message">{canManageFarms
+        {!hydrationPending && !hasFarm && noWorkspaceFarms && <p className="context-message">{canManageFarms
           ? t("dashboardPage.noFarmAvailableMessage")
           : hasOtherWorkspaces
             ? t("dashboardPage.emptyWorkspaceSwitchHint")
             : t("dashboardPage.noFarmVisibleReadOnly")}</p>}
-        {!hasFarm && noAccessibleFarms && <p className="context-message">{t("dashboardPage.noAccessibleFarmMessage")}</p>}
-        {hasFarm && !hasSeason && <p className="context-message">{t("dashboardPage.noActiveSeason")}</p>}
+        {!hydrationPending && !hasFarm && noAccessibleFarms && <p className="context-message">{t("dashboardPage.noAccessibleFarmMessage")}</p>}
+        {!hydrationPending && hasFarm && !hasSeason && <p className="context-message">{t("dashboardPage.noActiveSeason")}</p>}
 
         <section className="dashboard-context-grid" aria-label="Current workspace context">
           <Link className="dashboard-context-card" to="/workspace/farms">
@@ -309,14 +307,14 @@ export function DashboardPage() {
                 <UsersRound size={18} />
                 <div>
                   <span>Attendance</span>
-                  <strong>{totals.attendanceMarkedToday} labour today</strong>
+                  <strong>{attendanceTodayLabel}</strong>
                 </div>
               </article>
               <article className="dashboard-hero-card__stat">
                 <PackageOpen size={18} />
                 <div>
                   <span>Dispatches</span>
-                  <strong>{totals.dispatchesToday} today</strong>
+                  <strong>{dispatchTodayLabel}</strong>
                 </div>
               </article>
             </div>
@@ -335,8 +333,8 @@ export function DashboardPage() {
             <div className={`dashboard-kpi-card dashboard-kpi-card--${tone} dashboard-kpi-card--disabled`} key={label} aria-disabled="true">
               <div className="dashboard-kpi-card__icon"><Icon size={18} /></div>
               <span>{label}</span>
-              <strong>--</strong>
-              <small>{detail}</small>
+              <strong>{hydrationPending ? "..." : "--"}</strong>
+              <small>{hydrationPending ? "Preparing workspace data" : detail}</small>
             </div>
           ))}
         </section>

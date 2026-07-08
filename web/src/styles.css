@@ -1653,7 +1653,8 @@ button {
 }
 
 .dashboard-home__sync-chip--online,
-.dashboard-home__sync-chip--ready {
+.dashboard-home__sync-chip--ready,
+.dashboard-home__sync-chip--synced {
   background: rgba(22, 163, 74, 0.1);
   color: #166534;
 }
@@ -1663,9 +1664,19 @@ button {
   color: #92400e;
 }
 
+.dashboard-home__sync-chip--loading {
+  background: rgba(148, 163, 184, 0.16);
+  color: #475569;
+}
+
 .dashboard-home__sync-chip--syncing {
   background: rgba(59, 130, 246, 0.12);
   color: #1d4ed8;
+}
+
+.dashboard-home__sync-chip--setup {
+  background: rgba(245, 158, 11, 0.15);
+  color: #9a3412;
 }
 
 .dashboard-home__sync-chip--error {
@@ -7689,7 +7700,9 @@ button {
 
 .sync-badge--offline::before,
 .sync-badge--pending::before { background: #eab308; }
+.sync-badge--loading::before { background: #94a3b8; }
 .sync-badge--syncing::before { background: #3b82f6; }
+.sync-badge--setup::before { background: #f59e0b; }
 .sync-badge--error::before { background: #ef4444; }
 
 .sync-queue-panel {
