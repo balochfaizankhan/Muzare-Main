@@ -5994,7 +5994,7 @@ button {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 24px 28px;
+  padding: 22px 24px 28px;
 }
 
 .worker-dialog__body h3 {
@@ -6071,6 +6071,334 @@ button {
   font-weight: 700;
   margin: 0;
   text-align: start;
+}
+
+.labour-profile-dialog {
+  max-width: min(760px, calc(100vw - 24px));
+  width: min(100%, 760px);
+}
+
+.labour-profile-header {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.labour-profile-header__copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.labour-profile-header__title-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+
+.labour-profile-header__title-row h2 {
+  font-size: 1.1rem;
+  line-height: 1.1;
+  margin: 0;
+}
+
+.labour-profile-header__meta {
+  align-items: center;
+  color: var(--text-secondary);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  min-width: 0;
+}
+
+.labour-profile-header__copy small {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.labour-profile-header__close {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--border) 86%, white);
+  border-radius: 10px;
+  color: var(--text-secondary);
+  display: inline-flex;
+  flex: 0 0 auto;
+  justify-content: center;
+  min-height: 38px;
+  min-width: 38px;
+  padding: 0;
+}
+
+.labour-profile-status-chip {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  padding: 5px 9px;
+  text-transform: uppercase;
+}
+
+.labour-profile-status-chip--active {
+  background: #eaf8ef;
+  color: #1e8f4f;
+}
+
+.labour-profile-status-chip--inactive {
+  background: #edf1f5;
+  color: #6b7280;
+}
+
+.labour-profile-body {
+  display: grid;
+  gap: 14px;
+  padding-bottom: 34px;
+}
+
+.labour-profile-section {
+  background: color-mix(in srgb, var(--surface-soft) 72%, white);
+  border: 1px solid color-mix(in srgb, var(--border) 72%, white);
+  border-radius: 16px;
+  padding: 14px;
+}
+
+.labour-profile-section__head {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.labour-profile-section__head h3 {
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+.labour-profile-section__head span {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-align: end;
+}
+
+.labour-profile-balance-grid,
+.labour-profile-chip-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.labour-profile-balance-card,
+.labour-profile-chip-card {
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--border) 86%, white);
+  border-radius: 12px;
+  display: grid;
+  gap: 6px;
+  padding: 12px 13px;
+}
+
+.labour-profile-balance-card span,
+.labour-profile-chip-card span {
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.labour-profile-balance-card strong,
+.labour-profile-chip-card strong {
+  font-size: 1.05rem;
+  font-weight: 800;
+  margin: 0;
+}
+
+.labour-profile-summary-grid {
+  display: grid;
+  gap: 10px 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+.labour-profile-summary-grid div {
+  align-items: stretch;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--border) 86%, white);
+  border-radius: 12px;
+  display: grid;
+  gap: 4px;
+  padding: 11px 12px;
+}
+
+.labour-profile-summary-grid dt {
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.labour-profile-summary-grid dd {
+  font-size: 0.98rem;
+  font-weight: 750;
+  margin: 0;
+  overflow-wrap: anywhere;
+  text-align: start;
+}
+
+.labour-profile-summary-grid--compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.labour-profile-work-list,
+.labour-profile-rate-list {
+  display: grid;
+  gap: 10px;
+}
+
+.labour-profile-work-row,
+.labour-profile-rate-row {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--border) 86%, white);
+  border-radius: 12px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 11px 12px;
+}
+
+.labour-profile-work-row__main,
+.labour-profile-rate-row__period,
+.labour-profile-rate-row__rates {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.labour-profile-work-row__main strong,
+.labour-profile-rate-row__period strong,
+.labour-profile-rate-row__rates strong {
+  color: var(--text-primary);
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.labour-profile-work-row__main span,
+.labour-profile-rate-row__period span,
+.labour-profile-work-row__meta small {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.labour-profile-work-row__meta {
+  display: grid;
+  gap: 3px;
+  justify-items: end;
+  min-width: 0;
+  text-align: end;
+}
+
+.labour-profile-work-row__meta strong {
+  color: var(--text-primary);
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.labour-profile-work-row__meta small {
+  overflow-wrap: anywhere;
+}
+
+.labour-profile-empty-state {
+  background: var(--surface-soft);
+  border: 1px dashed color-mix(in srgb, var(--border) 82%, white);
+  border-radius: 12px;
+  color: var(--text-secondary);
+  margin: 0;
+  padding: 14px;
+}
+
+.labour-profile-footer {
+  gap: 8px;
+}
+
+.labour-profile-action {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.labour-profile-action--danger {
+  background: #fff4f4;
+  border-color: #f2c8c8;
+  color: #dc3f3f;
+}
+
+.labour-profile-action--close {
+  background: transparent;
+}
+
+.labour-profile-work-row__meta strong,
+.labour-profile-rate-row__rates strong {
+  white-space: nowrap;
+}
+
+@media (max-width: 767px) {
+  .worker-dialog.labour-profile-dialog {
+    max-width: calc(100vw - 24px);
+    width: calc(100vw - 24px);
+  }
+
+  .labour-profile-body {
+    padding-bottom: 92px;
+  }
+
+  .labour-profile-section__head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .labour-profile-section__head span {
+    text-align: start;
+  }
+
+  .labour-profile-balance-grid,
+  .labour-profile-chip-grid,
+  .labour-profile-summary-grid,
+  .labour-profile-summary-grid--compact {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .labour-profile-work-row,
+  .labour-profile-rate-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .labour-profile-work-row__meta {
+    justify-items: start;
+    text-align: start;
+  }
+
+  .labour-profile-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .labour-profile-action {
+    width: 100%;
+  }
 }
 
 .worker-dialog__surface {

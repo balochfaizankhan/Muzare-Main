@@ -63,6 +63,7 @@ import {
   type PartnerEntry,
   type ProductionEntry,
   type Sale,
+  type WageRate,
   type Vehicle,
   type Voucher,
   type VoucherItem,
@@ -74,6 +75,11 @@ export type ModuleKey = "workforce" | "expenses" | "sales" | "dispatch" | "accou
 const today = todayLocalDateKey;
 const money = formatMoney;
 const shortDate = (value: string) => formatDate(value, { day: "numeric", month: "short", year: "numeric" });
+const compactDate = (value: string) => formatDate(value, { day: "numeric", month: "short" });
+const formatWageRateRange = (rate: Pick<WageRate, "effectiveFrom" | "effectiveTo">) => {
+  const from = compactDate(rate.effectiveFrom);
+  return rate.effectiveTo ? `${from} - ${compactDate(rate.effectiveTo)}` : `${from} onward`;
+};
 const readableSyncTime = (value: string | null) => value ? new Date(value).toLocaleString() : "Not synced yet";
 const paymentTypes = ["daily_wage", "production_based", "contract_lump_sum", "monthly_salary", "other"] as const;
 type PaymentType = typeof paymentTypes[number];
@@ -96,18 +102,6 @@ type AccountLedgerRow = {
   partnerLiabilityGroup?: PartnerLiabilityLedgerGroupKey;
 };
 const paymentTypeLabel = (paymentType: PaymentType | undefined) => translatePaymentType(paymentType ?? "daily_wage");
-
-const labourPaymentSummary = (labourer: Labourer) => {
-  const type = labourer.paymentType ?? "daily_wage";
-  if (type === "production_based") {
-    const unit = labourer.productionUnit === "custom" ? labourer.customProductionUnit || "unit" : labourer.productionUnit || "unit";
-    return `${money(labourer.productionUnitRate ?? 0)}/${unit}`;
-  }
-  if (type === "contract_lump_sum") return `${money(labourer.contractAmount ?? 0)} contract`;
-  if (type === "monthly_salary") return `${money(labourer.monthlySalary ?? 0)}/month`;
-  if (type === "other") return labourer.otherPaymentRate ? money(labourer.otherPaymentRate) : (labourer.otherPaymentDescription || translatePaymentType("other"));
-  return `${money(labourer.dailyWage)}/day`;
-};
 
 function useData<T>(load: () => Promise<T[]>, setup?: () => Promise<void>) {
   const [records, setRecords] = useState<T[]>([]);
@@ -287,7 +281,6 @@ function WorkforceModule({
   const selectedLabourRates = selectedLabourer
     ? wageRates.filter((rate) => rate.labourerId === selectedLabourer.id)
     : [];
-  const currentWageRate = selectedLabourRates.find((rate) => getWageRateStatus(rate, today()) === "active") ?? null;
   const upcomingWageRate = selectedLabourRates.find((rate) => getWageRateStatus(rate, today()) === "upcoming") ?? null;
   const selectedAttendanceSummary = selectedLabourer
     ? summarizeAttendanceWages(selectedLabourer.id, selectedAttendance, wageRates)
@@ -321,6 +314,15 @@ function WorkforceModule({
   const advanceAmount = selectedLabourer ? advances.filter((entry) => entry.labourerId === selectedLabourer.id).reduce((sum, entry) => sum + entry.amount, 0) : 0;
   const paidAmount = selectedLabourer ? payments.filter((entry) => entry.labourerId === selectedLabourer.id).reduce((sum, entry) => sum + entry.amount, 0) : 0;
   const netBalance = totalEarnings - advanceAmount - paidAmount;
+  const selectedLabourerPeriod = selectedLabourer ? getWorkerWorkingPeriod(selectedLabourer) : null;
+  const selectedLabourerProfileStatus = selectedLabourer
+    ? {
+      label: getWorkerDisplayGroup(selectedLabourer) === "active" ? t("common.active") : t("common.inactive"),
+      className: getWorkerDisplayGroup(selectedLabourer) === "active" ? "labour-profile-status-chip--active" : "labour-profile-status-chip--inactive",
+    }
+    : null;
+  const selectedLabourRatesSorted = selectedLabourRates.slice().sort(compareWageRates);
+  const showEarningsBreakdown = Boolean(selectedLabourLedgerSummary && (selectedLabourLedgerSummary.attendanceSummary.records.length > 0 || selectedLabourLedgerSummary.pendingEarnings.length > 0));
   const canWriteAttendance = Boolean(!sessionRefreshing && user?.workspaceId && canCreate(user, "attendance", user.workspaceId));
   const canManageLabour = Boolean(!sessionRefreshing && user?.workspaceId && canCreate(user, "workforce", user.workspaceId));
   const canAddAdvance = Boolean(!sessionRefreshing && user?.workspaceId && canCreate(user, "advances", user.workspaceId));
@@ -408,7 +410,6 @@ function WorkforceModule({
     }
     return { label: t("common.active"), chipClassName: "status-active", detailClassName: "positive" };
   };
-  const selectedLabourerStatus = selectedLabourer ? labourerStatusDisplay(selectedLabourer) : null;
 
   return (
     <>
@@ -584,113 +585,174 @@ function WorkforceModule({
         </section>
       </div>}
       {selectedLabourer && (
-        <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedLabourer(null)}>
+        <div className="worker-dialog-backdrop labour-profile-backdrop" role="presentation" onClick={() => setSelectedLabourer(null)}>
           <section
-            className="worker-dialog worker-dialog--record-detail"
+            className="worker-dialog worker-dialog--record-detail labour-profile-dialog"
             role="dialog"
             aria-modal="true"
             aria-labelledby="worker-dialog-title"
             onClick={(event) => event.stopPropagation()}
           >
-            <header className="worker-dialog__header">
-              <h2 id="worker-dialog-title">{selectedLabourer.name}</h2>
+            <header className="worker-dialog__header labour-profile-header">
+              <div className="labour-profile-header__copy">
+                <div className="labour-profile-header__title-row">
+                  <h2 id="worker-dialog-title">{selectedLabourer.name}</h2>
+                  <span className={`labour-profile-status-chip ${selectedLabourerProfileStatus?.className ?? ""}`}>{selectedLabourerProfileStatus?.label}</span>
+                </div>
+                <div className="labour-profile-header__meta">
+                  <span>{selectedLabourer.group || "General"}</span>
+                  <span className="labour-profile-header__dot" aria-hidden="true">•</span>
+                  <span>{translatePaymentType(selectedLabourer.paymentType ?? "daily_wage")}</span>
+                </div>
+                {selectedLabourerPeriod?.workerStart ? <small>Joined {shortDate(selectedLabourerPeriod.workerStart)}</small> : null}
+              </div>
+              <button className="labour-profile-header__close" type="button" onClick={() => setSelectedLabourer(null)} aria-label={t("common.close")}>
+                <X size={18} />
+              </button>
             </header>
-            <div className="worker-dialog__body">
-              <h3>{t("workforcePage.attendanceStatistics")}</h3>
-              <dl className="worker-stats">
-                <div><dt>{t("common.status")}</dt><dd className={selectedLabourerStatus?.detailClassName}>{selectedLabourerStatus?.label}</dd></div>
-                <div><dt>{t("workforcePage.paymentTypeLabel")}</dt><dd>{translatePaymentType(selectedLabourer.paymentType ?? "daily_wage")}</dd></div>
-                <div><dt>{t("workforcePage.paymentSummary")}</dt><dd>{labourPaymentSummary(selectedLabourer)}</dd></div>
-                <div><dt>{t("workforcePage.groupLabel")}</dt><dd>{selectedLabourer.group}</dd></div>
-                <div><dt>{t("workforcePage.joinDate")}</dt><dd>{getWorkerWorkingPeriod(selectedLabourer).workerStart}</dd></div>
-                <div><dt>{t("workforcePage.endDate")}</dt><dd>{getWorkerWorkingPeriod(selectedLabourer).workerEnd || "-"}</dd></div>
-                <div><dt>{t("workforcePage.present")}</dt><dd>{presentCount}</dd></div>
-                <div><dt>{t("workforcePage.halfDay")}</dt><dd>{halfDayCount}</dd></div>
-                <div><dt>{t("workforcePage.absent")}</dt><dd>{absentCount}</dd></div>
-              </dl>
-
-              <h3>{t("workforcePage.financialOverview")}</h3>
-              <dl className="worker-stats">
-                <div><dt>{t("workforcePage.paymentSummary")}</dt><dd>{labourPaymentSummary(selectedLabourer)}</dd></div>
-                <div><dt>{t("wageRatesPage.currentRate")}</dt><dd>{currentWageRate ? money(currentWageRate.dailyRate) : t("wageRatesPage.noCurrentRate")}</dd></div>
-                <div><dt>{t("wageRatesPage.halfDayRate")}</dt><dd>{currentWageRate ? money(normalizeHalfDayRate(currentWageRate)) : "-"}</dd></div>
-                <div><dt>{t("reportsPage.payableDays")}</dt><dd>{selectedAttendanceSummary ? selectedAttendanceSummary.payable : "-"}</dd></div>
-                <div><dt>{t("wageRatesPage.attendanceWageTotal")}</dt><dd>{money(attendanceEarnings)}</dd></div>
-                <div><dt>Labour work</dt><dd>{money(selectedLabourLedgerSummary?.totalPendingEarnings ?? 0)}</dd></div>
-                <div><dt>Estimated earnings</dt><dd className="positive">{money(selectedLabourLedgerSummary?.totalEarned ?? totalEarnings)}</dd></div>
-                <div><dt>{t("advancesPage.recordAdvance")}</dt><dd className={advanceAmount > 0 ? "negative" : ""}>{money(advanceAmount)}</dd></div>
-                <div><dt>{t("workforcePage.paymentsLabel")}</dt><dd className={paidAmount > 0 ? "negative" : ""}>{money(paidAmount)}</dd></div>
-                <div><dt>Estimated payable</dt><dd className={(selectedLabourLedgerSummary?.estimatedPayable ?? netBalance) < 0 ? "negative" : "positive"}>{money(selectedLabourLedgerSummary?.estimatedPayable ?? Math.max(netBalance, 0))}</dd></div>
-                <div><dt>Carry forward advance</dt><dd className={(selectedLabourLedgerSummary?.carryForwardAdvance ?? 0) > 0 ? "negative" : ""}>{money(selectedLabourLedgerSummary?.carryForwardAdvance ?? 0)}</dd></div>
-                <div><dt>{t("workforcePage.netBalanceLabel")}</dt><dd className={netBalance < 0 ? "negative" : "positive"}>{money(netBalance)}</dd></div>
-              </dl>
+            <div className="worker-dialog__body labour-profile-body">
+              <section className="labour-profile-section labour-profile-section--balance">
+                <div className="labour-profile-section__head">
+                  <h3>Balance Summary</h3>
+                  <span>Quick financial outcome</span>
+                </div>
+                <div className="labour-profile-balance-grid">
+                  <article className="labour-profile-balance-card">
+                    <span>Estimated Payable</span>
+                    <strong className="positive">{money(selectedLabourLedgerSummary?.estimatedPayable ?? Math.max(netBalance, 0))}</strong>
+                  </article>
+                  <article className="labour-profile-balance-card">
+                    <span>Net Balance</span>
+                    <strong className={netBalance < 0 ? "negative" : "positive"}>{money(netBalance)}</strong>
+                  </article>
+                </div>
+              </section>
               {selectedAttendanceSummary?.missingRateDates.length ? (
                 <p className="form-error">
                   {t("wageRatesPage.missingRateProfileWarning", { count: selectedAttendanceSummary.missingRateDates.length })}
                 </p>
               ) : null}
-              {selectedLabourLedgerSummary && <>
-                <h3>Estimated Earnings Summary</h3>
-                <dl className="worker-stats">
-                  <div><dt>Attendance wages</dt><dd>{money(selectedLabourLedgerSummary.attendanceSummary.totalWage)}</dd></div>
-                  <div><dt>Labour work</dt><dd>{money(selectedLabourLedgerSummary.totalPendingEarnings)}</dd></div>
-                  <div><dt>Estimated earnings</dt><dd>{money(selectedLabourLedgerSummary.totalEarned)}</dd></div>
-                  <div><dt>Advances paid</dt><dd>{money(selectedLabourLedgerSummary.advancesPaid)}</dd></div>
-                  <div><dt>Estimated payable</dt><dd>{money(selectedLabourLedgerSummary.estimatedPayable)}</dd></div>
-                  <div><dt>Carry forward advance</dt><dd>{money(selectedLabourLedgerSummary.carryForwardAdvance)}</dd></div>
+              <section className="labour-profile-section">
+                <div className="labour-profile-section__head">
+                  <h3>Attendance Statistics</h3>
+                  <span>Payable days at a glance</span>
+                </div>
+                <div className="labour-profile-chip-grid">
+                  <article className="labour-profile-chip-card">
+                    <span>Present</span>
+                    <strong>{presentCount}</strong>
+                  </article>
+                  <article className="labour-profile-chip-card">
+                    <span>Half Day</span>
+                    <strong>{halfDayCount}</strong>
+                  </article>
+                  <article className="labour-profile-chip-card">
+                    <span>Absent</span>
+                    <strong>{absentCount}</strong>
+                  </article>
+                  <article className="labour-profile-chip-card">
+                    <span>Payable Days</span>
+                    <strong>{selectedAttendanceSummary?.payable ?? 0}</strong>
+                  </article>
+                </div>
+              </section>
+              <section className="labour-profile-section">
+                <div className="labour-profile-section__head">
+                  <h3>Financial Summary</h3>
+                  <span>Consolidated values from the existing calculations</span>
+                </div>
+                <dl className="labour-profile-summary-grid">
+                  <div><dt>Estimated earnings</dt><dd className="positive">{money(selectedLabourLedgerSummary?.totalEarned ?? totalEarnings)}</dd></div>
+                  <div><dt>Advances Paid</dt><dd className={advanceAmount > 0 ? "negative" : ""}>{money(selectedLabourLedgerSummary?.advancesPaid ?? advanceAmount)}</dd></div>
+                  <div><dt>Payments</dt><dd className={paidAmount > 0 ? "negative" : ""}>{money(paidAmount)}</dd></div>
+                  <div><dt>Carry forward advance</dt><dd className={(selectedLabourLedgerSummary?.carryForwardAdvance ?? 0) > 0 ? "negative" : ""}>{money(selectedLabourLedgerSummary?.carryForwardAdvance ?? 0)}</dd></div>
+                  <div><dt>Estimated payable</dt><dd className="positive">{money(selectedLabourLedgerSummary?.estimatedPayable ?? Math.max(netBalance, 0))}</dd></div>
+                  <div><dt>{t("workforcePage.netBalanceLabel")}</dt><dd className={netBalance < 0 ? "negative" : "positive"}>{money(netBalance)}</dd></div>
                 </dl>
-                <h3>Labour Work</h3>
-                {!selectedLabourLedgerSummary.pendingEarnings.length ? <p className="empty-records">No pending labour work for this labourer.</p> : (
-                  <div className="attendance-import-table-wrap report-wide-table">
-                    <table className="report-data-table">
-                      <thead>
-                        <tr>
-                          <th>Date</th>
-                          <th>Type</th>
-                          <th>Description</th>
-                          <th>Amount</th>
-                          <th>Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {selectedLabourLedgerSummary.pendingEarnings.map((earning) => (
-                          <tr key={earning.id}>
-                            <td>{earning.earningDate}</td>
-                            <td>{earning.earningType.replaceAll("_", " ")}</td>
-                            <td>{earning.description}</td>
-                            <td>{money(earning.amount)}</td>
-                            <td>Pending settlement</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+              </section>
+              {showEarningsBreakdown && (
+                <section className="labour-profile-section">
+                  <div className="labour-profile-section__head">
+                    <h3>Earnings Breakdown</h3>
+                    <span>Attendance wages and labour work only</span>
                   </div>
-                )}
-              </>}
-              {(selectedLabourRates.length > 0 || upcomingWageRate) && <>
-                <h3>{t("wageRatesPage.history")}</h3>
-                <dl className="worker-stats">
-                  {upcomingWageRate && <div><dt>{t("wageRatesPage.nextScheduledRate")}</dt><dd>{money(upcomingWageRate.dailyRate)} · {upcomingWageRate.effectiveFrom}</dd></div>}
-                  {selectedLabourRates.slice(0, 4).map((rate) => <div key={rate.id}>
-                    <dt>{rate.effectiveFrom}{rate.effectiveTo ? ` - ${rate.effectiveTo}` : ""}</dt>
-                    <dd>{money(rate.dailyRate)} / {money(normalizeHalfDayRate(rate))}</dd>
-                  </div>)}
-                </dl>
-              </>}
-            </div>
-            <footer className="worker-dialog__footer">
-              {canManageLabour && <button className="worker-dialog__link" type="button" onClick={() => { setActionLabourer(selectedLabourer); setLabourAction("update"); }}>{t("common.edit")}</button>}
-              {user?.workspaceId && hasModulePermission(user, "workforce", "view", user.workspaceId) && (
-                <button className="worker-dialog__link" type="button" onClick={() => navigate(`/workspace/labour-payments/overview?labourId=${encodeURIComponent(selectedLabourer.id)}`)}>Labour Payments</button>
+                  <dl className="labour-profile-summary-grid labour-profile-summary-grid--compact">
+                    <div><dt>Attendance wages</dt><dd>{money(selectedLabourLedgerSummary?.attendanceSummary.totalWage ?? attendanceEarnings)}</dd></div>
+                    <div><dt>Labour work</dt><dd>{money(selectedLabourLedgerSummary?.totalPendingEarnings ?? 0)}</dd></div>
+                    <div><dt>Estimated earnings</dt><dd className="positive">{money(selectedLabourLedgerSummary?.totalEarned ?? totalEarnings)}</dd></div>
+                  </dl>
+                </section>
               )}
-              {canManageLabour && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => {
+              <section className="labour-profile-section">
+                <div className="labour-profile-section__head">
+                  <h3>Labour Work</h3>
+                  <span>{selectedLabourLedgerSummary?.pendingEarnings.length ? `${selectedLabourLedgerSummary.pendingEarnings.length} records` : "No labour work records yet."}</span>
+                </div>
+                {selectedLabourLedgerSummary?.pendingEarnings.length ? (
+                  <div className="labour-profile-work-list">
+                    {selectedLabourLedgerSummary.pendingEarnings.map((earning) => (
+                      <article key={earning.id} className="labour-profile-work-row">
+                        <div className="labour-profile-work-row__main">
+                          <strong>{compactDate(earning.earningDate)}</strong>
+                          <span>{earning.earningType.replaceAll("_", " ")}</span>
+                        </div>
+                        <div className="labour-profile-work-row__meta">
+                          <strong>{money(earning.amount)}</strong>
+                          <small>{earning.description}</small>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="labour-profile-empty-state">No labour work records yet.</p>
+                )}
+              </section>
+              {(selectedLabourRatesSorted.length > 0 || upcomingWageRate) && (
+                <section className="labour-profile-section">
+                  <div className="labour-profile-section__head">
+                    <h3>{t("wageRatesPage.history")}</h3>
+                    <span>Daily and half-day rates by period</span>
+                  </div>
+                  <div className="labour-profile-rate-list">
+                    {upcomingWageRate ? (
+                      <article className="labour-profile-rate-row">
+                        <div className="labour-profile-rate-row__period">
+                          <strong>{formatWageRateRange(upcomingWageRate)}</strong>
+                          <span>Upcoming rate</span>
+                        </div>
+                        <div className="labour-profile-rate-row__rates">
+                          <strong>{money(upcomingWageRate.dailyRate)} / {money(normalizeHalfDayRate(upcomingWageRate))}</strong>
+                        </div>
+                      </article>
+                    ) : null}
+                    {selectedLabourRatesSorted.slice(0, 4).map((rate) => (
+                      <article key={rate.id} className="labour-profile-rate-row">
+                        <div className="labour-profile-rate-row__period">
+                          <strong>{formatWageRateRange(rate)}</strong>
+                          <span>{getWageRateStatus(rate, today()) === "active" ? "Current rate" : t(`wageRatesPage.status.${getWageRateStatus(rate, today())}`)}</span>
+                        </div>
+                        <div className="labour-profile-rate-row__rates">
+                          <strong>{money(rate.dailyRate)} / {money(normalizeHalfDayRate(rate))}</strong>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              )}
+            </div>
+            <footer className="worker-dialog__footer labour-profile-footer">
+              {canManageLabour && <button className="worker-dialog__link labour-profile-action labour-profile-action--secondary" type="button" onClick={() => { setActionLabourer(selectedLabourer); setLabourAction("update"); }}>{t("common.edit")}</button>}
+              {user?.workspaceId && hasModulePermission(user, "workforce", "view", user.workspaceId) && (
+                <button className="worker-dialog__link labour-profile-action labour-profile-action--secondary" type="button" onClick={() => navigate(`/workspace/labour-payments/overview?labourId=${encodeURIComponent(selectedLabourer.id)}`)}>Labour Payments</button>
+              )}
+              {canManageLabour && <button className="worker-dialog__link worker-dialog__link--danger labour-profile-action labour-profile-action--danger" type="button" onClick={() => {
                 if (!navigator.onLine || sync.pendingCount > 0) showToast(t("errors.syncPendingBeforeDeactivate"));
                 else {
                   setActionLabourer(selectedLabourer);
                   setLabourAction("deactivate");
                 }
               }}>{selectedLabourer.active === false ? t("common.delete") : t("workforcePage.deactivateDelete")}</button>}
-              <button className="worker-dialog__close" type="button" onClick={() => setSelectedLabourer(null)}>{t("common.close")}</button>
+              <button className="worker-dialog__close labour-profile-action labour-profile-action--close" type="button" onClick={() => setSelectedLabourer(null)}>{t("common.close")}</button>
             </footer>
           </section>
         </div>
