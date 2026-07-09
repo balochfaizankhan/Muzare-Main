@@ -24,8 +24,8 @@ linked_vouchers AS (
    AND settlement.farm_id = voucher.farm_id
    AND voucher.entity_type = 'voucher'
    AND (
-     coalesce(voucher.payload->>'settlementId', '') = settlement.client_record_id
-     OR coalesce(voucher.payload->>'linkedVoucherId', '') = settlement.client_record_id
+     coalesce(voucher.payload->>'settlementId', '') = settlement.client_record_id::text
+     OR coalesce(voucher.payload->>'linkedVoucherId', '') = settlement.client_record_id::text
      OR coalesce(voucher.client_record_id::text, '') = coalesce(settlement.payload->>'linkedVoucherId', '')
    )
 )
@@ -51,7 +51,7 @@ client_updated_at = now()
 FROM linked_vouchers
 WHERE voucher.id = linked_vouchers.id
   AND (
-    coalesce(voucher.payload->>'settlementId', '') <> linked_vouchers.settlement_id
+    coalesce(voucher.payload->>'settlementId', '') <> linked_vouchers.settlement_id::text
     OR coalesce(voucher.payload->>'voucherPurpose', '') <> 'labour_wage_settlement'
     OR coalesce(voucher.payload->>'nonCashSettlement', 'false') <> 'true'
   );
@@ -94,7 +94,7 @@ FROM voided_settlements settlement
 WHERE earning.entity_type = 'labourEarning'
   AND earning.workspace_id = settlement.workspace_id
   AND earning.farm_id = settlement.farm_id
-  AND coalesce(earning.payload->>'linkedSettlementId', '') = settlement.client_record_id
+  AND coalesce(earning.payload->>'linkedSettlementId', '') = settlement.client_record_id::text
   AND lower(coalesce(earning.payload->>'status', '')) = 'settled';
 
 WITH voided_settlements AS (
