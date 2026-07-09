@@ -74,8 +74,10 @@ export type ModuleKey = "workforce" | "expenses" | "sales" | "dispatch" | "accou
 
 const today = todayLocalDateKey;
 const money = formatMoney;
+const signedMoney = (amount: number) => amount < 0 ? `-${money(Math.abs(amount))}` : money(amount);
 const shortDate = (value: string) => formatDate(value, { day: "numeric", month: "short", year: "numeric" });
 const compactDate = (value: string) => formatDate(value, { day: "numeric", month: "short" });
+const compactDateRange = (fromDate: string, toDate: string) => fromDate === toDate ? compactDate(fromDate) : `${compactDate(fromDate)} - ${compactDate(toDate)}`;
 const formatWageRateRange = (rate: Pick<WageRate, "effectiveFrom" | "effectiveTo">) => {
   const from = compactDate(rate.effectiveFrom);
   return rate.effectiveTo ? `${from} - ${compactDate(rate.effectiveTo)}` : `${from} onward`;
@@ -198,6 +200,7 @@ function WorkforceModule({
   const [showAddGroup, setShowAddGroup] = useState(false);
   const [showAttendanceEntry, setShowAttendanceEntry] = useState(false);
   const [showRegisterFilters, setShowRegisterFilters] = useState(false);
+  const [showAttendanceWageBreakdown, setShowAttendanceWageBreakdown] = useState(false);
   const [labourAction, setLabourAction] = useState<"update" | "advance" | "production" | "payment" | "deactivate" | null>(null);
   const [newAttendanceLabourId, setNewAttendanceLabourId] = useState<string | null>(null);
   const [attendanceSaveState, setAttendanceSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -291,6 +294,7 @@ function WorkforceModule({
       attendance: selectedAttendance,
       wageRates,
       earnings: labourEarnings,
+      payments,
       advances,
       settlements: labourWageSettlements,
     })
@@ -316,10 +320,16 @@ function WorkforceModule({
   const selectedLabourerPeriod = selectedLabourer ? getWorkerWorkingPeriod(selectedLabourer) : null;
   const selectedLabourerProfileStatus = selectedLabourer
     ? {
-      label: getWorkerDisplayGroup(selectedLabourer) === "active" ? t("common.active") : t("common.inactive"),
-      className: getWorkerDisplayGroup(selectedLabourer) === "active" ? "labour-profile-status-chip--active" : "labour-profile-status-chip--inactive",
+      label: selectedLabourer.active === false ? t("common.inactive") : t("common.active"),
+      className: selectedLabourer.active === false ? "labour-profile-status-chip--inactive" : "labour-profile-status-chip--active",
     }
     : null;
+  const selectedLabourProfilePayable = selectedLabourLedgerSummary?.estimatedPayable ?? 0;
+  const selectedLabourProfilePayableStatus = selectedLabourProfilePayable > 0
+    ? { label: "Farm payable to labour", className: "positive" }
+    : selectedLabourProfilePayable < 0
+      ? { label: "Labour owes farm", className: "negative" }
+      : { label: "No payable balance", className: "" };
   const selectedLabourRatesSorted = selectedLabourRates.slice().sort(compareWageRates);
   const showEarningsBreakdown = Boolean(selectedLabourLedgerSummary && (selectedLabourLedgerSummary.attendanceSummary.records.length > 0 || selectedLabourLedgerSummary.pendingEarnings.length > 0));
   const canWriteAttendance = Boolean(!sessionRefreshing && user?.workspaceId && canCreate(user, "attendance", user.workspaceId));
@@ -381,6 +391,9 @@ function WorkforceModule({
   useEffect(() => {
     if (openAdvanceOnLoad && canAddAdvance) setShowAdvanceEntry(true);
   }, [canAddAdvance, openAdvanceOnLoad]);
+  useEffect(() => {
+    setShowAttendanceWageBreakdown(false);
+  }, [selectedLabourer?.id]);
   useEffect(() => {
     if (attendanceSaveState !== "saved" || sync.pendingCount > 0 || sync.status === "syncing") return;
     const handle = window.setTimeout(() => setAttendanceSaveState("idle"), 1400);
@@ -616,9 +629,10 @@ function WorkforceModule({
                   <span>Quick financial outcome</span>
                 </div>
                 <div className="labour-profile-balance-grid">
-                  <article className="labour-profile-balance-card">
+                  <article className={`labour-profile-balance-card ${selectedLabourProfilePayable > 0 ? "labour-profile-balance-card--positive" : selectedLabourProfilePayable < 0 ? "labour-profile-balance-card--negative" : "labour-profile-balance-card--neutral"}`}>
                     <span>Estimated Payable</span>
-                    <strong className="positive">{money(selectedLabourLedgerSummary?.estimatedPayable ?? 0)}</strong>
+                    <strong className={selectedLabourProfilePayable > 0 ? "positive" : selectedLabourProfilePayable < 0 ? "negative" : ""}>{signedMoney(selectedLabourProfilePayable)}</strong>
+                    <small className={selectedLabourProfilePayableStatus.className}>{selectedLabourProfilePayableStatus.label}</small>
                   </article>
                 </div>
               </section>
@@ -660,8 +674,7 @@ function WorkforceModule({
                   <div><dt>Estimated earnings</dt><dd className="positive">{money(selectedLabourLedgerSummary?.totalEarned ?? totalEarnings)}</dd></div>
                   <div><dt>Advances Paid</dt><dd className={advanceAmount > 0 ? "negative" : ""}>{money(selectedLabourLedgerSummary?.advancesPaid ?? advanceAmount)}</dd></div>
                   <div><dt>Payments</dt><dd className={paidAmount > 0 ? "negative" : ""}>{money(paidAmount)}</dd></div>
-                  <div><dt>Carry forward advance</dt><dd className={(selectedLabourLedgerSummary?.carryForwardAdvance ?? 0) > 0 ? "negative" : ""}>{money(selectedLabourLedgerSummary?.carryForwardAdvance ?? 0)}</dd></div>
-                  <div><dt>Estimated payable</dt><dd className="positive">{money(selectedLabourLedgerSummary?.estimatedPayable ?? 0)}</dd></div>
+                  <div><dt>Estimated payable</dt><dd className={selectedLabourProfilePayable > 0 ? "positive" : selectedLabourProfilePayable < 0 ? "negative" : ""}>{signedMoney(selectedLabourProfilePayable)}</dd></div>
                 </dl>
               </section>
               {showEarningsBreakdown && (
@@ -670,17 +683,55 @@ function WorkforceModule({
                     <h3>Earnings Breakdown</h3>
                     <span>Attendance wages and labour work only</span>
                   </div>
-                  <dl className="labour-profile-summary-grid labour-profile-summary-grid--compact">
-                    <div><dt>Attendance wages</dt><dd>{money(selectedLabourLedgerSummary?.attendanceSummary.totalWage ?? attendanceEarnings)}</dd></div>
-                    <div><dt>Labour work</dt><dd>{money(selectedLabourLedgerSummary?.totalPendingEarnings ?? 0)}</dd></div>
-                    <div><dt>Estimated earnings</dt><dd className="positive">{money(selectedLabourLedgerSummary?.totalEarned ?? totalEarnings)}</dd></div>
-                  </dl>
+                  <div className="labour-profile-breakdown">
+                    <button
+                      type="button"
+                      className="labour-profile-breakdown-toggle"
+                      onClick={() => setShowAttendanceWageBreakdown((current) => !current)}
+                      aria-expanded={showAttendanceWageBreakdown}
+                    >
+                      <span className="labour-profile-breakdown-toggle__copy">
+                        <strong>Attendance Wages</strong>
+                        <small>
+                          {selectedLabourLedgerSummary?.attendanceWageBreakdown.available === false
+                            ? "Breakdown unavailable for this period."
+                            : `${selectedLabourLedgerSummary?.attendanceWageBreakdown.rows.length ?? 0} wage periods`}
+                        </small>
+                      </span>
+                      <span className="labour-profile-breakdown-toggle__value">{money(selectedLabourLedgerSummary?.attendanceWageBreakdown.totalWage ?? attendanceEarnings)}</span>
+                      <ChevronDown size={16} className={`labour-profile-breakdown-toggle__icon ${showAttendanceWageBreakdown ? "is-open" : ""}`} aria-hidden="true" />
+                    </button>
+                    {showAttendanceWageBreakdown && (
+                      <div className="labour-profile-breakdown-list">
+                        {selectedLabourLedgerSummary?.attendanceWageBreakdown.available === false ? (
+                          <p className="labour-profile-empty-state labour-profile-empty-state--inline">Breakdown unavailable for this period.</p>
+                        ) : selectedLabourLedgerSummary?.attendanceWageBreakdown.rows.length ? (
+                          selectedLabourLedgerSummary.attendanceWageBreakdown.rows.map((row) => (
+                            <article key={`${row.fromDate}-${row.toDate}-${row.dailyRate}-${row.halfDayRate}`} className="labour-profile-breakdown-row">
+                              <div className="labour-profile-breakdown-row__period">
+                                <strong>{compactDateRange(row.fromDate, row.toDate)}</strong>
+                                <span>{row.presentCount} full day x {money(row.dailyRate)} = {money(row.fullDayAmount)}</span>
+                                <span>{row.halfDayCount} half day x {money(row.halfDayRate)} = {money(row.halfDayAmount)}</span>
+                              </div>
+                              <strong className="positive">{money(row.subtotal)}</strong>
+                            </article>
+                          ))
+                        ) : (
+                          <p className="labour-profile-empty-state labour-profile-empty-state--inline">Breakdown unavailable for this period.</p>
+                        )}
+                      </div>
+                    )}
+                    <dl className="labour-profile-summary-grid labour-profile-summary-grid--compact">
+                      <div><dt>Labour work</dt><dd>{money(selectedLabourLedgerSummary?.totalPendingEarnings ?? 0)}</dd></div>
+                      <div><dt>Estimated earnings</dt><dd className="positive">{money(selectedLabourLedgerSummary?.totalEarned ?? totalEarnings)}</dd></div>
+                    </dl>
+                  </div>
                 </section>
               )}
               <section className="labour-profile-section">
                 <div className="labour-profile-section__head">
                   <h3>Labour Work</h3>
-                  <span>{selectedLabourLedgerSummary?.pendingEarnings.length ? `${selectedLabourLedgerSummary.pendingEarnings.length} records` : "No labour work records yet."}</span>
+                  {selectedLabourLedgerSummary?.pendingEarnings.length ? <span>{selectedLabourLedgerSummary.pendingEarnings.length} records</span> : null}
                 </div>
                 {selectedLabourLedgerSummary?.pendingEarnings.length ? (
                   <div className="labour-profile-work-list">

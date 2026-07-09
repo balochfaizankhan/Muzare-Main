@@ -555,8 +555,13 @@ test("labour profile shows only the final payable balance and avoids a conflicti
   assert.match(modulePage, /selectedLabourLedgerSummary\?\.estimatedPayable \?\? 0/);
   assert.match(modulePage, /<span>Estimated Payable<\/span>/);
   assert.doesNotMatch(modulePage, /labour-profile-balance-card[\s\S]*<span>Net Balance<\/span>/);
+  assert.doesNotMatch(modulePage, /Carry forward advance/);
+  assert.match(modulePage, /Attendance Wages/);
+  assert.match(modulePage, /labour-profile-breakdown-toggle/);
+  assert.match(modulePage, /attendanceWageBreakdown\.totalWage/);
+  assert.match(labourEarnings, /export function buildAttendanceWageBreakdown\(/);
   assert.match(labourEarnings, /const totalEarned = attendanceSummary\.totalWage \+ totalPendingEarnings;/);
-  assert.match(labourEarnings, /const estimatedPayable = Math\.max\(totalEarned - advancesPaid, 0\);/);
+  assert.match(labourEarnings, /const estimatedPayable = totalEarned - advancesPaid - paymentsPaid;/);
 });
 
 test("accounts drill-down exposes live ledger totals and source links", async () => {

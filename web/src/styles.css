@@ -6194,7 +6194,7 @@ button {
 .labour-profile-chip-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .labour-profile-balance-card,
@@ -6205,6 +6205,20 @@ button {
   display: grid;
   gap: 6px;
   padding: 12px 13px;
+}
+
+.labour-profile-balance-card--positive {
+  background: #f0fbf4;
+  border-color: #cce9d6;
+}
+
+.labour-profile-balance-card--negative {
+  background: #fff4f4;
+  border-color: #f1c7c7;
+}
+
+.labour-profile-balance-card--neutral {
+  background: var(--surface);
 }
 
 .labour-profile-balance-card span,
@@ -6221,6 +6235,12 @@ button {
   font-size: 1.05rem;
   font-weight: 800;
   margin: 0;
+}
+
+.labour-profile-balance-card small {
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  font-weight: 700;
 }
 
 .labour-profile-summary-grid {
@@ -6257,7 +6277,93 @@ button {
 }
 
 .labour-profile-summary-grid--compact {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.labour-profile-breakdown {
+  display: grid;
+  gap: 10px;
+}
+
+.labour-profile-breakdown-toggle {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--border) 86%, white);
+  border-radius: 12px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  min-width: 0;
+  padding: 11px 12px;
+  text-align: start;
+}
+
+.labour-profile-breakdown-toggle__copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.labour-profile-breakdown-toggle__copy strong {
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.labour-profile-breakdown-toggle__copy small {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.labour-profile-breakdown-toggle__value {
+  color: var(--text-primary);
+  font-size: 0.92rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.labour-profile-breakdown-toggle__icon {
+  color: var(--text-secondary);
+  transition: transform 150ms ease;
+}
+
+.labour-profile-breakdown-toggle__icon.is-open {
+  transform: rotate(180deg);
+}
+
+.labour-profile-breakdown-list {
+  display: grid;
+  gap: 8px;
+}
+
+.labour-profile-breakdown-row {
+  align-items: start;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--border) 86%, white);
+  border-radius: 12px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 10px 12px;
+}
+
+.labour-profile-breakdown-row__period {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.labour-profile-breakdown-row__period strong {
+  color: var(--text-primary);
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.labour-profile-breakdown-row__period span {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 700;
 }
 
 .labour-profile-work-list,
@@ -6276,7 +6382,7 @@ button {
   gap: 12px;
   justify-content: space-between;
   min-width: 0;
-  padding: 11px 12px;
+  padding: 10px 12px;
 }
 
 .labour-profile-work-row__main,
@@ -6330,6 +6436,10 @@ button {
   padding: 14px;
 }
 
+.labour-profile-empty-state--inline {
+  background: var(--surface);
+}
+
 .labour-profile-footer {
   gap: 8px;
 }
@@ -6361,7 +6471,7 @@ button {
   }
 
   .labour-profile-body {
-    padding-bottom: 92px;
+    padding-bottom: 124px;
   }
 
   .labour-profile-section__head {
@@ -6373,17 +6483,38 @@ button {
     text-align: start;
   }
 
-  .labour-profile-balance-grid,
   .labour-profile-chip-grid,
   .labour-profile-summary-grid,
   .labour-profile-summary-grid--compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .labour-profile-breakdown-toggle {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .labour-profile-breakdown-toggle__value {
+    white-space: normal;
+  }
+
+  .labour-profile-breakdown-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .labour-profile-chip-grid,
+  .labour-profile-summary-grid,
+  .labour-profile-summary-grid--compact {
+    gap: 8px;
   }
 
   .labour-profile-work-row,
   .labour-profile-rate-row {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .labour-profile-work-row {
+    gap: 8px;
   }
 
   .labour-profile-work-row__meta {
