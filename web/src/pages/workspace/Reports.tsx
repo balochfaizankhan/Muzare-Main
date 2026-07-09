@@ -11,11 +11,11 @@ import { calculateAccountBalance } from "../../lib/accounting";
 import { getCanonicalExpenseCategory } from "../../lib/expenseCategories";
 import { formatMoney, formatNumber } from "../../lib/format";
 import { labourEarningTypeLabel, sumLabourEarnings } from "../../lib/labourEarnings";
-import { getActiveLabourWageSettlements, getCashAffectingVouchers, getLabourWageSettlementAdvanceOffset, getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher, outstandingLabourAdvances, totalSettledAdvances } from "../../lib/labourWageSettlements";
+import { getActiveLabourWageSettlements, getCashAffectingVouchers, getGeneralExpenseVouchers, getLabourWageSettlementAdvanceOffset, getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher, outstandingLabourAdvances, totalSettledAdvances } from "../../lib/labourWageSettlements";
 import { translateExpenseCategory, translateExpenseSubcategory, translateSaleType, translateSalesStatus } from "../../lib/systemTranslations";
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
 import { getVoucherDisplayNumber } from "../../lib/vouchers";
-import { getActiveVouchers, getVisibleVouchers, loadWorkspaceVouchers } from "../../lib/voucherCollections";
+import { getActiveVouchers, loadWorkspaceVouchers } from "../../lib/voucherCollections";
 import {
   buildPartnerLiabilityPositions,
   calculatePartnerLiabilityBalance,
@@ -696,8 +696,8 @@ export function Reports() {
   const settledAdvancesTotal = useMemo(() => totalSettledAdvances(activeSettlements), [activeSettlements]);
   const outstandingAdvancePool = useMemo(() => outstandingLabourAdvances(advanceRows, activeSettlements), [activeSettlements, advanceRows]);
   const activeVouchers = useMemo(() => getActiveVouchers(vouchers), [vouchers]);
-  const generalExpenseVouchers = useMemo(() => getVisibleVouchers(activeVouchers, { visibility: "general-expenses" }), [activeVouchers]);
-  const cashAffectingVouchers = useMemo(() => getCashAffectingVouchers(activeVouchers), [activeVouchers]);
+  const generalExpenseVouchers = useMemo(() => getGeneralExpenseVouchers(activeVouchers, activeSettlements), [activeSettlements, activeVouchers]);
+  const cashAffectingVouchers = useMemo(() => getCashAffectingVouchers(activeVouchers, activeSettlements), [activeSettlements, activeVouchers]);
 
   const voucherBaseRows = useMemo(() => generalExpenseVouchers
     .filter((item) => {

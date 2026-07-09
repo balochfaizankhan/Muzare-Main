@@ -377,7 +377,7 @@ export function LabourWageSettlements() {
   const summary = preview.status === "ready" ? preview.data : null;
   const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
   const settlementPaymentAccountById = useMemo(() => new Map(paymentAccounts.map((account) => [account.id, account])), [paymentAccounts]);
-  const settlementStatus = useCallback((settlement: LabourWageSettlement) => settlement.accountingStatus ?? settlement.status, []);
+  const settlementStatus = useCallback((settlement: Pick<LabourWageSettlement, "status" | "accountingStatus">) => settlement.accountingStatus ?? settlement.status, []);
   const canEditSettlement = useCallback((settlement: Pick<LabourWageSettlementDetail, "status" | "accountingStatus">) => settlement.status !== "deleted" && settlement.status !== "voided" && settlement.accountingStatus !== "posted", []);
   const canDeleteSettlement = useCallback((settlement: Pick<LabourWageSettlementDetail, "status" | "accountingStatus">) => settlement.status !== "deleted" && settlement.status !== "voided" && settlement.accountingStatus !== "posted", []);
   const canVoidSettlement = useCallback((settlement: Pick<LabourWageSettlementDetail, "status" | "accountingStatus">) => settlement.status === "posted" && settlement.accountingStatus === "posted", []);
@@ -948,6 +948,7 @@ export function LabourWageSettlements() {
                   <button aria-label={t("common.close")} type="button" onClick={closeSettlement}><X size={18} /></button>
                 </header>
                 <div className="worker-action-form">
+                  {settlementStatus(selectedSettlement) === "voided" ? <p className="worker-action-warning">This settlement was voided and no longer affects balances.</p> : null}
                   {selectedSettlementMode === "edit" ? (
                     <>
                       <div className="advances-filter-row">

@@ -31,6 +31,7 @@ const importTrackingSchemaAlignmentMigrationUrl = new URL("../../../database/mig
 const workspaceMemberFarmScopeMigrationUrl = new URL("../../../database/migrations/0029_workspace_member_farm_scope.sql", import.meta.url);
 const workspaceAccountantRoleMigrationUrl = new URL("../../../database/migrations/0030_workspace_accountant_role.sql", import.meta.url);
 const workspaceMembershipDedupMigrationUrl = new URL("../../../database/migrations/0031_workspace_membership_dedup.sql", import.meta.url);
+const voidedLabourWageSettlementRepairMigrationUrl = new URL("../../../database/migrations/0032_voided_labour_wage_settlement_repair.sql", import.meta.url);
 
 const requiredImportTrackingSchema = {
   farms: ["source_type", "old_android_id", "import_batch_id", "source_file_hash", "active", "deleted_at", "deletion_approved_at"],
@@ -209,5 +210,7 @@ export async function ensureWorkspaceSchema(): Promise<void> {
   await db.execute(workspaceAccountantRoleMigration);
   const workspaceMembershipDedupMigration = await readFile(workspaceMembershipDedupMigrationUrl, "utf8");
   await db.execute(workspaceMembershipDedupMigration);
+  const voidedLabourWageSettlementRepairMigration = await readFile(voidedLabourWageSettlementRepairMigrationUrl, "utf8");
+  await db.execute(voidedLabourWageSettlementRepairMigration);
   await validateRequiredColumns();
 }

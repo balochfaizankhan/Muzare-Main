@@ -2,7 +2,7 @@ import type { Account, Advance, LabourWageSettlement, PartnerEntry, Sale, Vouche
 import { isActiveOperationalRecord } from "./operationalRecords";
 import { isPartnerAccount, partnerAccountBalanceEffect, resolvePartnerTransferAccountIdentity } from "./partnerAccounting";
 import { getActiveVouchers } from "./voucherCollections";
-import { getActiveLabourWageSettlements, getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher, resolveLabourWageSettlementAccountId } from "./labourWageSettlements";
+import { getActiveLabourWageSettlements, getGeneralExpenseVouchers, getLabourWageSettlementCashPaidAmount, resolveLabourWageSettlementAccountId } from "./labourWageSettlements";
 import { buildAccountIdentityLookup, resolveCanonicalAccountId, type AccountIdentityLookup } from "./accountIdentity";
 
 export function partnerSettlementEffect(entry: PartnerEntry, accountId: string, accountLookup: AccountIdentityLookup): number {
@@ -37,7 +37,7 @@ export function calculateAccountBalance(
   const seasonId = options.seasonId ?? null;
   const farmMatches = (rowFarmId: string | null) => !farmId || rowFarmId === farmId || rowFarmId === null;
   const seasonMatches = (rowSeasonId: string | null) => !seasonId || rowSeasonId === seasonId || rowSeasonId === null;
-  const activeVouchers = getActiveVouchers(vouchers).filter((record) => !isLabourWageSettlementVoucher(record));
+  const activeVouchers = getGeneralExpenseVouchers(getActiveVouchers(vouchers), settlements);
   const activeSettlements = getActiveLabourWageSettlements(settlements)
     .filter((record) => resolveCanonicalAccountId(resolveLabourWageSettlementAccountId(record), lookup) === account.id)
     .filter((record) => farmMatches(record.farmId ?? null) && seasonMatches(record.seasonId ?? null))

@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { getCanonicalExpenseCategory } from "./expenseCategories";
 import { formatMoney } from "./format";
-import { getActiveLabourWageSettlements } from "./labourWageSettlements";
+import { getActiveLabourWageSettlements, getGeneralExpenseVouchers } from "./labourWageSettlements";
 import { offlineDb, workspaceRecords } from "./offline-db";
 import type {
   Account,
@@ -26,7 +26,7 @@ import type {
   Voucher,
 } from "./offline-db";
 import { isActiveOperationalRecord } from "./operationalRecords";
-import { getVisibleVouchers, loadWorkspaceVouchers } from "./voucherCollections";
+import { loadWorkspaceVouchers } from "./voucherCollections";
 import { getVoucherDisplayNumber } from "./vouchers";
 
 export type WorkspaceActivityModule = "attendance" | "labour" | "expenses" | "dispatch" | "sales" | "accounts";
@@ -105,8 +105,6 @@ const toDateLabel = (value: string) => {
 const labourerName = (labourerById: Map<string, Labourer>, labourerId: string) => labourerById.get(labourerId)?.name ?? "Labour";
 
 const accountName = (accountById: Map<string, Account>, accountId?: string | null) => accountId ? (accountById.get(accountId)?.name ?? "Account") : "Account";
-
-const getGeneralExpenseVouchers = (vouchers: Voucher[]) => getVisibleVouchers(vouchers, { visibility: "general-expenses" });
 
 const sameTimedBatch = (left: RawWorkspaceActivity, right: RawWorkspaceActivity) =>
   left.module === right.module
@@ -211,7 +209,7 @@ export async function loadWorkspaceActivity(): Promise<WorkspaceActivityItem[]> 
   const activeSettlements = getActiveLabourWageSettlements(settlements);
   const activePartnerEntries = partnerEntries.filter(isActiveOperationalRecord);
   const activeAccounts = accounts.filter(isActiveOperationalRecord);
-  const generalExpenseVouchers = getGeneralExpenseVouchers(vouchers);
+  const generalExpenseVouchers = getGeneralExpenseVouchers(vouchers, settlements);
   const labourerById = new Map(labourers.filter(isActiveOperationalRecord).map((item) => [item.id, item]));
   const accountById = new Map(activeAccounts.map((item) => [item.id, item]));
 

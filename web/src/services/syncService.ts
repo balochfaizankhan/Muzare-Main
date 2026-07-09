@@ -5,6 +5,7 @@ import type { Table } from "dexie";
 import i18n from "../i18n";
 import { canonicalizeImportedVoucherRecord, getVoucherDisplayNumber, normalizeVoucherNumber } from "../lib/vouchers";
 import { getActiveVouchers } from "../lib/voucherCollections";
+import { getGeneralExpenseVouchers } from "../lib/labourWageSettlements";
 
 export type SyncStatus = "online" | "offline" | "pending" | "syncing" | "error";
 export type SyncStartupStage = "checkingSession" | "loadingWorkspace" | "loadingContext" | "syncingLatestRecords" | "ready";
@@ -703,7 +704,10 @@ export async function retrySyncQueueItem(mutationId: string) {
       return;
     }
     const [cachedWorkspaceVouchers, pendingVoucherMutations] = await Promise.all([
-      offlineDb.vouchers.where("workspaceId").equals(context.workspaceId).toArray().then((rows) => getActiveVouchers(rows)),
+      Promise.all([
+        offlineDb.vouchers.where("workspaceId").equals(context.workspaceId).toArray(),
+        offlineDb.labourWageSettlements.where("workspaceId").equals(context.workspaceId).toArray(),
+      ]).then(([voucherRows, settlementRows]) => getGeneralExpenseVouchers(getActiveVouchers(voucherRows), settlementRows)),
       offlineDb.pendingMutations.where("workspaceId").equals(context.workspaceId).and((mutation) =>
         mutation.id !== mutationId
         && mutation.entity === "voucher"

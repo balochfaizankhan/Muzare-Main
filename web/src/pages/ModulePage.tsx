@@ -33,7 +33,7 @@ import {
 } from "../lib/partnerAccounting";
 import { formatDate, formatMoney } from "../lib/format";
 import { buildLabourEarningsProfileSummary } from "../lib/labourEarnings";
-import { getLabourWageSettlementAdvanceOffset, getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher, resolveLabourWageSettlementAccountIdentity } from "../lib/labourWageSettlements";
+import { getGeneralExpenseVouchers, getLabourWageSettlementAdvanceOffset, getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher, isVoidedLabourWageSettlement, resolveLabourWageSettlementAccountIdentity } from "../lib/labourWageSettlements";
 import { buildAccountIdentityLookup, resolveCanonicalAccountId } from "../lib/accountIdentity";
 import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { getVoucherDisplayNumber, normalizeVoucherNumber, parseVoucherSequenceNumber } from "../lib/vouchers";
@@ -1795,8 +1795,10 @@ function ExpensesModule() {
     includeImportedAcrossSeasons: true,
   })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }), []);
+  const loadLabourWageSettlements = useCallback(() => workspaceRecords(offlineDb.labourWageSettlements, { includeDeleted: true }), []);
   const [vouchers, refresh] = useData(load);
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
+  const [labourWageSettlements] = useData(loadLabourWageSettlements);
   const [date, setDate] = useState(today());
   const workspaceId = user?.workspaceId ?? "";
   const farmId = getActiveFarmId();
@@ -2032,7 +2034,7 @@ function ExpensesModule() {
     return () => window.clearTimeout(handle);
   }, [editingVoucher, voucherItems]);
   const nextLocalVoucherNumber = () => {
-    const highest = vouchers.reduce((max, item) => {
+    const highest = getGeneralExpenseVouchers(getActiveVouchers(vouchers), labourWageSettlements).reduce((max, item) => {
       const parsed = parseVoucherSequenceNumber(getVoucherDisplayNumber(item) || item.voucherNumber);
       return parsed ? Math.max(max, parsed) : max;
     }, 0);
@@ -2057,7 +2059,7 @@ function ExpensesModule() {
     }
     const currentFarmId = getActiveFarmId() ?? undefined;
     const [cachedWorkspaceVouchers, pendingVoucherMutations] = await Promise.all([
-      workspaceId ? offlineDb.vouchers.where("workspaceId").equals(workspaceId).toArray().then((rows) => getActiveVouchers(rows).filter((item) => item.farmId === currentFarmId)) : Promise.resolve([] as Voucher[]),
+      workspaceId ? offlineDb.vouchers.where("workspaceId").equals(workspaceId).toArray().then((rows) => getGeneralExpenseVouchers(getActiveVouchers(rows), labourWageSettlements).filter((item) => item.farmId === currentFarmId)) : Promise.resolve([] as Voucher[]),
       workspaceId ? offlineDb.pendingMutations.where("workspaceId").equals(workspaceId).and((mutation) =>
         mutation.entity === "voucher"
         && mutation.operation !== "delete"
@@ -2358,7 +2360,8 @@ function ExpensesModule() {
   const visibleVoucherSource = useMemo(() => getVisibleVouchers(vouchers, {
     includeDeleted: showDeletedVouchers,
     visibility: showSettlementVouchers ? "all" : "general-expenses",
-  }), [showDeletedVouchers, showSettlementVouchers, vouchers]);
+    settlements: labourWageSettlements,
+  }), [labourWageSettlements, showDeletedVouchers, showSettlementVouchers, vouchers]);
   const voucherCategories = useMemo(() => [...new Set(visibleVoucherSource.flatMap((voucher) => voucherLinesFor(voucher).map((line) => line.category)).filter(Boolean))].sort(), [visibleVoucherSource, voucherLinesFor]);
   const voucherSubcategories = useMemo(() => [...new Set(visibleVoucherSource
     .flatMap((voucher) => voucherLinesFor(voucher))
@@ -2481,7 +2484,7 @@ function ExpensesModule() {
       ? (() => {
           const mergedMap = new Map<string, Voucher | ExpenseSearchRecord>(serverRecords.map((record) => [record.id, record]));
           vouchers.forEach((item) => {
-            if (!showDeletedVouchers && getVisibleVouchers([item], { visibility: showSettlementVouchers ? "all" : "general-expenses" }).length === 0) return;
+            if (!showDeletedVouchers && getVisibleVouchers([item], { visibility: showSettlementVouchers ? "all" : "general-expenses", settlements: labourWageSettlements }).length === 0) return;
             const existing = mergedMap.get(item.id);
             if (!item.pendingSync) return;
             if (!existing || item.updatedAt > existing.updatedAt) mergedMap.set(item.id, item);
@@ -2493,11 +2496,12 @@ function ExpensesModule() {
       .filter((item) => getVisibleVouchers([item], {
         includeDeleted: showDeletedVouchers,
         visibility: showSettlementVouchers ? "all" : "general-expenses",
+        settlements: labourWageSettlements,
       }).length > 0)
       .map((item) => toVoucherRecord(item))
       .filter((item) => matchesVoucher(item))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }, [matchesVoucher, showDeletedVouchers, showSettlementVouchers, visibleVoucherSource, voucherSearchQuery.data, vouchers]);
+  }, [labourWageSettlements, matchesVoucher, showDeletedVouchers, showSettlementVouchers, visibleVoucherSource, voucherSearchQuery.data, vouchers]);
   const voucherLineItems = useMemo(() => filteredVouchers.flatMap((item) => voucherLinesFor(item)), [filteredVouchers, voucherLinesFor]);
   const total = filteredVouchers.reduce((sum, item) => sum + item.amount, 0);
   const grouped = [...voucherLineItems.reduce((map, item) => {
@@ -2529,6 +2533,7 @@ function ExpensesModule() {
     if (voucher && getVisibleVouchers([voucher], {
       includeDeleted: showDeletedVouchers,
       visibility: showSettlementVouchers ? "all" : "general-expenses",
+      settlements: labourWageSettlements,
     }).length === 0) return;
     if (voucher) setSelectedVoucher(voucher);
   }, [searchParams, showDeletedVouchers, showSettlementVouchers, vouchers]);
@@ -4155,15 +4160,101 @@ function AccountsModule() {
   const activeEntries = entries.filter((item) => isActiveOperationalRecord(item));
   const activeAdvances = advances.filter((item) => isActiveOperationalRecord(item));
   const activeLabourWageSettlements = labourWageSettlements.filter((item) => isActiveOperationalRecord(item));
-  const balance = (account: Account) => calculateAccountBalance(account, activeSales, activeVouchers, activeAdvances, activeEntries, activeLabourWageSettlements, accounts, { farmId, seasonId });
+  const activeGeneralExpenseVouchers = getGeneralExpenseVouchers(activeVouchers, activeLabourWageSettlements);
+  const balance = (account: Account) => calculateAccountBalance(account, activeSales, activeGeneralExpenseVouchers, activeAdvances, activeEntries, activeLabourWageSettlements, accounts, { farmId, seasonId });
   const totalAdvances = activeAdvances.reduce((sum, item) => sum + item.amount, 0);
-  const totalVoucherExpenses = activeVouchers.reduce((sum, item) => sum + item.amount, 0);
+  const totalVoucherExpenses = activeGeneralExpenseVouchers.reduce((sum, item) => sum + item.amount, 0);
+  const voucherExpenseDebug = useMemo(() => {
+    const settlementById = new Map(activeLabourWageSettlements.map((settlement) => [settlement.id, settlement] as const));
+    const tally = {
+      includedVoucherCount: activeGeneralExpenseVouchers.length,
+      includedActiveSettlementVoucherCount: 0,
+      excludedVoidedSettlementVoucherCount: 0,
+      excludedVoidedSettlementTotal: 0,
+      includedVoucherExpenseTotal: totalVoucherExpenses,
+      scopeFarmId: farmId || null,
+      scopeSeasonId: seasonId || null,
+      excludedReasons: {
+        voidedSettlement: 0,
+        voidedVoucher: 0,
+        deletedVoucher: 0,
+        reversedVoucher: 0,
+        wrongFarm: 0,
+        wrongSeason: 0,
+        nonExpenseVoucher: 0,
+        transferOrFundMovement: 0,
+        labourAdvance: 0,
+      },
+    };
+    for (const voucher of vouchers) {
+      const rawVoucher = voucher as Record<string, unknown>;
+      const settlementId = typeof rawVoucher.settlementId === "string" && rawVoucher.settlementId.trim() ? rawVoucher.settlementId.trim() : null;
+      const linkedSettlement = settlementId ? settlementById.get(settlementId) ?? null : null;
+      const isSettlementVoucher = Boolean(settlementId) || isLabourWageSettlementVoucher(voucher);
+      const isDeletedVoucher = Boolean(rawVoucher.deletedAt) || rawVoucher.status === "deleted";
+      const isVoidedVoucher = rawVoucher.status === "voided" || Boolean(rawVoucher.voidedAt);
+      const isReversedVoucher = Boolean(rawVoucher.reversedAt) || Boolean(rawVoucher.reversalOfId);
+      const farmMismatch = Boolean(farmId && voucher.farmId && voucher.farmId !== farmId);
+      const seasonMismatch = Boolean(seasonId && voucher.seasonId && voucher.seasonId !== seasonId);
+      const voidedSettlement = Boolean(linkedSettlement && isVoidedLabourWageSettlement(linkedSettlement));
+      const voucherPurpose = typeof rawVoucher.voucherPurpose === "string" ? rawVoucher.voucherPurpose.toLowerCase() : "";
+      const transferOrFundMovement = voucherPurpose.includes("transfer") || voucherPurpose.includes("fund");
+      const labourAdvanceVoucher = voucherPurpose.includes("advance");
+      const activeExpense = activeGeneralExpenseVouchers.some((item) => item.id === voucher.id);
+      if (isSettlementVoucher && linkedSettlement && !voidedSettlement) {
+        tally.includedActiveSettlementVoucherCount += 1;
+      }
+      if (activeExpense) {
+        continue;
+      }
+      if (voidedSettlement) {
+        tally.excludedVoidedSettlementVoucherCount += 1;
+        tally.excludedVoidedSettlementTotal += Number(voucher.amount ?? 0);
+        tally.excludedReasons.voidedSettlement += 1;
+        continue;
+      }
+      if (isDeletedVoucher) {
+        tally.excludedReasons.deletedVoucher += 1;
+        continue;
+      }
+      if (isVoidedVoucher) {
+        tally.excludedReasons.voidedVoucher += 1;
+        continue;
+      }
+      if (isReversedVoucher) {
+        tally.excludedReasons.reversedVoucher += 1;
+        continue;
+      }
+      if (farmMismatch) {
+        tally.excludedReasons.wrongFarm += 1;
+        continue;
+      }
+      if (seasonMismatch) {
+        tally.excludedReasons.wrongSeason += 1;
+        continue;
+      }
+      if (transferOrFundMovement) {
+        tally.excludedReasons.transferOrFundMovement += 1;
+        continue;
+      }
+      if (labourAdvanceVoucher) {
+        tally.excludedReasons.labourAdvance += 1;
+        continue;
+      }
+      if (isSettlementVoucher) {
+        tally.excludedReasons.nonExpenseVoucher += 1;
+        continue;
+      }
+      tally.excludedReasons.nonExpenseVoucher += 1;
+    }
+    return tally;
+  }, [activeGeneralExpenseVouchers, activeLabourWageSettlements, farmId, seasonId, totalVoucherExpenses, vouchers]);
   const selectedAccount = selectedAccountId ? accounts.find((item) => item.id === selectedAccountId) ?? null : null;
   const selectedPartnerSnapshot = useMemo(
     () => selectedAccount?.type === "partner"
-      ? getPartnerAccountingSnapshot(selectedAccount, sales, vouchers, advances, activeEntries, labourWageSettlements, accounts, { farmId, seasonId })
+      ? getPartnerAccountingSnapshot(selectedAccount, sales, activeGeneralExpenseVouchers, advances, activeEntries, labourWageSettlements, accounts, { farmId, seasonId })
       : null,
-    [accounts, activeEntries, advances, farmId, labourWageSettlements, sales, seasonId, selectedAccount, vouchers],
+    [accounts, activeEntries, activeGeneralExpenseVouchers, advances, farmId, labourWageSettlements, sales, seasonId, selectedAccount],
   );
   const ledgerGroupTitle = useCallback((groupKey: AccountTransactionGroupKey) => ({
     expenses: t("accountsPage.groupExpenses"),
@@ -4636,6 +4727,30 @@ function AccountsModule() {
           <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("advance")}><strong>{t("accountsPage.labourAdvances")}</strong><span>{money(totalAdvances)}</span><small>{t("accountsPage.viewDetails")}</small></article>
           <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("combined")}><strong>{t("accountsPage.totalBusinessExpenses")}</strong><span>{money(totalVoucherExpenses + totalAdvances)}</span><small>{t("accountsPage.viewDetails")}</small></article>
         </div>
+        {import.meta.env.DEV ? (
+          <div className="account-ledger-reconciliation account-ledger-reconciliation--debug">
+            <h3>Voucher expense reconciliation</h3>
+            <div className="account-ledger-reconciliation__rows">
+              <div><span>Included voucher count</span><strong>{voucherExpenseDebug.includedVoucherCount}</strong></div>
+              <div><span>Active settlement voucher count</span><strong>{voucherExpenseDebug.includedActiveSettlementVoucherCount}</strong></div>
+              <div><span>Excluded voided settlement voucher count</span><strong>{voucherExpenseDebug.excludedVoidedSettlementVoucherCount}</strong></div>
+              <div><span>Excluded voided settlement total</span><strong>{money(voucherExpenseDebug.excludedVoidedSettlementTotal)}</strong></div>
+              <div><span>Included voucher expense total</span><strong>{money(voucherExpenseDebug.includedVoucherExpenseTotal)}</strong></div>
+              <div><span>Scope</span><strong>{`${voucherExpenseDebug.scopeFarmId ?? "all farms"} / ${voucherExpenseDebug.scopeSeasonId ?? "all seasons"}`}</strong></div>
+            </div>
+            <div className="account-ledger-reconciliation__rows">
+              <div><span>Voided settlement</span><strong>{voucherExpenseDebug.excludedReasons.voidedSettlement}</strong></div>
+              <div><span>Voided voucher</span><strong>{voucherExpenseDebug.excludedReasons.voidedVoucher}</strong></div>
+              <div><span>Deleted voucher</span><strong>{voucherExpenseDebug.excludedReasons.deletedVoucher}</strong></div>
+              <div><span>Reversed voucher</span><strong>{voucherExpenseDebug.excludedReasons.reversedVoucher}</strong></div>
+              <div><span>Wrong farm</span><strong>{voucherExpenseDebug.excludedReasons.wrongFarm}</strong></div>
+              <div><span>Wrong season</span><strong>{voucherExpenseDebug.excludedReasons.wrongSeason}</strong></div>
+              <div><span>Non-expense voucher</span><strong>{voucherExpenseDebug.excludedReasons.nonExpenseVoucher}</strong></div>
+              <div><span>Transfer / fund movement</span><strong>{voucherExpenseDebug.excludedReasons.transferOrFundMovement}</strong></div>
+              <div><span>Labour advance</span><strong>{voucherExpenseDebug.excludedReasons.labourAdvance}</strong></div>
+            </div>
+          </div>
+        ) : null}
       </section>
       <Summary
         label={t("accountsPage.netOperatingPosition")}

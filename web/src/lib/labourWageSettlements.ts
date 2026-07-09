@@ -1,4 +1,4 @@
-import type { Advance, LabourWageSettlement, Voucher } from "./offline-db";
+import type { Advance, LabourWageSettlement } from "./offline-db";
 import { isActiveOperationalRecord } from "./operationalRecords";
 import { buildAccountIdentityLookup, resolveAccountIdentity, resolveCanonicalAccountId, type AccountIdentityLike, type AccountIdentityLookup, type AccountIdentityResolution } from "./accountIdentity";
 
@@ -7,8 +7,11 @@ export type SettlementVoucherLike = {
   settlementId?: unknown;
   voucherPurpose?: unknown;
   nonCashSettlement?: unknown;
-  deleted?: unknown;
   status?: unknown;
+  voidedAt?: unknown;
+  reversedAt?: unknown;
+  reversalOfId?: unknown;
+  deleted?: unknown;
 };
 
 export type SettlementAccountLike = {
@@ -50,6 +53,21 @@ type AccountingScopeOptions = {
 
 function accountIdFromSettlementField(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function normalizedStatus(value: unknown) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+export function isVoidedLabourWageSettlement(settlement: { status?: unknown; accountingStatus?: unknown; deletedAt?: unknown; voidedAt?: unknown; reversedAt?: unknown; deleted?: unknown } | null | undefined) {
+  if (!settlement) return false;
+  if (settlement.deleted === true) return true;
+  if (typeof settlement.deletedAt === "string" && settlement.deletedAt.trim()) return true;
+  if (typeof settlement.voidedAt === "string" && settlement.voidedAt.trim()) return true;
+  if (typeof settlement.reversedAt === "string" && settlement.reversedAt.trim()) return true;
+  const status = normalizedStatus(settlement.status);
+  const accountingStatus = normalizedStatus(settlement.accountingStatus);
+  return status === "voided" || status === "deleted" || status === "cancelled" || accountingStatus === "voided" || accountingStatus === "deleted";
 }
 
 export function resolveLabourWageSettlementAccountId(settlement: SettlementAccountLike | null | undefined) {
@@ -210,12 +228,30 @@ export function getSettlementGeneratedVouchers<T extends SettlementVoucherLike>(
   return vouchers.filter((voucher) => isLabourWageSettlementVoucher(voucher)) as T[];
 }
 
-export function getGeneralExpenseVouchers<T extends SettlementVoucherLike>(vouchers: readonly T[]) {
-  return vouchers.filter((voucher) => !isLabourWageSettlementVoucher(voucher)) as T[];
+export function getGeneralExpenseVouchers<T extends SettlementVoucherLike>(
+  vouchers: readonly T[],
+  settlements: readonly { id?: string; status?: unknown; accountingStatus?: unknown; deletedAt?: unknown; voidedAt?: unknown; reversedAt?: unknown; deleted?: unknown }[] = [],
+) {
+  const settlementById = new Map<string, { id?: string; status?: unknown; accountingStatus?: unknown; deletedAt?: unknown; voidedAt?: unknown; reversedAt?: unknown; deleted?: unknown }>();
+  for (const settlement of settlements) {
+    if (typeof settlement.id === "string" && settlement.id.trim()) settlementById.set(settlement.id, settlement);
+  }
+  return vouchers.filter((voucher) => {
+    if (!isActiveOperationalRecord(voucher)) return false;
+    if (isLabourWageSettlementVoucher(voucher)) return false;
+    const settlementId = typeof voucher.settlementId === "string" && voucher.settlementId.trim() ? voucher.settlementId.trim() : null;
+    if (!settlementId) return true;
+    const settlement = settlementById.get(settlementId);
+    if (!settlement) return false;
+    return !isVoidedLabourWageSettlement(settlement);
+  }) as T[];
 }
 
-export function getCashAffectingVouchers(vouchers: Voucher[]) {
-  return vouchers.filter((voucher) => isActiveOperationalRecord(voucher));
+export function getCashAffectingVouchers<T extends SettlementVoucherLike>(
+  vouchers: readonly T[],
+  settlements: readonly { id?: string; status?: unknown; accountingStatus?: unknown; deletedAt?: unknown; voidedAt?: unknown; reversedAt?: unknown; deleted?: unknown }[] = [],
+) {
+  return getGeneralExpenseVouchers(vouchers, settlements);
 }
 
 export function totalSettledAdvances(settlements: LabourWageSettlement[], options: AccountingScopeOptions = {}) {

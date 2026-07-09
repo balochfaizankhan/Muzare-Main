@@ -1,7 +1,7 @@
 import type { Account, Advance, LabourWageSettlement, PartnerEntry, Sale, Voucher } from "./offline-db";
 import { isActiveOperationalRecord } from "./operationalRecords";
 import { getActiveVouchers } from "./voucherCollections";
-import { getLabourWageSettlementAdvanceOffset, getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher, resolveLabourWageSettlementAccountIdentity } from "./labourWageSettlements";
+import { getGeneralExpenseVouchers, getLabourWageSettlementAdvanceOffset, getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher, resolveLabourWageSettlementAccountIdentity } from "./labourWageSettlements";
 import { buildAccountIdentityLookup, resolveAccountIdentity, resolveCanonicalAccountId, type AccountIdentityLookup, type AccountIdentityLike, type AccountIdentityResolution } from "./accountIdentity";
 
 export type PartnerLiabilityPosition = {
@@ -295,7 +295,7 @@ export function getPartnerAccountingSnapshot(
   const seasonId = options.seasonId ?? null;
   const farmMatches = (rowFarmId: string | null) => !farmId || rowFarmId === farmId || rowFarmId === null;
   const seasonMatches = (rowSeasonId: string | null) => !seasonId || rowSeasonId === seasonId || rowSeasonId === null;
-  const purchaseVouchers = getActiveVouchers(vouchers).map((voucher) => {
+  const purchaseVouchers = getGeneralExpenseVouchers(getActiveVouchers(vouchers), settlements).map((voucher) => {
     const resolvedPaymentAccountId = resolveCanonicalAccountId(voucher.accountId, accountLookup);
     const included = !isLabourWageSettlementVoucher(voucher) && resolvedPaymentAccountId === account.id;
     return {

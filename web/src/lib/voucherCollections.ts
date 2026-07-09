@@ -36,12 +36,13 @@ export function getVisibleVouchers<T extends VoucherRecordLike>(
     includeDeleted?: boolean;
     mode?: VoucherCollectionMode;
     visibility?: VoucherVisibility;
+    settlements?: readonly { id?: string; status?: unknown; accountingStatus?: unknown; deletedAt?: unknown; voidedAt?: unknown; reversedAt?: unknown; deleted?: unknown }[];
   } = {},
 ) {
   const scoped = getAllVouchers(records, options);
   const visibility = options.visibility ?? "all";
   if (visibility === "settlements") return getSettlementGeneratedVouchers(scoped) as T[];
-  if (visibility === "general-expenses") return getGeneralExpenseVouchers(scoped) as T[];
+  if (visibility === "general-expenses") return getGeneralExpenseVouchers(scoped, options.settlements) as T[];
   return [...scoped] as T[];
 }
 
