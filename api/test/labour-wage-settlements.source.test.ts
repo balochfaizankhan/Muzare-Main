@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { calculateLabourWageSettlementTotals, normalizeSettlementPayload, settlementAccountingStatus, settlementConsumesAdvanceBalance, settlementRangesOverlap } from "../src/lib/labour-wage-settlements.js";
+import { calculateGroupAdvancePoolTotals, calculateLabourWageSettlementTotals, normalizeSettlementPayload, settlementAccountingStatus, settlementConsumesAdvanceBalance, settlementRangesOverlap } from "../src/lib/labour-wage-settlements.js";
 
 test("settlementRangesOverlap detects overlapping inclusive date ranges", () => {
   assert.equal(settlementRangesOverlap("2026-06-01", "2026-06-15", "2026-06-15", "2026-06-30"), true);
@@ -36,6 +36,41 @@ test("calculateLabourWageSettlementTotals recognizes attendance plus labour work
   assert.equal(totals.advanceAdjustedNow, 1200);
   assert.equal(totals.remainingAdvanceCarryForward, 0);
   assert.equal(totals.payableBalance, 0);
+});
+
+test("calculateGroupAdvancePoolTotals uses pooled group advances instead of labour-wise caps", () => {
+  const totals = calculateGroupAdvancePoolTotals({
+    grossWages: 127_935,
+    totalAdvancesUpToSettlementDate: 136_030,
+    previouslySettledAdvances: 0,
+  });
+  assert.equal(totals.availableAdvanceBalanceBeforeSettlement, 136_030);
+  assert.equal(totals.advanceAdjustedNow, 127_935);
+  assert.equal(totals.remainingAdvanceCarryForward, 8_095);
+  assert.equal(totals.netPayableBeforePayment, 0);
+});
+
+test("calculateGroupAdvancePoolTotals leaves a payable balance when pooled advances are smaller than gross wages", () => {
+  const totals = calculateGroupAdvancePoolTotals({
+    grossWages: 100_000,
+    totalAdvancesUpToSettlementDate: 60_000,
+    previouslySettledAdvances: 0,
+  });
+  assert.equal(totals.availableAdvanceBalanceBeforeSettlement, 60_000);
+  assert.equal(totals.advanceAdjustedNow, 60_000);
+  assert.equal(totals.remainingAdvanceCarryForward, 0);
+  assert.equal(totals.netPayableBeforePayment, 40_000);
+});
+
+test("calculateGroupAdvancePoolTotals excludes prior voided settlements by using only previously settled valid amounts", () => {
+  const totals = calculateGroupAdvancePoolTotals({
+    grossWages: 100_000,
+    totalAdvancesUpToSettlementDate: 130_000,
+    previouslySettledAdvances: 20_000,
+  });
+  assert.equal(totals.availableAdvanceBalanceBeforeSettlement, 110_000);
+  assert.equal(totals.advanceAdjustedNow, 100_000);
+  assert.equal(totals.remainingAdvanceCarryForward, 10_000);
 });
 
 test("labour wage settlements use settlement numbering instead of reserving expense voucher numbers", () => {
@@ -191,9 +226,26 @@ test("labour settlement preview computes prior settled advances separately from 
   assert.ok(source.includes("settlementConsumesAdvanceBalance(row.payload)"));
   assert.ok(source.includes("priorValidAdvanceSettledByLabourer"));
   assert.ok(source.includes("excludedVoidedAdvanceSettledByLabourer"));
+  assert.ok(source.includes("priorValidGroupSettledAdvances"));
+  assert.ok(source.includes("settlementGroupScopeKey(settlement.payload) === currentGroupScopeKey"));
+  assert.ok(source.includes('const includedAdvanceRows = selection.settlementMode === "group"'));
   assert.ok(source.includes("advanceDebugTrace"));
-  assert.ok(source.includes("const previouslySettledAdvances = includedLabourRows.reduce"));
+  assert.ok(source.includes("const previouslySettledAdvances = groupAdvancePoolTotals?.previouslySettledAdvances"));
   assert.ok(!source.includes("const previouslySettledAdvances = Math.max(rawAdvancesUpToSettlementDate - availableAdvanceBalanceBeforeSettlement, 0);"));
+});
+
+test("group settlement posting preserves pooled advance totals without individual advance allocations", () => {
+  const source = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
+  assert.ok(source.includes("effectiveAdvanceAdjustmentForPosting"));
+  assert.ok(source.includes("rawAdvancesUpToSettlementDate: preview.rawAdvancesUpToSettlementDate"));
+  assert.ok(source.includes("previouslySettledAdvances: preview.previouslySettledAdvances"));
+  assert.ok(source.includes('advanceAdjustmentAllocations: settlementMode === "group" ? [] : (preview.advanceAdjustmentAllocations ?? [])'));
+});
+
+test("individual labour summaries do not subtract group settlement advance adjustments", () => {
+  const source = readFileSync(new URL("../../web/src/lib/labourEarnings.ts", import.meta.url), "utf8");
+  assert.ok(source.includes('settlement.settlementMode !== "group"'));
+  assert.ok(source.includes("settlement.includedLabourIds?.includes(args.labourerId)"));
 });
 
 test("labour wage settlements can be deleted safely only through the settlement register flow", () => {

@@ -11,6 +11,7 @@ import { hasModulePermission } from "../permissions.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
 import {
   allocateSettlementNumber,
+  calculateGroupAdvancePoolTotals,
   calculateLabourWageSettlementTotals,
   listCanonicalPaymentAccounts,
   listLabourWageSettlements,
@@ -138,6 +139,31 @@ function logSettlementAccountValidation(request: { log: { info: (...args: unknow
   if (process.env.NODE_ENV !== "production") {
     request.log.info({ ...details, context: "labour_settlement_payment_account_validation" }, "labour settlement payment account validation");
   }
+}
+
+function effectiveAdvanceAdjustmentForPosting(preview: {
+  settlementMode?: "individual" | "group";
+  grossWages?: number;
+  attendanceWages: number;
+  labourWorkWages?: number;
+  pendingLabourEarnings: number;
+  availableAdvanceBalanceBeforeSettlement?: number;
+  advancesAvailableUpToSettlementDate?: number;
+  advanceAdjustedNow?: number;
+  settledAdvanceAmount: number;
+}, manualAdjustment = 0) {
+  const labourWorkWages = Number(preview.labourWorkWages ?? preview.pendingLabourEarnings ?? 0);
+  const grossWages = Number(preview.grossWages ?? (preview.attendanceWages + labourWorkWages));
+  const availableAdvanceBalanceBeforeSettlement = Number(preview.availableAdvanceBalanceBeforeSettlement ?? preview.advancesAvailableUpToSettlementDate ?? 0);
+  if (preview.settlementMode === "group") {
+    return calculateGroupAdvancePoolTotals({
+      grossWages,
+      totalAdvancesUpToSettlementDate: availableAdvanceBalanceBeforeSettlement,
+      previouslySettledAdvances: 0,
+      manualAdjustment,
+    }).advanceAdjustedNow;
+  }
+  return Number(preview.advanceAdjustedNow ?? preview.settledAdvanceAmount ?? 0);
 }
 
 export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<void> {
@@ -311,12 +337,14 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
       groupId,
       labourIds,
     }));
+    const effectiveAdvanceAdjustedNow = effectiveAdvanceAdjustmentForPosting(preview, Number(manualAdjustment ?? 0));
     const updated = calculateLabourWageSettlementTotals(
       preview.attendanceWages,
       preview.labourWorkWages ?? preview.pendingLabourEarnings,
       preview.availableAdvanceBalanceBeforeSettlement ?? preview.advancesAvailableUpToSettlementDate ?? 0,
       Number(paidAmount ?? 0),
       Number(manualAdjustment ?? 0),
+      effectiveAdvanceAdjustedNow,
     );
     preview.paidAmount = Number(paidAmount ?? 0);
     preview.manualAdjustment = Number(manualAdjustment ?? 0);
@@ -493,12 +521,14 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         const createdAt = new Date();
         const settlementId = crypto.randomUUID();
         const settlementNumber = await allocateSettlementNumber(tx, workspaceId, farmId);
+        const effectiveAdvanceAdjustedNow = effectiveAdvanceAdjustmentForPosting(preview, Number(manualAdjustment ?? 0));
         const settlementTotals = calculateLabourWageSettlementTotals(
           preview.attendanceWages,
           preview.labourWorkWages ?? preview.pendingLabourEarnings,
           preview.availableAdvanceBalanceBeforeSettlement ?? preview.advancesAvailableUpToSettlementDate ?? 0,
           effectivePaidAmount,
           Number(manualAdjustment ?? 0),
+          effectiveAdvanceAdjustedNow,
         );
         const description = `Labour wage settlement: ${fromDate} to ${toDate} (attendance wages + labour work)`;
         const paymentAccountIdValue = effectivePaidAmount > 0 ? account?.id ?? resolvedAccount?.id ?? paymentAccountInput : null;
@@ -533,9 +563,11 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           availableAdvanceBalanceBeforeSettlement: settlementTotals.availableAdvanceBalanceBeforeSettlement,
           advancesPaid: settlementTotals.advancesPaid,
           advancesAvailableUpToSettlementDate: settlementTotals.availableAdvanceBalanceBeforeSettlement,
-          advanceAdjustedNow: preview.advanceAdjustedNow,
-          settledAdvanceAmount: preview.advanceAdjustedNow,
-          appliedAdvances: preview.advanceAdjustedNow,
+          rawAdvancesUpToSettlementDate: preview.rawAdvancesUpToSettlementDate,
+          previouslySettledAdvances: preview.previouslySettledAdvances,
+          advanceAdjustedNow: settlementTotals.advanceAdjustedNow,
+          settledAdvanceAmount: settlementTotals.advanceAdjustedNow,
+          appliedAdvances: settlementTotals.advanceAdjustedNow,
           remainingAdvanceCarryForward: settlementTotals.remainingAdvanceCarryForward,
           carryForwardAdvance: settlementTotals.carryForwardAdvance,
           manualAdjustment: Number(manualAdjustment ?? 0),
@@ -553,7 +585,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           updatedAt: createdAt.toISOString(),
           sourceAttendanceIds: preview.sourceAttendanceIds ?? [],
           sourceLabourWorkIds: preview.sourceLabourWorkIds ?? [],
-          advanceAdjustmentAllocations: preview.advanceAdjustmentAllocations ?? [],
+          advanceAdjustmentAllocations: settlementMode === "group" ? [] : (preview.advanceAdjustmentAllocations ?? []),
           settlementScopeSnapshot: preview.settlementScopeSnapshot ?? {
             settlementMode: settlementMode ?? "individual",
             groupId: preview.groupId ?? groupId ?? null,
@@ -564,7 +596,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
             includedInactiveLabourIds: preview.includedInactiveLabourIds ?? [],
             attendanceWageTotal: preview.attendanceWages,
             attendanceCountTotals: preview.attendanceTotals ?? { labourers: 0, present: 0, halfDay: 0, absent: 0, payableDays: 0 },
-            advanceAdjustedNow: preview.advanceAdjustedNow ?? preview.settledAdvanceAmount ?? 0,
+            advanceAdjustedNow: settlementTotals.advanceAdjustedNow,
             netPayable: settlementTotals.netPayableBeforePayment,
             paymentAccountId: paymentAccountIdValue,
             paidNow: settlementTotals.paidAmount,

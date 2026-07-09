@@ -461,6 +461,14 @@ export function LabourWageSettlements() {
     && summaryTotals.presentDays >= 0
     && summaryTotals.halfDayDays >= 0
     && summaryTotals.grossWagesEarned >= 0;
+  const summaryAdvanceBalance = summary?.availableAdvanceBalanceBeforeSettlement ?? summary?.advancesAvailableUpToSettlementDate ?? summaryTotals.availableAdvanceBalance;
+  const summaryAdvanceAdjustedNow = summary?.advanceAdjustedNow ?? summary?.settledAdvanceAmount ?? summaryTotals.advanceAdjustedNow;
+  const summaryAdvanceCarryForward = summary?.remainingAdvanceCarryForward ?? summary?.carryForwardAdvance ?? summaryTotals.advanceCarriedForward;
+  const summaryNetPayableBeforePayment = summary?.netPayableBeforePayment ?? summaryTotals.netPayableBeforePayment;
+  const summaryBalanceAfterSettlement = summary?.balanceAfterPayment ?? summary?.payableBalance ?? summaryTotals.balanceAfterSettlement;
+  const advanceBalanceLabel = summary?.settlementMode === "group" ? "Group advance pool" : "Available advance balance";
+  const advanceAdjustedLabel = summary?.settlementMode === "group" ? "Group advance adjusted now" : "Advance adjusted now";
+  const advanceCarryForwardLabel = summary?.settlementMode === "group" ? "Group advance carried forward" : "Advance carried forward";
   const selectedGroupName = summary?.groupName
     ?? labourGroups.find((group) => group.id === groupId || group.id === foremanId)?.name
     ?? "";
@@ -924,13 +932,13 @@ export function LabourWageSettlements() {
               <article><span>Attendance wages</span><strong>{money(summaryTotals.attendanceWages)}</strong></article>
               <article><span>Labour work wages</span><strong>{money(summaryTotals.labourWorkWages)}</strong></article>
               <article><span>Gross wages earned</span><strong>{money(summaryTotals.grossWagesEarned)}</strong></article>
-              <article><span>Available advance balance</span><strong>{money(summaryTotals.availableAdvanceBalance)}</strong></article>
-              <article><span>Advance adjusted now</span><strong>{money(summaryTotals.advanceAdjustedNow)}</strong></article>
-              <article><span>Advance carried forward</span><strong>{money(summaryTotals.advanceCarriedForward)}</strong></article>
+              <article><span>{advanceBalanceLabel}</span><strong>{money(summaryAdvanceBalance)}</strong></article>
+              <article><span>{advanceAdjustedLabel}</span><strong>{money(summaryAdvanceAdjustedNow)}</strong></article>
+              <article><span>{advanceCarryForwardLabel}</span><strong>{money(summaryAdvanceCarryForward)}</strong></article>
               <article><span>Manual adjustment</span><strong>{money(summary?.manualAdjustment ?? 0)}</strong></article>
-              <article><span>Net payable before payment</span><strong>{money(summaryTotals.netPayableBeforePayment)}</strong></article>
+              <article><span>Net payable before payment</span><strong>{money(summaryNetPayableBeforePayment)}</strong></article>
               <article><span>Paid now</span><strong>{money(summary?.paidAmount ?? 0)}</strong></article>
-              <article><span>Balance after settlement</span><strong>{money(summaryTotals.balanceAfterSettlement)}</strong></article>
+              <article><span>Balance after settlement</span><strong>{money(summaryBalanceAfterSettlement)}</strong></article>
             </div>
 
             <div className="reports-summary-list">

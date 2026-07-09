@@ -69,6 +69,8 @@ export type LabourWageSettlementPayload = {
   availableAdvanceBalanceBeforeSettlement: number;
   advancesPaid?: number;
   advancesAvailableUpToSettlementDate?: number;
+  rawAdvancesUpToSettlementDate?: number;
+  previouslySettledAdvances?: number;
   advanceAdjustedNow: number;
   settledAdvanceAmount?: number;
   appliedAdvances?: number;
@@ -153,6 +155,16 @@ export type SettlementAdvanceDebugRow = {
   carryForward: number;
 };
 
+export type GroupAdvancePoolTotals = {
+  grossWages: number;
+  totalAdvancesUpToSettlementDate: number;
+  previouslySettledAdvances: number;
+  availableAdvanceBalanceBeforeSettlement: number;
+  advanceAdjustedNow: number;
+  remainingAdvanceCarryForward: number;
+  netPayableBeforePayment: number;
+};
+
 type LabourPayload = { name?: unknown };
 type AttendancePayload = { labourerId?: unknown; labourId?: unknown; date?: unknown; status?: unknown };
 type AdvancePayload = { labourerId?: unknown; labourId?: unknown; date?: unknown; amount?: unknown };
@@ -183,11 +195,72 @@ function stringArrayValue(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
 }
 
+function settlementAdvanceAdjustedAmount(payload: LabourWageSettlementPayload | Record<string, unknown>) {
+  const normalized = "advanceAdjustedNow" in payload || "settledAdvanceAmount" in payload
+    ? payload
+    : normalizeSettlementPayload(payload);
+  return numberValue(
+    (normalized as Record<string, unknown>).advanceAdjustedNow
+      ?? (normalized as Record<string, unknown>).settledAdvanceAmount
+      ?? (normalized as Record<string, unknown>).appliedAdvances,
+  );
+}
+
+function groupScopeKey(args: {
+  settlementMode?: "individual" | "group";
+  groupId?: string | null;
+  foremanId?: string | null;
+  includedLabourIds?: string[] | null;
+}) {
+  if (args.settlementMode !== "group") return "";
+  if (typeof args.groupId === "string" && args.groupId.trim()) return `group:${args.groupId.trim()}`;
+  if (typeof args.foremanId === "string" && args.foremanId.trim()) return `foreman:${args.foremanId.trim()}`;
+  const includedLabourIds = [...new Set((args.includedLabourIds ?? []).filter((value): value is string => typeof value === "string" && value.trim().length > 0))].sort();
+  return includedLabourIds.length ? `members:${includedLabourIds.join(",")}` : "";
+}
+
+function settlementGroupScopeKey(payload: LabourWageSettlementPayload) {
+  return groupScopeKey({
+    settlementMode: payload.settlementMode,
+    groupId: payload.groupId ?? payload.settlementScopeSnapshot?.groupId ?? null,
+    foremanId: payload.foremanId ?? null,
+    includedLabourIds: payload.includedLabourIds ?? payload.settlementScopeSnapshot?.includedLabourIds ?? [],
+  });
+}
+
+export function calculateGroupAdvancePoolTotals(args: {
+  grossWages: number;
+  totalAdvancesUpToSettlementDate: number;
+  previouslySettledAdvances: number;
+  manualAdjustment?: number;
+}) : GroupAdvancePoolTotals {
+  const grossWages = Math.max(0, numberValue(args.grossWages));
+  const totalAdvancesUpToSettlementDate = Math.max(0, numberValue(args.totalAdvancesUpToSettlementDate));
+  const previouslySettledAdvances = Math.max(0, numberValue(args.previouslySettledAdvances));
+  const manualAdjustment = numberValue(args.manualAdjustment);
+  const availableAdvanceBalanceBeforeSettlement = Math.max(totalAdvancesUpToSettlementDate - previouslySettledAdvances, 0);
+  const adjustableSettlementAmount = Math.max(grossWages + manualAdjustment, 0);
+  const advanceAdjustedNow = Math.max(0, Math.min(adjustableSettlementAmount, availableAdvanceBalanceBeforeSettlement));
+  const remainingAdvanceCarryForward = Math.max(availableAdvanceBalanceBeforeSettlement - advanceAdjustedNow, 0);
+  const netPayableBeforePayment = grossWages + manualAdjustment - advanceAdjustedNow;
+  return {
+    grossWages,
+    totalAdvancesUpToSettlementDate,
+    previouslySettledAdvances,
+    availableAdvanceBalanceBeforeSettlement,
+    advanceAdjustedNow,
+    remainingAdvanceCarryForward,
+    netPayableBeforePayment,
+  };
+}
+
 export function normalizeSettlementPayload(payload: Record<string, unknown>): LabourWageSettlementPayload {
   const attendanceWages = numberValue(payload.attendanceWages);
   const labourWorkWages = numberValue(payload.labourWorkWages ?? payload.labourWork ?? payload.pendingLabourEarnings);
   const grossWages = numberValue(payload.grossWages ?? payload.totalEarned ?? payload.totalLabourCost ?? (attendanceWages + labourWorkWages));
   const availableAdvanceBalanceBeforeSettlement = numberValue(payload.availableAdvanceBalanceBeforeSettlement ?? payload.advancesAvailableUpToSettlementDate ?? payload.advancesPaid);
+  const rawAdvancesUpToSettlementDate = numberValue(payload.rawAdvancesUpToSettlementDate ?? availableAdvanceBalanceBeforeSettlement);
+  const previouslySettledAdvances = numberValue(payload.previouslySettledAdvances);
   const advanceAdjustedNow = numberValue(payload.advanceAdjustedNow ?? payload.settledAdvanceAmount ?? payload.appliedAdvances);
   const remainingAdvanceCarryForward = numberValue(payload.remainingAdvanceCarryForward ?? payload.carryForwardAdvance);
   const manualAdjustment = numberValue(payload.manualAdjustment);
@@ -277,6 +350,8 @@ export function normalizeSettlementPayload(payload: Record<string, unknown>): La
     availableAdvanceBalanceBeforeSettlement,
     advancesPaid: availableAdvanceBalanceBeforeSettlement,
     advancesAvailableUpToSettlementDate: availableAdvanceBalanceBeforeSettlement,
+    rawAdvancesUpToSettlementDate,
+    previouslySettledAdvances,
     advanceAdjustedNow,
     settledAdvanceAmount: advanceAdjustedNow,
     appliedAdvances: advanceAdjustedNow,
@@ -383,9 +458,10 @@ export function calculateLabourWageSettlementTotals(
   advanceAdjustedNowOverride?: number | null,
 ) {
   const grossWages = attendanceWages + labourWorkWages;
+  const adjustableSettlementAmount = Math.max(grossWages + manualAdjustment, 0);
   const advanceAdjustedNow = Math.max(0, Math.min(
-    Number.isFinite(advanceAdjustedNowOverride ?? NaN) ? Number(advanceAdjustedNowOverride) : grossWages,
-    grossWages,
+    Number.isFinite(advanceAdjustedNowOverride ?? NaN) ? Number(advanceAdjustedNowOverride) : adjustableSettlementAmount,
+    adjustableSettlementAmount,
     availableAdvanceBalanceBeforeSettlement,
   ));
   const remainingAdvanceCarryForward = Math.max(availableAdvanceBalanceBeforeSettlement - advanceAdjustedNow, 0);
@@ -898,6 +974,12 @@ export async function previewLabourWageSettlement(
     row.clientRecordId !== excludeSettlementId
     && !isDeletedOperationalPayload(row.payload)
     && settlementConsumesAdvanceBalance(row.payload));
+  const currentGroupScopeKey = groupScopeKey({
+    settlementMode: selection.settlementMode,
+    groupId: labourScope.selectedGroupId ?? selection.groupId ?? null,
+    foremanId: selection.foremanId ?? null,
+    includedLabourIds: labourScope.labourers.map((labourer) => labourer.id),
+  });
   const existingSettlements = activeSettlements.filter((row) =>
     typeof row.payload.fromDate === "string"
     && typeof row.payload.toDate === "string"
@@ -959,6 +1041,8 @@ export async function previewLabourWageSettlement(
   const labourWorkWages = includedEarnings.reduce((sum, row) => sum + row.amount, 0);
   const priorValidAdvanceSettledByLabourer = new Map<string, number>();
   const excludedVoidedAdvanceSettledByLabourer = new Map<string, number>();
+  let priorValidGroupSettledAdvances = 0;
+  let excludedVoidedGroupSettledAdvances = 0;
   const addAdvanceConsumption = (target: Map<string, number>, labourerId: string, amount: number) => {
     if (!labourerId || amount <= 0) return;
     target.set(labourerId, (target.get(labourerId) ?? 0) + amount);
@@ -972,6 +1056,18 @@ export async function previewLabourWageSettlement(
   for (const settlement of allSettlements) {
     if (settlement.clientRecordId === excludeSettlementId) continue;
     if (typeof settlement.payload.settlementDate !== "string" || settlement.payload.settlementDate > settlementDate) continue;
+    if (selection.settlementMode === "group") {
+      const settlementScopeMatches = currentGroupScopeKey.length > 0 && settlementGroupScopeKey(settlement.payload) === currentGroupScopeKey;
+      if (settlementScopeMatches) {
+        const amount = settlementAdvanceAdjustedAmount(settlement.payload);
+        if (settlementConsumesAdvanceBalance(settlement.payload)) {
+          priorValidGroupSettledAdvances += amount;
+        } else {
+          excludedVoidedGroupSettledAdvances += amount;
+        }
+      }
+      continue;
+    }
     const allocations = Array.isArray(settlement.payload.advanceAdjustmentAllocations) ? settlement.payload.advanceAdjustmentAllocations : [];
     const target = settlementConsumesAdvanceBalance(settlement.payload)
       ? priorValidAdvanceSettledByLabourer
@@ -1020,22 +1116,28 @@ export async function previewLabourWageSettlement(
     const previouslyConsumedForLabourer = priorValidAdvanceSettledByLabourer.get(labourer.id) ?? 0;
     const excludedVoidedSettledForLabourer = excludedVoidedAdvanceSettledByLabourer.get(labourer.id) ?? 0;
     const netAdvancePool = rawAdvancesForLabourer.reduce((sum, row) => sum + row.outstandingAmount, 0);
-    const advanceAvailable = Math.max(netAdvancePool - previouslyConsumedForLabourer, 0);
+    const advanceAvailable = selection.settlementMode === "group"
+      ? netAdvancePool
+      : Math.max(netAdvancePool - previouslyConsumedForLabourer, 0);
     const grossWage = attendanceWage + labourWorkWage;
-    const advanceAllocation = allocateAdvanceAdjustments({
-      settlementId: excludeSettlementId ?? crypto.randomUUID(),
-      workspaceId,
-      farmId,
-      seasonId,
-      grossWages: grossWage,
-      advances: rawAdvancesForLabourer.map((advance) => ({
-        advanceId: advance.advanceId,
-        outstandingAmount: Math.max(advance.outstandingAmount - Math.min(previouslyConsumedForLabourer, advance.outstandingAmount), 0),
-        advanceDate: advance.advanceDate,
-      })),
-    });
+    const advanceAllocation = selection.settlementMode === "group"
+      ? { allocations: [] as AdvanceAllocation[], advanceAdjustedNow: 0 }
+      : allocateAdvanceAdjustments({
+        settlementId: excludeSettlementId ?? crypto.randomUUID(),
+        workspaceId,
+        farmId,
+        seasonId,
+        grossWages: grossWage,
+        advances: rawAdvancesForLabourer.map((advance) => ({
+          advanceId: advance.advanceId,
+          outstandingAmount: Math.max(advance.outstandingAmount - Math.min(previouslyConsumedForLabourer, advance.outstandingAmount), 0),
+          advanceDate: advance.advanceDate,
+        })),
+      });
     const advanceAdjustedNow = advanceAllocation.advanceAdjustedNow;
-    const advanceCarriedForward = Math.max(advanceAvailable - advanceAdjustedNow, 0);
+    const advanceCarriedForward = selection.settlementMode === "group"
+      ? advanceAvailable
+      : Math.max(advanceAvailable - advanceAdjustedNow, 0);
     advanceDebugTrace.push({
       labourerId: labourer.id,
       labourName: labourer.name,
@@ -1063,9 +1165,9 @@ export async function previewLabourWageSettlement(
       advanceAvailable,
       advanceAdjustedNow,
       advanceCarriedForward,
-      netPayableBeforePayment: grossWage - advanceAdjustedNow,
+      netPayableBeforePayment: selection.settlementMode === "group" ? grossWage : grossWage - advanceAdjustedNow,
       paidNow: 0,
-      balanceAfterSettlement: grossWage - advanceAdjustedNow,
+      balanceAfterSettlement: selection.settlementMode === "group" ? grossWage : grossWage - advanceAdjustedNow,
       missingRateDates,
     }];
   });
@@ -1073,37 +1175,39 @@ export async function previewLabourWageSettlement(
   const includedLabourSet = new Set(includedLabourIds);
   const includedInactiveLabourIds = includedLabourRows.filter((labourer) => labourer.currentStatus === "inactive").map((labourer) => labourer.labourerId);
   const includedActiveLabourIds = includedLabourRows.filter((labourer) => labourer.currentStatus === "active").map((labourer) => labourer.labourerId);
-  const includedAdvanceRows = includedLabourRows.flatMap((row) => {
-    const rawAdvancesForLabourer = advanceRows
-      .filter((advanceRow) => {
-        const payload = advanceRow.payload as AdvancePayload;
-        return !isDeletedOperationalPayload(payload as Record<string, unknown>)
-          && typeof payload.labourerId === "string"
-          && payload.labourerId === row.labourerId
-          && typeof payload.date === "string"
-          && payload.date <= settlementDate;
-      })
-      .map((advanceRow) => ({
-        advanceId: advanceRow.clientRecordId,
-        labourerId: row.labourerId,
-        advanceDate: String((advanceRow.payload as AdvancePayload).date ?? ""),
-        outstandingAmount: Number((advanceRow.payload as AdvancePayload).amount ?? 0),
+  const includedAdvanceRows = selection.settlementMode === "group"
+    ? []
+    : includedLabourRows.flatMap((row) => {
+      const rawAdvancesForLabourer = advanceRows
+        .filter((advanceRow) => {
+          const payload = advanceRow.payload as AdvancePayload;
+          return !isDeletedOperationalPayload(payload as Record<string, unknown>)
+            && typeof payload.labourerId === "string"
+            && payload.labourerId === row.labourerId
+            && typeof payload.date === "string"
+            && payload.date <= settlementDate;
+        })
+        .map((advanceRow) => ({
+          advanceId: advanceRow.clientRecordId,
+          labourerId: row.labourerId,
+          advanceDate: String((advanceRow.payload as AdvancePayload).date ?? ""),
+          outstandingAmount: Number((advanceRow.payload as AdvancePayload).amount ?? 0),
+        }));
+      const previouslyConsumedForLabourer = priorValidAdvanceSettledByLabourer.get(row.labourerId) ?? 0;
+      const adjustedAdvances = rawAdvancesForLabourer.map((advance) => ({
+        ...advance,
+        outstandingAmount: Math.max(advance.outstandingAmount - Math.min(previouslyConsumedForLabourer, advance.outstandingAmount), 0),
       }));
-    const previouslyConsumedForLabourer = priorValidAdvanceSettledByLabourer.get(row.labourerId) ?? 0;
-    const adjustedAdvances = rawAdvancesForLabourer.map((advance) => ({
-      ...advance,
-      outstandingAmount: Math.max(advance.outstandingAmount - Math.min(previouslyConsumedForLabourer, advance.outstandingAmount), 0),
-    }));
-    const allocation = allocateAdvanceAdjustments({
-      settlementId: excludeSettlementId ?? crypto.randomUUID(),
-      workspaceId,
-      farmId,
-      seasonId,
-      grossWages: row.grossWage,
-      advances: adjustedAdvances,
+      const allocation = allocateAdvanceAdjustments({
+        settlementId: excludeSettlementId ?? crypto.randomUUID(),
+        workspaceId,
+        farmId,
+        seasonId,
+        grossWages: row.grossWage,
+        advances: adjustedAdvances,
+      });
+      return allocation.allocations;
     });
-    return allocation.allocations;
-  });
   const attendanceTotals = includedLabourRows.reduce<{
     labourers: number;
     present: number;
@@ -1125,14 +1229,29 @@ export async function previewLabourWageSettlement(
   });
   const attendanceWages = includedLabourRows.reduce((sum, row) => sum + row.attendanceWage, 0);
   const labourWorkWagesTotal = includedLabourRows.reduce((sum, row) => sum + row.labourWorkWage, 0);
-  const availableAdvanceBalanceBeforeSettlement = includedLabourRows.reduce((sum, row) => sum + row.advanceAvailable, 0);
-  const advanceAdjustedNow = includedLabourRows.reduce((sum, row) => sum + row.advanceAdjustedNow, 0);
-  const remainingAdvanceCarryForward = includedLabourRows.reduce((sum, row) => sum + row.advanceCarriedForward, 0);
   const grossWagesEarned = includedLabourRows.reduce((sum, row) => sum + row.grossWage, 0);
-  const netPayableBeforePayment = includedLabourRows.reduce((sum, row) => sum + row.netPayableBeforePayment, 0);
-  const balanceAfterPayment = includedLabourRows.reduce((sum, row) => sum + row.balanceAfterSettlement, 0);
   const rawAdvancesUpToSettlementDate = advanceDebugTrace.reduce((sum, row) => sum + row.totalAdvancesToDate, 0);
-  const previouslySettledAdvances = includedLabourRows.reduce((sum, row) => sum + (priorValidAdvanceSettledByLabourer.get(row.labourerId) ?? 0), 0);
+  const groupAdvancePoolTotals = selection.settlementMode === "group"
+    ? calculateGroupAdvancePoolTotals({
+      grossWages: grossWagesEarned,
+      totalAdvancesUpToSettlementDate: rawAdvancesUpToSettlementDate,
+      previouslySettledAdvances: priorValidGroupSettledAdvances,
+    })
+    : null;
+  const availableAdvanceBalanceBeforeSettlement = groupAdvancePoolTotals?.availableAdvanceBalanceBeforeSettlement
+    ?? includedLabourRows.reduce((sum, row) => sum + row.advanceAvailable, 0);
+  const advanceAdjustedNow = groupAdvancePoolTotals?.advanceAdjustedNow
+    ?? includedLabourRows.reduce((sum, row) => sum + row.advanceAdjustedNow, 0);
+  const remainingAdvanceCarryForward = groupAdvancePoolTotals?.remainingAdvanceCarryForward
+    ?? includedLabourRows.reduce((sum, row) => sum + row.advanceCarriedForward, 0);
+  const netPayableBeforePayment = groupAdvancePoolTotals?.netPayableBeforePayment
+    ?? includedLabourRows.reduce((sum, row) => sum + row.netPayableBeforePayment, 0);
+  const balanceAfterPayment = netPayableBeforePayment;
+  const previouslySettledAdvances = groupAdvancePoolTotals?.previouslySettledAdvances
+    ?? includedLabourRows.reduce((sum, row) => sum + (priorValidAdvanceSettledByLabourer.get(row.labourerId) ?? 0), 0);
+  const excludedVoidedSettledAdvances = selection.settlementMode === "group"
+    ? excludedVoidedGroupSettledAdvances
+    : advanceDebugTrace.reduce((sum, row) => sum + row.excludedVoidedSettledAdvances, 0);
   const excludedLabourers = candidateLabourers
     .filter((labourer) => !includedLabourSet.has(labourer.id))
     .map((labourer) => {
@@ -1163,6 +1282,7 @@ export async function previewLabourWageSettlement(
     advancesPaid: availableAdvanceBalanceBeforeSettlement,
     rawAdvancesUpToSettlementDate,
     previouslySettledAdvances,
+    excludedVoidedSettledAdvances,
     advanceAdjustedNow,
     settledAdvanceAmount: advanceAdjustedNow,
     appliedAdvances: advanceAdjustedNow,

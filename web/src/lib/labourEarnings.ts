@@ -124,7 +124,10 @@ export function buildLabourEarningsProfileSummary(args: {
     .filter((payment) => isActiveOperationalRecord(payment) && payment.labourerId === args.labourerId)
     .reduce((sum, payment) => sum + payment.amount, 0);
   const settledAdvances = args.settlements
-    .filter((settlement) => isActiveOperationalRecord(settlement))
+    .filter((settlement) =>
+      isActiveOperationalRecord(settlement)
+      && settlement.settlementMode !== "group"
+      && (settlement.includedLabourIds?.includes(args.labourerId) ?? false))
     .reduce((sum, settlement) => sum + settlement.settledAdvanceAmount, 0);
   const totalEarned = attendanceSummary.totalWage + totalPendingEarnings;
   const estimatedPayable = totalEarned - advancesPaid - paymentsPaid;
