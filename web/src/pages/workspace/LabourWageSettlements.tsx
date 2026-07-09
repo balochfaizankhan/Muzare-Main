@@ -132,6 +132,7 @@ export function LabourWageSettlements() {
         includedLabourIds: settlement.includedLabourIds ?? [],
         includedInactiveLabourIds: settlement.includedInactiveLabourIds ?? [],
         includedActiveLabourIds: settlement.includedActiveLabourIds ?? [],
+        includedLabourRows: settlement.includedLabourRows ?? [],
         excludedLabourers: settlement.excludedLabourers ?? [],
         attendanceTotals: settlement.attendanceTotals ?? undefined,
         sourceAttendanceIds: settlement.sourceAttendanceIds ?? [],
@@ -335,6 +336,7 @@ export function LabourWageSettlements() {
         includedLabourIds: response.settlement.includedLabourIds ?? [],
         includedInactiveLabourIds: response.settlement.includedInactiveLabourIds ?? [],
         includedActiveLabourIds: response.settlement.includedActiveLabourIds ?? [],
+        includedLabourRows: response.settlement.includedLabourRows ?? [],
         excludedLabourers: response.settlement.excludedLabourers ?? [],
         attendanceTotals: response.settlement.attendanceTotals ?? undefined,
         fromDate: response.settlement.fromDate,
@@ -395,10 +397,59 @@ export function LabourWageSettlements() {
   const summary = preview.status === "ready" ? preview.data : null;
   const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
   const settlementPaymentAccountById = useMemo(() => new Map(paymentAccounts.map((account) => [account.id, account])), [paymentAccounts]);
-  const selectedGroupName = useMemo(() => {
-    if (!summary?.groupName) return labourGroups.find((group) => group.id === groupId || group.id === foremanId)?.name ?? "";
-    return summary.groupName;
-  }, [foremanId, groupId, labourGroups, summary?.groupName]);
+  const includedLabourRows = summary?.includedLabourRows ?? [];
+  const summaryTotals = useMemo(() => includedLabourRows.reduce((totals, row) => ({
+    includedLabourers: totals.includedLabourers + 1,
+    activeNowIncluded: totals.activeNowIncluded + (row.currentStatus === "active" ? 1 : 0),
+    inactiveNowIncluded: totals.inactiveNowIncluded + (row.currentStatus === "inactive" ? 1 : 0),
+    presentDays: totals.presentDays + row.presentDays,
+    halfDayDays: totals.halfDayDays + row.halfDayDays,
+    absentDays: totals.absentDays + row.absentDays,
+    payableDays: totals.payableDays + row.payableDays,
+    attendanceWages: totals.attendanceWages + row.attendanceWage,
+    labourWorkWages: totals.labourWorkWages + row.labourWorkWage,
+    grossWagesEarned: totals.grossWagesEarned + row.grossWage,
+    availableAdvanceBalance: totals.availableAdvanceBalance + row.advanceAvailable,
+    advanceAdjustedNow: totals.advanceAdjustedNow + row.advanceAdjustedNow,
+    advanceCarriedForward: totals.advanceCarriedForward + row.advanceCarriedForward,
+    netPayableBeforePayment: totals.netPayableBeforePayment + row.netPayableBeforePayment,
+    paidNow: totals.paidNow + row.paidNow,
+    balanceAfterSettlement: totals.balanceAfterSettlement + row.balanceAfterSettlement,
+  }), {
+    includedLabourers: 0,
+    activeNowIncluded: 0,
+    inactiveNowIncluded: 0,
+    presentDays: 0,
+    halfDayDays: 0,
+    absentDays: 0,
+    payableDays: 0,
+    attendanceWages: 0,
+    labourWorkWages: 0,
+    grossWagesEarned: 0,
+    availableAdvanceBalance: 0,
+    advanceAdjustedNow: 0,
+    advanceCarriedForward: 0,
+    netPayableBeforePayment: 0,
+    paidNow: 0,
+    balanceAfterSettlement: 0,
+  }), [includedLabourRows]);
+  const summaryConsistent = Boolean(summary)
+    && includedLabourRows.length > 0
+    && summaryTotals.includedLabourers === includedLabourRows.length
+    && summaryTotals.activeNowIncluded + summaryTotals.inactiveNowIncluded === summaryTotals.includedLabourers
+    && !(summaryTotals.attendanceWages > 0 && summaryTotals.payableDays <= 0)
+    && !(summaryTotals.payableDays === 0 && summaryTotals.attendanceWages > 0)
+    && summaryTotals.presentDays >= 0
+    && summaryTotals.halfDayDays >= 0
+    && summaryTotals.grossWagesEarned >= 0;
+  const selectedGroupName = summary?.groupName
+    ?? labourGroups.find((group) => group.id === groupId || group.id === foremanId)?.name
+    ?? "";
+  const settlementScopeLabel = summary?.settlementMode === "group"
+    ? `Group ${selectedGroupName || summary?.groupId || "-"}`
+    : summary?.settlementMode === "individual"
+      ? "Individual labour settlement"
+      : "Settlement scope";
   const openMatchingAttendanceReport = useCallback(() => {
     if (!summary) return;
     const query = new URLSearchParams({
@@ -407,7 +458,7 @@ export function LabourWageSettlements() {
       to: toDate,
     });
     if (selectedGroupName) query.set("group", selectedGroupName);
-    if (summary.includedLabourIds?.length) query.set("labourIds", summary.includedLabourIds.join(","));
+    if (summary.settlementMode === "individual" && summary.includedLabourIds?.length) query.set("labourIds", summary.includedLabourIds.join(","));
     navigate(`/workspace/reports?${query.toString()}`);
   }, [fromDate, navigate, selectedGroupName, summary, toDate]);
   const settlementStatus = useCallback((settlement: Pick<LabourWageSettlement, "status" | "accountingStatus">) => settlement.accountingStatus ?? settlement.status, []);
@@ -507,6 +558,7 @@ export function LabourWageSettlements() {
         includedLabourIds: response.settlement.includedLabourIds ?? [],
         includedInactiveLabourIds: response.settlement.includedInactiveLabourIds ?? [],
         includedActiveLabourIds: response.settlement.includedActiveLabourIds ?? [],
+        includedLabourRows: response.settlement.includedLabourRows ?? [],
         excludedLabourers: response.settlement.excludedLabourers ?? [],
         attendanceTotals: response.settlement.attendanceTotals ?? undefined,
         fromDate: response.settlement.fromDate,
@@ -808,7 +860,7 @@ export function LabourWageSettlements() {
               <button type="button" className="secondary-action" onClick={() => void previewSettlement()} disabled={!token || !workspaceId || !activeFarmId || !activeSeasonId || preview.status === "loading"}>
                 {preview.status === "loading" ? "Previewing..." : "Preview Settlement"}
               </button>
-              <button type="submit" disabled={!canPost || submitting || preview.status !== "ready" || Boolean(summary?.unresolvedRows.length) || Boolean(summary?.overlappingSettlements.length) || onlineRequired}>
+              <button type="submit" disabled={!canPost || submitting || preview.status !== "ready" || !summaryConsistent || Boolean(summary?.unresolvedRows.length) || Boolean(summary?.overlappingSettlements.length) || onlineRequired}>
                 {submitting ? "Posting settlement..." : "Create Settlement"}
               </button>
             </div>
@@ -821,39 +873,130 @@ export function LabourWageSettlements() {
             <span>Advances stay immutable. Settlement accounting is posted under the LW settlement number.</span>
           </div>
           {!summary ? <p className="context-message">Run a preview to calculate period wages, advance use, and settlement balance.</p> : <>
-            <div className="reports-kpis">
-              <article><span>Included labourers</span><strong>{summary.includedLabourCount ?? summary.includedLabourIds?.length ?? 0}</strong></article>
-              <article><span>Active now included</span><strong>{summary.includedActiveLabourIds?.length ?? 0}</strong></article>
-              <article><span>Inactive now included</span><strong>{summary.includedInactiveLabourIds?.length ?? 0}</strong></article>
-              <article><span>Attendance wages</span><strong>{money(summary.attendanceWages)}</strong></article>
-              <article><span>Labour work wages</span><strong>{money(summary.labourWorkWages ?? summary.pendingLabourEarnings)}</strong></article>
-              <article><span>Gross wages earned</span><strong>{money(summary.grossWages ?? summary.totalEarned)}</strong></article>
-              <article><span>Available advance balance</span><strong>{money(summary.availableAdvanceBalanceBeforeSettlement ?? summary.advancesAvailableUpToSettlementDate)}</strong></article>
-              <article><span>Advance adjusted now</span><strong>{money(summary.advanceAdjustedNow ?? summary.settledAdvanceAmount)}</strong></article>
-              <article><span>Advance carried forward</span><strong>{money(summary.remainingAdvanceCarryForward ?? summary.carryForwardAdvance)}</strong></article>
-              <article><span>Manual adjustment</span><strong>{money(summary.manualAdjustment ?? 0)}</strong></article>
-              <article><span>Net payable before payment</span><strong>{money(summary.netPayableBeforePayment ?? summary.payableBalance)}</strong></article>
-              <article><span>Paid now</span><strong>{money(summary.paidAmount ?? 0)}</strong></article>
-              <article><span>Balance after settlement</span><strong>{money(summary.balanceAfterPayment ?? summary.payableBalance)}</strong></article>
-              <article><span>Status</span><strong>{summary.balanceAfterPayment && summary.balanceAfterPayment < 0 ? "Labour owes farm" : (summary.balanceAfterPayment === 0 && (summary.remainingAdvanceCarryForward ?? summary.carryForwardAdvance ?? 0) === 0 ? "Settled" : (summary.remainingAdvanceCarryForward ?? summary.carryForwardAdvance ?? 0) > 0 ? "Advance carried forward" : "Farm still owes labour")}</strong></article>
+            <div className="record-panel">
+              <h3>Settlement scope</h3>
+              <div className="reports-summary-list">
+                <article><span>Settlement scope</span><strong>{settlementScopeLabel}</strong></article>
+                <article><span>Labour status rule</span><strong>All labourers with wages in period</strong></article>
+                <article><span>Date range</span><strong>{fromDate} to {toDate}</strong></article>
+                <article><span>Farm / season</span><strong>{activeFarmId || "-"} / {activeSeasonId || "-"}</strong></article>
+                <article><span>Included labourers</span><strong>{summaryTotals.includedLabourers}</strong></article>
+                <article><span>Excluded group members</span><strong>{summary.excludedLabourers?.length ?? 0}</strong></article>
+                <article><span>Active now included</span><strong>{summaryTotals.activeNowIncluded}</strong></article>
+                <article><span>Inactive now included</span><strong>{summaryTotals.inactiveNowIncluded}</strong></article>
+              </div>
+              <p className="context-message">Settlement preview uses the same attendance wage engine as the attendance report.</p>
             </div>
+
+            <div className="reports-kpis">
+              <article><span>Included labourers</span><strong>{summaryTotals.includedLabourers}</strong></article>
+              <article><span>Active now included</span><strong>{summaryTotals.activeNowIncluded}</strong></article>
+              <article><span>Inactive now included</span><strong>{summaryTotals.inactiveNowIncluded}</strong></article>
+              <article><span>Present days</span><strong>{summaryTotals.presentDays}</strong></article>
+              <article><span>Half-day days</span><strong>{summaryTotals.halfDayDays}</strong></article>
+              <article><span>Payable days</span><strong>{summaryTotals.payableDays}</strong></article>
+              <article><span>Attendance wages</span><strong>{money(summaryTotals.attendanceWages)}</strong></article>
+              <article><span>Labour work wages</span><strong>{money(summaryTotals.labourWorkWages)}</strong></article>
+              <article><span>Gross wages earned</span><strong>{money(summaryTotals.grossWagesEarned)}</strong></article>
+              <article><span>Available advance balance</span><strong>{money(summaryTotals.availableAdvanceBalance)}</strong></article>
+              <article><span>Advance adjusted now</span><strong>{money(summaryTotals.advanceAdjustedNow)}</strong></article>
+              <article><span>Advance carried forward</span><strong>{money(summaryTotals.advanceCarriedForward)}</strong></article>
+              <article><span>Manual adjustment</span><strong>{money(summary?.manualAdjustment ?? 0)}</strong></article>
+              <article><span>Net payable before payment</span><strong>{money(summaryTotals.netPayableBeforePayment)}</strong></article>
+              <article><span>Paid now</span><strong>{money(summary?.paidAmount ?? 0)}</strong></article>
+              <article><span>Balance after settlement</span><strong>{money(summaryTotals.balanceAfterSettlement)}</strong></article>
+            </div>
+
             <div className="reports-summary-list">
-              <article><span>Group</span><strong>{summary.groupName ?? selectedGroupName ?? "-"}</strong></article>
-              <article><span>Wage period</span><strong>{fromDate} to {toDate}</strong></article>
               <article><span>Advances considered until</span><strong>{summary.settlementDate}</strong></article>
               <article><span>Total advances up to settlement date</span><strong>{money(summary.rawAdvancesUpToSettlementDate)}</strong></article>
               <article><span>Previously settled advances</span><strong>{money(summary.previouslySettledAdvances)}</strong></article>
+              <article><span>Preview status</span><strong>{summaryConsistent ? "Consistent" : "Needs review"}</strong></article>
             </div>
-            <div className="reports-summary-list">
-              <article><span>Attendance scope</span><strong>{summary.attendanceTotals?.labourers ?? summary.includedLabourCount ?? 0}</strong></article>
-              <article><span>Present days</span><strong>{summary.attendanceTotals?.present ?? 0}</strong></article>
-              <article><span>Half-day days</span><strong>{summary.attendanceTotals?.halfDay ?? 0}</strong></article>
-              <article><span>Payable days</span><strong>{summary.attendanceTotals?.payableDays ?? 0}</strong></article>
-            </div>
-            <p className="context-message">Settlement includes labourers with wages in this period, even if they are inactive today.</p>
+
+            {includedLabourRows.length > 0 ? (
+              <>
+                <div className="attendance-import-table-wrap report-wide-table">
+                  <table className="report-data-table">
+                    <thead>
+                      <tr>
+                        <th>Labourer</th>
+                        <th>Status</th>
+                        <th>Group</th>
+                        <th>Present</th>
+                        <th>Half-day</th>
+                        <th>Payable</th>
+                        <th>Wage rate</th>
+                        <th>Attendance wage</th>
+                        <th>Labour work wage</th>
+                        <th>Gross wage</th>
+                        <th>Advance available</th>
+                        <th>Advance adjusted</th>
+                        <th>Carry forward</th>
+                        <th>Net payable</th>
+                        <th>Paid now</th>
+                        <th>Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {includedLabourRows.map((row) => (
+                        <tr key={row.labourerId}>
+                          <td>{row.labourName}</td>
+                          <td>{row.currentStatus === "active" ? "Active now" : "Inactive now"}</td>
+                          <td>{row.groupName ?? summary.groupName ?? "-"}</td>
+                          <td>{row.presentDays}</td>
+                          <td>{row.halfDayDays}</td>
+                          <td>{row.payableDays}</td>
+                          <td>{row.wageRateLabel ?? "-"}</td>
+                          <td>{money(row.attendanceWage)}</td>
+                          <td>{money(row.labourWorkWage)}</td>
+                          <td>{money(row.grossWage)}</td>
+                          <td>{money(row.advanceAvailable)}</td>
+                          <td>{money(row.advanceAdjustedNow)}</td>
+                          <td>{money(row.advanceCarriedForward)}</td>
+                          <td>{money(row.netPayableBeforePayment)}</td>
+                          <td>{money(row.paidNow)}</td>
+                          <td>{money(row.balanceAfterSettlement)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="report-mobile-cards">
+                  {includedLabourRows.map((row) => (
+                    <article className="report-mobile-card" key={`preview:${row.labourerId}`}>
+                      <header>
+                        <strong>{row.labourName}</strong>
+                        <b>{money(row.grossWage)}</b>
+                      </header>
+                      <span>{row.currentStatus === "active" ? "Active now" : "Inactive now"}</span>
+                      <details>
+                        <summary>View labour breakdown</summary>
+                        <dl>
+                          <div><dt>Payable days</dt><dd>{row.payableDays}</dd></div>
+                          <div><dt>Gross wage</dt><dd>{money(row.grossWage)}</dd></div>
+                          <div><dt>Advance adjusted</dt><dd>{money(row.advanceAdjustedNow)}</dd></div>
+                          <div><dt>Net payable</dt><dd>{money(row.netPayableBeforePayment)}</dd></div>
+                          <div><dt>Present days</dt><dd>{row.presentDays}</dd></div>
+                          <div><dt>Half-day days</dt><dd>{row.halfDayDays}</dd></div>
+                          <div><dt>Wage rate</dt><dd>{row.wageRateLabel ?? "-"}</dd></div>
+                          <div><dt>Attendance wage</dt><dd>{money(row.attendanceWage)}</dd></div>
+                          <div><dt>Labour work wage</dt><dd>{money(row.labourWorkWage)}</dd></div>
+                          <div><dt>Advance available</dt><dd>{money(row.advanceAvailable)}</dd></div>
+                          <div><dt>Carry forward</dt><dd>{money(row.advanceCarriedForward)}</dd></div>
+                        </dl>
+                      </details>
+                    </article>
+                  ))}
+                </div>
+              </>
+            ) : null}
+
             <div className="module-inline-actions">
               <button type="button" className="secondary-action" onClick={openMatchingAttendanceReport}>View matching attendance report</button>
+              {!summaryConsistent ? <span className="worker-action-warning">Preview is inconsistent. Create Settlement is disabled until the labour rows reconcile.</span> : null}
             </div>
+
             {process.env.NODE_ENV !== "production" ? (
               <div className="record-panel">
                 <h3>Development reconciliation</h3>
@@ -865,26 +1008,42 @@ export function LabourWageSettlements() {
                     payableDays: totals.payableDays + row.payableDays,
                     wages: totals.wages + row.totalWage,
                   }), { labourers: 0, present: 0, halfDay: 0, payableDays: 0, wages: 0 });
-                  const excludedLabourCount = summary.excludedLabourers?.length ?? 0;
                   return (
-                    <div className="reports-summary-list">
-                      <article><span>Settlement labour count</span><strong>{summary.includedLabourCount ?? summary.includedLabourIds?.length ?? 0}</strong></article>
-                      <article><span>Report labour count</span><strong>{reportTotals.labourers}</strong></article>
-                      <article><span>Settlement attendance wages</span><strong>{money(summary.attendanceWages)}</strong></article>
-                      <article><span>Report attendance wages</span><strong>{money(reportTotals.wages)}</strong></article>
-                      <article><span>Included inactive labourers</span><strong>{summary.includedInactiveLabourIds?.length ?? 0}</strong></article>
-                      <article><span>Excluded labourers</span><strong>{excludedLabourCount}</strong></article>
-                    </div>
+                    <>
+                      <div className="reports-summary-list">
+                        <article><span>Preview labour count</span><strong>{summaryTotals.includedLabourers}</strong></article>
+                        <article><span>Report labour count</span><strong>{reportTotals.labourers}</strong></article>
+                        <article><span>Preview present days</span><strong>{summaryTotals.presentDays}</strong></article>
+                        <article><span>Report present days</span><strong>{reportTotals.present}</strong></article>
+                        <article><span>Preview half-day days</span><strong>{summaryTotals.halfDayDays}</strong></article>
+                        <article><span>Report half-day days</span><strong>{reportTotals.halfDay}</strong></article>
+                        <article><span>Preview payable days</span><strong>{summaryTotals.payableDays}</strong></article>
+                        <article><span>Report payable days</span><strong>{reportTotals.payableDays}</strong></article>
+                        <article><span>Preview attendance wages</span><strong>{money(summaryTotals.attendanceWages)}</strong></article>
+                        <article><span>Report attendance wages</span><strong>{money(reportTotals.wages)}</strong></article>
+                        <article><span>Preview labour row total</span><strong>{money(summaryTotals.grossWagesEarned)}</strong></article>
+                        <article><span>Included inactive labourers</span><strong>{summaryTotals.inactiveNowIncluded}</strong></article>
+                      </div>
+                      {summary.excludedLabourers?.length ? (
+                        <details>
+                          <summary>Excluded labourers with reasons</summary>
+                          <ul>
+                            {summary.excludedLabourers.map((row) => <li key={`dev-excluded:${row.labourerId}`}>{row.labourName}: {row.reason}</li>)}
+                          </ul>
+                        </details>
+                      ) : null}
+                    </>
                   );
                 })() : null}
               </div>
             ) : null}
-            {summary.excludedLabourers?.length ? <div className="worker-action-warning">
-              <strong>Excluded labourers</strong>
+
+            {summary.excludedLabourers?.length ? <details className="worker-action-warning">
+              <summary>Excluded labourers</summary>
               <ul>
-                {summary.excludedLabourers.slice(0, 12).map((row) => <li key={row.labourerId}>{row.labourName}: {row.reason}</li>)}
+                {summary.excludedLabourers.map((row) => <li key={row.labourerId}>{row.labourName}: {row.reason}</li>)}
               </ul>
-            </div> : null}
+            </details> : null}
             {summary.unresolvedRows.length > 0 && <div className="worker-action-warning">
               <strong>Missing wage rates</strong>
               <ul>

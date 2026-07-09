@@ -266,6 +266,27 @@ export type LabourWageSettlement = LocalRecord & {
   includedLabourIds?: string[];
   includedInactiveLabourIds?: string[];
   includedActiveLabourIds?: string[];
+  includedLabourRows?: Array<{
+    labourerId: string;
+    labourName: string;
+    currentStatus: "active" | "inactive";
+    groupName: string | null;
+    presentDays: number;
+    halfDayDays: number;
+    absentDays: number;
+    payableDays: number;
+    wageRateLabel: string | null;
+    attendanceWage: number;
+    labourWorkWage: number;
+    grossWage: number;
+    advanceAvailable: number;
+    advanceAdjustedNow: number;
+    advanceCarriedForward: number;
+    netPayableBeforePayment: number;
+    paidNow: number;
+    balanceAfterSettlement: number;
+    missingRateDates: string[];
+  }>;
   excludedLabourers?: Array<{
     labourerId: string;
     labourName: string;
@@ -330,6 +351,8 @@ export type LabourWageSettlement = LocalRecord & {
     };
     advanceAdjustedNow: number;
     netPayable: number;
+    paymentAccountId?: string | null;
+    paidNow: number;
   };
   status: "posted" | "voided" | "deleted";
   accountingStatus?: "draft" | "posted" | "accounting_missing" | "voided" | "deleted";

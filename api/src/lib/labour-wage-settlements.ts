@@ -28,6 +28,27 @@ export type LabourWageSettlementPayload = {
     labourName: string;
     reason: string;
   }>;
+  includedLabourRows?: Array<{
+    labourerId: string;
+    labourName: string;
+    currentStatus: "active" | "inactive";
+    groupName: string | null;
+    presentDays: number;
+    halfDayDays: number;
+    absentDays: number;
+    payableDays: number;
+    wageRateLabel: string | null;
+    attendanceWage: number;
+    labourWorkWage: number;
+    grossWage: number;
+    advanceAvailable: number;
+    advanceAdjustedNow: number;
+    advanceCarriedForward: number;
+    netPayableBeforePayment: number;
+    paidNow: number;
+    balanceAfterSettlement: number;
+    missingRateDates: string[];
+  }>;
   attendanceTotals?: {
     labourers: number;
     present: number;
@@ -91,6 +112,8 @@ export type LabourWageSettlementPayload = {
     };
     advanceAdjustedNow: number;
     netPayable: number;
+    paymentAccountId?: string | null;
+    paidNow: number;
   };
   status: "posted" | "voided" | "deleted";
   createdBy?: string;
@@ -180,6 +203,37 @@ export function normalizeSettlementPayload(payload: Record<string, unknown>): La
         return [{ labourerId, labourName, reason }];
       })
       : [],
+    includedLabourRows: Array.isArray(payload.includedLabourRows)
+      ? payload.includedLabourRows.flatMap((item) => {
+        if (!item || typeof item !== "object") return [];
+        const row = item as Record<string, unknown>;
+        const labourerId = typeof row.labourerId === "string" ? row.labourerId : "";
+        const labourName = typeof row.labourName === "string" ? row.labourName : "Labourer";
+        const currentStatus = row.currentStatus === "inactive" ? "inactive" : "active";
+        if (!labourerId) return [];
+        return [{
+          labourerId,
+          labourName,
+          currentStatus,
+          groupName: typeof row.groupName === "string" ? row.groupName : null,
+          presentDays: numberValue(row.presentDays),
+          halfDayDays: numberValue(row.halfDayDays),
+          absentDays: numberValue(row.absentDays),
+          payableDays: numberValue(row.payableDays),
+          wageRateLabel: typeof row.wageRateLabel === "string" ? row.wageRateLabel : null,
+          attendanceWage: numberValue(row.attendanceWage),
+          labourWorkWage: numberValue(row.labourWorkWage),
+          grossWage: numberValue(row.grossWage),
+          advanceAvailable: numberValue(row.advanceAvailable),
+          advanceAdjustedNow: numberValue(row.advanceAdjustedNow),
+          advanceCarriedForward: numberValue(row.advanceCarriedForward),
+          netPayableBeforePayment: numberValue(row.netPayableBeforePayment),
+          paidNow: numberValue(row.paidNow),
+          balanceAfterSettlement: numberValue(row.balanceAfterSettlement),
+          missingRateDates: stringArrayValue(row.missingRateDates),
+        }];
+      })
+      : [],
     attendanceTotals: payload.attendanceTotals && typeof payload.attendanceTotals === "object"
       ? {
         labourers: numberValue((payload.attendanceTotals as Record<string, unknown>).labourers),
@@ -252,6 +306,8 @@ export function normalizeSettlementPayload(payload: Record<string, unknown>): La
         },
         advanceAdjustedNow: numberValue((payload.settlementScopeSnapshot as Record<string, unknown>).advanceAdjustedNow),
         netPayable: numberValue((payload.settlementScopeSnapshot as Record<string, unknown>).netPayable),
+        paymentAccountId: typeof (payload.settlementScopeSnapshot as Record<string, unknown>).paymentAccountId === "string" ? String((payload.settlementScopeSnapshot as Record<string, unknown>).paymentAccountId) : null,
+        paidNow: numberValue((payload.settlementScopeSnapshot as Record<string, unknown>).paidNow),
       }
       : undefined,
     status: payload.status === "voided" ? "voided" : payload.status === "deleted" ? "deleted" : "posted",
@@ -549,7 +605,6 @@ async function resolveSelectedLabourers(
     }).from(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, workspaceId),
       eq(operationalRecords.farmId, farmId),
-      eq(operationalRecords.seasonId, seasonId),
       eq(operationalRecords.entityType, "labourGroup"),
     )),
   ]);
@@ -812,7 +867,6 @@ export async function previewLabourWageSettlement(
   const candidateIds = new Set(candidateLabourers.map((labourer) => labourer.id));
   const attendanceByLabourer = new Map<string, Array<{ date: string; status: string; rateMissing: boolean }>>();
   const earningsByLabourer = new Map<string, Array<{ id: string; earningDate: string; amount: number }>>();
-  let attendanceWages = 0;
   const sourceAttendanceIds: string[] = [];
   const unresolvedRows: Array<{ labourerId: string; labourName: string; date: string; status: string }> = [];
   for (const row of attendanceRows) {
@@ -837,7 +891,6 @@ export async function previewLabourWageSettlement(
     const bucket = attendanceByLabourer.get(labourerId) ?? [];
     bucket.push({ date, status, rateMissing: !rate && status !== "absent" });
     attendanceByLabourer.set(labourerId, bucket);
-    attendanceWages += calculateStatusWage(status as "present" | "half_day" | "absent", rate?.payload ?? null);
     sourceAttendanceIds.push(row.clientRecordId);
   }
 
@@ -863,65 +916,168 @@ export async function previewLabourWageSettlement(
     }];
   });
   const labourWorkWages = includedEarnings.reduce((sum, row) => sum + row.amount, 0);
-  const includedLabourIds = candidateLabourers
-    .filter((labourer) => (attendanceByLabourer.get(labourer.id)?.length ?? 0) > 0 || (earningsByLabourer.get(labourer.id)?.length ?? 0) > 0)
-    .map((labourer) => labourer.id);
-  const includedLabourSet = new Set(includedLabourIds);
-
-  const rawIncludedAdvances = advanceRows
-    .filter((row) => {
-      const payload = row.payload as AdvancePayload;
-      if (isDeletedOperationalPayload(payload as Record<string, unknown>)) return false;
-      if (!includedLabourSet.has(typeof payload.labourerId === "string" ? payload.labourerId : "")) return false;
-      return typeof payload.date === "string" && payload.date <= settlementDate;
-    })
-    .map((row) => ({
-      advanceId: row.clientRecordId,
-      labourerId: typeof (row.payload as AdvancePayload).labourerId === "string" ? String((row.payload as AdvancePayload).labourerId) : "",
-      advanceDate: String((row.payload as AdvancePayload).date ?? ""),
-      outstandingAmount: Number((row.payload as AdvancePayload).amount ?? 0),
+  const includedLabourRows = candidateLabourers.flatMap((labourer) => {
+    const attendanceRecords = attendanceByLabourer.get(labourer.id) ?? [];
+    const earningRecords = earningsByLabourer.get(labourer.id) ?? [];
+    if (!attendanceRecords.length && !earningRecords.length) return [];
+    const presentDays = attendanceRecords.filter((record) => record.status === "present").length;
+    const halfDayDays = attendanceRecords.filter((record) => record.status === "half_day").length;
+    const absentDays = attendanceRecords.filter((record) => record.status === "absent").length;
+    const payableDays = presentDays + halfDayDays * 0.5;
+    const appliedRates = attendanceRecords.map((record) => ({
+      record,
+      rate: resolveApplicableWageRate(wageRates, labourer.id, record.date),
     }));
-  const previouslySettledAdvances = activeSettlements
-    .filter((row) => row.payload.settlementDate <= settlementDate)
-    .reduce((sum, row) => sum + numberValue(row.payload.advanceAdjustedNow ?? row.payload.settledAdvanceAmount ?? row.payload.appliedAdvances), 0);
-  let consumedHistoricalAdvances = previouslySettledAdvances;
-  const includedAdvances = rawIncludedAdvances.map((advance) => {
-    const consumed = Math.min(advance.outstandingAmount, Math.max(consumedHistoricalAdvances, 0));
-    consumedHistoricalAdvances = Math.max(consumedHistoricalAdvances - consumed, 0);
-    return {
+    const attendanceWage = appliedRates.reduce((sum, item) => sum + calculateStatusWage(item.record.status as "present" | "half_day" | "absent", item.rate?.payload ?? null), 0);
+    const missingRateDates = attendanceRecords.filter((record) => record.status !== "absent" && !resolveApplicableWageRate(wageRates, labourer.id, record.date)).map((record) => record.date);
+    const distinctDailyRates = [...new Set(appliedRates
+      .filter((item) => item.rate)
+      .map((item) => Number(item.rate?.payload.dailyRate))
+      .filter((value) => Number.isFinite(value) && value > 0))];
+    const wageRateLabel = distinctDailyRates.length === 0 ? null : distinctDailyRates.length === 1 ? String(distinctDailyRates[0]) : "Mixed";
+    const labourWorkWage = earningRecords.reduce((sum, row) => sum + row.amount, 0);
+    const rawAdvancesForLabourer = advanceRows
+      .filter((row) => {
+        const payload = row.payload as AdvancePayload;
+        return !isDeletedOperationalPayload(payload as Record<string, unknown>)
+          && typeof payload.labourerId === "string"
+          && payload.labourerId === labourer.id
+          && typeof payload.date === "string"
+          && payload.date <= settlementDate;
+      })
+      .map((row) => ({
+        advanceId: row.clientRecordId,
+        labourerId: labourer.id,
+        advanceDate: String((row.payload as AdvancePayload).date ?? ""),
+        outstandingAmount: Number((row.payload as AdvancePayload).amount ?? 0),
+      }));
+    const previouslyConsumedForLabourer = activeSettlements
+      .filter((row) => typeof row.payload.settlementDate === "string" && row.payload.settlementDate <= settlementDate)
+      .flatMap((row) => Array.isArray(row.payload.advanceAdjustmentAllocations) ? row.payload.advanceAdjustmentAllocations : [])
+      .filter((allocation) => {
+        const advance = advanceRows.find((item) => item.clientRecordId === allocation.advanceId);
+        const advancePayload = advance?.payload as AdvancePayload | undefined;
+        return advancePayload?.labourerId === labourer.id;
+      })
+      .reduce((sum, allocation) => sum + numberValue(allocation.adjustedAmount), 0);
+    const netAdvancePool = rawAdvancesForLabourer.reduce((sum, row) => sum + row.outstandingAmount, 0);
+    const advanceAvailable = Math.max(netAdvancePool - previouslyConsumedForLabourer, 0);
+    const grossWage = attendanceWage + labourWorkWage;
+    const advanceAllocation = allocateAdvanceAdjustments({
+      settlementId: excludeSettlementId ?? crypto.randomUUID(),
+      workspaceId,
+      farmId,
+      seasonId,
+      grossWages: grossWage,
+      advances: rawAdvancesForLabourer.map((advance) => ({
+        advanceId: advance.advanceId,
+        outstandingAmount: Math.max(advance.outstandingAmount - Math.min(previouslyConsumedForLabourer, advance.outstandingAmount), 0),
+        advanceDate: advance.advanceDate,
+      })),
+    });
+    const advanceAdjustedNow = advanceAllocation.advanceAdjustedNow;
+    const advanceCarriedForward = Math.max(advanceAvailable - advanceAdjustedNow, 0);
+    return [{
+      labourerId: labourer.id,
+      labourName: labourer.name,
+      currentStatus: labourer.active === false ? "inactive" as const : "active" as const,
+      groupName: labourer.groupName ?? labourScope.selectedGroupName ?? null,
+      presentDays,
+      halfDayDays,
+      absentDays,
+      payableDays,
+      wageRateLabel,
+      attendanceWage,
+      labourWorkWage,
+      grossWage,
+      advanceAvailable,
+      advanceAdjustedNow,
+      advanceCarriedForward,
+      netPayableBeforePayment: grossWage - advanceAdjustedNow,
+      paidNow: 0,
+      balanceAfterSettlement: grossWage - advanceAdjustedNow,
+      missingRateDates,
+    }];
+  });
+  const includedLabourIds = includedLabourRows.map((row) => row.labourerId);
+  const includedLabourSet = new Set(includedLabourIds);
+  const includedInactiveLabourIds = includedLabourRows.filter((labourer) => labourer.currentStatus === "inactive").map((labourer) => labourer.labourerId);
+  const includedActiveLabourIds = includedLabourRows.filter((labourer) => labourer.currentStatus === "active").map((labourer) => labourer.labourerId);
+  const includedAdvanceRows = includedLabourRows.flatMap((row) => {
+    const rawAdvancesForLabourer = advanceRows
+      .filter((advanceRow) => {
+        const payload = advanceRow.payload as AdvancePayload;
+        return !isDeletedOperationalPayload(payload as Record<string, unknown>)
+          && typeof payload.labourerId === "string"
+          && payload.labourerId === row.labourerId
+          && typeof payload.date === "string"
+          && payload.date <= settlementDate;
+      })
+      .map((advanceRow) => ({
+        advanceId: advanceRow.clientRecordId,
+        labourerId: row.labourerId,
+        advanceDate: String((advanceRow.payload as AdvancePayload).date ?? ""),
+        outstandingAmount: Number((advanceRow.payload as AdvancePayload).amount ?? 0),
+      }));
+    const previouslyConsumedForLabourer = activeSettlements
+      .filter((settlement) => typeof settlement.payload.settlementDate === "string" && settlement.payload.settlementDate <= settlementDate)
+      .flatMap((settlement) => Array.isArray(settlement.payload.advanceAdjustmentAllocations) ? settlement.payload.advanceAdjustmentAllocations : [])
+      .filter((allocation) => {
+        const advance = advanceRows.find((item) => item.clientRecordId === allocation.advanceId);
+        const advancePayload = advance?.payload as AdvancePayload | undefined;
+        return advancePayload?.labourerId === row.labourerId;
+      })
+      .reduce((sum, allocation) => sum + numberValue(allocation.adjustedAmount), 0);
+    const adjustedAdvances = rawAdvancesForLabourer.map((advance) => ({
       ...advance,
-      outstandingAmount: Math.max(advance.outstandingAmount - consumed, 0),
-    };
+      outstandingAmount: Math.max(advance.outstandingAmount - Math.min(previouslyConsumedForLabourer, advance.outstandingAmount), 0),
+    }));
+    const allocation = allocateAdvanceAdjustments({
+      settlementId: excludeSettlementId ?? crypto.randomUUID(),
+      workspaceId,
+      farmId,
+      seasonId,
+      grossWages: row.grossWage,
+      advances: adjustedAdvances,
+    });
+    return allocation.allocations;
   });
-  const rawAdvancesUpToSettlementDate = rawIncludedAdvances.reduce((sum, row) => sum + row.outstandingAmount, 0);
-  const availableAdvanceBalanceBeforeSettlement = includedAdvances.reduce((sum, row) => sum + row.outstandingAmount, 0);
-
-  const baseTotals = calculateLabourWageSettlementTotals(
-    attendanceWages,
-    labourWorkWages,
-    availableAdvanceBalanceBeforeSettlement,
-    0,
-    0,
-  );
-  const allocationResult = allocateAdvanceAdjustments({
-    settlementId: excludeSettlementId ?? crypto.randomUUID(),
-    workspaceId,
-    farmId,
-    seasonId,
-    grossWages: baseTotals.grossWages,
-    advances: includedAdvances,
+  const attendanceTotals = includedLabourRows.reduce<{
+    labourers: number;
+    present: number;
+    halfDay: number;
+    absent: number;
+    payableDays: number;
+  }>((totals, row) => ({
+    labourers: totals.labourers + 1,
+    present: totals.present + row.presentDays,
+    halfDay: totals.halfDay + row.halfDayDays,
+    absent: totals.absent + row.absentDays,
+    payableDays: totals.payableDays + row.payableDays,
+  }), {
+    labourers: 0,
+    present: 0,
+    halfDay: 0,
+    absent: 0,
+    payableDays: 0,
   });
-  const advanceAdjustedNow = allocationResult.advanceAdjustedNow;
-  const remainingAdvanceCarryForward = Math.max(availableAdvanceBalanceBeforeSettlement - advanceAdjustedNow, 0);
-  const netPayableBeforePayment = baseTotals.grossWages - advanceAdjustedNow + baseTotals.manualAdjustment;
-  const balanceAfterPayment = netPayableBeforePayment;
+  const attendanceWages = includedLabourRows.reduce((sum, row) => sum + row.attendanceWage, 0);
+  const labourWorkWagesTotal = includedLabourRows.reduce((sum, row) => sum + row.labourWorkWage, 0);
+  const availableAdvanceBalanceBeforeSettlement = includedLabourRows.reduce((sum, row) => sum + row.advanceAvailable, 0);
+  const advanceAdjustedNow = includedLabourRows.reduce((sum, row) => sum + row.advanceAdjustedNow, 0);
+  const remainingAdvanceCarryForward = includedLabourRows.reduce((sum, row) => sum + row.advanceCarriedForward, 0);
+  const grossWagesEarned = includedLabourRows.reduce((sum, row) => sum + row.grossWage, 0);
+  const netPayableBeforePayment = includedLabourRows.reduce((sum, row) => sum + row.netPayableBeforePayment, 0);
+  const balanceAfterPayment = includedLabourRows.reduce((sum, row) => sum + row.balanceAfterSettlement, 0);
+  const rawAdvancesUpToSettlementDate = availableAdvanceBalanceBeforeSettlement + includedLabourRows.reduce((sum, row) => sum + row.advanceAdjustedNow, 0);
+  const previouslySettledAdvances = Math.max(rawAdvancesUpToSettlementDate - availableAdvanceBalanceBeforeSettlement, 0);
   const excludedLabourers = candidateLabourers
     .filter((labourer) => !includedLabourSet.has(labourer.id))
     .map((labourer) => {
       const attendanceCount = attendanceByLabourer.get(labourer.id)?.length ?? 0;
       const earningCount = earningsByLabourer.get(labourer.id)?.length ?? 0;
       const reason = labourScope.selectedGroupId
-        ? "not a member of selected group during period"
+        ? "not in selected group"
         : attendanceCount === 0 && earningCount === 0
           ? "no attendance in selected period"
           : "no payable wage";
@@ -930,44 +1086,19 @@ export async function previewLabourWageSettlement(
         labourName: labourer.name,
         reason,
       };
-    });
-  const includedInactiveLabourIds = candidateLabourers.filter((labourer) => includedLabourSet.has(labourer.id) && labourer.active === false).map((labourer) => labourer.id);
-  const includedActiveLabourIds = candidateLabourers.filter((labourer) => includedLabourSet.has(labourer.id) && labourer.active !== false).map((labourer) => labourer.id);
-  const attendanceTotals = candidateLabourers.reduce<{
-    labourers: number;
-    present: number;
-    halfDay: number;
-    absent: number;
-    payableDays: number;
-  }>((totals, labourer) => {
-    const records = attendanceByLabourer.get(labourer.id) ?? [];
-    if (!records.length) return totals;
-    const present = records.filter((record) => record.status === "present").length;
-    const halfDay = records.filter((record) => record.status === "half_day").length;
-    const absent = records.filter((record) => record.status === "absent").length;
-    return {
-      labourers: totals.labourers + 1,
-      present: totals.present + present,
-      halfDay: totals.halfDay + halfDay,
-      absent: totals.absent + absent,
-      payableDays: totals.payableDays + present + halfDay * 0.5,
-    };
-  }, {
-    labourers: 0,
-    present: 0,
-    halfDay: 0,
-    absent: 0,
-    payableDays: 0,
   });
+  const advanceAdjustmentAllocations = includedAdvanceRows;
 
   return {
-    ...baseTotals,
-    labourWorkWages,
-    pendingLabourEarnings: labourWorkWages,
-    grossWages: baseTotals.grossWages,
-    totalEarned: baseTotals.grossWages,
+    attendanceWages,
+    labourWorkWages: labourWorkWagesTotal,
+    pendingLabourEarnings: labourWorkWagesTotal,
+    grossWages: grossWagesEarned,
+    totalEarned: grossWagesEarned,
+    totalLabourCost: grossWagesEarned,
     availableAdvanceBalanceBeforeSettlement,
     advancesAvailableUpToSettlementDate: availableAdvanceBalanceBeforeSettlement,
+    advancesPaid: availableAdvanceBalanceBeforeSettlement,
     rawAdvancesUpToSettlementDate,
     previouslySettledAdvances,
     advanceAdjustedNow,
@@ -975,7 +1106,9 @@ export async function previewLabourWageSettlement(
     appliedAdvances: advanceAdjustedNow,
     remainingAdvanceCarryForward,
     carryForwardAdvance: remainingAdvanceCarryForward,
+    manualAdjustment: 0,
     netPayableBeforePayment,
+    expenseAmount: grossWagesEarned,
     paidAmount: 0,
     balanceAfterPayment,
     payableBalance: balanceAfterPayment,
@@ -984,17 +1117,6 @@ export async function previewLabourWageSettlement(
     foremanId: selection.foremanId ?? null,
     groupId: labourScope.selectedGroupId ?? selection.groupId ?? null,
     groupName: labourScope.selectedGroupName ?? null,
-    includedLabourIds,
-    includedLabourCount: includedLabourIds.length,
-    includedInactiveLabourIds,
-    includedActiveLabourIds,
-    excludedLabourers,
-    attendanceTotals,
-    includedEarnings,
-    sourceAttendanceIds,
-    sourceLabourWorkIds: includedEarnings.map((row) => row.id),
-    advanceAdjustmentAllocations: allocationResult.allocations,
-    unresolvedRows,
     settlementScopeSnapshot: {
       settlementMode: selection.settlementMode ?? "individual",
       groupId: labourScope.selectedGroupId ?? selection.groupId ?? null,
@@ -1007,7 +1129,21 @@ export async function previewLabourWageSettlement(
       attendanceCountTotals: attendanceTotals,
       advanceAdjustedNow,
       netPayable: netPayableBeforePayment,
+      paymentAccountId: null,
+      paidNow: 0,
     },
+    includedLabourIds,
+    includedLabourCount: includedLabourIds.length,
+    includedInactiveLabourIds,
+    includedActiveLabourIds,
+    excludedLabourers,
+    attendanceTotals,
+    includedEarnings,
+    includedLabourRows,
+    sourceAttendanceIds,
+    sourceLabourWorkIds: includedEarnings.map((row) => row.id),
+    advanceAdjustmentAllocations,
+    unresolvedRows,
     overlappingSettlements: existingSettlements.map((row) => ({
       id: row.clientRecordId,
       settlementNumber: row.payload.settlementNumber,

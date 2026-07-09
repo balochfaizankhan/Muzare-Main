@@ -414,6 +414,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           includedLabourIds: preview.includedLabourIds ?? [],
           includedInactiveLabourIds: preview.includedInactiveLabourIds ?? [],
           includedActiveLabourIds: preview.includedActiveLabourIds ?? [],
+          includedLabourRows: preview.includedLabourRows ?? [],
           excludedLabourers: preview.excludedLabourers ?? [],
           attendanceTotals: preview.attendanceTotals ?? undefined,
           fromDate,
@@ -461,6 +462,8 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
             attendanceCountTotals: preview.attendanceTotals ?? { labourers: 0, present: 0, halfDay: 0, absent: 0, payableDays: 0 },
             advanceAdjustedNow: preview.advanceAdjustedNow ?? preview.settledAdvanceAmount ?? 0,
             netPayable: settlementTotals.netPayableBeforePayment,
+            paymentAccountId: paymentAccountIdValue,
+            paidNow: settlementTotals.paidAmount,
           },
         };
         const earningsToSettle = await listLabourEarnings(tx, workspaceId, farmId, seasonId);

@@ -822,6 +822,27 @@ export type LabourWageSettlementRecord = {
     labourName: string;
     reason: string;
   }>;
+  includedLabourRows?: Array<{
+    labourerId: string;
+    labourName: string;
+    currentStatus: "active" | "inactive";
+    groupName: string | null;
+    presentDays: number;
+    halfDayDays: number;
+    absentDays: number;
+    payableDays: number;
+    wageRateLabel: string | null;
+    attendanceWage: number;
+    labourWorkWage: number;
+    grossWage: number;
+    advanceAvailable: number;
+    advanceAdjustedNow: number;
+    advanceCarriedForward: number;
+    netPayableBeforePayment: number;
+    paidNow: number;
+    balanceAfterSettlement: number;
+    missingRateDates: string[];
+  }>;
   attendanceTotals?: {
     labourers: number;
     present: number;
@@ -892,6 +913,8 @@ export type LabourWageSettlementRecord = {
     };
     advanceAdjustedNow: number;
     netPayable: number;
+    paymentAccountId?: string | null;
+    paidNow: number;
   };
 };
 export type LabourWageSettlementDetail = LabourWageSettlementRecord & {
@@ -978,6 +1001,27 @@ export type LabourWageSettlementPreview = {
   includedLabourCount?: number;
   includedInactiveLabourIds?: string[];
   includedActiveLabourIds?: string[];
+  includedLabourRows?: Array<{
+    labourerId: string;
+    labourName: string;
+    currentStatus: "active" | "inactive";
+    groupName: string | null;
+    presentDays: number;
+    halfDayDays: number;
+    absentDays: number;
+    payableDays: number;
+    wageRateLabel: string | null;
+    attendanceWage: number;
+    labourWorkWage: number;
+    grossWage: number;
+    advanceAvailable: number;
+    advanceAdjustedNow: number;
+    advanceCarriedForward: number;
+    netPayableBeforePayment: number;
+    paidNow: number;
+    balanceAfterSettlement: number;
+    missingRateDates: string[];
+  }>;
   excludedLabourers?: Array<{
     labourerId: string;
     labourName: string;
