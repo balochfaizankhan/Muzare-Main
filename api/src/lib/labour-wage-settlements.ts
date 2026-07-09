@@ -12,6 +12,7 @@ export { validateLabourSettlementPaymentAccount } from "./labour-settlement-acco
 type DbClient = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export type LabourWageSettlementPayload = {
+  clientRequestId?: string | null;
   settlementNumber: string;
   linkedVoucherId: string;
   linkedVoucherNumber: string;
@@ -181,6 +182,7 @@ export function normalizeSettlementPayload(payload: Record<string, unknown>): La
   const balanceAfterPayment = numberValue(payload.balanceAfterPayment ?? (netPayableBeforePayment - paidAmount));
   const settlementMode = payload.settlementMode === "group" ? "group" : "individual";
   return {
+    clientRequestId: typeof payload.clientRequestId === "string" ? payload.clientRequestId : null,
     settlementNumber: typeof payload.settlementNumber === "string" ? payload.settlementNumber : "LW-0001",
     linkedVoucherId: typeof payload.linkedVoucherId === "string" ? payload.linkedVoucherId : "",
     linkedVoucherNumber: typeof payload.linkedVoucherNumber === "string" ? payload.linkedVoucherNumber : "",

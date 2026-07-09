@@ -1101,6 +1101,7 @@ export type LabourWageSettlementCreateInput = {
   fromDate: string;
   toDate: string;
   settlementDate: string;
+  clientRequestId?: string;
   settlementMode?: "individual" | "group";
   labourerId?: string | null;
   foremanId?: string | null;
@@ -1285,9 +1286,12 @@ async function apiRequest<T>(path: string, options: RequestInit = {}, token?: st
   } catch (error) {
     if (controller.signal.aborted) {
       const isMigrationImport = requestOptions.debugLabel === "migration-import-import";
+      const isSettlementCreate = requestOptions.debugLabel === "labour-wage-settlement-create";
       throw new Error(isMigrationImport
         ? "Import is still running. Attendance is processing in the background."
-        : "Request is taking longer than expected. Please try again.");
+        : isSettlementCreate
+          ? "Settlement status is unknown. Please check Settlements before trying again."
+          : "Request is taking longer than expected. Please try again.");
     }
     throw error;
   } finally {

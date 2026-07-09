@@ -87,6 +87,23 @@ test("labour wage settlements repair missing accounting transactions through the
   assert.ok(libSource.includes('return "posted" as const;'));
 });
 
+test("labour wage settlement create requests reuse a client request id and narrow linked record updates", () => {
+  const source = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
+  const libSource = readFileSync(new URL("../src/lib/labour-wage-settlements.ts", import.meta.url), "utf8");
+  const webSource = readFileSync(new URL("../../web/src/pages/workspace/LabourWageSettlements.tsx", import.meta.url), "utf8");
+  const apiSource = readFileSync(new URL("../../web/src/lib/api.ts", import.meta.url), "utf8");
+  assert.ok(source.includes("clientRequestId: z.string().uuid().optional()"));
+  assert.ok(source.includes("findSettlementByClientRequestId"));
+  assert.ok(source.includes("pg_advisory_xact_lock"));
+  assert.ok(source.includes("inArray(operationalRecords.clientRecordId, includedEarningIds)"));
+  assert.ok(source.includes("inArray(operationalRecords.clientRecordId, includedAttendanceIds)"));
+  assert.ok(source.includes("labour wage settlement create request completed"));
+  assert.ok(libSource.includes("clientRequestId?: string | null;"));
+  assert.ok(webSource.includes("pendingRequestId"));
+  assert.ok(webSource.includes("Refresh settlements"));
+  assert.ok(apiSource.includes("Settlement status is unknown. Please check Settlements before trying again."));
+});
+
 test("non-cash labour settlement stays out of the positive farm owes partner formula", () => {
   const apiSource = readFileSync(new URL("../src/routes/accounting-reconciliation.ts", import.meta.url), "utf8");
   const webPartnerAccounting = readFileSync(new URL("../../web/src/lib/partnerAccounting.ts", import.meta.url), "utf8");

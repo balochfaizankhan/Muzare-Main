@@ -52,6 +52,8 @@ export function LabourWageSettlements() {
   }>({ status: "idle", data: null, error: "" });
   const [historyLoading, setHistoryLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
+  const [settlementStatusUnknown, setSettlementStatusUnknown] = useState(false);
   const [savingSettlementId, setSavingSettlementId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -229,6 +231,11 @@ export function LabourWageSettlements() {
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams, settlements]);
 
+  useEffect(() => {
+    setPendingRequestId(null);
+    setSettlementStatusUnknown(false);
+  }, [activeFarmId, activeSeasonId, fromDate, toDate, settlementDate, settlementMode, labourerId, foremanId, groupId, accountId, paidAmount, manualAdjustment, manualAdjustmentNote, notes]);
+
   const previewSettlement = async () => {
     if (!token || !workspaceId || !activeFarmId || !activeSeasonId) {
       setError(t("farmsPage.noActiveSeason"));
@@ -241,6 +248,7 @@ export function LabourWageSettlements() {
     setPreview({ status: "loading", data: null });
     setError("");
     setSuccess("");
+    setSettlementStatusUnknown(false);
     try {
       const response = await previewLabourWageSettlement(token, workspaceId, {
         farmId: activeFarmId,
@@ -303,6 +311,9 @@ export function LabourWageSettlements() {
     setSubmitting(true);
     setError("");
     setSuccess("");
+    setSettlementStatusUnknown(false);
+    const clientRequestId = pendingRequestId ?? crypto.randomUUID();
+    if (!pendingRequestId) setPendingRequestId(clientRequestId);
     try {
       const response = await createLabourWageSettlement(token, workspaceId, {
         farmId: activeFarmId,
@@ -310,6 +321,7 @@ export function LabourWageSettlements() {
         fromDate,
         toDate,
         settlementDate,
+        clientRequestId,
         settlementMode,
         labourerId: settlementMode === "individual" ? labourerId || undefined : undefined,
         foremanId: settlementMode === "group" ? foremanId || undefined : undefined,
@@ -384,11 +396,18 @@ export function LabourWageSettlements() {
       setManualAdjustment("0");
       setManualAdjustmentNote("");
       setPaidAmount("0");
+      setPendingRequestId(null);
       setSuccess(`Settlement ${response.settlement.settlementNumber} posted. Accounting reference: ${response.settlement.settlementNumber}.`);
       window.dispatchEvent(new Event("muzare-local-data-change"));
       await syncFromServer();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to create the labour wage settlement.");
+      const message = caught instanceof Error ? caught.message : "Unable to create the labour wage settlement.";
+      const isUnknownStatus = message.includes("Settlement status is unknown");
+      setSettlementStatusUnknown(isUnknownStatus);
+      setError(message);
+      if (isUnknownStatus) {
+        void syncFromServer();
+      }
     } finally {
       setSubmitting(false);
     }
@@ -855,6 +874,13 @@ export function LabourWageSettlements() {
             </div>
             {onlineRequired ? <p className="worker-action-warning">Wage settlement requires online connection.</p> : null}
             {error ? <p className="form-error">{error}</p> : null}
+            {settlementStatusUnknown ? (
+              <div className="module-inline-actions">
+                <button type="button" className="secondary-action" onClick={() => void syncFromServer()} disabled={historyLoading}>
+                  {historyLoading ? "Checking settlements..." : "Refresh settlements"}
+                </button>
+              </div>
+            ) : null}
             {success ? <p className="context-message">{success}</p> : null}
             <div className="wage-settlement-actions">
               <button type="button" className="secondary-action" onClick={() => void previewSettlement()} disabled={!token || !workspaceId || !activeFarmId || !activeSeasonId || preview.status === "loading"}>
