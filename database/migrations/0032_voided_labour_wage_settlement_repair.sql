@@ -120,6 +120,7 @@ missing_reversals AS (
     settlement.farm_id,
     settlement.season_id,
     settlement.payload,
+    original.reference_id AS settlement_reference_id,
     original.account_id,
     original.type,
     original.amount,
@@ -127,13 +128,13 @@ missing_reversals AS (
     original.created_by
   FROM voided_settlements settlement
   JOIN account_transactions original
-    ON original.reference_id = settlement.client_record_id
+    ON original.reference_id::text = settlement.client_record_id::text
    AND original.source = 'settlement'
    AND original.source_type = 'labour_wage_settlement'
   WHERE NOT EXISTS (
     SELECT 1
     FROM account_transactions reversal
-    WHERE reversal.reference_id = settlement.client_record_id
+    WHERE reversal.reference_id::text = settlement.client_record_id::text
       AND reversal.source = 'settlement'
       AND reversal.source_type = 'labour_wage_settlement'
       AND coalesce(reversal.remarks, '') LIKE 'Reversal of Labour Wage Settlement%'
@@ -157,7 +158,7 @@ SELECT
   missing_reversals.season_id,
   missing_reversals.account_id,
   'settlement',
-  missing_reversals.settlement_id,
+  missing_reversals.settlement_reference_id,
   CASE WHEN missing_reversals.type = 'credit' THEN 'debit' ELSE 'credit' END,
   missing_reversals.amount,
   missing_reversals.transaction_date,
