@@ -313,7 +313,6 @@ function WorkforceModule({
         : attendanceEarnings;
   const advanceAmount = selectedLabourer ? advances.filter((entry) => entry.labourerId === selectedLabourer.id).reduce((sum, entry) => sum + entry.amount, 0) : 0;
   const paidAmount = selectedLabourer ? payments.filter((entry) => entry.labourerId === selectedLabourer.id).reduce((sum, entry) => sum + entry.amount, 0) : 0;
-  const netBalance = totalEarnings - advanceAmount - paidAmount;
   const selectedLabourerPeriod = selectedLabourer ? getWorkerWorkingPeriod(selectedLabourer) : null;
   const selectedLabourerProfileStatus = selectedLabourer
     ? {
@@ -619,11 +618,7 @@ function WorkforceModule({
                 <div className="labour-profile-balance-grid">
                   <article className="labour-profile-balance-card">
                     <span>Estimated Payable</span>
-                    <strong className="positive">{money(selectedLabourLedgerSummary?.estimatedPayable ?? Math.max(netBalance, 0))}</strong>
-                  </article>
-                  <article className="labour-profile-balance-card">
-                    <span>Net Balance</span>
-                    <strong className={netBalance < 0 ? "negative" : "positive"}>{money(netBalance)}</strong>
+                    <strong className="positive">{money(selectedLabourLedgerSummary?.estimatedPayable ?? 0)}</strong>
                   </article>
                 </div>
               </section>
@@ -666,8 +661,7 @@ function WorkforceModule({
                   <div><dt>Advances Paid</dt><dd className={advanceAmount > 0 ? "negative" : ""}>{money(selectedLabourLedgerSummary?.advancesPaid ?? advanceAmount)}</dd></div>
                   <div><dt>Payments</dt><dd className={paidAmount > 0 ? "negative" : ""}>{money(paidAmount)}</dd></div>
                   <div><dt>Carry forward advance</dt><dd className={(selectedLabourLedgerSummary?.carryForwardAdvance ?? 0) > 0 ? "negative" : ""}>{money(selectedLabourLedgerSummary?.carryForwardAdvance ?? 0)}</dd></div>
-                  <div><dt>Estimated payable</dt><dd className="positive">{money(selectedLabourLedgerSummary?.estimatedPayable ?? Math.max(netBalance, 0))}</dd></div>
-                  <div><dt>{t("workforcePage.netBalanceLabel")}</dt><dd className={netBalance < 0 ? "negative" : "positive"}>{money(netBalance)}</dd></div>
+                  <div><dt>Estimated payable</dt><dd className="positive">{money(selectedLabourLedgerSummary?.estimatedPayable ?? 0)}</dd></div>
                 </dl>
               </section>
               {showEarningsBreakdown && (

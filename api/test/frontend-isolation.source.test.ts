@@ -549,6 +549,16 @@ test("labour lifecycle UI preserves history and hides inactive labour from daily
   assert.match(modulePage, /errors\.syncPendingBeforeDeactivate/);
 });
 
+test("labour profile shows only the final payable balance and avoids a conflicting net balance label", async () => {
+  const modulePage = await source("web/src/pages/ModulePage.tsx");
+  const labourEarnings = await source("web/src/lib/labourEarnings.ts");
+  assert.match(modulePage, /selectedLabourLedgerSummary\?\.estimatedPayable \?\? 0/);
+  assert.match(modulePage, /<span>Estimated Payable<\/span>/);
+  assert.doesNotMatch(modulePage, /labour-profile-balance-card[\s\S]*<span>Net Balance<\/span>/);
+  assert.match(labourEarnings, /const totalEarned = attendanceSummary\.totalWage \+ totalPendingEarnings;/);
+  assert.match(labourEarnings, /const estimatedPayable = Math\.max\(totalEarned - advancesPaid, 0\);/);
+});
+
 test("accounts drill-down exposes live ledger totals and source links", async () => {
   const modulePage = await source("web/src/pages/ModulePage.tsx");
   const accounting = await source("web/src/lib/accounting.ts");
