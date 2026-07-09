@@ -3,7 +3,7 @@ import { Search, Printer, Download, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
-import { createLabourWageSettlement, deleteLabourWageSettlement, fetchAttendanceReport, fetchLabourWageSettlement, fetchLabourWageSettlementPaymentAccounts, fetchLabourWageSettlements, previewLabourWageSettlement, repairLabourWageSettlementAccounting, updateLabourWageSettlement, voidLabourWageSettlement, type AttendanceReportData, type LabourWageSettlementDetail, type LabourWageSettlementPaymentAccount, type LabourWageSettlementPreview } from "../../lib/api";
+import { createLabourWageSettlement, deleteLabourWageSettlement, fetchAttendanceReport, fetchLabourWageSettlement, fetchLabourWageSettlementCreateStatus, fetchLabourWageSettlementPaymentAccounts, fetchLabourWageSettlements, previewLabourWageSettlement, repairLabourWageSettlementAccounting, updateLabourWageSettlement, voidLabourWageSettlement, type AttendanceReportData, type LabourWageSettlementDetail, type LabourWageSettlementPaymentAccount, type LabourWageSettlementPreview, type LabourWageSettlementRecord } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 import { getActiveFarmId, getActiveSeasonId, offlineDb, workspaceRecords, type Account, type LabourGroup, type LabourWageSettlement, type Labourer } from "../../lib/offline-db";
 import { canCreate } from "../../lib/permissions";
@@ -54,6 +54,8 @@ export function LabourWageSettlements() {
   const [submitting, setSubmitting] = useState(false);
   const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
   const [settlementStatusUnknown, setSettlementStatusUnknown] = useState(false);
+  const [statusCheckInFlight, setStatusCheckInFlight] = useState(false);
+  const [statusCheckNotice, setStatusCheckNotice] = useState("");
   const [savingSettlementId, setSavingSettlementId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -234,7 +236,138 @@ export function LabourWageSettlements() {
   useEffect(() => {
     setPendingRequestId(null);
     setSettlementStatusUnknown(false);
+    setStatusCheckInFlight(false);
+    setStatusCheckNotice("");
   }, [activeFarmId, activeSeasonId, fromDate, toDate, settlementDate, settlementMode, labourerId, foremanId, groupId, accountId, paidAmount, manualAdjustment, manualAdjustmentNote, notes]);
+
+  const persistSettlementRecord = useCallback(async (settlement: LabourWageSettlementRecord) => {
+    if (!activeFarmId || !activeSeasonId) return;
+    await offlineDb.labourWageSettlements.put({
+      id: settlement.id,
+      workspaceId,
+      farmId: activeFarmId,
+      seasonId: activeSeasonId,
+      settlementNumber: settlement.settlementNumber,
+      linkedVoucherId: settlement.linkedVoucherId || "",
+      linkedVoucherNumber: settlement.linkedVoucherNumber || settlement.settlementNumber,
+      linkedAccountId: settlement.linkedAccountId,
+      settlementMode: settlement.settlementMode,
+      foremanId: settlement.foremanId ?? null,
+      groupId: settlement.groupId ?? null,
+      groupName: settlement.groupName ?? null,
+      includedLabourIds: settlement.includedLabourIds ?? [],
+      includedInactiveLabourIds: settlement.includedInactiveLabourIds ?? [],
+      includedActiveLabourIds: settlement.includedActiveLabourIds ?? [],
+      includedLabourRows: settlement.includedLabourRows ?? [],
+      excludedLabourers: settlement.excludedLabourers ?? [],
+      attendanceTotals: settlement.attendanceTotals ?? undefined,
+      fromDate: settlement.fromDate,
+      toDate: settlement.toDate,
+      settlementDate: settlement.settlementDate,
+      attendanceWages: settlement.attendanceWages,
+      labourWorkWages: settlement.labourWorkWages,
+      pendingLabourEarnings: settlement.pendingLabourEarnings,
+      grossWages: settlement.grossWages ?? settlement.totalEarned,
+      totalEarned: settlement.totalEarned,
+      availableAdvanceBalanceBeforeSettlement: settlement.availableAdvanceBalanceBeforeSettlement,
+      advancesPaid: settlement.advancesPaid,
+      advanceAdjustedNow: settlement.advanceAdjustedNow ?? settlement.settledAdvanceAmount,
+      settledAdvanceAmount: settlement.settledAdvanceAmount,
+      expenseAmount: settlement.expenseAmount,
+      remainingAdvanceCarryForward: settlement.remainingAdvanceCarryForward ?? settlement.carryForwardAdvance,
+      carryForwardAdvance: settlement.carryForwardAdvance,
+      manualAdjustment: settlement.manualAdjustment,
+      manualAdjustmentNote: settlement.manualAdjustmentNote ?? null,
+      netPayableBeforePayment: settlement.netPayableBeforePayment,
+      paidAmount: settlement.paidAmount ?? settlement.payableBalance,
+      payableBalance: settlement.payableBalance,
+      balanceAfterPayment: settlement.balanceAfterPayment ?? settlement.payableBalance,
+      paymentAccountId: settlement.paymentAccountId ?? settlement.linkedAccountId,
+      sourceAttendanceIds: settlement.sourceAttendanceIds ?? [],
+      sourceLabourWorkIds: settlement.sourceLabourWorkIds ?? [],
+      advanceAdjustmentAllocations: settlement.advanceAdjustmentAllocations ?? [],
+      settlementScopeSnapshot: settlement.settlementScopeSnapshot ?? undefined,
+      notes: settlement.notes,
+      status: settlement.status,
+      accountingStatus: settlement.accountingStatus,
+      accountingMessage: settlement.accountingMessage ?? null,
+      createdBy: settlement.createdBy,
+      createdAt: settlement.createdAt,
+      updatedAt: settlement.updatedAt,
+      deletedAt: settlement.deletedAt ?? null,
+      deletedBy: settlement.deletedBy ?? null,
+      voidedAt: settlement.voidedAt ?? null,
+      voidedBy: settlement.voidedBy ?? null,
+      voidReason: settlement.voidReason ?? null,
+      pendingSync: false,
+    });
+  }, [activeFarmId, activeSeasonId, workspaceId]);
+
+  const scrollToSettlements = useCallback(() => {
+    document.getElementById("labour-settlement-register")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
+  const resolveUnknownSettlementStatus = useCallback(async (clientRequestId: string) => {
+    if (!token || !workspaceId || !activeFarmId || !activeSeasonId) {
+      setSettlementStatusUnknown(true);
+      setStatusCheckNotice("");
+      setError("Settlement status is still unknown. Please check Settlements before trying again.");
+      return;
+    }
+    setStatusCheckInFlight(true);
+    setSettlementStatusUnknown(false);
+    setStatusCheckNotice("Checking settlement status...");
+    setError("");
+    try {
+      const delaysMs = [0, 1500, 3000];
+      for (let attempt = 0; attempt < delaysMs.length; attempt += 1) {
+        const waitMs = delaysMs[attempt] ?? 0;
+        if (waitMs > 0) {
+          await new Promise((resolve) => window.setTimeout(resolve, waitMs));
+        }
+        const status = await fetchLabourWageSettlementCreateStatus(token, workspaceId, {
+          farmId: activeFarmId,
+          seasonId: activeSeasonId,
+          clientRequestId,
+        });
+        if (status.created && status.settlement) {
+          await persistSettlementRecord(status.settlement);
+          setPreview({ status: "idle", data: null });
+          setNotes("");
+          setManualAdjustment("0");
+          setManualAdjustmentNote("");
+          setPaidAmount("0");
+          setPendingRequestId(null);
+          setSettlementStatusUnknown(false);
+          setStatusCheckNotice("");
+          setSuccess(`Settlement ${status.settlement.settlementNumber} posted. Accounting reference: ${status.settlement.settlementNumber}.`);
+          window.dispatchEvent(new Event("muzare-local-data-change"));
+          await syncFromServer();
+          return;
+        }
+        if (status.processing) {
+          setStatusCheckNotice("Taking longer than expected... Checking settlement status...");
+          continue;
+        }
+        if (status.notFound && status.safeToRetry) {
+          setPendingRequestId(null);
+          setSettlementStatusUnknown(false);
+          setStatusCheckNotice("");
+          setError("Settlement was not created. You can safely try again.");
+          return;
+        }
+      }
+      setSettlementStatusUnknown(true);
+      setStatusCheckNotice("");
+      setError("Settlement status is still unknown. Please check Settlements before trying again.");
+    } catch (caught) {
+      setSettlementStatusUnknown(true);
+      setStatusCheckNotice("");
+      setError(caught instanceof Error ? caught.message : "Settlement status is still unknown. Please check Settlements before trying again.");
+    } finally {
+      setStatusCheckInFlight(false);
+    }
+  }, [activeFarmId, activeSeasonId, persistSettlementRecord, syncFromServer, token, workspaceId]);
 
   const previewSettlement = async () => {
     if (!token || !workspaceId || !activeFarmId || !activeSeasonId) {
@@ -312,6 +445,7 @@ export function LabourWageSettlements() {
     setError("");
     setSuccess("");
     setSettlementStatusUnknown(false);
+    setStatusCheckNotice("");
     const clientRequestId = pendingRequestId ?? crypto.randomUUID();
     if (!pendingRequestId) setPendingRequestId(clientRequestId);
     try {
@@ -332,65 +466,7 @@ export function LabourWageSettlements() {
         manualAdjustmentNote: Number(manualAdjustment || 0) !== 0 ? manualAdjustmentNote.trim() : undefined,
         notes: notes.trim() || undefined,
       });
-      await offlineDb.labourWageSettlements.put({
-        id: response.settlement.id,
-        workspaceId,
-        farmId: activeFarmId,
-        seasonId: activeSeasonId,
-        settlementNumber: response.settlement.settlementNumber,
-        linkedVoucherId: response.settlement.linkedVoucherId || "",
-        linkedVoucherNumber: response.settlement.linkedVoucherNumber || response.settlement.settlementNumber,
-        linkedAccountId: response.settlement.linkedAccountId,
-        settlementMode: response.settlement.settlementMode,
-        foremanId: response.settlement.foremanId ?? null,
-        groupId: response.settlement.groupId ?? null,
-        groupName: response.settlement.groupName ?? null,
-        includedLabourIds: response.settlement.includedLabourIds ?? [],
-        includedInactiveLabourIds: response.settlement.includedInactiveLabourIds ?? [],
-        includedActiveLabourIds: response.settlement.includedActiveLabourIds ?? [],
-        includedLabourRows: response.settlement.includedLabourRows ?? [],
-        excludedLabourers: response.settlement.excludedLabourers ?? [],
-        attendanceTotals: response.settlement.attendanceTotals ?? undefined,
-        fromDate: response.settlement.fromDate,
-        toDate: response.settlement.toDate,
-        settlementDate: response.settlement.settlementDate,
-        attendanceWages: response.settlement.attendanceWages,
-        labourWorkWages: response.settlement.labourWorkWages,
-        pendingLabourEarnings: response.settlement.pendingLabourEarnings,
-        grossWages: response.settlement.grossWages ?? response.settlement.totalEarned,
-        totalEarned: response.settlement.totalEarned,
-        availableAdvanceBalanceBeforeSettlement: response.settlement.availableAdvanceBalanceBeforeSettlement,
-        advancesPaid: response.settlement.advancesPaid,
-        advanceAdjustedNow: response.settlement.advanceAdjustedNow ?? response.settlement.settledAdvanceAmount,
-        settledAdvanceAmount: response.settlement.settledAdvanceAmount,
-        expenseAmount: response.settlement.expenseAmount,
-        remainingAdvanceCarryForward: response.settlement.remainingAdvanceCarryForward ?? response.settlement.carryForwardAdvance,
-        carryForwardAdvance: response.settlement.carryForwardAdvance,
-        manualAdjustment: response.settlement.manualAdjustment,
-        manualAdjustmentNote: response.settlement.manualAdjustmentNote ?? null,
-        netPayableBeforePayment: response.settlement.netPayableBeforePayment,
-        paidAmount: response.settlement.paidAmount ?? response.settlement.payableBalance,
-        payableBalance: response.settlement.payableBalance,
-        balanceAfterPayment: response.settlement.balanceAfterPayment ?? response.settlement.payableBalance,
-        paymentAccountId: response.settlement.paymentAccountId ?? response.settlement.linkedAccountId,
-        sourceAttendanceIds: response.settlement.sourceAttendanceIds ?? [],
-        sourceLabourWorkIds: response.settlement.sourceLabourWorkIds ?? [],
-        advanceAdjustmentAllocations: response.settlement.advanceAdjustmentAllocations ?? [],
-        settlementScopeSnapshot: response.settlement.settlementScopeSnapshot ?? undefined,
-        notes: response.settlement.notes,
-        status: response.settlement.status,
-        accountingStatus: response.settlement.accountingStatus,
-        accountingMessage: response.settlement.accountingMessage ?? null,
-        createdBy: response.settlement.createdBy,
-        createdAt: response.settlement.createdAt,
-        updatedAt: response.settlement.updatedAt,
-        deletedAt: response.settlement.deletedAt ?? null,
-        deletedBy: response.settlement.deletedBy ?? null,
-        voidedAt: response.settlement.voidedAt ?? null,
-        voidedBy: response.settlement.voidedBy ?? null,
-        voidReason: response.settlement.voidReason ?? null,
-        pendingSync: false,
-      });
+      await persistSettlementRecord(response.settlement);
       setPreview({ status: "idle", data: null });
       setNotes("");
       setManualAdjustment("0");
@@ -403,10 +479,13 @@ export function LabourWageSettlements() {
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Unable to create the labour wage settlement.";
       const isUnknownStatus = message.includes("Settlement status is unknown");
-      setSettlementStatusUnknown(isUnknownStatus);
-      setError(message);
       if (isUnknownStatus) {
-        void syncFromServer();
+        setSubmitting(false);
+        setStatusCheckNotice("Taking longer than expected... Checking settlement status...");
+        await resolveUnknownSettlementStatus(clientRequestId);
+      } else {
+        setSettlementStatusUnknown(false);
+        setError(message);
       }
     } finally {
       setSubmitting(false);
@@ -881,11 +960,20 @@ export function LabourWageSettlements() {
               </label>
             </div>
             {onlineRequired ? <p className="worker-action-warning">Wage settlement requires online connection.</p> : null}
+            {statusCheckNotice ? <p className="context-message">{statusCheckNotice}</p> : null}
             {error ? <p className="form-error">{error}</p> : null}
             {settlementStatusUnknown ? (
               <div className="module-inline-actions">
-                <button type="button" className="secondary-action" onClick={() => void syncFromServer()} disabled={historyLoading}>
-                  {historyLoading ? "Checking settlements..." : "Refresh settlements"}
+                <button
+                  type="button"
+                  className="secondary-action"
+                  onClick={() => pendingRequestId ? void resolveUnknownSettlementStatus(pendingRequestId) : undefined}
+                  disabled={statusCheckInFlight || !pendingRequestId}
+                >
+                  {statusCheckInFlight ? "Checking settlement..." : "Check Again"}
+                </button>
+                <button type="button" className="secondary-action" onClick={scrollToSettlements} disabled={statusCheckInFlight}>
+                  View Settlements
                 </button>
               </div>
             ) : null}
@@ -894,8 +982,8 @@ export function LabourWageSettlements() {
               <button type="button" className="secondary-action" onClick={() => void previewSettlement()} disabled={!token || !workspaceId || !activeFarmId || !activeSeasonId || preview.status === "loading"}>
                 {preview.status === "loading" ? "Previewing..." : "Preview Settlement"}
               </button>
-              <button type="submit" disabled={!canPost || submitting || preview.status !== "ready" || !summaryConsistent || Boolean(summary?.unresolvedRows.length) || Boolean(summary?.overlappingSettlements.length) || onlineRequired}>
-                {submitting ? "Posting settlement..." : "Create Settlement"}
+              <button type="submit" disabled={!canPost || submitting || statusCheckInFlight || settlementStatusUnknown || preview.status !== "ready" || !summaryConsistent || Boolean(summary?.unresolvedRows.length) || Boolean(summary?.overlappingSettlements.length) || onlineRequired}>
+                {submitting ? "Posting settlement..." : statusCheckInFlight ? "Checking settlement status..." : "Create Settlement"}
               </button>
             </div>
           </form>
@@ -1097,7 +1185,7 @@ export function LabourWageSettlements() {
           </>}
         </section>
 
-        <section className="record-panel labour-settlement-register-panel">
+        <section id="labour-settlement-register" className="record-panel labour-settlement-register-panel">
           <div className="advances-heading labour-settlement-register-header">
             <div>
               <h2>Labour settlement register</h2>

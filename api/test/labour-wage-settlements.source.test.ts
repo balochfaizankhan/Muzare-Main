@@ -135,7 +135,7 @@ test("labour wage settlement create requests reuse a client request id and narro
   assert.ok(source.includes("labour wage settlement create request completed"));
   assert.ok(libSource.includes("clientRequestId?: string | null;"));
   assert.ok(webSource.includes("pendingRequestId"));
-  assert.ok(webSource.includes("Refresh settlements"));
+  assert.ok(webSource.includes("resolveUnknownSettlementStatus"));
   assert.ok(apiSource.includes("Settlement status is unknown. Please check Settlements before trying again."));
 });
 
@@ -242,10 +242,31 @@ test("group settlement posting preserves pooled advance totals without individua
   assert.ok(source.includes('advanceAdjustmentAllocations: settlementMode === "group" ? [] : (preview.advanceAdjustmentAllocations ?? [])'));
 });
 
+test("settlement create status endpoint reuses the client request id and processing lock", () => {
+  const source = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
+  assert.ok(source.includes('app.get("/v1/workspace/:workspaceId/labour-wage-settlements/status"'));
+  assert.ok(source.includes("settlementStatusQuerySchema"));
+  assert.ok(source.includes("isSettlementRequestProcessing"));
+  assert.ok(source.includes("pg_try_advisory_lock"));
+  assert.ok(source.includes("safeToRetry: !processing"));
+});
+
 test("individual labour summaries do not subtract group settlement advance adjustments", () => {
   const source = readFileSync(new URL("../../web/src/lib/labourEarnings.ts", import.meta.url), "utf8");
   assert.ok(source.includes('settlement.settlementMode !== "group"'));
   assert.ok(source.includes("settlement.includedLabourIds?.includes(args.labourerId)"));
+});
+
+test("frontend rechecks settlement creation status after timeout before allowing retry", () => {
+  const apiSource = readFileSync(new URL("../../web/src/lib/api.ts", import.meta.url), "utf8");
+  const pageSource = readFileSync(new URL("../../web/src/pages/workspace/LabourWageSettlements.tsx", import.meta.url), "utf8");
+  assert.ok(apiSource.includes("fetchLabourWageSettlementCreateStatus"));
+  assert.ok(pageSource.includes("resolveUnknownSettlementStatus"));
+  assert.ok(pageSource.includes("Taking longer than expected... Checking settlement status..."));
+  assert.ok(pageSource.includes("Settlement was not created. You can safely try again."));
+  assert.ok(pageSource.includes("Settlement status is still unknown. Please check Settlements before trying again."));
+  assert.ok(pageSource.includes("View Settlements"));
+  assert.ok(pageSource.includes("Check Again"));
 });
 
 test("labour wage settlements can be deleted safely only through the settlement register flow", () => {

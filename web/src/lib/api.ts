@@ -1125,6 +1125,14 @@ export type LabourWageSettlementCreateInput = {
   manualAdjustmentNote?: string | null;
   notes?: string;
 };
+export type LabourWageSettlementCreateStatus = {
+  created: boolean;
+  processing: boolean;
+  notFound: boolean;
+  failed: boolean;
+  safeToRetry: boolean;
+  settlement: LabourWageSettlementRecord | null;
+};
 export type ExpenseSearchRecord = {
   id: string; workspaceId: string; farmId: string; seasonId: string; voucherNumber: string; date: string;
   originalVoucherNumber?: string;
@@ -1696,6 +1704,23 @@ export const createLabourWageSettlement = (
   token,
   { timeoutMs: 60_000, debugLabel: "labour-wage-settlement-create" },
 );
+export const fetchLabourWageSettlementCreateStatus = (
+  token: string,
+  workspaceId: string,
+  input: { farmId: string; seasonId: string; clientRequestId: string },
+) => {
+  const query = new URLSearchParams({
+    farmId: input.farmId,
+    seasonId: input.seasonId,
+    clientRequestId: input.clientRequestId,
+  });
+  return apiRequest<LabourWageSettlementCreateStatus>(
+    `/v1/workspace/${workspaceId}/labour-wage-settlements/status?${query.toString()}`,
+    {},
+    token,
+    { timeoutMs: 30_000, debugLabel: "labour-wage-settlement-status" },
+  );
+};
 export const updateLabourWageSettlement = (
   token: string,
   workspaceId: string,

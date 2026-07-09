@@ -58,6 +58,11 @@ const settlementParamsSchema = z.object({
   workspaceId: z.string().uuid(),
   settlementId: z.string().uuid(),
 });
+const settlementStatusQuerySchema = z.object({
+  farmId: z.string().uuid(),
+  seasonId: z.string().uuid(),
+  clientRequestId: z.string().uuid(),
+});
 const updateSchema = z.object({
   fromDate: z.string().date().optional(),
   toDate: z.string().date().optional(),
@@ -118,6 +123,22 @@ async function findSettlementByClientRequestId(
   return settlements[0] ?? null;
 }
 
+async function isSettlementRequestProcessing(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  workspaceId: string,
+  farmId: string,
+  clientRequestId: string,
+) {
+  const requestScopeKey = `${workspaceId}:${farmId}:labour-wage-settlement:${clientRequestId}`;
+  const lockResult = await tx.execute(sql`SELECT pg_try_advisory_lock(hashtext(${requestScopeKey}), 1) AS acquired`);
+  const acquired = (lockResult.rows[0] as Record<string, unknown> | undefined)?.acquired === true;
+  if (acquired) {
+    await tx.execute(sql`SELECT pg_advisory_unlock(hashtext(${requestScopeKey}), 1)`);
+    return false;
+  }
+  return true;
+}
+
 function settlementResponseFromRow(
   row: {
     clientRecordId: string;
@@ -167,6 +188,65 @@ function effectiveAdvanceAdjustmentForPosting(preview: {
 }
 
 export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<void> {
+  app.get("/v1/workspace/:workspaceId/labour-wage-settlements/status", { preHandler: requireUser }, async (request, reply) => {
+    if (!request.appUser || !request.sessionId) return reply.code(401).send({ message: "A valid session is required." });
+    const params = paramsSchema.safeParse(request.params);
+    const query = settlementStatusQuerySchema.safeParse(request.query);
+    if (!params.success || !query.success) {
+      return reply.code(400).send({ message: "A valid labour settlement status request is required." });
+    }
+    const { workspaceId } = params.data;
+    const { farmId, seasonId, clientRequestId } = query.data;
+    if (request.appUser.workspaceId !== workspaceId) return reply.code(403).send({ message: "Select this workspace before checking labour settlement status." });
+    if (!hasModulePermission(request.appUser, workspaceId, "wages", "view")) return reply.code(403).send({ message: "Workspace wage settlement view permission is required." });
+    if (!hasFarmAccess(request.appUser, workspaceId, farmId)) return reply.code(403).send({ message: "You do not have access to this farm." });
+    if (!(await validateContext(request.sessionId, workspaceId, farmId, seasonId))) {
+      return reply.code(403).send({ message: "Select this farm and season before checking labour settlement status." });
+    }
+    const ownershipError = await validateTenantReferences(workspaceId, { farmId, seasonId });
+    if (ownershipError) return reply.code(403).send({ message: ownershipError });
+
+    const status = await db.transaction(async (tx) => {
+      const existingSettlement = await findSettlementByClientRequestId(tx, workspaceId, farmId, seasonId, clientRequestId);
+      if (existingSettlement) {
+        return {
+          created: true,
+          processing: false,
+          notFound: false,
+          failed: false,
+          safeToRetry: false,
+          settlement: {
+            ...normalizeSettlementPayload(existingSettlement.payload as Record<string, unknown>),
+            id: existingSettlement.clientRecordId,
+            accountingStatus: "posted" as const,
+            accountingMessage: null,
+          },
+        };
+      }
+      const processing = await isSettlementRequestProcessing(tx, workspaceId, farmId, clientRequestId);
+      return {
+        created: false,
+        processing,
+        notFound: !processing,
+        failed: false,
+        safeToRetry: !processing,
+        settlement: null,
+      };
+    });
+
+    request.log.info({
+      workspaceId,
+      farmId,
+      seasonId,
+      clientRequestId,
+      created: status.created,
+      processing: status.processing,
+      safeToRetry: status.safeToRetry,
+    }, "labour wage settlement status checked");
+
+    return status;
+  });
+
   app.get("/v1/workspace/:workspaceId/labour-wage-settlements/payment-accounts", { preHandler: requireUser }, async (request, reply) => {
     if (!request.appUser || !request.sessionId) return reply.code(401).send({ message: "A valid session is required." });
     const params = paramsSchema.safeParse(request.params);
@@ -462,6 +542,12 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
     }
     try {
       const transactionStartedAt = Date.now();
+      request.log.info({
+        workspaceId,
+        farmId,
+        seasonId,
+        clientRequestId: clientRequestId ?? null,
+      }, "labour wage settlement transaction started");
       const result = await db.transaction(async (tx) => {
         if (clientRequestId) {
           const requestScopeKey = `${workspaceId}:${farmId}:labour-wage-settlement:${clientRequestId}`;
@@ -732,6 +818,13 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           seasonId,
           settlementId,
         }, "labour wage settlement accounting repair completed");
+        request.log.info({
+          workspaceId,
+          farmId,
+          seasonId,
+          settlementId,
+          settlementNumber,
+        }, "labour wage settlement transaction ready to commit");
         return {
           settlement: { ...settlementPayload, id: settlementId, accountingStatus: "posted" as const, accountingMessage: null },
         };
@@ -752,7 +845,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         seasonId,
         clientRequestId: clientRequestId ?? null,
         error,
-      }, "labour wage settlement create request failed");
+      }, "labour wage settlement create request rolled back");
       if (error instanceof Error) {
         return reply.code(400).send({ message: error.message });
       }
