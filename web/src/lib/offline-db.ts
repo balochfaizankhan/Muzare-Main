@@ -324,6 +324,8 @@ export type LabourEarning = LocalRecord & {
 
 export type LabourGroup = LocalRecord & {
   name: string;
+  phone?: string;
+  notes?: string;
   active?: boolean;
 };
 

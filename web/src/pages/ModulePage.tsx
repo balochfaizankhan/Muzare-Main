@@ -441,6 +441,7 @@ function WorkforceModule({
             {canManageLabour && <button type="button" onClick={() => setShowAddLabour(true)}>{t("workforcePage.addLabour")}</button>}
             {user?.workspaceId && hasModulePermission(user, "workforce", "view", user.workspaceId) && <button type="button" onClick={() => navigate("/workspace/labour-payments/overview")}>Labour Payments</button>}
             <button type="button" onClick={() => navigate("/workspace/workforce/reports")}>Reports</button>
+            {canManageLabour && <button type="button" onClick={() => navigate("/workspace/workforce/labour-groups")}>Labour Groups</button>}
             {canManageLabour && <button type="button" onClick={() => setShowAddGroup(true)}>{t("workforcePage.groups")}</button>}
           </div>
         </div>
@@ -819,7 +820,7 @@ function WorkforceModule({
       />}
       {actionLabourer && labourAction === "production" && <AddProductionPanel labourer={actionLabourer} onClose={closeLabourAction} onSave={saveProduction} />}
       {actionLabourer && labourAction === "payment" && <AddPaymentPanel labourer={actionLabourer} onClose={closeLabourAction} onSave={savePayment} />}
-      {showAddGroup && <AddGroupPanel onClose={() => setShowAddGroup(false)} onSave={async (record) => {
+      {showAddGroup && <AddGroupPanel groups={groups} onClose={() => setShowAddGroup(false)} onSave={async (record) => {
         await saveGroup(record);
         setShowAddGroup(false);
       }} />}
@@ -1047,7 +1048,13 @@ function AddLabourPanel({
     try {
       let nextGroupId = form.groupId;
       if (form.groupId === "__new_group__" && form.group.trim()) {
-        const record: LabourGroup = { ...makeLocalRecord(), name: form.group.trim(), active: true };
+        const groupName = form.group.trim();
+        const duplicateGroup = groups.some((group) => group.name.trim().toLowerCase() === groupName.toLowerCase());
+        if (duplicateGroup) {
+          setError("A labour group with this name already exists.");
+          return;
+        }
+        const record: LabourGroup = { ...makeLocalRecord(), name: groupName, active: true };
         await onCreateGroup(record);
         nextGroupId = record.id;
       }
@@ -1246,16 +1253,21 @@ function AdvanceEntryPanel({
   </ActionPanel>;
 }
 
-function AddGroupPanel({ onClose, onSave }: { onClose: () => void; onSave: (record: LabourGroup) => Promise<void> }) {
+function AddGroupPanel({ groups, onClose, onSave }: { groups: LabourGroup[]; onClose: () => void; onSave: (record: LabourGroup) => Promise<void> }) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!name.trim() || busy) return;
+    const trimmed = name.trim();
+    if (!trimmed || busy) return;
+    if (groups.some((group) => group.name.trim().toLowerCase() === trimmed.toLowerCase())) {
+      setError("A labour group with this name already exists.");
+      return;
+    }
     setBusy(true); setError("");
     try {
-      await onSave({ ...makeLocalRecord(), name: name.trim(), active: true });
+      await onSave({ ...makeLocalRecord(), name: trimmed, active: true });
       onClose();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to save group.");

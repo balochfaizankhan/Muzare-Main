@@ -165,6 +165,19 @@ export function LabourWageSettlements() {
   }, [syncFromServer]);
 
   useEffect(() => {
+    const presetGroupId = searchParams.get("groupId");
+    if (presetGroupId && !groupId) {
+      setSettlementMode("group");
+      setGroupId(presetGroupId);
+    }
+    const presetForemanId = searchParams.get("foremanId");
+    if (presetForemanId && !foremanId) {
+      setSettlementMode("group");
+      setForemanId(presetForemanId);
+    }
+  }, [foremanId, groupId, searchParams]);
+
+  useEffect(() => {
     if (!token || !workspaceId || !selectedSettlement?.id || !navigator.onLine) return;
     let cancelled = false;
     setSelectedSettlementLoading(true);

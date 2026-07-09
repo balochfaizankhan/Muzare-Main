@@ -39,6 +39,7 @@ const DirectLabourPaymentsPage = lazy(async () => ({ default: (await import("./p
 const WageRates = lazy(async () => ({ default: (await import("./pages/workspace/WageRates")).WageRates }));
 const WorkforceReportsHub = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).WorkforceReportsHub }));
 const WorkforceSectionLayout = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).WorkforceSectionLayout }));
+const LabourGroupsPage = lazy(async () => ({ default: (await import("./pages/workspace/LabourGroups")).LabourGroupsPage }));
 const Reports = lazy(async () => ({ default: (await import("./pages/workspace/Reports")).Reports }));
 const ActivityLog = lazy(async () => ({ default: (await import("./pages/workspace/ActivityLog")).ActivityLog }));
 const Sales = lazy(async () => ({ default: (await import("./pages/workspace/Sales")).Sales }));
@@ -144,6 +145,9 @@ export default function App() {
       <Route path="workforce" element={routeElement(<WorkforceSectionLayout />, "Loading workforce")}>
         <Route index element={<Navigate to="labour" replace />} />
         <Route path="labour" element={routeElement(<ModulePage module="workforce" />, "Loading labour")} />
+        <Route path="labour-groups" element={routeElement(<LabourGroupsPage />, "Loading labour groups")} />
+        <Route path="labour-groups/:groupId" element={routeElement(<LabourGroupsPage />, "Loading labour group")} />
+        <Route path="labour-groups/:groupId/members" element={routeElement(<LabourGroupsPage />, "Loading labour group members")} />
         <Route path="attendance" element={routeElement(<Attendance />, "Loading attendance")} />
         <Route path="reports" element={routeElement(<WorkforceReportsHub />, "Loading workforce reports")} />
         <Route path="labour-payments" element={<Navigate to="/workspace/labour-payments/overview" replace />} />

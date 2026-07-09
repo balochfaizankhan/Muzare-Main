@@ -949,6 +949,29 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       });
       if (saleLinkError) return reply.code(409).send({ message: saleLinkError });
     }
+    if (parsed.data.entity === "labourGroup" && typeof parsed.data.record.name === "string") {
+      const normalizedGroupName = cleanText(parsed.data.record.name).toLowerCase();
+      if (normalizedGroupName) {
+        const duplicateGroups = await db.select({ clientRecordId: operationalRecords.clientRecordId, payload: operationalRecords.payload }).from(operationalRecords).where(and(
+          eq(operationalRecords.workspaceId, parsed.data.workspaceId),
+          eq(operationalRecords.farmId, parsed.data.farmId!),
+          requestSeasonId ? eq(operationalRecords.seasonId, requestSeasonId) : isNull(operationalRecords.seasonId),
+          eq(operationalRecords.entityType, "labourGroup"),
+        ));
+        const conflict = duplicateGroups.find((record) => record.clientRecordId !== existing?.clientRecordId
+          && !isDeletedOperationalPayload(record.payload)
+          && cleanText(record.payload.name).toLowerCase() === normalizedGroupName);
+        if (conflict) {
+          return reply.code(409).send({
+            message: "A labour group with this name already exists.",
+            details: {
+              code: "labour_group_name_exists",
+              groupName: parsed.data.record.name,
+            },
+          });
+        }
+      }
+    }
     const clientUpdatedAt = new Date(parsed.data.record.updatedAt);
     if (existing && existing.clientUpdatedAt > clientUpdatedAt) {
       await db.insert(auditLogs).values({
