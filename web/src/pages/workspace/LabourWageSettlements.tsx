@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Search, Printer, Download, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
-import { createLabourWageSettlement, deleteLabourWageSettlement, fetchLabourWageSettlement, fetchLabourWageSettlementPaymentAccounts, fetchLabourWageSettlements, previewLabourWageSettlement, repairLabourWageSettlementAccounting, updateLabourWageSettlement, voidLabourWageSettlement, type LabourWageSettlementDetail, type LabourWageSettlementPaymentAccount, type LabourWageSettlementPreview } from "../../lib/api";
+import { createLabourWageSettlement, deleteLabourWageSettlement, fetchAttendanceReport, fetchLabourWageSettlement, fetchLabourWageSettlementPaymentAccounts, fetchLabourWageSettlements, previewLabourWageSettlement, repairLabourWageSettlementAccounting, updateLabourWageSettlement, voidLabourWageSettlement, type AttendanceReportData, type LabourWageSettlementDetail, type LabourWageSettlementPaymentAccount, type LabourWageSettlementPreview } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 import { getActiveFarmId, getActiveSeasonId, offlineDb, workspaceRecords, type Account, type LabourGroup, type LabourWageSettlement, type Labourer } from "../../lib/offline-db";
 import { canCreate } from "../../lib/permissions";
@@ -19,6 +19,7 @@ type PreviewState =
 
 export function LabourWageSettlements() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { token, user } = useAuth();
   const workspaceId = user?.workspaceId ?? "";
@@ -44,6 +45,11 @@ export function LabourWageSettlements() {
   const [manualAdjustmentNote, setManualAdjustmentNote] = useState("");
   const [notes, setNotes] = useState("");
   const [preview, setPreview] = useState<PreviewState>({ status: "idle", data: null });
+  const [attendanceComparison, setAttendanceComparison] = useState<{
+    status: "idle" | "loading" | "ready" | "error";
+    data: AttendanceReportData | null;
+    error: string;
+  }>({ status: "idle", data: null, error: "" });
   const [historyLoading, setHistoryLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [savingSettlementId, setSavingSettlementId] = useState<string | null>(null);
@@ -122,10 +128,16 @@ export function LabourWageSettlements() {
         settlementMode: settlement.settlementMode,
         foremanId: settlement.foremanId ?? null,
         groupId: settlement.groupId ?? null,
+        groupName: settlement.groupName ?? null,
         includedLabourIds: settlement.includedLabourIds ?? [],
+        includedInactiveLabourIds: settlement.includedInactiveLabourIds ?? [],
+        includedActiveLabourIds: settlement.includedActiveLabourIds ?? [],
+        excludedLabourers: settlement.excludedLabourers ?? [],
+        attendanceTotals: settlement.attendanceTotals ?? undefined,
         sourceAttendanceIds: settlement.sourceAttendanceIds ?? [],
         sourceLabourWorkIds: settlement.sourceLabourWorkIds ?? [],
         advanceAdjustmentAllocations: settlement.advanceAdjustmentAllocations ?? [],
+        settlementScopeSnapshot: settlement.settlementScopeSnapshot ?? undefined,
         notes: settlement.notes,
         status: settlement.status,
         accountingStatus: settlement.accountingStatus,
@@ -319,7 +331,12 @@ export function LabourWageSettlements() {
         settlementMode: response.settlement.settlementMode,
         foremanId: response.settlement.foremanId ?? null,
         groupId: response.settlement.groupId ?? null,
+        groupName: response.settlement.groupName ?? null,
         includedLabourIds: response.settlement.includedLabourIds ?? [],
+        includedInactiveLabourIds: response.settlement.includedInactiveLabourIds ?? [],
+        includedActiveLabourIds: response.settlement.includedActiveLabourIds ?? [],
+        excludedLabourers: response.settlement.excludedLabourers ?? [],
+        attendanceTotals: response.settlement.attendanceTotals ?? undefined,
         fromDate: response.settlement.fromDate,
         toDate: response.settlement.toDate,
         settlementDate: response.settlement.settlementDate,
@@ -345,6 +362,7 @@ export function LabourWageSettlements() {
         sourceAttendanceIds: response.settlement.sourceAttendanceIds ?? [],
         sourceLabourWorkIds: response.settlement.sourceLabourWorkIds ?? [],
         advanceAdjustmentAllocations: response.settlement.advanceAdjustmentAllocations ?? [],
+        settlementScopeSnapshot: response.settlement.settlementScopeSnapshot ?? undefined,
         notes: response.settlement.notes,
         status: response.settlement.status,
         accountingStatus: response.settlement.accountingStatus,
@@ -377,12 +395,51 @@ export function LabourWageSettlements() {
   const summary = preview.status === "ready" ? preview.data : null;
   const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
   const settlementPaymentAccountById = useMemo(() => new Map(paymentAccounts.map((account) => [account.id, account])), [paymentAccounts]);
+  const selectedGroupName = useMemo(() => {
+    if (!summary?.groupName) return labourGroups.find((group) => group.id === groupId || group.id === foremanId)?.name ?? "";
+    return summary.groupName;
+  }, [foremanId, groupId, labourGroups, summary?.groupName]);
+  const openMatchingAttendanceReport = useCallback(() => {
+    if (!summary) return;
+    const query = new URLSearchParams({
+      report: "attendance",
+      from: fromDate,
+      to: toDate,
+    });
+    if (selectedGroupName) query.set("group", selectedGroupName);
+    if (summary.includedLabourIds?.length) query.set("labourIds", summary.includedLabourIds.join(","));
+    navigate(`/workspace/reports?${query.toString()}`);
+  }, [fromDate, navigate, selectedGroupName, summary, toDate]);
   const settlementStatus = useCallback((settlement: Pick<LabourWageSettlement, "status" | "accountingStatus">) => settlement.accountingStatus ?? settlement.status, []);
   const canEditSettlement = useCallback((settlement: Pick<LabourWageSettlementDetail, "status" | "accountingStatus">) => settlement.status !== "deleted" && settlement.status !== "voided" && settlement.accountingStatus !== "posted", []);
   const canDeleteSettlement = useCallback((settlement: Pick<LabourWageSettlementDetail, "status" | "accountingStatus">) => settlement.status !== "deleted" && settlement.status !== "voided" && settlement.accountingStatus !== "posted", []);
   const canVoidSettlement = useCallback((settlement: Pick<LabourWageSettlementDetail, "status" | "accountingStatus">) => settlement.status === "posted" && settlement.accountingStatus === "posted", []);
   const activeLabourers = useMemo(() => labourers.filter((labourer) => labourer.active !== false).sort((left, right) => left.name.localeCompare(right.name)), [labourers]);
   const activeLabourGroups = useMemo(() => labourGroups.filter((group) => group.active !== false).sort((left, right) => left.name.localeCompare(right.name)), [labourGroups]);
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production" || preview.status !== "ready" || !token || !workspaceId || !activeFarmId || !activeSeasonId) {
+      setAttendanceComparison({ status: "idle", data: null, error: "" });
+      return;
+    }
+    let cancelled = false;
+    setAttendanceComparison({ status: "loading", data: null, error: "" });
+    void fetchAttendanceReport(token, workspaceId, {
+      farmId: activeFarmId,
+      seasonId: activeSeasonId,
+      from: fromDate,
+      to: toDate,
+      labourIds: preview.data.includedLabourIds ?? [],
+    }).then((data) => {
+      if (cancelled) return;
+      setAttendanceComparison({ status: "ready", data: data as AttendanceReportData, error: "" });
+    }).catch((caught) => {
+      if (cancelled) return;
+      setAttendanceComparison({ status: "error", data: null, error: caught instanceof Error ? caught.message : "Unable to load attendance comparison." });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeFarmId, activeSeasonId, fromDate, preview.data, preview.status, token, workspaceId, toDate]);
   const openSettlement = useCallback((settlement: LabourWageSettlement | LabourWageSettlementDetail, mode: "view" | "edit" = "view") => {
     setSelectedSettlement(settlement);
     setSelectedSettlementMode(mode);
@@ -446,7 +503,12 @@ export function LabourWageSettlements() {
         settlementMode: response.settlement.settlementMode,
         foremanId: response.settlement.foremanId ?? null,
         groupId: response.settlement.groupId ?? null,
+        groupName: response.settlement.groupName ?? null,
         includedLabourIds: response.settlement.includedLabourIds ?? [],
+        includedInactiveLabourIds: response.settlement.includedInactiveLabourIds ?? [],
+        includedActiveLabourIds: response.settlement.includedActiveLabourIds ?? [],
+        excludedLabourers: response.settlement.excludedLabourers ?? [],
+        attendanceTotals: response.settlement.attendanceTotals ?? undefined,
         fromDate: response.settlement.fromDate,
         toDate: response.settlement.toDate,
         settlementDate: response.settlement.settlementDate,
@@ -472,6 +534,7 @@ export function LabourWageSettlements() {
         sourceAttendanceIds: response.settlement.sourceAttendanceIds ?? [],
         sourceLabourWorkIds: response.settlement.sourceLabourWorkIds ?? [],
         advanceAdjustmentAllocations: response.settlement.advanceAdjustmentAllocations ?? [],
+        settlementScopeSnapshot: response.settlement.settlementScopeSnapshot ?? undefined,
         notes: response.settlement.notes,
         status: response.settlement.status,
         accountingStatus: response.settlement.accountingStatus,
@@ -760,6 +823,8 @@ export function LabourWageSettlements() {
           {!summary ? <p className="context-message">Run a preview to calculate period wages, advance use, and settlement balance.</p> : <>
             <div className="reports-kpis">
               <article><span>Included labourers</span><strong>{summary.includedLabourCount ?? summary.includedLabourIds?.length ?? 0}</strong></article>
+              <article><span>Active now included</span><strong>{summary.includedActiveLabourIds?.length ?? 0}</strong></article>
+              <article><span>Inactive now included</span><strong>{summary.includedInactiveLabourIds?.length ?? 0}</strong></article>
               <article><span>Attendance wages</span><strong>{money(summary.attendanceWages)}</strong></article>
               <article><span>Labour work wages</span><strong>{money(summary.labourWorkWages ?? summary.pendingLabourEarnings)}</strong></article>
               <article><span>Gross wages earned</span><strong>{money(summary.grossWages ?? summary.totalEarned)}</strong></article>
@@ -773,11 +838,53 @@ export function LabourWageSettlements() {
               <article><span>Status</span><strong>{summary.balanceAfterPayment && summary.balanceAfterPayment < 0 ? "Labour owes farm" : (summary.balanceAfterPayment === 0 && (summary.remainingAdvanceCarryForward ?? summary.carryForwardAdvance ?? 0) === 0 ? "Settled" : (summary.remainingAdvanceCarryForward ?? summary.carryForwardAdvance ?? 0) > 0 ? "Advance carried forward" : "Farm still owes labour")}</strong></article>
             </div>
             <div className="reports-summary-list">
+              <article><span>Group</span><strong>{summary.groupName ?? selectedGroupName ?? "-"}</strong></article>
               <article><span>Wage period</span><strong>{fromDate} to {toDate}</strong></article>
               <article><span>Advances considered until</span><strong>{summary.settlementDate}</strong></article>
               <article><span>Total advances up to settlement date</span><strong>{money(summary.rawAdvancesUpToSettlementDate)}</strong></article>
               <article><span>Previously settled advances</span><strong>{money(summary.previouslySettledAdvances)}</strong></article>
             </div>
+            <div className="reports-summary-list">
+              <article><span>Attendance scope</span><strong>{summary.attendanceTotals?.labourers ?? summary.includedLabourCount ?? 0}</strong></article>
+              <article><span>Present days</span><strong>{summary.attendanceTotals?.present ?? 0}</strong></article>
+              <article><span>Half-day days</span><strong>{summary.attendanceTotals?.halfDay ?? 0}</strong></article>
+              <article><span>Payable days</span><strong>{summary.attendanceTotals?.payableDays ?? 0}</strong></article>
+            </div>
+            <p className="context-message">Settlement includes labourers with wages in this period, even if they are inactive today.</p>
+            <div className="module-inline-actions">
+              <button type="button" className="secondary-action" onClick={openMatchingAttendanceReport}>View matching attendance report</button>
+            </div>
+            {process.env.NODE_ENV !== "production" ? (
+              <div className="record-panel">
+                <h3>Development reconciliation</h3>
+                {attendanceComparison.status === "loading" ? <p className="context-message">Loading attendance register comparison...</p> : attendanceComparison.status === "error" ? <p className="worker-action-warning">{attendanceComparison.error}</p> : attendanceComparison.status === "ready" && attendanceComparison.data ? (() => {
+                  const reportTotals = attendanceComparison.data.summaries.reduce((totals, row) => ({
+                    labourers: totals.labourers + 1,
+                    present: totals.present + row.presentDays,
+                    halfDay: totals.halfDay + row.halfDays,
+                    payableDays: totals.payableDays + row.payableDays,
+                    wages: totals.wages + row.totalWage,
+                  }), { labourers: 0, present: 0, halfDay: 0, payableDays: 0, wages: 0 });
+                  const excludedLabourCount = summary.excludedLabourers?.length ?? 0;
+                  return (
+                    <div className="reports-summary-list">
+                      <article><span>Settlement labour count</span><strong>{summary.includedLabourCount ?? summary.includedLabourIds?.length ?? 0}</strong></article>
+                      <article><span>Report labour count</span><strong>{reportTotals.labourers}</strong></article>
+                      <article><span>Settlement attendance wages</span><strong>{money(summary.attendanceWages)}</strong></article>
+                      <article><span>Report attendance wages</span><strong>{money(reportTotals.wages)}</strong></article>
+                      <article><span>Included inactive labourers</span><strong>{summary.includedInactiveLabourIds?.length ?? 0}</strong></article>
+                      <article><span>Excluded labourers</span><strong>{excludedLabourCount}</strong></article>
+                    </div>
+                  );
+                })() : null}
+              </div>
+            ) : null}
+            {summary.excludedLabourers?.length ? <div className="worker-action-warning">
+              <strong>Excluded labourers</strong>
+              <ul>
+                {summary.excludedLabourers.slice(0, 12).map((row) => <li key={row.labourerId}>{row.labourName}: {row.reason}</li>)}
+              </ul>
+            </div> : null}
             {summary.unresolvedRows.length > 0 && <div className="worker-action-warning">
               <strong>Missing wage rates</strong>
               <ul>

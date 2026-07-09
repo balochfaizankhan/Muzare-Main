@@ -262,7 +262,22 @@ export type LabourWageSettlement = LocalRecord & {
   settlementMode?: "individual" | "group";
   foremanId?: string | null;
   groupId?: string | null;
+  groupName?: string | null;
   includedLabourIds?: string[];
+  includedInactiveLabourIds?: string[];
+  includedActiveLabourIds?: string[];
+  excludedLabourers?: Array<{
+    labourerId: string;
+    labourName: string;
+    reason: string;
+  }>;
+  attendanceTotals?: {
+    labourers: number;
+    present: number;
+    halfDay: number;
+    absent: number;
+    payableDays: number;
+  };
   fromDate: string;
   toDate: string;
   settlementDate: string;
@@ -297,6 +312,25 @@ export type LabourWageSettlement = LocalRecord & {
     seasonId: string;
   }>;
   notes?: string;
+  settlementScopeSnapshot?: {
+    settlementMode?: "individual" | "group";
+    groupId?: string | null;
+    groupName?: string | null;
+    fromDate: string;
+    toDate: string;
+    includedLabourIds: string[];
+    includedInactiveLabourIds: string[];
+    attendanceWageTotal: number;
+    attendanceCountTotals: {
+      labourers: number;
+      present: number;
+      halfDay: number;
+      absent: number;
+      payableDays: number;
+    };
+    advanceAdjustedNow: number;
+    netPayable: number;
+  };
   status: "posted" | "voided" | "deleted";
   accountingStatus?: "draft" | "posted" | "accounting_missing" | "voided" | "deleted";
   accountingMessage?: string | null;

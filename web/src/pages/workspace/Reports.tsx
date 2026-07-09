@@ -428,6 +428,21 @@ export function Reports() {
   const [dispatches, setDispatches] = useState<Dispatch[]>([]);
   const [selectedSaleRecord, setSelectedSaleRecord] = useState<SalesReportRecord | null>(null);
   const [selectedDispatchRecord, setSelectedDispatchRecord] = useState<DispatchReportRecord | null>(null);
+  useEffect(() => {
+    if (normalizedRequestedReport && reportOptions.includes(normalizedRequestedReport)) {
+      setReport(normalizedRequestedReport);
+    }
+    const nextFrom = searchParams.get("from");
+    const nextTo = searchParams.get("to");
+    const nextGroup = searchParams.get("group");
+    const nextLabourIds = searchParams.get("labourIds");
+    if (nextFrom !== null) setFrom(nextFrom);
+    if (nextTo !== null) setTo(nextTo);
+    if (nextGroup !== null) setGroupFilter(nextGroup);
+    if (nextLabourIds !== null) {
+      setSelectedLabourerIds(nextLabourIds.split(",").map((item) => item.trim()).filter(Boolean));
+    }
+  }, [normalizedRequestedReport, requestedReport, searchParams]);
   const deleteSaleRecord = async (sale: Sale) => {
     if (!window.confirm(`Delete sale${sale.invoiceNumber ? ` ${sale.invoiceNumber}` : ""}?`)) return;
     await deleteOperationalRecord("sale", sale);

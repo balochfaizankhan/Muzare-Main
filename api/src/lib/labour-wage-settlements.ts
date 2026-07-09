@@ -19,7 +19,22 @@ export type LabourWageSettlementPayload = {
   settlementMode?: "individual" | "group";
   foremanId?: string | null;
   groupId?: string | null;
+  groupName?: string | null;
   includedLabourIds?: string[];
+  includedInactiveLabourIds?: string[];
+  includedActiveLabourIds?: string[];
+  excludedLabourers?: Array<{
+    labourerId: string;
+    labourName: string;
+    reason: string;
+  }>;
+  attendanceTotals?: {
+    labourers: number;
+    present: number;
+    halfDay: number;
+    absent: number;
+    payableDays: number;
+  };
   fromDate: string;
   toDate: string;
   settlementDate: string;
@@ -58,6 +73,25 @@ export type LabourWageSettlementPayload = {
     seasonId: string;
   }>;
   notes?: string;
+  settlementScopeSnapshot?: {
+    settlementMode?: "individual" | "group";
+    groupId?: string | null;
+    groupName?: string | null;
+    fromDate: string;
+    toDate: string;
+    includedLabourIds: string[];
+    includedInactiveLabourIds: string[];
+    attendanceWageTotal: number;
+    attendanceCountTotals: {
+      labourers: number;
+      present: number;
+      halfDay: number;
+      absent: number;
+      payableDays: number;
+    };
+    advanceAdjustedNow: number;
+    netPayable: number;
+  };
   status: "posted" | "voided" | "deleted";
   createdBy?: string;
   createdAt?: string;
@@ -131,7 +165,30 @@ export function normalizeSettlementPayload(payload: Record<string, unknown>): La
     settlementMode,
     foremanId: typeof payload.foremanId === "string" ? payload.foremanId : null,
     groupId: typeof payload.groupId === "string" ? payload.groupId : null,
+    groupName: typeof payload.groupName === "string" ? payload.groupName : null,
     includedLabourIds: stringArrayValue(payload.includedLabourIds),
+    includedInactiveLabourIds: stringArrayValue(payload.includedInactiveLabourIds),
+    includedActiveLabourIds: stringArrayValue(payload.includedActiveLabourIds),
+    excludedLabourers: Array.isArray(payload.excludedLabourers)
+      ? payload.excludedLabourers.flatMap((item) => {
+        if (!item || typeof item !== "object") return [];
+        const row = item as Record<string, unknown>;
+        const labourerId = typeof row.labourerId === "string" ? row.labourerId : "";
+        const labourName = typeof row.labourName === "string" ? row.labourName : "Labourer";
+        const reason = typeof row.reason === "string" ? row.reason : "";
+        if (!labourerId || !reason) return [];
+        return [{ labourerId, labourName, reason }];
+      })
+      : [],
+    attendanceTotals: payload.attendanceTotals && typeof payload.attendanceTotals === "object"
+      ? {
+        labourers: numberValue((payload.attendanceTotals as Record<string, unknown>).labourers),
+        present: numberValue((payload.attendanceTotals as Record<string, unknown>).present),
+        halfDay: numberValue((payload.attendanceTotals as Record<string, unknown>).halfDay),
+        absent: numberValue((payload.attendanceTotals as Record<string, unknown>).absent),
+        payableDays: numberValue((payload.attendanceTotals as Record<string, unknown>).payableDays),
+      }
+      : undefined,
     fromDate: typeof payload.fromDate === "string" ? payload.fromDate : "",
     toDate: typeof payload.toDate === "string" ? payload.toDate : "",
     settlementDate: typeof payload.settlementDate === "string" ? payload.settlementDate : "",
@@ -176,6 +233,27 @@ export function normalizeSettlementPayload(payload: Record<string, unknown>): La
       })
       : [],
     notes: typeof payload.notes === "string" ? payload.notes : "",
+    settlementScopeSnapshot: payload.settlementScopeSnapshot && typeof payload.settlementScopeSnapshot === "object"
+      ? {
+        settlementMode: (payload.settlementScopeSnapshot as Record<string, unknown>).settlementMode === "group" ? "group" : "individual",
+        groupId: typeof (payload.settlementScopeSnapshot as Record<string, unknown>).groupId === "string" ? String((payload.settlementScopeSnapshot as Record<string, unknown>).groupId) : null,
+        groupName: typeof (payload.settlementScopeSnapshot as Record<string, unknown>).groupName === "string" ? String((payload.settlementScopeSnapshot as Record<string, unknown>).groupName) : null,
+        fromDate: typeof (payload.settlementScopeSnapshot as Record<string, unknown>).fromDate === "string" ? String((payload.settlementScopeSnapshot as Record<string, unknown>).fromDate) : "",
+        toDate: typeof (payload.settlementScopeSnapshot as Record<string, unknown>).toDate === "string" ? String((payload.settlementScopeSnapshot as Record<string, unknown>).toDate) : "",
+        includedLabourIds: stringArrayValue((payload.settlementScopeSnapshot as Record<string, unknown>).includedLabourIds),
+        includedInactiveLabourIds: stringArrayValue((payload.settlementScopeSnapshot as Record<string, unknown>).includedInactiveLabourIds),
+        attendanceWageTotal: numberValue((payload.settlementScopeSnapshot as Record<string, unknown>).attendanceWageTotal),
+        attendanceCountTotals: {
+          labourers: numberValue(((payload.settlementScopeSnapshot as Record<string, unknown>).attendanceCountTotals as Record<string, unknown> | undefined)?.labourers),
+          present: numberValue(((payload.settlementScopeSnapshot as Record<string, unknown>).attendanceCountTotals as Record<string, unknown> | undefined)?.present),
+          halfDay: numberValue(((payload.settlementScopeSnapshot as Record<string, unknown>).attendanceCountTotals as Record<string, unknown> | undefined)?.halfDay),
+          absent: numberValue(((payload.settlementScopeSnapshot as Record<string, unknown>).attendanceCountTotals as Record<string, unknown> | undefined)?.absent),
+          payableDays: numberValue(((payload.settlementScopeSnapshot as Record<string, unknown>).attendanceCountTotals as Record<string, unknown> | undefined)?.payableDays),
+        },
+        advanceAdjustedNow: numberValue((payload.settlementScopeSnapshot as Record<string, unknown>).advanceAdjustedNow),
+        netPayable: numberValue((payload.settlementScopeSnapshot as Record<string, unknown>).netPayable),
+      }
+      : undefined,
     status: payload.status === "voided" ? "voided" : payload.status === "deleted" ? "deleted" : "posted",
     createdBy: typeof payload.createdBy === "string" ? payload.createdBy : undefined,
     createdAt: typeof payload.createdAt === "string" ? payload.createdAt : undefined,
@@ -429,48 +507,118 @@ export type LabourWageSettlementSelection = {
   labourIds?: string[];
 };
 
+type LabourScopeMember = {
+  id: string;
+  name: string;
+  groupId: string | null;
+  groupName: string | null;
+  active: boolean;
+  isArchived: boolean;
+};
+
+type LabourScopeResult = {
+  labourers: LabourScopeMember[];
+  selectedGroupId: string | null;
+  selectedGroupName: string | null;
+};
+
+function normalizeGroupKey(value?: string | null) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
 async function resolveSelectedLabourers(
   tx: DbClient,
   workspaceId: string,
   farmId: string,
   seasonId: string,
   selection: LabourWageSettlementSelection = {},
-) {
-  const labourRows = await tx.select({
-    clientRecordId: operationalRecords.clientRecordId,
-    payload: operationalRecords.payload,
-  }).from(operationalRecords).where(and(
-    eq(operationalRecords.workspaceId, workspaceId),
-    eq(operationalRecords.farmId, farmId),
-    eq(operationalRecords.seasonId, seasonId),
-    eq(operationalRecords.entityType, "labourer"),
-  ));
-  const labourers = labourRows.map((row) => {
+) : Promise<LabourScopeResult> {
+  const [labourRows, groupRows] = await Promise.all([
+    tx.select({
+      clientRecordId: operationalRecords.clientRecordId,
+      payload: operationalRecords.payload,
+    }).from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, workspaceId),
+      eq(operationalRecords.farmId, farmId),
+      eq(operationalRecords.seasonId, seasonId),
+      eq(operationalRecords.entityType, "labourer"),
+    )),
+    tx.select({
+      clientRecordId: operationalRecords.clientRecordId,
+      payload: operationalRecords.payload,
+    }).from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, workspaceId),
+      eq(operationalRecords.farmId, farmId),
+      eq(operationalRecords.seasonId, seasonId),
+      eq(operationalRecords.entityType, "labourGroup"),
+    )),
+  ]);
+  const groupsById = new Map(groupRows.map((row) => {
     const payload = row.payload as Record<string, unknown>;
-    return {
+    return [row.clientRecordId, {
+      id: row.clientRecordId,
+      name: typeof payload.name === "string" ? payload.name : "",
+    }] as const;
+  }));
+  const labourers = labourRows.flatMap((row) => {
+    const payload = row.payload as Record<string, unknown>;
+    if (isDeletedOperationalPayload(payload) || payload.isArchived === true) return [];
+    return [{
       id: row.clientRecordId,
       name: typeof payload.name === "string" ? payload.name : "Labourer",
       groupId: typeof payload.groupId === "string" ? payload.groupId : null,
+      groupName: typeof payload.group === "string" ? payload.group : null,
       active: payload.active !== false,
-    };
+      isArchived: payload.isArchived === true,
+    }];
   });
   const labourById = new Map(labourers.map((labourer) => [labourer.id, labourer]));
   const explicitIds = (selection.labourIds ?? []).filter((id) => labourById.has(id));
+  const selectedGroupId = selection.groupId
+    ?? (selection.foremanId ? labourById.get(selection.foremanId)?.groupId ?? null : null);
+  const selectedGroupName = selectedGroupId ? groupsById.get(selectedGroupId)?.name ?? null : null;
+
   if (selection.settlementMode === "group") {
-    const groupId = selection.groupId
-      ?? (selection.foremanId ? labourById.get(selection.foremanId)?.groupId ?? null : null);
-    if (groupId) {
-      return labourers.filter((labourer) => labourer.active && labourer.groupId === groupId).map((labourer) => labourer.id);
+    if (selectedGroupId) {
+      const normalizedGroupName = normalizeGroupKey(selectedGroupName);
+      const scoped = labourers.filter((labourer) =>
+        labourer.groupId === selectedGroupId
+        || (normalizedGroupName && normalizeGroupKey(labourer.groupName) === normalizedGroupName)
+        || (selection.foremanId && labourer.id === selection.foremanId)
+      );
+      return {
+        labourers: scoped,
+        selectedGroupId,
+        selectedGroupName,
+      };
     }
     if (selection.foremanId && labourById.has(selection.foremanId)) {
-      return [selection.foremanId];
+      return {
+        labourers: [labourById.get(selection.foremanId)!],
+        selectedGroupId: null,
+        selectedGroupName: null,
+      };
     }
   }
   if (selection.settlementMode === "individual" && selection.labourerId && labourById.has(selection.labourerId)) {
-    return [selection.labourerId];
+    return {
+      labourers: [labourById.get(selection.labourerId)!],
+      selectedGroupId: null,
+      selectedGroupName: null,
+    };
   }
-  if (explicitIds.length) return explicitIds;
-  return labourers.filter((labourer) => labourer.active).map((labourer) => labourer.id);
+  if (explicitIds.length) {
+    return {
+      labourers: explicitIds.map((id) => labourById.get(id)!).filter(Boolean),
+      selectedGroupId,
+      selectedGroupName,
+    };
+  }
+  return {
+    labourers,
+    selectedGroupId,
+    selectedGroupName,
+  };
 }
 
 export function settlementAccountingStatus(
@@ -631,50 +779,39 @@ export async function previewLabourWageSettlement(
   excludeSettlementId?: string,
   selection: LabourWageSettlementSelection = {},
 ) {
-  const [attendanceRows, advanceRows, labourRows, wageRates, earningRows, allSettlements, includedLabourIds] = await Promise.all([
-    tx.select({
-      clientRecordId: operationalRecords.clientRecordId,
-      payload: operationalRecords.payload,
-    }).from(operationalRecords).where(and(
-      eq(operationalRecords.workspaceId, workspaceId),
-      eq(operationalRecords.farmId, farmId),
-      eq(operationalRecords.seasonId, seasonId),
-      eq(operationalRecords.entityType, "attendance"),
-    )),
-    tx.select({
-      clientRecordId: operationalRecords.clientRecordId,
-      payload: operationalRecords.payload,
-    }).from(operationalRecords).where(and(
-      eq(operationalRecords.workspaceId, workspaceId),
-      eq(operationalRecords.farmId, farmId),
-      eq(operationalRecords.seasonId, seasonId),
-      eq(operationalRecords.entityType, "advance"),
-    )),
-    tx.select({
-      clientRecordId: operationalRecords.clientRecordId,
-      payload: operationalRecords.payload,
-    }).from(operationalRecords).where(and(
-      eq(operationalRecords.workspaceId, workspaceId),
-      eq(operationalRecords.farmId, farmId),
-      eq(operationalRecords.entityType, "labourer"),
-    )),
-    listWageRateRows(tx, workspaceId, farmId, seasonId),
-    listLabourEarnings(tx, workspaceId, farmId, seasonId),
-    listLabourWageSettlements(tx, workspaceId, farmId, seasonId),
-    resolveSelectedLabourers(tx, workspaceId, farmId, seasonId, selection),
-  ]);
+  const labourScope = await resolveSelectedLabourers(tx, workspaceId, farmId, seasonId, selection);
+  const attendanceRows = await tx.select({
+    clientRecordId: operationalRecords.clientRecordId,
+    payload: operationalRecords.payload,
+  }).from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, workspaceId),
+    eq(operationalRecords.farmId, farmId),
+    eq(operationalRecords.seasonId, seasonId),
+    eq(operationalRecords.entityType, "attendance"),
+  ));
+  const advanceRows = await tx.select({
+    clientRecordId: operationalRecords.clientRecordId,
+    payload: operationalRecords.payload,
+  }).from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, workspaceId),
+    eq(operationalRecords.farmId, farmId),
+    eq(operationalRecords.seasonId, seasonId),
+    eq(operationalRecords.entityType, "advance"),
+  ));
+  const wageRates = await listWageRateRows(tx, workspaceId, farmId, seasonId);
+  const earningRows = await listLabourEarnings(tx, workspaceId, farmId, seasonId);
+  const allSettlements = await listLabourWageSettlements(tx, workspaceId, farmId, seasonId);
   const activeSettlements = allSettlements.filter((row) => !isDeletedOperationalPayload(row.payload) && row.payload.status !== "voided" && row.clientRecordId !== excludeSettlementId);
   const existingSettlements = activeSettlements.filter((row) =>
-    settlementRangesOverlap(row.payload.fromDate, row.payload.toDate, fromDate, toDate));
+    typeof row.payload.fromDate === "string"
+    && typeof row.payload.toDate === "string"
+    && settlementRangesOverlap(row.payload.fromDate, row.payload.toDate, fromDate, toDate));
 
-  const labourById = new Map(labourRows.map((row) => {
-    const payload = row.payload as LabourPayload;
-    return [row.clientRecordId, {
-      name: typeof payload.name === "string" ? payload.name : "Labourer",
-    }] as const;
-  }));
-
-  const includedLabourSet = new Set(includedLabourIds);
+  const labourById = new Map(labourScope.labourers.map((labourer) => [labourer.id, labourer]));
+  const candidateLabourers = labourScope.labourers;
+  const candidateIds = new Set(candidateLabourers.map((labourer) => labourer.id));
+  const attendanceByLabourer = new Map<string, Array<{ date: string; status: string; rateMissing: boolean }>>();
+  const earningsByLabourer = new Map<string, Array<{ id: string; earningDate: string; amount: number }>>();
   let attendanceWages = 0;
   const sourceAttendanceIds: string[] = [];
   const unresolvedRows: Array<{ labourerId: string; labourName: string; date: string; status: string }> = [];
@@ -684,7 +821,7 @@ export async function previewLabourWageSettlement(
     const labourerId = typeof payload.labourerId === "string" ? payload.labourerId : typeof payload.labourId === "string" ? payload.labourId : "";
     const date = typeof payload.date === "string" ? payload.date : "";
     const status = typeof payload.status === "string" ? payload.status : "";
-    if (!includedLabourSet.has(labourerId)) continue;
+    if (!candidateIds.has(labourerId)) continue;
     if (!labourerId || !date || date < fromDate || date > toDate) continue;
     if (!["present", "half_day", "absent"].includes(status)) continue;
     const labour = labourById.get(labourerId);
@@ -697,17 +834,25 @@ export async function previewLabourWageSettlement(
         status,
       });
     }
+    const bucket = attendanceByLabourer.get(labourerId) ?? [];
+    bucket.push({ date, status, rateMissing: !rate && status !== "absent" });
+    attendanceByLabourer.set(labourerId, bucket);
     attendanceWages += calculateStatusWage(status as "present" | "half_day" | "absent", rate?.payload ?? null);
     sourceAttendanceIds.push(row.clientRecordId);
   }
 
-  const includedEarnings = earningRows
-    .filter((row) =>
-      row.payload.status === "pending_settlement"
-      && !isDeletedOperationalPayload(row.payload)
-      && includedLabourSet.has(row.payload.labourerId)
-      && row.payload.earningDate <= settlementDate)
-    .map((row) => ({
+  const includedEarnings = earningRows.flatMap((row) => {
+    if (row.payload.status !== "pending_settlement" || isDeletedOperationalPayload(row.payload) || !candidateIds.has(row.payload.labourerId) || row.payload.earningDate > settlementDate) {
+      return [];
+    }
+    const bucket = earningsByLabourer.get(row.payload.labourerId) ?? [];
+    bucket.push({
+      id: row.clientRecordId,
+      earningDate: row.payload.earningDate,
+      amount: row.payload.amount,
+    });
+    earningsByLabourer.set(row.payload.labourerId, bucket);
+    return [{
       id: row.clientRecordId,
       labourerId: row.payload.labourerId,
       labourName: labourById.get(row.payload.labourerId)?.name ?? "Labourer",
@@ -715,8 +860,13 @@ export async function previewLabourWageSettlement(
       earningType: row.payload.earningType,
       description: row.payload.description,
       amount: row.payload.amount,
-    }));
+    }];
+  });
   const labourWorkWages = includedEarnings.reduce((sum, row) => sum + row.amount, 0);
+  const includedLabourIds = candidateLabourers
+    .filter((labourer) => (attendanceByLabourer.get(labourer.id)?.length ?? 0) > 0 || (earningsByLabourer.get(labourer.id)?.length ?? 0) > 0)
+    .map((labourer) => labourer.id);
+  const includedLabourSet = new Set(includedLabourIds);
 
   const rawIncludedAdvances = advanceRows
     .filter((row) => {
@@ -765,6 +915,50 @@ export async function previewLabourWageSettlement(
   const remainingAdvanceCarryForward = Math.max(availableAdvanceBalanceBeforeSettlement - advanceAdjustedNow, 0);
   const netPayableBeforePayment = baseTotals.grossWages - advanceAdjustedNow + baseTotals.manualAdjustment;
   const balanceAfterPayment = netPayableBeforePayment;
+  const excludedLabourers = candidateLabourers
+    .filter((labourer) => !includedLabourSet.has(labourer.id))
+    .map((labourer) => {
+      const attendanceCount = attendanceByLabourer.get(labourer.id)?.length ?? 0;
+      const earningCount = earningsByLabourer.get(labourer.id)?.length ?? 0;
+      const reason = labourScope.selectedGroupId
+        ? "not a member of selected group during period"
+        : attendanceCount === 0 && earningCount === 0
+          ? "no attendance in selected period"
+          : "no payable wage";
+      return {
+        labourerId: labourer.id,
+        labourName: labourer.name,
+        reason,
+      };
+    });
+  const includedInactiveLabourIds = candidateLabourers.filter((labourer) => includedLabourSet.has(labourer.id) && labourer.active === false).map((labourer) => labourer.id);
+  const includedActiveLabourIds = candidateLabourers.filter((labourer) => includedLabourSet.has(labourer.id) && labourer.active !== false).map((labourer) => labourer.id);
+  const attendanceTotals = candidateLabourers.reduce<{
+    labourers: number;
+    present: number;
+    halfDay: number;
+    absent: number;
+    payableDays: number;
+  }>((totals, labourer) => {
+    const records = attendanceByLabourer.get(labourer.id) ?? [];
+    if (!records.length) return totals;
+    const present = records.filter((record) => record.status === "present").length;
+    const halfDay = records.filter((record) => record.status === "half_day").length;
+    const absent = records.filter((record) => record.status === "absent").length;
+    return {
+      labourers: totals.labourers + 1,
+      present: totals.present + present,
+      halfDay: totals.halfDay + halfDay,
+      absent: totals.absent + absent,
+      payableDays: totals.payableDays + present + halfDay * 0.5,
+    };
+  }, {
+    labourers: 0,
+    present: 0,
+    halfDay: 0,
+    absent: 0,
+    payableDays: 0,
+  });
 
   return {
     ...baseTotals,
@@ -788,14 +982,32 @@ export async function previewLabourWageSettlement(
     settlementDate,
     settlementMode: selection.settlementMode ?? "individual",
     foremanId: selection.foremanId ?? null,
-    groupId: selection.groupId ?? null,
+    groupId: labourScope.selectedGroupId ?? selection.groupId ?? null,
+    groupName: labourScope.selectedGroupName ?? null,
     includedLabourIds,
     includedLabourCount: includedLabourIds.length,
+    includedInactiveLabourIds,
+    includedActiveLabourIds,
+    excludedLabourers,
+    attendanceTotals,
     includedEarnings,
     sourceAttendanceIds,
     sourceLabourWorkIds: includedEarnings.map((row) => row.id),
     advanceAdjustmentAllocations: allocationResult.allocations,
     unresolvedRows,
+    settlementScopeSnapshot: {
+      settlementMode: selection.settlementMode ?? "individual",
+      groupId: labourScope.selectedGroupId ?? selection.groupId ?? null,
+      groupName: labourScope.selectedGroupName ?? null,
+      fromDate,
+      toDate,
+      includedLabourIds,
+      includedInactiveLabourIds,
+      attendanceWageTotal: attendanceWages,
+      attendanceCountTotals: attendanceTotals,
+      advanceAdjustedNow,
+      netPayable: netPayableBeforePayment,
+    },
     overlappingSettlements: existingSettlements.map((row) => ({
       id: row.clientRecordId,
       settlementNumber: row.payload.settlementNumber,

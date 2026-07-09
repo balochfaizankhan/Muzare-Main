@@ -813,7 +813,22 @@ export type LabourWageSettlementRecord = {
   settlementMode?: "individual" | "group";
   foremanId?: string | null;
   groupId?: string | null;
+  groupName?: string | null;
   includedLabourIds?: string[];
+  includedInactiveLabourIds?: string[];
+  includedActiveLabourIds?: string[];
+  excludedLabourers?: Array<{
+    labourerId: string;
+    labourName: string;
+    reason: string;
+  }>;
+  attendanceTotals?: {
+    labourers: number;
+    present: number;
+    halfDay: number;
+    absent: number;
+    payableDays: number;
+  };
   fromDate: string;
   toDate: string;
   settlementDate: string;
@@ -859,6 +874,25 @@ export type LabourWageSettlementRecord = {
   voidedAt?: string | null;
   voidedBy?: string | null;
   voidReason?: string | null;
+  settlementScopeSnapshot?: {
+    settlementMode?: "individual" | "group";
+    groupId?: string | null;
+    groupName?: string | null;
+    fromDate: string;
+    toDate: string;
+    includedLabourIds: string[];
+    includedInactiveLabourIds: string[];
+    attendanceWageTotal: number;
+    attendanceCountTotals: {
+      labourers: number;
+      present: number;
+      halfDay: number;
+      absent: number;
+      payableDays: number;
+    };
+    advanceAdjustedNow: number;
+    netPayable: number;
+  };
 };
 export type LabourWageSettlementDetail = LabourWageSettlementRecord & {
   accountingEntries?: number;
@@ -891,6 +925,25 @@ export type LabourWageSettlementLinkedVoucher = {
   amount: number;
   accountId: string;
   notes?: string;
+  settlementScopeSnapshot?: {
+    settlementMode?: "individual" | "group";
+    groupId?: string | null;
+    groupName?: string | null;
+    fromDate: string;
+    toDate: string;
+    includedLabourIds: string[];
+    includedInactiveLabourIds: string[];
+    attendanceWageTotal: number;
+    attendanceCountTotals: {
+      labourers: number;
+      present: number;
+      halfDay: number;
+      absent: number;
+      payableDays: number;
+    };
+    advanceAdjustedNow: number;
+    netPayable: number;
+  };
   createdBy?: string;
   updatedBy?: string;
   items?: Array<{
@@ -920,8 +973,23 @@ export type LabourWageSettlementPreview = {
   settlementMode?: "individual" | "group";
   foremanId?: string | null;
   groupId?: string | null;
+  groupName?: string | null;
   includedLabourIds?: string[];
   includedLabourCount?: number;
+  includedInactiveLabourIds?: string[];
+  includedActiveLabourIds?: string[];
+  excludedLabourers?: Array<{
+    labourerId: string;
+    labourName: string;
+    reason: string;
+  }>;
+  attendanceTotals?: {
+    labourers: number;
+    present: number;
+    halfDay: number;
+    absent: number;
+    payableDays: number;
+  };
   settledAdvanceAmount: number;
   advanceAdjustedNow?: number;
   expenseAmount: number;
@@ -953,6 +1021,25 @@ export type LabourWageSettlementPreview = {
     amount: number;
   }>;
   unresolvedRows: Array<{ labourerId: string; labourName: string; date: string; status: string }>;
+  settlementScopeSnapshot?: {
+    settlementMode?: "individual" | "group";
+    groupId?: string | null;
+    groupName?: string | null;
+    fromDate: string;
+    toDate: string;
+    includedLabourIds: string[];
+    includedInactiveLabourIds: string[];
+    attendanceWageTotal: number;
+    attendanceCountTotals: {
+      labourers: number;
+      present: number;
+      halfDay: number;
+      absent: number;
+      payableDays: number;
+    };
+    advanceAdjustedNow: number;
+    netPayable: number;
+  };
   overlappingSettlements: Array<{
     id: string;
     settlementNumber: string;

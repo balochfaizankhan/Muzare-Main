@@ -22,7 +22,12 @@ type GroupForm = {
 };
 
 const normalize = (value: string) => value.trim().toLowerCase();
+const normalizeGroupKey = (value?: string | null) => value?.trim().toLowerCase() ?? "";
 const labourSerial = (labourer: Labourer) => labourer.oldLabourId || labourer.oldAndroidId || (typeof labourer.sortOrder === "number" ? `#${labourer.sortOrder}` : typeof labourer.androidSortOrder === "number" ? `#${labourer.androidSortOrder}` : typeof labourer.originalIndex === "number" ? `#${labourer.originalIndex}` : "");
+
+function isLabourerInGroup(labourer: Pick<Labourer, "groupId" | "group">, group: Pick<LabourGroup, "id" | "name">) {
+  return labourer.groupId === group.id || normalizeGroupKey(labourer.group) === normalizeGroupKey(group.name);
+}
 
 function useLabourGroupsData() {
   const [labourers, setLabourers] = useState<Labourer[]>([]);
@@ -182,7 +187,7 @@ function ConfirmBulkPanel({
 }
 
 function groupMemberStats(group: LabourGroup, labourers: Labourer[], settlements: LabourWageSettlement[], advances: Advance[]) {
-  const members = labourers.filter((labourer) => labourer.groupId === group.id);
+  const members = labourers.filter((labourer) => isLabourerInGroup(labourer, group));
   const activeMembers = members.filter((labourer) => labourer.active !== false);
   const inactiveMembers = members.filter((labourer) => labourer.active === false);
   const memberIds = new Set(members.map((labourer) => labourer.id));
@@ -233,11 +238,16 @@ export function LabourGroupsPage() {
   }, [groups, search, statusFilter]);
   const visibleLabourers = useMemo(() => {
     const term = normalize(search);
-    const activeGroupId = selectedGroup?.id ?? "";
     return labourers.filter((labourer) => {
       const workerGroup = labourer.groupId ? groupLookup.get(labourer.groupId) ?? null : null;
+      const legacyGroupName = labourer.group?.trim() ?? "";
+      const inSelectedGroup = selectedGroup ? isLabourerInGroup(labourer, selectedGroup) : false;
       const labourStatus = labourer.active !== false ? "active" : "inactive";
-      const memberStatus = !labourer.groupId ? "no_group" : labourer.groupId === activeGroupId ? "in_group" : "another_group";
+      const memberStatus = !labourer.groupId && !legacyGroupName
+        ? "no_group"
+        : inSelectedGroup
+          ? "in_group"
+          : "another_group";
       const searchMatch = !term
         || normalize(labourer.name).includes(term)
         || normalize(labourer.phone ?? labourer.mobile ?? "").includes(term)
@@ -249,9 +259,9 @@ export function LabourGroupsPage() {
     });
   }, [groupLookup, labourers, membershipFilter, search, selectedGroup?.id, statusFilter]);
   const selectedLabourers = useMemo(() => selectedIds.map((id) => labourers.find((labourer) => labourer.id === id)).filter(Boolean) as Labourer[], [labourers, selectedIds]);
-  const selectedInThisGroup = selectedLabourers.filter((labourer) => labourer.groupId === selectedGroup?.id).length;
-  const selectedInAnotherGroup = selectedLabourers.filter((labourer) => labourer.groupId && labourer.groupId !== selectedGroup?.id).length;
-  const selectedNoGroup = selectedLabourers.filter((labourer) => !labourer.groupId).length;
+  const selectedInThisGroup = selectedGroup ? selectedLabourers.filter((labourer) => isLabourerInGroup(labourer, selectedGroup)).length : 0;
+  const selectedInAnotherGroup = selectedGroup ? selectedLabourers.filter((labourer) => !isLabourerInGroup(labourer, selectedGroup) && (labourer.groupId || labourer.group?.trim())).length : 0;
+  const selectedNoGroup = selectedLabourers.filter((labourer) => !labourer.groupId && !labourer.group?.trim()).length;
   const currentAction = selectedIds.length === 0
     ? null
     : selectedInAnotherGroup > 0
@@ -277,7 +287,7 @@ export function LabourGroupsPage() {
     } as LabourGroup;
     await persistOperationalRecord("labourGroup", nextRecord);
     if (previousGroup && changedName) {
-      const renamedMembers = labourers.filter((labourer) => labourer.groupId === record.id && labourer.group !== record.name);
+      const renamedMembers = labourers.filter((labourer) => isLabourerInGroup(labourer, record) && labourer.group !== record.name);
       for (const labourer of renamedMembers) {
         await persistOperationalRecord("labourer", {
           ...labourer,
@@ -334,9 +344,9 @@ export function LabourGroupsPage() {
           <button type="button" className="secondary-button" onClick={() => navigate(`/workspace/workforce/labour-groups/${group.id}`)}>View</button>
         </div>
         <div className="workforce-group-card__metrics">
-          <article><span>Total labourers</span><strong>{stats.members.length}</strong></article>
-          <article><span>Active</span><strong>{stats.activeMembers.length}</strong></article>
-          <article><span>Inactive</span><strong>{stats.inactiveMembers.length}</strong></article>
+          <article><span>Total members</span><strong>{stats.members.length}</strong></article>
+          <article><span>Active today</span><strong>{stats.activeMembers.length}</strong></article>
+          <article><span>Inactive today</span><strong>{stats.inactiveMembers.length}</strong></article>
         </div>
         <div className="workforce-group-card__copy">
           <small>{group.phone || "No contact"}</small>
@@ -369,13 +379,14 @@ export function LabourGroupsPage() {
             <span className={`sync-badge ${selectedGroup.active !== false ? "sync-badge--online" : "sync-badge--error"}`}>{selectedGroup.active !== false ? "Active" : "Inactive"}</span>
           </section>
           <section className="record-panel workforce-group-detail-grid">
-            <article><span>Total labourers</span><strong>{stats.members.length}</strong></article>
-            <article><span>Active</span><strong>{stats.activeMembers.length}</strong></article>
-            <article><span>Inactive</span><strong>{stats.inactiveMembers.length}</strong></article>
+            <article><span>Total members</span><strong>{stats.members.length}</strong></article>
+            <article><span>Active today</span><strong>{stats.activeMembers.length}</strong></article>
+            <article><span>Inactive today</span><strong>{stats.inactiveMembers.length}</strong></article>
             <article><span>Outstanding advances</span><strong>{money(stats.advanceBalance)}</strong></article>
             <article><span>Unsettled wages</span><strong>{money(stats.unsettledWages)}</strong></article>
             <article><span>Last settlement</span><strong>{stats.lastSettlement ? stats.lastSettlement.settlementDate : "-"}</strong></article>
           </section>
+          <p className="context-message">Settlement eligibility is based on wage-period attendance, not only the current active status.</p>
           <section className="record-panel workforce-group-section">
             <div className="workforce-group-section__heading">
               <h2>Members</h2>
@@ -430,8 +441,8 @@ export function LabourGroupsPage() {
           </section>
           <section className="record-panel workforce-group-detail-grid">
             <article><span>Assigned</span><strong>{stats.members.length}</strong></article>
-            <article><span>Active</span><strong>{stats.activeMembers.length}</strong></article>
-            <article><span>Inactive</span><strong>{stats.inactiveMembers.length}</strong></article>
+            <article><span>Active today</span><strong>{stats.activeMembers.length}</strong></article>
+            <article><span>Inactive today</span><strong>{stats.inactiveMembers.length}</strong></article>
             <article><span>Visible</span><strong>{visibleLabourers.length}</strong></article>
           </section>
           <section className="record-panel workforce-group-members-panel">
@@ -461,7 +472,7 @@ export function LabourGroupsPage() {
                 const workerGroup = labourer.groupId ? groupLookup.get(labourer.groupId) ?? null : null;
                 const currentGroupName = workerGroup?.name ?? labourer.group?.trim() ?? "No group";
                 const serial = labourSerial(labourer);
-                const inOtherGroup = Boolean(labourer.groupId && labourer.groupId !== selectedGroup.id);
+                const inOtherGroup = !isLabourerInGroup(labourer, selectedGroup) && Boolean(labourer.groupId || labourer.group?.trim());
                 return (
                   <button
                     type="button"
