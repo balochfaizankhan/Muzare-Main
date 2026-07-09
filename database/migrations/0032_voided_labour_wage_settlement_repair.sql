@@ -146,6 +146,7 @@ INSERT INTO account_transactions (
   season_id,
   account_id,
   source,
+  source_type,
   reference_id,
   type,
   amount,
@@ -158,6 +159,7 @@ SELECT
   missing_reversals.season_id,
   missing_reversals.account_id,
   'settlement'::transaction_source,
+  'labour_wage_settlement',
   missing_reversals.settlement_reference_id,
   (
     CASE

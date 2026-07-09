@@ -69,6 +69,5 @@ WHERE id IN (SELECT duplicate_id FROM tmp_duplicate_workspace_memberships);
 DROP TABLE IF EXISTS tmp_duplicate_workspace_memberships;
 DROP TABLE IF EXISTS tmp_ranked_workspace_memberships;
 
-DROP INDEX IF EXISTS workspace_memberships_workspace_user_uidx;
-CREATE UNIQUE INDEX workspace_memberships_workspace_user_uidx
+CREATE UNIQUE INDEX IF NOT EXISTS workspace_memberships_workspace_user_uidx
   ON workspace_memberships (workspace_id, user_id);

@@ -9,6 +9,7 @@ const pool = new Pool({
 });
 
 export const db = drizzle(pool, { schema });
+export { pool };
 
 export async function checkDatabaseConnection(): Promise<void> {
   await pool.query("select 1");

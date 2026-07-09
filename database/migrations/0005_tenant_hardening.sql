@@ -28,10 +28,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS farms_workspace_id_id_uidx
 
 DO $$
 BEGIN
-  ALTER TABLE operational_records
-    ADD CONSTRAINT operational_records_workspace_farm_fk
-    FOREIGN KEY (workspace_id, farm_id)
-    REFERENCES farms (workspace_id, id);
-EXCEPTION
-  WHEN duplicate_object THEN null;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'operational_records_workspace_farm_fk'
+  ) THEN
+    ALTER TABLE operational_records
+      ADD CONSTRAINT operational_records_workspace_farm_fk
+      FOREIGN KEY (workspace_id, farm_id)
+      REFERENCES farms (workspace_id, id)
+      NOT VALID;
+  END IF;
 END $$;

@@ -22,7 +22,12 @@ SET workspace_id = farms.workspace_id,
       ELSE 'planned'::season_status
     END)
 FROM farms
-WHERE farms.id = seasons.farm_id;
+WHERE farms.id = seasons.farm_id
+  AND (
+    seasons.workspace_id IS DISTINCT FROM farms.workspace_id
+    OR seasons.expected_ends_on IS NULL
+    OR seasons.status IS NULL
+  );
 
 ALTER TABLE seasons
   ALTER COLUMN workspace_id SET NOT NULL,
@@ -54,20 +59,30 @@ CREATE UNIQUE INDEX IF NOT EXISTS seasons_one_active_per_farm_uidx
 
 DO $$
 BEGIN
-  ALTER TABLE seasons
-    ADD CONSTRAINT seasons_workspace_farm_fk
-    FOREIGN KEY (workspace_id, farm_id)
-    REFERENCES farms (workspace_id, id);
-EXCEPTION
-  WHEN duplicate_object THEN null;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'seasons_workspace_farm_fk'
+  ) THEN
+    ALTER TABLE seasons
+      ADD CONSTRAINT seasons_workspace_farm_fk
+      FOREIGN KEY (workspace_id, farm_id)
+      REFERENCES farms (workspace_id, id)
+      NOT VALID;
+  END IF;
 END $$;
 
 DO $$
 BEGIN
-  ALTER TABLE operational_records
-    ADD CONSTRAINT operational_records_workspace_farm_season_fk
-    FOREIGN KEY (workspace_id, farm_id, season_id)
-    REFERENCES seasons (workspace_id, farm_id, id);
-EXCEPTION
-  WHEN duplicate_object THEN null;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'operational_records_workspace_farm_season_fk'
+  ) THEN
+    ALTER TABLE operational_records
+      ADD CONSTRAINT operational_records_workspace_farm_season_fk
+      FOREIGN KEY (workspace_id, farm_id, season_id)
+      REFERENCES seasons (workspace_id, farm_id, id)
+      NOT VALID;
+  END IF;
 END $$;
