@@ -1055,6 +1055,17 @@ export type LabourWageSettlementPreview = {
     farmId: string;
     seasonId: string;
   }>;
+  advanceDebugTrace?: Array<{
+    labourerId: string;
+    labourName: string;
+    totalAdvancesToDate: number;
+    priorValidSettledAdvances: number;
+    excludedVoidedSettledAdvances: number;
+    availableAdvance: number;
+    grossWages: number;
+    currentAdjustment: number;
+    carryForward: number;
+  }>;
   includedEarnings: Array<{
     id: string;
     labourerId: string;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { calculateLabourWageSettlementTotals, normalizeSettlementPayload, settlementAccountingStatus, settlementRangesOverlap } from "../src/lib/labour-wage-settlements.js";
+import { calculateLabourWageSettlementTotals, normalizeSettlementPayload, settlementAccountingStatus, settlementConsumesAdvanceBalance, settlementRangesOverlap } from "../src/lib/labour-wage-settlements.js";
 
 test("settlementRangesOverlap detects overlapping inclusive date ranges", () => {
   assert.equal(settlementRangesOverlap("2026-06-01", "2026-06-15", "2026-06-15", "2026-06-30"), true);
@@ -136,6 +136,64 @@ test("deleted labour settlements stay deleted in normalization and accounting st
   assert.equal(payload.status, "deleted");
   assert.equal(payload.deletedAt, "2026-07-05T10:00:00.000Z");
   assert.equal(settlementAccountingStatus(payload, 0), "deleted");
+});
+
+test("voided, cancelled, and reversed settlements do not consume advance balances", () => {
+  assert.equal(settlementConsumesAdvanceBalance(normalizeSettlementPayload({
+    settlementNumber: "LW-0002",
+    linkedVoucherId: "",
+    linkedVoucherNumber: "LW-0002",
+    linkedAccountId: "account-1",
+    fromDate: "2026-06-01",
+    toDate: "2026-06-30",
+    settlementDate: "2026-07-01",
+    expenseAmount: 100,
+    status: "posted",
+  })), true);
+  assert.equal(settlementConsumesAdvanceBalance(normalizeSettlementPayload({
+    settlementNumber: "LW-0003",
+    linkedVoucherId: "",
+    linkedVoucherNumber: "LW-0003",
+    linkedAccountId: "account-1",
+    fromDate: "2026-06-01",
+    toDate: "2026-06-30",
+    settlementDate: "2026-07-01",
+    expenseAmount: 100,
+    status: "voided",
+  })), false);
+  assert.equal(settlementConsumesAdvanceBalance(normalizeSettlementPayload({
+    settlementNumber: "LW-0004",
+    linkedVoucherId: "",
+    linkedVoucherNumber: "LW-0004",
+    linkedAccountId: "account-1",
+    fromDate: "2026-06-01",
+    toDate: "2026-06-30",
+    settlementDate: "2026-07-01",
+    expenseAmount: 100,
+    status: "cancelled",
+  })), false);
+  assert.equal(settlementConsumesAdvanceBalance(normalizeSettlementPayload({
+    settlementNumber: "LW-0005",
+    linkedVoucherId: "",
+    linkedVoucherNumber: "LW-0005",
+    linkedAccountId: "account-1",
+    fromDate: "2026-06-01",
+    toDate: "2026-06-30",
+    settlementDate: "2026-07-01",
+    expenseAmount: 100,
+    status: "posted",
+    reversedAt: "2026-07-02T08:00:00.000Z",
+  })), false);
+});
+
+test("labour settlement preview computes prior settled advances separately from current adjustment", () => {
+  const source = readFileSync(new URL("../src/lib/labour-wage-settlements.ts", import.meta.url), "utf8");
+  assert.ok(source.includes("settlementConsumesAdvanceBalance(row.payload)"));
+  assert.ok(source.includes("priorValidAdvanceSettledByLabourer"));
+  assert.ok(source.includes("excludedVoidedAdvanceSettledByLabourer"));
+  assert.ok(source.includes("advanceDebugTrace"));
+  assert.ok(source.includes("const previouslySettledAdvances = includedLabourRows.reduce"));
+  assert.ok(!source.includes("const previouslySettledAdvances = Math.max(rawAdvancesUpToSettlementDate - availableAdvanceBalanceBeforeSettlement, 0);"));
 });
 
 test("labour wage settlements can be deleted safely only through the settlement register flow", () => {
