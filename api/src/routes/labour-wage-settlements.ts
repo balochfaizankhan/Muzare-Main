@@ -11,6 +11,7 @@ import { hasModulePermission } from "../permissions.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
 import {
   allocateSettlementNumber,
+  calculateLabourWageSettlementTotals,
   listCanonicalPaymentAccounts,
   listLabourWageSettlements,
   normalizeSettlementPayload,
@@ -31,9 +32,24 @@ const baseSchema = z.object({
   toDate: z.string().date(),
   settlementDate: z.string().date(),
 });
-const previewSchema = baseSchema;
+const settlementSelectionSchema = z.object({
+  settlementMode: z.enum(["individual", "group"]).optional(),
+  labourerId: z.string().uuid().optional().nullable(),
+  foremanId: z.string().uuid().optional().nullable(),
+  groupId: z.string().uuid().optional().nullable(),
+  labourIds: z.array(z.string().uuid()).optional(),
+});
+const previewSchema = baseSchema.extend(settlementSelectionSchema.shape).extend({
+  paidAmount: z.coerce.number().nonnegative().optional(),
+  manualAdjustment: z.coerce.number().optional(),
+});
 const createSchema = baseSchema.extend({
-  accountId: z.string().min(1),
+  ...settlementSelectionSchema.shape,
+  paymentAccountId: z.string().min(1).optional(),
+  accountId: z.string().min(1).optional(),
+  paidAmount: z.coerce.number().nonnegative().default(0),
+  manualAdjustment: z.coerce.number().default(0),
+  manualAdjustmentNote: z.string().trim().max(500).optional().nullable(),
   notes: z.string().trim().max(500).optional(),
 });
 const settlementParamsSchema = z.object({
@@ -45,6 +61,7 @@ const updateSchema = z.object({
   toDate: z.string().date().optional(),
   settlementDate: z.string().date().optional(),
   accountId: z.string().min(1).optional(),
+  paymentAccountId: z.string().min(1).optional(),
   notes: z.string().trim().max(500).optional().nullable(),
   voidReason: z.string().trim().max(500).optional().nullable(),
 });
@@ -142,7 +159,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           ? "Settlement is voided."
           : (transactionCountBySettlementId.get(row.clientRecordId) ?? 0) > 0
             ? null
-            : "Accounting entries missing. Repost accounting.",
+            : null,
         updatedAt: row.clientUpdatedAt.toISOString(),
       })).sort((left, right) => right.settlementDate.localeCompare(left.settlementDate) || right.updatedAt.localeCompare(left.updatedAt));
       const activeRows = rows.filter((row) => row.status !== "voided" && !isDeletedOperationalPayload(row));
@@ -168,7 +185,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           const linked = voucherById.get(row.linkedVoucherId);
           return row.linkedVoucherId && (!linked || linked.settlementId !== row.id);
         }).length,
-        postedWithoutAccounting: rows.filter((row) => row.accountingStatus === "accounting_missing").length,
+        postedWithoutAccounting: rows.filter((row) => row.status === "posted" && row.accountingStatus !== "posted").length,
         voidedSettlementsWithActiveVoucher: rows.filter((row) => {
           const linked = voucherById.get(row.linkedVoucherId);
           return row.status === "voided" && linked && !isDeletedOperationalPayload(linked);
@@ -220,7 +237,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
             ? "Settlement is voided."
             : accountingEntries > 0
               ? null
-              : "Accounting entries missing. Repost accounting.",
+            : null,
         updatedAt: settlement.clientUpdatedAt.toISOString(),
         accountingEntries,
       },
@@ -235,7 +252,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
       return reply.code(400).send({ message: "A valid labour settlement preview request is required." });
     }
     const { workspaceId } = params.data;
-    const { farmId, seasonId, fromDate, toDate, settlementDate } = parsed.data;
+    const { farmId, seasonId, fromDate, toDate, settlementDate, settlementMode, labourerId, foremanId, groupId, labourIds, paidAmount, manualAdjustment } = parsed.data;
     if (request.appUser.workspaceId !== workspaceId) return reply.code(403).send({ message: "Select this workspace before previewing labour settlements." });
     if (!hasModulePermission(request.appUser, workspaceId, "wages", "view")) return reply.code(403).send({ message: "Workspace wage settlement view permission is required." });
     if (!hasFarmAccess(request.appUser, workspaceId, farmId)) return reply.code(403).send({ message: "You do not have access to this farm." });
@@ -244,7 +261,30 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
     }
     const ownershipError = await validateTenantReferences(workspaceId, { farmId, seasonId });
     if (ownershipError) return reply.code(403).send({ message: ownershipError });
-    const preview = await db.transaction((tx) => previewLabourWageSettlement(tx, workspaceId, farmId, seasonId, fromDate, toDate, settlementDate));
+    const preview = await db.transaction((tx) => previewLabourWageSettlement(tx, workspaceId, farmId, seasonId, fromDate, toDate, settlementDate, undefined, {
+      settlementMode,
+      labourerId,
+      foremanId,
+      groupId,
+      labourIds,
+    }));
+    const updated = calculateLabourWageSettlementTotals(
+      preview.attendanceWages,
+      preview.labourWorkWages ?? preview.pendingLabourEarnings,
+      preview.availableAdvanceBalanceBeforeSettlement ?? preview.advancesAvailableUpToSettlementDate ?? 0,
+      Number(paidAmount ?? 0),
+      Number(manualAdjustment ?? 0),
+    );
+    preview.paidAmount = Number(paidAmount ?? 0);
+    preview.manualAdjustment = Number(manualAdjustment ?? 0);
+    preview.netPayableBeforePayment = updated.netPayableBeforePayment;
+    preview.balanceAfterPayment = updated.balanceAfterPayment;
+    preview.payableBalance = updated.payableBalance;
+    preview.advanceAdjustedNow = updated.advanceAdjustedNow;
+    preview.settledAdvanceAmount = updated.advanceAdjustedNow;
+    preview.appliedAdvances = updated.advanceAdjustedNow;
+    preview.remainingAdvanceCarryForward = updated.remainingAdvanceCarryForward;
+    preview.carryForwardAdvance = updated.remainingAdvanceCarryForward;
     return { preview, valid: preview.unresolvedRows.length === 0 && preview.overlappingSettlements.length === 0 };
   });
 
@@ -256,7 +296,24 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
       return reply.code(400).send({ message: "A valid labour settlement payload is required." });
     }
     const { workspaceId } = params.data;
-    const { farmId, seasonId, fromDate, toDate, settlementDate, accountId, notes } = parsed.data;
+    const {
+      farmId,
+      seasonId,
+      fromDate,
+      toDate,
+      settlementDate,
+      settlementMode,
+      labourerId,
+      foremanId,
+      groupId,
+      labourIds,
+      paymentAccountId,
+      accountId,
+      paidAmount,
+      manualAdjustment,
+      manualAdjustmentNote,
+      notes,
+    } = parsed.data;
     if (request.appUser.workspaceId !== workspaceId) return reply.code(403).send({ message: "Select this workspace before creating labour settlements." });
     if (!hasModulePermission(request.appUser, workspaceId, "wages", "create")) return reply.code(403).send({ message: "Workspace wage settlement create permission is required." });
     if (!hasFarmAccess(request.appUser, workspaceId, farmId)) return reply.code(403).send({ message: "You do not have access to this farm." });
@@ -265,8 +322,17 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
     }
     const ownershipError = await validateTenantReferences(workspaceId, { farmId, seasonId });
     if (ownershipError) return reply.code(403).send({ message: ownershipError });
+    if (Number(manualAdjustment ?? 0) !== 0 && !manualAdjustmentNote?.trim()) {
+      return reply.code(400).send({ message: "Manual adjustment note is required when manual adjustment is non-zero." });
+    }
 
-    const preview = await db.transaction((tx) => previewLabourWageSettlement(tx, workspaceId, farmId, seasonId, fromDate, toDate, settlementDate));
+    const preview = await db.transaction((tx) => previewLabourWageSettlement(tx, workspaceId, farmId, seasonId, fromDate, toDate, settlementDate, undefined, {
+      settlementMode,
+      labourerId,
+      foremanId,
+      groupId,
+      labourIds,
+    }));
     if (preview.unresolvedRows.length) {
       return reply.code(409).send({
         message: "Attendance wages cannot be settled until missing wage rates are fixed.",
@@ -284,14 +350,18 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
     }
     try {
       const result = await db.transaction(async (tx) => {
+        const effectivePaidAmount = Number(paidAmount ?? 0);
+        const paymentAccountInput = paymentAccountId ?? accountId ?? "";
         logSettlementAccountValidation(request, {
-          paymentAccountId: accountId,
+          paymentAccountId: paymentAccountInput,
           selectedFarmId: farmId,
           selectedSeasonId: seasonId,
         });
-        const resolvedAccount = await resolveCanonicalPaymentAccountId(tx, workspaceId, farmId, accountId);
+        const resolvedAccount = paymentAccountInput
+          ? await resolveCanonicalPaymentAccountId(tx, workspaceId, farmId, paymentAccountInput)
+          : null;
         logSettlementAccountValidation(request, {
-          paymentAccountId: accountId,
+          paymentAccountId: paymentAccountInput,
           selectedFarmId: farmId,
           selectedSeasonId: seasonId,
           accountRowFound: Boolean(resolvedAccount),
@@ -300,53 +370,80 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           accountActive: resolvedAccount?.active ?? null,
           accountSourceType: resolvedAccount?.sourceType ?? null,
         });
-        const accountValidation = validateLabourSettlementPaymentAccount(resolvedAccount, farmId);
-        if (!accountValidation.valid) {
-          logSettlementAccountValidation(request, {
-            paymentAccountId: accountId,
-            selectedFarmId: farmId,
-            selectedSeasonId: seasonId,
-            validationReason: accountValidation.reason,
-            validationMessage: accountValidation.message,
-          });
-          throw new Error(accountValidation.message ?? "Payment account validation failed.");
-        }
-        if (!resolvedAccount) {
-          throw new Error("Payment account is not mapped. Please repair imported accounts.");
+        if (effectivePaidAmount > 0) {
+          const accountValidation = validateLabourSettlementPaymentAccount(resolvedAccount, farmId);
+          if (!accountValidation.valid) {
+            logSettlementAccountValidation(request, {
+              paymentAccountId: paymentAccountInput,
+              selectedFarmId: farmId,
+              selectedSeasonId: seasonId,
+              validationReason: accountValidation.reason,
+              validationMessage: accountValidation.message,
+            });
+            throw new Error(accountValidation.message ?? "Payment account validation failed.");
+          }
+          if (!resolvedAccount) {
+            throw new Error("Payment account is not mapped. Please repair imported accounts.");
+          }
         }
         const account = resolvedAccount;
         const createdAt = new Date();
         const settlementId = crypto.randomUUID();
         const settlementNumber = await allocateSettlementNumber(tx, workspaceId, farmId);
+        const settlementTotals = calculateLabourWageSettlementTotals(
+          preview.attendanceWages,
+          preview.labourWorkWages ?? preview.pendingLabourEarnings,
+          preview.availableAdvanceBalanceBeforeSettlement ?? preview.advancesAvailableUpToSettlementDate ?? 0,
+          effectivePaidAmount,
+          Number(manualAdjustment ?? 0),
+        );
         const description = `Labour wage settlement: ${fromDate} to ${toDate} (attendance wages + labour work)`;
+        const paymentAccountIdValue = effectivePaidAmount > 0 ? account?.id ?? resolvedAccount?.id ?? paymentAccountInput : null;
         const settlementPayload = {
           id: settlementId,
           settlementNumber,
           linkedVoucherId: "",
           linkedVoucherNumber: settlementNumber,
-          linkedAccountId: account.id,
-          linkedAccountName: account.name,
+          linkedAccountId: paymentAccountIdValue ?? "",
+          linkedAccountName: account?.name ?? resolvedAccount?.name ?? "",
+          paymentAccountId: paymentAccountIdValue,
+          settlementMode: settlementMode ?? "individual",
+          foremanId: foremanId ?? null,
+          groupId: groupId ?? null,
+          includedLabourIds: preview.includedLabourIds ?? [],
           fromDate,
           toDate,
           settlementDate,
-          attendanceWages: preview.attendanceWages,
-          pendingLabourEarnings: preview.pendingLabourEarnings,
-          labourWork: preview.pendingLabourEarnings,
-          totalEarned: preview.totalEarned,
-          totalLabourCost: preview.totalEarned,
-          advancesPaid: preview.advancesPaid,
-          advancesAvailableUpToSettlementDate: preview.advancesPaid,
-          settledAdvanceAmount: preview.settledAdvanceAmount,
-          appliedAdvances: preview.settledAdvanceAmount,
-          expenseAmount: preview.expenseAmount,
-          carryForwardAdvance: preview.carryForwardAdvance,
-          payableBalance: preview.payableBalance,
-          cashPayable: preview.payableBalance,
+          attendanceWages: settlementTotals.attendanceWages,
+          labourWorkWages: settlementTotals.labourWorkWages,
+          pendingLabourEarnings: settlementTotals.pendingLabourEarnings,
+          grossWages: settlementTotals.grossWages,
+          totalEarned: settlementTotals.totalEarned,
+          totalLabourCost: settlementTotals.grossWages,
+          availableAdvanceBalanceBeforeSettlement: settlementTotals.availableAdvanceBalanceBeforeSettlement,
+          advancesPaid: settlementTotals.advancesPaid,
+          advancesAvailableUpToSettlementDate: settlementTotals.availableAdvanceBalanceBeforeSettlement,
+          advanceAdjustedNow: preview.advanceAdjustedNow,
+          settledAdvanceAmount: preview.advanceAdjustedNow,
+          appliedAdvances: preview.advanceAdjustedNow,
+          remainingAdvanceCarryForward: settlementTotals.remainingAdvanceCarryForward,
+          carryForwardAdvance: settlementTotals.carryForwardAdvance,
+          manualAdjustment: Number(manualAdjustment ?? 0),
+          manualAdjustmentNote: manualAdjustment ? (manualAdjustmentNote ?? "") : null,
+          netPayableBeforePayment: settlementTotals.netPayableBeforePayment,
+          expenseAmount: settlementTotals.expenseAmount,
+          paidAmount: settlementTotals.paidAmount,
+          balanceAfterPayment: settlementTotals.balanceAfterPayment,
+          payableBalance: settlementTotals.payableBalance,
+          cashPayable: settlementTotals.payableBalance,
           notes: notes?.trim() || "",
           status: "posted" as const,
           createdBy: request.appUser!.id,
           createdAt: createdAt.toISOString(),
           updatedAt: createdAt.toISOString(),
+          sourceAttendanceIds: preview.sourceAttendanceIds ?? [],
+          sourceLabourWorkIds: preview.sourceLabourWorkIds ?? [],
+          advanceAdjustmentAllocations: preview.advanceAdjustmentAllocations ?? [],
         };
         const earningsToSettle = await listLabourEarnings(tx, workspaceId, farmId, seasonId);
         await tx.insert(operationalRecords).values([{
@@ -378,6 +475,31 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
             clientUpdatedAt: createdAt,
             updatedAt: createdAt,
           }).where(eq(operationalRecords.id, earning.id));
+        }
+        const attendanceRows = await tx.select({
+          id: operationalRecords.id,
+          clientRecordId: operationalRecords.clientRecordId,
+          payload: operationalRecords.payload,
+        }).from(operationalRecords).where(and(
+          eq(operationalRecords.workspaceId, workspaceId),
+          eq(operationalRecords.farmId, farmId),
+          eq(operationalRecords.seasonId, seasonId),
+          eq(operationalRecords.entityType, "attendance"),
+        ));
+        const includedAttendanceIds = new Set(preview.sourceAttendanceIds ?? []);
+        for (const attendance of attendanceRows) {
+          if (!includedAttendanceIds.has(attendance.clientRecordId)) continue;
+          const nextPayload = {
+            ...(attendance.payload as Record<string, unknown>),
+            linkedSettlementId: settlementId,
+            settlementDate,
+            updatedAt: createdAt.toISOString(),
+          };
+          await tx.update(operationalRecords).set({
+            payload: nextPayload,
+            clientUpdatedAt: createdAt,
+            updatedAt: createdAt,
+          }).where(eq(operationalRecords.id, attendance.id));
         }
         const settlementRecord = {
           id: settlementId,
@@ -481,12 +603,12 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
     const nextFromDate = parsed.data.fromDate ?? payload.fromDate;
     const nextToDate = parsed.data.toDate ?? payload.toDate;
     const nextSettlementDate = parsed.data.settlementDate ?? payload.settlementDate;
-    const nextAccountId = parsed.data.accountId ?? payload.linkedAccountId;
+    const nextAccountId = parsed.data.paymentAccountId ?? parsed.data.accountId ?? payload.paymentAccountId ?? payload.linkedAccountId;
     const nextNotes = parsed.data.notes === undefined ? payload.notes : (parsed.data.notes ?? "");
     const financialChanges = nextFromDate !== payload.fromDate
       || nextToDate !== payload.toDate
       || nextSettlementDate !== payload.settlementDate
-      || nextAccountId !== payload.linkedAccountId;
+      || nextAccountId !== (payload.paymentAccountId ?? payload.linkedAccountId);
 
     const transactionCount = await db.transaction((tx) => settlementAccountingTransactionCounts(tx, [settlementId])).then((result) => result.get(settlementId) ?? 0);
     const hasHealthyAccounting = transactionCount > 0 && settlementAccountingStatus(payload, transactionCount) === "posted";
@@ -590,8 +712,8 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
             workspaceId,
             farmId: settlement.farmId,
             seasonId: settlement.seasonId,
-            accountingStatus: transactionCount > 0 ? "posted" as const : "accounting_missing" as const,
-            accountingMessage: transactionCount > 0 ? null : "Accounting entries missing. Repost accounting.",
+            accountingStatus: "posted" as const,
+            accountingMessage: null,
             updatedAt: updatedAt.toISOString(),
           },
         };
@@ -627,7 +749,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           farmId: settlement.farmId,
           seasonId: settlement.seasonId,
           accountingStatus: settlementAccountingStatus(payload, transactionCount),
-          accountingMessage: transactionCount > 0 ? null : "Accounting entries missing. Repost accounting.",
+          accountingMessage: null,
           updatedAt: updatedAt.toISOString(),
         },
       };
@@ -818,7 +940,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
 
     const transactionCounts = await db.transaction((tx) => settlementAccountingTransactionCounts(tx, [settlementId]));
     const accountingEntries = transactionCounts.get(settlementId) ?? 0;
-    const canDelete = accountingEntries === 0 || settlementAccountingStatus(payload, accountingEntries) === "accounting_missing";
+    const canDelete = accountingEntries === 0 && payload.status !== "posted";
     if (!canDelete) {
       return reply.code(409).send({
         message: "This settlement has accounting entries. Use Void/Reverse instead.",

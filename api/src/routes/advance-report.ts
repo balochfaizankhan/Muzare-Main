@@ -137,7 +137,7 @@ export async function advanceReportRoutes(app: FastifyInstance): Promise<void> {
         linkedVoucherNumber: row.payload.linkedVoucherNumber,
       }))
       .sort((left, right) => left.settlementDate.localeCompare(right.settlementDate) || left.settlementNumber.localeCompare(right.settlementNumber));
-    const settledAdvances = settlementReferences.reduce((sum, item) => sum + item.settledAdvanceAmount, 0);
+    const settledAdvances = settlementReferences.reduce((sum, item) => sum + Number(item.settledAdvanceAmount ?? 0), 0);
     const outstandingAdvances = Math.max(grandTotal - settledAdvances, 0);
     return {
       records,

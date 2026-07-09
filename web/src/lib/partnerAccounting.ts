@@ -400,12 +400,12 @@ export function getPartnerAccountingSnapshot(
       deleted: flags.deleted,
       voided: flags.voided,
       reversed: flags.reversed,
-      totalLabourCost: settlement.totalEarned,
-      advancesApplied: getLabourWageSettlementAdvanceOffset(settlement as unknown as { advancesApplied?: number; settledAdvanceAmount?: number }),
-      settledAdvanceAmount: getLabourWageSettlementAdvanceOffset(settlement as unknown as { advancesApplied?: number; settledAdvanceAmount?: number }),
+      totalLabourCost: settlement.grossWages ?? settlement.totalEarned,
+      advancesApplied: getLabourWageSettlementAdvanceOffset(settlement as unknown as { advanceAdjustedNow?: number; advancesApplied?: number; settledAdvanceAmount?: number }),
+      settledAdvanceAmount: getLabourWageSettlementAdvanceOffset(settlement as unknown as { advanceAdjustedNow?: number; advancesApplied?: number; settledAdvanceAmount?: number }),
       cashPaid: getLabourWageSettlementCashPaidAmount(settlement),
-      carryForwardAdvance: settlement.carryForwardAdvance,
-      accountId: settlement.linkedAccountId,
+      carryForwardAdvance: settlement.remainingAdvanceCarryForward ?? settlement.carryForwardAdvance,
+      accountId: settlement.paymentAccountId ?? settlement.linkedAccountId,
       resolvedAccountId,
       farmId: settlement.farmId ?? null,
       seasonId: settlement.seasonId ?? null,
@@ -475,7 +475,8 @@ export function getPartnerAccountingSnapshot(
   }
   const totalLabourAdvancesPaid = advanceRows.filter((row) => row.included).reduce((sum, row) => sum + row.amount, 0);
   const labourAdvancesSettledThroughWageSettlements = settlementRows.filter((row) => row.included).reduce((sum, row) => sum + row.advancesApplied, 0);
-  const outstandingLabourAdvances = Math.max(0, totalLabourAdvancesPaid - labourAdvancesSettledThroughWageSettlements);
+  const carryForwardAdvances = settlementRows.filter((row) => row.included).reduce((sum, row) => sum + row.carryForwardAdvance, 0);
+  const outstandingLabourAdvances = Math.max(0, totalLabourAdvancesPaid - labourAdvancesSettledThroughWageSettlements + carryForwardAdvances);
   const labourSettlementCashPaid = settlementRows.filter((row) => row.included && row.cashPaid > 0).reduce((sum, row) => sum + row.cashPaid, 0);
   const labourSettlementNonCashApplied = labourAdvancesSettledThroughWageSettlements;
 

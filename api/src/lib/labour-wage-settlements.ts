@@ -16,22 +16,47 @@ export type LabourWageSettlementPayload = {
   linkedVoucherId: string;
   linkedVoucherNumber: string;
   linkedAccountId: string;
+  settlementMode?: "individual" | "group";
+  foremanId?: string | null;
+  groupId?: string | null;
+  includedLabourIds?: string[];
   fromDate: string;
   toDate: string;
   settlementDate: string;
   attendanceWages: number;
-  pendingLabourEarnings: number;
-  labourWork?: number;
-  totalEarned: number;
+  labourWorkWages?: number;
+  pendingLabourEarnings?: number;
+  grossWages: number;
+  totalEarned?: number;
   totalLabourCost?: number;
-  advancesPaid: number;
+  availableAdvanceBalanceBeforeSettlement: number;
+  advancesPaid?: number;
   advancesAvailableUpToSettlementDate?: number;
-  settledAdvanceAmount: number;
+  advanceAdjustedNow: number;
+  settledAdvanceAmount?: number;
   appliedAdvances?: number;
+  remainingAdvanceCarryForward: number;
+  carryForwardAdvance?: number;
+  manualAdjustment: number;
+  manualAdjustmentNote?: string | null;
+  netPayableBeforePayment: number;
   expenseAmount: number;
-  carryForwardAdvance: number;
-  payableBalance: number;
+  paidAmount: number;
+  balanceAfterPayment: number;
+  payableBalance?: number;
   cashPayable?: number;
+  paymentAccountId?: string | null;
+  settlementVoucherId?: string | null;
+  sourceAttendanceIds?: string[];
+  sourceLabourWorkIds?: string[];
+  advanceAdjustmentAllocations?: Array<{
+    settlementId: string;
+    advanceId: string;
+    adjustedAmount: number;
+    workspaceId: string;
+    farmId: string;
+    seasonId: string;
+  }>;
   notes?: string;
   status: "posted" | "voided" | "deleted";
   createdBy?: string;
@@ -58,7 +83,7 @@ export type SettlementAccountingRepairResult = {
 
 type LabourPayload = { name?: unknown };
 type AttendancePayload = { labourerId?: unknown; labourId?: unknown; date?: unknown; status?: unknown };
-type AdvancePayload = { date?: unknown; amount?: unknown };
+type AdvancePayload = { labourerId?: unknown; labourId?: unknown; date?: unknown; amount?: unknown };
 type CanonicalPaymentAccount = {
   id: LabourSettlementAccount["id"];
   farmId: LabourSettlementAccount["farmId"];
@@ -78,36 +103,78 @@ function parseSettlementSequenceNumber(value: string) {
   return match ? Number(match[1]) : null;
 }
 
+function numberValue(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : Number(value ?? 0);
+}
+
+function stringArrayValue(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
+}
+
 export function normalizeSettlementPayload(payload: Record<string, unknown>): LabourWageSettlementPayload {
-  const attendanceWages = Number(payload.attendanceWages ?? 0);
-  const pendingLabourEarnings = Number(payload.pendingLabourEarnings ?? payload.labourWork ?? 0);
-  const totalEarned = Number(payload.totalEarned ?? payload.totalLabourCost ?? (attendanceWages + pendingLabourEarnings));
-  const advancesPaid = Number(payload.advancesPaid ?? payload.advancesAvailableUpToSettlementDate ?? 0);
-  const settledAdvanceAmount = Number(payload.settledAdvanceAmount ?? payload.appliedAdvances ?? 0);
-  const expenseAmount = Number(payload.expenseAmount ?? totalEarned);
-  const carryForwardAdvance = Number(payload.carryForwardAdvance ?? 0);
-  const payableBalance = Number(payload.payableBalance ?? payload.cashPayable ?? 0);
+  const attendanceWages = numberValue(payload.attendanceWages);
+  const labourWorkWages = numberValue(payload.labourWorkWages ?? payload.labourWork ?? payload.pendingLabourEarnings);
+  const grossWages = numberValue(payload.grossWages ?? payload.totalEarned ?? payload.totalLabourCost ?? (attendanceWages + labourWorkWages));
+  const availableAdvanceBalanceBeforeSettlement = numberValue(payload.availableAdvanceBalanceBeforeSettlement ?? payload.advancesAvailableUpToSettlementDate ?? payload.advancesPaid);
+  const advanceAdjustedNow = numberValue(payload.advanceAdjustedNow ?? payload.settledAdvanceAmount ?? payload.appliedAdvances);
+  const remainingAdvanceCarryForward = numberValue(payload.remainingAdvanceCarryForward ?? payload.carryForwardAdvance);
+  const manualAdjustment = numberValue(payload.manualAdjustment);
+  const netPayableBeforePayment = numberValue(payload.netPayableBeforePayment ?? (grossWages - advanceAdjustedNow + manualAdjustment));
+  const paidAmount = numberValue(payload.paidAmount ?? payload.payableBalance ?? payload.cashPayable);
+  const balanceAfterPayment = numberValue(payload.balanceAfterPayment ?? (netPayableBeforePayment - paidAmount));
+  const settlementMode = payload.settlementMode === "group" ? "group" : "individual";
   return {
     settlementNumber: typeof payload.settlementNumber === "string" ? payload.settlementNumber : "LW-0001",
     linkedVoucherId: typeof payload.linkedVoucherId === "string" ? payload.linkedVoucherId : "",
     linkedVoucherNumber: typeof payload.linkedVoucherNumber === "string" ? payload.linkedVoucherNumber : "",
     linkedAccountId: typeof payload.linkedAccountId === "string" ? payload.linkedAccountId : "",
+    settlementMode,
+    foremanId: typeof payload.foremanId === "string" ? payload.foremanId : null,
+    groupId: typeof payload.groupId === "string" ? payload.groupId : null,
+    includedLabourIds: stringArrayValue(payload.includedLabourIds),
     fromDate: typeof payload.fromDate === "string" ? payload.fromDate : "",
     toDate: typeof payload.toDate === "string" ? payload.toDate : "",
     settlementDate: typeof payload.settlementDate === "string" ? payload.settlementDate : "",
     attendanceWages,
-    pendingLabourEarnings,
-    labourWork: pendingLabourEarnings,
-    totalEarned,
-    totalLabourCost: totalEarned,
-    advancesPaid,
-    advancesAvailableUpToSettlementDate: advancesPaid,
-    settledAdvanceAmount,
-    appliedAdvances: settledAdvanceAmount,
-    expenseAmount,
-    carryForwardAdvance,
-    payableBalance,
-    cashPayable: payableBalance,
+    labourWorkWages,
+    pendingLabourEarnings: labourWorkWages,
+    grossWages,
+    totalEarned: grossWages,
+    totalLabourCost: grossWages,
+    availableAdvanceBalanceBeforeSettlement,
+    advancesPaid: availableAdvanceBalanceBeforeSettlement,
+    advancesAvailableUpToSettlementDate: availableAdvanceBalanceBeforeSettlement,
+    advanceAdjustedNow,
+    settledAdvanceAmount: advanceAdjustedNow,
+    appliedAdvances: advanceAdjustedNow,
+    remainingAdvanceCarryForward,
+    carryForwardAdvance: remainingAdvanceCarryForward,
+    manualAdjustment,
+    manualAdjustmentNote: typeof payload.manualAdjustmentNote === "string" ? payload.manualAdjustmentNote : null,
+    netPayableBeforePayment,
+    expenseAmount: grossWages,
+    paidAmount,
+    balanceAfterPayment,
+    payableBalance: balanceAfterPayment,
+    cashPayable: balanceAfterPayment,
+    paymentAccountId: typeof payload.paymentAccountId === "string" ? payload.paymentAccountId : typeof payload.linkedAccountId === "string" ? payload.linkedAccountId : null,
+    settlementVoucherId: typeof payload.settlementVoucherId === "string" ? payload.settlementVoucherId : typeof payload.linkedVoucherId === "string" ? payload.linkedVoucherId : null,
+    sourceAttendanceIds: stringArrayValue(payload.sourceAttendanceIds),
+    sourceLabourWorkIds: stringArrayValue(payload.sourceLabourWorkIds),
+    advanceAdjustmentAllocations: Array.isArray(payload.advanceAdjustmentAllocations)
+      ? payload.advanceAdjustmentAllocations.flatMap((item) => {
+        if (!item || typeof item !== "object") return [];
+        const row = item as Record<string, unknown>;
+        const settlementId = typeof row.settlementId === "string" ? row.settlementId : "";
+        const advanceId = typeof row.advanceId === "string" ? row.advanceId : "";
+        const adjustedAmount = numberValue(row.adjustedAmount);
+        const workspaceId = typeof row.workspaceId === "string" ? row.workspaceId : "";
+        const farmId = typeof row.farmId === "string" ? row.farmId : "";
+        const seasonId = typeof row.seasonId === "string" ? row.seasonId : "";
+        if (!settlementId || !advanceId || !workspaceId || !farmId || !seasonId || adjustedAmount <= 0) return [];
+        return [{ settlementId, advanceId, adjustedAmount, workspaceId, farmId, seasonId }];
+      })
+      : [],
     notes: typeof payload.notes === "string" ? payload.notes : "",
     status: payload.status === "voided" ? "voided" : payload.status === "deleted" ? "deleted" : "posted",
     createdBy: typeof payload.createdBy === "string" ? payload.createdBy : undefined,
@@ -135,22 +202,79 @@ export function settlementRangesOverlap(fromA: string, toA: string, fromB: strin
   return fromA <= toB && fromB <= toA;
 }
 
-export function calculateLabourWageSettlementTotals(attendanceWages: number, pendingLabourEarnings: number, advancesPaid: number) {
-  const totalEarned = attendanceWages + pendingLabourEarnings;
-  const settledAdvanceAmount = Math.min(totalEarned, advancesPaid);
-  const carryForwardAdvance = Math.max(advancesPaid - totalEarned, 0);
-  const payableBalance = Math.max(totalEarned - advancesPaid, 0);
-  const expenseAmount = totalEarned;
+export function calculateLabourWageSettlementTotals(
+  attendanceWages: number,
+  labourWorkWages: number,
+  availableAdvanceBalanceBeforeSettlement: number,
+  paidAmount = 0,
+  manualAdjustment = 0,
+  advanceAdjustedNowOverride?: number | null,
+) {
+  const grossWages = attendanceWages + labourWorkWages;
+  const advanceAdjustedNow = Math.max(0, Math.min(
+    Number.isFinite(advanceAdjustedNowOverride ?? NaN) ? Number(advanceAdjustedNowOverride) : grossWages,
+    grossWages,
+    availableAdvanceBalanceBeforeSettlement,
+  ));
+  const remainingAdvanceCarryForward = Math.max(availableAdvanceBalanceBeforeSettlement - advanceAdjustedNow, 0);
+  const netPayableBeforePayment = grossWages - advanceAdjustedNow + manualAdjustment;
+  const balanceAfterPayment = netPayableBeforePayment - paidAmount;
   return {
     attendanceWages,
-    pendingLabourEarnings,
-    totalEarned,
-    advancesPaid,
-    settledAdvanceAmount,
-    expenseAmount,
-    carryForwardAdvance,
-    payableBalance,
+    labourWorkWages,
+    pendingLabourEarnings: labourWorkWages,
+    grossWages,
+    totalEarned: grossWages,
+    advancesPaid: availableAdvanceBalanceBeforeSettlement,
+    availableAdvanceBalanceBeforeSettlement,
+    advanceAdjustedNow,
+    settledAdvanceAmount: advanceAdjustedNow,
+    appliedAdvances: advanceAdjustedNow,
+    expenseAmount: grossWages,
+    remainingAdvanceCarryForward,
+    carryForwardAdvance: remainingAdvanceCarryForward,
+    manualAdjustment,
+    netPayableBeforePayment,
+    paidAmount,
+    balanceAfterPayment,
+    payableBalance: balanceAfterPayment,
   };
+}
+
+export type AdvanceAllocation = {
+  settlementId: string;
+  advanceId: string;
+  adjustedAmount: number;
+  workspaceId: string;
+  farmId: string;
+  seasonId: string;
+};
+
+export function allocateAdvanceAdjustments(args: {
+  settlementId: string;
+  workspaceId: string;
+  farmId: string;
+  seasonId: string;
+  grossWages: number;
+  advances: Array<{ advanceId: string; outstandingAmount: number; advanceDate: string }>;
+}) {
+  let remaining = Math.max(0, args.grossWages);
+  const allocations: AdvanceAllocation[] = [];
+  for (const advance of [...args.advances].sort((left, right) => left.advanceDate.localeCompare(right.advanceDate) || left.advanceId.localeCompare(right.advanceId))) {
+    if (remaining <= 0) break;
+    const adjustedAmount = Math.min(remaining, Math.max(0, advance.outstandingAmount));
+    if (adjustedAmount <= 0) continue;
+    allocations.push({
+      settlementId: args.settlementId,
+      advanceId: advance.advanceId,
+      adjustedAmount,
+      workspaceId: args.workspaceId,
+      farmId: args.farmId,
+      seasonId: args.seasonId,
+    });
+    remaining -= adjustedAmount;
+  }
+  return { allocations, advanceAdjustedNow: allocations.reduce((sum, item) => sum + item.adjustedAmount, 0) };
 }
 
 export async function listLabourWageSettlements(
@@ -297,13 +421,65 @@ export async function settlementAccountingTransactionCounts(
   return new Map(rows.map((row) => [row.referenceId ?? "", row.count]));
 }
 
+export type LabourWageSettlementSelection = {
+  settlementMode?: "individual" | "group";
+  labourerId?: string | null;
+  foremanId?: string | null;
+  groupId?: string | null;
+  labourIds?: string[];
+};
+
+async function resolveSelectedLabourers(
+  tx: DbClient,
+  workspaceId: string,
+  farmId: string,
+  seasonId: string,
+  selection: LabourWageSettlementSelection = {},
+) {
+  const labourRows = await tx.select({
+    clientRecordId: operationalRecords.clientRecordId,
+    payload: operationalRecords.payload,
+  }).from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, workspaceId),
+    eq(operationalRecords.farmId, farmId),
+    eq(operationalRecords.seasonId, seasonId),
+    eq(operationalRecords.entityType, "labourer"),
+  ));
+  const labourers = labourRows.map((row) => {
+    const payload = row.payload as Record<string, unknown>;
+    return {
+      id: row.clientRecordId,
+      name: typeof payload.name === "string" ? payload.name : "Labourer",
+      groupId: typeof payload.groupId === "string" ? payload.groupId : null,
+      active: payload.active !== false,
+    };
+  });
+  const labourById = new Map(labourers.map((labourer) => [labourer.id, labourer]));
+  const explicitIds = (selection.labourIds ?? []).filter((id) => labourById.has(id));
+  if (selection.settlementMode === "group") {
+    const groupId = selection.groupId
+      ?? (selection.foremanId ? labourById.get(selection.foremanId)?.groupId ?? null : null);
+    if (groupId) {
+      return labourers.filter((labourer) => labourer.active && labourer.groupId === groupId).map((labourer) => labourer.id);
+    }
+    if (selection.foremanId && labourById.has(selection.foremanId)) {
+      return [selection.foremanId];
+    }
+  }
+  if (selection.settlementMode === "individual" && selection.labourerId && labourById.has(selection.labourerId)) {
+    return [selection.labourerId];
+  }
+  if (explicitIds.length) return explicitIds;
+  return labourers.filter((labourer) => labourer.active).map((labourer) => labourer.id);
+}
+
 export function settlementAccountingStatus(
   settlement: Pick<LabourWageSettlementPayload, "status">,
   transactionCount: number,
 ) {
   if (settlement.status === "deleted") return "deleted" as const;
   if (settlement.status === "voided") return "voided" as const;
-  return transactionCount > 0 ? "posted" as const : "accounting_missing" as const;
+  return "posted" as const;
 }
 
 export async function repairPostedSettlementAccounting(
@@ -344,12 +520,13 @@ export async function repairPostedSettlementAccounting(
     payload.linkedAccountId,
   );
   const accountValidation = validateLabourSettlementPaymentAccount(resolvedAccount, settlementRecord.farmId);
-  const accountId = resolvedAccount?.id ?? payload.linkedAccountId;
+  const accountId = resolvedAccount?.id ?? payload.paymentAccountId ?? payload.linkedAccountId;
   const accountType = resolvedAccount?.accountType ?? null;
-  if (resolvedAccount && resolvedAccount.id !== payload.linkedAccountId) {
+  if (resolvedAccount && resolvedAccount.id !== (payload.paymentAccountId ?? payload.linkedAccountId)) {
     const updatedPayload = {
       ...payload,
       linkedAccountId: resolvedAccount.id,
+      paymentAccountId: resolvedAccount.id,
       linkedAccountName: resolvedAccount.name,
       updatedAt: new Date().toISOString(),
     };
@@ -364,6 +541,18 @@ export async function repairPostedSettlementAccounting(
   }
   if (!accountValidation.valid) {
     throw new Error(accountValidation.message ?? `Settlement ${payload.settlementNumber} cannot be reposted because its payment account is invalid.`);
+  }
+  const paidAmount = Number(payload.paidAmount ?? payload.payableBalance ?? payload.cashPayable ?? 0);
+  if (paidAmount <= 0) {
+    return {
+      settlementId: settlementRecord.clientRecordId,
+      settlementNumber: payload.settlementNumber,
+      accountingStatus: "posted",
+      createdTransactions: 0,
+      existingTransactions: 0,
+      accountId: accountId ?? payload.linkedAccountId,
+      amount: 0,
+    } satisfies SettlementAccountingRepairResult;
   }
   const existing = await tx.select({
     id: accountTransactions.id,
@@ -380,7 +569,7 @@ export async function repairPostedSettlementAccounting(
       seasonId: settlementRecord.seasonId,
       accountId,
       type: accountType === "partner" ? "credit" : "debit",
-      amount: String(payload.expenseAmount),
+      amount: String(paidAmount),
       transactionDate: payload.settlementDate,
       remarks: `Labour Wage Settlement ${payload.settlementNumber}`,
       createdBy: actorUserId,
@@ -401,7 +590,7 @@ export async function repairPostedSettlementAccounting(
       createdTransactions: 0,
       existingTransactions: existing.length,
       accountId: payload.linkedAccountId,
-      amount: payload.expenseAmount,
+      amount: paidAmount,
     } satisfies SettlementAccountingRepairResult;
   }
 
@@ -413,7 +602,7 @@ export async function repairPostedSettlementAccounting(
     sourceType: "labour_wage_settlement",
     referenceId: settlementRecord.clientRecordId,
     type: accountType === "partner" ? "credit" : "debit",
-    amount: String(payload.expenseAmount),
+    amount: String(paidAmount),
     transactionDate: payload.settlementDate,
     remarks: `Labour Wage Settlement ${payload.settlementNumber}`,
     createdBy: actorUserId,
@@ -427,7 +616,7 @@ export async function repairPostedSettlementAccounting(
     createdTransactions: 1,
     existingTransactions: 0,
     accountId: payload.linkedAccountId,
-    amount: payload.expenseAmount,
+    amount: paidAmount,
   } satisfies SettlementAccountingRepairResult;
 }
 
@@ -440,8 +629,9 @@ export async function previewLabourWageSettlement(
   toDate: string,
   settlementDate: string,
   excludeSettlementId?: string,
+  selection: LabourWageSettlementSelection = {},
 ) {
-  const [attendanceRows, advanceRows, labourRows, wageRates, earningRows, allSettlements] = await Promise.all([
+  const [attendanceRows, advanceRows, labourRows, wageRates, earningRows, allSettlements, includedLabourIds] = await Promise.all([
     tx.select({
       clientRecordId: operationalRecords.clientRecordId,
       payload: operationalRecords.payload,
@@ -471,6 +661,7 @@ export async function previewLabourWageSettlement(
     listWageRateRows(tx, workspaceId, farmId, seasonId),
     listLabourEarnings(tx, workspaceId, farmId, seasonId),
     listLabourWageSettlements(tx, workspaceId, farmId, seasonId),
+    resolveSelectedLabourers(tx, workspaceId, farmId, seasonId, selection),
   ]);
   const activeSettlements = allSettlements.filter((row) => !isDeletedOperationalPayload(row.payload) && row.payload.status !== "voided" && row.clientRecordId !== excludeSettlementId);
   const existingSettlements = activeSettlements.filter((row) =>
@@ -483,7 +674,9 @@ export async function previewLabourWageSettlement(
     }] as const;
   }));
 
+  const includedLabourSet = new Set(includedLabourIds);
   let attendanceWages = 0;
+  const sourceAttendanceIds: string[] = [];
   const unresolvedRows: Array<{ labourerId: string; labourName: string; date: string; status: string }> = [];
   for (const row of attendanceRows) {
     const payload = row.payload as AttendancePayload;
@@ -491,6 +684,7 @@ export async function previewLabourWageSettlement(
     const labourerId = typeof payload.labourerId === "string" ? payload.labourerId : typeof payload.labourId === "string" ? payload.labourId : "";
     const date = typeof payload.date === "string" ? payload.date : "";
     const status = typeof payload.status === "string" ? payload.status : "";
+    if (!includedLabourSet.has(labourerId)) continue;
     if (!labourerId || !date || date < fromDate || date > toDate) continue;
     if (!["present", "half_day", "absent"].includes(status)) continue;
     const labour = labourById.get(labourerId);
@@ -504,12 +698,14 @@ export async function previewLabourWageSettlement(
       });
     }
     attendanceWages += calculateStatusWage(status as "present" | "half_day" | "absent", rate?.payload ?? null);
+    sourceAttendanceIds.push(row.clientRecordId);
   }
 
   const includedEarnings = earningRows
     .filter((row) =>
       row.payload.status === "pending_settlement"
       && !isDeletedOperationalPayload(row.payload)
+      && includedLabourSet.has(row.payload.labourerId)
       && row.payload.earningDate <= settlementDate)
     .map((row) => ({
       id: row.clientRecordId,
@@ -520,29 +716,85 @@ export async function previewLabourWageSettlement(
       description: row.payload.description,
       amount: row.payload.amount,
     }));
-  const pendingLabourEarnings = includedEarnings.reduce((sum, row) => sum + row.amount, 0);
+  const labourWorkWages = includedEarnings.reduce((sum, row) => sum + row.amount, 0);
 
-  const advancesUpToSettlementDate = advanceRows.reduce((sum, row) => {
-    const payload = row.payload as AdvancePayload;
-    if (isDeletedOperationalPayload(payload as Record<string, unknown>)) return sum;
-    if (typeof payload.date !== "string" || payload.date > settlementDate) return sum;
-    return sum + Number(payload.amount ?? 0);
-  }, 0);
+  const rawIncludedAdvances = advanceRows
+    .filter((row) => {
+      const payload = row.payload as AdvancePayload;
+      if (isDeletedOperationalPayload(payload as Record<string, unknown>)) return false;
+      if (!includedLabourSet.has(typeof payload.labourerId === "string" ? payload.labourerId : "")) return false;
+      return typeof payload.date === "string" && payload.date <= settlementDate;
+    })
+    .map((row) => ({
+      advanceId: row.clientRecordId,
+      labourerId: typeof (row.payload as AdvancePayload).labourerId === "string" ? String((row.payload as AdvancePayload).labourerId) : "",
+      advanceDate: String((row.payload as AdvancePayload).date ?? ""),
+      outstandingAmount: Number((row.payload as AdvancePayload).amount ?? 0),
+    }));
+  const previouslySettledAdvances = activeSettlements
+    .filter((row) => row.payload.settlementDate <= settlementDate)
+    .reduce((sum, row) => sum + numberValue(row.payload.advanceAdjustedNow ?? row.payload.settledAdvanceAmount ?? row.payload.appliedAdvances), 0);
+  let consumedHistoricalAdvances = previouslySettledAdvances;
+  const includedAdvances = rawIncludedAdvances.map((advance) => {
+    const consumed = Math.min(advance.outstandingAmount, Math.max(consumedHistoricalAdvances, 0));
+    consumedHistoricalAdvances = Math.max(consumedHistoricalAdvances - consumed, 0);
+    return {
+      ...advance,
+      outstandingAmount: Math.max(advance.outstandingAmount - consumed, 0),
+    };
+  });
+  const rawAdvancesUpToSettlementDate = rawIncludedAdvances.reduce((sum, row) => sum + row.outstandingAmount, 0);
+  const availableAdvanceBalanceBeforeSettlement = includedAdvances.reduce((sum, row) => sum + row.outstandingAmount, 0);
 
-  const previouslySettledAdvances = activeSettlements.reduce((sum, row) => {
-    if (row.payload.settlementDate > settlementDate) return sum;
-    return sum + row.payload.settledAdvanceAmount;
-  }, 0);
-  const advancesPaid = Math.max(advancesUpToSettlementDate - previouslySettledAdvances, 0);
-  const totals = calculateLabourWageSettlementTotals(attendanceWages, pendingLabourEarnings, advancesPaid);
+  const baseTotals = calculateLabourWageSettlementTotals(
+    attendanceWages,
+    labourWorkWages,
+    availableAdvanceBalanceBeforeSettlement,
+    0,
+    0,
+  );
+  const allocationResult = allocateAdvanceAdjustments({
+    settlementId: excludeSettlementId ?? crypto.randomUUID(),
+    workspaceId,
+    farmId,
+    seasonId,
+    grossWages: baseTotals.grossWages,
+    advances: includedAdvances,
+  });
+  const advanceAdjustedNow = allocationResult.advanceAdjustedNow;
+  const remainingAdvanceCarryForward = Math.max(availableAdvanceBalanceBeforeSettlement - advanceAdjustedNow, 0);
+  const netPayableBeforePayment = baseTotals.grossWages - advanceAdjustedNow + baseTotals.manualAdjustment;
+  const balanceAfterPayment = netPayableBeforePayment;
 
   return {
-    ...totals,
-    advancesAvailableUpToSettlementDate: advancesPaid,
-    rawAdvancesUpToSettlementDate: advancesUpToSettlementDate,
+    ...baseTotals,
+    labourWorkWages,
+    pendingLabourEarnings: labourWorkWages,
+    grossWages: baseTotals.grossWages,
+    totalEarned: baseTotals.grossWages,
+    availableAdvanceBalanceBeforeSettlement,
+    advancesAvailableUpToSettlementDate: availableAdvanceBalanceBeforeSettlement,
+    rawAdvancesUpToSettlementDate,
     previouslySettledAdvances,
+    advanceAdjustedNow,
+    settledAdvanceAmount: advanceAdjustedNow,
+    appliedAdvances: advanceAdjustedNow,
+    remainingAdvanceCarryForward,
+    carryForwardAdvance: remainingAdvanceCarryForward,
+    netPayableBeforePayment,
+    paidAmount: 0,
+    balanceAfterPayment,
+    payableBalance: balanceAfterPayment,
     settlementDate,
+    settlementMode: selection.settlementMode ?? "individual",
+    foremanId: selection.foremanId ?? null,
+    groupId: selection.groupId ?? null,
+    includedLabourIds,
+    includedLabourCount: includedLabourIds.length,
     includedEarnings,
+    sourceAttendanceIds,
+    sourceLabourWorkIds: includedEarnings.map((row) => row.id),
+    advanceAdjustmentAllocations: allocationResult.allocations,
     unresolvedRows,
     overlappingSettlements: existingSettlements.map((row) => ({
       id: row.clientRecordId,

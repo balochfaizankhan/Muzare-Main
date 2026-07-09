@@ -5,7 +5,7 @@ import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
 import { createLabourWageSettlement, deleteLabourWageSettlement, fetchLabourWageSettlement, fetchLabourWageSettlementPaymentAccounts, fetchLabourWageSettlements, previewLabourWageSettlement, repairLabourWageSettlementAccounting, updateLabourWageSettlement, voidLabourWageSettlement, type LabourWageSettlementDetail, type LabourWageSettlementPaymentAccount, type LabourWageSettlementPreview } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
-import { getActiveFarmId, getActiveSeasonId, offlineDb, workspaceRecords, type Account, type LabourWageSettlement } from "../../lib/offline-db";
+import { getActiveFarmId, getActiveSeasonId, offlineDb, workspaceRecords, type Account, type LabourGroup, type LabourWageSettlement, type Labourer } from "../../lib/offline-db";
 import { canCreate } from "../../lib/permissions";
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -27,12 +27,21 @@ export function LabourWageSettlements() {
   const canPost = Boolean(user && workspaceId && canCreate(user, "wages", workspaceId));
 
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [labourers, setLabourers] = useState<Labourer[]>([]);
+  const [labourGroups, setLabourGroups] = useState<LabourGroup[]>([]);
   const [paymentAccounts, setPaymentAccounts] = useState<LabourWageSettlementPaymentAccount[]>([]);
   const [settlements, setSettlements] = useState<LabourWageSettlement[]>([]);
   const [settlementDate, setSettlementDate] = useState(today());
   const [fromDate, setFromDate] = useState(`${today().slice(0, 8)}01`);
   const [toDate, setToDate] = useState(today());
+  const [settlementMode, setSettlementMode] = useState<"individual" | "group">("individual");
+  const [labourerId, setLabourerId] = useState("");
+  const [foremanId, setForemanId] = useState("");
+  const [groupId, setGroupId] = useState("");
   const [accountId, setAccountId] = useState("");
+  const [paidAmount, setPaidAmount] = useState("0");
+  const [manualAdjustment, setManualAdjustment] = useState("0");
+  const [manualAdjustmentNote, setManualAdjustmentNote] = useState("");
   const [notes, setNotes] = useState("");
   const [preview, setPreview] = useState<PreviewState>({ status: "idle", data: null });
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -62,6 +71,8 @@ export function LabourWageSettlements() {
       workspaceRecords(offlineDb.labourWageSettlements),
     ]);
     setAccounts(cachedAccounts.filter((account) => account.type === "cash" || account.type === "bank" || account.type === "partner"));
+    setLabourers(await workspaceRecords(offlineDb.labourers));
+    setLabourGroups(await workspaceRecords(offlineDb.labourGroups));
     setSettlements(cachedSettlements.sort((left, right) => right.settlementDate.localeCompare(left.settlementDate) || right.updatedAt.localeCompare(left.updatedAt)));
   }, []);
 
@@ -90,13 +101,31 @@ export function LabourWageSettlements() {
         toDate: settlement.toDate,
         settlementDate: settlement.settlementDate,
         attendanceWages: settlement.attendanceWages,
+        labourWorkWages: settlement.labourWorkWages,
         pendingLabourEarnings: settlement.pendingLabourEarnings,
+        grossWages: settlement.grossWages ?? settlement.totalEarned,
         totalEarned: settlement.totalEarned,
+        availableAdvanceBalanceBeforeSettlement: settlement.availableAdvanceBalanceBeforeSettlement,
         advancesPaid: settlement.advancesPaid,
+        advanceAdjustedNow: settlement.advanceAdjustedNow ?? settlement.settledAdvanceAmount,
         settledAdvanceAmount: settlement.settledAdvanceAmount,
         expenseAmount: settlement.expenseAmount,
+        remainingAdvanceCarryForward: settlement.remainingAdvanceCarryForward ?? settlement.carryForwardAdvance,
         carryForwardAdvance: settlement.carryForwardAdvance,
+        manualAdjustment: settlement.manualAdjustment,
+        manualAdjustmentNote: settlement.manualAdjustmentNote ?? null,
+        netPayableBeforePayment: settlement.netPayableBeforePayment,
+        paidAmount: settlement.paidAmount ?? settlement.payableBalance,
         payableBalance: settlement.payableBalance,
+        balanceAfterPayment: settlement.balanceAfterPayment ?? settlement.payableBalance,
+        paymentAccountId: settlement.paymentAccountId ?? settlement.linkedAccountId,
+        settlementMode: settlement.settlementMode,
+        foremanId: settlement.foremanId ?? null,
+        groupId: settlement.groupId ?? null,
+        includedLabourIds: settlement.includedLabourIds ?? [],
+        sourceAttendanceIds: settlement.sourceAttendanceIds ?? [],
+        sourceLabourWorkIds: settlement.sourceLabourWorkIds ?? [],
+        advanceAdjustmentAllocations: settlement.advanceAdjustmentAllocations ?? [],
         notes: settlement.notes,
         status: settlement.status,
         accountingStatus: settlement.accountingStatus,
@@ -155,12 +184,12 @@ export function LabourWageSettlements() {
   }, [selectedSettlement?.id, token, workspaceId]);
 
   useEffect(() => {
-    if (!accountId && accounts.length) {
+    if (!accountId && paymentAccounts.length) {
       setAccountId(paymentAccounts.find((account) => account.accountType === "cash" || account.accountType === "bank")?.id
         ?? paymentAccounts[0]?.id
         ?? "");
     }
-  }, [accountId, paymentAccounts, accounts]);
+  }, [accountId, paymentAccounts]);
 
   useEffect(() => {
     const recordId = searchParams.get("recordId");
@@ -193,6 +222,12 @@ export function LabourWageSettlements() {
         fromDate,
         toDate,
         settlementDate,
+        settlementMode,
+        labourerId: settlementMode === "individual" ? labourerId || undefined : undefined,
+        foremanId: settlementMode === "group" ? foremanId || undefined : undefined,
+        groupId: settlementMode === "group" ? groupId || undefined : undefined,
+        paidAmount: Number(paidAmount || 0),
+        manualAdjustment: Number(manualAdjustment || 0),
       });
       setPreview({ status: "ready", data: response.preview });
     } catch (caught) {
@@ -211,8 +246,24 @@ export function LabourWageSettlements() {
       setError("Wage settlement requires online connection.");
       return;
     }
-    if (!token || !workspaceId || !activeFarmId || !activeSeasonId || !accountId) {
-      setError("Select an active farm, season, and settlement account before creating a settlement.");
+    if (!token || !workspaceId || !activeFarmId || !activeSeasonId) {
+      setError("Select an active farm and season before creating a settlement.");
+      return;
+    }
+    if (Number(paidAmount || 0) > 0 && !accountId) {
+      setError("Select a payment account when paid now is greater than zero.");
+      return;
+    }
+    if (settlementMode === "individual" && !labourerId) {
+      setError("Select a labourer for an individual settlement.");
+      return;
+    }
+    if (settlementMode === "group" && !groupId && !foremanId) {
+      setError("Select a foreman or group for a group settlement.");
+      return;
+    }
+    if (Number(manualAdjustment || 0) !== 0 && !manualAdjustmentNote.trim()) {
+      setError("Manual adjustment note is required when manual adjustment is non-zero.");
       return;
     }
     if (preview.status !== "ready") {
@@ -233,7 +284,14 @@ export function LabourWageSettlements() {
         fromDate,
         toDate,
         settlementDate,
-        accountId,
+        settlementMode,
+        labourerId: settlementMode === "individual" ? labourerId || undefined : undefined,
+        foremanId: settlementMode === "group" ? foremanId || undefined : undefined,
+        groupId: settlementMode === "group" ? groupId || undefined : undefined,
+        paymentAccountId: Number(paidAmount || 0) > 0 ? accountId : undefined,
+        paidAmount: Number(paidAmount || 0),
+        manualAdjustment: Number(manualAdjustment || 0),
+        manualAdjustmentNote: Number(manualAdjustment || 0) !== 0 ? manualAdjustmentNote.trim() : undefined,
         notes: notes.trim() || undefined,
       });
       await offlineDb.labourWageSettlements.put({
@@ -245,17 +303,35 @@ export function LabourWageSettlements() {
         linkedVoucherId: response.settlement.linkedVoucherId || "",
         linkedVoucherNumber: response.settlement.linkedVoucherNumber || response.settlement.settlementNumber,
         linkedAccountId: response.settlement.linkedAccountId,
+        settlementMode: response.settlement.settlementMode,
+        foremanId: response.settlement.foremanId ?? null,
+        groupId: response.settlement.groupId ?? null,
+        includedLabourIds: response.settlement.includedLabourIds ?? [],
         fromDate: response.settlement.fromDate,
         toDate: response.settlement.toDate,
         settlementDate: response.settlement.settlementDate,
         attendanceWages: response.settlement.attendanceWages,
+        labourWorkWages: response.settlement.labourWorkWages,
         pendingLabourEarnings: response.settlement.pendingLabourEarnings,
+        grossWages: response.settlement.grossWages ?? response.settlement.totalEarned,
         totalEarned: response.settlement.totalEarned,
+        availableAdvanceBalanceBeforeSettlement: response.settlement.availableAdvanceBalanceBeforeSettlement,
         advancesPaid: response.settlement.advancesPaid,
+        advanceAdjustedNow: response.settlement.advanceAdjustedNow ?? response.settlement.settledAdvanceAmount,
         settledAdvanceAmount: response.settlement.settledAdvanceAmount,
         expenseAmount: response.settlement.expenseAmount,
+        remainingAdvanceCarryForward: response.settlement.remainingAdvanceCarryForward ?? response.settlement.carryForwardAdvance,
         carryForwardAdvance: response.settlement.carryForwardAdvance,
+        manualAdjustment: response.settlement.manualAdjustment,
+        manualAdjustmentNote: response.settlement.manualAdjustmentNote ?? null,
+        netPayableBeforePayment: response.settlement.netPayableBeforePayment,
+        paidAmount: response.settlement.paidAmount ?? response.settlement.payableBalance,
         payableBalance: response.settlement.payableBalance,
+        balanceAfterPayment: response.settlement.balanceAfterPayment ?? response.settlement.payableBalance,
+        paymentAccountId: response.settlement.paymentAccountId ?? response.settlement.linkedAccountId,
+        sourceAttendanceIds: response.settlement.sourceAttendanceIds ?? [],
+        sourceLabourWorkIds: response.settlement.sourceLabourWorkIds ?? [],
+        advanceAdjustmentAllocations: response.settlement.advanceAdjustmentAllocations ?? [],
         notes: response.settlement.notes,
         status: response.settlement.status,
         accountingStatus: response.settlement.accountingStatus,
@@ -272,6 +348,9 @@ export function LabourWageSettlements() {
       });
       setPreview({ status: "idle", data: null });
       setNotes("");
+      setManualAdjustment("0");
+      setManualAdjustmentNote("");
+      setPaidAmount("0");
       setSuccess(`Settlement ${response.settlement.settlementNumber} posted. Accounting reference: ${response.settlement.settlementNumber}.`);
       window.dispatchEvent(new Event("muzare-local-data-change"));
       await syncFromServer();
@@ -289,6 +368,8 @@ export function LabourWageSettlements() {
   const canEditSettlement = useCallback((settlement: Pick<LabourWageSettlementDetail, "status" | "accountingStatus">) => settlement.status !== "deleted" && settlement.status !== "voided" && settlement.accountingStatus !== "posted", []);
   const canDeleteSettlement = useCallback((settlement: Pick<LabourWageSettlementDetail, "status" | "accountingStatus">) => settlement.status !== "deleted" && settlement.status !== "voided" && settlement.accountingStatus !== "posted", []);
   const canVoidSettlement = useCallback((settlement: Pick<LabourWageSettlementDetail, "status" | "accountingStatus">) => settlement.status === "posted" && settlement.accountingStatus === "posted", []);
+  const activeLabourers = useMemo(() => labourers.filter((labourer) => labourer.active !== false).sort((left, right) => left.name.localeCompare(right.name)), [labourers]);
+  const activeLabourGroups = useMemo(() => labourGroups.filter((group) => group.active !== false).sort((left, right) => left.name.localeCompare(right.name)), [labourGroups]);
   const openSettlement = useCallback((settlement: LabourWageSettlement | LabourWageSettlementDetail, mode: "view" | "edit" = "view") => {
     setSelectedSettlement(settlement);
     setSelectedSettlementMode(mode);
@@ -298,7 +379,7 @@ export function LabourWageSettlements() {
         fromDate: settlement.fromDate,
         toDate: settlement.toDate,
         settlementDate: settlement.settlementDate,
-        accountId: settlement.linkedAccountId,
+        accountId: settlement.paymentAccountId ?? settlement.linkedAccountId,
         notes: settlement.notes ?? "",
       });
     }
@@ -341,7 +422,7 @@ export function LabourWageSettlements() {
         fromDate: editForm.fromDate,
         toDate: editForm.toDate,
         settlementDate: editForm.settlementDate,
-        accountId: editForm.accountId,
+        paymentAccountId: editForm.accountId,
         notes: editForm.notes.trim() || null,
       });
       await offlineDb.labourWageSettlements.update(selectedSettlement.id, {
@@ -349,17 +430,35 @@ export function LabourWageSettlements() {
         linkedVoucherId: response.settlement.linkedVoucherId,
         linkedVoucherNumber: response.settlement.linkedVoucherNumber,
         linkedAccountId: response.settlement.linkedAccountId,
+        settlementMode: response.settlement.settlementMode,
+        foremanId: response.settlement.foremanId ?? null,
+        groupId: response.settlement.groupId ?? null,
+        includedLabourIds: response.settlement.includedLabourIds ?? [],
         fromDate: response.settlement.fromDate,
         toDate: response.settlement.toDate,
         settlementDate: response.settlement.settlementDate,
         attendanceWages: response.settlement.attendanceWages,
+        labourWorkWages: response.settlement.labourWorkWages,
         pendingLabourEarnings: response.settlement.pendingLabourEarnings,
+        grossWages: response.settlement.grossWages ?? response.settlement.totalEarned,
         totalEarned: response.settlement.totalEarned,
+        availableAdvanceBalanceBeforeSettlement: response.settlement.availableAdvanceBalanceBeforeSettlement,
         advancesPaid: response.settlement.advancesPaid,
+        advanceAdjustedNow: response.settlement.advanceAdjustedNow ?? response.settlement.settledAdvanceAmount,
         settledAdvanceAmount: response.settlement.settledAdvanceAmount,
         expenseAmount: response.settlement.expenseAmount,
+        remainingAdvanceCarryForward: response.settlement.remainingAdvanceCarryForward ?? response.settlement.carryForwardAdvance,
         carryForwardAdvance: response.settlement.carryForwardAdvance,
+        manualAdjustment: response.settlement.manualAdjustment,
+        manualAdjustmentNote: response.settlement.manualAdjustmentNote ?? null,
+        netPayableBeforePayment: response.settlement.netPayableBeforePayment,
+        paidAmount: response.settlement.paidAmount ?? response.settlement.payableBalance,
         payableBalance: response.settlement.payableBalance,
+        balanceAfterPayment: response.settlement.balanceAfterPayment ?? response.settlement.payableBalance,
+        paymentAccountId: response.settlement.paymentAccountId ?? response.settlement.linkedAccountId,
+        sourceAttendanceIds: response.settlement.sourceAttendanceIds ?? [],
+        sourceLabourWorkIds: response.settlement.sourceLabourWorkIds ?? [],
+        advanceAdjustmentAllocations: response.settlement.advanceAdjustmentAllocations ?? [],
         notes: response.settlement.notes,
         status: response.settlement.status,
         accountingStatus: response.settlement.accountingStatus,
@@ -444,9 +543,10 @@ export function LabourWageSettlements() {
   const registerRows = useMemo(() => {
     const term = registerSearch.trim().toLowerCase();
     return settlements.filter((settlement) => {
-      const accountName = settlementPaymentAccountById.get(settlement.linkedAccountId)?.name ?? accountById.get(settlement.linkedAccountId)?.name ?? "";
+      const settlementAccountId = settlement.paymentAccountId ?? settlement.linkedAccountId;
+      const accountName = settlementPaymentAccountById.get(settlementAccountId)?.name ?? accountById.get(settlementAccountId)?.name ?? "";
       return (statusFilter === "all" || settlementStatus(settlement) === statusFilter)
-        && (paymentAccountFilter === "all" || settlement.linkedAccountId === paymentAccountFilter)
+        && (paymentAccountFilter === "all" || settlementAccountId === paymentAccountFilter)
         && (!term || [
           settlement.settlementNumber,
           settlement.settlementDate,
@@ -463,11 +563,11 @@ export function LabourWageSettlements() {
   }, [accountById, paymentAccountFilter, registerSearch, settlementPaymentAccountById, settlementStatus, settlements, statusFilter]);
   const registerTotals = useMemo(() => registerRows.reduce((totals, settlement) => ({
     attendanceWages: totals.attendanceWages + settlement.attendanceWages,
-    labourWork: totals.labourWork + settlement.pendingLabourEarnings,
-    totalLabourCost: totals.totalLabourCost + settlement.expenseAmount,
-    appliedAdvances: totals.appliedAdvances + settlement.settledAdvanceAmount,
-    carryForward: totals.carryForward + settlement.carryForwardAdvance,
-    cashPaid: totals.cashPaid + settlement.payableBalance,
+    labourWork: totals.labourWork + (settlement.labourWorkWages ?? settlement.pendingLabourEarnings),
+    totalLabourCost: totals.totalLabourCost + (settlement.grossWages ?? settlement.expenseAmount),
+    appliedAdvances: totals.appliedAdvances + (settlement.advanceAdjustedNow ?? settlement.settledAdvanceAmount),
+    carryForward: totals.carryForward + (settlement.remainingAdvanceCarryForward ?? settlement.carryForwardAdvance),
+    cashPaid: totals.cashPaid + (settlement.paidAmount ?? settlement.payableBalance),
   }), {
     attendanceWages: 0,
     labourWork: 0,
@@ -481,12 +581,15 @@ export function LabourWageSettlements() {
       "Settlement No.",
       "Settlement Date",
       "Period",
+      "Settlement Mode",
+      "Foreman / Group",
+      "Included Labourers",
       "Attendance Wages",
       "Labour Work",
-      "Total Labour Cost",
-      "Applied Advances",
-      "Carry-forward Advance",
-      "Cash Paid",
+      "Gross Wages Earned",
+      "Advance Adjusted Now",
+      "Advance Carried Forward",
+      "Paid Now",
       "Payment Account",
       "Accounting Reference",
       "Status",
@@ -496,13 +599,16 @@ export function LabourWageSettlements() {
         settlement.settlementNumber,
         settlement.settlementDate,
         `${settlement.fromDate} to ${settlement.toDate}`,
+        settlement.settlementMode ?? "individual",
+        settlement.foremanId ?? settlement.groupId ?? "-",
+        settlement.includedLabourIds?.length ?? "-",
         settlement.attendanceWages,
-        settlement.pendingLabourEarnings,
-        settlement.expenseAmount,
-        settlement.settledAdvanceAmount,
-        settlement.carryForwardAdvance,
-        settlement.payableBalance,
-        settlementPaymentAccountById.get(settlement.linkedAccountId)?.name ?? accountById.get(settlement.linkedAccountId)?.name ?? "",
+        settlement.labourWorkWages ?? settlement.pendingLabourEarnings,
+        settlement.grossWages ?? settlement.expenseAmount,
+        settlement.advanceAdjustedNow ?? settlement.settledAdvanceAmount,
+        settlement.remainingAdvanceCarryForward ?? settlement.carryForwardAdvance,
+        settlement.paidAmount ?? settlement.payableBalance,
+        settlementPaymentAccountById.get(settlement.paymentAccountId ?? settlement.linkedAccountId)?.name ?? accountById.get(settlement.paymentAccountId ?? settlement.linkedAccountId)?.name ?? "",
         settlement.settlementNumber,
         settlement.status,
       ];
@@ -525,9 +631,9 @@ export function LabourWageSettlements() {
     <>
         <section className="record-panel workforce-shell-intro workforce-shell-intro--nested">
           <div>
-            <h2>Close Wage Period</h2>
+            <h2>{settlementMode === "group" ? "Foreman / Group Period Settlement" : "Labour Period Settlement"}</h2>
             <p>
-              Preview attendance wages, apply advances, and post a labour wage settlement.
+              Preview period wages, apply advances, and post a labour settlement voucher.
             </p>
           </div>
           <span className="local-pill">{onlineRequired ? "Online required" : "Online and ready"}</span>
@@ -539,7 +645,7 @@ export function LabourWageSettlements() {
 
         <section className="record-panel labour-settlement-form-panel">
           <div className="advances-heading">
-            <h2>Create settlement</h2>
+            <h2>{settlementMode === "group" ? "Foreman / group period settlement" : "Labour period settlement"}</h2>
             <span>Settlement accounting is posted under the LW settlement number.</span>
           </div>
           <form className="module-form wage-settlement-form" onSubmit={(event) => void submit(event)}>
@@ -559,9 +665,58 @@ export function LabourWageSettlements() {
             </div>
             <div className="advances-filter-row">
               <label className="advances-filter-field">
-                <span>Settlement account</span>
-                <select required value={accountId} onChange={(event) => setAccountId(event.target.value)}>
-                  <option value="">Select settlement account</option>
+                <span>Settlement mode</span>
+                <select value={settlementMode} onChange={(event) => setSettlementMode(event.target.value as "individual" | "group")}>
+                  <option value="individual">Individual labour settlement</option>
+                  <option value="group">Foreman / group period settlement</option>
+                </select>
+              </label>
+              {settlementMode === "individual" ? (
+                <label className="advances-filter-field">
+                  <span>Labourer</span>
+                  <select required value={labourerId} onChange={(event) => setLabourerId(event.target.value)}>
+                    <option value="">Select labourer</option>
+                    {activeLabourers.map((labourer) => <option key={labourer.id} value={labourer.id}>{labourer.name}</option>)}
+                  </select>
+                </label>
+              ) : (
+                <>
+                  <label className="advances-filter-field">
+                    <span>Foreman / group leader</span>
+                    <select value={foremanId} onChange={(event) => setForemanId(event.target.value)}>
+                      <option value="">Select foreman</option>
+                      {activeLabourers.map((labourer) => <option key={labourer.id} value={labourer.id}>{labourer.name}</option>)}
+                    </select>
+                  </label>
+                  <label className="advances-filter-field">
+                    <span>Group</span>
+                    <select value={groupId} onChange={(event) => setGroupId(event.target.value)}>
+                      <option value="">Select group</option>
+                      {activeLabourGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+                    </select>
+                  </label>
+                </>
+              )}
+            </div>
+            <div className="advances-filter-row">
+              <label className="advances-filter-field">
+                <span>Paid now</span>
+                <input type="number" min="0" step="0.01" value={paidAmount} onChange={(event) => setPaidAmount(event.target.value)} />
+              </label>
+              <label className="advances-filter-field">
+                <span>Manual adjustment</span>
+                <input type="number" step="0.01" value={manualAdjustment} onChange={(event) => setManualAdjustment(event.target.value)} />
+              </label>
+              <label className="advances-filter-field advances-filter-field--full">
+                <span>Manual adjustment note</span>
+                <input value={manualAdjustmentNote} onChange={(event) => setManualAdjustmentNote(event.target.value)} placeholder="Required when manual adjustment is non-zero" />
+              </label>
+            </div>
+            <div className="advances-filter-row">
+              <label className="advances-filter-field">
+                <span>Payment account</span>
+                <select required={Number(paidAmount || 0) > 0} value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+                  <option value="">Select payment account</option>
                   {paymentAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
                 </select>
               </label>
@@ -589,16 +744,20 @@ export function LabourWageSettlements() {
             <h2>Settlement preview</h2>
             <span>Advances stay immutable. Settlement accounting is posted under the LW settlement number.</span>
           </div>
-          {!summary ? <p className="context-message">Run a preview to calculate period wages, settled advances, carry-forward, and payable balance.</p> : <>
+          {!summary ? <p className="context-message">Run a preview to calculate period wages, advance use, and settlement balance.</p> : <>
             <div className="reports-kpis">
+              <article><span>Included labourers</span><strong>{summary.includedLabourCount ?? summary.includedLabourIds?.length ?? 0}</strong></article>
               <article><span>Attendance wages</span><strong>{money(summary.attendanceWages)}</strong></article>
-              <article><span>Labour work</span><strong>{money(summary.pendingLabourEarnings)}</strong></article>
-              <article><span>Total labour cost</span><strong>{money(summary.totalEarned)}</strong></article>
-              <article><span>Advances available up to settlement date</span><strong>{money(summary.advancesAvailableUpToSettlementDate)}</strong></article>
-              <article><span>Settlement voucher amount</span><strong>{money(summary.expenseAmount)}</strong></article>
-              <article><span>Applied advances</span><strong>{money(summary.settledAdvanceAmount)}</strong></article>
-              <article><span>Carry-forward advance</span><strong>{money(summary.carryForwardAdvance)}</strong></article>
-              <article><span>Remaining cash payable</span><strong>{money(summary.payableBalance)}</strong></article>
+              <article><span>Labour work wages</span><strong>{money(summary.labourWorkWages ?? summary.pendingLabourEarnings)}</strong></article>
+              <article><span>Gross wages earned</span><strong>{money(summary.grossWages ?? summary.totalEarned)}</strong></article>
+              <article><span>Available advance balance</span><strong>{money(summary.availableAdvanceBalanceBeforeSettlement ?? summary.advancesAvailableUpToSettlementDate)}</strong></article>
+              <article><span>Advance adjusted now</span><strong>{money(summary.advanceAdjustedNow ?? summary.settledAdvanceAmount)}</strong></article>
+              <article><span>Advance carried forward</span><strong>{money(summary.remainingAdvanceCarryForward ?? summary.carryForwardAdvance)}</strong></article>
+              <article><span>Manual adjustment</span><strong>{money(summary.manualAdjustment ?? 0)}</strong></article>
+              <article><span>Net payable before payment</span><strong>{money(summary.netPayableBeforePayment ?? summary.payableBalance)}</strong></article>
+              <article><span>Paid now</span><strong>{money(summary.paidAmount ?? 0)}</strong></article>
+              <article><span>Balance after settlement</span><strong>{money(summary.balanceAfterPayment ?? summary.payableBalance)}</strong></article>
+              <article><span>Status</span><strong>{summary.balanceAfterPayment && summary.balanceAfterPayment < 0 ? "Labour owes farm" : (summary.balanceAfterPayment === 0 && (summary.remainingAdvanceCarryForward ?? summary.carryForwardAdvance ?? 0) === 0 ? "Settled" : (summary.remainingAdvanceCarryForward ?? summary.carryForwardAdvance ?? 0) > 0 ? "Advance carried forward" : "Farm still owes labour")}</strong></article>
             </div>
             <div className="reports-summary-list">
               <article><span>Wage period</span><strong>{fromDate} to {toDate}</strong></article>
@@ -640,11 +799,11 @@ export function LabourWageSettlements() {
             <>
               <div className="reports-kpis">
                 <article><span>Attendance wages</span><strong>{money(registerTotals.attendanceWages)}</strong></article>
-                <article><span>Labour work</span><strong>{money(registerTotals.labourWork)}</strong></article>
-                <article><span>Total labour cost</span><strong>{money(registerTotals.totalLabourCost)}</strong></article>
-                <article><span>Applied advances</span><strong>{money(registerTotals.appliedAdvances)}</strong></article>
-                <article><span>Carry-forward advance</span><strong>{money(registerTotals.carryForward)}</strong></article>
-                <article><span>Cash paid</span><strong>{money(registerTotals.cashPaid)}</strong></article>
+                <article><span>Labour work wages</span><strong>{money(registerTotals.labourWork)}</strong></article>
+                <article><span>Gross wages earned</span><strong>{money(registerTotals.totalLabourCost)}</strong></article>
+                <article><span>Advance adjusted now</span><strong>{money(registerTotals.appliedAdvances)}</strong></article>
+                <article><span>Advance carried forward</span><strong>{money(registerTotals.carryForward)}</strong></article>
+                <article><span>Paid now</span><strong>{money(registerTotals.cashPaid)}</strong></article>
               </div>
               <div className="report-toolbar labour-settlement-register-toolbar">
                 <label className="search-input labour-settlement-register-search">
@@ -680,12 +839,15 @@ export function LabourWageSettlements() {
                     <th>Settlement No.</th>
                     <th>Settlement date</th>
                     <th>Settlement period</th>
+                    <th>Mode</th>
+                    <th>Foreman / group</th>
+                    <th>Labourers</th>
                     <th>Attendance wages</th>
                     <th>Labour work</th>
-                    <th>Total labour cost</th>
-                    <th>Applied advances</th>
-                    <th>Carry-forward advance</th>
-                    <th>Cash paid</th>
+                    <th>Gross wages earned</th>
+                    <th>Advance adjusted now</th>
+                    <th>Advance carried forward</th>
+                    <th>Paid now</th>
                     <th>Payment account</th>
                     <th>Accounting reference</th>
                     <th>Status</th>
@@ -699,13 +861,16 @@ export function LabourWageSettlements() {
                         <td><button type="button" className="worker-dialog__link" onClick={() => openSettlement(settlement)}>{settlement.settlementNumber}</button></td>
                         <td>{settlement.settlementDate}</td>
                         <td>{settlement.fromDate} to {settlement.toDate}</td>
+                        <td>{settlement.settlementMode ?? "individual"}</td>
+                        <td>{settlement.foremanId ?? settlement.groupId ?? "-"}</td>
+                        <td>{settlement.includedLabourIds?.length ?? "-"}</td>
                         <td>{money(settlement.attendanceWages)}</td>
-                        <td>{money(settlement.pendingLabourEarnings)}</td>
-                        <td>{money(settlement.expenseAmount)}</td>
-                        <td>{money(settlement.settledAdvanceAmount)}</td>
-                        <td>{money(settlement.carryForwardAdvance)}</td>
-                        <td>{money(settlement.payableBalance)}</td>
-                        <td>{settlementPaymentAccountById.get(settlement.linkedAccountId)?.name ?? accountById.get(settlement.linkedAccountId)?.name ?? "-"}</td>
+                        <td>{money(settlement.labourWorkWages ?? settlement.pendingLabourEarnings)}</td>
+                        <td>{money(settlement.grossWages ?? settlement.expenseAmount)}</td>
+                        <td>{money(settlement.advanceAdjustedNow ?? settlement.settledAdvanceAmount)}</td>
+                        <td>{money(settlement.remainingAdvanceCarryForward ?? settlement.carryForwardAdvance)}</td>
+                        <td>{money(settlement.paidAmount ?? settlement.payableBalance)}</td>
+                        <td>{settlementPaymentAccountById.get(settlement.paymentAccountId ?? settlement.linkedAccountId)?.name ?? accountById.get(settlement.paymentAccountId ?? settlement.linkedAccountId)?.name ?? "-"}</td>
                         <td>{settlement.settlementNumber}</td>
                         <td>{settlementStatus(settlement).replaceAll("_", " ")}</td>
                         <td>
@@ -788,9 +953,9 @@ export function LabourWageSettlements() {
                       </div>
                       <div className="advances-filter-row">
                         <label className="advances-filter-field">
-                          <span>Settlement account</span>
+                          <span>Payment account</span>
                           <select required value={editForm.accountId} onChange={(event) => setEditForm((current) => ({ ...current, accountId: event.target.value }))}>
-                            <option value="">Select settlement account</option>
+                            <option value="">Select payment account</option>
                             {paymentAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
                           </select>
                         </label>
@@ -806,12 +971,12 @@ export function LabourWageSettlements() {
                       <div className="reports-kpis">
                         <article><span>Settlement date</span><strong>{selectedSettlement.settlementDate}</strong></article>
                         <article><span>Attendance wages</span><strong>{money(selectedSettlement.attendanceWages)}</strong></article>
-                        <article><span>Labour work</span><strong>{money(selectedSettlement.pendingLabourEarnings)}</strong></article>
-                        <article><span>Total labour cost</span><strong>{money(selectedSettlement.expenseAmount)}</strong></article>
-                        <article><span>Advances applied</span><strong>{money(selectedSettlement.settledAdvanceAmount)}</strong></article>
-                        <article><span>Carry-forward advance</span><strong>{money(selectedSettlement.carryForwardAdvance)}</strong></article>
-                        <article><span>Cash paid</span><strong>{money(selectedSettlement.payableBalance)}</strong></article>
-                        <article><span>Payment account</span><strong>{settlementPaymentAccountById.get(selectedSettlement.linkedAccountId)?.name ?? accountById.get(selectedSettlement.linkedAccountId)?.name ?? "-"}</strong></article>
+                        <article><span>Labour work wages</span><strong>{money(selectedSettlement.labourWorkWages ?? selectedSettlement.pendingLabourEarnings)}</strong></article>
+                        <article><span>Gross wages earned</span><strong>{money(selectedSettlement.grossWages ?? selectedSettlement.expenseAmount)}</strong></article>
+                        <article><span>Advance adjusted now</span><strong>{money(selectedSettlement.advanceAdjustedNow ?? selectedSettlement.settledAdvanceAmount)}</strong></article>
+                        <article><span>Advance carried forward</span><strong>{money(selectedSettlement.remainingAdvanceCarryForward ?? selectedSettlement.carryForwardAdvance)}</strong></article>
+                        <article><span>Paid now</span><strong>{money(selectedSettlement.paidAmount ?? selectedSettlement.payableBalance)}</strong></article>
+                        <article><span>Payment account</span><strong>{settlementPaymentAccountById.get(selectedSettlement.paymentAccountId ?? selectedSettlement.linkedAccountId)?.name ?? accountById.get(selectedSettlement.paymentAccountId ?? selectedSettlement.linkedAccountId)?.name ?? "-"}</strong></article>
                         <article><span>Accounting reference</span><strong>{selectedSettlement.settlementNumber}</strong></article>
                       </div>
                       {selectedSettlement.notes ? <p className="context-message">{selectedSettlement.notes}</p> : null}

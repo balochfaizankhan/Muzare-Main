@@ -810,17 +810,43 @@ export type LabourWageSettlementRecord = {
   linkedVoucherId: string;
   linkedVoucherNumber: string;
   linkedAccountId: string;
+  settlementMode?: "individual" | "group";
+  foremanId?: string | null;
+  groupId?: string | null;
+  includedLabourIds?: string[];
   fromDate: string;
   toDate: string;
   settlementDate: string;
   attendanceWages: number;
+  labourWorkWages?: number;
   pendingLabourEarnings: number;
+  grossWages?: number;
   totalEarned: number;
+  availableAdvanceBalanceBeforeSettlement?: number;
   advancesPaid: number;
+  advanceAdjustedNow?: number;
   settledAdvanceAmount: number;
+  remainingAdvanceCarryForward?: number;
   expenseAmount: number;
   carryForwardAdvance: number;
+  manualAdjustment?: number;
+  manualAdjustmentNote?: string | null;
+  netPayableBeforePayment?: number;
+  paidAmount?: number;
+  balanceAfterPayment?: number;
   payableBalance: number;
+  paymentAccountId?: string | null;
+  settlementVoucherId?: string | null;
+  sourceAttendanceIds?: string[];
+  sourceLabourWorkIds?: string[];
+  advanceAdjustmentAllocations?: Array<{
+    settlementId: string;
+    advanceId: string;
+    adjustedAmount: number;
+    workspaceId: string;
+    farmId: string;
+    seasonId: string;
+  }>;
   notes?: string;
   status: "posted" | "voided" | "deleted";
   accountingStatus?: "draft" | "posted" | "accounting_missing" | "voided" | "deleted";
@@ -881,17 +907,42 @@ export type LabourWageSettlementLinkedVoucher = {
 };
 export type LabourWageSettlementPreview = {
   attendanceWages: number;
+  labourWorkWages?: number;
   pendingLabourEarnings: number;
+  grossWages?: number;
   totalEarned: number;
   advancesPaid: number;
+  availableAdvanceBalanceBeforeSettlement?: number;
   advancesAvailableUpToSettlementDate: number;
   rawAdvancesUpToSettlementDate: number;
   previouslySettledAdvances: number;
   settlementDate: string;
+  settlementMode?: "individual" | "group";
+  foremanId?: string | null;
+  groupId?: string | null;
+  includedLabourIds?: string[];
+  includedLabourCount?: number;
   settledAdvanceAmount: number;
+  advanceAdjustedNow?: number;
   expenseAmount: number;
   carryForwardAdvance: number;
+  remainingAdvanceCarryForward?: number;
+  manualAdjustment?: number;
+  manualAdjustmentNote?: string | null;
+  netPayableBeforePayment?: number;
+  paidAmount?: number;
+  balanceAfterPayment?: number;
   payableBalance: number;
+  sourceAttendanceIds?: string[];
+  sourceLabourWorkIds?: string[];
+  advanceAdjustmentAllocations?: Array<{
+    settlementId: string;
+    advanceId: string;
+    adjustedAmount: number;
+    workspaceId: string;
+    farmId: string;
+    seasonId: string;
+  }>;
   includedEarnings: Array<{
     id: string;
     labourerId: string;
@@ -919,7 +970,16 @@ export type LabourWageSettlementCreateInput = {
   fromDate: string;
   toDate: string;
   settlementDate: string;
-  accountId: string;
+  settlementMode?: "individual" | "group";
+  labourerId?: string | null;
+  foremanId?: string | null;
+  groupId?: string | null;
+  labourIds?: string[];
+  paymentAccountId?: string;
+  accountId?: string;
+  paidAmount?: number;
+  manualAdjustment?: number;
+  manualAdjustmentNote?: string | null;
   notes?: string;
 };
 export type ExpenseSearchRecord = {
@@ -1450,7 +1510,20 @@ export const fetchLabourWageSettlementPaymentAccounts = (
 export const previewLabourWageSettlement = (
   token: string,
   workspaceId: string,
-  input: { farmId: string; seasonId: string; fromDate: string; toDate: string; settlementDate: string },
+  input: {
+    farmId: string;
+    seasonId: string;
+    fromDate: string;
+    toDate: string;
+    settlementDate: string;
+    settlementMode?: "individual" | "group";
+    labourerId?: string | null;
+    foremanId?: string | null;
+    groupId?: string | null;
+    labourIds?: string[];
+    paidAmount?: number;
+    manualAdjustment?: number;
+  },
 ) => apiRequest<{ valid: boolean; preview: LabourWageSettlementPreview }>(
   `/v1/workspace/${workspaceId}/labour-wage-settlements/preview`,
   { method: "POST", body: JSON.stringify(input) },
@@ -1486,6 +1559,7 @@ export const updateLabourWageSettlement = (
     toDate?: string;
     settlementDate?: string;
     accountId?: string;
+    paymentAccountId?: string;
     notes?: string | null;
   },
 ) => apiRequest<{ settlement: LabourWageSettlementDetail; accountingEntries: number }>(

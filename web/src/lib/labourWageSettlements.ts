@@ -109,21 +109,24 @@ export function getActiveLabourWageSettlements(settlements: LabourWageSettlement
   return settlements.filter(isPostedLabourWageSettlement);
 }
 
-export function getLabourWageSettlementLedgerAmount(settlement: SettlementAccountLike & { settledAdvanceAmount?: number; expenseAmount?: number }) {
-  return Number(settlement.expenseAmount ?? settlement.settledAdvanceAmount ?? 0);
+export function getLabourWageSettlementLedgerAmount(settlement: SettlementAccountLike & { grossWages?: number; expenseAmount?: number; totalEarned?: number }) {
+  return Number(settlement.grossWages ?? settlement.expenseAmount ?? settlement.totalEarned ?? 0);
 }
 
-export function getLabourWageSettlementAdvanceOffset(settlement: SettlementAccountLike & { advancesApplied?: number; appliedAdvances?: number; settledAdvanceAmount?: number }) {
-  return Number(settlement.advancesApplied ?? settlement.appliedAdvances ?? settlement.settledAdvanceAmount ?? 0);
+export function getLabourWageSettlementAdvanceOffset(settlement: SettlementAccountLike & { advanceAdjustedNow?: number; advancesApplied?: number; appliedAdvances?: number; settledAdvanceAmount?: number }) {
+  return Number(settlement.advanceAdjustedNow ?? settlement.advancesApplied ?? settlement.appliedAdvances ?? settlement.settledAdvanceAmount ?? 0);
 }
 
-export function getLabourWageSettlementCashPaidAmount(settlement: SettlementAccountLike & { payableBalance?: number; cashPayable?: number; cashPaid?: number; expenseAmount?: number; advancesApplied?: number; appliedAdvances?: number; settledAdvanceAmount?: number }) {
-  const applied = Number(settlement.advancesApplied ?? settlement.appliedAdvances ?? settlement.settledAdvanceAmount ?? 0);
-  return Number(settlement.cashPaid ?? settlement.payableBalance ?? settlement.cashPayable ?? Math.max(Number(settlement.expenseAmount ?? 0) - applied, 0));
+export function getLabourWageSettlementCashPaidAmount(settlement: SettlementAccountLike & { paidAmount?: number; balanceAfterPayment?: number; payableBalance?: number; cashPayable?: number; cashPaid?: number }) {
+  return Number(settlement.paidAmount ?? settlement.cashPaid ?? settlement.cashPayable ?? settlement.payableBalance ?? 0);
 }
 
-export function getLabourWageSettlementNonCashAppliedAmount(settlement: SettlementAccountLike & { advancesApplied?: number; appliedAdvances?: number; settledAdvanceAmount?: number }) {
-  return Number(settlement.advancesApplied ?? settlement.appliedAdvances ?? settlement.settledAdvanceAmount ?? 0);
+export function getLabourWageSettlementNonCashAppliedAmount(settlement: SettlementAccountLike & { advanceAdjustedNow?: number; advancesApplied?: number; appliedAdvances?: number; settledAdvanceAmount?: number }) {
+  return Number(settlement.advanceAdjustedNow ?? settlement.advancesApplied ?? settlement.appliedAdvances ?? settlement.settledAdvanceAmount ?? 0);
+}
+
+export function getLabourWageSettlementRemainingAdvanceCarryForward(settlement: SettlementAccountLike & { remainingAdvanceCarryForward?: number; carryForwardAdvance?: number }) {
+  return Number(settlement.remainingAdvanceCarryForward ?? settlement.carryForwardAdvance ?? 0);
 }
 
 export function getLabourSettlementAccountingSnapshot(
@@ -156,11 +159,12 @@ export function getLabourSettlementAccountingSnapshot(
     .reduce((sum, advance) => sum + advance.amount, 0);
   const labourWageSettlements = activeSettlements
     .reduce((sum, settlement) => sum + getLabourWageSettlementNonCashAppliedAmount(settlement), 0);
-  const settledThroughWageSettlements = activeSettlements
-    .reduce((sum, settlement) => sum + getLabourWageSettlementAdvanceOffset(settlement), 0);
+  const settledThroughWageSettlements = labourWageSettlements;
   const labourSettlementCashPaid = activeSettlements
     .reduce((sum, settlement) => sum + getLabourWageSettlementCashPaidAmount(settlement), 0);
-  const outstandingLabourAdvances = Math.max(totalLabourAdvancesPaid - settledThroughWageSettlements, 0);
+  const carryForwardAdvances = activeSettlements
+    .reduce((sum, settlement) => sum + getLabourWageSettlementRemainingAdvanceCarryForward(settlement), 0);
+  const outstandingLabourAdvances = Math.max(totalLabourAdvancesPaid - settledThroughWageSettlements + carryForwardAdvances, 0);
   const diagnostics: LabourSettlementAccountingDiagnostics = {
     accountId,
     totalAdvanceRows: advances.length,
