@@ -157,11 +157,16 @@ SELECT
   missing_reversals.farm_id,
   missing_reversals.season_id,
   missing_reversals.account_id,
-  'settlement',
+  'settlement'::transaction_source,
   missing_reversals.settlement_reference_id,
-  CASE WHEN missing_reversals.type = 'credit' THEN 'debit' ELSE 'credit' END,
+  (
+    CASE
+      WHEN missing_reversals.type::text = 'credit' THEN 'debit'
+      ELSE 'credit'
+    END
+  )::transaction_type,
   missing_reversals.amount,
   missing_reversals.transaction_date,
-  'Reversal of Labour Wage Settlement ' || coalesce(missing_reversals.payload->>'settlementNumber', missing_reversals.settlement_id),
+  'Reversal of Labour Wage Settlement ' || coalesce(missing_reversals.payload->>'settlementNumber', missing_reversals.settlement_id::text),
   missing_reversals.created_by
 FROM missing_reversals;
