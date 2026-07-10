@@ -259,6 +259,7 @@ export type LabourWageSettlement = LocalRecord & {
   linkedVoucherId: string;
   linkedVoucherNumber: string;
   linkedAccountId: string;
+  linkedAccountName?: string | null;
   settlementMode?: "individual" | "group";
   foremanId?: string | null;
   groupId?: string | null;
@@ -321,6 +322,10 @@ export type LabourWageSettlement = LocalRecord & {
   balanceAfterPayment?: number;
   payableBalance: number;
   paymentAccountId?: string | null;
+  paymentAccountCanonicalId?: string | null;
+  paymentAccountLegacyId?: string | null;
+  paymentAccountName?: string | null;
+  paymentAccountType?: string | null;
   settlementVoucherId?: string | null;
   sourceAttendanceIds?: string[];
   sourceLabourWorkIds?: string[];

@@ -24,6 +24,7 @@ export function validateLabourSettlementPaymentAccount(
   account: LabourSettlementAccount | null,
   selectedFarmId: string,
   allowedAccountTypes: string[] = ["cash", "bank", "partner"],
+  options: { allowInactive?: boolean } = {},
 ): LabourSettlementAccountValidation {
   if (!account) {
     return {
@@ -33,6 +34,13 @@ export function validateLabourSettlementPaymentAccount(
     };
   }
   if (!account.active) {
+    if (options.allowInactive) {
+      return {
+        valid: true,
+        reason: null,
+        message: null,
+      };
+    }
     return {
       valid: false,
       reason: "inactive",

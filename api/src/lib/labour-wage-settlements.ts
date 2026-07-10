@@ -18,6 +18,7 @@ export type LabourWageSettlementPayload = {
   linkedVoucherId: string;
   linkedVoucherNumber: string;
   linkedAccountId: string;
+  linkedAccountName?: string | null;
   settlementMode?: "individual" | "group";
   foremanId?: string | null;
   groupId?: string | null;
@@ -86,6 +87,10 @@ export type LabourWageSettlementPayload = {
   payableBalance?: number;
   cashPayable?: number;
   paymentAccountId?: string | null;
+  paymentAccountCanonicalId?: string | null;
+  paymentAccountLegacyId?: string | null;
+  paymentAccountName?: string | null;
+  paymentAccountType?: string | null;
   settlementVoucherId?: string | null;
   sourceAttendanceIds?: string[];
   sourceLabourWorkIds?: string[];
@@ -142,6 +147,15 @@ export type SettlementAccountingRepairResult = {
   existingTransactions: number;
   accountId: string;
   amount: number;
+};
+
+export type SettlementAccountingIntegrityResult = {
+  accountingStatus: "COMPLETE" | "MISSING" | "REPAIR_REQUIRED" | "FAILED";
+  accountingMessage: string | null;
+  accountId: string | null;
+  accountName: string | null;
+  accountType: string | null;
+  existingTransactions: number;
 };
 
 export type SettlementAdvanceDebugRow = {
@@ -288,6 +302,7 @@ export function normalizeSettlementPayload(payload: Record<string, unknown>): La
     linkedVoucherId: typeof payload.linkedVoucherId === "string" ? payload.linkedVoucherId : "",
     linkedVoucherNumber: typeof payload.linkedVoucherNumber === "string" ? payload.linkedVoucherNumber : "",
     linkedAccountId: typeof payload.linkedAccountId === "string" ? payload.linkedAccountId : "",
+    linkedAccountName: typeof payload.linkedAccountName === "string" ? payload.linkedAccountName : typeof payload.paymentAccountName === "string" ? payload.paymentAccountName : null,
     settlementMode,
     foremanId: typeof payload.foremanId === "string" ? payload.foremanId : null,
     groupId: typeof payload.groupId === "string" ? payload.groupId : null,
@@ -374,6 +389,20 @@ export function normalizeSettlementPayload(payload: Record<string, unknown>): La
     payableBalance: balanceAfterPayment,
     cashPayable: balanceAfterPayment,
     paymentAccountId: typeof payload.paymentAccountId === "string" ? payload.paymentAccountId : typeof payload.linkedAccountId === "string" ? payload.linkedAccountId : null,
+    paymentAccountCanonicalId: typeof payload.paymentAccountCanonicalId === "string"
+      ? payload.paymentAccountCanonicalId
+      : typeof payload.paymentAccountId === "string"
+        ? payload.paymentAccountId
+        : typeof payload.linkedAccountId === "string"
+          ? payload.linkedAccountId
+          : null,
+    paymentAccountLegacyId: typeof payload.paymentAccountLegacyId === "string" ? payload.paymentAccountLegacyId : null,
+    paymentAccountName: typeof payload.paymentAccountName === "string"
+      ? payload.paymentAccountName
+      : typeof payload.linkedAccountName === "string"
+        ? payload.linkedAccountName
+        : null,
+    paymentAccountType: typeof payload.paymentAccountType === "string" ? payload.paymentAccountType : null,
     settlementVoucherId: typeof payload.settlementVoucherId === "string" ? payload.settlementVoucherId : typeof payload.linkedVoucherId === "string" ? payload.linkedVoucherId : null,
     sourceAttendanceIds: stringArrayValue(payload.sourceAttendanceIds),
     sourceLabourWorkIds: stringArrayValue(payload.sourceLabourWorkIds),
@@ -586,7 +615,7 @@ export async function listCanonicalPaymentAccounts(
 
 export async function resolveCanonicalPaymentAccountId(
   tx: DbClient,
-  _workspaceId: string,
+  workspaceId: string,
   farmId: string,
   accountId: string,
 ) {
@@ -603,6 +632,7 @@ export async function resolveCanonicalPaymentAccountId(
 
   if (isUuid(trimmed)) {
     const [account] = await tx.select(selectFields).from(accounts)
+      .innerJoin(farms, and(eq(farms.id, accounts.farmId), eq(farms.workspaceId, workspaceId)))
       .where(eq(accounts.id, trimmed))
       .limit(1);
     return account ?? null;
@@ -612,6 +642,7 @@ export async function resolveCanonicalPaymentAccountId(
   if (!legacyId) return null;
 
   const matches = await tx.select(selectFields).from(accounts)
+    .innerJoin(farms, and(eq(farms.id, accounts.farmId), eq(farms.workspaceId, workspaceId)))
     .where(eq(accounts.oldAndroidId, legacyId));
   if (!matches.length) return null;
   const farmMatches = matches.filter((account: CanonicalPaymentAccount) => account.farmId === farmId);
@@ -846,20 +877,26 @@ export async function repairPostedSettlementAccounting(
   if (!settlementRecord.farmId || !settlementRecord.seasonId) {
     throw new Error(`Settlement ${payload.settlementNumber} is missing farm or season context.`);
   }
+  const canonicalPaymentAccountId = payload.paymentAccountCanonicalId ?? payload.paymentAccountId ?? payload.linkedAccountId;
+  const paymentAccountLookupId = canonicalPaymentAccountId || payload.paymentAccountLegacyId || payload.linkedAccountId;
   const resolvedAccount = await resolveCanonicalPaymentAccountId(
     tx,
     settlementRecord.workspaceId,
     settlementRecord.farmId,
-    payload.linkedAccountId,
+    paymentAccountLookupId,
   );
-  const accountValidation = validateLabourSettlementPaymentAccount(resolvedAccount, settlementRecord.farmId);
-  const accountId = resolvedAccount?.id ?? payload.paymentAccountId ?? payload.linkedAccountId;
+  const accountValidation = validateLabourSettlementPaymentAccount(resolvedAccount, settlementRecord.farmId, undefined, { allowInactive: true });
+  const accountId = resolvedAccount?.id ?? payload.paymentAccountCanonicalId ?? payload.paymentAccountId ?? payload.linkedAccountId;
   const accountType = resolvedAccount?.accountType ?? null;
-  if (resolvedAccount && resolvedAccount.id !== (payload.paymentAccountId ?? payload.linkedAccountId)) {
+  if (resolvedAccount && resolvedAccount.id !== canonicalPaymentAccountId) {
     const updatedPayload = {
       ...payload,
       linkedAccountId: resolvedAccount.id,
       paymentAccountId: resolvedAccount.id,
+      paymentAccountCanonicalId: resolvedAccount.id,
+      paymentAccountLegacyId: resolvedAccount.oldAndroidId ?? payload.paymentAccountLegacyId ?? null,
+      paymentAccountName: resolvedAccount.name,
+      paymentAccountType: resolvedAccount.accountType,
       linkedAccountName: resolvedAccount.name,
       updatedAt: new Date().toISOString(),
     };
@@ -951,6 +988,92 @@ export async function repairPostedSettlementAccounting(
     accountId: payload.linkedAccountId,
     amount: paidAmount,
   } satisfies SettlementAccountingRepairResult;
+}
+
+export async function inspectSettlementAccountingIntegrity(
+  tx: DbClient,
+  settlementRecord: Awaited<ReturnType<typeof listLabourWageSettlements>>[number],
+) : Promise<SettlementAccountingIntegrityResult> {
+  const payload = settlementRecord.payload;
+  const paidAmount = Number(payload.paidAmount ?? payload.payableBalance ?? payload.cashPayable ?? 0);
+  const existingTransactions = (await settlementAccountingTransactionCounts(tx, [settlementRecord.clientRecordId])).get(settlementRecord.clientRecordId) ?? 0;
+  const canonicalPaymentAccountId = payload.paymentAccountCanonicalId ?? payload.paymentAccountId ?? payload.linkedAccountId;
+  const paymentAccountLookupId = canonicalPaymentAccountId || payload.paymentAccountLegacyId || payload.linkedAccountId;
+  let resolvedAccount: CanonicalPaymentAccount | null = null;
+  let resolutionError: string | null = null;
+
+  if (paymentAccountLookupId) {
+    try {
+      resolvedAccount = await resolveCanonicalPaymentAccountId(
+        tx,
+        settlementRecord.workspaceId,
+        settlementRecord.farmId ?? "",
+        paymentAccountLookupId,
+      );
+    } catch (error) {
+      resolutionError = error instanceof Error ? error.message : "Payment account could not be resolved.";
+    }
+  }
+
+  if (payload.status === "deleted") {
+    return {
+      accountingStatus: "COMPLETE",
+      accountingMessage: "Settlement deleted.",
+      accountId: canonicalPaymentAccountId,
+      accountName: payload.paymentAccountName ?? payload.linkedAccountName ?? null,
+      accountType: payload.paymentAccountType ?? null,
+      existingTransactions,
+    };
+  }
+  if (payload.status === "voided") {
+    return {
+      accountingStatus: "COMPLETE",
+      accountingMessage: "Settlement is voided.",
+      accountId: canonicalPaymentAccountId,
+      accountName: payload.paymentAccountName ?? payload.linkedAccountName ?? null,
+      accountType: payload.paymentAccountType ?? null,
+      existingTransactions,
+    };
+  }
+  if (paidAmount <= 0 || existingTransactions > 0) {
+    return {
+      accountingStatus: "COMPLETE",
+      accountingMessage: null,
+      accountId: resolvedAccount?.id ?? canonicalPaymentAccountId,
+      accountName: resolvedAccount?.name ?? payload.paymentAccountName ?? payload.linkedAccountName ?? null,
+      accountType: resolvedAccount?.accountType ?? payload.paymentAccountType ?? null,
+      existingTransactions,
+    };
+  }
+  if (!paymentAccountLookupId || !resolvedAccount) {
+    return {
+      accountingStatus: "REPAIR_REQUIRED",
+      accountingMessage: `Settlement ${payload.settlementNumber} was created, but its accounting entry needs repair because the original payment account could not be resolved.`,
+      accountId: canonicalPaymentAccountId,
+      accountName: payload.paymentAccountName ?? payload.linkedAccountName ?? null,
+      accountType: payload.paymentAccountType ?? null,
+      existingTransactions,
+    };
+  }
+  const repairValidation = validateLabourSettlementPaymentAccount(resolvedAccount, settlementRecord.farmId ?? "", undefined, { allowInactive: true });
+  if (!repairValidation.valid) {
+    return {
+      accountingStatus: "REPAIR_REQUIRED",
+      accountingMessage: repairValidation.message ?? resolutionError ?? `Settlement ${payload.settlementNumber} accounting needs repair.`,
+      accountId: resolvedAccount.id,
+      accountName: resolvedAccount.name,
+      accountType: resolvedAccount.accountType,
+      existingTransactions,
+    };
+  }
+  return {
+    accountingStatus: "MISSING",
+    accountingMessage: `Settlement ${payload.settlementNumber} was created, but its accounting entry has not been posted yet.`,
+    accountId: resolvedAccount.id,
+    accountName: resolvedAccount.name,
+    accountType: resolvedAccount.accountType,
+    existingTransactions,
+  };
 }
 
 export async function previewLabourWageSettlement(

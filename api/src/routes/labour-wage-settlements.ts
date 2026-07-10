@@ -12,6 +12,7 @@ import { validateTenantReferences } from "../tenant-ownership.js";
 import {
   allocateSettlementNumber,
   calculateLabourWageSettlementTotals,
+  inspectSettlementAccountingIntegrity,
   listCanonicalPaymentAccounts,
   listLabourWageSettlements,
   normalizeSettlementPayload,
@@ -133,6 +134,8 @@ type SettlementCreateStatusResponse = {
   safeToRetry: boolean;
   settlementId: string | null;
   settlementNumber: string | null;
+  accountingStatus: "COMPLETE" | "MISSING" | "REPAIR_REQUIRED" | "FAILED" | null;
+  accountingMessage: string | null;
   errorCode: string | null;
   message: string | null;
   stage: string | null;
@@ -445,6 +448,10 @@ function settlementCreateStatusFromSettlement(
     clientRecordId: string;
     payload: Record<string, unknown>;
   },
+  accounting: {
+    accountingStatus: "COMPLETE" | "MISSING" | "REPAIR_REQUIRED" | "FAILED";
+    accountingMessage: string | null;
+  },
   state: SettlementCreatePublicState = "SUCCESS",
 ): SettlementCreateStatusResponse {
   const settlement = settlementResponseFromRow(row).settlement;
@@ -454,6 +461,8 @@ function settlementCreateStatusFromSettlement(
     safeToRetry: false,
     settlementId: settlement.id,
     settlementNumber: settlement.settlementNumber,
+    accountingStatus: accounting.accountingStatus,
+    accountingMessage: accounting.accountingMessage,
     errorCode: null,
     message: state === "ALREADY_CREATED"
       ? `This settlement was already created as ${settlement.settlementNumber}.`
@@ -473,6 +482,8 @@ function settlementCreateStatusFromRequest(
     safeToRetry: row.safeToRetry,
     settlementId: row.settlementClientRecordId,
     settlementNumber: row.settlementNumber,
+    accountingStatus: null,
+    accountingMessage: null,
     errorCode: row.errorCode,
     message: row.message ?? settlementCreateStageMessage(row.stage ?? row.state),
     stage: row.stage ?? row.state,
@@ -664,6 +675,10 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
             clientRecordId: existingSettlement.clientRecordId,
             payload: existingSettlement.payload as Record<string, unknown>,
           },
+          await inspectSettlementAccountingIntegrity(tx, {
+            ...existingSettlement,
+            payload: normalizeSettlementPayload(existingSettlement.payload as Record<string, unknown>),
+          }),
           requestRow?.state === "already_created" ? "ALREADY_CREATED" : "SUCCESS",
         );
       }
@@ -692,6 +707,8 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         safeToRetry: !processing,
         settlementId: null,
         settlementNumber: null,
+        accountingStatus: null,
+        accountingMessage: null,
         errorCode: processing ? null : "SETTLEMENT_POSTING_FAILED",
         message: processing
           ? "Settlement creation is still processing. Do not submit it again."
@@ -1121,6 +1138,10 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
 
     const existingSettlement = await db.transaction((tx) => findSettlementByClientRequestId(tx, workspaceId, farmId, seasonId, effectiveClientRequestId));
     if (existingSettlement) {
+      const accounting = await db.transaction((tx) => inspectSettlementAccountingIntegrity(tx, {
+        ...existingSettlement,
+        payload: normalizeSettlementPayload(existingSettlement.payload as Record<string, unknown>),
+      }));
       await updateCreateRequestState("already_created", {
         settlementOperationalRecordId: existingSettlement.id,
         settlementClientRecordId: existingSettlement.clientRecordId,
@@ -1145,6 +1166,8 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         safeToRetry: false,
         settlementId: settlement.settlement.id,
         settlementNumber: settlement.settlement.settlementNumber,
+        accountingStatus: accounting.accountingStatus,
+        accountingMessage: accounting.accountingMessage,
         errorCode: null,
         message: `This settlement was already created as ${settlement.settlement.settlementNumber}.`,
         stage: "already_created",
@@ -1226,11 +1249,17 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
               clientRecordId: existingByRequest.clientRecordId,
               payload: existingByRequest.payload as Record<string, unknown>,
             });
+            const accounting = await inspectSettlementAccountingIntegrity(tx, {
+              ...existingByRequest,
+              payload: normalizeSettlementPayload(existingByRequest.payload as Record<string, unknown>),
+            });
             return {
               state: "ALREADY_CREATED" as const,
               settlementOperationalRecordId: existingByRequest.id,
               settlementClientRecordId: settlement.settlement.id,
               settlementNumber: settlement.settlement.settlementNumber,
+              accountingStatus: accounting.accountingStatus,
+              accountingMessage: accounting.accountingMessage,
               settlement: settlement.settlement,
             };
           }
@@ -1411,12 +1440,16 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           id: settlementClientRecordId,
           clientRequestId: effectiveClientRequestId,
           settlementNumber,
-          linkedVoucherId: "",
-          linkedVoucherNumber: settlementNumber,
-          linkedAccountId: paymentAccountIdValue ?? "",
-          linkedAccountName: account?.name ?? resolvedAccount?.name ?? "",
-          paymentAccountId: paymentAccountIdValue,
-          settlementMode: settlementMode ?? "individual",
+        linkedVoucherId: "",
+        linkedVoucherNumber: settlementNumber,
+        linkedAccountId: paymentAccountIdValue ?? "",
+        linkedAccountName: account?.name ?? resolvedAccount?.name ?? "",
+        paymentAccountId: paymentAccountIdValue,
+        paymentAccountCanonicalId: paymentAccountIdValue,
+        paymentAccountLegacyId: resolvedAccount?.oldAndroidId ?? null,
+        paymentAccountName: account?.name ?? resolvedAccount?.name ?? "",
+        paymentAccountType: account?.accountType ?? resolvedAccount?.accountType ?? null,
+        settlementMode: settlementMode ?? "individual",
           foremanId: preview.foremanId ?? resolvedSelection.foremanId ?? null,
           groupId: preview.groupId ?? resolvedSelection.groupId ?? null,
           groupName: preview.groupName ?? null,
@@ -1675,6 +1708,8 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           settlementOperationalRecordId,
           settlementClientRecordId,
           settlementNumber,
+          accountingStatus: "COMPLETE" as const,
+          accountingMessage: null,
           settlement: { ...settlementPayload, id: settlementClientRecordId, accountingStatus: "posted" as const, accountingMessage: null },
         };
       });
@@ -1702,6 +1737,8 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         safeToRetry: false,
         settlementId: result.settlement.id,
         settlementNumber: result.settlement.settlementNumber,
+        accountingStatus: result.accountingStatus,
+        accountingMessage: result.accountingMessage,
         errorCode: null,
         message: result.state === "ALREADY_CREATED"
           ? `This settlement was already created as ${result.settlement.settlementNumber}.`

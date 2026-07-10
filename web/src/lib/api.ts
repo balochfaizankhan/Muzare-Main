@@ -812,6 +812,11 @@ export type LabourWageSettlementRecord = {
   linkedVoucherId: string;
   linkedVoucherNumber: string;
   linkedAccountId: string;
+  linkedAccountName?: string | null;
+  paymentAccountCanonicalId?: string | null;
+  paymentAccountLegacyId?: string | null;
+  paymentAccountName?: string | null;
+  paymentAccountType?: string | null;
   settlementMode?: "individual" | "group";
   foremanId?: string | null;
   groupId?: string | null;
@@ -1158,6 +1163,8 @@ export type LabourWageSettlementCreateStatus = {
   safeToRetry: boolean;
   settlementId: string | null;
   settlementNumber: string | null;
+  accountingStatus: "COMPLETE" | "MISSING" | "REPAIR_REQUIRED" | "FAILED" | null;
+  accountingMessage: string | null;
   errorCode: string | null;
   message: string | null;
   stage: string | null;

@@ -138,6 +138,7 @@ export function LabourWageSettlements() {
         linkedVoucherId: settlement.linkedVoucherId,
         linkedVoucherNumber: settlement.linkedVoucherNumber,
         linkedAccountId: settlement.linkedAccountId,
+        linkedAccountName: settlement.linkedAccountName ?? settlement.paymentAccountName ?? null,
         fromDate: settlement.fromDate,
         toDate: settlement.toDate,
         settlementDate: settlement.settlementDate,
@@ -160,6 +161,10 @@ export function LabourWageSettlements() {
         payableBalance: settlement.payableBalance,
         balanceAfterPayment: settlement.balanceAfterPayment ?? settlement.payableBalance,
         paymentAccountId: settlement.paymentAccountId ?? settlement.linkedAccountId,
+        paymentAccountCanonicalId: settlement.paymentAccountCanonicalId ?? settlement.paymentAccountId ?? settlement.linkedAccountId,
+        paymentAccountLegacyId: settlement.paymentAccountLegacyId ?? null,
+        paymentAccountName: settlement.paymentAccountName ?? settlement.linkedAccountName ?? null,
+        paymentAccountType: settlement.paymentAccountType ?? null,
         settlementMode: settlement.settlementMode,
         foremanId: settlement.foremanId ?? null,
         groupId: settlement.groupId ?? null,
@@ -325,6 +330,7 @@ export function LabourWageSettlements() {
       linkedVoucherId: settlement.linkedVoucherId || "",
       linkedVoucherNumber: settlement.linkedVoucherNumber || settlement.settlementNumber,
       linkedAccountId: settlement.linkedAccountId,
+      linkedAccountName: settlement.linkedAccountName ?? settlement.paymentAccountName ?? null,
       settlementMode: settlement.settlementMode,
       foremanId: settlement.foremanId ?? null,
       groupId: settlement.groupId ?? null,
@@ -357,6 +363,10 @@ export function LabourWageSettlements() {
       payableBalance: settlement.payableBalance,
       balanceAfterPayment: settlement.balanceAfterPayment ?? settlement.payableBalance,
       paymentAccountId: settlement.paymentAccountId ?? settlement.linkedAccountId,
+      paymentAccountCanonicalId: settlement.paymentAccountCanonicalId ?? settlement.paymentAccountId ?? settlement.linkedAccountId,
+      paymentAccountLegacyId: settlement.paymentAccountLegacyId ?? null,
+      paymentAccountName: settlement.paymentAccountName ?? settlement.linkedAccountName ?? null,
+      paymentAccountType: settlement.paymentAccountType ?? null,
       sourceAttendanceIds: settlement.sourceAttendanceIds ?? [],
       sourceLabourWorkIds: settlement.sourceLabourWorkIds ?? [],
       advanceAdjustmentAllocations: settlement.advanceAdjustmentAllocations ?? [],
@@ -406,11 +416,11 @@ export function LabourWageSettlements() {
     setPaidAmount("0");
   }, []);
 
-  const finalizeSettlementCreateSuccess = useCallback(async (settlement: LabourWageSettlementRecord, message: string) => {
+  const finalizeSettlementCreateSuccess = useCallback(async (settlement: LabourWageSettlementRecord, message: string, accountingMessage?: string | null) => {
     await persistSettlementRecord(settlement);
     resetSettlementComposer();
     clearPendingSettlementRequest();
-    setStatusCheckNotice("");
+    setStatusCheckNotice(accountingMessage ?? "");
     setError("");
     setSuccess(message);
     window.dispatchEvent(new Event("muzare-local-data-change"));
@@ -448,6 +458,7 @@ export function LabourWageSettlements() {
             status.message ?? (status.state === "ALREADY_CREATED"
               ? `This settlement was already created as ${status.settlement.settlementNumber}.`
               : `Settlement ${status.settlement.settlementNumber} was created successfully.`),
+            status.accountingStatus === "REPAIR_REQUIRED" || status.accountingStatus === "MISSING" ? status.accountingMessage : null,
           );
           return;
         }
@@ -644,6 +655,7 @@ export function LabourWageSettlements() {
           response.message ?? (response.state === "ALREADY_CREATED"
             ? `This settlement was already created as ${response.settlement.settlementNumber}.`
             : `Settlement ${response.settlement.settlementNumber} was created successfully.`),
+          response.accountingStatus === "REPAIR_REQUIRED" || response.accountingStatus === "MISSING" ? response.accountingMessage : null,
         );
         return;
       }

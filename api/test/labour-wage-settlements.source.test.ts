@@ -285,9 +285,37 @@ test("settlement create status endpoint reuses the client request id and process
   assert.ok(source.includes("settlementStatusQuerySchema"));
   assert.ok(source.includes("SettlementCreateStatusResponse"));
   assert.ok(source.includes("settlementCreateStatusFromRequest"));
+  assert.ok(source.includes("inspectSettlementAccountingIntegrity"));
   assert.ok(source.includes("isSettlementRequestProcessing"));
   assert.ok(source.includes("pg_try_advisory_lock"));
   assert.ok(source.includes('state: "FAILED"'));
+});
+
+test("settlement status lookup is read-only and does not run accounting repair", () => {
+  const source = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
+  const statusStart = source.indexOf('app.get("/v1/workspace/:workspaceId/labour-wage-settlements/status"');
+  const paymentAccountsStart = source.indexOf('app.get("/v1/workspace/:workspaceId/labour-wage-settlements/payment-accounts"', statusStart + 1);
+  assert.ok(statusStart >= 0);
+  assert.ok(paymentAccountsStart > statusStart);
+  const statusBlock = source.slice(statusStart, paymentAccountsStart);
+  assert.ok(statusBlock.includes("inspectSettlementAccountingIntegrity"));
+  assert.doesNotMatch(statusBlock, /repairPostedSettlementAccounting/);
+  assert.doesNotMatch(statusBlock, /tx\.update\(/);
+  assert.doesNotMatch(statusBlock, /tx\.insert\(/);
+  assert.doesNotMatch(statusBlock, /tx\.delete\(/);
+});
+
+test("settlement payload stores immutable payment account identity snapshots", () => {
+  const routeSource = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
+  const libSource = readFileSync(new URL("../src/lib/labour-wage-settlements.ts", import.meta.url), "utf8");
+  assert.ok(routeSource.includes("paymentAccountCanonicalId: paymentAccountIdValue"));
+  assert.ok(routeSource.includes("paymentAccountLegacyId: resolvedAccount?.oldAndroidId ?? null"));
+  assert.ok(routeSource.includes("paymentAccountName: account?.name ?? resolvedAccount?.name ?? \"\""));
+  assert.ok(routeSource.includes("paymentAccountType: account?.accountType ?? resolvedAccount?.accountType ?? null"));
+  assert.ok(libSource.includes("paymentAccountCanonicalId?: string | null;"));
+  assert.ok(libSource.includes("paymentAccountLegacyId?: string | null;"));
+  assert.ok(libSource.includes("paymentAccountName?: string | null;"));
+  assert.ok(libSource.includes("paymentAccountType?: string | null;"));
 });
 
 test("individual labour summaries do not subtract group settlement advance adjustments", () => {
