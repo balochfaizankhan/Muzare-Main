@@ -48,6 +48,25 @@ export function sumLabourEarnings(earnings: LabourEarning[]) {
   return earnings.reduce((sum, earning) => sum + earning.amount, 0);
 }
 
+export function labourEarningScopeLabel(earning: LabourEarning) {
+  return earning.earningScope === "group" ? "Group" : "Individual";
+}
+
+export function labourEarningScopeTarget(earning: LabourEarning) {
+  if (earning.earningScope === "group") {
+    return earning.labourGroupName ?? earning.labourGroupId ?? "Labour group";
+  }
+  return earning.labourerId ?? "Labourer";
+}
+
+export function labourEarningsByScope(earnings: LabourEarning[]) {
+  return earnings.reduce((totals, earning) => {
+    if (earning.earningScope === "group") totals.group += earning.amount;
+    else totals.individual += earning.amount;
+    return totals;
+  }, { individual: 0, group: 0 });
+}
+
 export function buildAttendanceWageBreakdown(
   labourerId: string,
   attendance: Attendance[],

@@ -561,3 +561,108 @@ test("rolled-back settlement status normalizes accounting repair text into a saf
   assert.equal(response.json().lifecycleErrorCode, "SETTLEMENT_ACCOUNTING_REPAIR_FAILED");
   assert.notEqual(response.json().message, "Settlement LW-0006 cannot be reposted because its payment account no longer exists.");
 });
+
+test("group labour work is counted once in group settlement preview and posting", async () => {
+  const foremanId = randomUUID();
+  const workerId = randomUUID();
+  const groupId = randomUUID();
+  const earningId = randomUUID();
+  const attendanceId = randomUUID();
+  const clientRequestId = randomUUID();
+
+  const [paymentAccount] = await db.insert(accounts).values({
+    farmId: tenant.farmId,
+    name: "Group Settlement Cash",
+    accountType: "cash",
+    active: true,
+  }).returning({ id: accounts.id });
+  assert.ok(paymentAccount?.id);
+
+  await request("POST", "/v1/workspace/operational-records", envelope("labourer", foremanId, {
+    name: "Group Foreman",
+    active: true,
+  }));
+  await request("POST", "/v1/workspace/operational-records", envelope("labourer", workerId, {
+    name: "Group Worker",
+    groupId,
+    group: "Group Alpha",
+    active: true,
+  }));
+  await request("POST", "/v1/workspace/operational-records", envelope("labourGroup", groupId, {
+    name: "Group Alpha",
+    foremanLabourId: foremanId,
+    foremanId,
+    active: true,
+  }));
+  await request("POST", `/v1/workspace/${tenant.workspaceId}/wage-rates/bulk`, {
+    farmId: tenant.farmId,
+    seasonId: tenant.seasonId,
+    effectiveFrom: "2026-04-01",
+    effectiveTo: "2026-05-31",
+    rows: [{ labourerId: workerId, dailyRate: 100 }],
+  });
+  await request("POST", "/v1/workspace/operational-records", envelope("attendance", attendanceId, {
+    labourerId: workerId,
+    date: "2026-04-15",
+    status: "present",
+  }));
+  await request("POST", "/v1/workspace/operational-records", envelope("labourEarning", earningId, {
+    earningScope: "group",
+    labourGroupId: groupId,
+    labourGroupName: "Group Alpha",
+    foremanId,
+    earningDate: "2026-04-16",
+    amount: 75,
+    earningType: "bonus",
+    description: "Group bonus",
+    status: "pending_settlement",
+  }));
+
+  const previewResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements/preview`, {
+    farmId: tenant.farmId,
+    seasonId: tenant.seasonId,
+    fromDate: "2026-04-01",
+    toDate: "2026-04-30",
+    settlementDate: "2026-05-01",
+    settlementMode: "group",
+    groupId,
+    paidAmount: 0,
+    manualAdjustment: 0,
+  });
+  assert.equal(previewResponse.statusCode, 200);
+  const preview = previewResponse.json().preview;
+  assert.equal(preview.groupLabourWorkWages, 75);
+  assert.equal(preview.individualLabourWorkWages ?? 0, 0);
+  assert.equal(preview.includedEarnings.length, 1);
+  assert.equal(preview.includedEarnings[0].earningScope, "group");
+  assert.equal(preview.includedEarnings[0].labourGroupId, groupId);
+
+  const createResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements`, {
+    farmId: tenant.farmId,
+    seasonId: tenant.seasonId,
+    fromDate: "2026-04-01",
+    toDate: "2026-04-30",
+    settlementDate: "2026-05-01",
+    settlementMode: "group",
+    groupId,
+    paymentAccountId: paymentAccount.id,
+    paidAmount: 0,
+    manualAdjustment: 0,
+    clientRequestId,
+  });
+  assert.equal(createResponse.statusCode, 200);
+  const settlement = createResponse.json().settlement;
+  assert.equal(settlement.groupLabourWorkWages, 75);
+  assert.equal(settlement.individualLabourWorkWages ?? 0, 0);
+
+  const [earningRow] = await db.select({
+    payload: operationalRecords.payload,
+  }).from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, tenant.workspaceId),
+    eq(operationalRecords.entityType, "labourEarning"),
+    eq(operationalRecords.clientRecordId, earningId),
+  )).limit(1);
+  assert.ok(earningRow);
+  assert.equal((earningRow.payload as Record<string, unknown>).status, "settled");
+  assert.equal((earningRow.payload as Record<string, unknown>).linkedSettlementId, settlement.id);
+});

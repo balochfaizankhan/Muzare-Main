@@ -342,6 +342,8 @@ export type LabourWageSettlement = LocalRecord & {
     settlementMode?: "individual" | "group";
     groupId?: string | null;
     groupName?: string | null;
+    individualLabourWorkWages?: number;
+    groupLabourWorkWages?: number;
     fromDate: string;
     toDate: string;
     includedLabourIds: string[];
@@ -370,7 +372,11 @@ export type LabourWageSettlement = LocalRecord & {
 };
 
 export type LabourEarning = LocalRecord & {
-  labourerId: string;
+  earningScope?: "individual" | "group";
+  labourerId?: string | null;
+  labourGroupId?: string | null;
+  labourGroupName?: string | null;
+  foremanId?: string | null;
   earningDate: string;
   amount: number;
   earningType: "lump_sum" | "task" | "bonus" | "incentive" | "adjustment" | "other";

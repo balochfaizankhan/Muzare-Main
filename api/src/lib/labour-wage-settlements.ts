@@ -4,7 +4,7 @@ import { accountTransactions, accounts, farms, operationalRecords } from "../db/
 import { isDeletedOperationalPayload } from "../operational-record-state.js";
 import { normalizeLegacyAndroidAccountId } from "./account-identity.js";
 import { resolveLabourAdvanceLedger } from "./labour-advance-ledger.js";
-import { listLabourEarnings } from "./labour-earnings.js";
+import { labourEarningEligibleForSettlement, listLabourEarnings, normalizeLabourEarningPayload } from "./labour-earnings.js";
 import { validateLabourSettlementPaymentAccount, type LabourSettlementAccount } from "./labour-settlement-account-validation.js";
 import { calculateStatusWage, listWageRateRows, resolveApplicableWageRate } from "./wage-rates.js";
 
@@ -63,6 +63,8 @@ export type LabourWageSettlementPayload = {
   toDate: string;
   settlementDate: string;
   attendanceWages: number;
+  individualLabourWorkWages?: number;
+  groupLabourWorkWages?: number;
   labourWorkWages?: number;
   pendingLabourEarnings?: number;
   grossWages: number;
@@ -94,6 +96,19 @@ export type LabourWageSettlementPayload = {
   settlementVoucherId?: string | null;
   sourceAttendanceIds?: string[];
   sourceLabourWorkIds?: string[];
+  includedEarnings?: Array<{
+    id: string;
+    labourerId: string | null;
+    labourName: string;
+    labourGroupId: string | null;
+    labourGroupName: string | null;
+    foremanId: string | null;
+    earningScope: "individual" | "group";
+    earningDate: string;
+    earningType: string;
+    description: string;
+    amount: number;
+  }>;
   advanceAdjustmentAllocations?: Array<{
     settlementId: string;
     advanceId: string;
@@ -107,6 +122,8 @@ export type LabourWageSettlementPayload = {
     settlementMode?: "individual" | "group";
     groupId?: string | null;
     groupName?: string | null;
+    individualLabourWorkWages?: number;
+    groupLabourWorkWages?: number;
     fromDate: string;
     toDate: string;
     includedLabourIds: string[];
@@ -365,6 +382,8 @@ export function normalizeSettlementPayload(payload: Record<string, unknown>): La
     toDate: typeof payload.toDate === "string" ? payload.toDate : "",
     settlementDate: typeof payload.settlementDate === "string" ? payload.settlementDate : "",
     attendanceWages,
+    individualLabourWorkWages: numberValue(payload.individualLabourWorkWages ?? payload.individualWorkWages),
+    groupLabourWorkWages: numberValue(payload.groupLabourWorkWages ?? payload.groupWorkWages),
     labourWorkWages,
     pendingLabourEarnings: labourWorkWages,
     grossWages,
@@ -406,6 +425,31 @@ export function normalizeSettlementPayload(payload: Record<string, unknown>): La
     settlementVoucherId: typeof payload.settlementVoucherId === "string" ? payload.settlementVoucherId : typeof payload.linkedVoucherId === "string" ? payload.linkedVoucherId : null,
     sourceAttendanceIds: stringArrayValue(payload.sourceAttendanceIds),
     sourceLabourWorkIds: stringArrayValue(payload.sourceLabourWorkIds),
+    includedEarnings: Array.isArray(payload.includedEarnings)
+      ? payload.includedEarnings.flatMap((item) => {
+        if (!item || typeof item !== "object") return [];
+        const row = item as Record<string, unknown>;
+        const id = typeof row.id === "string" ? row.id : "";
+        const earningScope = row.earningScope === "group" ? "group" : "individual";
+        const earningDate = typeof row.earningDate === "string" ? row.earningDate : "";
+        const earningType = typeof row.earningType === "string" ? row.earningType : "other";
+        const description = typeof row.description === "string" ? row.description : "";
+        if (!id || !earningDate || !description) return [];
+        return [{
+          id,
+          labourerId: typeof row.labourerId === "string" ? row.labourerId : null,
+          labourName: typeof row.labourName === "string" ? row.labourName : "Labourer",
+          labourGroupId: typeof row.labourGroupId === "string" ? row.labourGroupId : null,
+          labourGroupName: typeof row.labourGroupName === "string" ? row.labourGroupName : null,
+          foremanId: typeof row.foremanId === "string" ? row.foremanId : null,
+          earningScope,
+          earningDate,
+          earningType,
+          description,
+          amount: numberValue(row.amount),
+        }];
+      })
+      : undefined,
     advanceAdjustmentAllocations: Array.isArray(payload.advanceAdjustmentAllocations)
       ? payload.advanceAdjustmentAllocations.flatMap((item) => {
         if (!item || typeof item !== "object") return [];
@@ -1141,28 +1185,74 @@ export async function previewLabourWageSettlement(
     sourceAttendanceIds.push(row.clientRecordId);
   }
 
-  const includedEarnings = earningRows.flatMap((row) => {
-    if (row.payload.status !== "pending_settlement" || isDeletedOperationalPayload(row.payload) || !candidateIds.has(row.payload.labourerId) || row.payload.earningDate > settlementDate) {
-      return [];
+  const includedEarnings: Array<{
+    id: string;
+    labourerId: string | null;
+    labourName: string;
+    labourGroupId: string | null;
+    labourGroupName: string | null;
+    foremanId: string | null;
+    earningScope: "individual" | "group";
+    earningDate: string;
+    earningType: "lump_sum" | "task" | "bonus" | "incentive" | "adjustment" | "other";
+    description: string;
+    amount: number;
+  }> = [];
+  for (const row of earningRows) {
+    if (!labourEarningEligibleForSettlement(row.payload, {
+      settlementMode: selection.settlementMode ?? "individual",
+      labourerId: selection.labourerId ?? null,
+      groupId: labourScope.selectedGroupId ?? selection.groupId ?? null,
+      foremanId: labourScope.selectedForemanId ?? selection.foremanId ?? null,
+      labourIds: candidateLabourers.map((labourer) => labourer.id),
+      settlementDate,
+    })) {
+      continue;
     }
-    const bucket = earningsByLabourer.get(row.payload.labourerId) ?? [];
+
+    const payload = normalizeLabourEarningPayload(row.payload as Record<string, unknown>);
+    if (payload.earningScope === "group") {
+      if (!labourScope.selectedGroupId) continue;
+      includedEarnings.push({
+        id: row.clientRecordId,
+        labourerId: null,
+        labourName: labourScope.selectedGroupName ?? payload.labourGroupName ?? "Labour group",
+        labourGroupId: payload.labourGroupId ?? labourScope.selectedGroupId,
+        labourGroupName: payload.labourGroupName ?? labourScope.selectedGroupName ?? null,
+        foremanId: payload.foremanId ?? labourScope.selectedForemanId ?? null,
+        earningScope: "group",
+        earningDate: payload.earningDate,
+        earningType: payload.earningType,
+        description: payload.description,
+        amount: payload.amount,
+      });
+      continue;
+    }
+    if (!payload.labourerId || !candidateIds.has(payload.labourerId)) continue;
+    const bucket = earningsByLabourer.get(payload.labourerId) ?? [];
     bucket.push({
       id: row.clientRecordId,
-      earningDate: row.payload.earningDate,
-      amount: row.payload.amount,
+      earningDate: payload.earningDate,
+      amount: payload.amount,
     });
-    earningsByLabourer.set(row.payload.labourerId, bucket);
-    return [{
+    earningsByLabourer.set(payload.labourerId, bucket);
+    includedEarnings.push({
       id: row.clientRecordId,
-      labourerId: row.payload.labourerId,
-      labourName: labourById.get(row.payload.labourerId)?.name ?? "Labourer",
-      earningDate: row.payload.earningDate,
-      earningType: row.payload.earningType,
-      description: row.payload.description,
-      amount: row.payload.amount,
-    }];
-  });
-  const labourWorkWages = includedEarnings.reduce((sum, row) => sum + row.amount, 0);
+      labourerId: payload.labourerId,
+      labourName: labourById.get(payload.labourerId)?.name ?? "Labourer",
+      labourGroupId: payload.labourGroupId ?? labourById.get(payload.labourerId)?.groupId ?? null,
+      labourGroupName: payload.labourGroupName ?? labourById.get(payload.labourerId)?.groupName ?? null,
+      foremanId: payload.foremanId ?? labourScope.selectedForemanId ?? null,
+      earningScope: "individual",
+      earningDate: payload.earningDate,
+      earningType: payload.earningType,
+      description: payload.description,
+      amount: payload.amount,
+    });
+  }
+  const individualLabourWorkWages = includedEarnings.filter((row) => row.earningScope === "individual").reduce((sum, row) => sum + row.amount, 0);
+  const groupLabourWorkWages = includedEarnings.filter((row) => row.earningScope === "group").reduce((sum, row) => sum + row.amount, 0);
+  const labourWorkWages = individualLabourWorkWages + groupLabourWorkWages;
   const advanceLedger = await resolveLabourAdvanceLedger(
     tx,
     {
@@ -1262,8 +1352,7 @@ export async function previewLabourWageSettlement(
     payableDays: 0,
   });
   const attendanceWages = includedLabourRows.reduce((sum, row) => sum + row.attendanceWage, 0);
-  const labourWorkWagesTotal = includedLabourRows.reduce((sum, row) => sum + row.labourWorkWage, 0);
-  const grossWagesEarned = includedLabourRows.reduce((sum, row) => sum + row.grossWage, 0);
+  const grossWagesEarned = includedLabourRows.reduce((sum, row) => sum + row.grossWage, 0) + groupLabourWorkWages;
   const rawAdvancesUpToSettlementDate = advanceLedger.totals.totalValidAdvancesToCutoff;
   const availableAdvanceBalanceBeforeSettlement = advanceLedger.totals.availableGroupAdvances;
   const advanceAdjustedNow = selection.settlementMode === "group"
@@ -1309,8 +1398,10 @@ export async function previewLabourWageSettlement(
 
   return {
     attendanceWages,
-    labourWorkWages: labourWorkWagesTotal,
-    pendingLabourEarnings: labourWorkWagesTotal,
+    individualLabourWorkWages,
+    groupLabourWorkWages,
+    labourWorkWages,
+    pendingLabourEarnings: labourWorkWages,
     grossWages: grossWagesEarned,
     totalEarned: grossWagesEarned,
     totalLabourCost: grossWagesEarned,
@@ -1350,6 +1441,8 @@ export async function previewLabourWageSettlement(
       attendanceCountTotals: attendanceTotals,
       advanceAdjustedNow,
       netPayable: netPayableBeforePayment,
+      individualLabourWorkWages,
+      groupLabourWorkWages,
       paymentAccountId: null,
       paidNow: 0,
     },

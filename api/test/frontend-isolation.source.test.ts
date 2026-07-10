@@ -117,6 +117,22 @@ test("attendance reports scope cached tenant data and selected date range", asyn
   assert.match(reports, /matches\(item\.date, \[labourName\(item\.labourerId\), labourer\?\.group, item\.status\]\)/);
 });
 
+test("labour work ledger exposes individual and group scopes in the UI and report output", async () => {
+  const labourEarnings = await source("web/src/pages/workspace/LabourEarnings.tsx");
+  const reports = await source("web/src/pages/workspace/Reports.tsx");
+  const api = await source("web/src/lib/api.ts");
+  assert.match(labourEarnings, /Work for/);
+  assert.match(labourEarnings, /Individual labour/);
+  assert.match(labourEarnings, /Labour group/);
+  assert.match(labourEarnings, /Assigned foreman/);
+  assert.match(labourEarnings, /Record group work/);
+  assert.match(reports, /Individual work/);
+  assert.match(reports, /Group work/);
+  assert.match(reports, /labourEarningScopeLabel/);
+  assert.match(api, /individualLabourWorkWages\?: number;/);
+  assert.match(api, /groupLabourWorkWages\?: number;/);
+});
+
 test("wage rate management is wired through shared permissions, sync storage, and reports", async () => {
   const apiPermissions = await source("api/src/permissions.ts");
   const syncRoute = await source("api/src/routes/operational-sync.ts");

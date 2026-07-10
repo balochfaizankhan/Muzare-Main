@@ -10,7 +10,7 @@ import { defaultTransactionGroupExpansion, groupAccountTransactions, type Accoun
 import { calculateAccountBalance } from "../../lib/accounting";
 import { getCanonicalExpenseCategory } from "../../lib/expenseCategories";
 import { formatMoney, formatNumber } from "../../lib/format";
-import { labourEarningTypeLabel, sumLabourEarnings } from "../../lib/labourEarnings";
+import { labourEarningScopeLabel, labourEarningScopeTarget, labourEarningTypeLabel, labourEarningsByScope, sumLabourEarnings } from "../../lib/labourEarnings";
 import { getActiveLabourWageSettlements, getCashAffectingVouchers, getGeneralExpenseVouchers, getLabourWageSettlementAdvanceOffset, getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher, outstandingLabourAdvances, totalSettledAdvances } from "../../lib/labourWageSettlements";
 import { translateExpenseCategory, translateExpenseSubcategory, translateSaleType, translateSalesStatus } from "../../lib/systemTranslations";
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
@@ -642,7 +642,7 @@ export function Reports() {
   const wageRateReportRows = useMemo(() => wageRates
     .filter((rate) => {
       const labourer = labourById.get(rate.labourerId);
-      return matchesGroup(labourer)
+      return matchesGroup(labourer ?? undefined)
         && matchesLabourFilter(rate.labourerId)
         && matches(rate.effectiveFrom, [labourer?.name, labourer?.group, rate.notes, rate.rateType, getWageRateStatus(rate, todayKey())]);
     })
@@ -659,7 +659,7 @@ export function Reports() {
   const advanceRows = useMemo(() => advances
     .filter((item) => {
       const labourer = labourById.get(item.labourerId);
-      return matchesGroup(labourer)
+      return matchesGroup(labourer ?? undefined)
         && matchesLabourFilter(item.labourerId)
         && (!accountId || resolveCanonicalAccountId(item.accountId, accountLookup) === accountId)
         && matches(item.date, [labourName(item.labourerId), labourer?.group, accountName(item.accountId), item.notes, item.sourceAccountName], item.amount);
@@ -686,15 +686,23 @@ export function Reports() {
   ] as const, [accountId, accountName, amountMax, amountMin, groupFilter, labourName, rangeLabel, selectedLabourerIds, ungroupedValue]);
   const labourEarningRows = useMemo(() => labourEarnings
     .filter((item) => {
-      const labourer = labourById.get(item.labourerId);
+      const labourer = item.labourerId ? labourById.get(item.labourerId) : null;
+      const groupName = item.labourGroupName ?? labourer?.group ?? "";
       const normalizedStatus = item.status === "pending_settlement" ? "pending" : item.status;
-      return matchesGroup(labourer)
-        && matchesLabourFilter(item.labourerId)
+      const groupMatches = !groupFilter
+        || (groupFilter === ungroupedValue ? !groupName.trim() : groupName.trim() === groupFilter);
+      const labourerMatches = item.earningScope === "group"
+        ? selectedLabourerIds.length === 0
+        : matchesLabourFilter(item.labourerId ?? "");
+      return matchesGroup(labourer ?? undefined)
+        && groupMatches
+        && labourerMatches
         && (!status || normalizedStatus === status)
         && (!category || item.earningType === category)
-        && matches(item.earningDate, [labourName(item.labourerId), labourer?.group, item.description, item.notes, item.earningType], item.amount);
+        && matches(item.earningDate, [labourer?.name ?? groupName, labourer?.group, item.description, item.notes, item.earningType], item.amount);
     })
-    .sort((a, b) => b.earningDate.localeCompare(a.earningDate) || b.updatedAt.localeCompare(a.updatedAt)), [category, labourById, labourEarnings, labourName, matches, selectedLabourerIds, status]);
+    .sort((a, b) => b.earningDate.localeCompare(a.earningDate) || b.updatedAt.localeCompare(a.updatedAt)), [category, labourById, labourEarnings, labourName, matches, selectedLabourerIds, status, groupFilter, ungroupedValue]);
+  const labourEarningTotals = useMemo(() => labourEarningsByScope(labourEarningRows), [labourEarningRows]);
   const labourEarningTypes = useMemo(
     () => [...new Set(labourEarningRows.map((item) => item.earningType))].sort(),
     [labourEarningRows],
@@ -1151,7 +1159,7 @@ export function Reports() {
     [t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.type"), t("reportsPage.description"), t("reportsPage.amount"), t("reportsPage.status"), t("reportsPage.reference")],
     ...labourEarningRows.map((item) => [
       item.earningDate,
-      labourName(item.labourerId),
+      item.labourerId ? labourName(item.labourerId) : item.labourGroupName ?? "Labour group",
       labourEarningTypeLabel(item.earningType),
       item.description,
       item.amount,
@@ -1589,6 +1597,8 @@ export function Reports() {
 
       {report === "labour-earnings" && <ReportShell title="Labour Work Report" rangeLabel={rangeLabel} sectionId="labour-earnings" onPrint={() => printSection("labour-earnings")} onExport={exportLabourEarnings}>
         <Kpis values={[
+          ["Individual work", money(labourEarningTotals.individual)],
+          ["Group work", money(labourEarningTotals.group)],
           ["Pending labour work", money(sumLabourEarnings(labourEarningPending))],
           ["Settled labour work", money(sumLabourEarnings(labourEarningSettled))],
           ["Voided labour work", money(sumLabourEarnings(labourEarningVoided))],
@@ -1597,14 +1607,14 @@ export function Reports() {
         <ReportTable
           empty={t("reportsPage.noRecords")}
           columns={[t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.type"), t("reportsPage.description"), t("reportsPage.amount"), t("reportsPage.status"), t("reportsPage.reference")]}
-          rows={labourEarningRows.map((item) => ({
+      rows={labourEarningRows.map((item) => ({
             id: item.id,
-            title: labourName(item.labourerId),
+            title: labourEarningScopeTarget(item),
             value: money(item.amount),
-            meta: `${item.earningDate} · ${labourEarningTypeLabel(item.earningType)}`,
+            meta: `${item.earningDate} · ${labourEarningScopeLabel(item)} · ${labourEarningTypeLabel(item.earningType)}`,
             cells: [
               item.earningDate,
-              labourName(item.labourerId),
+              labourEarningScopeTarget(item),
               labourEarningTypeLabel(item.earningType),
               item.description,
               money(item.amount),
@@ -1615,6 +1625,7 @@ export function Reports() {
               [t("reportsPage.notes"), item.notes || "-"],
               [t("reportsPage.reference"), item.linkedSettlementId ?? "-"],
               [t("reportsPage.status"), item.status],
+              ["Scope", labourEarningScopeLabel(item)],
             ],
             onOpen: () => navigate("/workspace/labour-payments/earnings"),
           }))}

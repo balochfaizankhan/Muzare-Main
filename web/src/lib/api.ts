@@ -906,6 +906,8 @@ export type LabourWageSettlementRecord = {
     settlementMode?: "individual" | "group";
     groupId?: string | null;
     groupName?: string | null;
+    individualLabourWorkWages?: number;
+    groupLabourWorkWages?: number;
     fromDate: string;
     toDate: string;
     includedLabourIds: string[];
@@ -959,6 +961,8 @@ export type LabourWageSettlementLinkedVoucher = {
     settlementMode?: "individual" | "group";
     groupId?: string | null;
     groupName?: string | null;
+    individualLabourWorkWages?: number;
+    groupLabourWorkWages?: number;
     fromDate: string;
     toDate: string;
     includedLabourIds: string[];
@@ -990,6 +994,8 @@ export type LabourWageSettlementLinkedVoucher = {
 };
 export type LabourWageSettlementPreview = {
   attendanceWages: number;
+  individualLabourWorkWages?: number;
+  groupLabourWorkWages?: number;
   labourWorkWages?: number;
   pendingLabourEarnings: number;
   grossWages?: number;
@@ -1100,8 +1106,12 @@ export type LabourWageSettlementPreview = {
   }>;
   includedEarnings: Array<{
     id: string;
-    labourerId: string;
+    labourerId: string | null;
     labourName: string;
+    labourGroupId?: string | null;
+    labourGroupName?: string | null;
+    foremanId?: string | null;
+    earningScope: "individual" | "group";
     earningDate: string;
     earningType: string;
     description: string;

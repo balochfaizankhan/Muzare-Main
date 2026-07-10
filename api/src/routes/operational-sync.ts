@@ -159,7 +159,13 @@ const financialPayloadSchemas = {
     source: z.enum(["manual", "attendance_csv_import", "old_android_csv"]).optional(),
   }).passthrough(),
   labourEarning: z.object({
-    labourerId: z.string().min(1),
+    earningScope: z.enum(["individual", "group"]).optional(),
+    labourerId: z.string().min(1).optional().nullable(),
+    labourGroupId: z.string().min(1).optional().nullable(),
+    labourGroupName: z.string().trim().optional().nullable(),
+    foremanId: z.string().min(1).optional().nullable(),
+    labourId: z.string().min(1).optional(),
+    groupId: z.string().min(1).optional(),
     earningDate: dateSchema,
     amount: positiveAmountSchema,
     earningType: z.enum(["lump_sum", "task", "bonus", "incentive", "adjustment", "other"]),
@@ -799,7 +805,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       toAccountId: parsed.data.record.toAccountId,
       ledgerId: parsed.data.record.ledgerId,
       labourerId: parsed.data.record.labourerId ?? parsed.data.record.labourId,
-      groupId: parsed.data.record.groupId,
+      groupId: parsed.data.record.groupId ?? parsed.data.record.labourGroupId,
       vehicleId: parsed.data.record.vehicleId,
       dateTypeIds: dispatchPayload?.success
         ? dispatchPayload.data.items.map((item) => item.dateTypeId)
@@ -989,6 +995,84 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       });
     }
     const payloadRecord = expenseCategory ? { ...parsed.data.record, ...expenseCategory } : parsed.data.record;
+    if (parsed.data.entity === "labourEarning") {
+      const earningScope = typeof payloadRecord.earningScope === "string" && payloadRecord.earningScope === "group" ? "group" : "individual";
+      const labourerId = typeof payloadRecord.labourerId === "string"
+        ? payloadRecord.labourerId
+        : typeof payloadRecord.labourId === "string"
+          ? payloadRecord.labourId
+          : "";
+      const labourGroupId = typeof payloadRecord.labourGroupId === "string"
+        ? payloadRecord.labourGroupId
+        : typeof payloadRecord.groupId === "string"
+          ? payloadRecord.groupId
+          : "";
+      if (earningScope === "group") {
+        if (!labourGroupId) {
+          return reply.code(400).send({ message: "Select a labour group." });
+        }
+        if (labourerId) {
+          return reply.code(400).send({ message: "Group work cannot be assigned to an individual labourer." });
+        }
+        const [groupRecord] = await db.select({
+          clientRecordId: operationalRecords.clientRecordId,
+          payload: operationalRecords.payload,
+        }).from(operationalRecords).where(and(
+          eq(operationalRecords.workspaceId, parsed.data.workspaceId),
+          eq(operationalRecords.farmId, parsed.data.farmId!),
+          eq(operationalRecords.entityType, "labourGroup"),
+          eq(operationalRecords.clientRecordId, labourGroupId),
+        )).limit(1);
+        if (!groupRecord || isDeletedOperationalPayload(groupRecord.payload)) {
+          return reply.code(400).send({ message: "Selected labour group was not found." });
+        }
+        const groupPayload = groupRecord.payload as Record<string, unknown>;
+        const foremanLabourId = typeof groupPayload.foremanLabourId === "string"
+          ? groupPayload.foremanLabourId
+          : typeof groupPayload.foremanId === "string"
+            ? groupPayload.foremanId
+            : "";
+        if (!foremanLabourId) {
+          return reply.code(400).send({ message: "The selected labour group has no foreman assigned." });
+        }
+        Object.assign(payloadRecord, {
+          earningScope: "group",
+          labourerId: null,
+          labourGroupId,
+          labourGroupName: typeof payloadRecord.labourGroupName === "string" && payloadRecord.labourGroupName.trim()
+            ? payloadRecord.labourGroupName
+            : typeof groupPayload.name === "string"
+              ? groupPayload.name
+              : undefined,
+          foremanId: foremanLabourId,
+          groupId: labourGroupId,
+        });
+      } else {
+        if (!labourerId) {
+          return reply.code(400).send({ message: "Select a labourer." });
+        }
+        const [labourerRecord] = await db.select({
+          clientRecordId: operationalRecords.clientRecordId,
+          payload: operationalRecords.payload,
+        }).from(operationalRecords).where(and(
+          eq(operationalRecords.workspaceId, parsed.data.workspaceId),
+          eq(operationalRecords.farmId, parsed.data.farmId!),
+          eq(operationalRecords.entityType, "labourer"),
+          eq(operationalRecords.clientRecordId, labourerId),
+        )).limit(1);
+        if (!labourerRecord || isDeletedOperationalPayload(labourerRecord.payload)) {
+          return reply.code(400).send({ message: "Select an existing labourer." });
+        }
+        const labourerPayload = labourerRecord.payload as Record<string, unknown>;
+        Object.assign(payloadRecord, {
+          earningScope: "individual",
+          labourerId,
+          labourGroupId: payloadRecord.labourGroupId ?? (typeof labourerPayload.groupId === "string" ? labourerPayload.groupId : null) ?? undefined,
+          labourGroupName: payloadRecord.labourGroupName ?? (typeof labourerPayload.group === "string" ? labourerPayload.group : null) ?? undefined,
+          foremanId: payloadRecord.foremanId ?? null,
+        });
+      }
+    }
     if (parsed.data.entity === "labourGroup") {
       const foremanLabourId = typeof payloadRecord.foremanLabourId === "string"
         ? payloadRecord.foremanLabourId
