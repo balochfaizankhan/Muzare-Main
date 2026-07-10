@@ -1153,11 +1153,15 @@ export type LabourWageSettlementCreateInput = {
   notes?: string;
 };
 export type LabourWageSettlementCreateStatus = {
-  created: boolean;
-  processing: boolean;
-  notFound: boolean;
-  failed: boolean;
+  clientRequestId: string;
+  state: "SUCCESS" | "FAILED" | "ALREADY_CREATED" | "IN_PROGRESS";
   safeToRetry: boolean;
+  settlementId: string | null;
+  settlementNumber: string | null;
+  errorCode: string | null;
+  message: string | null;
+  stage: string | null;
+  updatedAt: string;
   settlement: LabourWageSettlementRecord | null;
 };
 export type ExpenseSearchRecord = {
@@ -1336,7 +1340,7 @@ async function apiRequest<T>(path: string, options: RequestInit = {}, token?: st
       throw new Error(isMigrationImport
         ? "Import is still running. Attendance is processing in the background."
         : isSettlementCreate
-          ? "Settlement status is unknown. Please check Settlements before trying again."
+          ? "The request is taking longer than expected. Checking settlement status..."
           : "Request is taking longer than expected. Please try again.");
     }
     throw error;
@@ -1725,11 +1729,11 @@ export const createLabourWageSettlement = (
   token: string,
   workspaceId: string,
   input: LabourWageSettlementCreateInput,
-) => apiRequest<{ settlement: LabourWageSettlementRecord }>(
+) => apiRequest<LabourWageSettlementCreateStatus>(
   `/v1/workspace/${workspaceId}/labour-wage-settlements`,
   { method: "POST", body: JSON.stringify(input) },
   token,
-  { timeoutMs: 60_000, debugLabel: "labour-wage-settlement-create" },
+  { timeoutMs: 120_000, debugLabel: "labour-wage-settlement-create" },
 );
 export const fetchLabourWageSettlementCreateStatus = (
   token: string,

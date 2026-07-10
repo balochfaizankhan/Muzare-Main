@@ -3,7 +3,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireUser } from "../auth.js";
 import { db } from "../db/client.js";
-import { accountTransactions, auditLogs, labourWageSettlementAdvanceAllocations, operationalRecords, userSessions } from "../db/schema.js";
+import { accountTransactions, auditLogs, labourWageSettlementAdvanceAllocations, labourWageSettlementCreateRequests, operationalRecords, userSessions } from "../db/schema.js";
 import { listLabourEarnings, normalizeLabourEarningPayload } from "../lib/labour-earnings.js";
 import { isDeletedOperationalPayload } from "../operational-record-state.js";
 import { hasFarmAccess } from "../workspace-access.js";
@@ -89,6 +89,96 @@ type SettlementSelectionScope = {
   labourIds?: string[];
 };
 
+type SettlementCreateRequestInternalState =
+  | "request_received"
+  | "validation_complete"
+  | "selection_resolved"
+  | "preview_recalculated"
+  | "transaction_started"
+  | "inserting_settlement"
+  | "inserting_allocations"
+  | "linking_earnings"
+  | "linking_attendance"
+  | "posting_accounting"
+  | "committed"
+  | "rolled_back"
+  | "already_created";
+
+type SettlementCreatePublicState = "SUCCESS" | "FAILED" | "ALREADY_CREATED" | "IN_PROGRESS";
+
+type SettlementCreateRequestRow = {
+  id: string;
+  workspaceId: string;
+  farmId: string;
+  seasonId: string;
+  clientRequestId: string;
+  operationType: string;
+  state: string;
+  stage: string | null;
+  settlementOperationalRecordId: string | null;
+  settlementClientRecordId: string | null;
+  settlementNumber: string | null;
+  errorCode: string | null;
+  safeToRetry: boolean;
+  message: string | null;
+  correlationId: string | null;
+  completedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type SettlementCreateStatusResponse = {
+  clientRequestId: string;
+  state: SettlementCreatePublicState;
+  safeToRetry: boolean;
+  settlementId: string | null;
+  settlementNumber: string | null;
+  errorCode: string | null;
+  message: string | null;
+  stage: string | null;
+  updatedAt: string;
+  settlement: ReturnType<typeof settlementResponseFromRow>["settlement"] | null;
+};
+
+const settlementCreateOperationType = "labour_wage_settlement_create";
+
+function settlementPublicState(state: string | null | undefined): SettlementCreatePublicState {
+  if (state === "committed") return "SUCCESS";
+  if (state === "already_created") return "ALREADY_CREATED";
+  if (state === "rolled_back") return "FAILED";
+  return "IN_PROGRESS";
+}
+
+function settlementCreateStageMessage(stage: string | null | undefined) {
+  switch (stage) {
+    case "request_received":
+      return "Creating settlement...";
+    case "validation_complete":
+    case "selection_resolved":
+    case "preview_recalculated":
+      return "Validating settlement...";
+    case "transaction_started":
+    case "inserting_settlement":
+      return "Saving settlement...";
+    case "inserting_allocations":
+      return "Linking advances...";
+    case "linking_earnings":
+      return "Linking labour earnings...";
+    case "linking_attendance":
+      return "Linking attendance...";
+    case "posting_accounting":
+      return "Posting accounting...";
+    case "committed":
+      return "Settlement created successfully.";
+    case "already_created":
+      return "This settlement was already created.";
+    case "rolled_back":
+      return "Settlement could not be created. No changes were saved.";
+    default:
+      return "Settlement creation is still processing. Do not submit it again.";
+  }
+}
+
 async function validateContext(sessionId: string | undefined, workspaceId: string, farmId: string, seasonId: string) {
   const [session] = await db.select({
     activeFarmId: userSessions.activeFarmId,
@@ -137,6 +227,110 @@ async function findSettlementByClientRequestId(
     sql`${operationalRecords.payload}->>'clientRequestId' = ${clientRequestId}`,
   )).limit(1);
   return settlements[0] ?? null;
+}
+
+async function loadSettlementCreateRequest(
+  tx: DbTransaction | typeof db,
+  workspaceId: string,
+  clientRequestId: string,
+) {
+  const rows = await tx.select({
+    id: labourWageSettlementCreateRequests.id,
+    workspaceId: labourWageSettlementCreateRequests.workspaceId,
+    farmId: labourWageSettlementCreateRequests.farmId,
+    seasonId: labourWageSettlementCreateRequests.seasonId,
+    clientRequestId: labourWageSettlementCreateRequests.clientRequestId,
+    operationType: labourWageSettlementCreateRequests.operationType,
+    state: labourWageSettlementCreateRequests.state,
+    stage: labourWageSettlementCreateRequests.stage,
+    settlementOperationalRecordId: labourWageSettlementCreateRequests.settlementOperationalRecordId,
+    settlementClientRecordId: labourWageSettlementCreateRequests.settlementClientRecordId,
+    settlementNumber: labourWageSettlementCreateRequests.settlementNumber,
+    errorCode: labourWageSettlementCreateRequests.errorCode,
+    safeToRetry: labourWageSettlementCreateRequests.safeToRetry,
+    message: labourWageSettlementCreateRequests.message,
+    correlationId: labourWageSettlementCreateRequests.correlationId,
+    completedAt: labourWageSettlementCreateRequests.completedAt,
+    createdAt: labourWageSettlementCreateRequests.createdAt,
+    updatedAt: labourWageSettlementCreateRequests.updatedAt,
+  }).from(labourWageSettlementCreateRequests).where(and(
+    eq(labourWageSettlementCreateRequests.workspaceId, workspaceId),
+    eq(labourWageSettlementCreateRequests.clientRequestId, clientRequestId),
+    eq(labourWageSettlementCreateRequests.operationType, settlementCreateOperationType),
+  )).limit(1);
+  return (rows[0] ?? null) as SettlementCreateRequestRow | null;
+}
+
+async function upsertSettlementCreateRequestState(args: {
+  workspaceId: string;
+  farmId: string;
+  seasonId: string;
+  clientRequestId: string;
+  state: SettlementCreateRequestInternalState;
+  stage?: string | null;
+  settlementOperationalRecordId?: string | null;
+  settlementClientRecordId?: string | null;
+  settlementNumber?: string | null;
+  errorCode?: string | null;
+  safeToRetry?: boolean;
+  message?: string | null;
+  correlationId?: string | null;
+  completedAt?: Date | null;
+}) {
+  const updatedAt = new Date();
+  await db.execute(sql`
+    INSERT INTO labour_wage_settlement_create_requests (
+      workspace_id,
+      farm_id,
+      season_id,
+      client_request_id,
+      operation_type,
+      state,
+      stage,
+      settlement_operational_record_id,
+      settlement_client_record_id,
+      settlement_number,
+      error_code,
+      safe_to_retry,
+      message,
+      correlation_id,
+      completed_at,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      ${args.workspaceId}::uuid,
+      ${args.farmId}::uuid,
+      ${args.seasonId}::uuid,
+      ${args.clientRequestId}::uuid,
+      ${settlementCreateOperationType},
+      ${args.state},
+      ${args.stage ?? args.state},
+      ${args.settlementOperationalRecordId ?? null}::uuid,
+      ${args.settlementClientRecordId ?? null},
+      ${args.settlementNumber ?? null},
+      ${args.errorCode ?? null},
+      ${args.safeToRetry ?? false},
+      ${args.message ?? settlementCreateStageMessage(args.stage ?? args.state)},
+      ${args.correlationId ?? null},
+      ${args.completedAt ?? null},
+      ${updatedAt},
+      ${updatedAt}
+    )
+    ON CONFLICT (workspace_id, client_request_id, operation_type)
+    DO UPDATE SET
+      state = EXCLUDED.state,
+      stage = EXCLUDED.stage,
+      settlement_operational_record_id = COALESCE(EXCLUDED.settlement_operational_record_id, labour_wage_settlement_create_requests.settlement_operational_record_id),
+      settlement_client_record_id = COALESCE(EXCLUDED.settlement_client_record_id, labour_wage_settlement_create_requests.settlement_client_record_id),
+      settlement_number = COALESCE(EXCLUDED.settlement_number, labour_wage_settlement_create_requests.settlement_number),
+      error_code = EXCLUDED.error_code,
+      safe_to_retry = EXCLUDED.safe_to_retry,
+      message = EXCLUDED.message,
+      correlation_id = COALESCE(EXCLUDED.correlation_id, labour_wage_settlement_create_requests.correlation_id),
+      completed_at = COALESCE(EXCLUDED.completed_at, labour_wage_settlement_create_requests.completed_at),
+      updated_at = EXCLUDED.updated_at
+  `);
 }
 
 async function isSettlementRequestProcessing(
@@ -242,6 +436,48 @@ function settlementResponseFromRow(
       accountingStatus: payload.accountingStatus ?? "posted" as const,
       accountingMessage: payload.accountingMessage ?? null,
     },
+  };
+}
+
+function settlementCreateStatusFromSettlement(
+  clientRequestId: string,
+  row: {
+    clientRecordId: string;
+    payload: Record<string, unknown>;
+  },
+  state: SettlementCreatePublicState = "SUCCESS",
+): SettlementCreateStatusResponse {
+  const settlement = settlementResponseFromRow(row).settlement;
+  return {
+    clientRequestId,
+    state,
+    safeToRetry: false,
+    settlementId: settlement.id,
+    settlementNumber: settlement.settlementNumber,
+    errorCode: null,
+    message: state === "ALREADY_CREATED"
+      ? `This settlement was already created as ${settlement.settlementNumber}.`
+      : `Settlement ${settlement.settlementNumber} was created successfully.`,
+    stage: state === "ALREADY_CREATED" ? "already_created" : "committed",
+    updatedAt: new Date().toISOString(),
+    settlement,
+  };
+}
+
+function settlementCreateStatusFromRequest(
+  row: SettlementCreateRequestRow,
+): SettlementCreateStatusResponse {
+  return {
+    clientRequestId: row.clientRequestId,
+    state: settlementPublicState(row.state),
+    safeToRetry: row.safeToRetry,
+    settlementId: row.settlementClientRecordId,
+    settlementNumber: row.settlementNumber,
+    errorCode: row.errorCode,
+    message: row.message ?? settlementCreateStageMessage(row.stage ?? row.state),
+    stage: row.stage ?? row.state,
+    updatedAt: row.updatedAt.toISOString(),
+    settlement: null,
   };
 }
 
@@ -421,29 +657,49 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
     const status = await db.transaction(async (tx) => {
       const existingSettlement = await findSettlementByClientRequestId(tx, workspaceId, farmId, seasonId, clientRequestId);
       if (existingSettlement) {
-        return {
-          created: true,
-          processing: false,
-          notFound: false,
-          failed: false,
-          safeToRetry: false,
-          settlement: {
-            ...normalizeSettlementPayload(existingSettlement.payload as Record<string, unknown>),
-            id: existingSettlement.clientRecordId,
-            accountingStatus: "posted" as const,
-            accountingMessage: null,
+        const requestRow = await loadSettlementCreateRequest(tx, workspaceId, clientRequestId);
+        return settlementCreateStatusFromSettlement(
+          clientRequestId,
+          {
+            clientRecordId: existingSettlement.clientRecordId,
+            payload: existingSettlement.payload as Record<string, unknown>,
           },
-        };
+          requestRow?.state === "already_created" ? "ALREADY_CREATED" : "SUCCESS",
+        );
+      }
+      const requestRow = await loadSettlementCreateRequest(tx, workspaceId, clientRequestId);
+      if (requestRow) {
+        const requestStatus = settlementCreateStatusFromRequest(requestRow);
+        if (requestStatus.state === "IN_PROGRESS") {
+          const processing = await isSettlementRequestProcessing(tx, workspaceId, farmId, clientRequestId);
+          if (!processing) {
+            return {
+              ...requestStatus,
+              state: "FAILED",
+              safeToRetry: true,
+              errorCode: requestStatus.errorCode ?? "SETTLEMENT_POSTING_FAILED",
+              message: "Settlement could not be created. No changes were saved.",
+              stage: "rolled_back",
+            } satisfies SettlementCreateStatusResponse;
+          }
+        }
+        return requestStatus;
       }
       const processing = await isSettlementRequestProcessing(tx, workspaceId, farmId, clientRequestId);
       return {
-        created: false,
-        processing,
-        notFound: !processing,
-        failed: false,
+        clientRequestId,
+        state: processing ? "IN_PROGRESS" : "FAILED",
         safeToRetry: !processing,
+        settlementId: null,
+        settlementNumber: null,
+        errorCode: processing ? null : "SETTLEMENT_POSTING_FAILED",
+        message: processing
+          ? "Settlement creation is still processing. Do not submit it again."
+          : "Settlement could not be created. No changes were saved.",
+        stage: processing ? "transaction_started" : "rolled_back",
+        updatedAt: new Date().toISOString(),
         settlement: null,
-      };
+      } satisfies SettlementCreateStatusResponse;
     });
 
     request.log.info({
@@ -451,8 +707,8 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
       farmId,
       seasonId,
       clientRequestId,
-      created: status.created,
-      processing: status.processing,
+      state: status.state,
+      stage: status.stage,
       safeToRetry: status.safeToRetry,
     }, "labour wage settlement status checked");
 
@@ -745,6 +1001,47 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
       manualAdjustmentNote,
       notes,
     } = parsed.data;
+    const requestStartTime = Date.now();
+    const effectiveClientRequestId = clientRequestId ?? crypto.randomUUID();
+    const createRequestBase = {
+      workspaceId,
+      farmId,
+      seasonId,
+      clientRequestId: effectiveClientRequestId,
+      correlationId: request.id,
+    } as const;
+    const updateCreateRequestState = async (
+      state: SettlementCreateRequestInternalState,
+      options: {
+        stage?: SettlementCreateRequestInternalState | null;
+        settlementOperationalRecordId?: string | null;
+        settlementClientRecordId?: string | null;
+        settlementNumber?: string | null;
+        errorCode?: string | null;
+        safeToRetry?: boolean;
+        message?: string | null;
+        completedAt?: Date | null;
+      } = {},
+    ) => {
+      await upsertSettlementCreateRequestState({
+        ...createRequestBase,
+        state,
+        stage: options.stage ?? state,
+        settlementOperationalRecordId: options.settlementOperationalRecordId ?? null,
+        settlementClientRecordId: options.settlementClientRecordId ?? null,
+        settlementNumber: options.settlementNumber ?? null,
+        errorCode: options.errorCode ?? null,
+        safeToRetry: options.safeToRetry ?? false,
+        message: options.message ?? settlementCreateStageMessage(options.stage ?? state),
+        completedAt: options.completedAt ?? null,
+      });
+      request.log.info({
+        ...createRequestBase,
+        state,
+        stage: options.stage ?? state,
+        elapsedMs: Date.now() - requestStartTime,
+      }, "labour wage settlement request state updated");
+    };
     if (request.appUser.workspaceId !== workspaceId) return reply.code(403).send({ message: "Select this workspace before creating labour settlements." });
     if (!hasModulePermission(request.appUser, workspaceId, "wages", "create")) return reply.code(403).send({ message: "Workspace wage settlement create permission is required." });
     if (!hasFarmAccess(request.appUser, workspaceId, farmId)) return reply.code(403).send({ message: "You do not have access to this farm." });
@@ -765,8 +1062,19 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
       toDate,
       settlementDate,
       settlementMode: settlementMode ?? "individual",
-      clientRequestId: clientRequestId ?? null,
+      clientRequestId: effectiveClientRequestId,
     }, "labour wage settlement create request received");
+    const existingRequestState = await loadSettlementCreateRequest(db, workspaceId, effectiveClientRequestId);
+    if (existingRequestState && settlementPublicState(existingRequestState.state) === "IN_PROGRESS") {
+      const inProgressStatus = settlementCreateStatusFromRequest(existingRequestState);
+      request.log.info({
+        ...createRequestBase,
+        state: inProgressStatus.state,
+        stage: inProgressStatus.stage,
+      }, "labour wage settlement create request already in progress");
+      return reply.code(202).send(inProgressStatus);
+    }
+    await updateCreateRequestState("request_received");
     if (process.env.NODE_ENV !== "production") {
       request.log.info({
         workspaceId,
@@ -777,6 +1085,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         groupId: groupId ?? null,
       }, "labour wage settlement create request parsed");
     }
+    await updateCreateRequestState("validation_complete");
 
     let resolvedSelection;
     try {
@@ -788,11 +1097,18 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         labourIds,
       }));
     } catch (error) {
+      await updateCreateRequestState("rolled_back", {
+        errorCode: "SETTLEMENT_SCOPE_INVALID",
+        safeToRetry: true,
+        message: error instanceof Error ? error.message : "Unable to resolve the selected labour settlement group.",
+        completedAt: new Date(),
+      });
       return reply.code(400).send({
         message: error instanceof Error ? error.message : "Unable to resolve the selected labour settlement group.",
         fields: ["groupId"],
       });
     }
+    await updateCreateRequestState("selection_resolved");
     if (process.env.NODE_ENV !== "production") {
       request.log.info({
         workspaceId,
@@ -803,21 +1119,38 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
       }, "labour wage settlement create selection resolved");
     }
 
-    const existingSettlement = clientRequestId
-      ? await db.transaction((tx) => findSettlementByClientRequestId(tx, workspaceId, farmId, seasonId, clientRequestId))
-      : null;
+    const existingSettlement = await db.transaction((tx) => findSettlementByClientRequestId(tx, workspaceId, farmId, seasonId, effectiveClientRequestId));
     if (existingSettlement) {
+      await updateCreateRequestState("already_created", {
+        settlementOperationalRecordId: existingSettlement.id,
+        settlementClientRecordId: existingSettlement.clientRecordId,
+        settlementNumber: normalizeSettlementPayload(existingSettlement.payload as Record<string, unknown>).settlementNumber,
+        safeToRetry: false,
+        completedAt: new Date(),
+      });
       request.log.info({
         workspaceId,
         farmId,
         seasonId,
         settlementId: existingSettlement.clientRecordId,
-        clientRequestId,
+        clientRequestId: effectiveClientRequestId,
       }, "labour wage settlement create request matched existing settlement");
-      return settlementResponseFromRow({
+      const settlement = settlementResponseFromRow({
         clientRecordId: existingSettlement.clientRecordId,
         payload: existingSettlement.payload as Record<string, unknown>,
       });
+      return reply.send({
+        clientRequestId: effectiveClientRequestId,
+        state: "ALREADY_CREATED" as const,
+        safeToRetry: false,
+        settlementId: settlement.settlement.id,
+        settlementNumber: settlement.settlement.settlementNumber,
+        errorCode: null,
+        message: `This settlement was already created as ${settlement.settlement.settlementNumber}.`,
+        stage: "already_created",
+        updatedAt: new Date().toISOString(),
+        settlement: settlement.settlement,
+      } satisfies SettlementCreateStatusResponse);
     }
 
     const previewStartedAt = Date.now();
@@ -839,13 +1172,26 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
       overlappingSettlementCount: preview.overlappingSettlements.length,
       unresolvedRowCount: preview.unresolvedRows.length,
     }, "labour wage settlement preview revalidated for posting");
+    await updateCreateRequestState("preview_recalculated");
     if (preview.unresolvedRows.length) {
+      await updateCreateRequestState("rolled_back", {
+        errorCode: "SETTLEMENT_PREVIEW_INVALID",
+        safeToRetry: true,
+        message: "Attendance wages cannot be settled until missing wage rates are fixed.",
+        completedAt: new Date(),
+      });
       return reply.code(409).send({
         message: "Attendance wages cannot be settled until missing wage rates are fixed.",
         details: { code: "missing_wage_rates", unresolvedRows: preview.unresolvedRows },
       });
     }
     if (preview.overlappingSettlements.length) {
+      await updateCreateRequestState("rolled_back", {
+        errorCode: "SETTLEMENT_OVERLAP",
+        safeToRetry: true,
+        message: "An active labour wage settlement already exists for an overlapping date range.",
+        completedAt: new Date(),
+      });
       return reply.code(409).send({
         message: "An active labour wage settlement already exists for an overlapping date range.",
         details: {
@@ -856,29 +1202,37 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
     }
     try {
       const transactionStartedAt = Date.now();
+      await updateCreateRequestState("transaction_started");
       request.log.info({
         workspaceId,
         farmId,
         seasonId,
-        clientRequestId: clientRequestId ?? null,
+        clientRequestId: effectiveClientRequestId,
       }, "labour wage settlement transaction started");
-        const result = await db.transaction(async (tx) => {
-        if (clientRequestId) {
-          const requestScopeKey = `${workspaceId}:${farmId}:labour-wage-settlement:${clientRequestId}`;
+      const result = await db.transaction(async (tx) => {
+        {
+          const requestScopeKey = `${workspaceId}:${farmId}:labour-wage-settlement:${effectiveClientRequestId}`;
           await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${requestScopeKey}), 1)`);
-          const existingByRequest = await findSettlementByClientRequestId(tx, workspaceId, farmId, seasonId, clientRequestId);
+          const existingByRequest = await findSettlementByClientRequestId(tx, workspaceId, farmId, seasonId, effectiveClientRequestId);
           if (existingByRequest) {
             request.log.info({
               workspaceId,
               farmId,
               seasonId,
               settlementId: existingByRequest.clientRecordId,
-              clientRequestId,
+              clientRequestId: effectiveClientRequestId,
             }, "labour wage settlement duplicate request reused existing settlement inside transaction");
-            return settlementResponseFromRow({
+            const settlement = settlementResponseFromRow({
               clientRecordId: existingByRequest.clientRecordId,
               payload: existingByRequest.payload as Record<string, unknown>,
             });
+            return {
+              state: "ALREADY_CREATED" as const,
+              settlementOperationalRecordId: existingByRequest.id,
+              settlementClientRecordId: settlement.settlement.id,
+              settlementNumber: settlement.settlement.settlementNumber,
+              settlement: settlement.settlement,
+            };
           }
         }
         const effectivePaidAmount = Number(paidAmount ?? 0);
@@ -921,6 +1275,10 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         const createdAt = new Date();
         const settlementClientRecordId = crypto.randomUUID();
         const settlementNumber = await allocateSettlementNumber(tx, workspaceId, farmId);
+        await updateCreateRequestState("inserting_settlement", {
+          settlementClientRecordId,
+          settlementNumber,
+        });
         const effectiveAdvanceAdjustedNow = effectiveAdvanceAdjustmentForPosting(preview, Number(manualAdjustment ?? 0));
         const settlementTotals = calculateLabourWageSettlementTotals(
           preview.attendanceWages,
@@ -1051,7 +1409,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         }
         const settlementPayload = {
           id: settlementClientRecordId,
-          clientRequestId: clientRequestId ?? null,
+          clientRequestId: effectiveClientRequestId,
           settlementNumber,
           linkedVoucherId: "",
           linkedVoucherNumber: settlementNumber,
@@ -1146,6 +1504,11 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         }
         const settlementOperationalRecordId = insertedSettlementRecord.operationalRecordId;
         if (advanceAbsorptionRows.length) {
+          await updateCreateRequestState("inserting_allocations", {
+            settlementOperationalRecordId,
+            settlementClientRecordId,
+            settlementNumber,
+          });
           for (const row of advanceAbsorptionRows) {
             try {
               await tx.insert(labourWageSettlementAdvanceAllocations).values({
@@ -1201,6 +1564,11 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           settlementClientRecordId,
           includedEarningCount: earningsToSettle.length,
         }, "labour wage settlement labour earning update started");
+        await updateCreateRequestState("linking_earnings", {
+          settlementOperationalRecordId,
+          settlementClientRecordId,
+          settlementNumber,
+        });
         for (const earning of earningsToSettle) {
           const nextPayload = {
             ...normalizeLabourEarningPayload(earning.payload as Record<string, unknown>),
@@ -1243,6 +1611,11 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           settlementClientRecordId,
           includedAttendanceCount: attendanceRows.length,
         }, "labour wage settlement attendance update started");
+        await updateCreateRequestState("linking_attendance", {
+          settlementOperationalRecordId,
+          settlementClientRecordId,
+          settlementNumber,
+        });
         for (const attendance of attendanceRows) {
           const nextPayload = {
             ...(attendance.payload as Record<string, unknown>),
@@ -1278,6 +1651,11 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           seasonId,
           settlementClientRecordId,
         }, "labour wage settlement accounting repair started");
+        await updateCreateRequestState("posting_accounting", {
+          settlementOperationalRecordId,
+          settlementClientRecordId,
+          settlementNumber,
+        });
         await repairPostedSettlementAccounting(tx, settlementRecord, request.appUser!.id);
         request.log.info({
           workspaceId,
@@ -1293,8 +1671,22 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           settlementNumber,
         }, "labour wage settlement transaction ready to commit");
         return {
+          state: "SUCCESS" as const,
+          settlementOperationalRecordId,
+          settlementClientRecordId,
+          settlementNumber,
           settlement: { ...settlementPayload, id: settlementClientRecordId, accountingStatus: "posted" as const, accountingMessage: null },
         };
+      });
+      await updateCreateRequestState(result.state === "ALREADY_CREATED" ? "already_created" : "committed", {
+        settlementOperationalRecordId: result.settlementOperationalRecordId,
+        settlementClientRecordId: result.settlementClientRecordId,
+        settlementNumber: result.settlementNumber,
+        safeToRetry: false,
+        completedAt: new Date(),
+        message: result.state === "ALREADY_CREATED"
+          ? `This settlement was already created as ${result.settlementNumber}.`
+          : `Settlement ${result.settlementNumber} was created successfully.`,
       });
       request.log.info({
         workspaceId,
@@ -1303,15 +1695,30 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         settlementId: result.settlement.id,
         settlementNumber: result.settlement.settlementNumber,
         durationMs: Date.now() - transactionStartedAt,
-        }, "labour wage settlement create request completed");
-      return result;
+      }, "labour wage settlement create request completed");
+      return reply.send({
+        clientRequestId: effectiveClientRequestId,
+        state: result.state,
+        safeToRetry: false,
+        settlementId: result.settlement.id,
+        settlementNumber: result.settlement.settlementNumber,
+        errorCode: null,
+        message: result.state === "ALREADY_CREATED"
+          ? `This settlement was already created as ${result.settlement.settlementNumber}.`
+          : `Settlement ${result.settlement.settlementNumber} was created successfully.`,
+        stage: result.state === "ALREADY_CREATED" ? "already_created" : "committed",
+        updatedAt: new Date().toISOString(),
+        settlement: result.settlement,
+      } satisfies SettlementCreateStatusResponse);
     } catch (error) {
       const dbError = toDatabaseErrorInfo(error);
+      const failureCode = dbError ? settlementPostingErrorCode(dbError) : "SETTLEMENT_POSTING_FAILED";
+      const failureMessage = dbError ? settlementPostingErrorMessage(dbError) : error instanceof Error ? error.message : "Settlement could not be created. No changes were saved.";
       request.log.error({
         workspaceId,
         farmId,
         seasonId,
-        clientRequestId: clientRequestId ?? null,
+        clientRequestId: effectiveClientRequestId,
         requestId: request.id,
         errorCode: dbError?.code ?? null,
         errorConstraint: dbError?.constraint ?? null,
@@ -1323,17 +1730,23 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         errorPosition: dbError?.position ?? null,
         errorRoutine: dbError?.routine ?? null,
       }, "labour wage settlement create request rolled back");
+      await updateCreateRequestState("rolled_back", {
+        errorCode: failureCode,
+        safeToRetry: true,
+        message: failureMessage,
+        completedAt: new Date(),
+      });
       if (dbError) {
         return reply.code(400).send({
-          code: settlementPostingErrorCode(dbError),
-          message: settlementPostingErrorMessage(dbError),
+          code: failureCode,
+          message: failureMessage,
           requestId: request.id,
         });
       }
       if (error instanceof Error) {
         return reply.code(400).send({
-          code: "SETTLEMENT_POSTING_FAILED",
-          message: error.message,
+          code: failureCode,
+          message: failureMessage,
           requestId: request.id,
         });
       }

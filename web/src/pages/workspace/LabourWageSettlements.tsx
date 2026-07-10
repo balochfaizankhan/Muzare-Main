@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Search, Printer, Download, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -62,7 +62,6 @@ export function LabourWageSettlements() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
-  const [settlementStatusUnknown, setSettlementStatusUnknown] = useState(false);
   const [statusCheckInFlight, setStatusCheckInFlight] = useState(false);
   const [statusCheckNotice, setStatusCheckNotice] = useState("");
   const [savingSettlementId, setSavingSettlementId] = useState<string | null>(null);
@@ -93,6 +92,12 @@ export function LabourWageSettlements() {
   const [voidReason, setVoidReason] = useState("");
 
   const onlineRequired = !navigator.onLine;
+  const statusPollingAbortRef = useRef<AbortController | null>(null);
+  const restoredPendingRequestIdRef = useRef<string | null>(null);
+  const pendingSettlementStorageKey = useMemo(() => {
+    if (!workspaceId || !activeFarmId || !activeSeasonId) return "";
+    return `muzare-labour-settlement-pending:${workspaceId}:${activeFarmId}:${activeSeasonId}`;
+  }, [activeFarmId, activeSeasonId, workspaceId]);
 
   const refresh = useCallback(async () => {
     const [cachedAccounts, cachedSettlements] = await Promise.all([
@@ -207,6 +212,10 @@ export function LabourWageSettlements() {
     void syncFromServer();
   }, [syncFromServer]);
 
+  useEffect(() => () => {
+    statusPollingAbortRef.current?.abort();
+  }, []);
+
   useEffect(() => {
     const presetGroupId = searchParams.get("groupId");
     if (presetGroupId && !groupId) {
@@ -264,17 +273,17 @@ export function LabourWageSettlements() {
   }, [searchParams, setSearchParams, settlements]);
 
   useEffect(() => {
-    setPendingRequestId(null);
-    setSettlementStatusUnknown(false);
-    setStatusCheckInFlight(false);
-    setStatusCheckNotice("");
+    if (!pendingRequestId) {
+      setStatusCheckInFlight(false);
+      setStatusCheckNotice("");
+    }
     setPreview((current) => (current.status === "idle" ? current : { status: "idle", data: null }));
     setPreviewDiagnostics((current) => ({
       ...current,
       storedPreview: null,
       createDisabledReason: "Preview the settlement before posting it.",
     }));
-  }, [activeFarmId, activeSeasonId, fromDate, toDate, settlementDate, settlementMode, labourerId, foremanId, groupId, accountId, paidAmount, manualAdjustment, manualAdjustmentNote, notes]);
+  }, [activeFarmId, activeSeasonId, accountId, foremanId, fromDate, groupId, labourerId, manualAdjustment, manualAdjustmentNote, notes, pendingRequestId, settlementDate, settlementMode, toDate]);
 
   const previewRequest = useMemo(() => ({
     farmId: activeFarmId || "",
@@ -372,67 +381,121 @@ export function LabourWageSettlements() {
     document.getElementById("labour-settlement-register")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
 
-  const resolveUnknownSettlementStatus = useCallback(async (clientRequestId: string) => {
+  const clearPendingSettlementRequest = useCallback(() => {
+    if (pendingSettlementStorageKey) window.sessionStorage.removeItem(pendingSettlementStorageKey);
+    restoredPendingRequestIdRef.current = null;
+    setPendingRequestId(null);
+  }, [pendingSettlementStorageKey]);
+
+  const storePendingSettlementRequest = useCallback((clientRequestId: string) => {
+    if (!pendingSettlementStorageKey) return;
+    window.sessionStorage.setItem(pendingSettlementStorageKey, JSON.stringify({
+      clientRequestId,
+      workspaceId,
+      farmId: activeFarmId,
+      seasonId: activeSeasonId,
+      storedAt: new Date().toISOString(),
+    }));
+  }, [activeFarmId, activeSeasonId, pendingSettlementStorageKey, workspaceId]);
+
+  const resetSettlementComposer = useCallback(() => {
+    setPreview({ status: "idle", data: null });
+    setNotes("");
+    setManualAdjustment("0");
+    setManualAdjustmentNote("");
+    setPaidAmount("0");
+  }, []);
+
+  const finalizeSettlementCreateSuccess = useCallback(async (settlement: LabourWageSettlementRecord, message: string) => {
+    await persistSettlementRecord(settlement);
+    resetSettlementComposer();
+    clearPendingSettlementRequest();
+    setStatusCheckNotice("");
+    setError("");
+    setSuccess(message);
+    window.dispatchEvent(new Event("muzare-local-data-change"));
+    await syncFromServer();
+  }, [clearPendingSettlementRequest, persistSettlementRecord, resetSettlementComposer, syncFromServer]);
+
+  const resolveSettlementCreateStatus = useCallback(async (clientRequestId: string) => {
     if (!token || !workspaceId || !activeFarmId || !activeSeasonId) {
-      setSettlementStatusUnknown(true);
-      setStatusCheckNotice("");
-      setError("Settlement status is still unknown. Please check Settlements before trying again.");
+      setStatusCheckNotice("Settlement creation is still processing. Do not submit it again.");
       return;
     }
+    statusPollingAbortRef.current?.abort();
+    const abortController = new AbortController();
+    statusPollingAbortRef.current = abortController;
     setStatusCheckInFlight(true);
-    setSettlementStatusUnknown(false);
     setStatusCheckNotice("Checking settlement status...");
     setError("");
     try {
-      const delaysMs = [0, 1500, 3000];
+      const delaysMs = [0, 1500, 3000, 5000, 8000, 10000, 15000, 15000, 15000, 15000, 15000, 15000];
       for (let attempt = 0; attempt < delaysMs.length; attempt += 1) {
+        if (abortController.signal.aborted) return;
         const waitMs = delaysMs[attempt] ?? 0;
         if (waitMs > 0) {
           await new Promise((resolve) => window.setTimeout(resolve, waitMs));
         }
+        if (abortController.signal.aborted) return;
         const status = await fetchLabourWageSettlementCreateStatus(token, workspaceId, {
           farmId: activeFarmId,
           seasonId: activeSeasonId,
           clientRequestId,
         });
-        if (status.created && status.settlement) {
-          await persistSettlementRecord(status.settlement);
-          setPreview({ status: "idle", data: null });
-          setNotes("");
-          setManualAdjustment("0");
-          setManualAdjustmentNote("");
-          setPaidAmount("0");
-          setPendingRequestId(null);
-          setSettlementStatusUnknown(false);
-          setStatusCheckNotice("");
-          setSuccess(`Settlement ${status.settlement.settlementNumber} posted. Accounting reference: ${status.settlement.settlementNumber}.`);
-          window.dispatchEvent(new Event("muzare-local-data-change"));
-          await syncFromServer();
+        if ((status.state === "SUCCESS" || status.state === "ALREADY_CREATED") && status.settlement) {
+          await finalizeSettlementCreateSuccess(
+            status.settlement,
+            status.message ?? (status.state === "ALREADY_CREATED"
+              ? `This settlement was already created as ${status.settlement.settlementNumber}.`
+              : `Settlement ${status.settlement.settlementNumber} was created successfully.`),
+          );
           return;
         }
-        if (status.processing) {
-          setStatusCheckNotice("Taking longer than expected... Checking settlement status...");
+        if (status.state === "FAILED") {
+          if (status.safeToRetry) clearPendingSettlementRequest();
+          setStatusCheckNotice("");
+          setError(status.message ?? "Settlement could not be created. No changes were saved.");
+          return;
+        }
+        if (status.state === "IN_PROGRESS") {
+          setStatusCheckNotice(status.message ?? "Settlement creation is still processing. Do not submit it again.");
           continue;
         }
-        if (status.notFound && status.safeToRetry) {
-          setPendingRequestId(null);
-          setSettlementStatusUnknown(false);
-          setStatusCheckNotice("");
-          setError("Settlement was not created. You can safely try again.");
-          return;
-        }
       }
-      setSettlementStatusUnknown(true);
-      setStatusCheckNotice("");
-      setError("Settlement status is still unknown. Please check Settlements before trying again.");
+      setStatusCheckNotice("Settlement creation is still processing. You may leave this page and check Settlements shortly. Do not create it again.");
     } catch (caught) {
-      setSettlementStatusUnknown(true);
-      setStatusCheckNotice("");
-      setError(caught instanceof Error ? caught.message : "Settlement status is still unknown. Please check Settlements before trying again.");
+      if (!abortController.signal.aborted) {
+        setStatusCheckNotice("Settlement creation is still processing. You may leave this page and check Settlements shortly. Do not create it again.");
+        setError(caught instanceof Error ? caught.message : "Unable to verify the settlement status yet.");
+      }
     } finally {
+      if (statusPollingAbortRef.current === abortController) {
+        statusPollingAbortRef.current = null;
+      }
       setStatusCheckInFlight(false);
     }
-  }, [activeFarmId, activeSeasonId, persistSettlementRecord, syncFromServer, token, workspaceId]);
+  }, [activeFarmId, activeSeasonId, clearPendingSettlementRequest, finalizeSettlementCreateSuccess, token, workspaceId]);
+
+  useEffect(() => {
+    if (!pendingSettlementStorageKey || pendingRequestId || !token || !workspaceId || !activeFarmId || !activeSeasonId) return;
+    const raw = window.sessionStorage.getItem(pendingSettlementStorageKey);
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw) as { clientRequestId?: string };
+      const storedClientRequestId = typeof parsed.clientRequestId === "string" ? parsed.clientRequestId : "";
+      if (!storedClientRequestId) {
+        window.sessionStorage.removeItem(pendingSettlementStorageKey);
+        return;
+      }
+      if (restoredPendingRequestIdRef.current === storedClientRequestId) return;
+      restoredPendingRequestIdRef.current = storedClientRequestId;
+      setPendingRequestId(storedClientRequestId);
+      setStatusCheckNotice("Checking settlement status...");
+      void resolveSettlementCreateStatus(storedClientRequestId);
+    } catch {
+      window.sessionStorage.removeItem(pendingSettlementStorageKey);
+    }
+  }, [activeFarmId, activeSeasonId, pendingRequestId, pendingSettlementStorageKey, resolveSettlementCreateStatus, token, workspaceId]);
 
   const previewSettlement = async () => {
     if (!token || !workspaceId || !activeFarmId || !activeSeasonId) {
@@ -459,7 +522,6 @@ export function LabourWageSettlements() {
     setPreview({ status: "loading", data: null });
     setError("");
     setSuccess("");
-    setSettlementStatusUnknown(false);
     try {
       if (import.meta.env.DEV) {
         console.debug("labour-settlement-preview", {
@@ -529,10 +591,12 @@ export function LabourWageSettlements() {
     setSubmitting(true);
     setError("");
     setSuccess("");
-    setSettlementStatusUnknown(false);
     setStatusCheckNotice("");
     const clientRequestId = pendingRequestId ?? crypto.randomUUID();
-    if (!pendingRequestId) setPendingRequestId(clientRequestId);
+    if (!pendingRequestId) {
+      setPendingRequestId(clientRequestId);
+    }
+    storePendingSettlementRequest(clientRequestId);
     try {
       if (import.meta.env.DEV) {
         console.debug("labour-settlement-create", {
@@ -574,26 +638,37 @@ export function LabourWageSettlements() {
         manualAdjustmentNote: Number(manualAdjustment || 0) !== 0 ? manualAdjustmentNote.trim() : undefined,
         notes: notes.trim() || undefined,
       });
-      await persistSettlementRecord(response.settlement);
-      setPreview({ status: "idle", data: null });
-      setNotes("");
-      setManualAdjustment("0");
-      setManualAdjustmentNote("");
-      setPaidAmount("0");
-      setPendingRequestId(null);
-      setSuccess(`Settlement ${response.settlement.settlementNumber} posted. Accounting reference: ${response.settlement.settlementNumber}.`);
-      window.dispatchEvent(new Event("muzare-local-data-change"));
-      await syncFromServer();
+      if ((response.state === "SUCCESS" || response.state === "ALREADY_CREATED") && response.settlement) {
+        await finalizeSettlementCreateSuccess(
+          response.settlement,
+          response.message ?? (response.state === "ALREADY_CREATED"
+            ? `This settlement was already created as ${response.settlement.settlementNumber}.`
+            : `Settlement ${response.settlement.settlementNumber} was created successfully.`),
+        );
+        return;
+      }
+      if (response.state === "FAILED") {
+        if (response.safeToRetry) clearPendingSettlementRequest();
+        setStatusCheckNotice("");
+        setError(response.message ?? "Settlement could not be created. No changes were saved.");
+        return;
+      }
+      setStatusCheckNotice(response.message ?? "Settlement creation is still processing. Do not submit it again.");
+      await resolveSettlementCreateStatus(clientRequestId);
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Unable to create the labour wage settlement.";
-      const isUnknownStatus = message.includes("Settlement status is unknown");
-      if (isUnknownStatus) {
+      const isRecoverableTimeout = message.includes("Checking settlement status");
+      if (isRecoverableTimeout) {
         setSubmitting(false);
-        setStatusCheckNotice("Taking longer than expected... Checking settlement status...");
-        await resolveUnknownSettlementStatus(clientRequestId);
-      } else {
-        setSettlementStatusUnknown(false);
+        setStatusCheckNotice("The request is taking longer than expected. Checking settlement status...");
+        await resolveSettlementCreateStatus(clientRequestId);
+      } else if (caught instanceof ApiError) {
+        clearPendingSettlementRequest();
+        setStatusCheckNotice("");
         setError(message);
+      } else {
+        setStatusCheckNotice("The request is taking longer than expected. Checking settlement status...");
+        await resolveSettlementCreateStatus(clientRequestId);
       }
     } finally {
       setSubmitting(false);
@@ -1073,15 +1148,15 @@ export function LabourWageSettlements() {
             {onlineRequired ? <p className="worker-action-warning">Wage settlement requires online connection.</p> : null}
             {statusCheckNotice ? <p className="context-message">{statusCheckNotice}</p> : null}
             {error ? <p className="form-error">{error}</p> : null}
-            {settlementStatusUnknown ? (
+            {pendingRequestId ? (
               <div className="module-inline-actions">
                 <button
                   type="button"
                   className="secondary-action"
-                  onClick={() => pendingRequestId ? void resolveUnknownSettlementStatus(pendingRequestId) : undefined}
+                  onClick={() => pendingRequestId ? void resolveSettlementCreateStatus(pendingRequestId) : undefined}
                   disabled={statusCheckInFlight || !pendingRequestId}
                 >
-                  {statusCheckInFlight ? "Checking settlement..." : "Check Again"}
+                  {statusCheckInFlight ? "Checking status..." : "Check Status"}
                 </button>
                 <button type="button" className="secondary-action" onClick={scrollToSettlements} disabled={statusCheckInFlight}>
                   View Settlements
@@ -1090,11 +1165,17 @@ export function LabourWageSettlements() {
             ) : null}
             {success ? <p className="context-message">{success}</p> : null}
             <div className="wage-settlement-actions">
-              <button type="button" className="secondary-action" onClick={() => void previewSettlement()} disabled={!token || !workspaceId || !activeFarmId || !activeSeasonId || preview.status === "loading"}>
+              <button type="button" className="secondary-action" onClick={() => void previewSettlement()} disabled={!token || !workspaceId || !activeFarmId || !activeSeasonId || preview.status === "loading" || Boolean(pendingRequestId) || submitting || statusCheckInFlight}>
                 {preview.status === "loading" ? "Previewing..." : "Preview Settlement"}
               </button>
-              <button type="submit" disabled={Boolean(createDisabledReason) || submitting || statusCheckInFlight || settlementStatusUnknown}>
-                {submitting ? "Posting settlement..." : statusCheckInFlight ? "Checking settlement status..." : "Create Settlement"}
+              <button type="submit" disabled={Boolean(createDisabledReason) || submitting || statusCheckInFlight || Boolean(pendingRequestId)}>
+                {submitting
+                  ? "Creating settlement..."
+                  : statusCheckInFlight
+                    ? "Checking settlement status..."
+                    : pendingRequestId
+                      ? "Settlement still processing..."
+                      : "Create Settlement"}
               </button>
             </div>
           </form>

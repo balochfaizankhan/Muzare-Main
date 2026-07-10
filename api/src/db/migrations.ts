@@ -35,6 +35,7 @@ const workspaceAccountantRoleMigrationUrl = new URL("../../../database/migration
 const workspaceMembershipDedupMigrationUrl = new URL("../../../database/migrations/0031_workspace_membership_dedup.sql", import.meta.url);
 const voidedLabourWageSettlementRepairMigrationUrl = new URL("../../../database/migrations/0032_voided_labour_wage_settlement_repair.sql", import.meta.url);
 const labourWageSettlementAdvanceAllocationsMigrationUrl = new URL("../../../database/migrations/0033_labour_wage_settlement_advance_allocations.sql", import.meta.url);
+const labourWageSettlementCreateRequestsMigrationUrl = new URL("../../../database/migrations/0034_labour_wage_settlement_create_requests.sql", import.meta.url);
 
 const STARTUP_LOCK_KEY = "muzare_ensure_workspace_schema";
 const STARTUP_LOCK_TIMEOUT = "10s";
@@ -110,6 +111,7 @@ const deferredMigrationSteps: MigrationStep[] = [
   { key: "0031_workspace_membership_dedup", kind: "sql", required: false, sourceUrl: workspaceMembershipDedupMigrationUrl },
   { key: "0032_voided_labour_wage_settlement_repair", kind: "sql", required: false, sourceUrl: voidedLabourWageSettlementRepairMigrationUrl },
   { key: "0033_labour_wage_settlement_advance_allocations", kind: "sql", required: false, sourceUrl: labourWageSettlementAdvanceAllocationsMigrationUrl },
+  { key: "0034_labour_wage_settlement_create_requests", kind: "sql", required: false, sourceUrl: labourWageSettlementCreateRequestsMigrationUrl },
 ];
 
 function logMigrationEvent(event: string, details: Record<string, unknown>) {

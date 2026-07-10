@@ -288,6 +288,32 @@ export const labourWageSettlementAdvanceAllocations = pgTable(
   ],
 );
 
+export const labourWageSettlementCreateRequests = pgTable(
+  "labour_wage_settlement_create_requests",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+    farmId: uuid("farm_id").references(() => farms.id).notNull(),
+    seasonId: uuid("season_id").references(() => seasons.id).notNull(),
+    clientRequestId: uuid("client_request_id").notNull(),
+    operationType: text("operation_type").default("labour_wage_settlement_create").notNull(),
+    state: text("state").notNull(),
+    stage: text("stage"),
+    settlementOperationalRecordId: uuid("settlement_operational_record_id"),
+    settlementClientRecordId: text("settlement_client_record_id"),
+    settlementNumber: text("settlement_number"),
+    errorCode: text("error_code"),
+    safeToRetry: boolean("safe_to_retry").default(false).notNull(),
+    message: text("message"),
+    correlationId: text("correlation_id"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("labour_wage_settlement_create_requests_client_uidx").on(table.workspaceId, table.clientRequestId, table.operationType),
+  ],
+);
+
 export const vehicles = pgTable(
   "vehicles",
   {

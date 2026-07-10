@@ -130,13 +130,17 @@ test("labour wage settlement create requests reuse a client request id and narro
   assert.ok(source.includes("clientRequestId: z.string().uuid().optional()"));
   assert.ok(source.includes("findSettlementByClientRequestId"));
   assert.ok(source.includes("pg_advisory_xact_lock"));
+  assert.ok(source.includes("labourWageSettlementCreateRequests"));
+  assert.ok(source.includes("updateCreateRequestState(\"request_received\")"));
+  assert.ok(source.includes("updateCreateRequestState(\"transaction_started\")"));
+  assert.ok(source.includes("updateCreateRequestState(\"rolled_back\""));
   assert.ok(source.includes("inArray(operationalRecords.clientRecordId, includedEarningIds)"));
   assert.ok(source.includes("inArray(operationalRecords.clientRecordId, includedAttendanceIds)"));
   assert.ok(source.includes("labour wage settlement create request completed"));
   assert.ok(libSource.includes("clientRequestId?: string | null;"));
   assert.ok(webSource.includes("pendingRequestId"));
-  assert.ok(webSource.includes("resolveUnknownSettlementStatus"));
-  assert.ok(apiSource.includes("Settlement status is unknown. Please check Settlements before trying again."));
+  assert.ok(webSource.includes("resolveSettlementCreateStatus"));
+  assert.ok(apiSource.includes("The request is taking longer than expected. Checking settlement status..."));
 });
 
 test("labour wage settlement allocations persist canonical advance UUIDs and log safe allocation failures", () => {
@@ -279,9 +283,11 @@ test("settlement create status endpoint reuses the client request id and process
   const source = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
   assert.ok(source.includes('app.get("/v1/workspace/:workspaceId/labour-wage-settlements/status"'));
   assert.ok(source.includes("settlementStatusQuerySchema"));
+  assert.ok(source.includes("SettlementCreateStatusResponse"));
+  assert.ok(source.includes("settlementCreateStatusFromRequest"));
   assert.ok(source.includes("isSettlementRequestProcessing"));
   assert.ok(source.includes("pg_try_advisory_lock"));
-  assert.ok(source.includes("safeToRetry: !processing"));
+  assert.ok(source.includes('state: "FAILED"'));
 });
 
 test("individual labour summaries do not subtract group settlement advance adjustments", () => {
@@ -294,12 +300,13 @@ test("frontend rechecks settlement creation status after timeout before allowing
   const apiSource = readFileSync(new URL("../../web/src/lib/api.ts", import.meta.url), "utf8");
   const pageSource = readFileSync(new URL("../../web/src/pages/workspace/LabourWageSettlements.tsx", import.meta.url), "utf8");
   assert.ok(apiSource.includes("fetchLabourWageSettlementCreateStatus"));
-  assert.ok(pageSource.includes("resolveUnknownSettlementStatus"));
-  assert.ok(pageSource.includes("Taking longer than expected... Checking settlement status..."));
-  assert.ok(pageSource.includes("Settlement was not created. You can safely try again."));
-  assert.ok(pageSource.includes("Settlement status is still unknown. Please check Settlements before trying again."));
+  assert.ok(pageSource.includes("resolveSettlementCreateStatus"));
+  assert.ok(pageSource.includes("The request is taking longer than expected. Checking settlement status..."));
+  assert.ok(pageSource.includes("Settlement creation is still processing. Do not submit it again."));
+  assert.ok(pageSource.includes("Settlement creation is still processing. You may leave this page and check Settlements shortly. Do not create it again."));
+  assert.ok(pageSource.includes("window.sessionStorage"));
   assert.ok(pageSource.includes("View Settlements"));
-  assert.ok(pageSource.includes("Check Again"));
+  assert.ok(pageSource.includes("Check Status"));
 });
 
 test("labour group foreman support and advance report labels are explicit in the UI", () => {
