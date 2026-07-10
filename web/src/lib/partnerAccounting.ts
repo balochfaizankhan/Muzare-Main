@@ -18,7 +18,10 @@ export type PartnerLiabilityPosition = {
   labourSettlementCashPaid: number;
   labourSettlementNonCashApplied: number;
   totalLabourAdvancesPaid: number;
+  settledAdvances: number;
   outstandingLabourAdvances: number;
+  reconciliationDifference: number;
+  isConsistent: boolean;
   transfersIn: number;
   transfersOut: number;
   moneyReturned: number;
@@ -126,6 +129,9 @@ export type PartnerAccountingSnapshot = PartnerLiabilityPosition & {
   labourAdvancesSettledThroughWageSettlements: number;
   labourSettlementCashPaid: number;
   labourSettlementNonCashApplied: number;
+  settledAdvances: number;
+  reconciliationDifference: number;
+  isConsistent: boolean;
   moneyReturned: number;
   adjustment: number;
   farmOwesPartner: number;
@@ -200,6 +206,26 @@ export const defaultPartnerLiabilityGroupExpansion = (): Record<PartnerLiability
 });
 
 const normalized = (value: string) => value.trim().toLowerCase();
+
+export type LabourAdvanceBreakdown = {
+  totalLabourAdvancesPaid: number;
+  settledAdvances: number;
+  outstandingLabourAdvances: number;
+  reconciliationDifference: number;
+  isConsistent: boolean;
+};
+
+export function calculateLabourAdvanceBreakdown(totalLabourAdvancesPaid: number, settledAdvances: number): LabourAdvanceBreakdown {
+  const outstandingLabourAdvances = Math.max(totalLabourAdvancesPaid - settledAdvances, 0);
+  const reconciliationDifference = totalLabourAdvancesPaid - (settledAdvances + outstandingLabourAdvances);
+  return {
+    totalLabourAdvancesPaid,
+    settledAdvances,
+    outstandingLabourAdvances,
+    reconciliationDifference,
+    isConsistent: Math.abs(reconciliationDifference) <= 0.009,
+  };
+}
 
 export function calculatePartnerLiabilityBalance(position: Pick<PartnerLiabilityPosition, "openingBalance" | "capitalInjected" | "directExpensesPaid" | "transfersIn" | "transfersOut" | "moneyReturned" | "adjustments">) {
   return position.openingBalance
@@ -482,10 +508,10 @@ export function getPartnerAccountingSnapshot(
   }
   const totalLabourAdvancesPaid = advanceRows.filter((row) => row.included).reduce((sum, row) => sum + row.amount, 0);
   const labourAdvancesSettledThroughWageSettlements = settlementRows.filter((row) => row.included).reduce((sum, row) => sum + row.advancesApplied, 0);
-  const carryForwardAdvances = settlementRows.filter((row) => row.included).reduce((sum, row) => sum + row.carryForwardAdvance, 0);
-  const outstandingLabourAdvances = Math.max(0, totalLabourAdvancesPaid - labourAdvancesSettledThroughWageSettlements + carryForwardAdvances);
+  const labourAdvanceBreakdown = calculateLabourAdvanceBreakdown(totalLabourAdvancesPaid, labourAdvancesSettledThroughWageSettlements);
+  const outstandingLabourAdvances = labourAdvanceBreakdown.outstandingLabourAdvances;
   const labourSettlementCashPaid = settlementRows.filter((row) => row.included && row.cashPaid > 0).reduce((sum, row) => sum + row.cashPaid, 0);
-  const labourSettlementNonCashApplied = labourAdvancesSettledThroughWageSettlements;
+  const labourSettlementNonCashApplied = labourAdvanceBreakdown.settledAdvances;
 
   const purchaseVouchersPaid = purchaseVouchers.filter((row) => row.included).reduce((sum, row) => sum + row.amount, 0);
   const fundsGiven = funds.filter((row) => row.included && row.direction === "given").reduce((sum, row) => sum + row.amount, 0);
@@ -536,7 +562,10 @@ export function getPartnerAccountingSnapshot(
     labourAdvancesPaid: totalLabourAdvancesPaid,
     labourWageSettlements: labourSettlementNonCashApplied,
     totalLabourAdvancesPaid,
+    settledAdvances: labourAdvanceBreakdown.settledAdvances,
     outstandingLabourAdvances,
+    reconciliationDifference: labourAdvanceBreakdown.reconciliationDifference,
+    isConsistent: labourAdvanceBreakdown.isConsistent,
     transfersIn: fundsReceived,
     transfersOut: fundsGiven,
     moneyReturned,
@@ -608,7 +637,10 @@ export function buildPartnerLiabilityPositions(
       labourSettlementCashPaid: 0,
       labourSettlementNonCashApplied: 0,
       totalLabourAdvancesPaid: 0,
+      settledAdvances: 0,
       outstandingLabourAdvances: 0,
+      reconciliationDifference: 0,
+      isConsistent: true,
       transfersIn: 0,
       transfersOut: 0,
       moneyReturned: 0,
@@ -633,7 +665,10 @@ export function buildPartnerLiabilityPositions(
     position.labourSettlementCashPaid = snapshot.labourSettlementCashPaid;
     position.labourSettlementNonCashApplied = snapshot.labourSettlementNonCashApplied;
     position.totalLabourAdvancesPaid = snapshot.totalLabourAdvancesPaid;
+    position.settledAdvances = snapshot.settledAdvances;
     position.outstandingLabourAdvances = snapshot.outstandingLabourAdvances;
+    position.reconciliationDifference = snapshot.reconciliationDifference;
+    position.isConsistent = snapshot.isConsistent;
     position.transfersIn = snapshot.transfersIn;
     position.transfersOut = snapshot.transfersOut;
     position.moneyReturned = snapshot.moneyReturned;

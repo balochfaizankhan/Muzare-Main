@@ -4026,9 +4026,9 @@ function PartnerLedgerModule() {
             <div><span>Funds Given</span><strong>{money(item.transfersOut)}</strong></div>
             <div><span>Funds Received</span><strong>{money(item.transfersIn)}</strong></div>
             <div><span>Total labour advances paid</span><strong>{money(item.totalLabourAdvancesPaid)}</strong></div>
-            <div><span>Less: settled through wage settlements</span><strong>{money(item.labourSettlementNonCashApplied)}</strong></div>
-            <div><span>Outstanding Labour Advances</span><strong>{money(item.outstandingLabourAdvances)}</strong></div>
-            <div><span>Reconciliation</span><strong>{`Purchase vouchers ${money(item.purchaseVouchersPaid)} + Funds given ${money(item.transfersOut)} - Funds received ${money(item.transfersIn)} + Total labour advances paid ${money(item.totalLabourAdvancesPaid)} = ${money(item.currentPartnerBalance)}`}</strong></div>
+            <div><span>Settled through wages</span><strong>{money(item.settledAdvances)}</strong></div>
+            <div><span>Outstanding labour advances</span><strong>{money(item.outstandingLabourAdvances)}</strong></div>
+            <div><span>Reconciliation</span><strong>{`Settled ${money(item.settledAdvances)} + Outstanding ${money(item.outstandingLabourAdvances)} = Total ${money(item.totalLabourAdvancesPaid)}`}</strong></div>
           </article>)}
         </div>}
       </section>
@@ -4058,7 +4058,7 @@ function PartnerLedgerModule() {
               <section className="partner-ledger-details__subsection">
                 <h3>Labour Advance Status</h3>
                 <p><strong>Total advances paid</strong><span>{money(selectedPartnerPosition.totalLabourAdvancesPaid)}</span></p>
-                <p><strong>Settled through wage settlements</strong><span>{money(selectedPartnerPosition.labourSettlementNonCashApplied)}</span></p>
+                <p><strong>Settled through wage settlements</strong><span>{money(selectedPartnerPosition.settledAdvances)}</span></p>
                 <p><strong>Outstanding labour advances</strong><span>{money(selectedPartnerPosition.outstandingLabourAdvances)}</span></p>
                 {selectedPartnerPositionLabourSettlements.length > 0 && <div className="partner-ledger-details__memo-list">
                   {selectedPartnerPositionLabourSettlements.map((settlement) => (
@@ -4067,7 +4067,7 @@ function PartnerLedgerModule() {
                       <span>Type: Wage settlement advance applied</span>
                       <span>Advances applied: {money(settlement.advancesApplied)}</span>
                       <span>Cash paid: {money(settlement.cashPaid)}</span>
-                      <span>Effect: reduces labour outstanding advances</span>
+                      <span>Effect: changes labour advance breakdown only</span>
                       <span>Effect on Farm Owes Partner: none</span>
                     </article>
                   ))}
@@ -4076,7 +4076,7 @@ function PartnerLedgerModule() {
               <p><strong>{t("partnerLedgerPage.moneyReturned")}</strong><span>{money(selectedPartnerPosition.moneyReturned)}</span></p>
               <p><strong>{t("partnerLedgerPage.adjustments")}</strong><span>{money(selectedPartnerPosition.adjustments)}</span></p>
               <p><strong>{t("partnerLedgerPage.farmOwesPartner")}</strong><span>{money(selectedPartnerPosition.currentPartnerBalance)}</span></p>
-              <p><strong>Reconciliation</strong><span>{`Purchase vouchers ${money(selectedPartnerPosition.purchaseVouchersPaid)} + Funds given ${money(selectedPartnerPosition.transfersOut)} - Funds received ${money(selectedPartnerPosition.transfersIn)} + Total labour advances paid ${money(selectedPartnerPosition.totalLabourAdvancesPaid)} ${selectedPartnerPosition.moneyReturned ? `- Money returned ${money(selectedPartnerPosition.moneyReturned)} ` : ""}${selectedPartnerPosition.adjustments ? `${selectedPartnerPosition.adjustments >= 0 ? "+" : "-"} Adjustments ${money(Math.abs(selectedPartnerPosition.adjustments))} ` : ""}= ${money(selectedPartnerPosition.currentPartnerBalance)}`}</span></p>
+              <p><strong>Reconciliation</strong><span>{`Settled ${money(selectedPartnerPosition.settledAdvances)} + Outstanding ${money(selectedPartnerPosition.outstandingLabourAdvances)} = Total ${money(selectedPartnerPosition.totalLabourAdvancesPaid)}. Purchase vouchers ${money(selectedPartnerPosition.purchaseVouchersPaid)} + Funds given ${money(selectedPartnerPosition.transfersOut)} - Funds received ${money(selectedPartnerPosition.transfersIn)} + Total labour advances paid ${money(selectedPartnerPosition.totalLabourAdvancesPaid)} ${selectedPartnerPosition.moneyReturned ? `- Money returned ${money(selectedPartnerPosition.moneyReturned)} ` : ""}${selectedPartnerPosition.adjustments ? `${selectedPartnerPosition.adjustments >= 0 ? "+" : "-"} Adjustments ${money(Math.abs(selectedPartnerPosition.adjustments))} ` : ""}= ${money(selectedPartnerPosition.currentPartnerBalance)}`}</span></p>
               <footer><button type="button" onClick={() => setSelectedPartnerPosition(null)}>{t("partnerLedgerPage.close")}</button></footer>
             </div>
           </section>

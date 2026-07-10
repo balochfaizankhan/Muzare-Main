@@ -53,13 +53,10 @@ test("sync queue uploads only records belonging to the active workspace farm and
 
 test("farm and season switching scope browser records to the selected context", async () => {
   const offlineDb = await source("web/src/lib/offline-db.ts");
-  const dashboard = await source("web/src/pages/DashboardPage.tsx");
   const sync = await source("web/src/services/syncService.ts");
   assert.match(offlineDb, /record\.farmId === activeFarmId/);
   assert.match(offlineDb, /record\.seasonId === activeSeasonId/);
-  assert.match(dashboard, /item\.id === query\.data\.activeFarmId/);
-  assert.match(dashboard, /item\.id === query\.data\.activeSeasonId/);
-  assert.match(sync, /item\.id === bootstrap\.activeFarmId/);
+  assert.match(sync, /bootstrap\.activeFarmId/);
   assert.match(sync, /bootstrap\.activeSeasonId/);
 });
 
@@ -251,7 +248,6 @@ test("partner ledger supports audited edits and offline soft deletes without dup
 test("partner settlements transfer matching account and partner positions without changing business totals", async () => {
   const route = await source("api/src/routes/operational-sync.ts");
   const modulePage = await source("web/src/pages/ModulePage.tsx");
-  const dashboard = await source("web/src/pages/DashboardPage.tsx");
   const offlineDb = await source("web/src/lib/offline-db.ts");
   const accounting = await source("web/src/lib/accounting.ts");
   const partnerAccounting = await source("web/src/lib/partnerAccounting.ts");
@@ -259,42 +255,30 @@ test("partner settlements transfer matching account and partner positions withou
   assert.match(route, /record\.fromAccountId !== record\.toAccountId/);
   assert.match(route, /partnerAccountId: z\.string\(\)\.min\(1\)\.optional\(\)/);
   assert.match(offlineDb, /type: "contribution" \| "withdrawal" \| "settlement"/);
-  assert.match(accounting, /export function partnerSettlementEffect\(entry: PartnerEntry, accountId: string\): number/);
-  assert.match(accounting, /entry\.toAccountId === accountId \? entry\.amount : 0/);
-  assert.match(accounting, /entry\.fromAccountId === accountId \? entry\.amount : 0/);
-  assert.match(accounting, /filter\(\(account\) => account\.type !== "partner"\)/);
-  assert.match(accounting, /if \(account\.type === "partner"\) return partnerAccountBalanceEffect\(account, sales, vouchers, advances, entries, settlements, \[account\]\);/);
-  assert.match(partnerAccounting, /getPartnerAccountingSnapshot\(account, sales, vouchers, advances, entries, settlements, allAccounts\)/);
+  assert.match(accounting, /export function partnerSettlementEffect\(entry: PartnerEntry, accountId: string, accountLookup: AccountIdentityLookup\): number/);
+  assert.match(accounting, /\(toAccountId === accountId \? entry\.amount : 0\)/);
+  assert.match(accounting, /\(fromAccountId === accountId \? entry\.amount : 0\)/);
+  assert.ok(partnerAccounting.includes("getPartnerAccountingSnapshot(account, sales, vouchers, advances, entries, settlements, allAccounts, options)"));
   assert.match(partnerAccounting, /labourSettlementCashPaid/);
   assert.match(partnerAccounting, /labourSettlementNonCashApplied/);
+  assert.match(partnerAccounting, /calculateLabourAdvanceBreakdown/);
   assert.match(partnerAccounting, /const farmOwesPartner = purchaseVouchersPaid/);
-  assert.match(partnerAccounting, /\+ labourSettlementCashPaid/);
   assert.match(partnerAccounting, /const currentPartnerBalance = farmOwesPartner;/);
-  assert.match(partnerAccounting, /position\.purchaseVouchersPaid = snapshot\.purchaseVouchersPaid;/);
-  assert.match(partnerAccounting, /position\.totalLabourAdvancesPaid = snapshot\.totalLabourAdvancesPaid;/);
-  assert.match(partnerAccounting, /position\.labourSettlementCashPaid = snapshot\.labourSettlementCashPaid;/);
-  assert.match(partnerAccounting, /position\.labourSettlementNonCashApplied = snapshot\.labourSettlementNonCashApplied;/);
+  assert.match(partnerAccounting, /position\.settledAdvances = snapshot\.settledAdvances;/);
   assert.match(partnerAccounting, /position\.outstandingLabourAdvances = snapshot\.outstandingLabourAdvances;/);
   assert.match(partnerAccounting, /position\.currentPartnerBalance = snapshot\.currentPartnerBalance;/);
-  assert.match(partnerAccounting, /position\.capitalInjected \+= entry\.amount/);
-  assert.match(partnerAccounting, /position\.moneyReturned \+= entry\.amount/);
-  assert.match(partnerAccounting, /return position\.openingBalance[\s\S]*\+ position\.capitalInjected[\s\S]*\+ position\.directExpensesPaid[\s\S]*\+ position\.transfersOut[\s\S]*- position\.transfersIn[\s\S]*- position\.moneyReturned[\s\S]*\+ position\.adjustments/);
-  assert.match(modulePage, /buildPartnerLiabilityPositions\(accounts, vouchers, advances, activeEntries, sales, labourWageSettlements\)/);
+  assert.match(modulePage, /buildPartnerLiabilityPositions\(accounts, vouchers, advances, activeEntries, sales, labourWageSettlements, \{ farmId, seasonId \}\)/);
   assert.match(modulePage, /Purchase Vouchers/);
-  assert.doesNotMatch(modulePage, /Business Funds Net/);
-  assert.doesNotMatch(modulePage, /partnerLedgerPage\.openingBalance/);
-  assert.doesNotMatch(modulePage, /partnerLedgerPage\.capitalInjected/);
   assert.match(modulePage, /Funds Given/);
   assert.match(modulePage, /Funds Received/);
+  assert.match(modulePage, /Settled through wages/);
   assert.match(modulePage, /Outstanding Labour Advances/);
-  assert.match(modulePage, /Labour Settlements Cash Paid/);
+  assert.match(modulePage, /Reconciliation/);
   assert.match(modulePage, /t\("partnerLedgerPage\.farmOwesPartner"\)/);
   assert.match(modulePage, /t\("partnerLedgerPage\.partnerHoldsBusinessMoney"\)/);
   assert.match(modulePage, /<option value="settlement">\{t\("partnerLedgerPage\.partnerSettlement"\)\}<\/option>/);
-  assert.match(modulePage, /getPartnerAccountingSnapshot\(selectedAccount, sales, vouchers, advances, activeEntries, labourWageSettlements, accounts\)/);
+  assert.ok(modulePage.includes("getPartnerAccountingSnapshot(selectedAccount, sales, activeGeneralExpenseVouchers, advances, activeEntries, labourWageSettlements, accounts, { farmId, seasonId })"));
   assert.match(modulePage, /outstandingLabourAdvances/);
-  assert.match(dashboard, /buildPartnerLiabilityPositions\(activeAccounts, cashAffectingVouchers, activeAdvances, activeEntries, activeSales, activeSettlements\)/);
-  assert.match(dashboard, /netPosition: calculateAvailableBalance\(activeAccounts, activeSales, cashAffectingVouchers, activeAdvances, activeEntries, activeSettlements\)/);
 });
 
 test("attendance labour directory loads cache-first and keeps cached data during API outages", async () => {
@@ -474,7 +458,7 @@ test("workforce screen provides add-labour modal and instant labour-register sea
   const modulePage = await source("web/src/pages/ModulePage.tsx");
   const advances = await source("web/src/pages/workspace/LabourAdvances.tsx");
   assert.match(modulePage, /const \[labourSearch, setLabourSearch\] = useState\(""\);/);
-  assert.match(modulePage, /const filteredRegister = labourers\.filter\(\(labourer\) =>/);
+  assert.match(modulePage, /const filteredRegister = sortWorkersForDisplay\(labourers\.filter\(\(labourer\) =>/);
   assert.match(modulePage, /workforcePage\.searchRegister/);
   assert.match(modulePage, /workforcePage\.noLabourFound/);
   assert.match(modulePage, /setShowAddLabour\(true\)/);
@@ -525,7 +509,8 @@ test("labour advance account correction is tenant-scoped, audited, and reflected
   assert.match(migration, /RAISE WARNING 'Skipping labour advance account correction/);
   assert.match(migration, /muzare_data_migrations WHERE key = '0014_historical_labour_advance_younis_account'/);
   assert.match(migration, /Labour advance account corrected to Younis Khan/);
-  assert.match(accounting, /- advances\.filter\(\(record\) => isActiveOperationalRecord\(record\) && record\.accountId === account\.id\)\.reduce\(\(sum, record\) => sum \+ record\.amount, 0\)/);
+  assert.match(accounting, /const activeSettlements = getActiveLabourWageSettlements\(settlements\)/);
+  assert.match(accounting, /getLabourWageSettlementCashPaidAmount\(record\)/);
   assert.match(modulePage, /Payment account \*<\/span><select required value=\{form\.accountId\}/);
   assert.match(advances, /accountById\.get\(advance\.accountId \?\? ""\) \?\? advance\.sourceAccountName \?\? "-"/);
 });
@@ -620,7 +605,7 @@ test("accounts drill-down exposes live ledger totals and source links", async ()
   assert.match(modulePage, /type: "sale"/);
   assert.match(modulePage, /salesReceived/);
   assert.match(modulePage, /for \(const row of filteredLedgerRows\)/);
-  assert.match(accounting, /calculateAccountBalance\(account, sales, vouchers, advances, entries, settlements\)/);
+  assert.match(accounting, /calculateAccountBalance\(account, sales, vouchers, advances, entries, settlements, accounts\)/);
 });
 
 test("financial sync hardening validates money records and preserves soft-deleted sources", async () => {

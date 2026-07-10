@@ -17,12 +17,12 @@ test("temporary reconciliation debug route is gated and linked from settings", (
   assert.ok(source.includes("mode === \"admin\""));
   assert.ok(source.includes("workspace_user"));
   assert.ok(source.includes("dbBackedSession"));
-  assert.ok(source.includes("selected workspace"));
+  assert.ok(source.includes("Selected workspace"));
   assert.ok(source.includes("All farms"));
   assert.ok(source.includes("All seasons"));
   assert.ok(source.includes("Account search"));
   assert.ok(source.includes("Matched account"));
-  assert.ok(source.includes("select a workspace, farm, season, and account without typing UUIDs manually"));
+  assert.ok(source.includes("Use the selectors below"));
   assert.ok(source.includes("fetchWorkspaceAccounts"));
   assert.ok(source.includes("fetchAdminWorkspaces"));
   assert.ok(source.includes("fetchAdminWorkspace"));

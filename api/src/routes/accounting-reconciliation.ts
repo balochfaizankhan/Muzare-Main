@@ -9,6 +9,7 @@ import { db } from "../db/client.js";
 import { accountTransactions, accounts, farms, operationalRecords, userSessions } from "../db/schema.js";
 import { isDeletedOperationalPayload } from "../operational-record-state.js";
 import { buildAccountIdentityLookup, resolveAccountIdentity, resolveCanonicalAccountId, type AccountIdentityLookup } from "../lib/account-identity.js";
+import { calculateLabourAdvanceAccountingSnapshot } from "../lib/partner-labour-advance-accounting.js";
 import { normalizeSettlementPayload } from "../lib/labour-wage-settlements.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
 
@@ -122,6 +123,9 @@ type PartnerSnapshot = {
   labourAdvancesPaid: number;
   labourAdvancesSettledThroughWageSettlements: number;
   outstandingLabourAdvances: number;
+  settledAdvances: number;
+  reconciliationDifference: number;
+  isConsistent: boolean;
   labourSettlementCashPaid: number;
   labourSettlementNonCashApplied: number;
   moneyReturned: number;
@@ -230,14 +234,37 @@ function buildPartnerSnapshot(args: {
     .filter((entry) => (resolveCanonicalAccountId(entry.partnerAccountId, accountLookup) === selectedAccountId || resolveCanonicalAccountId(entry.accountId, accountLookup) === selectedAccountId) && farmMatches(entry.farmId) && seasonMatches(entry.seasonId))
     .reduce((sum, entry) => sum + entry.amount, 0)
     - sales.filter((sale) => resolveCanonicalAccountId(sale.accountId, accountLookup) === selectedAccountId && farmMatches(sale.farmId) && seasonMatches(sale.seasonId)).reduce((sum, sale) => sum + sale.amount, 0);
-  const totalLabourAdvancesPaid = advances
-    .filter((advance) => advance.resolvedAccountId === selectedAccountId && !advance.deleted && farmMatches(advance.farmId) && seasonMatches(advance.seasonId))
-    .reduce((sum, advance) => sum + advance.amount, 0);
   const settlementRows = settlements.filter((row) => (row.resolvedAccountId === selectedAccountId || row.transactionResolvedAccountIds.includes(selectedAccountId)) && farmMatches(row.farmId) && seasonMatches(row.seasonId));
-  const labourAdvancesSettledThroughWageSettlements = settlementRows.reduce((sum, row) => sum + row.advancesApplied, 0);
-  const labourSettlementNonCashApplied = labourAdvancesSettledThroughWageSettlements;
-  const labourSettlementCashPaid = settlementRows.reduce((sum, row) => sum + row.cashPaid, 0);
-  const outstandingLabourAdvances = Math.max(totalLabourAdvancesPaid - labourAdvancesSettledThroughWageSettlements, 0);
+  const labourAdvanceAccounting = calculateLabourAdvanceAccountingSnapshot({
+    selectedAccountId,
+    advances,
+    settlements: settlementRows.map((row) => ({
+      linkedAccountId: row.linkedAccountId,
+      paymentAccountId: row.paymentAccountId,
+      accountId: row.accountId,
+      partnerAccountId: row.partnerAccountId,
+      resolvedAccountId: row.resolvedAccountId,
+      advancesApplied: row.advancesApplied,
+      settledAdvanceAmount: row.settledAdvanceAmount,
+      cashPaid: row.cashPaid,
+      paidAmount: row.cashPaid,
+      farmId: row.farmId,
+      seasonId: row.seasonId,
+      status: row.status,
+      accountingStatus: row.status === "voided" || row.status === "deleted" ? row.status : row.accountingEntries > 0 ? "posted" : "accounting_missing",
+      deletedAt: row.deletedAt,
+      voidedAt: row.voidedAt,
+      reversedAt: row.reversedAt,
+    })),
+    accounts: accountLookup,
+    farmId,
+    seasonId,
+  });
+  const totalLabourAdvancesPaid = labourAdvanceAccounting.totalLabourAdvancesPaid;
+  const labourAdvancesSettledThroughWageSettlements = labourAdvanceAccounting.settledAdvances;
+  const labourSettlementNonCashApplied = labourAdvanceAccounting.labourSettlementNonCashApplied;
+  const labourSettlementCashPaid = labourAdvanceAccounting.labourSettlementCashPaid;
+  const outstandingLabourAdvances = labourAdvanceAccounting.outstandingAdvances;
   const farmOwesPartner = purchaseVouchersPaid
     + businessFundsGiven
     - businessFundsReceived
@@ -251,6 +278,9 @@ function buildPartnerSnapshot(args: {
     labourAdvancesPaid: totalLabourAdvancesPaid,
     labourAdvancesSettledThroughWageSettlements,
     outstandingLabourAdvances,
+    settledAdvances: labourAdvanceAccounting.settledAdvances,
+    reconciliationDifference: labourAdvanceAccounting.reconciliationDifference,
+    isConsistent: labourAdvanceAccounting.isConsistent,
     labourSettlementCashPaid,
     labourSettlementNonCashApplied,
     moneyReturned,
