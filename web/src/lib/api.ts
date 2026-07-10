@@ -1,7 +1,7 @@
 import { config } from "../config";
 
 export class ApiError extends Error {
-  constructor(message: string, readonly status: number, readonly details?: unknown) {
+  constructor(message: string, readonly status: number, readonly details?: unknown, readonly responseBody?: unknown) {
     super(message);
   }
 }
@@ -1346,7 +1346,7 @@ async function apiRequest<T>(path: string, options: RequestInit = {}, token?: st
     const body = (await response.json().catch(() => null)) as { message?: string; fields?: string[]; details?: unknown } | null;
     if (import.meta.env.DEV && requestOptions.debugLabel) console.error(`[${requestOptions.debugLabel}] response`, response.status, body);
     const fields = body?.fields?.length ? ` Missing or invalid fields: ${body.fields.join(", ")}.` : "";
-    throw new ApiError(`${body?.message ?? `Request failed with status ${response.status}.`}${fields}`, response.status, body?.details);
+    throw new ApiError(`${body?.message ?? `Request failed with status ${response.status}.`}${fields}`, response.status, body?.details, body);
   }
 
   if (response.status === 204) return undefined as T;

@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
 import { LabourSelectCombobox } from "../../components/LabourSelectCombobox";
-import { createLabourWageSettlement, deleteLabourWageSettlement, fetchLabourWageSettlement, fetchLabourWageSettlementCreateStatus, fetchLabourWageSettlementPaymentAccounts, fetchLabourWageSettlements, previewLabourWageSettlement, repairLabourWageSettlementAccounting, updateLabourWageSettlement, voidLabourWageSettlement, type LabourWageSettlementDetail, type LabourWageSettlementPaymentAccount, type LabourWageSettlementPreview, type LabourWageSettlementRecord } from "../../lib/api";
+import { ApiError, createLabourWageSettlement, deleteLabourWageSettlement, fetchLabourWageSettlement, fetchLabourWageSettlementCreateStatus, fetchLabourWageSettlementPaymentAccounts, fetchLabourWageSettlements, previewLabourWageSettlement, repairLabourWageSettlementAccounting, updateLabourWageSettlement, voidLabourWageSettlement, type LabourWageSettlementDetail, type LabourWageSettlementPaymentAccount, type LabourWageSettlementPreview, type LabourWageSettlementRecord } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 import { getActiveFarmId, getActiveSeasonId, offlineDb, workspaceRecords, type Account, type LabourGroup, type LabourWageSettlement, type Labourer } from "../../lib/offline-db";
 import { canCreate } from "../../lib/permissions";
@@ -17,6 +17,20 @@ type PreviewState =
   | { status: "loading"; data: null }
   | { status: "ready"; data: LabourWageSettlementPreview }
   | { status: "error"; data: null };
+
+type PreviewDiagnostics = {
+  submittedPayload: Record<string, unknown> | null;
+  missingRequiredFields: string[];
+  apiStatus: number | null;
+  apiResponseBody: unknown | null;
+  storedPreview: LabourWageSettlementPreview | null;
+  createDisabledReason: string;
+};
+
+function toFiniteNumber(value: string) {
+  const numeric = Number(value || 0);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
 
 export function LabourWageSettlements() {
   const { t } = useTranslation();
@@ -55,6 +69,14 @@ export function LabourWageSettlements() {
   const [savingSettlementId, setSavingSettlementId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [previewDiagnostics, setPreviewDiagnostics] = useState<PreviewDiagnostics>({
+    submittedPayload: null,
+    missingRequiredFields: [],
+    apiStatus: null,
+    apiResponseBody: null,
+    storedPreview: null,
+    createDisabledReason: "",
+  });
   const [previewSearch, setPreviewSearch] = useState("");
   const [previewStatusFilter, setPreviewStatusFilter] = useState<"all" | "active" | "inactive">("all");
   const [registerSearch, setRegisterSearch] = useState("");
@@ -243,7 +265,43 @@ export function LabourWageSettlements() {
     setSettlementStatusUnknown(false);
     setStatusCheckInFlight(false);
     setStatusCheckNotice("");
+    setPreview((current) => (current.status === "idle" ? current : { status: "idle", data: null }));
+    setPreviewDiagnostics((current) => ({
+      ...current,
+      storedPreview: null,
+      createDisabledReason: "Preview the settlement before posting it.",
+    }));
   }, [activeFarmId, activeSeasonId, fromDate, toDate, settlementDate, settlementMode, labourerId, foremanId, groupId, accountId, paidAmount, manualAdjustment, manualAdjustmentNote, notes]);
+
+  const previewRequest = useMemo(() => ({
+    farmId: activeFarmId || "",
+    seasonId: activeSeasonId || "",
+    fromDate,
+    toDate,
+    settlementDate,
+    settlementMode,
+    labourerId: settlementMode === "individual" ? labourerId || undefined : undefined,
+    foremanId: settlementMode === "group" ? foremanId || undefined : undefined,
+    groupId: settlementMode === "group" ? groupId || undefined : undefined,
+    paidAmount: toFiniteNumber(paidAmount),
+    manualAdjustment: toFiniteNumber(manualAdjustment),
+  }), [activeFarmId, activeSeasonId, fromDate, toDate, settlementDate, settlementMode, labourerId, foremanId, groupId, paidAmount, manualAdjustment]);
+
+  const previewRequestFingerprint = useMemo(() => JSON.stringify(previewRequest), [previewRequest]);
+  const previewSubmissionFingerprint = useMemo(() => JSON.stringify(previewDiagnostics.submittedPayload), [previewDiagnostics.submittedPayload]);
+  const summary = preview.status === "ready" && previewRequestFingerprint === previewSubmissionFingerprint ? preview.data : null;
+
+  const previewMissingRequiredFields = useMemo(() => {
+    const fields: string[] = [];
+    if (!previewRequest.farmId) fields.push("farmId");
+    if (!previewRequest.seasonId) fields.push("seasonId");
+    if (!previewRequest.fromDate) fields.push("fromDate");
+    if (!previewRequest.toDate) fields.push("toDate");
+    if (!previewRequest.settlementDate) fields.push("settlementDate");
+    if (previewRequest.settlementMode === "individual" && !previewRequest.labourerId) fields.push("labourerId");
+    if (previewRequest.settlementMode === "group" && !previewRequest.groupId && !previewRequest.foremanId) fields.push("groupId", "foremanId");
+    return fields;
+  }, [previewRequest]);
 
   const persistSettlementRecord = useCallback(async (settlement: LabourWageSettlementRecord) => {
     if (!activeFarmId || !activeSeasonId) return;
@@ -383,27 +441,42 @@ export function LabourWageSettlements() {
       setError("From date must be on or before the to date.");
       return;
     }
+    setPreviewDiagnostics({
+      submittedPayload: previewRequest,
+      missingRequiredFields: previewMissingRequiredFields,
+      apiStatus: null,
+      apiResponseBody: null,
+      storedPreview: null,
+      createDisabledReason,
+    });
+    if (previewMissingRequiredFields.length > 0) {
+      setPreview({ status: "error", data: null });
+      setError(`Preview request is missing required fields: ${previewMissingRequiredFields.join(", ")}.`);
+      return;
+    }
     setPreview({ status: "loading", data: null });
     setError("");
     setSuccess("");
     setSettlementStatusUnknown(false);
     try {
-      const response = await previewLabourWageSettlement(token, workspaceId, {
-        farmId: activeFarmId,
-        seasonId: activeSeasonId,
-        fromDate,
-        toDate,
-        settlementDate,
-        settlementMode,
-        labourerId: settlementMode === "individual" ? labourerId || undefined : undefined,
-        foremanId: settlementMode === "group" ? foremanId || undefined : undefined,
-        groupId: settlementMode === "group" ? groupId || undefined : undefined,
-        paidAmount: Number(paidAmount || 0),
-        manualAdjustment: Number(manualAdjustment || 0),
-      });
+      const response = await previewLabourWageSettlement(token, workspaceId, previewRequest);
       setPreview({ status: "ready", data: response.preview });
+      setPreviewDiagnostics((current) => ({
+        ...current,
+        apiStatus: 200,
+        apiResponseBody: response,
+        storedPreview: response.preview,
+        createDisabledReason: "",
+      }));
     } catch (caught) {
       setPreview({ status: "error", data: null });
+      if (caught instanceof ApiError) {
+        setPreviewDiagnostics((current) => ({
+          ...current,
+          apiStatus: caught.status,
+          apiResponseBody: caught.responseBody ?? caught.details ?? null,
+        }));
+      }
       setError(caught instanceof Error ? caught.message : "Unable to preview this wage settlement.");
     }
   };
@@ -438,12 +511,8 @@ export function LabourWageSettlements() {
       setError("Manual adjustment note is required when manual adjustment is non-zero.");
       return;
     }
-    if (preview.status !== "ready") {
-      setError("Preview the settlement before posting it.");
-      return;
-    }
-    if (preview.data.unresolvedRows.length || preview.data.overlappingSettlements.length) {
-      setError("This wage settlement still has unresolved wage rates or overlapping settlements.");
+    if (createDisabledReason) {
+      setError(createDisabledReason);
       return;
     }
     setSubmitting(true);
@@ -497,7 +566,6 @@ export function LabourWageSettlements() {
     }
   };
 
-  const summary = preview.status === "ready" ? preview.data : null;
   const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
   const settlementPaymentAccountById = useMemo(() => new Map(paymentAccounts.map((account) => [account.id, account])), [paymentAccounts]);
   const includedLabourRows = summary?.includedLabourRows ?? [];
@@ -553,6 +621,26 @@ export function LabourWageSettlements() {
   const advanceBalanceLabel = "Available Group Advances";
   const advanceAdjustedLabel = "Advance Absorbed This Settlement";
   const advanceCarryForwardLabel = "Outstanding Group Advance";
+  const createDisabledReason = useMemo(() => {
+    if (!canPost) return t("common.viewOnlyAccess");
+    if (onlineRequired) return "Wage settlement requires online connection.";
+    if (!token || !workspaceId || !activeFarmId || !activeSeasonId) return "Select an active farm and season before creating a settlement.";
+    if (Number(paidAmount || 0) > 0 && !accountId) return "Select a payment account when paid now is greater than zero.";
+    if (settlementMode === "individual" && !labourerId) return "Select a labourer for an individual settlement.";
+    if (settlementMode === "group" && !groupId && !foremanId) return "Select a foreman or group for a group settlement.";
+    if (Number(manualAdjustment || 0) !== 0 && !manualAdjustmentNote.trim()) return "Manual adjustment note is required when manual adjustment is non-zero.";
+    if (!summary) return "Preview the settlement before posting it.";
+    if (summary.unresolvedRows.length || summary.overlappingSettlements.length) return "This wage settlement still has unresolved wage rates or overlapping settlements.";
+    if (!summaryConsistent) return "Preview is inconsistent. Create Settlement is disabled until the reconciliation matches.";
+    return "";
+  }, [accountId, activeFarmId, activeSeasonId, canPost, foremanId, labourerId, manualAdjustment, manualAdjustmentNote, onlineRequired, paidAmount, settlementMode, summary, summaryConsistent, t, token, workspaceId, groupId]);
+  useEffect(() => {
+    setPreviewDiagnostics((current) => ({
+      ...current,
+      createDisabledReason,
+      storedPreview: summary,
+    }));
+  }, [createDisabledReason, summary]);
   const selectedGroup = useMemo(() => labourGroups.find((group) => group.id === groupId) ?? null, [groupId, labourGroups]);
   const selectedForeman = useMemo(() => labourers.find((labourer) => labourer.id === (summary?.foremanId ?? foremanId)) ?? null, [foremanId, labourers, summary?.foremanId]);
   const selectedGroupName = summary?.groupName ?? selectedGroup?.name ?? "";
@@ -979,7 +1067,7 @@ export function LabourWageSettlements() {
               <button type="button" className="secondary-action" onClick={() => void previewSettlement()} disabled={!token || !workspaceId || !activeFarmId || !activeSeasonId || preview.status === "loading"}>
                 {preview.status === "loading" ? "Previewing..." : "Preview Settlement"}
               </button>
-              <button type="submit" disabled={!canPost || submitting || statusCheckInFlight || settlementStatusUnknown || preview.status !== "ready" || !summaryConsistent || Boolean(summary?.unresolvedRows.length) || Boolean(summary?.overlappingSettlements.length) || onlineRequired}>
+              <button type="submit" disabled={Boolean(createDisabledReason) || submitting || statusCheckInFlight || settlementStatusUnknown}>
                 {submitting ? "Posting settlement..." : statusCheckInFlight ? "Checking settlement status..." : "Create Settlement"}
               </button>
             </div>
@@ -1146,6 +1234,19 @@ export function LabourWageSettlements() {
               </ul>
             </div>}
           </>}
+          {import.meta.env.DEV ? (
+            <details className="record-panel">
+              <summary>Preview diagnostics</summary>
+              <div className="reports-summary-list">
+                <article><span>Submitted payload</span><strong><pre>{JSON.stringify(previewDiagnostics.submittedPayload, null, 2)}</pre></strong></article>
+                <article><span>Missing required fields</span><strong>{previewDiagnostics.missingRequiredFields.length ? previewDiagnostics.missingRequiredFields.join(", ") : "None"}</strong></article>
+                <article><span>API status</span><strong>{previewDiagnostics.apiStatus ?? "-"}</strong></article>
+                <article><span>API response body</span><strong><pre>{JSON.stringify(previewDiagnostics.apiResponseBody, null, 2)}</pre></strong></article>
+                <article><span>Stored preview object</span><strong><pre>{JSON.stringify(previewDiagnostics.storedPreview, null, 2)}</pre></strong></article>
+                <article><span>Create Settlement disabled because</span><strong>{previewDiagnostics.createDisabledReason || "Enabled"}</strong></article>
+              </div>
+            </details>
+          ) : null}
         </section>
 
         <section id="labour-settlement-register" className="record-panel labour-settlement-register-panel">

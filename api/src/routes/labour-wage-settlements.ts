@@ -43,6 +43,13 @@ const previewSchema = baseSchema.extend(settlementSelectionSchema.shape).extend(
   paidAmount: z.coerce.number().nonnegative().optional(),
   manualAdjustment: z.coerce.number().optional(),
 });
+
+function validationIssuePaths(error: z.ZodError) {
+  return [...new Set(error.issues.flatMap((issue) => {
+    const path = issue.path.join(".");
+    return path ? [path] : [];
+  }))];
+}
 const createSchema = baseSchema.extend({
   ...settlementSelectionSchema.shape,
   clientRequestId: z.string().uuid().optional(),
@@ -392,7 +399,23 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
     const params = paramsSchema.safeParse(request.params);
     const parsed = previewSchema.safeParse(request.body);
     if (!params.success || !parsed.success || parsed.data.fromDate > parsed.data.toDate) {
-      return reply.code(400).send({ message: "A valid labour settlement preview request is required." });
+      const fields = [
+        ...(!params.success ? validationIssuePaths(params.error) : []),
+        ...(!parsed.success ? validationIssuePaths(parsed.error) : []),
+        ...(parsed.success && parsed.data.fromDate > parsed.data.toDate ? ["fromDate", "toDate"] : []),
+      ];
+      const uniqueFields = [...new Set(fields)];
+      return reply.code(400).send({
+        message: parsed.success && parsed.data.fromDate > parsed.data.toDate
+          ? "From date must be on or before the to date."
+          : "Labour settlement preview validation failed.",
+        fields: uniqueFields,
+        details: !params.success
+          ? params.error.issues
+          : !parsed.success
+            ? parsed.error.issues
+            : { fromDate: parsed.data.fromDate, toDate: parsed.data.toDate },
+      });
     }
     const { workspaceId } = params.data;
     const { farmId, seasonId, fromDate, toDate, settlementDate, settlementMode, labourerId, foremanId, groupId, labourIds, paidAmount, manualAdjustment } = parsed.data;
@@ -438,7 +461,23 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
     const params = paramsSchema.safeParse(request.params);
     const parsed = createSchema.safeParse(request.body);
     if (!params.success || !parsed.success || parsed.data.fromDate > parsed.data.toDate) {
-      return reply.code(400).send({ message: "A valid labour settlement payload is required." });
+      const fields = [
+        ...(!params.success ? validationIssuePaths(params.error) : []),
+        ...(!parsed.success ? validationIssuePaths(parsed.error) : []),
+        ...(parsed.success && parsed.data.fromDate > parsed.data.toDate ? ["fromDate", "toDate"] : []),
+      ];
+      const uniqueFields = [...new Set(fields)];
+      return reply.code(400).send({
+        message: parsed.success && parsed.data.fromDate > parsed.data.toDate
+          ? "From date must be on or before the to date."
+          : "Labour settlement validation failed.",
+        fields: uniqueFields,
+        details: !params.success
+          ? params.error.issues
+          : !parsed.success
+            ? parsed.error.issues
+            : { fromDate: parsed.data.fromDate, toDate: parsed.data.toDate },
+      });
     }
     const { workspaceId } = params.data;
     const {
