@@ -288,10 +288,13 @@ test("settlement create status endpoint reuses the client request id and process
   assert.ok(source.includes("settlementStatusQuerySchema"));
   assert.ok(source.includes("SettlementCreateStatusResponse"));
   assert.ok(source.includes("settlementCreateStatusFromRequest"));
+  assert.ok(source.includes("settlementCreateLifecycleMessage"));
   assert.ok(source.includes("inspectSettlementAccountingIntegrity"));
   assert.ok(source.includes("isSettlementRequestProcessing"));
   assert.ok(source.includes("pg_try_advisory_lock"));
   assert.ok(source.includes('state: "FAILED"'));
+  assert.ok(source.includes("lifecycleErrorCode"));
+  assert.ok(source.includes("lifecycleMessage"));
 });
 
 test("settlement status lookup is read-only and does not run accounting repair", () => {
@@ -331,6 +334,8 @@ test("frontend rechecks settlement creation status after timeout before allowing
   const apiSource = readFileSync(new URL("../../web/src/lib/api.ts", import.meta.url), "utf8");
   const pageSource = readFileSync(new URL("../../web/src/pages/workspace/LabourWageSettlements.tsx", import.meta.url), "utf8");
   assert.ok(apiSource.includes("fetchLabourWageSettlementCreateStatus"));
+  assert.ok(apiSource.includes("lifecycleErrorCode"));
+  assert.ok(apiSource.includes("lifecycleMessage"));
   assert.ok(pageSource.includes("resolveSettlementCreateStatus"));
   assert.ok(pageSource.includes("The request is taking longer than expected. Checking settlement status..."));
   assert.ok(pageSource.includes("Settlement creation is still processing. Do not submit it again."));
@@ -340,6 +345,12 @@ test("frontend rechecks settlement creation status after timeout before allowing
   assert.ok(pageSource.includes("View Settlements"));
   assert.ok(pageSource.includes("Check Status"));
   assert.ok(pageSource.includes("Settlement in progress..."));
+  assert.ok(pageSource.includes("status.lifecycleMessage ?? status.message"));
+  assert.ok(pageSource.includes("response.lifecycleMessage ?? response.message"));
+  assert.ok(pageSource.includes("status.accountingStatus === \"REPAIR_REQUIRED\" || status.accountingStatus === \"MISSING\" ? status.accountingMessage : null"));
+  assert.ok(pageSource.includes("response.accountingStatus === \"REPAIR_REQUIRED\" || response.accountingStatus === \"MISSING\" ? response.accountingMessage : null"));
+  assert.ok(pageSource.includes("Settlement could not be created. No changes were saved."));
+  assert.doesNotMatch(pageSource, /cannot be reposted because its payment account no longer exists/);
   assert.doesNotMatch(pageSource, /Checking status\.\.\./);
 });
 

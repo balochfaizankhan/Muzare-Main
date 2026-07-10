@@ -44,6 +44,30 @@ const envelope = (entity: string, id: string, record: Record<string, unknown>) =
   record: { id, createdAt: now, updatedAt: now, ...record },
 });
 
+const settlementStatusUrl = (clientRequestId: string) => `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements/status?${new URLSearchParams({
+  farmId: tenant.farmId,
+  seasonId: tenant.seasonId,
+  clientRequestId,
+}).toString()}`;
+
+const settlementPayload = (overrides: Record<string, unknown>) => ({
+  clientRequestId: randomUUID(),
+  settlementNumber: "LW-0006",
+  fromDate: "2026-04-11",
+  toDate: "2026-04-30",
+  settlementDate: "2026-05-01",
+  status: "posted",
+  paidAmount: 150,
+  expenseAmount: 150,
+  paymentAccountId: null,
+  paymentAccountCanonicalId: null,
+  paymentAccountLegacyId: null,
+  paymentAccountName: null,
+  paymentAccountType: null,
+  linkedAccountId: null,
+  ...overrides,
+});
+
 before(async () => {
   assert.ok(process.env.DATABASE_URL, "DATABASE_URL must point to an isolated migrated integration-test database.");
   await db.insert(workspaces).values({
@@ -317,4 +341,145 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
   const previewAfterVoid = previewAfterVoidResponse.json().preview;
   assert.equal(previewAfterVoid.previouslySettledAdvances, 0);
   assert.equal(previewAfterVoid.availableAdvanceBalanceBeforeSettlement, 120);
+});
+
+test("settlement status keeps committed settlements with missing accounts in SUCCESS plus REPAIR_REQUIRED", async () => {
+  const clientRequestId = randomUUID();
+  const settlementId = randomUUID();
+  const missingAccountId = randomUUID();
+
+  await db.insert(operationalRecords).values({
+    workspaceId: tenant.workspaceId,
+    farmId: tenant.farmId,
+    seasonId: tenant.seasonId,
+    clientRecordId: settlementId,
+    entityType: "labourWageSettlement",
+    payload: settlementPayload({
+      clientRequestId,
+      settlementNumber: "LW-0006",
+      paymentAccountId: missingAccountId,
+      paymentAccountCanonicalId: missingAccountId,
+      linkedAccountId: missingAccountId,
+      linkedAccountName: "Missing account",
+      paidAmount: 150,
+      expenseAmount: 150,
+    }),
+    recordedBy: tenant.userId,
+    clientUpdatedAt: now,
+  });
+
+  const [beforeRow] = await db.select({
+    payload: operationalRecords.payload,
+    updatedAt: operationalRecords.updatedAt,
+  }).from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, tenant.workspaceId),
+    eq(operationalRecords.entityType, "labourWageSettlement"),
+    eq(operationalRecords.clientRecordId, settlementId),
+  )).limit(1);
+  assert.ok(beforeRow);
+
+  const response = await request("GET", settlementStatusUrl(clientRequestId));
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().state, "SUCCESS");
+  assert.equal(response.json().settlementNumber, "LW-0006");
+  assert.equal(response.json().accountingStatus, "REPAIR_REQUIRED");
+  assert.equal(response.json().accountingMessage?.includes("cannot be reposted"), false);
+  assert.equal(response.json().lifecycleMessage, "Settlement LW-0006 was created successfully.");
+  assert.equal(response.json().message, "Settlement LW-0006 was created successfully.");
+
+  const [afterRow] = await db.select({
+    payload: operationalRecords.payload,
+    updatedAt: operationalRecords.updatedAt,
+  }).from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, tenant.workspaceId),
+    eq(operationalRecords.entityType, "labourWageSettlement"),
+    eq(operationalRecords.clientRecordId, settlementId),
+  )).limit(1);
+  assert.deepEqual(afterRow, beforeRow);
+});
+
+test("settlement status returns SUCCESS plus COMPLETE when accounting is already posted", async () => {
+  const clientRequestId = randomUUID();
+  const settlementId = randomUUID();
+
+  const [account] = await db.insert(accounts).values({
+    farmId: tenant.farmId,
+    name: "Status Test Account",
+    accountType: "cash",
+    active: true,
+  }).returning({ id: accounts.id });
+  assert.ok(account?.id);
+
+  await db.insert(operationalRecords).values({
+    workspaceId: tenant.workspaceId,
+    farmId: tenant.farmId,
+    seasonId: tenant.seasonId,
+    clientRecordId: settlementId,
+    entityType: "labourWageSettlement",
+    payload: settlementPayload({
+      clientRequestId,
+      settlementNumber: "LW-0007",
+      paymentAccountId: account.id,
+      paymentAccountCanonicalId: account.id,
+      linkedAccountId: account.id,
+      linkedAccountName: "Status Test Account",
+      paymentAccountName: "Status Test Account",
+      paymentAccountType: "cash",
+      paidAmount: 150,
+      expenseAmount: 150,
+    }),
+    recordedBy: tenant.userId,
+    clientUpdatedAt: now,
+  });
+
+  await db.insert(accountTransactions).values({
+    farmId: tenant.farmId,
+    seasonId: tenant.seasonId,
+    accountId: account.id,
+    source: "settlement",
+    referenceId: settlementId,
+    type: "debit",
+    amount: "150",
+    transactionDate: "2026-05-01",
+    remarks: "Labour Wage Settlement LW-0007",
+    createdBy: tenant.userId,
+  });
+
+  const response = await request("GET", settlementStatusUrl(clientRequestId));
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().state, "SUCCESS");
+  assert.equal(response.json().settlementNumber, "LW-0007");
+  assert.equal(response.json().accountingStatus, "COMPLETE");
+  assert.equal(response.json().accountingMessage, null);
+  assert.equal(response.json().lifecycleMessage, "Settlement LW-0007 was created successfully.");
+});
+
+test("rolled-back settlement status normalizes accounting repair text into a safe lifecycle failure", async () => {
+  const clientRequestId = randomUUID();
+
+  await db.insert(labourWageSettlementCreateRequests).values({
+    workspaceId: tenant.workspaceId,
+    farmId: tenant.farmId,
+    seasonId: tenant.seasonId,
+    clientRequestId,
+    operationType: "labour_wage_settlement_create",
+    state: "rolled_back",
+    stage: "rolled_back",
+    errorCode: "SETTLEMENT_ACCOUNTING_REPAIR_FAILED",
+    safeToRetry: true,
+    message: "Settlement LW-0006 cannot be reposted because its payment account no longer exists.",
+    correlationId: "status-normalization-test",
+    completedAt: new Date(),
+  });
+
+  const response = await request("GET", settlementStatusUrl(clientRequestId));
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().state, "FAILED");
+  assert.equal(response.json().message, "Settlement could not be created. No changes were saved.");
+  assert.equal(response.json().lifecycleMessage, "Settlement could not be created. No changes were saved.");
+  assert.equal(response.json().accountingStatus, null);
+  assert.equal(response.json().accountingMessage, null);
+  assert.equal(response.json().errorCode, "SETTLEMENT_ACCOUNTING_REPAIR_FAILED");
+  assert.equal(response.json().lifecycleErrorCode, "SETTLEMENT_ACCOUNTING_REPAIR_FAILED");
+  assert.notEqual(response.json().message, "Settlement LW-0006 cannot be reposted because its payment account no longer exists.");
 });

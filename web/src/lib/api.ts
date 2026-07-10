@@ -1167,6 +1167,8 @@ export type LabourWageSettlementCreateStatus = {
   accountingMessage: string | null;
   errorCode: string | null;
   message: string | null;
+  lifecycleErrorCode?: string | null;
+  lifecycleMessage?: string | null;
   stage: string | null;
   updatedAt: string;
   settlement: LabourWageSettlementRecord | null;

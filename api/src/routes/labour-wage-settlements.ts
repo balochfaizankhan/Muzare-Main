@@ -140,6 +140,8 @@ type SettlementCreateStatusResponse = {
   accountingMessage: string | null;
   errorCode: string | null;
   message: string | null;
+  lifecycleErrorCode: string | null;
+  lifecycleMessage: string | null;
   stage: string | null;
   updatedAt: string;
   settlement: ReturnType<typeof settlementResponseFromRow>["settlement"] | null;
@@ -187,6 +189,13 @@ function settlementCreateStageMessage(stage: string | null | undefined) {
     default:
       return "Settlement creation is still processing. Do not submit it again.";
   }
+}
+
+const failedSettlementCreateMessage = "Settlement could not be created. No changes were saved.";
+
+function settlementCreateLifecycleMessage(row: SettlementCreateRequestRow, state: SettlementCreatePublicState) {
+  if (state === "FAILED") return failedSettlementCreateMessage;
+  return row.message ?? settlementCreateStageMessage(row.stage ?? row.state);
 }
 
 async function validateContext(sessionId: string | undefined, workspaceId: string, farmId: string, seasonId: string) {
@@ -474,6 +483,10 @@ function settlementCreateStatusFromSettlement(
     message: state === "ALREADY_CREATED"
       ? `This settlement was already created as ${settlement.settlementNumber}.`
       : `Settlement ${settlement.settlementNumber} was created successfully.`,
+    lifecycleErrorCode: null,
+    lifecycleMessage: state === "ALREADY_CREATED"
+      ? `This settlement was already created as ${settlement.settlementNumber}.`
+      : `Settlement ${settlement.settlementNumber} was created successfully.`,
     stage: state === "ALREADY_CREATED" ? "already_created" : "committed",
     updatedAt: new Date().toISOString(),
     settlement,
@@ -483,16 +496,20 @@ function settlementCreateStatusFromSettlement(
 function settlementCreateStatusFromRequest(
   row: SettlementCreateRequestRow,
 ): SettlementCreateStatusResponse {
+  const state = settlementPublicState(row.state);
+  const lifecycleMessage = settlementCreateLifecycleMessage(row, state);
   return {
     clientRequestId: row.clientRequestId,
-    state: settlementPublicState(row.state),
+    state,
     safeToRetry: row.safeToRetry,
     settlementId: row.settlementClientRecordId,
     settlementNumber: row.settlementNumber,
     accountingStatus: null,
     accountingMessage: null,
     errorCode: row.errorCode,
-    message: row.message ?? settlementCreateStageMessage(row.stage ?? row.state),
+    message: lifecycleMessage,
+    lifecycleErrorCode: row.errorCode,
+    lifecycleMessage,
     stage: row.stage ?? row.state,
     updatedAt: row.updatedAt.toISOString(),
     settlement: null,
@@ -704,7 +721,9 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
               state: "FAILED",
               safeToRetry: true,
               errorCode: requestStatus.errorCode ?? "SETTLEMENT_POSTING_FAILED",
-              message: "Settlement could not be created. No changes were saved.",
+              message: failedSettlementCreateMessage,
+              lifecycleErrorCode: requestStatus.errorCode ?? "SETTLEMENT_POSTING_FAILED",
+              lifecycleMessage: failedSettlementCreateMessage,
               stage: "rolled_back",
             } satisfies SettlementCreateStatusResponse;
           }
@@ -723,7 +742,11 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         errorCode: processing ? null : "SETTLEMENT_POSTING_FAILED",
         message: processing
           ? "Settlement creation is still processing. Do not submit it again."
-          : "Settlement could not be created. No changes were saved.",
+          : failedSettlementCreateMessage,
+        lifecycleErrorCode: processing ? null : "SETTLEMENT_POSTING_FAILED",
+        lifecycleMessage: processing
+          ? "Settlement creation is still processing. Do not submit it again."
+          : failedSettlementCreateMessage,
         stage: processing ? "transaction_started" : "rolled_back",
         updatedAt: new Date().toISOString(),
         settlement: null,
@@ -1181,6 +1204,8 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         accountingMessage: accounting.accountingMessage,
         errorCode: null,
         message: `This settlement was already created as ${settlement.settlement.settlementNumber}.`,
+        lifecycleErrorCode: null,
+        lifecycleMessage: `This settlement was already created as ${settlement.settlement.settlementNumber}.`,
         stage: "already_created",
         updatedAt: new Date().toISOString(),
         settlement: settlement.settlement,
@@ -1795,6 +1820,10 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         message: result.state === "ALREADY_CREATED"
           ? `This settlement was already created as ${result.settlement.settlementNumber}.`
           : `Settlement ${result.settlement.settlementNumber} was created successfully.`,
+        lifecycleErrorCode: null,
+        lifecycleMessage: result.state === "ALREADY_CREATED"
+          ? `This settlement was already created as ${result.settlement.settlementNumber}.`
+          : `Settlement ${result.settlement.settlementNumber} was created successfully.`,
         stage: result.state === "ALREADY_CREATED" ? "already_created" : "committed",
         updatedAt: new Date().toISOString(),
         settlement: result.settlement,
@@ -1802,7 +1831,6 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
     } catch (error) {
       const dbError = toDatabaseErrorInfo(error);
       const failureCode = dbError ? settlementPostingErrorCode(dbError) : "SETTLEMENT_POSTING_FAILED";
-      const failureMessage = dbError ? settlementPostingErrorMessage(dbError) : error instanceof Error ? error.message : "Settlement could not be created. No changes were saved.";
       request.log.error({
         workspaceId,
         farmId,
@@ -1822,20 +1850,20 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
       await updateCreateRequestState("rolled_back", {
         errorCode: failureCode,
         safeToRetry: true,
-        message: failureMessage,
+        message: failedSettlementCreateMessage,
         completedAt: new Date(),
       });
       if (dbError) {
         return reply.code(400).send({
           code: failureCode,
-          message: failureMessage,
+          message: failedSettlementCreateMessage,
           requestId: request.id,
         });
       }
       if (error instanceof Error) {
         return reply.code(400).send({
           code: failureCode,
-          message: failureMessage,
+          message: failedSettlementCreateMessage,
           requestId: request.id,
         });
       }

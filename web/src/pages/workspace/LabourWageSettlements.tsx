@@ -460,7 +460,7 @@ export function LabourWageSettlements() {
         if ((status.state === "SUCCESS" || status.state === "ALREADY_CREATED") && status.settlement) {
           await finalizeSettlementCreateSuccess(
             status.settlement,
-            status.message ?? (status.state === "ALREADY_CREATED"
+            status.lifecycleMessage ?? status.message ?? (status.state === "ALREADY_CREATED"
               ? `This settlement was already created as ${status.settlement.settlementNumber}.`
               : `Settlement ${status.settlement.settlementNumber} was created successfully.`),
             status.accountingStatus === "REPAIR_REQUIRED" || status.accountingStatus === "MISSING" ? status.accountingMessage : null,
@@ -470,11 +470,11 @@ export function LabourWageSettlements() {
         if (status.state === "FAILED") {
           if (status.safeToRetry) clearPendingSettlementRequest();
           setStatusCheckNotice("");
-          setError(status.message ?? "Settlement could not be created. No changes were saved.");
+          setError(status.lifecycleMessage ?? status.message ?? "Settlement could not be created. No changes were saved.");
           return;
         }
         if (status.state === "IN_PROGRESS") {
-          setStatusCheckNotice(status.message ?? "Settlement creation is still processing. Do not submit it again.");
+          setStatusCheckNotice(status.lifecycleMessage ?? status.message ?? "Settlement creation is still processing. Do not submit it again.");
           continue;
         }
       }
@@ -660,7 +660,7 @@ export function LabourWageSettlements() {
       if ((response.state === "SUCCESS" || response.state === "ALREADY_CREATED") && response.settlement) {
         await finalizeSettlementCreateSuccess(
           response.settlement,
-          response.message ?? (response.state === "ALREADY_CREATED"
+          response.lifecycleMessage ?? response.message ?? (response.state === "ALREADY_CREATED"
             ? `This settlement was already created as ${response.settlement.settlementNumber}.`
             : `Settlement ${response.settlement.settlementNumber} was created successfully.`),
           response.accountingStatus === "REPAIR_REQUIRED" || response.accountingStatus === "MISSING" ? response.accountingMessage : null,
@@ -670,10 +670,10 @@ export function LabourWageSettlements() {
       if (response.state === "FAILED") {
         if (response.safeToRetry) clearPendingSettlementRequest();
         setStatusCheckNotice("");
-        setError(response.message ?? "Settlement could not be created. No changes were saved.");
+        setError(response.lifecycleMessage ?? response.message ?? "Settlement could not be created. No changes were saved.");
         return;
       }
-      setStatusCheckNotice(response.message ?? "Settlement creation is still processing. Do not submit it again.");
+      setStatusCheckNotice(response.lifecycleMessage ?? response.message ?? "Settlement creation is still processing. Do not submit it again.");
       await resolveSettlementCreateStatus(clientRequestId);
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Unable to create the labour wage settlement.";
