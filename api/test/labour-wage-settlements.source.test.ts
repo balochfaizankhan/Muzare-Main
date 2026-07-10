@@ -155,6 +155,7 @@ test("labour wage settlement allocations persist canonical advance UUIDs and log
   assert.ok(routeSource.includes("labour_wage_settlement_allocation_insert_failed"));
   assert.ok(routeSource.includes("Settlement could not be created because its advance records could not be linked. No changes were saved."));
   assert.ok(routeSource.includes("One or more advance records are no longer available. Please preview again."));
+  assert.doesNotMatch(routeSource, /const canonicalAdvanceRecordId = typeof row\.advanceRecordId === "string" && row\.advanceRecordId\.trim\(\)\s*\?\s*row\.advanceRecordId\.trim\(\)\s*:\s*row\.advanceId/);
   assert.doesNotMatch(routeSource, /labourWageSettlementAdvanceAllocations\)\.values\(\s*advanceAbsorptionRows\.map/);
 });
 

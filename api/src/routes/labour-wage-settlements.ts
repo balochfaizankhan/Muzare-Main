@@ -310,6 +310,13 @@ function settlementPostingErrorMessage(info: ReturnType<typeof toDatabaseErrorIn
   return "Settlement could not be created. No changes were saved.";
 }
 
+function settlementPostingErrorCode(info: ReturnType<typeof toDatabaseErrorInfo>) {
+  if (!info) return "SETTLEMENT_POSTING_FAILED";
+  if (info.code === "22P02" || info.code === "23503") return "SETTLEMENT_ADVANCE_LINK_FAILED";
+  if (info.code === "23505" && info.constraint?.toLowerCase().includes("labour_wage_settlement_advance_allocations")) return "SETTLEMENT_ALREADY_CREATED";
+  return "SETTLEMENT_POSTING_FAILED";
+}
+
 function logSettlementAllocationInsertFailure(
   request: { log: { error: (...args: unknown[]) => void } },
   details: {
@@ -918,10 +925,19 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         let absorbedAdvanceTotal = 0;
         for (const [allocationIndex, row] of (preview.advanceReconciliation ?? []).entries()) {
           if (!row.includedInPreview || row.remainingAvailableAmount <= 0) continue;
-          const canonicalAdvanceRecordId = typeof row.advanceRecordId === "string" && row.advanceRecordId.trim()
-            ? row.advanceRecordId.trim()
-            : row.advanceId;
-          if (!canonicalAdvanceRecordId) continue;
+          const canonicalAdvanceRecordId = typeof row.advanceRecordId === "string" ? row.advanceRecordId.trim() : "";
+          if (!canonicalAdvanceRecordId) {
+            request.log.error({
+              workspaceId,
+              farmId,
+              seasonId,
+              settlementRecordId: settlementId,
+              settlementNumber,
+              allocationIndex,
+              sourceAdvanceId: row.sourceAdvanceId ?? row.advanceId,
+            }, "labour wage settlement allocation missing canonical advance id");
+            throw new Error("Settlement could not be created because its advance records could not be linked. No changes were saved.");
+          }
           const sourceAdvanceId = typeof row.sourceAdvanceId === "string" && row.sourceAdvanceId.trim()
             ? row.sourceAdvanceId.trim()
             : row.advanceId;
@@ -1252,6 +1268,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         farmId,
         seasonId,
         clientRequestId: clientRequestId ?? null,
+        requestId: request.id,
         errorCode: dbError?.code ?? null,
         errorConstraint: dbError?.constraint ?? null,
         errorTable: dbError?.table ?? null,
@@ -1263,10 +1280,18 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         errorRoutine: dbError?.routine ?? null,
       }, "labour wage settlement create request rolled back");
       if (dbError) {
-        return reply.code(400).send({ message: settlementPostingErrorMessage(dbError) });
+        return reply.code(400).send({
+          code: settlementPostingErrorCode(dbError),
+          message: settlementPostingErrorMessage(dbError),
+          requestId: request.id,
+        });
       }
       if (error instanceof Error) {
-        return reply.code(400).send({ message: error.message });
+        return reply.code(400).send({
+          code: "SETTLEMENT_POSTING_FAILED",
+          message: error.message,
+          requestId: request.id,
+        });
       }
       throw error;
     }
