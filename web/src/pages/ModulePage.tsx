@@ -442,7 +442,6 @@ function WorkforceModule({
             {user?.workspaceId && hasModulePermission(user, "workforce", "view", user.workspaceId) && <button type="button" onClick={() => navigate("/workspace/labour-payments/overview")}>Labour Payments</button>}
             <button type="button" onClick={() => navigate("/workspace/workforce/reports")}>Reports</button>
             {canManageLabour && <button type="button" onClick={() => navigate("/workspace/workforce/labour-groups")}>Labour Groups</button>}
-            {canManageLabour && <button type="button" onClick={() => setShowAddGroup(true)}>{t("workforcePage.groups")}</button>}
           </div>
         </div>
         <div className="workforce-list-header">
