@@ -79,6 +79,8 @@ const updateSchema = z.object({
   voidReason: z.string().trim().max(500).optional().nullable(),
 });
 
+type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 async function validateContext(sessionId: string | undefined, workspaceId: string, farmId: string, seasonId: string) {
   const [session] = await db.select({
     activeFarmId: userSessions.activeFarmId,
@@ -87,7 +89,7 @@ async function validateContext(sessionId: string | undefined, workspaceId: strin
   return session?.activeFarmId === farmId && session.activeSeasonId === seasonId;
 }
 
-async function loadSettlementRow(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], workspaceId: string, settlementId: string) {
+async function loadSettlementRow(tx: DbTransaction, workspaceId: string, settlementId: string) {
   const settlements = await tx.select({
     id: operationalRecords.id,
     clientRecordId: operationalRecords.clientRecordId,
@@ -105,7 +107,7 @@ async function loadSettlementRow(tx: Parameters<Parameters<typeof db.transaction
 }
 
 async function findSettlementByClientRequestId(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  tx: DbTransaction,
   workspaceId: string,
   farmId: string,
   seasonId: string,
@@ -130,7 +132,7 @@ async function findSettlementByClientRequestId(
 }
 
 async function isSettlementRequestProcessing(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  tx: DbTransaction,
   workspaceId: string,
   farmId: string,
   clientRequestId: string,
@@ -143,6 +145,59 @@ async function isSettlementRequestProcessing(
     return false;
   }
   return true;
+}
+
+async function resolveSettlementSelection(
+  tx: DbTransaction,
+  workspaceId: string,
+  farmId: string,
+  selection: {
+    settlementMode?: "individual" | "group";
+    labourerId?: string | null;
+    foremanId?: string | null;
+    groupId?: string | null;
+    labourIds?: string[];
+  },
+) {
+  if (selection.settlementMode !== "group" || !selection.groupId) {
+    return {
+      labourerId: selection.labourerId ?? undefined,
+      foremanId: selection.foremanId ?? undefined,
+      groupId: selection.groupId ?? undefined,
+      labourIds: selection.labourIds,
+    };
+  }
+
+  const groupRows = await tx.select({
+    clientRecordId: operationalRecords.clientRecordId,
+    payload: operationalRecords.payload,
+  }).from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, workspaceId),
+    eq(operationalRecords.farmId, farmId),
+    eq(operationalRecords.entityType, "labourGroup"),
+    eq(operationalRecords.clientRecordId, selection.groupId),
+  )).limit(1);
+
+  const payload = groupRows[0]?.payload as Record<string, unknown> | undefined;
+  const resolvedForemanId = typeof payload?.foremanLabourId === "string"
+    ? payload.foremanLabourId
+    : typeof payload?.foremanId === "string"
+      ? payload.foremanId
+      : "";
+
+  if (!resolvedForemanId) {
+    throw new Error("The selected labour group has no foreman assigned.");
+  }
+  if (selection.foremanId && selection.foremanId !== resolvedForemanId) {
+    throw new Error("The submitted foreman does not match the selected labour group.");
+  }
+
+  return {
+    labourerId: selection.labourerId ?? undefined,
+    foremanId: resolvedForemanId,
+    groupId: selection.groupId,
+    labourIds: selection.labourIds,
+  };
 }
 
 function settlementResponseFromRow(
@@ -427,12 +482,27 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
     }
     const ownershipError = await validateTenantReferences(workspaceId, { farmId, seasonId });
     if (ownershipError) return reply.code(403).send({ message: ownershipError });
+    let resolvedSelection;
+    try {
+      resolvedSelection = await db.transaction((tx) => resolveSettlementSelection(tx, workspaceId, farmId, {
+        settlementMode,
+        labourerId,
+        foremanId,
+        groupId,
+        labourIds,
+      }));
+    } catch (error) {
+      return reply.code(400).send({
+        message: error instanceof Error ? error.message : "Unable to resolve the selected labour settlement group.",
+        fields: ["foremanId"],
+      });
+    }
     const preview = await db.transaction((tx) => previewLabourWageSettlement(tx, workspaceId, farmId, seasonId, fromDate, toDate, settlementDate, undefined, {
       settlementMode,
-      labourerId,
-      foremanId,
-      groupId,
-      labourIds,
+      labourerId: resolvedSelection.labourerId,
+      foremanId: resolvedSelection.foremanId,
+      groupId: resolvedSelection.groupId,
+      labourIds: resolvedSelection.labourIds,
     }));
     const effectiveAdvanceAdjustedNow = effectiveAdvanceAdjustmentForPosting(preview, Number(manualAdjustment ?? 0));
     const updated = calculateLabourWageSettlementTotals(
@@ -522,6 +592,22 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
       clientRequestId: clientRequestId ?? null,
     }, "labour wage settlement create request received");
 
+    let resolvedSelection;
+    try {
+      resolvedSelection = await db.transaction((tx) => resolveSettlementSelection(tx, workspaceId, farmId, {
+        settlementMode,
+        labourerId,
+        foremanId,
+        groupId,
+        labourIds,
+      }));
+    } catch (error) {
+      return reply.code(400).send({
+        message: error instanceof Error ? error.message : "Unable to resolve the selected labour settlement group.",
+        fields: ["foremanId"],
+      });
+    }
+
     const existingSettlement = clientRequestId
       ? await db.transaction((tx) => findSettlementByClientRequestId(tx, workspaceId, farmId, seasonId, clientRequestId))
       : null;
@@ -542,10 +628,10 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
     const previewStartedAt = Date.now();
     const preview = await db.transaction((tx) => previewLabourWageSettlement(tx, workspaceId, farmId, seasonId, fromDate, toDate, settlementDate, undefined, {
       settlementMode,
-      labourerId,
-      foremanId,
-      groupId,
-      labourIds,
+      labourerId: resolvedSelection.labourerId,
+      foremanId: resolvedSelection.foremanId,
+      groupId: resolvedSelection.groupId,
+      labourIds: resolvedSelection.labourIds,
     }));
     request.log.info({
       workspaceId,

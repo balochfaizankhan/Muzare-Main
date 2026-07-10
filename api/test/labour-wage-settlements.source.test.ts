@@ -283,6 +283,21 @@ test("labour group foreman support and advance report labels are explicit in the
   assert.ok(reportsPage.includes("Maximum Amount"));
 });
 
+test("group settlement preview carries the assigned foreman id through the form and route validation", () => {
+  const routeSource = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
+  const settlementsPage = readFileSync(new URL("../../web/src/pages/workspace/LabourWageSettlements.tsx", import.meta.url), "utf8");
+  assert.ok(settlementsPage.includes("const selectedGroupForemanId = selectedGroup?.foremanId ?? selectedGroup?.foremanLabourId ?? \"\";"));
+  assert.ok(settlementsPage.includes("const effectiveGroupForemanId = settlementMode === \"group\""));
+  assert.ok(settlementsPage.includes("if (foremanId !== selectedGroupForemanId) {"));
+  assert.ok(settlementsPage.includes("setForemanId(selectedGroupForemanId);"));
+  assert.ok(settlementsPage.includes("The selected labour group has no foreman assigned."));
+  assert.ok(settlementsPage.includes("foremanId: settlementMode === \"group\" ? effectiveGroupForemanId || undefined : undefined"));
+  assert.ok(routeSource.includes("async function resolveSettlementSelection("));
+  assert.ok(routeSource.includes("The selected labour group has no foreman assigned."));
+  assert.ok(routeSource.includes("The submitted foreman does not match the selected labour group."));
+  assert.ok(routeSource.includes("resolvedSelection = await db.transaction((tx) => resolveSettlementSelection(tx, workspaceId, farmId, {"));
+});
+
 test("labour wage settlements can be deleted safely only through the settlement register flow", () => {
   const source = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
   assert.ok(source.includes('app.delete("/v1/workspace/:workspaceId/labour-wage-settlements/:settlementId"'));

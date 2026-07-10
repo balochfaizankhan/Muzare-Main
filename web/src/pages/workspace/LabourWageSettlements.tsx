@@ -214,12 +214,22 @@ export function LabourWageSettlements() {
     }
   }, [foremanId, groupId, searchParams]);
 
+  const selectedGroup = useMemo(() => labourGroups.find((group) => group.id === groupId) ?? null, [groupId, labourGroups]);
+  const selectedGroupForemanId = selectedGroup?.foremanId ?? selectedGroup?.foremanLabourId ?? "";
+  const effectiveGroupForemanId = settlementMode === "group"
+    ? (groupId ? selectedGroupForemanId : foremanId)
+    : "";
+
   useEffect(() => {
-    if (!groupId || foremanId) return;
-    const selectedGroup = labourGroups.find((group) => group.id === groupId) ?? null;
-    const nextForemanId = selectedGroup?.foremanId ?? selectedGroup?.foremanLabourId ?? "";
-    if (nextForemanId) setForemanId(nextForemanId);
-  }, [foremanId, groupId, labourGroups]);
+    if (settlementMode !== "group") return;
+    if (!groupId) {
+      if (foremanId) setForemanId("");
+      return;
+    }
+    if (foremanId !== selectedGroupForemanId) {
+      setForemanId(selectedGroupForemanId);
+    }
+  }, [foremanId, groupId, selectedGroupForemanId, settlementMode]);
 
   useEffect(() => {
     if (!token || !workspaceId || !selectedSettlement?.id || !navigator.onLine) return;
@@ -281,11 +291,11 @@ export function LabourWageSettlements() {
     settlementDate,
     settlementMode,
     labourerId: settlementMode === "individual" ? labourerId || undefined : undefined,
-    foremanId: settlementMode === "group" ? foremanId || undefined : undefined,
+    foremanId: settlementMode === "group" ? effectiveGroupForemanId || undefined : undefined,
     groupId: settlementMode === "group" ? groupId || undefined : undefined,
     paidAmount: toFiniteNumber(paidAmount),
     manualAdjustment: toFiniteNumber(manualAdjustment),
-  }), [activeFarmId, activeSeasonId, fromDate, toDate, settlementDate, settlementMode, labourerId, foremanId, groupId, paidAmount, manualAdjustment]);
+  }), [activeFarmId, activeSeasonId, effectiveGroupForemanId, fromDate, toDate, settlementDate, settlementMode, labourerId, groupId, paidAmount, manualAdjustment]);
 
   const previewRequestFingerprint = useMemo(() => JSON.stringify(previewRequest), [previewRequest]);
   const previewSubmissionFingerprint = useMemo(() => JSON.stringify(previewDiagnostics.submittedPayload), [previewDiagnostics.submittedPayload]);
@@ -299,7 +309,10 @@ export function LabourWageSettlements() {
     if (!previewRequest.toDate) fields.push("toDate");
     if (!previewRequest.settlementDate) fields.push("settlementDate");
     if (previewRequest.settlementMode === "individual" && !previewRequest.labourerId) fields.push("labourerId");
-    if (previewRequest.settlementMode === "group" && !previewRequest.groupId && !previewRequest.foremanId) fields.push("groupId", "foremanId");
+    if (previewRequest.settlementMode === "group") {
+      if (!previewRequest.groupId) fields.push("groupId");
+      if (!previewRequest.foremanId) fields.push("foremanId");
+    }
     return fields;
   }, [previewRequest]);
 
@@ -503,8 +516,12 @@ export function LabourWageSettlements() {
       setError("Select a labourer for an individual settlement.");
       return;
     }
-    if (settlementMode === "group" && !groupId && !foremanId) {
-      setError("Select a foreman or group for a group settlement.");
+    if (settlementMode === "group" && !groupId) {
+      setError("Select a group for a group settlement.");
+      return;
+    }
+    if (settlementMode === "group" && !effectiveGroupForemanId) {
+      setError("The selected labour group has no foreman assigned.");
       return;
     }
     if (Number(manualAdjustment || 0) !== 0 && !manualAdjustmentNote.trim()) {
@@ -532,7 +549,7 @@ export function LabourWageSettlements() {
         clientRequestId,
         settlementMode,
         labourerId: settlementMode === "individual" ? labourerId || undefined : undefined,
-        foremanId: settlementMode === "group" ? foremanId || undefined : undefined,
+        foremanId: settlementMode === "group" ? effectiveGroupForemanId || undefined : undefined,
         groupId: settlementMode === "group" ? groupId || undefined : undefined,
         paymentAccountId: Number(paidAmount || 0) > 0 ? accountId : undefined,
         paidAmount: Number(paidAmount || 0),
@@ -627,13 +644,14 @@ export function LabourWageSettlements() {
     if (!token || !workspaceId || !activeFarmId || !activeSeasonId) return "Select an active farm and season before creating a settlement.";
     if (Number(paidAmount || 0) > 0 && !accountId) return "Select a payment account when paid now is greater than zero.";
     if (settlementMode === "individual" && !labourerId) return "Select a labourer for an individual settlement.";
-    if (settlementMode === "group" && !groupId && !foremanId) return "Select a foreman or group for a group settlement.";
+    if (settlementMode === "group" && !groupId) return "Select a group for a group settlement.";
+    if (settlementMode === "group" && !effectiveGroupForemanId) return "The selected labour group has no foreman assigned.";
     if (Number(manualAdjustment || 0) !== 0 && !manualAdjustmentNote.trim()) return "Manual adjustment note is required when manual adjustment is non-zero.";
     if (!summary) return "Preview the settlement before posting it.";
     if (summary.unresolvedRows.length || summary.overlappingSettlements.length) return "This wage settlement still has unresolved wage rates or overlapping settlements.";
     if (!summaryConsistent) return "Preview is inconsistent. Create Settlement is disabled until the reconciliation matches.";
     return "";
-  }, [accountId, activeFarmId, activeSeasonId, canPost, foremanId, labourerId, manualAdjustment, manualAdjustmentNote, onlineRequired, paidAmount, settlementMode, summary, summaryConsistent, t, token, workspaceId, groupId]);
+  }, [accountId, activeFarmId, activeSeasonId, canPost, effectiveGroupForemanId, labourerId, manualAdjustment, manualAdjustmentNote, onlineRequired, paidAmount, settlementMode, summary, summaryConsistent, t, token, workspaceId, groupId]);
   useEffect(() => {
     setPreviewDiagnostics((current) => ({
       ...current,
@@ -641,8 +659,8 @@ export function LabourWageSettlements() {
       storedPreview: summary,
     }));
   }, [createDisabledReason, summary]);
-  const selectedGroup = useMemo(() => labourGroups.find((group) => group.id === groupId) ?? null, [groupId, labourGroups]);
-  const selectedForeman = useMemo(() => labourers.find((labourer) => labourer.id === (summary?.foremanId ?? foremanId)) ?? null, [foremanId, labourers, summary?.foremanId]);
+  const resolvedSelectedForemanId = summary?.foremanId ?? effectiveGroupForemanId ?? foremanId;
+  const selectedForeman = useMemo(() => labourers.find((labourer) => labourer.id === resolvedSelectedForemanId) ?? null, [labourers, resolvedSelectedForemanId]);
   const selectedGroupName = summary?.groupName ?? selectedGroup?.name ?? "";
   const settlementForemanName = summary?.foremanId
     ? labourers.find((labourer) => labourer.id === summary.foremanId)?.name ?? null
