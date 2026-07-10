@@ -27,6 +27,9 @@ test("labour wage settlement diagnostics UI is admin/owner-only and read-only", 
   assert.ok(apiSource.includes("/admin/labour-wage-settlements/diagnostics"));
   assert.ok(apiSource.includes("fetchLabourWageSettlementDiagnostics"));
   assert.ok(pageSource.includes("fetchLabourWageSettlementDiagnostics"));
+  assert.ok(pageSource.includes("settlementNumber: diagnosticsSettlementNumber.trim()"));
+  assert.ok(!pageSource.includes("farmId: diagnosticsSettlementNumber"));
+  assert.ok(!pageSource.includes("seasonId: diagnosticsSettlementNumber"));
   assert.ok(pageSource.includes("platform_admin"));
   assert.ok(pageSource.includes("workspace_owner"));
   assert.ok(pageSource.includes("navigator.clipboard.writeText"));

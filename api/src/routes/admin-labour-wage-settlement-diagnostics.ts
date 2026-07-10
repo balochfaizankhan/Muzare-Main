@@ -5,7 +5,7 @@ import { requireUser, type AuthenticatedUser } from "../auth.js";
 import { db } from "../db/client.js";
 import { accountTransactions, accounts, farms, labourWageSettlementAdvanceAllocations, labourWageSettlementCreateRequests, operationalRecords } from "../db/schema.js";
 import { normalizeSettlementPayload } from "../lib/labour-wage-settlements.js";
-import { buildLabourWageSettlementDiagnostics } from "../lib/labour-wage-settlement-diagnostics.js";
+import { buildLabourWageSettlementDiagnostics, normalizeDiagnosticsScopeId, resolveLabourWageSettlementDiagnosticsFarmId } from "../lib/labour-wage-settlement-diagnostics.js";
 import { isDeletedOperationalPayload } from "../operational-record-state.js";
 
 const paramsSchema = z.object({ workspaceId: z.string().uuid() });
@@ -13,9 +13,19 @@ const querySchema = z.object({
   settlementNumber: z.string().trim().min(1).optional(),
   settlementId: z.string().uuid().optional(),
   clientRequestId: z.string().uuid().optional(),
+  farmId: z.string().uuid().optional(),
 }).refine((value) => Boolean(value.settlementNumber || value.settlementId || value.clientRequestId), {
   message: "At least one lookup parameter is required.",
 });
+
+function readLegacyFarmId(payload: Record<string, unknown> | null | undefined) {
+  const raw = payload?.farmId;
+  return typeof raw === "string" && raw.trim() ? raw.trim() : null;
+}
+
+function isUuid(value: string | null | undefined): value is string {
+  return typeof value === "string" && z.string().uuid().safeParse(value).success;
+}
 
 export function canAccessDiagnostics(user: AuthenticatedUser, workspaceId: string) {
   if (user.platformRole === "platform_admin") return true;
@@ -83,6 +93,7 @@ export async function adminLabourWageSettlementDiagnosticsRoutes(app: FastifyIns
 
     const lifecycleRows = await db.select({
       clientRequestId: labourWageSettlementCreateRequests.clientRequestId,
+      farmId: labourWageSettlementCreateRequests.farmId,
       state: labourWageSettlementCreateRequests.state,
       stage: labourWageSettlementCreateRequests.stage,
       errorCode: labourWageSettlementCreateRequests.errorCode,
@@ -99,6 +110,20 @@ export async function adminLabourWageSettlementDiagnosticsRoutes(app: FastifyIns
       ...(settlementNumber ? [eq(labourWageSettlementCreateRequests.settlementNumber, settlementNumber)] : []),
     )).orderBy(labourWageSettlementCreateRequests.updatedAt);
     const lifecycleRow = lifecycleRows[lifecycleRows.length - 1] ?? null;
+
+    const resolvedFarmId = resolveLabourWageSettlementDiagnosticsFarmId({
+      settlementFarmId: normalizeDiagnosticsScopeId(settlementRow?.farmId),
+      lifecycleFarmId: normalizeDiagnosticsScopeId(lifecycleRow?.farmId),
+      requestFarmId: normalizeDiagnosticsScopeId(query.data.farmId ?? null),
+      legacyPayloadFarmId: normalizeDiagnosticsScopeId(readLegacyFarmId(settlementRow?.payload as Record<string, unknown> | null)),
+    });
+    if (!isUuid(resolvedFarmId)) {
+      return reply.code(422).send({
+        code: "SETTLEMENT_DIAGNOSTICS_FARM_SCOPE_MISSING",
+        message: "The settlement farm context could not be resolved for accounting diagnostics.",
+        readOnly: true,
+      });
+    }
 
     const settlementClientRecordId = settlementRow?.clientRecordId ?? lifecycleRow?.clientRequestId ?? null;
     const allocationRows = settlementRow ? await db.select({
@@ -127,7 +152,7 @@ export async function adminLabourWageSettlementDiagnosticsRoutes(app: FastifyIns
       sourceType: accountTransactions.sourceType,
       type: accountTransactions.type,
     }).from(accountTransactions).where(and(
-      eq(accountTransactions.farmId, settlementRow?.farmId ?? settlementRows[0]?.farmId ?? ""),
+      eq(accountTransactions.farmId, resolvedFarmId),
       eq(accountTransactions.referenceId, settlementClientRecordId),
       eq(accountTransactions.source, "settlement"),
       eq(accountTransactions.sourceType, "labour_wage_settlement"),
@@ -139,6 +164,7 @@ export async function adminLabourWageSettlementDiagnosticsRoutes(app: FastifyIns
         settlementNumber,
         settlementId,
         clientRequestId,
+        farmId: resolvedFarmId,
       },
       settlementRecord: settlementRow ? {
         id: settlementRow.id,

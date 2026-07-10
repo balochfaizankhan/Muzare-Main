@@ -13,6 +13,10 @@ test("admin labour wage settlement diagnostics route stays read-only and registe
   assert.ok(routeSource.includes("workspace_owner"));
   assert.ok(appSource.includes("adminLabourWageSettlementDiagnosticsRoutes"));
   assert.ok(helperSource.includes("nameOnlyCandidates"));
+  assert.ok(helperSource.includes("resolveLabourWageSettlementDiagnosticsFarmId"));
+  assert.ok(helperSource.includes("normalizeDiagnosticsScopeId"));
+  assert.ok(routeSource.includes("SETTLEMENT_DIAGNOSTICS_FARM_SCOPE_MISSING"));
+  assert.ok(routeSource.includes("eq(accountTransactions.farmId, resolvedFarmId)"));
   assert.ok(!routeSource.includes("repairPostedSettlementAccounting"));
   assert.ok(!routeSource.includes("tx.insert("));
   assert.ok(!routeSource.includes("tx.update("));
@@ -20,6 +24,7 @@ test("admin labour wage settlement diagnostics route stays read-only and registe
   assert.ok(!routeSource.includes("db.insert("));
   assert.ok(!routeSource.includes("db.update("));
   assert.ok(!routeSource.includes("db.delete("));
+  assert.ok(!routeSource.includes('farmId, settlementRow?.farmId ?? settlementRows[0]?.farmId ?? ""'));
   assert.ok(!helperSource.includes("resolveAccountIdentity("));
   assert.ok(!helperSource.includes("fallbackName"));
 });

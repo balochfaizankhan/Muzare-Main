@@ -1179,6 +1179,7 @@ export type LabourWageSettlementDiagnostics = {
     settlementNumber?: string;
     settlementId?: string;
     clientRequestId?: string;
+    farmId?: string | null;
   };
   settlement: {
     exists: boolean;

@@ -7,6 +7,7 @@ export type LabourWageSettlementDiagnosticsLookup = {
   settlementNumber?: string;
   settlementId?: string;
   clientRequestId?: string;
+  farmId?: string | null;
 };
 
 export type LabourWageSettlementDiagnosticsSettlement = {
@@ -160,8 +161,33 @@ export type LabourWageSettlementDiagnosticsInput = {
   }>;
 };
 
+export type LabourWageSettlementDiagnosticsFarmScope = {
+  settlementFarmId: string | null;
+  lifecycleFarmId: string | null;
+  requestFarmId: string | null;
+  legacyPayloadFarmId: string | null;
+};
+
 function trim(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+export function normalizeDiagnosticsScopeId(value: string | null | undefined) {
+  const trimmed = trim(value);
+  return trimmed ? trimmed : null;
+}
+
+export function resolveLabourWageSettlementDiagnosticsFarmId(scope: LabourWageSettlementDiagnosticsFarmScope) {
+  const candidates = [
+    normalizeDiagnosticsScopeId(scope.settlementFarmId),
+    normalizeDiagnosticsScopeId(scope.lifecycleFarmId),
+    normalizeDiagnosticsScopeId(scope.requestFarmId),
+    normalizeDiagnosticsScopeId(scope.legacyPayloadFarmId),
+  ];
+  for (const candidate of candidates) {
+    if (candidate) return candidate;
+  }
+  return null;
 }
 
 function toNumber(value: unknown) {

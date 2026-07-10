@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import type { AuthenticatedUser } from "../src/auth.js";
-import { buildLabourWageSettlementDiagnostics } from "../src/lib/labour-wage-settlement-diagnostics.js";
+import { buildLabourWageSettlementDiagnostics, normalizeDiagnosticsScopeId, resolveLabourWageSettlementDiagnosticsFarmId } from "../src/lib/labour-wage-settlement-diagnostics.js";
 import { canAccessDiagnostics } from "../src/routes/admin-labour-wage-settlement-diagnostics.js";
 
 const workspaceId = randomUUID();
@@ -270,4 +270,43 @@ test("archived accounts are reported as inactive and require repair", () => {
   assert.equal(diagnostics.paymentAccountResolution.archived, true);
   assert.equal(diagnostics.paymentAccountResolution.active, false);
   assert.equal(diagnostics.accounting.status, "REPAIR_REQUIRED");
+});
+
+test("empty and whitespace farm ids normalize to null", () => {
+  assert.equal(normalizeDiagnosticsScopeId(""), null);
+  assert.equal(normalizeDiagnosticsScopeId("   "), null);
+  assert.equal(normalizeDiagnosticsScopeId(undefined), null);
+  assert.equal(normalizeDiagnosticsScopeId(null), null);
+});
+
+test("diagnostics resolves the canonical farm id in priority order", () => {
+  const canonicalFarmId = randomUUID();
+  const lifecycleFarmId = randomUUID();
+  const requestFarmId = randomUUID();
+  const legacyFarmId = randomUUID();
+
+  assert.equal(resolveLabourWageSettlementDiagnosticsFarmId({
+    settlementFarmId: canonicalFarmId,
+    lifecycleFarmId,
+    requestFarmId,
+    legacyPayloadFarmId: legacyFarmId,
+  }), canonicalFarmId);
+  assert.equal(resolveLabourWageSettlementDiagnosticsFarmId({
+    settlementFarmId: "   ",
+    lifecycleFarmId,
+    requestFarmId,
+    legacyPayloadFarmId: legacyFarmId,
+  }), lifecycleFarmId);
+  assert.equal(resolveLabourWageSettlementDiagnosticsFarmId({
+    settlementFarmId: null,
+    lifecycleFarmId: " ",
+    requestFarmId,
+    legacyPayloadFarmId: legacyFarmId,
+  }), requestFarmId);
+  assert.equal(resolveLabourWageSettlementDiagnosticsFarmId({
+    settlementFarmId: null,
+    lifecycleFarmId: null,
+    requestFarmId: null,
+    legacyPayloadFarmId: legacyFarmId,
+  }), legacyFarmId);
 });
