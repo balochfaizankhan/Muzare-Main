@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, FileClock, Leaf, LogOut, Map, MapPin, Pencil, Plus, Satellite, ShieldCheck, Trash2, UserRound, UsersRound, XCircle } from "lucide-react";
+import { CheckCircle2, ChevronRight, Leaf, Map, MapPin, Pencil, Plus, Satellite, ShieldCheck, Trash2, UserRound, UsersRound, XCircle } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
@@ -32,7 +32,7 @@ const emptyForm: FarmInput = { name: "", location: "", owner: "", remarks: "", c
 const emptyProfile: WorkspaceProfileInput = { name: "", contactEmail: "", contactPhone: "" };
 const emptyUserProfile: UserProfileInput = { displayName: "" };
 
-function UserProfileCard({ token }: { token: string }) {
+function UserProfileCard({ token, onLogout }: { token: string; onLogout: () => void }) {
   const { t } = useTranslation();
   const { user, updateUser } = useAuth();
   const [form, setForm] = useState<UserProfileInput>(emptyUserProfile);
@@ -62,16 +62,16 @@ function UserProfileCard({ token }: { token: string }) {
 
   return (
     <section className="record-panel workspace-profile">
-      <div className="workspace-profile__heading">
-        <div><h2>{t("userProfile.title")}</h2><p>{t("userProfile.description")}</p></div>
-      </div>
       {profile.isLoading && <p className="context-message">{t("userProfile.loading")}</p>}
       {profile.isError && <p className="error">{profile.error.message}</p>}
       {(profile.data || user) && (
         <form className="module-form workspace-profile__form" onSubmit={submit}>
           <label><span>{t("userProfile.displayName")}</span><input required value={form.displayName} onChange={(event) => setForm({ displayName: event.target.value })} /></label>
           <label><span>{t("email")}</span><input disabled value={profile.data?.user.email ?? user?.email ?? ""} /></label>
-          <div className="farm-actions"><button disabled={save.isPending} type="submit">{save.isPending ? t("userProfile.saving") : t("userProfile.save")}</button></div>
+          <div className="farm-actions workspace-profile__actions">
+            <button disabled={save.isPending} type="submit">{save.isPending ? t("userProfile.saving") : t("userProfile.save")}</button>
+            <button className="danger-button" type="button" onClick={onLogout}>{t("common.logout")}</button>
+          </div>
           {save.isSuccess && <p className="success">{t("userProfile.saved")}</p>}
           {save.isError && <p className="error">{save.error.message}</p>}
         </form>
@@ -114,10 +114,7 @@ function WorkspaceProfileCard({ token, workspaceId }: { token: string; workspace
 
   return (
     <section className="record-panel workspace-profile">
-      <div className="workspace-profile__heading">
-        <div><h2>{t("workspaceProfile.title")}</h2><p>{t("workspaceProfile.description")}</p></div>
-        {!canEdit && <span>{t("workspaceProfile.ownerOnly")}</span>}
-      </div>
+      {!canEdit && <p className="context-message">{t("workspaceProfile.ownerOnly")}</p>}
       {profile.isLoading && <p className="context-message">{t("workspaceProfile.loading")}</p>}
       {profile.isError && <p className="error">{profile.error.message}</p>}
       {profile.data && (
@@ -236,23 +233,82 @@ export function Farms() {
   return (
     <div className="dashboard-page">
       <SubpageHeader title={isSettings ? t("workspaceProfile.settingsTitle") : t("farmsPage.title")} />
-      <main className="subpage module-workspace">
-        {isSettings && <section className="mobile-settings-menu">
-          <button type="button" onClick={() => void logout()}><LogOut size={17} />{t("common.logout")}</button>
-        </section>}
-        {isSettings && token && <UserProfileCard token={token} />}
-        {isSettings && token && workspaceId && <WorkspaceProfileCard token={token} workspaceId={workspaceId} />}
-        {isSettings && <BuildDiagnostics compact />}
-        {isSettings && <section className="settings-link-grid">
-          <Link to="/workspace/settings/team"><UsersRound size={19} /><div><strong>{t("workspaceTeam.title")}</strong><span>{t("workspaceTeam.settingsCard")}</span></div></Link>
-          <Link to="/workspace/settings/approvals"><ShieldCheck size={19} /><div><strong>{t("workspaceApprovals.title")}</strong><span>{t("workspaceApprovals.settingsCard")}</span></div></Link>
-          <Link to="/workspace/seasons"><Leaf size={19} /><div><strong>{t("seasonsPage.title")}</strong><span>{t("seasonsPage.managementDescription")}</span></div></Link>
-          <Link to="/debug/accounting-reconciliation"><FileClock size={19} /><div><strong>Accounting Reconciliation Trace</strong><span>Inspect labour settlement reconciliation</span></div></Link>
-        </section>}
-        <section className="workspace-intro">
-          <div><h2>{t("farmsPage.managementTitle")}</h2><p>{t("farmsPage.managementDescription")}</p></div>
-          {canManage && <button className="shell-action" type="button" onClick={() => { setEditing(null); setForm(emptyForm); setShowForm(true); }}><Plus size={16} />{t("farmsPage.createFarm")}</button>}
-        </section>
+      <main className={`subpage module-workspace${isSettings ? " module-workspace--settings" : ""}`}>
+        {isSettings && (
+          <section className="settings-page-stack">
+            <section className="settings-section">
+              <div className="settings-section__header">
+                <div>
+                  <h2>{t("userProfile.title")}</h2>
+                  <p>{t("userProfile.description")}</p>
+                </div>
+              </div>
+              {token && <UserProfileCard token={token} onLogout={() => void logout()} />}
+            </section>
+
+            <section className="settings-section">
+              <div className="settings-section__header">
+                <div>
+                  <h2>{t("workspaceProfile.title")}</h2>
+                  <p>{t("workspaceProfile.description")}</p>
+                </div>
+              </div>
+              {token && workspaceId && <WorkspaceProfileCard token={token} workspaceId={workspaceId} />}
+            </section>
+
+            <section className="settings-section">
+              <div className="settings-section__header">
+                <div>
+                  <h2>{t("workspaceProfile.accessTitle")}</h2>
+                  <p>Manage who can access the workspace and review approvals.</p>
+                </div>
+              </div>
+              <div className="settings-menu-grid">
+                <Link to="/workspace/settings/team" className="settings-menu-row"><UsersRound size={19} /><div><strong>{t("workspaceTeam.title")}</strong><span>{t("workspaceTeam.settingsCard")}</span></div><ChevronRight size={17} /></Link>
+                <Link to="/workspace/settings/approvals" className="settings-menu-row"><ShieldCheck size={19} /><div><strong>{t("workspaceApprovals.title")}</strong><span>{t("workspaceApprovals.settingsCard")}</span></div><ChevronRight size={17} /></Link>
+              </div>
+            </section>
+
+            <section className="settings-section">
+              <div className="settings-section__header">
+                <div>
+                  <h2>{t("workspaceProfile.farmSetupTitle")}</h2>
+                  <p>{t("farmsPage.managementDescription")}</p>
+                </div>
+              </div>
+              <div className="settings-menu-grid settings-menu-grid--farm">
+                <Link to="/workspace/seasons" className="settings-menu-row"><Leaf size={19} /><div><strong>{t("seasonsPage.title")}</strong><span>{t("seasonsPage.managementDescription")}</span></div><ChevronRight size={17} /></Link>
+                {canManage && <button className="shell-action settings-menu-row__button" type="button" onClick={() => { setEditing(null); setForm(emptyForm); setShowForm(true); }}><Plus size={16} /><span>{t("farmsPage.createFarm")}</span><ChevronRight size={17} /></button>}
+              </div>
+            </section>
+
+            <section className="settings-section">
+              <div className="settings-section__header">
+                <div>
+                  <h2>{t("workspaceProfile.systemTitle")}</h2>
+                  <p>View app version details and technical reconciliation tools.</p>
+                </div>
+              </div>
+              <BuildDiagnostics compact />
+              <details className="settings-diagnostics-details">
+                <summary>
+                  <span>
+                    <strong>Accounting Reconciliation Trace</strong>
+                    <small>Inspect labour settlement reconciliation</small>
+                  </span>
+                  <ChevronRight size={16} />
+                </summary>
+                <Link to="/debug/accounting-reconciliation" className="settings-diagnostics-details__link">Open diagnostics</Link>
+              </details>
+            </section>
+          </section>
+        )}
+        {!isSettings && (
+          <section className="workspace-intro">
+            <div><h2>{t("farmsPage.managementTitle")}</h2><p>{t("farmsPage.managementDescription")}</p></div>
+            {canManage && <button className="shell-action" type="button" onClick={() => { setEditing(null); setForm(emptyForm); setShowForm(true); }}><Plus size={16} />{t("farmsPage.createFarm")}</button>}
+          </section>
+        )}
 
         {showForm && canManage && (
           <section className="record-panel">
@@ -297,23 +353,36 @@ export function Farms() {
           <section className="farm-grid">
             {activeFarms.map((farm) => {
               const isCurrent = farms.data.activeFarmId === farm.id;
+              const statusLabel = farm.deletedAt ? t("farmsPage.deleted") : farm.active ? t("common.active") : t("seasonsPage.archived");
               return (
                 <article className={`farm-card ${isCurrent ? "farm-card--active" : ""}`} key={farm.id}>
-                  <header><div><strong>{farm.name}</strong><span>{farm.active ? t("common.active") : t("seasonsPage.archived")}</span></div>{isCurrent && <b><CheckCircle2 size={15} />{t("farmsPage.currentFarm")}</b>}</header>
+                  <header className="farm-card__header">
+                    <div className="farm-card__title">
+                      <strong>{farm.name}</strong>
+                      <div className="farm-card__badges">
+                        <span className={`status-badge ${farm.deletedAt ? "status-badge--deleted" : farm.active ? "status-badge--active" : "status-badge--archived"}`}>{statusLabel}</span>
+                        {isCurrent && <span className="status-badge status-badge--active"><CheckCircle2 size={13} />{t("farmsPage.currentFarm")}</span>}
+                      </div>
+                    </div>
+                  </header>
                   <p><MapPin size={15} />{farm.location || t("farmsPage.locationNotRecorded")}</p>
                   <p><UserRound size={15} />{farm.owner || farm.contactName || t("farmsPage.contactNotRecorded")}</p>
                   {farm.contactEmail && <small>{farm.contactEmail}</small>}
                   {farm.contactPhone && <small>{farm.contactPhone}</small>}
                   {farm.remarks && <small>{farm.remarks}</small>}
-                  <footer>
-                    {config.featureFarmMap && <Link to={`/workspace/${workspaceId}/farms/${farm.id}/operations-map`}><Satellite size={15} />{t("farmMap.operationsMap")}</Link>}
-                    {config.featureFarmMap && canManage && <Link to={`/workspace/${workspaceId}/farms/${farm.id}/map-builder`}><Map size={15} />{t("farmMap.mapBuilder")}</Link>}
-                    {farm.active && !isCurrent && <button type="button" onClick={() => select.mutate(farm.id)}><Leaf size={15} />{t("farmsPage.setActive")}</button>}
-                    {canManage && <button type="button" onClick={() => edit(farm)}><Pencil size={15} />{t("farmsPage.edit")}</button>}
-                    {canManage && farm.active && <button className="danger-button" type="button" onClick={() => requestArchive(farm)}><XCircle size={15} />{t("farmsPage.archive")}</button>}
-                    {farm.deletionRequestStatus === "pending" && <span className="status-badge status-badge--pending">{t("farmsPage.deletionPending")}</span>}
-                    {canManage && !isCurrent && farm.deletionRequestStatus !== "pending" && <button className="danger-button" type="button" onClick={() => requestDelete(farm)}><Trash2 size={15} />{t("farmsPage.deleteFarm")}</button>}
-                    {canManage && !isCurrent && farm.deletionRequestStatus !== "pending" && <button type="button" onClick={() => requestAdminDeletion(farm)}>{t("farmsPage.requestDeletion")}</button>}
+                  <footer className="farm-card__footer">
+                    <div className="farm-card__primary-actions">
+                      {config.featureFarmMap && <Link to={`/workspace/${workspaceId}/farms/${farm.id}/operations-map`}><Satellite size={15} />{t("farmMap.operationsMap")}</Link>}
+                      {config.featureFarmMap && canManage && <Link to={`/workspace/${workspaceId}/farms/${farm.id}/map-builder`}><Map size={15} />{t("farmMap.mapBuilder")}</Link>}
+                      {farm.active && !isCurrent && <button className="farm-card__primary-action" type="button" onClick={() => select.mutate(farm.id)}><Leaf size={15} />{t("farmsPage.setActive")}</button>}
+                    </div>
+                    <div className="farm-card__secondary-actions">
+                      {canManage && <button type="button" onClick={() => edit(farm)}><Pencil size={15} />{t("farmsPage.edit")}</button>}
+                      {farm.deletionRequestStatus === "pending" && <span className="status-badge status-badge--pending">{t("farmsPage.deletionPending")}</span>}
+                      {canManage && farm.active && <button className="danger-button farm-card__danger-action" type="button" onClick={() => requestArchive(farm)}><XCircle size={15} />{t("farmsPage.archive")}</button>}
+                      {canManage && !isCurrent && farm.deletionRequestStatus !== "pending" && <button className="danger-button farm-card__danger-action" type="button" onClick={() => requestDelete(farm)}><Trash2 size={15} />{t("farmsPage.deleteFarm")}</button>}
+                      {canManage && !isCurrent && farm.deletionRequestStatus !== "pending" && <button type="button" className="farm-card__secondary-link" onClick={() => requestAdminDeletion(farm)}>{t("farmsPage.requestDeletion")}</button>}
+                    </div>
                   </footer>
                 </article>
               );
@@ -322,29 +391,35 @@ export function Farms() {
           </section>
         )}
         {Boolean(historyFarms.length) && (
-          <section className="record-panel">
-            <div className="workspace-intro">
-              <div><h2>{t("farmsPage.historyTitle")}</h2><p>{t("farmsPage.historyDescription")}</p></div>
-            </div>
-            <section className="farm-grid">
+          <details className="record-panel farm-history-details">
+            <summary>
+              <span>
+                <strong>{t("farmsPage.historyTitle")}</strong>
+                <small>{t("farmsPage.historyDescription")}</small>
+              </span>
+              <b>{historyFarms.length}</b>
+            </summary>
+            <section className="farm-grid farm-grid--history">
               {historyFarms.map((farm) => (
-                <article className="farm-card" key={farm.id}>
-                  <header>
-                    <div>
+                <article className="farm-card farm-card--history" key={farm.id}>
+                  <header className="farm-card__header">
+                    <div className="farm-card__title">
                       <strong>{farm.name}</strong>
-                      <span>{farm.deletedAt ? t("farmsPage.deleted") : t("seasonsPage.archived")}</span>
+                      <div className="farm-card__badges">
+                        <span className={`status-badge ${farm.deletedAt ? "status-badge--deleted" : "status-badge--archived"}`}>{farm.deletedAt ? t("farmsPage.deleted") : t("seasonsPage.archived")}</span>
+                      </div>
                     </div>
                   </header>
                   <p><MapPin size={15} />{farm.location || t("farmsPage.locationNotRecorded")}</p>
                   <p><UserRound size={15} />{farm.owner || farm.contactName || t("farmsPage.contactNotRecorded")}</p>
                   {farm.remarks && <small>{farm.remarks}</small>}
-                  <footer>
-                    {canManage && <button type="button" onClick={() => requestRestore(farm)}><Leaf size={15} />{t("farmsPage.restoreFarm")}</button>}
+                  <footer className="farm-card__footer">
+                    {canManage && <button type="button" className="farm-card__secondary-action" onClick={() => requestRestore(farm)}><Leaf size={15} />{t("farmsPage.restoreFarm")}</button>}
                   </footer>
                 </article>
               ))}
             </section>
-          </section>
+          </details>
         )}
         {deleteFarm.isError && <p className="error">{deleteFarm.error.message}</p>}
         {requestDeletion.isError && <p className="error">{requestDeletion.error.message}</p>}
