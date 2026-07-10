@@ -258,7 +258,8 @@ function WorkforceModule({
   }, [attendanceLookup.duplicates, yesterdayLookup.duplicates]);
   const filteredLabourers = sortWorkersForDisplay(labourers.filter((labourer) => {
     const status = attendanceByLabourer.get(attendanceStatusKey(labourer.id, date));
-    const matchesActive = showInactiveLabour || canMarkAttendanceOn(labourer, date);
+    const visibleOnSelectedDate = canMarkAttendanceOn(labourer, date);
+    const matchesActive = showInactiveLabour || visibleOnSelectedDate;
     const matchesStatus = attendanceFilter === "all" || status === attendanceFilter;
     const matchesSearch = labourer.name.toLowerCase().includes(attendanceSearch.trim().toLowerCase());
     const matchesGroup = groupFilterId === "all" || labourer.groupId === groupFilterId;
@@ -541,7 +542,7 @@ function WorkforceModule({
               <SearchInput className="attendance-entry-search" placeholder={t("workforcePage.searchLabour")} value={attendanceSearch} onChange={setAttendanceSearch} />
             </div>
             <div className="attendance-actions">
-              {canManageLabour && <button type="button" onClick={() => setShowAddLabour(true)}>{t("workforcePage.addLabour")}</button>}
+              {canManageLabour && <button className="attendance-add-labour" type="button" onClick={() => setShowAddLabour(true)}>{t("workforcePage.addLabour")}</button>}
             </div>
             <div className="attendance-entry-meta">
               <label className="attendance-inactive-toggle"><input type="checkbox" checked={showInactiveLabour} onChange={(event) => setShowInactiveLabour(event.target.checked)} /> {t("workforcePage.showInactive")}</label>
@@ -572,17 +573,18 @@ function WorkforceModule({
             <div className="attendance-board">
               {!labourers.length && sync.dataSource === "cache"
                 ? <Empty>{t("workforcePage.noCachedLabour")}</Empty>
-                : !filteredLabourers.length ? <Empty>{t("workforcePage.noLabourSearch")}</Empty> : filteredLabourers.map((labourer, index) => {
+              : !filteredLabourers.length ? <Empty>{t("workforcePage.noLabourSearch")}</Empty> : filteredLabourers.map((labourer, index) => {
                 const currentStatus = attendanceByLabourer.get(attendanceStatusKey(labourer.id, date));
                 const previousStatus = yesterdayByLabourer.get(attendanceStatusKey(labourer.id, yesterdayDate));
                 const markable = canMarkAttendanceOn(labourer, date);
+                const inactiveOnSelectedDate = !markable;
                 return (
-                  <article className="attendance-card" key={labourer.id} ref={(node) => { attendanceRowRefs.current[labourer.id] = node; }}>
+                  <article className={`attendance-card${inactiveOnSelectedDate ? " attendance-card--inactive" : ""}`} key={labourer.id} ref={(node) => { attendanceRowRefs.current[labourer.id] = node; }}>
                     <span className="attendance-card__index">{index + 1}</span>
                     <div className="attendance-card__body">
                       <strong>{labourer.name}</strong>
                       <span>{t("workforcePage.yesterday")}: {previousStatus ? previousStatus === "half_day" ? "1/2" : previousStatus === "present" ? "P" : "A" : "-"}</span>
-                      {!markable && <span className="status-inactive">{t("workforcePage.notAvailableForAttendance")}</span>}
+                      {inactiveOnSelectedDate && <span className="status-inactive">{t("workforcePage.notAvailableForAttendance")}</span>}
                     </div>
                     <div className="attendance-status-buttons">
                       <button disabled={!canWriteAttendance || !markable || markingLabourers.has(labourer.id)} className={currentStatus === "present" ? "is-active" : ""} type="button" onClick={() => void markAttendance(labourer.id, "present")}>P</button>

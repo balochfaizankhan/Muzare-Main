@@ -166,5 +166,13 @@ export function buildLabourEarningsProfileSummary(args: {
 }
 
 export function labourEarningTypeLabel(type: LabourEarning["earningType"]) {
-  return type;
+  const labels: Record<LabourEarning["earningType"], string> = {
+    adjustment: "Adjustment",
+    bonus: "Bonus",
+    incentive: "Incentive",
+    lump_sum: "Lump sum",
+    other: "Other",
+    task: "Task",
+  };
+  return labels[type] ?? type;
 }

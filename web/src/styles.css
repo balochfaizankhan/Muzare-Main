@@ -3732,6 +3732,14 @@ button {
   height: 44px;
 }
 
+.attendance-actions .attendance-add-labour {
+  background: #fff;
+  border: 1px solid #cfd5da;
+  color: var(--brand-primary);
+  height: 40px;
+  padding: 0 12px;
+}
+
 .attendance-auto-save {
   align-items: center;
   background: transparent;
@@ -3789,6 +3797,15 @@ button {
   width: 100%;
 }
 
+.attendance-add-labour {
+  align-self: flex-start;
+  background: #fff;
+  border: 1px solid #cfd5da;
+  color: var(--brand-primary);
+  min-height: 38px;
+  padding: 0 12px;
+}
+
 .attendance-date-control {
   align-items: center;
   background: #fff;
@@ -3809,6 +3826,7 @@ button {
 .attendance-date-control input {
   border: 0;
   height: 42px;
+  min-width: 0;
   padding-inline: 6px;
 }
 
@@ -3861,10 +3879,10 @@ button {
   background: transparent;
   border: 0;
   border-radius: 8px;
-  font-size: 1rem;
+  font-size: .93rem;
   font-weight: 800;
   height: 100%;
-  padding: 0;
+  padding: 0 4px;
 }
 
 .attendance-totals button.is-active {
@@ -3900,6 +3918,20 @@ button {
   padding: 10px 11px;
 }
 
+.attendance-card--inactive {
+  background: #f8fafc;
+  border-color: #dde3ea;
+  color: var(--text-secondary);
+}
+
+.attendance-card--inactive .attendance-card__index {
+  background: #98a2b3;
+}
+
+.attendance-card--inactive .attendance-card__body strong {
+  color: #475467;
+}
+
 .attendance-card--new {
   border-color: #2e7d32 !important;
   box-shadow: 0 0 0 2px rgba(46, 125, 50, 0.22), 0 5px 16px rgba(5, 35, 63, 0.05);
@@ -3912,9 +3944,9 @@ button {
   color: #fff;
   display: inline-flex;
   font-weight: 850;
-  height: 42px;
+  height: 36px;
   justify-content: center;
-  width: 42px;
+  width: 36px;
 }
 
 .attendance-card__body {
@@ -3935,6 +3967,15 @@ button {
   margin-top: 4px;
 }
 
+.attendance-card--inactive .status-inactive {
+  color: #8c3a1f;
+  font-weight: 700;
+}
+
+.attendance-card--inactive .attendance-status-buttons button:disabled {
+  opacity: .58;
+}
+
 .attendance-status-buttons {
   display: flex;
   gap: 7px;
@@ -3947,8 +3988,8 @@ button {
   box-shadow: 0 3px 7px rgba(5, 35, 63, 0.08);
   color: var(--text-secondary);
   font-weight: 800;
-  height: 48px;
-  min-width: 48px;
+  height: 42px;
+  min-width: 42px;
 }
 
 .attendance-status-buttons button:nth-child(1) {
@@ -3964,9 +4005,22 @@ button {
 }
 
 .attendance-status-buttons button.is-active {
-  background: var(--brand-primary);
-  border-color: var(--brand-primary);
   color: #fff;
+}
+
+.attendance-status-buttons button:nth-child(1).is-active {
+  background: #2e7d32;
+  border-color: #2e7d32;
+}
+
+.attendance-status-buttons button:nth-child(2).is-active {
+  background: #b7791f;
+  border-color: #b7791f;
+}
+
+.attendance-status-buttons button:nth-child(3).is-active {
+  background: #b42318;
+  border-color: #b42318;
 }
 
 .record-panel {
@@ -5762,6 +5816,166 @@ button {
   color: var(--text-secondary);
   font-size: .76rem;
   font-weight: 750;
+}
+
+.labour-earnings-filters {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.labour-earnings-filter-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.labour-earnings-filter-row--full {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.labour-earnings-kpis {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.labour-earnings-list {
+  display: grid;
+  gap: 8px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+}
+
+.labour-earnings-mobile-list {
+  display: none;
+}
+
+.labour-earnings-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.labour-earnings-card__header {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.labour-earnings-card__title {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.labour-earnings-card__title strong,
+.labour-earnings-card__title span,
+.labour-earnings-card__amount,
+.labour-earnings-card dd {
+  overflow-wrap: anywhere;
+}
+
+.labour-earnings-card__title strong {
+  color: var(--text-primary);
+  font-size: .92rem;
+}
+
+.labour-earnings-card__title span {
+  color: var(--text-secondary);
+  font-size: .76rem;
+}
+
+.labour-earnings-card__amount {
+  color: var(--brand-primary);
+  flex: 0 0 auto;
+  font-size: .96rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.labour-earnings-card__status-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.labour-earnings-status-chip {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: .68rem;
+  font-weight: 800;
+  letter-spacing: .03em;
+  line-height: 1;
+  padding: 5px 9px;
+  text-transform: uppercase;
+}
+
+.labour-earnings-status-chip--pending_settlement {
+  background: #fff6df;
+  color: #8a5a00;
+}
+
+.labour-earnings-status-chip--settled {
+  background: #eaf8ef;
+  color: #1e8f4f;
+}
+
+.labour-earnings-status-chip--voided,
+.labour-earnings-status-chip--cancelled {
+  background: #edf1f5;
+  color: #6b7280;
+}
+
+.labour-earnings-card details {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.labour-earnings-card summary {
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: .75rem;
+  font-weight: 750;
+}
+
+.labour-earnings-card dl {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.labour-earnings-card dl div {
+  align-items: start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.labour-earnings-card dt {
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+  font-size: .72rem;
+}
+
+.labour-earnings-card dd {
+  color: var(--text-primary);
+  font-size: .76rem;
+  font-weight: 750;
+  margin: 0;
+  text-align: end;
+}
+
+.labour-earnings-card button {
+  align-self: start;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--brand-primary);
+  min-height: 34px;
+  padding: 6px 10px;
 }
 
 .advances-entry-form {
@@ -10663,6 +10877,9 @@ button {
   flex-wrap: wrap;
   gap: 7px;
 }
+.reports-advance-switch {
+  margin-bottom: 6px;
+}
 .reports-tabs button,
 .reports-subtabs button,
 .reports-actions button {
@@ -10713,6 +10930,31 @@ button {
 .reports-filters { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-top: 10px; }
 .reports-filters > * { max-width: 100%; min-width: 0; }
 .reports-filters .search-input { grid-column: 1 / -1; }
+.reports-filter-group {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.reports-filter-group span {
+  color: var(--text-secondary);
+  font-size: .76rem;
+  font-weight: 750;
+}
+.reports-filter-group input,
+.reports-filter-group select,
+.reports-filter-group .clearable-select,
+.reports-filter-group .labour-combobox {
+  min-width: 0;
+  width: 100%;
+}
+.reports-advance-filter-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.reports-advance-filter-row > :only-child {
+  grid-column: 1 / -1;
+}
 .reports-date-row {
   display: grid;
   gap: 8px;
@@ -10817,6 +11059,59 @@ button {
 .reports-summary-list strong { color: var(--text-primary); font-size: .9rem; }
 .reports-summary-list { display: grid; gap: 7px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .reports-summary-list article { align-items: center; display: flex; justify-content: space-between; }
+.reports-advance-filter-chips {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.reports-advance-filter-chips h3 {
+  color: var(--text-primary);
+  font-size: .82rem;
+  margin: 0;
+}
+.reports-advance-filter-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.reports-filter-chip {
+  align-items: center;
+  background: rgba(28, 131, 84, .08);
+  border: 1px solid rgba(28, 131, 84, .22);
+  border-radius: 999px;
+  color: var(--text-primary);
+  display: inline-flex;
+  font-size: .74rem;
+  font-weight: 650;
+  line-height: 1.2;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 5px 10px;
+  overflow-wrap: anywhere;
+}
+.reports-advance-settlement-card {
+  align-items: flex-start;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.reports-advance-settlement-card__text {
+  flex: 1;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.reports-advance-settlement-card__text strong,
+.reports-advance-settlement-card__text span {
+  overflow-wrap: anywhere;
+}
+.reports-advance-settlement-card__amount {
+  color: var(--brand-primary);
+  font-size: .82rem;
+  text-align: end;
+}
 .reports-breakdowns { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .reports-breakdowns h3,
 .reports-page .record-panel > h3 { color: var(--text-primary); font-size: .88rem; margin: 12px 0 7px; }
@@ -11375,6 +11670,60 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .reports-summary-list { grid-template-columns: minmax(0, 1fr); }
   .reports-breakdowns { grid-template-columns: minmax(0, 1fr); }
   .reports-detail-links { flex-direction: column; }
+  .reports-advance-switch {
+    align-self: flex-start;
+    background: transparent;
+    border: 0;
+    display: inline-flex;
+    margin-bottom: 4px;
+    padding: 0;
+  }
+  .reports-advance-switch button {
+    min-height: 36px;
+    padding: 6px 10px;
+  }
+  .reports-advance-filter-chips {
+    gap: 6px;
+  }
+  .reports-advance-filter-chip-row {
+    gap: 5px;
+  }
+  .reports-filter-chip {
+    font-size: .7rem;
+    min-height: 28px;
+    padding: 4px 8px;
+  }
+  .reports-advance-settlement-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .reports-advance-settlement-card__amount {
+    text-align: start;
+  }
+  .reports-advance-filter-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .labour-earnings-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .labour-earnings-mobile-list {
+    display: grid;
+  }
+  .labour-earnings-list .report-wide-table {
+    display: none;
+  }
+  .labour-earnings-card__header {
+    flex-direction: column;
+  }
+  .labour-earnings-card__amount {
+    align-self: flex-start;
+  }
+  .labour-earnings-filter-row,
+  .labour-earnings-filter-row--full {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .labour-earnings-filter-row--full > * {
+    grid-column: 1 / -1;
+  }
   .reports-tabs,
   .reports-subtabs,
   .reports-attendance-switch { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
@@ -11423,11 +11772,29 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   }
   .attendance-report-filters { grid-template-columns: minmax(0, 1fr); }
   .attendance-report-dialog { max-height: 94vh; width: 95vw; }
-  .attendance-report-header { align-items: flex-start; }
-  .attendance-report-header h2 { font-size: 1.05rem; }
+  .attendance-report-header { align-items: flex-start; padding: 12px 14px; }
+  .attendance-report-header h2 { font-size: 1rem; line-height: 1.2; }
   .attendance-header-actions { align-self: center; gap: 6px; }
-  .attendance-header-actions .attendance-auto-save { flex-basis: 124px; max-width: 124px; min-width: 124px; }
+  .attendance-header-actions .attendance-auto-save { flex-basis: 112px; max-width: 112px; min-width: 112px; }
   .attendance-report-close { flex-basis: 34px; height: 34px; width: 34px; }
+  .attendance-entry-modal-body { gap: 8px; padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+  .attendance-entry-controls { gap: 6px; }
+  .attendance-entry-controls input,
+  .attendance-entry-controls select { font-size: .93rem; height: 42px; }
+  .attendance-date-control { min-width: 0; }
+  .attendance-date-control span { font-size: .66rem; }
+  .attendance-date-control input { font-size: .92rem; height: 40px; }
+  .attendance-actions .attendance-add-labour { align-self: start; min-height: 38px; }
+  .attendance-inactive-toggle { font-size: .7rem; }
+  .attendance-totals { min-height: 40px; }
+  .attendance-totals button { font-size: .84rem; }
+  .attendance-board { gap: 7px; }
+  .attendance-card { gap: 10px; padding: 9px 10px; }
+  .attendance-card__index { height: 32px; width: 32px; }
+  .attendance-card__body strong { font-size: .95rem; }
+  .attendance-card__body span { font-size: .75rem; margin-top: 3px; }
+  .attendance-status-buttons { gap: 6px; }
+  .attendance-status-buttons button { height: 40px; min-width: 40px; }
   .report-labour-filter__picker { max-height: 56vh; }
   .register-header { display: grid; }
   .register-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }

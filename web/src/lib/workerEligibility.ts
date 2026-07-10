@@ -73,10 +73,13 @@ export function sortWorkersForDisplay<T extends Pick<Labourer, "name" | "created
   return grouped;
 }
 
-export function isWorkerEligibleForAttendance(worker: Pick<Labourer, "createdAt" | "joinedOn" | "endedOn" | "firstAttendanceDate" | "lastAttendanceDate" | "inactiveDate" | "leftDate" | "isArchived">, selectedDate: string) {
+export function isWorkerEligibleForAttendance(worker: Pick<Labourer, "active" | "createdAt" | "joinedOn" | "endedOn" | "firstAttendanceDate" | "lastAttendanceDate" | "inactiveDate" | "leftDate" | "isArchived">, selectedDate: string) {
   if (isArchivedWorker(worker)) return false;
   const { workerStart, workerEnd } = getWorkerWorkingPeriod(worker);
-  return selectedDate >= workerStart && (!workerEnd || selectedDate <= workerEnd);
+  if (selectedDate < workerStart) return false;
+  if (workerEnd && selectedDate > workerEnd) return false;
+  if (worker.active === false && !workerEnd) return false;
+  return true;
 }
 
 export function isWorkerEligibleForWageRatePeriod(worker: Pick<Labourer, "createdAt" | "joinedOn" | "endedOn" | "firstAttendanceDate" | "lastAttendanceDate" | "inactiveDate" | "leftDate" | "isArchived">, selectedFrom: string, selectedTo: string) {

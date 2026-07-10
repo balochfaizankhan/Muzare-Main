@@ -109,7 +109,7 @@ export function LabourPaymentsSectionLayout() {
     const allTabs = [
       { to: `/workspace/labour-payments/overview${query}`, label: "Overview", module: "workforce" as const },
       { to: `/workspace/labour-payments/advances${query}`, label: t("layout.advances"), module: "advances" as const },
-      { to: `/workspace/labour-payments/earnings${query}`, label: "Work", module: "wages" as const },
+      { to: `/workspace/labour-payments/earnings${query}`, label: "Earnings", module: "wages" as const },
       { to: `/workspace/labour-payments/direct-payments${query}`, label: "Payments", module: "workforce" as const },
       { to: `/workspace/labour-payments/settlements${query}`, label: "Settlements", module: "wages" as const },
       { to: `/workspace/labour-payments/reports${query}`, label: "Reports", module: "reports" as const },
@@ -119,8 +119,8 @@ export function LabourPaymentsSectionLayout() {
   return (
     <WorkforceShell
       title="Labour Payments"
-      description="Keep advances, wage rates, labour work, direct payments, settlements, and payment reports together in one professional labour-payment center."
-      subtitle="Advances • Work • Payments • Settlements"
+      description="Keep advances, wage rates, labour earnings, direct payments, settlements, and payment reports together in one professional labour-payment center."
+      subtitle="Advances • Earnings • Payments • Settlements"
       tabs={tabs}
       compactMobileHeader
     >
@@ -227,7 +227,7 @@ export function LabourPaymentsOverview() {
         <div className="labour-payments-hero-card__metrics">
           <article>
             <Activity size={15} />
-            <span>Pending Labour Work</span>
+            <span>Pending Earnings</span>
             <strong>{money(pendingEarnings.reduce((sum, earning) => sum + earning.amount, 0))}</strong>
           </article>
           <article>
@@ -258,7 +258,7 @@ export function LabourPaymentsOverview() {
         <div className="labour-payments-quick-grid">
           {[
             { to: `/workspace/labour-payments/advances${query}`, icon: HandCoins, title: "Record Advance", detail: "Cash advance" },
-            { to: `/workspace/labour-payments/earnings${query}`, icon: ClipboardList, title: "Record Labour Work", detail: "Task, bonus, or adjustment" },
+            { to: `/workspace/labour-payments/earnings${query}`, icon: ClipboardList, title: "Record Labour Earning", detail: "Task, bonus, or adjustment" },
             { to: `/workspace/labour-payments/direct-payments${query}`, icon: CircleDollarSign, title: "Record Payment", detail: "Direct labour payout" },
             { to: `/workspace/labour-payments/settlements${query}`, icon: ReceiptText, title: "Create Settlement", detail: "Close a wage period" },
           ].map((item) => (
@@ -523,7 +523,7 @@ export function WorkforceReportsHub() {
         { to: "/workspace/reports?report=attendance", title: "Attendance", detail: "Register, payable days, and totals", icon: CalendarCheck },
         { to: "/workspace/reports?report=advances", title: "Advances", detail: "Summary and log by labour", icon: HandCoins },
         { to: "/workspace/reports?report=wage-rates", title: "Wage Rates", detail: "Current, expired, and upcoming rates", icon: WalletCards },
-        { to: "/workspace/reports?report=labour-earnings", title: "Labour Work", detail: "Pending and settled earnings", icon: ClipboardList },
+        { to: "/workspace/reports?report=labour-earnings", title: "Labour Earnings", detail: "Pending and settled earnings", icon: ClipboardList },
       ]}
     />
   );
@@ -533,11 +533,11 @@ export function LabourPaymentsReportsHub() {
   return (
     <WorkforceReportLinks
         title="Labour Payments Reports"
-        description="Keep labour-payment reporting grouped with advances, labour work, wage rates, settlements, and direct payments."
+        description="Keep labour-payment reporting grouped with advances, labour earnings, wage rates, settlements, and direct payments."
         links={[
           { to: "/workspace/reports?report=advances", title: "Advance Report", detail: "Track advances, outstanding balances, and recent transactions.", icon: HandCoins },
           { to: "/workspace/reports?report=wage-rates", title: "Wage Rate Report", detail: "Audit active and historical wage-rate assignments.", icon: WalletCards },
-          { to: "/workspace/reports?report=labour-earnings", title: "Labour Work Report", detail: "Review pending, settled, and voided labour work entries.", icon: ClipboardList },
+          { to: "/workspace/reports?report=labour-earnings", title: "Labour Earnings Report", detail: "Review pending, settled, and voided labour earnings entries.", icon: ClipboardList },
           { to: "/workspace/labour-payments/settlements", title: "Settlement Register", detail: "Review the period-level wage settlement register and linked vouchers.", icon: ReceiptText },
         ]}
       />

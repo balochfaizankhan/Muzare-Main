@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { SearchInput } from "../../components/SearchInput";
 import { formatMoney } from "../../lib/format";
 import {
@@ -26,9 +27,33 @@ import { persistOperationalRecord } from "../../services/syncService";
 
 const money = formatMoney;
 const today = () => new Date().toISOString().slice(0, 10);
+const labourEarningStatusLabel = (status: string) => {
+  switch (status) {
+    case "pending_settlement":
+      return "Pending settlement";
+    case "settled":
+      return "Settled";
+    case "voided":
+      return "Voided";
+    case "cancelled":
+      return "Cancelled";
+    default:
+      return status;
+  }
+};
+
+const labourEarningTargetLabel = (
+  earning: LabourEarning,
+  labourer: Labourer | null,
+  group: LabourGroup | null,
+) => {
+  if (earning.earningScope === "group") return group?.name ?? earning.labourGroupName ?? "Labour earning";
+  return labourer?.name ?? "Labour earning";
+};
 
 export function LabourEarnings() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const workspaceId = user?.workspaceId ?? "";
   const activeFarmId = getActiveFarmId();
@@ -184,7 +209,7 @@ export function LabourEarnings() {
       setAmount("");
       setDescription("");
       setNotes("");
-      setSuccess("Labour work recorded. It will be included in the next wage settlement.");
+      setSuccess("Labour earning recorded. It will be included in the next wage settlement.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to record this labour earning.");
     } finally {
@@ -195,7 +220,7 @@ export function LabourEarnings() {
   const voidPendingEarning = async (earning: LabourEarning) => {
     if (!canManage) return;
     if (earning.status === "settled") {
-      setError("Settled labour work must be reversed through settlement or adjustment workflow.");
+      setError("Settled labour earnings must be reversed through settlement or adjustment workflow.");
       return;
     }
     await persistOperationalRecord("labourEarning", {
@@ -210,20 +235,20 @@ export function LabourEarnings() {
     <>
       <section className="record-panel workforce-shell-intro workforce-shell-intro--nested">
         <div>
-          <h2>Labour Work Ledger</h2>
-          <p>Record non-attendance labour work for an individual labourer or an entire labour group, then settle it with wage settlement and advances.</p>
+          <h2>Labour Earnings Ledger</h2>
+          <p>Record non-attendance labour earnings for an individual labourer or an entire labour group, then settle them with wage settlement and advances.</p>
         </div>
       </section>
 
       <section className="record-panel">
         <div className="advances-heading">
-          <h2>Record labour work</h2>
+          <h2>Record Labour Earning</h2>
           <span>These entries do not touch cash, accounts, or partner ledgers until settlement.</span>
         </div>
-        <form className="module-form" onSubmit={(event) => void submit(event)}>
+        <form className="module-form labour-earnings-form" onSubmit={(event) => void submit(event)}>
           <div className="advances-filter-row">
             <label className="advances-filter-field">
-              <span>Work for</span>
+              <span>Earnings for</span>
               <select value={earningScope} onChange={(event) => {
                 const nextScope = event.target.value === "group" ? "group" : "individual";
                 setEarningScope(nextScope);
@@ -267,11 +292,11 @@ export function LabourEarnings() {
               <input readOnly value={earningScope === "group" ? selectedGroupForeman?.name ?? "" : (selectedTargetLabourer?.group ? "" : "")} placeholder={earningScope === "group" ? "Resolved from selected group" : "Not required"} />
             </label>
             <label className="advances-filter-field">
-              <span>Type</span>
+              <span>Earnings type</span>
               <select value={formType} onChange={(event) => setFormType(event.target.value as LabourEarning["earningType"])}>{["lump_sum", "task", "bonus", "incentive", "adjustment", "other"].map((type) => <option key={type} value={type}>{labourEarningTypeLabel(type as LabourEarning["earningType"])}</option>)}</select>
             </label>
             <label className="advances-filter-field">
-              <span>Amount</span>
+              <span>Earnings amount</span>
               <input required type="number" min="0" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} />
             </label>
           </div>
@@ -287,46 +312,110 @@ export function LabourEarnings() {
           </label>
           {error ? <p className="form-error">{error}</p> : null}
           {success ? <p className="context-message">{success}</p> : null}
-          <button disabled={!canManage || saving} type="submit">{saving ? "Saving..." : earningScope === "group" ? "Record group work" : "Record labour work"}</button>
+          <button disabled={!canManage || saving} type="submit">{saving ? "Saving..." : earningScope === "group" ? "Record group earning" : "Record labour earning"}</button>
         </form>
       </section>
 
       <section className="record-panel">
         <div className="advances-heading">
-          <h2>Labour work ledger</h2>
+          <h2>Labour earnings ledger</h2>
           <span>{visibleEarnings.length} entries</span>
         </div>
-        <div className="advances-filter-grid">
-          <SearchInput placeholder="Search labour work" value={search} onChange={setSearch} />
-          <label className="advances-filter-field">
-            <span>Scope</span>
-            <select value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value as "all" | "individual" | "group")}>
-              <option value="all">All scopes</option>
-              <option value="individual">Individual</option>
-              <option value="group">Group</option>
-            </select>
-          </label>
-          <label className="advances-filter-field"><span>Labourer</span><select value={selectedLabourerId} onChange={(event) => setSelectedLabourerId(event.target.value)}><option value="">All labourers</option>{labourers.map((labourer) => <option key={labourer.id} value={labourer.id}>{labourer.name}</option>)}</select></label>
-          <label className="advances-filter-field"><span>Labour group</span><select value={selectedGroupId} onChange={(event) => setSelectedGroupId(event.target.value)}><option value="">All groups</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
-          <label className="advances-filter-field"><span>Foreman</span><select value={selectedForemanId} onChange={(event) => setSelectedForemanId(event.target.value)}><option value="">All foremen</option>{labourers.map((labourer) => <option key={labourer.id} value={labourer.id}>{labourer.name}</option>)}</select></label>
-          <label className="advances-filter-field"><span>Status</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">All status</option><option value="pending_settlement">Pending settlement</option><option value="settled">Settled</option><option value="voided">Voided</option></select></label>
-          <label className="advances-filter-field"><span>Type</span><select value={earningType} onChange={(event) => setEarningType(event.target.value as LabourEarning["earningType"] | "")}><option value="">All types</option>{["lump_sum", "task", "bonus", "incentive", "adjustment", "other"].map((type) => <option key={type} value={type}>{labourEarningTypeLabel(type as LabourEarning["earningType"])}</option>)}</select></label>
-          <label className="advances-filter-field"><span>From</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
-          <label className="advances-filter-field"><span>To</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
-          <label className="advances-filter-field"><span>Min amount</span><input type="number" min="0" step="0.01" value={minAmount} onChange={(event) => setMinAmount(event.target.value)} /></label>
-          <label className="advances-filter-field"><span>Max amount</span><input type="number" min="0" step="0.01" value={maxAmount} onChange={(event) => setMaxAmount(event.target.value)} /></label>
+        <div className="labour-earnings-filters">
+          <div className="labour-earnings-filter-row labour-earnings-filter-row--full">
+            <SearchInput placeholder="Search earnings" value={search} onChange={setSearch} />
+          </div>
+          <div className="labour-earnings-filter-row labour-earnings-filter-row--full">
+            <label className="advances-filter-field">
+              <span>Scope</span>
+              <select value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value as "all" | "individual" | "group")}>
+                <option value="all">All scopes</option>
+                <option value="individual">Individual</option>
+                <option value="group">Group</option>
+              </select>
+            </label>
+          </div>
+          <div className="labour-earnings-filter-row">
+            <label className="advances-filter-field"><span>Labourer</span><select value={selectedLabourerId} onChange={(event) => setSelectedLabourerId(event.target.value)}><option value="">All labourers</option>{labourers.map((labourer) => <option key={labourer.id} value={labourer.id}>{labourer.name}</option>)}</select></label>
+            <label className="advances-filter-field"><span>Labour group</span><select value={selectedGroupId} onChange={(event) => setSelectedGroupId(event.target.value)}><option value="">All groups</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
+          </div>
+          <div className="labour-earnings-filter-row">
+            <label className="advances-filter-field"><span>Type</span><select value={earningType} onChange={(event) => setEarningType(event.target.value as LabourEarning["earningType"] | "")}><option value="">All types</option>{["lump_sum", "task", "bonus", "incentive", "adjustment", "other"].map((type) => <option key={type} value={type}>{labourEarningTypeLabel(type as LabourEarning["earningType"])}</option>)}</select></label>
+            <label className="advances-filter-field"><span>Status</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">All status</option><option value="pending_settlement">Pending settlement</option><option value="settled">Settled</option><option value="voided">Voided</option></select></label>
+          </div>
+          <div className="labour-earnings-filter-row">
+            <label className="advances-filter-field"><span>From</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
+            <label className="advances-filter-field"><span>To</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
+          </div>
+          <div className="labour-earnings-filter-row">
+            <label className="advances-filter-field"><span>Min amount</span><input type="number" min="0" step="0.01" value={minAmount} onChange={(event) => setMinAmount(event.target.value)} /></label>
+            <label className="advances-filter-field"><span>Max amount</span><input type="number" min="0" step="0.01" value={maxAmount} onChange={(event) => setMaxAmount(event.target.value)} /></label>
+          </div>
         </div>
-        <div className="reports-kpis">
-          <article><span>Individual work</span><strong>{money(totals.individual)}</strong></article>
-          <article><span>Group work</span><strong>{money(totals.group)}</strong></article>
-          <article><span>Pending labour work</span><strong>{money(sumLabourEarnings(pending))}</strong></article>
-          <article><span>Settled labour work</span><strong>{money(sumLabourEarnings(settled))}</strong></article>
-          <article><span>Voided labour work</span><strong>{money(sumLabourEarnings(voided))}</strong></article>
+        <div className="reports-kpis labour-earnings-kpis">
+          <article><span>Individual earnings</span><strong>{money(totals.individual)}</strong></article>
+          <article><span>Group earnings</span><strong>{money(totals.group)}</strong></article>
+          <article><span>Pending earnings</span><strong>{money(sumLabourEarnings(pending))}</strong></article>
+          <article><span>Settled earnings</span><strong>{money(sumLabourEarnings(settled))}</strong></article>
+          <article><span>Voided earnings</span><strong>{money(sumLabourEarnings(voided))}</strong></article>
         </div>
         {!visibleEarnings.length ? (
-          <p className="context-message">No labour work entries match this filter yet.</p>
+          <p className="context-message">No labour earnings entries match this filter yet.</p>
         ) : (
-          <div className="attendance-import-table-wrap report-wide-table">
+          <div className="labour-earnings-list">
+            <div className="labour-earnings-mobile-list">
+              {visibleEarnings.map((earning) => {
+                const labourer = earning.labourerId ? labourById.get(earning.labourerId) ?? null : null;
+                const group = earning.labourGroupId ? groupById.get(earning.labourGroupId) ?? null : null;
+                const foreman = earning.foremanId ? labourById.get(earning.foremanId) ?? null : null;
+                const title = labourEarningTargetLabel(earning, labourer, group);
+                return (
+                  <article className="labour-earnings-card" key={earning.id}>
+                    <header className="labour-earnings-card__header">
+                      <div className="labour-earnings-card__title">
+                        <strong>{title}</strong>
+                        <span>{earning.earningDate} · {labourEarningScopeLabel(earning)} · {labourEarningTypeLabel(earning.earningType)}</span>
+                      </div>
+                      <strong className="labour-earnings-card__amount">{money(earning.amount)}</strong>
+                    </header>
+                    <div className="labour-earnings-card__status-row">
+                      <span className={`labour-earnings-status-chip labour-earnings-status-chip--${earning.status}`}>{labourEarningStatusLabel(earning.status)}</span>
+                    </div>
+                    <details>
+                      <summary>View details</summary>
+                      <dl>
+                        <div>
+                          <dt>Scope</dt>
+                          <dd>{labourEarningScopeLabel(earning)}</dd>
+                        </div>
+                        <div>
+                          <dt>Type</dt>
+                          <dd>{labourEarningTypeLabel(earning.earningType)}</dd>
+                        </div>
+                        <div>
+                          <dt>Reference</dt>
+                          <dd>{earning.linkedSettlementId ?? "No reference"}</dd>
+                        </div>
+                        <div>
+                          <dt>Source ID</dt>
+                          <dd>{earning.id}</dd>
+                        </div>
+                        <div>
+                          <dt>Notes</dt>
+                          <dd>{earning.notes?.trim() ? earning.notes : "No notes"}</dd>
+                        </div>
+                        {earning.earningScope === "group" && <div>
+                          <dt>Foreman</dt>
+                          <dd>{foreman?.name ?? earning.foremanId ?? "No foreman"}</dd>
+                        </div>}
+                      </dl>
+                      <button type="button" onClick={() => navigate("/workspace/labour-payments/earnings")}>Open source record</button>
+                    </details>
+                  </article>
+                );
+              })}
+            </div>
+            <div className="attendance-import-table-wrap report-wide-table">
             <table className="report-data-table">
               <thead>
                 <tr>
@@ -356,7 +445,7 @@ export function LabourEarnings() {
                       <td>{labourEarningTypeLabel(earning.earningType)}</td>
                       <td>{earning.description}</td>
                       <td>{money(earning.amount)}</td>
-                      <td><span className={`status-chip status-chip--${earning.status}`}>{earning.status === "pending_settlement" ? "Pending" : earning.status === "settled" ? "Settled" : "Voided"}</span></td>
+                      <td><span className={`labour-earnings-status-chip labour-earnings-status-chip--${earning.status}`}>{labourEarningStatusLabel(earning.status)}</span></td>
                       <td>{earning.linkedSettlementId ?? "-"}</td>
                       <td>{earning.status === "pending_settlement" && canManage ? <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => void voidPendingEarning(earning)}>Void</button> : "-"}</td>
                     </tr>
@@ -364,6 +453,7 @@ export function LabourEarnings() {
                 })}
               </tbody>
             </table>
+          </div>
           </div>
         )}
       </section>

@@ -10,7 +10,7 @@ import { defaultTransactionGroupExpansion, groupAccountTransactions, type Accoun
 import { calculateAccountBalance } from "../../lib/accounting";
 import { getCanonicalExpenseCategory } from "../../lib/expenseCategories";
 import { formatMoney, formatNumber } from "../../lib/format";
-import { labourEarningScopeLabel, labourEarningScopeTarget, labourEarningTypeLabel, labourEarningsByScope, sumLabourEarnings } from "../../lib/labourEarnings";
+import { labourEarningScopeLabel, labourEarningTypeLabel, labourEarningsByScope, sumLabourEarnings } from "../../lib/labourEarnings";
 import { getActiveLabourWageSettlements, getCashAffectingVouchers, getGeneralExpenseVouchers, getLabourWageSettlementAdvanceOffset, getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher, outstandingLabourAdvances, totalSettledAdvances } from "../../lib/labourWageSettlements";
 import { translateExpenseCategory, translateExpenseSubcategory, translateSaleType, translateSalesStatus } from "../../lib/systemTranslations";
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
@@ -115,6 +115,24 @@ const attendanceStatusClass = (status?: Attendance["status"]) => status ? `regis
 const attendancePayable = (status?: Attendance["status"]) => status === "present" ? 1 : status === "half_day" ? 0.5 : 0;
 const formatShortDate = (date: string) => date.length >= 10 ? `${date.slice(8, 10)}/${date.slice(5, 7)}` : date;
 const formatRangeLabel = (from: string, to: string) => from && to ? `${from} - ${to}` : from ? `${i18n.t("reportsPage.fromDate")} ${from}` : to ? `${i18n.t("reportsPage.toDate")} ${to}` : i18n.t("reportsPage.allDates");
+const settlementCardDateFormatter = new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" });
+const settlementCardShortDateFormatter = new Intl.DateTimeFormat("en", { month: "short", day: "numeric" });
+const formatSettlementCardDate = (value: string) => {
+  if (!value) return value;
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return settlementCardDateFormatter.format(date);
+};
+const formatSettlementCardRange = (from: string, to: string) => {
+  if (!from || !to) return `${formatSettlementCardDate(from || to)}${from && to ? ` – ${formatSettlementCardDate(to)}` : ""}`;
+  const start = new Date(`${from}T00:00:00`);
+  const end = new Date(`${to}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return `${formatSettlementCardDate(from)} – ${formatSettlementCardDate(to)}`;
+  const sameYear = start.getFullYear() === end.getFullYear();
+  return sameYear
+    ? `${settlementCardShortDateFormatter.format(start)} – ${settlementCardDateFormatter.format(end)}`
+    : `${settlementCardDateFormatter.format(start)} – ${settlementCardDateFormatter.format(end)}`;
+};
 const normalizeText = (value?: string | null) => value?.trim() ?? "";
 const dispatchReference = (dispatch: Pick<Dispatch, "serialNumber" | "dispatchNumber" | "id" | "date">) =>
   normalizeText(dispatch.serialNumber) || normalizeText(dispatch.dispatchNumber) || `DIS-${dispatch.date.replaceAll("-", "")}-${dispatch.id.slice(0, 3).toUpperCase()}`;
@@ -131,6 +149,8 @@ const salePaymentsReceived = (sale: Sale) => {
 const saleOutstanding = (sale: Sale) => Math.max(sale.amount - salePaymentsReceived(sale), 0);
 const expenseLabel = (category?: string | null, subcategory?: string | null) =>
   `${getCanonicalExpenseCategory(category ?? "")} / ${subcategory ? translateExpenseSubcategory(subcategory) : "-"}`;
+const labourEarningReportTargetLabel = (earning: LabourEarning, labourer: Labourer | undefined, groupName: string) =>
+  earning.earningScope === "group" ? groupName || earning.labourGroupName || "Labour earning" : labourer?.name || "Labour earning";
 
 type VoucherReportLine = {
   id: string;
@@ -687,15 +707,21 @@ export function Reports() {
       return { labourer, records, total, outstanding: payable - total };
     })
     .filter((item) => item.records.length > 0), [advanceRows, attendanceSummary, labourers]);
-  const advanceFilterSummary = useMemo(() => [
-    ["Date Range", rangeLabel],
-    ["Advance Recorded By", "All Recorders"],
-    ["Labour Group", groupFilter === ungroupedValue ? "Ungrouped" : groupFilter || "All Groups"],
-    ["Labourer", selectedLabourerIds.length ? selectedLabourerIds.map((id) => labourName(id)).join(", ") : "All Labour"],
-    ["Paid From Account", accountId ? accountName(accountId) : "All Accounts"],
-    ["Minimum Amount", amountMin ? money(Number(amountMin)) : "All"],
-    ["Maximum Amount", amountMax ? money(Number(amountMax)) : "All"],
-  ] as const, [accountId, accountName, amountMax, amountMin, groupFilter, labourName, rangeLabel, selectedLabourerIds, ungroupedValue]);
+  const advanceActiveFilters = useMemo(() => {
+    const chips: string[] = [];
+    if (search.trim()) chips.push(`Search: ${search.trim()}`);
+    if (from || to) chips.push(from && to
+      ? `${formatReportDateValue(from)} - ${formatReportDateValue(to)}`
+      : from
+        ? `From ${formatReportDateValue(from)}`
+        : `To ${formatReportDateValue(to)}`);
+    if (groupFilter) chips.push(groupFilter === ungroupedValue ? "Ungrouped" : groupFilter);
+    if (selectedLabourerIds.length) chips.push(...selectedLabourerIds.map((id) => labourName(id)));
+    if (accountId) chips.push(accountName(accountId));
+    if (amountMin) chips.push(`Min ${money(Number(amountMin))}`);
+    if (amountMax) chips.push(`Max ${money(Number(amountMax))}`);
+    return chips;
+  }, [accountId, accountName, amountMax, amountMin, from, groupFilter, labourName, rangeLabel, search, selectedLabourerIds, to, ungroupedValue]);
   const labourEarningRows = useMemo(() => labourEarnings
     .filter((item) => {
       const labourer = item.labourerId ? labourById.get(item.labourerId) : null;
@@ -1258,11 +1284,11 @@ export function Reports() {
           {filtered && <button type="button" onClick={clearFilters}>{t("reportsPage.clearFilters")}</button>}
         </div>
         <div className="reports-filters">
-          {report === "advances" && <div className="reports-advance-filter-summary">
-            <h3>Active Advance Filters</h3>
-            <ul>
-              {advanceFilterSummary.map(([label, value]) => <li key={label}><span>{label}</span><strong>{value}</strong></li>)}
-            </ul>
+          {report === "advances" && advanceActiveFilters.length > 0 && <div className="reports-advance-filter-chips">
+            <h3>Active filters</h3>
+            <div className="reports-advance-filter-chip-row" aria-label="Active advances filters">
+              {advanceActiveFilters.map((chip) => <span key={chip} className="reports-filter-chip">{chip}</span>)}
+            </div>
           </div>}
           <SearchInput
             value={search}
@@ -1271,7 +1297,7 @@ export function Reports() {
               report === "attendance"
                 ? `${t("reportsPage.labour")} / ${t("reportsPage.group")}`
                 : report === "advances"
-                  ? `${t("reportsPage.labour")} / ${t("reportsPage.group")} / ${t("reportsPage.notes")}`
+                  ? "Search advances"
                   : report === "sales"
                     ? `${t("reportsPage.invoiceNumber")} / ${t("reportsPage.buyerName")} / ${t("reportsPage.product")} / ${t("reportsPage.quantity")}`
                     : report === "dispatch"
@@ -1341,43 +1367,49 @@ export function Reports() {
           </>}
 
           {report === "advances" && <>
-            <label className="reports-filter-group">
-              <span>Labour Group</span>
-              <ClearableSelect aria-label={t("reportsPage.group")} value={groupFilter} onChange={setGroupFilter}>
-                <option value="">{t("reportsPage.allGroups")}</option>
-                {labourGroups.map((group) => <option key={group} value={group}>{group}</option>)}
-                <option value={ungroupedValue}>{t("reportsPage.ungrouped")}</option>
-              </ClearableSelect>
-            </label>
-            <label className="reports-filter-group">
-              <span>Labourer</span>
-              <LabourMultiSelectFilter
-                ariaLabel={t("reportsPage.labour")}
-                options={reportLabourOptions}
-                selectedIds={selectedLabourerIds}
-                onChange={setSelectedLabourerIds}
-                placeholder={t("common.searchLabour")}
-              />
-            </label>
-            <label className="reports-filter-group">
-              <span>Paid From Account</span>
-              <ClearableSelect aria-label={t("reportsPage.account")} value={accountId} onChange={setAccountId}>
-                <option value="">{t("reportsPage.allAccounts")}</option>
-                {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-              </ClearableSelect>
-            </label>
-            {views.advances === "log" && <ClearableSelect clearValue="desc" aria-label={t("reportsPage.advanceSort")} value={advanceSort} onChange={(value) => setAdvanceSort(value as SortOrder)}>
-              <option value="desc">{t("advancesPage.newestFirst")}</option>
-              <option value="asc">{t("advancesPage.oldestFirst")}</option>
-            </ClearableSelect>}
-            <label className="reports-filter-group">
-              <span>Minimum Amount</span>
-              <input aria-label={t("reportsPage.minimumAmount")} inputMode="decimal" placeholder={t("reportsPage.minimumAmount")} value={amountMin} onChange={(event) => setAmountMin(event.target.value)} />
-            </label>
-            <label className="reports-filter-group">
-              <span>Maximum Amount</span>
-              <input aria-label={t("reportsPage.maximumAmount")} inputMode="decimal" placeholder={t("reportsPage.maximumAmount")} value={amountMax} onChange={(event) => setAmountMax(event.target.value)} />
-            </label>
+            <div className="reports-advance-filter-row">
+              <label className="reports-filter-group">
+                <span>Labour Group</span>
+                <ClearableSelect aria-label={t("reportsPage.group")} value={groupFilter} onChange={setGroupFilter}>
+                  <option value="">{t("reportsPage.allGroups")}</option>
+                  {labourGroups.map((group) => <option key={group} value={group}>{group}</option>)}
+                  <option value={ungroupedValue}>{t("reportsPage.ungrouped")}</option>
+                </ClearableSelect>
+              </label>
+              <label className="reports-filter-group">
+                <span>Labourer</span>
+                <LabourMultiSelectFilter
+                  ariaLabel={t("reportsPage.labour")}
+                  options={reportLabourOptions}
+                  selectedIds={selectedLabourerIds}
+                  onChange={setSelectedLabourerIds}
+                  placeholder={t("common.searchLabour")}
+                />
+              </label>
+            </div>
+            <div className="reports-advance-filter-row">
+              <label className="reports-filter-group">
+                <span>Paid from</span>
+                <ClearableSelect aria-label={t("reportsPage.account")} value={accountId} onChange={setAccountId}>
+                  <option value="">{t("reportsPage.allAccounts")}</option>
+                  {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+                </ClearableSelect>
+              </label>
+              <label className="reports-filter-group">
+                <span>Minimum Amount</span>
+                <input aria-label={t("reportsPage.minimumAmount")} inputMode="decimal" placeholder={t("reportsPage.minimumAmount")} value={amountMin} onChange={(event) => setAmountMin(event.target.value)} />
+              </label>
+            </div>
+            <div className="reports-advance-filter-row">
+              {views.advances === "log" && <ClearableSelect clearValue="desc" aria-label={t("reportsPage.advanceSort")} value={advanceSort} onChange={(value) => setAdvanceSort(value as SortOrder)}>
+                <option value="desc">{t("advancesPage.newestFirst")}</option>
+                <option value="asc">{t("advancesPage.oldestFirst")}</option>
+              </ClearableSelect>}
+              <label className="reports-filter-group">
+                <span>Maximum Amount</span>
+                <input aria-label={t("reportsPage.maximumAmount")} inputMode="decimal" placeholder={t("reportsPage.maximumAmount")} value={amountMax} onChange={(event) => setAmountMax(event.target.value)} />
+              </label>
+            </div>
           </>}
 
           {report === "expenditures" && <>
@@ -1628,7 +1660,7 @@ export function Reports() {
       </>}
 
       {report === "advances" && <>
-        <section className="record-panel reports-subtabs">
+        <section className="reports-subtabs reports-advance-switch" aria-label={t("reportsPage.summary")}>
           <button className={views.advances === "summary" ? "is-active" : ""} type="button" onClick={() => switchView("advances", "summary")}>{t("reportsPage.summary")}</button>
           <button className={views.advances === "log" ? "is-active" : ""} type="button" onClick={() => switchView("advances", "log")}>{t("reportsPage.log")}</button>
         </section>
@@ -1636,60 +1668,67 @@ export function Reports() {
           <Kpis values={[
             [t("reportsPage.totalAdvances"), money(advanceRows.reduce((sum, item) => sum + item.amount, 0))],
             [t("reportsPage.transactions"), advanceRows.length],
-            [t("reportsPage.labour"), advanceSummary.length],
-            ["Settled advances", money(settledAdvancesTotal)],
+            ["Labourers", advanceSummary.length],
+            ["Adjusted in settlements", money(settledAdvancesTotal)],
             ["Outstanding advances", money(outstandingAdvancePool)],
             ["Settlements posted", activeSettlements.length],
           ]} />
           {activeSettlements.length > 0 && <div className="reports-summary-list">
             {activeSettlements.map((settlement) => (
-              <article key={settlement.id}>
-                <span>{settlement.settlementNumber} • {settlement.fromDate} to {settlement.toDate}</span>
-                <strong>{money(settlement.settledAdvanceAmount)}</strong>
+              <article key={settlement.id} className="reports-advance-settlement-card">
+                <div className="reports-advance-settlement-card__text">
+                  <strong>{settlement.settlementNumber}</strong>
+                  <span>{formatSettlementCardRange(settlement.fromDate, settlement.toDate)}</span>
+                </div>
+                <strong className="reports-advance-settlement-card__amount">Adjusted {money(settlement.settledAdvanceAmount)}</strong>
               </article>
             ))}
           </div>}
-          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.labour"), t("reportsPage.transactions"), t("reportsPage.total"), t("reportsPage.netBalance")]} rows={advanceSummary.map((item) => ({ id: item.labourer.id, title: item.labourer.name, value: money(item.total), meta: `${item.records.length} ${t("reportsPage.transactions")}`, cells: [item.labourer.name, item.records.length, money(item.total), money(item.outstanding)], details: [[t("reportsPage.account"), [...new Set(item.records.map((record) => accountName(record.accountId)))].join(", ")], [t("reportsPage.status"), item.labourer.active === false ? t("reportsPage.inactive") : t("reportsPage.active")]] }))} />
+          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.labour"), t("reportsPage.transactions"), t("reportsPage.total"), t("reportsPage.netBalance")]} rows={advanceSummary.map((item) => ({ id: item.labourer.id, title: item.labourer.name, value: money(item.total), meta: `${item.records.length} ${t("reportsPage.transactions")} · ${t("reportsPage.netBalance")}: ${money(item.outstanding)}`, cells: [item.labourer.name, item.records.length, money(item.total), money(item.outstanding)], details: [[t("reportsPage.account"), [...new Set(item.records.map((record) => accountName(record.accountId)))].join(", ")], [t("reportsPage.status"), item.labourer.active === false ? t("reportsPage.inactive") : t("reportsPage.active")]] }))} />
         </ReportShell>}
         {views.advances === "log" && <ReportShell title={t("reportsPage.advanceLog")} rangeLabel={rangeLabel} sectionId="advance-log" onPrint={() => printSection("advance-log")} onExport={exportAdvanceLog}>
-          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.amount"), t("reportsPage.account"), t("reportsPage.description"), t("reportsPage.reference")]} rows={advanceRows.map((item) => ({ id: item.id, title: labourName(item.labourerId), value: money(item.amount), meta: item.date, cells: [item.date, labourName(item.labourerId), money(item.amount), accountName(item.accountId), item.notes || "-", item.id.slice(0, 8)], details: [[t("reportsPage.account"), accountName(item.accountId)], [t("reportsPage.notes"), item.notes || "-"]], onOpen: () => navigate(`/workspace/labour-advances?recordId=${item.id}`) }))} />
+          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.amount"), t("reportsPage.account"), t("reportsPage.description"), t("reportsPage.reference")]} rows={advanceRows.map((item) => ({ id: item.id, title: labourName(item.labourerId), value: money(item.amount), meta: `${item.date} · ${accountName(item.accountId)}`, cells: [item.date, labourName(item.labourerId), money(item.amount), accountName(item.accountId), item.notes || "-", item.id.slice(0, 8)], details: [[t("reportsPage.labour"), labourName(item.labourerId)], [t("reportsPage.account"), accountName(item.accountId)], [t("reportsPage.notes"), item.notes || "-"], [t("reportsPage.reference"), item.id.slice(0, 8)]], onOpen: () => navigate(`/workspace/labour-advances?recordId=${item.id}`) }))} />
         </ReportShell>}
       </>}
 
-      {report === "labour-earnings" && <ReportShell title="Labour Work Report" rangeLabel={rangeLabel} sectionId="labour-earnings" onPrint={() => printSection("labour-earnings")} onExport={exportLabourEarnings}>
+      {report === "labour-earnings" && <ReportShell title="Labour Earnings Report" rangeLabel={rangeLabel} sectionId="labour-earnings" onPrint={() => printSection("labour-earnings")} onExport={exportLabourEarnings}>
         <Kpis values={[
-          ["Individual work", money(labourEarningTotals.individual)],
-          ["Group work", money(labourEarningTotals.group)],
-          ["Pending labour work", money(sumLabourEarnings(labourEarningPending))],
-          ["Settled labour work", money(sumLabourEarnings(labourEarningSettled))],
-          ["Voided labour work", money(sumLabourEarnings(labourEarningVoided))],
+          ["Individual earnings", money(labourEarningTotals.individual)],
+          ["Group earnings", money(labourEarningTotals.group)],
+          ["Pending earnings", money(sumLabourEarnings(labourEarningPending))],
+          ["Settled earnings", money(sumLabourEarnings(labourEarningSettled))],
+          ["Voided earnings", money(sumLabourEarnings(labourEarningVoided))],
           ["Entries", labourEarningRows.length],
         ]} />
         <ReportTable
           empty={t("reportsPage.noRecords")}
           columns={[t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.type"), t("reportsPage.description"), t("reportsPage.amount"), t("reportsPage.status"), t("reportsPage.reference")]}
-      rows={labourEarningRows.map((item) => ({
-            id: item.id,
-            title: labourEarningScopeTarget(item),
-            value: money(item.amount),
-            meta: `${item.earningDate} · ${labourEarningScopeLabel(item)} · ${labourEarningTypeLabel(item.earningType)}`,
-            cells: [
-              item.earningDate,
-              labourEarningScopeTarget(item),
-              labourEarningTypeLabel(item.earningType),
-              item.description,
-              money(item.amount),
-              item.status === "pending_settlement" ? "Pending Settlement" : item.status === "settled" ? "Settled" : "Voided",
-              item.linkedSettlementId ?? "-",
-            ],
-            details: [
-              [t("reportsPage.notes"), item.notes || "-"],
-              [t("reportsPage.reference"), item.linkedSettlementId ?? "-"],
-              [t("reportsPage.status"), item.status],
-              ["Scope", labourEarningScopeLabel(item)],
-            ],
-            onOpen: () => navigate("/workspace/labour-payments/earnings"),
-          }))}
+          rows={labourEarningRows.map((item) => {
+            const labourer = item.labourerId ? labourById.get(item.labourerId) : undefined;
+            const groupName = item.labourGroupName ?? labourer?.group ?? "";
+            return {
+              id: item.id,
+              title: labourEarningReportTargetLabel(item, labourer, groupName),
+              value: money(item.amount),
+              meta: `${item.earningDate} · ${labourEarningScopeLabel(item)} · ${labourEarningTypeLabel(item.earningType)}`,
+              cells: [
+                item.earningDate,
+                labourEarningReportTargetLabel(item, labourer, groupName),
+                labourEarningTypeLabel(item.earningType),
+                item.description,
+                money(item.amount),
+                item.status === "pending_settlement" ? "Pending settlement" : item.status === "settled" ? "Settled" : item.status === "voided" ? "Voided" : "Cancelled",
+                item.linkedSettlementId ?? "-",
+              ],
+              details: [
+                [t("reportsPage.notes"), item.notes || "No notes"],
+                [t("reportsPage.reference"), item.linkedSettlementId ?? "-"],
+                [t("reportsPage.status"), item.status],
+                ["Scope", labourEarningScopeLabel(item)],
+              ],
+              onOpen: () => navigate("/workspace/labour-payments/earnings"),
+            };
+          })}
         />
       </ReportShell>}
 
