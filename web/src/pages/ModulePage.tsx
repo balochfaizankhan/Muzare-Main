@@ -1091,9 +1091,10 @@ function AddLabourPanel({
     }
   };
   return <ActionPanel title={t("workforcePage.addLabourTitle")} onClose={onClose}>
-    <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
-      <label><span>{t("workforcePage.labourName")} *</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+    <form className="worker-action-form worker-action-form--compact" onSubmit={(event) => void submit(event)}>
+      <label><span>{t("workforcePage.labourName")} *</span><input required placeholder="Enter labour name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
       <label><span>{t("workforcePage.dateOfJoining")} *</span><input required type="date" value={form.joinedOn} onChange={(event) => setForm({ ...form, joinedOn: event.target.value })} /></label>
+      <LabourPaymentFields form={form} setForm={setForm} />
       <label><span>{t("workforcePage.groupLabel")}</span><select value={form.groupId} onChange={(event) => {
         const next = event.target.value;
         const group = groups.find((item) => item.id === next);
@@ -1104,8 +1105,7 @@ function AddLabourPanel({
         <option value="__new_group__">{t("workforcePage.createNewGroup")}</option>
       </select></label>
       {form.groupId === "__new_group__" && <label><span>{t("workforcePage.newGroupName")} *</span><input required value={form.group} onChange={(event) => setForm({ ...form, group: event.target.value })} /></label>}
-      <LabourPaymentFields form={form} setForm={setForm} />
-      <label><span>{t("workforcePage.phoneContact")}</span><input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
+      <label><span>{t("workforcePage.phoneContact")}</span><input placeholder="Optional phone number" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
       <label><span>{t("workforcePage.statusLabel")}</span><select value={form.active ? "active" : "inactive"} onChange={(event) => setForm({ ...form, active: event.target.value === "active" })}><option value="active">{t("common.active")}</option><option value="inactive">{t("common.inactive")}</option></select></label>
       {error && <p className="worker-action-error">{error}</p>}
       <footer><button type="button" onClick={onClose}>{t("common.cancel")}</button><button disabled={busy} type="submit">{busy ? t("workforcePage.saving") : t("workforcePage.saveLabour")}</button></footer>

@@ -377,6 +377,8 @@ export function LabourGroupsPage() {
   const groupCardAction = (group: LabourGroup) => {
     const stats = groupMemberStats(group, labourers, settlements, advances);
     const foreman = labourById.get(group.foremanId ?? group.foremanLabourId ?? "") ?? null;
+    const contact = group.phone?.trim() || "";
+    const notes = group.notes?.trim() || "";
     return (
       <article className="workforce-group-card" key={group.id}>
         <div className="workforce-group-card__header">
@@ -390,17 +392,20 @@ export function LabourGroupsPage() {
           <article><span>Total members</span><strong>{stats.members.length}</strong></article>
           <article><span>Active today</span><strong>{stats.activeMembers.length}</strong></article>
           <article><span>Inactive today</span><strong>{stats.inactiveMembers.length}</strong></article>
-          <article><span>Foreman</span><strong>{foreman?.name ?? "No foreman assigned"}</strong></article>
+        </div>
+        <div className="workforce-group-card__foreman">
+          <span>Foreman</span>
+          <strong>{foreman?.name ?? "No foreman assigned"}</strong>
         </div>
         <div className="workforce-group-card__copy">
-          <small>{group.phone || "No contact"}</small>
-          <p>{group.notes || "No notes"}</p>
+          {contact ? <small>Contact: {contact}</small> : null}
+          {notes ? <p>{notes}</p> : null}
         </div>
         <div className="workforce-group-card__actions">
-          <button type="button" onClick={() => navigate(`/workspace/workforce/labour-groups/${group.id}`)}>View</button>
-          <button type="button" onClick={() => navigate(`/workspace/workforce/labour-groups/${group.id}/members`)}>Manage members</button>
-          <button type="button" onClick={() => setEditingGroup(group)}>Edit</button>
-          <button type="button" onClick={() => navigate(`/workspace/labour-payments/settlements?groupId=${encodeURIComponent(group.id)}`)}>Create settlement</button>
+          <button type="button" className="workforce-group-card__action workforce-group-card__action--primary" onClick={() => navigate(`/workspace/workforce/labour-groups/${group.id}/members`)}>Manage members</button>
+          <button type="button" className="workforce-group-card__action workforce-group-card__action--primary" onClick={() => navigate(`/workspace/labour-payments/settlements?groupId=${encodeURIComponent(group.id)}`)}>Create settlement</button>
+          <button type="button" className="workforce-group-card__action workforce-group-card__action--secondary" onClick={() => navigate(`/workspace/workforce/labour-groups/${group.id}`)}>View details</button>
+          <button type="button" className="workforce-group-card__action workforce-group-card__action--secondary" onClick={() => setEditingGroup(group)}>Edit</button>
         </div>
       </article>
     );
@@ -565,18 +570,18 @@ export function LabourGroupsPage() {
   return (
     <div className="dashboard-page">
       <SubpageHeader title="Labour Groups" />
-      <main className="subpage module-workspace workforce-shell-main">
+        <main className="subpage module-workspace workforce-shell-main">
         <section className="record-panel workforce-groups-shell">
-          <div className="workforce-group-page-header">
+          <div className="workforce-group-page-header workforce-group-page-header--stacked">
             <div className="workforce-group-page-header__copy">
               <h2>Labour Groups / Foremen</h2>
-              <p>Manage group leaders and bulk assign existing labourers without opening each labour profile.</p>
+              <p>Manage group leaders and assign labourers.</p>
             </div>
             <button type="button" className="secondary-button" onClick={() => setShowCreate(true)}>
               <Plus size={16} /> Create group
             </button>
           </div>
-          <SearchInput placeholder="Search group name, phone, or notes" value={search} onChange={setSearch} />
+          <SearchInput placeholder="Search groups" value={search} onChange={setSearch} />
           <div className="workforce-group-filter-row">
             <button type="button" className={statusFilter === "all" ? "is-active" : ""} onClick={() => setStatusFilter("all")}>All</button>
             <button type="button" className={statusFilter === "active" ? "is-active" : ""} onClick={() => setStatusFilter("active")}>Active</button>

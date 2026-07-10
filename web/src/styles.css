@@ -149,6 +149,12 @@ button {
 }
 
 .search-input input {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  height: 42px;
+  min-width: 0;
   width: 100%;
 }
 
@@ -164,6 +170,11 @@ button {
 .search-input input {
   padding-inline-end: 38px !important;
   padding-inline-start: 34px !important;
+}
+
+.search-input input::placeholder {
+  color: var(--text-secondary);
+  opacity: 1;
 }
 
 .search-input__clear {
@@ -8083,6 +8094,22 @@ button {
 .worker-action-form footer button[type="button"] { background: var(--surface); color: var(--text-secondary); }
 .worker-action-form footer button[type="submit"] { background: var(--brand-primary); border-color: var(--brand-primary); color: #fff; }
 .worker-action-form button:disabled { cursor: not-allowed; opacity: .55; }
+.worker-action-form--compact { gap: 8px; padding: 14px 16px; }
+.worker-action-form--compact label { gap: 4px; }
+.worker-action-form--compact label span { font-size: .76rem; }
+.worker-action-form--compact input,
+.worker-action-form--compact select,
+.worker-action-form--compact textarea {
+  min-height: 40px;
+  padding: 7px 10px;
+}
+.worker-action-form--compact textarea {
+  min-height: 68px;
+}
+.worker-action-form--compact footer {
+  margin: 2px -16px -14px;
+  padding: 10px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+}
 .worker-action-error { background: var(--danger-bg); border-radius: 8px; color: var(--danger); font-size: .78rem; margin: 0; padding: 9px; }
 
 .shell-header {
@@ -11681,6 +11708,10 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   gap: 12px;
 }
 
+.workforce-groups-shell {
+  padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+}
+
 .workforce-group-page-header {
   align-items: center;
   display: grid;
@@ -11727,12 +11758,12 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 .workforce-group-card {
   background: #fff;
   border: 1px solid var(--border);
-  border-radius: 18px;
-  box-shadow: 0 10px 22px rgba(5, 35, 63, 0.06);
+  border-radius: 16px;
+  box-shadow: 0 8px 18px rgba(5, 35, 63, 0.05);
   display: grid;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
-  padding: 14px;
+  padding: 12px;
 }
 
 .workforce-group-card__header,
@@ -11763,6 +11794,12 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   margin-top: 2px;
 }
 
+.workforce-group-card__header .secondary-button {
+  min-height: 36px;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
 .workforce-group-card__metrics,
 .workforce-group-detail-grid {
   display: grid;
@@ -11770,14 +11807,18 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
 }
 
+.workforce-group-card__metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .workforce-group-card__metrics article,
 .workforce-group-detail-grid article {
   background: #f8fbf7;
   border: 1px solid color-mix(in srgb, var(--border) 88%, white);
-  border-radius: 14px;
+  border-radius: 12px;
   display: grid;
   gap: 3px;
-  padding: 10px 12px;
+  padding: 9px 10px;
 }
 
 .workforce-group-card__metrics span,
@@ -11793,6 +11834,23 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   font-size: 1rem;
 }
 
+.workforce-group-card__foreman {
+  display: grid;
+  gap: 2px;
+}
+
+.workforce-group-card__foreman span {
+  color: var(--text-secondary);
+  font-size: .72rem;
+  font-weight: 700;
+}
+
+.workforce-group-card__foreman strong {
+  color: var(--text-primary);
+  font-size: .94rem;
+  line-height: 1.25;
+}
+
 .workforce-group-card__copy small {
   color: var(--text-secondary);
   display: block;
@@ -11804,12 +11862,12 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   color: var(--text-primary);
   font-size: .82rem;
   line-height: 1.45;
-  margin: 6px 0 0;
+  margin: 2px 0 0;
 }
 
 .workforce-group-card__actions {
   display: grid;
-  gap: 8px;
+  gap: 7px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -11824,13 +11882,21 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   font-size: .8rem;
   font-weight: 750;
   justify-content: center;
-  min-height: 42px;
-  padding: 0 12px;
+  min-height: 40px;
+  padding: 0 10px;
 }
 
-.workforce-group-card__actions button {
+.workforce-group-card__action--primary {
+  background: var(--brand-primary);
+  border-color: var(--brand-primary);
+  color: #fff;
+}
+
+.workforce-group-card__action--secondary {
   background: #fff;
-  color: var(--brand-primary);
+  border-color: color-mix(in srgb, var(--border) 82%, white);
+  color: var(--text-primary);
+  font-weight: 700;
 }
 
 .workforce-group-members-panel {
@@ -12013,6 +12079,15 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 }
 
 @media (max-width: 767px) {
+  .workforce-groups-shell .workforce-group-page-header--stacked {
+    grid-template-columns: 1fr;
+  }
+
+  .workforce-groups-shell .workforce-group-page-header--stacked > button {
+    justify-self: stretch;
+    width: 100%;
+  }
+
   .workforce-group-page-header {
     grid-template-columns: auto minmax(0, 1fr);
   }
@@ -12027,6 +12102,10 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .workforce-group-card__metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .workforce-group-sticky-bar {
     width: calc(100vw - 12px);
   }
@@ -12038,6 +12117,49 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 
   .workforce-group-section__heading .module-inline-actions {
     width: 100%;
+  }
+}
+
+@media (max-width: 430px) {
+  .worker-action-form--compact {
+    gap: 7px;
+  }
+
+  .worker-action-form--compact label {
+    gap: 3px;
+  }
+
+  .workforce-group-card {
+    gap: 7px;
+    padding: 11px;
+  }
+
+  .workforce-group-card__metrics {
+    gap: 6px;
+  }
+
+  .workforce-group-card__metrics article {
+    padding: 8px 9px;
+  }
+
+  .workforce-group-card__actions button {
+    min-height: 39px;
+    padding-inline: 8px;
+  }
+}
+
+@media (max-width: 390px) {
+  .workforce-group-card__actions {
+    gap: 6px;
+  }
+
+  .workforce-group-card__actions button {
+    font-size: .76rem;
+  }
+
+  .search-input input {
+    padding-inline-start: 32px !important;
+    padding-inline-end: 36px !important;
   }
 }
 
