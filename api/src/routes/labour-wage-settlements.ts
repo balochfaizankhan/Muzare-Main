@@ -243,6 +243,111 @@ function logSettlementAccountValidation(request: { log: { info: (...args: unknow
   }
 }
 
+function sameLegacyAdvanceScope(row: { farmId: string | null; seasonId: string | null }, scope: { farmId: string; seasonId: string }) {
+  return (row.farmId === scope.farmId || row.farmId === null)
+    && (row.seasonId === scope.seasonId || row.seasonId === null);
+}
+
+type DatabaseErrorLike = {
+  code?: unknown;
+  constraint?: unknown;
+  table?: unknown;
+  column?: unknown;
+  detail?: unknown;
+  hint?: unknown;
+  schema?: unknown;
+  position?: unknown;
+  routine?: unknown;
+  message?: unknown;
+  cause?: unknown;
+};
+
+function toDatabaseErrorInfo(error: unknown) {
+  let current: unknown = error;
+  for (let depth = 0; depth < 3 && current; depth += 1) {
+    if (typeof current === "object") {
+      const candidate = current as DatabaseErrorLike;
+      const message = typeof candidate.message === "string" ? candidate.message : "";
+      const code = typeof candidate.code === "string" ? candidate.code : null;
+      const constraint = typeof candidate.constraint === "string" ? candidate.constraint : null;
+      const table = typeof candidate.table === "string" ? candidate.table : null;
+      const column = typeof candidate.column === "string" ? candidate.column : null;
+      const detail = typeof candidate.detail === "string" ? candidate.detail : null;
+      const hint = typeof candidate.hint === "string" ? candidate.hint : null;
+      const schema = typeof candidate.schema === "string" ? candidate.schema : null;
+      const position = typeof candidate.position === "string" ? candidate.position : null;
+      const routine = typeof candidate.routine === "string" ? candidate.routine : null;
+      if (code || constraint || table || column || detail || hint || schema || position || routine || message.startsWith("Failed query")) {
+        return {
+          code,
+          constraint,
+          table,
+          column,
+          detail,
+          hint,
+          schema,
+          position,
+          routine,
+          message,
+        };
+      }
+      current = candidate.cause;
+      continue;
+    }
+    break;
+  }
+  return null;
+}
+
+function settlementPostingErrorMessage(info: ReturnType<typeof toDatabaseErrorInfo>) {
+  if (!info) return "Settlement could not be created. No changes were saved.";
+  if (info.code === "22P02" || info.code === "23503") {
+    return "Settlement could not be created because its advance records could not be linked. No changes were saved.";
+  }
+  if (info.code === "23505" && info.constraint?.toLowerCase().includes("labour_wage_settlement_advance_allocations")) {
+    return "This settlement has already been created.";
+  }
+  return "Settlement could not be created. No changes were saved.";
+}
+
+function logSettlementAllocationInsertFailure(
+  request: { log: { error: (...args: unknown[]) => void } },
+  details: {
+    workspaceId: string;
+    farmId: string;
+    seasonId: string;
+    settlementId: string;
+    settlementNumber: string;
+    allocationIndex: number;
+    canonicalAdvanceRecordId: string;
+    sourceAdvanceId: string;
+    absorbedAmount: number;
+    error: ReturnType<typeof toDatabaseErrorInfo>;
+  },
+) {
+  request.log.error({
+    context: "labour_wage_settlement_allocation_insert_failed",
+    workspaceId: details.workspaceId,
+    farmId: details.farmId,
+    seasonId: details.seasonId,
+    settlementRecordId: details.settlementId,
+    settlementNumber: details.settlementNumber,
+    failingAllocationIndex: details.allocationIndex,
+    canonicalAdvanceRecordId: details.canonicalAdvanceRecordId,
+    sourceAdvanceId: details.sourceAdvanceId,
+    absorbedAmount: details.absorbedAmount,
+    postgresCode: details.error?.code ?? null,
+    postgresConstraint: details.error?.constraint ?? null,
+    postgresTable: details.error?.table ?? null,
+    postgresColumn: details.error?.column ?? null,
+    postgresDetail: details.error?.detail ?? null,
+    postgresHint: details.error?.hint ?? null,
+    postgresSchema: details.error?.schema ?? null,
+    postgresPosition: details.error?.position ?? null,
+    postgresRoutine: details.error?.routine ?? null,
+  }, "labour wage settlement advance allocation insert failed");
+}
+
 function effectiveAdvanceAdjustmentForPosting(preview: {
   settlementMode?: "individual" | "group";
   grossWages?: number;
@@ -726,7 +831,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         seasonId,
         clientRequestId: clientRequestId ?? null,
       }, "labour wage settlement transaction started");
-      const result = await db.transaction(async (tx) => {
+        const result = await db.transaction(async (tx) => {
         if (clientRequestId) {
           const requestScopeKey = `${workspaceId}:${farmId}:labour-wage-settlement:${clientRequestId}`;
           await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${requestScopeKey}), 1)`);
@@ -796,16 +901,101 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         );
         const description = `Labour wage settlement: ${fromDate} to ${toDate} (attendance wages + labour work)`;
         const paymentAccountIdValue = effectivePaidAmount > 0 ? account?.id ?? resolvedAccount?.id ?? paymentAccountInput : null;
-        const advanceAbsorptionRows = preview.advanceReconciliation
-          ?.filter((row) => row.includedInPreview && row.remainingAvailableAmount > 0 && row.advanceId)
-          .reduce<Array<{ advanceRecordId: string; absorbedAmount: number }>>((rows, row) => {
-            const remainingTarget = Math.max(0, settlementTotals.advanceAdjustedNow - rows.reduce((sum, item) => sum + item.absorbedAmount, 0));
-            if (remainingTarget <= 0) return rows;
-            const absorbedAmount = Math.min(remainingTarget, row.remainingAvailableAmount);
-            if (absorbedAmount <= 0) return rows;
-            rows.push({ advanceRecordId: row.advanceId, absorbedAmount });
-            return rows;
-          }, []) ?? [];
+        const advanceAbsorptionRows: Array<{
+          allocationIndex: number;
+          advanceRecordId: string;
+          sourceAdvanceId: string;
+          absorbedAmount: number;
+          remainingAvailableAmount: number;
+        }> = [];
+        const advanceAbsorptionByCanonicalId = new Map<string, {
+          allocationIndex: number;
+          advanceRecordId: string;
+          sourceAdvanceId: string;
+          absorbedAmount: number;
+          remainingAvailableAmount: number;
+        }>();
+        let absorbedAdvanceTotal = 0;
+        for (const [allocationIndex, row] of (preview.advanceReconciliation ?? []).entries()) {
+          if (!row.includedInPreview || row.remainingAvailableAmount <= 0) continue;
+          const canonicalAdvanceRecordId = typeof row.advanceRecordId === "string" && row.advanceRecordId.trim()
+            ? row.advanceRecordId.trim()
+            : row.advanceId;
+          if (!canonicalAdvanceRecordId) continue;
+          const sourceAdvanceId = typeof row.sourceAdvanceId === "string" && row.sourceAdvanceId.trim()
+            ? row.sourceAdvanceId.trim()
+            : row.advanceId;
+          const remainingTarget = Math.max(0, settlementTotals.advanceAdjustedNow - absorbedAdvanceTotal);
+          if (remainingTarget <= 0) break;
+          const absorbedAmount = Math.min(remainingTarget, row.remainingAvailableAmount);
+          if (absorbedAmount <= 0) continue;
+          if (advanceAbsorptionByCanonicalId.has(canonicalAdvanceRecordId)) {
+            if (process.env.NODE_ENV !== "production") {
+              request.log.warn({
+                workspaceId,
+                farmId,
+                seasonId,
+                settlementRecordId: settlementId,
+                settlementNumber,
+                allocationIndex,
+                canonicalAdvanceRecordId,
+                sourceAdvanceId,
+              }, "duplicate settlement advance allocation skipped during preparation");
+            }
+            continue;
+          }
+          const allocation = {
+            allocationIndex,
+            advanceRecordId: canonicalAdvanceRecordId,
+            sourceAdvanceId,
+            absorbedAmount,
+            remainingAvailableAmount: row.remainingAvailableAmount,
+          };
+          advanceAbsorptionByCanonicalId.set(canonicalAdvanceRecordId, allocation);
+          advanceAbsorptionRows.push(allocation);
+          absorbedAdvanceTotal += absorbedAmount;
+        }
+        if (Math.abs(absorbedAdvanceTotal - settlementTotals.advanceAdjustedNow) > 0.005) {
+          request.log.error({
+            workspaceId,
+            farmId,
+            seasonId,
+            settlementRecordId: settlementId,
+            settlementNumber,
+            expectedAdvanceAdjustedNow: settlementTotals.advanceAdjustedNow,
+            preparedAdvanceAbsorptionTotal: absorbedAdvanceTotal,
+          }, "labour wage settlement advance absorption total drift detected before allocation insert");
+          throw new Error("The advance balance changed after preview. Please preview again.");
+        }
+        const advanceAllocationRecordIds = [...new Set(advanceAbsorptionRows.map((row) => row.advanceRecordId))];
+        const existingAdvanceRows = advanceAllocationRecordIds.length ? await tx.select({
+          id: operationalRecords.id,
+          clientRecordId: operationalRecords.clientRecordId,
+          workspaceId: operationalRecords.workspaceId,
+          farmId: operationalRecords.farmId,
+          seasonId: operationalRecords.seasonId,
+        }).from(operationalRecords).where(and(
+          eq(operationalRecords.workspaceId, workspaceId),
+          eq(operationalRecords.entityType, "advance"),
+          inArray(operationalRecords.id, advanceAllocationRecordIds),
+        )) : [];
+        const existingAdvanceById = new Map(existingAdvanceRows.map((row) => [row.id, row] as const));
+        const missingAdvanceRecordIds = advanceAllocationRecordIds.filter((advanceRecordId) => {
+          const row = existingAdvanceById.get(advanceRecordId);
+          if (!row) return true;
+          return !sameLegacyAdvanceScope({ farmId: row.farmId, seasonId: row.seasonId }, { farmId, seasonId });
+        });
+        if (missingAdvanceRecordIds.length) {
+          request.log.error({
+            workspaceId,
+            farmId,
+            seasonId,
+            settlementRecordId: settlementId,
+            settlementNumber,
+            missingAdvanceRecordIds,
+          }, "labour wage settlement advance lookup failed before allocation insert");
+          throw new Error("One or more advance records are no longer available. Please preview again.");
+        }
         const settlementPayload = {
           id: settlementId,
           clientRequestId: clientRequestId ?? null,
@@ -896,14 +1086,33 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           updatedAt: createdAt,
         }]);
         if (advanceAbsorptionRows.length) {
-          await tx.insert(labourWageSettlementAdvanceAllocations).values(advanceAbsorptionRows.map((row) => ({
-            workspaceId,
-            farmId,
-            seasonId,
-            settlementRecordId: settlementId,
-            advanceRecordId: row.advanceRecordId,
-            absorbedAmount: row.absorbedAmount.toFixed(2),
-          })));
+          for (const row of advanceAbsorptionRows) {
+            try {
+              await tx.insert(labourWageSettlementAdvanceAllocations).values({
+                workspaceId,
+                farmId,
+                seasonId,
+                settlementRecordId: settlementId,
+                advanceRecordId: row.advanceRecordId,
+                absorbedAmount: row.absorbedAmount.toFixed(2),
+              });
+            } catch (error) {
+              const dbError = toDatabaseErrorInfo(error);
+              logSettlementAllocationInsertFailure(request, {
+                workspaceId,
+                farmId,
+                seasonId,
+                settlementId,
+                settlementNumber,
+                allocationIndex: row.allocationIndex,
+                canonicalAdvanceRecordId: row.advanceRecordId,
+                sourceAdvanceId: row.sourceAdvanceId,
+                absorbedAmount: row.absorbedAmount,
+                error: dbError,
+              });
+              throw new Error(settlementPostingErrorMessage(dbError));
+            }
+          }
         }
         request.log.info({
           workspaceId,
@@ -1034,16 +1243,28 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         settlementId: result.settlement.id,
         settlementNumber: result.settlement.settlementNumber,
         durationMs: Date.now() - transactionStartedAt,
-      }, "labour wage settlement create request completed");
+        }, "labour wage settlement create request completed");
       return result;
     } catch (error) {
+      const dbError = toDatabaseErrorInfo(error);
       request.log.error({
         workspaceId,
         farmId,
         seasonId,
         clientRequestId: clientRequestId ?? null,
-        error,
+        errorCode: dbError?.code ?? null,
+        errorConstraint: dbError?.constraint ?? null,
+        errorTable: dbError?.table ?? null,
+        errorColumn: dbError?.column ?? null,
+        errorDetail: dbError?.detail ?? null,
+        errorHint: dbError?.hint ?? null,
+        errorSchema: dbError?.schema ?? null,
+        errorPosition: dbError?.position ?? null,
+        errorRoutine: dbError?.routine ?? null,
       }, "labour wage settlement create request rolled back");
+      if (dbError) {
+        return reply.code(400).send({ message: settlementPostingErrorMessage(dbError) });
+      }
       if (error instanceof Error) {
         return reply.code(400).send({ message: error.message });
       }

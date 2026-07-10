@@ -139,6 +139,36 @@ test("labour wage settlement create requests reuse a client request id and narro
   assert.ok(apiSource.includes("Settlement status is unknown. Please check Settlements before trying again."));
 });
 
+test("labour wage settlement allocations persist canonical advance UUIDs and log safe allocation failures", () => {
+  const routeSource = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
+  const ledgerSource = readFileSync(new URL("../src/lib/labour-advance-ledger.ts", import.meta.url), "utf8");
+  assert.ok(ledgerSource.includes("advanceRecordId: row.id"));
+  assert.ok(ledgerSource.includes("sourceAdvanceId: row.clientRecordId"));
+  assert.ok(ledgerSource.includes("advanceRecordId: row.advanceRecordId"));
+  assert.ok(routeSource.includes("canonicalAdvanceRecordId: row.advanceRecordId"));
+  assert.ok(routeSource.includes("sourceAdvanceId: row.sourceAdvanceId"));
+  assert.ok(routeSource.includes("failingAllocationIndex"));
+  assert.ok(routeSource.includes("postgresCode"));
+  assert.ok(routeSource.includes("postgresConstraint"));
+  assert.ok(routeSource.includes("postgresTable"));
+  assert.ok(routeSource.includes("postgresColumn"));
+  assert.ok(routeSource.includes("labour_wage_settlement_allocation_insert_failed"));
+  assert.ok(routeSource.includes("Settlement could not be created because its advance records could not be linked. No changes were saved."));
+  assert.ok(routeSource.includes("One or more advance records are no longer available. Please preview again."));
+  assert.doesNotMatch(routeSource, /labourWageSettlementAdvanceAllocations\)\.values\(\s*advanceAbsorptionRows\.map/);
+});
+
+test("labour wage settlement preview remains read-only and never inserts advance allocations", () => {
+  const routeSource = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
+  const previewStart = routeSource.indexOf('app.post("/v1/workspace/:workspaceId/labour-wage-settlements/preview"');
+  const createStart = routeSource.indexOf('app.post("/v1/workspace/:workspaceId/labour-wage-settlements"', previewStart + 1);
+  assert.ok(previewStart >= 0);
+  assert.ok(createStart > previewStart);
+  const previewBlock = routeSource.slice(previewStart, createStart);
+  assert.doesNotMatch(previewBlock, /labourWageSettlementAdvanceAllocations/);
+  assert.doesNotMatch(previewBlock, /tx\.insert\(/);
+});
+
 test("non-cash labour settlement stays out of the positive farm owes partner formula", () => {
   const apiSource = readFileSync(new URL("../src/routes/accounting-reconciliation.ts", import.meta.url), "utf8");
   const webPartnerAccounting = readFileSync(new URL("../../web/src/lib/partnerAccounting.ts", import.meta.url), "utf8");

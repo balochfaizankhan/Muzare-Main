@@ -46,6 +46,8 @@ type GroupRow = {
 
 export type LabourAdvanceReconciliationRow = {
   advanceId: string;
+  advanceRecordId: string;
+  sourceAdvanceId: string;
   date: string;
   amount: number;
   labourerId: string | null;
@@ -79,6 +81,7 @@ export type LabourAdvanceLedgerResult = {
   totals: LabourAdvanceLedgerTotals;
   includedAdvances: Array<{
     advanceId: string;
+    advanceRecordId: string;
     outstandingAmount: number;
     advanceDate: string;
   }>;
@@ -326,6 +329,8 @@ export async function resolveLabourAdvanceLedger(
     const includedInPreview = excludedReason === null;
     return {
       advanceId: row.clientRecordId,
+      advanceRecordId: row.id,
+      sourceAdvanceId: row.clientRecordId,
       date,
       amount,
       labourerId,
@@ -360,12 +365,13 @@ export async function resolveLabourAdvanceLedger(
   const availableGroupAdvances = Math.max(totalValidAdvancesToCutoff - previouslyAbsorbedAdvances, 0);
   const includedAdvances = validRows.map((row) => ({
     advanceId: row.advanceId,
+    advanceRecordId: row.advanceRecordId,
     outstandingAmount: row.remainingAvailableAmount,
     advanceDate: row.date,
   })).filter((row) => row.outstandingAmount > 0);
 
   return {
-    rows: advanceResults.sort((left, right) => left.date.localeCompare(right.date) || left.advanceId.localeCompare(right.advanceId)),
+    rows: advanceResults.sort((left, right) => left.date.localeCompare(right.date) || left.advanceRecordId.localeCompare(right.advanceRecordId)),
     totals: {
       totalValidAdvancesToCutoff,
       previouslyAbsorbedAdvances,

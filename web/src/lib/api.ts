@@ -1070,6 +1070,8 @@ export type LabourWageSettlementPreview = {
   }>;
   advanceReconciliation?: Array<{
     advanceId: string;
+    advanceRecordId: string;
+    sourceAdvanceId: string;
     date: string;
     amount: number;
     labourerId: string | null;
