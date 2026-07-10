@@ -1173,6 +1173,93 @@ export type LabourWageSettlementCreateStatus = {
   updatedAt: string;
   settlement: LabourWageSettlementRecord | null;
 };
+export type LabourWageSettlementDiagnostics = {
+  lookup: {
+    workspaceId: string;
+    settlementNumber?: string;
+    settlementId?: string;
+    clientRequestId?: string;
+  };
+  settlement: {
+    exists: boolean;
+    operationalRecordId: string | null;
+    clientRecordId: string | null;
+    settlementNumber: string | null;
+    status: string | null;
+    createdAt: string | null;
+    updatedAt: string | null;
+    fromDate: string | null;
+    toDate: string | null;
+    settlementDate: string | null;
+    groupId: string | null;
+    foremanId: string | null;
+    paidAmount: number | null;
+    advanceAdjustedNow: number | null;
+    grossWages: number | null;
+  };
+  lifecycle: {
+    exists: boolean;
+    state: string | null;
+    stage: string | null;
+    errorCode: string | null;
+    safeMessage: string | null;
+    safeToRetry: boolean | null;
+    createdAt: string | null;
+    updatedAt: string | null;
+    completedAt: string | null;
+  };
+  paymentAccountSnapshot: {
+    paymentAccountId: string | null;
+    paymentAccountCanonicalId: string | null;
+    paymentAccountLegacyId: string | null;
+    linkedAccountId: string | null;
+    paymentAccountName: string | null;
+    paymentAccountType: string | null;
+  };
+  paymentAccountResolution: {
+    canonicalAccountFound: boolean;
+    legacyAccountFound: boolean;
+    partnerAccountFound: boolean;
+    operationalAccountFound: boolean;
+    resolvedCanonicalId: string | null;
+    resolvedLegacyId: string | null;
+    resolvedName: string | null;
+    resolvedType: string | null;
+    active: boolean | null;
+    archived: boolean | null;
+    workspaceMatches: boolean;
+    resolutionFailureReason: string | null;
+    nameOnlyCandidates: Array<{ id: string; name: string; accountType: string | null; active: boolean | null; source: "canonical" | "operational" }>;
+  };
+  accounting: {
+    status: "COMPLETE" | "MISSING" | "REPAIR_REQUIRED" | "FAILED";
+    transactionCount: number;
+    activeTransactionCount: number;
+    reversalCount: number;
+    matchingReferenceIds: string[];
+    expectedPaymentAccountId: string | null;
+    storedPaymentAccountId: string | null;
+    identifierMismatch: boolean;
+    mismatchDescription: string | null;
+  };
+  allocations: {
+    count: number;
+    absorbedTotal: number;
+    missingAdvanceReferences: number;
+  };
+  attendance: {
+    linkedCount: number;
+  };
+  labourEarnings: {
+    linkedCount: number;
+    settledCount: number;
+  };
+  classification: {
+    settlementState: "FULLY_COMMITTED" | "COMMITTED_ACCOUNTING_MISSING" | "ROLLED_BACK" | "PARTIAL_OR_INCONSISTENT" | "NOT_FOUND";
+    recommendedAction: string;
+    safeToRetryCreate: boolean;
+  };
+};
 export type ExpenseSearchRecord = {
   id: string; workspaceId: string; farmId: string; seasonId: string; voucherNumber: string; date: string;
   originalVoucherNumber?: string;
@@ -1759,6 +1846,22 @@ export const fetchLabourWageSettlementCreateStatus = (
     {},
     token,
     { timeoutMs: 30_000, debugLabel: "labour-wage-settlement-status" },
+  );
+};
+export const fetchLabourWageSettlementDiagnostics = (
+  token: string,
+  workspaceId: string,
+  input: { settlementNumber?: string; settlementId?: string; clientRequestId?: string },
+) => {
+  const query = new URLSearchParams();
+  if (input.settlementNumber) query.set("settlementNumber", input.settlementNumber);
+  if (input.settlementId) query.set("settlementId", input.settlementId);
+  if (input.clientRequestId) query.set("clientRequestId", input.clientRequestId);
+  return apiRequest<LabourWageSettlementDiagnostics>(
+    `/v1/workspace/${workspaceId}/admin/labour-wage-settlements/diagnostics?${query.toString()}`,
+    {},
+    token,
+    { timeoutMs: 30_000, debugLabel: "labour-wage-settlement-diagnostics" },
   );
 };
 export const updateLabourWageSettlement = (

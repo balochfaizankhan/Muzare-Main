@@ -3970,6 +3970,20 @@ button {
   margin: 0 0 15px;
 }
 
+.diagnostic-json {
+  background: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 14px;
+  color: #e2e8f0;
+  font-size: .78rem;
+  line-height: 1.5;
+  margin: 12px 0 0;
+  overflow: auto;
+  padding: 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .expense-search-filters {
   display: grid;
   gap: 12px;
