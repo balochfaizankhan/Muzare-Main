@@ -1803,6 +1803,8 @@ export const previewLabourWageSettlement = (
     foremanId?: string | null;
     groupId?: string | null;
     labourIds?: string[];
+    paymentAccountId?: string | null;
+    accountId?: string | null;
     paidAmount?: number;
     manualAdjustment?: number;
   },

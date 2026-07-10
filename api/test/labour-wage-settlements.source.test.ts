@@ -144,6 +144,18 @@ test("labour wage settlement create requests reuse a client request id and narro
   assert.ok(webSource.includes("pendingRequestId"));
   assert.ok(webSource.includes("resolveSettlementCreateStatus"));
   assert.ok(apiSource.includes("The request is taking longer than expected. Checking settlement status..."));
+  assert.ok(source.includes('paymentAccountId: z.string().min(1).optional()'));
+  assert.ok(source.includes('accountId: z.string().min(1).optional()'));
+  assert.ok(source.includes('The payment account selection was not included. Select the account again.'));
+  assert.ok(source.includes('The selected payment account could not be found.'));
+  assert.ok(source.includes('The selected account cannot be used for labour settlements.'));
+  assert.ok(source.includes('const paymentAccountIdValue = account.id;'));
+  assert.doesNotMatch(source, /paymentAccountIdValue\s*=\s*effectivePaidAmount > 0 \?/);
+  assert.ok(webSource.includes('paymentAccountId: selectedPaymentAccountId'));
+  assert.ok(webSource.includes('accountId: selectedPaymentAccountId'));
+  assert.ok(webSource.includes('Select a valid payment account.'));
+  assert.ok(webSource.includes('required value={accountId}'));
+  assert.doesNotMatch(webSource, /required=\{Number\(paidAmount \|\| 0\) > 0\}/);
 });
 
 test("labour wage settlement allocations persist canonical advance UUIDs and log safe allocation failures", () => {

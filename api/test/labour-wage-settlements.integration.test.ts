@@ -9,6 +9,7 @@ import {
   accounts,
   farms,
   labourWageSettlementAdvanceAllocations,
+  labourWageSettlementCreateRequests,
   operationalRecords,
   seasons,
   userSessions,
@@ -117,6 +118,7 @@ after(async () => {
   if (app) await app.close();
   await db.delete(labourWageSettlementAdvanceAllocations).where(inArray(labourWageSettlementAdvanceAllocations.workspaceId, ids));
   await db.delete(accountTransactions).where(inArray(accountTransactions.farmId, [tenant.farmId]));
+  await db.delete(labourWageSettlementCreateRequests).where(eq(labourWageSettlementCreateRequests.workspaceId, tenant.workspaceId));
   await db.delete(operationalRecords).where(inArray(operationalRecords.workspaceId, ids));
   await db.delete(userSessions).where(eq(userSessions.userId, tenant.userId));
   await db.delete(accounts).where(eq(accounts.farmId, tenant.farmId));
@@ -214,7 +216,7 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
     settlementMode: "group",
     groupId: labourGroupId,
     paymentAccountId: paymentAccount.id,
-    paidAmount: 0,
+    paidAmount: 150,
     manualAdjustment: 0,
     clientRequestId,
   };
@@ -222,6 +224,11 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
   assert.equal(createResponse.statusCode, 200);
   const createdSettlement = createResponse.json().settlement;
   assert.equal(createdSettlement.foremanId, labourerId);
+  assert.equal(createdSettlement.paymentAccountId, paymentAccount.id);
+  assert.equal(createdSettlement.paymentAccountCanonicalId, paymentAccount.id);
+  assert.equal(createdSettlement.linkedAccountId, paymentAccount.id);
+  assert.equal(createdSettlement.paymentAccountName, "Settlement Cash Account");
+  assert.equal(createdSettlement.paymentAccountType, "cash");
 
   const duplicateCreateResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements`, createPayload);
   assert.equal(duplicateCreateResponse.statusCode, 200);
@@ -237,6 +244,11 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
     eq(operationalRecords.clientRecordId, createdSettlement.id),
   )).limit(1);
   assert.ok(settlementRow);
+  assert.equal((settlementRow!.payload as Record<string, unknown>).paymentAccountId, paymentAccount.id);
+  assert.equal((settlementRow!.payload as Record<string, unknown>).paymentAccountCanonicalId, paymentAccount.id);
+  assert.equal((settlementRow!.payload as Record<string, unknown>).linkedAccountId, paymentAccount.id);
+  assert.equal((settlementRow!.payload as Record<string, unknown>).paymentAccountName, "Settlement Cash Account");
+  assert.equal((settlementRow!.payload as Record<string, unknown>).paymentAccountType, "cash");
 
   const allocationRows = await db.select().from(labourWageSettlementAdvanceAllocations).where(eq(labourWageSettlementAdvanceAllocations.settlementRecordId, settlementRow!.id));
   assert.equal(allocationRows.length, 1);
@@ -341,6 +353,72 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
   const previewAfterVoid = previewAfterVoidResponse.json().preview;
   assert.equal(previewAfterVoid.previouslySettledAdvances, 0);
   assert.equal(previewAfterVoid.availableAdvanceBalanceBeforeSettlement, 120);
+});
+
+test("labour wage settlement create rejects a missing payment account before posting", async () => {
+  const labourerId = randomUUID();
+  const labourGroupId = randomUUID();
+  const clientRequestId = randomUUID();
+
+  assert.equal((await request("POST", "/v1/workspace/operational-records", envelope("labourer", labourerId, {
+    name: "Missing Account Foreman",
+    groupId: labourGroupId,
+    group: "Missing Account Group",
+    active: true,
+  }))).statusCode, 200);
+  assert.equal((await request("POST", "/v1/workspace/operational-records", envelope("labourGroup", labourGroupId, {
+    name: "Missing Account Group",
+    foremanLabourId: labourerId,
+    foremanId: labourerId,
+    active: true,
+  }))).statusCode, 200);
+  assert.equal((await request("POST", `/v1/workspace/${tenant.workspaceId}/wage-rates/bulk`, {
+    farmId: tenant.farmId,
+    seasonId: tenant.seasonId,
+    effectiveFrom: "2026-04-01",
+    effectiveTo: "2026-05-31",
+    rows: [{ labourerId, dailyRate: 100 }],
+  })).statusCode, 200);
+
+  const response = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements`, {
+    farmId: tenant.farmId,
+    seasonId: tenant.seasonId,
+    fromDate: "2026-04-11",
+    toDate: "2026-04-30",
+    settlementDate: "2026-05-01",
+    settlementMode: "group",
+    groupId: labourGroupId,
+    paidAmount: 0,
+    manualAdjustment: 0,
+    clientRequestId,
+  });
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.json().message, "The payment account selection was not included. Select the account again.");
+  assert.equal(response.json().fields[0], "paymentAccountId");
+
+  const [requestRow] = await db.select({
+    state: labourWageSettlementCreateRequests.state,
+    stage: labourWageSettlementCreateRequests.stage,
+    errorCode: labourWageSettlementCreateRequests.errorCode,
+    safeToRetry: labourWageSettlementCreateRequests.safeToRetry,
+  }).from(labourWageSettlementCreateRequests).where(and(
+    eq(labourWageSettlementCreateRequests.workspaceId, tenant.workspaceId),
+    eq(labourWageSettlementCreateRequests.clientRequestId, clientRequestId),
+    eq(labourWageSettlementCreateRequests.operationType, "labour_wage_settlement_create"),
+  )).limit(1);
+  assert.ok(requestRow);
+  assert.equal(requestRow!.state, "rolled_back");
+  assert.equal(requestRow!.stage, "rolled_back");
+  assert.equal(requestRow!.errorCode, "SETTLEMENT_PAYMENT_ACCOUNT_MISSING");
+  assert.equal(requestRow!.safeToRetry, true);
+
+  const settlementRows = await db.select({
+    id: operationalRecords.id,
+  }).from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, tenant.workspaceId),
+    eq(operationalRecords.entityType, "labourWageSettlement"),
+  ));
+  assert.equal(settlementRows.length, 0);
 });
 
 test("settlement status keeps committed settlements with missing accounts in SUCCESS plus REPAIR_REQUIRED", async () => {

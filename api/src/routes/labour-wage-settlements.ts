@@ -41,6 +41,8 @@ const settlementSelectionSchema = z.object({
   labourIds: z.array(z.string().uuid()).optional(),
 });
 const previewSchema = baseSchema.extend(settlementSelectionSchema.shape).extend({
+  paymentAccountId: z.string().min(1).optional(),
+  accountId: z.string().min(1).optional(),
   paidAmount: z.coerce.number().nonnegative().optional(),
   manualAdjustment: z.coerce.number().optional(),
 });
@@ -1268,6 +1270,64 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         seasonId,
         clientRequestId: effectiveClientRequestId,
       }, "labour wage settlement transaction started");
+      const effectivePaidAmount = Number(paidAmount ?? 0);
+      const paymentAccountInput = (paymentAccountId ?? accountId ?? "").trim();
+      if (!paymentAccountInput) {
+        await updateCreateRequestState("rolled_back", {
+          errorCode: "SETTLEMENT_PAYMENT_ACCOUNT_MISSING",
+          safeToRetry: true,
+          message: failedSettlementCreateMessage,
+          completedAt: new Date(),
+        });
+        return reply.code(400).send({
+          message: "The payment account selection was not included. Select the account again.",
+          fields: ["paymentAccountId"],
+        });
+      }
+      logSettlementAccountValidation(request, {
+        paymentAccountId: paymentAccountInput,
+        selectedFarmId: farmId,
+        selectedSeasonId: seasonId,
+      });
+      const resolvedAccount = await db.transaction((tx) => resolveCanonicalPaymentAccountId(tx, workspaceId, farmId, paymentAccountInput));
+      logSettlementAccountValidation(request, {
+        paymentAccountId: paymentAccountInput,
+        selectedFarmId: farmId,
+        selectedSeasonId: seasonId,
+        accountRowFound: Boolean(resolvedAccount),
+        accountFarmId: resolvedAccount?.farmId ?? null,
+        accountType: resolvedAccount?.accountType ?? null,
+        accountActive: resolvedAccount?.active ?? null,
+        accountSourceType: resolvedAccount?.sourceType ?? null,
+      });
+      const accountValidation = validateLabourSettlementPaymentAccount(resolvedAccount, farmId);
+      if (!accountValidation.valid) {
+        logSettlementAccountValidation(request, {
+          paymentAccountId: paymentAccountInput,
+          selectedFarmId: farmId,
+          selectedSeasonId: seasonId,
+          validationReason: accountValidation.reason,
+          validationMessage: accountValidation.message,
+        });
+        const validationMessage = accountValidation.reason === "not_mapped"
+          ? "The selected payment account could not be found."
+          : accountValidation.reason === "inactive"
+            ? "The selected account cannot be used for labour settlements."
+            : accountValidation.reason === "wrong_farm"
+              ? "The selected payment account belongs to another farm."
+              : "The selected account cannot be used for labour settlements.";
+        await updateCreateRequestState("rolled_back", {
+          errorCode: accountValidation.reason === "not_mapped" ? "SETTLEMENT_PAYMENT_ACCOUNT_MISSING" : "SETTLEMENT_PAYMENT_ACCOUNT_INVALID",
+          safeToRetry: true,
+          message: failedSettlementCreateMessage,
+          completedAt: new Date(),
+        });
+        return reply.code(400).send({
+          message: validationMessage,
+          fields: ["paymentAccountId"],
+        });
+      }
+      const account = resolvedAccount as NonNullable<typeof resolvedAccount>;
       const result = await db.transaction(async (tx) => {
         await tx.execute(sql`SET LOCAL lock_timeout = '10s'`);
         await tx.execute(sql`SET LOCAL statement_timeout = '90s'`);
@@ -1302,43 +1362,6 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
             };
           }
         }
-        const effectivePaidAmount = Number(paidAmount ?? 0);
-        const paymentAccountInput = paymentAccountId ?? accountId ?? "";
-        logSettlementAccountValidation(request, {
-          paymentAccountId: paymentAccountInput,
-          selectedFarmId: farmId,
-          selectedSeasonId: seasonId,
-        });
-        const resolvedAccount = paymentAccountInput
-          ? await resolveCanonicalPaymentAccountId(tx, workspaceId, farmId, paymentAccountInput)
-          : null;
-        logSettlementAccountValidation(request, {
-          paymentAccountId: paymentAccountInput,
-          selectedFarmId: farmId,
-          selectedSeasonId: seasonId,
-          accountRowFound: Boolean(resolvedAccount),
-          accountFarmId: resolvedAccount?.farmId ?? null,
-          accountType: resolvedAccount?.accountType ?? null,
-          accountActive: resolvedAccount?.active ?? null,
-          accountSourceType: resolvedAccount?.sourceType ?? null,
-        });
-        if (effectivePaidAmount > 0) {
-          const accountValidation = validateLabourSettlementPaymentAccount(resolvedAccount, farmId);
-          if (!accountValidation.valid) {
-            logSettlementAccountValidation(request, {
-              paymentAccountId: paymentAccountInput,
-              selectedFarmId: farmId,
-              selectedSeasonId: seasonId,
-              validationReason: accountValidation.reason,
-              validationMessage: accountValidation.message,
-            });
-            throw new Error(accountValidation.message ?? "Payment account validation failed.");
-          }
-          if (!resolvedAccount) {
-            throw new Error("Payment account is not mapped. Please repair imported accounts.");
-          }
-        }
-        const account = resolvedAccount;
         const createdAt = new Date();
         const settlementClientRecordId = crypto.randomUUID();
         const settlementNumber = await allocateSettlementNumber(tx, workspaceId, farmId);
@@ -1352,7 +1375,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           effectiveAdvanceAdjustedNow,
         );
         const description = `Labour wage settlement: ${fromDate} to ${toDate} (attendance wages + labour work)`;
-        const paymentAccountIdValue = effectivePaidAmount > 0 ? account?.id ?? resolvedAccount?.id ?? paymentAccountInput : null;
+        const paymentAccountIdValue = account.id;
         const legacyUnallocatedAdvanceConsumption = Number((preview as { legacyUnallocatedPreviouslySettledAdvances?: unknown }).legacyUnallocatedPreviouslySettledAdvances ?? 0);
         if (legacyUnallocatedAdvanceConsumption > 0.005) {
           request.log.error({

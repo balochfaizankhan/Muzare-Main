@@ -247,6 +247,7 @@ export function LabourWageSettlements() {
   const selectedGroup = useMemo(() => labourGroups.find((group) => group.id === groupId) ?? null, [groupId, labourGroups]);
   const selectedGroupForemanId = selectedGroup?.foremanLabourId ?? selectedGroup?.foremanId ?? "";
   const effectiveGroupForemanId = settlementMode === "group" ? selectedGroupForemanId : foremanId;
+  const selectedPaymentAccountId = accountId.trim() || undefined;
 
   useEffect(() => {
     if (!token || !workspaceId || !selectedSettlement?.id || !navigator.onLine) return;
@@ -309,9 +310,11 @@ export function LabourWageSettlements() {
     settlementMode,
     labourerId: settlementMode === "individual" ? labourerId || undefined : undefined,
     groupId: settlementMode === "group" ? groupId || undefined : undefined,
+    paymentAccountId: selectedPaymentAccountId,
+    accountId: selectedPaymentAccountId,
     paidAmount: toFiniteNumber(paidAmount),
     manualAdjustment: toFiniteNumber(manualAdjustment),
-  }), [activeFarmId, activeSeasonId, fromDate, toDate, settlementDate, settlementMode, labourerId, groupId, paidAmount, manualAdjustment]);
+  }), [activeFarmId, activeSeasonId, fromDate, toDate, settlementDate, settlementMode, labourerId, groupId, selectedPaymentAccountId, paidAmount, manualAdjustment]);
 
   const previewRequestFingerprint = useMemo(() => JSON.stringify(previewRequest), [previewRequest]);
   const previewSubmissionFingerprint = useMemo(() => JSON.stringify(previewDiagnostics.submittedPayload), [previewDiagnostics.submittedPayload]);
@@ -326,6 +329,7 @@ export function LabourWageSettlements() {
     if (!previewRequest.settlementDate) fields.push("settlementDate");
     if (previewRequest.settlementMode === "individual" && !previewRequest.labourerId) fields.push("labourerId");
     if (previewRequest.settlementMode === "group" && !previewRequest.groupId) fields.push("groupId");
+    if (!previewRequest.paymentAccountId) fields.push("paymentAccountId");
     return fields;
   }, [previewRequest]);
 
@@ -596,8 +600,8 @@ export function LabourWageSettlements() {
       setError("Select an active farm and season before creating a settlement.");
       return;
     }
-    if (Number(paidAmount || 0) > 0 && !accountId) {
-      setError("Select a payment account when paid now is greater than zero.");
+    if (!selectedPaymentAccountId) {
+      setError("Select a valid payment account.");
       return;
     }
     if (settlementMode === "individual" && !labourerId) {
@@ -642,7 +646,8 @@ export function LabourWageSettlements() {
             settlementMode,
             labourerId: settlementMode === "individual" ? labourerId || undefined : undefined,
             groupId: settlementMode === "group" ? groupId || undefined : undefined,
-            paymentAccountId: Number(paidAmount || 0) > 0 ? accountId : undefined,
+            paymentAccountId: selectedPaymentAccountId,
+            accountId: selectedPaymentAccountId,
             paidAmount: Number(paidAmount || 0),
             manualAdjustment: Number(manualAdjustment || 0),
             manualAdjustmentNote: Number(manualAdjustment || 0) !== 0 ? manualAdjustmentNote.trim() : undefined,
@@ -660,7 +665,8 @@ export function LabourWageSettlements() {
         settlementMode,
         labourerId: settlementMode === "individual" ? labourerId || undefined : undefined,
         groupId: settlementMode === "group" ? groupId || undefined : undefined,
-        paymentAccountId: Number(paidAmount || 0) > 0 ? accountId : undefined,
+        paymentAccountId: selectedPaymentAccountId,
+        accountId: selectedPaymentAccountId,
         paidAmount: Number(paidAmount || 0),
         manualAdjustment: Number(manualAdjustment || 0),
         manualAdjustmentNote: Number(manualAdjustment || 0) !== 0 ? manualAdjustmentNote.trim() : undefined,
@@ -819,7 +825,7 @@ export function LabourWageSettlements() {
     if (!canPost) return t("common.viewOnlyAccess");
     if (onlineRequired) return "Wage settlement requires online connection.";
     if (!token || !workspaceId || !activeFarmId || !activeSeasonId) return "Select an active farm and season before creating a settlement.";
-    if (Number(paidAmount || 0) > 0 && !accountId) return "Select a payment account when paid now is greater than zero.";
+    if (!selectedPaymentAccountId) return "Select a valid payment account.";
     if (settlementMode === "individual" && !labourerId) return "Select a labourer for an individual settlement.";
     if (settlementMode === "group" && !groupId) return "Select a labour group.";
     if (Number(manualAdjustment || 0) !== 0 && !manualAdjustmentNote.trim()) return "Manual adjustment note is required when manual adjustment is non-zero.";
@@ -827,7 +833,7 @@ export function LabourWageSettlements() {
     if (summary.unresolvedRows.length || summary.overlappingSettlements.length) return "This wage settlement still has unresolved wage rates or overlapping settlements.";
     if (!summaryConsistent) return "Preview is inconsistent. Create Settlement is disabled until the reconciliation matches.";
     return "";
-  }, [accountId, activeFarmId, activeSeasonId, canPost, labourerId, manualAdjustment, manualAdjustmentNote, onlineRequired, paidAmount, settlementMode, summary, summaryConsistent, t, token, workspaceId, groupId]);
+  }, [activeFarmId, activeSeasonId, canPost, labourerId, manualAdjustment, manualAdjustmentNote, onlineRequired, paidAmount, selectedPaymentAccountId, settlementMode, summary, summaryConsistent, t, token, workspaceId, groupId]);
   useEffect(() => {
     setPreviewDiagnostics((current) => ({
       ...current,
@@ -1236,7 +1242,7 @@ export function LabourWageSettlements() {
             <div className="advances-filter-row">
               <label className="advances-filter-field">
                 <span>Payment account</span>
-                <select required={Number(paidAmount || 0) > 0} value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+                <select required value={accountId} onChange={(event) => setAccountId(event.target.value)}>
                   <option value="">Select payment account</option>
                   {paymentAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
                 </select>
