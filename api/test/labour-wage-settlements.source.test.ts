@@ -133,6 +133,9 @@ test("labour wage settlement create requests reuse a client request id and narro
   assert.ok(source.includes("labourWageSettlementCreateRequests"));
   assert.ok(source.includes("updateCreateRequestState(\"request_received\")"));
   assert.ok(source.includes("updateCreateRequestState(\"transaction_started\")"));
+  assert.ok(source.includes("updateCreateRequestState(\"attendance_linked\""));
+  assert.ok(source.includes("updateCreateRequestState(\"accounting_posted\""));
+  assert.ok(source.includes("SET LOCAL statement_timeout = '90s'"));
   assert.ok(source.includes("updateCreateRequestState(\"rolled_back\""));
   assert.ok(source.includes("inArray(operationalRecords.clientRecordId, includedEarningIds)"));
   assert.ok(source.includes("inArray(operationalRecords.clientRecordId, includedAttendanceIds)"));
@@ -333,8 +336,11 @@ test("frontend rechecks settlement creation status after timeout before allowing
   assert.ok(pageSource.includes("Settlement creation is still processing. Do not submit it again."));
   assert.ok(pageSource.includes("Settlement creation is still processing. You may leave this page and check Settlements shortly. Do not create it again."));
   assert.ok(pageSource.includes("window.sessionStorage"));
+  assert.ok(pageSource.includes("activeStatusResolverRequestIdRef"));
   assert.ok(pageSource.includes("View Settlements"));
   assert.ok(pageSource.includes("Check Status"));
+  assert.ok(pageSource.includes("Settlement in progress..."));
+  assert.doesNotMatch(pageSource, /Checking status\.\.\./);
 });
 
 test("labour group foreman support and advance report labels are explicit in the UI", () => {

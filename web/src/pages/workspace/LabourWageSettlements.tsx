@@ -93,6 +93,7 @@ export function LabourWageSettlements() {
 
   const onlineRequired = !navigator.onLine;
   const statusPollingAbortRef = useRef<AbortController | null>(null);
+  const activeStatusResolverRequestIdRef = useRef<string | null>(null);
   const restoredPendingRequestIdRef = useRef<string | null>(null);
   const pendingSettlementStorageKey = useMemo(() => {
     if (!workspaceId || !activeFarmId || !activeSeasonId) return "";
@@ -432,9 +433,13 @@ export function LabourWageSettlements() {
       setStatusCheckNotice("Settlement creation is still processing. Do not submit it again.");
       return;
     }
+    if (activeStatusResolverRequestIdRef.current === clientRequestId && statusPollingAbortRef.current) {
+      return;
+    }
     statusPollingAbortRef.current?.abort();
     const abortController = new AbortController();
     statusPollingAbortRef.current = abortController;
+    activeStatusResolverRequestIdRef.current = clientRequestId;
     setStatusCheckInFlight(true);
     setStatusCheckNotice("Checking settlement status...");
     setError("");
@@ -482,6 +487,9 @@ export function LabourWageSettlements() {
     } finally {
       if (statusPollingAbortRef.current === abortController) {
         statusPollingAbortRef.current = null;
+      }
+      if (activeStatusResolverRequestIdRef.current === clientRequestId) {
+        activeStatusResolverRequestIdRef.current = null;
       }
       setStatusCheckInFlight(false);
     }
@@ -1168,7 +1176,7 @@ export function LabourWageSettlements() {
                   onClick={() => pendingRequestId ? void resolveSettlementCreateStatus(pendingRequestId) : undefined}
                   disabled={statusCheckInFlight || !pendingRequestId}
                 >
-                  {statusCheckInFlight ? "Checking status..." : "Check Status"}
+                  Check Status
                 </button>
                 <button type="button" className="secondary-action" onClick={scrollToSettlements} disabled={statusCheckInFlight}>
                   View Settlements
@@ -1183,11 +1191,9 @@ export function LabourWageSettlements() {
               <button type="submit" disabled={Boolean(createDisabledReason) || submitting || statusCheckInFlight || Boolean(pendingRequestId)}>
                 {submitting
                   ? "Creating settlement..."
-                  : statusCheckInFlight
-                    ? "Checking settlement status..."
-                    : pendingRequestId
-                      ? "Settlement still processing..."
-                      : "Create Settlement"}
+                  : pendingRequestId
+                    ? "Settlement in progress..."
+                    : "Create Settlement"}
               </button>
             </div>
           </form>

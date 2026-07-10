@@ -96,11 +96,13 @@ type SettlementCreateRequestInternalState =
   | "selection_resolved"
   | "preview_recalculated"
   | "transaction_started"
-  | "inserting_settlement"
-  | "inserting_allocations"
-  | "linking_earnings"
+  | "settlement_inserted"
+  | "allocations_inserted"
+  | "earnings_linked"
   | "linking_attendance"
+  | "attendance_linked"
   | "posting_accounting"
+  | "accounting_posted"
   | "committed"
   | "rolled_back"
   | "already_created";
@@ -161,16 +163,21 @@ function settlementCreateStageMessage(stage: string | null | undefined) {
     case "preview_recalculated":
       return "Validating settlement...";
     case "transaction_started":
-    case "inserting_settlement":
+      return "Starting settlement transaction...";
+    case "settlement_inserted":
       return "Saving settlement...";
-    case "inserting_allocations":
+    case "allocations_inserted":
       return "Linking advances...";
-    case "linking_earnings":
+    case "earnings_linked":
       return "Linking labour earnings...";
     case "linking_attendance":
       return "Linking attendance...";
+    case "attendance_linked":
+      return "Attendance linked. Posting accounting...";
     case "posting_accounting":
       return "Posting accounting...";
+    case "accounting_posted":
+      return "Accounting posted. Finalizing settlement...";
     case "committed":
       return "Settlement created successfully.";
     case "already_created":
@@ -572,6 +579,9 @@ function toDatabaseErrorInfo(error: unknown) {
 
 function settlementPostingErrorMessage(info: ReturnType<typeof toDatabaseErrorInfo>) {
   if (!info) return "Settlement could not be created. No changes were saved.";
+  if (info.code === "57014") {
+    return "Settlement creation took too long and was stopped. No changes were saved.";
+  }
   if (info.code === "22P02" || info.code === "23503") {
     return "Settlement could not be created because its advance records could not be linked. No changes were saved.";
   }
@@ -583,6 +593,7 @@ function settlementPostingErrorMessage(info: ReturnType<typeof toDatabaseErrorIn
 
 function settlementPostingErrorCode(info: ReturnType<typeof toDatabaseErrorInfo>) {
   if (!info) return "SETTLEMENT_POSTING_FAILED";
+  if (info.code === "57014") return "SETTLEMENT_STAGE_TIMEOUT";
   if (info.code === "22P02" || info.code === "23503") return "SETTLEMENT_ADVANCE_LINK_FAILED";
   if (info.code === "23505" && info.constraint?.toLowerCase().includes("labour_wage_settlement_advance_allocations")) return "SETTLEMENT_ALREADY_CREATED";
   return "SETTLEMENT_POSTING_FAILED";
@@ -1233,6 +1244,8 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         clientRequestId: effectiveClientRequestId,
       }, "labour wage settlement transaction started");
       const result = await db.transaction(async (tx) => {
+        await tx.execute(sql`SET LOCAL lock_timeout = '10s'`);
+        await tx.execute(sql`SET LOCAL statement_timeout = '90s'`);
         {
           const requestScopeKey = `${workspaceId}:${farmId}:labour-wage-settlement:${effectiveClientRequestId}`;
           await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${requestScopeKey}), 1)`);
@@ -1304,10 +1317,6 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         const createdAt = new Date();
         const settlementClientRecordId = crypto.randomUUID();
         const settlementNumber = await allocateSettlementNumber(tx, workspaceId, farmId);
-        await updateCreateRequestState("inserting_settlement", {
-          settlementClientRecordId,
-          settlementNumber,
-        });
         const effectiveAdvanceAdjustedNow = effectiveAdvanceAdjustmentForPosting(preview, Number(manualAdjustment ?? 0));
         const settlementTotals = calculateLabourWageSettlementTotals(
           preview.attendanceWages,
@@ -1536,12 +1545,13 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           throw new Error("Settlement could not be created. No changes were saved.");
         }
         const settlementOperationalRecordId = insertedSettlementRecord.operationalRecordId;
+        await updateCreateRequestState("settlement_inserted", {
+          settlementOperationalRecordId,
+          settlementClientRecordId,
+          settlementNumber,
+        });
         if (advanceAbsorptionRows.length) {
-          await updateCreateRequestState("inserting_allocations", {
-            settlementOperationalRecordId,
-            settlementClientRecordId,
-            settlementNumber,
-          });
+          const allocationsStartedAt = Date.now();
           for (const row of advanceAbsorptionRows) {
             try {
               await tx.insert(labourWageSettlementAdvanceAllocations).values({
@@ -1569,7 +1579,21 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
               throw new Error(settlementPostingErrorMessage(dbError));
             }
           }
+          request.log.info({
+            workspaceId,
+            farmId,
+            seasonId,
+            settlementClientRecordId,
+            settlementNumber,
+            allocationRowCount: advanceAbsorptionRows.length,
+            durationMs: Date.now() - allocationsStartedAt,
+          }, "labour wage settlement allocation insert completed");
         }
+        await updateCreateRequestState("allocations_inserted", {
+          settlementOperationalRecordId,
+          settlementClientRecordId,
+          settlementNumber,
+        });
         request.log.info({
           workspaceId,
           farmId,
@@ -1597,11 +1621,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           settlementClientRecordId,
           includedEarningCount: earningsToSettle.length,
         }, "labour wage settlement labour earning update started");
-        await updateCreateRequestState("linking_earnings", {
-          settlementOperationalRecordId,
-          settlementClientRecordId,
-          settlementNumber,
-        });
+        const earningsStartedAt = Date.now();
         for (const earning of earningsToSettle) {
           const nextPayload = {
             ...normalizeLabourEarningPayload(earning.payload as Record<string, unknown>),
@@ -1624,7 +1644,13 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           seasonId,
           settlementClientRecordId,
           includedEarningCount: earningsToSettle.length,
+          durationMs: Date.now() - earningsStartedAt,
         }, "labour wage settlement labour earning update completed");
+        await updateCreateRequestState("earnings_linked", {
+          settlementOperationalRecordId,
+          settlementClientRecordId,
+          settlementNumber,
+        });
         const includedAttendanceIds = [...new Set((preview.sourceAttendanceIds ?? []).filter(Boolean))];
         const attendanceRows = includedAttendanceIds.length ? await tx.select({
           id: operationalRecords.id,
@@ -1649,6 +1675,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           settlementClientRecordId,
           settlementNumber,
         });
+        const attendanceStartedAt = Date.now();
         for (const attendance of attendanceRows) {
           const nextPayload = {
             ...(attendance.payload as Record<string, unknown>),
@@ -1662,13 +1689,31 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
             updatedAt: createdAt,
           }).where(eq(operationalRecords.id, attendance.id));
         }
+        if (attendanceRows.length !== includedAttendanceIds.length) {
+          request.log.error({
+            workspaceId,
+            farmId,
+            seasonId,
+            settlementClientRecordId,
+            expectedIncludedAttendanceCount: includedAttendanceIds.length,
+            linkedAttendanceCount: attendanceRows.length,
+          }, "labour wage settlement attendance reconciliation failed before accounting");
+          throw new Error("Settlement attendance reconciliation failed. No changes were saved.");
+        }
         request.log.info({
           workspaceId,
           farmId,
           seasonId,
           settlementClientRecordId,
           includedAttendanceCount: attendanceRows.length,
+          expectedIncludedAttendanceCount: includedAttendanceIds.length,
+          durationMs: Date.now() - attendanceStartedAt,
         }, "labour wage settlement attendance update completed");
+        await updateCreateRequestState("attendance_linked", {
+          settlementOperationalRecordId,
+          settlementClientRecordId,
+          settlementNumber,
+        });
         const settlementRecord = {
           id: settlementOperationalRecordId,
           clientRecordId: settlementClientRecordId,
@@ -1689,13 +1734,20 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           settlementClientRecordId,
           settlementNumber,
         });
+        const accountingStartedAt = Date.now();
         await repairPostedSettlementAccounting(tx, settlementRecord, request.appUser!.id);
         request.log.info({
           workspaceId,
           farmId,
           seasonId,
           settlementClientRecordId,
+          durationMs: Date.now() - accountingStartedAt,
         }, "labour wage settlement accounting repair completed");
+        await updateCreateRequestState("accounting_posted", {
+          settlementOperationalRecordId,
+          settlementClientRecordId,
+          settlementNumber,
+        });
         request.log.info({
           workspaceId,
           farmId,
