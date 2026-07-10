@@ -383,8 +383,23 @@ test("labour settlement form loads canonical payment account uuids and shows LW 
   assert.match(settlementPage, /Void \/ Reverse settlement/);
   assert.match(settlementPage, /Delete settlement/);
   assert.match(settlementPage, /placeholder="Search settlement number, notes, or account"/);
+  assert.match(settlementPage, /Available Group Advances/);
+  assert.match(settlementPage, /Advance Absorbed This Settlement/);
+  assert.match(settlementPage, /Outstanding Group Advance/);
   assert.doesNotMatch(settlementPage, /Generated voucher|View Generated Voucher/);
   assert.doesNotMatch(settlementPage, /Settlement and voucher are posted together in one transaction\./);
+});
+
+test("advance report filters use explicit labels and a visible active-filter summary", async () => {
+  const reports = await source("web/src/pages/workspace/Reports.tsx");
+  assert.match(reports, /Active Advance Filters/);
+  assert.match(reports, /Advance Recorded By/);
+  assert.match(reports, /Labour Group/);
+  assert.match(reports, /Labourer/);
+  assert.match(reports, /Paid From Account/);
+  assert.match(reports, /Minimum Amount/);
+  assert.match(reports, /Maximum Amount/);
+  assert.match(reports, /Date Range/);
 });
 
 test("financial cards and expense category totals use readable tokenized surfaces and compact money", async () => {

@@ -3,7 +3,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireUser } from "../auth.js";
 import { db } from "../db/client.js";
-import { accountTransactions, auditLogs, operationalRecords, userSessions } from "../db/schema.js";
+import { accountTransactions, auditLogs, labourWageSettlementAdvanceAllocations, operationalRecords, userSessions } from "../db/schema.js";
 import { listLabourEarnings, normalizeLabourEarningPayload } from "../lib/labour-earnings.js";
 import { isDeletedOperationalPayload } from "../operational-record-state.js";
 import { hasFarmAccess } from "../workspace-access.js";
@@ -11,7 +11,6 @@ import { hasModulePermission } from "../permissions.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
 import {
   allocateSettlementNumber,
-  calculateGroupAdvancePoolTotals,
   calculateLabourWageSettlementTotals,
   listCanonicalPaymentAccounts,
   listLabourWageSettlements,
@@ -177,12 +176,7 @@ function effectiveAdvanceAdjustmentForPosting(preview: {
   const grossWages = Number(preview.grossWages ?? (preview.attendanceWages + labourWorkWages));
   const availableAdvanceBalanceBeforeSettlement = Number(preview.availableAdvanceBalanceBeforeSettlement ?? preview.advancesAvailableUpToSettlementDate ?? 0);
   if (preview.settlementMode === "group") {
-    return calculateGroupAdvancePoolTotals({
-      grossWages,
-      totalAdvancesUpToSettlementDate: availableAdvanceBalanceBeforeSettlement,
-      previouslySettledAdvances: 0,
-      manualAdjustment,
-    }).advanceAdjustedNow;
+    return Math.max(0, Math.min(grossWages + manualAdjustment, availableAdvanceBalanceBeforeSettlement));
   }
   return Number(preview.advanceAdjustedNow ?? preview.settledAdvanceAmount ?? 0);
 }
@@ -618,6 +612,16 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         );
         const description = `Labour wage settlement: ${fromDate} to ${toDate} (attendance wages + labour work)`;
         const paymentAccountIdValue = effectivePaidAmount > 0 ? account?.id ?? resolvedAccount?.id ?? paymentAccountInput : null;
+        const advanceAbsorptionRows = preview.advanceReconciliation
+          ?.filter((row) => row.includedInPreview && row.remainingAvailableAmount > 0 && row.advanceId)
+          .reduce<Array<{ advanceRecordId: string; absorbedAmount: number }>>((rows, row) => {
+            const remainingTarget = Math.max(0, settlementTotals.advanceAdjustedNow - rows.reduce((sum, item) => sum + item.absorbedAmount, 0));
+            if (remainingTarget <= 0) return rows;
+            const absorbedAmount = Math.min(remainingTarget, row.remainingAvailableAmount);
+            if (absorbedAmount <= 0) return rows;
+            rows.push({ advanceRecordId: row.advanceId, absorbedAmount });
+            return rows;
+          }, []) ?? [];
         const settlementPayload = {
           id: settlementId,
           clientRequestId: clientRequestId ?? null,
@@ -628,7 +632,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           linkedAccountName: account?.name ?? resolvedAccount?.name ?? "",
           paymentAccountId: paymentAccountIdValue,
           settlementMode: settlementMode ?? "individual",
-          foremanId: foremanId ?? null,
+          foremanId: preview.foremanId ?? foremanId ?? null,
           groupId: preview.groupId ?? groupId ?? null,
           groupName: preview.groupName ?? null,
           includedLabourIds: preview.includedLabourIds ?? [],
@@ -671,7 +675,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           updatedAt: createdAt.toISOString(),
           sourceAttendanceIds: preview.sourceAttendanceIds ?? [],
           sourceLabourWorkIds: preview.sourceLabourWorkIds ?? [],
-          advanceAdjustmentAllocations: settlementMode === "group" ? [] : (preview.advanceAdjustmentAllocations ?? []),
+          advanceAdjustmentAllocations: [],
           settlementScopeSnapshot: preview.settlementScopeSnapshot ?? {
             settlementMode: settlementMode ?? "individual",
             groupId: preview.groupId ?? groupId ?? null,
@@ -707,6 +711,16 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           createdAt,
           updatedAt: createdAt,
         }]);
+        if (advanceAbsorptionRows.length) {
+          await tx.insert(labourWageSettlementAdvanceAllocations).values(advanceAbsorptionRows.map((row) => ({
+            workspaceId,
+            farmId,
+            seasonId,
+            settlementRecordId: settlementId,
+            advanceRecordId: row.advanceRecordId,
+            absorbedAmount: row.absorbedAmount.toFixed(2),
+          })));
+        }
         request.log.info({
           workspaceId,
           farmId,

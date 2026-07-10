@@ -223,14 +223,13 @@ test("voided, cancelled, and reversed settlements do not consume advance balance
 
 test("labour settlement preview computes prior settled advances separately from current adjustment", () => {
   const source = readFileSync(new URL("../src/lib/labour-wage-settlements.ts", import.meta.url), "utf8");
-  assert.ok(source.includes("settlementConsumesAdvanceBalance(row.payload)"));
-  assert.ok(source.includes("priorValidAdvanceSettledByLabourer"));
-  assert.ok(source.includes("excludedVoidedAdvanceSettledByLabourer"));
-  assert.ok(source.includes("priorValidGroupSettledAdvances"));
-  assert.ok(source.includes("settlementGroupScopeKey(settlement.payload) === currentGroupScopeKey"));
-  assert.ok(source.includes('const includedAdvanceRows = selection.settlementMode === "group"'));
+  assert.ok(source.includes("settlementConsumesAdvanceBalance"));
   assert.ok(source.includes("advanceDebugTrace"));
-  assert.ok(source.includes("const previouslySettledAdvances = groupAdvancePoolTotals?.previouslySettledAdvances"));
+  assert.ok(source.includes("excludedVoidedSettledAdvances"));
+  assert.ok(source.includes("advanceReconciliation"));
+  assert.ok(source.includes("const advanceAdjustedNow = selection.settlementMode === \"group\""));
+  assert.ok(source.includes("advanceDebugTrace"));
+  assert.ok(source.includes("const previouslySettledAdvances = advanceLedger.totals.previouslyAbsorbedAdvances"));
   assert.ok(!source.includes("const previouslySettledAdvances = Math.max(rawAdvancesUpToSettlementDate - availableAdvanceBalanceBeforeSettlement, 0);"));
 });
 
@@ -239,7 +238,7 @@ test("group settlement posting preserves pooled advance totals without individua
   assert.ok(source.includes("effectiveAdvanceAdjustmentForPosting"));
   assert.ok(source.includes("rawAdvancesUpToSettlementDate: preview.rawAdvancesUpToSettlementDate"));
   assert.ok(source.includes("previouslySettledAdvances: preview.previouslySettledAdvances"));
-  assert.ok(source.includes('advanceAdjustmentAllocations: settlementMode === "group" ? [] : (preview.advanceAdjustmentAllocations ?? [])'));
+  assert.ok(source.includes("advanceAdjustmentAllocations: [],"));
 });
 
 test("settlement create status endpoint reuses the client request id and processing lock", () => {
@@ -267,6 +266,21 @@ test("frontend rechecks settlement creation status after timeout before allowing
   assert.ok(pageSource.includes("Settlement status is still unknown. Please check Settlements before trying again."));
   assert.ok(pageSource.includes("View Settlements"));
   assert.ok(pageSource.includes("Check Again"));
+});
+
+test("labour group foreman support and advance report labels are explicit in the UI", () => {
+  const groupsPage = readFileSync(new URL("../../web/src/pages/workspace/LabourGroups.tsx", import.meta.url), "utf8");
+  const settlementsPage = readFileSync(new URL("../../web/src/pages/workspace/LabourWageSettlements.tsx", import.meta.url), "utf8");
+  const reportsPage = readFileSync(new URL("../../web/src/pages/workspace/Reports.tsx", import.meta.url), "utf8");
+  assert.ok(groupsPage.includes("Foreman"));
+  assert.ok(groupsPage.includes("foremanId"));
+  assert.ok(settlementsPage.includes("Available Group Advances"));
+  assert.ok(settlementsPage.includes("Advance Absorbed This Settlement"));
+  assert.ok(settlementsPage.includes("Outstanding Group Advance"));
+  assert.ok(reportsPage.includes("Advance Recorded By"));
+  assert.ok(reportsPage.includes("Paid From Account"));
+  assert.ok(reportsPage.includes("Minimum Amount"));
+  assert.ok(reportsPage.includes("Maximum Amount"));
 });
 
 test("labour wage settlements can be deleted safely only through the settlement register flow", () => {

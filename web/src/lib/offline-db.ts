@@ -384,6 +384,8 @@ export type LabourGroup = LocalRecord & {
   phone?: string;
   notes?: string;
   active?: boolean;
+  foremanId?: string | null;
+  foremanLabourId?: string | null;
 };
 
 export type ProductionEntry = LocalRecord & {

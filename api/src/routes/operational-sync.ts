@@ -989,6 +989,48 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       });
     }
     const payloadRecord = expenseCategory ? { ...parsed.data.record, ...expenseCategory } : parsed.data.record;
+    if (parsed.data.entity === "labourGroup") {
+      const foremanLabourId = typeof payloadRecord.foremanLabourId === "string"
+        ? payloadRecord.foremanLabourId
+        : typeof payloadRecord.foremanId === "string"
+          ? payloadRecord.foremanId
+          : "";
+      if (foremanLabourId) {
+        const [foreman] = await db.select({
+          clientRecordId: operationalRecords.clientRecordId,
+          payload: operationalRecords.payload,
+        }).from(operationalRecords).where(and(
+          eq(operationalRecords.workspaceId, parsed.data.workspaceId),
+          eq(operationalRecords.farmId, parsed.data.farmId!),
+          eq(operationalRecords.entityType, "labourer"),
+          eq(operationalRecords.clientRecordId, foremanLabourId),
+        )).limit(1);
+        if (!foreman || isDeletedOperationalPayload(foreman.payload)) {
+          return reply.code(400).send({ message: "Select an existing labourer as the foreman." });
+        }
+      }
+    }
+    if (parsed.data.entity === "advance") {
+      const labourerId = typeof payloadRecord.labourerId === "string" ? payloadRecord.labourerId : typeof payloadRecord.labourId === "string" ? payloadRecord.labourId : "";
+      if (labourerId) {
+        const [labourer] = await db.select({
+          clientRecordId: operationalRecords.clientRecordId,
+          payload: operationalRecords.payload,
+        }).from(operationalRecords).where(and(
+          eq(operationalRecords.workspaceId, parsed.data.workspaceId),
+          eq(operationalRecords.farmId, parsed.data.farmId!),
+          eq(operationalRecords.entityType, "labourer"),
+          eq(operationalRecords.clientRecordId, labourerId),
+        )).limit(1);
+        const labourerPayload = labourer?.payload as Record<string, unknown> | undefined;
+        const labourGroupId = typeof labourerPayload?.groupId === "string" ? labourerPayload.groupId : null;
+        const labourGroupName = typeof labourerPayload?.group === "string" ? labourerPayload.group : null;
+        Object.assign(payloadRecord, {
+          labourGroupId: payloadRecord.labourGroupId ?? labourGroupId ?? undefined,
+          labourGroupName: payloadRecord.labourGroupName ?? labourGroupName ?? undefined,
+        });
+      }
+    }
     const wageRatePayload = parsed.data.entity === "wageRate"
       ? normalizeWageRatePayload(parsed.data.record as Record<string, unknown>)
       : null;

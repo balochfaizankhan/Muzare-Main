@@ -2,6 +2,7 @@ import { Check, Plus, ArrowLeft } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { SearchInput } from "../../components/SearchInput";
+import { LabourSelectCombobox } from "../../components/LabourSelectCombobox";
 import { SubpageHeader } from "../../components/SubpageHeader";
 import { formatMoney } from "../../lib/format";
 import { getActiveFarmId, getActiveSeasonId, makeLocalRecord, offlineDb, workspaceRecords, type LabourGroup, type LabourWageSettlement, type Labourer, type Advance } from "../../lib/offline-db";
@@ -19,6 +20,7 @@ type GroupForm = {
   phone: string;
   notes: string;
   active: boolean;
+  foremanId: string;
 };
 
 const normalize = (value: string) => value.trim().toLowerCase();
@@ -66,12 +68,14 @@ function GroupEditorPanel({
   title,
   initialGroup,
   groups,
+  labourers,
   onClose,
   onSave,
 }: {
   title: string;
   initialGroup?: LabourGroup | null;
   groups: LabourGroup[];
+  labourers: Labourer[];
   onClose: () => void;
   onSave: (record: LabourGroup, changedName: boolean) => Promise<void>;
 }) {
@@ -80,6 +84,7 @@ function GroupEditorPanel({
     phone: initialGroup?.phone ?? "",
     notes: initialGroup?.notes ?? "",
     active: initialGroup?.active !== false,
+    foremanId: initialGroup?.foremanId ?? initialGroup?.foremanLabourId ?? "",
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -105,6 +110,7 @@ function GroupEditorPanel({
         phone: form.phone.trim() || undefined,
         notes: form.notes.trim() || undefined,
         active: form.active,
+        foremanId: form.foremanId || undefined,
         updatedAt: new Date().toISOString(),
       }, name !== (initialGroup?.name ?? ""));
       onClose();
@@ -124,8 +130,25 @@ function GroupEditorPanel({
         <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
           <label><span>Group name *</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
           <label><span>Phone / contact</span><input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
+          <label>
+            <span>Foreman</span>
+            <LabourSelectCombobox
+              ariaLabel="Select foreman"
+              options={[...labourers].sort((left, right) => {
+                const leftActive = left.active !== false ? 0 : 1;
+                const rightActive = right.active !== false ? 0 : 1;
+                return leftActive - rightActive || left.name.localeCompare(right.name);
+              })}
+              value={form.foremanId}
+              onChange={(value) => setForm({ ...form, foremanId: value })}
+              placeholder="Select foreman"
+              noResultsLabel="No labourers found"
+              clearValue=""
+            />
+          </label>
           <label><span>Notes</span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
           <label><span>Status</span><select value={form.active ? "active" : "inactive"} onChange={(event) => setForm({ ...form, active: event.target.value === "active" })}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
+          <p className="context-message">Selecting a foreman will also assign that labourer to the group if needed.</p>
           {error ? <p className="worker-action-error">{error}</p> : null}
           <footer>
             <button type="button" onClick={onClose}>Cancel</button>
@@ -191,18 +214,19 @@ function groupMemberStats(group: LabourGroup, labourers: Labourer[], settlements
   const activeMembers = members.filter((labourer) => labourer.active !== false);
   const inactiveMembers = members.filter((labourer) => labourer.active === false);
   const memberIds = new Set(members.map((labourer) => labourer.id));
+  const foremanId = group.foremanId ?? group.foremanLabourId ?? null;
   const pendingWages = settlements
-    .filter((settlement) => settlement.status === "posted" && (settlement.groupId === group.id || settlement.foremanId === group.id))
+    .filter((settlement) => settlement.status === "posted" && (settlement.groupId === group.id || (foremanId && settlement.foremanId === foremanId)))
     .sort((left, right) => right.settlementDate.localeCompare(left.settlementDate));
   const lastSettlement = pendingWages[0] ?? null;
   const advanceBalance = Math.max(
     advances.filter((advance) => memberIds.has(advance.labourerId)).reduce((sum, advance) => sum + Number(advance.amount || 0), 0)
-      - settlements.filter((settlement) => settlement.status === "posted" && (settlement.groupId === group.id || settlement.foremanId === group.id))
+      - settlements.filter((settlement) => settlement.status === "posted" && (settlement.groupId === group.id || (foremanId && settlement.foremanId === foremanId)))
         .reduce((sum, settlement) => sum + Number(settlement.advanceAdjustedNow ?? settlement.settledAdvanceAmount ?? 0), 0),
     0,
   );
   const unsettledWages = settlements
-    .filter((settlement) => settlement.status === "posted" && (settlement.groupId === group.id || settlement.foremanId === group.id))
+    .filter((settlement) => settlement.status === "posted" && (settlement.groupId === group.id || (foremanId && settlement.foremanId === foremanId)))
     .reduce((sum, settlement) => sum + Number((settlement.grossWages ?? settlement.totalEarned ?? 0) - (settlement.advanceAdjustedNow ?? settlement.settledAdvanceAmount ?? 0) - Number(settlement.paidAmount ?? settlement.payableBalance ?? 0)), 0);
   return { members, activeMembers, inactiveMembers, lastSettlement, advanceBalance, unsettledWages };
 }
@@ -225,6 +249,7 @@ export function LabourGroupsPage() {
   const selectedGroup = useMemo(() => groups.find((group) => group.id === groupId) ?? null, [groupId, groups]);
   const memberStats = useMemo(() => selectedGroup ? groupMemberStats(selectedGroup, labourers, settlements, advances) : null, [advances, labourers, selectedGroup, settlements]);
   const groupLookup = useMemo(() => new Map(groups.map((group) => [group.id, group])), [groups]);
+  const labourById = useMemo(() => new Map(labourers.map((labourer) => [labourer.id, labourer])), [labourers]);
   const visibleGroups = useMemo(() => {
     const term = normalize(search);
     return groups.filter((group) => {
@@ -286,6 +311,18 @@ export function LabourGroupsPage() {
       pendingSync: true,
     } as LabourGroup;
     await persistOperationalRecord("labourGroup", nextRecord);
+    if (nextRecord.foremanId) {
+      const foreman = labourers.find((labourer) => labourer.id === nextRecord.foremanId) ?? null;
+      if (foreman && foreman.groupId !== nextRecord.id) {
+        await persistOperationalRecord("labourer", {
+          ...foreman,
+          groupId: nextRecord.id,
+          group: nextRecord.name,
+          updatedAt: new Date().toISOString(),
+          pendingSync: true,
+        });
+      }
+    }
     if (previousGroup && changedName) {
       const renamedMembers = labourers.filter((labourer) => isLabourerInGroup(labourer, record) && labourer.group !== record.name);
       for (const labourer of renamedMembers) {
@@ -334,6 +371,7 @@ export function LabourGroupsPage() {
 
   const groupCardAction = (group: LabourGroup) => {
     const stats = groupMemberStats(group, labourers, settlements, advances);
+    const foreman = labourById.get(group.foremanId ?? group.foremanLabourId ?? "") ?? null;
     return (
       <article className="workforce-group-card" key={group.id}>
         <div className="workforce-group-card__header">
@@ -347,6 +385,7 @@ export function LabourGroupsPage() {
           <article><span>Total members</span><strong>{stats.members.length}</strong></article>
           <article><span>Active today</span><strong>{stats.activeMembers.length}</strong></article>
           <article><span>Inactive today</span><strong>{stats.inactiveMembers.length}</strong></article>
+          <article><span>Foreman</span><strong>{foreman?.name ?? "No foreman assigned"}</strong></article>
         </div>
         <div className="workforce-group-card__copy">
           <small>{group.phone || "No contact"}</small>
@@ -364,6 +403,7 @@ export function LabourGroupsPage() {
 
   if (!isMembersView && selectedGroup) {
     const stats = memberStats ?? { members: [], activeMembers: [], inactiveMembers: [], lastSettlement: null, advanceBalance: 0, unsettledWages: 0 };
+    const foreman = labourById.get(selectedGroup.foremanId ?? selectedGroup.foremanLabourId ?? "") ?? null;
     return (
       <div className="dashboard-page">
         <SubpageHeader title="Labour Groups" />
@@ -385,6 +425,7 @@ export function LabourGroupsPage() {
             <article><span>Outstanding advances</span><strong>{money(stats.advanceBalance)}</strong></article>
             <article><span>Unsettled wages</span><strong>{money(stats.unsettledWages)}</strong></article>
             <article><span>Last settlement</span><strong>{stats.lastSettlement ? stats.lastSettlement.settlementDate : "-"}</strong></article>
+            <article><span>Foreman</span><strong>{foreman?.name ?? "No foreman assigned"}</strong></article>
           </section>
           <p className="context-message">Settlement eligibility is based on wage-period attendance, not only the current active status.</p>
           <section className="record-panel workforce-group-section">
@@ -412,7 +453,7 @@ export function LabourGroupsPage() {
             </div>
           </section>
         </main>
-        {editingGroup ? <GroupEditorPanel title="Edit Labour Group" initialGroup={editingGroup} groups={groups} onClose={() => setEditingGroup(null)} onSave={saveGroup} /> : null}
+        {editingGroup ? <GroupEditorPanel title="Edit Labour Group" initialGroup={editingGroup} groups={groups} labourers={labourers} onClose={() => setEditingGroup(null)} onSave={saveGroup} /> : null}
       </div>
     );
   }
@@ -541,8 +582,8 @@ export function LabourGroupsPage() {
           </div>
         </section>
       </main>
-      {showCreate ? <GroupEditorPanel title="Create Labour Group" groups={groups} onClose={() => setShowCreate(false)} onSave={async (record) => saveGroup(record, false)} /> : null}
-      {editingGroup ? <GroupEditorPanel title="Edit Labour Group" initialGroup={editingGroup} groups={groups} onClose={() => setEditingGroup(null)} onSave={saveGroup} /> : null}
+      {showCreate ? <GroupEditorPanel title="Create Labour Group" groups={groups} labourers={labourers} onClose={() => setShowCreate(false)} onSave={async (record) => saveGroup(record, false)} /> : null}
+      {editingGroup ? <GroupEditorPanel title="Edit Labour Group" initialGroup={editingGroup} groups={groups} labourers={labourers} onClose={() => setEditingGroup(null)} onSave={saveGroup} /> : null}
     </div>
   );
 }

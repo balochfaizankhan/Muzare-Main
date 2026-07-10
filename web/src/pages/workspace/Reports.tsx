@@ -675,6 +675,15 @@ export function Reports() {
       return { labourer, records, total, outstanding: payable - total };
     })
     .filter((item) => item.records.length > 0), [advanceRows, attendanceSummary, labourers]);
+  const advanceFilterSummary = useMemo(() => [
+    ["Date Range", rangeLabel],
+    ["Advance Recorded By", "All Recorders"],
+    ["Labour Group", groupFilter === ungroupedValue ? "Ungrouped" : groupFilter || "All Groups"],
+    ["Labourer", selectedLabourerIds.length ? selectedLabourerIds.map((id) => labourName(id)).join(", ") : "All Labour"],
+    ["Paid From Account", accountId ? accountName(accountId) : "All Accounts"],
+    ["Minimum Amount", amountMin ? money(Number(amountMin)) : "All"],
+    ["Maximum Amount", amountMax ? money(Number(amountMax)) : "All"],
+  ] as const, [accountId, accountName, amountMax, amountMin, groupFilter, labourName, rangeLabel, selectedLabourerIds, ungroupedValue]);
   const labourEarningRows = useMemo(() => labourEarnings
     .filter((item) => {
       const labourer = labourById.get(item.labourerId);
@@ -1229,6 +1238,12 @@ export function Reports() {
           {filtered && <button type="button" onClick={clearFilters}>{t("reportsPage.clearFilters")}</button>}
         </div>
         <div className="reports-filters">
+          {report === "advances" && <div className="reports-advance-filter-summary">
+            <h3>Active Advance Filters</h3>
+            <ul>
+              {advanceFilterSummary.map(([label, value]) => <li key={label}><span>{label}</span><strong>{value}</strong></li>)}
+            </ul>
+          </div>}
           <SearchInput
             value={search}
             onChange={setSearch}
@@ -1306,28 +1321,43 @@ export function Reports() {
           </>}
 
           {report === "advances" && <>
-            <ClearableSelect aria-label={t("reportsPage.group")} value={groupFilter} onChange={setGroupFilter}>
-              <option value="">{t("reportsPage.allGroups")}</option>
-              {labourGroups.map((group) => <option key={group} value={group}>{group}</option>)}
-              <option value={ungroupedValue}>{t("reportsPage.ungrouped")}</option>
-            </ClearableSelect>
-            <LabourMultiSelectFilter
-              ariaLabel={t("reportsPage.labour")}
-              options={reportLabourOptions}
-              selectedIds={selectedLabourerIds}
-              onChange={setSelectedLabourerIds}
-              placeholder={t("common.searchLabour")}
-            />
-            <ClearableSelect aria-label={t("reportsPage.account")} value={accountId} onChange={setAccountId}>
-              <option value="">{t("reportsPage.allAccounts")}</option>
-              {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-            </ClearableSelect>
+            <label className="reports-filter-group">
+              <span>Labour Group</span>
+              <ClearableSelect aria-label={t("reportsPage.group")} value={groupFilter} onChange={setGroupFilter}>
+                <option value="">{t("reportsPage.allGroups")}</option>
+                {labourGroups.map((group) => <option key={group} value={group}>{group}</option>)}
+                <option value={ungroupedValue}>{t("reportsPage.ungrouped")}</option>
+              </ClearableSelect>
+            </label>
+            <label className="reports-filter-group">
+              <span>Labourer</span>
+              <LabourMultiSelectFilter
+                ariaLabel={t("reportsPage.labour")}
+                options={reportLabourOptions}
+                selectedIds={selectedLabourerIds}
+                onChange={setSelectedLabourerIds}
+                placeholder={t("common.searchLabour")}
+              />
+            </label>
+            <label className="reports-filter-group">
+              <span>Paid From Account</span>
+              <ClearableSelect aria-label={t("reportsPage.account")} value={accountId} onChange={setAccountId}>
+                <option value="">{t("reportsPage.allAccounts")}</option>
+                {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+              </ClearableSelect>
+            </label>
             {views.advances === "log" && <ClearableSelect clearValue="desc" aria-label={t("reportsPage.advanceSort")} value={advanceSort} onChange={(value) => setAdvanceSort(value as SortOrder)}>
               <option value="desc">{t("advancesPage.newestFirst")}</option>
               <option value="asc">{t("advancesPage.oldestFirst")}</option>
             </ClearableSelect>}
-            <input aria-label={t("reportsPage.minimumAmount")} inputMode="decimal" placeholder={t("reportsPage.minimumAmount")} value={amountMin} onChange={(event) => setAmountMin(event.target.value)} />
-            <input aria-label={t("reportsPage.maximumAmount")} inputMode="decimal" placeholder={t("reportsPage.maximumAmount")} value={amountMax} onChange={(event) => setAmountMax(event.target.value)} />
+            <label className="reports-filter-group">
+              <span>Minimum Amount</span>
+              <input aria-label={t("reportsPage.minimumAmount")} inputMode="decimal" placeholder={t("reportsPage.minimumAmount")} value={amountMin} onChange={(event) => setAmountMin(event.target.value)} />
+            </label>
+            <label className="reports-filter-group">
+              <span>Maximum Amount</span>
+              <input aria-label={t("reportsPage.maximumAmount")} inputMode="decimal" placeholder={t("reportsPage.maximumAmount")} value={amountMax} onChange={(event) => setAmountMax(event.target.value)} />
+            </label>
           </>}
 
           {report === "expenditures" && <>

@@ -719,6 +719,8 @@ export type AdvanceReportData = {
     linkedVoucherId: string;
     linkedVoucherNumber: string;
   }>;
+  reconciliationTrace?: Array<Record<string, unknown>>;
+  filters?: Record<string, unknown>;
   metadata: {
     farmName: string;
     seasonName: string;
@@ -1065,6 +1067,29 @@ export type LabourWageSettlementPreview = {
     grossWages: number;
     currentAdjustment: number;
     carryForward: number;
+  }>;
+  advanceReconciliation?: Array<{
+    advanceId: string;
+    date: string;
+    amount: number;
+    labourerId: string | null;
+    labourerName: string | null;
+    labourGroupId: string | null;
+    labourGroupName: string | null;
+    farmId: string | null;
+    seasonId: string | null;
+    workspaceId: string;
+    accountId: string | null;
+    accountName: string | null;
+    recordedById: string | null;
+    recordedByName: string | null;
+    originalAmount: number;
+    previouslyAbsorbedAmount: number;
+    remainingAvailableAmount: number;
+    includedInPreview: boolean;
+    exclusionReason: string | null;
+    sourceRecordType: string;
+    voidedOrDeleted: boolean;
   }>;
   includedEarnings: Array<{
     id: string;

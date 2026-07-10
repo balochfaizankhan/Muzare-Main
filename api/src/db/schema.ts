@@ -270,6 +270,24 @@ export const advanceRecords = pgTable("advance_records", {
   ...timestamps,
 });
 
+export const labourWageSettlementAdvanceAllocations = pgTable(
+  "labour_wage_settlement_advance_allocations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+    farmId: uuid("farm_id").references(() => farms.id).notNull(),
+    seasonId: uuid("season_id").references(() => seasons.id).notNull(),
+    settlementRecordId: uuid("settlement_record_id").references(() => operationalRecords.id, { onDelete: "cascade" }).notNull(),
+    advanceRecordId: uuid("advance_record_id").references(() => operationalRecords.id, { onDelete: "cascade" }).notNull(),
+    absorbedAmount: numeric("absorbed_amount", { precision: 14, scale: 2 }).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("labour_wage_settlement_advance_allocations_unique_uidx").on(table.settlementRecordId, table.advanceRecordId),
+    uniqueIndex("labour_wage_settlement_advance_allocations_advance_uidx").on(table.advanceRecordId, table.settlementRecordId),
+  ],
+);
+
 export const vehicles = pgTable(
   "vehicles",
   {
