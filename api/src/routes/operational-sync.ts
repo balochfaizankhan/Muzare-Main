@@ -995,6 +995,10 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         : typeof payloadRecord.foremanId === "string"
           ? payloadRecord.foremanId
           : "";
+      Object.assign(payloadRecord, {
+        foremanId: foremanLabourId || undefined,
+        foremanLabourId: foremanLabourId || undefined,
+      });
       if (foremanLabourId) {
         const [foreman] = await db.select({
           clientRecordId: operationalRecords.clientRecordId,

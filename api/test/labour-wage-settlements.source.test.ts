@@ -283,19 +283,27 @@ test("labour group foreman support and advance report labels are explicit in the
   assert.ok(reportsPage.includes("Maximum Amount"));
 });
 
-test("group settlement preview carries the assigned foreman id through the form and route validation", () => {
+test("group settlement preview resolves the persisted foreman relation server-side", () => {
   const routeSource = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
   const settlementsPage = readFileSync(new URL("../../web/src/pages/workspace/LabourWageSettlements.tsx", import.meta.url), "utf8");
-  assert.ok(settlementsPage.includes("const selectedGroupForemanId = selectedGroup?.foremanId ?? selectedGroup?.foremanLabourId ?? \"\";"));
+  const groupsPage = readFileSync(new URL("../../web/src/pages/workspace/LabourGroups.tsx", import.meta.url), "utf8");
+  const syncRoute = readFileSync(new URL("../src/routes/operational-sync.ts", import.meta.url), "utf8");
+  assert.ok(settlementsPage.includes("const selectedGroupForemanId = selectedGroup?.foremanLabourId ?? selectedGroup?.foremanId ?? \"\";"));
   assert.ok(settlementsPage.includes("const effectiveGroupForemanId = settlementMode === \"group\""));
-  assert.ok(settlementsPage.includes("if (foremanId !== selectedGroupForemanId) {"));
-  assert.ok(settlementsPage.includes("setForemanId(selectedGroupForemanId);"));
-  assert.ok(settlementsPage.includes("The selected labour group has no foreman assigned."));
-  assert.ok(settlementsPage.includes("foremanId: settlementMode === \"group\" ? effectiveGroupForemanId || undefined : undefined"));
+  assert.ok(settlementsPage.includes("console.debug(\"labour-settlement-preview\""));
+  assert.ok(settlementsPage.includes("groupId: settlementMode === \"group\" ? groupId || undefined : undefined"));
+  assert.doesNotMatch(settlementsPage, /foremanId: settlementMode === "group"/);
   assert.ok(routeSource.includes("async function resolveSettlementSelection("));
-  assert.ok(routeSource.includes("The selected labour group has no foreman assigned."));
+  assert.ok(routeSource.includes("foremanId: z.unknown().optional().nullable()"));
+  assert.ok(routeSource.includes("Select a labour group."));
+  assert.ok(routeSource.includes("Selected labour group was not found."));
+  assert.ok(routeSource.includes("The selected labour group has no foreman assigned. Assign a foreman in Labour Groups before creating a settlement."));
+  assert.ok(routeSource.includes("The assigned foreman record is invalid. Reassign the group foreman."));
   assert.ok(routeSource.includes("The submitted foreman does not match the selected labour group."));
   assert.ok(routeSource.includes("resolvedSelection = await db.transaction((tx) => resolveSettlementSelection(tx, workspaceId, farmId, {"));
+  assert.ok(groupsPage.includes("foremanLabourId: normalizedForemanId"));
+  assert.ok(syncRoute.includes("foremanId: foremanLabourId || undefined"));
+  assert.ok(syncRoute.includes("foremanLabourId: foremanLabourId || undefined"));
 });
 
 test("labour wage settlements can be deleted safely only through the settlement register flow", () => {

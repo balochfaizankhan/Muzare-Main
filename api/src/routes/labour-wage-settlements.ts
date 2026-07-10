@@ -35,7 +35,7 @@ const baseSchema = z.object({
 const settlementSelectionSchema = z.object({
   settlementMode: z.enum(["individual", "group"]).optional(),
   labourerId: z.string().uuid().optional().nullable(),
-  foremanId: z.string().uuid().optional().nullable(),
+  foremanId: z.unknown().optional().nullable(),
   groupId: z.string().uuid().optional().nullable(),
   labourIds: z.array(z.string().uuid()).optional(),
 });
@@ -154,18 +154,21 @@ async function resolveSettlementSelection(
   selection: {
     settlementMode?: "individual" | "group";
     labourerId?: string | null;
-    foremanId?: string | null;
+    foremanId?: unknown;
     groupId?: string | null;
     labourIds?: string[];
   },
 ) {
-  if (selection.settlementMode !== "group" || !selection.groupId) {
+  if (selection.settlementMode !== "group") {
     return {
       labourerId: selection.labourerId ?? undefined,
-      foremanId: selection.foremanId ?? undefined,
+      foremanId: typeof selection.foremanId === "string" ? selection.foremanId : undefined,
       groupId: selection.groupId ?? undefined,
       labourIds: selection.labourIds,
     };
+  }
+  if (!selection.groupId) {
+    throw new Error("Select a labour group.");
   }
 
   const groupRows = await tx.select({
@@ -178,7 +181,11 @@ async function resolveSettlementSelection(
     eq(operationalRecords.clientRecordId, selection.groupId),
   )).limit(1);
 
-  const payload = groupRows[0]?.payload as Record<string, unknown> | undefined;
+  const groupRow = groupRows[0];
+  if (!groupRow || isDeletedOperationalPayload(groupRow.payload)) {
+    throw new Error("Selected labour group was not found.");
+  }
+  const payload = groupRow.payload as Record<string, unknown>;
   const resolvedForemanId = typeof payload?.foremanLabourId === "string"
     ? payload.foremanLabourId
     : typeof payload?.foremanId === "string"
@@ -186,10 +193,23 @@ async function resolveSettlementSelection(
       : "";
 
   if (!resolvedForemanId) {
-    throw new Error("The selected labour group has no foreman assigned.");
+    throw new Error("The selected labour group has no foreman assigned. Assign a foreman in Labour Groups before creating a settlement.");
   }
-  if (selection.foremanId && selection.foremanId !== resolvedForemanId) {
+  const submittedForemanId = typeof selection.foremanId === "string" ? selection.foremanId.trim() : "";
+  if (submittedForemanId && submittedForemanId !== resolvedForemanId) {
     throw new Error("The submitted foreman does not match the selected labour group.");
+  }
+  const [foreman] = await tx.select({
+    clientRecordId: operationalRecords.clientRecordId,
+    payload: operationalRecords.payload,
+  }).from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, workspaceId),
+    eq(operationalRecords.farmId, farmId),
+    eq(operationalRecords.entityType, "labourer"),
+    eq(operationalRecords.clientRecordId, resolvedForemanId),
+  )).limit(1);
+  if (!foreman || isDeletedOperationalPayload(foreman.payload)) {
+    throw new Error("The assigned foreman record is invalid. Reassign the group foreman.");
   }
 
   return {
@@ -474,6 +494,17 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
     }
     const { workspaceId } = params.data;
     const { farmId, seasonId, fromDate, toDate, settlementDate, settlementMode, labourerId, foremanId, groupId, labourIds, paidAmount, manualAdjustment } = parsed.data;
+    if (process.env.NODE_ENV !== "production") {
+      request.log.info({
+        workspaceId,
+        farmId,
+        seasonId,
+        settlementMode: settlementMode ?? "individual",
+        labourerId: labourerId ?? null,
+        foremanId: typeof foremanId === "string" ? foremanId : null,
+        groupId: groupId ?? null,
+      }, "labour wage settlement preview request parsed");
+    }
     if (request.appUser.workspaceId !== workspaceId) return reply.code(403).send({ message: "Select this workspace before previewing labour settlements." });
     if (!hasModulePermission(request.appUser, workspaceId, "wages", "view")) return reply.code(403).send({ message: "Workspace wage settlement view permission is required." });
     if (!hasFarmAccess(request.appUser, workspaceId, farmId)) return reply.code(403).send({ message: "You do not have access to this farm." });
@@ -494,8 +525,17 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
     } catch (error) {
       return reply.code(400).send({
         message: error instanceof Error ? error.message : "Unable to resolve the selected labour settlement group.",
-        fields: ["foremanId"],
+        fields: ["groupId"],
       });
+    }
+    if (process.env.NODE_ENV !== "production") {
+      request.log.info({
+        workspaceId,
+        farmId,
+        seasonId,
+        resolvedForemanId: resolvedSelection.foremanId ?? null,
+        resolvedGroupId: resolvedSelection.groupId ?? null,
+      }, "labour wage settlement preview selection resolved");
     }
     const preview = await db.transaction((tx) => previewLabourWageSettlement(tx, workspaceId, farmId, seasonId, fromDate, toDate, settlementDate, undefined, {
       settlementMode,
@@ -591,6 +631,16 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
       settlementMode: settlementMode ?? "individual",
       clientRequestId: clientRequestId ?? null,
     }, "labour wage settlement create request received");
+    if (process.env.NODE_ENV !== "production") {
+      request.log.info({
+        workspaceId,
+        farmId,
+        seasonId,
+        labourerId: labourerId ?? null,
+        foremanId: typeof foremanId === "string" ? foremanId : null,
+        groupId: groupId ?? null,
+      }, "labour wage settlement create request parsed");
+    }
 
     let resolvedSelection;
     try {
@@ -604,8 +654,17 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
     } catch (error) {
       return reply.code(400).send({
         message: error instanceof Error ? error.message : "Unable to resolve the selected labour settlement group.",
-        fields: ["foremanId"],
+        fields: ["groupId"],
       });
+    }
+    if (process.env.NODE_ENV !== "production") {
+      request.log.info({
+        workspaceId,
+        farmId,
+        seasonId,
+        resolvedForemanId: resolvedSelection.foremanId ?? null,
+        resolvedGroupId: resolvedSelection.groupId ?? null,
+      }, "labour wage settlement create selection resolved");
     }
 
     const existingSettlement = clientRequestId
@@ -757,8 +816,8 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           linkedAccountName: account?.name ?? resolvedAccount?.name ?? "",
           paymentAccountId: paymentAccountIdValue,
           settlementMode: settlementMode ?? "individual",
-          foremanId: preview.foremanId ?? foremanId ?? null,
-          groupId: preview.groupId ?? groupId ?? null,
+          foremanId: preview.foremanId ?? resolvedSelection.foremanId ?? null,
+          groupId: preview.groupId ?? resolvedSelection.groupId ?? null,
           groupName: preview.groupName ?? null,
           includedLabourIds: preview.includedLabourIds ?? [],
           includedInactiveLabourIds: preview.includedInactiveLabourIds ?? [],
@@ -803,7 +862,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           advanceAdjustmentAllocations: [],
           settlementScopeSnapshot: preview.settlementScopeSnapshot ?? {
             settlementMode: settlementMode ?? "individual",
-            groupId: preview.groupId ?? groupId ?? null,
+            groupId: preview.groupId ?? resolvedSelection.groupId ?? null,
             groupName: preview.groupName ?? null,
             fromDate,
             toDate,

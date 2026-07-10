@@ -104,13 +104,15 @@ function GroupEditorPanel({
     setBusy(true);
     setError("");
     try {
+      const normalizedForemanId = form.foremanId || undefined;
       await onSave({
         ...(initialGroup ?? makeLocalRecord()),
         name,
         phone: form.phone.trim() || undefined,
         notes: form.notes.trim() || undefined,
         active: form.active,
-        foremanId: form.foremanId || undefined,
+        foremanId: normalizedForemanId,
+        foremanLabourId: normalizedForemanId,
         updatedAt: new Date().toISOString(),
       }, name !== (initialGroup?.name ?? ""));
       onClose();
@@ -303,8 +305,11 @@ export function LabourGroupsPage() {
 
   const saveGroup = async (record: LabourGroup, changedName: boolean) => {
     const previousGroup = groups.find((group) => group.id === record.id) ?? null;
+    const normalizedForemanId = record.foremanLabourId ?? record.foremanId ?? undefined;
     const nextRecord = {
       ...record,
+      foremanId: normalizedForemanId,
+      foremanLabourId: normalizedForemanId,
       workspaceId: record.workspaceId ?? (selectedGroup?.workspaceId ?? ""),
       farmId: record.farmId ?? selectedGroup?.farmId ?? getActiveFarmId() ?? undefined,
       seasonId: record.seasonId ?? selectedGroup?.seasonId ?? getActiveSeasonId() ?? undefined,
