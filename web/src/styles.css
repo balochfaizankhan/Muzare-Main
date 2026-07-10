@@ -10657,8 +10657,12 @@ button {
   max-width: 100%;
   min-width: 0;
 }
-.reports-tabs { display: flex; flex-wrap: wrap; gap: 7px; }
-.reports-subtabs { display: flex; flex-wrap: wrap; gap: 7px; }
+.reports-tabs,
+.reports-subtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
 .reports-tabs button,
 .reports-subtabs button,
 .reports-actions button {
@@ -10851,6 +10855,183 @@ button {
   gap: 6px;
   margin: 0;
   padding-inline-start: 18px;
+}
+.reports-attendance-switch {
+  display: inline-flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.reports-attendance-switch::-webkit-scrollbar,
+.reports-tabs::-webkit-scrollbar,
+.reports-subtabs::-webkit-scrollbar {
+  display: none;
+}
+
+.reports-attendance-switch button {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex: 0 0 auto;
+  font-size: .78rem;
+  font-weight: 750;
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+.reports-attendance-switch button.is-active {
+  background: var(--brand-primary);
+  border-color: var(--brand-primary);
+  color: #fff;
+}
+
+.attendance-register-kpis .reports-kpis {
+  margin-top: 0;
+}
+
+.attendance-register-mobile-list {
+  display: none;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.attendance-register-mobile-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.05);
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 11px 12px;
+}
+
+.attendance-register-mobile-card__summary {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 0;
+  text-align: start;
+}
+
+.attendance-register-mobile-card__copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.attendance-register-mobile-card__copy strong {
+  color: var(--brand-primary);
+  font-size: .94rem;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attendance-register-mobile-card__copy span {
+  color: var(--text-secondary);
+  font-size: .76rem;
+  line-height: 1.35;
+}
+
+.attendance-register-mobile-card__summary b {
+  color: var(--text-primary);
+  flex: 0 0 auto;
+  font-size: .9rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.attendance-register-mobile-card__details {
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.attendance-register-mobile-card__chips {
+  display: grid;
+  gap: 5px;
+  grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
+}
+
+.attendance-register-mobile-card__chip {
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  min-width: 0;
+  padding: 6px 4px;
+  text-align: center;
+}
+
+.attendance-register-mobile-card__chip strong,
+.attendance-register-mobile-card__chip small {
+  line-height: 1.05;
+}
+
+.attendance-register-mobile-card__chip strong {
+  font-size: .68rem;
+  font-weight: 800;
+}
+
+.attendance-register-mobile-card__chip small {
+  font-size: .7rem;
+  font-weight: 850;
+}
+
+.attendance-register-mobile-card__chip.register-status--present {
+  background: #e5f7dd;
+}
+
+.attendance-register-mobile-card__chip.register-status--half_day {
+  background: #fff4c9;
+}
+
+.attendance-register-mobile-card__chip.register-status--absent {
+  background: #ffe3df;
+}
+
+.attendance-register-mobile-card__chip.register-status--empty {
+  background: #f5f6f7;
+}
+
+.attendance-register-mobile-card__meta {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 8px 9px;
+}
+
+.attendance-register-mobile-card__meta span {
+  color: var(--text-secondary);
+  font-size: .74rem;
+  font-weight: 700;
+}
+
+.attendance-register-mobile-card__meta strong {
+  color: var(--text-primary);
+  font-size: .76rem;
+  font-weight: 800;
+  text-align: end;
 }
 .reports-print-only {
   display: none;
@@ -11181,18 +11362,30 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .report-mobile-cards { display: grid; gap: 8px; }
   .partner-position-table { display: none; }
   .partner-position-cards { display: grid; gap: 10px; }
-  .reports-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .reports-date-row { grid-template-columns: 1fr; }
+  .reports-page { padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
+  .reports-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+  .reports-filters .search-input,
+  .reports-filters .reports-date-row,
+  .reports-filters .reports-range-actions {
+    grid-column: 1 / -1;
+  }
+  .reports-date-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .reports-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .attendance-register-kpis .reports-kpis article:last-child { grid-column: 1 / -1; }
   .reports-summary-list { grid-template-columns: minmax(0, 1fr); }
   .reports-breakdowns { grid-template-columns: minmax(0, 1fr); }
   .reports-detail-links { flex-direction: column; }
   .reports-tabs,
-  .reports-subtabs { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
+  .reports-subtabs,
+  .reports-attendance-switch { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
   .reports-tabs button,
-  .reports-subtabs button { flex: 0 0 auto; }
+  .reports-subtabs button,
+  .reports-attendance-switch button { flex: 0 0 auto; }
   .reports-view-header { align-items: stretch; flex-direction: column; }
   .reports-actions { justify-content: flex-start; }
+  .attendance-register-mobile-list { display: grid; }
+  .attendance-register-preview { gap: 10px; }
+  .register-table-wrap { display: none; }
   .farm-map-topbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .farm-map-workspace { grid-template-columns: minmax(0, 1fr); min-height: auto; }
   .farm-map-panel { grid-template-rows: auto minmax(430px, 58vh); }
@@ -12121,6 +12314,32 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 }
 
 @media (max-width: 430px) {
+  .reports-tabs button,
+  .reports-subtabs button,
+  .reports-attendance-switch button {
+    min-height: 34px;
+    padding-inline: 10px;
+  }
+
+  .reports-filters {
+    gap: 6px;
+  }
+
+  .reports-date-field {
+    min-height: 46px;
+    padding-inline: 12px;
+  }
+
+  .reports-range-actions button {
+    font-size: .74rem;
+    min-height: 34px;
+    padding-inline: 10px;
+  }
+
+  .attendance-register-mobile-card {
+    padding: 10px 11px;
+  }
+
   .worker-action-form--compact {
     gap: 7px;
   }
@@ -12149,6 +12368,20 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 }
 
 @media (max-width: 390px) {
+  .reports-tabs,
+  .reports-subtabs,
+  .reports-attendance-switch {
+    gap: 5px;
+  }
+
+  .reports-date-field__value {
+    font-size: .86rem;
+  }
+
+  .attendance-register-mobile-card__chips {
+    grid-template-columns: repeat(auto-fit, minmax(40px, 1fr));
+  }
+
   .workforce-group-card__actions {
     gap: 6px;
   }

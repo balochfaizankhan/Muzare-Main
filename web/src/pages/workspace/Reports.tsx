@@ -415,6 +415,7 @@ export function Reports() {
   const [showEmptyLedgerGroups, setShowEmptyLedgerGroups] = useState(false);
   const [reportGroupExpanded, setReportGroupExpanded] = useState<Record<AccountTransactionGroupKey, boolean>>(defaultTransactionGroupExpansion);
   const [partnerReportGroupExpanded, setPartnerReportGroupExpanded] = useState<Record<PartnerLiabilityLedgerGroupKey, boolean>>(defaultPartnerLiabilityGroupExpansion);
+  const [attendanceRegisterExpandedLabourerId, setAttendanceRegisterExpandedLabourerId] = useState<string | null>(null);
   const [labourers, setLabourers] = useState<Labourer[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
@@ -604,6 +605,13 @@ export function Reports() {
     window.print();
   };
 
+  const attendanceRegisterSwitch = (
+    <div className="reports-attendance-switch" role="tablist" aria-label={t("reportsPage.title")}>
+      <button className={views.attendance === "register" ? "is-active" : ""} type="button" onClick={() => switchView("attendance", "register")}>{t("reportsPage.register")}</button>
+      <button className={views.attendance === "summary" ? "is-active" : ""} type="button" onClick={() => switchView("attendance", "summary")}>{t("reportsPage.summary")}</button>
+    </div>
+  );
+
   const attendanceRows = attendance
     .filter((item) => {
       const labourer = labourById.get(item.labourerId);
@@ -655,6 +663,10 @@ export function Reports() {
     )),
     [attendanceDates, attendanceSummary],
   );
+
+  useEffect(() => {
+    setAttendanceRegisterExpandedLabourerId((current) => current && attendanceSummary.some((item) => item.labourer.id === current) ? current : null);
+  }, [attendanceSummary]);
 
   const advanceRows = useMemo(() => advances
     .filter((item) => {
@@ -1436,12 +1448,58 @@ export function Reports() {
       </section>
 
       {report === "attendance" && <>
-        <section className="record-panel reports-subtabs">
-          <button className={views.attendance === "register" ? "is-active" : ""} type="button" onClick={() => switchView("attendance", "register")}>{t("reportsPage.register")}</button>
-          <button className={views.attendance === "summary" ? "is-active" : ""} type="button" onClick={() => switchView("attendance", "summary")}>{t("reportsPage.summary")}</button>
-        </section>
         {views.attendance === "register" && <ReportShell title={t("reportsPage.attendanceRegister")} rangeLabel={rangeLabel} sectionId="attendance-register" onPrint={() => printSection("attendance-register-print")} onExport={exportAttendanceRegister}>
-          <Kpis values={[[t("reportsPage.labour"), attendanceSummary.length], [t("reportsPage.present"), attendanceRows.filter((item) => item.status === "present").length], [t("reportsPage.halfDay"), attendanceRows.filter((item) => item.status === "half_day").length], [t("reportsPage.absent"), attendanceRows.filter((item) => item.status === "absent").length], [t("reportsPage.totalWages"), money(attendanceSummary.reduce((sum, item) => sum + item.wage, 0))]]} />
+          {attendanceRegisterSwitch}
+          <div className="attendance-register-kpis">
+            <Kpis values={[[t("reportsPage.labour"), attendanceSummary.length], [t("reportsPage.present"), attendanceRows.filter((item) => item.status === "present").length], [t("reportsPage.halfDay"), attendanceRows.filter((item) => item.status === "half_day").length], [t("reportsPage.absent"), attendanceRows.filter((item) => item.status === "absent").length], [t("reportsPage.totalWages"), money(attendanceSummary.reduce((sum, item) => sum + item.wage, 0))]]} />
+          </div>
+          <div className="attendance-register-mobile-list">
+            {attendanceSummary.map((item) => {
+              const expanded = attendanceRegisterExpandedLabourerId === item.labourer.id;
+              const summaryText = `Present ${item.present} • Half-day ${item.halfDay} • Payable ${formatNumber(item.payable)}`;
+              return (
+                <article className="attendance-register-mobile-card" key={item.labourer.id}>
+                  <button
+                    type="button"
+                    className="attendance-register-mobile-card__summary"
+                    aria-expanded={expanded}
+                    onClick={() => setAttendanceRegisterExpandedLabourerId((current) => current === item.labourer.id ? null : item.labourer.id)}
+                  >
+                    <div className="attendance-register-mobile-card__copy">
+                      <strong>{item.labourer.name}</strong>
+                      <span>{summaryText}</span>
+                    </div>
+                    <b>{money(item.wage)}</b>
+                  </button>
+                  {expanded && (
+                    <div className="attendance-register-mobile-card__details">
+                      <div className="attendance-register-mobile-card__chips">
+                        {attendanceDates.map((date) => {
+                          const record = item.records.find((entry) => entry.date === date);
+                          return (
+                            <span key={date} className={`attendance-register-mobile-card__chip ${attendanceStatusClass(record?.status)}`}>
+                              <strong>{formatShortDate(date)}</strong>
+                              <small>{attendanceMark(record?.status)}</small>
+                            </span>
+                          );
+                        })}
+                      </div>
+                      <div className="attendance-register-mobile-card__meta">
+                        <span>{t("reportsPage.wageRate")}</span>
+                        <strong>{item.missingRateDates.length > 0
+                          ? t("wageRatesPage.missingRateWarning")
+                          : item.wageRateLabel === "Mixed"
+                            ? t("reportsPage.mixedRates")
+                            : item.wageRateLabel
+                              ? money(Number(item.wageRateLabel))
+                              : t("wageRatesPage.noCurrentRate")}</strong>
+                      </div>
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </div>
           <div className="attendance-register-preview">
             <div className="reports-register-shell">
               <p>{t("reportsPage.rangeShown", { range: rangeLabel })}</p>
@@ -1561,7 +1619,10 @@ export function Reports() {
           </div>
         </section>
         {views.attendance === "summary" && <ReportShell title={t("reportsPage.attendanceSummary")} rangeLabel={rangeLabel} sectionId="attendance-summary" onPrint={() => printSection("attendance-summary")} onExport={exportAttendanceSummary}>
-          <Kpis values={[[t("reportsPage.labour"), attendanceSummary.length], [t("reportsPage.present"), attendanceRows.filter((item) => item.status === "present").length], [t("reportsPage.halfDay"), attendanceRows.filter((item) => item.status === "half_day").length], [t("reportsPage.absent"), attendanceRows.filter((item) => item.status === "absent").length], [t("reportsPage.totalWages"), money(attendanceSummary.reduce((sum, item) => sum + item.wage, 0))]]} />
+          {attendanceRegisterSwitch}
+          <div className="attendance-register-kpis">
+            <Kpis values={[[t("reportsPage.labour"), attendanceSummary.length], [t("reportsPage.present"), attendanceRows.filter((item) => item.status === "present").length], [t("reportsPage.halfDay"), attendanceRows.filter((item) => item.status === "half_day").length], [t("reportsPage.absent"), attendanceRows.filter((item) => item.status === "absent").length], [t("reportsPage.totalWages"), money(attendanceSummary.reduce((sum, item) => sum + item.wage, 0))]]} />
+          </div>
           <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.labour"), t("reportsPage.present"), t("reportsPage.halfDay"), t("reportsPage.absent"), t("reportsPage.payableDays"), t("reportsPage.totalWages")]} rows={attendanceSummary.map((item) => ({ id: item.labourer.id, title: item.labourer.name, value: money(item.wage), meta: `${t("reportsPage.payableDays")}: ${formatNumber(item.payable)}`, cells: [item.labourer.name, item.present, item.halfDay, item.absent, formatNumber(item.payable), money(item.wage)], details: [[t("reportsPage.present"), item.present], [t("reportsPage.halfDay"), item.halfDay], [t("reportsPage.absent"), item.absent]] }))} />
         </ReportShell>}
       </>}
