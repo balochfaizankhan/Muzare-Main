@@ -25,6 +25,14 @@ type AdvancePayload = {
   source?: unknown;
 };
 
+type SettlementPayload = {
+  settlementNumber?: unknown;
+  advanceAdjustmentAllocations?: Array<{
+    advanceId?: unknown;
+    adjustedAmount?: unknown;
+  }>;
+};
+
 type LabourRow = {
   id: string;
   farmId: string;
@@ -74,6 +82,8 @@ export type LabourAdvanceLedgerTotals = {
   totalValidAdvancesToCutoff: number;
   previouslyAbsorbedAdvances: number;
   availableGroupAdvances: number;
+  legacyUnallocatedPreviouslyAbsorbedAdvances: number;
+  ambiguousHistoricalSettlementCount: number;
 };
 
 export type LabourAdvanceLedgerResult = {
@@ -84,6 +94,13 @@ export type LabourAdvanceLedgerResult = {
     advanceRecordId: string;
     outstandingAmount: number;
     advanceDate: string;
+  }>;
+  ambiguousHistoricalSettlements: Array<{
+    settlementRecordId: string;
+    settlementId: string;
+    settlementNumber: string | null;
+    settlementDate: string;
+    unallocatedAbsorbedAmount: number;
   }>;
 };
 
@@ -180,6 +197,7 @@ export async function resolveLabourAdvanceLedger(
       eq(operationalRecords.entityType, "labourGroup"),
     )),
     tx.select({
+      id: operationalRecords.id,
       clientRecordId: operationalRecords.clientRecordId,
       workspaceId: operationalRecords.workspaceId,
       farmId: operationalRecords.farmId,
@@ -250,8 +268,11 @@ export async function resolveLabourAdvanceLedger(
   if (scope.settlementMode !== "group" && scope.labourerId) candidateLabourerIds.add(scope.labourerId);
 
   const settlementById = new Map(settlementRows.map((row) => [row.clientRecordId, row]));
+  const advanceByClientRecordId = new Map(advanceRows.map((row) => [row.clientRecordId, row] as const));
   const allocationByAdvanceId = new Map<string, number>();
   const allocationsBySettlementId = new Map<string, Array<{ advanceRecordId: string; absorbedAmount: number }>>();
+  const ambiguousHistoricalSettlements: LabourAdvanceLedgerResult["ambiguousHistoricalSettlements"] = [];
+  let legacyUnallocatedPreviouslyAbsorbedAdvances = 0;
   for (const allocation of allocationRows) {
     const currentSettlement = allocationsBySettlementId.get(allocation.settlementRecordId) ?? [];
     currentSettlement.push({
@@ -264,13 +285,14 @@ export async function resolveLabourAdvanceLedger(
     if (!settlementConsumesAdvanceBalance(settlement.payload as Record<string, unknown>) || settlement.payload.status === "deleted" || settlement.payload.status === "voided") continue;
     if (normalizeSettlementPayload(settlement.payload as Record<string, unknown>).settlementDate > scope.cutoffDate) continue;
     if (scope.settlementId && settlement.clientRecordId === scope.settlementId) continue;
-    const settlementScope = normalizeSettlementPayload(settlement.payload as Record<string, unknown>);
+    const settlementPayload = settlement.payload as Record<string, unknown> & SettlementPayload;
+    const settlementScope = normalizeSettlementPayload(settlementPayload);
     const sameGroup = scope.settlementMode === "group"
       && settlementScope.settlementMode === "group"
       && stringValue(settlementScope.groupId) === stringValue(scope.groupId);
     const sameIndividual = scope.settlementMode !== "group" && settlementScope.settlementMode !== "group";
     if (!sameGroup && !sameIndividual) continue;
-    const settlementAllocations = allocationsBySettlementId.get(settlement.clientRecordId) ?? [];
+    const settlementAllocations = allocationsBySettlementId.get(settlement.id) ?? [];
     if (settlementAllocations.length) {
       for (const allocation of settlementAllocations) {
         allocationByAdvanceId.set(
@@ -282,13 +304,39 @@ export async function resolveLabourAdvanceLedger(
     }
     const fallbackConsumed = numberValue(settlementScope.settledAdvanceAmount ?? settlementScope.advanceAdjustedNow ?? settlementScope.appliedAdvances);
     if (fallbackConsumed <= 0) continue;
-    const eligibleAdvances = advanceRows
-      .filter((row) => row.clientRecordId !== scope.settlementId)
-      .filter((row) => sameLegacyScope(row, scope))
-      .map((row) => row.clientRecordId);
-    const firstAdvanceId = eligibleAdvances[0];
-    if (firstAdvanceId) {
-      allocationByAdvanceId.set(firstAdvanceId, (allocationByAdvanceId.get(firstAdvanceId) ?? 0) + fallbackConsumed);
+    const payloadAllocations = Array.isArray(settlementPayload.advanceAdjustmentAllocations)
+      ? settlementPayload.advanceAdjustmentAllocations
+        .flatMap((allocation) => {
+          const advanceId = stringValue(allocation?.advanceId);
+          const adjustedAmount = Math.max(0, numberValue(allocation?.adjustedAmount));
+          if (!advanceId || adjustedAmount <= 0) return [];
+          const advanceRow = advanceByClientRecordId.get(advanceId);
+          if (!advanceRow) return [];
+          if (!sameLegacyScope(advanceRow, scope)) return [];
+          return [{
+            advanceRecordId: advanceRow.id,
+            absorbedAmount: adjustedAmount,
+          }];
+        })
+        .filter((allocation) => allocation.absorbedAmount > 0)
+      : [];
+    const reconstructedAmount = settleConsumedAmountFromAllocations(payloadAllocations);
+    for (const allocation of payloadAllocations) {
+      allocationByAdvanceId.set(
+        allocation.advanceRecordId,
+        (allocationByAdvanceId.get(allocation.advanceRecordId) ?? 0) + allocation.absorbedAmount,
+      );
+    }
+    const unresolvedAmount = Math.max(fallbackConsumed - reconstructedAmount, 0);
+    if (unresolvedAmount > 0.005) {
+      legacyUnallocatedPreviouslyAbsorbedAdvances += unresolvedAmount;
+      ambiguousHistoricalSettlements.push({
+        settlementRecordId: settlement.id,
+        settlementId: settlement.clientRecordId,
+        settlementNumber: stringValue((settlement.payload as Record<string, unknown>).settlementNumber) || null,
+        settlementDate: settlementScope.settlementDate,
+        unallocatedAbsorbedAmount: unresolvedAmount,
+      });
     }
   }
 
@@ -361,7 +409,7 @@ export async function resolveLabourAdvanceLedger(
     && sameLegacyScope({ farmId: row.farmId, seasonId: row.seasonId }, scope),
   );
   const totalValidAdvancesToCutoff = validRows.reduce((sum, row) => sum + row.originalAmount, 0);
-  const previouslyAbsorbedAdvances = validRows.reduce((sum, row) => sum + row.previouslyAbsorbedAmount, 0);
+  const previouslyAbsorbedAdvances = validRows.reduce((sum, row) => sum + row.previouslyAbsorbedAmount, 0) + legacyUnallocatedPreviouslyAbsorbedAdvances;
   const availableGroupAdvances = Math.max(totalValidAdvancesToCutoff - previouslyAbsorbedAdvances, 0);
   const includedAdvances = validRows.map((row) => ({
     advanceId: row.advanceId,
@@ -376,8 +424,11 @@ export async function resolveLabourAdvanceLedger(
       totalValidAdvancesToCutoff,
       previouslyAbsorbedAdvances,
       availableGroupAdvances,
+      legacyUnallocatedPreviouslyAbsorbedAdvances,
+      ambiguousHistoricalSettlementCount: ambiguousHistoricalSettlements.length,
     },
     includedAdvances,
+    ambiguousHistoricalSettlements,
   };
 }
 

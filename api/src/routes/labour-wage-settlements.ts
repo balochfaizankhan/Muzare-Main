@@ -81,6 +81,14 @@ const updateSchema = z.object({
 
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
+type SettlementSelectionScope = {
+  settlementMode: "individual" | "group";
+  labourerId?: string | null;
+  foremanId?: string | null;
+  groupId?: string | null;
+  labourIds?: string[];
+};
+
 async function validateContext(sessionId: string | undefined, workspaceId: string, farmId: string, seasonId: string) {
   const [session] = await db.select({
     activeFarmId: userSessions.activeFarmId,
@@ -246,6 +254,22 @@ function logSettlementAccountValidation(request: { log: { info: (...args: unknow
 function sameLegacyAdvanceScope(row: { farmId: string | null; seasonId: string | null }, scope: { farmId: string; seasonId: string }) {
   return (row.farmId === scope.farmId || row.farmId === null)
     && (row.seasonId === scope.seasonId || row.seasonId === null);
+}
+
+function selectionScopeFromSettlementPayload(payload: ReturnType<typeof normalizeSettlementPayload>): SettlementSelectionScope {
+  if (payload.settlementMode === "group") {
+    return {
+      settlementMode: "group",
+      groupId: payload.groupId ?? null,
+      foremanId: payload.foremanId ?? null,
+      labourIds: payload.includedLabourIds?.length ? [...payload.includedLabourIds] : undefined,
+    };
+  }
+  return {
+    settlementMode: "individual",
+    labourerId: payload.includedLabourIds?.[0] ?? null,
+    labourIds: payload.includedLabourIds?.length ? [...payload.includedLabourIds] : undefined,
+  };
 }
 
 type DatabaseErrorLike = {
@@ -895,7 +919,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         }
         const account = resolvedAccount;
         const createdAt = new Date();
-        const settlementId = crypto.randomUUID();
+        const settlementClientRecordId = crypto.randomUUID();
         const settlementNumber = await allocateSettlementNumber(tx, workspaceId, farmId);
         const effectiveAdvanceAdjustedNow = effectiveAdvanceAdjustmentForPosting(preview, Number(manualAdjustment ?? 0));
         const settlementTotals = calculateLabourWageSettlementTotals(
@@ -908,6 +932,19 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         );
         const description = `Labour wage settlement: ${fromDate} to ${toDate} (attendance wages + labour work)`;
         const paymentAccountIdValue = effectivePaidAmount > 0 ? account?.id ?? resolvedAccount?.id ?? paymentAccountInput : null;
+        const legacyUnallocatedAdvanceConsumption = Number((preview as { legacyUnallocatedPreviouslySettledAdvances?: unknown }).legacyUnallocatedPreviouslySettledAdvances ?? 0);
+        if (legacyUnallocatedAdvanceConsumption > 0.005) {
+          request.log.error({
+            workspaceId,
+            farmId,
+            seasonId,
+            settlementClientRecordId,
+            settlementNumber,
+            legacyUnallocatedAdvanceConsumption,
+            ambiguousHistoricalSettlements: (preview as { ambiguousHistoricalSettlements?: unknown }).ambiguousHistoricalSettlements ?? [],
+          }, "labour wage settlement posting blocked by ambiguous historical advance consumption");
+          throw new Error("Historical settlement advance allocations need review before posting a new settlement.");
+        }
         const advanceAbsorptionRows: Array<{
           allocationIndex: number;
           advanceRecordId: string;
@@ -931,7 +968,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
               workspaceId,
               farmId,
               seasonId,
-              settlementRecordId: settlementId,
+              settlementClientRecordId,
               settlementNumber,
               allocationIndex,
               sourceAdvanceId: row.sourceAdvanceId ?? row.advanceId,
@@ -948,11 +985,11 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           if (advanceAbsorptionByCanonicalId.has(canonicalAdvanceRecordId)) {
             if (process.env.NODE_ENV !== "production") {
               request.log.warn({
-                workspaceId,
-                farmId,
-                seasonId,
-                settlementRecordId: settlementId,
-                settlementNumber,
+              workspaceId,
+              farmId,
+              seasonId,
+              settlementClientRecordId,
+              settlementNumber,
                 allocationIndex,
                 canonicalAdvanceRecordId,
                 sourceAdvanceId,
@@ -976,7 +1013,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
             workspaceId,
             farmId,
             seasonId,
-            settlementRecordId: settlementId,
+            settlementClientRecordId,
             settlementNumber,
             expectedAdvanceAdjustedNow: settlementTotals.advanceAdjustedNow,
             preparedAdvanceAbsorptionTotal: absorbedAdvanceTotal,
@@ -1006,14 +1043,14 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
             workspaceId,
             farmId,
             seasonId,
-            settlementRecordId: settlementId,
+            settlementClientRecordId,
             settlementNumber,
             missingAdvanceRecordIds,
           }, "labour wage settlement advance lookup failed before allocation insert");
           throw new Error("One or more advance records are no longer available. Please preview again.");
         }
         const settlementPayload = {
-          id: settlementId,
+          id: settlementClientRecordId,
           clientRequestId: clientRequestId ?? null,
           settlementNumber,
           linkedVoucherId: "",
@@ -1086,21 +1123,28 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           workspaceId,
           farmId,
           seasonId,
-          settlementId,
+          settlementClientRecordId,
           settlementNumber,
         }, "labour wage settlement record insert started");
-        await tx.insert(operationalRecords).values([{
+        const [insertedSettlementRecord] = await tx.insert(operationalRecords).values([{
           workspaceId,
           farmId,
           seasonId,
-          clientRecordId: settlementId,
+          clientRecordId: settlementClientRecordId,
           entityType: "labourWageSettlement",
           payload: settlementPayload,
           recordedBy: request.appUser!.id,
           clientUpdatedAt: createdAt,
           createdAt,
           updatedAt: createdAt,
-        }]);
+        }]).returning({
+          operationalRecordId: operationalRecords.id,
+          clientRecordId: operationalRecords.clientRecordId,
+        });
+        if (!insertedSettlementRecord?.operationalRecordId) {
+          throw new Error("Settlement could not be created. No changes were saved.");
+        }
+        const settlementOperationalRecordId = insertedSettlementRecord.operationalRecordId;
         if (advanceAbsorptionRows.length) {
           for (const row of advanceAbsorptionRows) {
             try {
@@ -1108,7 +1152,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
                 workspaceId,
                 farmId,
                 seasonId,
-                settlementRecordId: settlementId,
+                settlementRecordId: settlementOperationalRecordId,
                 advanceRecordId: row.advanceRecordId,
                 absorbedAmount: row.absorbedAmount.toFixed(2),
               });
@@ -1118,7 +1162,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
                 workspaceId,
                 farmId,
                 seasonId,
-                settlementId,
+                settlementId: settlementClientRecordId,
                 settlementNumber,
                 allocationIndex: row.allocationIndex,
                 canonicalAdvanceRecordId: row.advanceRecordId,
@@ -1134,7 +1178,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           workspaceId,
           farmId,
           seasonId,
-          settlementId,
+          settlementClientRecordId,
         }, "labour wage settlement record insert completed");
         const includedEarningIds = [...new Set(preview.includedEarnings.map((item) => item.id).filter(Boolean))];
         const earningsToSettle = includedEarningIds.length
@@ -1154,14 +1198,14 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           workspaceId,
           farmId,
           seasonId,
-          settlementId,
+          settlementClientRecordId,
           includedEarningCount: earningsToSettle.length,
         }, "labour wage settlement labour earning update started");
         for (const earning of earningsToSettle) {
           const nextPayload = {
             ...normalizeLabourEarningPayload(earning.payload as Record<string, unknown>),
             status: "settled",
-            linkedSettlementId: settlementId,
+            linkedSettlementId: settlementClientRecordId,
             linkedVoucherId: null,
             settlementDate,
             updatedBy: request.appUser!.id,
@@ -1177,7 +1221,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           workspaceId,
           farmId,
           seasonId,
-          settlementId,
+          settlementClientRecordId,
           includedEarningCount: earningsToSettle.length,
         }, "labour wage settlement labour earning update completed");
         const includedAttendanceIds = [...new Set((preview.sourceAttendanceIds ?? []).filter(Boolean))];
@@ -1196,13 +1240,13 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           workspaceId,
           farmId,
           seasonId,
-          settlementId,
+          settlementClientRecordId,
           includedAttendanceCount: attendanceRows.length,
         }, "labour wage settlement attendance update started");
         for (const attendance of attendanceRows) {
           const nextPayload = {
             ...(attendance.payload as Record<string, unknown>),
-            linkedSettlementId: settlementId,
+            linkedSettlementId: settlementClientRecordId,
             settlementDate,
             updatedAt: createdAt.toISOString(),
           };
@@ -1216,12 +1260,12 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           workspaceId,
           farmId,
           seasonId,
-          settlementId,
+          settlementClientRecordId,
           includedAttendanceCount: attendanceRows.length,
         }, "labour wage settlement attendance update completed");
         const settlementRecord = {
-          id: settlementId,
-          clientRecordId: settlementId,
+          id: settlementOperationalRecordId,
+          clientRecordId: settlementClientRecordId,
           workspaceId,
           farmId,
           seasonId,
@@ -1232,24 +1276,24 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           workspaceId,
           farmId,
           seasonId,
-          settlementId,
+          settlementClientRecordId,
         }, "labour wage settlement accounting repair started");
         await repairPostedSettlementAccounting(tx, settlementRecord, request.appUser!.id);
         request.log.info({
           workspaceId,
           farmId,
           seasonId,
-          settlementId,
+          settlementClientRecordId,
         }, "labour wage settlement accounting repair completed");
         request.log.info({
           workspaceId,
           farmId,
           seasonId,
-          settlementId,
+          settlementClientRecordId,
           settlementNumber,
         }, "labour wage settlement transaction ready to commit");
         return {
-          settlement: { ...settlementPayload, id: settlementId, accountingStatus: "posted" as const, accountingMessage: null },
+          settlement: { ...settlementPayload, id: settlementClientRecordId, accountingStatus: "posted" as const, accountingMessage: null },
         };
       });
       request.log.info({
@@ -1406,7 +1450,18 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         const accountValidation = validateLabourSettlementPaymentAccount(resolvedAccount, settlement.farmId!);
         if (!accountValidation.valid) throw new Error(accountValidation.message ?? "Payment account validation failed.");
         if (!resolvedAccount) throw new Error("Payment account is not mapped. Please repair imported accounts.");
-        const preview = await previewLabourWageSettlement(tx, workspaceId, settlement.farmId!, settlement.seasonId!, nextFromDate, nextToDate, nextSettlementDate, settlement.clientRecordId);
+        const storedSelection = selectionScopeFromSettlementPayload(payload);
+        const preview = await previewLabourWageSettlement(
+          tx,
+          workspaceId,
+          settlement.farmId!,
+          settlement.seasonId!,
+          nextFromDate,
+          nextToDate,
+          nextSettlementDate,
+          settlement.clientRecordId,
+          storedSelection,
+        );
         if (preview.unresolvedRows.length) {
           throw new Error("Attendance wages cannot be settled until missing wage rates are fixed.");
         }
@@ -1635,6 +1690,29 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           updatedAt: voidedAt,
         }).where(eq(operationalRecords.id, earning.id));
       }
+      const attendanceRows = await tx.select({
+        id: operationalRecords.id,
+        payload: operationalRecords.payload,
+      }).from(operationalRecords).where(and(
+        eq(operationalRecords.workspaceId, workspaceId),
+        eq(operationalRecords.farmId, settlement.farmId!),
+        eq(operationalRecords.seasonId, settlement.seasonId!),
+        eq(operationalRecords.entityType, "attendance"),
+        sql`${operationalRecords.payload}->>'linkedSettlementId' = ${settlementId}`,
+      ));
+      for (const attendance of attendanceRows) {
+        const nextAttendancePayload = {
+          ...(attendance.payload as Record<string, unknown>),
+          linkedSettlementId: null,
+          settlementDate: null,
+          updatedAt: voidedIso,
+        };
+        await tx.update(operationalRecords).set({
+          payload: nextAttendancePayload,
+          clientUpdatedAt: voidedAt,
+          updatedAt: voidedAt,
+        }).where(eq(operationalRecords.id, attendance.id));
+      }
       await tx.insert(auditLogs).values({
         workspaceId,
         userId: request.appUser!.id,
@@ -1647,6 +1725,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           settlementNumber: payload.settlementNumber,
           accountingEntries: transactionCount,
           voidReason,
+          reopenedAttendanceCount: attendanceRows.length,
         },
       });
       return {

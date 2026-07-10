@@ -416,7 +416,14 @@ export function getPartnerAccountingSnapshot(
       excludedReason: included ? null : "Settlement is deleted, voided, or not linked to the selected account.",
     };
   });
-  if (typeof console !== "undefined" && import.meta.env.DEV) {
+  const isDevRuntime = (() => {
+    try {
+      return typeof import.meta !== "undefined" && Boolean((import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV);
+    } catch {
+      return false;
+    }
+  })();
+  if (typeof console !== "undefined" && isDevRuntime) {
     for (const row of funds) {
       console.debug("PARTNER_ACCOUNTING_FUND_ROW", {
         id: row.transactionId,

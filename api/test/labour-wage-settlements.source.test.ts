@@ -145,6 +145,9 @@ test("labour wage settlement allocations persist canonical advance UUIDs and log
   assert.ok(ledgerSource.includes("advanceRecordId: row.id"));
   assert.ok(ledgerSource.includes("sourceAdvanceId: row.clientRecordId"));
   assert.ok(ledgerSource.includes("advanceRecordId: row.advanceRecordId"));
+  assert.ok(ledgerSource.includes("allocationsBySettlementId.get(settlement.id)"));
+  assert.ok(ledgerSource.includes("legacyUnallocatedPreviouslyAbsorbedAdvances"));
+  assert.doesNotMatch(ledgerSource, /eligibleAdvances\[0\]/);
   assert.ok(routeSource.includes("canonicalAdvanceRecordId: row.advanceRecordId"));
   assert.ok(routeSource.includes("sourceAdvanceId: row.sourceAdvanceId"));
   assert.ok(routeSource.includes("failingAllocationIndex"));

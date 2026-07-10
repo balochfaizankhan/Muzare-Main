@@ -156,6 +156,13 @@ export type SettlementAdvanceDebugRow = {
   carryForward: number;
 };
 
+export type SettlementAdvanceReconciliationWarning = {
+  code: "LEGACY_UNALLOCATED_ADVANCE_CONSUMPTION";
+  message: string;
+  affectedSettlementCount: number;
+  affectedAmount: number;
+};
+
 export type GroupAdvancePoolTotals = {
   grossWages: number;
   totalAdvancesUpToSettlementDate: number;
@@ -1148,6 +1155,15 @@ export async function previewLabourWageSettlement(
   const balanceAfterPayment = netPayableBeforePayment;
   const previouslySettledAdvances = advanceLedger.totals.previouslyAbsorbedAdvances;
   const excludedVoidedSettledAdvances = advanceDebugTrace.reduce((sum, row) => sum + row.excludedVoidedSettledAdvances, 0);
+  const advanceReconciliationWarnings: SettlementAdvanceReconciliationWarning[] =
+    advanceLedger.totals.legacyUnallocatedPreviouslyAbsorbedAdvances > 0.005
+      ? [{
+        code: "LEGACY_UNALLOCATED_ADVANCE_CONSUMPTION",
+        message: "One or more historical settlements consumed advances without canonical allocation rows. Review historical settlement allocations before posting a new settlement.",
+        affectedSettlementCount: advanceLedger.totals.ambiguousHistoricalSettlementCount,
+        affectedAmount: advanceLedger.totals.legacyUnallocatedPreviouslyAbsorbedAdvances,
+      }]
+      : [];
   const excludedLabourers = candidateLabourers
     .filter((labourer) => !includedLabourSet.has(labourer.id))
     .map((labourer) => {
@@ -1180,6 +1196,7 @@ export async function previewLabourWageSettlement(
     advancesPaid: availableAdvanceBalanceBeforeSettlement,
     rawAdvancesUpToSettlementDate,
     previouslySettledAdvances,
+    legacyUnallocatedPreviouslySettledAdvances: advanceLedger.totals.legacyUnallocatedPreviouslyAbsorbedAdvances,
     excludedVoidedSettledAdvances,
     advanceAdjustedNow,
     settledAdvanceAmount: advanceAdjustedNow,
@@ -1226,6 +1243,8 @@ export async function previewLabourWageSettlement(
     advanceAdjustmentAllocations,
     advanceDebugTrace,
     advanceReconciliation: advanceLedger.rows,
+    advanceReconciliationWarnings,
+    ambiguousHistoricalSettlements: advanceLedger.ambiguousHistoricalSettlements,
     unresolvedRows,
     overlappingSettlements: existingSettlements.map((row) => ({
       id: row.clientRecordId,
