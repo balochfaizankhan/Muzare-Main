@@ -7,6 +7,7 @@ import { SubpageHeader } from "../components/SubpageHeader";
 import { SearchInput } from "../components/SearchInput";
 import { LabourSelectCombobox } from "../components/LabourSelectCombobox";
 import { ClearableSelect } from "../components/ClearableSelect";
+import { ResponsiveSelectField } from "../components/ResponsivePicker";
 import { useAuth } from "../auth/AuthProvider";
 import { useSyncState } from "../hooks/useSyncState";
 import { calculateAccountBalance } from "../lib/accounting";
@@ -1952,6 +1953,8 @@ function ExpensesModule() {
   const [voucherCategory, setVoucherCategory] = useState("");
   const [voucherSubcategory, setVoucherSubcategory] = useState("");
   const [voucherAccountId, setVoucherAccountId] = useState("");
+  const [showExpenseMoreFilters, setShowExpenseMoreFilters] = useState(false);
+  const [showExpenseSubcategoryManager, setShowExpenseSubcategoryManager] = useState(false);
   const voucherFormRef = useRef<HTMLDivElement | null>(null);
   const voucherDateRef = useRef<HTMLInputElement | null>(null);
   const voucherItemCategoryRefs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -1962,6 +1965,29 @@ function ExpensesModule() {
   const isSyntheticLocalAccount = useCallback((value?: string) => Boolean(value?.includes(":local-")), []);
   const selectableExpenseAccounts = useMemo(() => accounts.filter((account) => !isSyntheticLocalAccount(account.id)), [accounts, isSyntheticLocalAccount]);
   const resolvedExpenseAccountId = accountId || selectableExpenseAccounts[0]?.id || "";
+  const voucherSearchPlaceholder = "Search vouchers";
+  const activeVoucherFilters = useMemo(() => {
+    const filters: string[] = [];
+    if (voucherSearch.trim()) filters.push(`Search: ${voucherSearch.trim()}`);
+    if (voucherFrom || voucherTo) filters.push(`${voucherFrom ? compactDate(voucherFrom) : "Start"} - ${voucherTo ? compactDate(voucherTo) : "End"}`);
+    if (voucherCategory) filters.push(translateExpenseCategory(voucherCategory));
+    if (voucherSubcategory) filters.push(translateExpenseSubcategory(voucherSubcategory));
+    if (voucherAccountId) filters.push(accounts.find((item) => item.id === voucherAccountId)?.name ?? voucherAccountId);
+    if (showDeletedVouchers) filters.push("Deleted / voided");
+    if (!showImportedVouchers) filters.push("Imported off");
+    if (showSettlementVouchers) filters.push("Settlement vouchers");
+    return filters;
+  }, [accounts, showDeletedVouchers, showImportedVouchers, showSettlementVouchers, voucherAccountId, voucherCategory, voucherFrom, voucherSearch, voucherSubcategory, voucherTo]);
+  const advancedVoucherFilterCount = [
+    voucherCategory,
+    voucherSubcategory,
+    voucherAccountId,
+    showDeletedVouchers,
+    !showImportedVouchers,
+    showSettlementVouchers,
+  ].filter(Boolean).length;
+  const expenseSummaryLabel = "Total expenses";
+  const expenseSummarySubtitle = activeVoucherFilters.length > 0 ? "Current filters" : "Current season";
   const resetForm = (options?: { preserveSessionDefaults?: boolean }) => {
     const preserveSessionDefaults = options?.preserveSessionDefaults !== false;
     setDate(preserveSessionDefaults ? expenseSessionDate : today());
@@ -2510,14 +2536,6 @@ function ExpensesModule() {
     category.set(item.subcategory || "Miscellaneous", (category.get(item.subcategory || "Miscellaneous") ?? 0) + item.amount);
     map.set(item.category, category); return map;
   }, new Map<string, Map<string, number>>())];
-  const hasActiveFilters = Boolean(
-    voucherSearch.trim()
-    || voucherFrom
-    || voucherTo
-    || voucherCategory
-    || voucherSubcategory
-    || voucherAccountId
-  );
   const clearFilters = () => {
     setVoucherSearch("");
     setDebouncedVoucherSearch("");
@@ -2526,6 +2544,9 @@ function ExpensesModule() {
     setVoucherCategory("");
     setVoucherSubcategory("");
     setVoucherAccountId("");
+    setShowDeletedVouchers(false);
+    setShowImportedVouchers(true);
+    setShowSettlementVouchers(false);
   };
   useEffect(() => {
     const recordId = searchParams.get("recordId");
@@ -2657,7 +2678,7 @@ function ExpensesModule() {
   const voucherGrandTotal = voucherItems.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
 
   return (
-    <>
+    <div className="expenses-module">
       {(canCreateVouchers || (editingVoucher && canEditVouchers)) && <FormCard title={<span className="expense-voucher-form__card-title"><span>{editingVoucher ? t("expensesPage.editVoucherAction") : t("expensesPage.newVoucher")}</span><span className="expense-voucher-form__number-display"><span className="expense-voucher-form__number-label">{t("expensesPage.voucherLabel")}</span><span className="expense-voucher-form__number">{displayedNewVoucherNumber}</span>{!editingVoucher && <button
           type="button"
           className="expense-voucher-form__number-trigger"
@@ -2680,18 +2701,30 @@ function ExpensesModule() {
         <form className="module-form inline-form expense-voucher-form" onSubmit={(event) => void submit(event)}>
           <div ref={voucherFormRef} />
           <fieldset disabled={savingVoucher} aria-busy={savingVoucher} className="expense-voucher-form__fieldset">
-          <div className="expense-voucher-form__top-row">
-            <label>
-              <span>{t("expensesPage.date")}</span>
-              <input ref={voucherDateRef} type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-            </label>
-            <label>
-              <span>{t("expensesPage.paymentAccount")}</span>
-              <select value={resolvedExpenseAccountId} onChange={(event) => setAccountId(event.target.value)}>
-                <option value="" disabled>{t("expensesPage.selectPaymentAccount")}</option>
-                {selectableExpenseAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-              </select>
-            </label>
+          <div className="expense-voucher-form__section">
+            <div className="expense-voucher-form__section-head">
+              <strong>{t("expensesPage.voucherDetails")}</strong>
+            </div>
+            <div className="expense-voucher-form__top-row">
+              <label>
+                <span>{t("expensesPage.date")}</span>
+                <input ref={voucherDateRef} type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+              </label>
+              <label>
+                <span>{t("expensesPage.paymentAccount")}</span>
+                <ResponsiveSelectField
+                  ariaLabel={t("expensesPage.paymentAccount")}
+                  title={t("expensesPage.paymentAccount")}
+                  placeholder={t("expensesPage.selectPaymentAccount")}
+                  allLabel={t("expensesPage.selectPaymentAccount")}
+                  allowClear={false}
+                  options={selectableExpenseAccounts.map((account) => ({ value: account.id, label: account.name }))}
+                  value={resolvedExpenseAccountId}
+                  onChange={setAccountId}
+                  searchPlaceholder="Search accounts"
+                />
+              </label>
+            </div>
           </div>
           {customVoucherNumberEnabled && <div className="expense-voucher-form__number-row">
               <label className="expense-voucher-form__number-edit">
@@ -2731,46 +2764,56 @@ function ExpensesModule() {
               </label>
           </div>}
           {!selectableExpenseAccounts.length && <p className="expense-voucher-form__warning">{t("expensesPage.noRealPaymentAccounts")}</p>}
-          <label className="expense-voucher-form__notes">
-            <span>{t("expensesPage.notesOptional")}</span>
-            <input value={notes} placeholder={t("expensesPage.notesOptional")} onChange={(event) => setNotes(event.target.value)} />
-          </label>
-          <div className="expense-voucher-items">
-            <div className="expense-voucher-items__header">
+          <div className="expense-voucher-form__section">
+            <div className="expense-voucher-form__section-head">
               <strong>{t("expensesPage.voucherItems")}</strong>
             </div>
-            <div className="expense-voucher-items__list">
-              {voucherItems.map((item, index) => {
-                const selectedCategory = categories.data?.categories.find((entry) => entry.id === item.categoryId);
-                return (
-                  <article className="expense-voucher-item" key={item.id}>
-                    <div className="expense-voucher-item__top">
-                      <strong>{t("expensesPage.itemNumber", { number: index + 1 })}</strong>
-                      {voucherItems.length > 1 && <button className="expense-voucher-item__remove" type="button" onClick={() => setVoucherItems((current) => current.filter((entry) => entry.id !== item.id))}>{t("expensesPage.removeItem")}</button>}
-                    </div>
-                    <div className="expense-voucher-item__grid">
-                      <label><span>{t("expensesPage.categoryRequired")}</span><SearchInput ref={(node) => { voucherItemCategoryRefs.current[item.id] = node; }} required list={`expense-category-options-${item.id}`} placeholder={t("expensesPage.selectCategory")} value={item.categorySearch} onChange={(value) => {
-                        const next = categories.data?.categories.find((entry) => entry.name === value);
-                        updateVoucherItem(item.id, (current) => ({ ...current, categorySearch: value, categoryId: next?.id ?? "", subcategoryId: "", subcategorySearch: "" }));
-                      }} onClear={() => updateVoucherItem(item.id, (current) => ({ ...current, categoryId: "", categorySearch: "", subcategoryId: "", subcategorySearch: "" }))} /><datalist id={`expense-category-options-${item.id}`}>{categories.data?.categories.map((entry) => <option key={entry.id} value={entry.name} />)}</datalist></label>
-                      <label><span>{t("expensesPage.subcategoryRequired")}</span><SearchInput required disabled={!item.categoryId} list={`expense-subcategory-options-${item.id}`} placeholder={t("expensesPage.selectSubcategory")} value={item.subcategorySearch} onChange={(value) => {
-                        const next = selectedCategory?.subcategories.find((entry) => entry.name === value);
-                        updateVoucherItem(item.id, (current) => ({ ...current, subcategorySearch: value, subcategoryId: next?.id ?? "" }));
-                      }} onClear={() => updateVoucherItem(item.id, (current) => ({ ...current, subcategoryId: "", subcategorySearch: "" }))} /><datalist id={`expense-subcategory-options-${item.id}`}>{selectedCategory?.subcategories.map((entry) => <option key={entry.id} value={entry.name} />)}</datalist></label>
-                      <label><span>{t("expensesPage.amount")}</span><input required min="0.01" step="0.01" type="number" value={item.amount} placeholder={t("expensesPage.amount")} onChange={(event) => updateVoucherItem(item.id, (current) => ({ ...current, amount: event.target.value }))} /></label>
-                      <label className="expense-voucher-item__description"><span>{t("expensesPage.description")}</span><input required value={item.description} placeholder={t("expensesPage.description")} onChange={(event) => updateVoucherItem(item.id, (current) => ({ ...current, description: event.target.value }))} /></label>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-            <button className="expense-voucher-items__add expense-voucher-items__add--bottom" type="button" onClick={addVoucherItem}>{t("expensesPage.addAnotherItem")}</button>
-            <div className="expense-voucher-items__total">
-              <span>{t("expensesPage.grandTotal")}</span>
-              <strong>{money(voucherGrandTotal)}</strong>
+            <label className="expense-voucher-form__notes">
+              <span>{t("expensesPage.notesOptional")}</span>
+              <input value={notes} placeholder={t("expensesPage.notesOptional")} onChange={(event) => setNotes(event.target.value)} />
+            </label>
+            <div className="expense-voucher-items">
+              <div className="expense-voucher-items__header">
+                <strong>{t("expensesPage.voucherItems")}</strong>
+              </div>
+              <div className="expense-voucher-items__list">
+                {voucherItems.map((item, index) => {
+                  const selectedCategory = categories.data?.categories.find((entry) => entry.id === item.categoryId);
+                  return (
+                    <article className="expense-voucher-item" key={item.id}>
+                      <div className="expense-voucher-item__top">
+                        <strong>{t("expensesPage.itemNumber", { number: index + 1 })}</strong>
+                        {voucherItems.length > 1 && <button className="expense-voucher-item__remove" type="button" onClick={() => setVoucherItems((current) => current.filter((entry) => entry.id !== item.id))}>{t("expensesPage.removeItem")}</button>}
+                      </div>
+                      <div className="expense-voucher-item__grid">
+                        <label><span>{t("expensesPage.categoryRequired")}</span><SearchInput ref={(node) => { voucherItemCategoryRefs.current[item.id] = node; }} required list={`expense-category-options-${item.id}`} placeholder={t("expensesPage.selectCategory")} value={item.categorySearch} onChange={(value) => {
+                          const next = categories.data?.categories.find((entry) => entry.name === value);
+                          updateVoucherItem(item.id, (current) => ({ ...current, categorySearch: value, categoryId: next?.id ?? "", subcategoryId: "", subcategorySearch: "" }));
+                        }} onClear={() => updateVoucherItem(item.id, (current) => ({ ...current, categoryId: "", categorySearch: "", subcategoryId: "", subcategorySearch: "" }))} /><datalist id={`expense-category-options-${item.id}`}>{categories.data?.categories.map((entry) => <option key={entry.id} value={entry.name} />)}</datalist></label>
+                        <label><span>{t("expensesPage.subcategoryRequired")}</span><SearchInput required disabled={!item.categoryId} list={`expense-subcategory-options-${item.id}`} placeholder={t("expensesPage.selectSubcategory")} value={item.subcategorySearch} onChange={(value) => {
+                          const next = selectedCategory?.subcategories.find((entry) => entry.name === value);
+                          updateVoucherItem(item.id, (current) => ({ ...current, subcategorySearch: value, subcategoryId: next?.id ?? "" }));
+                        }} onClear={() => updateVoucherItem(item.id, (current) => ({ ...current, subcategoryId: "", subcategorySearch: "" }))} /><datalist id={`expense-subcategory-options-${item.id}`}>{selectedCategory?.subcategories.map((entry) => <option key={entry.id} value={entry.name} />)}</datalist></label>
+                        <label><span>{t("expensesPage.amount")}</span><input required min="0.01" step="0.01" type="number" value={item.amount} placeholder={t("expensesPage.amount")} onChange={(event) => updateVoucherItem(item.id, (current) => ({ ...current, amount: event.target.value }))} /></label>
+                        <label className="expense-voucher-item__description"><span>{t("expensesPage.description")}</span><input required value={item.description} placeholder={t("expensesPage.description")} onChange={(event) => updateVoucherItem(item.id, (current) => ({ ...current, description: event.target.value }))} /></label>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+              <button className="expense-voucher-items__add expense-voucher-items__add--bottom" type="button" onClick={addVoucherItem}>{t("expensesPage.addAnotherItem")}</button>
+              <div className="expense-voucher-items__total">
+                <span>{t("expensesPage.grandTotal")}</span>
+                <strong>{money(voucherGrandTotal)}</strong>
+              </div>
             </div>
           </div>
-          <ReceiptAttachmentPicker pending={pendingReceipts} onFiles={addReceiptFiles} onRemove={removePendingReceipt} />
+          <div className="expense-voucher-form__section">
+            <div className="expense-voucher-form__section-head">
+              <strong>{t("expensesPage.receiptAttachment")}</strong>
+            </div>
+            <ReceiptAttachmentPicker pending={pendingReceipts} onFiles={addReceiptFiles} onRemove={removePendingReceipt} />
+          </div>
           {receiptError && <p className="worker-action-error">{receiptError}</p>}
           {expenseVoucherError && <p className="worker-action-error">{expenseVoucherError}</p>}
           <div className="expense-voucher-form__actions">
@@ -2783,48 +2826,154 @@ function ExpensesModule() {
       <section className="record-panel expense-search-panel">
         <h2>{t("expensesPage.searchVouchers")}</h2>
         <div className="expense-search-filters">
-          <SearchInput placeholder={t("expensesPage.searchPlaceholder")} value={voucherSearch} onChange={setVoucherSearch} />
-          <fieldset className="expense-date-range">
-            <legend>{t("expensesPage.dateRange")}</legend>
+          <SearchInput placeholder={voucherSearchPlaceholder} value={voucherSearch} onChange={setVoucherSearch} />
+          <div className="expense-filter-quick-chips" aria-label={t("expensesPage.dateRange")}>
+            <button type="button" className={voucherFrom === today() && voucherTo === today() ? "is-active" : ""} onClick={() => { setVoucherFrom(today()); setVoucherTo(today()); }}>{t("reportsPage.quickToday")}</button>
+            <button type="button" className={!voucherFrom && !voucherTo ? "" : ""} onClick={() => { const now = new Date(); const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay() + 1); const end = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const format = (value: Date) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`; setVoucherFrom(format(start)); setVoucherTo(format(end)); }}>{t("reportsPage.quickThisWeek")}</button>
+            <button type="button" onClick={() => { const now = new Date(); const start = new Date(now.getFullYear(), now.getMonth(), 1); const format = (value: Date) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`; setVoucherFrom(format(start)); setVoucherTo(today()); }}>{t("reportsPage.quickThisMonth")}</button>
+            <button type="button" onClick={clearFilters}>{t("reportsPage.quickClear")}</button>
+          </div>
+          <div className="expense-date-range">
             <label className="expense-filter-field expense-date-field"><span><CalendarDays size={15} />{t("expensesPage.fromDate")}</span><input aria-label={t("expensesPage.fromDate")} type="date" value={voucherFrom} onChange={(event) => setVoucherFrom(event.target.value)} /></label>
             <label className="expense-filter-field expense-date-field"><span><CalendarDays size={15} />{t("expensesPage.toDate")}</span><input aria-label={t("expensesPage.toDate")} type="date" value={voucherTo} onChange={(event) => setVoucherTo(event.target.value)} /></label>
-          </fieldset>
-          <div className="expense-filter-grid">
-            <label className="expense-filter-field"><span>{t("expensesPage.category")}</span><ClearableSelect aria-label={t("expensesPage.category")} value={voucherCategory} onChange={(value) => { setVoucherCategory(value); setVoucherSubcategory(""); }}>
-              <option value="">{t("expensesPage.allCategories")}</option>{voucherCategories.map((item) => <option key={item} value={item}>{item}</option>)}
-            </ClearableSelect></label>
-            <label className="expense-filter-field"><span>{t("expensesPage.subcategory")}</span><ClearableSelect aria-label={t("expensesPage.subcategory")} value={voucherSubcategory} onChange={setVoucherSubcategory}>
-              <option value="">{t("expensesPage.allSubcategories")}</option>{[...new Set(voucherSubcategories)].map((name) => <option key={name} value={name}>{translateExpenseSubcategory(name)}</option>)}
-            </ClearableSelect></label>
-            <label className="expense-filter-field expense-filter-field--account"><span>{t("expensesPage.paymentAccount")}</span><ClearableSelect aria-label={t("expensesPage.paymentAccount")} value={voucherAccountId} onChange={setVoucherAccountId}>
-              <option value="">{t("expensesPage.allAccounts")}</option>{accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-            </ClearableSelect></label>
           </div>
+          <button type="button" className="expense-more-filters-toggle" aria-expanded={showExpenseMoreFilters} onClick={() => setShowExpenseMoreFilters((current) => !current)}>
+            <span>More filters</span>
+            {advancedVoucherFilterCount > 0 && <strong>{advancedVoucherFilterCount}</strong>}
+            <ChevronDown size={16} className={showExpenseMoreFilters ? "is-open" : ""} />
+          </button>
+          {showExpenseMoreFilters && <div className="expense-filter-advanced">
+            <div className="expense-filter-grid">
+              <label className="expense-filter-field">
+                <span>{t("expensesPage.category")}</span>
+                <ResponsiveSelectField
+                  ariaLabel={t("expensesPage.category")}
+                  title={t("expensesPage.category")}
+                  placeholder={t("expensesPage.allCategories")}
+                  allLabel={t("expensesPage.allCategories")}
+                  value={voucherCategory}
+                  onChange={(value) => { setVoucherCategory(value); setVoucherSubcategory(""); }}
+                  options={voucherCategories.map((item) => ({ value: item, label: item }))}
+                  searchPlaceholder="Search categories"
+                />
+              </label>
+              <label className="expense-filter-field">
+                <span>{t("expensesPage.subcategory")}</span>
+                <ResponsiveSelectField
+                  ariaLabel={t("expensesPage.subcategory")}
+                  title={t("expensesPage.subcategory")}
+                  placeholder={t("expensesPage.allSubcategories")}
+                  allLabel={t("expensesPage.allSubcategories")}
+                  value={voucherSubcategory}
+                  onChange={setVoucherSubcategory}
+                  options={[...new Set(voucherSubcategories)].map((name) => ({ value: name, label: translateExpenseSubcategory(name) }))}
+                  searchPlaceholder="Search subcategories"
+                />
+              </label>
+              <label className="expense-filter-field expense-filter-field--account">
+                <span>{t("expensesPage.paymentAccount")}</span>
+                <ResponsiveSelectField
+                  ariaLabel={t("expensesPage.paymentAccount")}
+                  title={t("expensesPage.paymentAccount")}
+                  placeholder={t("expensesPage.allAccounts")}
+                  allLabel={t("expensesPage.allAccounts")}
+                  value={voucherAccountId}
+                  onChange={setVoucherAccountId}
+                  options={accounts.map((item) => ({ value: item.id, label: item.name }))}
+                  searchPlaceholder="Search accounts"
+                />
+              </label>
+            </div>
+            <div className="expense-filter-toggles">
+              <span className="expense-filter-note expense-filter-note--season">Current season only</span>
+              <button type="button" className={showDeletedVouchers ? "is-active" : ""} aria-pressed={showDeletedVouchers} onClick={() => setShowDeletedVouchers((current) => !current)}>{t("expensesPage.showDeletedVouchers")}</button>
+              <button type="button" className={showImportedVouchers ? "is-active" : ""} aria-pressed={showImportedVouchers} onClick={() => setShowImportedVouchers((current) => !current)}>{t("expensesPage.showImportedVouchers")}</button>
+              <button type="button" className={showSettlementVouchers ? "is-active" : ""} aria-pressed={showSettlementVouchers} onClick={() => setShowSettlementVouchers((current) => !current)}>Include settlement vouchers</button>
+              <p className="expense-filter-help">Shows accounting adjustment vouchers. This may change report totals.</p>
+            </div>
+          </div>}
         </div>
-        <div className="expense-search-meta">
-          <small>{hasActiveFilters ? t("expensesPage.showingCurrentFilters") : t("expensesPage.showingSeasonScope")}</small>
-          <label className="partner-ledger-show-deleted"><input checked={showDeletedVouchers} type="checkbox" onChange={(event) => setShowDeletedVouchers(event.target.checked)} /> {t("expensesPage.showDeletedVouchers")}</label>
-          <label className="partner-ledger-show-deleted"><input checked={showImportedVouchers} type="checkbox" onChange={(event) => setShowImportedVouchers(event.target.checked)} /> {t("expensesPage.showImportedVouchers")}</label>
-          <label className="partner-ledger-show-deleted"><input checked={showSettlementVouchers} type="checkbox" onChange={(event) => setShowSettlementVouchers(event.target.checked)} /> Show auto-generated settlement vouchers</label>
-          {hasActiveFilters && <button type="button" onClick={clearFilters}>{t("expensesPage.clearFilters")}</button>}
-        </div>
+        {activeVoucherFilters.length > 0 && <div className="expense-active-filters">
+          <small>{t("expensesPage.showingCurrentFilters")}</small>
+          <div className="expense-active-filters__chips">
+            {activeVoucherFilters.map((item) => <span key={item}>{item}</span>)}
+          </div>
+          <button type="button" onClick={clearFilters}>{t("expensesPage.clearFilters")}</button>
+        </div>}
+        {activeVoucherFilters.length === 0 && <small className="expense-season-note">{t("expensesPage.showingSeasonScope")}</small>}
         {voucherSearchQuery.isFetching && <small>{t("expensesPage.refreshingMatches")}</small>}
         {!navigator.onLine && <small>{t("expensesPage.offlineShowingCached")}</small>}
         {voucherSearchQuery.isError && <small>{t("expensesPage.apiRefreshFailed")}</small>}
       </section>
-      <Summary value={money(total)} label={hasActiveFilters ? t("expensesPage.totalCurrentFilters") : t("expensesPage.totalCurrentSeason")} />
+      <section className="summary-card expense-summary-card">
+        <div>
+          <span>{expenseSummaryLabel}</span>
+          <small>{expenseSummarySubtitle}</small>
+        </div>
+        <strong>{money(total)}</strong>
+      </section>
       <section className="record-panel"><h2>{t("expensesPage.expensesByCategory")}</h2>{!grouped.length ? <Empty>{t("expensesPage.noExpenseTotals")}</Empty> : <div className="expense-category-report">{grouped.map(([category, items]) => { const categoryTotal = [...items.values()].reduce((sum, amount) => sum + amount, 0); return <article key={category}><header><div><h3>{category}</h3><small>{getExpenseAccountingGroup(category)}</small></div><strong>{money(categoryTotal)}</strong></header>{[...items].map(([subcategory, amount]) => <p key={subcategory}><span>{subcategory === "Miscellaneous" ? t("expensesPage.miscellaneous") : translateExpenseSubcategory(subcategory)}</span><strong>{money(amount)}</strong></p>)}<b>{t("expensesPage.categoryTotal")} <span>{money(categoryTotal)}</span></b></article>; })}</div>}</section>
-      {canManage && <section className="record-panel"><h2>{t("expensesPage.customSubcategories")}</h2><form className="module-form compact-form" onSubmit={(event) => void addCustom(event)}><select required value={customCategoryId} onChange={(event) => setCustomCategoryId(event.target.value)}><option value="">{t("expensesPage.selectCategory")}</option>{categories.data?.categories.map((item) => <option key={item.id} value={item.id}>{translateExpenseCategory(item.name)}</option>)}</select><input required placeholder={t("expensesPage.newSubcategory")} value={customName} onChange={(event) => setCustomName(event.target.value)} /><button type="submit">{t("expensesPage.addSubcategory")}</button></form><div className="custom-subcategory-list">{categories.data?.categories.flatMap((item) => item.subcategories.filter((subcategory) => !subcategory.isSystem).map((subcategory) => <span key={subcategory.id}>{translateExpenseCategory(item.name)} / {subcategory.name}<button type="button" onClick={() => { const name = window.prompt(t("expensesPage.renameCustomSubcategory"), subcategory.name); if (token && name?.trim()) void updateExpenseSubcategory(token, workspaceId, subcategory.id, { name: name.trim() }).then(() => categories.refetch()); }}>{t("expensesPage.edit")}</button><button type="button" onClick={() => token && void updateExpenseSubcategory(token, workspaceId, subcategory.id, { active: false }).then(() => categories.refetch())}>{t("expensesPage.disable")}</button></span>))}</div></section>}
-      <RecordTable
-        empty={t("expensesPage.noExpensesFound")}
-        rows={filteredVouchers.map((item) => {
-          const lines = voucherLinesFor(item);
-          const summary = lines.length > 1 ? `${lines[0].category} / ${lines[0].subcategory ? translateExpenseSubcategory(lines[0].subcategory) : t("expensesPage.miscellaneous")} +${lines.length - 1} ${t("expensesPage.moreItems")}` : `${getCanonicalExpenseCategory(item.category)} / ${item.subcategory ? translateExpenseSubcategory(item.subcategory) : t("expensesPage.miscellaneous")}`;
-          const description = lines.length > 1 ? `${lines[0].description} +${lines.length - 1} ${t("expensesPage.moreItems")}` : item.description;
-          return [getVoucherDisplayNumber(item) || item.voucherNumber, item.date, summary, description, accountById.get(item.accountId) ?? t("expensesPage.unknownAccount"), money(item.amount)];
-        })}
-        actions={filteredVouchers.map((item) => <div className="record-list__actions" key={item.id}><button type="button" onClick={() => setSelectedVoucher(item)}>{t("expensesPage.viewDetails")}</button>{canEditVouchers && <button type="button" onClick={() => openEdit(item)}>{t("expensesPage.edit")}</button>}</div>)}
-      />
+      {canManage && <section className="record-panel expense-subcategory-manager">
+        <button type="button" className="expense-subcategory-manager__toggle" aria-expanded={showExpenseSubcategoryManager} onClick={() => setShowExpenseSubcategoryManager((current) => !current)}>
+          <div>
+            <h2>{t("expensesPage.customSubcategories")}</h2>
+            <p>Add custom subcategories for expense classification.</p>
+          </div>
+          <ChevronDown size={16} className={showExpenseSubcategoryManager ? "is-open" : ""} />
+        </button>
+        {showExpenseSubcategoryManager && <div className="expense-subcategory-manager__body">
+          <form className="module-form compact-form" onSubmit={(event) => void addCustom(event)}>
+            <ResponsiveSelectField
+              ariaLabel={t("expensesPage.selectCategory")}
+              title={t("expensesPage.selectCategory")}
+              placeholder={t("expensesPage.selectCategory")}
+              allLabel={t("expensesPage.selectCategory")}
+              value={customCategoryId}
+              onChange={setCustomCategoryId}
+              options={categories.data?.categories.map((item) => ({ value: item.id, label: translateExpenseCategory(item.name) })) ?? []}
+              searchPlaceholder="Search categories"
+            />
+            <input required placeholder={t("expensesPage.newSubcategory")} value={customName} onChange={(event) => setCustomName(event.target.value)} />
+            <button type="submit">{t("expensesPage.addSubcategory")}</button>
+          </form>
+          <div className="custom-subcategory-list">{categories.data?.categories.flatMap((item) => item.subcategories.filter((subcategory) => !subcategory.isSystem).map((subcategory) => <span key={subcategory.id}>{translateExpenseCategory(item.name)} / {subcategory.name}<button type="button" onClick={() => { const name = window.prompt(t("expensesPage.renameCustomSubcategory"), subcategory.name); if (token && name?.trim()) void updateExpenseSubcategory(token, workspaceId, subcategory.id, { name: name.trim() }).then(() => categories.refetch()); }}>{t("expensesPage.edit")}</button><button type="button" onClick={() => token && void updateExpenseSubcategory(token, workspaceId, subcategory.id, { active: false }).then(() => categories.refetch())}>{t("expensesPage.disable")}</button></span>))}</div>
+        </div>}
+      </section>}
+      <section className="record-panel expense-records">
+        <h2>{t("expensesPage.recentRecords")}</h2>
+        {!filteredVouchers.length ? <Empty>{t("expensesPage.noExpensesFound")}</Empty> : (
+          <div className="expense-voucher-cards">
+            {filteredVouchers.map((item) => {
+              const lines = voucherLinesFor(item);
+              const summary = lines.length > 1
+                ? `${lines[0].category} / ${lines[0].subcategory ? translateExpenseSubcategory(lines[0].subcategory) : t("expensesPage.miscellaneous")} +${lines.length - 1} ${t("expensesPage.moreItems")}`
+                : `${getCanonicalExpenseCategory(item.category)} / ${item.subcategory ? translateExpenseSubcategory(item.subcategory) : t("expensesPage.miscellaneous")}`;
+              const description = lines.length > 1 ? `${lines[0].description} +${lines.length - 1} ${t("expensesPage.moreItems")}` : item.description;
+              const accountName = accountById.get(item.accountId) ?? t("expensesPage.unknownAccount");
+              return (
+                <article className="expense-voucher-card" key={item.id}>
+                  <div className="expense-voucher-card__top">
+                    <div>
+                      <strong>{getVoucherDisplayNumber(item) || item.voucherNumber}</strong>
+                      <small>{shortDate(item.date)}</small>
+                    </div>
+                    <strong className="expense-voucher-card__amount">{money(item.amount)}</strong>
+                  </div>
+                  <div className="expense-voucher-card__body">
+                    <p>{summary}</p>
+                    <p>{description || "—"}</p>
+                    <p>{accountName}</p>
+                  </div>
+                  <div className="expense-voucher-card__actions">
+                    <button type="button" onClick={() => setSelectedVoucher(item)}>{t("expensesPage.viewDetails")}</button>
+                    {canEditVouchers && <button type="button" onClick={() => openEdit(item)}>{t("expensesPage.edit")}</button>}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
       {selectedVoucher && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedVoucher(null)}>
         <section className="worker-dialog worker-dialog--wide worker-dialog--record-detail expense-voucher-detail-dialog" role="dialog" aria-modal="true" aria-label={t("expensesPage.voucherDetails")} onClick={(event) => event.stopPropagation()}>
           <header className="worker-dialog__header worker-dialog__header--detail">
@@ -2898,7 +3047,7 @@ function ExpensesModule() {
           </footer>
         </section>
       </div>}
-    </>
+    </div>
   );
 }
 

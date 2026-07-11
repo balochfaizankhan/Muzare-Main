@@ -4685,6 +4685,57 @@ button {
   margin: 0 0 15px;
 }
 
+.expenses-module {
+  display: grid;
+  gap: 12px;
+  padding-bottom: calc(132px + env(safe-area-inset-bottom, 0px));
+}
+
+.expenses-module .workspace-intro {
+  align-items: flex-start;
+  background: linear-gradient(180deg, #ffffff, #f5fbf4);
+  border: 1px solid color-mix(in srgb, var(--border) 72%, white);
+  border-radius: 16px;
+  box-shadow: 0 10px 26px rgba(5, 35, 63, 0.045);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 16px;
+}
+
+.expenses-module .workspace-intro h2 {
+  font-size: 1.14rem;
+  margin-bottom: 4px;
+}
+
+.expenses-module .workspace-intro p {
+  max-width: 48rem;
+}
+
+.expense-voucher-form__fieldset {
+  border: 0;
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+}
+
+.expense-voucher-form__section {
+  display: grid;
+  gap: 10px;
+}
+
+.expense-voucher-form__section-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.expense-voucher-form__section-head strong {
+  color: var(--text-primary);
+  font-size: .88rem;
+}
+
 .diagnostic-json {
   background: #0f172a;
   border: 1px solid rgba(148, 163, 184, 0.2);
@@ -4701,7 +4752,7 @@ button {
 
 .expense-search-filters {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   margin-top: 12px;
 }
 
@@ -4734,7 +4785,7 @@ button {
 .expense-filter-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .expense-filter-field--account {
@@ -4756,6 +4807,137 @@ button {
 .expense-date-field svg {
   color: var(--brand-primary);
   flex: 0 0 auto;
+}
+
+.expense-filter-quick-chips,
+.expense-filter-toggles,
+.expense-active-filters__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.expense-filter-quick-chips button,
+.expense-more-filters-toggle,
+.expense-filter-toggles button,
+.expense-active-filters button {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-primary);
+  display: inline-flex;
+  gap: 7px;
+  min-height: 36px;
+  padding: 7px 12px;
+}
+
+.expense-filter-quick-chips button.is-active,
+.expense-more-filters-toggle,
+.expense-filter-toggles button.is-active {
+  background: #eef7ed;
+  border-color: rgba(46, 125, 50, 0.22);
+  color: var(--brand-primary);
+}
+
+.expense-more-filters-toggle {
+  justify-content: space-between;
+  width: 100%;
+}
+
+.expense-more-filters-toggle strong {
+  font-size: .74rem;
+  font-weight: 750;
+}
+
+.expense-more-filters-toggle svg {
+  margin-left: auto;
+  transition: transform 150ms ease;
+}
+
+.expense-more-filters-toggle svg.is-open {
+  transform: rotate(180deg);
+}
+
+.expense-filter-advanced {
+  background: var(--surface-soft);
+  border: 1px solid color-mix(in srgb, var(--border) 72%, white);
+  border-radius: 14px;
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.expense-filter-toggles {
+  align-items: flex-start;
+}
+
+.expense-filter-toggles button {
+  font-size: .82rem;
+  font-weight: 750;
+  text-align: left;
+}
+
+.expense-filter-note,
+.expense-season-note,
+.expense-filter-help {
+  color: var(--text-secondary);
+  font-size: .8rem;
+}
+
+.expense-filter-note--season {
+  align-items: center;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  display: inline-flex;
+  min-height: 36px;
+  padding: 7px 12px;
+}
+
+.expense-active-filters {
+  display: grid;
+  gap: 8px;
+}
+
+.expense-active-filters__chips span {
+  align-items: center;
+  background: #eef7ed;
+  border: 1px solid rgba(46, 125, 50, 0.18);
+  border-radius: 999px;
+  color: var(--brand-primary);
+  display: inline-flex;
+  font-size: .78rem;
+  font-weight: 700;
+  min-height: 32px;
+  padding: 6px 10px;
+}
+
+.expense-active-filters button {
+  justify-self: start;
+  font-size: .78rem;
+  font-weight: 750;
+}
+
+.expense-summary-card {
+  align-items: end;
+  background: linear-gradient(180deg, #ffffff, #f5fbf4);
+  display: flex;
+  justify-content: space-between;
+}
+
+.expense-summary-card div {
+  display: grid;
+  gap: 4px;
+}
+
+.expense-summary-card small {
+  color: var(--text-secondary);
+  font-size: .8rem;
+}
+
+.expense-summary-card strong {
+  color: var(--brand-primary);
+  font-size: 1.35rem;
 }
 
 .expense-search-filters input,
@@ -4938,10 +5120,10 @@ button {
 }
 
 .expense-category-report article {
-  background: var(--surface);
+  background: var(--surface-soft);
   border: 1px solid var(--border);
-  border-radius: 9px;
-  padding: 12px;
+  border-radius: 14px;
+  padding: 14px;
 }
 
 .expense-category-report header,
@@ -4965,6 +5147,10 @@ button {
   padding-bottom: 8px;
 }
 
+.expense-category-report header div {
+  min-width: 0;
+}
+
 .expense-category-report h3 {
   color: var(--text-primary);
   font-size: .9rem;
@@ -4978,9 +5164,15 @@ button {
   white-space: nowrap;
 }
 
+.expense-category-report header small,
+.expense-category-report h3 {
+  overflow-wrap: anywhere;
+}
+
 .expense-category-report p {
   color: var(--text-secondary);
-  padding: 5px 0;
+  align-items: center;
+  padding: 4px 0;
 }
 
 .expense-category-report b {
@@ -4996,6 +5188,113 @@ button {
 .expense-category-report b span {
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
+}
+
+.expense-subcategory-manager {
+  display: grid;
+  gap: 10px;
+}
+
+.expense-subcategory-manager__toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  display: flex;
+  justify-content: space-between;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.expense-subcategory-manager__toggle h2 {
+  margin: 0 0 4px;
+}
+
+.expense-subcategory-manager__toggle p {
+  color: var(--text-secondary);
+  font-size: .82rem;
+  margin: 0;
+}
+
+.expense-subcategory-manager__body {
+  display: grid;
+  gap: 10px;
+}
+
+.expense-voucher-cards {
+  display: grid;
+  gap: 10px;
+}
+
+.expense-voucher-card {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.expense-voucher-card__top {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.expense-voucher-card__top div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.expense-voucher-card__top strong {
+  color: var(--text-primary);
+  font-size: .98rem;
+}
+
+.expense-voucher-card__top small {
+  color: var(--text-secondary);
+  font-size: .76rem;
+}
+
+.expense-voucher-card__amount {
+  color: var(--brand-primary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.expense-voucher-card__body {
+  display: grid;
+  gap: 5px;
+}
+
+.expense-voucher-card__body p {
+  color: var(--text-secondary);
+  font-size: .82rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.expense-voucher-card__body p:first-child {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.expense-voucher-card__actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.expense-voucher-card__actions button {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--brand-primary);
+  min-height: 38px;
+  padding: 7px 10px;
 }
 
 .expense-voucher-items {
@@ -5132,7 +5431,7 @@ button {
 .expense-voucher-detail-item {
   background: var(--surface-soft);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 14px;
   padding: 12px;
 }
 
@@ -5263,8 +5562,20 @@ button {
 }
 
 .receipt-actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.receipt-actions label {
+  justify-content: center;
+  min-width: 0;
+  text-align: center;
+}
+
+.receipt-preview-grid {
+  display: grid;
   gap: 10px;
 }
 
@@ -5288,8 +5599,6 @@ button {
 }
 
 .receipt-preview-grid {
-  display: grid;
-  gap: 8px;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
@@ -10241,6 +10550,16 @@ button {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .expenses-module {
+    gap: 10px;
+    padding-bottom: calc(146px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .expenses-module .workspace-intro {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .expense-voucher-item__grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -10258,6 +10577,46 @@ button {
 
   .expense-voucher-form__top-row {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .expense-filter-grid,
+  .expense-voucher-card__actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .expense-filter-grid {
+    gap: 8px;
+  }
+
+  .expense-filter-advanced {
+    padding: 10px;
+  }
+
+  .expense-more-filters-toggle,
+  .expense-filter-toggles button,
+  .expense-active-filters button,
+  .expense-filter-note--season {
+    min-height: 38px;
+  }
+
+  .expense-voucher-card__actions {
+    display: grid;
+  }
+
+  .expense-voucher-card__amount {
+    text-align: end;
+  }
+
+  .expense-voucher-card__top {
+    gap: 10px;
+  }
+
+  .expense-voucher-card__body {
+    gap: 4px;
+  }
+
+  .receipt-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .expense-voucher-form__number-edit-row {
