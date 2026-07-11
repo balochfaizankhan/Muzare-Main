@@ -257,7 +257,7 @@ export async function loadWorkspaceActivity(): Promise<WorkspaceActivityItem[]> 
     id: `labour-payment:${item.id}`,
     module: "labour" as const,
     moduleLabel: "Labour",
-    path: "/workspace/labour-payments/direct-payments",
+    path: "/workspace/labour-payments/overview",
     title: "Labour payment posted",
     detail: `${labourerName(labourerById, item.labourerId)}${item.paymentMethod ? ` · ${item.paymentMethod}` : ""}`,
     value: `-${money(item.amount)}`,

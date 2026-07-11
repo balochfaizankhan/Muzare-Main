@@ -120,8 +120,8 @@ export function LabourPaymentsSectionLayout() {
   return (
     <WorkforceShell
       title="Labour Payments"
-      description="Keep advances, wage rates, labour earnings, settlements, and payment reports together in one professional labour-payment center."
-      subtitle="Advances • Earnings • Settlements"
+      description="Keep advances, wage rates, labour earnings, settlements, and reports together in one professional labour finance center."
+      subtitle="Advances • Earnings • Settlements • Reports"
       tabs={tabs}
       compactMobileHeader
     >

@@ -443,8 +443,9 @@ function WorkforceModule({
             {canWriteAttendance && <button className="workforce-mark-attendance" type="button" onClick={() => setShowAttendanceEntry(true)}>{t("workforcePage.markAttendance")}</button>}
           <div className="workforce-toolbar">
             {canManageLabour && <button type="button" onClick={() => setShowAddLabour(true)}>{t("workforcePage.addLabour")}</button>}
-            <button type="button" onClick={() => navigate("/workspace/workforce/reports")}>Reports</button>
             {canManageLabour && <button type="button" onClick={() => navigate("/workspace/workforce/labour-groups")}>Labour Groups</button>}
+            <button type="button" onClick={() => navigate("/workspace/labour-payments/overview")}>Labour Payment</button>
+            <button type="button" onClick={() => navigate("/workspace/workforce/reports")}>Reports</button>
           </div>
         </div>
         <div className="workforce-list-header">

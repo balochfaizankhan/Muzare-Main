@@ -158,7 +158,7 @@ export default function App() {
         <Route path="wage-rates" element={routeElement(<WageRates />, "Loading wage rates")} />
         <Route path="earnings" element={routeElement(<LabourEarnings />, "Loading labour work")} />
         <Route path="labour-work" element={<Navigate to="/workspace/labour-payments/earnings" replace />} />
-        <Route path="direct-payments" element={<Navigate to="/workspace/workforce/labour" replace />} />
+        <Route path="direct-payments" element={<Navigate to="/workspace/labour-payments/overview" replace />} />
         <Route path="settlements" element={routeElement(<LabourWageSettlements />, "Loading wage settlements")} />
         <Route path="settlement" element={<Navigate to="/workspace/labour-payments/settlements" replace />} />
         <Route path="reports" element={routeElement(<LabourPaymentsReportsHub />, "Loading labour payment reports")} />
