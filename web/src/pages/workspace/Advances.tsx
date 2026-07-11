@@ -1,10 +1,7 @@
-import { useNavigate } from "react-router-dom";
 import { ModulePage } from "../ModulePage";
+import { useAppBack } from "../../hooks/useAppBack";
 
 export function Advances() {
-  const navigate = useNavigate();
-  return <ModulePage module="workforce" workforceMode="advance" onAdvanceClose={() => {
-    if (window.history.length > 1) navigate(-1);
-    else navigate("/workspace/dashboard");
-  }} />;
+  const back = useAppBack("/workspace/workforce/labour");
+  return <ModulePage module="workforce" workforceMode="advance" onAdvanceClose={back} />;
 }

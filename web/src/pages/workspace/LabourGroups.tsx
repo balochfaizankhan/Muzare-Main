@@ -1,9 +1,10 @@
 import { Check, Plus, ArrowLeft } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { SearchInput } from "../../components/SearchInput";
 import { LabourSelectCombobox } from "../../components/LabourSelectCombobox";
 import { SubpageHeader } from "../../components/SubpageHeader";
+import { useAppBack } from "../../hooks/useAppBack";
 import { formatMoney } from "../../lib/format";
 import { getActiveFarmId, getActiveSeasonId, makeLocalRecord, offlineDb, workspaceRecords, type LabourGroup, type LabourWageSettlement, type Labourer, type Advance } from "../../lib/offline-db";
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
@@ -238,6 +239,8 @@ export function LabourGroupsPage() {
   const location = useLocation();
   const params = useParams();
   const groupId = params.groupId ?? "";
+  const backToGroupList = useAppBack("/workspace/workforce/labour-groups");
+  const backToGroupDetail = useAppBack(`/workspace/workforce/labour-groups/${groupId}`);
   const isMembersView = location.pathname.endsWith("/members");
   const { labourers, groups, settlements, advances, refresh } = useLabourGroupsData();
   const [search, setSearch] = useState("");
@@ -419,9 +422,9 @@ export function LabourGroupsPage() {
         <SubpageHeader title="Labour Groups" />
         <main className="subpage module-workspace workforce-shell-main">
           <section className="record-panel workforce-group-page-header">
-            <Link className="workforce-group-page-header__back" to="/workspace/workforce/labour-groups" aria-label="Back to labour groups">
+            <button className="workforce-group-page-header__back" type="button" onClick={backToGroupList} aria-label="Back to labour groups">
               <ArrowLeft size={18} />
-            </Link>
+            </button>
             <div className="workforce-group-page-header__copy">
               <h2>{selectedGroup.name}</h2>
               <p>{selectedGroup.phone || "No contact"} {selectedGroup.notes ? `- ${selectedGroup.notes}` : ""}</p>
@@ -481,9 +484,9 @@ export function LabourGroupsPage() {
         <SubpageHeader title="Labour Groups" />
         <main className="subpage module-workspace workforce-shell-main">
           <section className="record-panel workforce-group-page-header">
-            <Link className="workforce-group-page-header__back" to={`/workspace/workforce/labour-groups/${selectedGroup.id}`} aria-label="Back to group detail">
+            <button className="workforce-group-page-header__back" type="button" onClick={backToGroupDetail} aria-label="Back to group detail">
               <ArrowLeft size={18} />
-            </Link>
+            </button>
             <div className="workforce-group-page-header__copy">
               <h2>{selectedGroup.name}</h2>
               <p>Manage members and bulk assignment.</p>

@@ -3135,11 +3135,14 @@ button {
 
 .back-link {
   align-items: center;
+  background: transparent;
+  border: 0;
   color: var(--text-secondary);
   display: inline-flex;
   font-size: 0.85rem;
   font-weight: 600;
   gap: 5px;
+  padding: 0;
   text-decoration: none;
 }
 

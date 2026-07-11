@@ -15,7 +15,7 @@ export function Inventory() {
       <section className="panel admin-empty-panel">
         <h2>{t("inventoryPage.disabledTitle")}</h2>
         <p>{t("inventoryPage.disabledDescription")}</p>
-        <Link className="inventory-disabled__action" to="/workspace/dashboard">{t("inventoryPage.backToDashboard")}</Link>
+        <Link className="inventory-disabled__action" to="/workspace/dashboard" replace>{t("inventoryPage.backToDashboard")}</Link>
       </section>
     </main>;
   }

@@ -9,6 +9,7 @@ import { LabourSelectCombobox } from "../components/LabourSelectCombobox";
 import { ClearableSelect } from "../components/ClearableSelect";
 import { ResponsiveSelectField } from "../components/ResponsivePicker";
 import { useAuth } from "../auth/AuthProvider";
+import { useAppBack } from "../hooks/useAppBack";
 import { useSyncState } from "../hooks/useSyncState";
 import { calculateAccountBalance } from "../lib/accounting";
 import { defaultTransactionGroupExpansion, groupAccountTransactions, type AccountTransactionGroupKey } from "../lib/accountTransactionGroups";
@@ -155,6 +156,7 @@ function WorkforceModule({
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { token, user, sessionRefreshing } = useAuth();
+  const backToDashboard = useAppBack("/workspace/dashboard");
   const sync = useSyncState();
   const loadLabourers = useCallback(async () => (await workspaceRecords(offlineDb.labourers)).sort(compareLabourers), []);
   const loadGroups = useCallback(async () => (await workspaceRecords(offlineDb.labourGroups)).sort((a, b) => a.name.localeCompare(b.name)), []);
@@ -429,7 +431,7 @@ function WorkforceModule({
     <>
       <section className="record-panel">
         <header className="workforce-page-header">
-          <button className="workforce-page-header__back" type="button" aria-label="Back to dashboard" onClick={() => navigate(-1)}>
+          <button className="workforce-page-header__back" type="button" aria-label="Back to dashboard" onClick={backToDashboard}>
             <ArrowLeft size={18} />
           </button>
           <div className="workforce-page-header__copy">
@@ -3072,8 +3074,8 @@ function nextDispatchSerial(records: Dispatch[], date: string, editing?: Dispatc
 
 function DispatchModule() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const { user, sessionRefreshing } = useAuth();
+  const backToDashboard = useAppBack("/workspace/dashboard");
   const workspaceId = user?.workspaceId ?? "";
   const canCreateDispatch = Boolean(!sessionRefreshing && user && workspaceId && canCreate(user, "dispatch", workspaceId));
   const canEditDispatch = Boolean(!sessionRefreshing && user && workspaceId && canEdit(user, "dispatch", workspaceId));
@@ -3181,7 +3183,7 @@ function DispatchModule() {
   return (
     <>
       <header className="dispatch-page-header">
-        <button type="button" onClick={() => navigate(-1)} aria-label={t("common.back")}>
+        <button type="button" onClick={backToDashboard} aria-label={t("common.back")}>
           <ArrowLeft size={18} />
         </button>
         <div>

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Activity, ArrowLeft, ArrowRight, CalendarCheck, ChevronRight, CircleDollarSign, ClipboardList, HandCoins, ReceiptText, WalletCards } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Link, NavLink, Outlet, useNavigate, useSearchParams } from "react-router-dom";
+import { NavLink, Outlet, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
 import { LabourSelectCombobox } from "../../components/LabourSelectCombobox";
 import { SearchInput } from "../../components/SearchInput";
 import { SubpageHeader } from "../../components/SubpageHeader";
+import { useAppBack } from "../../hooks/useAppBack";
 import { useSyncState } from "../../hooks/useSyncState";
 import { formatMoney } from "../../lib/format";
 import { getActiveLabourWageSettlements, outstandingLabourAdvances } from "../../lib/labourWageSettlements";
@@ -42,6 +43,7 @@ function WorkforceShell({
 }) {
   const { t } = useTranslation();
   const sync = useSyncState();
+  const backToWorkforce = useAppBack("/workspace/workforce/labour");
   const statusText = sync.status === "offline"
     ? t("layout.workingOffline")
     : sync.status === "syncing"
@@ -57,9 +59,9 @@ function WorkforceShell({
       <main className={`subpage module-workspace workforce-shell-main${compactMobileHeader ? " workforce-shell-main--labour-payments" : ""}`}>
         {compactMobileHeader ? (
           <section className="labour-payments-mobile-header" aria-label={`${title} overview`}>
-            <Link className="labour-payments-mobile-header__back" to="/workspace/workforce/labour" aria-label="Back to workforce">
+            <button className="labour-payments-mobile-header__back" type="button" aria-label="Back to workforce" onClick={backToWorkforce}>
               <ArrowLeft size={18} />
-            </Link>
+            </button>
             <div className="labour-payments-mobile-header__copy">
               <strong>{title}</strong>
               <p>{subtitle ?? description}</p>
@@ -483,13 +485,14 @@ function WorkforceReportLinks({
   backTo?: string;
 }) {
   const navigate = useNavigate();
+  const back = useAppBack(backTo ?? "/workspace/workforce/labour");
   return (
     <section className={`record-panel${compactRows ? " workforce-reports-panel" : ""}`}>
       <div className={compactRows ? "workforce-reports-header" : "advances-heading"}>
         {compactRows && backTo ? (
-          <Link className="workforce-reports-header__back" to={backTo} aria-label="Back to workforce">
+          <button type="button" className="workforce-reports-header__back" aria-label="Back to workforce" onClick={back}>
             <ArrowLeft size={18} />
-          </Link>
+          </button>
         ) : null}
         <div className={compactRows ? "workforce-reports-header__copy" : undefined}>
           <h2>{title}</h2>

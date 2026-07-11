@@ -1,9 +1,6 @@
 import { ModulePage } from "../ModulePage";
-import { useNavigate } from "react-router-dom";
+import { useAppBack } from "../../hooks/useAppBack";
 export function Attendance() {
-  const navigate = useNavigate();
-  return <ModulePage module="workforce" workforceMode="attendance" onAttendanceClose={() => {
-    if (window.history.length > 1) navigate(-1);
-    else navigate("/workspace/dashboard");
-  }} />;
+  const back = useAppBack("/workspace/workforce/labour");
+  return <ModulePage module="workforce" workforceMode="attendance" onAttendanceClose={back} />;
 }
