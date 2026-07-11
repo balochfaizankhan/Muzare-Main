@@ -14,7 +14,7 @@ import { getCanonicalExpenseCategory } from "../../lib/expenseCategories";
 import { formatMoney, formatNumber } from "../../lib/format";
 import { labourEarningScopeLabel, labourEarningTypeLabel, labourEarningsByScope, sumLabourEarnings } from "../../lib/labourEarnings";
 import { getActiveLabourWageSettlements, getCashAffectingVouchers, getGeneralExpenseVouchers, getLabourWageSettlementAdvanceOffset, getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher, outstandingLabourAdvances, totalSettledAdvances } from "../../lib/labourWageSettlements";
-import { translateExpenseCategory, translateExpenseSubcategory, translateSaleType, translateSalesStatus } from "../../lib/systemTranslations";
+import { translateExpenseCategory, translateExpenseSubcategory, translatePaymentType, translateSaleType, translateSalesStatus } from "../../lib/systemTranslations";
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
 import { getVoucherDisplayNumber } from "../../lib/vouchers";
 import { getActiveVouchers, loadWorkspaceVouchers } from "../../lib/voucherCollections";
@@ -97,6 +97,19 @@ type AccountLedgerReportRow = {
   partnerLiabilityGroup?: PartnerLiabilityLedgerGroupKey;
 };
 
+type AdvanceReportLabourSection = {
+  labourer: Labourer;
+  paymentTypeLabel: string;
+  groupLabel: string;
+  transactionCount: number;
+  total: number;
+  settled: number;
+  outstanding: number;
+  lastAdvanceDate: string;
+  sourceLabel: string;
+  records: Advance[];
+};
+
 const reportOptions: Report[] = ["attendance", "advances", "labour-earnings", "wage-rates", "expenditures", "sales", "dispatch", "partner-position", "account-ledger"];
 const defaultViews: ReportViewState = {
   attendance: "register",
@@ -146,6 +159,7 @@ const formatSettlementCardRange = (from: string, to: string) => {
     : `${settlementCardDateFormatter.format(start)} – ${settlementCardDateFormatter.format(end)}`;
 };
 const normalizeText = (value?: string | null) => value?.trim() ?? "";
+const paymentTypeDisplayLabel = (labourer?: Labourer | null) => translatePaymentType(labourer?.paymentType ?? "daily_wage");
 const chunkArray = <T,>(items: T[], size: number) => {
   const chunks: T[][] = [];
   if (size <= 0) return chunks;
@@ -806,6 +820,92 @@ export function Reports() {
     );
   };
 
+  const renderAdvanceReportPrintPage = () => (
+    <section className="advance-report-print-page">
+      <header className="advance-report-print-header">
+        <div className="advance-report-print-brand">
+          <strong>Muzare</strong>
+          <span>Labour Advances Report</span>
+        </div>
+        <div className="advance-report-print-title">
+          <h2>{t("reportsPage.advanceSummary")}</h2>
+          <p>{rangeLabel}</p>
+        </div>
+        <dl className="advance-report-print-meta">
+          <div><dt>Farm</dt><dd>{bootstrapFarm?.name ?? "All farms"}</dd></div>
+          <div><dt>Season</dt><dd>{bootstrapSeason?.name ?? "All seasons"}</dd></div>
+          <div><dt>Group</dt><dd>{advanceHeaderGroupLabel}</dd></div>
+          <div><dt>Labour</dt><dd>{advanceHeaderLabourLabel}</dd></div>
+          <div><dt>Paid from</dt><dd>{advanceHeaderSourceLabel}</dd></div>
+          <div><dt>Generated</dt><dd>{advanceReportGeneratedAt}</dd></div>
+          <div><dt>By</dt><dd>{printGeneratedBy}</dd></div>
+        </dl>
+      </header>
+      <section className="advance-report-print-summary">
+        <article><span>Total advances</span><strong>{money(advanceReportTotals.totalAdvances)}</strong></article>
+        <article><span>Unique labourers</span><strong>{formatNumber(advanceReportTotals.uniqueLabourers)}</strong></article>
+        <article><span>Transactions</span><strong>{formatNumber(advanceReportTotals.transactions)}</strong></article>
+        <article><span>Adjusted in settlements</span><strong>{money(advanceReportTotals.adjustedInSettlements)}</strong></article>
+        <article><span>Outstanding advances</span><strong>{money(advanceReportTotals.outstandingAdvances)}</strong></article>
+        <article><span>Posted settlements</span><strong>{formatNumber(advanceReportTotals.postedSettlements)}</strong></article>
+      </section>
+      <div className="advance-report-print-note">
+        <p>Labour advances are grouped by labourer. Each section shows the labour total and the transactions included in the selected period.</p>
+      </div>
+      <footer className="advance-report-print-footer advance-report-print-footer--summary">
+        <span>Muzare</span>
+        <span>Page 1 of {Math.max(1, advanceReportLabourSections.length + 1)}</span>
+        <span>{advanceReportGeneratedAt}</span>
+      </footer>
+      <div className="advance-report-print-labours">
+        {advanceReportLabourSections.length > 0 ? advanceReportLabourSections.map((section, index) => (
+          <article key={section.labourer.id} className="advance-report-print-labour">
+            <header className="advance-report-print-labour-header">
+              <div>
+                <h3>{section.labourer.name}</h3>
+                <p>{section.paymentTypeLabel} · {section.groupLabel}</p>
+              </div>
+              <strong>Total: {money(section.total)}</strong>
+            </header>
+            <div className="advance-report-print-labour-meta">
+              <span>Transactions: {formatNumber(section.transactionCount)}</span>
+              <span>Adjusted in settlements: {money(section.settled)}</span>
+              <span>Outstanding: {money(section.outstanding)}</span>
+              <span>Last advance: {section.lastAdvanceDate || "-"}</span>
+            </div>
+            <table className="advance-report-print-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Source / Paid From</th>
+                  <th>Description</th>
+                  <th className="is-amount">Amount (SAR)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {section.records.map((record) => (
+                  <tr key={record.id}>
+                    <td>{record.date}</td>
+                    <td>{record.sourceAccountName || accountName(record.accountId) || "-"}</td>
+                    <td>{record.notes || "-"}</td>
+                    <td className="is-amount">{formatNumber(record.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <footer className="advance-report-print-footer advance-report-print-footer--labour">
+              <span>Muzare</span>
+              <span>Page {index + 2} of {Math.max(1, advanceReportLabourSections.length + 1)}</span>
+              <span>{advanceReportGeneratedAt}</span>
+            </footer>
+          </article>
+        )) : (
+          <div className="advance-report-print-empty">No advances found for the selected filters.</div>
+        )}
+      </div>
+    </section>
+  );
+
   const attendanceRows = attendance
     .filter((item) => {
       const labourer = labourById.get(item.labourerId);
@@ -1018,6 +1118,35 @@ export function Reports() {
   );
   const settledAdvancesTotal = useMemo(() => totalSettledAdvances(activeSettlements), [activeSettlements]);
   const outstandingAdvancePool = useMemo(() => outstandingLabourAdvances(advanceRows, activeSettlements), [activeSettlements, advanceRows]);
+  const advanceReportTotals = useMemo(() => ({
+    totalAdvances: advanceRows.reduce((sum, item) => sum + item.amount, 0),
+    uniqueLabourers: advanceSummary.length,
+    transactions: advanceRows.length,
+    adjustedInSettlements: settledAdvancesTotal,
+    outstandingAdvances: outstandingAdvancePool,
+    postedSettlements: activeSettlements.length,
+  }), [activeSettlements.length, advanceRows, advanceSummary.length, outstandingAdvancePool, settledAdvancesTotal]);
+  const advanceReportLabourSections = useMemo<AdvanceReportLabourSection[]>(() => advanceSummary.map((item) => {
+    const records = item.records.slice().sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+    const lastAdvanceDate = records[0]?.date ?? "";
+    const sourceLabel = [...new Set(records.map((record) => accountName(record.accountId) || record.sourceAccountName || "-"))].join(", ");
+    return {
+      labourer: item.labourer,
+      paymentTypeLabel: paymentTypeDisplayLabel(item.labourer),
+      groupLabel: item.labourer.group?.trim() || "-",
+      transactionCount: records.length,
+      total: item.total,
+      settled: Math.max(item.total - item.outstanding, 0),
+      outstanding: item.outstanding,
+      lastAdvanceDate,
+      sourceLabel: sourceLabel || "-",
+      records,
+    };
+  }), [accountName, advanceSummary]);
+  const advanceHeaderGroupLabel = groupFilter === ungroupedValue ? t("reportsPage.ungrouped") : groupFilter || t("reportsPage.allGroups");
+  const advanceHeaderLabourLabel = selectedLabourerIds.length > 0 ? selectedLabourerIds.map((id) => labourById.get(id)?.name).filter(Boolean).join(", ") : t("reportsPage.allLabour");
+  const advanceHeaderSourceLabel = accountId ? accountName(accountId) : t("reportsPage.allAccounts");
+  const advanceReportGeneratedAt = useMemo(() => printTimestampFormatter.format(new Date()), [advanceReportTotals.adjustedInSettlements, advanceReportTotals.outstandingAdvances, advanceReportTotals.postedSettlements, advanceReportTotals.totalAdvances, advanceReportTotals.transactions, advanceReportTotals.uniqueLabourers]);
   const activeVouchers = useMemo(() => getActiveVouchers(vouchers), [vouchers]);
   const generalExpenseVouchers = useMemo(() => getGeneralExpenseVouchers(activeVouchers, activeSettlements), [activeSettlements, activeVouchers]);
   const cashAffectingVouchers = useMemo(() => getCashAffectingVouchers(activeVouchers, activeSettlements), [activeSettlements, activeVouchers]);
@@ -1454,14 +1583,41 @@ export function Reports() {
     [t("reportsPage.labour"), t("reportsPage.present"), t("reportsPage.halfDay"), t("reportsPage.absent"), t("reportsPage.payableDays"), t("reportsPage.totalWages")],
     ...attendanceSummary.map((item) => [item.labourer.name, item.present, item.halfDay, item.absent, formatNumber(item.payable), item.wage]),
   ]);
-  const exportAdvanceSummary = () => downloadCsv("labour-advances-summary.csv", [
-    [t("reportsPage.labour"), t("reportsPage.transactions"), t("reportsPage.total"), t("reportsPage.netBalance")],
-    ...advanceSummary.map((item) => [item.labourer.name, item.records.length, item.total, item.outstanding]),
+  const exportAdvanceSummaryCsv = () => downloadCsv("labour-advances-summary.csv", [
+    ["Serial", "Labour Name", "Payment Type", "Group", "Total Advances SAR", "Adjusted in Settlements SAR", "Outstanding Advances SAR", "Transaction Count", "Last Advance Date"],
+    ...advanceReportLabourSections.map((section, index) => [
+      index + 1,
+      section.labourer.name,
+      section.paymentTypeLabel,
+      section.groupLabel,
+      section.total,
+      section.settled,
+      section.outstanding,
+      section.transactionCount,
+      section.lastAdvanceDate,
+    ]),
   ]);
-  const exportAdvanceLog = () => downloadCsv("labour-advances-log.csv", [
-    [t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.amount"), t("reportsPage.account"), t("reportsPage.description"), t("reportsPage.reference")],
-    ...advanceRows.map((item) => [item.date, labourName(item.labourerId), item.amount, accountName(item.accountId), item.notes || "-", item.id.slice(0, 8)]),
+  const exportAdvanceDetailCsv = () => downloadCsv("labour-advances-detail.csv", [
+    ["Serial", "Labour Name", "Payment Type", "Group", "Date", "Source / Paid From", "Description", "Amount SAR", "Settlement Status", "Settlement Number", "Adjusted in Settlement SAR", "Outstanding After Settlement SAR"],
+    ...advanceRows.map((item, index) => {
+      const labourer = labourById.get(item.labourerId);
+      return [
+        index + 1,
+        labourer?.name ?? labourName(item.labourerId),
+        paymentTypeDisplayLabel(labourer),
+        labourer?.group?.trim() || "-",
+        item.date,
+        item.sourceAccountName || accountName(item.accountId),
+        item.notes || "-",
+        item.amount,
+        "",
+        "",
+        "",
+        "",
+      ];
+    }),
   ]);
+  const exportAdvanceCsv = () => (views.advances === "summary" ? exportAdvanceSummaryCsv() : exportAdvanceDetailCsv());
   const exportLabourEarnings = () => downloadCsv("labour-earnings.csv", [
     [t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.type"), t("reportsPage.description"), t("reportsPage.amount"), t("reportsPage.status"), t("reportsPage.reference")],
     ...labourEarningRows.map((item) => [
@@ -1949,14 +2105,14 @@ export function Reports() {
           <button className={views.advances === "summary" ? "is-active" : ""} type="button" onClick={() => switchView("advances", "summary")}>{t("reportsPage.summary")}</button>
           <button className={views.advances === "log" ? "is-active" : ""} type="button" onClick={() => switchView("advances", "log")}>{t("reportsPage.log")}</button>
         </section>
-        {views.advances === "summary" && <ReportShell title={t("reportsPage.advanceSummary")} rangeLabel={rangeLabel} sectionId="advance-summary" onPrint={() => printSection("advance-summary")} onExport={exportAdvanceSummary}>
+        {views.advances === "summary" && <ReportShell title={t("reportsPage.advanceSummary")} rangeLabel={rangeLabel} sectionId="advance-summary" onPrint={() => printSection("advance-report-print")} onExport={exportAdvanceCsv} printLabel="Export PDF">
           <Kpis values={[
-            [t("reportsPage.totalAdvances"), money(advanceRows.reduce((sum, item) => sum + item.amount, 0))],
-            [t("reportsPage.transactions"), advanceRows.length],
-            ["Labourers", advanceSummary.length],
-            ["Adjusted in settlements", money(settledAdvancesTotal)],
-            ["Outstanding advances", money(outstandingAdvancePool)],
-            ["Settlements posted", activeSettlements.length],
+            ["Total advances", money(advanceReportTotals.totalAdvances)],
+            ["Unique labourers", formatNumber(advanceReportTotals.uniqueLabourers)],
+            ["Transactions", formatNumber(advanceReportTotals.transactions)],
+            ["Adjusted in settlements", money(advanceReportTotals.adjustedInSettlements)],
+            ["Outstanding advances", money(advanceReportTotals.outstandingAdvances)],
+            ["Posted settlements", formatNumber(advanceReportTotals.postedSettlements)],
           ]} />
           {activeSettlements.length > 0 && <div className="reports-summary-list">
             {activeSettlements.map((settlement) => (
@@ -1971,9 +2127,14 @@ export function Reports() {
           </div>}
           <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.labour"), t("reportsPage.transactions"), t("reportsPage.total"), t("reportsPage.netBalance")]} rows={advanceSummary.map((item) => ({ id: item.labourer.id, title: item.labourer.name, value: money(item.total), meta: `${item.records.length} ${t("reportsPage.transactions")} · ${t("reportsPage.netBalance")}: ${money(item.outstanding)}`, cells: [item.labourer.name, item.records.length, money(item.total), money(item.outstanding)], details: [[t("reportsPage.account"), [...new Set(item.records.map((record) => accountName(record.accountId)))].join(", ")], [t("reportsPage.status"), item.labourer.active === false ? t("reportsPage.inactive") : t("reportsPage.active")]] }))} />
         </ReportShell>}
-        {views.advances === "log" && <ReportShell title={t("reportsPage.advanceLog")} rangeLabel={rangeLabel} sectionId="advance-log" onPrint={() => printSection("advance-log")} onExport={exportAdvanceLog}>
+        {views.advances === "log" && <ReportShell title={t("reportsPage.advanceLog")} rangeLabel={rangeLabel} sectionId="advance-log" onPrint={() => printSection("advance-report-print")} onExport={exportAdvanceCsv} printLabel="Export PDF">
           <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.amount"), t("reportsPage.account"), t("reportsPage.description"), t("reportsPage.reference")]} rows={advanceRows.map((item) => ({ id: item.id, title: labourName(item.labourerId), value: money(item.amount), meta: `${item.date} · ${accountName(item.accountId)}`, cells: [item.date, labourName(item.labourerId), money(item.amount), accountName(item.accountId), item.notes || "-", item.id.slice(0, 8)], details: [[t("reportsPage.labour"), labourName(item.labourerId)], [t("reportsPage.account"), accountName(item.accountId)], [t("reportsPage.notes"), item.notes || "-"], [t("reportsPage.reference"), item.id.slice(0, 8)]], onOpen: () => navigate(`/workspace/labour-advances?recordId=${item.id}`) }))} />
         </ReportShell>}
+        <section className="record-panel reports-print-section reports-print-only" data-print-section="advance-report-print" aria-hidden="true">
+          <div className="advance-report-print-template">
+            {renderAdvanceReportPrintPage()}
+          </div>
+        </section>
       </>}
 
       {report === "labour-earnings" && <ReportShell title="Labour Earnings Report" rangeLabel={rangeLabel} sectionId="labour-earnings" onPrint={() => printSection("labour-earnings")} onExport={exportLabourEarnings}>

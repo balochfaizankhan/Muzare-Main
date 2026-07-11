@@ -13258,6 +13258,223 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 .attendance-register-print-daily-row td {
   background: #eef2f7;
 }
+.advance-report-print-template {
+  display: grid;
+  gap: 12px;
+}
+.advance-report-print-page {
+  background: #fff;
+  color: #111827;
+  display: grid;
+  gap: 10px;
+  page-break-after: auto;
+  break-after: auto;
+  font-variant-numeric: tabular-nums;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.advance-report-print-header {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1.8fr);
+  align-items: start;
+}
+.advance-report-print-brand,
+.advance-report-print-title,
+.advance-report-print-meta {
+  background: #f8fafc;
+  border: 1px solid #dbe4ee;
+  border-radius: 10px;
+  min-width: 0;
+  padding: 8px 10px;
+}
+.advance-report-print-brand,
+.advance-report-print-title {
+  display: grid;
+  gap: 2px;
+}
+.advance-report-print-brand strong {
+  color: var(--brand-primary);
+  font-size: 13px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.advance-report-print-brand span {
+  color: #334155;
+  font-size: 10px;
+}
+.advance-report-print-title h2 {
+  font-size: 16px;
+  line-height: 1.1;
+  margin: 0;
+}
+.advance-report-print-title p {
+  color: #475569;
+  font-size: 10px;
+  margin: 0;
+}
+.advance-report-print-meta {
+  display: grid;
+  gap: 6px 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+.advance-report-print-meta div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.advance-report-print-meta dt {
+  color: #64748b;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.advance-report-print-meta dd {
+  color: #111827;
+  font-size: 10px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.advance-report-print-summary {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.advance-report-print-summary article {
+  background: #f8fafc;
+  border: 1px solid #dbe4ee;
+  border-radius: 10px;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 9px;
+}
+.advance-report-print-summary span {
+  color: #64748b;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.advance-report-print-summary strong {
+  color: #111827;
+  font-size: 11px;
+}
+.advance-report-print-note {
+  color: #475569;
+  font-size: 9px;
+  line-height: 1.35;
+}
+.advance-report-print-note p {
+  margin: 0;
+}
+.advance-report-print-labours {
+  display: grid;
+  gap: 12px;
+}
+.advance-report-print-labour {
+  border: 1px solid #dbe4ee;
+  border-radius: 12px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  break-before: page;
+  break-inside: avoid-page;
+  page-break-inside: avoid;
+}
+.advance-report-print-labour:first-child {
+  break-before: auto;
+}
+.advance-report-print-labour-header {
+  align-items: start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+.advance-report-print-labour-header h3 {
+  font-size: 12px;
+  margin: 0;
+}
+.advance-report-print-labour-header p {
+  color: #64748b;
+  font-size: 9px;
+  margin: 2px 0 0;
+}
+.advance-report-print-labour-header strong {
+  font-size: 11px;
+  white-space: nowrap;
+}
+.advance-report-print-labour-meta {
+  color: #475569;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 8px;
+}
+.advance-report-print-labour-meta span {
+  background: #f8fafc;
+  border: 1px solid #dbe4ee;
+  border-radius: 999px;
+  padding: 3px 7px;
+}
+.advance-report-print-table {
+  border-collapse: collapse;
+  font-size: 8px;
+  table-layout: fixed;
+  width: 100%;
+}
+.advance-report-print-table th,
+.advance-report-print-table td {
+  border: 1px solid #cbd5e1;
+  line-height: 1.1;
+  padding: 3px 4px;
+  vertical-align: top;
+}
+.advance-report-print-table thead th {
+  background: #e2e8f0;
+  color: #0f172a;
+  font-weight: 700;
+}
+.advance-report-print-table .is-amount {
+  text-align: right;
+  white-space: nowrap;
+  width: 78px;
+}
+.advance-report-print-table tbody td:first-child {
+  white-space: nowrap;
+  width: 84px;
+}
+.advance-report-print-table tbody td:nth-child(2) {
+  white-space: nowrap;
+  width: 120px;
+}
+.advance-report-print-table tbody td:nth-child(3) {
+  overflow-wrap: anywhere;
+}
+.advance-report-print-empty {
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  color: #475569;
+  font-size: 9px;
+  padding: 14px 10px;
+  text-align: center;
+}
+.advance-report-print-footer {
+  align-items: center;
+  color: #475569;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  justify-content: space-between;
+  font-size: 8px;
+  padding-top: 2px;
+}
+.advance-report-print-footer span {
+  min-width: 0;
+}
 @media (max-width: 720px) {
   .attendance-register-table th,
   .attendance-register-table td,
@@ -14930,4 +15147,11 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .attendance-register-print-table .register-status--half_day,
   .attendance-register-print-table .register-status--absent,
   .attendance-register-print-table .register-status--empty { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .advance-report-print-template { gap: 0; }
+  .advance-report-print-page { margin: 0; min-height: calc(100vh - 10mm); }
+  .advance-report-print-header { grid-template-columns: 1fr 1.1fr 1.6fr; }
+  .advance-report-print-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .advance-report-print-labour { break-inside: avoid-page; }
+  .advance-report-print-table { font-size: 7px; }
+  .advance-report-print-table .is-amount { width: 68px; }
 }
