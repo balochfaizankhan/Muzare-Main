@@ -17,7 +17,7 @@ import { attendanceStatusKey, buildAttendanceStatusMap, previousLocalDateKey, to
 import { getCanonicalExpenseCategory, getExpenseAccountingGroup } from "../lib/expenseCategories";
 import { ApiError, confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteExpenseAttachment, deleteOrDeactivateLabour, extractExpenseReceipt, fetchExpenseAttachments, fetchExpenseCategories, fetchLabourDeletionPreview, fetchOperationalRecord, openExpenseAttachment, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, uploadExpenseAttachment, validateVoucherNumber, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type ExpenseAttachment, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type ExpenseOcrSuggestion, type ExpenseSearchRecord, type LabourDeletionPreview } from "../lib/api";
 import { buildDispatchAvailability, dispatchCartons, dispatchItemKey, resolveSaleType, saleProduceLabel, soldQuantityByDispatchItem } from "../lib/dispatch-sales";
-import { canCreate, canDelete, canEdit, hasModulePermission, hasPermission } from "../lib/permissions";
+import { canCreate, canDelete, canEdit, hasPermission } from "../lib/permissions";
 import { translateExpenseCategory, translateExpenseSubcategory, translatePaymentType, translateSaleType, translateSalesStatus } from "../lib/systemTranslations";
 import {
   buildPartnerLiabilityPositions,
@@ -443,7 +443,6 @@ function WorkforceModule({
             {canWriteAttendance && <button className="workforce-mark-attendance" type="button" onClick={() => setShowAttendanceEntry(true)}>{t("workforcePage.markAttendance")}</button>}
           <div className="workforce-toolbar">
             {canManageLabour && <button type="button" onClick={() => setShowAddLabour(true)}>{t("workforcePage.addLabour")}</button>}
-            {user?.workspaceId && hasModulePermission(user, "workforce", "view", user.workspaceId) && <button type="button" onClick={() => navigate("/workspace/labour-payments/overview")}>Labour Payments</button>}
             <button type="button" onClick={() => navigate("/workspace/workforce/reports")}>Reports</button>
             {canManageLabour && <button type="button" onClick={() => navigate("/workspace/workforce/labour-groups")}>Labour Groups</button>}
           </div>
@@ -792,9 +791,6 @@ function WorkforceModule({
             </div>
             <footer className="worker-dialog__footer labour-profile-footer">
               {canManageLabour && <button className="worker-dialog__link labour-profile-action labour-profile-action--secondary" type="button" onClick={() => { setActionLabourer(selectedLabourer); setLabourAction("update"); }}>{t("common.edit")}</button>}
-              {user?.workspaceId && hasModulePermission(user, "workforce", "view", user.workspaceId) && (
-                <button className="worker-dialog__link labour-profile-action labour-profile-action--secondary" type="button" onClick={() => navigate(`/workspace/labour-payments/overview?labourId=${encodeURIComponent(selectedLabourer.id)}`)}>Labour Payments</button>
-              )}
               {canManageLabour && <button className="worker-dialog__link worker-dialog__link--danger labour-profile-action labour-profile-action--danger" type="button" onClick={() => {
                 if (!navigator.onLine || sync.pendingCount > 0) showToast(t("errors.syncPendingBeforeDeactivate"));
                 else {

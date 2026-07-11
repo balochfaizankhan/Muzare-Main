@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { Activity, ArrowLeft, ArrowRight, CalendarCheck, ChevronRight, CircleDollarSign, ClipboardList, HandCoins, ReceiptText, WalletCards } from "lucide-react";
+import { Activity, ArrowLeft, ArrowRight, CalendarCheck, ChevronRight, ClipboardList, HandCoins, ReceiptText, WalletCards } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { NavLink, Outlet, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
@@ -112,7 +112,6 @@ export function LabourPaymentsSectionLayout() {
       { to: `/workspace/labour-payments/overview${query}`, label: "Overview", module: "workforce" as const },
       { to: `/workspace/labour-payments/advances${query}`, label: t("layout.advances"), module: "advances" as const },
       { to: `/workspace/labour-payments/earnings${query}`, label: "Earnings", module: "wages" as const },
-      { to: `/workspace/labour-payments/direct-payments${query}`, label: "Payments", module: "workforce" as const },
       { to: `/workspace/labour-payments/settlements${query}`, label: "Settlements", module: "wages" as const },
       { to: `/workspace/labour-payments/reports${query}`, label: "Reports", module: "reports" as const },
     ];
@@ -121,8 +120,8 @@ export function LabourPaymentsSectionLayout() {
   return (
     <WorkforceShell
       title="Labour Payments"
-      description="Keep advances, wage rates, labour earnings, direct payments, settlements, and payment reports together in one professional labour-payment center."
-      subtitle="Advances • Earnings • Payments • Settlements"
+      description="Keep advances, wage rates, labour earnings, settlements, and payment reports together in one professional labour-payment center."
+      subtitle="Advances • Earnings • Settlements"
       tabs={tabs}
       compactMobileHeader
     >
@@ -137,23 +136,20 @@ export function LabourPaymentsOverview() {
   const labourId = searchParams.get("labourId") ?? "";
   const [labourers, setLabourers] = useState<Labourer[]>([]);
   const [earnings, setEarnings] = useState<LabourEarning[]>([]);
-  const [payments, setPayments] = useState<LabourPayment[]>([]);
   const [rates, setRates] = useState<WageRate[]>([]);
   const [settlements, setSettlements] = useState<LabourWageSettlement[]>([]);
   const [advancesOutstanding, setAdvancesOutstanding] = useState(0);
 
   const refresh = useCallback(async () => {
-    const [nextLabourers, nextEarnings, nextPayments, nextRates, nextSettlements, nextAdvances] = await Promise.all([
+    const [nextLabourers, nextEarnings, nextRates, nextSettlements, nextAdvances] = await Promise.all([
       workspaceRecords(offlineDb.labourers),
       workspaceRecords(offlineDb.labourEarnings, { includeDeleted: true }),
-      workspaceRecords(offlineDb.labourPayments, { includeDeleted: true }),
       workspaceRecords(offlineDb.wageRates, { includeDeleted: true }),
       workspaceRecords(offlineDb.labourWageSettlements, { includeDeleted: true }),
       workspaceRecords(offlineDb.advances),
     ]);
     setLabourers(sortWorkersForDisplay(nextLabourers, { includeArchived: false }));
     setEarnings(nextEarnings);
-    setPayments(nextPayments);
     setRates(nextRates.sort(compareWageRates));
     setSettlements(nextSettlements);
     setAdvancesOutstanding(
@@ -178,28 +174,18 @@ export function LabourPaymentsOverview() {
   const selectedLabourer = labourId ? labourers.find((labourer) => labourer.id === labourId) ?? null : null;
   const pendingEarnings = earnings.filter((earning) => earning.status === "pending_settlement" && isActiveOperationalRecord(earning));
   const activeRates = rates.filter((rate) => isActiveOperationalRecord(rate) && getWageRateStatus(rate, today()) === "active");
-  const recentPayments = payments.filter((payment) => isActiveOperationalRecord(payment)).slice().sort((left, right) => right.date.localeCompare(left.date)).slice(0, 5);
   const recentSettlements = settlements.filter((settlement) => settlement.status === "posted" && isActiveOperationalRecord(settlement)).slice().sort((left, right) => right.settlementDate.localeCompare(left.settlementDate)).slice(0, 5);
   const query = labourId ? `?labourId=${encodeURIComponent(labourId)}` : "";
   const latestSettlement = recentSettlements[0] ?? null;
   const recentActivity = useMemo(() => [
     ...recentSettlements.map((settlement) => ({
       id: `settlement:${settlement.id}`,
-      type: "settlement" as const,
       title: `Wage Settlement ${settlement.settlementNumber}`,
       detail: `${settlement.fromDate} - ${settlement.toDate}`,
       amount: settlement.expenseAmount,
       date: settlement.settlementDate,
     })),
-    ...recentPayments.map((payment) => ({
-      id: `payment:${payment.id}`,
-      type: "payment" as const,
-      title: labourers.find((labourer) => labourer.id === payment.labourerId)?.name ?? "Direct Labour Payment",
-      detail: payment.paymentMethod ?? "Payment",
-      amount: payment.amount,
-      date: payment.date,
-    })),
-  ].sort((left, right) => right.date.localeCompare(left.date)).slice(0, 6), [labourers, recentPayments, recentSettlements]);
+  ].sort((left, right) => right.date.localeCompare(left.date)).slice(0, 6), [recentSettlements]);
 
   return (
     <>
@@ -255,13 +241,12 @@ export function LabourPaymentsOverview() {
       <section className="record-panel labour-payments-section-card">
         <div className="advances-heading labour-payments-section-heading">
           <h2>Quick Actions</h2>
-          <span>Start a labour-payment workflow fast.</span>
+          <span>Start an advances or settlement workflow fast.</span>
         </div>
         <div className="labour-payments-quick-grid">
           {[
             { to: `/workspace/labour-payments/advances${query}`, icon: HandCoins, title: "Record Advance", detail: "Cash advance" },
             { to: `/workspace/labour-payments/earnings${query}`, icon: ClipboardList, title: "Record Labour Earning", detail: "Task, bonus, or adjustment" },
-            { to: `/workspace/labour-payments/direct-payments${query}`, icon: CircleDollarSign, title: "Record Payment", detail: "Direct labour payout" },
             { to: `/workspace/labour-payments/settlements${query}`, icon: ReceiptText, title: "Create Settlement", detail: "Close a wage period" },
           ].map((item) => (
             <button key={item.to} type="button" className="labour-payments-quick-card" onClick={() => navigate(item.to)}>
@@ -273,7 +258,6 @@ export function LabourPaymentsOverview() {
         </div>
       </section>
       <section className="reports-kpis labour-payments-kpis-grid">
-        <article><Activity size={16} /><span>Total Direct Payments</span><strong>{money(recentPayments.reduce((sum, payment) => sum + payment.amount, 0))}</strong><small>{recentPayments.length} recent records</small></article>
         <article><HandCoins size={16} /><span>Selected Labour</span><strong>{selectedLabourer ? selectedLabourer.name : "All labour"}</strong><small>{selectedLabourer?.group || "Workspace view"}</small></article>
         <article><WalletCards size={16} /><span>Rate Coverage</span><strong>{activeRates.length}</strong><small>Active rate records</small></article>
         <article><ReceiptText size={16} /><span>Settlement Register</span><strong>{recentSettlements.length}</strong><small>Latest posted periods</small></article>
@@ -281,14 +265,14 @@ export function LabourPaymentsOverview() {
       <section className="record-panel labour-payments-section-card">
         <div className="advances-heading labour-payments-section-heading">
           <h2>Recent Activity</h2>
-          <span>{recentActivity.length ? "Payments and settlements in one feed." : "Activity will appear here as soon as you post records."}</span>
+          <span>{recentActivity.length ? "Settlements in one feed." : "Activity will appear here as soon as you post records."}</span>
         </div>
         {!recentActivity.length ? <p className="labour-payments-inline-empty">No activity yet.</p> : (
           <div className="labour-payments-activity-list">
             {recentActivity.map((item) => (
               <article key={item.id} className="labour-payments-activity-item">
-                <div className={`labour-payments-activity-item__icon labour-payments-activity-item__icon--${item.type}`}>
-                  {item.type === "settlement" ? <ReceiptText size={15} /> : <CircleDollarSign size={15} />}
+                <div className="labour-payments-activity-item__icon labour-payments-activity-item__icon--settlement">
+                  <ReceiptText size={15} />
                 </div>
                 <div className="labour-payments-activity-item__copy">
                   <strong>{item.title}</strong>
