@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { CalendarDays, ChevronDown, ChevronRight, ChevronUp, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useAuth } from "../../auth/AuthProvider";
 import { SearchInput } from "../../components/SearchInput";
 import { ClearableSelect } from "../../components/ClearableSelect";
 import { ResponsiveMultiSelectField, ResponsiveSelectField } from "../../components/ResponsivePicker";
@@ -16,6 +18,7 @@ import { translateExpenseCategory, translateExpenseSubcategory, translateSaleTyp
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
 import { getVoucherDisplayNumber } from "../../lib/vouchers";
 import { getActiveVouchers, loadWorkspaceVouchers } from "../../lib/voucherCollections";
+import { fetchBootstrap } from "../../lib/api";
 import {
   buildPartnerLiabilityPositions,
   calculatePartnerLiabilityBalance,
@@ -111,12 +114,21 @@ const csvCell = (value: unknown) => `"${String(value ?? "").replaceAll("\"", "\"
 const money = formatMoney;
 const inRange = (date: string, from: string, to: string) => (!from || date >= from) && (!to || date <= to);
 const attendanceMark = (status?: Attendance["status"]) => status === "present" ? "P" : status === "half_day" ? "H" : status === "absent" ? "A" : "-";
+const attendancePrintMark = (status?: Attendance["status"]) => status === "present" ? "P" : status === "half_day" ? "½" : status === "absent" ? "A" : "-";
 const attendanceStatusClass = (status?: Attendance["status"]) => status ? `register-status register-status--${status}` : "register-status register-status--empty";
 const attendancePayable = (status?: Attendance["status"]) => status === "present" ? 1 : status === "half_day" ? 0.5 : 0;
 const formatShortDate = (date: string) => date.length >= 10 ? `${date.slice(8, 10)}/${date.slice(5, 7)}` : date;
+const formatCsvDate = (date: string) => date.length >= 10 ? `${date.slice(8, 10)}/${date.slice(5, 7)}/${date.slice(0, 4)}` : date;
 const formatRangeLabel = (from: string, to: string) => from && to ? `${from} - ${to}` : from ? `${i18n.t("reportsPage.fromDate")} ${from}` : to ? `${i18n.t("reportsPage.toDate")} ${to}` : i18n.t("reportsPage.allDates");
 const settlementCardDateFormatter = new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" });
 const settlementCardShortDateFormatter = new Intl.DateTimeFormat("en", { month: "short", day: "numeric" });
+const printTimestampFormatter = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
 const formatSettlementCardDate = (value: string) => {
   if (!value) return value;
   const date = new Date(`${value}T00:00:00`);
@@ -134,6 +146,12 @@ const formatSettlementCardRange = (from: string, to: string) => {
     : `${settlementCardDateFormatter.format(start)} – ${settlementCardDateFormatter.format(end)}`;
 };
 const normalizeText = (value?: string | null) => value?.trim() ?? "";
+const chunkArray = <T,>(items: T[], size: number) => {
+  const chunks: T[][] = [];
+  if (size <= 0) return chunks;
+  for (let index = 0; index < items.length; index += size) chunks.push(items.slice(index, index + size));
+  return chunks;
+};
 const dispatchReference = (dispatch: Pick<Dispatch, "serialNumber" | "dispatchNumber" | "id" | "date">) =>
   normalizeText(dispatch.serialNumber) || normalizeText(dispatch.dispatchNumber) || `DIS-${dispatch.date.replaceAll("-", "")}-${dispatch.id.slice(0, 3).toUpperCase()}`;
 const invoiceReference = (sale: Pick<Sale, "invoiceNumber" | "id">) => normalizeText(sale.invoiceNumber) || "-";
@@ -208,6 +226,13 @@ function formatReportDateValue(value: string) {
   const date = new Date(`${value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return value;
   return reportDateFormatter.format(date);
+}
+
+function formatAttendanceBlockRange(dates: string[]) {
+  if (!dates.length) return "";
+  const first = formatReportDateValue(dates[0]);
+  const last = formatReportDateValue(dates[dates.length - 1]);
+  return first === last ? first : `${first} – ${last}`;
 }
 
 function todayKey() {
@@ -379,6 +404,10 @@ function ReportShell({
   sectionId,
   onPrint,
   onExport,
+  onPdfExport,
+  printLabel,
+  exportLabel,
+  pdfLabel,
   children,
 }: {
   title: string;
@@ -386,6 +415,10 @@ function ReportShell({
   sectionId: string;
   onPrint: () => void;
   onExport: () => void;
+  onPdfExport?: () => void;
+  printLabel?: string;
+  exportLabel?: string;
+  pdfLabel?: string;
   children: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -396,8 +429,9 @@ function ReportShell({
         <p>{rangeLabel}</p>
       </div>
       <div className="reports-actions">
-        <button type="button" onClick={onExport}>{t("reportsPage.exportCsv")}</button>
-        <button type="button" onClick={onPrint}>{t("reportsPage.print")}</button>
+        <button type="button" onClick={onExport}>{exportLabel ?? t("reportsPage.exportCsv")}</button>
+        {onPdfExport ? <button type="button" onClick={onPdfExport}>{pdfLabel ?? "Export PDF"}</button> : null}
+        <button type="button" onClick={onPrint}>{printLabel ?? t("reportsPage.print")}</button>
       </div>
     </header>
     {children}
@@ -407,7 +441,13 @@ function ReportShell({
 export function Reports() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { token, user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
+  const bootstrapQuery = useQuery({
+    queryKey: ["reports-bootstrap", user?.workspaceId],
+    queryFn: () => fetchBootstrap(token!),
+    enabled: Boolean(token),
+  });
   const requestedReport = searchParams.get("report");
   const normalizedRequestedReport = requestedReport === "combined-expenses" ? "expenditures" : requestedReport as Report | null;
   const [report, setReport] = useState<Report>(normalizedRequestedReport && reportOptions.includes(normalizedRequestedReport) ? normalizedRequestedReport : "attendance");
@@ -648,6 +688,124 @@ export function Reports() {
     </div>
   );
 
+  const renderAttendanceRegisterPrintPage = (page: typeof attendancePrintPages[number]) => {
+    const labourLabel = attendanceRegisterLabourLabel;
+    const labourGroupLabel = attendanceRegisterGroupLabel;
+    const printRangeLabel = page.dateBlock.length > 0 ? formatAttendanceBlockRange(page.dateBlock) : rangeLabel;
+    const dateColumnWidthClass = page.density === "normal" ? "attendance-register-print-page--normal" : page.density === "compact" ? "attendance-register-print-page--compact" : "attendance-register-print-page--ultra";
+    return (
+      <section key={page.id} className={`attendance-register-print-page ${dateColumnWidthClass}`}>
+        <header className="attendance-register-print-header">
+          <div className="attendance-register-print-brand">
+            <strong>Muzare</strong>
+            <span>Attendance Register</span>
+          </div>
+          <div className="attendance-register-print-title">
+            <h2>{t("reportsPage.attendanceRegister")}</h2>
+            <p>{printRangeLabel}</p>
+          </div>
+          <dl className="attendance-register-print-meta">
+            <div><dt>Farm</dt><dd>{bootstrapFarm?.name ?? "All farms"}</dd></div>
+            <div><dt>Season</dt><dd>{bootstrapSeason?.name ?? "All seasons"}</dd></div>
+            <div><dt>Group</dt><dd>{labourGroupLabel}</dd></div>
+            <div><dt>Labour</dt><dd>{labourLabel}</dd></div>
+            <div><dt>Generated</dt><dd>{printGeneratedAt}</dd></div>
+            <div><dt>By</dt><dd>{printGeneratedBy}</dd></div>
+          </dl>
+        </header>
+        <section className="attendance-register-print-summary">
+          <article><span>Labour count</span><strong>{attendanceTotals.labourCount}</strong></article>
+          <article><span>Present total</span><strong>{attendanceTotals.present}</strong></article>
+          <article><span>Half-day total</span><strong>{attendanceTotals.halfDay}</strong></article>
+          <article><span>Absent total</span><strong>{attendanceTotals.absent}</strong></article>
+          <article><span>Payable days</span><strong>{formatNumber(attendanceTotals.payableDays)}</strong></article>
+          <article><span>Attendance wages</span><strong>{money(attendanceTotals.wages)}</strong></article>
+        </section>
+        <section className="attendance-register-print-legend">
+          <span><b>P</b> Present</span>
+          <span><b>½</b> Half-day</span>
+          <span><b>A</b> Absent</span>
+          <span><b>-</b> No entry</span>
+        </section>
+        <div className="attendance-register-print-table-wrap">
+          <table className="attendance-register-print-table report-data-table">
+            <colgroup>
+              <col style={{ width: "var(--attendance-col-index)" }} />
+              <col style={{ width: "var(--attendance-col-name)" }} />
+              <col style={{ width: "var(--attendance-col-group)" }} />
+              <col style={{ width: "var(--attendance-col-stat)" }} />
+              <col style={{ width: "var(--attendance-col-stat)" }} />
+              <col style={{ width: "var(--attendance-col-stat)" }} />
+              <col style={{ width: "var(--attendance-col-payable)" }} />
+              <col style={{ width: "var(--attendance-col-wages)" }} />
+              {page.dateBlock.map((date) => <col key={date} style={{ width: "var(--attendance-col-date)" }} />)}
+            </colgroup>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Labour Name</th>
+                <th>Group</th>
+                <th>P</th>
+                <th>1/2</th>
+                <th>A</th>
+                <th>Payable Days</th>
+                <th>Wages (SAR)</th>
+                {page.dateBlock.map((date) => <th key={date}>{formatShortDate(date)}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {page.labourBlock.length > 0 ? page.labourBlock.map((item, index) => (
+                <tr key={item.labourer.id}>
+                  <th>{index + 1}</th>
+                  <td>{item.labourer.name}</td>
+                  <td>{item.labourer.group || "-"}</td>
+                  <td>{item.present}</td>
+                  <td>{item.halfDay}</td>
+                  <td>{item.absent}</td>
+                  <td>{formatNumber(item.payable)}</td>
+                  <td>{formatNumber(item.wage)}</td>
+                  {page.dateBlock.map((date) => {
+                    const record = item.records.find((entry) => entry.date === date);
+                    return (
+                      <td key={date} className={attendanceStatusClass(record?.status)}>
+                        {attendancePrintMark(record?.status)}
+                      </td>
+                    );
+                  })}
+                </tr>
+              )) : (
+                <tr>
+                  <td className="attendance-register-print-empty" colSpan={8 + page.dateBlock.length}>No attendance records found for the selected filters.</td>
+                </tr>
+              )}
+            </tbody>
+            <tfoot>
+              <tr className="attendance-register-print-total-row">
+                <th colSpan={3}>Grand Total</th>
+                <td>{formatNumber(page.pageTotals.present)}</td>
+                <td>{formatNumber(page.pageTotals.halfDay)}</td>
+                <td>{formatNumber(page.pageTotals.absent)}</td>
+                <td>{formatNumber(page.pageTotals.payableDays)}</td>
+                <td>{formatNumber(page.pageTotals.wages)}</td>
+                {page.dateBlock.map((date, index) => <td key={`${page.id}:total:${date}:${index}`} />)}
+              </tr>
+              <tr className="attendance-register-print-daily-row">
+                <th colSpan={8}>Daily Total Presents</th>
+                {page.dateTotals.map((total, index) => <td key={`${page.id}:${page.dateBlock[index]}`}>{formatNumber(total)}</td>)}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <footer className="attendance-register-print-footer">
+          <span>Muzare</span>
+          <span>Page {page.pageNumber} of {page.totalPages}</span>
+          <span>{printRangeLabel}</span>
+          <span>{printGeneratedAt}</span>
+        </footer>
+      </section>
+    );
+  };
+
   const attendanceRows = attendance
     .filter((item) => {
       const labourer = labourById.get(item.labourerId);
@@ -692,6 +850,14 @@ export function Reports() {
     })
     .sort(compareWageRates), [labourById, matches, selectedLabourerIds, wageRates]);
   const attendanceDates = useMemo(() => buildDateColumns(from, to, attendanceRows), [attendanceRows, from, to]);
+  const attendanceTotals = useMemo(() => ({
+    labourCount: attendanceSummary.length,
+    present: attendanceRows.filter((item) => item.status === "present").length,
+    halfDay: attendanceRows.filter((item) => item.status === "half_day").length,
+    absent: attendanceRows.filter((item) => item.status === "absent").length,
+    payableDays: attendanceSummary.reduce((sum, item) => sum + item.payable, 0),
+    wages: attendanceSummary.reduce((sum, item) => sum + item.wage, 0),
+  }), [attendanceRows, attendanceSummary]);
   const attendanceDateTotals = useMemo(
     () => attendanceDates.map((date) => attendanceSummary.reduce(
       (sum, item) => sum + attendancePayable(item.records.find((record) => record.date === date)?.status),
@@ -699,6 +865,80 @@ export function Reports() {
     )),
     [attendanceDates, attendanceSummary],
   );
+  const attendanceLabourBlockSize = attendanceSummary.length > 25 ? (attendanceSummary.length <= 30 ? 30 : 25) : 25;
+  const attendanceDateBlocks = useMemo(() => (attendanceDates.length > 0 ? chunkArray(attendanceDates, 40) : [[]]), [attendanceDates]);
+  const attendanceLabourBlocks = useMemo(() => (attendanceSummary.length > 0 ? chunkArray(attendanceSummary, attendanceLabourBlockSize) : [[]]), [attendanceLabourBlockSize, attendanceSummary]);
+  const attendancePrintPages = useMemo(() => {
+    const pages: Array<{
+      id: string;
+      dateBlock: string[];
+      labourBlock: typeof attendanceSummary;
+      dateBlockIndex: number;
+      labourBlockIndex: number;
+      pageNumber: number;
+      density: "normal" | "compact" | "ultra";
+      pageTotals: {
+        present: number;
+        halfDay: number;
+        absent: number;
+        payableDays: number;
+        wages: number;
+      };
+      dateTotals: number[];
+    }> = [];
+    const totalPages = Math.max(attendanceDateBlocks.length * attendanceLabourBlocks.length, 1);
+    let pageIndex = 0;
+    attendanceDateBlocks.forEach((dateBlock, dateBlockIndex) => {
+      attendanceLabourBlocks.forEach((labourBlock, labourBlockIndex) => {
+        const density: "normal" | "compact" | "ultra" = dateBlock.length <= 20 ? "normal" : dateBlock.length <= 30 ? "compact" : "ultra";
+        const pageTotals = labourBlock.reduce((acc, item) => {
+          acc.present += item.present;
+          acc.halfDay += item.halfDay;
+          acc.absent += item.absent;
+          acc.payableDays += item.payable;
+          acc.wages += item.wage;
+          return acc;
+        }, { present: 0, halfDay: 0, absent: 0, payableDays: 0, wages: 0 });
+        const dateTotals = dateBlock.map((date) => attendanceSummary.reduce(
+          (sum, item) => sum + attendancePayable(item.records.find((record) => record.date === date)?.status),
+          0,
+        ));
+        pages.push({
+          id: `${dateBlockIndex}:${labourBlockIndex}`,
+          dateBlock,
+          labourBlock,
+          dateBlockIndex,
+          labourBlockIndex,
+          pageNumber: pageIndex + 1,
+          density,
+          pageTotals,
+          dateTotals,
+        });
+        pageIndex += 1;
+      });
+    });
+    if (!pages.length) {
+      pages.push({
+        id: "0:0",
+        dateBlock: [],
+        labourBlock: [],
+        dateBlockIndex: 0,
+        labourBlockIndex: 0,
+        pageNumber: 1,
+        density: "normal",
+        pageTotals: { present: 0, halfDay: 0, absent: 0, payableDays: 0, wages: 0 },
+        dateTotals: [],
+      });
+    }
+    return pages.map((page, index) => ({ ...page, pageNumber: index + 1, totalPages }));
+  }, [attendanceDateBlocks, attendanceLabourBlocks, attendanceSummary]);
+  const bootstrapFarm = bootstrapQuery.data?.farms.find((farm) => farm.id === bootstrapQuery.data?.activeFarmId) ?? null;
+  const bootstrapSeason = bootstrapQuery.data?.seasons.find((season) => season.id === bootstrapQuery.data?.activeSeasonId) ?? null;
+  const printGeneratedAt = useMemo(() => printTimestampFormatter.format(new Date()), [attendanceTotals, attendanceDates.length, report, from, to, groupFilter, selectedLabourerIds.join(","), bootstrapQuery.dataUpdatedAt, user?.displayName, user?.email]);
+  const printGeneratedBy = user?.displayName ?? user?.email ?? "Unknown";
+  const selectedLabourNames = selectedLabourerIds.map((id) => labourById.get(id)?.name).filter(Boolean).join(", ");
+  const attendanceRegisterGroupLabel = groupFilter === ungroupedValue ? t("reportsPage.ungrouped") : groupFilter || t("reportsPage.allGroups");
+  const attendanceRegisterLabourLabel = selectedLabourNames || t("reportsPage.allLabour");
 
   useEffect(() => {
     setAttendanceRegisterExpandedLabourerId((current) => current && attendanceSummary.some((item) => item.labourer.id === current) ? current : null);
@@ -1165,31 +1405,47 @@ export function Reports() {
   const exportAttendanceRegister = () => {
     const rows = [
       [
+        "Serial",
         t("reportsPage.labourName"),
+        t("reportsPage.group"),
         t("reportsPage.present"),
         t("reportsPage.halfDay"),
+        t("reportsPage.absent"),
         t("reportsPage.payableDays"),
-        ...attendanceDates.map(formatShortDate),
-        t("reportsPage.wageRate"),
-        t("reportsPage.grossWages"),
+        "Wages SAR",
+        ...attendanceDates.map(formatCsvDate),
       ],
-      ...attendanceSummary.map((item) => [
+      ...attendanceSummary.map((item, index) => [
+        index + 1,
         item.labourer.name,
+        item.labourer.group ?? "",
         item.present,
         item.halfDay,
+        item.absent,
         formatNumber(item.payable),
-        ...attendanceDates.map((date) => attendanceMark(item.records.find((record) => record.date === date)?.status)),
-        item.wageRateLabel,
-        item.wage,
+        formatNumber(item.wage),
+        ...attendanceDates.map((date) => attendancePrintMark(item.records.find((record) => record.date === date)?.status)),
       ]),
       [
-        t("reportsPage.payableDays"),
+        "Grand Total",
         "",
         "",
-        formatNumber(attendanceSummary.reduce((sum, item) => sum + item.payable, 0)),
+        attendanceTotals.present,
+        attendanceTotals.halfDay,
+        attendanceTotals.absent,
+        formatNumber(attendanceTotals.payableDays),
+        formatNumber(attendanceTotals.wages),
+        ...attendanceDates.map(() => ""),
+      ],
+      [
+        "Daily Total Presents",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
         ...attendanceDateTotals.map((total) => formatNumber(total)),
-        "",
-        money(attendanceSummary.reduce((sum, item) => sum + item.wage, 0)),
       ],
     ];
     downloadCsv("attendance-register.csv", rows);
@@ -1552,10 +1808,19 @@ export function Reports() {
       </section>
 
       {report === "attendance" && <>
-        {views.attendance === "register" && <ReportShell title={t("reportsPage.attendanceRegister")} rangeLabel={rangeLabel} sectionId="attendance-register" onPrint={() => printSection("attendance-register-print")} onExport={exportAttendanceRegister}>
+        {views.attendance === "register" && <ReportShell
+          title={t("reportsPage.attendanceRegister")}
+          rangeLabel={rangeLabel}
+          sectionId="attendance-register"
+          onPrint={() => printSection("attendance-register-print")}
+          onPdfExport={() => printSection("attendance-register-print")}
+          onExport={exportAttendanceRegister}
+          printLabel="Print Register"
+          pdfLabel="Export PDF"
+        >
           {attendanceRegisterSwitch}
           <div className="attendance-register-kpis">
-            <Kpis values={[[t("reportsPage.labour"), attendanceSummary.length], [t("reportsPage.present"), attendanceRows.filter((item) => item.status === "present").length], [t("reportsPage.halfDay"), attendanceRows.filter((item) => item.status === "half_day").length], [t("reportsPage.absent"), attendanceRows.filter((item) => item.status === "absent").length], [t("reportsPage.totalWages"), money(attendanceSummary.reduce((sum, item) => sum + item.wage, 0))]]} />
+            <Kpis values={[[t("reportsPage.labour"), attendanceTotals.labourCount], [t("reportsPage.present"), attendanceTotals.present], [t("reportsPage.halfDay"), attendanceTotals.halfDay], [t("reportsPage.absent"), attendanceTotals.absent], [t("reportsPage.totalWages"), money(attendanceTotals.wages)]]} />
           </div>
           <div className="attendance-register-mobile-list">
             {attendanceSummary.map((item) => {
@@ -1655,10 +1920,10 @@ export function Reports() {
                     <th>{t("reportsPage.payableDays")}</th>
                     <td />
                     <td />
-                    <td>{formatNumber(attendanceSummary.reduce((sum, item) => sum + item.payable, 0))}</td>
+                    <td>{formatNumber(attendanceTotals.payableDays)}</td>
                     {attendanceDateTotals.map((total, index) => <td key={attendanceDates[index]}>{formatNumber(total)}</td>)}
                     <td />
-                    <td>{money(attendanceSummary.reduce((sum, item) => sum + item.wage, 0))}</td>
+                    <td>{money(attendanceTotals.wages)}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -1666,67 +1931,14 @@ export function Reports() {
           </div>
         </ReportShell>}
         <section className="record-panel reports-print-section reports-print-only" data-print-section="attendance-register-print" aria-hidden="true">
-          <header className="reports-view-header">
-            <div>
-              <h2>{t("reportsPage.attendanceRegister")}</h2>
-              <p>{rangeLabel}</p>
-            </div>
-          </header>
-          <div className="attendance-import-table-wrap report-wide-table">
-            <table className="report-data-table attendance-register-table attendance-register-report">
-              <thead>
-                <tr>
-                  <th>{t("reportsPage.labour")}</th>
-                  <th>{t("reportsPage.present")}</th>
-                  <th>{t("reportsPage.halfDay")}</th>
-                  <th>{t("reportsPage.payableDays")}</th>
-                  {attendanceDates.map((date) => <th key={date}>{formatShortDate(date)}</th>)}
-                  <th>{t("reportsPage.wageRate")}</th>
-                  <th>{t("reportsPage.grossWages")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {attendanceSummary.map((item) => <tr key={item.labourer.id}>
-                  <th>{item.labourer.name}</th>
-                  <td>{item.present}</td>
-                  <td>{item.halfDay}</td>
-                  <td>{formatNumber(item.payable)}</td>
-                  {attendanceDates.map((date) => {
-                    const record = item.records.find((entry) => entry.date === date);
-                    return (
-                      <td key={date} className={attendanceStatusClass(record?.status)}>
-                        {attendanceMark(record?.status)}
-                      </td>
-                    );
-                  })}
-                  <td>{item.missingRateDates.length > 0
-                    ? t("wageRatesPage.missingRateWarning")
-                    : item.wageRateLabel === "Mixed"
-                      ? t("reportsPage.mixedRates")
-                      : item.wageRateLabel
-                        ? money(Number(item.wageRateLabel))
-                        : t("wageRatesPage.noCurrentRate")}</td>
-                  <td>{money(item.wage)}</td>
-                </tr>)}
-              </tbody>
-              <tfoot>
-                <tr>
-                  <th>{t("reportsPage.payableDays")}</th>
-                  <td />
-                  <td />
-                  <td>{formatNumber(attendanceSummary.reduce((sum, item) => sum + item.payable, 0))}</td>
-                  {attendanceDateTotals.map((total, index) => <td key={attendanceDates[index]}>{formatNumber(total)}</td>)}
-                  <td />
-                  <td>{money(attendanceSummary.reduce((sum, item) => sum + item.wage, 0))}</td>
-                </tr>
-              </tfoot>
-            </table>
+          <div className="attendance-register-print-template">
+            {attendancePrintPages.map(renderAttendanceRegisterPrintPage)}
           </div>
         </section>
         {views.attendance === "summary" && <ReportShell title={t("reportsPage.attendanceSummary")} rangeLabel={rangeLabel} sectionId="attendance-summary" onPrint={() => printSection("attendance-summary")} onExport={exportAttendanceSummary}>
           {attendanceRegisterSwitch}
           <div className="attendance-register-kpis">
-            <Kpis values={[[t("reportsPage.labour"), attendanceSummary.length], [t("reportsPage.present"), attendanceRows.filter((item) => item.status === "present").length], [t("reportsPage.halfDay"), attendanceRows.filter((item) => item.status === "half_day").length], [t("reportsPage.absent"), attendanceRows.filter((item) => item.status === "absent").length], [t("reportsPage.totalWages"), money(attendanceSummary.reduce((sum, item) => sum + item.wage, 0))]]} />
+            <Kpis values={[[t("reportsPage.labour"), attendanceTotals.labourCount], [t("reportsPage.present"), attendanceTotals.present], [t("reportsPage.halfDay"), attendanceTotals.halfDay], [t("reportsPage.absent"), attendanceTotals.absent], [t("reportsPage.totalWages"), money(attendanceTotals.wages)]]} />
           </div>
           <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.labour"), t("reportsPage.present"), t("reportsPage.halfDay"), t("reportsPage.absent"), t("reportsPage.payableDays"), t("reportsPage.totalWages")]} rows={attendanceSummary.map((item) => ({ id: item.labourer.id, title: item.labourer.name, value: money(item.wage), meta: `${t("reportsPage.payableDays")}: ${formatNumber(item.payable)}`, cells: [item.labourer.name, item.present, item.halfDay, item.absent, formatNumber(item.payable), money(item.wage)], details: [[t("reportsPage.present"), item.present], [t("reportsPage.halfDay"), item.halfDay], [t("reportsPage.absent"), item.absent]] }))} />
         </ReportShell>}
