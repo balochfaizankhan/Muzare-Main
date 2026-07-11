@@ -25,6 +25,7 @@ const modules: WorkspaceModule[] = ["dashboard", "workforce", "attendance", "adv
 const actions: WorkspaceModuleAction[] = ["view", "create", "edit", "delete", "approve", "export"];
 const roles: WorkspaceRole[] = ["workspace_owner", "workspace_manager", "supervisor", "accountant", "operator", "viewer"];
 const blankInvite = { email: "", phone: "", role: "viewer" as WorkspaceRole, farmAccessMode: "all" as FarmAccessMode, farmIds: [] as string[] };
+const memberStatusClass = (member: WorkspaceTeamMember) => member.hasWorkspaceAccess ? "is-active" : member.userStatus === "suspended" ? "is-danger" : "is-muted";
 
 function cloneDefaults(role: WorkspaceRole): WorkspaceModulePermissions {
   return Object.fromEntries(modules.map((module) => [module, { ...roleModulePermissions[role][module] }]));
@@ -95,24 +96,44 @@ export function WorkspaceTeam() {
 
   return <div className="dashboard-page">
     <SubpageHeader title={t("workspaceTeam.title")} />
-    <main className="subpage module-workspace">
-      <section className="workspace-intro"><div><h2>{t("workspaceTeam.heading")}</h2><p>{t("workspaceTeam.description")}</p></div></section>
-      {isOwner && <section className="record-panel"><h2>{t("workspaceTeam.invite")}</h2>
+    <main className="subpage module-workspace workspace-team-page">
+      <section className="record-panel workspace-team-hero">
+        <div>
+          <h2>{t("workspaceTeam.heading")}</h2>
+          <p>{t("workspaceTeam.description")}</p>
+        </div>
+      </section>
+      {isOwner && <section className="record-panel workspace-team-invite">
+        <div className="workspace-team-section-head">
+          <h2>{t("workspaceTeam.invite")}</h2>
+        </div>
         <form className="module-form team-invite-form" onSubmit={submitInvite}>
-          <input required type="email" placeholder={t("workspaceTeam.email")} value={invite.email} onChange={(event) => setInvite({ ...invite, email: event.target.value })} />
-          <input placeholder={t("workspaceTeam.phone")} value={invite.phone} onChange={(event) => setInvite({ ...invite, phone: event.target.value })} />
-          <select value={invite.role} onChange={(event) => setInvite({ ...invite, role: event.target.value as WorkspaceRole })}>{roles.map((role) => <option value={role} key={role}>{t(`workspaceTeam.roles.${role}`)}</option>)}</select>
-          <select value={invite.farmAccessMode} onChange={(event) => setInvite({ ...invite, farmAccessMode: event.target.value as FarmAccessMode, farmIds: event.target.value === "assigned" ? invite.farmIds : [] })}>
+          <label className="team-invite-field">
+            <span>{t("workspaceTeam.email")}</span>
+            <input required type="email" placeholder={t("workspaceTeam.email")} value={invite.email} onChange={(event) => setInvite({ ...invite, email: event.target.value })} />
+          </label>
+          <label className="team-invite-field">
+            <span>{t("workspaceTeam.phone")}</span>
+            <input placeholder={t("workspaceTeam.phone")} value={invite.phone} onChange={(event) => setInvite({ ...invite, phone: event.target.value })} />
+          </label>
+          <label className="team-invite-field">
+            <span>{t("workspaceTeam.role")}</span>
+            <select value={invite.role} onChange={(event) => setInvite({ ...invite, role: event.target.value as WorkspaceRole })}>{roles.map((role) => <option value={role} key={role}>{t(`workspaceTeam.roles.${role}`)}</option>)}</select>
+          </label>
+          <label className="team-invite-field">
+            <span>{t("workspaceTeam.farmAccess")}</span>
+            <select value={invite.farmAccessMode} onChange={(event) => setInvite({ ...invite, farmAccessMode: event.target.value as FarmAccessMode, farmIds: event.target.value === "assigned" ? invite.farmIds : [] })}>
             <option value="all">{t("workspaceTeam.allFarms")}</option>
             <option value="assigned">{t("workspaceTeam.assignedFarmsOnly")}</option>
           </select>
+          </label>
           {invite.farmAccessMode === "assigned" && <div className="team-farm-assignment-list">
             {team.data?.availableFarms.map((farm) => <label key={farm.id} className="compact-checkbox">
               <input type="checkbox" checked={invite.farmIds.includes(farm.id)} onChange={() => toggleFarm(farm.id, invite.farmIds, (farmIds) => setInvite({ ...invite, farmIds }))} />
               {farm.name}
             </label>)}
           </div>}
-          <button disabled={inviteMember.isPending} type="submit"><UserPlus size={16} />{t("workspaceTeam.sendInvite")}</button>
+          <button className="team-invite-form__submit" disabled={inviteMember.isPending} type="submit"><UserPlus size={16} />{t("workspaceTeam.sendInvite")}</button>
         </form>
         {inviteMember.isError && <p className="error">{inviteMember.error.message}</p>}
         {!inviteMember.isError && inviteMessage && <p>{inviteMessage}</p>}
@@ -120,17 +141,27 @@ export function WorkspaceTeam() {
       </section>}
       {team.isLoading && <p>{t("workspaceTeam.loading")}</p>}
       {team.isError && <p className="error">{team.error.message}</p>}
-      {team.data && <section className="record-panel"><h2>{t("workspaceTeam.members")}</h2><div className="team-list">
+      {team.data && <section className="record-panel workspace-team-members"><div className="workspace-team-section-head"><h2>{t("workspaceTeam.members")}</h2></div><div className="team-list">
         {team.data.members.map((member) => <article className="team-card" key={member.id}>
-          <div>
-            <strong>{member.displayName || member.name || member.email || t("workspaceTeam.unnamedMember")}</strong>
-            <span>{member.email}{member.phone ? ` | ${member.phone}` : ""}</span>
-            <small>
-              {t(`workspaceTeam.roles.${member.role}`)} | {member.hasWorkspaceAccess ? t("common.active") : (member.userStatus === "suspended" ? t("common.suspended") : t("common.inactive"))}
-            </small>
+          <div className="team-card__copy">
+            <div className="team-card__topline">
+              <strong>{member.displayName || member.name || member.email || t("workspaceTeam.unnamedMember")}</strong>
+              <div className="team-card__badges">
+                <span className={`team-card__badge team-card__badge--role team-card__badge--${member.role}`}>{t(`workspaceTeam.roles.${member.role}`)}</span>
+                <span className={`team-card__badge team-card__badge--status ${memberStatusClass(member)}`}>{member.hasWorkspaceAccess ? t("common.active") : member.userStatus === "suspended" ? t("common.suspended") : t("common.inactive")}</span>
+              </div>
+            </div>
+            <span className="team-card__email" title={member.email}>{member.email}{member.phone ? ` · ${member.phone}` : ""}</span>
+            <small>{t(`workspaceTeam.roles.${member.role}`)} · {member.hasWorkspaceAccess ? t("common.active") : (member.userStatus === "suspended" ? t("common.suspended") : t("common.inactive"))}</small>
             <small>{member.farmAccessMode === "assigned" ? t("workspaceTeam.assignedFarmCount", { count: member.farmIds.length }) : t("workspaceTeam.allFarms")}</small>
           </div>
-          {isOwner && <div className="team-card__actions"><button type="button" onClick={() => setActivityMember(member)}><Activity size={15} />{t("workspaceTeam.activity")}</button><button type="button" onClick={() => startEdit(member)}>{t("workspaceTeam.permissions")}</button><button className="danger-button" type="button" onClick={() => window.confirm(t("workspaceTeam.confirmRemove")) && remove.mutate(member.id)}><Trash2 size={15} />{t("workspaceTeam.remove")}</button></div>}
+          {isOwner && <div className="team-card__actions">
+            <div className="team-card__actions-grid">
+              <button type="button" onClick={() => setActivityMember(member)}><Activity size={15} />{t("workspaceTeam.activity")}</button>
+              <button type="button" onClick={() => startEdit(member)}>{t("workspaceTeam.permissions")}</button>
+            </div>
+            <button className="team-card__remove-button" type="button" onClick={() => window.confirm(t("workspaceTeam.confirmRemove")) && remove.mutate(member.id)}><Trash2 size={15} />{t("workspaceTeam.remove")}</button>
+          </div>}
         </article>)}
       </div></section>}
       {team.data?.invitations.length ? <section className="record-panel"><h2>{t("workspaceTeam.pendingInvites")}</h2>{team.data.invitations.map((item) => <article className="team-card" key={item.id}><div><strong>{item.email}</strong><span>{t(`workspaceTeam.roles.${item.role}`)}</span></div>{isOwner && <button type="button" onClick={() => cancelInvite.mutate(item.id)}>{t("workspaceTeam.cancelInvite")}</button>}</article>)}</section> : null}

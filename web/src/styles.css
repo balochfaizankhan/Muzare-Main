@@ -3839,16 +3839,21 @@ button {
 
 .settings-link-grid a,
 .team-card {
-  align-items: center;
+  align-items: flex-start;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 9px;
-  display: flex;
+  border-radius: 12px;
+  display: grid;
   gap: 10px;
   justify-content: space-between;
   min-width: 0;
-  padding: 13px;
+  padding: 14px;
   text-decoration: none;
+}
+
+.workspace-team-page {
+  padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px));
+  scroll-padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px));
 }
 
 .settings-link-grid svg { color: var(--brand-primary); flex-shrink: 0; }
@@ -3856,6 +3861,171 @@ button {
 .settings-link-grid span, .team-card span, .team-card small { color: var(--text-secondary); font-size: .74rem; overflow-wrap: anywhere; }
 .settings-link-grid strong, .team-card strong { color: var(--text-primary); }
 .team-invite-form { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.workspace-team-hero {
+  display: grid;
+  gap: 6px;
+}
+.workspace-team-hero h2 {
+  color: var(--brand-primary);
+  font-size: 1.08rem;
+  margin: 0;
+}
+.workspace-team-hero p {
+  color: var(--text-secondary);
+  font-size: .82rem;
+  line-height: 1.45;
+  margin: 0;
+}
+.workspace-team-section-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+.workspace-team-section-head h2 {
+  color: var(--brand-primary);
+  font-size: 1rem;
+  margin: 0;
+}
+.workspace-team-invite {
+  display: grid;
+  gap: 12px;
+}
+.team-invite-form {
+  gap: 10px;
+}
+.team-invite-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.team-invite-field span {
+  color: var(--text-secondary);
+  font-size: .76rem;
+  font-weight: 750;
+}
+.team-invite-field input,
+.team-invite-field select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-primary);
+  min-height: 42px;
+  min-width: 0;
+  padding: 0 12px;
+}
+.team-invite-form__submit {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+  justify-content: center;
+  min-height: 44px;
+}
+.team-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.team-card__copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.team-card__topline {
+  align-items: start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
+}
+.team-card__topline strong {
+  color: var(--text-primary);
+  font-size: .96rem;
+  line-height: 1.25;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.team-card__email {
+  color: var(--text-secondary);
+  display: block;
+  font-size: .78rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.team-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.team-card__badge {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: .7rem;
+  font-weight: 800;
+  line-height: 1;
+  min-height: 28px;
+  padding: 5px 9px;
+}
+.team-card__badge--role {
+  background: #edf7ea;
+  border-color: #d5e8ce;
+  color: #2f6b31;
+}
+.team-card__badge--role.team-card__badge--viewer {
+  background: #f2f4f7;
+  border-color: #dde3ea;
+  color: #475467;
+}
+.team-card__badge--status.is-active {
+  background: #edf7ea;
+  border-color: #d5e8ce;
+  color: #2f6b31;
+}
+.team-card__badge--status.is-muted {
+  background: #f2f4f7;
+  border-color: #dde3ea;
+  color: #475467;
+}
+.team-card__badge--status.is-danger {
+  background: #fff1f1;
+  border-color: #f3c8c8;
+  color: #b42318;
+}
+.team-card__actions {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+.team-card__actions-grid {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.team-card__actions button,
+.invite-share button {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
+}
+.team-card__actions-grid button,
+.team-card__remove-button {
+  justify-content: center;
+  min-height: 40px;
+  width: 100%;
+}
+.team-card__remove-button {
+  background: #fff;
+  border: 1px solid #f2c7c7;
+  color: #b42318;
+}
+.team-card__remove-button:hover,
+.team-card__remove-button:focus-visible {
+  background: #fff5f5;
+  border-color: #efb0b0;
+  color: #9f1d17;
+}
 .team-list { display: grid; gap: 9px; }
 .wage-settlement-form {
   gap: 14px;
@@ -3977,8 +4147,7 @@ button {
   position: sticky;
   z-index: 2;
 }
-.team-card__actions { display: flex !important; flex-shrink: 0; }
-.team-card button, .invite-share button { align-items: center; display: inline-flex; gap: 5px; }
+.team-card button, .invite-share button { align-items: center; display: inline-flex; gap: 7px; }
 .team-farm-assignment-list { border: 1px solid var(--border); border-radius: 10px; display: grid; gap: 8px; max-height: 180px; overflow-y: auto; padding: 10px 12px; }
 .team-farm-assignment-list .compact-checkbox { align-items: center; display: flex; gap: 8px; }
 .invite-share { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 7px; margin-top: 12px; padding: 11px; }
@@ -8292,6 +8461,21 @@ button {
   .permission-matrix {
     grid-template-columns: 1fr;
   }
+  .team-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .team-card__topline {
+    flex-direction: column;
+  }
+  .team-card__badges {
+    justify-content: flex-start;
+  }
+  .team-card__actions-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .team-card__remove-button {
+    width: 100%;
+  }
 
   .settings-page-stack {
     gap: 10px;
@@ -8321,6 +8505,10 @@ button {
 
   .build-diagnostics__grid > article:last-child {
     grid-column: 1 / -1;
+  }
+
+  .workspace-team-page {
+    padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px));
   }
 
   .build-diagnostics__heading {
