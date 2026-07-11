@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { CalendarDays, ChevronDown, ChevronRight, X } from "lucide-react";
+import { CalendarDays, ChevronDown, ChevronRight, ChevronUp, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { SearchInput } from "../../components/SearchInput";
 import { ClearableSelect } from "../../components/ClearableSelect";
-import { LabourMultiSelectFilter } from "../../components/LabourMultiSelectFilter";
+import { ResponsiveMultiSelectField, ResponsiveSelectField } from "../../components/ResponsivePicker";
 import { SubpageHeader } from "../../components/SubpageHeader";
 import { defaultTransactionGroupExpansion, groupAccountTransactions, type AccountTransactionGroupKey } from "../../lib/accountTransactionGroups";
 import { calculateAccountBalance } from "../../lib/accounting";
@@ -449,6 +449,10 @@ export function Reports() {
   const [dispatches, setDispatches] = useState<Dispatch[]>([]);
   const [selectedSaleRecord, setSelectedSaleRecord] = useState<SalesReportRecord | null>(null);
   const [selectedDispatchRecord, setSelectedDispatchRecord] = useState<DispatchReportRecord | null>(null);
+  const [attendanceMoreFiltersOpen, setAttendanceMoreFiltersOpen] = useState(false);
+  const [advanceMoreFiltersOpen, setAdvanceMoreFiltersOpen] = useState(false);
+  const [earningMoreFiltersOpen, setEarningMoreFiltersOpen] = useState(false);
+  const reportTabRefs = useRef<Partial<Record<Report, HTMLButtonElement | null>>>({});
   useEffect(() => {
     if (normalizedRequestedReport && reportOptions.includes(normalizedRequestedReport)) {
       setReport(normalizedRequestedReport);
@@ -579,6 +583,9 @@ export function Reports() {
     setSaleTypeFilter("all");
     setSalesDateType("saleDate");
     setDispatchDateType("dispatchDate");
+    setAttendanceMoreFiltersOpen(false);
+    setAdvanceMoreFiltersOpen(false);
+    setEarningMoreFiltersOpen(false);
   };
 
   useEffect(() => {
@@ -603,6 +610,12 @@ export function Reports() {
 
   const labourFilterActive = (report === "attendance" || report === "advances" || report === "labour-earnings" || report === "wage-rates") && selectedLabourerIds.length > 0;
   const filtered = Boolean(search || from || to || accountId || groupFilter || labourFilterActive || category || subcategory || status || amountMin || amountMax || buyerFilter || productFilter || vehicleFilter || paymentStatusFilter);
+  const advancedFilterCount = useMemo(() => {
+    if (report === "attendance") return Number(Boolean(groupFilter)) + Number(selectedLabourerIds.length > 0);
+    if (report === "advances") return Number(Boolean(groupFilter)) + Number(selectedLabourerIds.length > 0) + Number(Boolean(accountId)) + Number(Boolean(amountMin)) + Number(Boolean(amountMax));
+    if (report === "labour-earnings") return Number(Boolean(groupFilter)) + Number(selectedLabourerIds.length > 0) + Number(Boolean(category)) + Number(Boolean(status)) + Number(Boolean(amountMin)) + Number(Boolean(amountMax));
+    return 0;
+  }, [accountId, amountMax, amountMin, category, groupFilter, report, selectedLabourerIds.length, status]);
   const switchReport = (next: Report) => {
     setReport(next);
     setSearchParams((current) => {
@@ -610,6 +623,9 @@ export function Reports() {
       return current;
     });
   };
+  useEffect(() => {
+    reportTabRefs.current[report]?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+  }, [report]);
   const switchView = <T extends Report>(reportKey: T, nextView: ReportViewState[T]) => {
     setViews((current) => ({ ...current, [reportKey]: nextView }));
   };
@@ -707,21 +723,6 @@ export function Reports() {
       return { labourer, records, total, outstanding: payable - total };
     })
     .filter((item) => item.records.length > 0), [advanceRows, attendanceSummary, labourers]);
-  const advanceActiveFilters = useMemo(() => {
-    const chips: string[] = [];
-    if (search.trim()) chips.push(`Search: ${search.trim()}`);
-    if (from || to) chips.push(from && to
-      ? `${formatReportDateValue(from)} - ${formatReportDateValue(to)}`
-      : from
-        ? `From ${formatReportDateValue(from)}`
-        : `To ${formatReportDateValue(to)}`);
-    if (groupFilter) chips.push(groupFilter === ungroupedValue ? "Ungrouped" : groupFilter);
-    if (selectedLabourerIds.length) chips.push(...selectedLabourerIds.map((id) => labourName(id)));
-    if (accountId) chips.push(accountName(accountId));
-    if (amountMin) chips.push(`Min ${money(Number(amountMin))}`);
-    if (amountMax) chips.push(`Max ${money(Number(amountMax))}`);
-    return chips;
-  }, [accountId, accountName, amountMax, amountMin, from, groupFilter, labourName, rangeLabel, search, selectedLabourerIds, to, ungroupedValue]);
   const labourEarningRows = useMemo(() => labourEarnings
     .filter((item) => {
       const labourer = item.labourerId ? labourById.get(item.labourerId) : null;
@@ -745,6 +746,18 @@ export function Reports() {
     () => [...new Set(labourEarningRows.map((item) => item.earningType))].sort(),
     [labourEarningRows],
   );
+  const labourGroupOptions = useMemo(() => labourGroups.map((group) => ({ value: group, label: group })), [labourGroups]);
+  const reportLabourOptionsWithLabel = useMemo(
+    () => reportLabourOptions.map((labourer) => ({ value: labourer.id, label: labourer.name, secondary: labourer.group || t("reportsPage.ungrouped") })),
+    [reportLabourOptions, t],
+  );
+  const accountOptions = useMemo(() => accounts.map((account) => ({ value: account.id, label: account.name, secondary: account.type })), [accounts]);
+  const labourEarningTypeOptions = useMemo(() => labourEarningTypes.map((item) => ({ value: item, label: labourEarningTypeLabel(item) })), [labourEarningTypes]);
+  const labourEarningStatusOptions = useMemo(() => ([
+    { value: "pending", label: "Pending settlement" },
+    { value: "settled", label: "Settled" },
+    { value: "voided", label: "Voided" },
+  ]), []);
   const labourEarningPending = useMemo(
     () => labourEarningRows.filter((item) => isActiveOperationalRecord(item) && item.status === "pending_settlement"),
     [labourEarningRows],
@@ -1276,7 +1289,7 @@ export function Reports() {
     <SubpageHeader title={t("reportsPage.title")} />
     <main className="subpage module-workspace reports-page">
       <section className="record-panel reports-tabs" aria-label={t("reportsPage.title")}>
-        {reportOptions.map((item) => <button className={report === item ? "is-active" : ""} type="button" key={item} onClick={() => switchReport(item)}>{t(`reportsPage.tabs.${item}`)}</button>)}
+        {reportOptions.map((item) => <button ref={(node) => { reportTabRefs.current[item] = node; }} className={report === item ? "is-active" : ""} type="button" key={item} onClick={() => switchReport(item)}>{t(`reportsPage.tabs.${item}`)}</button>)}
       </section>
       <section className="record-panel reports-filter-panel">
         <div className="reports-filter-heading">
@@ -1284,19 +1297,13 @@ export function Reports() {
           {filtered && <button type="button" onClick={clearFilters}>{t("reportsPage.clearFilters")}</button>}
         </div>
         <div className="reports-filters">
-          {report === "advances" && advanceActiveFilters.length > 0 && <div className="reports-advance-filter-chips">
-            <h3>Active filters</h3>
-            <div className="reports-advance-filter-chip-row" aria-label="Active advances filters">
-              {advanceActiveFilters.map((chip) => <span key={chip} className="reports-filter-chip">{chip}</span>)}
-            </div>
-          </div>}
           <SearchInput
             value={search}
             onChange={setSearch}
             placeholder={
               report === "attendance"
                 ? `${t("reportsPage.labour")} / ${t("reportsPage.group")}`
-                : report === "advances"
+              : report === "advances"
                   ? "Search advances"
                   : report === "sales"
                     ? `${t("reportsPage.invoiceNumber")} / ${t("reportsPage.buyerName")} / ${t("reportsPage.product")} / ${t("reportsPage.quantity")}`
@@ -1325,92 +1332,157 @@ export function Reports() {
             <button type="button" onClick={applyMonthRange}>{t("reportsPage.quickThisMonth")}</button>
             <button type="button" onClick={clearFilters}>{t("reportsPage.quickClear")}</button>
           </div>
+          {(report === "attendance" || report === "advances" || report === "labour-earnings") && <details className="reports-more-filters" open={report === "attendance" ? attendanceMoreFiltersOpen : report === "advances" ? advanceMoreFiltersOpen : earningMoreFiltersOpen}>
+            <summary onClick={(event) => {
+              event.preventDefault();
+              if (report === "attendance") setAttendanceMoreFiltersOpen((current) => !current);
+              else if (report === "advances") setAdvanceMoreFiltersOpen((current) => !current);
+              else setEarningMoreFiltersOpen((current) => !current);
+            }}>
+              <span>More filters</span>
+              {advancedFilterCount > 0 ? <b>{advancedFilterCount}</b> : null}
+              {(report === "attendance" ? attendanceMoreFiltersOpen : report === "advances" ? advanceMoreFiltersOpen : earningMoreFiltersOpen) ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            </summary>
+            <div className={`reports-more-filters__body${report === "attendance" ? " reports-more-filters__body--attendance" : report === "advances" ? " reports-more-filters__body--advances" : " reports-more-filters__body--earnings"}`}>
+              {report === "attendance" && <>
+                <ResponsiveSelectField
+                  ariaLabel={t("reportsPage.group")}
+                  title="Select labour group"
+                  value={groupFilter}
+                  onChange={setGroupFilter}
+                  placeholder={t("reportsPage.allGroups")}
+                  allLabel={t("reportsPage.allGroups")}
+                  searchPlaceholder="Search groups"
+                  clearValue=""
+                  options={[...labourGroupOptions, { value: ungroupedValue, label: t("reportsPage.ungrouped") }]}
+                />
+                <ResponsiveMultiSelectField
+                  ariaLabel={t("reportsPage.labour")}
+                  title="Select labour"
+                  selectedIds={selectedLabourerIds}
+                  onChange={setSelectedLabourerIds}
+                  placeholder={t("common.allLabour")}
+                  allLabel={t("reportsPage.allLabour")}
+                  searchPlaceholder="Search labour"
+                  noResultsLabel={t("common.noMatchingLabour")}
+                  options={reportLabourOptionsWithLabel}
+                />
+              </>}
+              {report === "advances" && <>
+                <ResponsiveSelectField
+                  ariaLabel={t("reportsPage.group")}
+                  title="Select labour group"
+                  value={groupFilter}
+                  onChange={setGroupFilter}
+                  placeholder={t("reportsPage.allGroups")}
+                  allLabel={t("reportsPage.allGroups")}
+                  searchPlaceholder="Search groups"
+                  clearValue=""
+                  options={[...labourGroupOptions, { value: ungroupedValue, label: t("reportsPage.ungrouped") }]}
+                />
+                <ResponsiveMultiSelectField
+                  ariaLabel={t("reportsPage.labour")}
+                  title="Select labour"
+                  selectedIds={selectedLabourerIds}
+                  onChange={setSelectedLabourerIds}
+                  placeholder={t("common.allLabour")}
+                  allLabel={t("reportsPage.allLabour")}
+                  searchPlaceholder="Search labour"
+                  noResultsLabel={t("common.noMatchingLabour")}
+                  options={reportLabourOptionsWithLabel}
+                />
+                <ResponsiveSelectField
+                  ariaLabel={t("reportsPage.account")}
+                  title="Paid from account"
+                  value={accountId}
+                  onChange={setAccountId}
+                  placeholder="All accounts"
+                  allLabel="All accounts"
+                  searchPlaceholder="Search accounts"
+                  clearValue=""
+                  options={accountOptions}
+                />
+                <label className="reports-filter-group">
+                  <span>Minimum Amount</span>
+                  <input aria-label={t("reportsPage.minimumAmount")} inputMode="decimal" placeholder={t("reportsPage.minimumAmount")} value={amountMin} onChange={(event) => setAmountMin(event.target.value)} />
+                </label>
+                <label className="reports-filter-group">
+                  <span>Maximum Amount</span>
+                  <input aria-label={t("reportsPage.maximumAmount")} inputMode="decimal" placeholder={t("reportsPage.maximumAmount")} value={amountMax} onChange={(event) => setAmountMax(event.target.value)} />
+                </label>
+              </>}
+              {report === "labour-earnings" && <>
+                <ResponsiveSelectField
+                  ariaLabel={t("reportsPage.group")}
+                  title="Select labour group"
+                  value={groupFilter}
+                  onChange={setGroupFilter}
+                  placeholder={t("reportsPage.allGroups")}
+                  allLabel={t("reportsPage.allGroups")}
+                  searchPlaceholder="Search groups"
+                  clearValue=""
+                  options={[...labourGroupOptions, { value: ungroupedValue, label: t("reportsPage.ungrouped") }]}
+                />
+                <ResponsiveMultiSelectField
+                  ariaLabel={t("reportsPage.labour")}
+                  title="Select labour"
+                  selectedIds={selectedLabourerIds}
+                  onChange={setSelectedLabourerIds}
+                  placeholder={t("common.allLabour")}
+                  allLabel={t("reportsPage.allLabour")}
+                  searchPlaceholder="Search labour"
+                  noResultsLabel={t("common.noMatchingLabour")}
+                  options={reportLabourOptionsWithLabel}
+                />
+                <ResponsiveSelectField
+                  ariaLabel={t("reportsPage.type")}
+                  title="Select earnings type"
+                  value={category}
+                  onChange={setCategory}
+                  placeholder="All types"
+                  allLabel="All types"
+                  searchPlaceholder="Search types"
+                  clearValue=""
+                  options={labourEarningTypeOptions}
+                />
+                <ResponsiveSelectField
+                  ariaLabel={t("reportsPage.status")}
+                  title="Select status"
+                  value={status}
+                  onChange={setStatus}
+                  placeholder={t("reportsPage.allStatuses")}
+                  allLabel={t("reportsPage.allStatuses")}
+                  searchPlaceholder="Search status"
+                  clearValue=""
+                  options={labourEarningStatusOptions}
+                />
+                <label className="reports-filter-group">
+                  <span>Minimum Amount</span>
+                  <input aria-label={t("reportsPage.minimumAmount")} inputMode="decimal" placeholder={t("reportsPage.minimumAmount")} value={amountMin} onChange={(event) => setAmountMin(event.target.value)} />
+                </label>
+                <label className="reports-filter-group">
+                  <span>Maximum Amount</span>
+                  <input aria-label={t("reportsPage.maximumAmount")} inputMode="decimal" placeholder={t("reportsPage.maximumAmount")} value={amountMax} onChange={(event) => setAmountMax(event.target.value)} />
+                </label>
+              </>}
+            </div>
+          </details>}
           {(report === "sales" || report === "dispatch") && <ClearableSelect allowClear={false} aria-label={t("reportsPage.dateType")} value={report === "sales" ? salesDateType : dispatchDateType} onChange={(value) => report === "sales" ? setSalesDateType(value as SalesDateType) : setDispatchDateType(value as DispatchDateType)}>
             {report === "sales"
               ? (["saleDate", "dispatchDate", "deliveryDate", "paymentDate", "createdDate"] as SalesDateType[]).map((item) => <option key={item} value={item}>{t(`reportsPage.salesDateTypes.${item}`)}</option>)
               : (["dispatchDate", "saleDate", "createdDate"] as DispatchDateType[]).map((item) => <option key={item} value={item}>{t(`reportsPage.dispatchDateTypes.${item}`)}</option>)}
           </ClearableSelect>}
 
-          {(report === "attendance" || report === "labour-earnings" || report === "wage-rates") && <>
-            <ClearableSelect aria-label={t("reportsPage.group")} value={groupFilter} onChange={setGroupFilter}>
-              <option value="">{t("reportsPage.allGroups")}</option>
-              {labourGroups.map((group) => <option key={group} value={group}>{group}</option>)}
-              <option value={ungroupedValue}>{t("reportsPage.ungrouped")}</option>
-            </ClearableSelect>
-            <LabourMultiSelectFilter
-              ariaLabel={t("reportsPage.labour")}
-              options={reportLabourOptions}
-              selectedIds={selectedLabourerIds}
-              onChange={setSelectedLabourerIds}
-              placeholder={t("common.searchLabour")}
-            />
-            {report === "attendance" && views.attendance === "summary" && <ClearableSelect aria-label={t("reportsPage.status")} value={status} onChange={setStatus}>
-              <option value="">{t("reportsPage.allStatuses")}</option>
-              <option value="present">{t("reportsPage.present")}</option>
-              <option value="half_day">{t("reportsPage.halfDay")}</option>
-              <option value="absent">{t("reportsPage.absent")}</option>
-            </ClearableSelect>}
-            {report === "labour-earnings" && <>
-              <ClearableSelect aria-label={t("reportsPage.type")} value={category} onChange={setCategory}>
-                <option value="">{t("reportsPage.allTypes")}</option>
-                {labourEarningTypes.map((item) => <option key={item} value={item}>{labourEarningTypeLabel(item)}</option>)}
-              </ClearableSelect>
-              <ClearableSelect aria-label={t("reportsPage.status")} value={status} onChange={setStatus}>
-                <option value="">{t("reportsPage.allStatuses")}</option>
-                <option value="pending">Pending Settlement</option>
-                <option value="settled">Settled</option>
-                <option value="voided">Voided</option>
-              </ClearableSelect>
-              <input aria-label={t("reportsPage.minimumAmount")} inputMode="decimal" placeholder={t("reportsPage.minimumAmount")} value={amountMin} onChange={(event) => setAmountMin(event.target.value)} />
-              <input aria-label={t("reportsPage.maximumAmount")} inputMode="decimal" placeholder={t("reportsPage.maximumAmount")} value={amountMax} onChange={(event) => setAmountMax(event.target.value)} />
-            </>}
-          </>}
+          {report === "attendance" && views.attendance === "summary" && <ResponsiveSelectField ariaLabel={t("reportsPage.status")} title="Select attendance status" value={status} onChange={setStatus} placeholder={t("reportsPage.allStatuses")} allLabel={t("reportsPage.allStatuses")} searchPlaceholder="Search status" clearValue="" options={[
+            { value: "present", label: t("reportsPage.present") },
+            { value: "half_day", label: t("reportsPage.halfDay") },
+            { value: "absent", label: t("reportsPage.absent") },
+          ]} />}
 
-          {report === "advances" && <>
-            <div className="reports-advance-filter-row">
-              <label className="reports-filter-group">
-                <span>Labour Group</span>
-                <ClearableSelect aria-label={t("reportsPage.group")} value={groupFilter} onChange={setGroupFilter}>
-                  <option value="">{t("reportsPage.allGroups")}</option>
-                  {labourGroups.map((group) => <option key={group} value={group}>{group}</option>)}
-                  <option value={ungroupedValue}>{t("reportsPage.ungrouped")}</option>
-                </ClearableSelect>
-              </label>
-              <label className="reports-filter-group">
-                <span>Labourer</span>
-                <LabourMultiSelectFilter
-                  ariaLabel={t("reportsPage.labour")}
-                  options={reportLabourOptions}
-                  selectedIds={selectedLabourerIds}
-                  onChange={setSelectedLabourerIds}
-                  placeholder={t("common.searchLabour")}
-                />
-              </label>
-            </div>
-            <div className="reports-advance-filter-row">
-              <label className="reports-filter-group">
-                <span>Paid from</span>
-                <ClearableSelect aria-label={t("reportsPage.account")} value={accountId} onChange={setAccountId}>
-                  <option value="">{t("reportsPage.allAccounts")}</option>
-                  {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-                </ClearableSelect>
-              </label>
-              <label className="reports-filter-group">
-                <span>Minimum Amount</span>
-                <input aria-label={t("reportsPage.minimumAmount")} inputMode="decimal" placeholder={t("reportsPage.minimumAmount")} value={amountMin} onChange={(event) => setAmountMin(event.target.value)} />
-              </label>
-            </div>
-            <div className="reports-advance-filter-row">
-              {views.advances === "log" && <ClearableSelect clearValue="desc" aria-label={t("reportsPage.advanceSort")} value={advanceSort} onChange={(value) => setAdvanceSort(value as SortOrder)}>
-                <option value="desc">{t("advancesPage.newestFirst")}</option>
-                <option value="asc">{t("advancesPage.oldestFirst")}</option>
-              </ClearableSelect>}
-              <label className="reports-filter-group">
-                <span>Maximum Amount</span>
-                <input aria-label={t("reportsPage.maximumAmount")} inputMode="decimal" placeholder={t("reportsPage.maximumAmount")} value={amountMax} onChange={(event) => setAmountMax(event.target.value)} />
-              </label>
-            </div>
-          </>}
+          {report === "advances" && views.advances === "log" && <ClearableSelect clearValue="desc" aria-label={t("reportsPage.advanceSort")} value={advanceSort} onChange={(value) => setAdvanceSort(value as SortOrder)}>
+            <option value="desc">{t("advancesPage.newestFirst")}</option>
+            <option value="asc">{t("advancesPage.oldestFirst")}</option>
+          </ClearableSelect>}
 
           {report === "expenditures" && <>
             <ClearableSelect aria-label={t("reportsPage.account")} value={accountId} onChange={setAccountId}>
@@ -1532,6 +1604,7 @@ export function Reports() {
               );
             })}
           </div>
+          <p className="reports-scroll-hint">Swipe horizontally to view dates.</p>
           <div className="attendance-register-preview">
             <div className="reports-register-shell">
               <p>{t("reportsPage.rangeShown", { range: rangeLabel })}</p>
