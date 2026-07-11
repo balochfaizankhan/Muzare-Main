@@ -672,18 +672,18 @@ button {
 
 .labour-multiselect__footer {
   align-items: center;
-  background: linear-gradient(180deg, rgba(255,255,255,0.92), var(--surface));
+  background: linear-gradient(180deg, rgba(255,255,255,0.96), var(--surface));
   border-top: 1px solid var(--border);
-  display: flex;
+  display: grid;
   gap: 10px;
-  justify-content: space-between;
   margin: 0 -8px -8px;
-  padding: 8px;
+  padding: 10px 8px calc(10px + env(safe-area-inset-bottom, 0px));
   position: sticky;
   bottom: 0;
+  z-index: 2;
 }
 
-.labour-multiselect__footer span {
+.labour-multiselect__footer-count {
   color: var(--text-secondary);
   font-size: .82rem;
   min-width: 0;
@@ -692,7 +692,13 @@ button {
   white-space: nowrap;
 }
 
-.labour-multiselect__footer button {
+.labour-multiselect__footer-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.labour-multiselect__footer-actions button {
   background: var(--primary);
   border: 0;
   border-radius: 10px;
@@ -12277,7 +12283,7 @@ button {
   justify-content: center;
   padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px));
   position: fixed;
-  z-index: 70;
+  z-index: 92;
 }
 .report-picker-sheet {
   background: var(--surface);
@@ -12415,8 +12421,23 @@ button {
   border-top: 1px solid var(--border);
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0px));
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+}
+.report-picker-sheet__footer-count {
+  color: var(--text-secondary);
+  font-size: .82rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.report-picker-sheet__footer-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .reports-actions { justify-content: flex-end; margin-top: 10px; }
 .reports-kpis { display: grid; gap: 8px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 10px 0; }
@@ -13569,9 +13590,32 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .reports-scroll-hint { display: none; }
   .report-picker-sheet {
     width: 100%;
+    max-height: calc(100dvh - 96px - env(safe-area-inset-bottom, 0px));
   }
   .report-picker-sheet__body {
-    max-height: 52vh;
+    max-height: 100%;
+    padding-bottom: 14px;
+    scroll-padding-bottom: 14px;
+  }
+  .report-picker-backdrop {
+    padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px) + 84px);
+  }
+  .labour-multiselect__menu {
+    left: 12px;
+    max-height: calc(100dvh - 104px - env(safe-area-inset-bottom, 0px));
+    position: fixed;
+    right: 12px;
+    top: auto;
+    width: auto;
+    z-index: 92;
+    bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  }
+  .labour-multiselect__options {
+    max-height: min(48vh, 300px);
+    padding-bottom: 6px;
+  }
+  .labour-multiselect__footer {
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
   }
   .attendance-register-mobile-list { display: grid; }
   .attendance-register-preview { gap: 10px; }

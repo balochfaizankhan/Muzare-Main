@@ -338,8 +338,13 @@ export function ResponsiveMultiSelectField({
           })}
         </div>
         <footer className="report-picker-sheet__footer">
-          <button type="button" onClick={close}>{t("common.cancel")}</button>
-          <button type="button" onClick={apply}>{t("common.apply")}</button>
+          <span className="report-picker-sheet__footer-count">
+            {draftIds.length === 0 ? t("common.allLabour") : t("common.labourSelectedCount", { count: draftIds.length })}
+          </span>
+          <div className="report-picker-sheet__footer-actions">
+            <button type="button" onClick={close}>{t("common.cancel")}</button>
+            <button type="button" onClick={apply}>{t("common.apply")}</button>
+          </div>
         </footer>
       </MobilePickerShell>
     </div>

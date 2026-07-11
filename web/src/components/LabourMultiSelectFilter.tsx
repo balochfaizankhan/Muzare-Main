@@ -188,8 +188,11 @@ export function LabourMultiSelectFilter({
             })}
           </div>
           <div className="labour-multiselect__footer">
-            <span>{draftIds.length === 0 ? t("common.allLabour") : t("common.labourSelectedCount", { count: draftIds.length })}</span>
-            <button type="button" onClick={apply}>{t("common.apply")}</button>
+            <span className="labour-multiselect__footer-count">{draftIds.length === 0 ? t("common.allLabour") : t("common.labourSelectedCount", { count: draftIds.length })}</span>
+            <div className="labour-multiselect__footer-actions">
+              <button type="button" onClick={closeMenu}>{t("common.cancel")}</button>
+              <button type="button" onClick={apply}>{t("common.apply")}</button>
+            </div>
           </div>
         </div>
       ) : null}
