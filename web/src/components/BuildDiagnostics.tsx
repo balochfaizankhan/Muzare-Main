@@ -13,6 +13,21 @@ export function BuildDiagnostics({ compact = false }: { compact?: boolean }) {
   const apiBuildTime = health.data?.buildTime ?? "-";
   const frontendVersion = __APP_VERSION__;
   const frontendBuildTime = __BUILD_TIME__;
+  const formatBuildTime = (value: string) => {
+    if (!value || value === "-") return "-";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    const formatted = new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(date);
+    const parts = formatted.split(", ");
+    return parts.length >= 3 ? `${parts[0]}, ${parts[1]} · ${parts.slice(2).join(", ")}` : formatted;
+  };
+  const displayBuildTime = formatBuildTime(apiBuildTime !== "-" ? apiBuildTime : frontendBuildTime);
 
   return (
     <section className={`record-panel build-diagnostics ${compact ? "build-diagnostics--compact" : ""}`}>
@@ -34,7 +49,7 @@ export function BuildDiagnostics({ compact = false }: { compact?: boolean }) {
         </article>
         <article>
           <span>Last update</span>
-          <strong>{apiBuildTime || frontendBuildTime}</strong>
+          <strong>{displayBuildTime}</strong>
         </article>
       </div>
       <details className="build-diagnostics__details">

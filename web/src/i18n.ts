@@ -1218,6 +1218,7 @@ const extraResources = {
       },
       workspaceProfile: {
         settingsTitle: "Profile & Settings",
+        settingsSubtitle: "Manage your account, workspace, farms, and system tools.",
         title: "Workspace",
         description: "Update the workspace identity and contact details shown across Muzare.",
         ownerOnly: "Only the workspace owner can edit this profile.",
@@ -1353,6 +1354,7 @@ const extraResources = {
         deleted: "Deleted",
         noUsableFarms: "No active farm is available. Create a new farm or restore one from history.",
         noFarms: "No farms exist yet. Create the first farm to begin operations.",
+        moreActions: "More actions",
       },
       seasonsPage: {
         title: "Seasons",
@@ -2444,6 +2446,7 @@ const extraResources = {
       },
       workspaceProfile: {
         settingsTitle: "الملف والإعدادات",
+        settingsSubtitle: "أدر حسابك ومساحة العمل والمزارع وأدوات النظام.",
         title: "مساحة العمل",
         description: "حدّث هوية مساحة العمل وبيانات التواصل الظاهرة في مزارع.",
         ownerOnly: "يمكن لمالك مساحة العمل فقط تعديل هذا الملف.",
@@ -2579,6 +2582,7 @@ const extraResources = {
         deleted: "محذوفة",
         noUsableFarms: "لا توجد مزرعة نشطة متاحة. أنشئ مزرعة جديدة أو استعد مزرعة من السجل.",
         noFarms: "لا توجد مزارع بعد. أنشئ أول مزرعة لبدء العمليات.",
+        moreActions: "المزيد من الإجراءات",
       },
       seasonsPage: {
         title: "المواسم",
@@ -3657,6 +3661,7 @@ const extraResources = {
       },
       workspaceProfile: {
         settingsTitle: "پروفائل اور ترتیبات",
+        settingsSubtitle: "اپنا اکاؤنٹ، ورک اسپیس، فارمز، اور سسٹم ٹولز منظم کریں۔",
         title: "ورک اسپیس",
         description: "مزارع میں دکھائی جانے والی ورک اسپیس شناخت اور رابطہ تفصیلات اپ ڈیٹ کریں۔",
         ownerOnly: "صرف ورک اسپیس مالک اس پروفائل میں ترمیم کر سکتا ہے۔",
@@ -3792,6 +3797,7 @@ const extraResources = {
         deleted: "حذف شدہ",
         noUsableFarms: "کوئی فعال فارم دستیاب نہیں۔ نیا فارم بنائیں یا ہسٹری سے فارم بحال کریں۔",
         noFarms: "ابھی کوئی فارم موجود نہیں۔ کام شروع کرنے کے لیے پہلا فارم بنائیں۔",
+        moreActions: "مزید اقدامات",
       },
       seasonsPage: {
         title: "سیزنز",

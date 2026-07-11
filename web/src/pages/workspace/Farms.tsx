@@ -235,73 +235,61 @@ export function Farms() {
       <SubpageHeader title={isSettings ? t("workspaceProfile.settingsTitle") : t("farmsPage.title")} />
       <main className={`subpage module-workspace${isSettings ? " module-workspace--settings" : ""}`}>
         {isSettings && (
-          <section className="settings-page-stack">
-            <section className="settings-section">
-              <div className="settings-section__header">
-                <div>
-                  <h2>{t("userProfile.title")}</h2>
-                  <p>{t("userProfile.description")}</p>
-                </div>
+          <>
+            <section className="settings-page-hero record-panel">
+              <div>
+                <h2>{t("workspaceProfile.settingsTitle")}</h2>
+                <p>{t("workspaceProfile.settingsSubtitle")}</p>
               </div>
-              {token && <UserProfileCard token={token} onLogout={() => void logout()} />}
             </section>
+            <section className="settings-page-stack">
+              <section className="settings-section">
+                <div className="settings-section__header">
+                  <div>
+                    <h2>{t("userProfile.title")}</h2>
+                    <p>{t("userProfile.description")}</p>
+                  </div>
+                </div>
+                {token && <UserProfileCard token={token} onLogout={() => void logout()} />}
+              </section>
 
-            <section className="settings-section">
-              <div className="settings-section__header">
-                <div>
-                  <h2>{t("workspaceProfile.title")}</h2>
-                  <p>{t("workspaceProfile.description")}</p>
+              <section className="settings-section">
+                <div className="settings-section__header">
+                  <div>
+                    <h2>{t("workspaceProfile.title")}</h2>
+                    <p>{t("workspaceProfile.description")}</p>
+                  </div>
                 </div>
-              </div>
-              {token && workspaceId && <WorkspaceProfileCard token={token} workspaceId={workspaceId} />}
-            </section>
+                {token && workspaceId && <WorkspaceProfileCard token={token} workspaceId={workspaceId} />}
+              </section>
 
-            <section className="settings-section">
-              <div className="settings-section__header">
-                <div>
-                  <h2>{t("workspaceProfile.accessTitle")}</h2>
-                  <p>Manage who can access the workspace and review approvals.</p>
+              <section className="settings-section">
+                <div className="settings-section__header">
+                  <div>
+                    <h2>{t("workspaceProfile.accessTitle")}</h2>
+                    <p>Manage who can access the workspace and review approvals.</p>
+                  </div>
                 </div>
-              </div>
-              <div className="settings-menu-grid">
-                <Link to="/workspace/settings/team" className="settings-menu-row"><UsersRound size={19} /><div><strong>{t("workspaceTeam.title")}</strong><span>{t("workspaceTeam.settingsCard")}</span></div><ChevronRight size={17} /></Link>
-                <Link to="/workspace/settings/approvals" className="settings-menu-row"><ShieldCheck size={19} /><div><strong>{t("workspaceApprovals.title")}</strong><span>{t("workspaceApprovals.settingsCard")}</span></div><ChevronRight size={17} /></Link>
-              </div>
-            </section>
+                <div className="settings-menu-grid">
+                  <Link to="/workspace/settings/team" className="settings-menu-row"><UsersRound size={19} /><div><strong>{t("workspaceTeam.title")}</strong><span>{t("workspaceTeam.settingsCard")}</span></div><ChevronRight size={17} /></Link>
+                  <Link to="/workspace/settings/approvals" className="settings-menu-row"><ShieldCheck size={19} /><div><strong>{t("workspaceApprovals.title")}</strong><span>{t("workspaceApprovals.settingsCard")}</span></div><ChevronRight size={17} /></Link>
+                </div>
+              </section>
 
-            <section className="settings-section">
-              <div className="settings-section__header">
-                <div>
-                  <h2>{t("workspaceProfile.farmSetupTitle")}</h2>
-                  <p>{t("farmsPage.managementDescription")}</p>
+              <section className="settings-section">
+                <div className="settings-section__header">
+                  <div>
+                    <h2>{t("workspaceProfile.farmSetupTitle")}</h2>
+                    <p>{t("farmsPage.managementDescription")}</p>
+                  </div>
                 </div>
-              </div>
-              <div className="settings-menu-grid settings-menu-grid--farm">
-                <Link to="/workspace/seasons" className="settings-menu-row"><Leaf size={19} /><div><strong>{t("seasonsPage.title")}</strong><span>{t("seasonsPage.managementDescription")}</span></div><ChevronRight size={17} /></Link>
-                {canManage && <button className="shell-action settings-menu-row__button" type="button" onClick={() => { setEditing(null); setForm(emptyForm); setShowForm(true); }}><Plus size={16} /><span>{t("farmsPage.createFarm")}</span><ChevronRight size={17} /></button>}
-              </div>
-            </section>
-
-            <section className="settings-section">
-              <div className="settings-section__header">
-                <div>
-                  <h2>{t("workspaceProfile.systemTitle")}</h2>
-                  <p>View app version details and technical reconciliation tools.</p>
+                <div className="settings-menu-grid settings-menu-grid--farm">
+                  <Link to="/workspace/seasons" className="settings-menu-row"><Leaf size={19} /><div><strong>{t("seasonsPage.title")}</strong><span>{t("seasonsPage.managementDescription")}</span></div><ChevronRight size={17} /></Link>
+                  {canManage && <button className="shell-action settings-menu-row__button" type="button" onClick={() => { setEditing(null); setForm(emptyForm); setShowForm(true); }}><Plus size={16} /><span>{t("farmsPage.createFarm")}</span><ChevronRight size={17} /></button>}
                 </div>
-              </div>
-              <BuildDiagnostics compact />
-              <details className="settings-diagnostics-details">
-                <summary>
-                  <span>
-                    <strong>Accounting Reconciliation Trace</strong>
-                    <small>Inspect labour settlement reconciliation</small>
-                  </span>
-                  <ChevronRight size={16} />
-                </summary>
-                <Link to="/debug/accounting-reconciliation" className="settings-diagnostics-details__link">Open diagnostics</Link>
-              </details>
+              </section>
             </section>
-          </section>
+          </>
         )}
         {!isSettings && (
           <section className="workspace-intro">
@@ -377,11 +365,19 @@ export function Farms() {
                       {farm.active && !isCurrent && <button className="farm-card__primary-action" type="button" onClick={() => select.mutate(farm.id)}><Leaf size={15} />{t("farmsPage.setActive")}</button>}
                     </div>
                     <div className="farm-card__secondary-actions">
-                      {canManage && <button type="button" onClick={() => edit(farm)}><Pencil size={15} />{t("farmsPage.edit")}</button>}
+                      {canManage && <button type="button" className="farm-card__secondary-action" onClick={() => edit(farm)}><Pencil size={15} />{t("farmsPage.edit")}</button>}
                       {farm.deletionRequestStatus === "pending" && <span className="status-badge status-badge--pending">{t("farmsPage.deletionPending")}</span>}
-                      {canManage && farm.active && <button className="danger-button farm-card__danger-action" type="button" onClick={() => requestArchive(farm)}><XCircle size={15} />{t("farmsPage.archive")}</button>}
-                      {canManage && !isCurrent && farm.deletionRequestStatus !== "pending" && <button className="danger-button farm-card__danger-action" type="button" onClick={() => requestDelete(farm)}><Trash2 size={15} />{t("farmsPage.deleteFarm")}</button>}
-                      {canManage && !isCurrent && farm.deletionRequestStatus !== "pending" && <button type="button" className="farm-card__secondary-link" onClick={() => requestAdminDeletion(farm)}>{t("farmsPage.requestDeletion")}</button>}
+                      {canManage && farm.active && isCurrent && <button className="danger-button farm-card__secondary-action farm-card__danger-action" type="button" onClick={() => requestArchive(farm)}><XCircle size={15} />{t("farmsPage.archive")}</button>}
+                      {canManage && !isCurrent && farm.deletionRequestStatus !== "pending" && (
+                        <details className="farm-card__danger-details">
+                          <summary>{t("farmsPage.moreActions")}</summary>
+                          <div className="farm-card__danger-menu">
+                            {farm.active && <button className="danger-button farm-card__danger-action" type="button" onClick={() => requestArchive(farm)}><XCircle size={15} />{t("farmsPage.archive")}</button>}
+                            <button className="danger-button farm-card__danger-action" type="button" onClick={() => requestDelete(farm)}><Trash2 size={15} />{t("farmsPage.deleteFarm")}</button>
+                            <button type="button" className="farm-card__secondary-link" onClick={() => requestAdminDeletion(farm)}>{t("farmsPage.requestDeletion")}</button>
+                          </div>
+                        </details>
+                      )}
                     </div>
                   </footer>
                 </article>
@@ -420,6 +416,27 @@ export function Farms() {
               ))}
             </section>
           </details>
+        )}
+        {isSettings && (
+          <section className="settings-section settings-section--diagnostics">
+            <div className="settings-section__header">
+              <div>
+                <h2>{t("workspaceProfile.systemTitle")}</h2>
+                <p>View app version details and technical reconciliation tools.</p>
+              </div>
+            </div>
+            <BuildDiagnostics compact />
+            <details className="settings-diagnostics-details">
+              <summary>
+                <span>
+                  <strong>Accounting Reconciliation Trace</strong>
+                  <small>Inspect labour settlement reconciliation</small>
+                </span>
+                <ChevronRight size={16} />
+              </summary>
+              <Link to="/debug/accounting-reconciliation" className="settings-diagnostics-details__link">Open diagnostics</Link>
+            </details>
+          </section>
         )}
         {deleteFarm.isError && <p className="error">{deleteFarm.error.message}</p>}
         {requestDeletion.isError && <p className="error">{requestDeletion.error.message}</p>}
