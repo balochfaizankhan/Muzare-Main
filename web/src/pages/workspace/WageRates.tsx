@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { ChevronRight, Plus, X } from "lucide-react";
+import { ChevronRight, Pencil, Plus, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { SearchInput } from "../../components/SearchInput";
@@ -26,6 +26,8 @@ type RowDraft = {
   rateType: WageRate["rateType"];
   notes: string;
 };
+
+type WageRateHistoryStatus = "active" | "expired" | "upcoming" | "inactive";
 
 const emptyDraft: RowDraft = {
   dailyRate: "",
@@ -60,7 +62,7 @@ export function WageRates() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historySearch, setHistorySearch] = useState("");
   const [historyGroupFilter, setHistoryGroupFilter] = useState("");
-  const [historyStatusFilter, setHistoryStatusFilter] = useState<"all" | "active" | "expired" | "upcoming" | "inactive">("all");
+  const [historyStatusFilter, setHistoryStatusFilter] = useState<"all" | "active" | "expired" | "upcoming">("all");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -113,8 +115,21 @@ export function WageRates() {
   const wageRangeTo = effectiveTo || effectiveFrom;
   const groupOptions = useMemo(() => Array.from(new Set(labourers.map((labourer) => labourer.group.trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right)).map((group) => ({ value: group, label: group })), [labourers]);
   const historyRows = useMemo(() => rates
-    .map((rate) => ({ rate, status: getWageRateStatus(rate, todayKey) }))
+    .map((rate) => ({ rate, status: getWageRateStatus(rate, todayKey) as WageRateHistoryStatus }))
     .sort((left, right) => compareWageRates(left.rate, right.rate)), [rates, todayKey]);
+  const historyCounts = useMemo(() => historyRows.reduce((counts, item) => {
+    counts.all += 1;
+    if (item.status === "active") counts.active += 1;
+    if (item.status === "expired") counts.expired += 1;
+    if (item.status === "upcoming") counts.upcoming += 1;
+    return counts;
+  }, { all: 0, active: 0, expired: 0, upcoming: 0 }), [historyRows]);
+  const historyStatusTabs = useMemo(() => ([
+    { value: "all" as const, label: "All", count: historyCounts.all },
+    { value: "active" as const, label: "Current", count: historyCounts.active },
+    { value: "expired" as const, label: "Expired", count: historyCounts.expired },
+    { value: "upcoming" as const, label: "Future", count: historyCounts.upcoming },
+  ]), [historyCounts]);
   const filteredLabourers = useMemo(() => sortWorkersForDisplay(labourers.filter((labourer) => {
     const term = search.trim().toLowerCase();
     return isWorkerEligibleForWageRatePeriod(labourer, effectiveFrom, wageRangeTo)
@@ -150,9 +165,26 @@ export function WageRates() {
     const matchesStatus = historyStatusFilter === "all" || status === historyStatusFilter;
     return matchesSearch && matchesGroup && matchesStatus;
   }), [historyGroupFilter, historyStatusFilter, historyRows, historySearch, labourers]);
+  const historyHasFilters = historyStatusFilter !== "all" || historySearch.trim().length > 0 || historyGroupFilter.trim().length > 0;
   const selectedCount = selectedIds.length;
   const filteredIds = useMemo(() => filteredLabourers.map((labourer) => labourer.id), [filteredLabourers]);
   const filteredSelectedCount = useMemo(() => filteredIds.filter((id) => selectedIds.includes(id)).length, [filteredIds, selectedIds]);
+
+  useEffect(() => {
+    const modalOpen = editorOpen || historyOpen;
+    if (!modalOpen) return;
+    const originalOverflow = document.body.style.overflow;
+    const originalPaddingRight = document.body.style.paddingRight;
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+    document.body.style.overflow = "hidden";
+    if (scrollbarWidth > 0) {
+      document.body.style.paddingRight = `${scrollbarWidth}px`;
+    }
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      document.body.style.paddingRight = originalPaddingRight;
+    };
+  }, [editorOpen, historyOpen]);
 
   const toggleLabour = (labourerId: string) => {
     setSelectedIds((current) => current.includes(labourerId)
@@ -241,6 +273,18 @@ export function WageRates() {
     setEditorOpen(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
+
+  const formatHistoryDate = useCallback((value: string) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" }).format(date);
+  }, []);
+
+  const formatHistoryRange = useCallback((rate: WageRate, status: WageRateHistoryStatus) => {
+    if (status === "upcoming") return `Starts ${formatHistoryDate(rate.effectiveFrom)}`;
+    if (rate.effectiveTo) return `${formatHistoryDate(rate.effectiveFrom)} – ${formatHistoryDate(rate.effectiveTo)}`;
+    return `${formatHistoryDate(rate.effectiveFrom)} – Current`;
+  }, [formatHistoryDate]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -533,7 +577,6 @@ export function WageRates() {
           >
             <header className="worker-dialog__header wage-rates-history__header">
               <div className="worker-dialog__title-stack">
-                <span className="worker-dialog__eyebrow">{t("wageRatesPage.history")}</span>
                 <h2>{t("wageRatesPage.history")}</h2>
                 <p>{t("wageRatesPage.historyDescription")}</p>
               </div>
@@ -542,46 +585,41 @@ export function WageRates() {
               </button>
             </header>
             <div className="worker-dialog__body wage-rates-history__body">
-              <section className="wage-rates-history-summary">
-                <article>
-                  <span>Total records</span>
-                  <strong>{historyRows.length}</strong>
-                </article>
-                <article>
-                  <span>Current</span>
-                  <strong>{historyRows.filter(({ status }) => status === "active").length}</strong>
-                </article>
-                <article>
-                  <span>Expired</span>
-                  <strong>{historyRows.filter(({ status }) => status === "expired").length}</strong>
-                </article>
-                <article>
-                  <span>Future</span>
-                  <strong>{historyRows.filter(({ status }) => status === "upcoming").length}</strong>
-                </article>
-              </section>
-
-              <section className="wage-rates-history-filters">
-                <SearchInput placeholder="Search labour" value={historySearch} onChange={setHistorySearch} />
-                <div className="wage-rates-history-filters__row">
-                  <ClearableSelect aria-label="Group filter" value={historyGroupFilter} onChange={setHistoryGroupFilter}>
-                    <option value="">All groups</option>
-                    {groupOptions.map((group) => (
-                      <option key={group.value} value={group.value}>{group.label}</option>
-                    ))}
-                  </ClearableSelect>
-                  <ClearableSelect aria-label="Status filter" value={historyStatusFilter} onChange={(value) => setHistoryStatusFilter(value as typeof historyStatusFilter)}>
-                    <option value="all">All</option>
-                    <option value="active">Current</option>
-                    <option value="expired">Expired</option>
-                    <option value="upcoming">Future</option>
-                    <option value="inactive">Inactive</option>
-                  </ClearableSelect>
-                </div>
+              <section className="wage-rates-history-controls">
+                <nav className="wage-rates-history-tabs" aria-label={t("wageRatesPage.history")}>
+                  {historyStatusTabs.map((tab) => (
+                    <button
+                      key={tab.value}
+                      type="button"
+                      className={`wage-rates-history-tab${historyStatusFilter === tab.value ? " is-active" : ""}`}
+                      aria-pressed={historyStatusFilter === tab.value}
+                      onClick={() => setHistoryStatusFilter(tab.value)}
+                    >
+                      <span>{tab.label}</span>
+                      <strong>{tab.count}</strong>
+                    </button>
+                  ))}
+                </nav>
+                <section className="wage-rates-history-filters">
+                  <div className="wage-rates-history-filters__row">
+                    <SearchInput placeholder="Search labour" value={historySearch} onChange={setHistorySearch} />
+                    {groupOptions.length ? (
+                      <ClearableSelect aria-label="Group filter" value={historyGroupFilter} onChange={setHistoryGroupFilter}>
+                        <option value="">All groups</option>
+                        {groupOptions.map((group) => (
+                          <option key={group.value} value={group.value}>{group.label}</option>
+                        ))}
+                      </ClearableSelect>
+                    ) : null}
+                  </div>
+                </section>
               </section>
 
               {!filteredHistoryRows.length ? (
-                <p className="context-message">No wage rate history found.</p>
+                <div className="wage-rates-history-empty">
+                  <p className="context-message">{historyHasFilters ? "No wage rates found. Try changing the search or filters." : "No wage rate history found."}</p>
+                  {historyHasFilters ? <button type="button" className="secondary-action wage-rates-history-empty__clear" onClick={() => { setHistorySearch(""); setHistoryGroupFilter(""); setHistoryStatusFilter("all"); }}>Clear filters</button> : null}
+                </div>
               ) : (
                 <div className="wage-rates-history-list">
                   {filteredHistoryRows.map(({ rate, status }) => {
@@ -593,18 +631,32 @@ export function WageRates() {
                         : status === "upcoming"
                           ? "Future"
                           : "Inactive";
-                    return (
-                      <article key={rate.id} className="wage-rates-history-card-item">
-                        <div className="wage-rates-history-card-item__head">
+                    const rowContent = (
+                      <>
+                        <div className="wage-rates-history-row__head">
                           <strong>{labourer?.name ?? rate.labourerId}</strong>
                           <span>{money(rate.dailyRate)}</span>
                         </div>
-                        <small>{labourer?.group || "-"} · Effective {displayDate(rate.effectiveFrom)} to {rate.effectiveTo ? displayDate(rate.effectiveTo) : t("common.current")}</small>
-                        <div className="wage-rates-history-card-item__meta">
+                        <div className="wage-rates-history-row__meta">
+                          <small>{labourer?.group || "-"} · {formatHistoryRange(rate, status)}</small>
                           <span className={`status-badge status-badge--${status}`}>{statusLabel}</span>
-                          <span>Half-day {money(normalizeHalfDayRate(rate))}</span>
-                          {canManage ? <button className="secondary-action wage-rates-history-card-item__edit" type="button" onClick={() => { setHistoryOpen(false); startEditingRate(rate); }}>{t("common.edit")}</button> : null}
+                          {canManage ? <span className="wage-rates-history-row__action" aria-hidden="true"><Pencil size={14} /></span> : null}
                         </div>
+                      </>
+                    );
+                    return canManage ? (
+                      <button
+                        key={rate.id}
+                        type="button"
+                        className={`wage-rates-history-row wage-rates-history-row--${status}`}
+                        aria-label={`Edit wage rate for ${labourer?.name ?? rate.labourerId}`}
+                        onClick={() => { setHistoryOpen(false); startEditingRate(rate); }}
+                      >
+                        {rowContent}
+                      </button>
+                    ) : (
+                      <article key={rate.id} className={`wage-rates-history-row wage-rates-history-row--${status}`}>
+                        {rowContent}
                       </article>
                     );
                   })}
