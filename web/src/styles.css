@@ -4185,10 +4185,58 @@ button {
   gap: 8px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
+.wage-rates-management-card .advances-heading {
+  gap: 4px;
+}
+.wage-rates-management-actions button {
+  align-items: center;
+  border-radius: 14px;
+  display: inline-flex;
+  gap: 8px;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 14px;
+}
+.wage-rates-management-actions__primary {
+  box-shadow: 0 12px 24px rgba(46, 125, 50, 0.16);
+}
+.wage-rates-management-actions__history {
+  background: #fff;
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  justify-content: space-between;
+  text-align: start;
+}
+.wage-rates-management-actions__history span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.wage-rates-management-actions__history strong {
+  color: var(--text-primary);
+  font-size: .94rem;
+}
+.wage-rates-management-actions__history small {
+  color: var(--text-secondary);
+  font-size: .74rem;
+  font-weight: 700;
+}
 .wage-rates-active-toolbar {
   display: grid;
   gap: 10px;
   grid-template-columns: minmax(0, 1.5fr) minmax(160px, 0.9fr);
+}
+.wage-rates-active-toolbar .clearable-select select {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text-primary);
+  height: 42px;
+  min-width: 0;
+  padding-inline: 12px 40px !important;
+}
+.wage-rates-active-toolbar .clearable-select__actions {
+  inset-inline-end: 8px;
 }
 .wage-rates-active-note {
   color: var(--text-secondary);
@@ -4239,6 +4287,32 @@ button {
   font-size: .77rem;
   line-height: 1.35;
 }
+.wage-rates-history-card {
+  display: grid;
+  gap: 10px;
+}
+.wage-rates-history-card__content {
+  display: grid;
+  gap: 10px;
+}
+.wage-rates-history-card__note {
+  color: var(--text-secondary);
+  font-size: .82rem;
+  line-height: 1.45;
+  margin: 0;
+}
+.wage-rates-history-card__open {
+  background: #fff;
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  justify-content: space-between;
+  min-height: 44px;
+  padding: 0 14px;
+  text-align: start;
+}
+.wage-rates-history-card__open span {
+  flex: 1 1 auto;
+}
 .wage-rates-editor-backdrop {
   align-items: stretch;
 }
@@ -4247,6 +4321,7 @@ button {
 }
 .wage-rates-editor__header {
   align-items: start;
+  padding: 18px 20px 14px;
 }
 .wage-rates-editor__header .worker-dialog__title-stack {
   min-width: 0;
@@ -4255,6 +4330,7 @@ button {
   color: var(--text-secondary);
   font-size: .84rem;
   line-height: 1.45;
+  margin: 0;
 }
 .wage-rates-editor-form {
   display: grid;
@@ -4262,14 +4338,54 @@ button {
 }
 .wage-rates-editor__body {
   display: grid;
-  gap: 14px;
-  max-height: calc(100vh - 160px);
+  gap: 12px;
+  max-height: calc(100dvh - 152px);
   overflow: auto;
-  padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
 }
 .wage-rates-editor-section {
   display: grid;
   gap: 12px;
+}
+.wage-rates-editor-section .advances-heading {
+  display: grid;
+  gap: 4px;
+}
+.wage-rates-editor-section .advances-heading h3 {
+  margin: 0;
+}
+.wage-rates-editor-section .advances-heading span {
+  color: var(--text-secondary);
+  font-size: .82rem;
+  line-height: 1.45;
+}
+.wage-rates-editor-section .advances-filter-row {
+  gap: 10px;
+}
+.wage-rates-editor-section .advances-filter-field input,
+.wage-rates-editor-section .advances-filter-field select,
+.wage-rates-history-filters .clearable-select select {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text-primary);
+  min-height: 42px;
+  padding: 0 12px;
+}
+.wage-rates-editor-section .advances-filter-field input,
+.wage-rates-editor-section .advances-filter-field select {
+  width: 100%;
+}
+.wage-rates-editor-section .advances-filter-field span {
+  color: var(--text-secondary);
+  font-size: .76rem;
+  font-weight: 700;
+}
+.wage-rates-effective-to-hint {
+  color: var(--text-secondary);
+  font-size: .74rem;
+  line-height: 1.35;
+  margin-top: -2px;
 }
 .wage-rates-options {
   display: grid;
@@ -4298,6 +4414,15 @@ button {
 }
 .wage-rates-apply-button {
   align-self: start;
+  background: #fff;
+  border: 1px solid var(--border);
+  color: var(--brand-primary);
+  justify-self: start;
+}
+.wage-rates-apply-button:hover,
+.wage-rates-apply-button:focus-visible {
+  background: #f5fbf5;
+  border-color: rgba(46, 125, 50, 0.24);
 }
 .wage-rates-selection-bar--editor {
   align-items: start;
@@ -4318,6 +4443,13 @@ button {
   display: grid;
   gap: 8px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.wage-rates-selection-actions button {
+  background: #fff;
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  min-height: 40px;
+  padding-inline: 10px;
 }
 .wage-rate-labour-list,
 .wage-rate-overlap-list {
@@ -4394,10 +4526,122 @@ button {
 .wage-rates-submit-bar--sticky {
   position: sticky;
   bottom: 0;
+  box-shadow: 0 -14px 30px rgba(15, 23, 42, 0.08);
   z-index: 3;
 }
 .wage-rates-submit-bar--sticky button {
   min-height: 42px;
+}
+.wage-rates-submit-bar--sticky span {
+  color: var(--text-secondary);
+  font-size: .82rem;
+}
+.status-badge--upcoming,
+.status-badge--inactive {
+  background: #f8fafc;
+  color: #475569;
+}
+.wage-rates-history-dialog {
+  max-width: min(940px, calc(100vw - 16px));
+}
+.wage-rates-history__header {
+  align-items: start;
+  padding: 18px 20px 14px;
+}
+.wage-rates-history__header .worker-dialog__title-stack p {
+  margin: 0;
+}
+.wage-rates-history__body {
+  display: grid;
+  gap: 14px;
+  max-height: calc(100dvh - 152px);
+  overflow: auto;
+  padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+}
+.wage-rates-history-summary {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.wage-rates-history-summary article {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+}
+.wage-rates-history-summary span {
+  color: var(--text-secondary);
+  font-size: .74rem;
+  font-weight: 700;
+}
+.wage-rates-history-summary strong {
+  color: var(--text-primary);
+  font-size: .96rem;
+}
+.wage-rates-history-filters {
+  display: grid;
+  gap: 10px;
+}
+.wage-rates-history-filters__row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.wage-rates-history-list {
+  display: grid;
+  gap: 10px;
+}
+.wage-rates-history-card-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  display: grid;
+  gap: 6px;
+  padding: 12px 13px;
+}
+.wage-rates-history-card-item__head {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
+}
+.wage-rates-history-card-item__head strong {
+  color: var(--text-primary);
+  font-size: .94rem;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wage-rates-history-card-item__head span {
+  color: var(--brand-primary);
+  flex-shrink: 0;
+  font-size: .95rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.wage-rates-history-card-item small {
+  color: var(--text-secondary);
+  font-size: .77rem;
+  line-height: 1.35;
+}
+.wage-rates-history-card-item__meta {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.wage-rates-history-card-item__meta span:last-child {
+  color: var(--text-secondary);
+  font-size: .78rem;
+  font-weight: 700;
+}
+.wage-rates-history-card-item__edit {
+  margin-inline-start: auto;
+  min-height: 36px;
 }
 .wage-rates-edit-banner,
 .wage-rates-selection-bar,
@@ -15416,14 +15660,17 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 @media (max-width: 767px) {
   .workforce-shell-tabs {
     gap: .45rem;
-    padding: .7rem .9rem;
-    scroll-padding-inline: .9rem;
+    padding: .7rem 1rem;
+    scroll-padding-inline: 1rem;
+    scroll-snap-type: x proximity;
+    mask-image: linear-gradient(to right, transparent, black 18px, black calc(100% - 18px), transparent);
   }
 
   .workforce-shell-tab {
     font-size: .86rem;
     justify-content: center;
     padding: .62rem .85rem;
+    scroll-snap-align: center;
   }
 
   .labour-payments-quick-grid,
@@ -15446,8 +15693,31 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
     padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px));
   }
 
-  .wage-rates-management-actions,
-  .wage-rates-selection-actions {
+  .wage-rates-management-card .advances-heading {
+    gap: 3px;
+  }
+
+  .wage-rates-management-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .wage-rates-management-actions__history {
+    justify-content: space-between;
+  }
+
+  .wage-rates-management-actions__history span {
+    gap: 1px;
+  }
+
+  .wage-rates-management-actions__history small {
+    font-size: .72rem;
+  }
+
+  .wage-rates-history-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .wage-rates-history-filters__row {
     grid-template-columns: 1fr;
   }
 
@@ -15456,7 +15726,16 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .wage-rates-editor__header,
+  .wage-rates-history__header {
+    padding: 18px 18px 14px;
+  }
+
   .wage-rates-editor__body {
+    max-height: none;
+  }
+
+  .wage-rates-history__body {
     max-height: none;
   }
 
@@ -15464,8 +15743,17 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .wage-rates-selection-actions {
+    grid-template-columns: 1fr;
+  }
+
   .wage-rates-submit-bar--sticky {
     padding-inline: 12px;
+  }
+
+  .wage-rates-history-card-item__edit {
+    margin-inline-start: 0;
+    width: 100%;
   }
 
   .workforce-reports-panel {

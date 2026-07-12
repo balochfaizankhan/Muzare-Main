@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Activity, ArrowLeft, ArrowRight, CalendarCheck, ChevronRight, ClipboardList, HandCoins, ReceiptText, WalletCards } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { NavLink, Outlet, useNavigate, useSearchParams } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
 import { LabourSelectCombobox } from "../../components/LabourSelectCombobox";
 import { SearchInput } from "../../components/SearchInput";
@@ -42,8 +42,10 @@ function WorkforceShell({
   children: ReactNode;
 }) {
   const { t } = useTranslation();
+  const location = useLocation();
   const sync = useSyncState();
   const backToWorkforce = useAppBack("/workspace/workforce/labour");
+  const tabsRef = useRef<HTMLElement | null>(null);
   const statusText = sync.status === "offline"
     ? t("layout.workingOffline")
     : sync.status === "syncing"
@@ -53,6 +55,10 @@ function WorkforceShell({
         : sync.pendingCount
           ? t("layout.changesWaiting", { count: sync.pendingCount })
           : t("layout.synced");
+  useEffect(() => {
+    const activeTab = tabsRef.current?.querySelector<HTMLElement>(".workforce-shell-tab.is-active");
+    activeTab?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+  }, [location.pathname, location.search, title]);
   return (
     <div className="dashboard-page">
       {!compactMobileHeader ? <SubpageHeader title={title} /> : null}
@@ -77,7 +83,7 @@ function WorkforceShell({
           </section>
         )}
         <section className="record-panel workforce-shell-panel">
-          <nav className="workforce-shell-tabs" aria-label={`${title} navigation`}>
+          <nav ref={tabsRef} className="workforce-shell-tabs" aria-label={`${title} navigation`}>
             {tabs.map((tab) => (
               <NavLink
                 key={tab.to}
