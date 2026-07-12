@@ -4180,6 +4180,24 @@ button {
   display: grid;
   gap: 12px;
 }
+.wage-rates-section-head {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
+}
+.wage-rates-section-head h2 {
+  color: var(--text-primary);
+  margin: 0;
+}
+.wage-rates-section-head span {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  font-size: .84rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
 .wage-rates-management-actions {
   display: grid;
   gap: 8px;
@@ -4199,6 +4217,7 @@ button {
 }
 .wage-rates-management-actions__primary {
   box-shadow: 0 12px 24px rgba(46, 125, 50, 0.16);
+  min-height: 48px;
 }
 .wage-rates-management-actions__history {
   background: #fff;
@@ -4231,7 +4250,7 @@ button {
   border: 1px solid var(--border);
   border-radius: 12px;
   color: var(--text-primary);
-  height: 42px;
+  height: 48px;
   min-width: 0;
   padding-inline: 12px 40px !important;
 }
@@ -4248,12 +4267,12 @@ button {
   gap: 10px;
 }
 .wage-rate-active-card {
-  background: linear-gradient(180deg, #ffffff, #fbfdf9);
+  background: #fff;
   border: 1px solid var(--border);
-  border-radius: 14px;
-  box-shadow: 0 8px 18px rgba(5, 35, 63, 0.05);
+  border-radius: 12px;
+  box-shadow: 0 8px 18px rgba(5, 35, 63, 0.04);
   min-width: 0;
-  padding: 11px 12px;
+  padding: 10px 12px;
 }
 .wage-rate-active-card__copy {
   display: grid;
@@ -4286,32 +4305,6 @@ button {
   color: var(--text-secondary);
   font-size: .77rem;
   line-height: 1.35;
-}
-.wage-rates-history-card {
-  display: grid;
-  gap: 10px;
-}
-.wage-rates-history-card__content {
-  display: grid;
-  gap: 10px;
-}
-.wage-rates-history-card__note {
-  color: var(--text-secondary);
-  font-size: .82rem;
-  line-height: 1.45;
-  margin: 0;
-}
-.wage-rates-history-card__open {
-  background: #fff;
-  border: 1px solid var(--border);
-  color: var(--text-primary);
-  justify-content: space-between;
-  min-height: 44px;
-  padding: 0 14px;
-  text-align: start;
-}
-.wage-rates-history-card__open span {
-  flex: 1 1 auto;
 }
 .wage-rates-editor-backdrop {
   align-items: stretch;
@@ -15690,7 +15683,35 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   }
 
   .wage-rates-page {
-    padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(var(--mobile-nav-height, 96px) + env(safe-area-inset-bottom, 0px) + 24px);
+  }
+
+  .labour-payments-mobile-header {
+    align-items: start;
+    gap: 8px;
+    grid-template-columns: auto minmax(0, 1fr);
+    padding: 10px 12px;
+  }
+
+  .labour-payments-mobile-header__copy strong {
+    font-size: .98rem;
+  }
+
+  .labour-payments-mobile-header__copy p {
+    font-size: .74rem;
+    line-height: 1.35;
+    margin-top: 2px;
+  }
+
+  .workforce-shell-tabs {
+    padding: .65rem .95rem .8rem;
+    scroll-padding-inline: .95rem;
+    scroll-snap-type: x proximity;
+    mask-image: linear-gradient(90deg, transparent, #000 14px, #000 calc(100% - 14px), transparent);
+  }
+
+  .workforce-shell-tab {
+    scroll-snap-align: center;
   }
 
   .wage-rates-management-card .advances-heading {
@@ -15703,6 +15724,8 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 
   .wage-rates-management-actions__history {
     justify-content: space-between;
+    min-height: 48px;
+    padding-inline: 12px;
   }
 
   .wage-rates-management-actions__history span {
@@ -15724,6 +15747,34 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .wage-rates-active-toolbar,
   .wage-rates-editor__body .advances-filter-row {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .wage-rates-section-head {
+    gap: 8px;
+  }
+
+  .wage-rates-section-head h2 {
+    font-size: 1rem;
+  }
+
+  .wage-rates-section-head span {
+    font-size: .77rem;
+  }
+
+  .wage-rate-active-card {
+    padding: 10px 11px;
+  }
+
+  .wage-rate-active-card__head strong {
+    font-size: .92rem;
+  }
+
+  .wage-rate-active-card__head span {
+    font-size: .92rem;
+  }
+
+  .wage-rate-active-card__copy small {
+    font-size: .74rem;
   }
 
   .wage-rates-editor__header,

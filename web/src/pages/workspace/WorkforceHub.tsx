@@ -7,7 +7,6 @@ import { LabourSelectCombobox } from "../../components/LabourSelectCombobox";
 import { SearchInput } from "../../components/SearchInput";
 import { SubpageHeader } from "../../components/SubpageHeader";
 import { useAppBack } from "../../hooks/useAppBack";
-import { useSyncState } from "../../hooks/useSyncState";
 import { formatMoney } from "../../lib/format";
 import { getActiveLabourWageSettlements, outstandingLabourAdvances } from "../../lib/labourWageSettlements";
 import { canCreate, hasModulePermission } from "../../lib/permissions";
@@ -41,20 +40,9 @@ function WorkforceShell({
   compactMobileHeader?: boolean;
   children: ReactNode;
 }) {
-  const { t } = useTranslation();
   const location = useLocation();
-  const sync = useSyncState();
   const backToWorkforce = useAppBack("/workspace/workforce/labour");
   const tabsRef = useRef<HTMLElement | null>(null);
-  const statusText = sync.status === "offline"
-    ? t("layout.workingOffline")
-    : sync.status === "syncing"
-      ? t("layout.syncing")
-      : sync.status === "error"
-        ? t("layout.syncFailed")
-        : sync.pendingCount
-          ? t("layout.changesWaiting", { count: sync.pendingCount })
-          : t("layout.synced");
   useEffect(() => {
     const activeTab = tabsRef.current?.querySelector<HTMLElement>(".workforce-shell-tab.is-active");
     activeTab?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
@@ -72,7 +60,6 @@ function WorkforceShell({
               <strong>{title}</strong>
               <p>{subtitle ?? description}</p>
             </div>
-            <span className={`labour-payments-mobile-header__status sync-badge sync-badge--${sync.status}`}>{statusText}</span>
           </section>
         ) : (
           <section className="workspace-intro workforce-shell-intro">

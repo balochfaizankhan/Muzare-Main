@@ -14,6 +14,11 @@ import { getWorkerWorkingPeriod, isWorkerEligibleForWageRatePeriod, sortWorkersF
 
 const today = () => new Date().toISOString().slice(0, 10);
 const money = formatMoney;
+const displayDate = (value: string) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" }).format(date);
+};
 
 type RowDraft = {
   dailyRate: string;
@@ -326,7 +331,7 @@ export function WageRates() {
           <div className="wage-rates-management-actions">
             <button className="primary-action wage-rates-management-actions__primary" type="button" onClick={openAddRates}>
               <Plus size={16} />
-              <span>Add / Update Rates</span>
+              <span>{t("wageRatesPage.bulkEntry")}</span>
             </button>
             <button className="secondary-action wage-rates-management-actions__history" type="button" onClick={() => setHistoryOpen(true)}>
               <span>
@@ -339,7 +344,7 @@ export function WageRates() {
         </section>
 
         <section className="record-panel wage-rates-active-section">
-          <div className="advances-heading">
+          <div className="wage-rates-section-head">
             <h2>{t("wageRatesPage.currentRates")}</h2>
             <span>{t("wageRatesPage.activeRateCount", { count: currentRates.length })}</span>
           </div>
@@ -364,26 +369,12 @@ export function WageRates() {
                       <strong>{labourer.name}</strong>
                       <span>{money(rate.dailyRate)}</span>
                     </div>
-                    <small>{labourer.group || "-"} · {t("wageRatesPage.effectiveRange", { from: rate.effectiveFrom, to: rate.effectiveTo || t("common.current") })}</small>
+                    <small>{labourer.group || "-"} · Effective {displayDate(rate.effectiveFrom)}</small>
                   </div>
                 </article>
               ))}
             </div>
           )}
-        </section>
-
-        <section className="record-panel wage-rates-history-card">
-          <div className="advances-heading">
-            <h2>{t("wageRatesPage.history")}</h2>
-            <span>{t("wageRatesPage.historyDescription")}</span>
-          </div>
-          <div className="wage-rates-history-card__content">
-            <p className="wage-rates-history-card__note">Active, expired, and upcoming wage-rate ranges are available in the history sheet.</p>
-            <button className="secondary-action wage-rates-history-card__open" type="button" onClick={() => setHistoryOpen(true)}>
-              <span>Open Wage Rate History</span>
-              <ChevronRight size={16} />
-            </button>
-          </div>
         </section>
       </main>
 
@@ -608,7 +599,7 @@ export function WageRates() {
                           <strong>{labourer?.name ?? rate.labourerId}</strong>
                           <span>{money(rate.dailyRate)}</span>
                         </div>
-                        <small>{labourer?.group || "-"} · {t("wageRatesPage.effectiveRange", { from: rate.effectiveFrom, to: rate.effectiveTo || t("common.current") })}</small>
+                        <small>{labourer?.group || "-"} · Effective {displayDate(rate.effectiveFrom)} to {rate.effectiveTo ? displayDate(rate.effectiveTo) : t("common.current")}</small>
                         <div className="wage-rates-history-card-item__meta">
                           <span className={`status-badge status-badge--${status}`}>{statusLabel}</span>
                           <span>Half-day {money(normalizeHalfDayRate(rate))}</span>
