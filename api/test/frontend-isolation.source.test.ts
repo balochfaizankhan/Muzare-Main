@@ -145,7 +145,7 @@ test("wage rate management is wired through shared permissions, sync storage, an
   assert.match(wageRatesPage, /wageRatesPage\.currentRates/);
   assert.match(wageRatesPage, /wageRatesPage\.history/);
   assert.match(wageRatesPage, /wageRatesPage\.searchLabour/);
-  assert.match(wageRatesPage, /Apply values to selected labourers/);
+  assert.match(wageRatesPage, /Apply values/);
   assert.match(wageRatesPage, /wageRatesPage\.saveRates/);
 });
 

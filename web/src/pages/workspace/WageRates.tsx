@@ -443,11 +443,13 @@ export function WageRates() {
                     <label className="compact-checkbox wage-rates-toggle-row"><input type="checkbox" checked={closePrevious} onChange={(event) => setClosePrevious(event.target.checked)} /><span>{t("wageRatesPage.closePrevious")}</span></label>
                     <label className="compact-checkbox wage-rates-toggle-row"><input type="checkbox" checked={replaceExisting} onChange={(event) => setReplaceExisting(event.target.checked)} /><span>{t("wageRatesPage.replaceExisting")}</span></label>
                   </div>
-                  <button className="secondary-action wage-rates-apply-button" disabled={selectedCount === 0} type="button" onClick={applyBulkToSelected}>Apply values to selected labourers</button>
-                  <label className="advances-filter-field advances-filter-field--full">
-                    <span>{t("wageRatesPage.changeReason")}</span>
-                    <input value={changeReason} onChange={(event) => setChangeReason(event.target.value)} placeholder={t("wageRatesPage.changeReasonPlaceholder")} />
-                  </label>
+                  <button className="secondary-action wage-rates-apply-button" disabled={selectedCount === 0} type="button" onClick={applyBulkToSelected}>Apply values</button>
+                  {replaceExisting ? (
+                    <label className="advances-filter-field advances-filter-field--full">
+                      <span>{t("wageRatesPage.changeReason")}</span>
+                      <input value={changeReason} onChange={(event) => setChangeReason(event.target.value)} placeholder={t("wageRatesPage.changeReasonPlaceholder")} />
+                    </label>
+                  ) : null}
                 </section>
 
                 <section className="wage-rates-editor-section">
