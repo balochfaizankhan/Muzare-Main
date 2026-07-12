@@ -4208,16 +4208,27 @@ button {
 }
 .wage-rates-management-actions button {
   align-items: center;
-  border-radius: 14px;
   display: inline-flex;
   gap: 8px;
   justify-content: center;
   min-height: 44px;
-  padding: 0 14px;
 }
 .wage-rates-management-actions__primary {
-  box-shadow: 0 12px 24px rgba(46, 125, 50, 0.16);
+  box-shadow: 0 10px 20px rgba(46, 125, 50, 0.14);
+  justify-content: center;
   min-height: 48px;
+  padding: 0 14px;
+  width: 100%;
+}
+.wage-rates-management-actions__primary:hover:not(:disabled),
+.wage-rates-management-actions__primary:focus-visible {
+  background: color-mix(in srgb, var(--brand-primary) 92%, white 8%);
+  box-shadow: 0 12px 24px rgba(46, 125, 50, 0.18);
+  outline: 2px solid color-mix(in srgb, var(--brand-primary) 34%, white);
+  outline-offset: 2px;
+}
+.wage-rates-management-actions__primary:active:not(:disabled) {
+  transform: translateY(1px);
 }
 .wage-rates-management-actions__history {
   background: #fff;
@@ -4225,6 +4236,18 @@ button {
   color: var(--text-primary);
   justify-content: space-between;
   text-align: start;
+  width: 100%;
+}
+.wage-rates-management-actions__history:hover:not(:disabled),
+.wage-rates-management-actions__history:focus-visible {
+  background: color-mix(in srgb, var(--surface) 90%, var(--brand-primary) 10%);
+  border-color: color-mix(in srgb, var(--brand-primary) 20%, var(--border));
+  color: var(--text-primary);
+  outline: 2px solid color-mix(in srgb, var(--brand-primary) 22%, white);
+  outline-offset: 2px;
+}
+.wage-rates-management-actions__history:active:not(:disabled) {
+  transform: translateY(1px);
 }
 .wage-rates-management-actions__history span {
   display: grid;
@@ -4239,6 +4262,10 @@ button {
   color: var(--text-secondary);
   font-size: .74rem;
   font-weight: 700;
+}
+.wage-rates-management-actions__history svg {
+  color: var(--brand-primary);
+  flex-shrink: 0;
 }
 .wage-rates-active-toolbar {
   display: grid;

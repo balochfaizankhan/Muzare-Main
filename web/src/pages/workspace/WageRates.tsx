@@ -329,11 +329,11 @@ export function WageRates() {
             <span>{t("wageRatesPage.description")}</span>
           </div>
           <div className="wage-rates-management-actions">
-            <button className="primary-action wage-rates-management-actions__primary" type="button" onClick={openAddRates}>
+            <button className="farm-card__primary-action wage-rates-management-actions__primary" type="button" onClick={openAddRates}>
               <Plus size={16} />
               <span>{t("wageRatesPage.bulkEntry")}</span>
             </button>
-            <button className="secondary-action wage-rates-management-actions__history" type="button" onClick={() => setHistoryOpen(true)}>
+            <button className="farm-card__secondary-action wage-rates-management-actions__history" type="button" onClick={() => setHistoryOpen(true)}>
               <span>
                 <strong>{t("wageRatesPage.history")}</strong>
                 <small>{historicalRateCount} previous rates</small>
