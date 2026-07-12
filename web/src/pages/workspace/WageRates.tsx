@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { SearchInput } from "../../components/SearchInput";
+import { ClearableSelect } from "../../components/ClearableSelect";
 import { bulkUpsertWageRates, fetchWageRates, validateWageRateOverlap, type WageRateBulkRowInput, type WageRateOverlapPreview } from "../../lib/api";
 import { getActiveFarmId, getActiveSeasonId, offlineDb, workspaceRecords, type Labourer, type WageRate } from "../../lib/offline-db";
 import { canCreate, canEdit } from "../../lib/permissions";
@@ -35,6 +37,8 @@ export function WageRates() {
   const [labourers, setLabourers] = useState<Labourer[]>([]);
   const [rates, setRates] = useState<WageRate[]>([]);
   const [search, setSearch] = useState("");
+  const [activeSearch, setActiveSearch] = useState("");
+  const [activeGroupFilter, setActiveGroupFilter] = useState("");
   const [effectiveFrom, setEffectiveFrom] = useState(today());
   const [effectiveTo, setEffectiveTo] = useState("");
   const [bulkDailyRate, setBulkDailyRate] = useState("");
@@ -47,6 +51,7 @@ export function WageRates() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
   const [editingRateId, setEditingRateId] = useState<string>("");
+  const [editorOpen, setEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -55,6 +60,7 @@ export function WageRates() {
   const canManage = Boolean(user && workspaceId && (canCreate(user, "wages", workspaceId) || canEdit(user, "wages", workspaceId)));
   const activeFarmId = getActiveFarmId();
   const activeSeasonId = getActiveSeasonId();
+  const historyRef = useRef<HTMLElement | null>(null);
 
   const refresh = useCallback(async () => {
     const nextLabourers = await workspaceRecords(offlineDb.labourers);
@@ -97,6 +103,7 @@ export function WageRates() {
 
   const todayKey = today();
   const wageRangeTo = effectiveTo || effectiveFrom;
+  const groupOptions = useMemo(() => Array.from(new Set(labourers.map((labourer) => labourer.group.trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right)).map((group) => ({ value: group, label: group })), [labourers]);
   const filteredLabourers = useMemo(() => sortWorkersForDisplay(labourers.filter((labourer) => {
     const term = search.trim().toLowerCase();
     return isWorkerEligibleForWageRatePeriod(labourer, effectiveFrom, wageRangeTo)
@@ -117,6 +124,12 @@ export function WageRates() {
       .sort(compareWageRates)[0];
     return current ? [{ labourer, rate: current }] : [];
   }), [labourers, ratesByLabourer, todayKey]);
+  const filteredCurrentRates = useMemo(() => currentRates.filter(({ labourer }) => {
+    const term = activeSearch.trim().toLowerCase();
+    const matchesSearch = !term || labourer.name.toLowerCase().includes(term) || labourer.group.toLowerCase().includes(term);
+    const matchesGroup = !activeGroupFilter || labourer.group === activeGroupFilter;
+    return matchesSearch && matchesGroup;
+  }), [activeGroupFilter, activeSearch, currentRates]);
   const selectedCount = selectedIds.length;
   const filteredIds = useMemo(() => filteredLabourers.map((labourer) => labourer.id), [filteredLabourers]);
   const filteredSelectedCount = useMemo(() => filteredIds.filter((id) => selectedIds.includes(id)).length, [filteredIds, selectedIds]);
@@ -164,6 +177,21 @@ export function WageRates() {
     setOverlapPreview([]);
   };
 
+  const openAddRates = () => {
+    resetEditor();
+    setSelectedIds([]);
+    setDrafts({});
+    setEffectiveFrom(today());
+    setEffectiveTo("");
+    setBulkDailyRate("");
+    setBulkHalfDayRate("");
+    setBulkRateType("daily");
+    setBulkNotes("");
+    setSearch("");
+    setEditorOpen(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   const startEditingRate = (rate: WageRate) => {
     const labourer = labourers.find((item) => item.id === rate.labourerId);
     setEditingRateId(rate.id);
@@ -190,6 +218,7 @@ export function WageRates() {
     setReplaceExisting(false);
     setClosePrevious(false);
     setChangeReason("");
+    setEditorOpen(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -261,6 +290,7 @@ export function WageRates() {
       setSelectedIds([]);
       setDrafts({});
       resetEditor();
+      setEditorOpen(false);
       window.dispatchEvent(new Event("muzare-local-data-change"));
       await refresh();
     } catch (caught) {
@@ -272,30 +302,45 @@ export function WageRates() {
 
   return (
     <>
-        <section className="record-panel workforce-shell-intro workforce-shell-intro--nested">
-          <div>
+      <main className="subpage module-workspace wage-rates-page">
+        <section className="record-panel wage-rates-management-card">
+          <div className="advances-heading">
             <h2>{t("wageRatesPage.heading")}</h2>
-            <p>{t("wageRatesPage.description")}</p>
+            <span>{t("wageRatesPage.description")}</span>
+          </div>
+          <div className="wage-rates-management-actions">
+            <button className="primary-action" type="button" onClick={openAddRates}>Add / Update Rates</button>
+            <button className="secondary-action" type="button" onClick={() => historyRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}>{t("wageRatesPage.history")}</button>
           </div>
         </section>
 
-        <section className="record-panel">
+        <section className="record-panel wage-rates-active-section">
           <div className="advances-heading">
             <h2>{t("wageRatesPage.currentRates")}</h2>
             <span>{t("wageRatesPage.activeRateCount", { count: currentRates.length })}</span>
           </div>
-          {!currentRates.length ? <p className="context-message">{t("wageRatesPage.noCurrentRates")}</p> : (
-            <div className="team-list">
-              {currentRates.map(({ labourer, rate }) => (
-                <article key={`${labourer.id}:${rate.id}`} className="team-card">
-                  <div>
-                    <strong>{labourer.name}</strong>
-                    <span>{labourer.group || "-"}</span>
-                    <small>{t("wageRatesPage.effectiveRange", { from: rate.effectiveFrom, to: rate.effectiveTo || t("common.current") })}</small>
-                  </div>
-                  <div>
-                    <strong>{money(rate.dailyRate)}</strong>
-                    <small>{t("wageRatesPage.halfDayRate")}: {money(normalizeHalfDayRate(rate))}</small>
+          <div className="wage-rates-active-toolbar">
+            <SearchInput placeholder={t("wageRatesPage.searchLabour")} value={activeSearch} onChange={setActiveSearch} />
+            {groupOptions.length ? (
+              <ClearableSelect aria-label="Group filter" value={activeGroupFilter} onChange={setActiveGroupFilter}>
+                <option value="">All groups</option>
+                {groupOptions.map((group) => (
+                  <option key={group.value} value={group.value}>{group.label}</option>
+                ))}
+              </ClearableSelect>
+            ) : null}
+          </div>
+          {(activeSearch || activeGroupFilter) ? <p className="wage-rates-active-note">Showing {filteredCurrentRates.length} of {currentRates.length} active rates</p> : null}
+          {!filteredCurrentRates.length ? <p className="context-message">{t("wageRatesPage.noCurrentRates")}</p> : (
+            <div className="wage-rate-active-list">
+              {filteredCurrentRates.map(({ labourer, rate }) => (
+                <article key={`${labourer.id}:${rate.id}`} className="wage-rate-active-card">
+                  <div className="wage-rate-active-card__copy">
+                    <div className="wage-rate-active-card__head">
+                      <strong>{labourer.name}</strong>
+                      <span>{money(rate.dailyRate)}</span>
+                    </div>
+                    <small>{labourer.group || "-"} · {t("wageRatesPage.effectiveRange", { from: rate.effectiveFrom, to: rate.effectiveTo || t("common.current") })}</small>
                   </div>
                 </article>
               ))}
@@ -303,113 +348,7 @@ export function WageRates() {
           )}
         </section>
 
-        <section className="record-panel">
-          <div className="advances-heading">
-            <h2>{t("wageRatesPage.bulkEntry")}</h2>
-            <span>{t("wageRatesPage.bulkEntryDescription")}</span>
-          </div>
-          <form className="module-form wage-rates-form" onSubmit={(event) => void submit(event)}>
-            {editingRateId ? (
-              <div className="wage-rates-edit-banner">
-                <div>
-                  <strong>{t("wageRatesPage.editingRate")}</strong>
-                  <span>{t("wageRatesPage.editingRateDescription")}</span>
-                </div>
-                <button className="secondary-action" type="button" onClick={() => {
-                  setSelectedIds([]);
-                  setDrafts({});
-                  setSearch("");
-                  resetEditor();
-                }}>{t("common.cancel")}</button>
-              </div>
-            ) : null}
-            <div className="advances-filter-row wage-rates-toolbar">
-              <label className="advances-filter-field"><span>{t("wageRatesPage.effectiveFrom")}</span><input required type="date" value={effectiveFrom} onChange={(event) => setEffectiveFrom(event.target.value)} /></label>
-              <label className="advances-filter-field"><span>{t("wageRatesPage.effectiveTo")}</span><input type="date" value={effectiveTo} onChange={(event) => setEffectiveTo(event.target.value)} /></label>
-              <label className="advances-filter-field"><span>{t("wageRatesPage.rateType")}</span><select value={bulkRateType} onChange={(event) => setBulkRateType(event.target.value as WageRate["rateType"])}><option value="daily">{t("wageRatesPage.dailyRateType")}</option><option value="half_day">{t("wageRatesPage.halfDayRateType")}</option><option value="monthly">{t("wageRatesPage.monthlyRateType")}</option><option value="custom">{t("wageRatesPage.customRateType")}</option></select></label>
-            </div>
-            <div className="advances-filter-row wage-rates-toolbar">
-              <label className="advances-filter-field"><span>{t("wageRatesPage.dailyRate")}</span><input inputMode="decimal" type="number" min="0" step="0.01" value={bulkDailyRate} onChange={(event) => setBulkDailyRate(event.target.value)} /></label>
-              <label className="advances-filter-field"><span>{t("wageRatesPage.halfDayRate")}</span><input inputMode="decimal" type="number" min="0" step="0.01" value={bulkHalfDayRate} onChange={(event) => setBulkHalfDayRate(event.target.value)} /></label>
-              <label className="advances-filter-field advances-filter-field--full"><span>{t("wageRatesPage.notes")}</span><input value={bulkNotes} onChange={(event) => setBulkNotes(event.target.value)} /></label>
-            </div>
-            <div className="permission-dialog__meta wage-rates-options">
-              <label className="compact-checkbox"><input type="checkbox" checked={closePrevious} onChange={(event) => setClosePrevious(event.target.checked)} />{t("wageRatesPage.closePrevious")}</label>
-              <label className="compact-checkbox"><input type="checkbox" checked={replaceExisting} onChange={(event) => setReplaceExisting(event.target.checked)} />{t("wageRatesPage.replaceExisting")}</label>
-              <button className="secondary-action" disabled={selectedCount === 0} type="button" onClick={applyBulkToSelected}>{t("wageRatesPage.applyBulkRate")}</button>
-            </div>
-            <label className="advances-filter-field advances-filter-field--full">
-              <span>{t("wageRatesPage.changeReason")}</span>
-              <input value={changeReason} onChange={(event) => setChangeReason(event.target.value)} placeholder={t("wageRatesPage.changeReasonPlaceholder")} />
-            </label>
-            <SearchInput placeholder={t("wageRatesPage.searchLabour")} value={search} onChange={setSearch} />
-            <div className="wage-rates-selection-bar">
-              <div>
-                <strong>{t("wageRatesPage.selectedCount", { count: selectedCount })}</strong>
-                <span>{t("wageRatesPage.filteredSelectionCount", { count: filteredSelectedCount, total: filteredLabourers.length })}</span>
-              </div>
-              <div className="wage-rates-selection-actions">
-                <button className="secondary-action" disabled={filteredLabourers.length === 0} type="button" onClick={selectAllFiltered}>{t("wageRatesPage.selectAll")}</button>
-                <button className="secondary-action" disabled={filteredSelectedCount === 0} type="button" onClick={deselectAllFiltered}>{t("wageRatesPage.deselectAll")}</button>
-              </div>
-            </div>
-            <div className="wage-rate-labour-list">
-              {filteredLabourers.map((labourer) => {
-                const draft = drafts[labourer.id] ?? emptyDraft;
-                const latestRate = (ratesByLabourer.get(labourer.id) ?? []).sort(compareWageRates)[0];
-                const workingPeriod = getWorkerWorkingPeriod(labourer);
-                return (
-                  <article key={labourer.id} className={`wage-rate-labour-row${selectedIds.includes(labourer.id) ? " is-selected" : ""}`}>
-                    <div className="wage-rate-labour-main">
-                      <label className="compact-checkbox wage-rate-labour-toggle">
-                        <input type="checkbox" checked={selectedIds.includes(labourer.id)} onChange={() => toggleLabour(labourer.id)} />
-                        <strong>{labourer.name}</strong>
-                      </label>
-                      <span>{labourer.group || "-"}</span>
-                      <small>{latestRate ? `${t("wageRatesPage.currentRate")}: ${money(latestRate.dailyRate)}` : t("wageRatesPage.noCurrentRate")}</small>
-                      <small>{workingPeriod.workerEnd ? `Left after ${workingPeriod.workerEnd}` : "Active for selected period"}</small>
-                    </div>
-                    <div className="wage-rate-entry-grid">
-                      <input aria-label={`${labourer.name} ${t("wageRatesPage.dailyRate")}`} inputMode="decimal" type="number" min="0" step="0.01" value={draft.dailyRate} onChange={(event) => updateDraft(labourer.id, { dailyRate: event.target.value })} placeholder={t("wageRatesPage.dailyRate")} />
-                      <input aria-label={`${labourer.name} ${t("wageRatesPage.halfDayRate")}`} inputMode="decimal" type="number" min="0" step="0.01" value={draft.halfDayRate} onChange={(event) => updateDraft(labourer.id, { halfDayRate: event.target.value })} placeholder={t("wageRatesPage.halfDayRate")} />
-                      <input aria-label={`${labourer.name} ${t("wageRatesPage.notes")}`} value={draft.notes} onChange={(event) => updateDraft(labourer.id, { notes: event.target.value })} placeholder={t("wageRatesPage.notes")} />
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-            {overlapPreview.length ? (
-              <div className="wage-rate-overlap-list">
-                {overlapPreview.map((item) => (
-                  <article key={item.labourerId} className="wage-rate-overlap-card">
-                    <div className="wage-rate-overlap-head">
-                      <strong>{item.labourName ?? item.labourerId}</strong>
-                      <span>{t("wageRatesPage.affectedAttendance", { count: item.affectedAttendanceCount })}</span>
-                    </div>
-                    <small>{t("wageRatesPage.overlapAffectedDates", { from: item.affectedFrom, to: item.affectedTo || t("common.current") })}</small>
-                    <ul>
-                      {item.overlaps.map((overlap) => (
-                        <li key={overlap.id}>
-                          <span>{t("wageRatesPage.effectiveRange", { from: overlap.effectiveFrom, to: overlap.effectiveTo || t("common.current") })}</span>
-                          <strong>{money(overlap.dailyRate)} / {money(overlap.halfDayRate)}</strong>
-                        </li>
-                      ))}
-                    </ul>
-                  </article>
-                ))}
-              </div>
-            ) : null}
-            {overlapSummary ? <p className="form-error">{overlapSummary}</p> : null}
-            {error ? <p className="form-error">{error}</p> : null}
-            {success ? <p className="context-message">{success}</p> : null}
-            <div className="wage-rates-submit-bar">
-              <span>{selectedCount === 0 ? t("wageRatesPage.noSelectionReady") : t("wageRatesPage.readyToSave", { count: selectedCount })}</span>
-              <button disabled={saving || !canManage || selectedCount === 0} type="submit">{saving ? t("advancesPage.saving") : editingRateId ? t("wageRatesPage.updateRates") : t("wageRatesPage.saveRates")}</button>
-            </div>
-          </form>
-        </section>
-
-        <section className="record-panel">
+        <section className="record-panel" ref={historyRef}>
           <div className="advances-heading">
             <h2>{t("wageRatesPage.history")}</h2>
             <span>{t("wageRatesPage.historyDescription")}</span>
@@ -445,6 +384,149 @@ export function WageRates() {
             </div>
           )}
         </section>
+      </main>
+
+      {editorOpen ? (
+        <div className="worker-dialog-backdrop wage-rates-editor-backdrop" role="presentation" onClick={() => { if (!saving) { setEditorOpen(false); resetEditor(); } }}>
+          <section
+            className="worker-dialog worker-dialog--wide wage-rates-editor-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label={editingRateId ? "Update wage rates" : "Add / Update Rates"}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="worker-dialog__header wage-rates-editor__header">
+              <div className="worker-dialog__title-stack">
+                <span className="worker-dialog__eyebrow">Wage Rate Management</span>
+                <h2>Add / Update Rates</h2>
+                <p>Select multiple labourers, set effective dates, and save rate updates together.</p>
+              </div>
+              <button type="button" className="worker-dialog__icon-button" aria-label={t("common.close")} disabled={saving} onClick={() => { if (!saving) { setEditorOpen(false); resetEditor(); } }}>
+                <X size={18} />
+              </button>
+            </header>
+            <form className="wage-rates-editor-form" onSubmit={(event) => void submit(event)}>
+              <div className="worker-dialog__body wage-rates-editor__body">
+                {editingRateId ? (
+                  <div className="wage-rates-edit-banner">
+                    <div>
+                      <strong>{t("wageRatesPage.editingRate")}</strong>
+                      <span>{t("wageRatesPage.editingRateDescription")}</span>
+                    </div>
+                    <button className="secondary-action" type="button" disabled={saving} onClick={() => {
+                      setSelectedIds([]);
+                      setDrafts({});
+                      setSearch("");
+                      resetEditor();
+                      setEditorOpen(false);
+                    }}>{t("common.cancel")}</button>
+                  </div>
+                ) : null}
+
+                <section className="wage-rates-editor-section">
+                  <div className="advances-heading">
+                    <h3>Rate details</h3>
+                    <span>Set the values that will apply to the selected labourers.</span>
+                  </div>
+                  <div className="advances-filter-row wage-rates-toolbar">
+                    <label className="advances-filter-field"><span>{t("wageRatesPage.effectiveFrom")}</span><input required type="date" value={effectiveFrom} onChange={(event) => setEffectiveFrom(event.target.value)} /></label>
+                    <label className="advances-filter-field"><span>{t("wageRatesPage.effectiveTo")}</span><input type="date" value={effectiveTo} onChange={(event) => setEffectiveTo(event.target.value)} /></label>
+                    <label className="advances-filter-field"><span>{t("wageRatesPage.rateType")}</span><select value={bulkRateType} onChange={(event) => setBulkRateType(event.target.value as WageRate["rateType"])}><option value="daily">{t("wageRatesPage.dailyRateType")}</option><option value="half_day">{t("wageRatesPage.halfDayRateType")}</option><option value="monthly">{t("wageRatesPage.monthlyRateType")}</option><option value="custom">{t("wageRatesPage.customRateType")}</option></select></label>
+                  </div>
+                  <div className="advances-filter-row wage-rates-toolbar">
+                    <label className="advances-filter-field"><span>{t("wageRatesPage.dailyRate")}</span><input inputMode="decimal" type="number" min="0" step="0.01" value={bulkDailyRate} onChange={(event) => setBulkDailyRate(event.target.value)} /></label>
+                    <label className="advances-filter-field"><span>{t("wageRatesPage.halfDayRate")}</span><input inputMode="decimal" type="number" min="0" step="0.01" value={bulkHalfDayRate} onChange={(event) => setBulkHalfDayRate(event.target.value)} /></label>
+                    <label className="advances-filter-field advances-filter-field--full"><span>{t("wageRatesPage.notes")}</span><input value={bulkNotes} onChange={(event) => setBulkNotes(event.target.value)} /></label>
+                  </div>
+                  <div className="wage-rates-options">
+                    <label className="compact-checkbox wage-rates-toggle-row"><input type="checkbox" checked={closePrevious} onChange={(event) => setClosePrevious(event.target.checked)} /><span>{t("wageRatesPage.closePrevious")}</span></label>
+                    <label className="compact-checkbox wage-rates-toggle-row"><input type="checkbox" checked={replaceExisting} onChange={(event) => setReplaceExisting(event.target.checked)} /><span>{t("wageRatesPage.replaceExisting")}</span></label>
+                  </div>
+                  <button className="secondary-action wage-rates-apply-button" disabled={selectedCount === 0} type="button" onClick={applyBulkToSelected}>Apply values to selected labourers</button>
+                  <label className="advances-filter-field advances-filter-field--full">
+                    <span>{t("wageRatesPage.changeReason")}</span>
+                    <input value={changeReason} onChange={(event) => setChangeReason(event.target.value)} placeholder={t("wageRatesPage.changeReasonPlaceholder")} />
+                  </label>
+                </section>
+
+                <section className="wage-rates-editor-section">
+                  <div className="wage-rates-selection-bar wage-rates-selection-bar--editor">
+                    <div>
+                      <strong>{selectedCount} selected from {filteredLabourers.length} labourers</strong>
+                      <span>{filteredSelectedCount} matching labourers in the current search</span>
+                    </div>
+                    <div className="wage-rates-selection-actions">
+                      <button className="secondary-action" disabled={filteredLabourers.length === 0} type="button" onClick={selectAllFiltered}>Select all filtered</button>
+                      <button className="secondary-action" disabled={filteredSelectedCount === 0} type="button" onClick={deselectAllFiltered}>Clear filtered</button>
+                    </div>
+                  </div>
+                  <SearchInput placeholder="Search labour" value={search} onChange={setSearch} />
+                  <div className="wage-rate-labour-list">
+                    {filteredLabourers.map((labourer) => {
+                      const draft = drafts[labourer.id] ?? emptyDraft;
+                      const latestRate = (ratesByLabourer.get(labourer.id) ?? []).sort(compareWageRates)[0];
+                      const workingPeriod = getWorkerWorkingPeriod(labourer);
+                      const selected = selectedIds.includes(labourer.id);
+                      return (
+                        <article key={labourer.id} className={`wage-rate-labour-row${selected ? " is-selected" : ""}`}>
+                          <button type="button" className="wage-rate-labour-summary" onClick={() => toggleLabour(labourer.id)}>
+                            <span className="wage-rate-labour-toggle">
+                              <input type="checkbox" checked={selected} onChange={() => toggleLabour(labourer.id)} />
+                              <span className="wage-rate-labour-summary__copy">
+                                <strong>{labourer.name}</strong>
+                                <span>{labourer.group || "-"} · {workingPeriod.workerEnd ? `${workingPeriod.workerStart} to ${workingPeriod.workerEnd}` : "Current"} · {latestRate ? money(latestRate.dailyRate) : t("wageRatesPage.noCurrentRate")}</span>
+                              </span>
+                            </span>
+                            <span className="wage-rate-labour-summary-rate">{latestRate ? money(latestRate.dailyRate) : "-"}</span>
+                          </button>
+                          {selected ? (
+                            <div className="wage-rate-entry-grid">
+                              <input aria-label={`${labourer.name} ${t("wageRatesPage.dailyRate")}`} inputMode="decimal" type="number" min="0" step="0.01" value={draft.dailyRate} onChange={(event) => updateDraft(labourer.id, { dailyRate: event.target.value })} placeholder={t("wageRatesPage.dailyRate")} />
+                              <input aria-label={`${labourer.name} ${t("wageRatesPage.halfDayRate")}`} inputMode="decimal" type="number" min="0" step="0.01" value={draft.halfDayRate} onChange={(event) => updateDraft(labourer.id, { halfDayRate: event.target.value })} placeholder={t("wageRatesPage.halfDayRate")} />
+                              <input aria-label={`${labourer.name} ${t("wageRatesPage.notes")}`} value={draft.notes} onChange={(event) => updateDraft(labourer.id, { notes: event.target.value })} placeholder={t("wageRatesPage.notes")} />
+                            </div>
+                          ) : null}
+                        </article>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                {overlapPreview.length ? (
+                  <section className="wage-rates-editor-section">
+                    <div className="wage-rate-overlap-list">
+                      {overlapPreview.map((item) => (
+                        <article key={item.labourerId} className="wage-rate-overlap-card">
+                          <div className="wage-rate-overlap-head">
+                            <strong>{item.labourName ?? item.labourerId}</strong>
+                            <span>{t("wageRatesPage.affectedAttendance", { count: item.affectedAttendanceCount })}</span>
+                          </div>
+                          <small>{t("wageRatesPage.overlapAffectedDates", { from: item.affectedFrom, to: item.affectedTo || t("common.current") })}</small>
+                          <ul>
+                            {item.overlaps.map((overlap) => (
+                              <li key={overlap.id}>
+                                <span>{t("wageRatesPage.effectiveRange", { from: overlap.effectiveFrom, to: overlap.effectiveTo || t("common.current") })}</span>
+                                <strong>{money(overlap.dailyRate)} / {money(overlap.halfDayRate)}</strong>
+                              </li>
+                            ))}
+                          </ul>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                ) : null}
+                {overlapSummary ? <p className="form-error">{overlapSummary}</p> : null}
+                {error ? <p className="form-error">{error}</p> : null}
+                {success ? <p className="context-message">{success}</p> : null}
+              </div>
+              <footer className="worker-dialog__footer wage-rates-submit-bar wage-rates-submit-bar--sticky">
+                <span>{selectedCount === 0 ? "Select labourers and enter rates to continue." : `${selectedCount} selected`}</span>
+                <button disabled={saving || !canManage || selectedCount === 0} type="submit">{saving ? t("advancesPage.saving") : editingRateId ? t("wageRatesPage.updateRates") : t("wageRatesPage.saveRates")}</button>
+              </footer>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </>
   );
 }

@@ -112,7 +112,7 @@ export function LabourPaymentsSectionLayout() {
       { to: `/workspace/labour-payments/overview${query}`, label: "Overview", module: "workforce" as const },
       { to: `/workspace/labour-payments/advances${query}`, label: t("layout.advances"), module: "advances" as const },
       { to: `/workspace/labour-payments/earnings${query}`, label: "Earnings", module: "wages" as const },
-      { to: `/workspace/labour-payments/settlements${query}`, label: "Settlements", module: "wages" as const },
+      { to: `/workspace/labour-payments/settlements${query}`, label: "Settle", module: "wages" as const },
       { to: `/workspace/labour-payments/reports${query}`, label: "Reports", module: "reports" as const },
     ];
     return allTabs.filter((tab) => !user || hasModulePermission(user, tab.module, "view", workspaceId));
@@ -121,7 +121,7 @@ export function LabourPaymentsSectionLayout() {
     <WorkforceShell
       title="Labour Payments"
       description="Keep advances, wage rates, labour earnings, settlements, and reports together in one professional labour finance center."
-      subtitle="Advances • Earnings • Settlements • Reports"
+      subtitle="Advances • Earnings • Settle • Reports"
       tabs={tabs}
       compactMobileHeader
     >

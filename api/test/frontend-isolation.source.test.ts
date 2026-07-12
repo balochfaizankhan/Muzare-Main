@@ -140,7 +140,13 @@ test("wage rate management is wired through shared permissions, sync storage, an
   assert.match(syncRoute, /"wageRate"/);
   assert.match(syncService, /wageRate: offlineDb\.wageRates/);
   assert.match(reports, /report === "wage-rates"/);
-  assert.match(wageRatesPage, /bulkEntry/);
+  assert.match(wageRatesPage, /Wage Rate Management/);
+  assert.match(wageRatesPage, /Add \/ Update Rates/);
+  assert.match(wageRatesPage, /wageRatesPage\.currentRates/);
+  assert.match(wageRatesPage, /wageRatesPage\.history/);
+  assert.match(wageRatesPage, /wageRatesPage\.searchLabour/);
+  assert.match(wageRatesPage, /Apply values to selected labourers/);
+  assert.match(wageRatesPage, /wageRatesPage\.saveRates/);
 });
 
 test("operational writes queue locally before background sync", async () => {

@@ -4171,6 +4171,234 @@ button {
 .wage-rates-toolbar {
   align-items: end;
 }
+.wage-rates-page {
+  min-width: 0;
+  padding-bottom: calc(136px + env(safe-area-inset-bottom, 0px));
+}
+.wage-rates-management-card,
+.wage-rates-active-section {
+  display: grid;
+  gap: 12px;
+}
+.wage-rates-management-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.wage-rates-active-toolbar {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1.5fr) minmax(160px, 0.9fr);
+}
+.wage-rates-active-note {
+  color: var(--text-secondary);
+  font-size: .8rem;
+  margin: 0;
+}
+.wage-rate-active-list {
+  display: grid;
+  gap: 10px;
+}
+.wage-rate-active-card {
+  background: linear-gradient(180deg, #ffffff, #fbfdf9);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 8px 18px rgba(5, 35, 63, 0.05);
+  min-width: 0;
+  padding: 11px 12px;
+}
+.wage-rate-active-card__copy {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.wage-rate-active-card__head {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
+}
+.wage-rate-active-card__head strong {
+  color: var(--text-primary);
+  font-size: .94rem;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wage-rate-active-card__head span {
+  color: var(--brand-primary);
+  flex-shrink: 0;
+  font-size: .95rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.wage-rate-active-card__copy small {
+  color: var(--text-secondary);
+  font-size: .77rem;
+  line-height: 1.35;
+}
+.wage-rates-editor-backdrop {
+  align-items: stretch;
+}
+.wage-rates-editor-dialog {
+  max-width: min(960px, calc(100vw - 16px));
+}
+.wage-rates-editor__header {
+  align-items: start;
+}
+.wage-rates-editor__header .worker-dialog__title-stack {
+  min-width: 0;
+}
+.wage-rates-editor__header .worker-dialog__title-stack p {
+  color: var(--text-secondary);
+  font-size: .84rem;
+  line-height: 1.45;
+}
+.wage-rates-editor-form {
+  display: grid;
+  min-height: 0;
+}
+.wage-rates-editor__body {
+  display: grid;
+  gap: 14px;
+  max-height: calc(100vh - 160px);
+  overflow: auto;
+  padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+}
+.wage-rates-editor-section {
+  display: grid;
+  gap: 12px;
+}
+.wage-rates-options {
+  display: grid;
+  gap: 8px;
+}
+.wage-rates-toggle-row {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: flex;
+  gap: 10px;
+  min-height: 42px;
+  padding: 10px 12px;
+}
+.wage-rates-toggle-row input[type="checkbox"] {
+  accent-color: var(--brand-primary);
+  block-size: 18px;
+  inline-size: 18px;
+  margin: 0;
+}
+.wage-rates-toggle-row span {
+  color: var(--text-primary);
+  font-size: .84rem;
+  line-height: 1.35;
+}
+.wage-rates-apply-button {
+  align-self: start;
+}
+.wage-rates-selection-bar--editor {
+  align-items: start;
+}
+.wage-rates-selection-bar--editor > div {
+  display: grid;
+  gap: 4px;
+}
+.wage-rates-selection-bar--editor strong {
+  color: var(--text-primary);
+  font-size: .9rem;
+}
+.wage-rates-selection-bar--editor span {
+  color: var(--text-secondary);
+  font-size: .78rem;
+}
+.wage-rates-selection-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.wage-rate-labour-list,
+.wage-rate-overlap-list {
+  display: grid;
+  gap: 10px;
+}
+.wage-rate-labour-row {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+.wage-rate-labour-row.is-selected {
+  border-color: color-mix(in srgb, var(--brand-primary) 42%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--brand-primary) 18%, transparent);
+}
+.wage-rate-labour-summary {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  padding: 0;
+  text-align: start;
+}
+.wage-rate-labour-toggle {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-width: 0;
+}
+.wage-rate-labour-summary__copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.wage-rate-labour-summary__copy strong {
+  color: var(--text-primary);
+  font-size: .92rem;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wage-rate-labour-summary__copy span {
+  color: var(--text-secondary);
+  font-size: .76rem;
+  line-height: 1.35;
+}
+.wage-rate-labour-summary-rate {
+  color: var(--brand-primary);
+  font-size: .92rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.wage-rate-labour-toggle input[type="checkbox"] {
+  accent-color: var(--brand-primary);
+  block-size: 16px;
+  inline-size: 16px;
+}
+.wage-rate-entry-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.wage-rate-entry-grid input {
+  min-width: 0;
+}
+.wage-rates-submit-bar--sticky {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+}
+.wage-rates-submit-bar--sticky button {
+  min-height: 42px;
+}
 .wage-rates-edit-banner,
 .wage-rates-selection-bar,
 .wage-rates-submit-bar,
@@ -4205,51 +4433,6 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-}
-.wage-rate-labour-list,
-.wage-rate-overlap-list {
-  display: grid;
-  gap: 10px;
-}
-.wage-rate-labour-row {
-  align-items: center;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  display: grid;
-  gap: 12px;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.6fr);
-  padding: 12px 14px;
-}
-.wage-rate-labour-row.is-selected {
-  border-color: color-mix(in srgb, var(--brand-primary) 42%, var(--border));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--brand-primary) 22%, transparent);
-}
-.wage-rate-labour-main {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-.wage-rate-labour-main span,
-.wage-rate-labour-main small {
-  color: var(--text-secondary);
-  font-size: 0.76rem;
-}
-.wage-rate-labour-toggle {
-  align-items: center;
-  gap: 8px;
-}
-.wage-rate-labour-toggle input[type="checkbox"] {
-  block-size: 16px;
-  inline-size: 16px;
-}
-.wage-rate-entry-grid {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-.wage-rate-entry-grid input {
-  min-width: 0;
 }
 .wage-rate-overlap-card {
   display: grid;
@@ -15233,7 +15416,8 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 @media (max-width: 767px) {
   .workforce-shell-tabs {
     gap: .45rem;
-    padding: .7rem .8rem;
+    padding: .7rem .9rem;
+    scroll-padding-inline: .9rem;
   }
 
   .workforce-shell-tab {
@@ -15256,6 +15440,32 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
     position: sticky;
     top: 8px;
     z-index: 4;
+  }
+
+  .wage-rates-page {
+    padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .wage-rates-management-actions,
+  .wage-rates-selection-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .wage-rates-active-toolbar,
+  .wage-rates-editor__body .advances-filter-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .wage-rates-editor__body {
+    max-height: none;
+  }
+
+  .wage-rate-entry-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .wage-rates-submit-bar--sticky {
+    padding-inline: 12px;
   }
 
   .workforce-reports-panel {
@@ -15287,6 +15497,16 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 
   .labour-settlement-register-toolbar {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 768px) {
+  .wage-rates-page {
+    padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .wage-rates-editor-dialog {
+    max-height: calc(100vh - 20px);
   }
 }
 
