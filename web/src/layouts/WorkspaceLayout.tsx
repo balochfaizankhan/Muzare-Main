@@ -14,6 +14,7 @@ import { deriveWorkspaceDisplayStatus } from "../lib/workspaceStatus";
 import { discardSyncQueueItem, getSyncQueueItems, refreshOperationalData, repairStaleSyncQueueItem, resolveSyncQueueItem, retrySyncQueueItem, startSyncService, stopSyncService, syncNow } from "../services/syncService";
 import { setActiveWorkspaceId } from "../lib/offline-db";
 import { hasModulePermission } from "../lib/permissions";
+import { markStartup } from "../lib/startupPerf";
 
 const nav = [
   ["/workspace/dashboard", "layout.dashboard", LayoutDashboard, "dashboard"],
@@ -52,23 +53,23 @@ export function WorkspaceLayout() {
     setActiveWorkspaceId(user?.workspaceId ?? null);
   }, [user?.workspaceId]);
   useEffect(() => {
-    if (token && user?.workspaceId) void startSyncService(token, user.workspaceId);
+    if (token && user?.workspaceId) void startSyncService(token, user.workspaceId, bootstrap.data ?? null);
     return stopSyncService;
-  }, [token, user?.workspaceId]);
+  }, [bootstrap.data, token, user?.workspaceId]);
   useEffect(() => {
     const reloadSeason = () => {
-      if (token && user?.workspaceId) void startSyncService(token, user.workspaceId);
+      if (token && user?.workspaceId) void startSyncService(token, user.workspaceId, bootstrap.data ?? null);
     };
     window.addEventListener("muzare-season-changed", reloadSeason);
     return () => window.removeEventListener("muzare-season-changed", reloadSeason);
-  }, [token, user?.workspaceId]);
+  }, [bootstrap.data, token, user?.workspaceId]);
   useEffect(() => {
     const reloadFarm = () => {
-      if (token && user?.workspaceId) void startSyncService(token, user.workspaceId);
+      if (token && user?.workspaceId) void startSyncService(token, user.workspaceId, bootstrap.data ?? null);
     };
     window.addEventListener("muzare-farm-changed", reloadFarm);
     return () => window.removeEventListener("muzare-farm-changed", reloadFarm);
-  }, [token, user?.workspaceId]);
+  }, [bootstrap.data, token, user?.workspaceId]);
   useEffect(() => {
     const showToast = (event: Event) => {
       setToast((event as CustomEvent<string>).detail);
@@ -78,6 +79,10 @@ export function WorkspaceLayout() {
     return () => window.removeEventListener("muzare-toast", showToast);
   }, []);
   useEffect(() => {
+    if (!queueOpen) {
+      setQueueItems([]);
+      return;
+    }
     const refreshQueue = () => { void getSyncQueueItems().then(setQueueItems); };
     void refreshQueue();
     window.addEventListener("muzare-local-data-change", refreshQueue);
@@ -86,7 +91,7 @@ export function WorkspaceLayout() {
       window.removeEventListener("muzare-local-data-change", refreshQueue);
       window.removeEventListener("muzare-data-refresh", refreshQueue);
     };
-  }, []);
+  }, [queueOpen]);
   useEffect(() => {
     setMobileSheet(null);
   }, [location.pathname, location.search]);
@@ -97,6 +102,15 @@ export function WorkspaceLayout() {
     bootstrapLoaded: bootstrap.isSuccess,
     bootstrapErrored: bootstrap.isError,
   });
+  useEffect(() => {
+    if (bootstrap.isSuccess) {
+      markStartup("workspace-bootstrap-ready", {
+        workspaceId: user?.workspaceId,
+        farmId: bootstrap.data?.activeFarmId ?? null,
+        seasonId: bootstrap.data?.activeSeasonId ?? null,
+      });
+    }
+  }, [bootstrap.data?.activeFarmId, bootstrap.data?.activeSeasonId, bootstrap.isSuccess, user?.workspaceId]);
   const statusText = workspaceStatus.tone === "offline"
     ? "Offline"
     : workspaceStatus.label;

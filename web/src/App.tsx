@@ -52,10 +52,36 @@ const WorkspaceTeam = lazy(async () => ({ default: (await import("./pages/worksp
 function StartupScreen({ title, detail }: { title: string; detail: string }) {
   return (
     <div className="app-startup-screen" role="status" aria-live="polite">
-      <div className="app-startup-screen__card">
-        <div className="app-startup-screen__spinner" aria-hidden="true" />
-        <strong>{title}</strong>
-        <p>{detail}</p>
+      <div className="app-startup-shell">
+        <aside className="app-startup-shell__sidebar" aria-hidden="true">
+          <div className="app-startup-shell__brand app-skeleton" />
+          <div className="app-startup-shell__nav">
+            <span className="app-skeleton app-startup-shell__nav-item" />
+            <span className="app-skeleton app-startup-shell__nav-item" />
+            <span className="app-skeleton app-startup-shell__nav-item" />
+            <span className="app-skeleton app-startup-shell__nav-item" />
+          </div>
+        </aside>
+        <section className="app-startup-shell__body">
+          <header className="app-startup-shell__header">
+            <div>
+              <div className="app-skeleton app-startup-shell__eyebrow" />
+              <div className="app-skeleton app-startup-shell__title" />
+            </div>
+            <div className="app-skeleton app-startup-shell__status" />
+          </header>
+          <div className="app-startup-shell__hero app-skeleton" />
+          <div className="app-startup-shell__cards">
+            <div className="app-skeleton app-startup-shell__card" />
+            <div className="app-skeleton app-startup-shell__card" />
+            <div className="app-skeleton app-startup-shell__card" />
+            <div className="app-skeleton app-startup-shell__card" />
+          </div>
+          <div className="app-startup-screen__copy">
+            <strong>{title}</strong>
+            <p>{detail}</p>
+          </div>
+        </section>
       </div>
     </div>
   );

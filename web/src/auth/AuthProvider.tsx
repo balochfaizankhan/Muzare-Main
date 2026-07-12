@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { ApiError, fetchSession, login as loginRequest, logout as logoutRequest, selectWorkspace, type AppUser } from "../lib/api";
 import { setPermissionContextUser } from "../lib/permissions";
 import { queryClient } from "../lib/query-client";
-import { clearWorkspaceCache } from "../services/syncService";
+import { markStartup } from "../lib/startupPerf";
 
 const tokenKey = "muzare-session-token";
 const cachedUserKey = "muzare-cached-user";
@@ -38,6 +38,11 @@ async function reconcileWorkspacePreference(
   return session.user;
 }
 
+async function clearWorkspaceCache() {
+  const { clearWorkspaceCache: clearWorkspaceCacheFromSync } = await import("../services/syncService");
+  await clearWorkspaceCacheFromSync();
+}
+
 const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: PropsWithChildren) {
@@ -55,24 +60,28 @@ export function AuthProvider({ children }: PropsWithChildren) {
       setUser(null);
       setLoading(false);
       setSessionRefreshing(false);
+      markStartup("session-cleared");
       return;
     }
 
     let active = true;
     if (!cachedUser()) setLoading(true);
     setSessionRefreshing(true);
+    markStartup("session-refresh-start");
     void fetchSession(token)
       .then((session) => {
         if (active) {
           window.localStorage.setItem(cachedUserKey, JSON.stringify(session.user));
           if (session.user.workspaceId) window.localStorage.setItem(lastWorkspaceKey, session.user.workspaceId);
           setUser(session.user);
+          markStartup("session-restored", { workspaceId: session.user.workspaceId, role: session.user.role });
         }
       })
       .catch((error: unknown) => {
         if (!active) return;
         if (!(error instanceof ApiError && [401, 403].includes(error.status)) && cachedUser()) {
           setUser(cachedUser());
+          markStartup("session-restored-from-cache");
           return;
         }
         window.localStorage.removeItem(tokenKey);
@@ -81,11 +90,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
         queryClient.clear();
         setToken(null);
         setUser(null);
+        markStartup("session-invalidated", { status: error instanceof ApiError ? error.status : "unknown" });
       })
       .finally(() => {
         if (active) {
           setLoading(false);
           setSessionRefreshing(false);
+          markStartup("session-refresh-finished");
         }
       });
 
@@ -102,6 +113,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     if (nextUser.workspaceId) window.localStorage.setItem(lastWorkspaceKey, nextUser.workspaceId);
     setToken(session.token);
     setUser(nextUser);
+    markStartup("login-complete", { workspaceId: nextUser.workspaceId, role: nextUser.role });
   }, []);
 
   const logout = useCallback(async () => {
@@ -114,6 +126,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     queryClient.clear();
     setToken(null);
     setUser(null);
+    markStartup("logout-complete");
   }, [token]);
 
   const switchWorkspace = useCallback(async (workspaceId: string) => {
@@ -124,6 +137,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     window.localStorage.setItem(cachedUserKey, JSON.stringify(session.user));
     window.localStorage.setItem(lastWorkspaceKey, workspaceId);
     setUser(session.user);
+    markStartup("workspace-switched", { workspaceId });
   }, [token, user?.workspaceId]);
 
   const updateUser = useCallback((nextUser: AppUser) => {
@@ -140,6 +154,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     queryClient.clear();
     setToken(nextToken);
     setUser(nextUser);
+    markStartup("session-completed", { workspaceId: nextUser.workspaceId, role: nextUser.role });
   }, []);
 
   const value = useMemo(() => ({ user, token, loading, sessionRefreshing, login, logout, switchWorkspace, updateUser, completeSession }), [user, token, loading, sessionRefreshing, login, logout, switchWorkspace, updateUser, completeSession]);

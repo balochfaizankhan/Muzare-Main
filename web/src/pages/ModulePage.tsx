@@ -41,7 +41,7 @@ import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { getVoucherDisplayNumber, normalizeVoucherNumber, parseVoucherSequenceNumber } from "../lib/vouchers";
 import { getActiveVouchers, getVisibleVouchers, loadWorkspaceVouchers } from "../lib/voucherCollections";
 import { compareWageRates, getWageRateStatus, normalizeHalfDayRate, summarizeAttendanceWages } from "../lib/wageRates";
-import { getWorkerDisplayGroup, getWorkerWorkingPeriod, isWorkerEligibleForAttendance, sortWorkersForDisplay } from "../lib/workerEligibility";
+import { getWorkerDisplayGroup, getWorkerWorkingPeriod, isLabourAvailableForEntry, isWorkerEligibleForAttendance, sortWorkersForDisplay } from "../lib/workerEligibility";
 import {
   compareLabourers,
   ensureLocalAccounts,
@@ -1149,40 +1149,66 @@ function AddAdvancePanel({ labourer, accounts, onClose, onSave }: { labourer: La
 function DeactivateLabourPanel({ token, workspaceId, labourer, onClose, onComplete }: {
   token: string; workspaceId: string; labourer: Labourer; onClose: () => void; onComplete: (action: "deleted" | "deactivated") => Promise<void>;
 }) {
-  const { t } = useTranslation();
   const [preview, setPreview] = useState<LabourDeletionPreview | null>(null);
   const [confirmation, setConfirmation] = useState("");
-  const [endDate, setEndDate] = useState(today());
+  const [endDate, setEndDate] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
     let active = true;
     void fetchLabourDeletionPreview(token, workspaceId, labourer.id)
-      .then((result) => { if (active) setPreview(result); })
-      .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : t("reports.unableInspectLinkedRecords")); });
+      .then((result) => {
+        if (!active) return;
+        setPreview(result);
+        setConfirmation("");
+        setEndDate("");
+      })
+      .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "Unable to inspect protected labour records."); });
     return () => { active = false; };
   }, [token, workspaceId, labourer.id]);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (confirmation !== "DELETE" || busy) return;
+    if (!preview || busy) return;
+    const expectedConfirmationValue = preview.action === "delete" ? "DELETE" : "DEACTIVATE";
+    if (confirmation !== expectedConfirmationValue) return;
+    if (preview.action === "deactivate" && !endDate) {
+      setError("End date is required to deactivate labour.");
+      return;
+    }
     setBusy(true); setError("");
     try {
-      const result = await deleteOrDeactivateLabour(token, workspaceId, labourer.id, { confirmation: "DELETE", endDate });
+      const result = await deleteOrDeactivateLabour(token, workspaceId, labourer.id, {
+        confirmation: expectedConfirmationValue,
+        endDate: preview.action === "deactivate" ? endDate : undefined,
+      });
       await onComplete(result.action);
-    } catch (caught) { setError(caught instanceof Error ? caught.message : t("reports.unableUpdateLabourStatus")); }
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to update labour status."); }
     finally { setBusy(false); }
   };
-  return <ActionPanel title={t("reports.deactivateOrDeleteLabour")} onClose={onClose}>
+  const title = preview?.action === "delete" ? "Delete Labour Permanently" : "Deactivate Labour";
+  const expectedConfirmation = preview?.action === "delete" ? "DELETE" : "DEACTIVATE";
+  const actionLabel = preview?.action === "delete" ? "Delete Permanently" : "Deactivate Labour";
+  return <ActionPanel title={title} onClose={onClose}>
     <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
       <p><strong>{labourer.name}</strong></p>
-      {!preview && !error && <p>{t("reports.checkingLinkedRecords")}</p>}
-      {preview && <p>{t("reports.existingLinkedRecords")}: <strong>{preview.linkedRecordCount}</strong></p>}
-      {preview?.action === "deactivate" && <p className="worker-action-warning">{t("reports.deactivatePreserveRecords")}</p>}
-      {preview?.action === "delete" && <p className="worker-action-warning">{t("reports.deleteNoLinkedRecords")}</p>}
-      {preview?.action === "deactivate" && <label><span>{t("reports.endDateRequired")}</span><input required type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} /></label>}
-      <label><span>{t("reports.typeDeleteConfirm")}</span><input required autoComplete="off" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
+      {!preview && !error && <p>Checking protected attendance, advance, and payment history...</p>}
+      {preview && (
+        <>
+          <p>{preview.action === "delete"
+            ? "This labour has no attendance, advance, or payment history and can be permanently deleted."
+            : "This labour has attendance, advance, or payment history. The historical records will remain preserved, but the labour will no longer be available for new entries."}
+          </p>
+          <div className="worker-action-stats">
+            <article><span>Attendance records</span><strong>{preview.attendanceCount}</strong></article>
+            <article><span>Advance records</span><strong>{preview.advanceCount}</strong></article>
+            <article><span>Payment records</span><strong>{preview.paymentCount}</strong></article>
+          </div>
+        </>
+      )}
+      {preview?.action === "deactivate" && <label><span>End date *</span><input required type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} /></label>}
+      <label><span>{preview?.action === "delete" ? "Type DELETE to confirm *" : "Type DEACTIVATE to confirm *"}</span><input required autoComplete="off" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
       {error && <p className="worker-action-error">{error}</p>}
-      <footer><button type="button" onClick={onClose}>{t("common.close")}</button><button className="danger-button" disabled={!preview || confirmation !== "DELETE" || busy} type="submit">{busy ? t("reports.processing") : preview?.action === "delete" ? t("reports.deletePermanently") : t("reports.deactivateLabour")}</button></footer>
+      <footer><button type="button" onClick={onClose}>Cancel</button><button className="danger-button" disabled={!preview || confirmation !== expectedConfirmation || busy || (preview.action === "deactivate" && !endDate)} type="submit">{busy ? (preview?.action === "delete" ? "Deleting..." : "Deactivating...") : actionLabel}</button></footer>
     </form>
   </ActionPanel>;
 }
@@ -1206,8 +1232,11 @@ function AdvanceEntryPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const labourInputRef = useRef<HTMLInputElement>(null);
-  const filteredLabourers = labourers.filter((labourer) => labourer.active !== false && (groupId === "all" || labourer.groupId === groupId));
+  const filteredLabourers = labourers.filter((labourer) => isLabourAvailableForEntry(labourer, form.date) && (groupId === "all" || labourer.groupId === groupId));
   const selectedLabourer = filteredLabourers.find((labourer) => labourer.id === labourerId);
+  useEffect(() => {
+    if (labourerId && !filteredLabourers.some((labourer) => labourer.id === labourerId)) setLabourerId("");
+  }, [filteredLabourers, labourerId]);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const amount = Number(form.amount);

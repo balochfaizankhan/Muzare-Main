@@ -1,4 +1,4 @@
-import { ApiError, deleteOperationalRecord as deleteOperationalRecordFromApi, fetchBootstrap, fetchOperationalRecords, saveOperationalRecord, validateVoucherNumber, type OperationalEntity, type OperationalRecordEnvelope } from "../lib/api";
+import { ApiError, deleteOperationalRecord as deleteOperationalRecordFromApi, fetchBootstrap, fetchOperationalRecords, saveOperationalRecord, validateVoucherNumber, type BootstrapData, type OperationalEntity, type OperationalRecordEnvelope } from "../lib/api";
 import { clearCachedData, offlineDb, setActiveFarmId, setActiveSeasonId, setActiveWorkspaceId, type LocalRecord, type PendingMutation } from "../lib/offline-db";
 import { canQueueOperationalMutation } from "../lib/permissions";
 import type { Table } from "dexie";
@@ -6,6 +6,7 @@ import i18n from "../i18n";
 import { canonicalizeImportedVoucherRecord, getVoucherDisplayNumber, normalizeVoucherNumber } from "../lib/vouchers";
 import { getActiveVouchers } from "../lib/voucherCollections";
 import { getGeneralExpenseVouchers } from "../lib/labourWageSettlements";
+import { markStartup, scheduleBackgroundTask } from "../lib/startupPerf";
 
 export type SyncStatus = "online" | "offline" | "pending" | "syncing" | "error";
 export type SyncStartupStage = "checkingSession" | "loadingWorkspace" | "loadingContext" | "syncingLatestRecords" | "ready";
@@ -829,7 +830,7 @@ export function subscribeSyncState(listener: (next: SyncState) => void) {
   };
 }
 
-export async function startSyncService(token: string, workspaceId: string) {
+export async function startSyncService(token: string, workspaceId: string, bootstrapSnapshot?: BootstrapData | null) {
   const cached = restoreOperationalContext(workspaceId);
   applyOperationalContext(token, workspaceId, cached?.farmId ?? undefined, cached?.seasonId ?? undefined);
   emitStartup("loadingWorkspace", i18n.t("sync.loadingWorkspace"), {
@@ -837,12 +838,13 @@ export async function startSyncService(token: string, workspaceId: string) {
     lastSyncTime: getLastSyncTime(),
     status: navigator.onLine ? "online" : "offline",
   });
+  markStartup("sync-started", { workspaceId });
   await refreshSyncState({ dataSource: "cache", lastSyncTime: getLastSyncTime() });
   if (timer) window.clearInterval(timer);
   timer = window.setInterval(() => void syncPendingRecords(), 30_000);
-  void (async () => {
+  void scheduleBackgroundTask(async () => {
     try {
-      const bootstrap = await fetchBootstrap(token);
+      const bootstrap = bootstrapSnapshot ?? await fetchBootstrap(token);
       const farm = bootstrap.farms.find((item) => item.id === bootstrap.activeFarmId);
       const season = bootstrap.seasons.find((item) => item.id === bootstrap.activeSeasonId);
       applyOperationalContext(token, workspaceId, farm?.id, season?.id);
@@ -854,13 +856,30 @@ export async function startSyncService(token: string, workspaceId: string) {
       });
       window.dispatchEvent(new Event("muzare-data-refresh"));
       await repairDateTypeQueueItems();
-      emitStartup("syncingLatestRecords", navigator.onLine ? i18n.t("sync.syncingLatestRecords") : i18n.t("sync.offlineReady"));
-      await refreshOperationalData({ notifySuccess: false });
-      await syncPendingRecords();
       emitStartup("ready", navigator.onLine ? i18n.t("sync.connectedReady") : i18n.t("sync.offlineReady"), {
         startupInProgress: false,
         status: navigator.onLine ? state.status : "offline",
       });
+      void scheduleBackgroundTask(async () => {
+        try {
+          emitStartup("syncingLatestRecords", navigator.onLine ? i18n.t("sync.syncingLatestRecords") : i18n.t("sync.offlineReady"));
+          await refreshOperationalData({ notifySuccess: false });
+          await syncPendingRecords();
+          emitStartup("ready", navigator.onLine ? i18n.t("sync.connectedReady") : i18n.t("sync.offlineReady"), {
+            startupInProgress: false,
+            status: navigator.onLine ? state.status : "offline",
+          });
+        } catch {
+          await refreshSyncState({
+            status: navigator.onLine ? "error" : "offline",
+            dataSource: "cache",
+            message: i18n.t("workforcePage.cachedLoadingLabour"),
+            startupStage: "ready",
+            startupInProgress: false,
+            lastProgressAt: new Date().toISOString(),
+          });
+        }
+      }, { timeoutMs: 500 });
     } catch {
       await refreshSyncState({
         status: navigator.onLine ? "error" : "offline",
@@ -871,7 +890,7 @@ export async function startSyncService(token: string, workspaceId: string) {
         lastProgressAt: new Date().toISOString(),
       });
     }
-  })();
+  });
 }
 
 export async function repairStaleSyncQueueItem(mutationId: string) {

@@ -16,7 +16,7 @@ import {
   Wifi,
   WifiOff,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
@@ -32,6 +32,7 @@ import { loadWorkspaceVouchers } from "../lib/voucherCollections";
 import { useSyncState } from "../hooks/useSyncState";
 import { formatWorkspaceActivityDateTime, loadWorkspaceActivity, type WorkspaceActivityItem } from "../lib/workspaceActivity";
 import { deriveWorkspaceDisplayStatus } from "../lib/workspaceStatus";
+import { markStartup, scheduleBackgroundTask } from "../lib/startupPerf";
 
 type DashboardTotals = {
   presentToday: number;
@@ -56,7 +57,11 @@ export function DashboardPage() {
   const { t } = useTranslation();
   const { user, token } = useAuth();
   const sync = useSyncState();
-  const [totals, setTotals] = useState<DashboardTotals>({
+  const [totals, setTotals] = useState<DashboardTotals | null>(null);
+  const [activities, setActivities] = useState<WorkspaceActivityItem[]>([]);
+  const refreshInFlight = useRef(false);
+  const [dashboardLoading, setDashboardLoading] = useState(true);
+  const fallbackTotals: DashboardTotals = {
     presentToday: 0,
     attendanceMarkedToday: 0,
     dispatchesToday: 0,
@@ -66,8 +71,7 @@ export function DashboardPage() {
     totalExpenses: 0,
     netPosition: 0,
     partnerBalance: 0,
-  });
-  const [activities, setActivities] = useState<WorkspaceActivityItem[]>([]);
+  };
   const query = useQuery({
     queryKey: ["bootstrap", user?.workspaceId, sync.farmId, sync.seasonId],
     queryFn: () => fetchBootstrap(token!),
@@ -123,16 +127,33 @@ export function DashboardPage() {
 
     setActivities(recentActivities.slice(0, 5));
   }, [sync.farmId, sync.seasonId, t]);
+  const scheduleDashboardRefresh = useCallback(() => {
+    if (refreshInFlight.current) return;
+    refreshInFlight.current = true;
+    setDashboardLoading(true);
+    markStartup("dashboard-refresh-scheduled", { workspaceId: user?.workspaceId, farmId: sync.farmId, seasonId: sync.seasonId });
+    void scheduleBackgroundTask(async () => {
+      try {
+        await loadLocalDashboard();
+        markStartup("dashboard-data-ready", { workspaceId: user?.workspaceId, farmId: sync.farmId, seasonId: sync.seasonId });
+      } catch (error) {
+        markStartup("dashboard-data-error", { message: error instanceof Error ? error.message : "Unknown dashboard load failure" });
+      } finally {
+        refreshInFlight.current = false;
+        setDashboardLoading(false);
+      }
+    }, { timeoutMs: 500 });
+  }, [loadLocalDashboard]);
 
   useEffect(() => {
-    void loadLocalDashboard();
-    window.addEventListener("muzare-data-refresh", loadLocalDashboard);
-    window.addEventListener("muzare-local-data-change", loadLocalDashboard);
+    scheduleDashboardRefresh();
+    window.addEventListener("muzare-data-refresh", scheduleDashboardRefresh);
+    window.addEventListener("muzare-local-data-change", scheduleDashboardRefresh);
     return () => {
-      window.removeEventListener("muzare-data-refresh", loadLocalDashboard);
-      window.removeEventListener("muzare-local-data-change", loadLocalDashboard);
+      window.removeEventListener("muzare-data-refresh", scheduleDashboardRefresh);
+      window.removeEventListener("muzare-local-data-change", scheduleDashboardRefresh);
     };
-  }, [loadLocalDashboard]);
+  }, [scheduleDashboardRefresh]);
 
   const workspaceStatus = deriveWorkspaceDisplayStatus({
     sync,
@@ -146,6 +167,7 @@ export function DashboardPage() {
   const hasOperationalContext = workspaceStatus.hasOperationalContext;
   const hydrationPending = workspaceStatus.hydrationPending;
   const canManageFarms = Boolean(user?.workspaceId && user && hasPermission(user, "MANAGE_FARMS", user.workspaceId));
+  const totalsValue = totals ?? fallbackTotals;
   const workspaceFarmCount = query.data?.workspaceFarmCount ?? query.data?.farms.length ?? 0;
   const accessibleFarmCount = query.data?.accessibleFarmCount ?? query.data?.farms.length ?? 0;
   const noAccessibleFarms = workspaceFarmCount > 0 && accessibleFarmCount === 0;
@@ -159,21 +181,22 @@ export function DashboardPage() {
   const heroStatusCopy = workspaceStatus.heroCopy;
   const heroSyncLabel = workspaceStatus.label;
   const syncNote = workspaceStatus.tone === "offline" ? t("layout.workingOffline") : workspaceStatus.note;
-  const attendanceTodayLabel = hydrationPending ? "--" : `${totals.attendanceMarkedToday} labour today`;
-  const dispatchTodayLabel = hydrationPending ? "--" : `${totals.dispatchesToday} today`;
+  const metricsReady = !hydrationPending && !dashboardLoading && Boolean(totals);
+  const attendanceTodayLabel = hydrationPending || dashboardLoading ? "--" : `${totalsValue.attendanceMarkedToday} labour today`;
+  const dispatchTodayLabel = hydrationPending || dashboardLoading ? "--" : `${totalsValue.dispatchesToday} today`;
 
   const summaryCards = [
     {
       label: "Cash Balance",
-      value: moneyWhole(totals.netPosition),
+      value: metricsReady ? moneyWhole(totalsValue.netPosition) : "—",
       icon: Wallet,
       path: "/workspace/accounts",
-      tone: totals.netPosition >= 0 ? "green" : "orange",
+      tone: totalsValue.netPosition >= 0 ? "green" : "orange",
       detail: hasOperationalContext ? "Available cash position" : "Requires a farm and season",
     },
     {
       label: "Total Expenses",
-      value: moneyWhole(totals.totalExpenses),
+      value: metricsReady ? moneyWhole(totalsValue.totalExpenses) : "—",
       icon: BanknoteArrowDown,
       path: "/workspace/reports?report=expenditures",
       tone: "orange",
@@ -181,7 +204,7 @@ export function DashboardPage() {
     },
     {
       label: "Labour Advances",
-      value: moneyWhole(totals.labourAdvances),
+      value: metricsReady ? moneyWhole(totalsValue.labourAdvances) : "—",
       icon: HandCoins,
       path: "/workspace/labour-payments/advances",
       tone: "purple",
@@ -189,11 +212,11 @@ export function DashboardPage() {
     },
     {
       label: "Dispatches",
-      value: String(totals.dispatchesToday),
+      value: metricsReady ? String(totalsValue.dispatchesToday) : "—",
       icon: PackageOpen,
       path: "/workspace/dispatch",
       tone: "blue",
-      detail: `${totals.cartonsToday} cartons today`,
+      detail: metricsReady ? `${totalsValue.cartonsToday} cartons today` : "Loading today's dispatches",
     },
   ];
 
@@ -361,11 +384,13 @@ export function DashboardPage() {
               <div className="dashboard-section-heading dashboard-section-heading--split">
                 <div>
                   <h2>{t("dashboard.recentActivity")}</h2>
-                  <p>{activities.length ? "Recent operational records from the current workspace." : "Activity will appear here as soon as records are saved."}</p>
+                  <p>{dashboardLoading ? "Loading recent workspace activity..." : (activities.length ? "Recent operational records from the current workspace." : "Activity will appear here as soon as records are saved.")}</p>
                 </div>
             <Link className="dashboard-section-link" to="/workspace/activity"><span>View all</span><ChevronRight size={14} /></Link>
               </div>
-              {activities.length === 0 ? (
+              {dashboardLoading ? (
+                <p className="activity-empty">Loading activity...</p>
+              ) : activities.length === 0 ? (
                 <p className="activity-empty">{t("dashboard.noActivity")}</p>
               ) : (
                 <div className="dashboard-activity-list">

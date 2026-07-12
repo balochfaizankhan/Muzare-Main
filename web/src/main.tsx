@@ -1,18 +1,20 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { StrictMode } from "react";
+import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
-import { registerSW } from "virtual:pwa-register";
 import App from "./App";
 import { AuthProvider } from "./auth/AuthProvider";
 import "./i18n";
 import "./styles.css";
 import { queryClient } from "./lib/query-client";
+import { markStartup, scheduleBackgroundTask } from "./lib/startupPerf";
 
-registerSW({ immediate: true });
+function RootShell() {
+  useEffect(() => {
+    markStartup("app-shell-mounted");
+  }, []);
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
+  return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <BrowserRouter>
@@ -20,5 +22,18 @@ createRoot(document.getElementById("root")!).render(
         </BrowserRouter>
       </AuthProvider>
     </QueryClientProvider>
+  );
+}
+
+markStartup("react-root-render-start");
+void scheduleBackgroundTask(async () => {
+  const { registerSW } = await import("virtual:pwa-register");
+  registerSW({ immediate: true });
+  markStartup("service-worker-registered");
+}, { timeoutMs: 3_000 });
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <RootShell />
   </StrictMode>,
 );

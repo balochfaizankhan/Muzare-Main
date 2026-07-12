@@ -2,10 +2,12 @@ import { Activity, AlertCircle, Building2, CheckCircle2, Clock3, LandPlot, Shiel
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { useEffect } from "react";
 import { useAuth } from "../../auth/AuthProvider";
 import { fetchAdminOverview } from "../../lib/api";
 import { formatDate, formatNumber } from "../../lib/format";
 import i18n from "../../i18n";
+import { markStartup } from "../../lib/startupPerf";
 
 const actions = [
   ["/admin/approvals", "adminOverview.actions.pendingApprovals", UserRoundPlus],
@@ -17,12 +19,17 @@ const actions = [
 
 export function AdminDashboard() {
   const { t } = useTranslation();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const overview = useQuery({
     queryKey: ["admin-overview"],
     queryFn: () => fetchAdminOverview(token!),
     enabled: Boolean(token),
   });
+  useEffect(() => {
+    if (overview.isSuccess) {
+      markStartup("admin-overview-ready", { workspaceId: user?.workspaceId ?? null });
+    }
+  }, [overview.isSuccess, user?.workspaceId]);
   const data = overview.data;
 
   const metrics = [
