@@ -244,7 +244,7 @@ export function LabourGroupsPage() {
   const isMembersView = location.pathname.endsWith("/members");
   const { labourers, groups, settlements, advances, refresh } = useLabourGroupsData();
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<LabourStatusFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<LabourStatusFilter>("active");
   const [membershipFilter, setMembershipFilter] = useState<MembershipFilter>("all");
   const [showCreate, setShowCreate] = useState(false);
   const [editingGroup, setEditingGroup] = useState<LabourGroup | null>(null);

@@ -1188,7 +1188,7 @@ function DeactivateLabourPanel({ token, workspaceId, labourer, onClose, onComple
   const title = preview?.action === "delete" ? "Delete Labour Permanently" : "Deactivate Labour";
   const expectedConfirmation = preview?.action === "delete" ? "DELETE" : "DEACTIVATE";
   const actionLabel = preview?.action === "delete" ? "Delete Permanently" : "Deactivate Labour";
-  return <ActionPanel title={title} onClose={onClose}>
+  return <ActionPanel title={title} onClose={onClose} closeDisabled={busy}>
     <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
       <p><strong>{labourer.name}</strong></p>
       {!preview && !error && <p>Checking protected attendance, advance, and payment history...</p>}
@@ -1208,7 +1208,7 @@ function DeactivateLabourPanel({ token, workspaceId, labourer, onClose, onComple
       {preview?.action === "deactivate" && <label><span>End date *</span><input required type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} /></label>}
       <label><span>{preview?.action === "delete" ? "Type DELETE to confirm *" : "Type DEACTIVATE to confirm *"}</span><input required autoComplete="off" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
       {error && <p className="worker-action-error">{error}</p>}
-      <footer><button type="button" onClick={onClose}>Cancel</button><button className="danger-button" disabled={!preview || confirmation !== expectedConfirmation || busy || (preview.action === "deactivate" && !endDate)} type="submit">{busy ? (preview?.action === "delete" ? "Deleting..." : "Deactivating...") : actionLabel}</button></footer>
+      <footer><button type="button" onClick={onClose} disabled={busy}>Cancel</button><button className="danger-button" disabled={!preview || confirmation !== expectedConfirmation || busy || (preview.action === "deactivate" && !endDate)} type="submit">{busy ? (preview?.action === "delete" ? "Deleting..." : "Deactivating...") : actionLabel}</button></footer>
     </form>
   </ActionPanel>;
 }
@@ -1400,10 +1400,11 @@ function AddPaymentPanel({ labourer, onClose, onSave }: { labourer: Labourer; on
   </ActionPanel>;
 }
 
-function ActionPanel({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
-  return <div className="worker-dialog-backdrop worker-action-backdrop" role="presentation" onClick={onClose}>
+function ActionPanel({ title, onClose, children, closeDisabled = false }: { title: string; onClose: () => void; children: ReactNode; closeDisabled?: boolean }) {
+  const handleClose = closeDisabled ? undefined : onClose;
+  return <div className="worker-dialog-backdrop worker-action-backdrop" role="presentation" onClick={handleClose}>
     <section className="worker-action-dialog" role="dialog" aria-modal="true" aria-label={title} onClick={(event) => event.stopPropagation()}>
-      <header><h2>{title}</h2><button type="button" aria-label={`Close ${title}`} onClick={onClose}><X size={19} /></button></header>
+      <header><h2>{title}</h2><button type="button" aria-label={`Close ${title}`} disabled={closeDisabled} onClick={handleClose}><X size={19} /></button></header>
       {children}
     </section>
   </div>;

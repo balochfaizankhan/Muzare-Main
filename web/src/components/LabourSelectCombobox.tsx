@@ -104,7 +104,12 @@ export function LabourSelectCombobox({
   const resolvedAriaLabel = ariaLabel ?? t("reports.labour");
   const resolvedNoResultsLabel = noResultsLabel ?? t("advancesPage.noLabourResults");
 
-  const labourOptions = useMemo<LabourOption[]>(() => options.map((option) => {
+  const selectableLabourOptions = useMemo(
+    () => options.filter((option) => option.active !== false || option.id === value),
+    [options, value],
+  );
+
+  const labourOptions = useMemo<LabourOption[]>(() => selectableLabourOptions.map((option) => {
     const phone = option.mobile ?? option.phone ?? "";
     const normalizedName = normalize(option.name);
     return {
@@ -115,7 +120,7 @@ export function LabourSelectCombobox({
       normalizedName,
       words: normalizedName.split(/\s+/).filter(Boolean),
     };
-  }), [options]);
+  }), [selectableLabourOptions]);
 
   const selected = useMemo(() => labourOptions.find((option) => option.id === value), [labourOptions, value]);
   const selectedLabel = value === "all" ? resolvedAllOptionLabel : (selected?.name ?? "");
@@ -137,7 +142,7 @@ export function LabourSelectCombobox({
         return left.index - right.index;
       })
       .map((entry) => entry.option);
-  }, [deferredQuery, labourOptions, options]);
+  }, [deferredQuery, labourOptions]);
 
   const items = useMemo(
     () => (includeAllOption && !normalize(deferredQuery) ? [{ id: "all", name: resolvedAllOptionLabel, phone: "", searchText: "" }, ...filtered] : filtered).slice(0, maxSuggestions),

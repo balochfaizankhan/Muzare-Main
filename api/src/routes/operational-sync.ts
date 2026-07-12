@@ -24,6 +24,7 @@ import {
   normalizeVoucherNumber,
   reserveVoucherNumber,
 } from "../lib/voucher-numbers.js";
+import { isLabourAvailableForEntry } from "../lib/labour-eligibility.js";
 import { hasModulePermission, hasPermission, type WorkspaceModule } from "../permissions.js";
 import { validateTenantReferences, validateTenantReferencesDetailed } from "../tenant-ownership.js";
 import { validateExpenseCategoryReference } from "./expense-categories.js";
@@ -263,6 +264,52 @@ function voucherValidationError(
 
 function cleanText(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function recordDateForEntity(entity: typeof entities[number], record: Record<string, unknown>) {
+  if (entity === "attendance") return cleanText(record.date);
+  if (entity === "advance") return cleanText(record.date);
+  if (entity === "labourPayment") return cleanText(record.date);
+  if (entity === "labourEarning") return cleanText(record.earningDate) || cleanText(record.date);
+  if (entity === "productionEntry") return cleanText(record.date);
+  if (entity === "wageRate") return cleanText(record.effectiveFrom);
+  return "";
+}
+
+function labourIdentifierForEntity(entity: typeof entities[number], record: Record<string, unknown>) {
+  if (entity === "labourGroup") return cleanText(record.foremanId) || cleanText(record.foremanLabourId);
+  if (entity === "wageRate") return cleanText(record.labourerId) || cleanText(record.labourId);
+  if (entity === "labourEarning" || entity === "labourPayment" || entity === "advance" || entity === "attendance" || entity === "productionEntry") {
+    return cleanText(record.labourerId) || cleanText(record.labourId);
+  }
+  return "";
+}
+
+async function ensureLabourIsAvailableForEntry(args: {
+  workspaceId: string;
+  farmId: string;
+  entity: typeof entities[number];
+  record: Record<string, unknown>;
+}) {
+  const labourerId = labourIdentifierForEntity(args.entity, args.record);
+  if (!labourerId) return null;
+  const date = recordDateForEntity(args.entity, args.record) || new Date().toISOString().slice(0, 10);
+  const [labourer] = await db.select({
+    clientRecordId: operationalRecords.clientRecordId,
+    payload: operationalRecords.payload,
+  }).from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, args.workspaceId),
+    eq(operationalRecords.farmId, args.farmId),
+    eq(operationalRecords.entityType, "labourer"),
+    eq(operationalRecords.clientRecordId, labourerId),
+  )).limit(1);
+  if (!labourer || isDeletedOperationalPayload(labourer.payload)) {
+    return "Select an existing labourer.";
+  }
+  if (!isLabourAvailableForEntry(labourer.payload, date)) {
+    return "This labour is inactive and cannot be used for new entries.";
+  }
+  return null;
 }
 
 function canManageDateTypes(user: AuthenticatedUser, workspaceId: string) {
@@ -819,6 +866,17 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         });
       }
       return forbiddenResponse(reply, ownershipError.message, ownershipError);
+    }
+    if (["attendance", "advance", "labourPayment", "labourEarning", "labourGroup", "productionEntry", "wageRate"].includes(parsed.data.entity)) {
+      const labourEligibilityError = await ensureLabourIsAvailableForEntry({
+        workspaceId: parsed.data.workspaceId,
+        farmId: parsed.data.farmId!,
+        entity: parsed.data.entity,
+        record: parsed.data.record as Record<string, unknown>,
+      });
+      if (labourEligibilityError) {
+        return reply.code(400).send({ message: labourEligibilityError });
+      }
     }
     if (dispatchPayload?.success) {
       const dateTypeIds = dispatchPayload.data.items.map((item) => item.dateTypeId);

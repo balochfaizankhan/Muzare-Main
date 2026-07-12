@@ -89,10 +89,19 @@ export function isWorkerEligibleForWageRatePeriod(worker: Pick<Labourer, "create
   return selectedFrom <= periodEnd && workerStart <= selectedTo;
 }
 
-export function isWorkerEligibleForAdvancePayment(worker: Pick<Labourer, "createdAt" | "joinedOn" | "isArchived">, _selectedDate: string) {
-  return !isArchivedWorker(worker) && Boolean(worker.joinedOn || worker.createdAt);
+export function isLabourAvailableForEntry(worker: Pick<Labourer, "active" | "createdAt" | "joinedOn" | "endedOn" | "firstAttendanceDate" | "lastAttendanceDate" | "inactiveDate" | "leftDate" | "isArchived">, transactionDate: string) {
+  if (isArchivedWorker(worker)) return false;
+  const { workerStart, workerEnd } = getWorkerWorkingPeriod(worker);
+  if (workerStart && transactionDate < workerStart) return false;
+  if (workerEnd && transactionDate > workerEnd) return false;
+  if (worker.active === false && !workerEnd) return false;
+  return Boolean(workerStart);
 }
 
-export function isWorkerEligibleForSettlement(worker: Pick<Labourer, "createdAt" | "joinedOn" | "isArchived">, _selectedDate: string) {
-  return !isArchivedWorker(worker) && Boolean(worker.joinedOn || worker.createdAt);
+export function isWorkerEligibleForAdvancePayment(worker: Pick<Labourer, "active" | "createdAt" | "joinedOn" | "endedOn" | "firstAttendanceDate" | "lastAttendanceDate" | "inactiveDate" | "leftDate" | "isArchived">, selectedDate: string) {
+  return isLabourAvailableForEntry(worker, selectedDate);
+}
+
+export function isWorkerEligibleForSettlement(worker: Pick<Labourer, "active" | "createdAt" | "joinedOn" | "endedOn" | "firstAttendanceDate" | "lastAttendanceDate" | "inactiveDate" | "leftDate" | "isArchived">, selectedDate: string) {
+  return isLabourAvailableForEntry(worker, selectedDate);
 }

@@ -11221,6 +11221,10 @@ button {
 .attendance-inactive-toggle { align-items: center; color: var(--text-secondary); display: flex; font-size: .72rem; gap: 5px; width: fit-content; }
 .attendance-inactive-toggle input { height: 14px; margin: 0; width: 14px; }
 .worker-action-warning { background: var(--danger-bg); border-radius: 12px; color: var(--text); padding: 10px; }
+.worker-action-stats { display: grid; gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.worker-action-stats article { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 10px; display: grid; gap: 4px; padding: 10px; }
+.worker-action-stats article span { color: var(--text-secondary); font-size: .78rem; font-weight: 700; }
+.worker-action-stats article strong { color: var(--text); font-size: 1rem; }
 .worker-action-dialog .danger-button { background: var(--danger); color: #fff; }
 .worker-action-dialog .danger-button:disabled { opacity: .55; }
 .dispatch-page-header {
@@ -14719,6 +14723,10 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 
   .worker-action-form--compact {
     gap: 7px;
+  }
+
+  .worker-action-stats {
+    grid-template-columns: 1fr;
   }
 
   .worker-action-form--compact label {

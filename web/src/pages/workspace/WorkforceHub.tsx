@@ -14,7 +14,7 @@ import { canCreate, hasModulePermission } from "../../lib/permissions";
 import { getActiveFarmId, getActiveSeasonId, makeLocalRecord, offlineDb, workspaceRecords, type LabourEarning, type LabourPayment, type LabourWageSettlement, type Labourer, type WageRate } from "../../lib/offline-db";
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
 import { compareWageRates, getWageRateStatus } from "../../lib/wageRates";
-import { sortWorkersForDisplay } from "../../lib/workerEligibility";
+import { isLabourAvailableForEntry, sortWorkersForDisplay } from "../../lib/workerEligibility";
 import { persistOperationalRecord } from "../../services/syncService";
 
 const money = formatMoney;
@@ -349,6 +349,10 @@ export function DirectLabourPaymentsPage() {
   }), [payments, labourById, search, from, to, selectedLabourId]);
 
   const total = filtered.reduce((sum, payment) => sum + payment.amount, 0);
+  const recordableLabourers = useMemo(() => labourers.filter((labourer) => isLabourAvailableForEntry(labourer, entryDate)).sort((left, right) => left.name.localeCompare(right.name)), [entryDate, labourers]);
+  useEffect(() => {
+    if (entryLabourerId && !recordableLabourers.some((labourer) => labourer.id === entryLabourerId)) setEntryLabourerId("");
+  }, [entryLabourerId, recordableLabourers]);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setError("");
@@ -398,7 +402,7 @@ export function DirectLabourPaymentsPage() {
         <form className="module-form" onSubmit={(event) => void submit(event)}>
           <div className="advances-filter-row">
             <label className="advances-filter-field"><span>Date</span><input required type="date" value={entryDate} onChange={(event) => setEntryDate(event.target.value)} /></label>
-            <label className="advances-filter-field advances-filter-field--full"><span>Labour</span><LabourSelectCombobox ariaLabel="Labour" options={labourers} value={entryLabourerId} onChange={setEntryLabourerId} placeholder="Search labour" noResultsLabel="No matching labour found" renderOption={(option) => <div className="labour-combobox__option-content"><div className="labour-combobox__option-content-top"><strong>{option.name}</strong></div><div className="labour-combobox__option-meta"><span>{option.group || "General"}</span>{option.active === false ? <span>Inactive</span> : null}</div></div>} /></label>
+            <label className="advances-filter-field advances-filter-field--full"><span>Labour</span><LabourSelectCombobox ariaLabel="Labour" options={recordableLabourers} value={entryLabourerId} onChange={setEntryLabourerId} placeholder="Search labour" noResultsLabel="No matching labour found" renderOption={(option) => <div className="labour-combobox__option-content"><div className="labour-combobox__option-content-top"><strong>{option.name}</strong></div><div className="labour-combobox__option-meta"><span>{option.group || "General"}</span>{option.active === false ? <span>Inactive</span> : null}</div></div>} /></label>
           </div>
           <div className="advances-filter-row">
             <label className="advances-filter-field"><span>Amount</span><input required type="number" min="0" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} /></label>

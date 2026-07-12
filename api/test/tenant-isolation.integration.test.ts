@@ -1197,25 +1197,68 @@ test("labour lifecycle hard deletes unused labour and deactivates linked labour 
     name: "Unused Worker", group: "General", dailyWage: 80,
   }))).statusCode, 200);
   const unusedPreview = await request(alpha.token, "GET", `/api/workspaces/${alpha.workspaceId}/labour/${unusedLabourerId}/deletion-preview`);
-  assert.deepEqual(unusedPreview.json(), { labourId: unusedLabourerId, labourName: "Unused Worker", linkedRecordCount: 0, action: "delete" });
+  assert.deepEqual(unusedPreview.json(), {
+    labourId: unusedLabourerId,
+    labourName: "Unused Worker",
+    attendanceCount: 0,
+    advanceCount: 0,
+    paymentCount: 0,
+    protectedRecordCount: 0,
+    action: "delete",
+  });
   assert.equal((await request(alpha.token, "DELETE", `/api/workspaces/${alpha.workspaceId}/labour/${unusedLabourerId}`, {})).statusCode, 400);
   const deleted = await request(alpha.token, "DELETE", `/api/workspaces/${alpha.workspaceId}/labour/${unusedLabourerId}`, { confirmation: "DELETE" });
-  assert.deepEqual(deleted.json(), { action: "deleted", linkedRecordCount: 0 });
+  assert.deepEqual(deleted.json(), {
+    action: "deleted",
+    attendanceCount: 0,
+    advanceCount: 0,
+    paymentCount: 0,
+    protectedRecordCount: 0,
+  });
 
   const linkedLabourerId = randomUUID();
+  const linkedPaymentAccountId = await createAccount(alpha, "Historical Worker Cash");
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", linkedLabourerId, {
     name: "Historical Worker", group: "General", dailyWage: 95,
   }))).statusCode, 200);
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "attendance", randomUUID(), {
     labourerId: linkedLabourerId, date: "2026-08-01", status: "present",
   }))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "advance", randomUUID(), {
+    labourerId: linkedLabourerId, date: "2026-08-01", amount: 25, accountId: linkedPaymentAccountId,
+  }))).statusCode, 200);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourPayment", randomUUID(), {
+    labourerId: linkedLabourerId, date: "2026-08-01", amount: 40, paymentMethod: "Cash",
+  }))).statusCode, 200);
   assert.equal((await request(bravo.token, "GET", `/api/workspaces/${alpha.workspaceId}/labour/${linkedLabourerId}/deletion-preview`)).statusCode, 403);
   const linkedPreview = await request(alpha.token, "GET", `/api/workspaces/${alpha.workspaceId}/labour/${linkedLabourerId}/deletion-preview`);
-  assert.deepEqual(linkedPreview.json(), { labourId: linkedLabourerId, labourName: "Historical Worker", linkedRecordCount: 1, action: "deactivate" });
-  const deactivated = await request(alpha.token, "DELETE", `/api/workspaces/${alpha.workspaceId}/labour/${linkedLabourerId}`, { confirmation: "DELETE", endDate: "2026-08-02" });
-  assert.deepEqual(deactivated.json(), { action: "deactivated", linkedRecordCount: 1, record: deactivated.json().record });
-  assert.equal(deactivated.json().record.active, false);
-  assert.equal(deactivated.json().record.endedOn, "2026-08-02");
+  assert.deepEqual(linkedPreview.json(), {
+    labourId: linkedLabourerId,
+    labourName: "Historical Worker",
+    attendanceCount: 1,
+    advanceCount: 1,
+    paymentCount: 1,
+    protectedRecordCount: 3,
+    action: "deactivate",
+  });
+  assert.equal((await request(alpha.token, "DELETE", `/api/workspaces/${alpha.workspaceId}/labour/${linkedLabourerId}`, { confirmation: "DELETE" })).statusCode, 400);
+  const deactivated = await request(alpha.token, "DELETE", `/api/workspaces/${alpha.workspaceId}/labour/${linkedLabourerId}`, { confirmation: "DEACTIVATE", endDate: "2026-08-02" });
+  const deactivatedBody = deactivated.json();
+  assert.deepEqual(deactivatedBody, {
+    action: "deactivated",
+    attendanceCount: 1,
+    advanceCount: 1,
+    paymentCount: 1,
+    protectedRecordCount: 3,
+    record: deactivatedBody.record,
+  });
+  assert.equal(deactivatedBody.record.active, false);
+  assert.equal(deactivatedBody.record.endedOn, "2026-08-02");
+  const staleAttendance = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "attendance", randomUUID(), {
+    labourerId: linkedLabourerId, date: "2026-08-03", status: "present",
+  }));
+  assert.equal(staleAttendance.statusCode, 400);
+  assert.match(staleAttendance.json().message, /inactive and cannot be used for new entries/i);
   const report = await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/attendance/report?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}&from=2026-08-01&to=2026-08-02`);
   assert.equal(report.json().summaries.find((item: { id: string }) => item.id === linkedLabourerId).name, "Historical Worker");
 });

@@ -1714,11 +1714,19 @@ export const fetchOperationalRecords = (token: string, workspaceId: string) =>
   apiRequest<OperationalSnapshot>(`/v1/workspace/${workspaceId}/operational-records`, {}, token);
 export const fetchOperationalRecord = (token: string, workspaceId: string, recordId: string) =>
   apiRequest<OperationalRecordEnvelope>(`/v1/workspace/${workspaceId}/operational-records/${encodeURIComponent(recordId)}`, {}, token, { debugLabel: "operational-record-fetch" });
-export type LabourDeletionPreview = { labourId: string; labourName: string; linkedRecordCount: number; action: "deactivate" | "delete" };
+export type LabourDeletionPreview = {
+  labourId: string;
+  labourName: string;
+  attendanceCount: number;
+  advanceCount: number;
+  paymentCount: number;
+  protectedRecordCount: number;
+  action: "deactivate" | "delete";
+};
 export const fetchLabourDeletionPreview = (token: string, workspaceId: string, labourId: string) =>
   apiRequest<LabourDeletionPreview>(`/api/workspaces/${workspaceId}/labour/${labourId}/deletion-preview`, {}, token);
-export const deleteOrDeactivateLabour = (token: string, workspaceId: string, labourId: string, input: { confirmation: "DELETE"; endDate?: string }) =>
-  apiRequest<{ action: "deleted" | "deactivated"; linkedRecordCount: number }>(`/api/workspaces/${workspaceId}/labour/${labourId}`, { method: "DELETE", body: JSON.stringify(input) }, token);
+export const deleteOrDeactivateLabour = (token: string, workspaceId: string, labourId: string, input: { confirmation: "DELETE" | "DEACTIVATE"; endDate?: string }) =>
+  apiRequest<{ action: "deleted" | "deactivated"; attendanceCount: number; advanceCount: number; paymentCount: number; protectedRecordCount: number }>(`/api/workspaces/${workspaceId}/labour/${labourId}`, { method: "DELETE", body: JSON.stringify(input) }, token);
 export const fetchAttendanceReport = (token: string, workspaceId: string, filters: AttendanceReportFilters) => {
   const query = new URLSearchParams({
     farmId: filters.farmId, seasonId: filters.seasonId, from: filters.from, to: filters.to,

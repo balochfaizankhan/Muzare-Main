@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   getWorkerWorkingPeriod,
   groupWorkersByStatusPreserveOrder,
+  isLabourAvailableForEntry,
   isWorkerEligibleForAdvancePayment,
   isWorkerEligibleForAttendance,
   isWorkerEligibleForSettlement,
@@ -35,7 +36,7 @@ test("worker grouping preserves source order within active and inactive groups",
   ]);
 });
 
-test("worker eligibility stays date-aware for wage rates and keeps inactive workers available for payments and settlements", () => {
+test("worker eligibility stays date-aware and hides inactive workers from new entries by default", () => {
   const worker = {
     id: "w1",
     name: "Worker",
@@ -54,6 +55,8 @@ test("worker eligibility stays date-aware for wage rates and keeps inactive work
   assert.equal(isWorkerEligibleForAttendance(worker, "2026-06-01"), false);
   assert.equal(isWorkerEligibleForWageRatePeriod(worker, "2026-05-01", "2026-05-31"), true);
   assert.equal(isWorkerEligibleForWageRatePeriod(worker, "2026-06-01", "2026-06-30"), false);
-  assert.equal(isWorkerEligibleForAdvancePayment(worker, "2026-06-15"), true);
-  assert.equal(isWorkerEligibleForSettlement(worker, "2026-06-15"), true);
+  assert.equal(isLabourAvailableForEntry(worker, "2026-05-31"), true);
+  assert.equal(isLabourAvailableForEntry(worker, "2026-06-15"), false);
+  assert.equal(isWorkerEligibleForAdvancePayment(worker, "2026-06-15"), false);
+  assert.equal(isWorkerEligibleForSettlement(worker, "2026-06-15"), false);
 });

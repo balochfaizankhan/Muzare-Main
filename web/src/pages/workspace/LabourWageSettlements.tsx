@@ -7,6 +7,7 @@ import { ApiError, createLabourWageSettlement, deleteLabourWageSettlement, fetch
 import { formatMoney } from "../../lib/format";
 import { getActiveFarmId, getActiveSeasonId, offlineDb, workspaceRecords, type Account, type LabourGroup, type LabourWageSettlement, type Labourer } from "../../lib/offline-db";
 import { canCreate } from "../../lib/permissions";
+import { isLabourAvailableForEntry } from "../../lib/workerEligibility";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const money = formatMoney;
@@ -870,8 +871,11 @@ export function LabourWageSettlements() {
   const canEditSettlement = useCallback((settlement: Pick<LabourWageSettlementDetail, "status" | "accountingStatus">) => settlement.status !== "deleted" && settlement.status !== "voided" && settlement.accountingStatus !== "posted", []);
   const canDeleteSettlement = useCallback((settlement: Pick<LabourWageSettlementDetail, "status" | "accountingStatus">) => settlement.status !== "deleted" && settlement.status !== "voided" && settlement.accountingStatus !== "posted", []);
   const canVoidSettlement = useCallback((settlement: Pick<LabourWageSettlementDetail, "status" | "accountingStatus">) => settlement.status === "posted" && settlement.accountingStatus === "posted", []);
-  const activeLabourers = useMemo(() => labourers.filter((labourer) => labourer.active !== false).sort((left, right) => left.name.localeCompare(right.name)), [labourers]);
+  const activeLabourers = useMemo(() => labourers.filter((labourer) => isLabourAvailableForEntry(labourer, settlementDate)).sort((left, right) => left.name.localeCompare(right.name)), [labourers, settlementDate]);
   const activeLabourGroups = useMemo(() => labourGroups.filter((group) => group.active !== false).sort((left, right) => left.name.localeCompare(right.name)), [labourGroups]);
+  useEffect(() => {
+    if (settlementMode === "individual" && labourerId && !activeLabourers.some((labourer) => labourer.id === labourerId)) setLabourerId("");
+  }, [activeLabourers, labourerId, settlementMode]);
   const openSettlement = useCallback((settlement: LabourWageSettlement | LabourWageSettlementDetail, mode: "view" | "edit" = "view") => {
     setSelectedSettlement(settlement);
     setSelectedSettlementMode(mode);

@@ -118,13 +118,13 @@ test("labour work ledger exposes individual and group scopes in the UI and repor
   const labourEarnings = await source("web/src/pages/workspace/LabourEarnings.tsx");
   const reports = await source("web/src/pages/workspace/Reports.tsx");
   const api = await source("web/src/lib/api.ts");
-  assert.match(labourEarnings, /Work for/);
+  assert.match(labourEarnings, /Labour Earnings/);
   assert.match(labourEarnings, /Individual labour/);
   assert.match(labourEarnings, /Labour group/);
   assert.match(labourEarnings, /Assigned foreman/);
-  assert.match(labourEarnings, /Record group work/);
-  assert.match(reports, /Individual work/);
-  assert.match(reports, /Group work/);
+  assert.match(labourEarnings, /Record group earning/);
+  assert.match(reports, /Individual earnings/);
+  assert.match(reports, /Group earnings/);
   assert.match(reports, /labourEarningScopeLabel/);
   assert.match(api, /individualLabourWorkWages\?: number;/);
   assert.match(api, /groupLabourWorkWages\?: number;/);
@@ -339,7 +339,7 @@ test("reports module stays compact and responsive across desktop and mobile view
   assert.match(styles, /\.reports-view-header \{ align-items: flex-start; display: flex;/);
   assert.match(styles, /\.report-wide-table \{ display: none; \}/);
   assert.match(styles, /\.report-mobile-cards \{ display: grid; gap: 8px; \}/);
-  assert.match(styles, /\.reports-subtabs \{ flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; \}/);
+  assert.match(styles, /\.reports-subtabs \{[\s\S]*flex-wrap: wrap;[\s\S]*overflow-x: auto;[\s\S]*scroll-snap-type: x proximity;/);
   assert.match(styles, /\.report-mobile-cards \{ display: none; \}/);
 });
 
@@ -392,14 +392,13 @@ test("labour settlement form loads canonical payment account uuids and shows LW 
 
 test("advance report filters use explicit labels and a visible active-filter summary", async () => {
   const reports = await source("web/src/pages/workspace/Reports.tsx");
-  assert.match(reports, /Active Advance Filters/);
-  assert.match(reports, /Advance Recorded By/);
-  assert.match(reports, /Labour Group/);
-  assert.match(reports, /Labourer/);
-  assert.match(reports, /Paid From Account/);
+  assert.match(reports, /More filters/);
+  assert.match(reports, /Select labour group/);
+  assert.match(reports, /Select labour/);
+  assert.match(reports, /Paid from account/);
   assert.match(reports, /Minimum Amount/);
   assert.match(reports, /Maximum Amount/);
-  assert.match(reports, /Date Range/);
+  assert.match(reports, /reportsPage\.dateRange/);
 });
 
 test("financial cards and expense category totals use readable tokenized surfaces and compact money", async () => {
@@ -543,7 +542,7 @@ test("expense voucher search is debounced online, cache-first offline, and tenan
   assert.match(styles, /\.expense-search-filters input\[type="date"\] \{[\s\S]*-webkit-text-fill-color: var\(--text\);/);
   assert.match(styles, /@media \(max-width: 767px\) \{[\s\S]*\.expense-date-range,[\s\S]*\.expense-filter-grid \{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/);
   assert.match(modulePage, /expensesPage\.searchVouchers/);
-  assert.match(modulePage, /label=\{hasActiveFilters \? t\("expensesPage\.totalCurrentFilters"\) : t\("expensesPage\.totalCurrentSeason"\)\}/);
+  assert.match(modulePage, /expensesPage\.showingCurrentFilters/);
   assert.match(i18n, /noExpensesFound: "No expenses found for this search\."/);
 });
 
@@ -553,16 +552,27 @@ test("labour lifecycle UI preserves history and hides inactive labour from daily
   const api = await source("web/src/lib/api.ts");
   const modulePage = await source("web/src/pages/ModulePage.tsx");
   assert.match(app, /labourManagementRoutes/);
-  assert.match(route, /linkedRecordCount \? "deactivate" : "delete"/);
+  assert.match(route, /attendanceCount/);
+  assert.match(route, /advanceCount/);
+  assert.match(route, /paymentCount/);
+  assert.match(route, /protectedRecordCount/);
+  assert.match(route, /Type DELETE or DEACTIVATE to confirm this labour action\./);
+  assert.match(route, /Type DEACTIVATE to confirm this labour action\./);
   assert.match(route, /active: false, endedOn: endDate/);
   assert.match(route, /action: "labour_deleted"/);
   assert.match(route, /action: "labour_deactivated"/);
   assert.match(api, /fetchLabourDeletionPreview/);
   assert.match(api, /deleteOrDeactivateLabour/);
-  assert.match(modulePage, /showInactiveLabour \|\| canMarkAttendanceOn\(labourer, date\)/);
+  assert.match(modulePage, /showInactiveLabour \|\| visibleOnSelectedDate/);
   assert.match(modulePage, /workforcePage\.showInactive/);
-  assert.match(modulePage, /reports\.typeDeleteConfirm/);
-  assert.match(modulePage, /errors\.syncPendingBeforeDeactivate/);
+  assert.match(modulePage, /Delete Labour Permanently/);
+  assert.match(modulePage, /Deactivate Labour/);
+  assert.match(modulePage, /Checking protected attendance, advance, and payment history/);
+  assert.match(modulePage, /Type DELETE to confirm \*/);
+  assert.match(modulePage, /Type DEACTIVATE to confirm \*/);
+  assert.match(modulePage, /Attendance records/);
+  assert.match(modulePage, /Advance records/);
+  assert.match(modulePage, /Payment records/);
 });
 
 test("labour profile shows only the final payable balance and avoids a conflicting net balance label", async () => {

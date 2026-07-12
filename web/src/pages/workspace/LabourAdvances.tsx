@@ -13,6 +13,7 @@ import { canCreate, canDelete, canEdit } from "../../lib/permissions";
 import { translatePaymentType } from "../../lib/systemTranslations";
 import { compareLabourers, ensureLocalAccounts, makeLocalRecord, offlineDb, workspaceRecords, type Account, type Advance, type Labourer } from "../../lib/offline-db";
 import { deleteOperationalRecord, persistOperationalRecord } from "../../services/syncService";
+import { isLabourAvailableForEntry } from "../../lib/workerEligibility";
 
 const today = todayLocalDateKey;
 const monthStart = () => `${today().slice(0, 8)}01`;
@@ -100,6 +101,9 @@ export function LabourAdvances() {
   const groupedLabourers = useMemo(() => labourers
     .filter((labourer) => group === "all" || labourer.group === group)
     .sort(compareLabourers), [group, labourers]);
+  const recordableLabourers = useMemo(() => labourers
+    .filter((labourer) => isLabourAvailableForEntry(labourer, entryDate) && (group === "all" || labourer.group === group))
+    .sort(compareLabourers), [entryDate, group, labourers]);
   const advanceTotalByLabour = useMemo(() => {
     const totals = new Map<string, number>();
     for (const advance of advances) totals.set(advance.labourerId, (totals.get(advance.labourerId) ?? 0) + advance.amount);
@@ -110,9 +114,9 @@ export function LabourAdvances() {
     : t("advancesPage.noLabourResultsInGroup", { group });
 
   useEffect(() => {
-    if (entryLabourerId && !groupedLabourers.some((labourer) => labourer.id === entryLabourerId)) setEntryLabourerId("");
+    if (entryLabourerId && !recordableLabourers.some((labourer) => labourer.id === entryLabourerId)) setEntryLabourerId("");
     setSelectedLabourerIds((current) => current.filter((id) => groupedLabourers.some((labourer) => labourer.id === id)));
-  }, [entryLabourerId, groupedLabourers]);
+  }, [entryLabourerId, groupedLabourers, recordableLabourers]);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -204,9 +208,9 @@ export function LabourAdvances() {
               <option value="all">{t("advancesPage.allGroups")}</option>
               {groups.map((name) => <option key={name}>{name}</option>)}
             </ClearableSelect></label>
-            <label className="advances-filter-field advances-filter-field--full"><span>{t("advancesPage.labour")}</span><LabourSelectCombobox
+          <label className="advances-filter-field advances-filter-field--full"><span>{t("advancesPage.labour")}</span><LabourSelectCombobox
               ariaLabel={t("advancesPage.labour")}
-              options={groupedLabourers}
+              options={recordableLabourers}
               value={entryLabourerId}
               onChange={setEntryLabourerId}
               placeholder={t("advancesPage.searchLabourByName")}
