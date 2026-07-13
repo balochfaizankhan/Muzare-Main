@@ -902,29 +902,7 @@ export async function repairStaleSyncQueueItem(mutationId: string) {
     if (navigator.onLine) await syncPendingRecords({ force: true });
     return;
   }
-  const payload = item.payload as LocalRecord;
-  const repairedPayload = {
-    ...payload,
-    workspaceId: context.workspaceId,
-    farmId: payload.farmId ?? context.farmId ?? null,
-    seasonId: payload.seasonId ?? context.seasonId ?? null,
-    pendingSync: true,
-  };
-  await tableFor(item.entity).update(payload.id, repairedPayload);
-  await offlineDb.pendingMutations.update(mutationId, {
-    payload: repairedPayload,
-    workspaceId: context.workspaceId,
-    farmId: repairedPayload.farmId ?? undefined,
-    seasonId: repairedPayload.seasonId ?? undefined,
-    attempts: 0,
-    retryable: true,
-    status: "pending",
-    nextAttemptAt: undefined,
-    lastError: undefined,
-    updatedAt: new Date().toISOString(),
-  });
-  await refreshSyncState({ status: navigator.onLine ? "pending" : "offline" });
-  if (navigator.onLine) await syncPendingRecords({ force: true });
+  throw new Error("This record belongs to a different workspace, farm, or season. Switch back to its original context to retry it, or discard it after review.");
 }
 
 export function stopSyncService() {

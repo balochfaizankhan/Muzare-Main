@@ -249,7 +249,7 @@ export function WorkspaceLayout() {
                 </details>
                 <div className="sync-queue-item__actions">
                   {(isDateTypeQueueItem || (item.status !== "permission_denied" && item.status !== "stale_context")) && <button type="button" onClick={() => void retrySyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.retryItem")}</button>}
-                  {(isDateTypeQueueItem || item.status === "stale_context") && <button type="button" onClick={() => void repairStaleSyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.repairStaleContext")}</button>}
+                  {isDateTypeQueueItem && <button type="button" onClick={() => void repairStaleSyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.repairStaleContext")}</button>}
                   {!isDateTypeQueueItem && <button type="button" onClick={() => void resolveSyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{t("sync.markResolved")}</button>}
                   <button type="button" onClick={() => void discardSyncQueueItem(item.id).then(() => getSyncQueueItems().then(setQueueItems))}>{item.status === "permission_denied" ? t("sync.discardUnauthorizedChange") : t("sync.discardStaleItem")}</button>
                 </div>

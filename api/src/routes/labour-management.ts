@@ -51,7 +51,7 @@ function referencesLabour(payload: Record<string, unknown>, labourId: string) {
 }
 
 async function protectedLabourCounts(database: Pick<typeof db, "select">, workspaceId: string, labourId: string, farmId: string) {
-  const [attendanceCount, advanceCount] = await Promise.all([
+  const [typedAttendanceRows, typedAdvanceRows, operationalDependencyRows] = await Promise.all([
     database.select({ id: attendanceEntries.id }).from(attendanceEntries).where(and(
       eq(attendanceEntries.farmId, farmId),
       eq(attendanceEntries.labourerId, labourId),
@@ -60,7 +60,27 @@ async function protectedLabourCounts(database: Pick<typeof db, "select">, worksp
       eq(advanceRecords.farmId, farmId),
       eq(advanceRecords.labourerId, labourId),
     )),
+    database.select({
+      entityType: operationalRecords.entityType,
+      payload: operationalRecords.payload,
+    }).from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, workspaceId),
+      eq(operationalRecords.farmId, farmId),
+      inArray(operationalRecords.entityType, ["attendance", "advance"]),
+    )),
   ]);
+  const operationalAttendanceCount = operationalDependencyRows.filter((record) =>
+    record.entityType === "attendance"
+    && !isDeletedOperationalPayload(record.payload)
+    && referencesLabour(record.payload, labourId)).length;
+  const operationalAdvanceCount = operationalDependencyRows.filter((record) =>
+    record.entityType === "advance"
+    && !isDeletedOperationalPayload(record.payload)
+    && referencesLabour(record.payload, labourId)).length;
+  // A deployment may contain legacy typed rows or current operational rows.
+  // Prefer current records when present to avoid double-counting dual-written imports.
+  const attendanceCount = operationalAttendanceCount || typedAttendanceRows.length;
+  const advanceCount = operationalAdvanceCount || typedAdvanceRows.length;
   const paymentRows = await database.select({
     entityType: operationalRecords.entityType,
     payload: operationalRecords.payload,
@@ -71,10 +91,10 @@ async function protectedLabourCounts(database: Pick<typeof db, "select">, worksp
   ));
   const paymentCount = paymentRows.filter((record) => !isDeletedOperationalPayload(record.payload) && referencesLabour(record.payload, labourId)).length;
   return {
-    attendanceCount: attendanceCount.length,
-    advanceCount: advanceCount.length,
+    attendanceCount,
+    advanceCount,
     paymentCount,
-    protectedRecordCount: attendanceCount.length + advanceCount.length + paymentCount,
+    protectedRecordCount: attendanceCount + advanceCount + paymentCount,
   };
 }
 

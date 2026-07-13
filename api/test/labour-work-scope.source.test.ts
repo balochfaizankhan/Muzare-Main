@@ -18,14 +18,13 @@ test("labour work scope plumbing persists individual and group earning fields en
   assert.ok(settlements.includes("groupLabourWorkWages"));
   assert.ok(settlements.includes('earningScope: "group"'));
   assert.ok(settlements.includes("includedEarnings"));
-  assert.ok(webPage.includes("Work for"));
+  assert.ok(webPage.includes("Earnings for"));
   assert.ok(webPage.includes("Individual labour"));
   assert.ok(webPage.includes("Labour group"));
   assert.ok(webPage.includes("Assigned foreman"));
-  assert.ok(webPage.includes("Record group work"));
+  assert.ok(webPage.includes("Record group earning"));
   assert.ok(webPage.includes("labourGroupId"));
   assert.ok(apiTypes.includes("individualLabourWorkWages?: number;"));
   assert.ok(apiTypes.includes("groupLabourWorkWages?: number;"));
   assert.ok(apiTypes.includes('earningScope: "individual" | "group";'));
 });
-

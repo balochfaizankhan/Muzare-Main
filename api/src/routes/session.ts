@@ -45,12 +45,12 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
     if (!parsed.success) return reply.code(400).send({ message: "Please complete all required onboarding fields." });
 
     const email = parsed.data.email.toLowerCase();
-    const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
-    if (existing) return reply.code(409).send({ message: "An account already exists for this email." });
-
     if (localDevelopmentMode) {
       return reply.code(503).send({ message: "Configure PostgreSQL to create accounts." });
     }
+
+    const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
+    if (existing) return reply.code(409).send({ message: "An account already exists for this email." });
 
     const created = await createApprovedWorkspaceOwner({ ...parsed.data, email });
     const token = await createSession(created.user.id, created.workspace.id);

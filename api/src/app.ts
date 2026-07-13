@@ -37,13 +37,19 @@ export async function buildApp() {
   const corsMethods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
   const corsHeaders = ["Content-Type", "Authorization", "X-Workspace-Id", "X-Farm-Id", "X-Season-Id", "X-Requested-With"];
 
-  app.setErrorHandler((error, _request, reply) => {
+  app.setErrorHandler((error, request, reply) => {
     app.log.error(error);
     const statusCode = typeof (error as { statusCode?: number }).statusCode === "number" ? (error as { statusCode: number }).statusCode : 500;
-    const message = error instanceof Error && error.message.trim()
-      ? error.message
-      : "Something went wrong. Please try again or contact support.";
-    return reply.code(statusCode).send({ message });
+    if (statusCode < 500) {
+      const message = error instanceof Error && error.message.trim()
+        ? error.message
+        : "The request could not be completed.";
+      return reply.code(statusCode).send({ message });
+    }
+    return reply.code(statusCode).send({
+      message: "Something went wrong. Please try again or contact support.",
+      requestId: request.id,
+    });
   });
 
   app.log.info({ allowedOrigins }, "CORS allowed origins");

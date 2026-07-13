@@ -388,7 +388,9 @@ async function inactiveDispatchReference(
     eq(operationalRecords.entityType, entityType),
     inArray(operationalRecords.clientRecordId, ids),
   ];
-  if (seasonId) conditions.push(eq(operationalRecords.seasonId, seasonId));
+  // Date types are farm-scoped masters. Their writes intentionally ignore a
+  // season context, so dispatch validation must not look for a season-scoped copy.
+  if (seasonId && entityType !== "dateType") conditions.push(eq(operationalRecords.seasonId, seasonId));
   const records = await db.select({ clientRecordId: operationalRecords.clientRecordId, payload: operationalRecords.payload })
     .from(operationalRecords).where(and(...conditions));
   return records.length !== ids.length || records.some((record) => record.payload.active === false || isDeletedOperationalPayload(record.payload));
@@ -1052,7 +1054,13 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         details: { clientRecordId: parsed.data.record.id, clientUpdatedAt: parsed.data.record.updatedAt, databaseUpdatedAt: existing.clientUpdatedAt.toISOString() },
       });
     }
-    const payloadRecord = expenseCategory ? { ...parsed.data.record, ...expenseCategory } : parsed.data.record;
+    // Older offline clients may omit fields they do not understand. Preserve
+    // authoritative server fields instead of letting a newer partial copy erase them.
+    const payloadRecord: Record<string, unknown> = {
+      ...(existing?.payload ?? {}),
+      ...parsed.data.record,
+      ...(expenseCategory ?? {}),
+    };
     if (parsed.data.entity === "labourEarning") {
       const earningScope = typeof payloadRecord.earningScope === "string" && payloadRecord.earningScope === "group" ? "group" : "individual";
       const labourerId = typeof payloadRecord.labourerId === "string"

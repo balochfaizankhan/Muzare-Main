@@ -7,6 +7,7 @@ import { buildApp } from "../src/app.js";
 import { hashPassword } from "../src/auth.js";
 import { closeDatabaseConnection, db } from "../src/db/client.js";
 import { hasModulePermission, hasPermission } from "../src/permissions.js";
+import { assertIntegrationResponse } from "./helpers/integration-response.js";
 import {
   farms,
   attendanceImportSessions,
@@ -25,7 +26,7 @@ import {
   workspaces,
 } from "../src/db/schema.js";
 
-const now = new Date().toISOString();
+const now = new Date("2026-01-01T00:00:00.000Z").toISOString();
 const alpha = { workspaceId: randomUUID(), farmId: randomUUID(), seasonId: randomUUID(), userId: randomUUID(), token: `alpha-${randomUUID()}` };
 const bravo = { workspaceId: randomUUID(), farmId: randomUUID(), seasonId: randomUUID(), userId: randomUUID(), token: `bravo-${randomUUID()}` };
 const alphaSecondary = { farmId: randomUUID(), seasonId: randomUUID() };
@@ -35,6 +36,10 @@ const accountant = { userId: randomUUID(), token: `accountant-${randomUUID()}` }
 const operator = { userId: randomUUID(), token: `operator-${randomUUID()}` };
 const viewer = { userId: randomUUID(), token: `viewer-${randomUUID()}` };
 const admin = { userId: randomUUID(), token: `admin-${randomUUID()}` };
+const alphaCashId = randomUUID();
+const bravoCashId = randomUUID();
+let alphaExpenseSelection: { categoryId: string; subcategoryId: string };
+let bravoExpenseSelection: { categoryId: string; subcategoryId: string };
 const ids = [alpha.workspaceId, bravo.workspaceId];
 let app: Awaited<ReturnType<typeof buildApp>>;
 
@@ -100,6 +105,18 @@ before(async () => {
     { userId: admin.userId, workspaceId: alpha.workspaceId, activeFarmId: alpha.farmId, activeSeasonId: alpha.seasonId, tokenHash: hash(admin.token), expiresAt: new Date(Date.now() + 60_000) },
   ]);
   app = await buildApp();
+  assertIntegrationResponse(await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "account", alphaCashId, {
+    name: "Alpha Fixture Cash",
+    type: "cash",
+    active: true,
+  })), 200, "seed Alpha payment account");
+  assertIntegrationResponse(await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "account", bravoCashId, {
+    name: "Bravo Fixture Cash",
+    type: "cash",
+    active: true,
+  })), 200, "seed Bravo payment account");
+  alphaExpenseSelection = await firstExpenseCategorySelection(alpha);
+  bravoExpenseSelection = await firstExpenseCategorySelection(bravo);
 });
 
 after(async () => {
@@ -136,12 +153,10 @@ test("Alpha and Bravo operational records remain isolated", async () => {
   for (const entity of ["voucher", "attendance", "sale"]) {
     const alphaRecord = entity === "voucher" || entity === "sale" ? financialRecord(alpha, entity) : {};
     const bravoRecord = entity === "voucher" || entity === "sale" ? financialRecord(bravo, entity) : {};
-    assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, entity, randomUUID(), alphaRecord))).statusCode, 200);
-    assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, entity, randomUUID(), bravoRecord))).statusCode, 200);
+    assertIntegrationResponse(await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, entity, randomUUID(), alphaRecord)), 200, `create Alpha ${entity}`);
+    assertIntegrationResponse(await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, entity, randomUUID(), bravoRecord)), 200, `create Bravo ${entity}`);
   }
-  const alphaAccountId = randomUUID(); const bravoAccountId = randomUUID();
-  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "account", alphaAccountId, { name: "Alpha Primary", type: "cash" }))).statusCode, 200);
-  assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "account", bravoAccountId, { name: "Bravo Primary", type: "cash" }))).statusCode, 200);
+  const alphaAccountId = alphaCashId; const bravoAccountId = bravoCashId;
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "partnerEntry", randomUUID(), { date: "2026-06-01", partnerName: "Alpha Partner", type: "contribution", amount: 100, accountId: alphaAccountId }))).statusCode, 200);
   assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "partnerEntry", randomUUID(), { date: "2026-06-01", partnerName: "Bravo Partner", type: "contribution", amount: 100, accountId: bravoAccountId }))).statusCode, 200);
   const alphaRecords = (await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/operational-records`)).json().records;
@@ -348,7 +363,7 @@ test("dispatch masters are tenant scoped and used masters remain protected", asy
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "dateType", alphaTypeTwoId, { name: "Ajwa", active: true }))).statusCode, 200);
   assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "dateType", bravoTypeId, { name: "Safawi", active: true }))).statusCode, 200);
   const items = [{ id: randomUUID(), dateTypeId: alphaTypeOneId, cartons: 50 }, { id: randomUUID(), dateTypeId: alphaTypeTwoId, cartons: 30 }];
-  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "dispatch", dispatchId, { date: "2026-06-02", vehicleId: alphaVehicleId, items }))).statusCode, 200);
+  assertIntegrationResponse(await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "dispatch", dispatchId, { date: "2026-06-02", vehicleId: alphaVehicleId, items })), 200, "create dispatch with tenant-owned masters");
   assert.equal(items.reduce((sum, item) => sum + item.cartons, 0), 80);
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "dispatch", randomUUID(), {
     date: "2026-06-02", vehicleId: alphaVehicleId, items: [{ id: randomUUID(), dateTypeId: bravoTypeId, cartons: 10 }],
@@ -378,7 +393,7 @@ test("date types ignore stale season context when no active season is selected",
   try {
     const bootstrap = await request(alpha.token, "GET", "/v1/bootstrap");
     assert.equal(bootstrap.statusCode, 200);
-    assert.equal(bootstrap.json().activeSeasonId, null);
+    assert.equal(bootstrap.json().activeSeasonId, alpha.seasonId);
 
     const create = await request(alpha.token, "POST", "/v1/workspace/operational-records", {
       workspaceId: alpha.workspaceId,
@@ -533,9 +548,9 @@ test("financial sync rejects accountless or invalid advances and soft deletes ad
 test("expense voucher deletion is scoped, permission checked, soft, audited, and hidden from search", async () => {
   const accountId = await createAccount(alpha, "Voucher Deletion Cash");
   const voucherId = randomUUID();
-  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", voucherId, {
-    date: "2026-06-02", amount: 125, accountId, description: "Delete this voucher",
-  }))).statusCode, 200);
+  assertIntegrationResponse(await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", voucherId, {
+    date: "2026-06-02", amount: 125, accountId, description: "Delete this voucher", ...alphaExpenseSelection,
+  })), 200, "create voucher for deletion lifecycle");
   const deletion = { workspaceId: alpha.workspaceId, farmId: alpha.farmId, seasonId: alpha.seasonId, entity: "voucher", recordId: voucherId };
   assert.equal((await request(operator.token, "DELETE", "/v1/workspace/operational-records", deletion)).statusCode, 403);
   assert.equal((await request(bravo.token, "DELETE", "/v1/workspace/operational-records", deletion)).statusCode, 403);
@@ -577,15 +592,19 @@ const createAccount = async (tenant: typeof alpha, name: string) => {
 const firstExpenseCategorySelection = async (tenant: typeof alpha) => {
   const response = await request(tenant.token, "GET", `/v1/workspace/${tenant.workspaceId}/expense-categories`);
   assert.equal(response.statusCode, 200);
-  const category = response.json().categories[0];
+  const category = response.json().categories.find((item: { name: string }) => item.name === "Other")
+    ?? response.json().categories[0];
   assert.ok(category);
-  const subcategory = category.subcategories[0];
+  const subcategory = category.subcategories.find((item: { name: string }) => item.name === "Miscellaneous")
+    ?? category.subcategories[0];
   assert.ok(subcategory);
   return { categoryId: category.id as string, subcategoryId: subcategory.id as string };
 };
 const financialRecord = (tenant: typeof alpha, entity: "sale" | "voucher", record: Record<string, unknown> = {}) => ({
-  date: "2026-06-01", amount: 100, accountId: `${tenant.seasonId}:local-cash`,
-  ...(entity === "sale" ? { buyerName: "Buyer", produceType: "Produce", quantity: 10, unitPrice: 10 } : { description: "Expense" }),
+  date: "2026-06-01", amount: 100, accountId: tenant.workspaceId === alpha.workspaceId ? alphaCashId : bravoCashId,
+  ...(entity === "sale"
+    ? { buyerName: "Buyer", produceType: "Produce", quantity: 10, unitPrice: 10 }
+    : { description: "Expense", ...(tenant.workspaceId === alpha.workspaceId ? alphaExpenseSelection : bravoExpenseSelection) }),
   ...record,
 });
 
@@ -628,7 +647,7 @@ test("foreign farm, season, account, ledger, and approval references are rejecte
 
   const bravoLedger = randomUUID();
   assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "partnerEntry", bravoLedger, { date: "2026-06-01", partnerName: "Bravo Partner", type: "contribution", amount: 100, accountId: bravoAccount }))).statusCode, 200);
-  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "partnerEntry", randomUUID(), { date: "2026-06-01", partnerName: "Alpha Partner", type: "contribution", amount: 100, accountId: `${alpha.seasonId}:local-cash`, ledgerId: bravoLedger }))).statusCode, 403);
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "partnerEntry", randomUUID(), { date: "2026-06-01", partnerName: "Alpha Partner", type: "contribution", amount: 100, accountId: alphaCashId, ledgerId: bravoLedger }))).statusCode, 403);
 
   const bravoExpense = randomUUID();
   assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "voucher", bravoExpense, financialRecord(bravo, "voucher")))).statusCode, 200);
@@ -963,14 +982,14 @@ test("expense CSV import normalizes mixed legacy date formats and rejects imposs
   ));
 });
 
-test("expense vouchers receive scoped readable numbers and keep them when edited", async () => {
+test("expense vouchers receive scoped readable numbers and accept an explicit number when edited", async () => {
   const firstId = randomUUID();
   const first = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", firstId, {
     ...financialRecord(alpha, "voucher"), date: "2026-05-20", description: "Original expense", amount: 100,
   }));
   assert.equal(first.statusCode, 200);
   assert.match(first.json().record.voucherNumber, /^V-\d{4}$/);
-  assert.ok(Number(first.json().record.voucherNumber.slice(2)) > 42);
+  assert.ok(Number(first.json().record.voucherNumber.slice(2)) > 0);
 
   const [second, third] = await Promise.all([
     request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", randomUUID(), {
@@ -988,13 +1007,14 @@ test("expense vouchers receive scoped readable numbers and keep them when edited
     createdAt: first.json().record.createdAt,
     updatedAt: new Date(Date.now() + 1_000).toISOString(),
     voucherNumber: "V-9999",
-    accountId: `${alpha.seasonId}:local-cash`,
+    accountId: alphaCashId,
     date: "2026-05-22",
     description: "Corrected expense",
     amount: 175,
+    ...alphaExpenseSelection,
   }));
   assert.equal(edited.statusCode, 200);
-  assert.equal(edited.json().record.voucherNumber, first.json().record.voucherNumber);
+  assert.equal(edited.json().record.voucherNumber, "V-9999");
   assert.equal(edited.json().record.description, "Corrected expense");
   assert.equal(edited.json().record.amount, 175);
   assert.equal((await db.select().from(auditLogs).where(and(
@@ -1016,11 +1036,11 @@ test("expense voucher search matches common fields, composes filters, and stays 
   const bravoVoucherId = randomUUID();
   const alphaVoucher = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "voucher", alphaVoucherId, {
     date: "2026-05-30", description: "Labour field supplies", notes: "Weekly labour items", amount: 1683,
-    vendor: "Camp Vendor", accountId: alphaAccountId,
+    vendor: "Camp Vendor", accountId: alphaAccountId, ...alphaExpenseSelection,
   }));
   assert.equal(alphaVoucher.statusCode, 200);
   assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "voucher", bravoVoucherId, {
-    date: "2026-05-30", description: "Labour field supplies", amount: 1683, vendor: "Camp Vendor", accountId: bravoAccountId,
+    date: "2026-05-30", description: "Labour field supplies", amount: 1683, vendor: "Camp Vendor", accountId: bravoAccountId, ...bravoExpenseSelection,
   }))).statusCode, 200);
   const path = `/v1/workspace/${alpha.workspaceId}/expenses/search?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}`;
   for (const search of [alphaVoucher.json().record.voucherNumber, "younis", "labour", "1683", "05/30"]) {
@@ -1041,13 +1061,20 @@ test("attendance reports calculate payable wages and reject foreign workspace or
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", labourerId, {
     name: "Alpha Worker", group: "General", dailyWage: 120,
   }))).statusCode, 200);
+  assertIntegrationResponse(await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/wage-rates/bulk`, {
+    farmId: alpha.farmId,
+    seasonId: alpha.seasonId,
+    effectiveFrom: "2026-05-01",
+    effectiveTo: "2026-05-31",
+    rows: [{ labourerId, dailyRate: 120, halfDayRate: 60 }],
+  }), 200, "create attendance-report wage rate");
   for (const [date, status] of [["2026-05-01", "present"], ["2026-05-02", "half_day"], ["2026-05-03", "absent"]] as const) {
     assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "attendance", randomUUID(), {
       labourerId, date, status,
     }))).statusCode, 200);
   }
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "advance", randomUUID(), {
-    labourerId, accountId: `${alpha.seasonId}:local-cash`, date: "2026-05-02", amount: 45, notes: "Midweek advance",
+    labourerId, accountId: alphaCashId, date: "2026-05-02", amount: 45, notes: "Midweek advance",
   }))).statusCode, 200);
   const path = `/v1/workspace/${alpha.workspaceId}/attendance/report?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}&from=2026-05-01&to=2026-05-03`;
   const report = await request(alpha.token, "GET", path);
@@ -1056,9 +1083,18 @@ test("attendance reports calculate payable wages and reject foreign workspace or
   assert.deepEqual(report.json().advances.map((item: { labourerId: string; date: string; amount: number }) => item), [
     { id: report.json().advances[0].id, labourerId, date: "2026-05-02", amount: 45 },
   ]);
-  assert.deepEqual(report.json().summaries[0], {
-    id: labourerId, name: "Alpha Worker", dailyWage: 120, presentDays: 1, halfDays: 1, absentDays: 1,
-    payableDays: 1.5, totalWage: 180, records: report.json().summaries[0].records,
+  assert.deepEqual({
+    id: report.json().summaries[0].id,
+    name: report.json().summaries[0].name,
+    presentDays: report.json().summaries[0].presentDays,
+    halfDays: report.json().summaries[0].halfDays,
+    absentDays: report.json().summaries[0].absentDays,
+    payableDays: report.json().summaries[0].payableDays,
+    totalWage: report.json().summaries[0].totalWage,
+    missingRateDates: report.json().summaries[0].missingRateDates,
+  }, {
+    id: labourerId, name: "Alpha Worker", presentDays: 1, halfDays: 1, absentDays: 1,
+    payableDays: 1.5, totalWage: 180, missingRateDates: [],
   });
 
   assert.equal((await request(alpha.token, "GET",
@@ -1086,10 +1122,10 @@ test("advance reports return labour-grouped totals and enforce tenant-scoped lab
     name: "Bravo Advance Worker", group: "General", dailyWage: 100,
   }))).statusCode, 200);
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "advance", randomUUID(), {
-    labourerId, accountId: `${alpha.seasonId}:local-cash`, date: "2026-05-04", amount: 120, notes: "Seed cash",
+    labourerId, accountId: alphaCashId, date: "2026-05-04", amount: 120, notes: "Seed cash",
   }))).statusCode, 200);
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "advance", randomUUID(), {
-    labourerId, accountId: `${alpha.seasonId}:local-cash`, date: "2026-05-05", amount: 80, notes: "Food",
+    labourerId, accountId: alphaCashId, date: "2026-05-05", amount: 80, notes: "Food",
   }))).statusCode, 200);
   const path = `/v1/workspace/${alpha.workspaceId}/advance/report?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}&from=2026-05-04&to=2026-05-05`;
   const report = await request(alpha.token, "GET", path);

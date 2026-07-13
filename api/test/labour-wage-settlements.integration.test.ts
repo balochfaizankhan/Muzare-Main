@@ -7,6 +7,7 @@ import { closeDatabaseConnection, db } from "../src/db/client.js";
 import {
   accountTransactions,
   accounts,
+  auditLogs,
   farms,
   labourWageSettlementAdvanceAllocations,
   labourWageSettlementCreateRequests,
@@ -17,10 +18,11 @@ import {
   workspaceMemberships,
   workspaces,
 } from "../src/db/schema.js";
-import { normalizeLabourEarningPayload } from "../src/lib/labour-earnings.js";
+import { labourEarningEligibleForSettlement, normalizeLabourEarningPayload } from "../src/lib/labour-earnings.js";
 import { normalizeSettlementPayload } from "../src/lib/labour-wage-settlements.js";
+import { assertIntegrationResponse, assertPersistedUuid } from "./helpers/integration-response.js";
 
-const now = new Date().toISOString();
+const now = new Date("2026-01-01T00:00:00.000Z").toISOString();
 const tenant = {
   workspaceId: randomUUID(),
   farmId: randomUUID(),
@@ -37,6 +39,13 @@ const request = async (
   url: string,
   payload?: Record<string, unknown>,
 ) => app.inject({ method, url, headers: { authorization: `Bearer ${tenant.token}` }, payload });
+const setupRequest = async (
+  step: string,
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
+  url: string,
+  payload?: Record<string, unknown>,
+  expectedStatus = 200,
+) => assertIntegrationResponse(await request(method, url, payload), expectedStatus, step);
 const envelope = (entity: string, id: string, record: Record<string, unknown>) => ({
   workspaceId: tenant.workspaceId,
   farmId: tenant.farmId,
@@ -119,6 +128,7 @@ after(async () => {
   await db.delete(labourWageSettlementAdvanceAllocations).where(inArray(labourWageSettlementAdvanceAllocations.workspaceId, ids));
   await db.delete(accountTransactions).where(inArray(accountTransactions.farmId, [tenant.farmId]));
   await db.delete(labourWageSettlementCreateRequests).where(eq(labourWageSettlementCreateRequests.workspaceId, tenant.workspaceId));
+  await db.delete(auditLogs).where(eq(auditLogs.workspaceId, tenant.workspaceId));
   await db.delete(operationalRecords).where(inArray(operationalRecords.workspaceId, ids));
   await db.delete(userSessions).where(eq(userSessions.userId, tenant.userId));
   await db.delete(accounts).where(eq(accounts.farmId, tenant.farmId));
@@ -135,8 +145,13 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
   const labourerId = randomUUID();
   const labourGroupId = randomUUID();
   const attendanceId = randomUUID();
+  const endAttendanceId = randomUUID();
+  const beforeAttendanceId = randomUUID();
+  const afterAttendanceId = randomUUID();
   const earningId = randomUUID();
   const advanceId = randomUUID();
+  const duringAdvanceId = randomUUID();
+  const afterCutoffAdvanceId = randomUUID();
   const clientRequestId = randomUUID();
 
   const [paymentAccount] = await db.insert(accounts).values({
@@ -145,8 +160,17 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
     accountType: "cash",
     active: true,
   }).returning({ id: accounts.id });
-  assert.ok(paymentAccount?.id);
+  assertPersistedUuid(paymentAccount?.id, "create settlement payment account");
+  await setupRequest("persist settlement payment account identity", "POST", "/v1/workspace/operational-records", envelope("account", paymentAccount.id, {
+    name: "Settlement Cash Account",
+    type: "partner",
+    active: true,
+  }));
 
+  await setupRequest("create settlement group", "POST", "/v1/workspace/operational-records", envelope("labourGroup", labourGroupId, {
+    name: "Settlement Group",
+    active: true,
+  }));
   assert.equal((await request("POST", "/v1/workspace/operational-records", envelope("labourer", labourerId, {
     name: "Foreman Labourer",
     groupId: labourGroupId,
@@ -171,6 +195,21 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
     date: "2026-04-11",
     status: "present",
   }))).statusCode, 200);
+  await setupRequest("create end-boundary settlement attendance", "POST", "/v1/workspace/operational-records", envelope("attendance", endAttendanceId, {
+    labourerId,
+    date: "2026-04-30",
+    status: "half_day",
+  }));
+  await setupRequest("create pre-period attendance", "POST", "/v1/workspace/operational-records", envelope("attendance", beforeAttendanceId, {
+    labourerId,
+    date: "2026-04-10",
+    status: "present",
+  }));
+  await setupRequest("create post-period attendance", "POST", "/v1/workspace/operational-records", envelope("attendance", afterAttendanceId, {
+    labourerId,
+    date: "2026-05-01",
+    status: "present",
+  }));
   assert.equal((await request("POST", "/v1/workspace/operational-records", envelope("labourEarning", earningId, {
     labourerId,
     earningDate: "2026-04-12",
@@ -179,7 +218,7 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
     description: "Bonus",
     status: "pending_settlement",
   }))).statusCode, 200);
-  assert.equal((await request("POST", "/v1/workspace/operational-records", envelope("advance", advanceId, {
+  await setupRequest("create settlement advance", "POST", "/v1/workspace/operational-records", envelope("advance", advanceId, {
     labourerId,
     labourGroupId,
     labourGroupName: "Settlement Group",
@@ -187,7 +226,25 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
     amount: 120,
     accountId: paymentAccount.id,
     sourceAccountName: "Settlement Cash Account",
-  }))).statusCode, 200);
+  }));
+  await setupRequest("create in-period settlement advance", "POST", "/v1/workspace/operational-records", envelope("advance", duringAdvanceId, {
+    labourerId,
+    labourGroupId,
+    labourGroupName: "Settlement Group",
+    date: "2026-04-20",
+    amount: 10,
+    accountId: paymentAccount.id,
+    sourceAccountName: "Settlement Cash Account",
+  }));
+  await setupRequest("create post-cutoff settlement advance", "POST", "/v1/workspace/operational-records", envelope("advance", afterCutoffAdvanceId, {
+    labourerId,
+    labourGroupId,
+    labourGroupName: "Settlement Group",
+    date: "2026-05-02",
+    amount: 500,
+    accountId: paymentAccount.id,
+    sourceAccountName: "Settlement Cash Account",
+  }));
 
   const previewResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements/preview`, {
     farmId: tenant.farmId,
@@ -203,9 +260,33 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
   assert.equal(previewResponse.statusCode, 200);
   const preview = previewResponse.json().preview;
   assert.equal(preview.foremanId, labourerId);
-  assert.equal(preview.advanceAdjustedNow, 120);
-  assert.equal(preview.availableAdvanceBalanceBeforeSettlement, 120);
+  assert.equal(preview.attendanceWages, 150);
+  assert.equal(preview.individualLabourWorkWages, 50);
+  assert.equal(preview.groupLabourWorkWages, 0);
+  assert.equal(preview.grossWages, 200);
+  assert.equal(preview.advanceAdjustedNow, 130);
+  assert.equal(preview.availableAdvanceBalanceBeforeSettlement, 130);
+  assert.equal(preview.remainingAdvanceCarryForward, 0);
+  assert.equal(preview.netPayableBeforePayment, 70);
+  assert.equal(preview.includedLabourRows.length, 1);
+  assert.deepEqual(new Set(preview.sourceAttendanceIds), new Set([attendanceId, endAttendanceId]));
+  assert.deepEqual(preview.sourceLabourWorkIds, [earningId]);
   assert.equal(preview.legacyUnallocatedPreviouslySettledAdvances ?? 0, 0);
+
+  const repeatedPreviewResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements/preview`, {
+    farmId: tenant.farmId,
+    seasonId: tenant.seasonId,
+    fromDate: "2026-04-11",
+    toDate: "2026-04-30",
+    settlementDate: "2026-05-01",
+    settlementMode: "group",
+    groupId: labourGroupId,
+    paidAmount: 0,
+    manualAdjustment: 0,
+  });
+  assertIntegrationResponse(repeatedPreviewResponse, 200, "repeat read-only settlement preview");
+  assert.deepEqual(repeatedPreviewResponse.json().preview, preview);
+  assert.equal((await db.select().from(labourWageSettlementAdvanceAllocations)).length, 0);
 
   const createPayload = {
     farmId: tenant.farmId,
@@ -216,7 +297,7 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
     settlementMode: "group",
     groupId: labourGroupId,
     paymentAccountId: paymentAccount.id,
-    paidAmount: 150,
+    paidAmount: 70,
     manualAdjustment: 0,
     clientRequestId,
   };
@@ -251,7 +332,7 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
   assert.equal((settlementRow!.payload as Record<string, unknown>).paymentAccountType, "cash");
 
   const allocationRows = await db.select().from(labourWageSettlementAdvanceAllocations).where(eq(labourWageSettlementAdvanceAllocations.settlementRecordId, settlementRow!.id));
-  assert.equal(allocationRows.length, 1);
+  assert.equal(allocationRows.length, 2);
   assert.equal(allocationRows[0]!.settlementRecordId, settlementRow!.id);
 
   const [advanceRow] = await db.select({
@@ -262,8 +343,10 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
     eq(operationalRecords.clientRecordId, advanceId),
   )).limit(1);
   assert.ok(advanceRow);
-  assert.equal(allocationRows[0]!.advanceRecordId, advanceRow!.id);
-  assert.equal(Number(allocationRows[0]!.absorbedAmount), 120);
+  const originalAdvanceAllocation = allocationRows.find((row) => row.advanceRecordId === advanceRow!.id);
+  assert.ok(originalAdvanceAllocation);
+  assert.equal(Number(originalAdvanceAllocation.absorbedAmount), 120);
+  assert.equal(allocationRows.reduce((sum, row) => sum + Number(row.absorbedAmount), 0), 130);
 
   const [attendanceRowAfterCreate] = await db.select({
     payload: operationalRecords.payload,
@@ -290,6 +373,8 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
     eq(accountTransactions.sourceType, "labour_wage_settlement"),
   ));
   assert.equal(accountEntriesAfterCreate.length, 1);
+  assert.equal(Number(accountEntriesAfterCreate[0]!.amount), 70);
+  assert.equal(accountEntriesAfterCreate[0]!.type, "debit");
 
   const voidResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements/${createdSettlement.id}/void`, {
     voidReason: "Integration test void",
@@ -337,6 +422,7 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
     eq(accountTransactions.sourceType, "labour_wage_settlement"),
   ));
   assert.equal(accountEntriesAfterVoid.length, 2);
+  assert.equal(accountEntriesAfterVoid.reduce((sum, row) => sum + (row.type === "debit" ? Number(row.amount) : -Number(row.amount)), 0), 0);
 
   const previewAfterVoidResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements/preview`, {
     farmId: tenant.farmId,
@@ -352,7 +438,7 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
   assert.equal(previewAfterVoidResponse.statusCode, 200);
   const previewAfterVoid = previewAfterVoidResponse.json().preview;
   assert.equal(previewAfterVoid.previouslySettledAdvances, 0);
-  assert.equal(previewAfterVoid.availableAdvanceBalanceBeforeSettlement, 120);
+  assert.equal(previewAfterVoid.availableAdvanceBalanceBeforeSettlement, 130);
 });
 
 test("labour wage settlement create rejects a missing payment account before posting", async () => {
@@ -360,6 +446,10 @@ test("labour wage settlement create rejects a missing payment account before pos
   const labourGroupId = randomUUID();
   const clientRequestId = randomUUID();
 
+  await setupRequest("create missing-account settlement group", "POST", "/v1/workspace/operational-records", envelope("labourGroup", labourGroupId, {
+    name: "Missing Account Group",
+    active: true,
+  }));
   assert.equal((await request("POST", "/v1/workspace/operational-records", envelope("labourer", labourerId, {
     name: "Missing Account Foreman",
     groupId: labourGroupId,
@@ -414,11 +504,12 @@ test("labour wage settlement create rejects a missing payment account before pos
 
   const settlementRows = await db.select({
     id: operationalRecords.id,
+    payload: operationalRecords.payload,
   }).from(operationalRecords).where(and(
     eq(operationalRecords.workspaceId, tenant.workspaceId),
     eq(operationalRecords.entityType, "labourWageSettlement"),
   ));
-  assert.equal(settlementRows.length, 0);
+  assert.equal(settlementRows.filter((row) => normalizeSettlementPayload(row.payload as Record<string, unknown>).clientRequestId === clientRequestId).length, 0);
 });
 
 test("settlement status keeps committed settlements with missing accounts in SUCCESS plus REPAIR_REQUIRED", async () => {
@@ -443,7 +534,7 @@ test("settlement status keeps committed settlements with missing accounts in SUC
       expenseAmount: 150,
     }),
     recordedBy: tenant.userId,
-    clientUpdatedAt: now,
+    clientUpdatedAt: new Date(now),
   });
 
   const [beforeRow] = await db.select({
@@ -486,7 +577,7 @@ test("settlement status returns SUCCESS plus COMPLETE when accounting is already
     accountType: "cash",
     active: true,
   }).returning({ id: accounts.id });
-  assert.ok(account?.id);
+  assertPersistedUuid(account?.id, "create status payment account");
 
   await db.insert(operationalRecords).values({
     workspaceId: tenant.workspaceId,
@@ -507,7 +598,7 @@ test("settlement status returns SUCCESS plus COMPLETE when accounting is already
       expenseAmount: 150,
     }),
     recordedBy: tenant.userId,
-    clientUpdatedAt: now,
+    clientUpdatedAt: new Date(now),
   });
 
   await db.insert(accountTransactions).values({
@@ -515,6 +606,7 @@ test("settlement status returns SUCCESS plus COMPLETE when accounting is already
     seasonId: tenant.seasonId,
     accountId: account.id,
     source: "settlement",
+    sourceType: "labour_wage_settlement",
     referenceId: settlementId,
     type: "debit",
     amount: "150",
@@ -569,6 +661,7 @@ test("group labour work is counted once in group settlement preview and posting"
   const earningId = randomUUID();
   const attendanceId = randomUUID();
   const clientRequestId = randomUUID();
+  const concurrentRequestId = randomUUID();
 
   const [paymentAccount] = await db.insert(accounts).values({
     farmId: tenant.farmId,
@@ -576,57 +669,98 @@ test("group labour work is counted once in group settlement preview and posting"
     accountType: "cash",
     active: true,
   }).returning({ id: accounts.id });
-  assert.ok(paymentAccount?.id);
-
-  await request("POST", "/v1/workspace/operational-records", envelope("labourer", foremanId, {
-    name: "Group Foreman",
+  assertPersistedUuid(paymentAccount?.id, "create group settlement payment account");
+  await setupRequest("persist group settlement payment account identity", "POST", "/v1/workspace/operational-records", envelope("account", paymentAccount.id, {
+    name: "Group Settlement Cash",
+    type: "cash",
     active: true,
   }));
-  await request("POST", "/v1/workspace/operational-records", envelope("labourer", workerId, {
+
+  await setupRequest("create group-settlement group", "POST", "/v1/workspace/operational-records", envelope("labourGroup", groupId, {
+    name: "Group Alpha",
+    active: true,
+  }));
+  await setupRequest("create group foreman", "POST", "/v1/workspace/operational-records", envelope("labourer", foremanId, {
+    name: "Group Foreman",
+    groupId,
+    group: "Group Alpha",
+    active: true,
+  }));
+  await setupRequest("create group worker", "POST", "/v1/workspace/operational-records", envelope("labourer", workerId, {
     name: "Group Worker",
     groupId,
     group: "Group Alpha",
     active: true,
   }));
-  await request("POST", "/v1/workspace/operational-records", envelope("labourGroup", groupId, {
+  await setupRequest("assign group foreman", "POST", "/v1/workspace/operational-records", envelope("labourGroup", groupId, {
     name: "Group Alpha",
     foremanLabourId: foremanId,
     foremanId,
     active: true,
   }));
-  await request("POST", `/v1/workspace/${tenant.workspaceId}/wage-rates/bulk`, {
+  await setupRequest("create group worker wage rate", "POST", `/v1/workspace/${tenant.workspaceId}/wage-rates/bulk`, {
     farmId: tenant.farmId,
     seasonId: tenant.seasonId,
-    effectiveFrom: "2026-04-01",
-    effectiveTo: "2026-05-31",
+    effectiveFrom: "2026-06-01",
+    effectiveTo: "2026-06-30",
     rows: [{ labourerId: workerId, dailyRate: 100 }],
   });
-  await request("POST", "/v1/workspace/operational-records", envelope("attendance", attendanceId, {
+  await setupRequest("create group attendance", "POST", "/v1/workspace/operational-records", envelope("attendance", attendanceId, {
     labourerId: workerId,
-    date: "2026-04-15",
+    date: "2026-06-15",
     status: "present",
   }));
-  await request("POST", "/v1/workspace/operational-records", envelope("labourEarning", earningId, {
+  const groupEarningResponse = await setupRequest("create group labour earning", "POST", "/v1/workspace/operational-records", envelope("labourEarning", earningId, {
     earningScope: "group",
     labourGroupId: groupId,
     labourGroupName: "Group Alpha",
     foremanId,
-    earningDate: "2026-04-16",
+    earningDate: "2026-06-16",
     amount: 75,
     earningType: "bonus",
     description: "Group bonus",
     status: "pending_settlement",
   }));
+  const persistedGroupEarning = normalizeLabourEarningPayload((groupEarningResponse.json() as { record: Record<string, unknown> }).record);
+  assert.equal(persistedGroupEarning.earningScope, "group");
+  assert.equal(persistedGroupEarning.labourGroupId, groupId);
+  assert.equal(persistedGroupEarning.status, "pending_settlement");
+  assert.equal(labourEarningEligibleForSettlement(persistedGroupEarning, {
+    settlementMode: "group",
+    groupId,
+    foremanId,
+    labourIds: [foremanId, workerId],
+    settlementDate: "2026-07-01",
+  }), true);
+  const [storedGroupEarning] = await db.select({
+    farmId: operationalRecords.farmId,
+    seasonId: operationalRecords.seasonId,
+    payload: operationalRecords.payload,
+  }).from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, tenant.workspaceId),
+    eq(operationalRecords.entityType, "labourEarning"),
+    eq(operationalRecords.clientRecordId, earningId),
+  )).limit(1);
+  assert.ok(storedGroupEarning, "group labour earning was not persisted");
+  assert.equal(storedGroupEarning.farmId, tenant.farmId);
+  assert.equal(storedGroupEarning.seasonId, tenant.seasonId);
+  assert.equal(labourEarningEligibleForSettlement(storedGroupEarning.payload, {
+    settlementMode: "group",
+    groupId,
+    foremanId,
+    labourIds: [foremanId, workerId],
+    settlementDate: "2026-07-01",
+  }), true);
 
   const previewResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements/preview`, {
     farmId: tenant.farmId,
     seasonId: tenant.seasonId,
-    fromDate: "2026-04-01",
-    toDate: "2026-04-30",
-    settlementDate: "2026-05-01",
+    fromDate: "2026-06-01",
+    toDate: "2026-06-30",
+    settlementDate: "2026-07-01",
     settlementMode: "group",
     groupId,
-    paidAmount: 0,
+    paidAmount: 175,
     manualAdjustment: 0,
   });
   assert.equal(previewResponse.statusCode, 200);
@@ -636,24 +770,58 @@ test("group labour work is counted once in group settlement preview and posting"
   assert.equal(preview.includedEarnings.length, 1);
   assert.equal(preview.includedEarnings[0].earningScope, "group");
   assert.equal(preview.includedEarnings[0].labourGroupId, groupId);
+  assert.equal(preview.attendanceWages, 100);
+  assert.equal(preview.grossWages, 175);
+  assert.equal(preview.netPayableBeforePayment, 175);
+  assert.equal(preview.balanceAfterPayment, 0);
 
-  const createResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements`, {
+  const createPayload = {
     farmId: tenant.farmId,
     seasonId: tenant.seasonId,
-    fromDate: "2026-04-01",
-    toDate: "2026-04-30",
-    settlementDate: "2026-05-01",
+    fromDate: "2026-06-01",
+    toDate: "2026-06-30",
+    settlementDate: "2026-07-01",
     settlementMode: "group",
     groupId,
     paymentAccountId: paymentAccount.id,
-    paidAmount: 0,
+    paidAmount: 175,
     manualAdjustment: 0,
     clientRequestId,
-  });
-  assert.equal(createResponse.statusCode, 200);
+  };
+  const concurrentPayload = { ...createPayload, clientRequestId: concurrentRequestId };
+  const concurrentResponses = await Promise.all([
+    request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements`, createPayload),
+    request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements`, concurrentPayload),
+  ]);
+  assert.deepEqual(concurrentResponses.map((response) => response.statusCode).sort(), [200, 409]);
+  const createResponse = concurrentResponses.find((response) => response.statusCode === 200)!;
+  const winningClientRequestId = createResponse.json().clientRequestId as string;
+  const winningPayload = winningClientRequestId === clientRequestId ? createPayload : concurrentPayload;
   const settlement = createResponse.json().settlement;
   assert.equal(settlement.groupLabourWorkWages, 75);
   assert.equal(settlement.individualLabourWorkWages ?? 0, 0);
+  assert.equal(settlement.grossWages, preview.grossWages);
+  assert.equal(settlement.paidAmount, preview.paidAmount);
+  assert.equal(settlement.balanceAfterPayment, preview.balanceAfterPayment);
+
+  const lostAcknowledgementRetry = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements`, winningPayload);
+  assertIntegrationResponse(lostAcknowledgementRetry, 200, "retry committed group settlement after lost acknowledgement");
+  assert.equal(lostAcknowledgementRetry.json().settlement.id, settlement.id);
+
+  const groupSettlementRows = (await db.select({
+    clientRecordId: operationalRecords.clientRecordId,
+    payload: operationalRecords.payload,
+  }).from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, tenant.workspaceId),
+    eq(operationalRecords.entityType, "labourWageSettlement"),
+  ))).filter((row) => normalizeSettlementPayload(row.payload).fromDate === "2026-06-01");
+  assert.equal(groupSettlementRows.length, 1);
+  const groupAccountEntries = await db.select().from(accountTransactions).where(and(
+    eq(accountTransactions.referenceId, settlement.id),
+    eq(accountTransactions.sourceType, "labour_wage_settlement"),
+  ));
+  assert.equal(groupAccountEntries.length, 1);
+  assert.equal(Number(groupAccountEntries[0]!.amount), 175);
 
   const [earningRow] = await db.select({
     payload: operationalRecords.payload,
@@ -665,4 +833,223 @@ test("group labour work is counted once in group settlement preview and posting"
   assert.ok(earningRow);
   assert.equal((earningRow.payload as Record<string, unknown>).status, "settled");
   assert.equal((earningRow.payload as Record<string, unknown>).linkedSettlementId, settlement.id);
+
+  await setupRequest("rename group after settlement", "POST", "/v1/workspace/operational-records", envelope("labourGroup", groupId, {
+    name: "Group Alpha Renamed",
+    foremanLabourId: foremanId,
+    foremanId,
+    active: true,
+  }));
+  const historicalSettlementResponse = await request("GET", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements/${settlement.id}`);
+  assertIntegrationResponse(historicalSettlementResponse, 200, "load historical group settlement after group edit");
+  assert.equal(historicalSettlementResponse.json().settlement.groupName, "Group Alpha");
+  assert.deepEqual(historicalSettlementResponse.json().settlement.includedLabourIds, [workerId]);
+  assert.equal(historicalSettlementResponse.json().settlement.foremanId, foremanId);
+
+  const voidResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements/${settlement.id}/void`, {
+    voidReason: "Concurrent lifecycle verification",
+  });
+  assertIntegrationResponse(voidResponse, 200, "void concurrent group settlement");
+  const repeatedVoid = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements/${settlement.id}/void`, {
+    voidReason: "Concurrent lifecycle verification retry",
+  });
+  assertIntegrationResponse(repeatedVoid, 200, "retry concurrent group settlement void");
+  const groupAccountEntriesAfterVoid = await db.select().from(accountTransactions).where(and(
+    eq(accountTransactions.referenceId, settlement.id),
+    eq(accountTransactions.sourceType, "labour_wage_settlement"),
+  ));
+  assert.equal(groupAccountEntriesAfterVoid.length, 2);
+  assert.equal(groupAccountEntriesAfterVoid.reduce((sum, row) => sum + (row.type === "debit" ? Number(row.amount) : -Number(row.amount)), 0), 0);
+  const [earningAfterVoid] = await db.select({ payload: operationalRecords.payload }).from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, tenant.workspaceId),
+    eq(operationalRecords.entityType, "labourEarning"),
+    eq(operationalRecords.clientRecordId, earningId),
+  )).limit(1);
+  assert.equal(normalizeLabourEarningPayload(earningAfterVoid!.payload).status, "pending_settlement");
+});
+
+test("advance cutoff, partial allocation, report reconciliation, void restoration, and re-settlement remain consistent", async () => {
+  const groupId = randomUUID();
+  const labourerId = randomUUID();
+  const attendanceId = randomUUID();
+  const earningId = randomUUID();
+  const beforeAdvanceId = randomUUID();
+  const duringAdvanceId = randomUUID();
+  const afterCutoffAdvanceId = randomUUID();
+  const deletedAdvanceId = randomUUID();
+
+  const [paymentAccount] = await db.insert(accounts).values({
+    farmId: tenant.farmId,
+    name: "Partial Advance Settlement Cash",
+    accountType: "cash",
+    active: true,
+  }).returning({ id: accounts.id });
+  assertPersistedUuid(paymentAccount?.id, "create partial-advance settlement payment account");
+  await setupRequest("persist partial-advance partner identity", "POST", "/v1/workspace/operational-records", envelope("account", paymentAccount.id, {
+    name: "Partner Funded Advances",
+    type: "partner",
+    active: true,
+  }));
+  await setupRequest("create partial-advance group", "POST", "/v1/workspace/operational-records", envelope("labourGroup", groupId, {
+    name: "Partial Advance Group",
+    active: true,
+  }));
+  await setupRequest("create partial-advance foreman", "POST", "/v1/workspace/operational-records", envelope("labourer", labourerId, {
+    name: "Partial Advance Foreman",
+    groupId,
+    group: "Partial Advance Group",
+    active: true,
+  }));
+  await setupRequest("assign partial-advance foreman", "POST", "/v1/workspace/operational-records", envelope("labourGroup", groupId, {
+    name: "Partial Advance Group",
+    foremanLabourId: labourerId,
+    foremanId: labourerId,
+    active: true,
+  }));
+  await setupRequest("create partial-advance wage rate", "POST", `/v1/workspace/${tenant.workspaceId}/wage-rates/bulk`, {
+    farmId: tenant.farmId,
+    seasonId: tenant.seasonId,
+    effectiveFrom: "2026-08-01",
+    effectiveTo: "2026-08-31",
+    rows: [{ labourerId, dailyRate: 100 }],
+  });
+  await setupRequest("create partial-advance attendance", "POST", "/v1/workspace/operational-records", envelope("attendance", attendanceId, {
+    labourerId,
+    date: "2026-08-10",
+    status: "present",
+  }));
+  await setupRequest("create partial-advance labour earning", "POST", "/v1/workspace/operational-records", envelope("labourEarning", earningId, {
+    labourerId,
+    earningDate: "2026-08-11",
+    amount: 50,
+    earningType: "task",
+    description: "Harvest task",
+    status: "pending_settlement",
+  }));
+  for (const [step, id, date, amount] of [
+    ["create pre-period advance", beforeAdvanceId, "2026-07-31", 100],
+    ["create in-period advance", duringAdvanceId, "2026-08-15", 100],
+    ["create post-cutoff advance", afterCutoffAdvanceId, "2026-09-02", 300],
+    ["create deleted advance", deletedAdvanceId, "2026-08-20", 999],
+  ] as const) {
+    await setupRequest(step, "POST", "/v1/workspace/operational-records", envelope("advance", id, {
+      labourerId,
+      labourGroupId: groupId,
+      labourGroupName: "Partial Advance Group",
+      date,
+      amount,
+      accountId: paymentAccount.id,
+      sourceAccountName: "Partner Funded Advances",
+    }));
+  }
+  assertIntegrationResponse(await request("DELETE", "/v1/workspace/operational-records", {
+    workspaceId: tenant.workspaceId,
+    farmId: tenant.farmId,
+    seasonId: tenant.seasonId,
+    entity: "advance",
+    recordId: deletedAdvanceId,
+  }), 204, "delete excluded advance");
+
+  const previewPayload = {
+    farmId: tenant.farmId,
+    seasonId: tenant.seasonId,
+    fromDate: "2026-08-01",
+    toDate: "2026-08-31",
+    settlementDate: "2026-09-01",
+    settlementMode: "group",
+    groupId,
+    paidAmount: 0,
+    manualAdjustment: 0,
+  };
+  const firstPreviewResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements/preview`, previewPayload);
+  assertIntegrationResponse(firstPreviewResponse, 200, "preview partial-advance settlement");
+  const preview = firstPreviewResponse.json().preview;
+  assert.equal(preview.attendanceWages, 100);
+  assert.equal(preview.individualLabourWorkWages, 50);
+  assert.equal(preview.grossWages, 150);
+  assert.equal(preview.rawAdvancesUpToSettlementDate, 200);
+  assert.equal(preview.availableAdvanceBalanceBeforeSettlement, 200);
+  assert.equal(preview.advanceAdjustedNow, 150);
+  assert.equal(preview.remainingAdvanceCarryForward, 50);
+  assert.equal(preview.netPayableBeforePayment, 0);
+  assert.equal(preview.advanceReconciliation.some((row: { advanceId: string }) => row.advanceId === afterCutoffAdvanceId), true);
+  assert.equal(preview.advanceReconciliation.find((row: { advanceId: string }) => row.advanceId === afterCutoffAdvanceId).includedInPreview, false);
+  assert.equal(preview.advanceReconciliation.find((row: { advanceId: string }) => row.advanceId === deletedAdvanceId).includedInPreview, false);
+  const secondPreviewResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements/preview`, previewPayload);
+  assertIntegrationResponse(secondPreviewResponse, 200, "repeat partial-advance preview");
+  assert.deepEqual(secondPreviewResponse.json().preview, preview);
+
+  const reconciliationUrl = `/v1/debug/accounting-reconciliation?workspaceId=${tenant.workspaceId}&farmId=${tenant.farmId}&seasonId=${tenant.seasonId}&accountId=${paymentAccount.id}`;
+  const reconciliationBeforePosting = await request("GET", reconciliationUrl);
+  assertIntegrationResponse(reconciliationBeforePosting, 200, "reconcile partner advances before settlement");
+  assert.equal(reconciliationBeforePosting.json().labourWageSettlements.sourceOfTruthSnapshot.labourAdvancesPaid, 500);
+  assert.equal(reconciliationBeforePosting.json().labourWageSettlements.sourceOfTruthSnapshot.settledAdvances, 0);
+  assert.equal(reconciliationBeforePosting.json().labourWageSettlements.sourceOfTruthSnapshot.outstandingLabourAdvances, 500);
+  assert.equal(reconciliationBeforePosting.json().labourWageSettlements.sourceOfTruthSnapshot.farmOwesPartner, 500);
+
+  const createPayload = {
+    ...previewPayload,
+    paymentAccountId: paymentAccount.id,
+    clientRequestId: randomUUID(),
+  };
+  const createResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements`, createPayload);
+  assertIntegrationResponse(createResponse, 200, "post partial-advance settlement");
+  const settlement = createResponse.json().settlement;
+  assert.equal(settlement.grossWages, preview.grossWages);
+  assert.equal(settlement.advanceAdjustedNow, preview.advanceAdjustedNow);
+  assert.equal(settlement.netPayableBeforePayment, preview.netPayableBeforePayment);
+
+  const [settlementRecord] = await db.select({ id: operationalRecords.id }).from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, tenant.workspaceId),
+    eq(operationalRecords.entityType, "labourWageSettlement"),
+    eq(operationalRecords.clientRecordId, settlement.id),
+  )).limit(1);
+  assert.ok(settlementRecord);
+  const allocations = await db.select().from(labourWageSettlementAdvanceAllocations).where(
+    eq(labourWageSettlementAdvanceAllocations.settlementRecordId, settlementRecord.id),
+  );
+  assert.equal(allocations.length, 2);
+  assert.equal(allocations.reduce((sum, row) => sum + Number(row.absorbedAmount), 0), 150);
+  assert.deepEqual(allocations.map((row) => Number(row.absorbedAmount)).sort((a, b) => a - b), [50, 100]);
+  assert.equal((await db.select().from(accountTransactions).where(eq(accountTransactions.referenceId, settlement.id))).length, 0);
+
+  const advanceReportUrl = `/v1/workspace/${tenant.workspaceId}/advance/report?farmId=${tenant.farmId}&seasonId=${tenant.seasonId}&from=2026-07-01&to=2026-09-02&labourIds=${labourerId}`;
+  const advancesAfterPosting = await request("GET", advanceReportUrl);
+  assertIntegrationResponse(advancesAfterPosting, 200, "reconcile advances after settlement posting");
+  assert.equal(advancesAfterPosting.json().grandTotal, 500);
+  assert.equal(advancesAfterPosting.json().settledAdvances, 150);
+  assert.equal(advancesAfterPosting.json().outstandingAdvances, 350);
+  const reconciliationAfterPosting = await request("GET", reconciliationUrl);
+  assertIntegrationResponse(reconciliationAfterPosting, 200, "reconcile partner advances after settlement");
+  assert.equal(reconciliationAfterPosting.json().labourWageSettlements.sourceOfTruthSnapshot.labourAdvancesPaid, 500);
+  assert.equal(reconciliationAfterPosting.json().labourWageSettlements.sourceOfTruthSnapshot.settledAdvances, 150);
+  assert.equal(reconciliationAfterPosting.json().labourWageSettlements.sourceOfTruthSnapshot.outstandingLabourAdvances, 350);
+  assert.equal(reconciliationAfterPosting.json().labourWageSettlements.sourceOfTruthSnapshot.farmOwesPartner, 500);
+
+  const voidResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements/${settlement.id}/void`, {
+    voidReason: "Restore partially allocated advances",
+  });
+  assertIntegrationResponse(voidResponse, 200, "void partial-advance settlement");
+  const advancesAfterVoid = await request("GET", advanceReportUrl);
+  assertIntegrationResponse(advancesAfterVoid, 200, "reconcile advances after settlement void");
+  assert.equal(advancesAfterVoid.json().grandTotal, 500);
+  assert.equal(advancesAfterVoid.json().settledAdvances, 0);
+  assert.equal(advancesAfterVoid.json().outstandingAdvances, 500);
+  const reconciliationAfterVoid = await request("GET", reconciliationUrl);
+  assertIntegrationResponse(reconciliationAfterVoid, 200, "reconcile partner advances after settlement void");
+  assert.equal(reconciliationAfterVoid.json().labourWageSettlements.sourceOfTruthSnapshot.labourAdvancesPaid, 500);
+  assert.equal(reconciliationAfterVoid.json().labourWageSettlements.sourceOfTruthSnapshot.settledAdvances, 0);
+  assert.equal(reconciliationAfterVoid.json().labourWageSettlements.sourceOfTruthSnapshot.outstandingLabourAdvances, 500);
+  assert.equal(reconciliationAfterVoid.json().labourWageSettlements.sourceOfTruthSnapshot.farmOwesPartner, 500);
+
+  const reSettlementResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements`, {
+    ...createPayload,
+    clientRequestId: randomUUID(),
+  });
+  assertIntegrationResponse(reSettlementResponse, 200, "re-settle sources after void");
+  assert.notEqual(reSettlementResponse.json().settlement.id, settlement.id);
+  assert.equal(reSettlementResponse.json().settlement.advanceAdjustedNow, 150);
+  assertIntegrationResponse(await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements/${reSettlementResponse.json().settlement.id}/void`, {
+    voidReason: "Clean up re-settlement verification",
+  }), 200, "void re-settlement verification");
 });

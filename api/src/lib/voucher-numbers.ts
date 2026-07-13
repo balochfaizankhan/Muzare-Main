@@ -50,15 +50,9 @@ export async function findExistingVoucherByNumber(
     eq(operationalRecords.entityType, "voucher"),
     activeOperationalPayloadSql(operationalRecords.payload),
     normalExpenseVoucherWhereSql(),
-    sql`coalesce(
-      case
-        when coalesce(${operationalRecords.payload}->>'originalVoucherNumber', '') <> ''
-          and coalesce(${operationalRecords.payload}->>'voucherNumberEdited', 'false') <> 'true'
-          then ${operationalRecords.payload}->>'originalVoucherNumber'
-        else ${operationalRecords.payload}->>'voucherNumber'
-      end,
-      ''
-    ) = ${voucherNumber}`,
+    // Provenance fields remain traceable but do not reserve a second number.
+    // Only the active display voucher number participates in uniqueness.
+    sql`coalesce(${operationalRecords.payload}->>'voucherNumber', '') = ${voucherNumber}`,
   ];
   if (excludeRecordId) {
     filters.push(sql`${operationalRecords.clientRecordId} <> ${excludeRecordId}`);

@@ -148,10 +148,18 @@ export async function listLabourEarnings(
     eq(operationalRecords.seasonId, seasonId),
     eq(operationalRecords.entityType, "labourEarning"),
   ));
-  return rows
-    .map((row) => ({
+  const normalizedRows = rows.map((row) => ({
       ...row,
       payload: normalizeLabourEarningPayload(row.payload as Record<string, unknown>),
-    }))
-    .filter((row) => labourEarningMatchesSettlementScope(row.payload, filter));
+    }));
+  const hasScopeFilter = Boolean(
+    filter.settlementMode
+    || filter.labourerId
+    || filter.groupId
+    || filter.foremanId
+    || filter.labourIds?.length,
+  );
+  return hasScopeFilter
+    ? normalizedRows.filter((row) => labourEarningMatchesSettlementScope(row.payload, filter))
+    : normalizedRows;
 }

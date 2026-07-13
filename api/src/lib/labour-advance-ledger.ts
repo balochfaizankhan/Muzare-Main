@@ -287,11 +287,15 @@ export async function resolveLabourAdvanceLedger(
     if (scope.settlementId && settlement.clientRecordId === scope.settlementId) continue;
     const settlementPayload = settlement.payload as Record<string, unknown> & SettlementPayload;
     const settlementScope = normalizeSettlementPayload(settlementPayload);
+    const reportAllLabour = scope.settlementMode === "group"
+      && !scope.groupId
+      && !scope.foremanId
+      && !scope.labourerId;
     const sameGroup = scope.settlementMode === "group"
       && settlementScope.settlementMode === "group"
       && stringValue(settlementScope.groupId) === stringValue(scope.groupId);
     const sameIndividual = scope.settlementMode !== "group" && settlementScope.settlementMode !== "group";
-    if (!sameGroup && !sameIndividual) continue;
+    if (!reportAllLabour && !sameGroup && !sameIndividual) continue;
     const settlementAllocations = allocationsBySettlementId.get(settlement.id) ?? [];
     if (settlementAllocations.length) {
       for (const allocation of settlementAllocations) {

@@ -186,12 +186,19 @@ function settlementAccountingStatus(status: string, accountingEntries: number) {
   return accountingEntries > 0 ? "posted" : "accounting_missing";
 }
 
-function buildPartnerSnapshot(args: {
+export function buildPartnerSnapshot(args: {
   selectedAccountId: string;
   accountLookup: AccountIdentityLookup;
   advances: AdvanceRow[];
   settlements: SettlementRow[];
-  vouchers: Array<{ accountId: string; amount: number; isLabourWageSettlementVoucher: boolean }>;
+  vouchers: Array<{
+    accountId: string;
+    amount: number;
+    isLabourWageSettlementVoucher: boolean;
+    active: boolean;
+    farmId: string | null;
+    seasonId: string | null;
+  }>;
   partnerEntries: Array<{
     type: string;
     amount: number;
@@ -202,6 +209,7 @@ function buildPartnerSnapshot(args: {
     toPartnerId: string | null;
     partnerId: string | null;
     accountId: string | null;
+    adjustmentDirection: string | null;
     farmId: string | null;
     seasonId: string | null;
   }>;
@@ -213,7 +221,11 @@ function buildPartnerSnapshot(args: {
   const farmMatches = (rowFarmId: string | null) => !farmId || rowFarmId === farmId || rowFarmId === null;
   const seasonMatches = (rowSeasonId: string | null) => !seasonId || rowSeasonId === seasonId || rowSeasonId === null;
   const purchaseVouchersPaid = vouchers
-    .filter((voucher) => !voucher.isLabourWageSettlementVoucher && resolveCanonicalAccountId(voucher.accountId, accountLookup) === selectedAccountId)
+    .filter((voucher) => voucher.active
+      && !voucher.isLabourWageSettlementVoucher
+      && resolveCanonicalAccountId(voucher.accountId, accountLookup) === selectedAccountId
+      && farmMatches(voucher.farmId)
+      && seasonMatches(voucher.seasonId))
     .reduce((sum, voucher) => sum + voucher.amount, 0);
   const businessFundsGiven = partnerEntries
     .filter((entry) => entry.type === "settlement" && resolvePartnerTransferAccountIdentity(entry as Record<string, unknown>, "from", accountLookup).canonicalAccountId === selectedAccountId && farmMatches(entry.farmId) && seasonMatches(entry.seasonId))
@@ -232,7 +244,7 @@ function buildPartnerSnapshot(args: {
   const adjustments = partnerEntries
     .filter((entry) => entry.type === "adjustment")
     .filter((entry) => (resolveCanonicalAccountId(entry.partnerAccountId, accountLookup) === selectedAccountId || resolveCanonicalAccountId(entry.accountId, accountLookup) === selectedAccountId) && farmMatches(entry.farmId) && seasonMatches(entry.seasonId))
-    .reduce((sum, entry) => sum + entry.amount, 0)
+    .reduce((sum, entry) => sum + (entry.adjustmentDirection === "decrease" ? -entry.amount : entry.amount), 0)
     - sales.filter((sale) => resolveCanonicalAccountId(sale.accountId, accountLookup) === selectedAccountId && farmMatches(sale.farmId) && seasonMatches(sale.seasonId)).reduce((sum, sale) => sum + sale.amount, 0);
   const settlementRows = settlements.filter((row) => (row.resolvedAccountId === selectedAccountId || row.transactionResolvedAccountIds.includes(selectedAccountId)) && farmMatches(row.farmId) && seasonMatches(row.seasonId));
   const labourAdvanceAccounting = calculateLabourAdvanceAccountingSnapshot({
@@ -449,9 +461,18 @@ export async function buildAccountingReconciliationTrace(input: {
 
     const vouchers = voucherRecords.map((row) => {
       const payload = row.payload as Record<string, unknown>;
+      const status = typeof payload.status === "string" ? payload.status.trim().toLowerCase() : "";
       return {
         accountId: firstString(payload.accountId) ?? "",
         amount: numberValue(payload.totalAmount ?? payload.amount),
+        active: !isDeletedOperationalPayload(payload)
+          && !payload.voidedAt
+          && !payload.reversedAt
+          && status !== "voided"
+          && status !== "reversed"
+          && status !== "cancelled",
+        farmId: row.farmId,
+        seasonId: row.seasonId,
         isLabourWageSettlementVoucher: Boolean(
           payload.settlementId
           || payload.voucherPurpose === "labour_wage_settlement"
@@ -472,6 +493,7 @@ export async function buildAccountingReconciliationTrace(input: {
         toPartnerId: firstString(payload.toPartnerId),
         partnerId: firstString(payload.partnerId),
         accountId: firstString(payload.accountId),
+        adjustmentDirection: firstString(payload.adjustmentDirection),
         farmId: row.farmId,
         seasonId: row.seasonId,
       };

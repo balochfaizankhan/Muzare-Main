@@ -676,6 +676,12 @@ function effectiveAdvanceAdjustmentForPosting(preview: {
   return Number(preview.advanceAdjustedNow ?? preview.settledAdvanceAmount ?? 0);
 }
 
+class SettlementOverlapConflict extends Error {
+  constructor(readonly overlaps: unknown[]) {
+    super("An active labour wage settlement already exists for an overlapping date range.");
+  }
+}
+
 export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<void> {
   app.get("/v1/workspace/:workspaceId/labour-wage-settlements/status", { preHandler: requireUser }, async (request, reply) => {
     if (!request.appUser || !request.sessionId) return reply.code(401).send({ message: "A valid session is required." });
@@ -1215,7 +1221,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
     }
 
     const previewStartedAt = Date.now();
-    const preview = await db.transaction((tx) => previewLabourWageSettlement(tx, workspaceId, farmId, seasonId, fromDate, toDate, settlementDate, undefined, {
+    let preview = await db.transaction((tx) => previewLabourWageSettlement(tx, workspaceId, farmId, seasonId, fromDate, toDate, settlementDate, undefined, {
       settlementMode,
       labourerId: resolvedSelection.labourerId,
       foremanId: resolvedSelection.foremanId,
@@ -1332,8 +1338,8 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         await tx.execute(sql`SET LOCAL lock_timeout = '10s'`);
         await tx.execute(sql`SET LOCAL statement_timeout = '90s'`);
         {
-          const requestScopeKey = `${workspaceId}:${farmId}:labour-wage-settlement:${effectiveClientRequestId}`;
-          await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${requestScopeKey}), 1)`);
+          const postingScopeKey = `${workspaceId}:${farmId}:${seasonId}:labour-wage-settlement-posting`;
+          await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${postingScopeKey}), 1)`);
           const existingByRequest = await findSettlementByClientRequestId(tx, workspaceId, farmId, seasonId, effectiveClientRequestId);
           if (existingByRequest) {
             request.log.info({
@@ -1360,6 +1366,19 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
               accountingMessage: accounting.accountingMessage,
               settlement: settlement.settlement,
             };
+          }
+          preview = await previewLabourWageSettlement(tx, workspaceId, farmId, seasonId, fromDate, toDate, settlementDate, undefined, {
+            settlementMode,
+            labourerId: resolvedSelection.labourerId,
+            foremanId: resolvedSelection.foremanId,
+            groupId: resolvedSelection.groupId,
+            labourIds: resolvedSelection.labourIds,
+          });
+          if (preview.unresolvedRows.length) {
+            throw new Error("Attendance wages cannot be settled until missing wage rates are fixed.");
+          }
+          if (preview.overlappingSettlements.length) {
+            throw new SettlementOverlapConflict(preview.overlappingSettlements);
           }
         }
         const createdAt = new Date();
@@ -1857,6 +1876,21 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         settlement: result.settlement,
       } satisfies SettlementCreateStatusResponse);
     } catch (error) {
+      if (error instanceof SettlementOverlapConflict) {
+        await updateCreateRequestState("rolled_back", {
+          errorCode: "SETTLEMENT_OVERLAP",
+          safeToRetry: true,
+          message: error.message,
+          completedAt: new Date(),
+        });
+        return reply.code(409).send({
+          message: error.message,
+          details: {
+            code: "overlapping_labour_wage_settlement",
+            overlaps: error.overlaps,
+          },
+        });
+      }
       const dbError = toDatabaseErrorInfo(error);
       const failureCode = dbError ? settlementPostingErrorCode(dbError) : "SETTLEMENT_POSTING_FAILED";
       request.log.error({
@@ -1874,6 +1908,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         errorSchema: dbError?.schema ?? null,
         errorPosition: dbError?.position ?? null,
         errorRoutine: dbError?.routine ?? null,
+        errorMessage: error instanceof Error ? error.message : null,
       }, "labour wage settlement create request rolled back");
       await updateCreateRequestState("rolled_back", {
         errorCode: failureCode,
@@ -2181,9 +2216,6 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
     }
 
     const transactionCount = await db.transaction((tx) => settlementAccountingTransactionCounts(tx, [settlementId])).then((result) => result.get(settlementId) ?? 0);
-    if (transactionCount === 0) {
-      return reply.code(409).send({ message: "This settlement has no accounting entries to reverse. Delete the settlement instead." });
-    }
 
     const voidedAt = new Date();
     const voidedIso = voidedAt.toISOString();

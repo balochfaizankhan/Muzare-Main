@@ -85,6 +85,7 @@ export async function advanceReportRoutes(app: FastifyInstance): Promise<void> {
       return [record.clientRecordId, typeof payload.name === "string" ? payload.name : "Account"] as const;
     }));
 
+    const reportLabourIds = selectedLabourIds.size ? [...selectedLabourIds] : [...labourById.keys()];
     const ledger = await db.transaction((tx) => listAdvanceLedgerForReport(tx, {
       workspaceId,
       farmId,
@@ -94,8 +95,8 @@ export async function advanceReportRoutes(app: FastifyInstance): Promise<void> {
       groupId: null,
       foremanId: null,
       labourerId: null,
-      labourIds: [...selectedLabourIds],
-    }, [...selectedLabourIds]));
+      labourIds: reportLabourIds,
+    }, reportLabourIds));
     const records = ledger.rows.flatMap((row) => {
       if (!row.includedInPreview || !row.labourerId || !row.date) return [];
       if (row.date < from || row.date > to) return [];
