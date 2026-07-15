@@ -172,7 +172,14 @@ export async function labourManagementRoutes(app: FastifyInstance): Promise<void
       }
       const timestamp = new Date();
       const endDate = body.data.endDate;
-      const payload = { ...labour.payload, active: false, endedOn: endDate, updatedAt: timestamp.toISOString() };
+      const payload = {
+        ...labour.payload,
+        active: false,
+        endedOn: endDate,
+        status: "deactivated",
+        deactivatedAt: timestamp.toISOString(),
+        updatedAt: timestamp.toISOString(),
+      };
       await tx.update(operationalRecords).set({ payload, clientUpdatedAt: timestamp, updatedAt: timestamp }).where(eq(operationalRecords.id, labour.id));
       await tx.insert(auditLogs).values({
         workspaceId: params.data.workspaceId, farmId: context.farmId, userId: context.user.id,

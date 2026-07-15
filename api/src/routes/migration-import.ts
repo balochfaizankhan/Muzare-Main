@@ -529,9 +529,21 @@ const attendanceStatus = (record: AndroidRecord): "present" | "half_day" | "abse
 };
 const importedActive = (record: AndroidRecord) => {
   const status = text(record, ["status", "state"]).toLowerCase();
-  if (status === "archived" || status === "inactive" || status === "deleted") return false;
+  if (status === "archived" || status === "inactive" || status === "deleted" || status === "deactivated" || status === "terminated") return false;
   if (record.active === false || record.archived === true || record.isArchived === true || record.deleted === true) return false;
   return true;
+};
+const importedLifecycle = (record: AndroidRecord) => {
+  const status = text(record, ["status", "state"]).toLowerCase();
+  return {
+    status: status || undefined,
+    isArchived: status === "archived" || record.archived === true || record.isArchived === true,
+    archivedAt: text(record, ["archivedAt", "archived_at"]) || undefined,
+    deactivatedAt: text(record, ["deactivatedAt", "deactivated_at"]) || undefined,
+    endedOn: text(record, ["endedOn", "ended_on", "endDate", "end_date", "leftDate", "left_date"]) || undefined,
+    deleted: record.deleted === true || undefined,
+    deletedAt: text(record, ["deletedAt", "deleted_at"]) || undefined,
+  };
 };
 
 const normalizedLabel = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
@@ -3366,6 +3378,7 @@ export async function migrationImportRoutes(app: FastifyInstance): Promise<void>
           dailyWage: numberValue(source, ["dailyWage", "dailyRate", "wage"]),
           paymentType: text(source, ["paymentType"], "daily_wage"),
           active: importedActive(source),
+          ...importedLifecycle(source),
         });
         const labourId = result.clientRecordId ?? result.payloadId ?? id;
         maps.labour.set(oldId(source), labourId);

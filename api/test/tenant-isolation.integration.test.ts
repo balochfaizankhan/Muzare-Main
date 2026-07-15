@@ -1228,6 +1228,46 @@ test("labour advance account backfill maps Younis Khan per workspace, skips miss
 });
 
 test("labour lifecycle hard deletes unused labour and deactivates linked labour without breaking reports", async () => {
+  const inactiveLabourerId = randomUUID();
+  const inactivePaymentAccountId = await createAccount(alpha, "Inactive Worker Cash");
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", inactiveLabourerId, {
+    name: "Inactive Eligible Worker", group: "General", dailyWage: 75, active: false, status: "inactive",
+  }))).statusCode, 200);
+  const inactiveAdvance = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "advance", randomUUID(), {
+    labourerId: inactiveLabourerId, date: "2026-08-01", amount: 25, accountId: inactivePaymentAccountId,
+  }));
+  assert.equal(inactiveAdvance.statusCode, 200, inactiveAdvance.body);
+
+  for (const [name, lifecycleDates] of [
+    ["Ended Period Eligible Worker", { active: false, status: "inactive", endedOn: "2020-01-01" }],
+    ["Left Period Eligible Worker", { active: false, status: "inactive", leftDate: "2020-01-01" }],
+  ] as const) {
+    const labourerId = randomUUID();
+    assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", labourerId, {
+      name, group: "General", dailyWage: 75, ...lifecycleDates,
+    }))).statusCode, 200);
+    const advance = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "advance", randomUUID(), {
+      labourerId, date: "2026-08-01", amount: 25, accountId: inactivePaymentAccountId,
+    }));
+    assert.equal(advance.statusCode, 200, advance.body);
+  }
+
+  const archivedLabourerId = randomUUID();
+  assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", archivedLabourerId, {
+    name: "Explicitly Archived Worker", group: "General", dailyWage: 75,
+  }))).statusCode, 200);
+  const [archiveCandidate] = await db.select().from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, alpha.workspaceId),
+    eq(operationalRecords.clientRecordId, archivedLabourerId),
+  )).limit(1);
+  assert.ok(archiveCandidate);
+  await db.update(operationalRecords).set({ payload: { ...archiveCandidate.payload, status: "archived", isArchived: true, archivedAt: "2026-08-01T00:00:00.000Z" } })
+    .where(eq(operationalRecords.id, archiveCandidate.id));
+  const archivedAdvance = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "advance", randomUUID(), {
+    labourerId: archivedLabourerId, date: "2026-08-01", amount: 25, accountId: inactivePaymentAccountId,
+  }));
+  assert.equal(archivedAdvance.statusCode, 400);
+
   const unusedLabourerId = randomUUID();
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", unusedLabourerId, {
     name: "Unused Worker", group: "General", dailyWage: 80,
@@ -1251,6 +1291,10 @@ test("labour lifecycle hard deletes unused labour and deactivates linked labour 
     paymentCount: 0,
     protectedRecordCount: 0,
   });
+  const deletedLabourAdvance = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "advance", randomUUID(), {
+    labourerId: unusedLabourerId, date: "2026-08-01", amount: 25, accountId: inactivePaymentAccountId,
+  }));
+  assert.equal(deletedLabourAdvance.statusCode, 400);
 
   const linkedLabourerId = randomUUID();
   const linkedPaymentAccountId = await createAccount(alpha, "Historical Worker Cash");
@@ -1290,6 +1334,13 @@ test("labour lifecycle hard deletes unused labour and deactivates linked labour 
   });
   assert.equal(deactivatedBody.record.active, false);
   assert.equal(deactivatedBody.record.endedOn, "2026-08-02");
+  assert.equal(deactivatedBody.record.status, "deactivated");
+  assert.equal(typeof deactivatedBody.record.deactivatedAt, "string");
+  const backdatedAdvance = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "advance", randomUUID(), {
+    labourerId: linkedLabourerId, date: "2026-08-01", amount: 10, accountId: linkedPaymentAccountId,
+  }));
+  assert.equal(backdatedAdvance.statusCode, 400);
+  assert.match(backdatedAdvance.json().message, /inactive and cannot be used for new entries/i);
   const staleAttendance = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "attendance", randomUUID(), {
     labourerId: linkedLabourerId, date: "2026-08-03", status: "present",
   }));
@@ -1297,6 +1348,19 @@ test("labour lifecycle hard deletes unused labour and deactivates linked labour 
   assert.match(staleAttendance.json().message, /inactive and cannot be used for new entries/i);
   const report = await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/attendance/report?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}&from=2026-08-01&to=2026-08-02`);
   assert.equal(report.json().summaries.find((item: { id: string }) => item.id === linkedLabourerId).name, "Historical Worker");
+  const advanceReport = await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/advance/report?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}&from=2026-08-01&to=2026-08-02`);
+  assert.equal(advanceReport.statusCode, 200);
+  assert.equal(advanceReport.json().records.find((item: { labourerId: string }) => item.labourerId === linkedLabourerId).labourName, "Historical Worker");
+  const [historicalLabour] = await db.select().from(operationalRecords).where(eq(operationalRecords.clientRecordId, linkedLabourerId)).limit(1);
+  assert.ok(historicalLabour);
+  await db.update(operationalRecords).set({ payload: { ...historicalLabour.payload, isArchived: true, archivedAt: "2026-08-03T00:00:00.000Z" } })
+    .where(eq(operationalRecords.id, historicalLabour.id));
+  const archivedAdvanceReport = await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/advance/report?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}&from=2026-08-01&to=2026-08-02`);
+  assert.equal(archivedAdvanceReport.json().records.find((item: { labourerId: string }) => item.labourerId === linkedLabourerId).labourName, "Historical Worker");
+  await db.update(operationalRecords).set({ payload: { ...historicalLabour.payload, deletedAt: "2026-08-04T00:00:00.000Z" } })
+    .where(eq(operationalRecords.id, historicalLabour.id));
+  const deletedAdvanceReport = await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/advance/report?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}&from=2026-08-01&to=2026-08-02`);
+  assert.equal(deletedAdvanceReport.json().records.find((item: { labourerId: string }) => item.labourerId === linkedLabourerId).labourName, "Historical Worker");
 });
 
 test("attendance CSV imports preview safely, enforce owner access, and avoid duplicate attendance or advances", async () => {

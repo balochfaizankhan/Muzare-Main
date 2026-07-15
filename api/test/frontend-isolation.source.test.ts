@@ -520,6 +520,42 @@ test("labour advance account correction is tenant-scoped, audited, and reflected
   assert.match(advances, /accountById\.get\(advance\.accountId \?\? ""\) \?\? advance\.sourceAccountName \?\? "-"/);
 });
 
+test("advance selector includes inactive labour while excluding deleted, archived, and deactivated records", async () => {
+  const advances = await source("web/src/pages/workspace/LabourAdvances.tsx");
+  const selector = await source("web/src/components/LabourSelectCombobox.tsx");
+  const multiSelector = await source("web/src/components/LabourMultiSelectFilter.tsx");
+  const selectorSheet = await source("web/src/components/LabourSelectorSheet.tsx");
+  const eligibility = await source("web/src/lib/workerEligibility.ts");
+  const apiEligibility = await source("api/src/lib/labour-eligibility.ts");
+  const syncRoute = await source("api/src/routes/operational-sync.ts");
+  const labourManagement = await source("api/src/routes/labour-management.ts");
+  const migration = await source("api/src/routes/migration-import.ts");
+
+  assert.match(advances, /workspaceRecords\(offlineDb\.labourers, \{ includeDeleted: true \}\)/);
+  assert.match(advances, /filterLabourSelectableForAdvance\(selectableLabourers, entryDate, entryGroup\)/);
+  assert.match(advances, /includeInactive/);
+  assert.match(selector, /includeInactive \|\| option\.active !== false \|\| option\.id === value/);
+  assert.match(selector, /open && !isMobileSelector/);
+  assert.match(selector, /<LabourSelectorSheet/);
+  assert.match(multiSelector, /<LabourSelectorSheet/);
+  assert.match(multiSelector, /applyLabel=\{t\("common\.apply"\)\}/);
+  assert.match(selectorSheet, /createPortal/);
+  assert.match(selectorSheet, /labour-selector-sheet__cancel/);
+  assert.match(selectorSheet, /labour-selector-sheet__apply/);
+  const advanceEligibility = eligibility.slice(eligibility.indexOf("export function isLabourSelectableForAdvance"), eligibility.indexOf("export function filterLabourSelectableForAdvance"));
+  assert.doesNotMatch(advanceEligibility, /worker\.active === false/);
+  assert.doesNotMatch(advanceEligibility, /worker\.endedOn|worker\.leftDate/);
+  assert.match(advanceEligibility, /lifecycleStatus === "deleted"/);
+  assert.match(advanceEligibility, /lifecycleStatus === "archived"/);
+  assert.match(advanceEligibility, /lifecycleStatus === "deactivated"/);
+  const apiAdvanceEligibility = apiEligibility.slice(apiEligibility.indexOf("export function isLabourSelectableForAdvance"));
+  assert.doesNotMatch(apiAdvanceEligibility, /worker\.endedOn|worker\.leftDate|worker\.active === false/);
+  assert.match(syncRoute, /args\.entity === "advance"[\s\S]*isLabourSelectableForAdvance/);
+  assert.match(labourManagement, /status: "deactivated"/);
+  assert.match(labourManagement, /deactivatedAt: timestamp\.toISOString\(\)/);
+  assert.match(migration, /\.\.\.importedLifecycle\(source\)/);
+});
+
 test("expense voucher search is debounced online, cache-first offline, and tenant scoped", async () => {
   const app = await source("api/src/app.ts");
   const route = await source("api/src/routes/expense-search.ts");
@@ -564,7 +600,7 @@ test("labour lifecycle UI preserves history and hides inactive labour from daily
   assert.match(route, /protectedRecordCount/);
   assert.match(route, /Type DELETE or DEACTIVATE to confirm this labour action\./);
   assert.match(route, /Type DEACTIVATE to confirm this labour action\./);
-  assert.match(route, /active: false, endedOn: endDate/);
+  assert.match(route, /active: false,[\s\S]*endedOn: endDate,[\s\S]*status: "deactivated",[\s\S]*deactivatedAt: timestamp\.toISOString\(\)/);
   assert.match(route, /action: "labour_deleted"/);
   assert.match(route, /action: "labour_deactivated"/);
   assert.match(api, /fetchLabourDeletionPreview/);

@@ -86,6 +86,9 @@ export type Labourer = LocalRecord & {
   otherPaymentDescription?: string;
   otherPaymentRate?: number;
   active?: boolean;
+  status?: string;
+  deleted?: boolean | string;
+  deactivatedAt?: string;
   joinedOn?: string;
   endedOn?: string;
   phone?: string;

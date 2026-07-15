@@ -24,7 +24,7 @@ import {
   normalizeVoucherNumber,
   reserveVoucherNumber,
 } from "../lib/voucher-numbers.js";
-import { isLabourAvailableForEntry } from "../lib/labour-eligibility.js";
+import { isLabourAvailableForEntry, isLabourSelectableForAdvance } from "../lib/labour-eligibility.js";
 import { hasModulePermission, hasPermission, type WorkspaceModule } from "../permissions.js";
 import { validateTenantReferences, validateTenantReferencesDetailed } from "../tenant-ownership.js";
 import { validateExpenseCategoryReference } from "./expense-categories.js";
@@ -303,10 +303,13 @@ async function ensureLabourIsAvailableForEntry(args: {
     eq(operationalRecords.entityType, "labourer"),
     eq(operationalRecords.clientRecordId, labourerId),
   )).limit(1);
-  if (!labourer || isDeletedOperationalPayload(labourer.payload)) {
+  if (!labourer) {
     return "Select an existing labourer.";
   }
-  if (!isLabourAvailableForEntry(labourer.payload, date)) {
+  const selectable = args.entity === "advance"
+    ? isLabourSelectableForAdvance(labourer.payload, date)
+    : !isDeletedOperationalPayload(labourer.payload) && isLabourAvailableForEntry(labourer.payload, date);
+  if (!selectable) {
     return "This labour is inactive and cannot be used for new entries.";
   }
   return null;

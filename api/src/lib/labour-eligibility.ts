@@ -8,6 +8,11 @@ type LabourLike = {
   lastAttendanceDate?: unknown;
   inactiveDate?: unknown;
   leftDate?: unknown;
+  archivedAt?: unknown;
+  deletedAt?: unknown;
+  deleted?: unknown;
+  status?: unknown;
+  deactivatedAt?: unknown;
 };
 
 function normalizeDate(value: unknown) {
@@ -32,5 +37,18 @@ export function isLabourAvailableForEntry(worker: LabourLike, transactionDate: s
   const { workerStart, workerEnd } = getLabourWorkingPeriod(worker);
   if (workerStart && transactionDate < workerStart) return false;
   if (workerEnd && transactionDate > workerEnd) return false;
+  return true;
+}
+
+export function isLabourSelectableForAdvance(worker: LabourLike, _transactionDate: string) {
+  const lifecycleStatus = typeof worker.status === "string" ? worker.status.trim().toLowerCase() : "";
+  const explicitlyDeleted = normalizeDate(worker.deletedAt)
+    || worker.deleted === true
+    || (typeof worker.deleted === "string" && worker.deleted.trim().toLowerCase() === "true")
+    || lifecycleStatus === "deleted";
+  if (explicitlyDeleted) return false;
+  if (worker.isArchived === true || normalizeDate(worker.archivedAt)) return false;
+  if (lifecycleStatus === "archived") return false;
+  if (normalizeDate(worker.deactivatedAt) || lifecycleStatus === "deactivated") return false;
   return true;
 }

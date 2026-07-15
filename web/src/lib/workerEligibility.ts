@@ -98,8 +98,30 @@ export function isLabourAvailableForEntry(worker: Pick<Labourer, "active" | "cre
   return Boolean(workerStart);
 }
 
-export function isWorkerEligibleForAdvancePayment(worker: Pick<Labourer, "active" | "createdAt" | "joinedOn" | "endedOn" | "firstAttendanceDate" | "lastAttendanceDate" | "inactiveDate" | "leftDate" | "isArchived">, selectedDate: string) {
-  return isLabourAvailableForEntry(worker, selectedDate);
+type AdvanceSelectableLabour = Pick<Labourer,
+  "isArchived" | "archivedAt" | "deletedAt" | "deactivatedAt" | "deleted" | "status"
+> & { deleted?: unknown; status?: unknown };
+
+export function isLabourSelectableForAdvance(worker: AdvanceSelectableLabour, _transactionDate: string) {
+  const lifecycleStatus = typeof worker.status === "string" ? worker.status.trim().toLowerCase() : "";
+  const explicitlyDeleted = normalizeDate(worker.deletedAt)
+    || worker.deleted === true
+    || (typeof worker.deleted === "string" && worker.deleted.trim().toLowerCase() === "true")
+    || lifecycleStatus === "deleted";
+  if (explicitlyDeleted) return false;
+  if (worker.isArchived === true || normalizeDate(worker.archivedAt)) return false;
+  if (lifecycleStatus === "archived") return false;
+  if (normalizeDate(worker.deactivatedAt) || lifecycleStatus === "deactivated") return false;
+  return true;
+}
+
+export function filterLabourSelectableForAdvance<T extends AdvanceSelectableLabour>(workers: T[], transactionDate: string, group = "all") {
+  return workers.filter((worker) => isLabourSelectableForAdvance(worker, transactionDate)
+    && (group === "all" || ("group" in worker && worker.group === group)));
+}
+
+export function isWorkerEligibleForAdvancePayment(worker: AdvanceSelectableLabour, selectedDate: string) {
+  return isLabourSelectableForAdvance(worker, selectedDate);
 }
 
 export function isWorkerEligibleForSettlement(worker: Pick<Labourer, "active" | "createdAt" | "joinedOn" | "endedOn" | "firstAttendanceDate" | "lastAttendanceDate" | "inactiveDate" | "leftDate" | "isArchived">, selectedDate: string) {

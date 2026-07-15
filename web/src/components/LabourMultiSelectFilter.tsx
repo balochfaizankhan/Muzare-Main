@@ -2,6 +2,8 @@ import { Check, ChevronDown, Search, X } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { Labourer } from "../lib/offline-db";
+import { translatePaymentType } from "../lib/systemTranslations";
+import { LabourSelectorSheet, useMobileLabourSelector } from "./LabourSelectorSheet";
 
 type LabourMultiSelectFilterProps = {
   options: Labourer[];
@@ -37,6 +39,7 @@ export function LabourMultiSelectFilter({
   const { t } = useTranslation();
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const isMobileSelector = useMobileLabourSelector();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [draftIds, setDraftIds] = useState<string[]>(selectedIds);
@@ -95,13 +98,13 @@ export function LabourMultiSelectFilter({
   };
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || isMobileSelector) return;
     const onPointerDown = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) closeMenu();
     };
     window.addEventListener("pointerdown", onPointerDown);
     return () => window.removeEventListener("pointerdown", onPointerDown);
-  }, [open, selectedIds]);
+  }, [isMobileSelector, open, selectedIds]);
 
   useEffect(() => {
     if (!open) setDraftIds(selectedIds);
@@ -151,7 +154,7 @@ export function LabourMultiSelectFilter({
           <ChevronDown size={16} className={open ? "is-open" : ""} aria-hidden="true" />
         </span>
       </div>
-      {open ? (
+      {open && !isMobileSelector ? (
         <div className="labour-multiselect__menu">
           <label className="labour-multiselect__search">
             <Search size={15} aria-hidden="true" />
@@ -196,6 +199,40 @@ export function LabourMultiSelectFilter({
           </div>
         </div>
       ) : null}
+      <LabourSelectorSheet
+        open={open && isMobileSelector}
+        title={t("common.selectLabour")}
+        subtitle={t("common.searchChooseLabourers")}
+        query={query}
+        onQueryChange={setQuery}
+        onClose={closeMenu}
+        searchPlaceholder={resolvedPlaceholder}
+        clearSearchLabel={t("common.clearSearch")}
+        summary={draftIds.length === 0 ? t("common.allLabour") : t("common.labourSelectedCount", { count: draftIds.length })}
+        cancelLabel={t("common.cancel")}
+        applyLabel={t("common.apply")}
+        onApply={apply}
+        searchInputRef={inputRef}
+        toolbar={<div className="labour-selector-sheet__toolbar">
+          <button type="button" onClick={() => setDraftIds(sortedOptions.map((labourer) => labourer.id))}>{t("common.selectAll")}</button>
+          <button type="button" onClick={() => setDraftIds([])}>{t("common.clearSelection")}</button>
+        </div>}
+      >
+        <button type="button" role="option" aria-selected={draftIds.length === 0} className={`labour-selector-sheet__option${draftIds.length === 0 ? " is-selected" : ""}`} onClick={() => setDraftIds([])}>
+          <span className="labour-selector-sheet__indicator labour-selector-sheet__indicator--checkbox">{draftIds.length === 0 ? <Check size={14} /> : null}</span>
+          <span className="labour-selector-sheet__option-text"><strong>{t("common.allLabour")}</strong><small>{t("common.allLabourHint")}</small></span>
+        </button>
+        {filteredOptions.length === 0 ? <p className="labour-selector-sheet__empty">{resolvedNoResults}</p> : filteredOptions.map((labourer) => {
+          const checked = selectedSet.has(labourer.id);
+          return <button type="button" role="option" aria-selected={checked} key={labourer.id} className={`labour-selector-sheet__option${checked ? " is-selected" : ""}`} onClick={() => toggle(labourer.id)}>
+            <span className="labour-selector-sheet__indicator labour-selector-sheet__indicator--checkbox">{checked ? <Check size={14} /> : null}</span>
+            <span className="labour-selector-sheet__option-text">
+              <strong>{labourer.name}</strong>
+              <small>{[labourer.group || t("reportsPage.ungrouped"), translatePaymentType(labourer.paymentType ?? "daily_wage")].join(" · ")}</small>
+            </span>
+          </button>;
+        })}
+      </LabourSelectorSheet>
     </div>
   );
 }

@@ -13,7 +13,7 @@ import { canCreate, canDelete, canEdit } from "../../lib/permissions";
 import { translatePaymentType } from "../../lib/systemTranslations";
 import { compareLabourers, ensureLocalAccounts, makeLocalRecord, offlineDb, workspaceRecords, type Account, type Advance, type Labourer } from "../../lib/offline-db";
 import { deleteOperationalRecord, persistOperationalRecord } from "../../services/syncService";
-import { isLabourAvailableForEntry } from "../../lib/workerEligibility";
+import { filterLabourSelectableForAdvance } from "../../lib/workerEligibility";
 
 const today = todayLocalDateKey;
 const monthStart = () => `${today().slice(0, 8)}01`;
@@ -48,6 +48,7 @@ export function LabourAdvances() {
   const [to, setTo] = useState(today());
   const [entryDate, setEntryDate] = useState(today());
   const [entryLabourerId, setEntryLabourerId] = useState("");
+  const [entryGroup, setEntryGroup] = useState("all");
   const [entryAmount, setEntryAmount] = useState("");
   const [entryAccountId, setEntryAccountId] = useState("");
   const [entryNotes, setEntryNotes] = useState("");
@@ -69,7 +70,7 @@ export function LabourAdvances() {
     await ensureLocalAccounts();
     const [nextAdvances, nextLabourers, nextAccounts] = await Promise.all([
       workspaceRecords(offlineDb.advances),
-      workspaceRecords(offlineDb.labourers),
+      workspaceRecords(offlineDb.labourers, { includeDeleted: true }),
       workspaceRecords(offlineDb.accounts),
     ]);
     setAdvances(nextAdvances);
@@ -98,18 +99,22 @@ export function LabourAdvances() {
   const labourById = useMemo(() => new Map(labourers.map((labourer) => [labourer.id, labourer])), [labourers]);
   const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account.name])), [accounts]);
   const groups = useMemo(() => [...new Set(labourers.map((labourer) => labourer.group).filter(Boolean))].sort(), [labourers]);
+  const selectableLabourers = useMemo(() => filterLabourSelectableForAdvance(labourers, entryDate), [entryDate, labourers]);
+  const entryGroups = useMemo(() => [...new Set(selectableLabourers.map((labourer) => labourer.group).filter(Boolean))].sort(), [selectableLabourers]);
   const groupedLabourers = useMemo(() => labourers
     .filter((labourer) => group === "all" || labourer.group === group)
     .sort(compareLabourers), [group, labourers]);
-  const recordableLabourers = useMemo(() => labourers
-    .filter((labourer) => isLabourAvailableForEntry(labourer, entryDate) && (group === "all" || labourer.group === group))
-    .sort(compareLabourers), [entryDate, group, labourers]);
+  const recordableLabourers = useMemo(() => filterLabourSelectableForAdvance(selectableLabourers, entryDate, entryGroup)
+    .sort(compareLabourers), [entryDate, entryGroup, selectableLabourers]);
   const advanceTotalByLabour = useMemo(() => {
     const totals = new Map<string, number>();
     for (const advance of advances) totals.set(advance.labourerId, (totals.get(advance.labourerId) ?? 0) + advance.amount);
     return totals;
   }, [advances]);
-  const noLabourResultsMessage = group === "all"
+  const noLabourResultsMessage = entryGroup === "all"
+    ? t("advancesPage.noLabourResults")
+    : t("advancesPage.noLabourResultsInGroup", { group: entryGroup });
+  const noHistoryLabourResultsMessage = group === "all"
     ? t("advancesPage.noLabourResults")
     : t("advancesPage.noLabourResultsInGroup", { group });
 
@@ -205,9 +210,9 @@ export function LabourAdvances() {
           <div className="advances-heading"><h2>{t("advancesPage.recordAdvance")}</h2><span>{t("advancesPage.recordAdvanceDescription")}</span></div>
           <form className="module-form advances-entry-form" onSubmit={(event) => void submit(event)}>
             <label className="advances-filter-field"><span>{t("advancesPage.date")}</span><input required type="date" value={entryDate} onChange={(event) => setEntryDate(event.target.value)} /></label>
-            <label className="advances-filter-field"><span>{t("advancesPage.group")}</span><ClearableSelect value={group} clearValue="all" onChange={setGroup}>
+            <label className="advances-filter-field"><span>{t("advancesPage.group")}</span><ClearableSelect value={entryGroup} clearValue="all" onChange={setEntryGroup}>
               <option value="all">{t("advancesPage.allGroups")}</option>
-              {groups.map((name) => <option key={name}>{name}</option>)}
+              {entryGroups.map((name) => <option key={name}>{name}</option>)}
             </ClearableSelect></label>
           <label className="advances-filter-field advances-filter-field--full"><span>{t("advancesPage.labour")}</span><LabourSelectCombobox
               ariaLabel={t("advancesPage.labour")}
@@ -218,6 +223,7 @@ export function LabourAdvances() {
               noResultsLabel={noLabourResultsMessage}
               inputRef={labourInputRef}
               maxSuggestions={6}
+              includeInactive
               renderOption={(option) => <div className="labour-combobox__option-content">
                 <div className="labour-combobox__option-content-top">
                   <strong>{option.name}</strong>
@@ -266,7 +272,7 @@ export function LabourAdvances() {
                     selectedIds={selectedLabourerIds}
                     onChange={setSelectedLabourerIds}
                     placeholder={t("common.searchLabour")}
-                    noResultsLabel={noLabourResultsMessage}
+                    noResultsLabel={noHistoryLabourResultsMessage}
                   /></label>
                   <label className="advances-filter-field"><span>{t("advancesPage.group")}</span><ClearableSelect aria-label={t("advancesPage.group")} value={group} clearValue="all" onChange={setGroup}>
                     <option value="all">{t("advancesPage.allGroups")}</option>
