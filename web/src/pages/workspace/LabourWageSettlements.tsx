@@ -78,7 +78,7 @@ export function LabourWageSettlements() {
   const [previewSearch, setPreviewSearch] = useState("");
   const [previewStatusFilter, setPreviewStatusFilter] = useState<"all" | "active" | "inactive">("all");
   const [registerSearch, setRegisterSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "posted" | "voided" | "accounting_missing">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "posted" | "voided" | "deleted" | "accounting_missing">("all");
   const [paymentAccountFilter, setPaymentAccountFilter] = useState("all");
   const [selectedSettlement, setSelectedSettlement] = useState<LabourWageSettlementDetail | null>(null);
   const [selectedSettlementMode, setSelectedSettlementMode] = useState<"view" | "edit">("view");
@@ -103,7 +103,7 @@ export function LabourWageSettlements() {
   const refresh = useCallback(async () => {
     const [cachedAccounts, cachedSettlements] = await Promise.all([
       workspaceRecords(offlineDb.accounts),
-      workspaceRecords(offlineDb.labourWageSettlements),
+      workspaceRecords(offlineDb.labourWageSettlements, { includeDeleted: true }),
     ]);
     setAccounts(cachedAccounts.filter((account) => account.type === "cash" || account.type === "bank" || account.type === "partner"));
     setLabourers(await workspaceRecords(offlineDb.labourers));
@@ -239,6 +239,8 @@ export function LabourWageSettlements() {
   const selectedGroupForemanId = selectedGroup?.foremanLabourId ?? selectedGroup?.foremanId ?? "";
   const effectiveGroupForemanId = settlementMode === "group" ? selectedGroupForemanId : foremanId;
   const selectedPaymentAccountId = accountId.trim() || undefined;
+  const hasPaidNow = toFiniteNumber(paidAmount) > 0;
+  const hasManualAdjustment = toFiniteNumber(manualAdjustment) !== 0;
 
   useEffect(() => {
     if (!token || !workspaceId || !selectedSettlement?.id || !navigator.onLine) return;
@@ -320,7 +322,7 @@ export function LabourWageSettlements() {
     if (!previewRequest.settlementDate) fields.push("settlementDate");
     if (previewRequest.settlementMode === "individual" && !previewRequest.labourerId) fields.push("labourerId");
     if (previewRequest.settlementMode === "group" && !previewRequest.groupId) fields.push("groupId");
-    if (!previewRequest.paymentAccountId) fields.push("paymentAccountId");
+    if (previewRequest.paidAmount > 0 && !previewRequest.paymentAccountId) fields.push("paymentAccountId");
     return fields;
   }, [previewRequest]);
 
@@ -592,7 +594,7 @@ export function LabourWageSettlements() {
       return;
     }
     if (!selectedPaymentAccountId) {
-      setError("Select a valid payment account.");
+      setError("Select a valid paid from account.");
       return;
     }
     if (settlementMode === "individual" && !labourerId) {
@@ -760,7 +762,7 @@ export function LabourWageSettlements() {
     if (!canPost) return t("common.viewOnlyAccess");
     if (onlineRequired) return "Wage settlement requires online connection.";
     if (!token || !workspaceId || !activeFarmId || !activeSeasonId) return "Select an active farm and season before creating a settlement.";
-    if (!selectedPaymentAccountId) return "Select a valid payment account.";
+    if (!selectedPaymentAccountId) return "Select a valid paid from account.";
     if (settlementMode === "individual" && !labourerId) return "Select a labourer for an individual settlement.";
     if (settlementMode === "group" && !groupId) return "Select a labour group.";
     if (Number(manualAdjustment || 0) !== 0 && !manualAdjustmentNote.trim()) return "Manual adjustment note is required when manual adjustment is non-zero.";
@@ -824,6 +826,12 @@ export function LabourWageSettlements() {
       });
     }
   }, []);
+  const openSettlementVoucher = useCallback((settlement: LabourWageSettlement | LabourWageSettlementDetail) => {
+    openSettlement(settlement);
+    const next = new URLSearchParams(searchParams);
+    next.set("recordId", settlement.id);
+    setSearchParams(next);
+  }, [openSettlement, searchParams, setSearchParams]);
   const closeSettlement = useCallback(() => {
     setSelectedSettlement(null);
     setSelectedSettlementMode("view");
@@ -992,6 +1000,8 @@ export function LabourWageSettlements() {
     return settlements.filter((settlement) => {
       const settlementAccountId = settlement.paymentAccountId ?? settlement.linkedAccountId;
       const accountName = settlementPaymentAccountById.get(settlementAccountId)?.name ?? accountById.get(settlementAccountId)?.name ?? "";
+      const foremanName = labourers.find((labourer) => labourer.id === settlement.foremanId)?.name ?? "";
+      const labourNames = (settlement.includedLabourRows ?? []).map((row) => row.labourName).join(" ");
       return (statusFilter === "all" || settlementStatus(settlement) === statusFilter)
         && (paymentAccountFilter === "all" || settlementAccountId === paymentAccountFilter)
         && (!term || [
@@ -1000,15 +1010,28 @@ export function LabourWageSettlements() {
           settlement.fromDate,
           settlement.toDate,
           settlement.notes ?? "",
-          settlement.settlementNumber,
+          settlement.linkedVoucherNumber ?? "",
+          settlement.groupName ?? "",
+          foremanName,
+          labourNames,
+          settlement.status,
+          settlement.accountingStatus ?? "",
           accountName,
           String(settlement.totalEarned),
           String(settlement.expenseAmount),
           String(settlement.settledAdvanceAmount),
         ].some((value) => value.toLowerCase().includes(term)));
     });
-  }, [accountById, paymentAccountFilter, registerSearch, settlementPaymentAccountById, settlementStatus, settlements, statusFilter]);
-  const registerTotals = useMemo(() => registerRows.reduce((totals, settlement) => ({
+  }, [accountById, labourers, paymentAccountFilter, registerSearch, settlementPaymentAccountById, settlementStatus, settlements, statusFilter]);
+  const clearRegisterFilters = useCallback(() => {
+    setRegisterSearch("");
+    setStatusFilter("all");
+    setPaymentAccountFilter("all");
+  }, []);
+  const registerTotalRows = useMemo(() => statusFilter === "voided" || statusFilter === "deleted"
+    ? registerRows
+    : registerRows.filter((settlement) => !["voided", "deleted"].includes(settlementStatus(settlement))), [registerRows, settlementStatus, statusFilter]);
+  const registerTotals = useMemo(() => registerTotalRows.reduce((totals, settlement) => ({
     attendanceWages: totals.attendanceWages + settlement.attendanceWages,
     labourWork: totals.labourWork + (settlement.labourWorkWages ?? settlement.pendingLabourEarnings),
     totalLabourCost: totals.totalLabourCost + (settlement.grossWages ?? settlement.expenseAmount),
@@ -1022,7 +1045,7 @@ export function LabourWageSettlements() {
     appliedAdvances: 0,
     carryForward: 0,
     cashPaid: 0,
-  }), [registerRows]);
+  }), [registerTotalRows]);
   const exportRegister = () => {
     const header = [
       "Settlement No.",
@@ -1037,7 +1060,7 @@ export function LabourWageSettlements() {
       "Advance Adjusted Now",
       "Advance Carried Forward",
       "Paid Now",
-      "Payment Account",
+      "Paid From Account",
       "Accounting Reference",
       "Status",
     ];
@@ -1076,7 +1099,7 @@ export function LabourWageSettlements() {
   };
 
   return (
-    <>
+    <div className="labour-wage-settlements-page">
         <section className="record-panel workforce-shell-intro workforce-shell-intro--nested">
           <div>
             <h2>{settlementMode === "group" ? "Foreman / Group Period Settlement" : "Labour Period Settlement"}</h2>
@@ -1097,7 +1120,9 @@ export function LabourWageSettlements() {
             <span>Settlement accounting is posted under the LW settlement number.</span>
           </div>
           <form className="module-form wage-settlement-form" onSubmit={(event) => void submit(event)}>
-            <div className="advances-filter-row">
+            <fieldset className="wage-settlement-form-section">
+              <legend>Period</legend>
+              <div className="wage-settlement-period-grid">
               <label className="advances-filter-field">
                 <span>From date</span>
                 <input required type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} />
@@ -1110,8 +1135,11 @@ export function LabourWageSettlements() {
                 <span>Settlement date</span>
                 <input required type="date" value={settlementDate} onChange={(event) => setSettlementDate(event.target.value)} />
               </label>
-            </div>
-            <div className="advances-filter-row">
+              </div>
+            </fieldset>
+            <fieldset className="wage-settlement-form-section">
+              <legend>Scope</legend>
+              <div className="advances-filter-row wage-settlement-scope-grid">
               <label className="advances-filter-field">
                 <span>Settlement mode</span>
                 <select value={settlementMode} onChange={(event) => setSettlementMode(event.target.value as "individual" | "group")}>
@@ -1146,8 +1174,11 @@ export function LabourWageSettlements() {
                   </label>
                 </>
               )}
-            </div>
-            <div className="advances-filter-row">
+              </div>
+            </fieldset>
+            <fieldset className="wage-settlement-form-section">
+              <legend>Payment / adjustments</legend>
+              <div className="advances-filter-row wage-settlement-payment-grid">
               <label className="advances-filter-field">
                 <span>Paid now</span>
                 <input type="number" min="0" step="0.01" value={paidAmount} onChange={(event) => setPaidAmount(event.target.value)} />
@@ -1156,24 +1187,24 @@ export function LabourWageSettlements() {
                 <span>Manual adjustment</span>
                 <input type="number" step="0.01" value={manualAdjustment} onChange={(event) => setManualAdjustment(event.target.value)} />
               </label>
-              <label className="advances-filter-field advances-filter-field--full">
+              {hasManualAdjustment ? <label className="advances-filter-field advances-filter-field--full">
                 <span>Manual adjustment note</span>
-                <input value={manualAdjustmentNote} onChange={(event) => setManualAdjustmentNote(event.target.value)} placeholder="Required when manual adjustment is non-zero" />
-              </label>
-            </div>
-            <div className="advances-filter-row">
-              <label className="advances-filter-field">
-                <span>Payment account</span>
+                <input required value={manualAdjustmentNote} onChange={(event) => setManualAdjustmentNote(event.target.value)} placeholder="Explain this manual adjustment" />
+                <small>Required because the manual adjustment is not zero.</small>
+              </label> : null}
+              {hasPaidNow ? <label className="advances-filter-field">
+                <span>Paid from account</span>
                 <select required value={accountId} onChange={(event) => setAccountId(event.target.value)}>
-                  <option value="">Select payment account</option>
+                  <option value="">Select paid from account</option>
                   {paymentAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
                 </select>
-              </label>
+              </label> : <p className="wage-settlement-account-hint">Paid from account is only needed when Paid now is greater than zero.</p>}
               <label className="advances-filter-field advances-filter-field--full">
                 <span>Notes</span>
                 <input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional settlement notes or reference" />
               </label>
-            </div>
+              </div>
+            </fieldset>
             {onlineRequired ? <p className="worker-action-warning">Wage settlement requires online connection.</p> : null}
             {statusCheckNotice ? <p className="context-message">{statusCheckNotice}</p> : null}
             {error ? <p className="form-error">{error}</p> : null}
@@ -1194,7 +1225,7 @@ export function LabourWageSettlements() {
             ) : null}
             {success ? <p className="context-message">{success}</p> : null}
             <div className="wage-settlement-actions">
-              <button type="button" className="secondary-action" onClick={() => void previewSettlement()} disabled={!token || !workspaceId || !activeFarmId || !activeSeasonId || preview.status === "loading" || Boolean(pendingRequestId) || submitting || statusCheckInFlight}>
+              <button type="button" className="primary-action wage-settlement-preview-action" onClick={() => void previewSettlement()} disabled={!token || !workspaceId || !activeFarmId || !activeSeasonId || preview.status === "loading" || Boolean(pendingRequestId) || submitting || statusCheckInFlight}>
                 {preview.status === "loading" ? "Previewing..." : "Preview Settlement"}
               </button>
               <button type="submit" disabled={Boolean(createDisabledReason) || submitting || statusCheckInFlight || Boolean(pendingRequestId)}>
@@ -1205,6 +1236,7 @@ export function LabourWageSettlements() {
                     : "Create Settlement"}
               </button>
             </div>
+            {createDisabledReason && !submitting ? <p className="wage-settlement-create-hint">{createDisabledReason}</p> : null}
           </form>
         </section>
 
@@ -1387,16 +1419,16 @@ export function LabourWageSettlements() {
           <div className="advances-heading labour-settlement-register-header">
             <div>
               <h2>Labour settlement register</h2>
-              <span>{historyLoading ? "Refreshing register..." : `${settlements.length} settlements in this farm and season`}</span>
+              <span>{historyLoading ? "Refreshing register..." : `${settlements.length} ${settlements.length === 1 ? "settlement" : "settlements"} in this farm and season`}</span>
             </div>
             <div className="module-inline-actions">
               <button type="button" className="secondary-action" onClick={() => window.print()}><Printer size={16} /> Print</button>
               <button type="button" className="secondary-action" onClick={exportRegister}><Download size={16} /> Export CSV</button>
             </div>
           </div>
-          {!settlements.length ? <p className="context-message">No wage settlements have been posted for this farm and season yet.</p> : (
+          {!settlements.length ? <p className="context-message">No settlements found. Create a settlement preview to get started.</p> : (
             <>
-              <div className="reports-kpis">
+              <div className="reports-kpis labour-settlement-register-kpis">
                 <article><span>Attendance wages</span><strong>{money(registerTotals.attendanceWages)}</strong></article>
                 <article><span>Labour work wages</span><strong>{money(registerTotals.labourWork)}</strong></article>
         <article><span>Gross wages earned</span><strong>{money(registerTotals.totalLabourCost)}</strong></article>
@@ -1409,7 +1441,7 @@ export function LabourWageSettlements() {
                   <Search size={16} />
                   <input
                     type="search"
-                    placeholder="Search settlement number, notes, or account"
+                    placeholder="Search settlement, voucher, note, labour or group"
                     value={registerSearch}
                     onChange={(event) => setRegisterSearch(event.target.value)}
                   />
@@ -1421,10 +1453,11 @@ export function LabourWageSettlements() {
                     <option value="posted">Posted</option>
                     <option value="accounting_missing">Accounting missing</option>
                     <option value="voided">Voided</option>
+                    <option value="deleted">Deleted</option>
                   </select>
                 </label>
                 <label className="advances-filter-field labour-settlement-filter-field">
-                  <span>Payment account</span>
+                  <span>Paid from account</span>
                   <select value={paymentAccountFilter} onChange={(event) => setPaymentAccountFilter(event.target.value)}>
                     <option value="all">All accounts</option>
                     {paymentAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
@@ -1447,7 +1480,7 @@ export function LabourWageSettlements() {
                     <th>Advance absorbed this settlement</th>
                     <th>Outstanding group advance</th>
                     <th>Paid now</th>
-                    <th>Payment account</th>
+                    <th>Paid from account</th>
                     <th>Accounting reference</th>
                     <th>Status</th>
                     <th>Actions</th>
@@ -1470,11 +1503,12 @@ export function LabourWageSettlements() {
                         <td>{money(settlement.remainingAdvanceCarryForward ?? settlement.carryForwardAdvance)}</td>
                         <td>{money(settlement.paidAmount ?? settlement.payableBalance)}</td>
                         <td>{settlementPaymentAccountById.get(settlement.paymentAccountId ?? settlement.linkedAccountId)?.name ?? accountById.get(settlement.paymentAccountId ?? settlement.linkedAccountId)?.name ?? "-"}</td>
-                        <td>{settlement.settlementNumber}</td>
+                        <td>{settlement.linkedVoucherNumber || settlement.settlementNumber || "Reference unavailable"}</td>
                         <td>{settlementStatus(settlement).replaceAll("_", " ")}</td>
                         <td>
                           <div className="stacked-inline-actions">
-                            <button type="button" className="secondary-action" onClick={() => openSettlement(settlement)}>View</button>
+                            <button type="button" className="secondary-action" onClick={() => openSettlement(settlement)}>View details</button>
+                            <button type="button" className="secondary-action" onClick={() => openSettlementVoucher(settlement)}>Open voucher</button>
                             {canEditSettlement(settlement) ? (
                               <button type="button" className="secondary-action" onClick={() => openSettlement(settlement, "edit")}>Edit / Update</button>
                             ) : null}
@@ -1519,6 +1553,63 @@ export function LabourWageSettlements() {
                 </tbody>
               </table>
             </div>
+            {registerRows.length ? (
+              <div className="labour-settlement-mobile-list" aria-label="Settlement records">
+                {registerRows.map((settlement) => {
+                  const status = settlementStatus(settlement);
+                  const voucherNumber = settlement.linkedVoucherNumber || settlement.settlementNumber;
+                  return (
+                    <article className="labour-settlement-card" key={`mobile:${settlement.id}`}>
+                      <header className="labour-settlement-card__header">
+                        <button type="button" onClick={() => openSettlement(settlement)}>{settlement.settlementNumber}</button>
+                        <span className={`labour-settlement-status labour-settlement-status--${status}`}>{status.replaceAll("_", " ")}</span>
+                      </header>
+                      <div className="labour-settlement-card__period">
+                        <span>Period: {settlement.fromDate} to {settlement.toDate}</span>
+                        <span>Settlement date: {settlement.settlementDate}</span>
+                      </div>
+                      <dl className="labour-settlement-card__summary">
+                        <div><dt>Gross wages</dt><dd>{money(settlement.grossWages ?? settlement.expenseAmount)}</dd></div>
+                        <div><dt>Advance adjusted</dt><dd>{money(settlement.advanceAdjustedNow ?? settlement.settledAdvanceAmount)}</dd></div>
+                        <div><dt>Paid now</dt><dd>{money(settlement.paidAmount ?? settlement.payableBalance)}</dd></div>
+                        <div><dt>Balance after settlement</dt><dd>{money(settlement.balanceAfterPayment ?? settlement.payableBalance)}</dd></div>
+                      </dl>
+                      {voucherNumber ? (
+                        <p className="labour-settlement-card__voucher"><span>Voucher</span><strong>{voucherNumber}</strong></p>
+                      ) : (
+                        <p className="worker-action-warning">Accounting voucher reference unavailable.</p>
+                      )}
+                      <footer className="labour-settlement-card__actions">
+                        <button type="button" className="secondary-action" onClick={() => openSettlement(settlement)}>View details</button>
+                        <button type="button" className="secondary-action" onClick={() => openSettlementVoucher(settlement)}>Open voucher</button>
+                        {canEditSettlement(settlement) ? <button type="button" className="secondary-action" onClick={() => openSettlement(settlement, "edit")}>Edit</button> : null}
+                        {canDeleteSettlement(settlement) ? (
+                          <button type="button" className="danger-button" disabled={deletingSettlementId === settlement.id} onClick={() => setDeletingSettlement(settlement)}>
+                            {deletingSettlementId === settlement.id ? "Deleting..." : "Delete"}
+                          </button>
+                        ) : null}
+                        {canVoidSettlement(settlement) ? (
+                          <button type="button" className="secondary-action" disabled={voidingSettlementId === settlement.id} onClick={() => { setVoidingSettlement(settlement); setVoidReason(""); }}>
+                            {voidingSettlementId === settlement.id ? "Voiding..." : "Void / Reverse"}
+                          </button>
+                        ) : null}
+                        {status === "accounting_missing" ? (
+                          <button type="button" className="secondary-action" disabled={repairingSettlementId === settlement.id} onClick={() => void repairAccounting(settlement)}>
+                            {repairingSettlementId === settlement.id ? "Repairing..." : "Repair accounting"}
+                          </button>
+                        ) : null}
+                      </footer>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="labour-settlement-filter-empty">
+                <strong>No settlements match these filters.</strong>
+                <span>Clear the filters to show all settlement vouchers.</span>
+                <button type="button" className="secondary-action" onClick={clearRegisterFilters}>Clear filters</button>
+              </div>
+            )}
             </>
           )}
         </section>
@@ -1553,9 +1644,9 @@ export function LabourWageSettlements() {
                       </div>
                       <div className="advances-filter-row">
                         <label className="advances-filter-field">
-                          <span>Payment account</span>
+                          <span>Paid from account</span>
                           <select required value={editForm.accountId} onChange={(event) => setEditForm((current) => ({ ...current, accountId: event.target.value }))}>
-                            <option value="">Select payment account</option>
+                            <option value="">Select paid from account</option>
                             {paymentAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
                           </select>
                         </label>
@@ -1578,8 +1669,8 @@ export function LabourWageSettlements() {
                         <article><span>Advance absorbed this settlement</span><strong>{money(selectedSettlement.advanceAdjustedNow ?? selectedSettlement.settledAdvanceAmount)}</strong></article>
                         <article><span>Outstanding group advance</span><strong>{money(selectedSettlement.remainingAdvanceCarryForward ?? selectedSettlement.carryForwardAdvance)}</strong></article>
                         <article><span>Paid now</span><strong>{money(selectedSettlement.paidAmount ?? selectedSettlement.payableBalance)}</strong></article>
-                        <article><span>Payment account</span><strong>{settlementPaymentAccountById.get(selectedSettlement.paymentAccountId ?? selectedSettlement.linkedAccountId)?.name ?? accountById.get(selectedSettlement.paymentAccountId ?? selectedSettlement.linkedAccountId)?.name ?? "-"}</strong></article>
-                        <article><span>Accounting reference</span><strong>{selectedSettlement.settlementNumber}</strong></article>
+                        <article><span>Paid from account</span><strong>{settlementPaymentAccountById.get(selectedSettlement.paymentAccountId ?? selectedSettlement.linkedAccountId)?.name ?? accountById.get(selectedSettlement.paymentAccountId ?? selectedSettlement.linkedAccountId)?.name ?? "-"}</strong></article>
+                        <article><span>Voucher number</span><strong>{selectedSettlement.linkedVoucherNumber || selectedSettlement.settlementNumber || "Reference unavailable"}</strong></article>
                       </div>
                       {selectedSettlement.notes ? <p className="context-message">{selectedSettlement.notes}</p> : null}
                       {selectedSettlement.accountingStatus === "accounting_missing" ? (
@@ -1721,6 +1812,6 @@ export function LabourWageSettlements() {
             </section>
           </div>
         ) : null}
-    </>
+    </div>
   );
 }

@@ -4455,14 +4455,85 @@ button {
 .wage-settlement-form {
   gap: 14px;
 }
-.wage-settlement-actions {
-  display: flex;
-  flex-wrap: wrap;
+.labour-wage-settlements-page {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  padding-bottom: calc(var(--mobile-nav-height, 96px) + env(safe-area-inset-bottom, 0px) + 28px);
+}
+.wage-settlement-form-section {
+  border: 0;
+  display: grid;
   gap: 10px;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+.wage-settlement-form-section + .wage-settlement-form-section {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+.wage-settlement-form-section legend {
+  color: #244a2b;
+  font-size: .84rem;
+  font-weight: 800;
+  margin-bottom: 9px;
+  padding: 0;
+}
+.wage-settlement-period-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.wage-settlement-period-grid > *,
+.wage-settlement-period-grid input,
+.wage-settlement-scope-grid > *,
+.wage-settlement-payment-grid > * {
+  min-width: 0;
+}
+.wage-settlement-account-hint,
+.wage-settlement-create-hint {
+  color: var(--text-secondary);
+  font-size: .79rem;
+  line-height: 1.4;
+  margin: 0;
+}
+.wage-settlement-account-hint {
+  align-self: end;
+  background: #f6f8f4;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  min-height: 42px;
+  padding: 10px 12px;
+}
+.wage-settlement-form-section small {
+  color: var(--text-secondary);
+  font-size: .74rem;
+}
+.wage-settlement-actions {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .wage-settlement-actions .secondary-action,
 .wage-settlement-actions button[type="submit"] {
-  min-height: 42px;
+  min-height: 44px;
+  width: 100%;
+}
+.wage-settlement-preview-action {
+  background: var(--primary, #245c2b);
+  border: 1px solid var(--primary, #245c2b);
+  border-radius: 10px;
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  min-height: 44px;
+  padding: 0 16px;
+  width: 100%;
+}
+.wage-settlement-preview-action:disabled {
+  cursor: not-allowed;
+  opacity: .55;
 }
 .wage-rates-form {
   gap: 14px;
@@ -16076,6 +16147,26 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   min-width: 1080px;
 }
 
+.labour-settlement-mobile-list {
+  display: none;
+}
+
+.labour-settlement-filter-empty {
+  align-items: start;
+  background: #f8faf6;
+  border: 1px dashed #cbd8c8;
+  border-radius: 14px;
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  padding: 18px;
+}
+
+.labour-settlement-filter-empty span {
+  color: var(--text-secondary);
+  font-size: .84rem;
+}
+
 .labour-payments-hero-card {
   background:
     radial-gradient(circle at top right, rgba(138, 201, 108, 0.22), transparent 34%),
@@ -16370,13 +16461,14 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   }
 
   .workforce-shell-tabs {
-    padding: .65rem .95rem .8rem;
-    scroll-padding-inline: .95rem;
+    padding: .65rem 1.35rem .8rem;
+    scroll-padding-inline: 1.35rem;
     scroll-snap-type: x proximity;
-    mask-image: linear-gradient(90deg, transparent, #000 14px, #000 calc(100% - 14px), transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 8px, #000 calc(100% - 8px), transparent);
   }
 
   .workforce-shell-tab {
+    min-height: 44px;
     scroll-snap-align: center;
   }
 
@@ -16533,11 +16625,208 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   }
 
   .labour-settlement-register-toolbar {
+    gap: 9px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .labour-settlement-register-search {
+    grid-column: 1 / -1;
+  }
+
+  .labour-wage-settlements-page {
+    gap: 12px;
+    padding-bottom: calc(var(--mobile-nav-height, 96px) + env(safe-area-inset-bottom, 0px) + 34px);
+  }
+
+  .labour-settlement-form-panel,
+  .labour-settlement-preview-panel,
+  .labour-settlement-register-panel {
+    border-radius: 16px;
+    padding: 14px;
+  }
+
+  .wage-settlement-period-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .wage-settlement-period-grid > :last-child {
+    grid-column: 1 / -1;
+  }
+
+  .wage-settlement-scope-grid,
+  .wage-settlement-payment-grid {
+    gap: 9px;
+  }
+
+  .wage-settlement-actions {
     grid-template-columns: 1fr;
+  }
+
+  .labour-settlement-register-header {
+    align-items: start;
+    display: grid;
+    gap: 10px;
+  }
+
+  .labour-settlement-register-header .module-inline-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .labour-settlement-register-header .module-inline-actions button {
+    justify-content: center;
+    min-height: 44px;
+  }
+
+  .labour-settlement-register-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .labour-settlement-register-kpis article {
+    min-height: 86px;
+    padding: 11px;
+  }
+
+  .labour-settlement-register-kpis span {
+    font-size: .72rem;
+    line-height: 1.25;
+  }
+
+  .labour-settlement-register-kpis strong {
+    font-size: .96rem;
+  }
+
+  .labour-settlement-mobile-list {
+    display: grid;
+    gap: 11px;
+  }
+
+  .labour-settlement-card {
+    background: #fff;
+    border: 1px solid #dce5d9;
+    border-radius: 15px;
+    box-shadow: 0 8px 20px rgba(30, 67, 35, .06);
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+    padding: 14px;
+  }
+
+  .labour-settlement-card__header {
+    align-items: center;
+    display: flex;
+    gap: 10px;
+    justify-content: space-between;
+  }
+
+  .labour-settlement-card__header button {
+    background: none;
+    border: 0;
+    color: #1f5128;
+    font: inherit;
+    font-size: 1rem;
+    font-weight: 800;
+    min-height: 44px;
+    padding: 0;
+    text-align: start;
+  }
+
+  .labour-settlement-status {
+    background: #edf6eb;
+    border: 1px solid #cfe3cb;
+    border-radius: 999px;
+    color: #275b2d;
+    flex: 0 0 auto;
+    font-size: .7rem;
+    font-weight: 800;
+    padding: 5px 8px;
+    text-transform: capitalize;
+  }
+
+  .labour-settlement-status--voided,
+  .labour-settlement-status--deleted {
+    background: #f7f2f2;
+    border-color: #e6d3d3;
+    color: #8c3535;
+  }
+
+  .labour-settlement-status--accounting_missing {
+    background: #fff7e5;
+    border-color: #f1d89c;
+    color: #77530a;
+  }
+
+  .labour-settlement-card__period {
+    color: var(--text-secondary);
+    display: grid;
+    font-size: .78rem;
+    gap: 3px;
+    line-height: 1.4;
+  }
+
+  .labour-settlement-card__summary {
+    display: grid;
+    gap: 7px;
+    margin: 0;
+  }
+
+  .labour-settlement-card__summary div {
+    align-items: baseline;
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+  }
+
+  .labour-settlement-card__summary dt {
+    color: var(--text-secondary);
+    font-size: .79rem;
+  }
+
+  .labour-settlement-card__summary dd {
+    color: #203b24;
+    font-size: .84rem;
+    font-weight: 800;
+    margin: 0;
+    text-align: end;
+  }
+
+  .labour-settlement-card__voucher {
+    align-items: center;
+    background: #f6f8f4;
+    border-radius: 9px;
+    display: flex;
+    font-size: .78rem;
+    gap: 10px;
+    justify-content: space-between;
+    margin: 0;
+    padding: 9px 10px;
+  }
+
+  .labour-settlement-card__voucher span {
+    color: var(--text-secondary);
+  }
+
+  .labour-settlement-card__actions {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .labour-settlement-card__actions button {
+    justify-content: center;
+    min-height: 44px;
+    min-width: 0;
+    padding-inline: 10px;
+    width: 100%;
   }
 }
 
 @media (min-width: 768px) {
+  .labour-wage-settlements-page {
+    padding-bottom: 32px;
+  }
+
   .wage-rates-page {
     padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
   }
