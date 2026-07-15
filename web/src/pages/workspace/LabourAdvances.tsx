@@ -150,6 +150,7 @@ export function LabourAdvances() {
 
   const total = filtered.reduce((sum, advance) => sum + advance.amount, 0);
   const labourCount = new Set(filtered.map((advance) => advance.labourerId)).size;
+  const additionalFilterCount = selectedLabourerIds.length + (group !== "all" ? 1 : 0) + (paymentType !== "all" ? 1 : 0) + (sort !== "date_desc" ? 1 : 0);
   const selectedEntryAccountId = entryAccountId;
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -195,7 +196,7 @@ export function LabourAdvances() {
   };
 
   return (
-    <>
+    <div className="labour-advances-page">
         <section className="record-panel workforce-shell-intro workforce-shell-intro--nested">
           <div><h2>{t("advancesPage.introTitle")}</h2><p>{t("advancesPage.introDescription")}</p></div>
           <span className="local-pill">{t("advancesPage.databaseSynchronized")}</span>
@@ -228,20 +229,9 @@ export function LabourAdvances() {
                   <span>{t("advancesPage.outstandingAdvance")}</span>
                 </div>
               </div>}
-              renderSelectedValue={(option, actions) => <article className="labour-selected-card">
-                <div className="labour-selected-card__body">
-                  <span className="labour-selected-card__eyebrow">{t("advancesPage.selectedLabour")}</span>
-                  <strong>{option.name}</strong>
-                  <div className="labour-selected-card__summary">
-                    {labourGroupSummary(option)}{" "}
-                    <strong>{t("advancesPage.outstandingAdvance")} {money(advanceTotalByLabour.get(option.id) ?? 0)}</strong>
-                  </div>
-                </div>
-                <button type="button" className="labour-selected-card__change" onClick={actions.change}>{t("advancesPage.changeLabour")}</button>
-              </article>}
             /></label>
             <label className="advances-filter-field"><span>{t("advancesPage.amount")}</span><input required min="0.01" step="0.01" type="number" value={entryAmount} onChange={(event) => setEntryAmount(event.target.value)} /></label>
-            <label className="advances-filter-field"><span>{t("advancesPage.paymentAccount")}</span><ClearableSelect required value={selectedEntryAccountId} onChange={setEntryAccountId}>
+            <label className="advances-filter-field"><span>{t("advancesPage.paidFromAccount")}</span><ClearableSelect required value={selectedEntryAccountId} onChange={setEntryAccountId}>
               <option value="">{t("advancesPage.selectAccount")}</option>
               {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
             </ClearableSelect></label>
@@ -255,7 +245,7 @@ export function LabourAdvances() {
           <section className="advances-summary">
             <article><span>{t("advancesPage.totalAdvances")}</span><strong>{money(total)}</strong></article>
             <article><span>{t("advancesPage.transactions")}</span><strong>{filtered.length}</strong></article>
-            <article><span>{t("advancesPage.labourWithAdvances")}</span><strong>{labourCount}</strong></article>
+            <article><span>{t("advancesPage.labourers")}</span><strong>{labourCount}</strong></article>
           </section>
           <div className="advances-filters">
             <SearchInput placeholder={t("advancesPage.searchPlaceholder")} value={search} onChange={setSearch} />
@@ -263,38 +253,49 @@ export function LabourAdvances() {
               <label className="advances-filter-field"><span>{t("advancesPage.dateFrom")}</span><input aria-label={t("advancesPage.dateFrom")} type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
               <label className="advances-filter-field"><span>{t("advancesPage.dateTo")}</span><input aria-label={t("advancesPage.dateTo")} type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
             </div>
-            <div className="advances-filter-row">
-              <label className="advances-filter-field"><span>{t("advancesPage.labour")}</span><LabourMultiSelectFilter
-                ariaLabel={t("advancesPage.labour")}
-                options={groupedLabourers}
-                selectedIds={selectedLabourerIds}
-                onChange={setSelectedLabourerIds}
-                placeholder={t("common.searchLabour")}
-                noResultsLabel={noLabourResultsMessage}
-              /></label>
-              <label className="advances-filter-field"><span>{t("advancesPage.group")}</span><ClearableSelect aria-label={t("advancesPage.group")} value={group} clearValue="all" onChange={setGroup}>
-                <option value="all">{t("advancesPage.allGroups")}</option>
-                {groups.map((name) => <option key={name}>{name}</option>)}
-              </ClearableSelect></label>
-            </div>
-            <div className="advances-filter-row">
-              <label className="advances-filter-field"><span>{t("advancesPage.paymentType")}</span><ClearableSelect aria-label={t("advancesPage.paymentType")} value={paymentType} clearValue="all" onChange={setPaymentType}>
-                <option value="all">{t("advancesPage.allPaymentTypes")}</option>
-                <option value="daily_wage">{translatePaymentType("daily_wage")}</option><option value="production_based">{translatePaymentType("production_based")}</option>
-                <option value="contract_lump_sum">{translatePaymentType("contract_lump_sum")}</option><option value="monthly_salary">{translatePaymentType("monthly_salary")}</option><option value="other">{translatePaymentType("other")}</option>
-              </ClearableSelect></label>
-              <label className="advances-filter-field"><span>{t("advancesPage.transactions")}</span><ClearableSelect aria-label={t("advancesPage.transactions")} value={sort} clearValue="date_desc" onChange={(value) => setSort(value as Sort)}>
-                <option value="date_desc">{t("advancesPage.newestFirst")}</option><option value="date_asc">{t("advancesPage.oldestFirst")}</option>
-                <option value="amount_desc">{t("advancesPage.highestAmount")}</option><option value="amount_asc">{t("advancesPage.lowestAmount")}</option>
-              </ClearableSelect></label>
-            </div>
+            <details className="advances-more-filters">
+              <summary>
+                <span>{t("advancesPage.moreFilters")}</span>
+                {additionalFilterCount > 0 ? <b>{t("advancesPage.activeFilterCount", { count: additionalFilterCount })}</b> : null}
+              </summary>
+              <div className="advances-more-filters__body">
+                <div className="advances-filter-row">
+                  <label className="advances-filter-field"><span>{t("advancesPage.labour")}</span><LabourMultiSelectFilter
+                    ariaLabel={t("advancesPage.labour")}
+                    options={groupedLabourers}
+                    selectedIds={selectedLabourerIds}
+                    onChange={setSelectedLabourerIds}
+                    placeholder={t("common.searchLabour")}
+                    noResultsLabel={noLabourResultsMessage}
+                  /></label>
+                  <label className="advances-filter-field"><span>{t("advancesPage.group")}</span><ClearableSelect aria-label={t("advancesPage.group")} value={group} clearValue="all" onChange={setGroup}>
+                    <option value="all">{t("advancesPage.allGroups")}</option>
+                    {groups.map((name) => <option key={name}>{name}</option>)}
+                  </ClearableSelect></label>
+                </div>
+                <div className="advances-filter-row">
+                  <label className="advances-filter-field"><span>{t("advancesPage.labourType")}</span><ClearableSelect aria-label={t("advancesPage.labourType")} value={paymentType} clearValue="all" onChange={setPaymentType}>
+                    <option value="all">{t("advancesPage.allLabourTypes")}</option>
+                    <option value="daily_wage">{translatePaymentType("daily_wage")}</option><option value="production_based">{translatePaymentType("production_based")}</option>
+                    <option value="contract_lump_sum">{translatePaymentType("contract_lump_sum")}</option><option value="monthly_salary">{translatePaymentType("monthly_salary")}</option><option value="other">{translatePaymentType("other")}</option>
+                  </ClearableSelect></label>
+                  <label className="advances-filter-field"><span>{t("advancesPage.transactionSort")}</span><ClearableSelect aria-label={t("advancesPage.transactionSort")} value={sort} clearValue="date_desc" onChange={(value) => setSort(value as Sort)}>
+                    <option value="date_desc">{t("advancesPage.newestFirst")}</option><option value="date_asc">{t("advancesPage.oldestFirst")}</option>
+                    <option value="amount_desc">{t("advancesPage.highestAmount")}</option><option value="amount_asc">{t("advancesPage.lowestAmount")}</option>
+                  </ClearableSelect></label>
+                </div>
+              </div>
+            </details>
           </div>
           {!filtered.length ? <p className="empty-records">{t("advancesPage.noResults")}</p> : <div className="advances-list">
             {filtered.map((advance) => {
               const labourer = labourById.get(advance.labourerId);
+              const accountName = accountById.get(advance.accountId ?? "") ?? advance.sourceAccountName ?? "-";
               return <button type="button" className="advance-row" key={advance.id} onClick={() => setSelected(advance)}>
-                <span>{advance.date}</span><strong>{labourer?.name ?? t("advancesPage.labour")}</strong><span>{labourer?.group ?? "-"}</span>
-                <b>{money(advance.amount)}</b><span>{advance.notes || "-"}</span><span>{accountById.get(advance.accountId ?? "") ?? advance.sourceAccountName ?? "-"}</span>
+                <span className="advance-row__header"><strong>{labourer?.name ?? t("advancesPage.labour")}</strong><b>{money(advance.amount)}</b></span>
+                <span className="advance-row__meta">{labourer?.group ?? "-"} · {advance.date}</span>
+                <span className="advance-row__notes">{advance.notes || "-"}</span>
+                <span className="advance-row__source"><em>{t("advancesPage.paidFrom")}:</em> {accountName}</span>
               </button>;
             })}
           </div>}
@@ -304,7 +305,7 @@ export function LabourAdvances() {
           await persistOperationalRecord("advance", record);
           setSelected(record); setEditing(false); await refresh();
         }} />}
-    </>
+    </div>
   );
 }
 
@@ -338,7 +339,7 @@ function EditAdvance({ advance, accounts, onClose, onSave }: { advance: Advance;
     <header><h2>{t("advancesPage.editAdvance")}</h2><button type="button" onClick={onClose} aria-label={t("advancesPage.closeEditAdvance")}><X size={18} /></button></header>
     <form className="worker-action-form" onSubmit={(event) => void submit(event)}><label><span>{t("advancesPage.date")} *</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
       <label><span>{t("advancesPage.amount")} *</span><input required min="0.01" step="0.01" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
-      <label><span>{t("advancesPage.paymentAccount")} *</span><ClearableSelect required value={accountId} onChange={setAccountId}><option value="">{t("advancesPage.selectAccount")}</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</ClearableSelect></label>
+      <label><span>{t("advancesPage.paidFromAccount")} *</span><ClearableSelect required value={accountId} onChange={setAccountId}><option value="">{t("advancesPage.selectAccount")}</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</ClearableSelect></label>
       <label><span>{t("advancesPage.notesReference")}</span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} /></label>{error && <p className="worker-action-error">{error}</p>}
       <footer><button type="button" onClick={onClose}>{t("common.close")}</button><button disabled={busy} type="submit">{busy ? t("advancesPage.saving") : t("advancesPage.saveChanges")}</button></footer>
     </form></section></div>;

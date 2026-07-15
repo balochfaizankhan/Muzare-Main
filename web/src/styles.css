@@ -7734,6 +7734,168 @@ button {
   text-align: end;
 }
 
+.labour-advances-page {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px));
+}
+
+.labour-advances-page > .record-panel {
+  background: var(--surface);
+}
+
+.labour-advances-page .advances-summary {
+  margin-bottom: 12px;
+}
+
+.labour-advances-page .advances-summary article {
+  background: #f8fbf7;
+  border-radius: 12px;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.labour-advances-page .advances-summary span,
+.labour-advances-page .advances-heading span {
+  line-height: 1.25;
+}
+
+.labour-advances-page .advances-summary strong {
+  font-size: 1.08rem;
+  overflow-wrap: anywhere;
+}
+
+.advances-more-filters {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: visible;
+}
+
+.advances-more-filters summary {
+  align-items: center;
+  color: var(--brand-primary);
+  cursor: pointer;
+  display: flex;
+  font-size: .82rem;
+  font-weight: 800;
+  gap: 8px;
+  justify-content: space-between;
+  list-style: none;
+  min-height: 42px;
+  padding: 0 12px;
+}
+
+.advances-more-filters summary::-webkit-details-marker {
+  display: none;
+}
+
+.advances-more-filters summary::after {
+  content: "+";
+  font-size: 1rem;
+  margin-inline-start: auto;
+}
+
+.advances-more-filters[open] summary::after {
+  content: "−";
+}
+
+.advances-more-filters summary b {
+  background: #eaf5e8;
+  border-radius: 999px;
+  color: var(--brand-primary);
+  font-size: .7rem;
+  padding: 4px 8px;
+}
+
+.advances-more-filters__body {
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.labour-advances-page .advances-entry-form > button {
+  border-radius: 11px;
+  min-height: 46px;
+  width: 100%;
+}
+
+.labour-advances-page .advances-entry-form .labour-combobox__input input {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  height: 42px;
+  min-height: 42px;
+}
+
+.labour-advances-page .advances-entry-form .labour-combobox__chevron {
+  inset-inline-end: 12px;
+  top: 21px;
+}
+
+.labour-advances-page .advances-list {
+  gap: 9px;
+  padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+}
+
+.labour-advances-page .advance-row {
+  align-items: stretch;
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(5, 35, 63, 0.035);
+  gap: 5px;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  padding: 12px;
+}
+
+.labour-advances-page .advance-row > span {
+  grid-column: 1;
+  min-width: 0;
+}
+
+.labour-advances-page .advance-row__header {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.labour-advances-page .advance-row__header strong {
+  color: var(--text-primary);
+  display: -webkit-box;
+  font-size: .92rem;
+  line-height: 1.3;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.labour-advances-page .advance-row__header b {
+  color: var(--brand-primary);
+  flex: 0 0 auto;
+  font-size: .94rem;
+  text-align: end;
+  white-space: nowrap;
+}
+
+.labour-advances-page .advance-row__notes {
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.labour-advances-page .advance-row__source {
+  margin-top: 2px;
+}
+
+.labour-advances-page .advance-row__source em {
+  color: var(--text-primary);
+  font-style: normal;
+  font-weight: 750;
+}
+
 .worker-dialog-backdrop {
   align-items: center;
   backdrop-filter: blur(10px);
@@ -14718,6 +14880,76 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 
   .labour-selected-card__change {
     justify-self: start;
+  }
+}
+
+@media (max-width: 767px) {
+  .labour-advances-page {
+    gap: 10px;
+    padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .labour-advances-page > .record-panel {
+    border-radius: 14px;
+    padding: 12px;
+  }
+
+  .labour-advances-page .advances-heading {
+    align-items: flex-start;
+    margin-bottom: 9px;
+  }
+
+  .labour-advances-page .advances-heading > span {
+    max-width: 52%;
+    text-align: end;
+  }
+
+  .labour-advances-page .advances-summary {
+    gap: 7px;
+  }
+
+  .labour-advances-page .advances-summary article {
+    padding: 9px 8px;
+  }
+
+  .labour-advances-page .advances-summary span {
+    font-size: .67rem;
+  }
+
+  .labour-advances-page .advances-summary strong {
+    font-size: .9rem;
+  }
+
+  .labour-advances-page .advances-entry-form,
+  .labour-advances-page .advances-filter-row {
+    gap: 8px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .labour-advances-page .advances-filter-field span {
+    font-size: .72rem;
+    line-height: 1.25;
+  }
+
+  .labour-advances-page .advance-row {
+    gap: 5px;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 11px;
+  }
+
+  .labour-advances-page .advance-row > span,
+  .labour-advances-page .advance-row__header,
+  .labour-advances-page .advance-row__header strong,
+  .labour-advances-page .advance-row__header b {
+    grid-column: auto;
+    grid-row: auto;
+  }
+}
+
+@media (max-width: 340px) {
+  .labour-advances-page .advances-entry-form,
+  .labour-advances-page .advances-filter-row {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
