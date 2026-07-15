@@ -3,7 +3,7 @@ import { Search, Printer, Download, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
-import { ApiError, createLabourWageSettlement, deleteLabourWageSettlement, fetchLabourWageSettlement, fetchLabourWageSettlementCreateStatus, fetchLabourWageSettlementDiagnostics, fetchLabourWageSettlementPaymentAccounts, fetchLabourWageSettlements, previewLabourWageSettlement, repairLabourWageSettlementAccounting, updateLabourWageSettlement, voidLabourWageSettlement, type LabourWageSettlementDetail, type LabourWageSettlementDiagnostics, type LabourWageSettlementPaymentAccount, type LabourWageSettlementPreview, type LabourWageSettlementRecord } from "../../lib/api";
+import { ApiError, createLabourWageSettlement, deleteLabourWageSettlement, fetchLabourWageSettlement, fetchLabourWageSettlementCreateStatus, fetchLabourWageSettlementPaymentAccounts, fetchLabourWageSettlements, previewLabourWageSettlement, repairLabourWageSettlementAccounting, updateLabourWageSettlement, voidLabourWageSettlement, type LabourWageSettlementDetail, type LabourWageSettlementPaymentAccount, type LabourWageSettlementPreview, type LabourWageSettlementRecord } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 import { getActiveFarmId, getActiveSeasonId, offlineDb, workspaceRecords, type Account, type LabourGroup, type LabourWageSettlement, type Labourer } from "../../lib/offline-db";
 import { canCreate } from "../../lib/permissions";
@@ -41,11 +41,6 @@ export function LabourWageSettlements() {
   const activeFarmId = getActiveFarmId();
   const activeSeasonId = getActiveSeasonId();
   const canPost = Boolean(user && workspaceId && canCreate(user, "wages", workspaceId));
-  const canViewDiagnostics = Boolean(user && workspaceId && (
-    user.platformRole === "platform_admin"
-    || user.memberships.some((membership) => membership.active && membership.workspaceId === workspaceId && membership.role === "workspace_owner")
-  ));
-
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [labourers, setLabourers] = useState<Labourer[]>([]);
   const [labourGroups, setLabourGroups] = useState<LabourGroup[]>([]);
@@ -69,11 +64,6 @@ export function LabourWageSettlements() {
   const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
   const [statusCheckInFlight, setStatusCheckInFlight] = useState(false);
   const [statusCheckNotice, setStatusCheckNotice] = useState("");
-  const [diagnosticsSettlementNumber, setDiagnosticsSettlementNumber] = useState("LW-0006");
-  const [diagnosticsInFlight, setDiagnosticsInFlight] = useState(false);
-  const [diagnosticsError, setDiagnosticsError] = useState("");
-  const [diagnosticsCopyNotice, setDiagnosticsCopyNotice] = useState("");
-  const [diagnosticsResult, setDiagnosticsResult] = useState<LabourWageSettlementDiagnostics | null>(null);
   const [savingSettlementId, setSavingSettlementId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -713,62 +703,6 @@ export function LabourWageSettlements() {
 
   const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
   const settlementPaymentAccountById = useMemo(() => new Map(paymentAccounts.map((account) => [account.id, account])), [paymentAccounts]);
-  const diagnosticsRawJson = useMemo(() => {
-    if (!diagnosticsResult) return "";
-    return JSON.stringify(redactDiagnosticsJson(diagnosticsResult), null, 2);
-  }, [diagnosticsResult]);
-  const diagnosticsLegacyStatusLabel = diagnosticsResult
-    ? diagnosticsResult.paymentAccountResolution.legacyAccountFound
-      ? "Mapped"
-      : diagnosticsResult.paymentAccountSnapshot.paymentAccountLegacyId
-        ? "Missing"
-        : "Not stored"
-    : "-";
-  const diagnosticsCanonicalStatusLabel = diagnosticsResult
-    ? diagnosticsResult.paymentAccountResolution.canonicalAccountFound
-      ? "Resolved"
-      : diagnosticsResult.paymentAccountSnapshot.paymentAccountCanonicalId
-        ? "Unresolved"
-        : "Not stored"
-    : "-";
-  const diagnosticsAccountFoundLabel = diagnosticsResult
-    ? (diagnosticsResult.paymentAccountResolution.resolvedCanonicalId || diagnosticsResult.paymentAccountResolution.resolvedLegacyId ? "yes" : "no")
-    : "-";
-  const copyDiagnosticsJson = useCallback(async () => {
-    if (!diagnosticsResult) return;
-    const text = diagnosticsRawJson;
-    if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      setDiagnosticsCopyNotice("Diagnostic JSON copied.");
-    } catch {
-      setDiagnosticsError("Unable to copy diagnostic JSON.");
-    }
-  }, [diagnosticsRawJson, diagnosticsResult]);
-  const runDiagnostics = useCallback(async () => {
-    if (!token || !workspaceId) {
-      setDiagnosticsError("Select a workspace first.");
-      return;
-    }
-    if (!diagnosticsSettlementNumber.trim()) {
-      setDiagnosticsError("Enter a settlement number.");
-      return;
-    }
-    setDiagnosticsInFlight(true);
-    setDiagnosticsError("");
-    setDiagnosticsCopyNotice("");
-    try {
-      const response = await fetchLabourWageSettlementDiagnostics(token, workspaceId, {
-        settlementNumber: diagnosticsSettlementNumber.trim(),
-      });
-      setDiagnosticsResult(response);
-    } catch (caught) {
-      setDiagnosticsResult(null);
-      setDiagnosticsError(caught instanceof Error ? caught.message : "Unable to run diagnostics.");
-    } finally {
-      setDiagnosticsInFlight(false);
-    }
-  }, [diagnosticsSettlementNumber, token, workspaceId]);
   const includedLabourRows = summary?.includedLabourRows ?? [];
   const summaryTotals = useMemo(() => includedLabourRows.reduce((totals, row) => ({
     includedLabourers: totals.includedLabourers + 1,
@@ -897,22 +831,6 @@ export function LabourWageSettlements() {
     setVoidReason("");
     setEditForm({ fromDate: "", toDate: "", settlementDate: "", accountId: "", notes: "" });
   }, []);
-  function redactDiagnosticsJson(value: LabourWageSettlementDiagnostics): LabourWageSettlementDiagnostics {
-    const redacted = JSON.parse(JSON.stringify(value)) as LabourWageSettlementDiagnostics;
-    const redactKeys = (input: unknown): unknown => {
-      if (Array.isArray(input)) return input.map(redactKeys);
-      if (!input || typeof input !== "object") return input;
-      for (const [key, current] of Object.entries(input as Record<string, unknown>)) {
-        if (/(token|secret|password|cookie|authorization)/i.test(key)) {
-          (input as Record<string, unknown>)[key] = "[redacted]";
-          continue;
-        }
-        (input as Record<string, unknown>)[key] = redactKeys(current) as never;
-      }
-      return input;
-    };
-    return redactKeys(redacted) as LabourWageSettlementDiagnostics;
-  }
   const repairAccounting = useCallback(async (settlement: Pick<LabourWageSettlementDetail, "id" | "settlementNumber">) => {
     if (!token || !workspaceId) return;
     setRepairingSettlementId(settlement.id);
@@ -1289,62 +1207,6 @@ export function LabourWageSettlements() {
             </div>
           </form>
         </section>
-
-        {canViewDiagnostics ? (
-          <section className="record-panel admin-diagnostics-panel">
-            <div className="advances-heading">
-              <h2>Admin diagnostics - read only</h2>
-              <span>Temporary admin/owner-only diagnostics for settlement inspection only.</span>
-            </div>
-            <div className="advances-filter-row">
-              <label className="advances-filter-field advances-filter-field--full">
-                <span>Settlement number</span>
-                <input
-                  value={diagnosticsSettlementNumber}
-                  onChange={(event) => setDiagnosticsSettlementNumber(event.target.value)}
-                  placeholder="LW-0006"
-                />
-              </label>
-            </div>
-            <div className="module-inline-actions">
-              <button type="button" className="secondary-action" onClick={() => void runDiagnostics()} disabled={!token || !workspaceId || diagnosticsInFlight}>
-                {diagnosticsInFlight ? "Running..." : "Run Read-Only Diagnostics"}
-              </button>
-              <button type="button" className="secondary-action" onClick={() => void copyDiagnosticsJson()} disabled={!diagnosticsResult}>
-                Copy Diagnostic JSON
-              </button>
-            </div>
-            {diagnosticsError ? <p className="form-error">{diagnosticsError}</p> : null}
-            {diagnosticsCopyNotice ? <p className="context-message">{diagnosticsCopyNotice}</p> : null}
-            {diagnosticsResult ? (
-              <>
-                <div className="reports-summary-list">
-                  <article><span>Settlement classification</span><strong>{diagnosticsResult.classification.settlementState}</strong></article>
-                  <article><span>Lifecycle state</span><strong>{diagnosticsResult.lifecycle.state ?? "-"}</strong></article>
-                  <article><span>Settlement status</span><strong>{diagnosticsResult.settlement.status ?? "-"}</strong></article>
-                  <article><span>Settlement number</span><strong>{diagnosticsResult.settlement.settlementNumber ?? diagnosticsResult.lookup.settlementNumber ?? "-"}</strong></article>
-                  <article><span>Client request ID</span><strong>{diagnosticsResult.lookup.clientRequestId ?? "-"}</strong></article>
-                  <article><span>Accounting status</span><strong>{diagnosticsResult.accounting.status}</strong></article>
-                  <article><span>Payment account name</span><strong>{diagnosticsResult.paymentAccountSnapshot.paymentAccountName ?? "-"}</strong></article>
-                  <article><span>Stored canonical account ID status</span><strong>{diagnosticsCanonicalStatusLabel}</strong></article>
-                  <article><span>Legacy account mapping status</span><strong>{diagnosticsLegacyStatusLabel}</strong></article>
-                  <article><span>Account found</span><strong>{diagnosticsAccountFoundLabel}</strong></article>
-                  <article><span>Allocation count and total</span><strong>{diagnosticsResult.allocations.count} / {money(diagnosticsResult.allocations.absorbedTotal)}</strong></article>
-                  <article><span>Attendance linked count</span><strong>{diagnosticsResult.attendance.linkedCount}</strong></article>
-                  <article><span>Labour earnings linked count</span><strong>{diagnosticsResult.labourEarnings.linkedCount}</strong></article>
-                  <article><span>Safe to retry create</span><strong>{diagnosticsResult.classification.safeToRetryCreate ? "yes" : "no"}</strong></article>
-                  <article><span>Recommended action</span><strong>{diagnosticsResult.classification.recommendedAction}</strong></article>
-                </div>
-                <details className="record-panel">
-                  <summary>Raw diagnostic JSON</summary>
-                  <pre className="diagnostic-json">{diagnosticsRawJson}</pre>
-                </details>
-              </>
-            ) : (
-              <p className="context-message">Enter a settlement number and run diagnostics to inspect the live read-only state.</p>
-            )}
-          </section>
-        ) : null}
 
         <section className="record-panel labour-settlement-preview-panel">
           <div className="advances-heading">

@@ -35,6 +35,7 @@ export function canAccessDiagnostics(user: AuthenticatedUser, workspaceId: strin
 }
 
 export async function adminLabourWageSettlementDiagnosticsRoutes(app: FastifyInstance): Promise<void> {
+  // Internal support tooling only; keep owner/admin protected and out of the production PWA.
   app.get("/v1/workspace/:workspaceId/admin/labour-wage-settlements/diagnostics", { preHandler: requireUser }, async (request, reply) => {
     if (!request.appUser) return reply.code(401).send({ message: "Authentication token is required." });
 
