@@ -20,6 +20,7 @@ type LabourSelectComboboxProps = {
   inputRef?: RefObject<HTMLInputElement | null>;
   maxSuggestions?: number;
   includeInactive?: boolean;
+  mobileClearable?: boolean;
   renderOption?: (option: Labourer, state: { selected: boolean; active: boolean }) => ReactNode;
   renderSelectedValue?: (option: Labourer, actions: { change: () => void; clear: () => void }) => ReactNode;
 };
@@ -92,6 +93,7 @@ export function LabourSelectCombobox({
   inputRef,
   maxSuggestions = 8,
   includeInactive = false,
+  mobileClearable = true,
   renderOption,
   renderSelectedValue,
 }: LabourSelectComboboxProps) {
@@ -101,6 +103,7 @@ export function LabourSelectCombobox({
   const sheetInputRef = useRef<HTMLInputElement>(null);
   const isMobileSelector = useMobileLabourSelector();
   const [open, setOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const deferredQuery = useDeferredValue(query);
@@ -133,8 +136,8 @@ export function LabourSelectCombobox({
   const showClear = Boolean(query) && !(isDefaultSelection && query === selectedLabel);
 
   useEffect(() => {
-    if (!open) setQuery(selectedLabel);
-  }, [open, selectedLabel]);
+    if (!open && !mobileOpen) setQuery(selectedLabel);
+  }, [mobileOpen, open, selectedLabel]);
 
   const filtered = useMemo(() => {
     const term = normalize(deferredQuery);
@@ -174,6 +177,7 @@ export function LabourSelectCombobox({
     onChange(nextValue);
     setQuery(nextLabel);
     setOpen(false);
+    setMobileOpen(false);
     setActiveIndex(0);
   };
 
@@ -182,11 +186,20 @@ export function LabourSelectCombobox({
     setOpen(true);
     setActiveIndex(0);
     if (query === selectedLabel) setQuery("");
-    if (isMobileSelector) window.requestAnimationFrame(() => sheetInputRef.current?.focus());
+  };
+
+  const openMobileMenu = () => {
+    if (disabled) return;
+    setMobileOpen(true);
+    setOpen(false);
+    setActiveIndex(0);
+    if (query === selectedLabel) setQuery("");
+    window.requestAnimationFrame(() => sheetInputRef.current?.focus());
   };
 
   const closeMenu = () => {
     setOpen(false);
+    setMobileOpen(false);
     setQuery(selectedLabel);
     setActiveIndex(0);
   };
@@ -195,23 +208,29 @@ export function LabourSelectCombobox({
     onChange(clearValue);
     setQuery("");
     setOpen(false);
+    setMobileOpen(false);
     setActiveIndex(0);
   };
 
   const beginChange = () => {
     clear();
-    setOpen(true);
-    window.requestAnimationFrame(() => inputRef?.current?.focus());
+    if (isMobileSelector) {
+      setMobileOpen(true);
+      window.requestAnimationFrame(() => sheetInputRef.current?.focus());
+    } else {
+      setOpen(true);
+      window.requestAnimationFrame(() => inputRef?.current?.focus());
+    }
   };
 
   useEffect(() => {
-    if (!open || isMobileSelector) return;
+    if (!open) return;
     const onPointerDown = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) closeMenu();
     };
     window.addEventListener("pointerdown", onPointerDown);
     return () => window.removeEventListener("pointerdown", onPointerDown);
-  }, [isMobileSelector, open, selectedLabel]);
+  }, [open, selectedLabel]);
 
   const selectedLabour = value && value !== "all" ? options.find((option) => option.id === value) : undefined;
 
@@ -254,25 +273,26 @@ export function LabourSelectCombobox({
 
   return (
     <div className="labour-combobox" ref={rootRef}>
-      {selectedLabour && !open && renderSelectedValue ? renderSelectedValue(selectedLabour, { change: beginChange, clear }) : null}
-      {isMobileSelector ? <div
+      {selectedLabour && !open && !mobileOpen && renderSelectedValue ? renderSelectedValue(selectedLabour, { change: beginChange, clear }) : null}
+      <div
         role="combobox"
         tabIndex={disabled ? -1 : 0}
         className="labour-combobox__mobile-trigger"
         aria-label={resolvedAriaLabel}
         aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={openMenu}
+        aria-expanded={mobileOpen}
+        onClick={openMobileMenu}
         onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openMenu(); }
+          if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openMobileMenu(); }
         }}
       >
         <span className={selectedLabel ? "" : "labour-combobox__placeholder"}>{selectedLabel || resolvedPlaceholder}</span>
         <span className="labour-combobox__trigger-actions">
-          {selectedLabel ? <button type="button" className="labour-combobox__clear" aria-label={t("common.clearSelection")} onClick={(event) => { event.stopPropagation(); clear(); }}><X size={15} /></button> : null}
+          {selectedLabel && mobileClearable ? <button type="button" className="labour-combobox__clear" aria-label={t("common.clearSelection")} onClick={(event) => { event.stopPropagation(); clear(); }}><X size={15} /></button> : null}
           <ChevronDown size={16} aria-hidden="true" />
         </span>
-      </div> : <SearchInput
+      </div>
+      <SearchInput
         aria-label={resolvedAriaLabel}
         className={`labour-combobox__input${selectedLabour && !open && renderSelectedValue ? " labour-combobox__input--hidden" : ""}`}
         disabled={disabled}
@@ -296,9 +316,9 @@ export function LabourSelectCombobox({
         aria-controls="labour-combobox-options"
         showClear={showClear}
         value={query}
-      />}
-      {!isMobileSelector ? <ChevronDown className={`labour-combobox__chevron${open ? " is-open" : ""}`} size={16} aria-hidden="true" /> : null}
-      {open && !isMobileSelector ? (
+      />
+      <ChevronDown className={`labour-combobox__chevron${open ? " is-open" : ""}`} size={16} aria-hidden="true" />
+      {open ? (
         <div className="labour-combobox__menu" id="labour-combobox-options" role="listbox" aria-label={resolvedAriaLabel}>
           <div className="labour-combobox__options">
             {items.length === 0 ? <p className="empty-records labour-combobox__empty">{resolvedNoResultsLabel}</p> : items.map((option, index) => {
@@ -326,7 +346,7 @@ export function LabourSelectCombobox({
         </div>
       ) : null}
       <LabourSelectorSheet
-        open={open && isMobileSelector}
+        open={mobileOpen}
         title={t("common.selectLabour")}
         subtitle={t("common.searchChooseLabourer")}
         query={query}

@@ -224,16 +224,11 @@ export function LabourAdvances() {
               inputRef={labourInputRef}
               maxSuggestions={6}
               includeInactive
+              mobileClearable={false}
               renderOption={(option) => <div className="labour-combobox__option-content">
-                <div className="labour-combobox__option-content-top">
-                  <strong>{option.name}</strong>
-                  <span className="labour-combobox__option-value">{money(advanceTotalByLabour.get(option.id) ?? 0)}</span>
-                </div>
-                <div className="labour-combobox__option-meta">
-                  <span>{labourGroupSummary(option)}</span>
-                  <span className="labour-combobox__option-meta-dot" aria-hidden="true" />
-                  <span>{t("advancesPage.outstandingAdvance")}</span>
-                </div>
+                <strong>{option.name}</strong>
+                <span className="labour-combobox__option-meta">{labourGroupSummary(option)}</span>
+                <span className="labour-combobox__option-outstanding">{t("advancesPage.outstandingAdvance")} {money(advanceTotalByLabour.get(option.id) ?? 0)}</span>
               </div>}
             /></label>
             <label className="advances-filter-field"><span>{t("advancesPage.amount")}</span><input required min="0.01" step="0.01" type="number" value={entryAmount} onChange={(event) => setEntryAmount(event.target.value)} /></label>

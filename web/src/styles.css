@@ -406,6 +406,13 @@ button {
   gap: 6px;
 }
 
+.labour-combobox__option-outstanding {
+  color: #2e6b35;
+  font-size: .76rem;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
 .labour-combobox__option-meta-dot {
   background: #cbd5e1;
   border-radius: 999px;
@@ -690,7 +697,7 @@ button {
   border-radius: 8px;
   color: var(--text-primary);
   cursor: pointer;
-  display: flex;
+  display: none;
   font: inherit;
   gap: 10px;
   height: 42px;
@@ -1005,6 +1012,26 @@ button {
   background: var(--brand-primary);
   border: 1px solid var(--brand-primary);
   color: #fff;
+}
+
+@media (max-width: 767px) {
+  .labour-combobox__mobile-trigger {
+    display: flex;
+  }
+
+  .labour-combobox__input,
+  .labour-combobox__chevron,
+  .labour-combobox__menu {
+    display: none !important;
+  }
+
+  .labour-selector-sheet__option .labour-combobox__option-content {
+    gap: 3px;
+  }
+
+  .labour-selector-sheet__option .labour-combobox__option-content strong {
+    white-space: normal;
+  }
 }
 
 .labour-selected-card {
