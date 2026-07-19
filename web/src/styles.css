@@ -10402,7 +10402,8 @@ button {
 }
 
 @media (max-width: 767px) and (max-height: 620px) {
-  .expense-voucher-form:focus-within .expense-voucher-form__sticky-footer {
+  .expense-voucher-form:focus-within .expense-voucher-form__sticky-footer,
+  .dispatch-form:focus-within .dispatch-submit-footer {
     display: none;
   }
 }
@@ -12739,6 +12740,7 @@ button {
 }
 
 .dispatch-form__section--details {
+  column-gap: 12px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -12896,7 +12898,12 @@ button {
   color: var(--text-secondary);
   font-size: 0.78rem;
   margin: 0;
-  padding: 8px 10px;
+  padding: 6px 9px;
+}
+
+.dispatch-added-items:has(.dispatch-empty-note) {
+  gap: 4px;
+  padding-block: 8px;
 }
 
 .dispatch-submit-footer {
@@ -13005,10 +13012,20 @@ button {
   border-radius: 12px;
   color: var(--text-primary);
   font: inherit;
-  min-height: 42px;
+  min-height: 44px;
   min-width: 0;
   padding: 8px 10px;
   width: 100%;
+}
+
+.dispatch-form .clearable-select select {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dispatch-form .clearable-select:not(:has(.clearable-select__clear)) select {
+  padding-inline-end: 36px !important;
 }
 
 .inventory-disabled__action {
@@ -15233,20 +15250,23 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .advance-row span { grid-column: 1 / -1; }
   .module-workspace--dispatch {
     gap: 9px;
-    padding-bottom: calc(160px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(180px + env(safe-area-inset-bottom, 0px));
     padding-top: 10px;
-    scroll-padding-bottom: calc(160px + env(safe-area-inset-bottom, 0px));
+    scroll-padding-bottom: calc(180px + env(safe-area-inset-bottom, 0px));
   }
   .dispatch-page-header { border-radius: 16px; padding: 11px; }
-  .dispatch-overview-card,
+  .dispatch-overview-card {
+    gap: 4px;
+    padding: 12px;
+  }
   .dispatch-summary-panel,
   .dispatch-records-panel { padding: 14px; }
   .dispatch-form { grid-template-columns: minmax(0, 1fr); }
-  .dispatch-form { padding-bottom: 86px; }
+  .dispatch-form { padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px)); }
   .dispatch-form__section--details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dispatch-support-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dispatch-support-actions button { font-size: 0.8rem; min-height: 44px; padding-inline: 8px; }
-  .dispatch-overview-card__metric { padding: 7px 8px; }
+  .dispatch-overview-card__metric { gap: 5px; padding: 6px 7px; }
   .dispatch-overview-card__metric span,
   .dispatch-kpi-grid span { font-size: 0.62rem; }
   .dispatch-overview-card__metric strong,
@@ -15254,12 +15274,16 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .dispatch-overview-card__metric small,
   .dispatch-kpi-grid small { font-size: 0.66rem; }
   .dispatch-kpi-panel { display: none; }
-  .dispatch-item-row__fields { grid-template-columns: minmax(0, 1fr) minmax(82px, .42fr); }
+  .dispatch-item-row__fields { grid-template-columns: minmax(0, 1fr) minmax(112px, .42fr); }
   .dispatch-list header { align-items: stretch; flex-direction: column; }
   .dispatch-summary__filters { gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dispatch-summary__filters input { font-size: 0.74rem; min-height: 40px; padding-inline: 6px; }
   .dispatch-summary__groups { grid-template-columns: minmax(0, 1fr); }
-  .dispatch-records-panel { margin-bottom: calc(22px + env(safe-area-inset-bottom, 0px)); }
+  .dispatch-summary-panel,
+  .dispatch-records-panel {
+    scroll-margin-block-end: calc(160px + env(safe-area-inset-bottom, 0px));
+  }
+  .dispatch-records-panel { margin-bottom: calc(38px + env(safe-area-inset-bottom, 0px)); }
   .dispatch-submit-footer {
     bottom: calc(63px + env(safe-area-inset-bottom, 0px));
     grid-template-columns: minmax(0, 1fr) auto;

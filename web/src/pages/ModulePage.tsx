@@ -3303,7 +3303,7 @@ function DispatchModule() {
           <div className="dispatch-added-items">
             <div className="dispatch-section-subhead">
               <h4>Added Items</h4>
-              <p>Review the draft rows before submitting.</p>
+              {validDraftItems.length ? <p>Review the draft rows before submitting.</p> : null}
             </div>
             {!validDraftItems.length ? <p className="dispatch-empty-note">No carton items added yet.</p> : <div className="dispatch-added-items__list">
               {validDraftItems.map((item, index) => (
