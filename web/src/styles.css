@@ -14551,13 +14551,13 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   display: block;
 }
 .attendance-register-print-page {
-  --attendance-col-index: 22px;
-  --attendance-col-name: 130px;
-  --attendance-col-group: 76px;
-  --attendance-col-stat: 30px;
-  --attendance-col-payable: 58px;
-  --attendance-col-wages: 68px;
-  --attendance-col-date: 28px;
+  --attendance-col-index: 26px;
+  --attendance-col-name: 160px;
+  --attendance-col-group: 92px;
+  --attendance-col-stat: 34px;
+  --attendance-col-payable: 70px;
+  --attendance-col-wages: 80px;
+  --attendance-col-date: 40px;
   --attendance-print-font-size: 8.2px;
   --attendance-print-line-height: 1.15;
   background: #fff;
@@ -14567,7 +14567,7 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   display: grid;
   gap: 2mm;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
-  height: 199mm;
+  height: 285mm;
   overflow: hidden;
   page-break-after: always;
   break-after: page;
@@ -14582,24 +14582,24 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   page-break-after: auto;
 }
 .attendance-register-print-page--compact {
-  --attendance-col-index: 20px;
-  --attendance-col-name: 120px;
-  --attendance-col-group: 70px;
-  --attendance-col-stat: 26px;
-  --attendance-col-payable: 54px;
-  --attendance-col-wages: 64px;
-  --attendance-col-date: 22px;
-  --attendance-print-font-size: 7.6px;
+  --attendance-col-index: 24px;
+  --attendance-col-name: 150px;
+  --attendance-col-group: 86px;
+  --attendance-col-stat: 32px;
+  --attendance-col-payable: 66px;
+  --attendance-col-wages: 76px;
+  --attendance-col-date: 32px;
+  --attendance-print-font-size: 7.8px;
 }
 .attendance-register-print-page--ultra {
-  --attendance-col-index: 18px;
-  --attendance-col-name: 112px;
-  --attendance-col-group: 64px;
-  --attendance-col-stat: 23px;
-  --attendance-col-payable: 50px;
-  --attendance-col-wages: 60px;
-  --attendance-col-date: 17px;
-  --attendance-print-font-size: 7.1px;
+  --attendance-col-index: 22px;
+  --attendance-col-name: 142px;
+  --attendance-col-group: 80px;
+  --attendance-col-stat: 28px;
+  --attendance-col-payable: 62px;
+  --attendance-col-wages: 72px;
+  --attendance-col-date: 24px;
+  --attendance-print-font-size: 7.3px;
   --attendance-print-line-height: 1.1;
 }
 .attendance-register-print-header {
@@ -14607,7 +14607,7 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   border-bottom: 1.5px solid #334155;
   display: grid;
   gap: 4mm;
-  grid-template-columns: 34mm minmax(48mm, .8fr) minmax(0, 1.8fr);
+  grid-template-columns: 42mm minmax(65mm, .8fr) minmax(0, 2.2fr);
   padding-bottom: 2mm;
 }
 .attendance-register-print-brand,
@@ -14642,7 +14642,7 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 .attendance-register-print-meta {
   display: grid;
   gap: 1.5mm 3mm;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   margin: 0;
   min-width: 0;
   padding: 0;
@@ -14780,14 +14780,10 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   white-space: nowrap;
 }
 .attendance-register-print-page--ultra .attendance-register-print-date-heading {
-  height: 10mm;
-  padding: 0;
-  vertical-align: middle;
+  padding-inline: .35mm;
 }
 .attendance-register-print-page--ultra .attendance-register-print-date-heading span {
-  display: inline-block;
-  font-size: 6.8px;
-  transform: rotate(-90deg);
+  font-size: 7px;
 }
 .attendance-register-print-empty {
   background: #fff;
@@ -17192,6 +17188,7 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 
 @media print {
   @page { size: A4 landscape; margin: 5mm; }
+  @page attendance-register { size: A3 landscape; margin: 6mm; }
   html,
   body {
     background: #fff !important;
@@ -17252,8 +17249,9 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .report-wide-table { display: block !important; }
   .attendance-register-print-template { gap: 0; }
   .attendance-register-print-page {
-    height: 199mm;
+    height: 285mm;
     margin: 0;
+    page: attendance-register;
     padding: 0;
   }
   .attendance-register-print-summary { grid-template-columns: repeat(6, minmax(0, 1fr)); }

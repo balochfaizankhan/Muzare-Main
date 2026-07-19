@@ -11,6 +11,7 @@ import { SubpageHeader } from "../../components/SubpageHeader";
 import { defaultTransactionGroupExpansion, groupAccountTransactions, type AccountTransactionGroupKey } from "../../lib/accountTransactionGroups";
 import { calculateAccountBalance } from "../../lib/accounting";
 import { getCanonicalExpenseCategory } from "../../lib/expenseCategories";
+import { buildInclusiveDateKeys, chunkAttendanceDateKeys, formatLocalDateKey, normalizeDateKey } from "../../lib/dateOnly";
 import { formatMoney, formatNumber } from "../../lib/format";
 import { labourEarningScopeLabel, labourEarningTypeLabel, labourEarningsByScope, sumLabourEarnings } from "../../lib/labourEarnings";
 import { getActiveLabourWageSettlements, getCashAffectingVouchers, getGeneralExpenseVouchers, getLabourWageSettlementAdvanceOffset, getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher, outstandingLabourAdvances, totalSettledAdvances } from "../../lib/labourWageSettlements";
@@ -125,7 +126,12 @@ const defaultViews: ReportViewState = {
 
 const csvCell = (value: unknown) => `"${String(value ?? "").replaceAll("\"", "\"\"")}"`;
 const money = formatMoney;
-const inRange = (date: string, from: string, to: string) => (!from || date >= from) && (!to || date <= to);
+const inRange = (date: string, from: string, to: string) => {
+  const dateKey = normalizeDateKey(date);
+  const fromKey = normalizeDateKey(from);
+  const toKey = normalizeDateKey(to);
+  return (!fromKey || dateKey >= fromKey) && (!toKey || dateKey <= toKey);
+};
 const attendanceMark = (status?: Attendance["status"]) => status === "present" ? "P" : status === "half_day" ? "H" : status === "absent" ? "A" : "-";
 const attendancePrintMark = (status?: Attendance["status"]) => status === "present" ? "P" : status === "half_day" ? "½" : status === "absent" ? "A" : "-";
 const attendanceStatusClass = (status?: Attendance["status"]) => status ? `register-status register-status--${status}` : "register-status register-status--empty";
@@ -250,7 +256,7 @@ function formatAttendanceBlockRange(dates: string[]) {
 }
 
 function todayKey() {
-  return new Date().toISOString().slice(0, 10);
+  return formatLocalDateKey(new Date());
 }
 
 function startOfWeekKey() {
@@ -258,13 +264,13 @@ function startOfWeekKey() {
   const day = date.getDay();
   const diff = day === 0 ? -6 : 1 - day;
   date.setDate(date.getDate() + diff);
-  return date.toISOString().slice(0, 10);
+  return formatLocalDateKey(date);
 }
 
 function monthStartKey() {
   const date = new Date();
   date.setDate(1);
-  return date.toISOString().slice(0, 10);
+  return formatLocalDateKey(date);
 }
 
 type SalesReportRecord = {
@@ -307,17 +313,7 @@ function downloadCsv(filename: string, rows: unknown[][]) {
 }
 
 function buildDateColumns(from: string, to: string, rows: Attendance[]) {
-  if (from && to && from <= to) {
-    const dates: string[] = [];
-    const cursor = new Date(`${from}T00:00:00`);
-    const end = new Date(`${to}T00:00:00`);
-    while (cursor <= end) {
-      dates.push(cursor.toISOString().slice(0, 10));
-      cursor.setDate(cursor.getDate() + 1);
-    }
-    return dates;
-  }
-  return [...new Set(rows.map((row) => row.date))].sort();
+  return buildInclusiveDateKeys(from, to, rows.map((row) => row.date));
 }
 
 const fallbackLabourForSort = (id: string, name: string) => ({ id, name, createdAt: "" });
@@ -712,7 +708,8 @@ export function Reports() {
   const renderAttendanceRegisterPrintPage = (page: typeof attendancePrintPages[number]) => {
     const labourLabel = attendanceRegisterLabourLabel;
     const labourGroupLabel = attendanceRegisterGroupLabel;
-    const printRangeLabel = page.dateBlock.length > 0 ? formatAttendanceBlockRange(page.dateBlock) : rangeLabel;
+    const printRangeLabel = attendanceDates.length > 0 ? formatAttendanceBlockRange(attendanceDates) : rangeLabel;
+    const shownDateRangeLabel = page.dateBlock.length > 0 ? formatAttendanceBlockRange(page.dateBlock) : "-";
     const dateColumnWidthClass = page.density === "normal" ? "attendance-register-print-page--normal" : page.density === "compact" ? "attendance-register-print-page--compact" : "attendance-register-print-page--ultra";
     return (
       <section key={page.id} className={`attendance-register-print-page ${dateColumnWidthClass}`}>
@@ -730,8 +727,10 @@ export function Reports() {
             <div><dt>Season</dt><dd>{bootstrapSeason?.name ?? "All seasons"}</dd></div>
             <div><dt>Group</dt><dd>{labourGroupLabel}</dd></div>
             <div><dt>Labour</dt><dd>{labourLabel}</dd></div>
+            <div><dt>Dates shown</dt><dd>{shownDateRangeLabel}</dd></div>
             <div><dt>Generated</dt><dd>{printGeneratedAt}</dd></div>
             <div><dt>By</dt><dd>{printGeneratedBy}</dd></div>
+            <div><dt>Page</dt><dd>{page.pageNumber} of {page.totalPages}</dd></div>
           </dl>
         </header>
         <section className="attendance-register-print-summary">
@@ -802,7 +801,7 @@ export function Reports() {
             </tbody>
             <tfoot>
               <tr className="attendance-register-print-total-row">
-                <th colSpan={3}>Grand Total</th>
+                <th colSpan={3}>Full-period totals (shown labour)</th>
                 <td>{formatNumber(page.pageTotals.present)}</td>
                 <td>{formatNumber(page.pageTotals.halfDay)}</td>
                 <td>{formatNumber(page.pageTotals.absent)}</td>
@@ -811,7 +810,7 @@ export function Reports() {
                 {page.dateBlock.map((date, index) => <td key={`${page.id}:total:${date}:${index}`} />)}
               </tr>
               <tr className="attendance-register-print-daily-row">
-                <th colSpan={8}>Daily Total Presents</th>
+                <th colSpan={8}>Daily payable totals (shown dates)</th>
                 {page.dateTotals.map((total, index) => <td key={`${page.id}:${page.dateBlock[index]}`}>{formatNumber(total)}</td>)}
               </tr>
             </tfoot>
@@ -971,9 +970,9 @@ export function Reports() {
     )),
     [attendanceDates, attendanceSummary],
   );
-  const attendanceLabourPageCount = Math.max(Math.ceil(attendanceSummary.length / 30), 1);
+  const attendanceLabourPageCount = Math.max(Math.ceil(attendanceSummary.length / 35), 1);
   const attendanceLabourBlockSize = Math.max(Math.ceil(attendanceSummary.length / attendanceLabourPageCount), 1);
-  const attendanceDateBlocks = useMemo(() => (attendanceDates.length > 0 ? chunkArray(attendanceDates, 40) : [[]]), [attendanceDates]);
+  const attendanceDateBlocks = useMemo(() => (attendanceDates.length > 0 ? chunkAttendanceDateKeys(attendanceDates) : [[]]), [attendanceDates]);
   const attendanceLabourBlocks = useMemo(() => (attendanceSummary.length > 0 ? chunkArray(attendanceSummary, attendanceLabourBlockSize) : [[]]), [attendanceLabourBlockSize, attendanceSummary]);
   const attendancePrintPages = useMemo(() => {
     const pages: Array<{
