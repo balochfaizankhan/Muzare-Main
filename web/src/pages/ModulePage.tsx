@@ -1589,6 +1589,10 @@ type PendingReceipt = { id: string; file: File; originalFile?: File; cropMetadat
 type CropBox = { left: number; top: number; right: number; bottom: number };
 const receiptTypes = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 const receiptMaxSize = 10 * 1024 * 1024;
+// Receipt uploads are temporarily hidden from the expense form. Keep the
+// attachment implementation intact so existing voucher attachments and detail
+// views continue to work, and the form controls can be restored safely.
+const expenseReceiptUploadEnabled = false;
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -2175,21 +2179,21 @@ function ExpensesModule() {
       }
       return {
         status: "valid" as const,
-        message: "",
+        message: t("expensesPage.voucherNumberAvailable"),
         normalized: result.voucherNumber,
       };
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
         return {
           status: "duplicate" as const,
-          message: error.message,
+          message: t("expensesPage.voucherNumberDuplicate"),
           normalized: normalizedValue,
         };
       }
       if (error instanceof ApiError && error.status === 400) {
         return {
           status: "invalid" as const,
-          message: error.message,
+          message: t("expensesPage.voucherNumberFormatError"),
           normalized: normalizedValue,
         };
       }
@@ -2207,7 +2211,7 @@ function ExpensesModule() {
     }
     const trimmedValue = customVoucherNumber.trim();
     if (!trimmedValue) {
-      setVoucherNumberValidation({ status: "idle", message: "" });
+      setVoucherNumberValidation({ status: "invalid", message: t("expensesPage.voucherNumberFormatError") });
       return;
     }
     let cancelled = false;
@@ -2726,7 +2730,7 @@ function ExpensesModule() {
         >
           <Pencil size={14} />
         </button>}</span></span>}>
-        {receiptCropTarget && <ReceiptCropReviewModal file={receiptCropTarget} onCancel={() => advanceReceiptCropQueue()} onAccept={advanceReceiptCropQueue} />}
+        {expenseReceiptUploadEnabled && receiptCropTarget && <ReceiptCropReviewModal file={receiptCropTarget} onCancel={() => advanceReceiptCropQueue()} onAccept={advanceReceiptCropQueue} />}
         <form className="module-form inline-form expense-voucher-form" onSubmit={(event) => void submit(event)}>
           <div ref={voucherFormRef} />
           <fieldset disabled={savingVoucher} aria-busy={savingVoucher} className="expense-voucher-form__fieldset">
@@ -2754,6 +2758,10 @@ function ExpensesModule() {
                 />
               </label>
             </div>
+            <label className="expense-voucher-form__notes">
+              <span>{t("expensesPage.notesOptional")}</span>
+              <input value={notes} placeholder={t("expensesPage.notesOptional")} onChange={(event) => setNotes(event.target.value)} />
+            </label>
           </div>
           {customVoucherNumberEnabled && <div className="expense-voucher-form__number-row">
               <label className="expense-voucher-form__number-edit">
@@ -2774,7 +2782,7 @@ function ExpensesModule() {
                     {t("expensesPage.useSuggestedVoucherNumber")}
                   </button>}
                 </div>
-                {voucherNumberValidation.message ? <small className={voucherNumberValidation.status === "duplicate" || voucherNumberValidation.status === "invalid" ? "expense-voucher-form__number-feedback is-error" : "expense-voucher-form__number-feedback"}>{voucherNumberValidation.message}</small> : null}
+                {voucherNumberValidation.message ? <small aria-live="polite" className={`expense-voucher-form__number-feedback${voucherNumberValidation.status === "duplicate" || voucherNumberValidation.status === "invalid" ? " is-error" : ""}${voucherNumberValidation.status === "valid" ? " is-success" : ""}${voucherNumberValidation.status === "checking" ? " is-checking" : ""}`}>{voucherNumberValidation.message}</small> : null}
                 {voucherNumberValidation.status === "duplicate" && voucherNumberValidation.blockingVoucher ? <div className="expense-voucher-form__blocking-voucher">
                   <small>{voucherNumberValidation.blockingVoucher.source === "imported" ? t("expensesPage.blockingImportedVoucher") : t("expensesPage.blockingVoucher")}: {getVoucherDisplayNumber(voucherNumberValidation.blockingVoucher) || voucherNumberValidation.blockingVoucher.voucherNumber} · {voucherNumberValidation.blockingVoucher.date} · {money(voucherNumberValidation.blockingVoucher.amount)}</small>
                   <small>{voucherNumberValidation.blockingVoucher.description || "-"}</small>
@@ -2797,14 +2805,7 @@ function ExpensesModule() {
             <div className="expense-voucher-form__section-head">
               <strong>{t("expensesPage.voucherItems")}</strong>
             </div>
-            <label className="expense-voucher-form__notes">
-              <span>{t("expensesPage.notesOptional")}</span>
-              <input value={notes} placeholder={t("expensesPage.notesOptional")} onChange={(event) => setNotes(event.target.value)} />
-            </label>
             <div className="expense-voucher-items">
-              <div className="expense-voucher-items__header">
-                <strong>{t("expensesPage.voucherItems")}</strong>
-              </div>
               <div className="expense-voucher-items__list">
                 {voucherItems.map((item, index) => {
                   const selectedCategory = categories.data?.categories.find((entry) => entry.id === item.categoryId);
@@ -2812,7 +2813,7 @@ function ExpensesModule() {
                     <article className="expense-voucher-item" key={item.id}>
                       <div className="expense-voucher-item__top">
                         <strong>{t("expensesPage.itemNumber", { number: index + 1 })}</strong>
-                        {voucherItems.length > 1 && <button className="expense-voucher-item__remove" type="button" onClick={() => setVoucherItems((current) => current.filter((entry) => entry.id !== item.id))}>{t("expensesPage.removeItem")}</button>}
+                        {voucherItems.length > 1 && <button aria-label={t("expensesPage.removeItem")} title={t("expensesPage.removeItem")} className="expense-voucher-item__remove" type="button" onClick={() => setVoucherItems((current) => current.filter((entry) => entry.id !== item.id))}><Trash2 size={16} /></button>}
                       </div>
                       <div className="expense-voucher-item__grid">
                         <label><span>{t("expensesPage.categoryRequired")}</span><SearchInput ref={(node) => { voucherItemCategoryRefs.current[item.id] = node; }} required list={`expense-category-options-${item.id}`} placeholder={t("expensesPage.selectCategory")} value={item.categorySearch} onChange={(value) => {
@@ -2823,7 +2824,7 @@ function ExpensesModule() {
                           const next = selectedCategory?.subcategories.find((entry) => entry.name === value);
                           updateVoucherItem(item.id, (current) => ({ ...current, subcategorySearch: value, subcategoryId: next?.id ?? "" }));
                         }} onClear={() => updateVoucherItem(item.id, (current) => ({ ...current, subcategoryId: "", subcategorySearch: "" }))} /><datalist id={`expense-subcategory-options-${item.id}`}>{selectedCategory?.subcategories.map((entry) => <option key={entry.id} value={entry.name} />)}</datalist></label>
-                        <label><span>{t("expensesPage.amount")}</span><input required min="0.01" step="0.01" type="number" value={item.amount} placeholder={t("expensesPage.amount")} onChange={(event) => updateVoucherItem(item.id, (current) => ({ ...current, amount: event.target.value }))} /></label>
+                        <label><span>{t("expensesPage.amount")} (SAR)</span><input required min="0.01" step="0.01" type="number" value={item.amount} placeholder={t("expensesPage.amount")} onChange={(event) => updateVoucherItem(item.id, (current) => ({ ...current, amount: event.target.value }))} /></label>
                         <label className="expense-voucher-item__description"><span>{t("expensesPage.description")}</span><input required value={item.description} placeholder={t("expensesPage.description")} onChange={(event) => updateVoucherItem(item.id, (current) => ({ ...current, description: event.target.value }))} /></label>
                       </div>
                     </article>
@@ -2831,23 +2832,25 @@ function ExpensesModule() {
                 })}
               </div>
               <button className="expense-voucher-items__add expense-voucher-items__add--bottom" type="button" onClick={addVoucherItem}>{t("expensesPage.addAnotherItem")}</button>
-              <div className="expense-voucher-items__total">
-                <span>{t("expensesPage.grandTotal")}</span>
-                <strong>{money(voucherGrandTotal)}</strong>
-              </div>
             </div>
           </div>
-          <div className="expense-voucher-form__section">
+          {expenseReceiptUploadEnabled && <div className="expense-voucher-form__section">
             <div className="expense-voucher-form__section-head">
               <strong>{t("expensesPage.receiptAttachment")}</strong>
             </div>
             <ReceiptAttachmentPicker pending={pendingReceipts} onFiles={addReceiptFiles} onRemove={removePendingReceipt} />
-          </div>
-          {receiptError && <p className="worker-action-error">{receiptError}</p>}
+          </div>}
+          {expenseReceiptUploadEnabled && receiptError && <p className="worker-action-error">{receiptError}</p>}
           {expenseVoucherError && <p className="worker-action-error">{expenseVoucherError}</p>}
-          <div className="expense-voucher-form__actions">
-            <button type="submit" disabled={savingVoucher || !selectableExpenseAccounts.length || voucherNumberSaveBlocked}>{savingVoucher ? "Saving..." : (editingVoucher ? t("expensesPage.updateVoucher") : t("expensesPage.saveVoucher"))}</button>
-            {editingVoucher && <button type="button" disabled={savingVoucher} onClick={() => { pendingEditFocusRef.current = false; setEditingVoucher(null); resetForm(); }}>{t("expensesPage.cancelEdit")}</button>}
+          <div className="expense-voucher-form__sticky-footer">
+            <div className="expense-voucher-form__footer-total">
+              <span>{t("expensesPage.grandTotal")}</span>
+              <strong>{money(voucherGrandTotal)}</strong>
+            </div>
+            <div className="expense-voucher-form__actions">
+              {editingVoucher && <button className="expense-voucher-form__cancel" type="button" disabled={savingVoucher} onClick={() => { pendingEditFocusRef.current = false; setEditingVoucher(null); resetForm(); }}>{t("expensesPage.cancelEdit")}</button>}
+              <button type="submit" disabled={savingVoucher || !selectableExpenseAccounts.length || voucherNumberSaveBlocked}>{savingVoucher ? "Saving..." : (editingVoucher ? t("expensesPage.updateVoucher") : t("expensesPage.saveVoucher"))}</button>
+            </div>
           </div>
           </fieldset>
         </form>
