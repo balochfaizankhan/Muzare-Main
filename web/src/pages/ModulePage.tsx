@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { ArrowLeft, CalendarDays, Camera, ChevronDown, ChevronRight, Eye, FileText, ImageIcon, MoreVertical, Package, PackageCheck, PackageMinus, Paperclip, Pencil, RotateCw, Search, Tag, Trash2, Truck, UploadCloud, X } from "lucide-react";
+import { ArrowLeft, CalendarDays, Camera, ChevronDown, ChevronRight, Eye, FileText, ImageIcon, MoreVertical, Package, PackageCheck, PackageMinus, Paperclip, Pencil, Plus, RotateCw, Search, Tag, Trash2, Truck, UploadCloud, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -2816,22 +2816,22 @@ function ExpensesModule() {
                         {voucherItems.length > 1 && <button aria-label={t("expensesPage.removeItem")} title={t("expensesPage.removeItem")} className="expense-voucher-item__remove" type="button" onClick={() => setVoucherItems((current) => current.filter((entry) => entry.id !== item.id))}><Trash2 size={16} /></button>}
                       </div>
                       <div className="expense-voucher-item__grid">
-                        <label><span>{t("expensesPage.categoryRequired")}</span><SearchInput ref={(node) => { voucherItemCategoryRefs.current[item.id] = node; }} required list={`expense-category-options-${item.id}`} placeholder={t("expensesPage.selectCategory")} value={item.categorySearch} onChange={(value) => {
+                        <label className="expense-voucher-item__category"><span><span className="expense-voucher-item__label-full">{t("expensesPage.categoryRequired")}</span><span className="expense-voucher-item__label-compact">{t("expensesPage.categoryCompact")}</span></span><SearchInput ref={(node) => { voucherItemCategoryRefs.current[item.id] = node; }} required list={`expense-category-options-${item.id}`} placeholder={t("expensesPage.selectCompact")} value={item.categorySearch} onChange={(value) => {
                           const next = categories.data?.categories.find((entry) => entry.name === value);
                           updateVoucherItem(item.id, (current) => ({ ...current, categorySearch: value, categoryId: next?.id ?? "", subcategoryId: "", subcategorySearch: "" }));
                         }} onClear={() => updateVoucherItem(item.id, (current) => ({ ...current, categoryId: "", categorySearch: "", subcategoryId: "", subcategorySearch: "" }))} /><datalist id={`expense-category-options-${item.id}`}>{categories.data?.categories.map((entry) => <option key={entry.id} value={entry.name} />)}</datalist></label>
-                        <label><span>{t("expensesPage.subcategoryRequired")}</span><SearchInput required disabled={!item.categoryId} list={`expense-subcategory-options-${item.id}`} placeholder={t("expensesPage.selectSubcategory")} value={item.subcategorySearch} onChange={(value) => {
+                        <label className="expense-voucher-item__subcategory"><span><span className="expense-voucher-item__label-full">{t("expensesPage.subcategoryRequired")}</span><span className="expense-voucher-item__label-compact">{t("expensesPage.subcategoryCompact")}</span></span><SearchInput required disabled={!item.categoryId} list={`expense-subcategory-options-${item.id}`} placeholder={t("expensesPage.selectCompact")} value={item.subcategorySearch} onChange={(value) => {
                           const next = selectedCategory?.subcategories.find((entry) => entry.name === value);
                           updateVoucherItem(item.id, (current) => ({ ...current, subcategorySearch: value, subcategoryId: next?.id ?? "" }));
                         }} onClear={() => updateVoucherItem(item.id, (current) => ({ ...current, subcategoryId: "", subcategorySearch: "" }))} /><datalist id={`expense-subcategory-options-${item.id}`}>{selectedCategory?.subcategories.map((entry) => <option key={entry.id} value={entry.name} />)}</datalist></label>
-                        <label><span>{t("expensesPage.amount")} (SAR)</span><input required min="0.01" step="0.01" type="number" value={item.amount} placeholder={t("expensesPage.amount")} onChange={(event) => updateVoucherItem(item.id, (current) => ({ ...current, amount: event.target.value }))} /></label>
+                        <label className="expense-voucher-item__amount"><span>{t("expensesPage.amount")} (SAR)</span><input required min="0.01" step="0.01" type="number" value={item.amount} placeholder={t("expensesPage.amount")} onChange={(event) => updateVoucherItem(item.id, (current) => ({ ...current, amount: event.target.value }))} /></label>
                         <label className="expense-voucher-item__description"><span>{t("expensesPage.description")}</span><input required value={item.description} placeholder={t("expensesPage.description")} onChange={(event) => updateVoucherItem(item.id, (current) => ({ ...current, description: event.target.value }))} /></label>
                       </div>
                     </article>
                   );
                 })}
               </div>
-              <button className="expense-voucher-items__add expense-voucher-items__add--bottom" type="button" onClick={addVoucherItem}>{t("expensesPage.addAnotherItem")}</button>
+              <button className="expense-voucher-items__add expense-voucher-items__add--bottom" type="button" onClick={addVoucherItem}><Plus size={16} aria-hidden="true" />{t("expensesPage.addAnotherItem")}</button>
             </div>
           </div>
           {expenseReceiptUploadEnabled && <div className="expense-voucher-form__section">
