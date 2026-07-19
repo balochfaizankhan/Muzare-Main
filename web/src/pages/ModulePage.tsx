@@ -3209,6 +3209,11 @@ function DispatchModule() {
   const submitDispatchLabel = editing ? t("dispatchPage.updateDispatch") : "Create Dispatch";
   const draftTotalCartons = items.reduce((sum, item) => sum + (Number(item.cartons) || 0), 0);
   const validDraftItems = items.filter((item) => item.dateTypeId || item.cartons);
+  const hasValidDispatchVehicle = activeVehicles.some((item) => item.id === vehicleId);
+  const hasValidDispatchItems = items.length > 0
+    && items.every((item) => item.dateTypeId && Number.isInteger(Number(item.cartons)) && Number(item.cartons) > 0)
+    && new Set(items.map((item) => item.dateTypeId)).size === items.length;
+  const dispatchDraftReady = hasValidDispatchVehicle && hasValidDispatchItems;
 
   return (
     <>
@@ -3270,7 +3275,7 @@ function DispatchModule() {
             </div>
             <label className="dispatch-form__field"><span>{t("dispatchPage.dispatchDate")}</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
             <label className="dispatch-form__field"><span>{t("dispatchPage.vehicle")}</span><ClearableSelect required value={vehicleId} onChange={setVehicleId}><option value="">{t("dispatchPage.selectActiveVehicle")}</option>{activeVehicles.map((item) => <option key={item.id} value={item.id}>{item.number}{item.driverName ? ` - ${item.driverName}` : ""}</option>)}</ClearableSelect></label>
-            <label className="dispatch-form__field dispatch-form__field--full"><span>{t("dispatchPage.notes")}</span><input placeholder={t("dispatchPage.optional")} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
+            <label className="dispatch-form__field dispatch-form__field--full"><span>{t("dispatchPage.notes")}</span><input placeholder="Optional notes" value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
           </div>
           <div className="dispatch-carton-entry">
             <div className="dispatch-section-heading dispatch-section-heading--simple">
@@ -3309,12 +3314,15 @@ function DispatchModule() {
               ))}
             </div>}
           </div>
-          <div className="dispatch-total-card">
-            <span>Total Cartons</span>
-            <strong>{draftTotalCartons}</strong>
-          </div>
           {error && <p className="form-error">{error}</p>}
-          <div className="dispatch-form-actions"><button disabled={saving} type="submit">{saving ? t("advancesPage.saving") : submitDispatchLabel}</button>{editing && <button className="secondary-action" type="button" onClick={reset}>{t("common.close")}</button>}</div>
+          <div className="dispatch-submit-footer">
+            <div className="dispatch-submit-footer__summary">
+              <span>Total cartons</span>
+              <strong>{draftTotalCartons}</strong>
+              {!dispatchDraftReady && <small>Select vehicle and add cartons to continue.</small>}
+            </div>
+            <div className="dispatch-form-actions"><button disabled={saving || !dispatchDraftReady} type="submit">{saving ? t("advancesPage.saving") : submitDispatchLabel}</button>{editing && <button className="secondary-action" type="button" onClick={reset}>{t("common.close")}</button>}</div>
+          </div>
         </form>
       </FormCard>}
       <section className="record-panel dispatch-kpi-panel">
