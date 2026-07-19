@@ -14486,17 +14486,31 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 .attendance-register-report tbody th:first-child,
 .attendance-register-report tfoot th:first-child { background: var(--surface); }
 .attendance-register-print-template {
-  display: grid;
-  gap: 12px;
+  display: block;
 }
 .attendance-register-print-page {
+  --attendance-col-index: 22px;
+  --attendance-col-name: 130px;
+  --attendance-col-group: 76px;
+  --attendance-col-stat: 30px;
+  --attendance-col-payable: 58px;
+  --attendance-col-wages: 68px;
+  --attendance-col-date: 28px;
+  --attendance-print-font-size: 8.2px;
+  --attendance-print-line-height: 1.15;
   background: #fff;
+  box-sizing: border-box;
   color: #111827;
+  direction: ltr;
   display: grid;
-  gap: 8px;
+  gap: 2mm;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  height: 199mm;
+  overflow: hidden;
   page-break-after: always;
   break-after: page;
   padding: 0;
+  width: 100%;
   font-variant-numeric: tabular-nums;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
@@ -14505,147 +14519,141 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   break-after: auto;
   page-break-after: auto;
 }
-.attendance-register-print-page {
-  --attendance-col-index: 24px;
-  --attendance-col-name: 116px;
-  --attendance-col-group: 68px;
-  --attendance-col-stat: 30px;
+.attendance-register-print-page--compact {
+  --attendance-col-index: 20px;
+  --attendance-col-name: 120px;
+  --attendance-col-group: 70px;
+  --attendance-col-stat: 26px;
   --attendance-col-payable: 54px;
   --attendance-col-wages: 64px;
   --attendance-col-date: 22px;
-  --attendance-print-font-size: 6.7px;
-  --attendance-print-line-height: 1.08;
-}
-.attendance-register-print-page--compact {
-  --attendance-col-name: 108px;
-  --attendance-col-group: 64px;
-  --attendance-col-stat: 28px;
-  --attendance-col-payable: 50px;
-  --attendance-col-wages: 58px;
-  --attendance-col-date: 18px;
-  --attendance-print-font-size: 6px;
+  --attendance-print-font-size: 7.6px;
 }
 .attendance-register-print-page--ultra {
-  --attendance-col-name: 96px;
-  --attendance-col-group: 58px;
-  --attendance-col-stat: 26px;
-  --attendance-col-payable: 46px;
-  --attendance-col-wages: 56px;
-  --attendance-col-date: 16px;
-  --attendance-print-font-size: 5.3px;
-  --attendance-print-line-height: 1.04;
+  --attendance-col-index: 18px;
+  --attendance-col-name: 112px;
+  --attendance-col-group: 64px;
+  --attendance-col-stat: 23px;
+  --attendance-col-payable: 50px;
+  --attendance-col-wages: 60px;
+  --attendance-col-date: 17px;
+  --attendance-print-font-size: 7.1px;
+  --attendance-print-line-height: 1.1;
 }
 .attendance-register-print-header {
-  display: grid;
-  gap: 6px;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1.8fr);
   align-items: start;
+  border-bottom: 1.5px solid #334155;
+  display: grid;
+  gap: 4mm;
+  grid-template-columns: 34mm minmax(48mm, .8fr) minmax(0, 1.8fr);
+  padding-bottom: 2mm;
 }
 .attendance-register-print-brand,
 .attendance-register-print-title {
-  background: #f8fafc;
-  border: 1px solid #dbe4ee;
-  border-radius: 10px;
   display: grid;
-  gap: 2px;
+  gap: 1mm;
   min-width: 0;
-  padding: 8px 10px;
+  padding: 0;
 }
 .attendance-register-print-brand strong {
-  color: var(--brand-primary);
-  font-size: 13px;
-  letter-spacing: .06em;
+  color: #173f2a;
+  font-size: 15px;
+  letter-spacing: .08em;
   text-transform: uppercase;
 }
 .attendance-register-print-brand span {
-  color: #334155;
-  font-size: 10px;
+  color: #475569;
+  font-size: 8.5px;
 }
 .attendance-register-print-title h2 {
-  font-size: 16px;
+  color: #0f172a;
+  font-size: 15px;
   line-height: 1.1;
   margin: 0;
 }
 .attendance-register-print-title p {
-  color: #475569;
-  font-size: 10px;
+  color: #334155;
+  font-size: 9.5px;
+  font-weight: 650;
   margin: 0;
 }
 .attendance-register-print-meta {
-  background: #f8fafc;
-  border: 1px solid #dbe4ee;
-  border-radius: 10px;
   display: grid;
-  gap: 6px 10px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.5mm 3mm;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin: 0;
   min-width: 0;
-  padding: 8px 10px;
+  padding: 0;
 }
 .attendance-register-print-meta div {
-  display: grid;
-  gap: 2px;
+  align-items: baseline;
+  display: flex;
+  gap: 1.5mm;
   min-width: 0;
 }
 .attendance-register-print-meta dt {
   color: #64748b;
-  font-size: 8px;
+  flex: 0 0 auto;
+  font-size: 7.5px;
   font-weight: 700;
-  letter-spacing: .04em;
-  text-transform: uppercase;
 }
 .attendance-register-print-meta dd {
   color: #111827;
-  font-size: 10px;
+  font-size: 8.5px;
+  font-weight: 650;
   margin: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .attendance-register-print-summary {
   display: grid;
-  gap: 6px;
+  gap: 1.5mm;
   grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 .attendance-register-print-summary article {
-  background: #f8fafc;
-  border: 1px solid #dbe4ee;
-  border-radius: 10px;
-  display: grid;
-  gap: 2px;
+  align-items: center;
+  background: #f8faf9;
+  border: 1px solid #d5ddd8;
+  border-radius: 2px;
+  display: flex;
+  gap: 2mm;
+  justify-content: space-between;
   min-width: 0;
-  padding: 7px 9px;
+  padding: 1.5mm 2mm;
 }
 .attendance-register-print-summary span {
-  color: #64748b;
-  font-size: 8px;
+  color: #475569;
+  font-size: 7.5px;
   font-weight: 700;
-  letter-spacing: .04em;
-  text-transform: uppercase;
 }
 .attendance-register-print-summary strong {
   color: #111827;
-  font-size: 11px;
+  font-size: 9px;
+  white-space: nowrap;
 }
 .attendance-register-print-legend {
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 10px;
-  font-size: 8px;
+  gap: 2mm 5mm;
+  font-size: 7.5px;
   justify-content: flex-start;
 }
 .attendance-register-print-legend span {
   align-items: center;
-  background: #f8fafc;
-  border: 1px solid #dbe4ee;
-  border-radius: 999px;
   display: inline-flex;
-  gap: 5px;
-  padding: 4px 8px;
+  gap: 1mm;
+  padding: 0;
 }
 .attendance-register-print-legend b {
   display: inline-grid;
-  min-width: 12px;
+  min-width: 3mm;
+  text-align: center;
 }
 .attendance-register-print-table-wrap {
+  align-self: start;
+  min-width: 0;
   overflow: visible;
 }
 .attendance-register-print-table {
@@ -14655,46 +14663,69 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 }
 .attendance-register-print-table th,
 .attendance-register-print-table td {
-  border: 1px solid #cbd5e1;
+  border: .5px solid #b8c0c8;
   font-size: var(--attendance-print-font-size);
   line-height: var(--attendance-print-line-height);
-  padding: 2px 3px;
+  padding: 1.2mm .8mm;
   text-align: center;
   vertical-align: middle;
   white-space: nowrap;
 }
 .attendance-register-print-table thead th {
-  background: #e2e8f0;
+  background: #e9eeeb;
   color: #0f172a;
   font-weight: 700;
+  padding-block: 1.4mm;
+  white-space: normal;
 }
-.attendance-register-print-table tbody th {
+.attendance-register-print-table tbody th,
+.attendance-register-print-table tbody td:nth-child(2),
+.attendance-register-print-table tbody td:nth-child(3) {
   background: #f8fafc;
   text-align: left;
   white-space: normal;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 .attendance-register-print-table tbody tr:nth-child(even) td,
 .attendance-register-print-table tbody tr:nth-child(even) th {
-  background: #fbfdff;
+  background: #fafcfb;
 }
 .attendance-register-print-table tfoot th,
 .attendance-register-print-table tfoot td {
-  background: #eef2f7;
+  background: #eef2ef;
   font-weight: 700;
 }
 .attendance-register-print-table .register-status--present {
-  background: #e4f5e9;
+  background: #edf7ef;
+  color: #155c31;
+  font-weight: 800;
 }
 .attendance-register-print-table .register-status--half_day {
-  background: #fff3c7;
+  background: #fff8e6;
+  color: #7a4d00;
+  font-weight: 800;
 }
 .attendance-register-print-table .register-status--absent {
-  background: #fde8e8;
+  background: #fbefef;
+  color: #8b2c2c;
+  font-weight: 800;
 }
 .attendance-register-print-table .register-status--empty {
-  background: #f8fafc;
+  background: #f7f8f8;
   color: #64748b;
+}
+.attendance-register-print-date-heading span {
+  white-space: nowrap;
+}
+.attendance-register-print-page--ultra .attendance-register-print-date-heading {
+  height: 10mm;
+  padding: 0;
+  vertical-align: middle;
+}
+.attendance-register-print-page--ultra .attendance-register-print-date-heading span {
+  display: inline-block;
+  font-size: 6.8px;
+  transform: rotate(-90deg);
 }
 .attendance-register-print-empty {
   background: #fff;
@@ -14705,13 +14736,13 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 }
 .attendance-register-print-footer {
   align-items: center;
+  border-top: .5px solid #94a3b8;
   color: #475569;
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px 12px;
+  gap: 4mm;
   justify-content: space-between;
-  padding-top: 2px;
-  font-size: 8px;
+  padding-top: 1.5mm;
+  font-size: 7.5px;
 }
 .attendance-register-print-footer span {
   min-width: 0;
@@ -14720,7 +14751,7 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 .attendance-register-print-total-row td,
 .attendance-register-print-daily-row th,
 .attendance-register-print-daily-row td {
-  background: #eef2f7;
+  background: #eef2ef;
 }
 .advance-report-print-template {
   display: grid;
@@ -17092,7 +17123,37 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 
 @media print {
   @page { size: A4 landscape; margin: 5mm; }
+  html,
+  body {
+    background: #fff !important;
+    height: auto !important;
+    margin: 0 !important;
+    max-width: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    width: auto !important;
+  }
   body * { visibility: hidden; }
+  html[data-muzare-print-section] .app-shell,
+  html[data-muzare-print-section] .app-shell__body,
+  html[data-muzare-print-section] .dashboard-page,
+  html[data-muzare-print-section] .reports-page {
+    background: #fff !important;
+    display: block !important;
+    margin: 0 !important;
+    max-width: none !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    width: auto !important;
+  }
+  html[data-muzare-print-section] .app-sidebar,
+  html[data-muzare-print-section] .app-mobile-bottom-nav,
+  html[data-muzare-print-section] .app-shell__body > :not(.dashboard-page),
+  html[data-muzare-print-section] .dashboard-page > :not(.reports-page),
+  html[data-muzare-print-section] .reports-page > :not(.reports-print-section.is-print-target) {
+    display: none !important;
+  }
   .reports-page { display: block; }
   .reports-page .reports-tabs,
   .reports-page .reports-subtabs,
@@ -17101,19 +17162,34 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .reports-print-only { display: none !important; }
   .reports-print-section.is-print-target,
   .reports-print-section.is-print-target * { visibility: visible; }
-  .reports-print-section.is-print-target { display: block !important; inset: auto; left: auto; position: static; top: auto; width: 100%; }
+  .reports-print-section.is-print-target {
+    background: #fff !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    display: block !important;
+    inset: auto;
+    left: auto;
+    margin: 0 !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+    position: static;
+    top: auto;
+    width: 100% !important;
+  }
   .no-print, .screen-only { display: none !important; }
   .report-mobile-cards { display: none !important; }
   .report-wide-table { display: block !important; }
   .attendance-register-print-template { gap: 0; }
   .attendance-register-print-page {
+    height: 199mm;
     margin: 0;
-    min-height: calc(100vh - 10mm);
     padding: 0;
   }
-  .attendance-register-print-header { grid-template-columns: 1fr 1.2fr 1.6fr; }
-  .attendance-register-print-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .attendance-register-print-summary { grid-template-columns: repeat(6, minmax(0, 1fr)); }
   .attendance-register-print-table thead { display: table-header-group; }
+  .attendance-register-print-table tfoot { display: table-footer-group; }
   .attendance-register-print-table tr { break-inside: avoid; page-break-inside: avoid; }
   .attendance-register-print-table .register-status--present,
   .attendance-register-print-table .register-status--half_day,

@@ -691,7 +691,14 @@ export function Reports() {
     document.querySelectorAll(".reports-print-section.is-print-target").forEach((node) => node.classList.remove("is-print-target"));
     const section = document.querySelector<HTMLElement>(`.reports-print-section[data-print-section="${sectionId}"]`);
     if (!section) return;
+    const printRoot = document.documentElement;
+    const cleanupPrintTarget = () => {
+      section.classList.remove("is-print-target");
+      printRoot.removeAttribute("data-muzare-print-section");
+    };
+    printRoot.setAttribute("data-muzare-print-section", sectionId);
     section.classList.add("is-print-target");
+    window.addEventListener("afterprint", cleanupPrintTarget, { once: true });
     window.print();
   };
 
@@ -764,13 +771,13 @@ export function Reports() {
                 <th>A</th>
                 <th>Payable Days</th>
                 <th>Wages (SAR)</th>
-                {page.dateBlock.map((date) => <th key={date}>{formatShortDate(date)}</th>)}
+                {page.dateBlock.map((date) => <th className="attendance-register-print-date-heading" key={date}><span>{formatShortDate(date)}</span></th>)}
               </tr>
             </thead>
             <tbody>
               {page.labourBlock.length > 0 ? page.labourBlock.map((item, index) => (
                 <tr key={item.labourer.id}>
-                  <th>{index + 1}</th>
+                  <th>{page.labourStartIndex + index + 1}</th>
                   <td>{item.labourer.name}</td>
                   <td>{item.labourer.group || "-"}</td>
                   <td>{item.present}</td>
@@ -814,7 +821,6 @@ export function Reports() {
           <span>Muzare</span>
           <span>Page {page.pageNumber} of {page.totalPages}</span>
           <span>{printRangeLabel}</span>
-          <span>{printGeneratedAt}</span>
         </footer>
       </section>
     );
@@ -965,7 +971,8 @@ export function Reports() {
     )),
     [attendanceDates, attendanceSummary],
   );
-  const attendanceLabourBlockSize = attendanceSummary.length > 25 ? (attendanceSummary.length <= 30 ? 30 : 25) : 25;
+  const attendanceLabourPageCount = Math.max(Math.ceil(attendanceSummary.length / 30), 1);
+  const attendanceLabourBlockSize = Math.max(Math.ceil(attendanceSummary.length / attendanceLabourPageCount), 1);
   const attendanceDateBlocks = useMemo(() => (attendanceDates.length > 0 ? chunkArray(attendanceDates, 40) : [[]]), [attendanceDates]);
   const attendanceLabourBlocks = useMemo(() => (attendanceSummary.length > 0 ? chunkArray(attendanceSummary, attendanceLabourBlockSize) : [[]]), [attendanceLabourBlockSize, attendanceSummary]);
   const attendancePrintPages = useMemo(() => {
@@ -975,6 +982,7 @@ export function Reports() {
       labourBlock: typeof attendanceSummary;
       dateBlockIndex: number;
       labourBlockIndex: number;
+      labourStartIndex: number;
       pageNumber: number;
       density: "normal" | "compact" | "ultra";
       pageTotals: {
@@ -1009,6 +1017,7 @@ export function Reports() {
           labourBlock,
           dateBlockIndex,
           labourBlockIndex,
+          labourStartIndex: labourBlockIndex * attendanceLabourBlockSize,
           pageNumber: pageIndex + 1,
           density,
           pageTotals,
@@ -1024,6 +1033,7 @@ export function Reports() {
         labourBlock: [],
         dateBlockIndex: 0,
         labourBlockIndex: 0,
+        labourStartIndex: 0,
         pageNumber: 1,
         density: "normal",
         pageTotals: { present: 0, halfDay: 0, absent: 0, payableDays: 0, wages: 0 },
@@ -1031,7 +1041,7 @@ export function Reports() {
       });
     }
     return pages.map((page, index) => ({ ...page, pageNumber: index + 1, totalPages }));
-  }, [attendanceDateBlocks, attendanceLabourBlocks, attendanceSummary]);
+  }, [attendanceDateBlocks, attendanceLabourBlockSize, attendanceLabourBlocks, attendanceSummary]);
   const bootstrapFarm = bootstrapQuery.data?.farms.find((farm) => farm.id === bootstrapQuery.data?.activeFarmId) ?? null;
   const bootstrapSeason = bootstrapQuery.data?.seasons.find((season) => season.id === bootstrapQuery.data?.activeSeasonId) ?? null;
   const printGeneratedAt = useMemo(() => printTimestampFormatter.format(new Date()), [attendanceTotals, attendanceDates.length, report, from, to, groupFilter, selectedLabourerIds.join(","), bootstrapQuery.dataUpdatedAt, user?.displayName, user?.email]);
