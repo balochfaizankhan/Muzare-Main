@@ -31,7 +31,6 @@ import {
 } from "../lib/labour-payments.js";
 import { resolveCanonicalPaymentAccountId } from "../lib/labour-wage-settlements.js";
 import { validateLabourSettlementPaymentAccount } from "../lib/labour-settlement-account-validation.js";
-import { legacyAdvancePosition, mergeAdvancePositions, type LegacyAdvanceReadRow } from "../lib/labour-advance-read-model.js";
 import { hasModulePermission } from "../permissions.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
 import { hasFarmAccess } from "../workspace-access.js";
@@ -41,6 +40,16 @@ const dueParamsSchema = paramsSchema.extend({ dueId: z.string().uuid() });
 const voucherParamsSchema = paramsSchema.extend({ voucherId: z.string().uuid() });
 const advanceApplicationParamsSchema = dueParamsSchema.extend({ applicationId: z.string().uuid() });
 const contextSchema = z.object({ farmId: z.string().uuid(), seasonId: z.string().uuid() });
+const advanceListQuerySchema = contextSchema.extend({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  search: z.string().trim().max(160).optional(),
+  recipientScope: z.enum(["INDIVIDUAL", "LABOUR_GROUP", "CONTRACTOR_FOREMAN", "TEMPORARY_CREW", "UNREGISTERED_LABOUR", "NO_SPECIFIC_RECIPIENT"]).optional(),
+  status: z.enum(["OPEN", "OUTSTANDING", "PARTIALLY_APPLIED", "PARTIALLY_REFUNDED", "FULLY_APPLIED", "FULLY_REFUNDED", "VOIDED", "ALL"]).default("OPEN"),
+  accountId: z.string().uuid().optional(),
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
+});
 const recipientScopeSchema = z.enum(["INDIVIDUAL", "LABOUR_GROUP", "CONTRACTOR_FOREMAN", "TEMPORARY_CREW", "UNREGISTERED_LABOUR", "NO_SPECIFIC_RECIPIENT"]);
 const directDueSchema = contextSchema.extend({
   idempotencyKey: z.string().uuid(),
@@ -542,62 +551,135 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/v1/workspace/:workspaceId/labour-payments/advances", { preHandler: requireUser }, async (request, reply) => {
     const params = paramsSchema.safeParse(request.params);
-    const query = contextSchema.safeParse(request.query);
+    const query = advanceListQuerySchema.safeParse(request.query);
     if (!params.success || !query.success) return reply.code(400).send({ message: "A valid advance query is required." });
     if (!(await requireRequestScope(request, reply, params.data.workspaceId, query.data.farmId, query.data.seasonId, "view"))) return;
-    const rows = await db.select().from(labourPaymentVouchers).where(and(
-      eq(labourPaymentVouchers.workspaceId, params.data.workspaceId), eq(labourPaymentVouchers.farmId, query.data.farmId), eq(labourPaymentVouchers.seasonId, query.data.seasonId), eq(labourPaymentVouchers.nature, "ADVANCE"),
-    )).orderBy(desc(labourPaymentVouchers.voucherDate));
-    const canonical = await db.transaction(async (tx) => Promise.all(rows.map(async (voucher) => {
-      const [applied] = await tx.select({ total: sql<number>`coalesce(sum(${labourAdvanceApplications.amount}) filter (where ${labourAdvanceApplications.status} = 'ACTIVE'), 0)::numeric` }).from(labourAdvanceApplications).where(eq(labourAdvanceApplications.advanceVoucherId, voucher.id));
-      const [refunded] = await tx.select({ total: sql<number>`coalesce(sum(${labourPaymentVouchers.paymentAmount}) filter (where ${labourPaymentVouchers.status} = 'POSTED' and ${labourPaymentVouchers.nature} = 'REFUND_RECOVERY'), 0)::numeric` }).from(labourPaymentVouchers).where(eq(labourPaymentVouchers.relatedAdvanceVoucherId, voucher.id));
-      return { ...voucher, paymentAccountName: null, reversedAmount: voucher.status === "VOIDED" ? Number(voucher.paymentAmount) : 0, readOnlyLegacy: false, ...calculateAdvancePosition({ originalAmount: voucher.paymentAmount, appliedAmount: applied?.total, refundedAmount: refunded?.total, voided: voucher.status === "VOIDED" }) };
-    })));
-    const legacyResult = await db.execute(sql`
-      SELECT 'legacy-operational:' || advance.id::text AS "id", advance.id::text AS "sourceId",
-        COALESCE(NULLIF(advance.payload->>'voucherNumber',''), NULLIF(advance.payload->>'voucherNo',''), NULLIF(advance.payload->>'reference',''), advance.client_record_id) AS "voucherNumber",
-        COALESCE(NULLIF(advance.payload->>'date',''), NULLIF(advance.payload->>'advanceDate',''), advance.created_at::date::text) AS "voucherDate",
-        CASE WHEN NULLIF(advance.payload->>'labourGroupId','') IS NOT NULL THEN 'LABOUR_GROUP' ELSE 'INDIVIDUAL' END AS "recipientScope",
-        CASE WHEN NULLIF(advance.payload->>'labourGroupId','') IS NOT NULL THEN 'group:' || (advance.payload->>'labourGroupId') ELSE 'individual:' || COALESCE(NULLIF(advance.payload->>'labourerId',''), NULLIF(advance.payload->>'labourId',''), advance.client_record_id) END AS "financialScopeKey",
-        COALESCE(NULLIF(advance.payload->>'labourerId',''), NULLIF(advance.payload->>'labourId','')) AS "labourerId",
-        NULLIF(advance.payload->>'labourGroupId','') AS "labourGroupId",
-        jsonb_build_object('labourerName',COALESCE(NULLIF(advance.payload->>'labourerName',''),NULLIF(labour.payload->>'name','')),'labourGroupName',COALESCE(NULLIF(advance.payload->>'labourGroupName',''),NULLIF(group_record.payload->>'name','')),'receivedBy',COALESCE(NULLIF(advance.payload->>'receivedBy',''),NULLIF(advance.payload->>'recipientName','')),'leaderSnapshot',NULLIF(advance.payload->>'leaderName',''),'sourceAccountName',NULLIF(advance.payload->>'sourceAccountName','')) AS "recipientSnapshot",
-        COALESCE(NULLIF(advance.payload->>'notes',''),'Legacy labour advance') AS "description",
-        CASE WHEN NULLIF(advance.payload->>'amount','') ~ '^[0-9]+([.][0-9]+)?$' THEN (advance.payload->>'amount')::numeric ELSE 0 END AS "originalAmount",
-        COALESCE(applications.applied_amount,0)::numeric AS "appliedAmount", 0::numeric AS "refundedAmount",
-        CASE WHEN NULLIF(advance.payload->>'deletedAt','') IS NOT NULL OR lower(COALESCE(advance.payload->>'status','')) IN ('voided','deleted','reversed') OR NULLIF(advance.payload->>'voidedAt','') IS NOT NULL OR NULLIF(advance.payload->>'reversedAt','') IS NOT NULL THEN 'VOIDED' ELSE 'POSTED' END AS "status",
-        CASE WHEN NULLIF(advance.payload->>'accountId','') ~* '^[0-9a-f-]{36}$' THEN (advance.payload->>'accountId')::uuid ELSE NULL END AS "paymentAccountId",
-        COALESCE(NULLIF(advance.payload->>'sourceAccountName',''),account.name) AS "paymentAccountName", advance.created_at::text AS "createdAt", 'LEGACY_OPERATIONAL' AS "sourceKind"
-      FROM operational_records advance
-      LEFT JOIN operational_records labour ON labour.workspace_id=advance.workspace_id AND labour.entity_type='labourer' AND labour.client_record_id=COALESCE(NULLIF(advance.payload->>'labourerId',''),NULLIF(advance.payload->>'labourId',''))
-      LEFT JOIN operational_records group_record ON group_record.workspace_id=advance.workspace_id AND group_record.entity_type='labourGroup' AND group_record.client_record_id=NULLIF(advance.payload->>'labourGroupId','')
-      LEFT JOIN accounts account ON account.id::text=NULLIF(advance.payload->>'accountId','')
-      LEFT JOIN (SELECT advance_record_id,sum(absorbed_amount) AS applied_amount FROM labour_wage_settlement_advance_allocations GROUP BY advance_record_id) applications ON applications.advance_record_id=advance.id
-      WHERE advance.workspace_id=${params.data.workspaceId} AND advance.entity_type='advance'
-        AND (advance.farm_id=${query.data.farmId}::uuid OR advance.farm_id IS NULL) AND (advance.season_id=${query.data.seasonId}::uuid OR advance.season_id IS NULL)
-        AND NOT EXISTS (SELECT 1 FROM labour_payment_vouchers mapped WHERE mapped.nature='ADVANCE' AND (mapped.legacy_source_record_id=advance.id OR mapped.source_id=advance.client_record_id))
+    const startedAt = performance.now();
+    const search = query.data.search ? `%${query.data.search.replaceAll("%", "\\%").replaceAll("_", "\\_")}%` : null;
+    const offset = (query.data.page - 1) * query.data.pageSize;
+    const databaseStartedAt = performance.now();
+    const result = await db.execute(sql`
+      WITH application_totals AS (
+        SELECT advance_voucher_id, sum(amount) FILTER (WHERE status='ACTIVE')::numeric AS applied_amount
+        FROM labour_advance_applications WHERE workspace_id=${params.data.workspaceId} GROUP BY advance_voucher_id
+      ), refund_totals AS (
+        SELECT related_advance_voucher_id, sum(payment_amount) FILTER (WHERE status='POSTED' AND nature='REFUND_RECOVERY')::numeric AS refunded_amount
+        FROM labour_payment_vouchers WHERE workspace_id=${params.data.workspaceId} AND related_advance_voucher_id IS NOT NULL GROUP BY related_advance_voucher_id
+      ), legacy_application_totals AS (
+        SELECT advance_record_id, sum(absorbed_amount)::numeric AS applied_amount
+        FROM labour_wage_settlement_advance_allocations WHERE workspace_id=${params.data.workspaceId} GROUP BY advance_record_id
+      ), operational_people AS (
+        SELECT DISTINCT ON (workspace_id,entity_type,client_record_id) workspace_id,entity_type,client_record_id,payload
+        FROM operational_records WHERE workspace_id=${params.data.workspaceId} AND entity_type IN ('labourer','labourGroup')
+        ORDER BY workspace_id,entity_type,client_record_id,client_updated_at DESC,updated_at DESC
+      ), source_rows AS (
+        SELECT voucher.id::text AS id, voucher.id::text AS canonical_id,
+          CASE WHEN voucher.voucher_number ~ '^LPV-LA-[0-9a-f]{8}$' THEN COALESCE(NULLIF(source_record.payload->>'voucherNumber',''),NULLIF(source_record.payload->>'voucherNo',''),NULLIF(source_record.payload->>'reference',''),'ADV-L-'||lpad(abs(hashtextextended(COALESCE(voucher.source_id,voucher.id::text),0)%10000000)::text,7,'0')) ELSE voucher.voucher_number END AS display_voucher_number,
+          voucher.voucher_date, voucher.created_at, voucher.recipient_scope, voucher.financial_scope_key,
+          voucher.labourer_id AS financial_owner_id, voucher.labour_group_id,
+          CASE voucher.recipient_scope
+            WHEN 'LABOUR_GROUP' THEN COALESCE(NULLIF(voucher.recipient_snapshot->>'labourGroupName',''),NULLIF(group_person.payload->>'name',''),normalized_group.name)
+            WHEN 'INDIVIDUAL' THEN COALESCE(NULLIF(voucher.recipient_snapshot->>'labourerName',''),NULLIF(labour_person.payload->>'name',''),normalized_labour.name)
+            ELSE COALESCE(NULLIF(voucher.recipient_snapshot->>'manualRecipientName',''),NULLIF(voucher.recipient_snapshot->>'crewReference',''),NULLIF(voucher.recipient_snapshot->>'contractorReference',''),NULLIF(voucher.recipient_snapshot->>'batchIdentity',''))
+          END AS financial_owner_name,
+          COALESCE(NULLIF(voucher.recipient_snapshot->>'receivedBy',''),NULLIF(voucher.recipient_snapshot->>'recipientName','')) AS received_by_name,
+          NULLIF(voucher.recipient_snapshot->>'leaderSnapshot','') AS group_leader_snapshot,
+          voucher.description, voucher.payment_amount::numeric AS original_amount,
+          COALESCE(applications.applied_amount,0)::numeric AS applied_amount,
+          COALESCE(refunds.refunded_amount,0)::numeric AS refunded_amount,
+          CASE WHEN voucher.status='VOIDED' THEN voucher.payment_amount ELSE 0 END::numeric AS reversed_amount,
+          voucher.status, voucher.payment_account_id::text AS payment_account_id,
+          COALESCE(account.name,NULLIF(voucher.recipient_snapshot->>'sourceAccountName','')) AS payment_account_name,
+          voucher.payment_method, voucher.transaction_reference, voucher.source_type, voucher.source_id,
+          voucher.legacy, voucher.reconciliation_status, voucher.created_by::text AS created_by,
+          creator.display_name AS created_by_name, false AS read_only_legacy
+        FROM labour_payment_vouchers voucher
+        LEFT JOIN application_totals applications ON applications.advance_voucher_id=voucher.id
+        LEFT JOIN refund_totals refunds ON refunds.related_advance_voucher_id=voucher.id
+        LEFT JOIN accounts account ON account.id=voucher.payment_account_id
+        LEFT JOIN operational_records source_record ON source_record.id=voucher.legacy_source_record_id
+        LEFT JOIN operational_people labour_person ON labour_person.workspace_id=voucher.workspace_id AND labour_person.entity_type='labourer' AND labour_person.client_record_id=voucher.labourer_id
+        LEFT JOIN operational_people group_person ON group_person.workspace_id=voucher.workspace_id AND group_person.entity_type='labourGroup' AND group_person.client_record_id=voucher.labour_group_id
+        LEFT JOIN labourers normalized_labour ON normalized_labour.id=CASE WHEN voucher.labourer_id ~* '^[0-9a-f-]{36}$' THEN voucher.labourer_id::uuid END
+        LEFT JOIN labour_groups normalized_group ON normalized_group.id=CASE WHEN voucher.labour_group_id ~* '^[0-9a-f-]{36}$' THEN voucher.labour_group_id::uuid END
+        LEFT JOIN users creator ON creator.id=voucher.created_by
+        WHERE voucher.workspace_id=${params.data.workspaceId} AND voucher.farm_id=${query.data.farmId}::uuid AND voucher.season_id=${query.data.seasonId}::uuid AND voucher.nature='ADVANCE'
+        UNION ALL
+        SELECT advance.id::text, NULL::text,
+          COALESCE(NULLIF(advance.payload->>'voucherNumber',''),NULLIF(advance.payload->>'voucherNo',''),NULLIF(advance.payload->>'reference',''),'ADV-L-'||lpad(abs(hashtextextended(advance.id::text,0)%10000000)::text,7,'0')),
+          COALESCE(NULLIF(advance.payload->>'date','')::date,NULLIF(advance.payload->>'advanceDate','')::date,advance.created_at::date), advance.created_at,
+          CASE WHEN NULLIF(advance.payload->>'labourGroupId','') IS NOT NULL THEN 'LABOUR_GROUP' ELSE 'INDIVIDUAL' END,
+          CASE WHEN NULLIF(advance.payload->>'labourGroupId','') IS NOT NULL THEN 'group:'||(advance.payload->>'labourGroupId') ELSE 'individual:'||COALESCE(NULLIF(advance.payload->>'labourerId',''),NULLIF(advance.payload->>'labourId',''),advance.client_record_id) END,
+          COALESCE(NULLIF(advance.payload->>'labourerId',''),NULLIF(advance.payload->>'labourId','')),NULLIF(advance.payload->>'labourGroupId',''),
+          CASE WHEN NULLIF(advance.payload->>'labourGroupId','') IS NOT NULL THEN COALESCE(NULLIF(advance.payload->>'labourGroupName',''),NULLIF(group_person.payload->>'name','')) ELSE COALESCE(NULLIF(advance.payload->>'labourerName',''),NULLIF(labour_person.payload->>'name','')) END,
+          COALESCE(NULLIF(advance.payload->>'receivedBy',''),NULLIF(advance.payload->>'recipientName','')),NULLIF(advance.payload->>'leaderName',''),
+          COALESCE(NULLIF(advance.payload->>'notes',''),'Legacy labour advance'),(advance.payload->>'amount')::numeric,COALESCE(applications.applied_amount,0),0,
+          CASE WHEN NULLIF(advance.payload->>'deletedAt','') IS NOT NULL OR lower(COALESCE(advance.payload->>'status','')) IN ('voided','deleted','reversed') OR NULLIF(advance.payload->>'voidedAt','') IS NOT NULL OR NULLIF(advance.payload->>'reversedAt','') IS NOT NULL THEN (advance.payload->>'amount')::numeric ELSE 0 END,
+          CASE WHEN NULLIF(advance.payload->>'deletedAt','') IS NOT NULL OR lower(COALESCE(advance.payload->>'status','')) IN ('voided','deleted','reversed') THEN 'VOIDED' ELSE 'POSTED' END,
+          CASE WHEN NULLIF(advance.payload->>'accountId','') ~* '^[0-9a-f-]{36}$' THEN advance.payload->>'accountId' ELSE NULL END,
+          COALESCE(account.name,NULLIF(advance.payload->>'sourceAccountName','')),NULLIF(advance.payload->>'paymentMethod',''),advance.client_record_id,'LEGACY_OPERATIONAL_ADVANCE',advance.client_record_id,true,'LEGACY_READ_MODEL',advance.recorded_by::text,creator.display_name,true
+        FROM operational_records advance
+        LEFT JOIN legacy_application_totals applications ON applications.advance_record_id=advance.id
+        LEFT JOIN operational_people labour_person ON labour_person.workspace_id=advance.workspace_id AND labour_person.entity_type='labourer' AND labour_person.client_record_id=COALESCE(NULLIF(advance.payload->>'labourerId',''),NULLIF(advance.payload->>'labourId',''))
+        LEFT JOIN operational_people group_person ON group_person.workspace_id=advance.workspace_id AND group_person.entity_type='labourGroup' AND group_person.client_record_id=NULLIF(advance.payload->>'labourGroupId','')
+        LEFT JOIN accounts account ON account.id::text=NULLIF(advance.payload->>'accountId','')
+        LEFT JOIN users creator ON creator.id=advance.recorded_by
+        WHERE advance.workspace_id=${params.data.workspaceId} AND advance.entity_type='advance'
+          AND NULLIF(advance.payload->>'amount','') ~ '^[0-9]+([.][0-9]+)?$' AND (advance.payload->>'amount')::numeric>0
+          AND (advance.farm_id=${query.data.farmId}::uuid OR advance.farm_id IS NULL) AND (advance.season_id=${query.data.seasonId}::uuid OR advance.season_id IS NULL)
+          AND NOT EXISTS (SELECT 1 FROM labour_payment_vouchers mapped WHERE mapped.nature='ADVANCE' AND (mapped.legacy_source_record_id=advance.id OR mapped.source_id=advance.client_record_id))
+        UNION ALL
+        SELECT advance.id::text,NULL::text,COALESCE(NULLIF(advance.old_android_id,''),'ADV-N-'||lpad(abs(hashtextextended(advance.id::text,0)%10000000)::text,7,'0')),
+          advance.advance_date,advance.created_at,'INDIVIDUAL','individual:'||advance.labourer_id::text,advance.labourer_id::text,NULL::text,labourer.name,NULL::text,NULL::text,
+          COALESCE(NULLIF(advance.description,''),'Legacy labour advance'),advance.amount,0,0,0,'POSTED',advance.account_id::text,account.name,NULL::text,NULLIF(advance.old_android_id,''),'LEGACY_NORMALIZED_ADVANCE',advance.id::text,true,'LEGACY_READ_MODEL',advance.created_by::text,creator.display_name,true
+        FROM advance_records advance JOIN farms farm ON farm.id=advance.farm_id
+        LEFT JOIN labourers labourer ON labourer.id=advance.labourer_id LEFT JOIN accounts account ON account.id=advance.account_id LEFT JOIN users creator ON creator.id=advance.created_by
+        WHERE farm.workspace_id=${params.data.workspaceId} AND advance.farm_id=${query.data.farmId}::uuid AND advance.season_id=${query.data.seasonId}::uuid
+          AND NOT EXISTS (SELECT 1 FROM labour_payment_vouchers mapped WHERE mapped.nature='ADVANCE' AND mapped.source_type='LEGACY_ADVANCE_RECORD' AND mapped.source_id=advance.id::text)
+          AND NOT EXISTS (SELECT 1 FROM operational_records operational WHERE operational.workspace_id=${params.data.workspaceId} AND operational.entity_type='advance' AND (operational.payload->>'normalizedAdvanceRecordId'=advance.id::text OR operational.payload->>'oldAndroidId'=advance.old_android_id))
+      ), positioned AS (
+        SELECT *,greatest(original_amount-applied_amount-refunded_amount-reversed_amount,0)::numeric AS outstanding_amount,
+          CASE WHEN status='VOIDED' THEN 'VOIDED' WHEN greatest(original_amount-applied_amount-refunded_amount-reversed_amount,0)<=0.005 AND applied_amount>0 THEN 'FULLY_APPLIED' WHEN greatest(original_amount-applied_amount-refunded_amount-reversed_amount,0)<=0.005 AND refunded_amount>0 THEN 'FULLY_REFUNDED' WHEN refunded_amount>0 THEN 'PARTIALLY_REFUNDED' WHEN applied_amount>0 THEN 'PARTIALLY_APPLIED' ELSE 'OUTSTANDING' END AS advance_status,
+          (financial_owner_name IS NULL OR payment_account_name IS NULL OR reconciliation_status IN ('NEEDS_REVIEW','LEGACY_UNLINKED')) AS review_required
+        FROM source_rows
+      ), filtered AS (
+        SELECT * FROM positioned WHERE
+          (${query.data.status}='ALL' OR (${query.data.status}='OPEN' AND status<>'VOIDED' AND outstanding_amount>0.005) OR advance_status=${query.data.status})
+          AND (${query.data.recipientScope ?? null}::text IS NULL OR recipient_scope=${query.data.recipientScope ?? null})
+          AND (${query.data.accountId ?? null}::text IS NULL OR payment_account_id=${query.data.accountId ?? null})
+          AND (${query.data.from ?? null}::date IS NULL OR voucher_date>=${query.data.from ?? null}::date)
+          AND (${query.data.to ?? null}::date IS NULL OR voucher_date<=${query.data.to ?? null}::date)
+          AND (${search}::text IS NULL OR concat_ws(' ',display_voucher_number,financial_owner_name,received_by_name,group_leader_snapshot,payment_account_name,description) ILIKE ${search} ESCAPE '\\')
+      )
+      SELECT *,count(*) OVER()::int AS total_count,coalesce(sum(outstanding_amount) OVER(),0)::numeric AS total_outstanding,
+        count(*) FILTER (WHERE advance_status IN ('PARTIALLY_APPLIED','PARTIALLY_REFUNDED')) OVER()::int AS partially_applied_count
+      FROM filtered ORDER BY voucher_date DESC,created_at DESC,id DESC LIMIT ${query.data.pageSize} OFFSET ${offset}
     `);
-    const normalizedResult = await db.execute(sql`
-      SELECT 'legacy-normalized:' || advance.id::text AS "id", advance.id::text AS "sourceId",
-        COALESCE(NULLIF(advance.old_android_id,''), advance.id::text) AS "voucherNumber", advance.advance_date::text AS "voucherDate",
-        'INDIVIDUAL' AS "recipientScope", 'individual:' || advance.labourer_id::text AS "financialScopeKey",
-        advance.labourer_id::text AS "labourerId", NULL::text AS "labourGroupId",
-        jsonb_build_object('labourerName',labourer.name,'sourceAccountName',account.name) AS "recipientSnapshot",
-        COALESCE(NULLIF(advance.description,''),'Legacy labour advance') AS "description", advance.amount AS "originalAmount",
-        0::numeric AS "appliedAmount", 0::numeric AS "refundedAmount", 'POSTED' AS "status",
-        advance.account_id AS "paymentAccountId", account.name AS "paymentAccountName", advance.created_at::text AS "createdAt", 'LEGACY_NORMALIZED' AS "sourceKind"
-      FROM advance_records advance
-      JOIN farms farm ON farm.id=advance.farm_id
-      LEFT JOIN labourers labourer ON labourer.id=advance.labourer_id
-      LEFT JOIN accounts account ON account.id=advance.account_id
-      WHERE farm.workspace_id=${params.data.workspaceId} AND advance.farm_id=${query.data.farmId}::uuid AND advance.season_id=${query.data.seasonId}::uuid
-        AND NOT EXISTS (SELECT 1 FROM labour_payment_vouchers mapped WHERE mapped.nature='ADVANCE' AND mapped.source_type='LEGACY_ADVANCE_RECORD' AND mapped.source_id=advance.id::text)
-        AND NOT EXISTS (SELECT 1 FROM operational_records operational WHERE operational.workspace_id=${params.data.workspaceId} AND operational.entity_type='advance' AND (operational.payload->>'normalizedAdvanceRecordId'=advance.id::text OR operational.payload->>'oldAndroidId'=advance.old_android_id))
-    `);
-    const legacyRows = [...legacyResult.rows, ...normalizedResult.rows] as unknown as LegacyAdvanceReadRow[];
-    const legacy = legacyRows.filter((row) => Number(row.originalAmount)>0).map((row) => legacyAdvancePosition({ ...row, originalAmount:Number(row.originalAmount), appliedAmount:Number(row.appliedAmount), refundedAmount:Number(row.refundedAmount??0) }));
-    const advances = mergeAdvancePositions(canonical, legacy).filter((advance) => advance.status !== "VOIDED" && advance.outstandingAmount > 0.005);
-    return { advances, meta: { canonicalCount: canonical.length, legacyMappedCount: legacy.length, outstandingCount: advances.length, outstandingAmount: advances.reduce((sum,row)=>sum+row.outstandingAmount,0) } };
+    const databaseMs = performance.now() - databaseStartedAt;
+    const rawRows = result.rows as Array<Record<string, unknown>>;
+    const advances = rawRows.map((row) => ({
+      id: String(row.canonical_id ?? row.id), canonicalId: row.canonical_id ? String(row.canonical_id) : null,
+      voucherNumber: String(row.display_voucher_number), displayVoucherNumber: String(row.display_voucher_number), voucherDate: String(row.voucher_date),
+      recipientScope: String(row.recipient_scope), financialScopeKey: String(row.financial_scope_key), financialOwnerId: row.financial_owner_id ? String(row.financial_owner_id) : null,
+      labourerId: String(row.recipient_scope)==="INDIVIDUAL" && row.financial_owner_id ? String(row.financial_owner_id) : null, labourGroupId: row.labour_group_id ? String(row.labour_group_id) : null,
+      financialOwnerName: row.financial_owner_name ? String(row.financial_owner_name) : null, receivedByName: row.received_by_name ? String(row.received_by_name) : null,
+      groupLeaderSnapshot: row.group_leader_snapshot ? String(row.group_leader_snapshot) : null,
+      recipientSnapshot: {
+        ...(String(row.recipient_scope)==="INDIVIDUAL" && row.financial_owner_name ? { labourerName:String(row.financial_owner_name) } : {}),
+        ...(String(row.recipient_scope)==="LABOUR_GROUP" && row.financial_owner_name ? { labourGroupName:String(row.financial_owner_name) } : {}),
+        ...(!["INDIVIDUAL","LABOUR_GROUP"].includes(String(row.recipient_scope)) && row.financial_owner_name ? { manualRecipientName:String(row.financial_owner_name) } : {}),
+        ...(row.received_by_name ? { receivedBy:String(row.received_by_name) } : {}),
+      }, description: String(row.description),
+      originalAmount:Number(row.original_amount),appliedAmount:Number(row.applied_amount),refundedAmount:Number(row.refunded_amount),reversedAmount:Number(row.reversed_amount),outstandingAmount:Number(row.outstanding_amount),advanceStatus:String(row.advance_status),
+      paymentAmount:String(row.original_amount),paymentAccountId:row.payment_account_id?String(row.payment_account_id):null,paymentAccountName:row.payment_account_name?String(row.payment_account_name):null,
+      paymentMethod:row.payment_method?String(row.payment_method):null,transactionReference:row.transaction_reference?String(row.transaction_reference):null,status:String(row.status),nature:"ADVANCE",sourceType:String(row.source_type),sourceId:row.source_id?String(row.source_id):null,
+      legacy:Boolean(row.legacy),reconciliationStatus:String(row.reconciliation_status),reviewRequired:Boolean(row.review_required),readOnlyLegacy:Boolean(row.read_only_legacy),createdBy:row.created_by?String(row.created_by):null,createdByName:row.created_by_name?String(row.created_by_name):null,createdAt:String(row.created_at),
+    }));
+    const totalCount=Number(rawRows[0]?.total_count??0); const totalOutstanding=Number(rawRows[0]?.total_outstanding??0); const partiallyAppliedCount=Number(rawRows[0]?.partially_applied_count??0);
+    const response={advances,summary:{totalOutstanding,openCount:totalCount,partiallyAppliedCount},pageInfo:{page:query.data.page,pageSize:query.data.pageSize,totalCount,hasMore:offset+advances.length<totalCount},diagnostics:{queryCount:1,databaseMs:Number(databaseMs.toFixed(2)),totalMs:Number((performance.now()-startedAt).toFixed(2))}};
+    const payloadBytes=Buffer.byteLength(JSON.stringify(response)); response.diagnostics.totalMs=Number((performance.now()-startedAt).toFixed(2));
+    reply.header("Server-Timing",`db;dur=${response.diagnostics.databaseMs}, total;dur=${response.diagnostics.totalMs}`).header("X-Result-Count",String(advances.length)).header("X-Payload-Bytes",String(payloadBytes));
+    return response;
   });
 
   app.get("/v1/workspace/:workspaceId/labour-payments/reconciliation", { preHandler: requireUser }, async (request, reply) => {

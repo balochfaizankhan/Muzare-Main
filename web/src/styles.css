@@ -17344,6 +17344,59 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 .workforce-advance-position-list article > div span { color: #64748b; display: grid; font-size: 10px; gap: 2px; }
 .workforce-advance-position-list article > div b { color: #334155; font-size: 12px; }
 .workforce-advance-position-list article > div .is-outstanding b { color: #166534; }
+.workforce-advances-panel { gap: 10px; }
+.workforce-advances-header p { white-space: nowrap; }
+.workforce-record-advance { min-height: 40px !important; padding: 0 12px; }
+.workforce-advance-summary { background: #f4f9f5; border: 1px solid #d9e7dd; border-radius: 12px; display: flex; gap: 0; min-height: 62px; }
+.workforce-advance-summary > div { display: grid; flex: 1; gap: 2px; min-width: 0; padding: 9px 11px; }
+.workforce-advance-summary > div + div { border-inline-start: 1px solid #d9e7dd; }
+.workforce-advance-summary span { color: #64748b; font-size: 10px; }
+.workforce-advance-summary strong { color: #16472a; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workforce-advance-toolbar { display: grid; gap: 8px; grid-template-columns: minmax(0,1fr) auto auto; }
+.workforce-advance-toolbar .workforce-payments-search { grid-column: auto; }
+.workforce-advance-toolbar > button { background: #fff; border: 1px solid #bcd0c2; color: #166534; min-height: 44px; }
+.workforce-advance-toolbar > button[aria-pressed="true"] { background: #edf7ef; border-color: #7fac8c; }
+.workforce-advance-filters { display: grid; gap: 8px; grid-template-columns: repeat(2,minmax(0,1fr)); }
+.workforce-advance-filters select,.workforce-advance-filters input { background: #fff; border: 1px solid #cfded4; border-radius: 10px; min-height: 42px; min-width: 0; padding: 0 9px; }
+.workforce-advance-position-list { gap: 8px; }
+.workforce-advance-position-list .workforce-advance-card { background: #fff; cursor: pointer; display: grid; gap: 6px; min-height: 0; padding: 10px 11px; }
+.workforce-advance-card:focus-visible { box-shadow: 0 0 0 3px rgba(47,133,90,.16); outline: 2px solid #2f855a; }
+.workforce-advance-card > header { align-items: start; gap: 8px; }
+.workforce-advance-card > header > div { display: grid; gap: 1px; min-width: 0; }
+.workforce-advance-card > header span { color: #1f3828; font-size: 14px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workforce-advance-card > header small { color: #64748b; font-size: 10px; }
+.workforce-advance-card > p { color: #526174; font-size: 10px; margin: 0; }
+.workforce-advance-card__reference { align-items: center; color: #64748b; display: flex !important; font-size: 10px; justify-content: space-between; }
+.workforce-advance-card__reference span { color: #16723b !important; font-size: 11px !important; font-weight: 750; }
+.workforce-advance-card__money { align-items: end; background: #f7faf8; border-radius: 9px; display: grid !important; gap: 8px !important; grid-template-columns: auto minmax(0,1fr) !important; padding: 7px 9px; }
+.workforce-advance-card__money > div { display: grid; gap: 0; }
+.workforce-advance-card__money span { color: #64748b; font-size: 9px; text-transform: uppercase; }
+.workforce-advance-card__money strong { color: #166534; font-size: 17px; line-height: 1.15; }
+.workforce-advance-card__money > small { color: #64748b; font-size: 9px; overflow: hidden; text-align: end; text-overflow: ellipsis; white-space: nowrap; }
+.workforce-advance-card > footer { align-items: center; border-top: 1px solid #edf2ee; display: flex; gap: 8px; justify-content: space-between; padding-top: 6px; }
+.workforce-advance-card > footer > span { color: #64748b; font-size: 10px; max-width: 52%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workforce-advance-card > footer > div { align-items: center; display: flex; gap: 6px; }
+.workforce-advance-link { background: transparent; border: 0; color: #166534; font-size: 11px; font-weight: 750; min-height: 34px; padding: 0 6px; }
+.workforce-advance-recover { min-height: 34px !important; padding: 0 10px !important; width: auto !important; }
+.workforce-advance-pagination { align-items: center; display: flex; gap: 10px; justify-content: space-between; padding: 4px 1px; }
+.workforce-advance-pagination span,.workforce-advance-pagination small { color: #64748b; font-size: 11px; }
+.workforce-advance-pagination button { min-height: 40px; }
+.workforce-advance-recipient-list { display: grid; gap: 8px; }
+.workforce-advance-recipient-list article { align-items: center; background: #fff; border: 1px solid #dbe5de; border-radius: 13px; display: grid; gap: 10px; grid-template-columns: minmax(0,1fr) auto auto; padding: 10px 11px; }
+.workforce-advance-recipient-list article > div { display: grid; gap: 2px; min-width: 0; }
+.workforce-advance-recipient-list article > div:nth-child(2) { text-align: end; }
+.workforce-advance-recipient-list strong,.workforce-advance-recipient-list b { color: #1f3828; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workforce-advance-recipient-list b { color: #166534; }
+.workforce-advance-recipient-list span { color: #64748b; font-size: 10px; }
+.workforce-advance-recipient-list button { min-height: 40px; padding-inline: 10px; }
+.workforce-advance-skeletons { display: grid; gap: 8px; }
+.workforce-advance-skeleton { animation: workforce-advance-pulse 1.2s ease-in-out infinite; background: linear-gradient(90deg,#f1f5f2,#fafcfb,#f1f5f2); background-size: 200% 100%; border: 1px solid #e3ebe5; border-radius: 13px; height: 154px; }
+@keyframes workforce-advance-pulse { to { background-position: -200% 0; } }
+.workforce-advance-entry-sheet,.workforce-recovery-sheet,.workforce-advance-detail { max-width: 720px; }
+.workforce-recovery-balance,.workforce-recovery-preview { align-items: center; background: #f2f8f4; border-radius: 11px; display: flex; justify-content: space-between; padding: 10px 12px; }
+.workforce-recovery-balance span,.workforce-recovery-preview span { color: #64748b; font-size: 11px; }
+.workforce-recovery-balance strong,.workforce-recovery-preview strong { color: #166534; font-size: 16px; }
+.workforce-recovery-sheet .is-full { grid-column: 1/-1; }
 .workforce-payment-review-backdrop { align-items: end; z-index: 120; }
 .workforce-payment-review { background: #fff; border-radius: 20px 20px 0 0; box-shadow: 0 -12px 38px rgba(15, 23, 42, .2); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; max-height: 92dvh; overflow: hidden; width: 100%; }
 .workforce-payment-review > header { align-items: start; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; padding: 14px 16px; }
@@ -17400,6 +17453,26 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .workforce-payment-form,
   .workforce-payment-review-form { grid-template-columns: 1fr; }
   .workforce-payment-form label.is-full { grid-column: auto; }
+}
+
+@media (max-width: 767px) {
+  .app-shell__body { padding-bottom: calc(var(--mobile-nav-height, 96px) + env(safe-area-inset-bottom, 0px) + 16px); }
+  .workforce-payments-page { padding-bottom: calc(var(--mobile-nav-height, 96px) + env(safe-area-inset-bottom, 0px) + 28px); scroll-padding-bottom: calc(var(--mobile-nav-height, 96px) + env(safe-area-inset-bottom, 0px) + 28px); }
+  .workforce-shell-panel { position: relative; }
+  .workforce-shell-panel::after { background: linear-gradient(90deg,transparent,#fff 78%); content:""; inset-block:0; inset-inline-end:0; pointer-events:none; position:absolute; width:28px; }
+  .workforce-shell-tabs { padding-inline-end: 32px; }
+  .workforce-advances-panel { padding: 11px; }
+  .workforce-advance-toolbar { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .workforce-advance-toolbar .workforce-payments-search { grid-column: 1/-1; }
+  .workforce-advance-recipient-list article { grid-template-columns: minmax(0,1fr) auto; }
+  .workforce-advance-recipient-list article > button { grid-column: 1/-1; }
+  .workforce-advance-summary strong { font-size: 15px; }
+  .workforce-advance-card { max-height: 190px; }
+}
+
+@media (min-width: 760px) {
+  .workforce-advance-position-list { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .workforce-advance-filters { grid-template-columns: repeat(5,minmax(0,1fr)); }
 }
 
 @media print {

@@ -1347,6 +1347,10 @@ async function apiRequest<T>(path: string, options: RequestInit = {}, token?: st
   if (options.body) headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const controller = new AbortController();
+  const externalSignal = options.signal;
+  const abortFromCaller = () => controller.abort();
+  if (externalSignal?.aborted) controller.abort();
+  else externalSignal?.addEventListener("abort", abortFromCaller, { once: true });
   const timeout = requestOptions.timeoutMs ? window.setTimeout(() => controller.abort(), requestOptions.timeoutMs) : null;
   if (import.meta.env.DEV && requestOptions.debugLabel) console.info(`[${requestOptions.debugLabel}] request`, options.body ? JSON.parse(String(options.body)) : undefined);
   let response: Response;
@@ -1365,6 +1369,7 @@ async function apiRequest<T>(path: string, options: RequestInit = {}, token?: st
     throw error;
   } finally {
     if (timeout) window.clearTimeout(timeout);
+    externalSignal?.removeEventListener("abort", abortFromCaller);
   }
 
   if (!response.ok) {
@@ -1907,6 +1912,7 @@ export type LabourPaymentVoucherRecord = {
   transactionReference?: string | null;
   linkedDueId?: string | null;
   sourceId?: string | null;
+  sourceType?: string | null;
   legacySourceRecordId?: string | null;
   postedAt?: string | null;
   voidReason?: string | null;
@@ -1916,6 +1922,12 @@ export type LabourPaymentVoucherRecord = {
   reconciliationStatus: string;
 };
 export type LabourAdvancePosition = LabourPaymentVoucherRecord & {
+  canonicalId?: string | null;
+  displayVoucherNumber: string;
+  financialOwnerId?: string | null;
+  financialOwnerName: string | null;
+  receivedByName?: string | null;
+  groupLeaderSnapshot?: string | null;
   originalAmount: number;
   appliedAmount: number;
   refundedAmount: number;
@@ -1924,6 +1936,14 @@ export type LabourAdvancePosition = LabourPaymentVoucherRecord & {
   reversedAmount?: number;
   paymentAccountName?: string | null;
   readOnlyLegacy?: boolean;
+  reviewRequired: boolean;
+  createdByName?: string | null;
+};
+export type LabourAdvanceListResponse = {
+  advances: LabourAdvancePosition[];
+  summary: { totalOutstanding: number; openCount: number; partiallyAppliedCount: number };
+  pageInfo: { page: number; pageSize: number; totalCount: number; hasMore: boolean };
+  diagnostics?: { queryCount: number; databaseMs: number; totalMs: number };
 };
 
 const labourPaymentContextQuery = (farmId: string, seasonId: string) => new URLSearchParams({ farmId, seasonId }).toString();
@@ -1959,8 +1979,22 @@ export const fetchLabourPaymentVouchers = (token: string, workspaceId: string, i
   if (input.status) query.set("status", input.status);
   return apiRequest<{ vouchers: LabourPaymentVoucherRecord[] }>(`/v1/workspace/${workspaceId}/labour-payments/vouchers?${query.toString()}`, {}, token);
 };
-export const fetchLabourPaymentAdvances = (token: string, workspaceId: string, farmId: string, seasonId: string) =>
-  apiRequest<{ advances: LabourAdvancePosition[] }>(`/v1/workspace/${workspaceId}/labour-payments/advances?${labourPaymentContextQuery(farmId, seasonId)}`, {}, token);
+export const fetchLabourPaymentAdvances = (token: string, workspaceId: string, farmId: string, seasonId: string, input: { page?: number; pageSize?: number; search?: string; recipientScope?: string; status?: string; accountId?: string; from?: string; to?: string; signal?: AbortSignal } = {}) => {
+  const query = new URLSearchParams({ farmId, seasonId, page: String(input.page ?? 1), pageSize: String(input.pageSize ?? 20) });
+  for (const [key,value] of Object.entries({ search:input.search,recipientScope:input.recipientScope,status:input.status,accountId:input.accountId,from:input.from,to:input.to })) if(value) query.set(key,value);
+  return apiRequest<LabourAdvanceListResponse>(`/v1/workspace/${workspaceId}/labour-payments/advances?${query.toString()}`, { signal: input.signal }, token);
+};
+export const fetchAllLabourPaymentAdvances = async (token: string, workspaceId: string, farmId: string, seasonId: string, input: { status?: string; signal?: AbortSignal } = {}) => {
+  const advances: LabourAdvancePosition[] = [];
+  let page = 1;
+  do {
+    const response = await fetchLabourPaymentAdvances(token, workspaceId, farmId, seasonId, { ...input, page, pageSize: 100 });
+    advances.push(...response.advances.filter((next) => !advances.some((existing) => existing.id === next.id)));
+    if (!response.pageInfo.hasMore) return { ...response, advances, pageInfo: { ...response.pageInfo, page: 1, pageSize: advances.length, hasMore: false } };
+    page += 1;
+  } while (!input.signal?.aborted);
+  throw new DOMException("The advance report request was cancelled.", "AbortError");
+};
 export const postLabourAdvanceVoucher = (token: string, workspaceId: string, input: {
   farmId: string; seasonId: string; idempotencyKey: string; voucherDate: string; recipientScope: LabourRecipientScope;
   labourerId?: string | null; labourGroupId?: string | null; contractorReference?: string | null; crewReference?: string | null;

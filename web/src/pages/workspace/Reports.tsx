@@ -19,7 +19,7 @@ import { translateExpenseCategory, translateExpenseSubcategory, translatePayment
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
 import { getVoucherDisplayNumber } from "../../lib/vouchers";
 import { getActiveVouchers, loadWorkspaceVouchers } from "../../lib/voucherCollections";
-import { fetchBootstrap, fetchLabourPaymentAdvances, fetchLabourPaymentVouchers, type LabourAdvancePosition, type LabourPaymentVoucherRecord } from "../../lib/api";
+import { fetchAllLabourPaymentAdvances, fetchBootstrap, fetchLabourPaymentVouchers, type LabourAdvancePosition, type LabourPaymentVoucherRecord } from "../../lib/api";
 import {
   buildPartnerLiabilityPositions,
   calculatePartnerLiabilityBalance,
@@ -565,7 +565,7 @@ export function Reports() {
     if (!token || !workspaceId || !farmId || !seasonId || !navigator.onLine) return;
     void Promise.all([
       fetchLabourPaymentVouchers(token, workspaceId, { farmId, seasonId }),
-      fetchLabourPaymentAdvances(token, workspaceId, farmId, seasonId),
+      fetchAllLabourPaymentAdvances(token, workspaceId, farmId, seasonId),
     ]).then(([voucherResponse, advanceResponse]) => {
       setLabourPaymentVouchers(voucherResponse.vouchers);
       setCanonicalAdvancePositions(advanceResponse.advances);
