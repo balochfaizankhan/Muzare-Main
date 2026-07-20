@@ -8,6 +8,12 @@ const paymentServiceSource = readFileSync(new URL("../src/lib/labour-payments.ts
 const settlementRouteSource = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
 const migrationSource = readFileSync(new URL("../../database/migrations/0035_unified_labour_payments.sql", import.meta.url), "utf8");
 const groupPoolGuardMigration = readFileSync(new URL("../../database/migrations/0039_group_due_member_advance_applications.sql", import.meta.url), "utf8");
+const startupMigrationSource = readFileSync(new URL("../src/db/migrations.ts", import.meta.url), "utf8");
+
+test("the group-member advance guard migration runs during API startup", () => {
+  assert.match(startupMigrationSource, /0039_group_due_member_advance_applications\.sql/);
+  assert.match(startupMigrationSource, /key: "0039_group_due_member_advance_applications"[\s\S]*required: true/);
+});
 
 test("an approved attendance settlement creates an unpaid due and rejects immediate cash", () => {
   assert.match(settlementRouteSource, /Settlement approval no longer moves cash/i);

@@ -40,6 +40,7 @@ const unifiedLabourPaymentsMigrationUrl = new URL("../../../database/migrations/
 const labourAdvanceListPerformanceMigrationUrl = new URL("../../../database/migrations/0036_labour_advance_list_performance.sql", import.meta.url);
 const labourDataCleanupMigrationUrl = new URL("../../../database/migrations/0037_labour_data_cleanup.sql", import.meta.url);
 const labourDueAttendanceSourcesMigrationUrl = new URL("../../../database/migrations/0038_labour_due_attendance_sources.sql", import.meta.url);
+const groupDueMemberAdvanceApplicationsMigrationUrl = new URL("../../../database/migrations/0039_group_due_member_advance_applications.sql", import.meta.url);
 
 const STARTUP_LOCK_KEY = "muzare_ensure_workspace_schema";
 const STARTUP_LOCK_TIMEOUT = "10s";
@@ -120,6 +121,7 @@ const deferredMigrationSteps: MigrationStep[] = [
   { key: "0036_labour_advance_list_performance", kind: "sql", required: true, sourceUrl: labourAdvanceListPerformanceMigrationUrl },
   { key: "0037_labour_data_cleanup", kind: "sql", required: true, sourceUrl: labourDataCleanupMigrationUrl },
   { key: "0038_labour_due_attendance_sources", kind: "sql", required: true, sourceUrl: labourDueAttendanceSourcesMigrationUrl },
+  { key: "0039_group_due_member_advance_applications", kind: "sql", required: true, sourceUrl: groupDueMemberAdvanceApplicationsMigrationUrl },
 ];
 
 function logMigrationEvent(event: string, details: Record<string, unknown>) {
