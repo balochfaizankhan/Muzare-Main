@@ -1244,6 +1244,81 @@ test("group due atomically applies snapshot-member advances across controlled in
   assert.equal(advances.length, 45);
 });
 
+test("individual due applies legacy-scoped advances resolved to the same labourer without creating an LPV", async () => {
+  const labourerId = randomUUID();
+  const dueId = randomUUID();
+  const requestKey = randomUUID();
+  await db.insert(labourDues).values({
+    id: dueId, workspaceId: tenant.workspaceId, farmId: tenant.farmId, seasonId: tenant.seasonId,
+    dueNumber: `LD-LEGACY-IND-${Date.now()}`, origin: "DIRECT", recipientScope: "INDIVIDUAL",
+    financialScopeKey: `individual:${labourerId}`, labourerId,
+    recipientSnapshot: { labourerId, labourerName: "Saleem Nutkani" },
+    description: "Individual legacy advance settlement", workFromDate: "2026-06-01", workToDate: "2026-06-01",
+    grossAmount: "7108.00", idempotencyKey: randomUUID(), createdBy: tenant.userId,
+  });
+  const [advanceAccount] = await db.insert(accounts).values({
+    farmId: tenant.farmId, name: `Legacy individual advance cash ${Date.now()}`, accountType: "cash", active: true,
+  }).returning({ id: accounts.id });
+  assert.ok(advanceAccount?.id);
+  await db.insert(labourPaymentVouchers).values([
+    {
+      workspaceId: tenant.workspaceId, farmId: tenant.farmId, seasonId: tenant.seasonId,
+      voucherNumber: `LAV-LEGACY-IND-${Date.now()}-1`, voucherDate: "2026-05-01", nature: "ADVANCE", status: "POSTED",
+      recipientScope: "INDIVIDUAL", financialScopeKey: `legacy:${randomUUID()}`, labourerId,
+      recipientSnapshot: { labourerId, labourerName: "Saleem Nutkani" }, description: "Legacy Saleem advance", paymentAmount: "5000.00",
+      paymentAccountId: advanceAccount!.id, paymentMethod: "CASH", sourceType: "LABOUR_ADVANCE",
+      idempotencyKey: randomUUID(), createdBy: tenant.userId, postedBy: tenant.userId, postedAt: new Date(now),
+    },
+    {
+      workspaceId: tenant.workspaceId, farmId: tenant.farmId, seasonId: tenant.seasonId,
+      voucherNumber: `LAV-LEGACY-IND-${Date.now()}-2`, voucherDate: "2026-05-02", nature: "ADVANCE", status: "POSTED",
+      recipientScope: "INDIVIDUAL", financialScopeKey: `legacy:${randomUUID()}`, labourerId: null,
+      recipientSnapshot: { recipientLabourerId: labourerId, recipientName: "Saleem Nutkani" }, description: "Legacy Saleem snapshot advance", paymentAmount: "3000.00",
+      paymentAccountId: advanceAccount!.id, paymentMethod: "CASH", sourceType: "LABOUR_ADVANCE",
+      idempotencyKey: randomUUID(), createdBy: tenant.userId, postedBy: tenant.userId, postedAt: new Date(now),
+    },
+    {
+      workspaceId: tenant.workspaceId, farmId: tenant.farmId, seasonId: tenant.seasonId,
+      voucherNumber: `LAV-LEGACY-IND-${Date.now()}-OTHER`, voucherDate: "2026-05-01", nature: "ADVANCE", status: "POSTED",
+      recipientScope: "INDIVIDUAL", financialScopeKey: `individual:${randomUUID()}`, labourerId: randomUUID(),
+      recipientSnapshot: { recipientName: "Other labourer" }, description: "Other advance", paymentAmount: "9000.00",
+      paymentAccountId: advanceAccount!.id, paymentMethod: "CASH", sourceType: "LABOUR_ADVANCE",
+      idempotencyKey: randomUUID(), createdBy: tenant.userId, postedBy: tenant.userId, postedAt: new Date(now),
+    },
+  ]);
+  const pool = await request("GET", `/v1/workspace/${tenant.workspaceId}/labour-payments/dues/${dueId}/advance-pool?farmId=${tenant.farmId}&seasonId=${tenant.seasonId}&settlementDate=2026-07-20`);
+  assertIntegrationResponse(pool, 200, "load individual legacy advance pool");
+  assert.equal(pool.json().pool.eligibleTotal, 8000);
+  assert.equal(pool.json().pool.maximumApplicable, 7108);
+  assert.ok(pool.json().pool.exclusionTotals.labourersOutsideDue >= 9000);
+
+  const vouchersBefore = (await db.select({ id: labourPaymentVouchers.id }).from(labourPaymentVouchers).where(eq(labourPaymentVouchers.workspaceId, tenant.workspaceId))).length;
+  const settled = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/dues/${dueId}/settle`, {
+    farmId: tenant.farmId,
+    seasonId: tenant.seasonId,
+    advancePool: { amount: 7108, idempotencyKey: requestKey, settlementDate: "2026-07-20" },
+    advanceApplications: [],
+  });
+  assertIntegrationResponse(settled, 200, "apply individual legacy advance pool");
+  assert.equal(settled.json().result.settlementSummary.advanceAmountApplied, 7108);
+  assert.equal(settled.json().result.settlementSummary.cashPaymentPosted, 0);
+  assert.equal(settled.json().result.voucher, null);
+  assert.equal(settled.json().result.due.outstandingBalance, 0);
+  assert.equal(settled.json().result.due.paymentStatus, "SETTLED_BY_ADVANCE");
+  assert.equal((await db.select({ id: labourPaymentVouchers.id }).from(labourPaymentVouchers).where(eq(labourPaymentVouchers.workspaceId, tenant.workspaceId))).length, vouchersBefore);
+  const applications = await db.select().from(labourAdvanceApplications).where(eq(labourAdvanceApplications.dueId, dueId));
+  assert.equal(applications.length, 2);
+  assert.equal(applications.reduce((sum, row) => sum + Number(row.amount), 0), 7108);
+  const retried = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/dues/${dueId}/settle`, {
+    farmId: tenant.farmId,
+    seasonId: tenant.seasonId,
+    advancePool: { amount: 7108, idempotencyKey: requestKey, settlementDate: "2026-07-20" },
+    advanceApplications: [],
+  });
+  assertIntegrationResponse(retried, 200, "retry individual legacy advance application");
+  assert.equal((await db.select().from(labourAdvanceApplications).where(eq(labourAdvanceApplications.dueId, dueId))).length, 2);
+});
+
 test("cash, bank, and partner LPVs reconcile funding, payable, retry, and reversal atomically", async () => {
   const cases = [
     { accountType: "cash", transactionType: "debit", ledgerCode: "CASH_CONTROL" },

@@ -8,11 +8,14 @@ const paymentServiceSource = readFileSync(new URL("../src/lib/labour-payments.ts
 const settlementRouteSource = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
 const migrationSource = readFileSync(new URL("../../database/migrations/0035_unified_labour_payments.sql", import.meta.url), "utf8");
 const groupPoolGuardMigration = readFileSync(new URL("../../database/migrations/0039_group_due_member_advance_applications.sql", import.meta.url), "utf8");
+const legacyIndividualGuardMigration = readFileSync(new URL("../../database/migrations/0040_legacy_individual_advance_application_scope.sql", import.meta.url), "utf8");
 const startupMigrationSource = readFileSync(new URL("../src/db/migrations.ts", import.meta.url), "utf8");
 
 test("the group-member advance guard migration runs during API startup", () => {
   assert.match(startupMigrationSource, /0039_group_due_member_advance_applications\.sql/);
   assert.match(startupMigrationSource, /key: "0039_group_due_member_advance_applications"[\s\S]*required: true/);
+  assert.match(startupMigrationSource, /0040_legacy_individual_advance_application_scope\.sql/);
+  assert.match(startupMigrationSource, /key: "0040_legacy_individual_advance_application_scope"[\s\S]*required: true/);
 });
 
 test("an approved attendance settlement creates an unpaid due and rejects immediate cash", () => {
@@ -126,4 +129,13 @@ test("database guard accepts only immutable snapshot members for group advance p
   assert.match(groupPoolGuardMigration, /due_payments \+ due_advances \+ NEW\.amount > payable/);
   assert.match(routeSource, /advance_application_insert_batch_/);
   assert.match(routeSource, /sqlState/);
+});
+
+test("database guard resolves legacy individual advance ownership from immutable voucher identity", () => {
+  assert.match(legacyIndividualGuardMigration, /effective_advance_scope := target_advance\.financial_scope_key/);
+  assert.match(legacyIndividualGuardMigration, /effective_advance_scope LIKE 'legacy:%'/);
+  assert.match(legacyIndividualGuardMigration, /target_advance\.recipient_snapshot->>'labourerId'/);
+  assert.match(legacyIndividualGuardMigration, /'individual:' \|\| snapshot_labourer_id/);
+  assert.match(legacyIndividualGuardMigration, /scope_is_eligible := effective_advance_scope = target_due\.financial_scope_key/);
+  assert.doesNotMatch(legacyIndividualGuardMigration, /FROM labourers/);
 });
