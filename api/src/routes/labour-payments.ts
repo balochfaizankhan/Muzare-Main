@@ -37,6 +37,7 @@ import { validateLabourSettlementPaymentAccount } from "../lib/labour-settlement
 import { hasModulePermission } from "../permissions.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
 import { hasFarmAccess } from "../workspace-access.js";
+import { parseSarMinorUnits, sarFromMinorUnits } from "../lib/money.js";
 
 const paramsSchema = z.object({ workspaceId: z.string().uuid() });
 const dueParamsSchema = paramsSchema.extend({ dueId: z.string().uuid() });
@@ -88,12 +89,17 @@ const recipientScopeSchema = z.enum([
   "UNREGISTERED_LABOUR",
   "NO_SPECIFIC_RECIPIENT",
 ]);
+const moneyMinorUnitsSchema = z.any().transform((raw, context) => {
+  const result = parseSarMinorUnits(raw);
+  if (!result.success) { context.addIssue({ code: "custom", message: result.message }); return z.NEVER; }
+  return result.minorUnits;
+});
 const directDueSchema = contextSchema.extend({
   source: z.enum(["DIRECT", "ATTENDANCE_PERIOD"]).default("DIRECT"),
   idempotencyKey: z.string().uuid(),
   recipientScope: recipientScopeSchema,
-  labourerId: z.string().uuid().optional().nullable(),
-  labourGroupId: z.string().uuid().optional().nullable(),
+  labourerId: z.string().trim().min(1).max(200).optional().nullable(),
+  labourGroupId: z.string().trim().min(1).max(200).optional().nullable(),
   contractorReference: z.string().trim().max(200).optional().nullable(),
   crewReference: z.string().trim().max(200).optional().nullable(),
   manualRecipientName: z.string().trim().max(200).optional().nullable(),
@@ -101,12 +107,24 @@ const directDueSchema = contextSchema.extend({
   description: z.string().trim().min(1).max(500),
   workFromDate: z.string().date(),
   workToDate: z.string().date(),
-  grossAmount: z.coerce.number().positive().optional(),
-  authorizedDeductions: z.coerce.number().nonnegative().default(0),
-  leaderAllowance: z.coerce.number().nonnegative().default(0),
+  agreedGrossAmount: moneyMinorUnitsSchema.optional(),
+  authorizedDeductions: moneyMinorUnitsSchema.default(0),
   notes: z.string().trim().max(1000).optional().nullable(),
   costCategory: z.string().trim().max(200).optional().nullable(),
-});
+}).superRefine((value, context) => {
+  if (value.workToDate < value.workFromDate) context.addIssue({ code: "custom", path: ["workToDate"], message: "Work-to date cannot be before work-from date." });
+  if (value.recipientScope === "INDIVIDUAL" && !value.labourerId) context.addIssue({ code: "custom", path: ["labourerId"], message: "Select a valid labourer." });
+  if (value.recipientScope === "LABOUR_GROUP" && !value.labourGroupId) context.addIssue({ code: "custom", path: ["labourGroupId"], message: "Select a valid labour group." });
+  if (value.source === "DIRECT" && (value.agreedGrossAmount == null || value.agreedGrossAmount <= 0)) context.addIssue({ code: "custom", path: ["agreedGrossAmount"], message: "Enter an amount greater than zero." });
+  if (value.authorizedDeductions < 0) context.addIssue({ code: "custom", path: ["authorizedDeductions"], message: "Deductions cannot be negative." });
+  if (value.source === "DIRECT" && value.agreedGrossAmount != null && value.authorizedDeductions > value.agreedGrossAmount) context.addIssue({ code: "custom", path: ["authorizedDeductions"], message: "Deductions cannot exceed the agreed amount." });
+}).transform((value) => ({
+  ...value,
+  agreedGrossAmountMinor: value.agreedGrossAmount ?? null,
+  authorizedDeductionsMinor: value.authorizedDeductions,
+  agreedGrossAmount: value.agreedGrossAmount == null ? undefined : sarFromMinorUnits(value.agreedGrossAmount),
+  authorizedDeductions: sarFromMinorUnits(value.authorizedDeductions),
+}));
 const attendanceDuePreviewSchema = contextSchema.extend({
   recipientScope: z.enum(["INDIVIDUAL", "LABOUR_GROUP"]),
   labourerId: z.string().uuid().optional().nullable(),
@@ -735,22 +753,44 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
       const params = paramsSchema.safeParse(request.params);
       const body = directDueSchema.safeParse(request.body);
       phases.requestValidation = performance.now() - validationStartedAt;
-      if (
-        !params.success ||
-        !body.success ||
-        (body.success &&
-          (body.data.workFromDate > body.data.workToDate ||
-            body.data.authorizedDeductions >
-              (body.data.grossAmount ?? 0) + body.data.leaderAllowance))
-      )
-        return reply
-          .code(400)
-          .send({
-            message:
-              "A valid direct labour due is required. Deductions cannot exceed the agreed amount.",
-          });
+      if (!params.success) return reply.code(400).send({ message: "A valid workspace is required." });
+      if (!body.success) {
+        const errors = Object.fromEntries(body.error.issues.map((issue) => [String(issue.path[0] ?? "form"), issue.message]));
+        const raw = request.body && typeof request.body === "object"
+          ? request.body as Record<string, unknown>
+          : {};
+        request.log.info({
+          event: "labour_due_create_validation_failed",
+          values: {
+            source: raw.source,
+            recipientScope: raw.recipientScope,
+            labourerId: raw.labourerId,
+            labourGroupId: raw.labourGroupId,
+            workFromDate: raw.workFromDate,
+            workToDate: raw.workToDate,
+            agreedGrossAmount: raw.agreedGrossAmount,
+            agreedGrossAmountType: typeof raw.agreedGrossAmount,
+            authorizedDeductions: raw.authorizedDeductions,
+            authorizedDeductionsType: typeof raw.authorizedDeductions,
+            farmId: raw.farmId,
+            seasonId: raw.seasonId,
+            idempotencyKey: raw.idempotencyKey,
+          },
+          errors,
+        });
+        return reply.code(400).send({ message: "Please correct the highlighted fields.", errors });
+      }
       const { workspaceId } = params.data;
       const input = body.data;
+      request.log.info({ event: "labour_due_create_contract", values: {
+        source: input.source, recipientScope: input.recipientScope,
+        labourerId: input.labourerId ?? null, labourGroupId: input.labourGroupId ?? null,
+        descriptionLength: input.description.length, workFromDate: input.workFromDate, workToDate: input.workToDate,
+        agreedGrossAmount: input.agreedGrossAmount ?? null, agreedGrossAmountMinor: input.agreedGrossAmountMinor,
+        authorizedDeductions: input.authorizedDeductions, authorizedDeductionsMinor: input.authorizedDeductionsMinor,
+        calculatedAmountDueMinor: Math.max((input.agreedGrossAmountMinor ?? 0) - input.authorizedDeductionsMinor, 0),
+        farmId: input.farmId, seasonId: input.seasonId, idempotencyKey: input.idempotencyKey,
+      } });
       if (
         !(await requireRequestScope(
           request,
@@ -803,7 +843,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             if (sourceRows.some((row) => Boolean(row.payload.labourDueId || row.payload.labourWageSettlementId))) throw new Error("Some attendance records are already included in another due or settlement. Refresh the preview.");
             phases.sourceValidation = performance.now() - sourceCheckStartedAt;
           }
-          const grossAmount = attendancePreview?.grossWages ?? input.grossAmount ?? 0;
+          const grossAmount = attendancePreview?.grossWages ?? input.agreedGrossAmount ?? 0;
           if (grossAmount <= 0) throw new Error("No payable attendance is available for this due.");
           const dueNumber = await allocateLabourDueNumber(
             tx,
@@ -844,7 +884,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               workFromDate: input.workFromDate,
               workToDate: input.workToDate,
               grossAmount: grossAmount.toFixed(2),
-              adjustmentAmount: input.leaderAllowance.toFixed(2),
+              adjustmentAmount: "0.00",
               authorizedDeductions: input.authorizedDeductions.toFixed(2),
               calculationStatus: "APPROVED",
               paymentStatus: "UNPAID",
@@ -890,9 +930,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             seasonId: input.seasonId,
             dueId: created!.id,
             amount: Math.max(
-              grossAmount +
-                input.leaderAllowance -
-                input.authorizedDeductions,
+              grossAmount - input.authorizedDeductions,
               0,
             ),
             actorId: request.appUser!.id,
@@ -923,13 +961,13 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
         request.log.info({ event: "labour_due_create_timing", dueId: due.id, source: input.source, memberCount, attendanceCount, phases, totalMs: total, sqlShape: "fixed-set-based" });
         return reply.code(201).send({ due, performance: { totalMs: total, transactionMs: phases.transaction, attendanceCount, memberCount, sqlShape: "fixed-set-based" } });
       } catch (error) {
+        const message = error instanceof Error ? error.message : "Unable to create the labour due.";
+        const recipientField = /labourer/i.test(message) ? "labourerId" : /group/i.test(message) ? "labourGroupId" : null;
         return reply
           .code(400)
           .send({
-            message:
-              error instanceof Error
-                ? error.message
-                : "Unable to create the labour due.",
+            message: recipientField ? "Please correct the highlighted fields." : message,
+            errors: recipientField ? { [recipientField]: message } : undefined,
           });
       }
     },

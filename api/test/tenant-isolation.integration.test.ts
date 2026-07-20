@@ -16,6 +16,10 @@ import {
   operationalRecords,
   importBatches,
   importFailures,
+  labourAccountingEntries,
+  labourAdvanceApplications,
+  labourDues,
+  labourPaymentVouchers,
   seasons,
   userSessions,
   users,
@@ -129,6 +133,10 @@ after(async () => {
   await db.delete(workspaceTeamInvitations).where(inArray(workspaceTeamInvitations.workspaceId, ids));
   await db.delete(importFailures).where(inArray(importFailures.workspaceId, ids));
   await db.delete(importBatches).where(inArray(importBatches.workspaceId, ids));
+  await db.delete(labourAccountingEntries).where(inArray(labourAccountingEntries.workspaceId, ids));
+  await db.delete(labourAdvanceApplications).where(inArray(labourAdvanceApplications.workspaceId, ids));
+  await db.delete(labourPaymentVouchers).where(inArray(labourPaymentVouchers.workspaceId, ids));
+  await db.delete(labourDues).where(inArray(labourDues.workspaceId, ids));
   await db.delete(operationalRecords).where(inArray(operationalRecords.workspaceId, ids));
   await db.delete(userSessions).where(inArray(userSessions.userId, [alpha.userId, bravo.userId, manager.userId, supervisor.userId, accountant.userId, operator.userId, viewer.userId, admin.userId]));
   await db.delete(seasons).where(inArray(seasons.workspaceId, ids));
@@ -167,6 +175,32 @@ test("Alpha and Bravo operational records remain isolated", async () => {
   assert.ok(bravoRecords.every((record: { workspaceId: string }) => record.workspaceId === bravo.workspaceId));
   assert.equal((await request(alpha.token, "GET", `/v1/workspace/${bravo.workspaceId}/operational-records`)).statusCode, 403);
   assert.equal((await request(bravo.token, "GET", `/v1/workspace/${alpha.workspaceId}/operational-records`)).statusCode, 403);
+});
+
+test("direct labour due accepts decimal SAR and a canonical historical labour ID", async () => {
+  const labourerId = `legacy-labour-${randomUUID()}`;
+  assertIntegrationResponse(await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "labourer", labourerId, {
+    name: "Historical Direct Due Worker", group: "General", active: false, status: "inactive", dailyWage: 100,
+  })), 200, "seed historical labourer");
+  const idempotencyKey = randomUUID();
+  const payload = { farmId: alpha.farmId, seasonId: alpha.seasonId, idempotencyKey, source: "DIRECT", recipientScope: "INDIVIDUAL", labourerId, labourGroupId: null, description: "Historical direct labour correction", workFromDate: "2026-07-01", workToDate: "2026-07-01", agreedGrossAmount: 7107.5, authorizedDeductions: "0.00", notes: "Direct due validation acceptance" };
+  const created = await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/labour-payments/dues`, payload);
+  assertIntegrationResponse(created, 201, "create direct labour due");
+  const due = created.json().due;
+  assert.equal(due.labourerId, labourerId);
+  assert.equal(due.grossAmount, "7107.50");
+  assert.equal(due.authorizedDeductions, "0.00");
+  const retried = await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/labour-payments/dues`, payload);
+  assert.equal(retried.statusCode, 201);
+  assert.equal(retried.json().due.id, due.id);
+  const matching = await db.select().from(labourDues).where(and(eq(labourDues.workspaceId, alpha.workspaceId), eq(labourDues.idempotencyKey, idempotencyKey)));
+  assert.equal(matching.length, 1);
+  assert.equal((await db.select().from(labourPaymentVouchers).where(eq(labourPaymentVouchers.linkedDueId, due.id))).length, 0);
+  assert.equal((await db.select().from(labourAdvanceApplications).where(eq(labourAdvanceApplications.dueId, due.id))).length, 0);
+  assert.equal((await db.select().from(labourAccountingEntries).where(eq(labourAccountingEntries.dueId, due.id))).length, 2);
+  const invalid = await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/labour-payments/dues`, { ...payload, idempotencyKey: randomUUID(), agreedGrossAmount: "100.00", authorizedDeductions: "100.01" });
+  assert.equal(invalid.statusCode, 400);
+  assert.equal(invalid.json().errors.authorizedDeductions, "Deductions cannot exceed the agreed amount.");
 });
 
 test("CORS preflight and operational error responses allow the configured frontend origin", async () => {

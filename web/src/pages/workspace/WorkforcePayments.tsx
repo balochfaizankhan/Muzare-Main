@@ -24,6 +24,7 @@ import { useAuth } from "../../auth/AuthProvider";
 import { LabourSelectCombobox } from "../../components/LabourSelectCombobox";
 import {
   createDirectLabourDue,
+  ApiError,
   previewLabourAttendanceDue,
   fetchAllLabourPaymentAdvances,
   fetchLabourPaymentAdvances,
@@ -651,9 +652,12 @@ function DirectDueForm({
   const [description, setDescription] = useState("");
   const [from, setFrom] = useState(today());
   const [to, setTo] = useState(today());
-  const [amount, setAmount] = useState("");
-  const [leaderAllowance, setLeaderAllowance] = useState("");
-  const [deductions, setDeductions] = useState("");
+  const [agreedGrossAmount, setAgreedGrossAmount] = useState("");
+  const [authorizedDeductions, setAuthorizedDeductions] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const labourerFieldRef = useRef<HTMLLabelElement>(null);
+  const agreedAmountRef = useRef<HTMLInputElement>(null);
+  const deductionsRef = useRef<HTMLInputElement>(null);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [previewing, setPreviewing] = useState(false);
@@ -672,6 +676,7 @@ function DirectDueForm({
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!canManage || saving) return;
+    setFieldErrors({});
     setSaving(true);
     let committed = false;
     const submitStartedAt = performance.now();
@@ -697,9 +702,8 @@ function DirectDueForm({
         description: description || (source === "ATTENDANCE_PERIOD" ? `Attendance wages ${from} to ${to}` : ""),
         workFromDate: from,
         workToDate: to,
-        grossAmount: source === "DIRECT" ? Number(amount) : undefined,
-        authorizedDeductions: Number(deductions || 0),
-        leaderAllowance: Number(leaderAllowance || 0),
+        agreedGrossAmount: source === "DIRECT" ? agreedGrossAmount : undefined,
+        authorizedDeductions: authorizedDeductions || "0.00",
         notes,
       });
       committed = true;
@@ -709,8 +713,18 @@ function DirectDueForm({
       console.info("labour_due_create_frontend_timing", { totalMs: performance.now() - submitStartedAt, server: response.performance ?? null });
       onSaved(`Labour due ${response.due.dueNumber} created successfully.`);
     } catch (caught) {
+      const responseErrors = caught instanceof ApiError && caught.responseBody && typeof caught.responseBody === "object" && "errors" in caught.responseBody
+        ? (caught.responseBody as { errors?: Record<string, string> }).errors ?? {}
+        : {};
+      setFieldErrors(responseErrors);
+      const firstField = Object.keys(responseErrors)[0];
+      window.setTimeout(() => {
+        if (firstField === "labourerId") labourerFieldRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        if (firstField === "agreedGrossAmount") agreedAmountRef.current?.focus();
+        if (firstField === "authorizedDeductions") deductionsRef.current?.focus();
+      }, 0);
       onError(
-        caught instanceof Error
+        Object.keys(responseErrors).length ? "Please correct the highlighted fields." : caught instanceof Error
           ? caught.message
           : "Unable to create the labour due.",
       );
@@ -753,15 +767,17 @@ function DirectDueForm({
           </select>
         </label>
         {scope === "INDIVIDUAL" ? (
-          <label>
+          <label ref={labourerFieldRef} className={fieldErrors.labourerId ? "has-error" : undefined}>
             <span>Labourer</span>
             <LabourSelectCombobox ariaLabel="Labourer" options={labourers} value={labourerId} onChange={setLabourerId} placeholder="Search labourer" noResultsLabel="No matching labourer" includeInactive />
+            {fieldErrors.labourerId ? <small className="workforce-field-error">{fieldErrors.labourerId}</small> : null}
           </label>
         ) : null}
         {scope === "LABOUR_GROUP" ? (
-          <label>
+          <label className={fieldErrors.labourGroupId ? "has-error" : undefined}>
             <span>Labour group</span>
             <LabourSelectCombobox ariaLabel="Labour group" options={groupSelectorOptions} value={groupId} onChange={setGroupId} placeholder="Search labour group" noResultsLabel="No matching labour group" includeInactive />
+            {fieldErrors.labourGroupId ? <small className="workforce-field-error">{fieldErrors.labourGroupId}</small> : null}
           </label>
         ) : null}
         {!["INDIVIDUAL", "LABOUR_GROUP"].includes(scope) ? (
@@ -791,7 +807,7 @@ function DirectDueForm({
             </label>
           </>
         ) : null}
-        <label className="is-full">
+        <label className={`is-full${fieldErrors.description ? " has-error" : ""}`}>
           <span>Work description</span>
           <input
             required={source === "DIRECT"}
@@ -799,8 +815,9 @@ function DirectDueForm({
             onChange={(event) => setDescription(event.target.value)}
             placeholder={source === "ATTENDANCE_PERIOD" ? "Optional attendance due description" : "e.g. Temporary workers for onion loading"}
           />
+          {fieldErrors.description ? <small className="workforce-field-error">{fieldErrors.description}</small> : null}
         </label>
-        <label>
+        <label className={fieldErrors.workFromDate ? "has-error" : undefined}>
           <span>Work from</span>
           <input
             required
@@ -808,8 +825,9 @@ function DirectDueForm({
             value={from}
             onChange={(event) => setFrom(event.target.value)}
           />
+          {fieldErrors.workFromDate ? <small className="workforce-field-error">{fieldErrors.workFromDate}</small> : null}
         </label>
-        <label>
+        <label className={fieldErrors.workToDate ? "has-error" : undefined}>
           <span>Work to</span>
           <input
             required
@@ -818,42 +836,34 @@ function DirectDueForm({
             value={to}
             onChange={(event) => setTo(event.target.value)}
           />
+          {fieldErrors.workToDate ? <small className="workforce-field-error">{fieldErrors.workToDate}</small> : null}
         </label>
-        {source === "DIRECT" ? <label>
+        {source === "DIRECT" ? <label className={fieldErrors.agreedGrossAmount ? "has-error" : undefined}>
           <span>Final agreed amount (SAR)</span>
           <input
             required
             min="0.01"
             step="0.01"
             type="number"
-            value={amount}
-            onChange={(event) => setAmount(event.target.value)}
+            ref={agreedAmountRef}
+            value={agreedGrossAmount}
+            onChange={(event) => { setAgreedGrossAmount(event.target.value); setFieldErrors((current) => ({ ...current, agreedGrossAmount: "" })); }}
             placeholder="0.00"
           />
+          {fieldErrors.agreedGrossAmount ? <small className="workforce-field-error">{fieldErrors.agreedGrossAmount}</small> : null}
         </label> : null}
-        {source === "DIRECT" && scope === "LABOUR_GROUP" ? (
-          <label>
-            <span>Leader allowance (optional)</span>
-            <input
-              min="0"
-              step="0.01"
-              type="number"
-              value={leaderAllowance}
-              onChange={(event) => setLeaderAllowance(event.target.value)}
-              placeholder="0.00"
-            />
-          </label>
-        ) : null}
-        {source === "DIRECT" ? <label>
+        {source === "DIRECT" ? <label className={fieldErrors.authorizedDeductions ? "has-error" : undefined}>
           <span>Authorized deductions</span>
           <input
             min="0"
             step="0.01"
             type="number"
-            value={deductions}
-            onChange={(event) => setDeductions(event.target.value)}
+              ref={deductionsRef}
+              value={authorizedDeductions}
+              onChange={(event) => { setAuthorizedDeductions(event.target.value); setFieldErrors((current) => ({ ...current, authorizedDeductions: "" })); }}
             placeholder="0.00"
           />
+          {fieldErrors.authorizedDeductions ? <small className="workforce-field-error">{fieldErrors.authorizedDeductions}</small> : null}
         </label> : null}
         {source === "ATTENDANCE_PERIOD" ? <div className="workforce-attendance-preview is-full">
           <button type="button" className="secondary-action" disabled={previewing || !(scope === "INDIVIDUAL" ? labourerId : groupId)} onClick={() => void calculateAttendance()}>{previewing ? "Calculating…" : "Preview attendance wages"}</button>
@@ -876,9 +886,7 @@ function DirectDueForm({
             <strong>Amount due</strong>
             <span>
               {money(source === "ATTENDANCE_PERIOD" ? (preview?.grossWages ?? 0) :
-                Number(amount || 0) +
-                  Number(leaderAllowance || 0) -
-                  Number(deductions || 0),
+                Number(agreedGrossAmount || 0) - Number(authorizedDeductions || 0),
               )}
             </span>
           </div>
