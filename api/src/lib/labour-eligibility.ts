@@ -49,6 +49,5 @@ export function isLabourSelectableForAdvance(worker: LabourLike, _transactionDat
   if (explicitlyDeleted) return false;
   if (worker.isArchived === true || normalizeDate(worker.archivedAt)) return false;
   if (lifecycleStatus === "archived") return false;
-  if (normalizeDate(worker.deactivatedAt) || lifecycleStatus === "deactivated") return false;
   return true;
 }

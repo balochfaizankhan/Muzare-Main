@@ -1340,8 +1340,10 @@ test("labour lifecycle hard deletes unused labour and deactivates linked labour 
   const backdatedAdvance = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "advance", randomUUID(), {
     labourerId: linkedLabourerId, date: "2026-08-01", amount: 10, accountId: linkedPaymentAccountId,
   }));
-  assert.equal(backdatedAdvance.statusCode, 400);
-  assert.match(backdatedAdvance.json().message, /inactive and cannot be used for new entries/i);
+  assert.equal(backdatedAdvance.statusCode, 200, "historical advances remain valid after labour deactivation");
+  const [stillDeactivated] = await db.select().from(operationalRecords).where(eq(operationalRecords.clientRecordId, linkedLabourerId)).limit(1);
+  assert.equal(stillDeactivated.payload.active, false, "recording an advance must not reactivate labour");
+  assert.equal(stillDeactivated.payload.status, "deactivated");
   const staleAttendance = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "attendance", randomUUID(), {
     labourerId: linkedLabourerId, date: "2026-08-03", status: "present",
   }));

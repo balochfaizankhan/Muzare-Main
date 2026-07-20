@@ -111,13 +111,23 @@ export function isLabourSelectableForAdvance(worker: AdvanceSelectableLabour, _t
   if (explicitlyDeleted) return false;
   if (worker.isArchived === true || normalizeDate(worker.archivedAt)) return false;
   if (lifecycleStatus === "archived") return false;
-  if (normalizeDate(worker.deactivatedAt) || lifecycleStatus === "deactivated") return false;
   return true;
 }
 
 export function filterLabourSelectableForAdvance<T extends AdvanceSelectableLabour>(workers: T[], transactionDate: string, group = "all") {
   return workers.filter((worker) => isLabourSelectableForAdvance(worker, transactionDate)
     && (group === "all" || ("group" in worker && worker.group === group)));
+}
+
+export function sortLabourSelectableForAdvance<T extends AdvanceSelectableLabour & Pick<Labourer, "name" | "active" | "endedOn" | "isArchived">>(workers: T[]) {
+  return [...workers].sort((left, right) => {
+    const statusRank = (worker: T) => {
+      const lifecycle = typeof worker.status === "string" ? worker.status.trim().toLowerCase() : "";
+      return worker.active === false || Boolean(worker.endedOn) || normalizeDate(worker.deactivatedAt) || lifecycle === "inactive" || lifecycle === "deactivated" ? 1 : 0;
+    };
+    const statusDelta = statusRank(left) - statusRank(right);
+    return statusDelta || left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+  });
 }
 
 export function isWorkerEligibleForAdvancePayment(worker: AdvanceSelectableLabour, selectedDate: string) {

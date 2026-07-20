@@ -80,7 +80,9 @@ test("human references, account review states, and all mobile payment tabs remai
 test("record advance uses sectioned searchable selectors and valid-state posting", () => {
   const advances = page.slice(page.indexOf("function AdvancesView"), page.indexOf("function ReviewSettleDialog"));
   assert.match(advances, /<LabourSelectCombobox\s+ariaLabel="Labourer"/);
-  assert.match(advances, /placeholder="Search active labourers"/);
+  assert.match(advances, /placeholder="Search labourers"/);
+  assert.match(advances, /includeInactive/);
+  assert.match(advances, /renderOption=\{renderAdvanceLabourOption\}/);
   assert.match(advances, /<LabourSelectCombobox\s+ariaLabel="Paid from account"/);
   for (const heading of ["Recipient", "Payment", "Details", "Preview"]) assert.match(advances, new RegExp(`>\\s*${heading}\\s*<`));
   assert.match(advances, /disabled=\{saving \|\| !formValid\}/);

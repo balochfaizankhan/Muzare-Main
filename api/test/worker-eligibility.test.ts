@@ -11,6 +11,7 @@ import {
   isWorkerEligibleForSettlement,
   isWorkerEligibleForWageRatePeriod,
   sortWorkersForDisplay,
+  sortLabourSelectableForAdvance,
 } from "../../web/src/lib/workerEligibility.ts";
 import { isLabourSelectableForAdvance as isLabourSelectableForAdvanceOnline } from "../src/lib/labour-eligibility.js";
 
@@ -64,7 +65,7 @@ test("worker eligibility stays date-aware and hides inactive workers from new en
   assert.equal(isWorkerEligibleForSettlement(worker, "2026-06-15"), false);
 });
 
-test("advance eligibility ignores activity and working-period dates but excludes explicit lifecycle actions", () => {
+test("advance eligibility includes inactive and deactivated history but excludes deleted or archived identities", () => {
   const base = { createdAt: "2026-01-01T00:00:00.000Z", joinedOn: "2026-01-01", group: "North" };
   const workers = [
     { ...base, id: "saleem", name: "Saleem", active: true },
@@ -84,11 +85,11 @@ test("advance eligibility ignores activity and working-period dates but excludes
   ] as any[];
 
   const eligible = filterLabourSelectableForAdvance(workers, "2026-07-15");
-  assert.deepEqual(eligible.map((worker) => worker.id), ["saleem", "mumtaz", "seasonal", "future", "ended", "left", "inactive-ended", "terminated-status"]);
+  assert.deepEqual(eligible.map((worker) => worker.id), ["saleem", "mumtaz", "seasonal", "future", "ended", "left", "inactive-ended", "terminated-status", "zafar", "deactivated-status"]);
   assert.equal(isLabourSelectableForAdvance(workers[1], "2026-07-15"), true);
   assert.equal(isLabourSelectableForAdvance(workers[4], "2026-07-15"), true, "endedOn is only a working-period field");
   assert.equal(isLabourSelectableForAdvance(workers[5], "2026-07-15"), true, "leftDate is only a working-period field");
-  assert.equal(isLabourSelectableForAdvance(workers[8], "2026-06-15"), false, "the explicit deactivation marker excludes even backdated advances");
+  assert.equal(isLabourSelectableForAdvance(workers[8], "2026-06-15"), true, "deactivation preserves a selectable historical identity");
 });
 
 test("advance group and search filtering retain eligible inactive labour and preserve source order", () => {
@@ -105,7 +106,7 @@ test("advance group and search filtering retain eligible inactive labour and pre
   ] as any[];
 
   const north = filterLabourSelectableForAdvance(workers, "2026-07-15", "North");
-  assert.deepEqual(north.map((worker) => worker.id), ["active-1", "inactive-1", "ended", "left"]);
+  assert.deepEqual(north.map((worker) => worker.id), ["active-1", "inactive-1", "ended", "left", "deactivated"]);
   assert.deepEqual(north.filter((worker) => worker.name.toLowerCase().includes("mum")).map((worker) => worker.id), ["inactive-1"]);
   assert.deepEqual(north.filter((worker) => worker.name.toLowerCase().includes("ended")).map((worker) => worker.id), ["ended"]);
 });
@@ -124,5 +125,15 @@ test("online and offline advance eligibility return the same labour set", () => 
   const offline = workers.filter((worker) => isLabourSelectableForAdvance(worker, "2026-07-15")).map((worker) => worker.id);
   const online = workers.filter((worker) => isLabourSelectableForAdvanceOnline(worker, "2026-07-15")).map((worker) => worker.id);
   assert.deepEqual(online, offline);
-  assert.deepEqual(online, ["active", "inactive", "other", "ended", "left"]);
+  assert.deepEqual(online, ["active", "inactive", "other", "ended", "left", "deactivated"]);
+});
+
+test("advance selector sorts active labour first and names alphabetically within status", () => {
+  const workers = [
+    { id: "inactive-z", name: "Zafar", active: false, status: "inactive" },
+    { id: "active-y", name: "Younis", active: true },
+    { id: "deactivated-a", name: "Akram", active: false, status: "deactivated", deactivatedAt: "2026-07-01" },
+    { id: "active-m", name: "Muhammad", active: true },
+  ] as any[];
+  assert.deepEqual(sortLabourSelectableForAdvance(workers).map((worker) => worker.id), ["active-m", "active-y", "deactivated-a", "inactive-z"]);
 });

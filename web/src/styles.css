@@ -17512,6 +17512,10 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 .workforce-advance-entry-body h3 > span { align-items: center; background: #edf7ef; border-radius: 999px; color: #166534; display: inline-flex; font-size: 9px; height: 20px; justify-content: center; width: 20px; }
 .workforce-advance-entry-body .workforce-payment-form { gap: 8px; }
 .workforce-advance-entry-body .workforce-payment-form input,.workforce-advance-entry-body .workforce-payment-form select { min-height: 42px; }
+.workforce-advance-labour-option { align-items: center; display: flex; gap: 7px; min-width: 0; }
+.workforce-advance-labour-option strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workforce-advance-labour-option small { background: #f1f5f9; border-radius: 999px; color: #475569; flex: 0 0 auto; font-size: 9px; font-weight: 750; padding: 3px 6px; }
+.workforce-advance-inactive-note { background: #f8fafc; border-inline-start: 3px solid #94a3b8; color: #475569 !important; line-height: 1.35; padding: 7px 9px; }
 .workforce-advance-preview { background: #f6faf7; border: 1px solid #dce9df !important; border-radius: 11px; padding: 10px !important; }
 .workforce-advance-preview dl { display: grid; gap: 7px; grid-template-columns: repeat(2,minmax(0,1fr)); margin: 0; }
 .workforce-advance-preview dl div { display: grid; gap: 2px; }

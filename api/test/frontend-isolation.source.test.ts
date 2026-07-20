@@ -520,21 +520,30 @@ test("labour advance account correction is tenant-scoped, audited, and reflected
   assert.match(advances, /accountById\.get\(advance\.accountId \?\? ""\) \?\? advance\.sourceAccountName \?\? "-"/);
 });
 
-test("advance selector includes inactive labour while excluding deleted, archived, and deactivated records", async () => {
+test("advance selectors include inactive and deactivated labour while excluding deleted and archived records", async () => {
   const advances = await source("web/src/pages/workspace/LabourAdvances.tsx");
+  const payments = await source("web/src/pages/workspace/WorkforcePayments.tsx");
   const selector = await source("web/src/components/LabourSelectCombobox.tsx");
   const multiSelector = await source("web/src/components/LabourMultiSelectFilter.tsx");
   const selectorSheet = await source("web/src/components/LabourSelectorSheet.tsx");
   const eligibility = await source("web/src/lib/workerEligibility.ts");
   const apiEligibility = await source("api/src/lib/labour-eligibility.ts");
   const syncRoute = await source("api/src/routes/operational-sync.ts");
+  const labourPaymentsRoute = await source("api/src/routes/labour-payments.ts");
   const labourManagement = await source("api/src/routes/labour-management.ts");
   const migration = await source("api/src/routes/migration-import.ts");
 
   assert.match(advances, /workspaceRecords\(offlineDb\.labourers, \{ includeDeleted: true \}\)/);
   assert.match(advances, /filterLabourSelectableForAdvance\(selectableLabourers, entryDate, entryGroup\)/);
   assert.match(advances, /includeInactive/);
+  assert.match(payments, /sortLabourSelectableForAdvance\(filterLabourSelectableForAdvance\(labourers, date\)\)/);
+  assert.match(payments, /options=\{selectableLabourers\}/);
+  assert.match(payments, /includeInactive/);
+  assert.match(payments, /Deactivated/);
+  assert.match(payments, /This labourer is currently inactive\. The advance will still be recorded against their historical labour account\./);
   assert.match(selector, /includeInactive \|\| option\.active !== false \|\| option\.id === value/);
+  assert.match(selector, /oldLabourId/);
+  assert.match(selector, /labourStatusSearchText/);
   assert.match(selector, /open && !isMobileSelector/);
   assert.match(selector, /<LabourSelectorSheet/);
   assert.match(multiSelector, /<LabourSelectorSheet/);
@@ -547,10 +556,13 @@ test("advance selector includes inactive labour while excluding deleted, archive
   assert.doesNotMatch(advanceEligibility, /worker\.endedOn|worker\.leftDate/);
   assert.match(advanceEligibility, /lifecycleStatus === "deleted"/);
   assert.match(advanceEligibility, /lifecycleStatus === "archived"/);
-  assert.match(advanceEligibility, /lifecycleStatus === "deactivated"/);
+  assert.doesNotMatch(advanceEligibility, /lifecycleStatus === "deactivated"\) return false/);
   const apiAdvanceEligibility = apiEligibility.slice(apiEligibility.indexOf("export function isLabourSelectableForAdvance"));
   assert.doesNotMatch(apiAdvanceEligibility, /worker\.endedOn|worker\.leftDate|worker\.active === false/);
+  assert.doesNotMatch(apiAdvanceEligibility, /lifecycleStatus === "deactivated"\) return false/);
   assert.match(syncRoute, /args\.entity === "advance"[\s\S]*isLabourSelectableForAdvance/);
+  assert.match(labourPaymentsRoute, /!isLabourSelectableForAdvance\(record\.payload, ""\)/);
+  assert.match(labourPaymentsRoute, /isLabourSelectableForAdvance\(item\.payload, ""\)/);
   assert.match(labourManagement, /status: "deactivated"/);
   assert.match(labourManagement, /deactivatedAt: timestamp\.toISOString\(\)/);
   assert.match(migration, /\.\.\.importedLifecycle\(source\)/);

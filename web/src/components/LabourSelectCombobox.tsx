@@ -34,6 +34,13 @@ type LabourOption = {
   words: string[];
 };
 
+const labourStatusSearchText = (option: Labourer) => {
+  const status = typeof option.status === "string" ? option.status.trim().toLowerCase() : "";
+  if (status === "deactivated" || option.deactivatedAt) return "deactivated inactive";
+  if (option.active === false || option.endedOn || option.inactiveDate || option.leftDate) return "inactive";
+  return "active";
+};
+
 const normalize = (value: string) => value.trim().toLowerCase();
 
 const isSubsequenceMatch = (text: string, term: string) => {
@@ -63,11 +70,12 @@ const scoreLabourOption = (option: LabourOption, rawTerm: string) => {
     if (option.words.some((word) => word.startsWith(single))) return 3600 - Math.min(joinedWords.indexOf(single), 500);
     if (compactName.includes(single)) return 2800 - Math.min(compactName.indexOf(single), 500);
     if (option.phone.includes(single)) return 2200;
+    if (option.searchText.includes(single)) return 1800;
     if (isSubsequenceMatch(compactName.replace(/\s+/g, ""), single.replace(/\s+/g, ""))) return 1200;
     return -1;
   }
 
-  const allTermsMatch = terms.every((part) => option.words.some((word) => word.startsWith(part)) || compactName.includes(part) || option.phone.includes(part));
+  const allTermsMatch = terms.every((part) => option.words.some((word) => word.startsWith(part)) || compactName.includes(part) || option.phone.includes(part) || option.searchText.includes(part));
   if (allTermsMatch) {
     const startsCount = terms.filter((part) => option.words.some((word) => word.startsWith(part))).length;
     return 3400 + startsCount * 120 - terms.join(" ").length;
@@ -124,7 +132,7 @@ export function LabourSelectCombobox({
       id: option.id,
       name: option.name,
       phone,
-      searchText: normalize(`${option.name} ${phone}`),
+      searchText: normalize(`${option.name} ${phone} ${option.oldLabourId ?? ""} ${option.oldAndroidId ?? ""} ${labourStatusSearchText(option)}`),
       normalizedName,
       words: normalizedName.split(/\s+/).filter(Boolean),
     };

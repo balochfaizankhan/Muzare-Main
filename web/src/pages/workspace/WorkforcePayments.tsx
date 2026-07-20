@@ -51,6 +51,7 @@ import {
   type LabourGroup,
   type Labourer,
 } from "../../lib/offline-db";
+import { filterLabourSelectableForAdvance, getWorkerDisplayGroup, sortLabourSelectableForAdvance } from "../../lib/workerEligibility";
 
 const today = () => {
   const date = new Date();
@@ -77,6 +78,23 @@ function statusLabel(value: string) {
     .toLowerCase()
     .replaceAll("_", " ")
     .replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function advanceLabourStatus(labourer: Labourer) {
+  const status = typeof labourer.status === "string" ? labourer.status.trim().toLowerCase() : "";
+  if (status === "deactivated" || labourer.deactivatedAt) return "Deactivated";
+  if (getWorkerDisplayGroup(labourer) === "inactive") return "Inactive";
+  return "Active";
+}
+
+function renderAdvanceLabourOption(labourer: Labourer) {
+  const lifecycle = advanceLabourStatus(labourer);
+  return (
+    <span className="workforce-advance-labour-option">
+      <strong>{labourer.name}</strong>
+      {lifecycle !== "Active" ? <small>{lifecycle}</small> : null}
+    </span>
+  );
 }
 
 function recipientLabel(
@@ -1449,9 +1467,9 @@ function AdvancesView({
       ),
     [rows],
   );
-  const activeLabourers = useMemo(
-    () => labourers.filter((item) => item.active !== false),
-    [labourers],
+  const selectableLabourers = useMemo(
+    () => sortLabourSelectableForAdvance(filterLabourSelectableForAdvance(labourers, date)),
+    [date, labourers],
   );
   const groupOptions = useMemo(
     () =>
@@ -1480,6 +1498,8 @@ function AdvancesView({
         ? labourers.find((item) => item.id === receivedByLabourerId)?.name
         : "";
   const selectedAccount = accounts.find((item) => item.id === accountId)?.name;
+  const selectedIndividualLabourer = labourers.find((item) => item.id === labourerId);
+  const selectedReceiverLabourer = labourers.find((item) => item.id === receivedByLabourerId);
   const formValid = Boolean(
     date &&
     Number(amount) > 0 &&
@@ -1847,12 +1867,17 @@ function AdvancesView({
                       <span>Labourer</span>
                       <LabourSelectCombobox
                         ariaLabel="Labourer"
-                        options={activeLabourers}
+                        options={selectableLabourers}
                         value={labourerId}
                         onChange={setLabourerId}
-                        placeholder="Search active labourers"
-                        noResultsLabel="No active labourers found"
+                        placeholder="Search labourers"
+                        noResultsLabel="No selectable labourers found"
+                        includeInactive
+                        renderOption={renderAdvanceLabourOption}
                       />
+                      {selectedIndividualLabourer && advanceLabourStatus(selectedIndividualLabourer) !== "Active" ? (
+                        <small className="workforce-advance-inactive-note">This labourer is currently inactive. The advance will still be recorded against their historical labour account.</small>
+                      ) : null}
                     </label>
                   ) : null}
                   {scope === "LABOUR_GROUP" ? (
@@ -1871,12 +1896,17 @@ function AdvancesView({
                         <span>Received by</span>
                         <LabourSelectCombobox
                           ariaLabel="Received by labourer"
-                          options={activeLabourers}
+                          options={selectableLabourers}
                           value={receivedByLabourerId}
                           onChange={setReceivedByLabourerId}
                           placeholder="Search receiving labourer"
-                          noResultsLabel="No active labourers found"
+                          noResultsLabel="No selectable labourers found"
+                          includeInactive
+                          renderOption={renderAdvanceLabourOption}
                         />
+                        {selectedReceiverLabourer && advanceLabourStatus(selectedReceiverLabourer) !== "Active" ? (
+                          <small className="workforce-advance-inactive-note">This labourer is currently inactive. The advance will still be recorded against their historical labour account.</small>
+                        ) : null}
                       </label>
                     </>
                   ) : null}

@@ -30,6 +30,7 @@ import {
   type LabourRecipientScope,
 } from "../lib/labour-payments.js";
 import { resolveCanonicalPaymentAccountId } from "../lib/labour-wage-settlements.js";
+import { isLabourSelectableForAdvance } from "../lib/labour-eligibility.js";
 import { validateLabourSettlementPaymentAccount } from "../lib/labour-settlement-account-validation.js";
 import { hasModulePermission } from "../permissions.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
@@ -305,7 +306,7 @@ async function loadRecipient(
         ),
       )
       .limit(1);
-    if (!record || record.payload.deletedAt)
+    if (!record || !isLabourSelectableForAdvance(record.payload, ""))
       throw new Error("The selected labourer was not found in this farm.");
     labourerName =
       typeof record.payload.name === "string"
@@ -355,7 +356,7 @@ async function loadRecipient(
     groupMembers = labourRows
       .filter(
         (item) =>
-          !item.payload.deletedAt &&
+          isLabourSelectableForAdvance(item.payload, "") &&
           item.payload.groupId === input.labourGroupId,
       )
       .map((item) => ({
@@ -378,7 +379,7 @@ async function loadRecipient(
       const receiverRow = labourRows.find(
         (item) =>
           item.clientRecordId === input.receivedByLabourerId &&
-          !item.payload.deletedAt,
+          isLabourSelectableForAdvance(item.payload, ""),
       );
       if (!receiverRow)
         throw new Error(
