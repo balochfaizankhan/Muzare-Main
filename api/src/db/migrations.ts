@@ -42,6 +42,7 @@ const labourDataCleanupMigrationUrl = new URL("../../../database/migrations/0037
 const labourDueAttendanceSourcesMigrationUrl = new URL("../../../database/migrations/0038_labour_due_attendance_sources.sql", import.meta.url);
 const groupDueMemberAdvanceApplicationsMigrationUrl = new URL("../../../database/migrations/0039_group_due_member_advance_applications.sql", import.meta.url);
 const legacyIndividualAdvanceApplicationScopeMigrationUrl = new URL("../../../database/migrations/0040_legacy_individual_advance_application_scope.sql", import.meta.url);
+const exactLabourJournalReversalsMigrationUrl = new URL("../../../database/migrations/0041_exact_labour_journal_reversals.sql", import.meta.url);
 
 const STARTUP_LOCK_KEY = "muzare_ensure_workspace_schema";
 const STARTUP_LOCK_TIMEOUT = "10s";
@@ -124,6 +125,7 @@ const deferredMigrationSteps: MigrationStep[] = [
   { key: "0038_labour_due_attendance_sources", kind: "sql", required: true, sourceUrl: labourDueAttendanceSourcesMigrationUrl },
   { key: "0039_group_due_member_advance_applications", kind: "sql", required: true, sourceUrl: groupDueMemberAdvanceApplicationsMigrationUrl },
   { key: "0040_legacy_individual_advance_application_scope", kind: "sql", required: true, sourceUrl: legacyIndividualAdvanceApplicationScopeMigrationUrl },
+  { key: "0041_exact_labour_journal_reversals", kind: "sql", required: true, sourceUrl: exactLabourJournalReversalsMigrationUrl },
 ];
 
 function logMigrationEvent(event: string, details: Record<string, unknown>) {

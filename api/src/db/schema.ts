@@ -14,6 +14,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -814,6 +815,7 @@ export const labourAccountingEntries = pgTable(
   },
   (table) => [
     unique("labour_accounting_entries_workspace_entry_key").on(table.workspaceId, table.entryKey),
+    uniqueIndex("labour_accounting_entries_one_reversal_uidx").on(table.reversalOf).where(sql`${table.reversalOf} is not null`),
     foreignKey({ columns: [table.workspaceId, table.farmId, table.seasonId], foreignColumns: [seasons.workspaceId, seasons.farmId, seasons.id], name: "labour_accounting_entries_context_fk" }),
   ],
 );

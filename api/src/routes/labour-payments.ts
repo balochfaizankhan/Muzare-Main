@@ -43,6 +43,8 @@ import { hasModulePermission } from "../permissions.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
 import { hasFarmAccess } from "../workspace-access.js";
 import { parseSarMinorUnits, sarFromMinorUnits } from "../lib/money.js";
+import { reconcileLabourFinancialScope } from "../lib/labour-financial-reconciliation.js";
+import { loadLabourFinancialReadModel } from "../lib/labour-financial-read-model.js";
 
 const paramsSchema = z.object({ workspaceId: z.string().uuid() });
 const dueParamsSchema = paramsSchema.extend({ dueId: z.string().uuid() });
@@ -1940,7 +1942,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             seasonId: query.data.seasonId,
             actorId: request.appUser!.id,
             reversalKey: `due-void:${record.id}:${body.data.idempotencyKey}`,
-            dueId: record.id,
+            originalEventKey: `due:${record.id}`,
           });
           const snapshot = record.recipientSnapshot as Record<string, unknown>;
           const sourceAttendanceIds = Array.isArray(snapshot.sourceAttendanceIds)
@@ -2054,7 +2056,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             seasonId: query.data.seasonId,
             actorId: request.appUser!.id,
             reversalKey: `advance-application-reversal:${body.data.idempotencyKey}`,
-            advanceApplicationId: application.application.id,
+            originalEventKey: `advance-application:${application.application.id}`,
           });
           const due = await refreshLabourDuePaymentStatus(
             tx,
@@ -2798,6 +2800,18 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
   );
 
   app.get(
+    "/v1/workspace/:workspaceId/labour-payments/financial-read-model",
+    { preHandler: requireUser },
+    async (request, reply) => {
+      const params = paramsSchema.safeParse(request.params);
+      const query = contextSchema.safeParse(request.query);
+      if (!params.success || !query.success) return reply.code(400).send({ message: "A valid Labour Payments financial scope is required." });
+      if (!(await requireRequestScope(request, reply, params.data.workspaceId, query.data.farmId, query.data.seasonId, "view"))) return;
+      return { financials: await loadLabourFinancialReadModel({ workspaceId: params.data.workspaceId, farmId: query.data.farmId, seasonId: query.data.seasonId }) };
+    },
+  );
+
+  app.get(
     "/v1/workspace/:workspaceId/labour-payments/reconciliation",
     { preHandler: requireUser },
     async (request, reply) => {
@@ -2818,7 +2832,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
         ))
       )
         return;
-      const [journal, vouchers, dues, legacyOperational] = await Promise.all([
+      const [journal, vouchers, dues, applications, allocations, scopeAccounts, scopeTransactions, legacyOperational] = await Promise.all([
         db
           .select()
           .from(labourAccountingEntries)
@@ -2827,7 +2841,6 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               eq(labourAccountingEntries.workspaceId, params.data.workspaceId),
               eq(labourAccountingEntries.farmId, query.data.farmId),
               eq(labourAccountingEntries.seasonId, query.data.seasonId),
-              eq(labourAccountingEntries.status, "POSTED"),
             ),
           ),
         db
@@ -2850,6 +2863,10 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               eq(labourDues.seasonId, query.data.seasonId),
             ),
           ),
+        db.select().from(labourAdvanceApplications).where(eq(labourAdvanceApplications.workspaceId, params.data.workspaceId)),
+        db.select().from(labourPaymentAllocations).where(eq(labourPaymentAllocations.workspaceId, params.data.workspaceId)),
+        db.select().from(accounts).where(eq(accounts.farmId, query.data.farmId)),
+        db.select().from(accountTransactions).where(and(eq(accountTransactions.farmId, query.data.farmId), eq(accountTransactions.seasonId, query.data.seasonId))),
         db
           .select({
             id: operationalRecords.id,
@@ -2911,6 +2928,19 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
         result[row.ledgerCode] = current;
         return result;
       }, {});
+      const structured = reconcileLabourFinancialScope({
+        workspaceId: params.data.workspaceId,
+        farmId: query.data.farmId,
+        seasonId: query.data.seasonId,
+        accounts: scopeAccounts,
+        accountTransactions: scopeTransactions,
+        journal,
+        applications: applications.filter((row) => dues.some((due) => due.id === row.dueId)),
+        dues,
+        allocations: allocations.filter((row) => dues.some((due) => due.id === row.dueId)),
+        vouchers,
+      });
+      const legacyCoveragePassed = legacyNeedsReview.length === 0 && unmappedLegacyRecords.length === 0;
       return {
         reconciliation: {
           journal: {
@@ -2931,11 +2961,12 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           missingAccountTransactions,
           legacyNeedsReview,
           unmappedLegacyRecords,
-          reconciled:
-            Math.abs(debitTotal - creditTotal) < 0.01 &&
-            missingAccountTransactions.length === 0 &&
-            legacyNeedsReview.length === 0 &&
-            unmappedLegacyRecords.length === 0,
+          checks: [
+            ...structured.checks,
+            { name: "legacy-coverage", passed: legacyCoveragePassed, checkedCount: legacyOperational.length, failureCount: legacyNeedsReview.length + unmappedLegacyRecords.length },
+          ],
+          failures: structured.failures,
+          reconciled: structured.reconciled && legacyCoveragePassed,
         },
       };
     },
@@ -3242,7 +3273,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             seasonId: query.data.seasonId,
             actorId: request.appUser!.id,
             reversalKey: `voucher-reversal:${reversal!.id}`,
-            voucherId: voucher.id,
+            originalEventKey: `voucher:${voucher.id}`,
           });
           // Refunds are account inflows. Their reversal must therefore be an
           // outflow; all other supported voucher natures are outflows whose

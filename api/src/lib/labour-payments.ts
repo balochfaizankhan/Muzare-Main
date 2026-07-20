@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import {
   labourAdvanceApplications,
@@ -220,21 +220,39 @@ export async function postLabourAdvanceApplicationJournals(tx: DbTransaction, in
 
 export async function reverseLabourJournal(tx: DbTransaction, input: {
   workspaceId: string; farmId: string; seasonId: string; actorId: string; reversalKey: string;
-  voucherId?: string; dueId?: string; advanceApplicationId?: string;
+  originalEventKey: string;
 }) {
+  // Journal convention: originals remain historical facts (status may become
+  // REVERSED), one POSTED inverse references each original, and current
+  // balances sum both original and reversal rows. Routine business voiding is
+  // anchored to the immutable posting key and can never select a reversal row.
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`${input.workspaceId}:labour-journal:${input.originalEventKey}`}), 1)`);
+  const originalKeys = [`${input.originalEventKey}:debit`, `${input.originalEventKey}:credit`];
   const rows = await tx.select().from(labourAccountingEntries).where(and(
     eq(labourAccountingEntries.workspaceId, input.workspaceId),
-    eq(labourAccountingEntries.status, "POSTED"),
-    input.voucherId ? eq(labourAccountingEntries.voucherId, input.voucherId) : undefined,
-    input.dueId ? eq(labourAccountingEntries.dueId, input.dueId) : undefined,
-    input.advanceApplicationId ? eq(labourAccountingEntries.advanceApplicationId, input.advanceApplicationId) : undefined,
+    eq(labourAccountingEntries.farmId, input.farmId),
+    eq(labourAccountingEntries.seasonId, input.seasonId),
+    inArray(labourAccountingEntries.entryKey, originalKeys),
+    isNull(labourAccountingEntries.reversalOf),
   ));
+  if (!rows.length) throw new Error(`Original labour journal event ${input.originalEventKey} was not found.`);
+  if (rows.length !== originalKeys.length || new Set(rows.map((row) => row.entryKey)).size !== originalKeys.length)
+    throw new Error(`Original labour journal event ${input.originalEventKey} is incomplete or duplicated.`);
+  const existing = await tx.select({ reversalOf: labourAccountingEntries.reversalOf }).from(labourAccountingEntries).where(and(
+    eq(labourAccountingEntries.workspaceId, input.workspaceId),
+    inArray(labourAccountingEntries.reversalOf, rows.map((row) => row.id)),
+  ));
+  if (existing.length) {
+    if (new Set(existing.map((row) => row.reversalOf)).size !== rows.length)
+      throw new Error(`Original labour journal event ${input.originalEventKey} has a partial reversal.`);
+    return { originalRows: rows, alreadyReversed: true };
+  }
   const now = new Date();
   for (const row of rows) {
     await tx.insert(labourAccountingEntries).values({
       workspaceId: input.workspaceId, farmId: input.farmId, seasonId: input.seasonId,
       entryKey: `${input.reversalKey}:${row.id}`, eventType: "REVERSAL", ledgerCode: row.ledgerCode,
-      dueId: row.dueId, voucherId: input.voucherId ?? row.voucherId, advanceApplicationId: row.advanceApplicationId,
+      dueId: row.dueId, voucherId: row.voucherId, advanceApplicationId: row.advanceApplicationId,
       debit: row.credit, credit: row.debit, status: "POSTED", reversalOf: row.id,
       postedBy: input.actorId, postedAt: now,
     }).onConflictDoNothing();
@@ -243,6 +261,7 @@ export async function reverseLabourJournal(tx: DbTransaction, input: {
     eq(labourAccountingEntries.workspaceId, input.workspaceId),
     inArray(labourAccountingEntries.id, rows.map((row) => row.id)),
   ));
+  return { originalRows: rows, alreadyReversed: false };
 }
 
 export function labourFinancialScopeKey(input: {

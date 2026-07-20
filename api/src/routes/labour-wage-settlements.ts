@@ -2250,6 +2250,10 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         recordedBy: request.appUser!.id,
       }).where(eq(operationalRecords.id, settlement.id));
       if (linkedDue) {
+        const applicationsToReverse = await tx.select({ id: labourAdvanceApplications.id }).from(labourAdvanceApplications).where(and(
+          eq(labourAdvanceApplications.dueId, linkedDue.id),
+          eq(labourAdvanceApplications.status, "ACTIVE"),
+        ));
         await tx.update(labourAdvanceApplications).set({
           status: "REVERSED",
           reversedAt: voidedAt,
@@ -2269,7 +2273,12 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         }).where(eq(labourDues.id, linkedDue.id));
         await reverseLabourJournal(tx, {
           workspaceId, farmId: settlement.farmId!, seasonId: settlement.seasonId!, actorId: request.appUser!.id,
-          reversalKey: `settlement-void:${settlement.id}`, dueId: linkedDue.id,
+          reversalKey: `settlement-void:${settlement.id}:due`, originalEventKey: `due:${linkedDue.id}`,
+        });
+        for (const application of applicationsToReverse) await reverseLabourJournal(tx, {
+          workspaceId, farmId: settlement.farmId!, seasonId: settlement.seasonId!, actorId: request.appUser!.id,
+          reversalKey: `settlement-void:${settlement.id}:application:${application.id}`,
+          originalEventKey: `advance-application:${application.id}`,
         });
       }
       const earningsToReopen = await listLabourEarnings(tx, workspaceId, settlement.farmId!, settlement.seasonId!);
