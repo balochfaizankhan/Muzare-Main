@@ -673,6 +673,40 @@ export const labourDues = pgTable(
   ],
 );
 
+export const labourDueMemberSnapshots = pgTable(
+  "labour_due_member_snapshots",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+    dueId: uuid("due_id").references(() => labourDues.id, { onDelete: "cascade" }).notNull(),
+    labourerId: text("labourer_id").notNull(),
+    snapshot: jsonb("snapshot").$type<Record<string, unknown>>().default({}).notNull(),
+    calculatedAmount: numeric("calculated_amount", { precision: 14, scale: 2 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("labour_due_member_snapshots_due_labourer_uidx").on(table.dueId, table.labourerId),
+  ],
+);
+
+export const labourDueAttendanceSources = pgTable(
+  "labour_due_attendance_sources",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+    farmId: uuid("farm_id").references(() => farms.id, { onDelete: "cascade" }).notNull(),
+    seasonId: uuid("season_id").references(() => seasons.id, { onDelete: "cascade" }).notNull(),
+    dueId: uuid("due_id").references(() => labourDues.id, { onDelete: "cascade" }).notNull(),
+    attendanceRecordId: uuid("attendance_record_id").references(() => operationalRecords.id, { onDelete: "restrict" }).notNull(),
+    attendanceClientRecordId: text("attendance_client_record_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("labour_due_attendance_sources_record_uidx").on(table.workspaceId, table.attendanceRecordId),
+    uniqueIndex("labour_due_attendance_sources_client_uidx").on(table.workspaceId, table.attendanceClientRecordId),
+  ],
+);
+
 export const labourPaymentVouchers = pgTable(
   "labour_payment_vouchers",
   {

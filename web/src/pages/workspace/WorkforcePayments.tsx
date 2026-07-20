@@ -543,9 +543,8 @@ export function WorkforcePaymentsPage() {
           labourers={labourers}
           groups={groups}
           canManage={canManage}
-          onSaved={async (message) => {
+          onSaved={(message) => {
             setSuccess(message);
-            await refresh();
             navigate("/workspace/labour-payments/overview");
           }}
           onError={setError}
@@ -632,7 +631,7 @@ function DirectDueForm({
   labourers: Labourer[];
   groups: LabourGroup[];
   canManage: boolean;
-  onSaved: (message: string) => Promise<void>;
+  onSaved: (message: string) => void;
   onError: (message: string) => void;
   token: string;
   workspaceId: string;
@@ -674,6 +673,8 @@ function DirectDueForm({
     event.preventDefault();
     if (!canManage || saving) return;
     setSaving(true);
+    let committed = false;
+    const submitStartedAt = performance.now();
     try {
       if (!navigator.onLine)
         throw new Error(
@@ -701,10 +702,12 @@ function DirectDueForm({
         leaderAllowance: Number(leaderAllowance || 0),
         notes,
       });
+      committed = true;
       idempotencyKey.current = uuid();
-      await onSaved(
-        `Labour due ${response.due.dueNumber} created. No cash was moved.`,
-      );
+      setSaving(false);
+      performance.mark("labour-due-create-committed");
+      console.info("labour_due_create_frontend_timing", { totalMs: performance.now() - submitStartedAt, server: response.performance ?? null });
+      onSaved(`Labour due ${response.due.dueNumber} created successfully.`);
     } catch (caught) {
       onError(
         caught instanceof Error
@@ -712,7 +715,7 @@ function DirectDueForm({
           : "Unable to create the labour due.",
       );
     } finally {
-      setSaving(false);
+      if (!committed) setSaving(false);
     }
   };
   return (

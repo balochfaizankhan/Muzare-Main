@@ -1976,7 +1976,7 @@ export const createDirectLabourDue = (token: string, workspaceId: string, input:
   crewReference?: string | null; manualRecipientName?: string | null; batchIdentity?: string | null;
   description: string; workFromDate: string; workToDate: string; grossAmount?: number;
   authorizedDeductions?: number; leaderAllowance?: number; notes?: string | null; costCategory?: string | null;
-}) => apiRequest<{ due: LabourDueRecord }>(`/v1/workspace/${workspaceId}/labour-payments/dues`, { method: "POST", body: JSON.stringify(input) }, token);
+}) => apiRequest<{ due: LabourDueRecord; performance?: { totalMs: number; transactionMs: number; attendanceCount: number; memberCount: number; sqlShape: string } }>(`/v1/workspace/${workspaceId}/labour-payments/dues`, { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 45_000, debugLabel: "labour-due-create" });
 export type LabourAttendanceDuePreview = {
   groupId?: string | null; groupName?: string | null; foremanId?: string | null;
   includedLabourCount: number; excludedAttendanceCount: number; grossWages: number;

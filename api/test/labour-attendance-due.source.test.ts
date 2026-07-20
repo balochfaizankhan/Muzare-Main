@@ -7,6 +7,7 @@ const calculation = readFileSync(new URL("../src/lib/labour-wage-settlements.ts"
 const page = readFileSync(new URL("../../web/src/pages/workspace/WorkforcePayments.tsx", import.meta.url), "utf8");
 const app = readFileSync(new URL("../../web/src/App.tsx", import.meta.url), "utf8");
 const hub = readFileSync(new URL("../../web/src/pages/workspace/WorkforceHub.tsx", import.meta.url), "utf8");
+const migration = readFileSync(new URL("../../database/migrations/0038_labour_due_attendance_sources.sql", import.meta.url), "utf8");
 
 test("attendance and direct modes create the same canonical labour due", () => {
   assert.match(route, /dues\/attendance-preview/);
@@ -17,9 +18,9 @@ test("attendance and direct modes create the same canonical labour due", () => {
 });
 
 test("attendance source locking is canonical and reversible", () => {
-  assert.match(route, /labourDueId: created!\.id/);
+  assert.match(route, /jsonb_build_object\('labourDueId', \$\{created!\.id\}/);
   assert.match(route, /row\.payload\.labourDueId \|\| row\.payload\.labourWageSettlementId/);
-  assert.match(route, /const \{ labourDueId: _dueId/);
+  assert.match(route, /payload = payload - 'labourDueId' - 'labourDueNumber' - 'labourDueLockedAt'/);
 });
 
 test("group calculation includes the configured leader exactly once", () => {
@@ -40,4 +41,28 @@ test("review and settle loads advances only after a due opens", () => {
   assert.match(review, /fetchAllLabourPaymentAdvances/);
   assert.match(review, /advance\.financialScopeKey === due\.financialScopeKey/);
   assert.match(page, /pageSize: view === "dues" \? 1 : 20/);
+});
+
+test("attendance due persistence is set-based and database-enforced", () => {
+  assert.match(route, /insert\(labourDueMemberSnapshots\)\.values\(attendancePreview\.includedLabourRows\.map/);
+  assert.match(route, /insert\(labourDueAttendanceSources\)\.values\(sourceRows\.map/);
+  assert.match(route, /UPDATE operational_records SET payload = payload \|\| jsonb_build_object/);
+  assert.doesNotMatch(route, /for \(const row of attendanceRows\).*tx\.update/s);
+  assert.match(migration, /UNIQUE \(workspace_id, attendance_record_id\)/);
+  assert.match(migration, /REFERENCES labour_dues\(id\) ON DELETE CASCADE/);
+});
+
+test("create success is released before background route refresh", () => {
+  const form = page.slice(page.indexOf("function DirectDueForm"), page.indexOf("function VoucherRegister"));
+  assert.match(form, /setSaving\(false\);[\s\S]*onSaved\(/);
+  assert.doesNotMatch(form, /await onSaved/);
+  assert.match(form, /timeoutMs: 45_000|createDirectLabourDue/);
+});
+
+test("attendance creation does not invoke settlement posting or advance loading", () => {
+  const createStart = route.indexOf('app.post(\n    "/v1/workspace/:workspaceId/labour-payments/dues",');
+  const createRoute = route.slice(createStart, route.indexOf('app.post(\n    "/v1/workspace/:workspaceId/labour-payments/dues/:dueId/settle"'));
+  assert.doesNotMatch(createRoute, /labourWageSettlements|resolveLabourAdvanceLedger|labourPaymentVouchers/);
+  assert.match(createRoute, /postLabourDueRecognition/);
+  assert.match(createRoute, /db\.transaction/);
 });

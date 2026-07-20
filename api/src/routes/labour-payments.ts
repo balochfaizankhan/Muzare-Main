@@ -10,6 +10,8 @@ import {
   auditLogs,
   labourAdvanceApplications,
   labourAccountingEntries,
+  labourDueAttendanceSources,
+  labourDueMemberSnapshots,
   labourDues,
   labourPaymentAllocations,
   labourPaymentVouchers,
@@ -727,8 +729,12 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
     "/v1/workspace/:workspaceId/labour-payments/dues",
     { preHandler: requireUser },
     async (request, reply) => {
+      const requestStartedAt = performance.now();
+      const phases: Record<string, number> = {};
+      const validationStartedAt = performance.now();
       const params = paramsSchema.safeParse(request.params);
       const body = directDueSchema.safeParse(request.body);
+      phases.requestValidation = performance.now() - validationStartedAt;
       if (
         !params.success ||
         !body.success ||
@@ -757,6 +763,9 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
       )
         return;
       try {
+        let attendanceCount = 0;
+        let memberCount = 0;
+        const transactionStartedAt = performance.now();
         const due = await db.transaction(async (tx) => {
           await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`${workspaceId}:${input.idempotencyKey}:labour-due-create`}), 1)`);
           const [existing] = await tx
@@ -776,15 +785,23 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             input.farmId,
             input,
           );
+          const revalidationStartedAt = performance.now();
           const attendancePreview = input.source === "ATTENDANCE_PERIOD"
             ? await previewLabourWageSettlement(tx, workspaceId, input.farmId, input.seasonId, input.workFromDate, input.workToDate, input.workToDate, undefined,
                 input.recipientScope === "LABOUR_GROUP" ? { settlementMode: "group", groupId: input.labourGroupId ?? undefined } : { settlementMode: "individual", labourerId: input.labourerId ?? undefined }, { includeAdvances: false })
             : null;
+          phases.attendanceRevalidation = performance.now() - revalidationStartedAt;
           if (attendancePreview?.unresolvedRows.length) throw new Error("Add wage rates for all included attendance before creating the due.");
           const sourceAttendanceIds = attendancePreview?.sourceAttendanceIds ?? [];
+          attendanceCount = sourceAttendanceIds.length;
+          memberCount = attendancePreview?.includedLabourCount ?? 0;
+          let sourceRows: Array<{ id: string; clientRecordId: string; payload: Record<string, unknown> }> = [];
           if (sourceAttendanceIds.length) {
-            const sourceRows = await tx.select({ payload: operationalRecords.payload }).from(operationalRecords).where(and(eq(operationalRecords.workspaceId, workspaceId), inArray(operationalRecords.clientRecordId, sourceAttendanceIds)));
+            const sourceCheckStartedAt = performance.now();
+            sourceRows = await tx.select({ id: operationalRecords.id, clientRecordId: operationalRecords.clientRecordId, payload: operationalRecords.payload }).from(operationalRecords).where(and(eq(operationalRecords.workspaceId, workspaceId), eq(operationalRecords.farmId, input.farmId), eq(operationalRecords.seasonId, input.seasonId), eq(operationalRecords.entityType, "attendance"), inArray(operationalRecords.clientRecordId, sourceAttendanceIds)));
+            if (sourceRows.length !== sourceAttendanceIds.length) throw new Error("Some previewed attendance records are no longer available. Refresh the preview.");
             if (sourceRows.some((row) => Boolean(row.payload.labourDueId || row.payload.labourWageSettlementId))) throw new Error("Some attendance records are already included in another due or settlement. Refresh the preview.");
+            phases.sourceValidation = performance.now() - sourceCheckStartedAt;
           }
           const grossAmount = attendancePreview?.grossWages ?? input.grossAmount ?? 0;
           if (grossAmount <= 0) throw new Error("No payable attendance is available for this due.");
@@ -793,6 +810,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             workspaceId,
             input.farmId,
           );
+          const dueInsertStartedAt = performance.now();
           const [created] = await tx
             .insert(labourDues)
             .values({
@@ -836,6 +854,36 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               createdBy: request.appUser!.id,
             })
             .returning();
+          phases.dueInsert = performance.now() - dueInsertStartedAt;
+          if (attendancePreview?.includedLabourRows.length) {
+            const memberInsertStartedAt = performance.now();
+            await tx.insert(labourDueMemberSnapshots).values(attendancePreview.includedLabourRows.map((row) => ({
+              workspaceId,
+              dueId: created!.id,
+              labourerId: row.labourerId,
+              snapshot: row as unknown as Record<string, unknown>,
+              calculatedAmount: row.grossWage.toFixed(2),
+            })));
+            phases.memberSnapshotInsert = performance.now() - memberInsertStartedAt;
+          }
+          if (sourceRows.length) {
+            const sourceLinkStartedAt = performance.now();
+            try {
+              await tx.insert(labourDueAttendanceSources).values(sourceRows.map((row) => ({
+                workspaceId,
+                farmId: input.farmId,
+                seasonId: input.seasonId,
+                dueId: created!.id,
+                attendanceRecordId: row.id,
+                attendanceClientRecordId: row.clientRecordId,
+              })));
+            } catch (error) {
+              if (error instanceof Error && /unique|duplicate/i.test(error.message)) throw new Error("Some attendance records were already consumed by another labour due. Refresh the preview.");
+              throw error;
+            }
+            phases.attendanceSourceInsert = performance.now() - sourceLinkStartedAt;
+          }
+          const accountingStartedAt = performance.now();
           await postLabourDueRecognition(tx, {
             workspaceId,
             farmId: input.farmId,
@@ -849,6 +897,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             ),
             actorId: request.appUser!.id,
           });
+          phases.accountingPosting = performance.now() - accountingStartedAt;
           await tx
             .insert(auditLogs)
             .values({
@@ -861,13 +910,18 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               entityId: created!.id,
               afterJson: created as unknown as Record<string, unknown>,
             });
-          if (sourceAttendanceIds.length) {
-            const attendanceRows = await tx.select({ id: operationalRecords.id, payload: operationalRecords.payload }).from(operationalRecords).where(and(eq(operationalRecords.workspaceId, workspaceId), inArray(operationalRecords.clientRecordId, sourceAttendanceIds)));
-            for (const row of attendanceRows) await tx.update(operationalRecords).set({ payload: { ...row.payload, labourDueId: created!.id, labourDueNumber: dueNumber, labourDueLockedAt: new Date().toISOString() } }).where(eq(operationalRecords.id, row.id));
+          if (sourceRows.length) {
+            const attendanceLockStartedAt = performance.now();
+            await tx.execute(sql`UPDATE operational_records SET payload = payload || jsonb_build_object('labourDueId', ${created!.id}, 'labourDueNumber', ${dueNumber}, 'labourDueLockedAt', ${new Date().toISOString()}), updated_at = now() WHERE workspace_id = ${workspaceId} AND id IN (${sql.join(sourceRows.map((row) => sql`${row.id}::uuid`), sql`, `)})`);
+            phases.attendanceBulkLock = performance.now() - attendanceLockStartedAt;
           }
           return created!;
         });
-        return reply.code(201).send({ due });
+        phases.transaction = performance.now() - transactionStartedAt;
+        const total = performance.now() - requestStartedAt;
+        reply.header("Server-Timing", Object.entries(phases).map(([name, duration]) => `${name};dur=${duration.toFixed(1)}`).concat(`total;dur=${total.toFixed(1)}`).join(", "));
+        request.log.info({ event: "labour_due_create_timing", dueId: due.id, source: input.source, memberCount, attendanceCount, phases, totalMs: total, sqlShape: "fixed-set-based" });
+        return reply.code(201).send({ due, performance: { totalMs: total, transactionMs: phases.transaction, attendanceCount, memberCount, sqlShape: "fixed-set-based" } });
       } catch (error) {
         return reply
           .code(400)
@@ -1326,12 +1380,8 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             ? snapshot.sourceAttendanceIds.filter((value): value is string => typeof value === "string")
             : [];
           if (sourceAttendanceIds.length) {
-            const attendanceRows = await tx.select({ id: operationalRecords.id, payload: operationalRecords.payload }).from(operationalRecords).where(and(eq(operationalRecords.workspaceId, params.data.workspaceId), inArray(operationalRecords.clientRecordId, sourceAttendanceIds)));
-            for (const row of attendanceRows) {
-              if (row.payload.labourDueId !== record.id) continue;
-              const { labourDueId: _dueId, labourDueNumber: _dueNumber, labourDueLockedAt: _lockedAt, ...unlockedPayload } = row.payload;
-              await tx.update(operationalRecords).set({ payload: unlockedPayload }).where(eq(operationalRecords.id, row.id));
-            }
+            await tx.delete(labourDueAttendanceSources).where(eq(labourDueAttendanceSources.dueId, record.id));
+            await tx.execute(sql`UPDATE operational_records SET payload = payload - 'labourDueId' - 'labourDueNumber' - 'labourDueLockedAt', updated_at = now() WHERE workspace_id = ${params.data.workspaceId} AND client_record_id IN (${sql.join(sourceAttendanceIds.map((id) => sql`${id}`), sql`, `)}) AND payload->>'labourDueId' = ${record.id}`);
           }
           await tx
             .insert(auditLogs)
