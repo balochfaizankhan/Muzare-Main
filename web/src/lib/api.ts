@@ -1986,6 +1986,33 @@ export type LabourAttendanceDuePreview = {
   includedLabourRows: Array<{ labourerId: string; labourName: string; presentDays: number; halfDayDays: number; absentDays: number; payableDays: number; wageRateLabel: string | null; attendanceWage: number; labourWorkWage: number; grossWage: number }>;
   sourceAttendanceIds: string[]; unresolvedRows: Array<{ labourerId: string; labourName: string; date: string; status: string }>;
 };
+export type CanonicalLabourAccountEntry = {
+  id: string; voucherId: string; voucherNumber: string; sourceId?: string | null; legacySourceRecordId?: string | null;
+  accountId: string; accountName: string; accountType: string; transactionType: "credit" | "debit";
+  amount: number; balanceEffect: number; date: string; nature: LabourPaymentVoucherRecord["nature"];
+  status: string; description: string; reversalReference?: string | null; recipientScope: LabourRecipientScope;
+  labourerId?: string | null; labourGroupId?: string | null; recipientName: string; canonical: true;
+};
+export type CanonicalLabourLedgerEntry = {
+  id: string; eventType: string; originalEventType?: string | null; status: string; date: string; postedAt: string;
+  dueId?: string | null; dueNumber?: string | null; voucherId?: string | null; voucherNumber?: string | null;
+  advanceApplicationId?: string | null; recipientScope?: LabourRecipientScope | null; financialScopeKey?: string | null;
+  labourerId?: string | null; labourGroupId?: string | null; recipientName: string; description: string;
+  labourDueEffect: number; labourAdvanceEffect: number; expenseEffect: number; partnerEffect: number; cashControlEffect: number; canonical: true;
+};
+export type LabourFinancialReadModel = {
+  scope: { workspaceId: string; farmId: string; seasonId: string };
+  accountEntries: CanonicalLabourAccountEntry[];
+  partnerPositions: Array<{ accountId: string; accountName: string; farmOwesPartner: number; ledgerBalance: number; entryCount: number }>;
+  partnerLedger: CanonicalLabourAccountEntry[];
+  labourLedger: CanonicalLabourLedgerEntry[];
+  expenses: Array<{ id: string; dueId?: string | null; dueNumber?: string | null; date: string; recipientScope?: LabourRecipientScope | null; labourerId?: string | null; labourGroupId?: string | null; recipientName: string; description: string; status: string; amount: number; canonical: true }>;
+  activity: Array<{ id: string; date: string; module: "labour"; title: string; detail: string; status: string; sourceId?: string | null; canonical: true }>;
+  currentLedger: Record<string, number>;
+  advancePositions: Array<{ voucherId: string; voucherNumber: string; accountId?: string | null; sourceId?: string | null; legacySourceRecordId?: string | null; labourerId?: string | null; labourGroupId?: string | null; recipientScope: LabourRecipientScope; originalAmount: number; appliedAmount: number; recoveredAmount: number; outstandingAmount: number; status: string }>;
+  replacedLegacySourceIds: string[];
+  summary: { labourDue: number; outstandingAdvance: number; wageExpense: number; farmOwesPartner: number; accountMovement: number; activePaymentAmount: number; activeAdvanceApplied: number };
+};
 export const previewLabourAttendanceDue = (token: string, workspaceId: string, input: {
   farmId: string; seasonId: string; recipientScope: "INDIVIDUAL" | "LABOUR_GROUP"; labourerId?: string | null; labourGroupId?: string | null; fromDate: string; toDate: string; recordDate: string;
 }) => apiRequest<{ preview: LabourAttendanceDuePreview }>(`/v1/workspace/${workspaceId}/labour-payments/dues/attendance-preview`, { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 60_000, debugLabel: "labour-attendance-due-preview" });
@@ -2026,6 +2053,8 @@ export const fetchLabourPaymentVouchers = (token: string, workspaceId: string, i
   if (input.status) query.set("status", input.status);
   return apiRequest<{ vouchers: LabourPaymentVoucherRecord[] }>(`/v1/workspace/${workspaceId}/labour-payments/vouchers?${query.toString()}`, {}, token);
 };
+export const fetchLabourFinancialReadModel = (token: string, workspaceId: string, farmId: string, seasonId: string, signal?: AbortSignal) =>
+  apiRequest<{ financials: LabourFinancialReadModel }>(`/v1/workspace/${workspaceId}/labour-payments/financial-read-model?${labourPaymentContextQuery(farmId, seasonId)}`, { signal }, token);
 export const fetchLabourPaymentAdvances = (token: string, workspaceId: string, farmId: string, seasonId: string, input: { page?: number; pageSize?: number; search?: string; recipientScope?: string; status?: string; accountId?: string; from?: string; to?: string; signal?: AbortSignal } = {}) => {
   const query = new URLSearchParams({ farmId, seasonId, page: String(input.page ?? 1), pageSize: String(input.pageSize ?? 20) });
   for (const [key,value] of Object.entries({ search:input.search,recipientScope:input.recipientScope,status:input.status,accountId:input.accountId,from:input.from,to:input.to })) if(value) query.set(key,value);

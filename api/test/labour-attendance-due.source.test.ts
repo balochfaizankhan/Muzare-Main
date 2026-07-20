@@ -54,7 +54,8 @@ test("legacy settlement creation screen is retired from navigation", () => {
   assert.doesNotMatch(app, /<LabourWageSettlements/);
   assert.match(app, /direct-due\?source=attendance&scope=group/);
   assert.match(hub, /New Labour Due/);
-  assert.match(hub, /Create Attendance Due/);
+  assert.doesNotMatch(hub, /Create Attendance Due/);
+  assert.match(hub, /Due → Review → Apply advance or pay → Post/);
 });
 
 test("review and settle loads the eligible pool only after a due opens", () => {
@@ -62,7 +63,8 @@ test("review and settle loads the eligible pool only after a due opens", () => {
   assert.match(review, /fetchLabourDueAdvancePool/);
   assert.doesNotMatch(review, /fetchAllLabourPaymentAdvances/);
   assert.match(review, /Total available for this due/);
-  assert.match(page, /pageSize: view === "dues" \? 1 : 20/);
+  assert.match(page, /fetchLabourPaymentAdvances\(token, workspaceId, farmId, seasonId, \{ pageSize: 1, status: "OPEN" \}\)/);
+  assert.match(page, /if \(view === "advances" \|\| view === "direct"\) return/);
 });
 
 test("attendance due persistence is set-based and database-enforced", () => {

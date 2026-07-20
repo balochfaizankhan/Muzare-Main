@@ -2,6 +2,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { formatWorkspaceActivityDateTime, loadWorkspaceActivity, type WorkspaceActivityItem, type WorkspaceActivityModule } from "../../lib/workspaceActivity";
+import { useCanonicalLabourFinancials } from "../../hooks/useCanonicalLabourFinancials";
 
 type PeriodFilter = "today" | "last7" | "month" | "custom";
 
@@ -68,6 +69,7 @@ function ActivitySummary({ activity, expandable, expanded }: { activity: Workspa
 }
 
 export function ActivityLog() {
+  const canonicalFinancials = useCanonicalLabourFinancials();
   const [activities, setActivities] = useState<WorkspaceActivityItem[]>([]);
   const [period, setPeriod] = useState<PeriodFilter>("last7");
   const [moduleFilter, setModuleFilter] = useState<"all" | WorkspaceActivityModule>("all");
@@ -76,8 +78,8 @@ export function ActivityLog() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    setActivities(await loadWorkspaceActivity());
-  }, []);
+    setActivities(await loadWorkspaceActivity(canonicalFinancials.data));
+  }, [canonicalFinancials.data]);
 
   useEffect(() => {
     void refresh();

@@ -114,18 +114,23 @@ test("attendance reports scope cached tenant data and selected date range", asyn
   assert.match(reports, /matches\(item\.date, \[labourName\(item\.labourerId\), labourer\?\.group, item\.status\]\)/);
 });
 
-test("labour work ledger exposes individual and group scopes in the UI and report output", async () => {
+test("canonical labour ledger preserves individual and group dimensions in the shared report model", async () => {
   const labourEarnings = await source("web/src/pages/workspace/LabourEarnings.tsx");
   const reports = await source("web/src/pages/workspace/Reports.tsx");
   const api = await source("web/src/lib/api.ts");
+  const readModel = await source("api/src/lib/labour-financial-read-model.ts");
   assert.match(labourEarnings, /Labour Earnings/);
   assert.match(labourEarnings, /Individual labour/);
   assert.match(labourEarnings, /Labour group/);
   assert.match(labourEarnings, /Assigned foreman/);
   assert.match(labourEarnings, /Record group earning/);
-  assert.match(reports, /Individual earnings/);
-  assert.match(reports, /Group earnings/);
-  assert.match(reports, /labourEarningScopeLabel/);
+  assert.match(reports, /canonicalFinancials\.data\?\.expenses/);
+  assert.match(reports, /Labour wages/);
+  assert.match(readModel, /recipientScope/);
+  assert.match(readModel, /labourerId/);
+  assert.match(readModel, /labourGroupId/);
+  assert.match(readModel, /recipientSnapshot/);
+  assert.match(api, /CanonicalLabourLedgerEntry/);
   assert.match(api, /individualLabourWorkWages\?: number;/);
   assert.match(api, /groupLabourWorkWages\?: number;/);
 });
@@ -273,7 +278,10 @@ test("partner settlements transfer matching account and partner positions withou
   assert.match(partnerAccounting, /position\.settledAdvances = snapshot\.settledAdvances;/);
   assert.match(partnerAccounting, /position\.outstandingLabourAdvances = snapshot\.outstandingLabourAdvances;/);
   assert.match(partnerAccounting, /position\.currentPartnerBalance = snapshot\.currentPartnerBalance;/);
-  assert.match(modulePage, /buildPartnerLiabilityPositions\(accounts, vouchers, advances, activeEntries, sales, labourWageSettlements, \{ farmId, seasonId \}\)/);
+  assert.match(modulePage, /useCanonicalLabourFinancials\(\)/);
+  assert.match(modulePage, /buildPartnerLiabilityPositions\(accounts, vouchers, legacyAdvances, activeEntries, sales, labourWageSettlements, \{ farmId, seasonId \}\)/);
+  assert.match(modulePage, /replacedLegacySourceIds/);
+  assert.match(modulePage, /canonical\.farmOwesPartner/);
   assert.match(modulePage, /Purchase Vouchers/);
   assert.match(modulePage, /Funds Given/);
   assert.match(modulePage, /Funds Received/);

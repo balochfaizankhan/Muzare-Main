@@ -18,7 +18,7 @@ import { translateExpenseCategory, translateExpenseSubcategory, translatePayment
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
 import { getVoucherDisplayNumber } from "../../lib/vouchers";
 import { getActiveVouchers, loadWorkspaceVouchers } from "../../lib/voucherCollections";
-import { fetchAllLabourPaymentAdvances, fetchBootstrap, fetchLabourPaymentVouchers, type LabourAdvancePosition, type LabourPaymentVoucherRecord } from "../../lib/api";
+import { fetchAllLabourPaymentAdvances, fetchBootstrap, type LabourAdvancePosition } from "../../lib/api";
 import {
   buildPartnerLiabilityPositions,
   calculatePartnerLiabilityBalance,
@@ -34,8 +34,6 @@ import {
 import { resolveSaleType, saleProduceLabel } from "../../lib/dispatch-sales";
 import {
   compareLabourers,
-  getActiveFarmId,
-  getActiveSeasonId,
   offlineDb,
   workspaceRecords,
   type Account,
@@ -53,6 +51,7 @@ import { buildAccountIdentityLookup, resolveCanonicalAccountId } from "../../lib
 import { compareWageRates, getWageRateStatus, normalizeHalfDayRate, summarizeAttendanceWages } from "../../lib/wageRates";
 import { deleteOperationalRecord } from "../../services/syncService";
 import i18n from "../../i18n";
+import { useCanonicalLabourFinancials } from "../../hooks/useCanonicalLabourFinancials";
 
 type Report = "attendance" | "advances" | "wage-rates" | "expenditures" | "sales" | "dispatch" | "partner-position" | "account-ledger";
 type SortOrder = "desc" | "asc";
@@ -453,6 +452,8 @@ export function Reports() {
     queryFn: () => fetchBootstrap(token!),
     enabled: Boolean(token),
   });
+  const canonicalFinancials = useCanonicalLabourFinancials();
+  const canonicalRequestSequence = useRef(0);
   const requestedReport = searchParams.get("report");
   const normalizedRequestedReport = requestedReport === "combined-expenses" ? "expenditures" : requestedReport as Report | null;
   const [report, setReport] = useState<Report>(normalizedRequestedReport && reportOptions.includes(normalizedRequestedReport) ? normalizedRequestedReport : "attendance");
@@ -488,7 +489,6 @@ export function Reports() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [wageRates, setWageRates] = useState<WageRate[]>([]);
   const [labourWageSettlements, setLabourWageSettlements] = useState<LabourWageSettlement[]>([]);
-  const [labourPaymentVouchers, setLabourPaymentVouchers] = useState<LabourPaymentVoucherRecord[]>([]);
   const [canonicalAdvancePositions, setCanonicalAdvancePositions] = useState<LabourAdvancePosition[]>([]);
   const [entries, setEntries] = useState<PartnerEntry[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
@@ -549,20 +549,21 @@ export function Reports() {
 
   useEffect(() => {
     const workspaceId = user?.workspaceId;
-    const farmId = getActiveFarmId();
-    const seasonId = getActiveSeasonId();
+    const farmId = canonicalFinancials.farmId;
+    const seasonId = canonicalFinancials.seasonId;
+    const sequence = ++canonicalRequestSequence.current;
+    setCanonicalAdvancePositions([]);
     if (!token || !workspaceId || !farmId || !seasonId || !navigator.onLine) return;
-    void Promise.all([
-      fetchLabourPaymentVouchers(token, workspaceId, { farmId, seasonId }),
-      fetchAllLabourPaymentAdvances(token, workspaceId, farmId, seasonId),
-    ]).then(([voucherResponse, advanceResponse]) => {
-      setLabourPaymentVouchers(voucherResponse.vouchers);
+    const controller = new AbortController();
+    void fetchAllLabourPaymentAdvances(token, workspaceId, farmId, seasonId, { signal: controller.signal }).then((advanceResponse) => {
+      if (sequence !== canonicalRequestSequence.current || controller.signal.aborted) return;
       setCanonicalAdvancePositions(advanceResponse.advances);
     }).catch(() => {
-      setLabourPaymentVouchers([]);
+      if (sequence !== canonicalRequestSequence.current || controller.signal.aborted) return;
       setCanonicalAdvancePositions([]);
     });
-  }, [token, user?.workspaceId]);
+    return () => controller.abort();
+  }, [canonicalFinancials.farmId, canonicalFinancials.seasonId, token, user?.workspaceId]);
 
   useEffect(() => {
     if (normalizedRequestedReport && reportOptions.includes(normalizedRequestedReport)) setReport(normalizedRequestedReport);
@@ -1152,6 +1153,14 @@ export function Reports() {
     .sort((a, b) => expenseSort === "desc" ? b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt) : a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt)),
   [category, expenseSort, subcategory, voucherBaseRows]);
   const voucherReportLineRows = useMemo(() => voucherRows.flatMap((item) => voucherReportItems(item)), [voucherRows]);
+  const canonicalExpenseRows = useMemo(() => (canonicalFinancials.data?.expenses ?? [])
+    .filter((item) => inRange(item.date, from, to)
+      && (!category || category === "Labour wages")
+      && (!subcategory || subcategory === "Canonical labour due")
+      && matches(item.date, [item.dueNumber, item.recipientName, item.description, item.status], item.amount))
+    .sort((a, b) => expenseSort === "desc" ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date)),
+  [canonicalFinancials.data?.expenses, category, expenseSort, from, matches, subcategory, to]);
+  const totalRecognizedExpenses = voucherRows.reduce((sum, item) => sum + item.amount, 0) + canonicalExpenseRows.reduce((sum, item) => sum + item.amount, 0);
   const voucherCategories = useMemo(
     () => [...new Set(voucherBaseRows.flatMap((item) => voucherReportItems(item).map((line) => line.category)).filter(Boolean))].sort(),
     [voucherBaseRows],
@@ -1283,36 +1292,22 @@ export function Reports() {
     })
     .sort((a, b) => b.dispatch.date.localeCompare(a.dispatch.date) || a.dispatchNumber.localeCompare(b.dispatchNumber)), [dispatchDateType, dispatches, from, matches, productFilter, salesByDispatchKey, to, vehicleFilter, t]);
 
-  // Legacy LPVs mirror transactions already represented by the historical
-  // operational settlement/advance records. Only canonical, non-legacy LPVs
-  // are added here so reports never double count migrated cash movements.
-  const canonicalCashLabourVouchers = useMemo(
-    () => labourPaymentVouchers.filter((voucher) => voucher.status === "POSTED" && !voucher.legacy && voucher.nature !== "ADVANCE"),
-    [labourPaymentVouchers],
-  );
-  const labourVoucherIsInflow = (voucher: LabourPaymentVoucherRecord) => {
-    if (voucher.nature === "REFUND_RECOVERY") return true;
-    if (voucher.nature !== "REVERSAL") return false;
-    const original = labourPaymentVouchers.find((item) => item.id === voucher.reversalReference);
-    return original?.nature !== "REFUND_RECOVERY";
-  };
+  // Canonical cash effects are supplied by the shared server read model. A
+  // stable source id suppresses only the corresponding IndexedDB mirror.
+  const canonicalLabourAccountEntries = canonicalFinancials.data?.accountEntries ?? [];
+  const replacedLegacySourceIds = useMemo(() => new Set(canonicalFinancials.data?.replacedLegacySourceIds ?? []), [canonicalFinancials.data?.replacedLegacySourceIds]);
+  const accountingAdvanceRows = useMemo(() => advanceRows.filter((item) => !replacedLegacySourceIds.has(item.id)), [advanceRows, replacedLegacySourceIds]);
   const positions = useMemo(() => accounts
     .filter((account) => !accountId || account.id === accountId)
     .map((account) => {
       const voucherExpenses = cashAffectingVouchers.filter((item) => resolveCanonicalAccountId(item.accountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
-      const labourAdvances = advanceRows.filter((item) => resolveCanonicalAccountId(item.accountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
+      const labourAdvances = accountingAdvanceRows.filter((item) => resolveCanonicalAccountId(item.accountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
       const contributions = partnerRows.filter((item) => item.type === "contribution" && resolveCanonicalAccountId(item.accountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
       const withdrawals = partnerRows.filter((item) => item.type === "withdrawal" && resolveCanonicalAccountId(item.accountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
       const settlementsSent = partnerRows.filter((item) => item.type === "settlement" && resolveCanonicalAccountId(item.fromAccountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
       const settlementsReceived = partnerRows.filter((item) => item.type === "settlement" && resolveCanonicalAccountId(item.toAccountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
       const salesReceived = saleRows.filter((item) => resolveCanonicalAccountId(item.accountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
-      const canonicalLabourCashEffect = canonicalCashLabourVouchers
-        .filter((voucher) => voucher.paymentAccountId === account.id)
-        .reduce((sum, voucher) => {
-          const amount = Number(voucher.paymentAmount);
-          const inflow = labourVoucherIsInflow(voucher);
-          return sum + (account.type === "partner" ? (inflow ? -amount : amount) : (inflow ? amount : -amount));
-        }, 0);
+      const canonicalLabourCashEffect = canonicalLabourAccountEntries.filter((entry) => entry.accountId === account.id).reduce((sum, entry) => sum + entry.balanceEffect, 0);
       return {
         account,
         voucherExpenses,
@@ -1322,13 +1317,17 @@ export function Reports() {
         settlementsSent,
         settlementsReceived,
         salesReceived,
-        net: calculateAccountBalance(account, saleRows, cashAffectingVouchers, advanceRows, partnerRows, activeSettlements, accounts) + canonicalLabourCashEffect,
+        net: calculateAccountBalance(account, saleRows, cashAffectingVouchers, accountingAdvanceRows, partnerRows, activeSettlements, accounts) + canonicalLabourCashEffect,
       };
-    }), [accountId, accounts, activeSettlements, advanceRows, canonicalCashLabourVouchers, cashAffectingVouchers, labourPaymentVouchers, partnerRows, saleRows]);
+    }), [accountId, accountingAdvanceRows, accounts, activeSettlements, canonicalLabourAccountEntries, cashAffectingVouchers, partnerRows, saleRows]);
   const partnerLiabilityPositions = useMemo(
-    () => buildPartnerLiabilityPositions(accounts, cashAffectingVouchers, advanceRows, partnerRows, saleRows, activeSettlements)
-      .filter((item) => !accountId || item.account?.id === accountId),
-    [accountId, accounts, activeSettlements, cashAffectingVouchers, advanceRows, partnerRows, saleRows],
+    () => buildPartnerLiabilityPositions(accounts, cashAffectingVouchers, accountingAdvanceRows, partnerRows, saleRows, activeSettlements)
+      .map((item) => {
+        const canonical = item.account?.id ? canonicalFinancials.data?.partnerPositions.find((entry) => entry.accountId === item.account!.id) : undefined;
+        const outstanding = item.account?.id ? (canonicalFinancials.data?.advancePositions ?? []).filter((entry) => entry.accountId === item.account!.id).reduce((sum, entry) => sum + entry.outstandingAmount, 0) : 0;
+        return canonical ? { ...item, labourAdvancesPaid: item.labourAdvancesPaid + canonical.farmOwesPartner, totalLabourAdvancesPaid: item.totalLabourAdvancesPaid + canonical.farmOwesPartner, outstandingLabourAdvances: item.outstandingLabourAdvances + outstanding, currentPartnerBalance: item.currentPartnerBalance + canonical.farmOwesPartner } : item;
+      }).filter((item) => !accountId || item.account?.id === accountId),
+    [accountId, accountingAdvanceRows, accounts, activeSettlements, canonicalFinancials.data, cashAffectingVouchers, partnerRows, saleRows],
   );
   const selectedAccountRecord = accountId ? accounts.find((item) => item.id === accountId) ?? null : null;
   const selectedPartnerSnapshot = useMemo(
@@ -1366,30 +1365,27 @@ export function Reports() {
         partnerLiabilityGroup: isPartner ? (settlementVoucher ? undefined : "purchase_vouchers_paid") : undefined,
       });
     }
-    for (const advance of advanceRows) {
+    for (const advance of accountingAdvanceRows) {
       const account = accountById.get(resolveCanonicalAccountId(advance.accountId, accountLookup) ?? "");
       const isPartner = account?.type === "partner";
       rows.push({ id: `advance:${advance.id}`, date: advance.date, accountId: resolveCanonicalAccountId(advance.accountId, accountLookup) ?? advance.accountId ?? "", accountName: accountName(advance.accountId), type: "advance", typeLabel: t("reportsPage.labourAdvance"), reference: advance.id.slice(0, 8), description: `${labourName(advance.labourerId)}${advance.notes ? ` - ${advance.notes}` : ""}`, debit: isPartner ? 0 : advance.amount, credit: isPartner ? advance.amount : 0, path: `/workspace/labour-advances?recordId=${advance.id}`, classification: "advance", partnerLiabilityGroup: isPartner ? "labour_advances_paid" : undefined });
     }
-    for (const voucher of canonicalCashLabourVouchers) {
-      if (!voucher.paymentAccountId) continue;
-      const account = accountById.get(voucher.paymentAccountId);
-      const isPartner = account?.type === "partner";
-      const inflow = labourVoucherIsInflow(voucher);
+    for (const voucher of canonicalLabourAccountEntries) {
+      const account = accountById.get(voucher.accountId);
       rows.push({
         id: `labour-payment-voucher:${voucher.id}`,
-        date: voucher.voucherDate,
-        accountId: voucher.paymentAccountId,
+        date: voucher.date,
+        accountId: voucher.accountId,
         accountName: account?.name ?? "Payment account",
         type: "labour_payment_voucher",
         typeLabel: voucher.nature.toLowerCase().replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase()),
         reference: voucher.voucherNumber,
         description: voucher.description,
-        debit: isPartner ? (inflow ? Number(voucher.paymentAmount) : 0) : (inflow ? 0 : Number(voucher.paymentAmount)),
-        credit: isPartner ? (inflow ? 0 : Number(voucher.paymentAmount)) : (inflow ? Number(voucher.paymentAmount) : 0),
+        debit: voucher.transactionType === "debit" ? voucher.amount : 0,
+        credit: voucher.transactionType === "credit" ? voucher.amount : 0,
         path: "/workspace/labour-payments/vouchers",
         classification: voucher.nature === "REFUND_RECOVERY" ? "income" : voucher.nature === "REVERSAL" ? "other" : "settlement",
-        partnerLiabilityGroup: isPartner ? "labour_wage_settlements" : undefined,
+        partnerLiabilityGroup: account?.type === "partner" ? "labour_wage_settlements" : undefined,
       });
     }
     for (const sale of saleRows) rows.push({
@@ -1434,7 +1430,7 @@ export function Reports() {
         running.set(item.accountId, next);
         return { ...item, running: next, accountName: item.accountName || accountName(item.accountId) };
       });
-  }, [accountId, accountName, accountById, accounts, advanceRows, canonicalCashLabourVouchers, cashAffectingVouchers, labourName, labourPaymentVouchers, partnerRows, saleRows, t]);
+  }, [accountId, accountName, accountById, accountingAdvanceRows, accounts, canonicalLabourAccountEntries, cashAffectingVouchers, labourName, partnerRows, saleRows, t]);
   const groupedAccountLedgerRows = useMemo(() => groupAccountTransactions(accountLedgerRows), [accountLedgerRows]);
   const groupedPartnerLedgerRows = useMemo(
     () => selectedAccountRecord?.type === "partner" ? groupPartnerLiabilityTransactions(accountLedgerRows) : [],
@@ -1640,6 +1636,7 @@ export function Reports() {
   const exportAdvanceCsv = () => (views.advances === "summary" ? exportAdvanceSummaryCsv() : exportAdvanceDetailCsv());
   const exportExpenseSummary = () => {
     const categoryTotals = [...new Set(voucherReportLineRows.map((item) => item.category))].map((name) => [translateExpenseCategory(name), voucherReportLineRows.filter((item) => item.category === name).reduce((sum, item) => sum + item.amount, 0)]);
+    if (canonicalExpenseRows.length) categoryTotals.push(["Labour wages", canonicalExpenseRows.reduce((sum, item) => sum + item.amount, 0)]);
     const accountTotals = [...new Set(voucherReportLineRows.map((item) => accountName(item.accountId)))].map((name) => [name, voucherReportLineRows.filter((item) => accountName(item.accountId) === name).reduce((sum, item) => sum + item.amount, 0)]);
     downloadCsv("expense-summary.csv", [
       [t("reportsPage.dateRange"), rangeLabel],
@@ -1650,12 +1647,13 @@ export function Reports() {
       [t("reportsPage.account"), t("reportsPage.total")],
       ...accountTotals,
       [],
-      [t("reportsPage.total"), voucherRows.reduce((sum, item) => sum + item.amount, 0)],
+      [t("reportsPage.total"), totalRecognizedExpenses],
     ]);
   };
   const exportExpenseLog = () => downloadCsv("expense-log.csv", [
     [t("reportsPage.voucher"), t("reportsPage.date"), t("reportsPage.description"), t("reportsPage.category"), t("reportsPage.account"), t("reportsPage.amount")],
     ...voucherRows.flatMap((voucher) => voucherReportItems(voucher).map((item, index) => [index === 0 ? (getVoucherDisplayNumber(voucher) || voucher.voucherNumber) : "", index === 0 ? voucher.date : "", item.description, expenseLabel(item.category, item.subcategory), index === 0 ? accountName(voucher.accountId) : "", item.amount])),
+    ...canonicalExpenseRows.map((item) => [item.dueNumber ?? item.id, item.date, item.description, "Labour wages", "Accrued labour payable", item.amount]),
   ]);
   const exportPartnerPosition = () => downloadCsv("partner-position.csv", [
     [t("reportsPage.partner"), t("reportsPage.openingBalance"), t("reportsPage.capitalInjected"), "Purchase vouchers", "Total labour advances paid", "Settled through wage settlements", "Outstanding labour advances", "Labour settlements cash paid", t("reportsPage.transfersOut"), t("reportsPage.transfersIn"), t("reportsPage.moneyReturned"), t("reportsPage.adjustments"), t("reportsPage.currentPartnerBalance")],
@@ -2129,12 +2127,13 @@ export function Reports() {
           <button className={views.expenditures === "log" ? "is-active" : ""} type="button" onClick={() => switchView("expenditures", "log")}>{t("reportsPage.log")}</button>
         </section>
         {views.expenditures === "summary" && <ReportShell title={t("reportsPage.expenseSummary")} rangeLabel={rangeLabel} sectionId="expense-summary" onPrint={() => printSection("expense-summary")} onExport={exportExpenseSummary}>
-          <Kpis values={[[t("reportsPage.totalExpenses"), money(voucherRows.reduce((sum, item) => sum + item.amount, 0))], [t("reportsPage.vouchers"), new Set(voucherRows.map((item) => getVoucherDisplayNumber(item) || item.voucherNumber)).size], [t("reportsPage.categories"), new Set(voucherReportLineRows.map((item) => item.category)).size], [t("reportsPage.account"), new Set(voucherRows.map((item) => item.accountId)).size]]} />
+          <Kpis values={[[t("reportsPage.totalExpenses"), money(totalRecognizedExpenses)], [t("reportsPage.vouchers"), new Set([...voucherRows.map((item) => getVoucherDisplayNumber(item) || item.voucherNumber), ...canonicalExpenseRows.map((item) => item.dueNumber ?? item.id)]).size], [t("reportsPage.categories"), new Set([...voucherReportLineRows.map((item) => item.category), ...(canonicalExpenseRows.length ? ["Labour wages"] : [])]).size], [t("reportsPage.account"), new Set(voucherRows.map((item) => item.accountId)).size]]} />
           <div className="reports-breakdowns">
             <div>
               <h3>{t("reportsPage.byCategory")}</h3>
               <div className="reports-summary-list">
                 {[...new Set(voucherReportLineRows.map((item) => item.category))].map((name) => <article key={name}><span>{translateExpenseCategory(name)}</span><strong>{money(voucherReportLineRows.filter((item) => item.category === name).reduce((sum, item) => sum + item.amount, 0))}</strong></article>)}
+                {canonicalExpenseRows.length ? <article><span>Labour wages</span><strong>{money(canonicalExpenseRows.reduce((sum, item) => sum + item.amount, 0))}</strong></article> : null}
               </div>
             </div>
             <div>
@@ -2146,7 +2145,7 @@ export function Reports() {
           </div>
         </ReportShell>}
         {views.expenditures === "log" && <ReportShell title={t("reportsPage.expenseLog")} rangeLabel={rangeLabel} sectionId="expense-log" onPrint={() => printSection("expense-log")} onExport={exportExpenseLog}>
-          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.voucher"), t("reportsPage.date"), t("reportsPage.description"), t("reportsPage.category"), t("reportsPage.account"), t("reportsPage.amount")]} rows={voucherRows.map((item) => {
+          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.voucher"), t("reportsPage.date"), t("reportsPage.description"), t("reportsPage.category"), t("reportsPage.account"), t("reportsPage.amount")]} rows={[...voucherRows.map((item) => {
             const lines = voucherReportItems(item);
             const firstLine = lines[0];
             return {
@@ -2162,10 +2161,10 @@ export function Reports() {
                 accountName(item.accountId),
                 money(item.amount),
               ],
-              details: [...lines.map((line, index) => [`${t("expensesPage.itemNumber", { number: index + 1 })}`, `${line.description} • ${expenseLabel(line.category, line.subcategory)} • ${money(line.amount)}`] as [string, ReactNode]), [t("reportsPage.account"), accountName(item.accountId)]],
+              details: [...lines.map((line, index) => [`${t("expensesPage.itemNumber", { number: index + 1 })}`, `${line.description} • ${expenseLabel(line.category, line.subcategory)} • ${money(line.amount)}`] as [string, ReactNode]), [t("reportsPage.account"), accountName(item.accountId)] as [string, ReactNode]],
               onOpen: () => navigate(`/workspace/expenses?recordId=${item.id}`),
             };
-          })} />
+          }), ...canonicalExpenseRows.map((item) => ({ id: item.id, title: item.dueNumber ?? item.recipientName, value: money(item.amount), meta: item.date, cells: [item.dueNumber ?? "-", item.date, item.description, "Labour wages", "Accrued labour payable", money(item.amount)], details: [["Status", item.status], ["Recipient", item.recipientName]] as [string, ReactNode][] }))]} />
         </ReportShell>}
       </>}
 

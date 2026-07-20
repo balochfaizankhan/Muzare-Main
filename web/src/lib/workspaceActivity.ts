@@ -28,6 +28,7 @@ import type {
 import { isActiveOperationalRecord } from "./operationalRecords";
 import { loadWorkspaceVouchers } from "./voucherCollections";
 import { getVoucherDisplayNumber } from "./vouchers";
+import type { LabourFinancialReadModel } from "./api";
 
 export type WorkspaceActivityModule = "attendance" | "labour" | "expenses" | "dispatch" | "sales" | "accounts";
 
@@ -187,7 +188,7 @@ const groupLabourBatchActivities = (items: RawWorkspaceActivity[], groupedTitle:
   });
 };
 
-export async function loadWorkspaceActivity(): Promise<WorkspaceActivityItem[]> {
+export async function loadWorkspaceActivity(canonical?: LabourFinancialReadModel): Promise<WorkspaceActivityItem[]> {
   const [labourers, attendance, dispatches, sales, advances, payments, settlements, partnerEntries, accounts, vouchers] = await Promise.all([
     workspaceRecords(offlineDb.labourers),
     workspaceRecords(offlineDb.attendance),
@@ -204,8 +205,9 @@ export async function loadWorkspaceActivity(): Promise<WorkspaceActivityItem[]> 
   const activeAttendance = attendance.filter(isActiveOperationalRecord);
   const activeDispatches = dispatches.filter(isActiveOperationalRecord);
   const activeSales = sales.filter(isActiveOperationalRecord);
-  const activeAdvances = advances.filter(isActiveOperationalRecord);
-  const activePayments = payments.filter(isActiveOperationalRecord);
+  const replaced = new Set(canonical?.replacedLegacySourceIds ?? []);
+  const activeAdvances = advances.filter((item) => isActiveOperationalRecord(item) && !replaced.has(item.id));
+  const activePayments = payments.filter((item) => isActiveOperationalRecord(item) && !replaced.has(item.id));
   const activeSettlements = getActiveLabourWageSettlements(settlements);
   const activePartnerEntries = partnerEntries.filter(isActiveOperationalRecord);
   const activeAccounts = accounts.filter(isActiveOperationalRecord);
@@ -341,7 +343,21 @@ export async function loadWorkspaceActivity(): Promise<WorkspaceActivityItem[]> 
     })),
   ];
 
-  return [...attendanceActivities, ...advanceActivities, ...paymentActivities, ...individualActivities]
+  const canonicalActivities: WorkspaceActivityItem[] = (canonical?.activity ?? []).map((item) => ({
+    id: item.id,
+    module: "labour",
+    moduleLabel: "Labour",
+    path: "/workspace/labour-payments/vouchers",
+    title: item.title,
+    detail: `${item.detail} · ${capitalize(item.status)}`,
+    value: capitalize(item.status),
+    createdAt: item.date,
+    activityDate: item.date.slice(0, 10),
+    icon: ClipboardList,
+    tone: item.status === "VOIDED" || item.status === "REVERSED" ? "slate" : "purple",
+  }));
+
+  return [...canonicalActivities, ...attendanceActivities, ...advanceActivities, ...paymentActivities, ...individualActivities]
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 

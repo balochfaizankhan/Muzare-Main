@@ -30,6 +30,7 @@ import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { hasPermission } from "../lib/permissions";
 import { loadWorkspaceVouchers } from "../lib/voucherCollections";
 import { useSyncState } from "../hooks/useSyncState";
+import { useCanonicalLabourFinancials } from "../hooks/useCanonicalLabourFinancials";
 import { formatWorkspaceActivityDateTime, loadWorkspaceActivity, type WorkspaceActivityItem } from "../lib/workspaceActivity";
 import { deriveWorkspaceDisplayStatus } from "../lib/workspaceStatus";
 import { markStartup, scheduleBackgroundTask } from "../lib/startupPerf";
@@ -57,6 +58,7 @@ export function DashboardPage() {
   const { t } = useTranslation();
   const { user, token } = useAuth();
   const sync = useSyncState();
+  const canonicalFinancials = useCanonicalLabourFinancials();
   const [totals, setTotals] = useState<DashboardTotals | null>(null);
   const [activities, setActivities] = useState<WorkspaceActivityItem[]>([]);
   const refreshInFlight = useRef(false);
@@ -89,7 +91,7 @@ export function DashboardPage() {
       workspaceRecords(offlineDb.advances),
       workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }),
       workspaceRecords(offlineDb.labourWageSettlements),
-      loadWorkspaceActivity(),
+      loadWorkspaceActivity(canonicalFinancials.data),
     ]);
     const activeAttendance = attendance.filter(isActiveOperationalRecord);
     const activeDispatches = dispatches.filter(isActiveOperationalRecord);
@@ -98,17 +100,18 @@ export function DashboardPage() {
     const generalExpenseVouchers = getGeneralExpenseVouchers(activeVouchers, settlements);
     const cashAffectingVouchers = getCashAffectingVouchers(activeVouchers, settlements);
     const activeEntries = entries.filter(isActiveOperationalRecord);
-    const activeAdvances = advances.filter(isActiveOperationalRecord);
+    const replaced = new Set(canonicalFinancials.data?.replacedLegacySourceIds ?? []);
+    const activeAdvances = advances.filter((item) => isActiveOperationalRecord(item) && !replaced.has(item.id));
     const activeSettlements = getActiveLabourWageSettlements(settlements);
     const activeAccounts = accounts.filter(isActiveOperationalRecord);
     const farmId = sync.farmId ?? null;
     const seasonId = sync.seasonId ?? null;
     const date = today();
     const totalSales = activeSales.reduce((sum, item) => sum + item.amount, 0);
-    const labourAdvances = outstandingLabourAdvances(activeAdvances, activeSettlements, { farmId, seasonId });
-    const totalExpenses = generalExpenseVouchers.reduce((sum, item) => sum + item.amount, 0);
+    const labourAdvances = outstandingLabourAdvances(activeAdvances, activeSettlements, { farmId, seasonId }) + (canonicalFinancials.data?.summary.outstandingAdvance ?? 0);
+    const totalExpenses = generalExpenseVouchers.reduce((sum, item) => sum + item.amount, 0) + (canonicalFinancials.data?.summary.wageExpense ?? 0);
     const partnerBalance = buildPartnerLiabilityPositions(activeAccounts, cashAffectingVouchers, activeAdvances, activeEntries, activeSales, activeSettlements, { farmId, seasonId })
-      .reduce((sum, item) => sum + item.currentPartnerBalance, 0);
+      .reduce((sum, item) => sum + item.currentPartnerBalance, 0) + (canonicalFinancials.data?.summary.farmOwesPartner ?? 0);
     const attendanceMarkedToday = activeAttendance.filter((item) => item.date === date).length;
     const presentToday = activeAttendance.filter((item) => item.date === date && item.status === "present").length;
     const dispatchesToday = activeDispatches.filter((item) => item.date === date).length;
@@ -121,12 +124,12 @@ export function DashboardPage() {
       totalSales,
       labourAdvances,
       totalExpenses,
-      netPosition: calculateAvailableBalance(activeAccounts, activeSales, cashAffectingVouchers, activeAdvances, activeEntries, activeSettlements),
+      netPosition: calculateAvailableBalance(activeAccounts, activeSales, cashAffectingVouchers, activeAdvances, activeEntries, activeSettlements) + (canonicalFinancials.data?.summary.accountMovement ?? 0),
       partnerBalance,
     });
 
     setActivities(recentActivities.slice(0, 5));
-  }, [sync.farmId, sync.seasonId, t]);
+  }, [canonicalFinancials.data, sync.farmId, sync.seasonId, t]);
   const scheduleDashboardRefresh = useCallback(() => {
     if (refreshInFlight.current) return;
     refreshInFlight.current = true;
