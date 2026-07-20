@@ -1130,7 +1130,7 @@ export async function previewLabourWageSettlement(
   settlementDate: string,
   excludeSettlementId?: string,
   selection: LabourWageSettlementSelection = {},
-  options: { includeAdvances?: boolean } = {},
+  options: { includeAdvances?: boolean; excludedAttendanceClientIds?: ReadonlySet<string> } = {},
 ) {
   const labourScope = await resolveSelectedLabourers(tx, workspaceId, farmId, seasonId, selection);
   const attendanceRows = await tx.select({
@@ -1162,6 +1162,7 @@ export async function previewLabourWageSettlement(
   const sourceAttendanceIds: string[] = [];
   const unresolvedRows: Array<{ labourerId: string; labourName: string; date: string; status: string }> = [];
   for (const row of attendanceRows) {
+    if (options.excludedAttendanceClientIds?.has(row.clientRecordId)) continue;
     const payload = row.payload as AttendancePayload;
     if (isDeletedOperationalPayload(payload as Record<string, unknown>)) continue;
     const labourerId = typeof payload.labourerId === "string" ? payload.labourerId : typeof payload.labourId === "string" ? payload.labourId : "";

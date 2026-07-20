@@ -176,6 +176,13 @@ export function WorkforcePaymentsPage() {
   const [toFilter, setToFilter] = useState("");
   const [selectedDue, setSelectedDue] = useState<LabourDueRecord | null>(null);
 
+  useEffect(() => {
+    const requestedDueId = new URLSearchParams(location.search).get("dueId");
+    if (!requestedDueId || view !== "dues") return;
+    const requested = dues.find((due) => due.id === requestedDueId);
+    if (requested) setSelectedDue(requested);
+  }, [dues, location.search, view]);
+
   const refresh = useCallback(async () => {
     const [nextLabourers, nextGroups, nextAccounts] = await Promise.all([
       workspaceRecords(offlineDb.labourers, { includeDeleted: true }),
@@ -544,8 +551,9 @@ export function WorkforcePaymentsPage() {
           labourers={labourers}
           groups={groups}
           canManage={canManage}
-          onSaved={(message) => {
+          onSaved={(message, due) => {
             setSuccess(message);
+            setDues((current) => [due, ...current.filter((item) => item.id !== due.id)]);
             navigate("/workspace/labour-payments/overview");
           }}
           onError={setError}
@@ -632,7 +640,7 @@ function DirectDueForm({
   labourers: Labourer[];
   groups: LabourGroup[];
   canManage: boolean;
-  onSaved: (message: string) => void;
+  onSaved: (message: string, due: LabourDueRecord) => void;
   onError: (message: string) => void;
   token: string;
   workspaceId: string;
@@ -641,6 +649,7 @@ function DirectDueForm({
 }) {
   const idempotencyKey = useRef(uuid());
   const location = useLocation();
+  const navigate = useNavigate();
   const initialAttendance = new URLSearchParams(location.search).get("source") === "attendance";
   const [source, setSource] = useState<"ATTENDANCE_PERIOD" | "DIRECT">(initialAttendance ? "ATTENDANCE_PERIOD" : "DIRECT");
   const initialParams = new URLSearchParams(location.search);
@@ -711,7 +720,7 @@ function DirectDueForm({
       setSaving(false);
       performance.mark("labour-due-create-committed");
       console.info("labour_due_create_frontend_timing", { totalMs: performance.now() - submitStartedAt, server: response.performance ?? null });
-      onSaved(`Labour due ${response.due.dueNumber} created successfully.`);
+      onSaved(`Labour due ${response.due.dueNumber} created successfully.`, response.due);
     } catch (caught) {
       const responseErrors = caught instanceof ApiError && caught.responseBody && typeof caught.responseBody === "object" && "errors" in caught.responseBody
         ? (caught.responseBody as { errors?: Record<string, string> }).errors ?? {}
@@ -870,6 +879,12 @@ function DirectDueForm({
           {preview ? <section aria-label="Attendance calculation preview">
             <header><div><strong>{preview.groupName || labourers.find((item) => item.id === labourerId)?.name || "Attendance due"}</strong><span>{preview.includedLabourCount} worker{preview.includedLabourCount === 1 ? "" : "s"} · {preview.attendanceTotals.payableDays} payable days</span></div><b>{money(preview.grossWages)}</b></header>
             <p>{preview.attendanceTotals.present} full days · {preview.attendanceTotals.halfDay} half days{preview.excludedAttendanceCount ? ` · ${preview.excludedAttendanceCount} already used` : ""}</p>
+            {preview.excludedOwners?.map((owner) => <div className="workforce-attendance-owner" key={`${owner.ownerType}:${owner.ownerId}`}>
+              <span>{owner.attendanceCount} attendance entr{owner.attendanceCount === 1 ? "y is" : "ies are"} already included in {owner.ownerType === "LABOUR_DUE" ? "Labour Due" : "historical settlement"} <strong>{owner.ownerNumber}</strong>.</span>
+              {owner.ownerType === "LABOUR_DUE" ? <button type="button" className="secondary-action" onClick={() => navigate(`/workspace/labour-payments/overview?dueId=${encodeURIComponent(owner.ownerId)}`)}>View labour due</button> : null}
+            </div>)}
+            {preview.orphanedAttendanceCount ? <p className="workforce-attendance-warning">{preview.orphanedAttendanceCount} attendance entries have invalid source links and require repair.</p> : null}
+            {!preview.orphanedAttendanceCount && preview.grossWages <= 0 ? <p className="workforce-attendance-warning">{preview.excludedOwners?.length === 1 ? `This attendance is already included in ${preview.excludedOwners[0]!.ownerNumber}.` : "No eligible attendance remains for this period."}</p> : null}
             <details><summary>Member wage breakdown</summary>{preview.includedLabourRows.map((row) => <div className="workforce-attendance-member" key={row.labourerId}><span>{row.labourName}<small>{row.payableDays} days · rate {row.wageRateLabel ?? "missing"}</small></span><strong>{money(row.grossWage)}</strong></div>)}</details>
           </section> : null}
         </div> : null}
@@ -890,7 +905,7 @@ function DirectDueForm({
               )}
             </span>
           </div>
-          <button disabled={!canManage || saving || (source === "ATTENDANCE_PERIOD" && !preview)} type="submit">
+          <button disabled={!canManage || saving || (source === "ATTENDANCE_PERIOD" && (!preview || preview.grossWages <= 0 || preview.includedLabourCount <= 0 || Boolean(preview.orphanedAttendanceCount)))} type="submit">
             {saving ? "Creating…" : "Create labour due"}
           </button>
         </footer>

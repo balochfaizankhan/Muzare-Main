@@ -1980,6 +1980,8 @@ export const createDirectLabourDue = (token: string, workspaceId: string, input:
 export type LabourAttendanceDuePreview = {
   groupId?: string | null; groupName?: string | null; foremanId?: string | null;
   includedLabourCount: number; excludedAttendanceCount: number; grossWages: number;
+  orphanedAttendanceCount?: number;
+  excludedOwners?: Array<{ ownerId: string; ownerNumber: string; ownerType: "LABOUR_DUE" | "HISTORICAL_SETTLEMENT"; ownerStatus: string; fromDate: string | null; toDate: string | null; amount: number; attendanceCount: number }>;
   attendanceTotals: { labourers: number; present: number; halfDay: number; absent: number; payableDays: number };
   includedLabourRows: Array<{ labourerId: string; labourName: string; presentDays: number; halfDayDays: number; absentDays: number; payableDays: number; wageRateLabel: string | null; attendanceWage: number; labourWorkWage: number; grossWage: number }>;
   sourceAttendanceIds: string[]; unresolvedRows: Array<{ labourerId: string; labourName: string; date: string; status: string }>;

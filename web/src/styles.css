@@ -17413,6 +17413,8 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 .workforce-payment-form label > span { color: #526174; font-size: 11px; font-weight: 700; }
 .workforce-payment-form label.has-error input,.workforce-payment-form label.has-error select { border-color: #c2413b; }
 .workforce-field-error { color: #b42318; font-size: 11px; font-weight: 650; }
+.workforce-attendance-owner, .workforce-attendance-warning { margin-top: .65rem; padding: .7rem .8rem; border: 1px solid #e8d7a7; border-radius: .65rem; background: #fffaf0; }
+.workforce-attendance-owner { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
 .workforce-payment-form input,
 .workforce-payment-form select,
 .workforce-payment-review-form input,

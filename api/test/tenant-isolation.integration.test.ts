@@ -188,8 +188,8 @@ test("direct labour due accepts decimal SAR and a canonical historical labour ID
   assertIntegrationResponse(created, 201, "create direct labour due");
   const due = created.json().due;
   assert.equal(due.labourerId, labourerId);
-  assert.equal(due.grossAmount, "7107.50");
-  assert.equal(due.authorizedDeductions, "0.00");
+  assert.equal(Number(due.grossAmount), 7107.5);
+  assert.equal(Number(due.authorizedDeductions), 0);
   const retried = await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/labour-payments/dues`, payload);
   assert.equal(retried.statusCode, 201);
   assert.equal(retried.json().due.id, due.id);
@@ -198,6 +198,12 @@ test("direct labour due accepts decimal SAR and a canonical historical labour ID
   assert.equal((await db.select().from(labourPaymentVouchers).where(eq(labourPaymentVouchers.linkedDueId, due.id))).length, 0);
   assert.equal((await db.select().from(labourAdvanceApplications).where(eq(labourAdvanceApplications.dueId, due.id))).length, 0);
   assert.equal((await db.select().from(labourAccountingEntries).where(eq(labourAccountingEntries.dueId, due.id))).length, 2);
+  await db.update(labourDues).set({ origin: "SETTLEMENT", settlementBasis: "ATTENDANCE", sourceRecordId: null, legacy: false }).where(eq(labourDues.id, due.id));
+  const visible = await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/labour-payments/dues?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}`);
+  assertIntegrationResponse(visible, 200, "list canonical attendance due");
+  assert.ok(visible.json().dues.some((row: { id: string }) => row.id === due.id));
+  const adminIntegrity = await request(alpha.token, "GET", `/v1/admin/labour-due-attendance-integrity?workspaceId=${alpha.workspaceId}&farmId=${alpha.farmId}&seasonId=${alpha.seasonId}`);
+  assert.equal(adminIntegrity.statusCode, 403);
   const invalid = await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/labour-payments/dues`, { ...payload, idempotencyKey: randomUUID(), agreedGrossAmount: "100.00", authorizedDeductions: "100.01" });
   assert.equal(invalid.statusCode, 400);
   assert.equal(invalid.json().errors.authorizedDeductions, "Deductions cannot exceed the agreed amount.");

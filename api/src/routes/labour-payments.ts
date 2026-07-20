@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
-import { requireUser } from "../auth.js";
+import { requireAdmin, requireUser } from "../auth.js";
 import { db } from "../db/client.js";
 import {
   accountTransactions,
@@ -15,6 +15,7 @@ import {
   labourDues,
   labourPaymentAllocations,
   labourPaymentVouchers,
+  labourWageSettlementCreateRequests,
   operationalRecords,
   userSessions,
 } from "../db/schema.js";
@@ -523,6 +524,92 @@ async function requireRequestScope(
 
 export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
   app.get(
+    "/v1/admin/labour-due-attendance-integrity",
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const query = contextSchema.extend({ workspaceId: z.string().uuid() }).safeParse(request.query);
+      if (!query.success) return reply.code(400).send({ message: "A valid workspace, farm, and season are required." });
+      const { workspaceId, farmId, seasonId } = query.data;
+      const result = await db.execute(sql`
+        WITH context_attendance AS (
+          SELECT * FROM operational_records
+          WHERE workspace_id=${workspaceId} AND farm_id=${farmId} AND season_id=${seasonId} AND entity_type='attendance'
+        ), valid_links AS (
+          SELECT s.attendance_record_id, s.due_id FROM labour_due_attendance_sources s
+          JOIN labour_dues d ON d.id=s.due_id
+          WHERE s.workspace_id=${workspaceId} AND s.farm_id=${farmId} AND s.season_id=${seasonId}
+            AND d.calculation_status='APPROVED' AND d.payment_status NOT IN ('VOIDED','CANCELLED')
+        )
+        SELECT
+          (SELECT count(*)::int FROM labour_due_attendance_sources s LEFT JOIN labour_dues d ON d.id=s.due_id WHERE s.workspace_id=${workspaceId} AND s.farm_id=${farmId} AND s.season_id=${seasonId} AND d.id IS NULL) AS links_missing_due,
+          (SELECT count(*)::int FROM context_attendance a LEFT JOIN valid_links v ON v.attendance_record_id=a.id WHERE v.due_id IS NULL AND (a.payload ? 'labourDueId' OR a.payload ? 'labourDueNumber')) AS consumed_without_due_link,
+          (SELECT count(*)::int FROM (SELECT d.id FROM labour_dues d LEFT JOIN labour_due_attendance_sources s ON s.due_id=d.id WHERE d.workspace_id=${workspaceId} AND d.farm_id=${farmId} AND d.season_id=${seasonId} AND d.settlement_basis='ATTENDANCE' AND d.calculation_status='APPROVED' GROUP BY d.id HAVING count(s.id)=0) missing) AS dues_without_attendance,
+          (SELECT count(*)::int FROM labour_wage_settlement_create_requests r LEFT JOIN operational_records o ON o.id=r.settlement_operational_record_id WHERE r.workspace_id=${workspaceId} AND r.farm_id=${farmId} AND r.season_id=${seasonId} AND r.state='completed' AND o.id IS NULL) AS completed_requests_missing_result,
+          (SELECT count(*)::int FROM labour_wage_settlement_create_requests r WHERE r.workspace_id=${workspaceId} AND r.farm_id=${farmId} AND r.season_id=${seasonId} AND r.state='pending' AND r.updated_at < now()-interval '15 minutes') AS abandoned_pending_requests,
+          (SELECT count(*)::int FROM labour_accounting_entries e LEFT JOIN labour_dues d ON d.id=e.due_id WHERE e.workspace_id=${workspaceId} AND e.farm_id=${farmId} AND e.season_id=${seasonId} AND e.due_id IS NOT NULL AND d.id IS NULL) AS accounting_missing_due,
+          (SELECT count(*)::int FROM labour_dues d WHERE d.workspace_id=${workspaceId} AND d.farm_id=${farmId} AND d.season_id=${seasonId} AND d.payment_status IN ('UNPAID','PARTIALLY_SETTLED','ON_HOLD') AND d.origin='SETTLEMENT' AND NOT d.legacy AND d.source_record_id IS NULL) AS canonical_attendance_dues
+      `);
+      const owners = await db.execute(sql`
+        SELECT d.id, d.due_number, d.payment_status, d.origin, d.settlement_basis,
+               d.gross_amount, d.workspace_id, d.farm_id, d.season_id, d.labour_group_id,
+               d.recipient_snapshot, d.idempotency_key, d.created_at,
+               count(DISTINCT s.id)::int AS attendance_count,
+               count(DISTINCT m.id)::int AS member_snapshot_count,
+               count(DISTINCT e.id)::int AS accounting_entry_count
+        FROM labour_dues d
+        LEFT JOIN labour_due_attendance_sources s ON s.due_id=d.id
+        LEFT JOIN labour_due_member_snapshots m ON m.due_id=d.id
+        LEFT JOIN labour_accounting_entries e ON e.due_id=d.id AND e.status='POSTED'
+        WHERE d.workspace_id=${workspaceId} AND d.farm_id=${farmId} AND d.season_id=${seasonId}
+          AND d.settlement_basis='ATTENDANCE'
+        GROUP BY d.id ORDER BY d.created_at DESC
+      `);
+      const createRequests = await db.select().from(labourWageSettlementCreateRequests).where(and(eq(labourWageSettlementCreateRequests.workspaceId, workspaceId), eq(labourWageSettlementCreateRequests.farmId, farmId), eq(labourWageSettlementCreateRequests.seasonId, seasonId)));
+      return { integrity: result.rows[0], attendanceDues: owners.rows, legacyCreateRequests: createRequests };
+    },
+  );
+
+  app.post(
+    "/v1/admin/labour-due-attendance-integrity/repair",
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const body = contextSchema.extend({ workspaceId: z.string().uuid() }).safeParse(request.body);
+      if (!body.success) return reply.code(400).send({ message: "A valid workspace, farm, and season are required." });
+      const { workspaceId, farmId, seasonId } = body.data;
+      const repaired = await db.transaction(async (tx) => {
+        const rows = await tx.execute(sql`
+          UPDATE operational_records a
+          SET payload=payload-'labourDueId'-'labourDueNumber'-'labourDueLockedAt', updated_at=now()
+          WHERE a.workspace_id=${workspaceId} AND a.farm_id=${farmId} AND a.season_id=${seasonId} AND a.entity_type='attendance'
+            AND (a.payload ? 'labourDueId' OR a.payload ? 'labourDueNumber')
+            AND NOT EXISTS (
+              SELECT 1 FROM labour_due_attendance_sources s JOIN labour_dues d ON d.id=s.due_id
+              WHERE s.attendance_record_id=a.id AND s.workspace_id=a.workspace_id
+                AND d.calculation_status='APPROVED' AND d.payment_status NOT IN ('VOIDED','CANCELLED')
+            )
+          RETURNING a.id
+        `);
+        const legacyRows = await tx.execute(sql`
+          UPDATE operational_records a
+          SET payload=payload-'linkedSettlementId'-'labourWageSettlementId'-'settlementDate', updated_at=now()
+          WHERE a.workspace_id=${workspaceId} AND a.farm_id=${farmId} AND a.season_id=${seasonId} AND a.entity_type='attendance'
+            AND (a.payload ? 'linkedSettlementId' OR a.payload ? 'labourWageSettlementId')
+            AND NOT EXISTS (
+              SELECT 1 FROM operational_records s
+              WHERE s.workspace_id=a.workspace_id AND s.entity_type='labourWageSettlement'
+                AND (s.client_record_id=coalesce(a.payload->>'linkedSettlementId',a.payload->>'labourWageSettlementId') OR s.id::text=coalesce(a.payload->>'linkedSettlementId',a.payload->>'labourWageSettlementId'))
+                AND s.payload->>'deletedAt' IS NULL
+                AND lower(coalesce(s.payload->>'status','posted')) NOT IN ('voided','deleted','reversed')
+            )
+          RETURNING a.id
+        `);
+        await tx.update(labourWageSettlementCreateRequests).set({ state: "failed", stage: "integrity_repair", safeToRetry: true, errorCode: "ABANDONED_REQUEST", message: "The abandoned request was released for retry." }).where(and(eq(labourWageSettlementCreateRequests.workspaceId, workspaceId), eq(labourWageSettlementCreateRequests.farmId, farmId), eq(labourWageSettlementCreateRequests.seasonId, seasonId), eq(labourWageSettlementCreateRequests.state, "pending"), sql`${labourWageSettlementCreateRequests.updatedAt} < now() - interval '15 minutes'`));
+        return rows.rows.length + legacyRows.rows.length;
+      });
+      return { repairedAttendanceCount: repaired, retryable: true };
+    },
+  );
+  app.get(
     "/v1/workspace/:workspaceId/labour-payments/dues",
     { preHandler: requireUser },
     async (request, reply) => {
@@ -605,6 +692,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
       const validRows = rows.filter(
         (row) =>
           row.origin !== "SETTLEMENT" ||
+          (!row.legacy && !row.sourceRecordId) ||
           (Boolean(row.sourceRecordId) &&
             activeSettlementSourceIds.has(row.sourceRecordId!)),
       );
@@ -711,32 +799,65 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
       const input = body.data;
       if (!(await requireRequestScope(request, reply, workspaceId, input.farmId, input.seasonId, "view"))) return;
       try {
-        const preview = await db.transaction((tx) => previewLabourWageSettlement(
-          tx,
-          workspaceId,
-          input.farmId,
-          input.seasonId,
-          input.fromDate,
-          input.toDate,
-          input.recordDate,
-          undefined,
-          input.recipientScope === "LABOUR_GROUP"
-            ? { settlementMode: "group", groupId: input.labourGroupId ?? undefined }
-            : { settlementMode: "individual", labourerId: input.labourerId ?? undefined },
-          { includeAdvances: false },
+        const selection = input.recipientScope === "LABOUR_GROUP"
+          ? { settlementMode: "group" as const, groupId: input.labourGroupId ?? undefined }
+          : { settlementMode: "individual" as const, labourerId: input.labourerId ?? undefined };
+        const unfiltered = await db.transaction((tx) => previewLabourWageSettlement(
+          tx, workspaceId, input.farmId, input.seasonId, input.fromDate, input.toDate,
+          input.recordDate, undefined, selection, { includeAdvances: false },
         ));
-        const locked = preview.sourceAttendanceIds.length
-          ? await db.select({ clientRecordId: operationalRecords.clientRecordId, payload: operationalRecords.payload })
-              .from(operationalRecords)
-              .where(and(eq(operationalRecords.workspaceId, workspaceId), inArray(operationalRecords.clientRecordId, preview.sourceAttendanceIds)))
-          : [];
-        const lockedIds = new Set(locked.filter((row) => Boolean(row.payload.labourDueId || row.payload.labourWageSettlementId)).map((row) => row.clientRecordId));
-        const eligibleRows = preview.includedLabourRows.filter((row) =>
-          locked.some((source) => !lockedIds.has(source.clientRecordId) && (source.payload.labourerId === row.labourerId || source.payload.labourId === row.labourerId)),
-        );
-        const eligibleAttendanceIds = preview.sourceAttendanceIds.filter((id) => !lockedIds.has(id));
-        const grossAmount = eligibleRows.reduce((sum, row) => sum + row.grossWage, 0);
-        return { preview: { ...preview, includedLabourRows: eligibleRows, includedLabourCount: eligibleRows.length, sourceAttendanceIds: eligibleAttendanceIds, grossWages: grossAmount, totalEarned: grossAmount, totalLabourCost: grossAmount, excludedAttendanceCount: lockedIds.size } };
+        const sourceIds = unfiltered.sourceAttendanceIds;
+        const ownershipRows = sourceIds.length ? await db.execute(sql`
+          SELECT s.attendance_client_record_id AS attendance_id,
+                 d.id::text AS owner_id, d.due_number AS owner_number,
+                 'LABOUR_DUE'::text AS owner_type, d.payment_status AS owner_status,
+                 d.work_from_date::text AS from_date, d.work_to_date::text AS to_date,
+                 d.gross_amount::text AS amount
+          FROM labour_due_attendance_sources s
+          JOIN labour_dues d ON d.id = s.due_id
+          WHERE s.workspace_id = ${workspaceId} AND s.farm_id = ${input.farmId}
+            AND s.season_id = ${input.seasonId}
+            AND s.attendance_client_record_id IN (${sql.join(sourceIds.map((id) => sql`${id}`), sql`, `)})
+            AND d.calculation_status = 'APPROVED'
+            AND d.payment_status NOT IN ('VOIDED', 'CANCELLED')
+          UNION ALL
+          SELECT a.client_record_id AS attendance_id,
+                 s.id::text AS owner_id,
+                 coalesce(s.payload->>'settlementNumber', s.client_record_id) AS owner_number,
+                 'HISTORICAL_SETTLEMENT'::text AS owner_type,
+                 coalesce(s.payload->>'status', 'posted') AS owner_status,
+                 s.payload->>'fromDate' AS from_date, s.payload->>'toDate' AS to_date,
+                 coalesce(s.payload->>'grossWagesEarned', s.payload->>'grossAmount', '0') AS amount
+          FROM operational_records a
+          JOIN operational_records s ON s.workspace_id = a.workspace_id
+            AND s.entity_type = 'labourWageSettlement'
+            AND (s.client_record_id = coalesce(a.payload->>'linkedSettlementId', a.payload->>'labourWageSettlementId')
+              OR s.id::text = coalesce(a.payload->>'linkedSettlementId', a.payload->>'labourWageSettlementId'))
+          WHERE a.workspace_id = ${workspaceId} AND a.farm_id = ${input.farmId}
+            AND a.season_id = ${input.seasonId} AND a.entity_type = 'attendance'
+            AND a.client_record_id IN (${sql.join(sourceIds.map((id) => sql`${id}`), sql`, `)})
+            AND s.payload->>'deletedAt' IS NULL
+            AND lower(coalesce(s.payload->>'status', 'posted')) NOT IN ('voided', 'deleted', 'reversed')
+        `) : { rows: [] };
+        const ownership = ownershipRows.rows as Array<Record<string, unknown>>;
+        const lockedIds = new Set(ownership.map((row) => String(row.attendance_id)));
+        const preview = lockedIds.size
+          ? await db.transaction((tx) => previewLabourWageSettlement(
+              tx, workspaceId, input.farmId, input.seasonId, input.fromDate, input.toDate,
+              input.recordDate, undefined, selection,
+              { includeAdvances: false, excludedAttendanceClientIds: lockedIds },
+            ))
+          : unfiltered;
+        const ownerMap = new Map<string, { ownerId: string; ownerNumber: string; ownerType: string; ownerStatus: string; fromDate: string | null; toDate: string | null; amount: number; attendanceCount: number }>();
+        for (const row of ownership) {
+          const key = `${row.owner_type}:${row.owner_id}`;
+          const current = ownerMap.get(key);
+          if (current) current.attendanceCount += 1;
+          else ownerMap.set(key, { ownerId: String(row.owner_id), ownerNumber: String(row.owner_number), ownerType: String(row.owner_type), ownerStatus: String(row.owner_status), fromDate: row.from_date ? String(row.from_date) : null, toDate: row.to_date ? String(row.to_date) : null, amount: Number(row.amount ?? 0), attendanceCount: 1 });
+        }
+        const flagged = sourceIds.length ? await db.select({ clientRecordId: operationalRecords.clientRecordId, payload: operationalRecords.payload }).from(operationalRecords).where(and(eq(operationalRecords.workspaceId, workspaceId), inArray(operationalRecords.clientRecordId, sourceIds))) : [];
+        const orphanedAttendanceCount = flagged.filter((row) => Boolean(row.payload.labourDueId || row.payload.labourWageSettlementId || row.payload.linkedSettlementId) && !lockedIds.has(row.clientRecordId)).length;
+        return { preview: { ...preview, excludedAttendanceCount: lockedIds.size, excludedOwners: [...ownerMap.values()], orphanedAttendanceCount } };
       } catch (error) {
         return reply.code(400).send({ message: error instanceof Error ? error.message : "Unable to calculate attendance wages." });
       }
@@ -840,7 +961,27 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             const sourceCheckStartedAt = performance.now();
             sourceRows = await tx.select({ id: operationalRecords.id, clientRecordId: operationalRecords.clientRecordId, payload: operationalRecords.payload }).from(operationalRecords).where(and(eq(operationalRecords.workspaceId, workspaceId), eq(operationalRecords.farmId, input.farmId), eq(operationalRecords.seasonId, input.seasonId), eq(operationalRecords.entityType, "attendance"), inArray(operationalRecords.clientRecordId, sourceAttendanceIds)));
             if (sourceRows.length !== sourceAttendanceIds.length) throw new Error("Some previewed attendance records are no longer available. Refresh the preview.");
-            if (sourceRows.some((row) => Boolean(row.payload.labourDueId || row.payload.labourWageSettlementId))) throw new Error("Some attendance records are already included in another due or settlement. Refresh the preview.");
+            const owned = await tx.execute(sql`
+              SELECT s.attendance_client_record_id
+              FROM labour_due_attendance_sources s
+              JOIN labour_dues d ON d.id = s.due_id
+              WHERE s.workspace_id = ${workspaceId}
+                AND s.attendance_client_record_id IN (${sql.join(sourceAttendanceIds.map((id) => sql`${id}`), sql`, `)})
+                AND d.calculation_status = 'APPROVED'
+                AND d.payment_status NOT IN ('VOIDED', 'CANCELLED')
+              UNION
+              SELECT a.client_record_id
+              FROM operational_records a
+              JOIN operational_records s ON s.workspace_id = a.workspace_id
+                AND s.entity_type = 'labourWageSettlement'
+                AND (s.client_record_id = coalesce(a.payload->>'linkedSettlementId', a.payload->>'labourWageSettlementId')
+                  OR s.id::text = coalesce(a.payload->>'linkedSettlementId', a.payload->>'labourWageSettlementId'))
+              WHERE a.workspace_id = ${workspaceId}
+                AND a.client_record_id IN (${sql.join(sourceAttendanceIds.map((id) => sql`${id}`), sql`, `)})
+                AND s.payload->>'deletedAt' IS NULL
+                AND lower(coalesce(s.payload->>'status', 'posted')) NOT IN ('voided', 'deleted', 'reversed')
+            `);
+            if (owned.rows.length) throw new Error("Some attendance records are already included in another due or settlement. Refresh the preview.");
             phases.sourceValidation = performance.now() - sourceCheckStartedAt;
           }
           const grossAmount = attendancePreview?.grossWages ?? input.agreedGrossAmount ?? 0;
@@ -956,10 +1097,14 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           return created!;
         });
         phases.transaction = performance.now() - transactionStartedAt;
+        const position = await db.transaction((tx) => loadLabourDuePosition(tx, due.id));
+        const responseDue = position
+          ? { ...due, ...position, due: undefined }
+          : { ...due, outstandingBalance: Math.max(Number(due.grossAmount) - Number(due.authorizedDeductions), 0), previousPayments: 0, advancesApplied: 0 };
         const total = performance.now() - requestStartedAt;
         reply.header("Server-Timing", Object.entries(phases).map(([name, duration]) => `${name};dur=${duration.toFixed(1)}`).concat(`total;dur=${total.toFixed(1)}`).join(", "));
         request.log.info({ event: "labour_due_create_timing", dueId: due.id, source: input.source, memberCount, attendanceCount, phases, totalMs: total, sqlShape: "fixed-set-based" });
-        return reply.code(201).send({ due, performance: { totalMs: total, transactionMs: phases.transaction, attendanceCount, memberCount, sqlShape: "fixed-set-based" } });
+        return reply.code(201).send({ due: responseDue, performance: { totalMs: total, transactionMs: phases.transaction, attendanceCount, memberCount, sqlShape: "fixed-set-based" } });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unable to create the labour due.";
         const recipientField = /labourer/i.test(message) ? "labourerId" : /group/i.test(message) ? "labourGroupId" : null;

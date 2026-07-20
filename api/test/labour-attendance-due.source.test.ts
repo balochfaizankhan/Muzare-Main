@@ -19,8 +19,29 @@ test("attendance and direct modes create the same canonical labour due", () => {
 
 test("attendance source locking is canonical and reversible", () => {
   assert.match(route, /jsonb_build_object\('labourDueId', \$\{created!\.id\}/);
-  assert.match(route, /row\.payload\.labourDueId \|\| row\.payload\.labourWageSettlementId/);
+  assert.match(route, /FROM labour_due_attendance_sources s/);
+  assert.match(route, /JOIN labour_dues d ON d\.id = s\.due_id/);
   assert.match(route, /payload = payload - 'labourDueId' - 'labourDueNumber' - 'labourDueLockedAt'/);
+});
+
+test("canonical attendance dues are visible without a legacy settlement source", () => {
+  assert.match(route, /\(!row\.legacy && !row\.sourceRecordId\)/);
+  assert.match(route, /"UNPAID",\s*"PARTIALLY_SETTLED",\s*"ON_HOLD"/);
+});
+
+test("used attendance reports its valid owner and orphan flags require repair", () => {
+  assert.match(route, /excludedOwners/);
+  assert.match(route, /orphanedAttendanceCount/);
+  assert.match(page, /View labour due/);
+  assert.match(page, /No eligible attendance remains for this period/);
+  assert.match(page, /preview\.grossWages <= 0/);
+});
+
+test("admin integrity repair is scoped and idempotently clears only ownerless due flags", () => {
+  assert.match(route, /\/v1\/admin\/labour-due-attendance-integrity/);
+  assert.match(route, /preHandler: requireAdmin/);
+  assert.match(route, /NOT EXISTS \([\s\S]*labour_due_attendance_sources/);
+  assert.match(route, /payload-'labourDueId'-'labourDueNumber'-'labourDueLockedAt'/);
 });
 
 test("group calculation includes the configured leader exactly once", () => {
