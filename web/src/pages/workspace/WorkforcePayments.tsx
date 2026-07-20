@@ -2522,7 +2522,7 @@ function ReviewSettleDialog({
         {
           farmId,
           seasonId,
-          advancePool: advanceTotal > 0 ? { amount: advanceTotal, idempotencyKey: poolIdempotencyKey.current } : null,
+          advancePool: advanceTotal > 0 ? { amount: advanceTotal, idempotencyKey: poolIdempotencyKey.current, settlementDate: today() } : null,
           advanceApplications: [],
           payment:
             cashNow > 0
@@ -2697,13 +2697,14 @@ function ReviewSettleDialog({
               ) : (
                 <div className="workforce-advance-pool">
                   <div className="workforce-advance-pool__summary">
-                    <div><span>Eligible for this due</span><strong>{money(advancePool.eligibleTotal)}</strong></div>
+                    <div><span>Total available for this due</span><strong>{money(advancePool.eligibleTotal)}</strong></div>
                     <div><span>Open advances</span><strong>{advancePool.eligibleOpenCount}</strong></div>
-                    <div><span>Group-level</span><strong>{money(advancePool.groupLevelAmount)}</strong></div>
-                    <div><span>Member-level</span><strong>{money(advancePool.memberLevelAmount)}</strong></div>
+                    <div><span>Available group advances</span><strong>{money(advancePool.groupLevelAmount)}</strong></div>
+                    <div><span>Available member advances</span><strong>{money(advancePool.memberLevelAmount)}</strong></div>
                     <div><span>Maximum applicable</span><strong>{money(advancePool.maximumApplicable)}</strong></div>
-                    <div><span>Global outstanding</span><strong>{money(advancePool.globalOutstanding)}</strong></div>
+                    <div><span>Farm-wide outstanding advances</span><strong>{money(advancePool.globalOutstanding)}</strong></div>
                   </div>
+                  <p className="workforce-advance-pool__note">Includes all outstanding advances for this group and its included members, regardless of the Labour Due work period.</p>
                   <label className="workforce-advance-pool__amount">
                     <span>Apply from advance pool</span>
                     <input type="number" min="0" max={advancePool.maximumApplicable} step="0.01" value={advanceAmount}
@@ -2726,6 +2727,17 @@ function ReviewSettleDialog({
                         </div>)}
                       </div>
                     ) : <p>No voucher allocation is proposed.</p>}
+                  </details>
+                  <details>
+                    <summary>Why are some advances excluded?</summary>
+                    <dl className="workforce-advance-pool__exclusions">
+                      <div><dt>Other groups</dt><dd>{money(advancePool.exclusionTotals.otherGroups)}</dd></div>
+                      <div><dt>Labourers outside this due</dt><dd>{money(advancePool.exclusionTotals.labourersOutsideDue)}</dd></div>
+                      <div><dt>Refunded or voided</dt><dd>{money(advancePool.exclusionTotals.refundedOrVoided)}</dd></div>
+                      <div><dt>Different farm or workspace</dt><dd>{money(advancePool.exclusionTotals.differentFinancialContext)}</dd></div>
+                      <div><dt>Posted after settlement date</dt><dd>{money(advancePool.exclusionTotals.postedAfterSettlementDate)}</dd></div>
+                      <div><dt>Unresolved ownership</dt><dd>{money(advancePool.exclusionTotals.unresolvedOwnership)}</dd></div>
+                    </dl>
                   </details>
                 </div>
               )}

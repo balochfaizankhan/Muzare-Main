@@ -32,10 +32,47 @@ test("member advances are capped to that member share before group advances", ()
       candidate({ voucherNumber: "GROUP", originalAmount: 200, voucherDate: "2026-02-01" }),
     ],
   });
-  assert.equal(plan.memberLevelAmount, 40);
+  assert.equal(plan.memberLevelAmount, 90);
   assert.equal(plan.groupLevelAmount, 200);
   assert.deepEqual(plan.allocations.map((row) => [row.ownership, row.proposedAmount]), [["MEMBER", 40], ["GROUP", 110]]);
-  assert.equal(plan.carriedForwardAmount, 90);
+  assert.equal(plan.carriedForwardAmount, 140);
+});
+
+test("advance dates outside the work period remain eligible up to settlement date", () => {
+  const plan = calculateLabourAdvancePool({
+    dueFinancialScopeKey: "group:g1", dueOutstandingAmount: 500, settlementDate: "2026-07-01",
+    memberPayableShares: [{ labourerId: "m1", amount: 500 }],
+    candidates: [
+      candidate({ voucherNumber: "BEFORE", voucherDate: "2026-03-01", originalAmount: 25 }),
+      candidate({ voucherNumber: "DURING", voucherDate: "2026-04-20", originalAmount: 30 }),
+      candidate({ voucherNumber: "AFTER_WORK", voucherDate: "2026-06-15", financialScopeKey: "individual:m1", labourerId: "m1", originalAmount: 35 }),
+    ],
+  });
+  assert.equal(plan.eligibleTotal, 90);
+  assert.deepEqual(plan.allocations.map((row) => row.voucherNumber), ["AFTER_WORK", "BEFORE", "DURING"]);
+});
+
+test("a genuinely backdated settlement excludes advances that did not yet exist", () => {
+  const plan = calculateLabourAdvancePool({
+    dueFinancialScopeKey: "group:g1", dueOutstandingAmount: 500, settlementDate: "2026-05-01",
+    candidates: [
+      candidate({ voucherDate: "2026-04-30", originalAmount: 40 }),
+      candidate({ voucherDate: "2026-05-02", originalAmount: 60 }),
+    ],
+  });
+  assert.equal(plan.eligibleTotal, 40);
+  assert.equal(plan.exclusionTotals.postedAfterSettlementDate, 60);
+});
+
+test("farm-wide outstanding reconciles to eligible and ownership exclusions", () => {
+  const candidates = [
+    candidate({ originalAmount: 50 }),
+    candidate({ financialScopeKey: "group:other", originalAmount: 20 }),
+    candidate({ financialScopeKey: "individual:outside", labourerId: "outside", originalAmount: 10 }),
+  ];
+  const plan = calculateLabourAdvancePool({ dueFinancialScopeKey: "group:g1", dueOutstandingAmount: 100, candidates });
+  const farmWide = candidates.reduce((sum, row) => sum + row.originalAmount - row.appliedAmount - row.refundedAmount, 0);
+  assert.equal(farmWide, plan.eligibleTotal + plan.exclusionTotals.otherGroups + plan.exclusionTotals.labourersOutsideDue);
 });
 
 test("refunds and prior applications reduce only the available balance", () => {

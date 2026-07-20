@@ -56,6 +56,7 @@ const contextSchema = z.object({
 });
 const advancePoolQuerySchema = contextSchema.extend({
   amount: z.coerce.number().min(0).optional(),
+  settlementDate: z.string().date().optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
 });
@@ -162,6 +163,7 @@ const settleSchema = contextSchema.extend({
   advancePool: z.object({
     amount: z.coerce.number().positive(),
     idempotencyKey: z.string().uuid(),
+    settlementDate: z.string().date().optional(),
   }).optional().nullable(),
   advanceApplications: z
     .array(
@@ -267,7 +269,7 @@ function dueMemberPayableShares(due: typeof labourDues.$inferSelect) {
   });
 }
 
-async function loadDueAdvancePool(tx: DbTransaction, due: typeof labourDues.$inferSelect, requestedAmount?: number) {
+async function loadDueAdvancePool(tx: DbTransaction, due: typeof labourDues.$inferSelect, requestedAmount?: number, settlementDate?: string) {
   const candidates = await tx.select({
     id: labourPaymentVouchers.id,
     voucherNumber: labourPaymentVouchers.voucherNumber,
@@ -275,6 +277,7 @@ async function loadDueAdvancePool(tx: DbTransaction, due: typeof labourDues.$inf
     createdAt: labourPaymentVouchers.createdAt,
     financialScopeKey: labourPaymentVouchers.financialScopeKey,
     labourerId: labourPaymentVouchers.labourerId,
+    labourGroupId: labourPaymentVouchers.labourGroupId,
     recipientSnapshot: labourPaymentVouchers.recipientSnapshot,
     originalAmount: labourPaymentVouchers.paymentAmount,
     appliedAmount: sql<number>`coalesce((select sum(a.amount) from labour_advance_applications a where a.advance_voucher_id = ${labourPaymentVouchers.id} and a.status = 'ACTIVE'), 0)::numeric`,
@@ -289,8 +292,19 @@ async function loadDueAdvancePool(tx: DbTransaction, due: typeof labourDues.$inf
   ));
   const normalized = candidates.map((row) => {
     const snapshot = row.recipientSnapshot as Record<string, unknown>;
+    const historicalLabourerId = row.labourerId
+      || (typeof snapshot.labourerId === "string" ? snapshot.labourerId : null)
+      || (typeof snapshot.advanceLabourerId === "string" ? snapshot.advanceLabourerId : null)
+      || (typeof snapshot.recipientLabourerId === "string" ? snapshot.recipientLabourerId : null);
+    const historicalGroupId = row.labourGroupId
+      || (typeof snapshot.labourGroupId === "string" ? snapshot.labourGroupId : null)
+      || (typeof snapshot.groupId === "string" ? snapshot.groupId : null);
     return {
       ...row,
+      labourerId: historicalLabourerId,
+      financialScopeKey: historicalGroupId && row.financialScopeKey.startsWith("legacy:") ? `group:${historicalGroupId}`
+        : historicalLabourerId && row.financialScopeKey.startsWith("legacy:") ? `individual:${historicalLabourerId}`
+        : row.financialScopeKey,
       recipientName: typeof snapshot.receivedByNameSnapshot === "string" ? snapshot.receivedByNameSnapshot
         : typeof snapshot.labourerName === "string" ? snapshot.labourerName
         : typeof snapshot.recipientName === "string" ? snapshot.recipientName : null,
@@ -303,6 +317,7 @@ async function loadDueAdvancePool(tx: DbTransaction, due: typeof labourDues.$inf
   const pool = calculateLabourAdvancePool({
     dueFinancialScopeKey: due.financialScopeKey,
     dueOutstandingAmount: (await loadLabourDuePosition(tx, due.id))?.outstandingBalance ?? 0,
+    settlementDate,
     memberPayableShares: due.recipientScope === "LABOUR_GROUP" ? dueMemberPayableShares(due) : [],
     candidates: normalized,
     requestedAmount,
@@ -1227,7 +1242,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
         eq(labourDues.seasonId, query.data.seasonId),
       )).limit(1);
       if (!due) return reply.code(404).send({ message: "Labour due was not found." });
-      const pool = await db.transaction((tx) => loadDueAdvancePool(tx, due, query.data.amount));
+      const pool = await db.transaction((tx) => loadDueAdvancePool(tx, due, query.data.amount, query.data.settlementDate ?? new Date().toISOString().slice(0, 10)));
       const start = (query.data.page - 1) * query.data.pageSize;
       const details = query.data.amount == null ? undefined : pool.allocations.slice(start, start + query.data.pageSize);
       return {
@@ -1242,6 +1257,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           proposedApplication: pool.proposedApplication,
           carriedForwardAmount: pool.carriedForwardAmount,
           proposedAllocationCount: pool.allocations.length,
+          exclusionTotals: pool.exclusionTotals,
         },
         ...(details ? { details, pageInfo: { page: query.data.page, pageSize: query.data.pageSize, totalCount: pool.allocations.length, hasMore: start + query.data.pageSize < pool.allocations.length } } : {}),
       };
@@ -1312,7 +1328,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           let requestedApplications = input.advanceApplications;
           let aggregatePlan: ReturnType<typeof calculateLabourAdvancePool> | null = null;
           if (input.advancePool) {
-            aggregatePlan = await loadDueAdvancePool(tx, position.due, input.advancePool.amount);
+            aggregatePlan = await loadDueAdvancePool(tx, position.due, input.advancePool.amount, input.advancePool.settlementDate ?? new Date().toISOString().slice(0, 10));
             if (input.advancePool.amount > aggregatePlan.maximumApplicable + 0.005)
               throw new Error("Advance application exceeds the eligible advance pool or current due balance.");
             if (Math.abs(aggregatePlan.proposedApplication - input.advancePool.amount) > 0.005)

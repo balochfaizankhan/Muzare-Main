@@ -8,8 +8,10 @@ const ui = readFileSync(new URL("../../web/src/pages/workspace/WorkforcePayments
 test("review uses a narrow aggregate endpoint and lazy allocation details", () => {
   assert.match(route, /dues\/:dueId\/advance-pool/);
   assert.match(route, /query\.data\.amount == null \? undefined/);
-  assert.match(ui, /Eligible for this due/);
+  assert.match(ui, /Total available for this due/);
   assert.match(ui, /View allocation details/);
+  assert.match(ui, /Why are some advances excluded\?/);
+  assert.match(ui, /regardless of the Labour Due work period/);
   assert.doesNotMatch(ui.slice(ui.indexOf("function ReviewSettleDialog")), /fetchAllLabourPaymentAdvances/);
   assert.doesNotMatch(ui.slice(ui.indexOf("function ReviewSettleDialog")), /advanceValues/);
 });

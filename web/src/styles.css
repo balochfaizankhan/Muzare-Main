@@ -17569,6 +17569,7 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 .workforce-advance-pool__summary div { display: grid; gap: 2px; min-width: 0; }
 .workforce-advance-pool__summary span,.workforce-advance-pool__amount > span,.workforce-advance-pool__carry span { color: #64748b; font-size: 9px; font-weight: 700; text-transform: uppercase; }
 .workforce-advance-pool__summary strong { color: #153c26; font-size: 13px; overflow-wrap: anywhere; }
+.workforce-advance-pool__note { background: #eef6ff; border-radius: 8px; color: #475569; font-size: 10px; line-height: 1.45; margin: 0; padding: 8px 9px; }
 .workforce-advance-pool__amount { display: grid; gap: 5px; }
 .workforce-advance-pool__amount input { background: #fff; border: 1px solid #cbd5e1; border-radius: 9px; font-size: 15px; font-weight: 750; min-height: 42px; padding: 8px 10px; width: 100%; }
 .workforce-advance-pool__quick-actions { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -17582,6 +17583,10 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 .workforce-advance-pool__details span { display: grid; gap: 2px; min-width: 0; }
 .workforce-advance-pool__details span:last-child { text-align: right; }
 .workforce-advance-pool__details small { color: #64748b; font-size: 9px; }
+.workforce-advance-pool__exclusions { display: grid; gap: 5px; margin: 8px 0 0; }
+.workforce-advance-pool__exclusions div { align-items: center; display: flex; justify-content: space-between; }
+.workforce-advance-pool__exclusions dt { color: #64748b; font-size: 10px; }
+.workforce-advance-pool__exclusions dd { color: #334155; font-size: 11px; font-weight: 700; margin: 0; }
 .workforce-payment-review-form { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .workforce-payment-review-form label { display: grid; gap: 5px; }
 .workforce-payment-review-form label span { color: #64748b; font-size: 10px; font-weight: 700; }
