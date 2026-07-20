@@ -1993,6 +1993,7 @@ export type LabourDueAdvancePool = {
   globalOutstanding: number; eligibleTotal: number; eligibleOpenCount: number;
   groupLevelAmount: number; memberLevelAmount: number; maximumApplicable: number;
   defaultApplyAmount: number; proposedApplication: number; carriedForwardAmount: number;
+  remainingAfterAdvances: number; allocationPreviewVersion: string;
   proposedAllocationCount: number;
   exclusionTotals: { otherGroups: number; labourersOutsideDue: number; refundedOrVoided: number; differentFinancialContext: number; postedAfterSettlementDate: number; unresolvedOwnership: number };
 };

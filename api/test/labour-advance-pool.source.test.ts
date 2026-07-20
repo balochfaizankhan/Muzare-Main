@@ -18,7 +18,7 @@ test("review uses a narrow aggregate endpoint and lazy allocation details", () =
 
 test("aggregate settlement retains voucher allocations and does not require a payment", () => {
   assert.match(route, /calculateLabourAdvancePool/);
-  assert.match(route, /allocationPolicy: "MEMBER_OLDEST_FIRST_THEN_GROUP_OLDEST_FIRST"/);
+  assert.match(route, /allocationPolicy: "GROUP_OLDEST_FIRST_THEN_MEMBER_OLDEST_FIRST"/);
   assert.match(route, /if \(input\.payment\)/);
   assert.match(route, /postLabourAdvanceApplicationJournal/);
 });

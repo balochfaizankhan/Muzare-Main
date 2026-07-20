@@ -1256,6 +1256,8 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           defaultApplyAmount: pool.maximumApplicable,
           proposedApplication: pool.proposedApplication,
           carriedForwardAmount: pool.carriedForwardAmount,
+          remainingAfterAdvances: pool.remainingAfterAdvances,
+          allocationPreviewVersion: pool.allocationPreviewVersion,
           proposedAllocationCount: pool.allocations.length,
           exclusionTotals: pool.exclusionTotals,
         },
@@ -1592,7 +1594,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
                 advancePool: input.advancePool ? {
                   idempotencyKey: input.advancePool.idempotencyKey,
                   requestedAmount: input.advancePool.amount,
-                  allocationPolicy: "MEMBER_OLDEST_FIRST_THEN_GROUP_OLDEST_FIRST",
+                  allocationPolicy: "GROUP_OLDEST_FIRST_THEN_MEMBER_OLDEST_FIRST",
                   allocations: aggregatePlan?.allocations.map((allocation) => ({ voucherId: allocation.id, amount: allocation.proposedAmount, order: allocation.allocationOrder, ownership: allocation.ownership })) ?? [],
                 } : null,
                 advanceApplications: requestedApplications,

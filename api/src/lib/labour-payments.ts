@@ -91,7 +91,7 @@ export function calculateLabourAdvancePool(input: {
   candidates: LabourAdvancePoolCandidate[];
   requestedAmount?: number;
 }) {
-  const memberCaps = new Map(input.memberPayableShares?.map((row) => [row.labourerId, minor(row.amount)]) ?? []);
+  const memberIds = new Set(input.memberPayableShares?.map((row) => row.labourerId) ?? []);
   const exclusions = { otherGroups: 0, labourersOutsideDue: 0, refundedOrVoided: 0, differentFinancialContext: 0, postedAfterSettlementDate: 0, unresolvedOwnership: 0 };
   const eligible = input.candidates.flatMap((candidate) => {
     const availableMinor = Math.max(minor(candidate.originalAmount) - minor(candidate.appliedAmount) - minor(candidate.refundedAmount), 0);
@@ -101,7 +101,7 @@ export function calculateLabourAdvancePool(input: {
       return [];
     }
     const isGroup = candidate.financialScopeKey === input.dueFinancialScopeKey;
-    const isMember = !isGroup && !!candidate.labourerId && memberCaps.has(candidate.labourerId);
+    const isMember = !isGroup && !!candidate.labourerId && memberIds.has(candidate.labourerId);
     if (!isGroup && !isMember) {
       if (candidate.financialScopeKey.startsWith("group:")) exclusions.otherGroups += availableMinor;
       else if (candidate.labourerId) exclusions.labourersOutsideDue += availableMinor;
@@ -110,44 +110,27 @@ export function calculateLabourAdvancePool(input: {
     }
     return [{ ...candidate, ownership: (isMember ? "MEMBER" : "GROUP") as "MEMBER" | "GROUP", availableMinor }];
   }).sort((left, right) => {
-    if (left.ownership !== right.ownership) return left.ownership === "MEMBER" ? -1 : 1;
+    if (left.ownership !== right.ownership) return left.ownership === "GROUP" ? -1 : 1;
     return left.voucherDate.localeCompare(right.voucherDate)
       || String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? ""))
       || left.id.localeCompare(right.id);
   });
 
-  const memberUsed = new Map<string, number>();
-  for (const candidate of eligible) if (candidate.ownership === "MEMBER" && candidate.labourerId) {
-    memberUsed.set(candidate.labourerId, (memberUsed.get(candidate.labourerId) ?? 0) + minor(candidate.appliedToDueAmount));
-  }
-  const memberEligible = new Map<string, number>();
   let groupLevelMinor = 0;
   let memberLevelMinor = 0;
   for (const candidate of eligible) {
     if (candidate.ownership === "GROUP") groupLevelMinor += candidate.availableMinor;
-    else if (candidate.labourerId) {
-      memberLevelMinor += candidate.availableMinor;
-      const remainingCap = Math.max((memberCaps.get(candidate.labourerId) ?? 0) - (memberUsed.get(candidate.labourerId) ?? 0) - (memberEligible.get(candidate.labourerId) ?? 0), 0);
-      memberEligible.set(candidate.labourerId, (memberEligible.get(candidate.labourerId) ?? 0) + Math.min(candidate.availableMinor, remainingCap));
-    }
+    else memberLevelMinor += candidate.availableMinor;
   }
-  const memberApplicableMinor = [...memberEligible.values()].reduce((sum, value) => sum + value, 0);
   const eligibleMinor = groupLevelMinor + memberLevelMinor;
-  const maximumMinor = Math.min(minor(input.dueOutstandingAmount), groupLevelMinor + memberApplicableMinor);
+  const maximumMinor = Math.min(minor(input.dueOutstandingAmount), eligibleMinor);
   const requestedMinor = input.requestedAmount == null ? maximumMinor : Math.min(Math.max(minor(input.requestedAmount), 0), maximumMinor);
   let remainingToAllocate = requestedMinor;
-  const memberAllocated = new Map<string, number>();
   const allocations: LabourAdvancePoolAllocation[] = [];
   for (const candidate of eligible) {
     if (remainingToAllocate <= 0) break;
-    let allowed = candidate.availableMinor;
-    if (candidate.ownership === "MEMBER" && candidate.labourerId) {
-      const cap = Math.max((memberCaps.get(candidate.labourerId) ?? 0) - (memberUsed.get(candidate.labourerId) ?? 0) - (memberAllocated.get(candidate.labourerId) ?? 0), 0);
-      allowed = Math.min(allowed, cap);
-    }
-    const applied = Math.min(allowed, remainingToAllocate);
+    const applied = Math.min(candidate.availableMinor, remainingToAllocate);
     if (!applied) continue;
-    if (candidate.ownership === "MEMBER" && candidate.labourerId) memberAllocated.set(candidate.labourerId, (memberAllocated.get(candidate.labourerId) ?? 0) + applied);
     remainingToAllocate -= applied;
     allocations.push({
       ...candidate,
@@ -165,6 +148,8 @@ export function calculateLabourAdvancePool(input: {
     maximumApplicable: major(maximumMinor),
     proposedApplication: major(requestedMinor - remainingToAllocate),
     carriedForwardAmount: major(eligibleMinor - (requestedMinor - remainingToAllocate)),
+    remainingAfterAdvances: major(Math.max(minor(input.dueOutstandingAmount) - (requestedMinor - remainingToAllocate), 0)),
+    allocationPreviewVersion: "GROUP_POOL_FIFO_V2",
     exclusionTotals: Object.fromEntries(Object.entries(exclusions).map(([key, value]) => [key, major(value)])) as Record<keyof typeof exclusions, number>,
     allocations,
   };
