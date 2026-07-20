@@ -32,6 +32,8 @@ import {
   fetchLabourPaymentVouchers,
   postLabourAdvanceVoucher,
   refundLabourAdvance,
+  updateLabourAdvanceVoucher,
+  deleteLabourAdvanceVoucher,
   setLabourDueHold,
   settleLabourPaymentDue,
   voidLabourPaymentVoucher,
@@ -1209,6 +1211,11 @@ function AdvancesView({
   const [groupMode, setGroupMode] = useState(false);
   const [selectedAdvance, setSelectedAdvance] =
     useState<LabourAdvancePosition | null>(null);
+  const [editingAdvance, setEditingAdvance] =
+    useState<LabourAdvancePosition | null>(null);
+  const [deleteAdvance, setDeleteAdvance] =
+    useState<LabourAdvancePosition | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [scope, setScope] = useState<LabourRecipientScope>("INDIVIDUAL");
   const [labourerId, setLabourerId] = useState("");
@@ -1257,8 +1264,23 @@ function AdvancesView({
     setTransactionReference("");
     idempotencyKey.current = uuid();
   }, []);
+  const populateAdvanceForm = useCallback((advance: LabourAdvancePosition) => {
+    setScope(advance.recipientScope);
+    setLabourerId(advance.recipientScope === "INDIVIDUAL" ? advance.labourerId ?? advance.financialOwnerId ?? "" : "");
+    setGroupId(advance.recipientScope === "LABOUR_GROUP" ? advance.labourGroupId ?? "" : "");
+    setReceivedByLabourerId(advance.receivedByLabourerId ?? "");
+    setReference(String(advance.recipientSnapshot.contractorReference ?? advance.recipientSnapshot.crewReference ?? advance.recipientSnapshot.batchIdentity ?? ""));
+    setRecipientName(String(advance.recipientSnapshot.manualRecipientName ?? ""));
+    setDate(advance.voucherDate);
+    setAmount(String(advance.originalAmount));
+    setAccountId(advance.paymentAccountId ?? "");
+    setMethod(advance.paymentMethod ?? "Cash");
+    setDescription(advance.description);
+    setTransactionReference(advance.transactionReference ?? "");
+  }, []);
   const openRecordAdvance = useCallback((deepAction = false) => {
     if (showForm) return;
+    setEditingAdvance(null);
     resetRecordAdvanceForm();
     const currentUrl = `${location.pathname}${location.search}${location.hash}`;
     if (deepAction) {
@@ -1274,8 +1296,18 @@ function AdvancesView({
     setShowForm(true);
     window.requestAnimationFrame(() => recipientScopeRef.current?.focus());
   }, [location.hash, location.pathname, location.search, resetRecordAdvanceForm, showForm]);
+  const openEditAdvance = useCallback((advance: LabourAdvancePosition) => {
+    setSelectedAdvance(null);
+    setEditingAdvance(advance);
+    populateAdvanceForm(advance);
+    window.history.pushState({ ...window.history.state, muzareRecordAdvance: true }, "", `${location.pathname}${location.search}${location.hash}`);
+    modalHistoryEntryRef.current = true;
+    setShowForm(true);
+    window.requestAnimationFrame(() => recipientScopeRef.current?.focus());
+  }, [location.hash, location.pathname, location.search, populateAdvanceForm]);
   const closeRecordAdvance = useCallback(() => {
     setShowForm(false);
+    setEditingAdvance(null);
     if (modalHistoryEntryRef.current) {
       modalHistoryEntryRef.current = false;
       window.history.back();
@@ -1462,10 +1494,9 @@ function AdvancesView({
           item.id ===
           (scope === "INDIVIDUAL" ? labourerId : receivedByLabourerId),
       );
-      const response = await postLabourAdvanceVoucher(token, workspaceId, {
+      const payload = {
         farmId,
         seasonId,
-        idempotencyKey: idempotencyKey.current,
         voucherDate: date,
         recipientScope: scope,
         labourerId: scope === "INDIVIDUAL" ? labourerId : null,
@@ -1487,10 +1518,17 @@ function AdvancesView({
         paymentMethod: method,
         transactionReference: transactionReference || null,
         description,
-      });
-      idempotencyKey.current = uuid();
+      };
+      const response = editingAdvance
+        ? await updateLabourAdvanceVoucher(token, workspaceId, editingAdvance.id, payload)
+        : await postLabourAdvanceVoucher(token, workspaceId, {
+            ...payload,
+            idempotencyKey: idempotencyKey.current,
+          });
+      if (!editingAdvance) idempotencyKey.current = uuid();
       closeRecordAdvance();
-      await onSaved(`Advance ${response.voucher.voucherNumber} posted successfully.`);
+      await onSaved(`Advance ${response.voucher.voucherNumber} ${editingAdvance ? "updated" : "posted"} successfully.`);
+      await loadPage(1, false);
     } catch (caught) {
       onError(
         caught instanceof Error
@@ -1544,6 +1582,21 @@ function AdvancesView({
       );
     } finally {
       setRefunding(false);
+    }
+  };
+  const submitDeleteAdvance = async () => {
+    if (!deleteAdvance || deleting) return;
+    setDeleting(true);
+    try {
+      const response = await deleteLabourAdvanceVoucher(token, workspaceId, deleteAdvance.id, farmId, seasonId);
+      setDeleteAdvance(null);
+      setSelectedAdvance(null);
+      await onSaved(`Advance ${response.result.voucherNumber} deleted.`);
+      await loadPage(1, false);
+    } catch (caught) {
+      onError(caught instanceof Error ? caught.message : "Unable to delete the advance.");
+    } finally {
+      setDeleting(false);
     }
   };
   const formatDate = (value: string) =>
@@ -1838,6 +1891,14 @@ function AdvancesView({
                 (advance.recipientScope === "INDIVIDUAL"
                   ? advance.financialOwnerName
                   : null);
+              const canModifyAdvance =
+                canManage &&
+                !advance.readOnlyLegacy &&
+                advance.status === "POSTED" &&
+                advance.appliedAmount <= 0 &&
+                advance.refundedAmount <= 0 &&
+                (advance.reversedAmount ?? 0) <= 0 &&
+                !advance.linkedDueId;
               return (
                 <article
                   key={advance.id}
@@ -1902,6 +1963,24 @@ function AdvancesView({
                       >
                         Details
                       </button>
+                      <details className="workforce-advance-actions-menu" onClick={(event) => event.stopPropagation()}>
+                        <summary>Actions</summary>
+                        <div>
+                          <button type="button" onClick={() => setSelectedAdvance(advance)}>
+                            View
+                          </button>
+                          {canModifyAdvance ? (
+                            <button type="button" onClick={() => openEditAdvance(advance)}>
+                              Edit
+                            </button>
+                          ) : null}
+                          {canModifyAdvance ? (
+                            <button type="button" className="danger-action" onClick={() => setDeleteAdvance(advance)}>
+                              Delete
+                            </button>
+                          ) : null}
+                        </div>
+                      </details>
                       {canManage &&
                       !advance.readOnlyLegacy &&
                       advance.status === "POSTED" ? (
@@ -1962,8 +2041,10 @@ function AdvancesView({
             <header>
               <div>
                 <span>Labour payment voucher</span>
-                <h2 id="record-advance-title">Record advance</h2>
-                <p>Record money paid before final settlement</p>
+                <h2 id="record-advance-title">
+                  {editingAdvance ? `Edit Advance Voucher · ${editingAdvance.displayVoucherNumber}` : "Record advance"}
+                </h2>
+                <p>{editingAdvance ? "Update an unused Labour Advance Voucher" : "Record money paid before final settlement"}</p>
               </div>
               <button
                 type="button"
@@ -2186,11 +2267,54 @@ function AdvancesView({
                   disabled={saving || !formValid}
                   type="submit"
                 >
-                  {saving ? "Posting…" : "Post advance"}
+                  {saving ? "Saving…" : editingAdvance ? "Update advance" : "Post advance"}
                 </button>
               </div>
             </footer>
           </form>
+        </div>
+      ) : null}
+      {deleteAdvance ? (
+        <div
+          className="worker-dialog-backdrop workforce-payment-review-backdrop"
+          role="presentation"
+          onClick={() => setDeleteAdvance(null)}
+        >
+          <section
+            className="workforce-payment-review workforce-advance-detail"
+            role="dialog"
+            aria-modal="true"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header>
+              <div>
+                <span>Delete advance voucher</span>
+                <h2>Delete Advance Voucher {deleteAdvance.displayVoucherNumber}?</h2>
+                <p>This permanently removes the unused advance and its partner-accounting effect.</p>
+              </div>
+              <button type="button" onClick={() => setDeleteAdvance(null)} aria-label="Close">
+                <X size={18} />
+              </button>
+            </header>
+            <div className="workforce-payment-review__body">
+              <dl className="workforce-payment-position">
+                <div><dt>Amount</dt><dd>{money(deleteAdvance.originalAmount)}</dd></div>
+                <div><dt>Recipient</dt><dd>{deleteAdvance.financialOwnerName ?? "Recipient unavailable"}</dd></div>
+                <div><dt>Funding partner/account</dt><dd>{deleteAdvance.paymentAccountName ?? "Account unavailable"}</dd></div>
+                <div><dt>Date</dt><dd>{formatDate(deleteAdvance.voucherDate)}</dd></div>
+              </dl>
+            </div>
+            <footer>
+              <div className="workforce-payment-review__actions">
+                <button className="secondary-action" type="button" onClick={() => setDeleteAdvance(null)}>
+                  Cancel
+                </button>
+                <button className="danger-action" type="button" disabled={deleting} onClick={() => void submitDeleteAdvance()}>
+                  {deleting ? "Deleting…" : "Delete advance"}
+                </button>
+              </div>
+            </footer>
+          </section>
         </div>
       ) : null}
       {refundAdvance ? (

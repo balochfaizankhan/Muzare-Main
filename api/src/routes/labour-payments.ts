@@ -243,6 +243,34 @@ const advanceSchema = contextSchema
         message: "Enter a stable recipient or crew reference.",
       });
   });
+const advanceEditSchema = contextSchema
+  .extend({
+    voucherDate: z.string().date(),
+    recipientScope: recipientScopeSchema,
+    labourerId: z.string().trim().min(1).max(200).optional().nullable(),
+    labourGroupId: z.string().trim().min(1).max(200).optional().nullable(),
+    receivedByLabourerId: z.string().trim().min(1).max(200).optional().nullable(),
+    receivedByNameSnapshot: z.string().trim().max(200).optional().nullable(),
+    contractorReference: z.string().trim().max(200).optional().nullable(),
+    crewReference: z.string().trim().max(200).optional().nullable(),
+    manualRecipientName: z.string().trim().max(200).optional().nullable(),
+    batchIdentity: z.string().trim().max(200).optional().nullable(),
+    amount: z.coerce.number().positive(),
+    paymentAccountId: z.string().min(1),
+    paymentMethod: z.string().trim().min(1).max(100).default("Cash"),
+    transactionReference: z.string().trim().max(200).optional().nullable(),
+    description: z.string().trim().min(1).max(500),
+  })
+  .superRefine((value, context) => {
+    if (value.recipientScope === "INDIVIDUAL" && !value.labourerId)
+      context.addIssue({ code: "custom", path: ["labourerId"], message: "Select a labourer for this advance." });
+    if (value.recipientScope === "LABOUR_GROUP" && !value.labourGroupId)
+      context.addIssue({ code: "custom", path: ["labourGroupId"], message: "Select a labour group for this advance." });
+    if (value.recipientScope === "LABOUR_GROUP" && !value.receivedByLabourerId)
+      context.addIssue({ code: "custom", path: ["receivedByLabourerId"], message: "Select the labourer who received this group advance." });
+    if (["CONTRACTOR_FOREMAN", "TEMPORARY_CREW", "UNREGISTERED_LABOUR", "NO_SPECIFIC_RECIPIENT"].includes(value.recipientScope) && !value.contractorReference && !value.crewReference && !value.batchIdentity)
+      context.addIssue({ code: "custom", path: ["recipientReference"], message: "Enter a stable recipient or crew reference." });
+  });
 const holdSchema = z.object({
   hold: z.boolean(),
   reason: z.string().trim().max(500).optional().nullable(),
@@ -606,6 +634,66 @@ async function insertAccountMovement(
     })
     .returning({ id: accountTransactions.id });
   return transaction!.id;
+}
+
+async function loadEditableAdvance(tx: DbTransaction, input: {
+  workspaceId: string;
+  farmId: string;
+  seasonId: string;
+  voucherId: string;
+}) {
+  const [advance] = await tx
+    .select()
+    .from(labourPaymentVouchers)
+    .where(
+      and(
+        eq(labourPaymentVouchers.id, input.voucherId),
+        eq(labourPaymentVouchers.workspaceId, input.workspaceId),
+        eq(labourPaymentVouchers.farmId, input.farmId),
+        eq(labourPaymentVouchers.seasonId, input.seasonId),
+      ),
+    )
+    .for("update")
+    .limit(1);
+  if (!advance || advance.nature !== "ADVANCE")
+    throw new Error("Labour Advance Voucher was not found.");
+  const [position] = await tx
+    .select({
+      appliedAmount: sql<number>`coalesce(sum(${labourAdvanceApplications.amount}) filter (where ${labourAdvanceApplications.status} = 'ACTIVE'), 0)::numeric`,
+      applicationCount: sql<number>`count(*) filter (where ${labourAdvanceApplications.status} = 'ACTIVE')::int`,
+    })
+    .from(labourAdvanceApplications)
+    .where(eq(labourAdvanceApplications.advanceVoucherId, advance.id));
+  const [refunds] = await tx
+    .select({
+      refundedAmount: sql<number>`coalesce(sum(${labourPaymentVouchers.paymentAmount}) filter (where ${labourPaymentVouchers.status} = 'POSTED' and ${labourPaymentVouchers.nature} = 'REFUND_RECOVERY'), 0)::numeric`,
+      refundCount: sql<number>`count(*) filter (where ${labourPaymentVouchers.status} = 'POSTED' and ${labourPaymentVouchers.nature} = 'REFUND_RECOVERY')::int`,
+    })
+    .from(labourPaymentVouchers)
+    .where(eq(labourPaymentVouchers.relatedAdvanceVoucherId, advance.id));
+  const [reversal] = await tx
+    .select({ id: labourPaymentVouchers.id })
+    .from(labourPaymentVouchers)
+    .where(
+      and(
+        eq(labourPaymentVouchers.reversalReference, advance.id),
+        eq(labourPaymentVouchers.status, "POSTED"),
+      ),
+    )
+    .limit(1);
+  if (
+    advance.status !== "POSTED" ||
+    advance.linkedDueId ||
+    Number(position?.appliedAmount ?? 0) > 0 ||
+    Number(position?.applicationCount ?? 0) > 0 ||
+    Number(refunds?.refundedAmount ?? 0) > 0 ||
+    Number(refunds?.refundCount ?? 0) > 0 ||
+    reversal
+  )
+    throw new Error("This advance has already been used and its financial details cannot be edited.");
+  if (advance.legacy && (!advance.accountTransactionId || advance.reconciliationStatus !== "RECONCILED"))
+    throw new Error("This legacy advance cannot be changed because its linked accounting effect is not uniquely identified.");
+  return advance;
 }
 
 async function requireRequestScope(
@@ -2191,6 +2279,188 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
                 ? error.message
                 : "Unable to post the labour advance.",
           });
+      }
+    },
+  );
+
+  app.patch(
+    "/v1/workspace/:workspaceId/labour-payments/advances/:voucherId",
+    { preHandler: requireUser },
+    async (request, reply) => {
+      const params = voucherParamsSchema.safeParse(request.params);
+      const body = advanceEditSchema.safeParse(request.body);
+      if (!params.success)
+        return reply.code(400).send({ message: "A valid Labour Advance Voucher is required." });
+      if (!body.success)
+        return reply.code(400).send({
+          message: "Check the highlighted advance fields.",
+          fields: Object.keys(body.error.flatten().fieldErrors),
+          details: body.error.flatten().fieldErrors,
+        });
+      const input = body.data;
+      if (!(await requireRequestScope(request, reply, params.data.workspaceId, input.farmId, input.seasonId, "edit"))) return;
+      try {
+        const voucher = await db.transaction(async (tx) => {
+          await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`${params.data.workspaceId}:${input.farmId}:${input.seasonId}:labour-payment-posting`}), 1)`);
+          const advance = await loadEditableAdvance(tx, {
+            workspaceId: params.data.workspaceId,
+            farmId: input.farmId,
+            seasonId: input.seasonId,
+            voucherId: params.data.voucherId,
+          });
+          const recipient = await loadRecipient(tx, params.data.workspaceId, input.farmId, { ...input, requireReceivedBy: true });
+          const account = await validatedAccount(tx, params.data.workspaceId, input.farmId, input.paymentAccountId);
+          if (advance.accountTransactionId) {
+            await tx.update(labourPaymentVouchers).set({ accountTransactionId: null }).where(eq(labourPaymentVouchers.id, advance.id));
+            await tx.delete(accountTransactions).where(eq(accountTransactions.id, advance.accountTransactionId));
+          }
+          await tx.delete(labourAccountingEntries).where(eq(labourAccountingEntries.voucherId, advance.id));
+          const [updated] = await tx
+            .update(labourPaymentVouchers)
+            .set({
+              voucherDate: input.voucherDate,
+              recipientScope: input.recipientScope,
+              financialScopeKey: recipient.financialScopeKey,
+              labourerId: input.recipientScope === "INDIVIDUAL" ? input.labourerId : null,
+              labourGroupId: input.recipientScope === "LABOUR_GROUP" ? input.labourGroupId : null,
+              recipientSnapshot: recipient.snapshot,
+              description: input.description,
+              paymentAmount: input.amount.toFixed(2),
+              paymentAccountId: account.id,
+              paymentMethod: input.paymentMethod,
+              transactionReference: input.transactionReference,
+              updatedAt: new Date(),
+              reconciliationStatus: "RECONCILED",
+            })
+            .where(eq(labourPaymentVouchers.id, advance.id))
+            .returning();
+          if (!updated) throw new Error("Unable to update the advance voucher.");
+          await postLabourVoucherJournal(tx, {
+            workspaceId: params.data.workspaceId,
+            farmId: input.farmId,
+            seasonId: input.seasonId,
+            voucherId: updated.id,
+            nature: "ADVANCE",
+            amount: input.amount,
+            accountType: account.accountType,
+            actorId: request.appUser!.id,
+          });
+          const accountTransactionId = await insertAccountMovement(tx, {
+            farmId: input.farmId,
+            seasonId: input.seasonId,
+            voucherId: updated.id,
+            voucherNumber: updated.voucherNumber,
+            voucherDate: input.voucherDate,
+            amount: input.amount,
+            account,
+            actorId: request.appUser!.id,
+          });
+          const [finalVoucher] = await tx
+            .update(labourPaymentVouchers)
+            .set({ accountTransactionId, updatedAt: new Date() })
+            .where(eq(labourPaymentVouchers.id, updated.id))
+            .returning();
+          if (advance.legacySourceRecordId) {
+            const [sourceRecord] = await tx
+              .select({ payload: operationalRecords.payload })
+              .from(operationalRecords)
+              .where(eq(operationalRecords.id, advance.legacySourceRecordId))
+              .limit(1);
+            await tx.update(operationalRecords).set({
+              payload: {
+                ...((sourceRecord?.payload as Record<string, unknown> | undefined) ?? {}),
+                id: updated.sourceId ?? advance.sourceId,
+                workspaceId: params.data.workspaceId,
+                farmId: input.farmId,
+                seasonId: input.seasonId,
+                labourerId: input.recipientScope === "INDIVIDUAL" ? input.labourerId ?? null : null,
+                labourGroupId: input.recipientScope === "LABOUR_GROUP" ? input.labourGroupId ?? null : null,
+                receivedByLabourerId: input.receivedByLabourerId ?? null,
+                receivedByNameSnapshot: recipient.snapshot.receivedByNameSnapshot,
+                labourGroupName: recipient.snapshot.labourGroupName,
+                recipientScope: input.recipientScope,
+                financialScopeKey: recipient.financialScopeKey,
+                recipientSnapshot: recipient.snapshot,
+                date: input.voucherDate,
+                amount: input.amount,
+                accountId: account.id,
+                sourceAccountName: account.name,
+                paymentMethod: input.paymentMethod,
+                notes: input.description,
+                status: "posted",
+                updatedAt: new Date().toISOString(),
+              },
+              clientUpdatedAt: new Date(),
+              updatedAt: new Date(),
+            }).where(eq(operationalRecords.id, advance.legacySourceRecordId));
+          }
+          await tx.insert(auditLogs).values({
+            workspaceId: params.data.workspaceId,
+            farmId: input.farmId,
+            userId: request.appUser!.id,
+            actorUserId: request.appUser!.id,
+            action: "labour_advance_updated",
+            entityType: "labour_payment_voucher",
+            entityId: advance.id,
+            beforeJson: advance as unknown as Record<string, unknown>,
+            afterJson: finalVoucher as unknown as Record<string, unknown>,
+          });
+          return finalVoucher!;
+        });
+        return { voucher };
+      } catch (error) {
+        return reply.code(409).send({ message: error instanceof Error ? error.message : "Unable to update the advance." });
+      }
+    },
+  );
+
+  app.delete(
+    "/v1/workspace/:workspaceId/labour-payments/advances/:voucherId",
+    { preHandler: requireUser },
+    async (request, reply) => {
+      const params = voucherParamsSchema.safeParse(request.params);
+      const query = contextSchema.safeParse(request.query);
+      if (!params.success || !query.success)
+        return reply.code(400).send({ message: "A valid Labour Advance Voucher is required." });
+      if (!(await requireRequestScope(request, reply, params.data.workspaceId, query.data.farmId, query.data.seasonId, "delete"))) return;
+      try {
+        const result = await db.transaction(async (tx) => {
+          await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`${params.data.workspaceId}:${query.data.farmId}:${query.data.seasonId}:labour-payment-posting`}), 1)`);
+          const advance = await loadEditableAdvance(tx, {
+            workspaceId: params.data.workspaceId,
+            farmId: query.data.farmId,
+            seasonId: query.data.seasonId,
+            voucherId: params.data.voucherId,
+          });
+          if (advance.accountTransactionId) {
+            await tx.update(labourPaymentVouchers).set({ accountTransactionId: null }).where(eq(labourPaymentVouchers.id, advance.id));
+            await tx.delete(accountTransactions).where(eq(accountTransactions.id, advance.accountTransactionId));
+          }
+          await tx.delete(labourAccountingEntries).where(eq(labourAccountingEntries.voucherId, advance.id));
+          await tx.delete(labourPaymentVouchers).where(eq(labourPaymentVouchers.id, advance.id));
+          if (advance.legacySourceRecordId) {
+            await tx.delete(operationalRecords).where(eq(operationalRecords.id, advance.legacySourceRecordId));
+          }
+          await tx.insert(auditLogs).values({
+            workspaceId: params.data.workspaceId,
+            farmId: query.data.farmId,
+            userId: request.appUser!.id,
+            actorUserId: request.appUser!.id,
+            action: "labour_advance_deleted",
+            entityType: "labour_payment_voucher",
+            entityId: advance.id,
+            beforeJson: advance as unknown as Record<string, unknown>,
+          });
+          return { deleted: true, voucherId: advance.id, voucherNumber: advance.voucherNumber };
+        });
+        return { result };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unable to delete the advance.";
+        return reply.code(409).send({
+          message: message.includes("financial details cannot be edited")
+            ? "This advance has already been used and cannot be deleted."
+            : message,
+        });
       }
     },
   );

@@ -2049,6 +2049,15 @@ export const postLabourAdvanceVoucher = (token: string, workspaceId: string, inp
   manualRecipientName?: string | null; batchIdentity?: string | null; amount: number; paymentAccountId: string;
   paymentMethod: string; transactionReference?: string | null; description: string;
 }) => apiRequest<{ voucher: LabourPaymentVoucherRecord }>(`/v1/workspace/${workspaceId}/labour-payments/advances`, { method: "POST", body: JSON.stringify(input) }, token, { debugLabel: "labour-advance-post" });
+export const updateLabourAdvanceVoucher = (token: string, workspaceId: string, voucherId: string, input: {
+  farmId: string; seasonId: string; voucherDate: string; recipientScope: LabourRecipientScope;
+  labourerId?: string | null; labourGroupId?: string | null; contractorReference?: string | null; crewReference?: string | null;
+  receivedByLabourerId?: string | null; receivedByNameSnapshot?: string | null;
+  manualRecipientName?: string | null; batchIdentity?: string | null; amount: number; paymentAccountId: string;
+  paymentMethod: string; transactionReference?: string | null; description: string;
+}) => apiRequest<{ voucher: LabourPaymentVoucherRecord }>(`/v1/workspace/${workspaceId}/labour-payments/advances/${voucherId}`, { method: "PATCH", body: JSON.stringify(input) }, token, { debugLabel: "labour-advance-update" });
+export const deleteLabourAdvanceVoucher = (token: string, workspaceId: string, voucherId: string, farmId: string, seasonId: string) =>
+  apiRequest<{ result: { deleted: boolean; voucherId: string; voucherNumber: string } }>(`/v1/workspace/${workspaceId}/labour-payments/advances/${voucherId}?${labourPaymentContextQuery(farmId, seasonId)}`, { method: "DELETE" }, token);
 export const refundLabourAdvance = (token: string, workspaceId: string, voucherId: string, input: { farmId: string; seasonId: string; payment: { idempotencyKey: string; voucherDate: string; amount: number; paymentAccountId: string; paymentMethod: string; transactionReference?: string | null; description?: string | null } }) =>
   apiRequest<{ voucher: LabourPaymentVoucherRecord }>(`/v1/workspace/${workspaceId}/labour-payments/advances/${voucherId}/refund`, { method: "POST", body: JSON.stringify(input) }, token);
 export const voidLabourPaymentVoucher = (token: string, workspaceId: string, voucherId: string, farmId: string, seasonId: string, input: { idempotencyKey: string; reason: string }) =>

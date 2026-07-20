@@ -1319,6 +1319,92 @@ test("individual due applies legacy-scoped advances resolved to the same laboure
   assert.equal((await db.select().from(labourAdvanceApplications).where(eq(labourAdvanceApplications.dueId, dueId))).length, 2);
 });
 
+test("unused Labour Advance Vouchers can be edited or deleted while used advances are blocked", async () => {
+  const labourerId = randomUUID();
+  const otherLabourerId = randomUUID();
+  const [oldPartner] = await db.insert(accounts).values({
+    farmId: tenant.farmId, name: `Old partner ${Date.now()}`, accountType: "partner", active: true,
+  }).returning({ id: accounts.id });
+  const [newPartner] = await db.insert(accounts).values({
+    farmId: tenant.farmId, name: `New partner ${Date.now()}`, accountType: "partner", active: true,
+  }).returning({ id: accounts.id });
+  assert.ok(oldPartner?.id);
+  assert.ok(newPartner?.id);
+  await db.insert(operationalRecords).values([
+    {
+      workspaceId: tenant.workspaceId, farmId: tenant.farmId, seasonId: tenant.seasonId,
+      clientRecordId: labourerId, entityType: "labourer", recordedBy: tenant.userId,
+      clientUpdatedAt: new Date(now), payload: { id: labourerId, name: "Editable Labourer", status: "ACTIVE" },
+    },
+    {
+      workspaceId: tenant.workspaceId, farmId: tenant.farmId, seasonId: tenant.seasonId,
+      clientRecordId: otherLabourerId, entityType: "labourer", recordedBy: tenant.userId,
+      clientUpdatedAt: new Date(now), payload: { id: otherLabourerId, name: "Moved Labourer", status: "ACTIVE" },
+    },
+  ]);
+  const createPayload = {
+    farmId: tenant.farmId, seasonId: tenant.seasonId, idempotencyKey: randomUUID(), voucherDate: "2026-06-01",
+    recipientScope: "INDIVIDUAL", labourerId, receivedByLabourerId: labourerId, receivedByNameSnapshot: "Editable Labourer",
+    amount: 100, paymentAccountId: oldPartner!.id, paymentMethod: "Partner", description: "Editable advance",
+  };
+  const created = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/advances`, createPayload);
+  assertIntegrationResponse(created, 201, "create editable LAV");
+  const voucher = created.json().voucher;
+  const originalId = voucher.id;
+  const originalNumber = voucher.voucherNumber;
+  const originalMovementId = voucher.accountTransactionId;
+  assert.ok(originalMovementId);
+
+  const edited = await request("PATCH", `/v1/workspace/${tenant.workspaceId}/labour-payments/advances/${originalId}`, {
+    farmId: tenant.farmId, seasonId: tenant.seasonId, voucherDate: "2026-06-02",
+    recipientScope: "INDIVIDUAL", labourerId: otherLabourerId, receivedByLabourerId: otherLabourerId, receivedByNameSnapshot: "Moved Labourer",
+    amount: 125, paymentAccountId: newPartner!.id, paymentMethod: "Partner", transactionReference: "EDIT-1", description: "Edited advance",
+  });
+  assertIntegrationResponse(edited, 200, "edit unused LAV");
+  assert.equal(edited.json().voucher.id, originalId);
+  assert.equal(edited.json().voucher.voucherNumber, originalNumber);
+  assert.equal(Number(edited.json().voucher.paymentAmount), 125);
+  assert.equal(edited.json().voucher.paymentAccountId, newPartner!.id);
+  assert.equal(edited.json().voucher.labourerId, otherLabourerId);
+  assert.notEqual(edited.json().voucher.accountTransactionId, originalMovementId);
+  assert.equal((await db.select().from(accountTransactions).where(eq(accountTransactions.id, originalMovementId))).length, 0);
+  let journal = await db.select().from(labourAccountingEntries).where(eq(labourAccountingEntries.voucherId, originalId));
+  assert.equal(journal.filter((row) => row.ledgerCode === "LABOUR_ADVANCE").reduce((sum, row) => sum + Number(row.debit) - Number(row.credit), 0), 125);
+  assert.equal(journal.filter((row) => row.ledgerCode === "PARTNER_PAYABLE").reduce((sum, row) => sum + Number(row.credit) - Number(row.debit), 0), 125);
+
+  const deleted = await request("DELETE", `/v1/workspace/${tenant.workspaceId}/labour-payments/advances/${originalId}?farmId=${tenant.farmId}&seasonId=${tenant.seasonId}`);
+  assertIntegrationResponse(deleted, 200, "delete unused LAV");
+  assert.equal((await db.select().from(labourPaymentVouchers).where(eq(labourPaymentVouchers.id, originalId))).length, 0);
+  assert.equal((await db.select().from(labourAccountingEntries).where(eq(labourAccountingEntries.voucherId, originalId))).length, 0);
+  assert.equal((await db.select().from(accountTransactions).where(eq(accountTransactions.referenceId, originalId))).length, 0);
+
+  const dueId = randomUUID();
+  await db.insert(labourDues).values({
+    id: dueId, workspaceId: tenant.workspaceId, farmId: tenant.farmId, seasonId: tenant.seasonId,
+    dueNumber: `LD-USED-ADV-${Date.now()}`, origin: "DIRECT", recipientScope: "INDIVIDUAL",
+    financialScopeKey: `individual:${labourerId}`, labourerId, recipientSnapshot: { labourerId, labourerName: "Used Labourer" },
+    description: "Used advance blocker", workFromDate: "2026-06-01", workToDate: "2026-06-01",
+    grossAmount: "25.00", idempotencyKey: randomUUID(), createdBy: tenant.userId,
+  });
+  const used = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/advances`, {
+    ...createPayload, idempotencyKey: randomUUID(), amount: 25, description: "Used advance",
+  });
+  assertIntegrationResponse(used, 201, "create used LAV");
+  const usedVoucher = used.json().voucher;
+  await db.insert(labourAdvanceApplications).values({
+    workspaceId: tenant.workspaceId, advanceVoucherId: usedVoucher.id, dueId, amount: "5.00", idempotencyKey: randomUUID(), status: "ACTIVE",
+  });
+  const blockedEdit = await request("PATCH", `/v1/workspace/${tenant.workspaceId}/labour-payments/advances/${usedVoucher.id}`, {
+    ...createPayload, amount: 30, paymentAccountId: newPartner!.id, description: "Blocked edit",
+  });
+  assert.equal(blockedEdit.statusCode, 409);
+  assert.match(blockedEdit.json().message, /already been used/i);
+  const blockedDelete = await request("DELETE", `/v1/workspace/${tenant.workspaceId}/labour-payments/advances/${usedVoucher.id}?farmId=${tenant.farmId}&seasonId=${tenant.seasonId}`);
+  assert.equal(blockedDelete.statusCode, 409);
+  assert.match(blockedDelete.json().message, /cannot be deleted/i);
+  assert.equal((await db.select().from(labourPaymentVouchers).where(eq(labourPaymentVouchers.id, usedVoucher.id))).length, 1);
+});
+
 test("cash, bank, and partner LPVs reconcile funding, payable, retry, and reversal atomically", async () => {
   const cases = [
     { accountType: "cash", transactionType: "debit", ledgerCode: "CASH_CONTROL" },

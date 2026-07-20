@@ -17503,6 +17503,14 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 .workforce-advance-card > footer { align-items: center; border-top: 1px solid #edf2ee; display: flex; gap: 8px; justify-content: space-between; padding-top: 6px; }
 .workforce-advance-card > footer > span { color: #64748b; font-size: 10px; max-width: 52%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workforce-advance-card > footer > div { align-items: center; display: flex; gap: 6px; }
+.workforce-advance-actions-menu { position: relative; }
+.workforce-advance-actions-menu summary { color: #166534; cursor: pointer; font-size: 11px; font-weight: 700; list-style: none; }
+.workforce-advance-actions-menu summary::-webkit-details-marker { display: none; }
+.workforce-advance-actions-menu > div { background: #fff; border: 1px solid #dce8df; border-radius: 8px; box-shadow: 0 14px 28px rgba(15, 23, 42, .14); display: grid; gap: 3px; min-width: 120px; padding: 6px; position: absolute; right: 0; top: calc(100% + 4px); z-index: 10; }
+.workforce-advance-actions-menu button { background: transparent; border: 0; border-radius: 6px; color: #1f3828; cursor: pointer; font-size: 12px; padding: 7px 8px; text-align: left; }
+.workforce-advance-actions-menu button:hover { background: #f1f7f3; }
+.danger-action { background: #fff5f5; border: 1px solid #fecaca; border-radius: 8px; color: #b91c1c; cursor: pointer; font-weight: 800; padding: 8px 11px; }
+.danger-action:disabled { cursor: not-allowed; opacity: .6; }
 .workforce-advance-link { background: transparent; border: 0; color: #166534; font-size: 11px; font-weight: 750; min-height: 34px; padding: 0 6px; }
 .workforce-advance-recover { min-height: 34px !important; padding: 0 10px !important; width: auto !important; }
 .workforce-advance-pagination { align-items: center; display: flex; gap: 10px; justify-content: space-between; padding: 4px 1px; }
