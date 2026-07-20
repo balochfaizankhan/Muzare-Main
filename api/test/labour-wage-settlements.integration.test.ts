@@ -11,6 +11,8 @@ import {
   farms,
   labourAccountingEntries,
   labourAdvanceApplications,
+  labourCleanupLogs,
+  labourCleanupTombstones,
   labourWageSettlementAdvanceAllocations,
   labourWageSettlementCreateRequests,
   labourDues,
@@ -139,6 +141,8 @@ after(async () => {
   await db.delete(accountTransactions).where(inArray(accountTransactions.farmId, [tenant.farmId]));
   await db.delete(labourWageSettlementCreateRequests).where(eq(labourWageSettlementCreateRequests.workspaceId, tenant.workspaceId));
   await db.delete(auditLogs).where(eq(auditLogs.workspaceId, tenant.workspaceId));
+  await db.delete(labourCleanupLogs).where(eq(labourCleanupLogs.workspaceId, tenant.workspaceId));
+  await db.delete(labourCleanupTombstones).where(eq(labourCleanupTombstones.workspaceId, tenant.workspaceId));
   await db.delete(operationalRecords).where(inArray(operationalRecords.workspaceId, ids));
   await db.delete(userSessions).where(eq(userSessions.userId, tenant.userId));
   await db.delete(accounts).where(eq(accounts.farmId, tenant.farmId));

@@ -278,9 +278,9 @@ async function buildCleanupPreview(tx:DbTransaction,workspaceId:string,farmId:st
   const linkedLegacyVoucherIds=settlements.map((row)=>text(row.payload.linkedVoucherId)).filter(Boolean);
   const legacyVoucherPredicates=[];
   if(linkedLegacyVoucherIds.length)legacyVoucherPredicates.push(inArray(operationalRecords.clientRecordId,linkedLegacyVoucherIds));
-  if(settlementIds.length)legacyVoucherPredicates.push(sql`${operationalRecords.payload}->>'settlementId' = ANY(${settlementIds}::text[])`);
+  if(settlementIds.length)legacyVoucherPredicates.push(inArray(sql`${operationalRecords.payload}->>'settlementId'`,settlementIds));
   const legacyVouchers=legacyVoucherPredicates.length?await tx.select().from(operationalRecords).where(and(eq(operationalRecords.workspaceId,workspaceId),eq(operationalRecords.entityType,"voucher"),or(...legacyVoucherPredicates))):[];
-  const linkedSourceRows=settlementIds.length?await tx.select().from(operationalRecords).where(and(eq(operationalRecords.workspaceId,workspaceId),inArray(operationalRecords.entityType,["attendance","labourEarning"]),sql`${operationalRecords.payload}->>'linkedSettlementId' = ANY(${settlementIds}::text[])`)):[];
+  const linkedSourceRows=settlementIds.length?await tx.select().from(operationalRecords).where(and(eq(operationalRecords.workspaceId,workspaceId),inArray(operationalRecords.entityType,["attendance","labourEarning"]),inArray(sql`${operationalRecords.payload}->>'linkedSettlementId'`,settlementIds))):[];
   const oldAllocations=settlements.length?await tx.select().from(labourWageSettlementAdvanceAllocations).where(inArray(labourWageSettlementAdvanceAllocations.settlementRecordId,settlements.map((row)=>row.id))):[];
   const createRequests=settlements.length?await tx.select().from(labourWageSettlementCreateRequests).where(and(eq(labourWageSettlementCreateRequests.workspaceId,workspaceId),inArray(labourWageSettlementCreateRequests.settlementOperationalRecordId,settlements.map((row)=>row.id)))):[];
   const dependencies:PreviewDependency[]=[

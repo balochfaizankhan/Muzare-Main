@@ -111,6 +111,9 @@ test("cleanup preview is null-safe and returns a classification for every select
   assert.match(route, /linkedDue:rowDues\[0\]\?\.dueNumber\?\?null/);
   assert.match(route, /blockers:rowBlocked/);
   assert.match(route, /preview\.targets\.length!==new Set/);
+  assert.match(route, /inArray\(sql`\$\{operationalRecords\.payload\}->>'settlementId'`,settlementIds\)/);
+  assert.match(route, /inArray\(sql`\$\{operationalRecords\.payload\}->>'linkedSettlementId'`,settlementIds\)/);
+  assert.doesNotMatch(route, /ANY\(\$\{settlementIds\}::text\[\]\)/);
 });
 
 test("preview and deletion have independent loading and error states", () => {
