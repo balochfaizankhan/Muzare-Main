@@ -1,23 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { Activity, ArrowLeft, ArrowRight, CalendarCheck, ChevronRight, ClipboardList, HandCoins, ReceiptText, WalletCards } from "lucide-react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { ArrowLeft, CalendarCheck, ChevronRight, HandCoins, ReceiptText, WalletCards } from "lucide-react";
 import { NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
-import { LabourSelectCombobox } from "../../components/LabourSelectCombobox";
-import { SearchInput } from "../../components/SearchInput";
 import { SubpageHeader } from "../../components/SubpageHeader";
 import { useAppBack } from "../../hooks/useAppBack";
-import { formatMoney } from "../../lib/format";
-import { getActiveLabourWageSettlements, outstandingLabourAdvances } from "../../lib/labourWageSettlements";
-import { canCreate, hasModulePermission } from "../../lib/permissions";
-import { getActiveFarmId, getActiveSeasonId, makeLocalRecord, offlineDb, workspaceRecords, type LabourEarning, type LabourPayment, type LabourWageSettlement, type Labourer, type WageRate } from "../../lib/offline-db";
-import { isActiveOperationalRecord } from "../../lib/operationalRecords";
-import { compareWageRates, getWageRateStatus } from "../../lib/wageRates";
-import { isLabourAvailableForEntry, sortWorkersForDisplay } from "../../lib/workerEligibility";
-import { persistOperationalRecord } from "../../services/syncService";
-
-const money = formatMoney;
-const today = () => new Date().toISOString().slice(0, 10);
-const monthStart = () => `${today().slice(0, 8)}01`;
+import { hasModulePermission } from "../../lib/permissions";
 
 function workforceQuery(searchParams: URLSearchParams) {
   const labourId = searchParams.get("labourId");
@@ -102,10 +89,9 @@ export function LabourPaymentsSectionLayout() {
     const allTabs = [
       { to: `/workspace/labour-payments/overview${query}`, label: "Payments Due", module: "wages" as const },
       { to: `/workspace/labour-payments/direct-due${query}`, label: "New Labour Due", module: "wages" as const },
+      { to: `/workspace/labour-payments/wage-rates${query}`, label: "Wage Rates", module: "wages" as const },
       { to: `/workspace/labour-payments/vouchers${query}`, label: "Payment Vouchers", module: "wages" as const },
       { to: `/workspace/labour-payments/advances${query}`, label: "Outstanding Advances", module: "wages" as const },
-      { to: `/workspace/labour-payments/legacy-earnings${query}`, label: "Legacy Earnings", module: "wages" as const },
-      { to: `/workspace/labour-payments/settlement-history${query}`, label: "Settlement History", module: "wages" as const },
     ];
     return allTabs.filter((tab) => !user || hasModulePermission(user, tab.module, "view", workspaceId));
   }, [query, user, workspaceId]);
@@ -119,335 +105,6 @@ export function LabourPaymentsSectionLayout() {
     >
       <Outlet />
     </WorkforceShell>
-  );
-}
-
-export function LabourPaymentsOverview() {
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const labourId = searchParams.get("labourId") ?? "";
-  const [labourers, setLabourers] = useState<Labourer[]>([]);
-  const [earnings, setEarnings] = useState<LabourEarning[]>([]);
-  const [rates, setRates] = useState<WageRate[]>([]);
-  const [settlements, setSettlements] = useState<LabourWageSettlement[]>([]);
-  const [advancesOutstanding, setAdvancesOutstanding] = useState(0);
-
-  const refresh = useCallback(async () => {
-    const [nextLabourers, nextEarnings, nextRates, nextSettlements, nextAdvances] = await Promise.all([
-      workspaceRecords(offlineDb.labourers),
-      workspaceRecords(offlineDb.labourEarnings, { includeDeleted: true }),
-      workspaceRecords(offlineDb.wageRates, { includeDeleted: true }),
-      workspaceRecords(offlineDb.labourWageSettlements, { includeDeleted: true }),
-      workspaceRecords(offlineDb.advances),
-    ]);
-    setLabourers(sortWorkersForDisplay(nextLabourers, { includeArchived: false }));
-    setEarnings(nextEarnings);
-    setRates(nextRates.sort(compareWageRates));
-    setSettlements(nextSettlements);
-    setAdvancesOutstanding(
-      outstandingLabourAdvances(
-        nextAdvances.filter((record) => isActiveOperationalRecord(record)),
-        getActiveLabourWageSettlements(nextSettlements),
-      ),
-    );
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-    const handle = () => void refresh();
-    window.addEventListener("muzare-data-refresh", handle);
-    window.addEventListener("muzare-local-data-change", handle);
-    return () => {
-      window.removeEventListener("muzare-data-refresh", handle);
-      window.removeEventListener("muzare-local-data-change", handle);
-    };
-  }, [refresh]);
-
-  const selectedLabourer = labourId ? labourers.find((labourer) => labourer.id === labourId) ?? null : null;
-  const pendingEarnings = earnings.filter((earning) => earning.status === "pending_settlement" && isActiveOperationalRecord(earning));
-  const activeRates = rates.filter((rate) => isActiveOperationalRecord(rate) && getWageRateStatus(rate, today()) === "active");
-  const recentSettlements = settlements.filter((settlement) => settlement.status === "posted" && isActiveOperationalRecord(settlement)).slice().sort((left, right) => right.settlementDate.localeCompare(left.settlementDate)).slice(0, 5);
-  const query = labourId ? `?labourId=${encodeURIComponent(labourId)}` : "";
-  const latestSettlement = recentSettlements[0] ?? null;
-  const recentActivity = useMemo(() => [
-    ...recentSettlements.map((settlement) => ({
-      id: `settlement:${settlement.id}`,
-      title: `Wage Settlement ${settlement.settlementNumber}`,
-      detail: `${settlement.fromDate} - ${settlement.toDate}`,
-      amount: settlement.expenseAmount,
-      date: settlement.settlementDate,
-    })),
-  ].sort((left, right) => right.date.localeCompare(left.date)).slice(0, 6), [recentSettlements]);
-
-  return (
-    <>
-      {selectedLabourer ? (
-        <section className="record-panel labour-payments-selected-panel">
-          <div className="labour-selected-card labour-payments-selected-card">
-            <div>
-              <span className="labour-selected-card__eyebrow">Selected labour</span>
-              <strong>{selectedLabourer.name}</strong>
-              <small>{selectedLabourer.group || "General"}</small>
-            </div>
-            <button type="button" className="secondary-button" onClick={() => navigate("/workspace/labour-payments/overview")}>Clear selection</button>
-          </div>
-        </section>
-      ) : null}
-      <section className="labour-payments-hero-card">
-        <div className="labour-payments-hero-card__header">
-          <div>
-            <span>Labour Balance</span>
-            <strong>{money(advancesOutstanding)}</strong>
-            <small>Outstanding Advances</small>
-          </div>
-          <div className="labour-payments-hero-card__icon">
-            <WalletCards size={22} />
-          </div>
-        </div>
-        <div className="labour-payments-hero-card__metrics">
-          <article>
-            <Activity size={15} />
-            <span>Pending Earnings</span>
-            <strong>{money(pendingEarnings.reduce((sum, earning) => sum + earning.amount, 0))}</strong>
-          </article>
-          <article>
-            <ReceiptText size={15} />
-            <span>Upcoming Settlements</span>
-            <strong>{recentSettlements.length}</strong>
-          </article>
-          <article>
-            <CalendarCheck size={15} />
-            <span>Last Settlement</span>
-            <strong>{latestSettlement ? money(latestSettlement.expenseAmount) : "-"}</strong>
-          </article>
-          <article>
-            <ClipboardList size={15} />
-            <span>Current Wage Rates</span>
-            <strong>{activeRates.length}</strong>
-          </article>
-        </div>
-        <button type="button" className="labour-payments-hero-card__link" onClick={() => navigate(`/workspace/labour-payments/wage-rates${query}`)}>
-          Manage wage rates <ArrowRight size={14} />
-        </button>
-      </section>
-      <section className="record-panel labour-payments-section-card">
-        <div className="advances-heading labour-payments-section-heading">
-          <h2>Quick Actions</h2>
-          <span>Start an advances or settlement workflow fast.</span>
-        </div>
-        <div className="labour-payments-quick-grid">
-          {[
-            { to: `/workspace/labour-payments/advances${query}`, icon: HandCoins, title: "Record Advance", detail: "Cash advance" },
-            { to: `/workspace/labour-payments/earnings${query}`, icon: ClipboardList, title: "Record Labour Earning", detail: "Task, bonus, or adjustment" },
-            { to: `/workspace/labour-payments/direct-due?source=attendance&scope=group`, icon: ReceiptText, title: "Create Attendance Due", detail: "Calculate a wage period" },
-          ].map((item) => (
-            <button key={item.to} type="button" className="labour-payments-quick-card" onClick={() => navigate(item.to)}>
-              <item.icon size={18} />
-              <strong>{item.title}</strong>
-              <span>{item.detail}</span>
-            </button>
-          ))}
-        </div>
-      </section>
-      <section className="reports-kpis labour-payments-kpis-grid">
-        <article><HandCoins size={16} /><span>Selected Labour</span><strong>{selectedLabourer ? selectedLabourer.name : "All labour"}</strong><small>{selectedLabourer?.group || "Workspace view"}</small></article>
-        <article><WalletCards size={16} /><span>Rate Coverage</span><strong>{activeRates.length}</strong><small>Active rate records</small></article>
-        <article><ReceiptText size={16} /><span>Settlement Register</span><strong>{recentSettlements.length}</strong><small>Latest posted periods</small></article>
-      </section>
-      <section className="record-panel labour-payments-section-card">
-        <div className="advances-heading labour-payments-section-heading">
-          <h2>Recent Activity</h2>
-          <span>{recentActivity.length ? "Settlements in one feed." : "Activity will appear here as soon as you post records."}</span>
-        </div>
-        {!recentActivity.length ? <p className="labour-payments-inline-empty">No activity yet.</p> : (
-          <div className="labour-payments-activity-list">
-            {recentActivity.map((item) => (
-              <article key={item.id} className="labour-payments-activity-item">
-                <div className="labour-payments-activity-item__icon labour-payments-activity-item__icon--settlement">
-                  <ReceiptText size={15} />
-                </div>
-                <div className="labour-payments-activity-item__copy">
-                  <strong>{item.title}</strong>
-                  <span>{item.detail}</span>
-                </div>
-                <div className="labour-payments-activity-item__meta">
-                  <small>{item.date}</small>
-                  <strong>{money(item.amount)}</strong>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
-    </>
-  );
-}
-
-export function DirectLabourPaymentsPage() {
-  const { user } = useAuth();
-  const workspaceId = user?.workspaceId ?? "";
-  const [searchParams] = useSearchParams();
-  const selectedLabourId = searchParams.get("labourId") ?? "";
-  const activeFarmId = getActiveFarmId();
-  const activeSeasonId = getActiveSeasonId();
-  const canManage = Boolean(user && workspaceId && canCreate(user, "workforce", workspaceId));
-
-  const [labourers, setLabourers] = useState<Labourer[]>([]);
-  const [payments, setPayments] = useState<LabourPayment[]>([]);
-  const [search, setSearch] = useState("");
-  const [from, setFrom] = useState(monthStart());
-  const [to, setTo] = useState(today());
-  const [entryDate, setEntryDate] = useState(today());
-  const [entryLabourerId, setEntryLabourerId] = useState(selectedLabourId);
-  const [amount, setAmount] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("Cash");
-  const [notes, setNotes] = useState("");
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const refresh = useCallback(async () => {
-    const [nextLabourers, nextPayments] = await Promise.all([
-      workspaceRecords(offlineDb.labourers, { includeDeleted: true }),
-      workspaceRecords(offlineDb.labourPayments, { includeDeleted: true }),
-    ]);
-    setLabourers(sortWorkersForDisplay(nextLabourers, { includeArchived: false }));
-    setPayments(nextPayments.sort((left, right) => right.date.localeCompare(left.date) || right.updatedAt.localeCompare(left.updatedAt)));
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-    const handle = () => void refresh();
-    window.addEventListener("muzare-data-refresh", handle);
-    window.addEventListener("muzare-local-data-change", handle);
-    return () => {
-      window.removeEventListener("muzare-data-refresh", handle);
-      window.removeEventListener("muzare-local-data-change", handle);
-    };
-  }, [refresh]);
-
-  useEffect(() => {
-    setEntryLabourerId(selectedLabourId);
-  }, [selectedLabourId]);
-
-  const labourById = useMemo(() => new Map(labourers.map((labourer) => [labourer.id, labourer])), [labourers]);
-  const filtered = useMemo(() => payments.filter((payment) => {
-    const labourer = labourById.get(payment.labourerId);
-    const term = search.trim().toLowerCase();
-    return isActiveOperationalRecord(payment)
-      && payment.date >= from
-      && payment.date <= to
-      && (!selectedLabourId || payment.labourerId === selectedLabourId)
-      && (!term || [labourer?.name, labourer?.group, payment.paymentMethod, payment.notes].join(" ").toLowerCase().includes(term));
-  }), [payments, labourById, search, from, to, selectedLabourId]);
-
-  const total = filtered.reduce((sum, payment) => sum + payment.amount, 0);
-  const recordableLabourers = useMemo(() => labourers.filter((labourer) => isLabourAvailableForEntry(labourer, entryDate)).sort((left, right) => left.name.localeCompare(right.name)), [entryDate, labourers]);
-  useEffect(() => {
-    if (entryLabourerId && !recordableLabourers.some((labourer) => labourer.id === entryLabourerId)) setEntryLabourerId("");
-  }, [entryLabourerId, recordableLabourers]);
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    setError("");
-    if (!canManage) {
-      setError("You have view-only access.");
-      return;
-    }
-    if (!workspaceId || !activeFarmId || !activeSeasonId) {
-      setError("Select an active farm and season before recording labour payments.");
-      return;
-    }
-    const numericAmount = Number(amount);
-    if (!entryLabourerId || !Number.isFinite(numericAmount) || numericAmount <= 0) {
-      setError("Select labour and enter a payment amount greater than zero.");
-      return;
-    }
-    setSaving(true);
-    try {
-      await persistOperationalRecord("labourPayment", {
-        ...makeLocalRecord(),
-        workspaceId,
-        farmId: activeFarmId,
-        seasonId: activeSeasonId,
-        labourerId: entryLabourerId,
-        date: entryDate,
-        amount: numericAmount,
-        paymentMethod,
-        notes: notes.trim() || undefined,
-      });
-      setAmount("");
-      setNotes("");
-      window.dispatchEvent(new CustomEvent("muzare-toast", { detail: "Labour payment recorded." }));
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to save labour payment.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <>
-      <section className="record-panel">
-        <div className="advances-heading">
-          <h2>Record Direct Payment</h2>
-          <span>Keep direct labour payouts under Workforce without mixing them into general operational expenses.</span>
-        </div>
-        <form className="module-form" onSubmit={(event) => void submit(event)}>
-          <div className="advances-filter-row">
-            <label className="advances-filter-field"><span>Date</span><input required type="date" value={entryDate} onChange={(event) => setEntryDate(event.target.value)} /></label>
-            <label className="advances-filter-field advances-filter-field--full"><span>Labour</span><LabourSelectCombobox ariaLabel="Labour" options={recordableLabourers} value={entryLabourerId} onChange={setEntryLabourerId} placeholder="Search labour" noResultsLabel="No matching labour found" renderOption={(option) => <div className="labour-combobox__option-content"><div className="labour-combobox__option-content-top"><strong>{option.name}</strong></div><div className="labour-combobox__option-meta"><span>{option.group || "General"}</span>{option.active === false ? <span>Inactive</span> : null}</div></div>} /></label>
-          </div>
-          <div className="advances-filter-row">
-            <label className="advances-filter-field"><span>Amount</span><input required type="number" min="0" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
-            <label className="advances-filter-field"><span>Payment method</span><select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}><option>Cash</option><option>Bank Transfer</option><option>Other</option></select></label>
-            <label className="advances-filter-field advances-filter-field--full"><span>Notes</span><input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional notes" /></label>
-          </div>
-          {error ? <p className="form-error">{error}</p> : null}
-          <button disabled={!canManage || saving} type="submit">{saving ? "Saving..." : "Record payment"}</button>
-        </form>
-      </section>
-      <section className="record-panel">
-        <div className="advances-heading">
-          <h2>Payment History</h2>
-          <span>{filtered.length} payments · {money(total)}</span>
-        </div>
-        <div className="advances-filter-grid">
-          <SearchInput placeholder="Search labour payments" value={search} onChange={setSearch} />
-          <label className="advances-filter-field"><span>From</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
-          <label className="advances-filter-field"><span>To</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
-        </div>
-        <div className="reports-kpis">
-          <article><span>Total Payments</span><strong>{money(total)}</strong></article>
-          <article><span>Transactions</span><strong>{filtered.length}</strong></article>
-          <article><span>Labour Paid</span><strong>{new Set(filtered.map((payment) => payment.labourerId)).size}</strong></article>
-        </div>
-        {!filtered.length ? <p className="empty-records">No direct labour payments match this filter yet.</p> : (
-          <div className="attendance-import-table-wrap report-wide-table">
-            <table className="report-data-table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Labour</th>
-                  <th>Method</th>
-                  <th>Amount</th>
-                  <th>Notes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((payment) => (
-                  <tr key={payment.id}>
-                    <td>{payment.date}</td>
-                    <td>{labourById.get(payment.labourerId)?.name ?? payment.labourerId}</td>
-                    <td>{payment.paymentMethod ?? "-"}</td>
-                    <td>{money(payment.amount)}</td>
-                    <td>{payment.notes || "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-    </>
   );
 }
 
@@ -506,7 +163,6 @@ export function WorkforceReportsHub() {
         { to: "/workspace/reports?report=attendance", title: "Attendance", detail: "Register, payable days, and totals", icon: CalendarCheck },
         { to: "/workspace/reports?report=advances", title: "Advances", detail: "Summary and log by labour", icon: HandCoins },
         { to: "/workspace/reports?report=wage-rates", title: "Wage Rates", detail: "Current, expired, and upcoming rates", icon: WalletCards },
-        { to: "/workspace/reports?report=labour-earnings", title: "Labour Earnings", detail: "Pending and settled earnings", icon: ClipboardList },
       ]}
     />
   );
@@ -516,12 +172,11 @@ export function LabourPaymentsReportsHub() {
   return (
     <WorkforceReportLinks
         title="Labour Payments Reports"
-        description="Keep labour-payment reporting grouped with advances, labour earnings, wage rates, settlements, and direct payments."
+        description="Keep labour-payment reporting grouped with advances, wage rates, Labour Dues, and payment vouchers."
         links={[
           { to: "/workspace/reports?report=advances", title: "Advance Report", detail: "Track advances, outstanding balances, and recent transactions.", icon: HandCoins },
           { to: "/workspace/reports?report=wage-rates", title: "Wage Rate Report", detail: "Audit active and historical wage-rate assignments.", icon: WalletCards },
-          { to: "/workspace/reports?report=labour-earnings", title: "Labour Earnings Report", detail: "Review pending, settled, and voided labour earnings entries.", icon: ClipboardList },
-          { to: "/workspace/labour-payments/settlements", title: "Settlement Register", detail: "Review the period-level wage settlement register and linked vouchers.", icon: ReceiptText },
+          { to: "/workspace/labour-payments/overview", title: "Payments Due", detail: "Review Labour Dues and settlement progress.", icon: ReceiptText },
         ]}
       />
     );

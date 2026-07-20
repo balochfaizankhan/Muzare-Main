@@ -13,7 +13,6 @@ import { calculateAccountBalance } from "../../lib/accounting";
 import { getCanonicalExpenseCategory } from "../../lib/expenseCategories";
 import { buildInclusiveDateKeys, chunkAttendanceDateKeys, formatLocalDateKey, normalizeDateKey } from "../../lib/dateOnly";
 import { formatMoney, formatNumber } from "../../lib/format";
-import { labourEarningScopeLabel, labourEarningTypeLabel, labourEarningsByScope, sumLabourEarnings } from "../../lib/labourEarnings";
 import { getActiveLabourWageSettlements, getCashAffectingVouchers, getGeneralExpenseVouchers, getLabourWageSettlementAdvanceOffset, getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher, outstandingLabourAdvances, totalSettledAdvances } from "../../lib/labourWageSettlements";
 import { translateExpenseCategory, translateExpenseSubcategory, translatePaymentType, translateSaleType, translateSalesStatus } from "../../lib/systemTranslations";
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
@@ -44,7 +43,6 @@ import {
   type Attendance,
   type Dispatch,
   type Labourer,
-  type LabourEarning,
   type PartnerEntry,
   type Sale,
   type Voucher,
@@ -56,7 +54,7 @@ import { compareWageRates, getWageRateStatus, normalizeHalfDayRate, summarizeAtt
 import { deleteOperationalRecord } from "../../services/syncService";
 import i18n from "../../i18n";
 
-type Report = "attendance" | "advances" | "labour-earnings" | "wage-rates" | "expenditures" | "sales" | "dispatch" | "partner-position" | "account-ledger";
+type Report = "attendance" | "advances" | "wage-rates" | "expenditures" | "sales" | "dispatch" | "partner-position" | "account-ledger";
 type SortOrder = "desc" | "asc";
 type SalesDateType = "saleDate" | "dispatchDate" | "deliveryDate" | "paymentDate" | "createdDate";
 type DispatchDateType = "dispatchDate" | "saleDate" | "createdDate";
@@ -64,7 +62,6 @@ type SalesTypeFilter = "all" | "dispatch_sale" | "farm_direct_sale";
 type ReportViewState = {
   attendance: "register" | "summary";
   advances: "summary" | "log";
-  "labour-earnings": "list";
   "wage-rates": "list";
   expenditures: "summary" | "log";
   sales: "list";
@@ -113,11 +110,10 @@ type AdvanceReportLabourSection = {
   records: Advance[];
 };
 
-const reportOptions: Report[] = ["attendance", "advances", "labour-earnings", "wage-rates", "expenditures", "sales", "dispatch", "partner-position", "account-ledger"];
+const reportOptions: Report[] = ["attendance", "advances", "wage-rates", "expenditures", "sales", "dispatch", "partner-position", "account-ledger"];
 const defaultViews: ReportViewState = {
   attendance: "register",
   advances: "summary",
-  "labour-earnings": "list",
   "wage-rates": "list",
   expenditures: "summary",
   sales: "list",
@@ -189,9 +185,6 @@ const salePaymentsReceived = (sale: Sale) => {
 const saleOutstanding = (sale: Sale) => Math.max(sale.amount - salePaymentsReceived(sale), 0);
 const expenseLabel = (category?: string | null, subcategory?: string | null) =>
   `${getCanonicalExpenseCategory(category ?? "")} / ${subcategory ? translateExpenseSubcategory(subcategory) : "-"}`;
-const labourEarningReportTargetLabel = (earning: LabourEarning, labourer: Labourer | undefined, groupName: string) =>
-  earning.earningScope === "group" ? groupName || earning.labourGroupName || "Labour earning" : labourer?.name || "Labour earning";
-
 type VoucherReportLine = {
   id: string;
   voucherId: string;
@@ -492,7 +485,6 @@ export function Reports() {
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
   const [advances, setAdvances] = useState<Advance[]>([]);
-  const [labourEarnings, setLabourEarnings] = useState<LabourEarning[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [wageRates, setWageRates] = useState<WageRate[]>([]);
   const [labourWageSettlements, setLabourWageSettlements] = useState<LabourWageSettlement[]>([]);
@@ -505,7 +497,6 @@ export function Reports() {
   const [selectedDispatchRecord, setSelectedDispatchRecord] = useState<DispatchReportRecord | null>(null);
   const [attendanceMoreFiltersOpen, setAttendanceMoreFiltersOpen] = useState(false);
   const [advanceMoreFiltersOpen, setAdvanceMoreFiltersOpen] = useState(false);
-  const [earningMoreFiltersOpen, setEarningMoreFiltersOpen] = useState(false);
   const reportTabRefs = useRef<Partial<Record<Report, HTMLButtonElement | null>>>({});
   useEffect(() => {
     if (normalizedRequestedReport && reportOptions.includes(normalizedRequestedReport)) {
@@ -536,19 +527,17 @@ export function Reports() {
       workspaceRecords(offlineDb.attendance),
       loadWorkspaceVouchers({ includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }),
       workspaceRecords(offlineDb.advances),
-      workspaceRecords(offlineDb.labourEarnings, { includeDeleted: true }),
       workspaceRecords(offlineDb.labourWageSettlements),
       workspaceRecords(offlineDb.wageRates, { includeDeleted: true }),
       workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }),
       workspaceRecords(offlineDb.partnerEntries),
       workspaceRecords(offlineDb.sales),
       workspaceRecords(offlineDb.dispatches),
-    ]).then(([nextLabourers, nextAttendance, nextVouchers, nextAdvances, nextLabourEarnings, nextSettlements, nextWageRates, nextAccounts, nextEntries, nextSales, nextDispatches]) => {
+    ]).then(([nextLabourers, nextAttendance, nextVouchers, nextAdvances, nextSettlements, nextWageRates, nextAccounts, nextEntries, nextSales, nextDispatches]) => {
       setLabourers(nextLabourers.sort(compareLabourers));
       setAttendance(nextAttendance);
       setVouchers(nextVouchers);
       setAdvances(nextAdvances);
-      setLabourEarnings(nextLabourEarnings);
       setLabourWageSettlements(nextSettlements);
       setWageRates(nextWageRates);
       setAccounts(nextAccounts);
@@ -656,7 +645,6 @@ export function Reports() {
     setDispatchDateType("dispatchDate");
     setAttendanceMoreFiltersOpen(false);
     setAdvanceMoreFiltersOpen(false);
-    setEarningMoreFiltersOpen(false);
   };
 
   useEffect(() => {
@@ -679,12 +667,11 @@ export function Reports() {
     setTo(todayKey());
   };
 
-  const labourFilterActive = (report === "attendance" || report === "advances" || report === "labour-earnings" || report === "wage-rates") && selectedLabourerIds.length > 0;
+  const labourFilterActive = (report === "attendance" || report === "advances" || report === "wage-rates") && selectedLabourerIds.length > 0;
   const filtered = Boolean(search || from || to || accountId || groupFilter || labourFilterActive || category || subcategory || status || amountMin || amountMax || buyerFilter || productFilter || vehicleFilter || paymentStatusFilter);
   const advancedFilterCount = useMemo(() => {
     if (report === "attendance") return Number(Boolean(groupFilter)) + Number(selectedLabourerIds.length > 0);
     if (report === "advances") return Number(Boolean(groupFilter)) + Number(selectedLabourerIds.length > 0) + Number(Boolean(accountId)) + Number(Boolean(amountMin)) + Number(Boolean(amountMax));
-    if (report === "labour-earnings") return Number(Boolean(groupFilter)) + Number(selectedLabourerIds.length > 0) + Number(Boolean(category)) + Number(Boolean(status)) + Number(Boolean(amountMin)) + Number(Boolean(amountMax));
     return 0;
   }, [accountId, amountMax, amountMin, category, groupFilter, report, selectedLabourerIds.length, status]);
   const switchReport = (next: Report) => {
@@ -1093,53 +1080,12 @@ export function Reports() {
       return { labourer, records, total, outstanding: payable - total };
     })
     .filter((item) => item.records.length > 0), [advanceRows, attendanceSummary, labourers]);
-  const labourEarningRows = useMemo(() => labourEarnings
-    .filter((item) => {
-      const labourer = item.labourerId ? labourById.get(item.labourerId) : null;
-      const groupName = item.labourGroupName ?? labourer?.group ?? "";
-      const normalizedStatus = item.status === "pending_settlement" ? "pending" : item.status;
-      const groupMatches = !groupFilter
-        || (groupFilter === ungroupedValue ? !groupName.trim() : groupName.trim() === groupFilter);
-      const labourerMatches = item.earningScope === "group"
-        ? selectedLabourerIds.length === 0
-        : matchesLabourFilter(item.labourerId ?? "");
-      return matchesGroup(labourer ?? undefined)
-        && groupMatches
-        && labourerMatches
-        && (!status || normalizedStatus === status)
-        && (!category || item.earningType === category)
-        && matches(item.earningDate, [labourer?.name ?? groupName, labourer?.group, item.description, item.notes, item.earningType], item.amount);
-    })
-    .sort((a, b) => b.earningDate.localeCompare(a.earningDate) || b.updatedAt.localeCompare(a.updatedAt)), [category, labourById, labourEarnings, labourName, matches, selectedLabourerIds, status, groupFilter, ungroupedValue]);
-  const labourEarningTotals = useMemo(() => labourEarningsByScope(labourEarningRows), [labourEarningRows]);
-  const labourEarningTypes = useMemo(
-    () => [...new Set(labourEarningRows.map((item) => item.earningType))].sort(),
-    [labourEarningRows],
-  );
   const labourGroupOptions = useMemo(() => labourGroups.map((group) => ({ value: group, label: group })), [labourGroups]);
   const reportLabourOptionsWithLabel = useMemo(
     () => reportLabourOptions.map((labourer) => ({ value: labourer.id, label: labourer.name, secondary: labourer.group || t("reportsPage.ungrouped") })),
     [reportLabourOptions, t],
   );
   const accountOptions = useMemo(() => accounts.map((account) => ({ value: account.id, label: account.name, secondary: account.type })), [accounts]);
-  const labourEarningTypeOptions = useMemo(() => labourEarningTypes.map((item) => ({ value: item, label: labourEarningTypeLabel(item) })), [labourEarningTypes]);
-  const labourEarningStatusOptions = useMemo(() => ([
-    { value: "pending", label: "Pending settlement" },
-    { value: "settled", label: "Settled" },
-    { value: "voided", label: "Voided" },
-  ]), []);
-  const labourEarningPending = useMemo(
-    () => labourEarningRows.filter((item) => isActiveOperationalRecord(item) && item.status === "pending_settlement"),
-    [labourEarningRows],
-  );
-  const labourEarningSettled = useMemo(
-    () => labourEarningRows.filter((item) => isActiveOperationalRecord(item) && item.status === "settled"),
-    [labourEarningRows],
-  );
-  const labourEarningVoided = useMemo(
-    () => labourEarningRows.filter((item) => !isActiveOperationalRecord(item) || item.status === "voided"),
-    [labourEarningRows],
-  );
   const activeSettlements = useMemo(
     () => getActiveLabourWageSettlements(labourWageSettlements)
       .filter((settlement) => !from || settlement.settlementDate >= from)
@@ -1692,18 +1638,6 @@ export function Reports() {
     }),
   ]);
   const exportAdvanceCsv = () => (views.advances === "summary" ? exportAdvanceSummaryCsv() : exportAdvanceDetailCsv());
-  const exportLabourEarnings = () => downloadCsv("labour-earnings.csv", [
-    [t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.type"), t("reportsPage.description"), t("reportsPage.amount"), t("reportsPage.status"), t("reportsPage.reference")],
-    ...labourEarningRows.map((item) => [
-      item.earningDate,
-      item.labourerId ? labourName(item.labourerId) : item.labourGroupName ?? "Labour group",
-      labourEarningTypeLabel(item.earningType),
-      item.description,
-      item.amount,
-      item.status,
-      item.linkedSettlementId ?? "-",
-    ]),
-  ]);
   const exportExpenseSummary = () => {
     const categoryTotals = [...new Set(voucherReportLineRows.map((item) => item.category))].map((name) => [translateExpenseCategory(name), voucherReportLineRows.filter((item) => item.category === name).reduce((sum, item) => sum + item.amount, 0)]);
     const accountTotals = [...new Set(voucherReportLineRows.map((item) => accountName(item.accountId)))].map((name) => [name, voucherReportLineRows.filter((item) => accountName(item.accountId) === name).reduce((sum, item) => sum + item.amount, 0)]);
@@ -1818,18 +1752,17 @@ export function Reports() {
             <button type="button" onClick={applyMonthRange}>{t("reportsPage.quickThisMonth")}</button>
             <button type="button" onClick={clearFilters}>{t("reportsPage.quickClear")}</button>
           </div>
-          {(report === "attendance" || report === "advances" || report === "labour-earnings") && <details className="reports-more-filters" open={report === "attendance" ? attendanceMoreFiltersOpen : report === "advances" ? advanceMoreFiltersOpen : earningMoreFiltersOpen}>
+          {(report === "attendance" || report === "advances") && <details className="reports-more-filters" open={report === "attendance" ? attendanceMoreFiltersOpen : advanceMoreFiltersOpen}>
             <summary onClick={(event) => {
               event.preventDefault();
               if (report === "attendance") setAttendanceMoreFiltersOpen((current) => !current);
-              else if (report === "advances") setAdvanceMoreFiltersOpen((current) => !current);
-              else setEarningMoreFiltersOpen((current) => !current);
+              else setAdvanceMoreFiltersOpen((current) => !current);
             }}>
               <span>More filters</span>
               {advancedFilterCount > 0 ? <b>{advancedFilterCount}</b> : null}
-              {(report === "attendance" ? attendanceMoreFiltersOpen : report === "advances" ? advanceMoreFiltersOpen : earningMoreFiltersOpen) ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+              {(report === "attendance" ? attendanceMoreFiltersOpen : advanceMoreFiltersOpen) ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
             </summary>
-            <div className={`reports-more-filters__body${report === "attendance" ? " reports-more-filters__body--attendance" : report === "advances" ? " reports-more-filters__body--advances" : " reports-more-filters__body--earnings"}`}>
+            <div className={`reports-more-filters__body${report === "attendance" ? " reports-more-filters__body--attendance" : " reports-more-filters__body--advances"}`}>
               {report === "attendance" && <>
                 <ResponsiveSelectField
                   ariaLabel={t("reportsPage.group")}
@@ -1887,60 +1820,6 @@ export function Reports() {
                   searchPlaceholder="Search accounts"
                   clearValue=""
                   options={accountOptions}
-                />
-                <label className="reports-filter-group">
-                  <span>Minimum Amount</span>
-                  <input aria-label={t("reportsPage.minimumAmount")} inputMode="decimal" placeholder={t("reportsPage.minimumAmount")} value={amountMin} onChange={(event) => setAmountMin(event.target.value)} />
-                </label>
-                <label className="reports-filter-group">
-                  <span>Maximum Amount</span>
-                  <input aria-label={t("reportsPage.maximumAmount")} inputMode="decimal" placeholder={t("reportsPage.maximumAmount")} value={amountMax} onChange={(event) => setAmountMax(event.target.value)} />
-                </label>
-              </>}
-              {report === "labour-earnings" && <>
-                <ResponsiveSelectField
-                  ariaLabel={t("reportsPage.group")}
-                  title="Select labour group"
-                  value={groupFilter}
-                  onChange={setGroupFilter}
-                  placeholder={t("reportsPage.allGroups")}
-                  allLabel={t("reportsPage.allGroups")}
-                  searchPlaceholder="Search groups"
-                  clearValue=""
-                  options={[...labourGroupOptions, { value: ungroupedValue, label: t("reportsPage.ungrouped") }]}
-                />
-                <ResponsiveMultiSelectField
-                  ariaLabel={t("reportsPage.labour")}
-                  title="Select labour"
-                  selectedIds={selectedLabourerIds}
-                  onChange={setSelectedLabourerIds}
-                  placeholder={t("common.allLabour")}
-                  allLabel={t("reportsPage.allLabour")}
-                  searchPlaceholder="Search labour"
-                  noResultsLabel={t("common.noMatchingLabour")}
-                  options={reportLabourOptionsWithLabel}
-                />
-                <ResponsiveSelectField
-                  ariaLabel={t("reportsPage.type")}
-                  title="Select earnings type"
-                  value={category}
-                  onChange={setCategory}
-                  placeholder="All types"
-                  allLabel="All types"
-                  searchPlaceholder="Search types"
-                  clearValue=""
-                  options={labourEarningTypeOptions}
-                />
-                <ResponsiveSelectField
-                  ariaLabel={t("reportsPage.status")}
-                  title="Select status"
-                  value={status}
-                  onChange={setStatus}
-                  placeholder={t("reportsPage.allStatuses")}
-                  allLabel={t("reportsPage.allStatuses")}
-                  searchPlaceholder="Search status"
-                  clearValue=""
-                  options={labourEarningStatusOptions}
                 />
                 <label className="reports-filter-group">
                   <span>Minimum Amount</span>
@@ -2210,47 +2089,6 @@ export function Reports() {
           </div>
         </section>
       </>}
-
-      {report === "labour-earnings" && <ReportShell title="Labour Earnings Report" rangeLabel={rangeLabel} sectionId="labour-earnings" onPrint={() => printSection("labour-earnings")} onExport={exportLabourEarnings}>
-        <Kpis values={[
-          ["Individual earnings", money(labourEarningTotals.individual)],
-          ["Group earnings", money(labourEarningTotals.group)],
-          ["Pending earnings", money(sumLabourEarnings(labourEarningPending))],
-          ["Settled earnings", money(sumLabourEarnings(labourEarningSettled))],
-          ["Voided earnings", money(sumLabourEarnings(labourEarningVoided))],
-          ["Entries", labourEarningRows.length],
-        ]} />
-        <ReportTable
-          empty={t("reportsPage.noRecords")}
-          columns={[t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.type"), t("reportsPage.description"), t("reportsPage.amount"), t("reportsPage.status"), t("reportsPage.reference")]}
-          rows={labourEarningRows.map((item) => {
-            const labourer = item.labourerId ? labourById.get(item.labourerId) : undefined;
-            const groupName = item.labourGroupName ?? labourer?.group ?? "";
-            return {
-              id: item.id,
-              title: labourEarningReportTargetLabel(item, labourer, groupName),
-              value: money(item.amount),
-              meta: `${item.earningDate} · ${labourEarningScopeLabel(item)} · ${labourEarningTypeLabel(item.earningType)}`,
-              cells: [
-                item.earningDate,
-                labourEarningReportTargetLabel(item, labourer, groupName),
-                labourEarningTypeLabel(item.earningType),
-                item.description,
-                money(item.amount),
-                item.status === "pending_settlement" ? "Pending settlement" : item.status === "settled" ? "Settled" : item.status === "voided" ? "Voided" : "Cancelled",
-                item.linkedSettlementId ?? "-",
-              ],
-              details: [
-                [t("reportsPage.notes"), item.notes || "No notes"],
-                [t("reportsPage.reference"), item.linkedSettlementId ?? "-"],
-                [t("reportsPage.status"), item.status],
-                ["Scope", labourEarningScopeLabel(item)],
-              ],
-              onOpen: () => navigate("/workspace/labour-payments/earnings"),
-            };
-          })}
-        />
-      </ReportShell>}
 
       {report === "wage-rates" && <ReportShell title={t("wageRatesPage.reportTitle")} rangeLabel={rangeLabel} sectionId="wage-rates" onPrint={() => printSection("wage-rates")} onExport={() => downloadCsv("wage-rates.csv", [
         [t("reportsPage.labour"), t("wageRatesPage.effectiveFrom"), t("wageRatesPage.effectiveTo"), t("wageRatesPage.dailyRate"), t("wageRatesPage.halfDayRate"), t("common.status")],

@@ -29,12 +29,9 @@ const Attendance = lazy(async () => ({ default: (await import("./pages/workspace
 const Dispatch = lazy(async () => ({ default: (await import("./pages/workspace/Dispatch")).Dispatch }));
 const Expenses = lazy(async () => ({ default: (await import("./pages/workspace/Expenses")).Expenses }));
 const Inventory = lazy(async () => ({ default: (await import("./pages/workspace/Inventory")).Inventory }));
-const LabourAdvances = lazy(async () => ({ default: (await import("./pages/workspace/LabourAdvances")).LabourAdvances }));
-const LabourEarnings = lazy(async () => ({ default: (await import("./pages/workspace/LabourEarnings")).LabourEarnings }));
 const LabourPaymentsReportsHub = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).LabourPaymentsReportsHub }));
 const LabourPaymentsSectionLayout = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).LabourPaymentsSectionLayout }));
 const WorkforcePaymentsPage = lazy(async () => ({ default: (await import("./pages/workspace/WorkforcePayments")).WorkforcePaymentsPage }));
-const LabourReconciliationPage = lazy(async () => ({ default: (await import("./pages/workspace/LabourReconciliation")).LabourReconciliationPage }));
 const WageRates = lazy(async () => ({ default: (await import("./pages/workspace/WageRates")).WageRates }));
 const WorkforceReportsHub = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).WorkforceReportsHub }));
 const WorkforceSectionLayout = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).WorkforceSectionLayout }));
@@ -182,14 +179,14 @@ export default function App() {
         <Route path="overview" element={routeElement(<WorkforcePaymentsPage />, "Loading payments due")} />
         <Route path="payments-due" element={<Navigate to="/workspace/labour-payments/overview" replace />} />
         <Route path="direct-due" element={routeElement(<WorkforcePaymentsPage />, "Loading direct labour due")} />
+        <Route path="wage-rates" element={routeElement(<WageRates />, "Loading wage rates")} />
         <Route path="vouchers" element={routeElement(<WorkforcePaymentsPage />, "Loading Labour Payment Vouchers")} />
         <Route path="advances" element={routeElement(<WorkforcePaymentsPage />, "Loading outstanding advances")} />
-        <Route path="legacy-earnings" element={routeElement(<LabourReconciliationPage />, "Loading legacy earnings")} />
-        <Route path="settlement-history" element={routeElement(<LabourReconciliationPage />, "Loading settlement history")} />
-        <Route path="legacy-advances" element={routeElement(<LabourAdvances />, "Loading legacy advances")} />
-        <Route path="wage-rates" element={routeElement(<WageRates />, "Loading wage rates")} />
-        <Route path="earnings" element={routeElement(<LabourEarnings />, "Loading labour work")} />
-        <Route path="labour-work" element={<Navigate to="/workspace/labour-payments/earnings" replace />} />
+        <Route path="legacy-earnings" element={<Navigate to="/workspace/labour-payments/direct-due" replace />} />
+        <Route path="settlement-history" element={<Navigate to="/workspace/labour-payments/vouchers" replace />} />
+        <Route path="legacy-advances" element={<Navigate to="/workspace/labour-payments/advances" replace />} />
+        <Route path="earnings" element={<Navigate to="/workspace/labour-payments/direct-due" replace />} />
+        <Route path="labour-work" element={<Navigate to="/workspace/labour-payments/direct-due" replace />} />
         <Route path="direct-payments" element={<Navigate to="/workspace/labour-payments/overview" replace />} />
         <Route path="settlements" element={<Navigate to="/workspace/labour-payments/direct-due?source=attendance&scope=group" replace />} />
         <Route path="settlement" element={<Navigate to="/workspace/labour-payments/direct-due?source=attendance&scope=group" replace />} />
@@ -202,7 +199,7 @@ export default function App() {
       <Route path="attendance" element={<Navigate to="/workspace/workforce/attendance" replace />} />
       <Route path="advances" element={<Navigate to="/workspace/labour-payments/advances" replace />} />
       <Route path="labour-advances" element={<Navigate to="/workspace/labour-payments/advances" replace />} />
-      <Route path="labour-earnings" element={<Navigate to="/workspace/labour-payments/earnings" replace />} />
+      <Route path="labour-earnings" element={<Navigate to="/workspace/labour-payments/direct-due" replace />} />
       <Route path="wage-rates" element={<Navigate to="/workspace/labour-payments/wage-rates" replace />} />
       <Route path="wage-settlements" element={<Navigate to="/workspace/labour-payments/direct-due?source=attendance&scope=group" replace />} />
       <Route path="activity" element={routeElement(<ActivityLog />, "Loading activity log")} />
@@ -221,7 +218,7 @@ export default function App() {
       <Route path="partner-ledger" element={routeElement(<ModulePage module="partnerLedger" />, "Loading partner ledger")} />
     </Route>
     <Route path="/debug/accounting-reconciliation" element={<RequireAuth>{routeElement(<WorkspaceAccountingReconciliationDebug />, "Loading accounting reconciliation trace")}</RequireAuth>} />
-    {["workforce", "advances", "labour-earnings", "wage-rates", "wage-settlements", "expenses", "sales", "dispatch", "inventory", "accounts", "partner-ledger", "farms", "seasons"].map((path) =>
+    {["workforce", "advances", "wage-rates", "wage-settlements", "expenses", "sales", "dispatch", "inventory", "accounts", "partner-ledger", "farms", "seasons"].map((path) =>
       <Route key={path} path={`/${path}`} element={<Navigate to={`/workspace/${path === "workforce" ? "workforce/labour" : path}`} replace />} />,
     )}
     <Route path="*" element={<RequireAuth><NotFoundPage /></RequireAuth>} />
