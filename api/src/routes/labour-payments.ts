@@ -105,6 +105,8 @@ const directDueSchema = contextSchema.extend({
   crewReference: z.string().trim().max(200).optional().nullable(),
   manualRecipientName: z.string().trim().max(200).optional().nullable(),
   batchIdentity: z.string().trim().max(200).optional().nullable(),
+  recipientReference: z.string().trim().max(200).optional().nullable(),
+  contactPerson: z.string().trim().max(200).optional().nullable(),
   description: z.string().trim().min(1).max(500),
   workFromDate: z.string().date(),
   workToDate: z.string().date(),
@@ -116,11 +118,17 @@ const directDueSchema = contextSchema.extend({
   if (value.workToDate < value.workFromDate) context.addIssue({ code: "custom", path: ["workToDate"], message: "Work-to date cannot be before work-from date." });
   if (value.recipientScope === "INDIVIDUAL" && !value.labourerId) context.addIssue({ code: "custom", path: ["labourerId"], message: "Select a valid labourer." });
   if (value.recipientScope === "LABOUR_GROUP" && !value.labourGroupId) context.addIssue({ code: "custom", path: ["labourGroupId"], message: "Select a valid labour group." });
+  if (["CONTRACTOR_FOREMAN", "TEMPORARY_CREW", "UNREGISTERED_LABOUR", "NO_SPECIFIC_RECIPIENT"].includes(value.recipientScope)) {
+    const identity = value.recipientReference || value.crewReference || value.contractorReference || value.batchIdentity;
+    if (!identity) context.addIssue({ code: "custom", path: ["recipientReference"], message: "Enter a crew or reference name." });
+  }
   if (value.source === "DIRECT" && (value.agreedGrossAmount == null || value.agreedGrossAmount <= 0)) context.addIssue({ code: "custom", path: ["agreedGrossAmount"], message: "Enter an amount greater than zero." });
   if (value.authorizedDeductions < 0) context.addIssue({ code: "custom", path: ["authorizedDeductions"], message: "Deductions cannot be negative." });
   if (value.source === "DIRECT" && value.agreedGrossAmount != null && value.authorizedDeductions > value.agreedGrossAmount) context.addIssue({ code: "custom", path: ["authorizedDeductions"], message: "Deductions cannot exceed the agreed amount." });
 }).transform((value) => ({
   ...value,
+  recipientReference: value.recipientReference || value.crewReference || value.contractorReference || value.batchIdentity || null,
+  contactPerson: value.contactPerson || value.manualRecipientName || null,
   agreedGrossAmountMinor: value.agreedGrossAmount ?? null,
   authorizedDeductionsMinor: value.authorizedDeductions,
   agreedGrossAmount: value.agreedGrossAmount == null ? undefined : sarFromMinorUnits(value.agreedGrossAmount),
@@ -274,6 +282,8 @@ function recipientSnapshot(input: {
   contractorReference?: string | null;
   crewReference?: string | null;
   batchIdentity?: string | null;
+  recipientReference?: string | null;
+  contactPerson?: string | null;
   labourerName?: string | null;
   labourGroupName?: string | null;
   groupLeaderId?: string | null;
@@ -288,6 +298,8 @@ function recipientSnapshot(input: {
     contractorReference: input.contractorReference ?? null,
     crewReference: input.crewReference ?? null,
     batchIdentity: input.batchIdentity ?? null,
+    recipientReference: input.recipientReference ?? null,
+    contactPerson: input.contactPerson ?? null,
     labourerName: input.labourerName ?? null,
     labourGroupName: input.labourGroupName ?? null,
     groupLeaderId: input.groupLeaderId ?? null,
@@ -313,6 +325,8 @@ async function loadRecipient(
     contractorReference?: string | null;
     crewReference?: string | null;
     batchIdentity?: string | null;
+    recipientReference?: string | null;
+    contactPerson?: string | null;
     requireReceivedBy?: boolean;
   },
 ) {
@@ -887,6 +901,10 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             recipientScope: raw.recipientScope,
             labourerId: raw.labourerId,
             labourGroupId: raw.labourGroupId,
+            recipientReference: raw.recipientReference,
+            recipientReferenceType: typeof raw.recipientReference,
+            contactPerson: raw.contactPerson,
+            legacyBatchIdentity: raw.batchIdentity,
             workFromDate: raw.workFromDate,
             workToDate: raw.workToDate,
             agreedGrossAmount: raw.agreedGrossAmount,
@@ -906,6 +924,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
       request.log.info({ event: "labour_due_create_contract", values: {
         source: input.source, recipientScope: input.recipientScope,
         labourerId: input.labourerId ?? null, labourGroupId: input.labourGroupId ?? null,
+        recipientReference: input.recipientReference ?? null, contactPerson: input.contactPerson ?? null,
         descriptionLength: input.description.length, workFromDate: input.workFromDate, workToDate: input.workToDate,
         agreedGrossAmount: input.agreedGrossAmount ?? null, agreedGrossAmountMinor: input.agreedGrossAmountMinor,
         authorizedDeductions: input.authorizedDeductions, authorizedDeductionsMinor: input.authorizedDeductionsMinor,
@@ -1005,8 +1024,8 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               financialScopeKey: recipient.financialScopeKey,
               labourerId: input.labourerId,
               labourGroupId: input.labourGroupId,
-              contractorReference: input.contractorReference,
-              crewReference: input.crewReference,
+              contractorReference: input.recipientScope === "CONTRACTOR_FOREMAN" ? input.recipientReference : input.contractorReference,
+              crewReference: ["TEMPORARY_CREW", "UNREGISTERED_LABOUR", "NO_SPECIFIC_RECIPIENT"].includes(input.recipientScope) ? input.recipientReference : input.crewReference,
               recipientSnapshot: {
                 ...recipient.snapshot,
                 notes: input.notes,
@@ -1107,7 +1126,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(201).send({ due: responseDue, performance: { totalMs: total, transactionMs: phases.transaction, attendanceCount, memberCount, sqlShape: "fixed-set-based" } });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unable to create the labour due.";
-        const recipientField = /labourer/i.test(message) ? "labourerId" : /group/i.test(message) ? "labourGroupId" : null;
+        const recipientField = /labourer/i.test(message) ? "labourerId" : /group/i.test(message) ? "labourGroupId" : /recipient|crew|contractor|batch identity/i.test(message) ? "recipientReference" : null;
         return reply
           .code(400)
           .send({

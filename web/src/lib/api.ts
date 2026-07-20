@@ -1972,8 +1972,8 @@ export const fetchLabourPaymentDue = (token: string, workspaceId: string, dueId:
 export const createDirectLabourDue = (token: string, workspaceId: string, input: {
   farmId: string; seasonId: string; idempotencyKey: string; recipientScope: LabourRecipientScope;
   source?: "DIRECT" | "ATTENDANCE_PERIOD";
-  labourerId?: string | null; labourGroupId?: string | null; contractorReference?: string | null;
-  crewReference?: string | null; manualRecipientName?: string | null; batchIdentity?: string | null;
+  labourerId?: string | null; labourGroupId?: string | null; recipientReference?: string | null;
+  contactPerson?: string | null;
   description: string; workFromDate: string; workToDate: string; agreedGrossAmount?: string | number;
   authorizedDeductions?: string | number; notes?: string | null; costCategory?: string | null;
 }) => apiRequest<{ due: LabourDueRecord; performance?: { totalMs: number; transactionMs: number; attendanceCount: number; memberCount: number; sqlShape: string } }>(`/v1/workspace/${workspaceId}/labour-payments/dues`, { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 45_000, debugLabel: "labour-due-create" });

@@ -209,6 +209,33 @@ test("direct labour due accepts decimal SAR and a canonical historical labour ID
   assert.equal(invalid.json().errors.authorizedDeductions, "Deductions cannot exceed the agreed amount.");
 });
 
+test("no-specific-recipient due accepts a canonical crew reference and blank contact", async () => {
+  const idempotencyKey = randomUUID();
+  const payload = {
+    farmId: alpha.farmId, seasonId: alpha.seasonId, idempotencyKey,
+    source: "DIRECT", recipientScope: "NO_SPECIFIC_RECIPIENT",
+    labourerId: null, labourGroupId: null, recipientReference: "  lagah team  ", contactPerson: null,
+    description: "Lagah, Tarkeeb etc", workFromDate: "2026-02-01", workToDate: "2026-02-28",
+    agreedGrossAmount: "102030", authorizedDeductions: "0",
+  };
+  const created = await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/labour-payments/dues`, payload);
+  assertIntegrationResponse(created, 201, "create no-specific-recipient due");
+  const due = created.json().due;
+  assert.equal(due.recipientSnapshot.recipientReference, "lagah team");
+  assert.equal(due.recipientSnapshot.contactPerson, null);
+  assert.equal(Number(due.grossAmount), 102030);
+  assert.equal(Number(due.outstandingBalance), 102030);
+  assert.equal((await db.select().from(labourPaymentVouchers).where(eq(labourPaymentVouchers.linkedDueId, due.id))).length, 0);
+  assert.equal((await db.select().from(operationalRecords).where(and(eq(operationalRecords.workspaceId, alpha.workspaceId), eq(operationalRecords.entityType, "labourWageSettlement"), eq(operationalRecords.clientRecordId, due.id)))).length, 0);
+  const retried = await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/labour-payments/dues`, payload);
+  assert.equal(retried.json().due.id, due.id);
+  const listed = await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/labour-payments/dues?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}`);
+  assert.ok(listed.json().dues.some((row: { id: string; recipientSnapshot: Record<string, unknown> }) => row.id === due.id && row.recipientSnapshot.recipientReference === "lagah team"));
+  const invalid = await request(alpha.token, "POST", `/v1/workspace/${alpha.workspaceId}/labour-payments/dues`, { ...payload, idempotencyKey: randomUUID(), recipientReference: "   " });
+  assert.equal(invalid.statusCode, 400);
+  assert.equal(invalid.json().errors.recipientReference, "Enter a crew or reference name.");
+});
+
 test("CORS preflight and operational error responses allow the configured frontend origin", async () => {
   const origin = "http://localhost:5173";
   const preflight = await app.inject({

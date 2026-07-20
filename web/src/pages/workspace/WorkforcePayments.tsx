@@ -119,7 +119,8 @@ function recipientLabel(
       String(record.recipientSnapshot.labourGroupName ?? "Labour group")
     );
   return String(
-    record.recipientSnapshot.manualRecipientName ??
+    record.recipientSnapshot.recipientReference ??
+      record.recipientSnapshot.manualRecipientName ??
       record.recipientSnapshot.crewReference ??
       record.recipientSnapshot.contractorReference ??
       record.recipientSnapshot.batchIdentity ??
@@ -509,6 +510,11 @@ export function WorkforcePaymentsPage() {
                         Leader: {String(due.recipientSnapshot.foremanName ?? due.recipientSnapshot.leaderName ?? "Unavailable")} · {Number(due.recipientSnapshot.memberCount ?? 0)} workers
                       </span>
                     ) : null}
+                    {["TEMPORARY_CREW", "UNREGISTERED_LABOUR", "NO_SPECIFIC_RECIPIENT"].includes(due.recipientScope) ? (
+                      <span className="workforce-payment-due-card__description">
+                        Temporary / unregistered crew{due.recipientSnapshot.contactPerson ? ` · Contact: ${String(due.recipientSnapshot.contactPerson)}` : ""}
+                      </span>
+                    ) : null}
                     <span className="workforce-payment-due-card__description">
                       {due.description}
                     </span>
@@ -525,6 +531,9 @@ export function WorkforcePaymentsPage() {
                     <span className="workforce-payment-due-card__amounts">
                       <i>
                         Gross <b>{money(Number(due.grossAmount))}</b>
+                      </i>
+                      <i>
+                        Deductions <b>{money(Number(due.authorizedDeductions))}</b>
                       </i>
                       <i>
                         Advances <b>{money(due.advancesApplied)}</b>
@@ -667,6 +676,7 @@ function DirectDueForm({
   const labourerFieldRef = useRef<HTMLLabelElement>(null);
   const agreedAmountRef = useRef<HTMLInputElement>(null);
   const deductionsRef = useRef<HTMLInputElement>(null);
+  const recipientReferenceRef = useRef<HTMLInputElement>(null);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [previewing, setPreviewing] = useState(false);
@@ -702,12 +712,8 @@ function DirectDueForm({
         recipientScope: scope,
         labourerId: scope === "INDIVIDUAL" ? labourerId : null,
         labourGroupId: scope === "LABOUR_GROUP" ? groupId : null,
-        contractorReference: scope === "CONTRACTOR_FOREMAN" ? reference : null,
-        crewReference: ["TEMPORARY_CREW", "UNREGISTERED_LABOUR"].includes(scope)
-          ? reference
-          : null,
-        manualRecipientName: recipientName || null,
-        batchIdentity: scope === "NO_SPECIFIC_RECIPIENT" ? reference : null,
+        recipientReference: !["INDIVIDUAL", "LABOUR_GROUP"].includes(scope) ? reference : null,
+        contactPerson: !["INDIVIDUAL", "LABOUR_GROUP"].includes(scope) ? recipientName || null : null,
         description: description || (source === "ATTENDANCE_PERIOD" ? `Attendance wages ${from} to ${to}` : ""),
         workFromDate: from,
         workToDate: to,
@@ -725,17 +731,23 @@ function DirectDueForm({
       const responseErrors = caught instanceof ApiError && caught.responseBody && typeof caught.responseBody === "object" && "errors" in caught.responseBody
         ? (caught.responseBody as { errors?: Record<string, string> }).errors ?? {}
         : {};
-      setFieldErrors(responseErrors);
-      const firstField = Object.keys(responseErrors)[0];
+      const visibleFields = new Set(["labourerId", "labourGroupId", "recipientReference", "description", "workFromDate", "workToDate", "agreedGrossAmount", "authorizedDeductions"]);
+      const normalizedErrors = Object.fromEntries(Object.entries(responseErrors).flatMap(([field, message]) => {
+        const normalizedField = ["batchIdentity", "crewReference", "contractorReference", "settlementIdentity"].includes(field) ? "recipientReference" : field;
+        return visibleFields.has(normalizedField) ? [[normalizedField, message]] : [];
+      }));
+      setFieldErrors(normalizedErrors);
+      const firstField = Object.keys(normalizedErrors)[0];
       window.setTimeout(() => {
         if (firstField === "labourerId") labourerFieldRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
         if (firstField === "agreedGrossAmount") agreedAmountRef.current?.focus();
         if (firstField === "authorizedDeductions") deductionsRef.current?.focus();
+        if (firstField === "recipientReference") recipientReferenceRef.current?.focus();
       }, 0);
       onError(
-        Object.keys(responseErrors).length ? "Please correct the highlighted fields." : caught instanceof Error
+        Object.keys(normalizedErrors).length ? `Please correct the highlighted field${Object.keys(normalizedErrors).length === 1 ? "" : "s"}.` : Object.values(responseErrors)[0] ?? (caught instanceof Error
           ? caught.message
-          : "Unable to create the labour due.",
+          : "Unable to create the labour due."),
       );
     } finally {
       if (!committed) setSaving(false);
@@ -792,27 +804,23 @@ function DirectDueForm({
         {!["INDIVIDUAL", "LABOUR_GROUP"].includes(scope) ? (
           <>
             <label>
-              <span>Recipient name</span>
+              <span>Contact person (optional)</span>
               <input
                 value={recipientName}
                 onChange={(event) => setRecipientName(event.target.value)}
-                placeholder="Optional name"
+                placeholder="Enter foreman or representative name"
               />
             </label>
-            <label>
-              <span>
-                {scope === "CONTRACTOR_FOREMAN"
-                  ? "Contractor / foreman reference"
-                  : scope === "NO_SPECIFIC_RECIPIENT"
-                    ? "Batch identity"
-                    : "Crew / work reference"}
-              </span>
+            <label className={fieldErrors.recipientReference ? "has-error" : undefined}>
+              <span>Crew / reference name</span>
               <input
                 required
+                ref={recipientReferenceRef}
                 value={reference}
-                onChange={(event) => setReference(event.target.value)}
-                placeholder="Required settlement identity"
+                onChange={(event) => { setReference(event.target.value); setFieldErrors((current) => ({ ...current, recipientReference: "" })); }}
+                placeholder="Enter crew, contractor, foreman, or reference"
               />
+              {fieldErrors.recipientReference ? <small className="workforce-field-error">{fieldErrors.recipientReference}</small> : null}
             </label>
           </>
         ) : null}

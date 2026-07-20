@@ -53,6 +53,11 @@ test("unnamed labour advances require a stable settlement identity", () => {
   assert.equal(labourFinancialScopeKey({ recipientScope: "UNREGISTERED_LABOUR", crewReference: "Onion Loading Crew" }), "unregistered:onion loading crew");
 });
 
+test("temporary and no-specific dues use canonical recipient references", () => {
+  assert.equal(labourFinancialScopeKey({ recipientScope: "NO_SPECIFIC_RECIPIENT", recipientReference: "  lagah team  " }), "batch:lagah team");
+  assert.equal(labourFinancialScopeKey({ recipientScope: "TEMPORARY_CREW", recipientReference: "February pruning workers" }), "crew:february pruning workers");
+});
+
 test("posting paths are transactional, locked, idempotent, account-linked, and allocation-based", () => {
   assert.match(routeSource, /db\.transaction/);
   assert.match(routeSource, /pg_advisory_xact_lock/);

@@ -50,3 +50,17 @@ test("direct due UI submits canonical IDs and canonical money fields", () => {
   assert.doesNotMatch(form, /parseInt/);
   assert.doesNotMatch(form, /createLabourEarning|createLabourWageSettlement|paymentAccountId/);
 });
+
+test("no-specific-recipient uses one canonical crew identity with optional contact", () => {
+  const schema = route.slice(route.indexOf("const directDueSchema"), route.indexOf("const attendanceDuePreviewSchema"));
+  const form = page.slice(page.indexOf("function DirectDueForm"), page.indexOf("function VoucherRegister"));
+  assert.match(schema, /recipientReference: z\.string\(\)\.trim\(\)\.max\(200\)/);
+  assert.match(schema, /path: \["recipientReference"\], message: "Enter a crew or reference name\."/);
+  assert.match(schema, /recipientReference: value\.recipientReference \|\| value\.crewReference \|\| value\.contractorReference \|\| value\.batchIdentity/);
+  assert.match(form, /Crew \/ reference name/);
+  assert.match(form, /Contact person \(optional\)/);
+  assert.match(form, /recipientReference: !\["INDIVIDUAL", "LABOUR_GROUP"\]\.includes\(scope\) \? reference : null/);
+  assert.doesNotMatch(form, />Batch identity</);
+  assert.match(form, /className=\{fieldErrors\.recipientReference \? "has-error"/);
+  assert.match(form, /Object\.values\(responseErrors\)\[0\]/);
+});

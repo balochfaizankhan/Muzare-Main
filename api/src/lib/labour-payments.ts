@@ -133,16 +133,17 @@ export function labourFinancialScopeKey(input: {
   crewReference?: string | null;
   manualRecipientName?: string | null;
   batchIdentity?: string | null;
+  recipientReference?: string | null;
 }) {
   if (input.recipientScope === "INDIVIDUAL" && input.labourerId) return `individual:${input.labourerId}`;
   if (input.recipientScope === "LABOUR_GROUP" && input.labourGroupId) return `group:${input.labourGroupId}`;
-  if (input.recipientScope === "CONTRACTOR_FOREMAN" && input.contractorReference) return `contractor:${input.contractorReference.trim().toLowerCase()}`;
-  if (input.recipientScope === "TEMPORARY_CREW" && input.crewReference) return `crew:${input.crewReference.trim().toLowerCase()}`;
+  if (input.recipientScope === "CONTRACTOR_FOREMAN" && (input.recipientReference || input.contractorReference)) return `contractor:${(input.recipientReference || input.contractorReference)!.trim().toLowerCase()}`;
+  if (input.recipientScope === "TEMPORARY_CREW" && (input.recipientReference || input.crewReference)) return `crew:${(input.recipientReference || input.crewReference)!.trim().toLowerCase()}`;
   if (input.recipientScope === "UNREGISTERED_LABOUR") {
-    const identity = input.crewReference || input.contractorReference || input.batchIdentity || input.manualRecipientName;
+    const identity = input.recipientReference || input.crewReference || input.contractorReference || input.batchIdentity || input.manualRecipientName;
     if (identity) return `unregistered:${identity.trim().toLowerCase()}`;
   }
-  if (input.recipientScope === "NO_SPECIFIC_RECIPIENT" && input.batchIdentity) return `batch:${input.batchIdentity.trim().toLowerCase()}`;
+  if (input.recipientScope === "NO_SPECIFIC_RECIPIENT" && (input.recipientReference || input.batchIdentity)) return `batch:${(input.recipientReference || input.batchIdentity)!.trim().toLowerCase()}`;
   throw new Error("A stable recipient, group, contractor, crew, or batch identity is required for this labour financial scope.");
 }
 
