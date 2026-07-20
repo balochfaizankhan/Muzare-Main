@@ -1,0 +1,5 @@
+# Labour Payments corrective-journal design
+
+If the read-only detection queries find affected production rows, do not update or delete original source or journal history. Export the affected source, original journal, reversals, vouchers, allocations, account transactions, and audit log first. A reviewed repair should append one scoped corrective journal event whose lines reference the affected originals in repair metadata, preserve the original voucher numbers, and use a distinct repair operation ID. Operational status is changed only after the corrective journal and validation snapshot commit in the same transaction. The repair transaction must rerun structured reconciliation before commit and write an audit log containing before/after balances by ledger code.
+
+Repairs are designed per affected event, not as one aggregate balancing entry. No repair should reuse a voucher number, rewrite an original `entry_key`, delete a bad reversal, or make a reversal row eligible for routine business reversal.
