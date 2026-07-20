@@ -36,6 +36,7 @@ const workspaceMembershipDedupMigrationUrl = new URL("../../../database/migratio
 const voidedLabourWageSettlementRepairMigrationUrl = new URL("../../../database/migrations/0032_voided_labour_wage_settlement_repair.sql", import.meta.url);
 const labourWageSettlementAdvanceAllocationsMigrationUrl = new URL("../../../database/migrations/0033_labour_wage_settlement_advance_allocations.sql", import.meta.url);
 const labourWageSettlementCreateRequestsMigrationUrl = new URL("../../../database/migrations/0034_labour_wage_settlement_create_requests.sql", import.meta.url);
+const unifiedLabourPaymentsMigrationUrl = new URL("../../../database/migrations/0035_unified_labour_payments.sql", import.meta.url);
 
 const STARTUP_LOCK_KEY = "muzare_ensure_workspace_schema";
 const STARTUP_LOCK_TIMEOUT = "10s";
@@ -110,8 +111,9 @@ const requiredMigrationSteps: MigrationStep[] = [
 const deferredMigrationSteps: MigrationStep[] = [
   { key: "0031_workspace_membership_dedup", kind: "sql", required: false, sourceUrl: workspaceMembershipDedupMigrationUrl },
   { key: "0032_voided_labour_wage_settlement_repair", kind: "sql", required: false, sourceUrl: voidedLabourWageSettlementRepairMigrationUrl },
-  { key: "0033_labour_wage_settlement_advance_allocations", kind: "sql", required: false, sourceUrl: labourWageSettlementAdvanceAllocationsMigrationUrl },
-  { key: "0034_labour_wage_settlement_create_requests", kind: "sql", required: false, sourceUrl: labourWageSettlementCreateRequestsMigrationUrl },
+  { key: "0033_labour_wage_settlement_advance_allocations", kind: "sql", required: true, sourceUrl: labourWageSettlementAdvanceAllocationsMigrationUrl },
+  { key: "0034_labour_wage_settlement_create_requests", kind: "sql", required: true, sourceUrl: labourWageSettlementCreateRequestsMigrationUrl },
+  { key: "0035_unified_labour_payments", kind: "sql", required: true, sourceUrl: unifiedLabourPaymentsMigrationUrl },
 ];
 
 function logMigrationEvent(event: string, details: Record<string, unknown>) {
@@ -363,6 +365,7 @@ export async function ensureWorkspaceSchema(): Promise<void> {
             try {
               await runStep(client, step);
             } catch (error) {
+              if (step.required) throw error;
               logMigrationEvent("MIGRATION_DEFERRED_STEP_SKIPPED", {
                 step: step.key,
                 reason: error instanceof Error ? error.message : String(error),

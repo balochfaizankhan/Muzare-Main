@@ -3,12 +3,13 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireUser } from "../auth.js";
 import { db } from "../db/client.js";
-import { accountTransactions, auditLogs, labourWageSettlementAdvanceAllocations, labourWageSettlementCreateRequests, operationalRecords, userSessions } from "../db/schema.js";
+import { accountTransactions, auditLogs, labourAdvanceApplications, labourDues, labourPaymentAllocations, labourWageSettlementAdvanceAllocations, labourWageSettlementCreateRequests, operationalRecords, userSessions } from "../db/schema.js";
 import { listLabourEarnings, normalizeLabourEarningPayload } from "../lib/labour-earnings.js";
 import { isDeletedOperationalPayload } from "../operational-record-state.js";
 import { hasFarmAccess } from "../workspace-access.js";
 import { hasModulePermission } from "../permissions.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
+import { ensureSettlementLabourDue, reverseLabourJournal } from "../lib/labour-payments.js";
 import {
   allocateSettlementNumber,
   calculateLabourWageSettlementTotals,
@@ -1276,64 +1277,28 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         seasonId,
         clientRequestId: effectiveClientRequestId,
       }, "labour wage settlement transaction started");
-      const effectivePaidAmount = Number(paidAmount ?? 0);
+      if (Number(paidAmount ?? 0) > 0) {
+        await updateCreateRequestState("rolled_back", {
+          errorCode: "SETTLEMENT_DIRECT_PAYMENT_DISABLED",
+          safeToRetry: true,
+          message: "Create the settlement due first, then post its Labour Payment Voucher from Payments Due.",
+          completedAt: new Date(),
+        });
+        return reply.code(400).send({
+          message: "Settlement approval no longer moves cash. Create the settlement due, then pay it from Payments Due.",
+          fields: ["paidAmount"],
+        });
+      }
+      const effectivePaidAmount = 0;
       const paymentAccountInput = (paymentAccountId ?? accountId ?? "").trim();
-      if (!paymentAccountInput) {
-        await updateCreateRequestState("rolled_back", {
-          errorCode: "SETTLEMENT_PAYMENT_ACCOUNT_MISSING",
-          safeToRetry: true,
-          message: failedSettlementCreateMessage,
-          completedAt: new Date(),
-        });
-        return reply.code(400).send({
-          message: "The payment account selection was not included. Select the account again.",
-          fields: ["paymentAccountId"],
-        });
+      const resolvedAccount = paymentAccountInput
+        ? await db.transaction((tx) => resolveCanonicalPaymentAccountId(tx, workspaceId, farmId, paymentAccountInput))
+        : null;
+      if (paymentAccountInput) {
+        const accountValidation = validateLabourSettlementPaymentAccount(resolvedAccount, farmId);
+        if (!accountValidation.valid) return reply.code(400).send({ message: accountValidation.message, fields: ["paymentAccountId"] });
       }
-      logSettlementAccountValidation(request, {
-        paymentAccountId: paymentAccountInput,
-        selectedFarmId: farmId,
-        selectedSeasonId: seasonId,
-      });
-      const resolvedAccount = await db.transaction((tx) => resolveCanonicalPaymentAccountId(tx, workspaceId, farmId, paymentAccountInput));
-      logSettlementAccountValidation(request, {
-        paymentAccountId: paymentAccountInput,
-        selectedFarmId: farmId,
-        selectedSeasonId: seasonId,
-        accountRowFound: Boolean(resolvedAccount),
-        accountFarmId: resolvedAccount?.farmId ?? null,
-        accountType: resolvedAccount?.accountType ?? null,
-        accountActive: resolvedAccount?.active ?? null,
-        accountSourceType: resolvedAccount?.sourceType ?? null,
-      });
-      const accountValidation = validateLabourSettlementPaymentAccount(resolvedAccount, farmId);
-      if (!accountValidation.valid) {
-        logSettlementAccountValidation(request, {
-          paymentAccountId: paymentAccountInput,
-          selectedFarmId: farmId,
-          selectedSeasonId: seasonId,
-          validationReason: accountValidation.reason,
-          validationMessage: accountValidation.message,
-        });
-        const validationMessage = accountValidation.reason === "not_mapped"
-          ? "The selected payment account could not be found."
-          : accountValidation.reason === "inactive"
-            ? "The selected account cannot be used for labour settlements."
-            : accountValidation.reason === "wrong_farm"
-              ? "The selected payment account belongs to another farm."
-              : "The selected account cannot be used for labour settlements.";
-        await updateCreateRequestState("rolled_back", {
-          errorCode: accountValidation.reason === "not_mapped" ? "SETTLEMENT_PAYMENT_ACCOUNT_MISSING" : "SETTLEMENT_PAYMENT_ACCOUNT_INVALID",
-          safeToRetry: true,
-          message: failedSettlementCreateMessage,
-          completedAt: new Date(),
-        });
-        return reply.code(400).send({
-          message: validationMessage,
-          fields: ["paymentAccountId"],
-        });
-      }
-      const account = resolvedAccount as NonNullable<typeof resolvedAccount>;
+      const account = resolvedAccount;
       const result = await db.transaction(async (tx) => {
         await tx.execute(sql`SET LOCAL lock_timeout = '10s'`);
         await tx.execute(sql`SET LOCAL statement_timeout = '90s'`);
@@ -1394,7 +1359,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           effectiveAdvanceAdjustedNow,
         );
         const description = `Labour wage settlement: ${fromDate} to ${toDate} (attendance wages + labour work)`;
-        const paymentAccountIdValue = account.id;
+        const paymentAccountIdValue = account?.id ?? null;
         const legacyUnallocatedAdvanceConsumption = Number((preview as { legacyUnallocatedPreviouslySettledAdvances?: unknown }).legacyUnallocatedPreviouslySettledAdvances ?? 0);
         if (legacyUnallocatedAdvanceConsumption > 0.005) {
           request.log.error({
@@ -1794,7 +1759,10 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
           seasonId,
           clientUpdatedAt: createdAt,
           payload: settlementPayload,
+          recordedBy: request.appUser!.id,
+          createdAt,
         };
+        await ensureSettlementLabourDue(tx, settlementRecord);
         request.log.info({
           workspaceId,
           farmId,
@@ -2217,10 +2185,24 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
 
     const transactionCount = await db.transaction((tx) => settlementAccountingTransactionCounts(tx, [settlementId])).then((result) => result.get(settlementId) ?? 0);
 
+    const activeLinkedPayment = await db.select({ id: labourPaymentAllocations.id }).from(labourPaymentAllocations)
+      .innerJoin(labourDues, eq(labourDues.id, labourPaymentAllocations.dueId))
+      .where(and(eq(labourDues.sourceRecordId, settlement.id), eq(labourPaymentAllocations.status, "ACTIVE")))
+      .limit(1);
+    if (activeLinkedPayment.length) return reply.code(409).send({ message: "Void linked Labour Payment Vouchers before voiding this settlement." });
+
     const voidedAt = new Date();
     const voidedIso = voidedAt.toISOString();
     const voidReason = parsed.data.voidReason?.trim() || "Voided settlement";
     const result = await db.transaction(async (tx) => {
+      const [linkedDue] = await tx.select({ id: labourDues.id }).from(labourDues).where(eq(labourDues.sourceRecordId, settlement.id)).limit(1);
+      if (linkedDue) {
+        const activePayments = await tx.select({ id: labourPaymentAllocations.id }).from(labourPaymentAllocations).where(and(
+          eq(labourPaymentAllocations.dueId, linkedDue.id),
+          eq(labourPaymentAllocations.status, "ACTIVE"),
+        )).limit(1);
+        if (activePayments.length) throw new Error("Void linked Labour Payment Vouchers before voiding this settlement.");
+      }
       const accountingRows = await tx.select({
         id: accountTransactions.id,
         accountId: accountTransactions.accountId,
@@ -2267,6 +2249,29 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         updatedAt: voidedAt,
         recordedBy: request.appUser!.id,
       }).where(eq(operationalRecords.id, settlement.id));
+      if (linkedDue) {
+        await tx.update(labourAdvanceApplications).set({
+          status: "REVERSED",
+          reversedAt: voidedAt,
+          reversedBy: request.appUser!.id,
+          updatedAt: voidedAt,
+        }).where(and(
+          eq(labourAdvanceApplications.dueId, linkedDue.id),
+          eq(labourAdvanceApplications.status, "ACTIVE"),
+        ));
+        await tx.update(labourDues).set({
+          calculationStatus: "VOIDED",
+          paymentStatus: "VOIDED",
+          voidReason,
+          voidedAt,
+          voidedBy: request.appUser!.id,
+          updatedAt: voidedAt,
+        }).where(eq(labourDues.id, linkedDue.id));
+        await reverseLabourJournal(tx, {
+          workspaceId, farmId: settlement.farmId!, seasonId: settlement.seasonId!, actorId: request.appUser!.id,
+          reversalKey: `settlement-void:${settlement.id}`, dueId: linkedDue.id,
+        });
+      }
       const earningsToReopen = await listLabourEarnings(tx, workspaceId, settlement.farmId!, settlement.seasonId!);
       for (const earning of earningsToReopen) {
         if (earning.payload.linkedSettlementId !== settlementId) continue;

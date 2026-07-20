@@ -102,7 +102,7 @@ test("labour wage settlements resolve canonical payment accounts and accept lega
   assert.ok(libSource.includes('return "posted" as const;'));
   assert.ok(partnerAccounting.includes("getPartnerAccountingSnapshot"));
   assert.ok(accounting.includes("resolveLabourWageSettlementAccountId"));
-  assert.ok(pageSource.includes("Payment account"));
+  assert.ok(pageSource.includes("Pay it later from Payments Due with a Labour Payment Voucher."));
   assert.ok(pageSource.includes("Accounting reference"));
 });
 
@@ -146,16 +146,10 @@ test("labour wage settlement create requests reuse a client request id and narro
   assert.ok(apiSource.includes("The request is taking longer than expected. Checking settlement status..."));
   assert.ok(source.includes('paymentAccountId: z.string().min(1).optional()'));
   assert.ok(source.includes('accountId: z.string().min(1).optional()'));
-  assert.ok(source.includes('The payment account selection was not included. Select the account again.'));
-  assert.ok(source.includes('The selected payment account could not be found.'));
-  assert.ok(source.includes('The selected account cannot be used for labour settlements.'));
-  assert.ok(source.includes('const paymentAccountIdValue = account.id;'));
-  assert.doesNotMatch(source, /paymentAccountIdValue\s*=\s*effectivePaidAmount > 0 \?/);
-  assert.ok(webSource.includes('paymentAccountId: selectedPaymentAccountId'));
-  assert.ok(webSource.includes('accountId: selectedPaymentAccountId'));
-  assert.ok(webSource.includes('Select a valid payment account.'));
-  assert.ok(webSource.includes('required value={accountId}'));
-  assert.doesNotMatch(webSource, /required=\{Number\(paidAmount \|\| 0\) > 0\}/);
+  assert.ok(source.includes('Settlement approval no longer moves cash.'));
+  assert.ok(source.includes('const effectivePaidAmount = 0;'));
+  assert.ok(webSource.includes('paidAmount: 0'));
+  assert.ok(webSource.includes('Pay it later from Payments Due with a Labour Payment Voucher.'));
 });
 
 test("labour wage settlement allocations persist canonical advance UUIDs and log safe allocation failures", () => {

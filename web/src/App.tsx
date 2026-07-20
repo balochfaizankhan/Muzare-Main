@@ -34,7 +34,7 @@ const LabourEarnings = lazy(async () => ({ default: (await import("./pages/works
 const LabourWageSettlements = lazy(async () => ({ default: (await import("./pages/workspace/LabourWageSettlements")).LabourWageSettlements }));
 const LabourPaymentsReportsHub = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).LabourPaymentsReportsHub }));
 const LabourPaymentsSectionLayout = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).LabourPaymentsSectionLayout }));
-const LabourPaymentsOverview = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).LabourPaymentsOverview }));
+const WorkforcePaymentsPage = lazy(async () => ({ default: (await import("./pages/workspace/WorkforcePayments")).WorkforcePaymentsPage }));
 const WageRates = lazy(async () => ({ default: (await import("./pages/workspace/WageRates")).WageRates }));
 const WorkforceReportsHub = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).WorkforceReportsHub }));
 const WorkforceSectionLayout = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).WorkforceSectionLayout }));
@@ -179,8 +179,12 @@ export default function App() {
       </Route>
       <Route path="labour-payments" element={routeElement(<LabourPaymentsSectionLayout />, "Loading labour payments")}>
         <Route index element={<Navigate to="overview" replace />} />
-        <Route path="overview" element={routeElement(<LabourPaymentsOverview />, "Loading labour payments overview")} />
-        <Route path="advances" element={routeElement(<LabourAdvances />, "Loading advances")} />
+        <Route path="overview" element={routeElement(<WorkforcePaymentsPage />, "Loading payments due")} />
+        <Route path="payments-due" element={<Navigate to="/workspace/labour-payments/overview" replace />} />
+        <Route path="direct-due" element={routeElement(<WorkforcePaymentsPage />, "Loading direct labour due")} />
+        <Route path="vouchers" element={routeElement(<WorkforcePaymentsPage />, "Loading Labour Payment Vouchers")} />
+        <Route path="advances" element={routeElement(<WorkforcePaymentsPage />, "Loading outstanding advances")} />
+        <Route path="legacy-advances" element={routeElement(<LabourAdvances />, "Loading legacy advances")} />
         <Route path="wage-rates" element={routeElement(<WageRates />, "Loading wage rates")} />
         <Route path="earnings" element={routeElement(<LabourEarnings />, "Loading labour work")} />
         <Route path="labour-work" element={<Navigate to="/workspace/labour-payments/earnings" replace />} />

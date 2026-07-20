@@ -54,7 +54,7 @@ export function LabourWageSettlements() {
   const [foremanId, setForemanId] = useState("");
   const [groupId, setGroupId] = useState("");
   const [accountId, setAccountId] = useState("");
-  const [paidAmount, setPaidAmount] = useState("0");
+  const [paidAmount] = useState("0");
   const [manualAdjustment, setManualAdjustment] = useState("0");
   const [manualAdjustmentNote, setManualAdjustmentNote] = useState("");
   const [notes, setNotes] = useState("");
@@ -238,8 +238,7 @@ export function LabourWageSettlements() {
   const selectedGroup = useMemo(() => labourGroups.find((group) => group.id === groupId) ?? null, [groupId, labourGroups]);
   const selectedGroupForemanId = selectedGroup?.foremanLabourId ?? selectedGroup?.foremanId ?? "";
   const effectiveGroupForemanId = settlementMode === "group" ? selectedGroupForemanId : foremanId;
-  const selectedPaymentAccountId = accountId.trim() || undefined;
-  const hasPaidNow = toFiniteNumber(paidAmount) > 0;
+  const selectedPaymentAccountId = undefined;
   const hasManualAdjustment = toFiniteNumber(manualAdjustment) !== 0;
 
   useEffect(() => {
@@ -420,7 +419,6 @@ export function LabourWageSettlements() {
     setNotes("");
     setManualAdjustment("0");
     setManualAdjustmentNote("");
-    setPaidAmount("0");
   }, []);
 
   const finalizeSettlementCreateSuccess = useCallback(async (settlement: LabourWageSettlementRecord, message: string, accountingMessage?: string | null) => {
@@ -593,10 +591,6 @@ export function LabourWageSettlements() {
       setError("Select an active farm and season before creating a settlement.");
       return;
     }
-    if (!selectedPaymentAccountId) {
-      setError("Select a valid paid from account.");
-      return;
-    }
     if (settlementMode === "individual" && !labourerId) {
       setError("Select a labourer for an individual settlement.");
       return;
@@ -639,9 +633,7 @@ export function LabourWageSettlements() {
             settlementMode,
             labourerId: settlementMode === "individual" ? labourerId || undefined : undefined,
             groupId: settlementMode === "group" ? groupId || undefined : undefined,
-            paymentAccountId: selectedPaymentAccountId,
-            accountId: selectedPaymentAccountId,
-            paidAmount: Number(paidAmount || 0),
+            paidAmount: 0,
             manualAdjustment: Number(manualAdjustment || 0),
             manualAdjustmentNote: Number(manualAdjustment || 0) !== 0 ? manualAdjustmentNote.trim() : undefined,
             notes: notes.trim() || undefined,
@@ -658,9 +650,7 @@ export function LabourWageSettlements() {
         settlementMode,
         labourerId: settlementMode === "individual" ? labourerId || undefined : undefined,
         groupId: settlementMode === "group" ? groupId || undefined : undefined,
-        paymentAccountId: selectedPaymentAccountId,
-        accountId: selectedPaymentAccountId,
-        paidAmount: Number(paidAmount || 0),
+        paidAmount: 0,
         manualAdjustment: Number(manualAdjustment || 0),
         manualAdjustmentNote: Number(manualAdjustment || 0) !== 0 ? manualAdjustmentNote.trim() : undefined,
         notes: notes.trim() || undefined,
@@ -762,7 +752,6 @@ export function LabourWageSettlements() {
     if (!canPost) return t("common.viewOnlyAccess");
     if (onlineRequired) return "Wage settlement requires online connection.";
     if (!token || !workspaceId || !activeFarmId || !activeSeasonId) return "Select an active farm and season before creating a settlement.";
-    if (!selectedPaymentAccountId) return "Select a valid paid from account.";
     if (settlementMode === "individual" && !labourerId) return "Select a labourer for an individual settlement.";
     if (settlementMode === "group" && !groupId) return "Select a labour group.";
     if (Number(manualAdjustment || 0) !== 0 && !manualAdjustmentNote.trim()) return "Manual adjustment note is required when manual adjustment is non-zero.";
@@ -770,7 +759,7 @@ export function LabourWageSettlements() {
     if (summary.unresolvedRows.length || summary.overlappingSettlements.length) return "This wage settlement still has unresolved wage rates or overlapping settlements.";
     if (!summaryConsistent) return "Preview is inconsistent. Create Settlement is disabled until the reconciliation matches.";
     return "";
-  }, [activeFarmId, activeSeasonId, canPost, labourerId, manualAdjustment, manualAdjustmentNote, onlineRequired, paidAmount, selectedPaymentAccountId, settlementMode, summary, summaryConsistent, t, token, workspaceId, groupId]);
+  }, [activeFarmId, activeSeasonId, canPost, labourerId, manualAdjustment, manualAdjustmentNote, onlineRequired, settlementMode, summary, summaryConsistent, t, token, workspaceId, groupId]);
   useEffect(() => {
     setPreviewDiagnostics((current) => ({
       ...current,
@@ -1177,12 +1166,8 @@ export function LabourWageSettlements() {
               </div>
             </fieldset>
             <fieldset className="wage-settlement-form-section">
-              <legend>Payment / adjustments</legend>
+              <legend>Adjustments and due creation</legend>
               <div className="advances-filter-row wage-settlement-payment-grid">
-              <label className="advances-filter-field">
-                <span>Paid now</span>
-                <input type="number" min="0" step="0.01" value={paidAmount} onChange={(event) => setPaidAmount(event.target.value)} />
-              </label>
               <label className="advances-filter-field">
                 <span>Manual adjustment</span>
                 <input type="number" step="0.01" value={manualAdjustment} onChange={(event) => setManualAdjustment(event.target.value)} />
@@ -1192,13 +1177,7 @@ export function LabourWageSettlements() {
                 <input required value={manualAdjustmentNote} onChange={(event) => setManualAdjustmentNote(event.target.value)} placeholder="Explain this manual adjustment" />
                 <small>Required because the manual adjustment is not zero.</small>
               </label> : null}
-              {hasPaidNow ? <label className="advances-filter-field">
-                <span>Paid from account</span>
-                <select required value={accountId} onChange={(event) => setAccountId(event.target.value)}>
-                  <option value="">Select paid from account</option>
-                  {paymentAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-                </select>
-              </label> : <p className="wage-settlement-account-hint">Paid from account is only needed when Paid now is greater than zero.</p>}
+              <p className="wage-settlement-account-hint">Creating this settlement establishes the labour amount due. It does not move cash. Pay it later from Payments Due with a Labour Payment Voucher.</p>
               <label className="advances-filter-field advances-filter-field--full">
                 <span>Notes</span>
                 <input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional settlement notes or reference" />
@@ -1230,10 +1209,10 @@ export function LabourWageSettlements() {
               </button>
               <button type="submit" disabled={Boolean(createDisabledReason) || submitting || statusCheckInFlight || Boolean(pendingRequestId)}>
                 {submitting
-                  ? "Creating settlement..."
+                  ? "Creating settlement due..."
                   : pendingRequestId
                     ? "Settlement in progress..."
-                    : "Create Settlement"}
+                    : "Create Settlement Due"}
               </button>
             </div>
             {createDisabledReason && !submitting ? <p className="wage-settlement-create-hint">{createDisabledReason}</p> : null}
@@ -1243,7 +1222,7 @@ export function LabourWageSettlements() {
         <section className="record-panel labour-settlement-preview-panel">
           <div className="advances-heading">
             <h2>Settlement preview</h2>
-            <span>Advances stay immutable. Settlement accounting is posted under the LW settlement number.</span>
+            <span>Advances may reduce the due, but creating the settlement does not move cash.</span>
           </div>
           {!summary ? <p className="context-message">Run a preview to calculate period wages, advance use, and settlement balance.</p> : <>
             <div className="record-panel">
@@ -1255,7 +1234,7 @@ export function LabourWageSettlements() {
                 <article><span>Attendance period</span><strong>{fromDate} to {toDate}</strong></article>
                 <article><span>Advances considered until</span><strong>{summary.settlementDate}</strong></article>
                 <article><span>Included workers</span><strong>{summaryTotals.includedLabourers}</strong></article>
-                <article><span>Settlement status</span><strong>{summaryConsistent ? "Ready to post" : "Needs review"}</strong></article>
+                <article><span>Settlement status</span><strong>{summaryConsistent ? "Ready to create due" : "Needs review"}</strong></article>
               </div>
             </div>
 
@@ -1265,8 +1244,8 @@ export function LabourWageSettlements() {
               <article><span>{advanceAdjustedLabel}</span><strong>{money(summaryAdvanceAdjustedNow)}</strong></article>
               <article><span>{advanceCarryForwardLabel}</span><strong>{money(summaryAdvanceCarryForward)}</strong></article>
               <article><span>Net Wages Payable</span><strong>{money(summaryNetPayableBeforePayment)}</strong></article>
-              <article><span>Paid Now</span><strong>{money(summary?.paidAmount ?? 0)}</strong></article>
-              <article><span>Balance After Settlement</span><strong>{money(summaryBalanceAfterSettlement)}</strong></article>
+              <article><span>Cash paid now</span><strong>{money(0)}</strong></article>
+              <article><span>Due after advances</span><strong>{money(summaryBalanceAfterSettlement)}</strong></article>
             </div>
 
             <details className="record-panel">

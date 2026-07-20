@@ -31,6 +31,7 @@ import { accountingReconciliationRoutes } from "./routes/accounting-reconciliati
 import { adminLabourWageSettlementDiagnosticsRoutes } from "./routes/admin-labour-wage-settlement-diagnostics.js";
 import { wageRateRoutes } from "./routes/wage-rates.js";
 import { labourWageSettlementRoutes } from "./routes/labour-wage-settlements.js";
+import { labourPaymentRoutes } from "./routes/labour-payments.js";
 
 export async function buildApp() {
   const app = Fastify({ logger: true });
@@ -91,6 +92,7 @@ export async function buildApp() {
   await app.register(expenseAttachmentRoutes);
   await app.register(wageRateRoutes);
   await app.register(labourWageSettlementRoutes);
+  await app.register(labourPaymentRoutes);
   await app.register(farmOperationRoutes);
   await app.register(migrationImportRoutes);
   await app.register(accountingDiagnosticsRoutes);

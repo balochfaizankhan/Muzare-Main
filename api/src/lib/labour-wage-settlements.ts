@@ -921,6 +921,18 @@ export async function repairPostedSettlementAccounting(
   if (!settlementRecord.farmId || !settlementRecord.seasonId) {
     throw new Error(`Settlement ${payload.settlementNumber} is missing farm or season context.`);
   }
+  const paidAmount = Number(payload.paidAmount ?? payload.payableBalance ?? payload.cashPayable ?? 0);
+  if (paidAmount <= 0) {
+    return {
+      settlementId: settlementRecord.clientRecordId,
+      settlementNumber: payload.settlementNumber,
+      accountingStatus: "posted",
+      createdTransactions: 0,
+      existingTransactions: 0,
+      accountId: payload.paymentAccountCanonicalId ?? payload.paymentAccountId ?? payload.linkedAccountId,
+      amount: 0,
+    } satisfies SettlementAccountingRepairResult;
+  }
   const canonicalPaymentAccountId = payload.paymentAccountCanonicalId ?? payload.paymentAccountId ?? payload.linkedAccountId;
   const paymentAccountLookupId = canonicalPaymentAccountId || payload.paymentAccountLegacyId || payload.linkedAccountId;
   const resolvedAccount = await resolveCanonicalPaymentAccountId(
@@ -955,18 +967,6 @@ export async function repairPostedSettlementAccounting(
   }
   if (!accountValidation.valid) {
     throw new Error(accountValidation.message ?? `Settlement ${payload.settlementNumber} cannot be reposted because its payment account is invalid.`);
-  }
-  const paidAmount = Number(payload.paidAmount ?? payload.payableBalance ?? payload.cashPayable ?? 0);
-  if (paidAmount <= 0) {
-    return {
-      settlementId: settlementRecord.clientRecordId,
-      settlementNumber: payload.settlementNumber,
-      accountingStatus: "posted",
-      createdTransactions: 0,
-      existingTransactions: 0,
-      accountId: accountId ?? payload.linkedAccountId,
-      amount: 0,
-    } satisfies SettlementAccountingRepairResult;
   }
   const existing = await tx.select({
     id: accountTransactions.id,

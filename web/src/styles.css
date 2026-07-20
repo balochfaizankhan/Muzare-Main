@@ -17186,6 +17186,222 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   }
 }
 
+.workforce-payments-page {
+  display: grid;
+  gap: 14px;
+  padding-bottom: calc(92px + env(safe-area-inset-bottom));
+}
+.workforce-payments-context,
+.workforce-payments-notice {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+.workforce-payments-context p { margin: 0; }
+.workforce-payments-notice {
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  color: #334155;
+  padding: 10px 12px;
+}
+.workforce-payments-notice.is-error { background: #fff7f7; border-color: #fecaca; color: #991b1b; }
+.workforce-payments-notice.is-success { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
+.workforce-payments-notice span { flex: 1; }
+.workforce-payments-notice button { align-items: center; background: transparent; border: 0; color: inherit; display: inline-flex; height: 32px; justify-content: center; padding: 0; width: 32px; }
+.workforce-payments-summary-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.workforce-payments-summary-grid button {
+  align-items: start;
+  background: #fff;
+  border: 1px solid #dbe7df;
+  border-radius: 14px;
+  box-shadow: 0 5px 16px rgba(20, 65, 38, .05);
+  color: #174b2b;
+  display: grid;
+  gap: 4px;
+  min-height: 92px;
+  padding: 12px;
+  text-align: left;
+}
+.workforce-payments-summary-grid button span { color: #64748b; font-size: 11px; line-height: 1.2; }
+.workforce-payments-summary-grid button strong { color: #123e24; font-size: 17px; overflow-wrap: anywhere; }
+.workforce-payments-panel { display: grid; gap: 14px; padding: 14px; }
+.workforce-payments-panel__header { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
+.workforce-payments-panel__header h2 { color: #153c26; font-size: 17px; margin: 0; }
+.workforce-payments-panel__header p { color: #64748b; font-size: 12px; margin: 3px 0 0; }
+.workforce-payments-panel__header button { align-items: center; display: inline-flex; gap: 6px; min-height: 44px; white-space: nowrap; }
+.workforce-payments-panel__actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.workforce-payments-filters { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.workforce-payments-filters select,
+.workforce-payments-search {
+  background: #fff;
+  border: 1px solid #cfded4;
+  border-radius: 11px;
+  min-height: 44px;
+}
+.workforce-payments-search { align-items: center; display: flex; gap: 8px; grid-column: 1 / -1; padding: 0 11px; }
+.workforce-payments-search svg { color: #718096; flex: 0 0 auto; }
+.workforce-payments-search input { background: transparent; border: 0; flex: 1; min-width: 0; outline: 0; padding: 0; }
+.workforce-payments-filters select { min-width: 0; padding: 0 10px; }
+.workforce-payments-date-filter { display: grid; gap: 3px; min-width: 0; }
+.workforce-payments-date-filter span { color: #64748b; font-size: 10px; font-weight: 700; }
+.workforce-payments-date-filter input { background: #fff; border: 1px solid #cfded4; border-radius: 11px; min-height: 44px; min-width: 0; padding: 0 9px; }
+.workforce-payment-refund { align-items: end; background: #f7fbf8; border: 1px solid #cfe0d4; border-radius: 12px; display: grid; gap: 9px; grid-template-columns: 1fr 1fr; padding: 11px; }
+.workforce-payment-refund > strong { color: #17452b; grid-column: 1 / -1; }
+.workforce-payment-refund label { display: grid; gap: 4px; min-width: 0; }
+.workforce-payment-refund label span { color: #64748b; font-size: 11px; font-weight: 700; }
+.workforce-payment-refund input, .workforce-payment-refund select { background: #fff; border: 1px solid #cfded4; border-radius: 10px; min-height: 44px; min-width: 0; padding: 0 10px; }
+.workforce-payment-refund > div { display: flex; gap: 8px; grid-column: 1 / -1; justify-content: flex-end; }
+.workforce-payment-report-grid { display: grid; gap: 8px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.workforce-payment-report-grid article { background: #f8fbf9; border: 1px solid #dce8e0; border-radius: 11px; display: grid; gap: 4px; padding: 10px; }
+.workforce-payment-report-grid span { color: #64748b; font-size: 10px; }
+.workforce-payment-report-grid strong { color: #17452b; font-size: 14px; overflow-wrap: anywhere; }
+.workforce-payments-empty,
+.workforce-payments-inline-note { color: #64748b; font-size: 13px; margin: 0; padding: 12px 2px; }
+.workforce-payments-due-list { display: grid; gap: 9px; }
+.workforce-payment-due-card {
+  background: #fff;
+  border: 1px solid #dbe5de;
+  border-radius: 14px;
+  color: #1e293b;
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 12px;
+  text-align: left;
+}
+.workforce-payment-due-card__top,
+.workforce-payment-due-card__meta,
+.workforce-payment-due-card__action { align-items: center; display: flex; gap: 8px; justify-content: space-between; }
+.workforce-payment-due-card__top strong { color: #16723b; font-size: 14px; }
+.workforce-payment-status { border-radius: 999px; font-size: 10px; font-style: normal; font-weight: 700; letter-spacing: .02em; padding: 4px 7px; text-transform: uppercase; }
+.workforce-payment-status.status-unpaid,
+.workforce-payment-status.status-outstanding { background: #fff7ed; color: #9a3412; }
+.workforce-payment-status.status-partially_settled,
+.workforce-payment-status.status-partially_applied,
+.workforce-payment-status.status-partially_refunded { background: #fffbeb; color: #92400e; }
+.workforce-payment-status.status-paid,
+.workforce-payment-status.status-settled_by_advance,
+.workforce-payment-status.status-fully_applied,
+.workforce-payment-status.status-fully_refunded,
+.workforce-payment-status.status-posted { background: #ecfdf3; color: #166534; }
+.workforce-payment-status.status-on_hold { background: #f1f5f9; color: #475569; }
+.workforce-payment-status.status-voided { background: #fef2f2; color: #991b1b; }
+.workforce-payment-due-card__recipient { font-size: 14px; font-weight: 700; }
+.workforce-payment-due-card__description { color: #475569; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workforce-payment-due-card__meta { color: #718096; font-size: 10px; }
+.workforce-payment-due-card__meta i { font-style: normal; }
+.workforce-payment-due-card__amounts { background: #f7faf8; border-radius: 10px; display: grid; gap: 6px; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 9px; }
+.workforce-payment-due-card__amounts i { color: #64748b; display: flex; flex-direction: column; font-size: 10px; font-style: normal; gap: 2px; }
+.workforce-payment-due-card__amounts b { color: #334155; font-size: 12px; }
+.workforce-payment-due-card__amounts .is-outstanding b { color: #166534; font-size: 14px; }
+.workforce-payment-due-card__action { border-top: 1px solid #edf2ee; color: #166534; font-size: 12px; font-weight: 700; padding-top: 8px; }
+.workforce-payment-form { display: grid; gap: 11px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.workforce-payment-form label { display: grid; gap: 5px; min-width: 0; }
+.workforce-payment-form label.is-full { grid-column: 1 / -1; }
+.workforce-payment-form label > span { color: #526174; font-size: 11px; font-weight: 700; }
+.workforce-payment-form input,
+.workforce-payment-form select,
+.workforce-payment-review-form input,
+.workforce-payment-review-form select,
+.workforce-payment-advance-options input {
+  background: #fff;
+  border: 1px solid #cfded4;
+  border-radius: 11px;
+  box-sizing: border-box;
+  height: 44px;
+  min-width: 0;
+  padding: 0 10px;
+  width: 100%;
+}
+.workforce-payment-form input:focus,
+.workforce-payment-form select:focus,
+.workforce-payment-review-form input:focus,
+.workforce-payment-review-form select:focus { border-color: #2f855a; box-shadow: 0 0 0 3px rgba(47, 133, 90, .1); outline: 0; }
+.workforce-payment-form__footer { align-items: center; background: #f5faf6; border: 1px solid #dbe7df; border-radius: 12px; display: flex; gap: 12px; grid-column: 1 / -1; justify-content: space-between; padding: 10px; }
+.workforce-payment-form__footer div { display: grid; gap: 2px; }
+.workforce-payment-form__footer strong { color: #64748b; font-size: 10px; text-transform: uppercase; }
+.workforce-payment-form__footer span { color: #153c26; font-size: 16px; font-weight: 800; }
+.workforce-payment-form__footer button { background: #176b38; border: 0; border-radius: 10px; color: #fff; min-height: 44px; padding: 0 15px; }
+.workforce-payment-voucher-list,
+.workforce-advance-position-list { display: grid; gap: 9px; }
+.workforce-payment-voucher-list article,
+.workforce-advance-position-list article { border: 1px solid #dbe5de; border-radius: 13px; padding: 12px; }
+.workforce-payment-voucher-list header,
+.workforce-advance-position-list header { align-items: center; display: flex; justify-content: space-between; }
+.workforce-payment-voucher-list h3 { font-size: 14px; margin: 8px 0 2px; }
+.workforce-payment-voucher-list p,
+.workforce-advance-position-list p { color: #64748b; font-size: 12px; margin: 3px 0 9px; }
+.workforce-payment-voucher-list dl { display: grid; gap: 7px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
+.workforce-payment-voucher-list dl div { display: grid; gap: 2px; }
+.workforce-payment-voucher-list dt { color: #718096; font-size: 9px; text-transform: uppercase; }
+.workforce-payment-voucher-list dd { font-size: 11px; margin: 0; overflow-wrap: anywhere; }
+.workforce-payment-voucher-list small { color: #9a6700; display: block; font-size: 10px; margin-top: 8px; }
+.workforce-advance-position-list article > div { display: grid; gap: 7px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.workforce-advance-position-list article > div span { color: #64748b; display: grid; font-size: 10px; gap: 2px; }
+.workforce-advance-position-list article > div b { color: #334155; font-size: 12px; }
+.workforce-advance-position-list article > div .is-outstanding b { color: #166534; }
+.workforce-payment-review-backdrop { align-items: end; z-index: 120; }
+.workforce-payment-review { background: #fff; border-radius: 20px 20px 0 0; box-shadow: 0 -12px 38px rgba(15, 23, 42, .2); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; max-height: 92dvh; overflow: hidden; width: 100%; }
+.workforce-payment-review > header { align-items: start; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; padding: 14px 16px; }
+.workforce-payment-review > header span { color: #16723b; font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.workforce-payment-review > header h2 { font-size: 19px; margin: 2px 0; }
+.workforce-payment-review > header p { color: #64748b; font-size: 12px; margin: 0; }
+.workforce-payment-review > header button { align-items: center; background: #f1f5f9; border: 0; border-radius: 999px; display: inline-flex; height: 36px; justify-content: center; padding: 0; width: 36px; }
+.workforce-payment-review__body { display: grid; gap: 15px; overflow-y: auto; padding: 14px 16px; }
+.workforce-payment-review__body section { display: grid; gap: 9px; }
+.workforce-payment-review__body h3 { color: #153c26; font-size: 13px; margin: 0; }
+.workforce-payment-review-grid,
+.workforce-payment-position { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
+.workforce-payment-review-grid div,
+.workforce-payment-position div { background: #f8faf9; border-radius: 9px; display: grid; gap: 3px; padding: 8px; }
+.workforce-payment-review-grid dt,
+.workforce-payment-position dt { color: #718096; font-size: 9px; text-transform: uppercase; }
+.workforce-payment-review-grid dd,
+.workforce-payment-position dd { font-size: 11px; font-weight: 700; margin: 0; overflow-wrap: anywhere; }
+.workforce-payment-position .is-total { background: #edf8f0; grid-column: 1 / -1; }
+.workforce-payment-position .is-total dd { color: #166534; font-size: 17px; }
+.workforce-payment-advance-options { display: grid; gap: 7px; }
+.workforce-payment-advance-options label { align-items: center; border: 1px solid #dbe5de; border-radius: 10px; display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) 110px; padding: 8px; }
+.workforce-payment-advance-options label > span { display: grid; gap: 2px; }
+.workforce-payment-advance-options small { color: #64748b; font-size: 10px; }
+.workforce-payment-review-form { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.workforce-payment-review-form label { display: grid; gap: 5px; }
+.workforce-payment-review-form label span { color: #64748b; font-size: 10px; font-weight: 700; }
+.workforce-payment-review > footer { background: #fff; border-top: 1px solid #dbe5de; box-shadow: 0 -6px 18px rgba(15, 23, 42, .06); padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); }
+.workforce-payment-review__preview { display: flex; gap: 10px; justify-content: space-between; margin-bottom: 8px; }
+.workforce-payment-review__preview span { color: #64748b; display: grid; font-size: 9px; gap: 2px; }
+.workforce-payment-review__preview b { color: #153c26; font-size: 12px; }
+.workforce-payment-review__actions { display: grid; gap: 8px; grid-template-columns: auto minmax(0, 1fr); }
+.workforce-payment-review__actions button { align-items: center; display: inline-flex; justify-content: center; min-height: 44px; }
+
+@media (min-width: 760px) {
+  .workforce-payments-summary-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .workforce-payments-summary-grid button { min-height: 104px; }
+  .workforce-payments-filters { grid-template-columns: minmax(280px, 1fr) 180px 180px; }
+  .workforce-payments-search { grid-column: auto; }
+  .workforce-payments-due-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .workforce-payment-voucher-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .workforce-payment-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .workforce-payment-review-backdrop { align-items: center; padding: 24px; }
+  .workforce-payment-review { border-radius: 18px; max-width: 820px; }
+}
+
+@media (max-width: 380px) {
+  .workforce-payments-panel__header { align-items: stretch; flex-direction: column; }
+  .workforce-payments-panel__header button { justify-content: center; }
+  .workforce-payments-panel__actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .workforce-payment-refund { grid-template-columns: 1fr; }
+  .workforce-payment-refund > strong, .workforce-payment-refund > div { grid-column: 1; }
+  .workforce-payment-report-grid { grid-template-columns: 1fr 1fr; }
+  .workforce-payment-form,
+  .workforce-payment-review-form { grid-template-columns: 1fr; }
+  .workforce-payment-form label.is-full { grid-column: auto; }
+}
+
 @media print {
   @page { size: A4 landscape; margin: 5mm; }
   @page attendance-register { size: A3 landscape; margin: 6mm; }

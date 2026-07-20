@@ -1,0 +1,94 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { test } from "node:test";
+import { calculateAdvancePosition, calculateLabourDuePosition, labourFinancialScopeKey } from "../src/lib/labour-payments.js";
+
+const routeSource = readFileSync(new URL("../src/routes/labour-payments.ts", import.meta.url), "utf8");
+const settlementRouteSource = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
+const migrationSource = readFileSync(new URL("../../database/migrations/0035_unified_labour_payments.sql", import.meta.url), "utf8");
+
+test("an approved attendance settlement creates an unpaid due and rejects immediate cash", () => {
+  assert.match(settlementRouteSource, /Settlement approval no longer moves cash/i);
+  assert.match(settlementRouteSource, /ensureSettlementLabourDue/);
+  assert.match(migrationSource, /payment_status text NOT NULL DEFAULT 'UNPAID'/);
+});
+
+test("due position supports unpaid, partial, cash-paid, advance-only, and mixed clearing", () => {
+  assert.deepEqual(calculateLabourDuePosition({ grossAmount: 50_000 }), {
+    grossAmount: 50_000, adjustmentAmount: 0, authorizedDeductions: 0, payableAmount: 50_000,
+    previousPayments: 0, advancesApplied: 0, outstandingBalance: 50_000, paymentStatus: "UNPAID",
+  });
+  assert.equal(calculateLabourDuePosition({ grossAmount: 50_000, advancesApplied: 20_000, previousPayments: 10_000 }).outstandingBalance, 20_000);
+  assert.equal(calculateLabourDuePosition({ grossAmount: 50_000, advancesApplied: 20_000, previousPayments: 10_000 }).paymentStatus, "PARTIALLY_SETTLED");
+  assert.equal(calculateLabourDuePosition({ grossAmount: 50_000, advancesApplied: 50_000 }).paymentStatus, "SETTLED_BY_ADVANCE");
+  assert.equal(calculateLabourDuePosition({ grossAmount: 50_000, advancesApplied: 20_000, previousPayments: 30_000 }).paymentStatus, "PAID");
+});
+
+test("authorized deductions reduce payable without overwriting original gross", () => {
+  const result = calculateLabourDuePosition({ grossAmount: 12_000, adjustmentAmount: 500, authorizedDeductions: 1_000 });
+  assert.equal(result.grossAmount, 12_000);
+  assert.equal(result.payableAmount, 11_500);
+  assert.equal(result.outstandingBalance, 11_500);
+});
+
+test("advance position supports partial applications, multi-due carry-forward, excess, and refunds", () => {
+  assert.deepEqual(calculateAdvancePosition({ originalAmount: 20_000, appliedAmount: 7_500 }), {
+    originalAmount: 20_000, appliedAmount: 7_500, refundedAmount: 0,
+    outstandingAmount: 12_500, advanceStatus: "PARTIALLY_APPLIED",
+  });
+  assert.equal(calculateAdvancePosition({ originalAmount: 20_000, appliedAmount: 7_500, refundedAmount: 2_500 }).outstandingAmount, 10_000);
+  assert.equal(calculateAdvancePosition({ originalAmount: 20_000, appliedAmount: 20_000 }).advanceStatus, "FULLY_APPLIED");
+  assert.equal(calculateAdvancePosition({ originalAmount: 20_000, refundedAmount: 20_000 }).advanceStatus, "FULLY_REFUNDED");
+});
+
+test("financial scope prevents a leader personal advance from clearing a group due", () => {
+  const person = labourFinancialScopeKey({ recipientScope: "INDIVIDUAL", labourerId: "leader-1" });
+  const group = labourFinancialScopeKey({ recipientScope: "LABOUR_GROUP", labourGroupId: "group-1" });
+  assert.notEqual(person, group);
+  assert.equal(group, labourFinancialScopeKey({ recipientScope: "LABOUR_GROUP", labourGroupId: "group-1", labourerId: "leader-1" }));
+});
+
+test("unnamed labour advances require a stable settlement identity", () => {
+  assert.throws(() => labourFinancialScopeKey({ recipientScope: "UNREGISTERED_LABOUR" }), /stable recipient/i);
+  assert.equal(labourFinancialScopeKey({ recipientScope: "UNREGISTERED_LABOUR", crewReference: "Onion Loading Crew" }), "unregistered:onion loading crew");
+});
+
+test("posting paths are transactional, locked, idempotent, account-linked, and allocation-based", () => {
+  assert.match(routeSource, /db\.transaction/);
+  assert.match(routeSource, /pg_advisory_xact_lock/);
+  assert.match(routeSource, /labourPaymentVouchers\.idempotencyKey/);
+  assert.match(routeSource, /labourPaymentAllocations/);
+  assert.match(routeSource, /labourAdvanceApplications/);
+  assert.match(routeSource, /insertAccountMovement/);
+  assert.match(routeSource, /Payment exceeds the current outstanding due balance/);
+  assert.match(routeSource, /Advance application exceeds the available advance balance/);
+});
+
+test("voucher voiding restores allocations and blocks unsafe advance void order", () => {
+  assert.match(routeSource, /Reverse active advance applications before voiding this advance voucher/);
+  assert.match(routeSource, /status: "REVERSED"/);
+  assert.match(routeSource, /refreshLabourDuePaymentStatus/);
+  assert.match(routeSource, /nature !== "REFUND_RECOVERY"/);
+});
+
+test("migration maps historical records without replaying cash and enforces normalized integrity", () => {
+  assert.match(migrationSource, /No account transaction is inserted by this migration/i);
+  assert.match(migrationSource, /ON CONFLICT \(legacy_source_record_id, nature\).*DO NOTHING/);
+  assert.match(migrationSource, /CHECK \(amount > 0\)/);
+  assert.match(migrationSource, /UNIQUE\(workspace_id, idempotency_key\)/);
+  assert.match(migrationSource, /labour_payment_vouchers_workspace_farm_number_uidx/);
+  assert.match(migrationSource, /CREATE TABLE IF NOT EXISTS labour_accounting_entries/);
+  assert.match(migrationSource, /labour_payment_allocation_guard/);
+  assert.match(migrationSource, /labour_advance_application_guard/);
+  assert.match(migrationSource, /labour_advance_refund_guard/);
+});
+
+test("labour subledger distinguishes expense, payable, advance, cash, and partner liability", () => {
+  for (const ledger of ["LABOUR_EXPENSE", "LABOUR_PAYABLE", "LABOUR_ADVANCE", "CASH_CONTROL", "PARTNER_PAYABLE"]) {
+    assert.match(migrationSource, new RegExp(ledger));
+  }
+  assert.match(routeSource, /postLabourDueRecognition/);
+  assert.match(routeSource, /postLabourAdvanceApplicationJournal/);
+  assert.match(routeSource, /postLabourVoucherJournal/);
+  assert.match(routeSource, /reverseLabourJournal/);
+});

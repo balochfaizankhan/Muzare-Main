@@ -388,7 +388,7 @@ test("labour settlement form loads canonical payment account uuids and shows LW 
   assert.match(settlementPage, /Edit \/ Update/);
   assert.match(settlementPage, /Void \/ Reverse settlement/);
   assert.match(settlementPage, /Delete settlement/);
-  assert.match(settlementPage, /placeholder="Search settlement number, notes, or account"/);
+  assert.match(settlementPage, /placeholder="Search settlement, voucher, note, labour or group"/);
   assert.match(settlementPage, /Available Group Advances/);
   assert.match(settlementPage, /Advance Absorbed This Settlement/);
   assert.match(settlementPage, /Outstanding Group Advance/);

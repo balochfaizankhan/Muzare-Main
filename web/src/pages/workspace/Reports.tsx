@@ -19,7 +19,7 @@ import { translateExpenseCategory, translateExpenseSubcategory, translatePayment
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
 import { getVoucherDisplayNumber } from "../../lib/vouchers";
 import { getActiveVouchers, loadWorkspaceVouchers } from "../../lib/voucherCollections";
-import { fetchBootstrap } from "../../lib/api";
+import { fetchBootstrap, fetchLabourPaymentAdvances, fetchLabourPaymentVouchers, type LabourAdvancePosition, type LabourPaymentVoucherRecord } from "../../lib/api";
 import {
   buildPartnerLiabilityPositions,
   calculatePartnerLiabilityBalance,
@@ -35,6 +35,8 @@ import {
 import { resolveSaleType, saleProduceLabel } from "../../lib/dispatch-sales";
 import {
   compareLabourers,
+  getActiveFarmId,
+  getActiveSeasonId,
   offlineDb,
   workspaceRecords,
   type Account,
@@ -494,6 +496,8 @@ export function Reports() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [wageRates, setWageRates] = useState<WageRate[]>([]);
   const [labourWageSettlements, setLabourWageSettlements] = useState<LabourWageSettlement[]>([]);
+  const [labourPaymentVouchers, setLabourPaymentVouchers] = useState<LabourPaymentVoucherRecord[]>([]);
+  const [canonicalAdvancePositions, setCanonicalAdvancePositions] = useState<LabourAdvancePosition[]>([]);
   const [entries, setEntries] = useState<PartnerEntry[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
   const [dispatches, setDispatches] = useState<Dispatch[]>([]);
@@ -553,6 +557,23 @@ export function Reports() {
       setDispatches(nextDispatches);
     });
   }, []);
+
+  useEffect(() => {
+    const workspaceId = user?.workspaceId;
+    const farmId = getActiveFarmId();
+    const seasonId = getActiveSeasonId();
+    if (!token || !workspaceId || !farmId || !seasonId || !navigator.onLine) return;
+    void Promise.all([
+      fetchLabourPaymentVouchers(token, workspaceId, { farmId, seasonId }),
+      fetchLabourPaymentAdvances(token, workspaceId, farmId, seasonId),
+    ]).then(([voucherResponse, advanceResponse]) => {
+      setLabourPaymentVouchers(voucherResponse.vouchers);
+      setCanonicalAdvancePositions(advanceResponse.advances);
+    }).catch(() => {
+      setLabourPaymentVouchers([]);
+      setCanonicalAdvancePositions([]);
+    });
+  }, [token, user?.workspaceId]);
 
   useEffect(() => {
     if (normalizedRequestedReport && reportOptions.includes(normalizedRequestedReport)) setReport(normalizedRequestedReport);
@@ -1127,14 +1148,17 @@ export function Reports() {
   );
   const settledAdvancesTotal = useMemo(() => totalSettledAdvances(activeSettlements), [activeSettlements]);
   const outstandingAdvancePool = useMemo(() => outstandingLabourAdvances(advanceRows, activeSettlements), [activeSettlements, advanceRows]);
+  const canonicalAdvanceBySourceId = useMemo(() => new Map(canonicalAdvancePositions.map((item) => [item.sourceId, item])), [canonicalAdvancePositions]);
+  const filteredCanonicalAdvancePositions = useMemo(() => advanceRows.map((row) => canonicalAdvanceBySourceId.get(row.id)).filter((item): item is LabourAdvancePosition => Boolean(item)), [advanceRows, canonicalAdvanceBySourceId]);
+  const canonicalAdvanceCoverageComplete = advanceRows.length > 0 && filteredCanonicalAdvancePositions.length === advanceRows.length;
   const advanceReportTotals = useMemo(() => ({
     totalAdvances: advanceRows.reduce((sum, item) => sum + item.amount, 0),
     uniqueLabourers: advanceSummary.length,
     transactions: advanceRows.length,
-    adjustedInSettlements: settledAdvancesTotal,
-    outstandingAdvances: outstandingAdvancePool,
+    adjustedInSettlements: canonicalAdvanceCoverageComplete ? filteredCanonicalAdvancePositions.reduce((sum, item) => sum + item.appliedAmount, 0) : settledAdvancesTotal,
+    outstandingAdvances: canonicalAdvanceCoverageComplete ? filteredCanonicalAdvancePositions.reduce((sum, item) => sum + item.outstandingAmount, 0) : outstandingAdvancePool,
     postedSettlements: activeSettlements.length,
-  }), [activeSettlements.length, advanceRows, advanceSummary.length, outstandingAdvancePool, settledAdvancesTotal]);
+  }), [activeSettlements.length, advanceRows, advanceSummary.length, canonicalAdvanceCoverageComplete, filteredCanonicalAdvancePositions, outstandingAdvancePool, settledAdvancesTotal]);
   const advanceReportLabourSections = useMemo<AdvanceReportLabourSection[]>(() => advanceSummary.map((item) => {
     const records = item.records.slice().sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
     const lastAdvanceDate = records[0]?.date ?? "";
@@ -1313,6 +1337,19 @@ export function Reports() {
     })
     .sort((a, b) => b.dispatch.date.localeCompare(a.dispatch.date) || a.dispatchNumber.localeCompare(b.dispatchNumber)), [dispatchDateType, dispatches, from, matches, productFilter, salesByDispatchKey, to, vehicleFilter, t]);
 
+  // Legacy LPVs mirror transactions already represented by the historical
+  // operational settlement/advance records. Only canonical, non-legacy LPVs
+  // are added here so reports never double count migrated cash movements.
+  const canonicalCashLabourVouchers = useMemo(
+    () => labourPaymentVouchers.filter((voucher) => voucher.status === "POSTED" && !voucher.legacy && voucher.nature !== "ADVANCE"),
+    [labourPaymentVouchers],
+  );
+  const labourVoucherIsInflow = (voucher: LabourPaymentVoucherRecord) => {
+    if (voucher.nature === "REFUND_RECOVERY") return true;
+    if (voucher.nature !== "REVERSAL") return false;
+    const original = labourPaymentVouchers.find((item) => item.id === voucher.reversalReference);
+    return original?.nature !== "REFUND_RECOVERY";
+  };
   const positions = useMemo(() => accounts
     .filter((account) => !accountId || account.id === accountId)
     .map((account) => {
@@ -1323,6 +1360,13 @@ export function Reports() {
       const settlementsSent = partnerRows.filter((item) => item.type === "settlement" && resolveCanonicalAccountId(item.fromAccountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
       const settlementsReceived = partnerRows.filter((item) => item.type === "settlement" && resolveCanonicalAccountId(item.toAccountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
       const salesReceived = saleRows.filter((item) => resolveCanonicalAccountId(item.accountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
+      const canonicalLabourCashEffect = canonicalCashLabourVouchers
+        .filter((voucher) => voucher.paymentAccountId === account.id)
+        .reduce((sum, voucher) => {
+          const amount = Number(voucher.paymentAmount);
+          const inflow = labourVoucherIsInflow(voucher);
+          return sum + (account.type === "partner" ? (inflow ? -amount : amount) : (inflow ? amount : -amount));
+        }, 0);
       return {
         account,
         voucherExpenses,
@@ -1332,9 +1376,9 @@ export function Reports() {
         settlementsSent,
         settlementsReceived,
         salesReceived,
-        net: calculateAccountBalance(account, saleRows, cashAffectingVouchers, advanceRows, partnerRows, activeSettlements, accounts),
+        net: calculateAccountBalance(account, saleRows, cashAffectingVouchers, advanceRows, partnerRows, activeSettlements, accounts) + canonicalLabourCashEffect,
       };
-    }), [accountId, accounts, activeSettlements, advanceRows, cashAffectingVouchers, partnerRows, saleRows]);
+    }), [accountId, accounts, activeSettlements, advanceRows, canonicalCashLabourVouchers, cashAffectingVouchers, labourPaymentVouchers, partnerRows, saleRows]);
   const partnerLiabilityPositions = useMemo(
     () => buildPartnerLiabilityPositions(accounts, cashAffectingVouchers, advanceRows, partnerRows, saleRows, activeSettlements)
       .filter((item) => !accountId || item.account?.id === accountId),
@@ -1381,6 +1425,27 @@ export function Reports() {
       const isPartner = account?.type === "partner";
       rows.push({ id: `advance:${advance.id}`, date: advance.date, accountId: resolveCanonicalAccountId(advance.accountId, accountLookup) ?? advance.accountId ?? "", accountName: accountName(advance.accountId), type: "advance", typeLabel: t("reportsPage.labourAdvance"), reference: advance.id.slice(0, 8), description: `${labourName(advance.labourerId)}${advance.notes ? ` - ${advance.notes}` : ""}`, debit: isPartner ? 0 : advance.amount, credit: isPartner ? advance.amount : 0, path: `/workspace/labour-advances?recordId=${advance.id}`, classification: "advance", partnerLiabilityGroup: isPartner ? "labour_advances_paid" : undefined });
     }
+    for (const voucher of canonicalCashLabourVouchers) {
+      if (!voucher.paymentAccountId) continue;
+      const account = accountById.get(voucher.paymentAccountId);
+      const isPartner = account?.type === "partner";
+      const inflow = labourVoucherIsInflow(voucher);
+      rows.push({
+        id: `labour-payment-voucher:${voucher.id}`,
+        date: voucher.voucherDate,
+        accountId: voucher.paymentAccountId,
+        accountName: account?.name ?? "Payment account",
+        type: "labour_payment_voucher",
+        typeLabel: voucher.nature.toLowerCase().replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase()),
+        reference: voucher.voucherNumber,
+        description: voucher.description,
+        debit: isPartner ? (inflow ? Number(voucher.paymentAmount) : 0) : (inflow ? 0 : Number(voucher.paymentAmount)),
+        credit: isPartner ? (inflow ? 0 : Number(voucher.paymentAmount)) : (inflow ? Number(voucher.paymentAmount) : 0),
+        path: "/workspace/labour-payments/vouchers",
+        classification: voucher.nature === "REFUND_RECOVERY" ? "income" : voucher.nature === "REVERSAL" ? "other" : "settlement",
+        partnerLiabilityGroup: isPartner ? "labour_wage_settlements" : undefined,
+      });
+    }
     for (const sale of saleRows) rows.push({
       id: `sale:${sale.id}`,
       date: sale.date,
@@ -1423,7 +1488,7 @@ export function Reports() {
         running.set(item.accountId, next);
         return { ...item, running: next, accountName: item.accountName || accountName(item.accountId) };
       });
-  }, [accountId, accountName, accountById, accounts, advanceRows, cashAffectingVouchers, labourName, partnerRows, saleRows, t]);
+  }, [accountId, accountName, accountById, accounts, advanceRows, canonicalCashLabourVouchers, cashAffectingVouchers, labourName, labourPaymentVouchers, partnerRows, saleRows, t]);
   const groupedAccountLedgerRows = useMemo(() => groupAccountTransactions(accountLedgerRows), [accountLedgerRows]);
   const groupedPartnerLedgerRows = useMemo(
     () => selectedAccountRecord?.type === "partner" ? groupPartnerLiabilityTransactions(accountLedgerRows) : [],

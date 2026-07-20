@@ -318,7 +318,7 @@ export function LabourSelectCombobox({
         value={query}
       />
       <ChevronDown className={`labour-combobox__chevron${open ? " is-open" : ""}`} size={16} aria-hidden="true" />
-      {open ? (
+      {open && !isMobileSelector ? (
         <div className="labour-combobox__menu" id="labour-combobox-options" role="listbox" aria-label={resolvedAriaLabel}>
           <div className="labour-combobox__options">
             {items.length === 0 ? <p className="empty-records labour-combobox__empty">{resolvedNoResultsLabel}</p> : items.map((option, index) => {

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { requireUser, type AuthenticatedUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
-import { auditLogs, expenseVoucherSequences, operationalRecords, userSessions } from "../db/schema.js";
+import { auditLogs, expenseVoucherSequences, labourPaymentVouchers, operationalRecords, userSessions } from "../db/schema.js";
 import { activeOperationalPayloadSql, isDeletedOperationalPayload } from "../operational-record-state.js";
 import {
   canonicalImportedVoucherNumber,
@@ -1008,6 +1008,15 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     if (existing && ["partnerEntry", "advance", "voucher"].includes(parsed.data.entity) && isDeletedOperationalPayload(existing.payload)) {
       return reply.code(409).send({ message: "Deleted financial records cannot be edited." });
     }
+    if (existing && parsed.data.entity === "advance") {
+      const [canonicalVoucher] = await db.select({ id: labourPaymentVouchers.id, status: labourPaymentVouchers.status })
+        .from(labourPaymentVouchers)
+        .where(eq(labourPaymentVouchers.legacySourceRecordId, existing.id))
+        .limit(1);
+      if (canonicalVoucher?.status === "POSTED") {
+        return reply.code(409).send({ message: "Posted labour advances are immutable. Void the Labour Payment Voucher instead." });
+      }
+    }
     if (parsed.data.entity === "sale") {
       const saleLinkError = await validateLinkedDispatchSale({
         workspaceId: parsed.data.workspaceId,
@@ -1389,6 +1398,15 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         seasonCondition,
       )).limit(1);
       if (!entry) return reply.code(204).send();
+      if (parsed.data.entity === "advance") {
+        const [canonicalVoucher] = await db.select({ id: labourPaymentVouchers.id, status: labourPaymentVouchers.status })
+          .from(labourPaymentVouchers)
+          .where(eq(labourPaymentVouchers.legacySourceRecordId, entry.id))
+          .limit(1);
+        if (canonicalVoucher?.status === "POSTED") {
+          return reply.code(409).send({ message: "Posted labour advances are immutable. Void the Labour Payment Voucher instead." });
+        }
+      }
       if ((parsed.data.entity === "vehicle" || parsed.data.entity === "dateType")
         && await dispatchMasterIsUsed(parsed.data.workspaceId, parsed.data.farmId, parsed.data.entity === "dateType" ? null : requestSeasonId, parsed.data.entity, parsed.data.recordId)) {
         return reply.code(409).send({ message: `${parsed.data.entity === "vehicle" ? "Vehicle" : "Date type"} cannot be deleted because it is used by a dispatch.` });

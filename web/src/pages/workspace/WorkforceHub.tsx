@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Activity, ArrowLeft, ArrowRight, CalendarCheck, ChevronRight, ClipboardList, HandCoins, ReceiptText, WalletCards } from "lucide-react";
-import { useTranslation } from "react-i18next";
 import { NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
 import { LabourSelectCombobox } from "../../components/LabourSelectCombobox";
@@ -95,26 +94,24 @@ export function WorkforceSectionLayout() {
 }
 
 export function LabourPaymentsSectionLayout() {
-  const { t } = useTranslation();
   const { user } = useAuth();
   const workspaceId = user?.workspaceId ?? "";
   const [searchParams] = useSearchParams();
   const query = workforceQuery(searchParams);
   const tabs = useMemo(() => {
     const allTabs = [
-      { to: `/workspace/labour-payments/overview${query}`, label: "Overview", module: "workforce" as const },
-      { to: `/workspace/labour-payments/advances${query}`, label: t("layout.advances"), module: "advances" as const },
-      { to: `/workspace/labour-payments/earnings${query}`, label: "Earnings", module: "wages" as const },
-      { to: `/workspace/labour-payments/settlements${query}`, label: "Settle", module: "wages" as const },
-      { to: `/workspace/labour-payments/reports${query}`, label: "Reports", module: "reports" as const },
+      { to: `/workspace/labour-payments/overview${query}`, label: "Payments Due", module: "wages" as const },
+      { to: `/workspace/labour-payments/direct-due${query}`, label: "New Direct Due", module: "wages" as const },
+      { to: `/workspace/labour-payments/vouchers${query}`, label: "Payment Vouchers", module: "wages" as const },
+      { to: `/workspace/labour-payments/advances${query}`, label: "Outstanding Advances", module: "wages" as const },
     ];
     return allTabs.filter((tab) => !user || hasModulePermission(user, tab.module, "view", workspaceId));
-  }, [query, t, user, workspaceId]);
+  }, [query, user, workspaceId]);
   return (
     <WorkforceShell
       title="Labour Payments"
-      description="Keep advances, wage rates, labour earnings, settlements, and reports together in one professional labour finance center."
-      subtitle="Advances • Earnings • Settle • Reports"
+      description="Review labour dues, apply advances, and post every cash movement through one Labour Payment Voucher register."
+      subtitle="Due → Review → Apply advance or pay → Post"
       tabs={tabs}
       compactMobileHeader
     >

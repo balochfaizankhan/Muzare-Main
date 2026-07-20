@@ -11,6 +11,8 @@ import {
   farms,
   labourWageSettlementAdvanceAllocations,
   labourWageSettlementCreateRequests,
+  labourDues,
+  labourPaymentVouchers,
   operationalRecords,
   seasons,
   userSessions,
@@ -296,8 +298,7 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
     settlementDate: "2026-05-01",
     settlementMode: "group",
     groupId: labourGroupId,
-    paymentAccountId: paymentAccount.id,
-    paidAmount: 70,
+    paidAmount: 0,
     manualAdjustment: 0,
     clientRequestId,
   };
@@ -305,11 +306,8 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
   assert.equal(createResponse.statusCode, 200);
   const createdSettlement = createResponse.json().settlement;
   assert.equal(createdSettlement.foremanId, labourerId);
-  assert.equal(createdSettlement.paymentAccountId, paymentAccount.id);
-  assert.equal(createdSettlement.paymentAccountCanonicalId, paymentAccount.id);
-  assert.equal(createdSettlement.linkedAccountId, paymentAccount.id);
-  assert.equal(createdSettlement.paymentAccountName, "Settlement Cash Account");
-  assert.equal(createdSettlement.paymentAccountType, "cash");
+  assert.equal(createdSettlement.paidAmount, 0);
+  assert.equal(createdSettlement.paymentAccountId ?? null, null);
 
   const duplicateCreateResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements`, createPayload);
   assert.equal(duplicateCreateResponse.statusCode, 200);
@@ -325,11 +323,8 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
     eq(operationalRecords.clientRecordId, createdSettlement.id),
   )).limit(1);
   assert.ok(settlementRow);
-  assert.equal((settlementRow!.payload as Record<string, unknown>).paymentAccountId, paymentAccount.id);
-  assert.equal((settlementRow!.payload as Record<string, unknown>).paymentAccountCanonicalId, paymentAccount.id);
-  assert.equal((settlementRow!.payload as Record<string, unknown>).linkedAccountId, paymentAccount.id);
-  assert.equal((settlementRow!.payload as Record<string, unknown>).paymentAccountName, "Settlement Cash Account");
-  assert.equal((settlementRow!.payload as Record<string, unknown>).paymentAccountType, "cash");
+  assert.equal((settlementRow!.payload as Record<string, unknown>).paidAmount, 0);
+  assert.equal((settlementRow!.payload as Record<string, unknown>).paymentAccountId ?? null, null);
 
   const allocationRows = await db.select().from(labourWageSettlementAdvanceAllocations).where(eq(labourWageSettlementAdvanceAllocations.settlementRecordId, settlementRow!.id));
   assert.equal(allocationRows.length, 2);
@@ -372,9 +367,38 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
     eq(accountTransactions.source, "settlement"),
     eq(accountTransactions.sourceType, "labour_wage_settlement"),
   ));
-  assert.equal(accountEntriesAfterCreate.length, 1);
-  assert.equal(Number(accountEntriesAfterCreate[0]!.amount), 70);
-  assert.equal(accountEntriesAfterCreate[0]!.type, "debit");
+  assert.equal(accountEntriesAfterCreate.length, 0);
+
+  const [linkedDue] = await db.select().from(labourDues).where(eq(labourDues.sourceRecordId, settlementRow!.id)).limit(1);
+  assert.ok(linkedDue);
+  assert.equal(linkedDue!.paymentStatus, "PARTIALLY_SETTLED");
+  const paymentIdempotencyKey = randomUUID();
+  const payResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/dues/${linkedDue!.id}/settle`, {
+    farmId: tenant.farmId,
+    seasonId: tenant.seasonId,
+    advanceApplications: [],
+    payment: { idempotencyKey: paymentIdempotencyKey, voucherDate: "2026-05-01", amount: 70, paymentAccountId: paymentAccount.id, paymentMethod: "Cash" },
+  });
+  assertIntegrationResponse(payResponse, 200, "pay settlement due balance");
+  assert.equal(payResponse.json().result.due.outstandingBalance, 0);
+  assert.equal(payResponse.json().result.due.due.paymentStatus, "PAID");
+  const paymentVoucherId = payResponse.json().result.voucher.id as string;
+  const retryPayResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/dues/${linkedDue!.id}/settle`, {
+    farmId: tenant.farmId,
+    seasonId: tenant.seasonId,
+    advanceApplications: [],
+    payment: { idempotencyKey: paymentIdempotencyKey, voucherDate: "2026-05-01", amount: 70, paymentAccountId: paymentAccount.id, paymentMethod: "Cash" },
+  });
+  assertIntegrationResponse(retryPayResponse, 200, "retry settlement due payment after lost acknowledgement");
+  assert.equal(retryPayResponse.json().result.voucher.id, paymentVoucherId);
+  assert.equal((await db.select().from(labourPaymentVouchers).where(eq(labourPaymentVouchers.idempotencyKey, paymentIdempotencyKey))).length, 1);
+
+  const blockedVoidResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements/${createdSettlement.id}/void`, { voidReason: "Must reverse payment first" });
+  assert.equal(blockedVoidResponse.statusCode, 409);
+  const voucherVoidResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/vouchers/${paymentVoucherId}/void?${new URLSearchParams({ farmId: tenant.farmId, seasonId: tenant.seasonId })}`, {
+    idempotencyKey: randomUUID(), reason: "Integration test payment reversal",
+  });
+  assertIntegrationResponse(voucherVoidResponse, 200, "reverse settlement Labour Payment Voucher");
 
   const voidResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements/${createdSettlement.id}/void`, {
     voidReason: "Integration test void",
@@ -421,8 +445,7 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
     eq(accountTransactions.source, "settlement"),
     eq(accountTransactions.sourceType, "labour_wage_settlement"),
   ));
-  assert.equal(accountEntriesAfterVoid.length, 2);
-  assert.equal(accountEntriesAfterVoid.reduce((sum, row) => sum + (row.type === "debit" ? Number(row.amount) : -Number(row.amount)), 0), 0);
+  assert.equal(accountEntriesAfterVoid.length, 0);
 
   const previewAfterVoidResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements/preview`, {
     farmId: tenant.farmId,
@@ -441,7 +464,7 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
   assert.equal(previewAfterVoid.availableAdvanceBalanceBeforeSettlement, 130);
 });
 
-test("labour wage settlement create rejects a missing payment account before posting", async () => {
+test("labour wage settlement creates an unpaid due without requiring a payment account", async () => {
   const labourerId = randomUUID();
   const labourGroupId = randomUUID();
   const clientRequestId = randomUUID();
@@ -482,9 +505,8 @@ test("labour wage settlement create rejects a missing payment account before pos
     manualAdjustment: 0,
     clientRequestId,
   });
-  assert.equal(response.statusCode, 400);
-  assert.equal(response.json().message, "The payment account selection was not included. Select the account again.");
-  assert.equal(response.json().fields[0], "paymentAccountId");
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().settlement.paidAmount, 0);
 
   const [requestRow] = await db.select({
     state: labourWageSettlementCreateRequests.state,
@@ -497,10 +519,9 @@ test("labour wage settlement create rejects a missing payment account before pos
     eq(labourWageSettlementCreateRequests.operationType, "labour_wage_settlement_create"),
   )).limit(1);
   assert.ok(requestRow);
-  assert.equal(requestRow!.state, "rolled_back");
-  assert.equal(requestRow!.stage, "rolled_back");
-  assert.equal(requestRow!.errorCode, "SETTLEMENT_PAYMENT_ACCOUNT_MISSING");
-  assert.equal(requestRow!.safeToRetry, true);
+  assert.equal(requestRow!.state, "committed");
+  assert.equal(requestRow!.stage, "committed");
+  assert.equal(requestRow!.errorCode, null);
 
   const settlementRows = await db.select({
     id: operationalRecords.id,
@@ -509,7 +530,7 @@ test("labour wage settlement create rejects a missing payment account before pos
     eq(operationalRecords.workspaceId, tenant.workspaceId),
     eq(operationalRecords.entityType, "labourWageSettlement"),
   ));
-  assert.equal(settlementRows.filter((row) => normalizeSettlementPayload(row.payload as Record<string, unknown>).clientRequestId === clientRequestId).length, 0);
+  assert.equal(settlementRows.filter((row) => normalizeSettlementPayload(row.payload as Record<string, unknown>).clientRequestId === clientRequestId).length, 1);
 });
 
 test("settlement status keeps committed settlements with missing accounts in SUCCESS plus REPAIR_REQUIRED", async () => {
@@ -760,7 +781,7 @@ test("group labour work is counted once in group settlement preview and posting"
     settlementDate: "2026-07-01",
     settlementMode: "group",
     groupId,
-    paidAmount: 175,
+    paidAmount: 0,
     manualAdjustment: 0,
   });
   assert.equal(previewResponse.statusCode, 200);
@@ -773,7 +794,7 @@ test("group labour work is counted once in group settlement preview and posting"
   assert.equal(preview.attendanceWages, 100);
   assert.equal(preview.grossWages, 175);
   assert.equal(preview.netPayableBeforePayment, 175);
-  assert.equal(preview.balanceAfterPayment, 0);
+  assert.equal(preview.balanceAfterPayment, 175);
 
   const createPayload = {
     farmId: tenant.farmId,
@@ -783,8 +804,7 @@ test("group labour work is counted once in group settlement preview and posting"
     settlementDate: "2026-07-01",
     settlementMode: "group",
     groupId,
-    paymentAccountId: paymentAccount.id,
-    paidAmount: 175,
+    paidAmount: 0,
     manualAdjustment: 0,
     clientRequestId,
   };
@@ -820,8 +840,7 @@ test("group labour work is counted once in group settlement preview and posting"
     eq(accountTransactions.referenceId, settlement.id),
     eq(accountTransactions.sourceType, "labour_wage_settlement"),
   ));
-  assert.equal(groupAccountEntries.length, 1);
-  assert.equal(Number(groupAccountEntries[0]!.amount), 175);
+  assert.equal(groupAccountEntries.length, 0);
 
   const [earningRow] = await db.select({
     payload: operationalRecords.payload,
@@ -858,8 +877,7 @@ test("group labour work is counted once in group settlement preview and posting"
     eq(accountTransactions.referenceId, settlement.id),
     eq(accountTransactions.sourceType, "labour_wage_settlement"),
   ));
-  assert.equal(groupAccountEntriesAfterVoid.length, 2);
-  assert.equal(groupAccountEntriesAfterVoid.reduce((sum, row) => sum + (row.type === "debit" ? Number(row.amount) : -Number(row.amount)), 0), 0);
+  assert.equal(groupAccountEntriesAfterVoid.length, 0);
   const [earningAfterVoid] = await db.select({ payload: operationalRecords.payload }).from(operationalRecords).where(and(
     eq(operationalRecords.workspaceId, tenant.workspaceId),
     eq(operationalRecords.entityType, "labourEarning"),
