@@ -1926,6 +1926,7 @@ export type LabourAdvancePosition = LabourPaymentVoucherRecord & {
   displayVoucherNumber: string;
   financialOwnerId?: string | null;
   financialOwnerName: string | null;
+  receivedByLabourerId?: string | null;
   receivedByName?: string | null;
   groupLeaderSnapshot?: string | null;
   originalAmount: number;
@@ -1998,7 +1999,7 @@ export const fetchAllLabourPaymentAdvances = async (token: string, workspaceId: 
 export const postLabourAdvanceVoucher = (token: string, workspaceId: string, input: {
   farmId: string; seasonId: string; idempotencyKey: string; voucherDate: string; recipientScope: LabourRecipientScope;
   labourerId?: string | null; labourGroupId?: string | null; contractorReference?: string | null; crewReference?: string | null;
-  receivedBy?: string | null;
+  receivedByLabourerId?: string | null; receivedByNameSnapshot?: string | null;
   manualRecipientName?: string | null; batchIdentity?: string | null; amount: number; paymentAccountId: string;
   paymentMethod: string; transactionReference?: string | null; description: string;
 }) => apiRequest<{ voucher: LabourPaymentVoucherRecord }>(`/v1/workspace/${workspaceId}/labour-payments/advances`, { method: "POST", body: JSON.stringify(input) }, token, { debugLabel: "labour-advance-post" });
