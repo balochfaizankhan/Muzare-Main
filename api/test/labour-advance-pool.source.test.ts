@@ -22,3 +22,14 @@ test("aggregate settlement retains voucher allocations and does not require a pa
   assert.match(route, /if \(input\.payment\)/);
   assert.match(route, /postLabourAdvanceApplicationJournal/);
 });
+
+test("pooled persistence locks rows, batches writes, and reports safe database diagnostics", () => {
+  assert.match(route, /labourDues\.id[\s\S]+\.for\("update"\)/);
+  assert.match(route, /labourPaymentVouchers\.id[\s\S]+\.for\("update"\)/);
+  assert.match(route, /offset \+= 40/);
+  assert.match(route, /labourPaymentDatabaseError/);
+  assert.match(route, /sqlState/);
+  assert.match(route, /No balances were changed\. Reference:/);
+  assert.match(route, /settlementSummary/);
+  assert.match(route, /await db\.transaction/);
+});

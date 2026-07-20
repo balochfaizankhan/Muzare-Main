@@ -202,17 +202,20 @@ export async function postLabourAdvanceApplicationJournals(tx: DbTransaction, in
 }) {
   if (!input.applications.length) return;
   const postedAt = new Date();
-  await tx.insert(labourAccountingEntries).values(input.applications.flatMap((application) => {
-    const common = {
-      workspaceId: input.workspaceId, farmId: input.farmId, seasonId: input.seasonId,
-      eventType: "ADVANCE_APPLICATION", dueId: application.dueId, advanceApplicationId: application.id,
-      voucherId: null, postedBy: input.actorId, postedAt, status: "POSTED",
-    };
-    return [
-      { ...common, entryKey: `advance-application:${application.id}:debit`, ledgerCode: "LABOUR_PAYABLE", debit: application.amount.toFixed(2), credit: "0" },
-      { ...common, entryKey: `advance-application:${application.id}:credit`, ledgerCode: "LABOUR_ADVANCE", debit: "0", credit: application.amount.toFixed(2) },
-    ];
-  })).onConflictDoNothing();
+  for (let offset = 0; offset < input.applications.length; offset += 40) {
+    const batch = input.applications.slice(offset, offset + 40);
+    await tx.insert(labourAccountingEntries).values(batch.flatMap((application) => {
+      const common = {
+        workspaceId: input.workspaceId, farmId: input.farmId, seasonId: input.seasonId,
+        eventType: "ADVANCE_APPLICATION", dueId: application.dueId, advanceApplicationId: application.id,
+        voucherId: null, postedBy: input.actorId, postedAt, status: "POSTED",
+      };
+      return [
+        { ...common, entryKey: `advance-application:${application.id}:debit`, ledgerCode: "LABOUR_PAYABLE", debit: application.amount.toFixed(2), credit: "0" },
+        { ...common, entryKey: `advance-application:${application.id}:credit`, ledgerCode: "LABOUR_ADVANCE", debit: "0", credit: application.amount.toFixed(2) },
+      ];
+    })).onConflictDoNothing();
+  }
 }
 
 export async function reverseLabourJournal(tx: DbTransaction, input: {

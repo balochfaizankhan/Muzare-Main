@@ -249,6 +249,25 @@ const refundSchema = contextSchema.extend({ payment: paymentSchema });
 
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
+type PostgreSqlErrorLike = { code?: unknown; constraint?: unknown; detail?: unknown; table?: unknown; column?: unknown; message?: unknown; cause?: unknown };
+function labourPaymentDatabaseError(error: unknown) {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current && typeof current === "object"; depth += 1) {
+    const value = current as PostgreSqlErrorLike;
+    const info = {
+      sqlState: typeof value.code === "string" ? value.code : null,
+      constraint: typeof value.constraint === "string" ? value.constraint : null,
+      detail: typeof value.detail === "string" ? value.detail : null,
+      table: typeof value.table === "string" ? value.table : null,
+      column: typeof value.column === "string" ? value.column : null,
+      message: typeof value.message === "string" ? value.message : null,
+    };
+    if (info.sqlState || info.constraint || info.detail || info.table || info.column) return info;
+    current = value.cause;
+  }
+  return null;
+}
+
 function allocationIdempotencyKey(poolKey: string, voucherId: string) {
   const bytes = crypto.createHash("sha256").update(`${poolKey}:${voucherId}`).digest().subarray(0, 16);
   bytes[6] = (bytes[6]! & 0x0f) | 0x40;
@@ -1298,6 +1317,10 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           await tx.execute(
             sql`SELECT pg_advisory_xact_lock(hashtext(${`${workspaceId}:${input.farmId}:${input.seasonId}:labour-payment-posting`}), 1)`,
           );
+          await tx.select({ id: labourDues.id }).from(labourDues).where(and(
+            eq(labourDues.id, dueId),
+            eq(labourDues.workspaceId, workspaceId),
+          )).for("update");
           let position = await loadLabourDuePosition(tx, dueId);
           if (
             !position ||
@@ -1320,7 +1343,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
                 throw new Error("The settlement idempotency key was already used for a different amount.");
               const voucherId = typeof details.voucherId === "string" ? details.voucherId : null;
               const [existingVoucher] = voucherId ? await tx.select().from(labourPaymentVouchers).where(eq(labourPaymentVouchers.id, voucherId)).limit(1) : [];
-              return { due: position, voucher: existingVoucher ?? null };
+              return { due: position, voucher: existingVoucher ?? null, settlementSummary: details.settlementSummary ?? null };
             }
           }
           if (["VOIDED", "ON_HOLD"].includes(position.due.paymentStatus))
@@ -1340,17 +1363,40 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               amount: allocation.proposedAmount,
               idempotencyKey: allocationIdempotencyKey(input.advancePool!.idempotencyKey, allocation.id),
             }));
+            if (requestedApplications.length) {
+              const locked = await tx.select({ id: labourPaymentVouchers.id }).from(labourPaymentVouchers).where(and(
+                eq(labourPaymentVouchers.workspaceId, workspaceId),
+                eq(labourPaymentVouchers.farmId, input.farmId),
+                eq(labourPaymentVouchers.seasonId, input.seasonId),
+                inArray(labourPaymentVouchers.id, requestedApplications.map((application) => application.advanceVoucherId)),
+              )).for("update");
+              if (locked.length !== requestedApplications.length)
+                throw new Error("One or more selected advances are no longer structurally valid.");
+              aggregatePlan = await loadDueAdvancePool(tx, position.due, input.advancePool.amount, input.advancePool.settlementDate ?? new Date().toISOString().slice(0, 10));
+              if (Math.abs(aggregatePlan.proposedApplication - input.advancePool.amount) > 0.005)
+                throw new Error("The usable advance pool changed while posting. Review the refreshed allocation before retrying.");
+              requestedApplications = aggregatePlan.allocations.map((allocation) => ({
+                advanceVoucherId: allocation.id,
+                amount: allocation.proposedAmount,
+                idempotencyKey: allocationIdempotencyKey(input.advancePool!.idempotencyKey, allocation.id),
+              }));
+            }
           }
           const memberIds = new Set(dueMemberPayableShares(position.due).map((row) => row.labourerId));
           if (input.advancePool && requestedApplications.length) {
-            const createdApplications = await tx.insert(labourAdvanceApplications).values(requestedApplications.map((application) => ({
-              workspaceId,
-              advanceVoucherId: application.advanceVoucherId,
-              dueId,
-              amount: application.amount.toFixed(2),
-              idempotencyKey: application.idempotencyKey,
-              status: "ACTIVE",
-            }))).returning();
+            const createdApplications: Array<typeof labourAdvanceApplications.$inferSelect> = [];
+            for (let offset = 0; offset < requestedApplications.length; offset += 40) {
+              const batch = requestedApplications.slice(offset, offset + 40);
+              const inserted = await tx.insert(labourAdvanceApplications).values(batch.map((application) => ({
+                workspaceId,
+                advanceVoucherId: application.advanceVoucherId,
+                dueId,
+                amount: application.amount.toFixed(2),
+                idempotencyKey: application.idempotencyKey,
+                status: "ACTIVE",
+              }))).returning();
+              createdApplications.push(...inserted);
+            }
             await postLabourAdvanceApplicationJournals(tx, {
               workspaceId, farmId: input.farmId, seasonId: input.seasonId, actorId: request.appUser!.id,
               applications: createdApplications.map((application) => ({ id: application.id, dueId, amount: Number(application.amount) })),
@@ -1579,6 +1625,19 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             }
           }
           const refreshed = await refreshLabourDuePaymentStatus(tx, dueId);
+          const settlementSummary = {
+            dueId,
+            dueNumber: refreshed.due.dueNumber,
+            grossDue: Number(refreshed.due.grossAmount),
+            advanceAmountApplied: input.advancePool?.amount ?? requestedApplications.reduce((sum, application) => sum + application.amount, 0),
+            advanceVoucherCount: requestedApplications.length,
+            fullyConsumedAdvanceCount: aggregatePlan?.allocations.filter((allocation) => allocation.remainingAmount <= 0.005).length ?? 0,
+            partiallyConsumedAdvanceCount: aggregatePlan?.allocations.filter((allocation) => allocation.remainingAmount > 0.005).length ?? 0,
+            advanceAmountCarriedForward: aggregatePlan?.carriedForwardAmount ?? 0,
+            cashPaymentPosted: input.payment?.amount ?? 0,
+            remainingDue: refreshed.outstandingBalance,
+            finalStatus: refreshed.paymentStatus,
+          };
           await tx
             .insert(auditLogs)
             .values({
@@ -1599,19 +1658,22 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
                 } : null,
                 advanceApplications: requestedApplications,
                 outstandingBalance: refreshed.outstandingBalance,
+                settlementSummary,
               },
             });
-          return { due: refreshed, voucher };
+          return { due: refreshed, voucher, settlementSummary };
         });
         return { result };
       } catch (error) {
+        const database = labourPaymentDatabaseError(error);
+        if (database) request.log.error({ event: "labour_advance_pool_persistence_failed", requestId: request.id, dueId, allocationCount: input.advancePool ? "pooled" : input.advanceApplications.length, database }, "Labour advance pool persistence failed and was rolled back");
         return reply
           .code(409)
           .send({
-            message:
-              error instanceof Error
-                ? error.message
-                : "Unable to settle the labour due.",
+            message: database
+              ? `Advances were not applied. No balances were changed. Reference: ${request.id}.`
+              : error instanceof Error ? error.message : "Unable to settle the labour due.",
+            requestId: request.id,
           });
       }
     },

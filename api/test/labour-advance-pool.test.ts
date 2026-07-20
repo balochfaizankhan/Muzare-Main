@@ -115,3 +115,19 @@ test("refunds and prior applications reduce only the available balance", () => {
   assert.equal(plan.proposedApplication, 60);
   assert.equal(plan.carriedForwardAmount, 0);
 });
+
+test("a pooled full settlement produces stable allocations across 183 vouchers", () => {
+  const candidates = Array.from({ length: 183 }, (_, index) => candidate({
+    id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    voucherNumber: `ADV-${String(index + 1).padStart(4, "0")}`,
+    voucherDate: `2026-01-${String((index % 28) + 1).padStart(2, "0")}`,
+    originalAmount: 10,
+  }));
+  const first = calculateLabourAdvancePool({ dueFinancialScopeKey: "group:g1", dueOutstandingAmount: 1_830, candidates, requestedAmount: 1_830 });
+  const retry = calculateLabourAdvancePool({ dueFinancialScopeKey: "group:g1", dueOutstandingAmount: 1_830, candidates, requestedAmount: 1_830 });
+  assert.equal(first.allocations.length, 183);
+  assert.equal(first.proposedApplication, 1_830);
+  assert.equal(first.remainingAfterAdvances, 0);
+  assert.deepEqual(first.allocations, retry.allocations);
+  assert.equal(first.allocations.reduce((sum, row) => sum + row.proposedAmount, 0), 1_830);
+});
