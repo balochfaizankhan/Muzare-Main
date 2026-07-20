@@ -1314,6 +1314,12 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
         ))
       )
         return;
+      const persistence = {
+        endpoint: "POST /v1/workspace/:workspaceId/labour-payments/dues/:dueId/settle",
+        operation: "transaction_start",
+        allocationCount: input.advanceApplications.length,
+        requestedAdvanceAmount: input.advancePool?.amount ?? input.advanceApplications.reduce((sum, item) => sum + item.amount, 0),
+      };
       try {
         const result = await db.transaction(async (tx) => {
           await tx.execute(
@@ -1365,6 +1371,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               amount: allocation.proposedAmount,
               idempotencyKey: allocationIdempotencyKey(input.advancePool!.idempotencyKey, allocation.id),
             }));
+            persistence.allocationCount = requestedApplications.length;
             if (requestedApplications.length) {
               const locked = await tx.select({ id: labourPaymentVouchers.id }).from(labourPaymentVouchers).where(and(
                 eq(labourPaymentVouchers.workspaceId, workspaceId),
@@ -1389,6 +1396,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             const createdApplications: Array<typeof labourAdvanceApplications.$inferSelect> = [];
             for (let offset = 0; offset < requestedApplications.length; offset += 40) {
               const batch = requestedApplications.slice(offset, offset + 40);
+              persistence.operation = `advance_application_insert_batch_${Math.floor(offset / 40) + 1}`;
               const inserted = await tx.insert(labourAdvanceApplications).values(batch.map((application) => ({
                 workspaceId,
                 advanceVoucherId: application.advanceVoucherId,
@@ -1399,6 +1407,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               }))).returning();
               createdApplications.push(...inserted);
             }
+            persistence.operation = "advance_application_accounting";
             await postLabourAdvanceApplicationJournals(tx, {
               workspaceId, farmId: input.farmId, seasonId: input.seasonId, actorId: request.appUser!.id,
               applications: createdApplications.map((application) => ({ id: application.id, dueId, amount: Number(application.amount) })),
@@ -1627,6 +1636,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             }
           }
           const refreshed = await refreshLabourDuePaymentStatus(tx, dueId);
+          persistence.operation = "settlement_audit";
           const settlementSummary = {
             dueId,
             dueNumber: refreshed.due.dueNumber,
@@ -1668,7 +1678,16 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
         return { result };
       } catch (error) {
         const database = labourPaymentDatabaseError(error);
-        if (database) request.log.error({ event: "labour_advance_pool_persistence_failed", requestId: request.id, dueId, allocationCount: input.advancePool ? "pooled" : input.advanceApplications.length, database }, "Labour advance pool persistence failed and was rolled back");
+        if (database) request.log.error({
+          event: "labour_advance_pool_persistence_failed",
+          requestId: request.id,
+          workspaceId,
+          farmId: input.farmId,
+          seasonId: input.seasonId,
+          dueId,
+          ...persistence,
+          database,
+        }, "Labour advance pool persistence failed and was rolled back");
         return reply
           .code(409)
           .send({

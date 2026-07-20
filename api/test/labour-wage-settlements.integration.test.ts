@@ -16,6 +16,7 @@ import {
   labourWageSettlementAdvanceAllocations,
   labourWageSettlementCreateRequests,
   labourDues,
+  labourDueMemberSnapshots,
   labourPaymentAllocations,
   labourPaymentVouchers,
   operationalRecords,
@@ -1191,4 +1192,54 @@ test("canonical advance headline summary is independent of pagination and list f
   assert.deepEqual(filtered.json().summary, page.json().summary);
 
   await db.delete(operationalRecords).where(inArray(operationalRecords.id, inserted.map((row) => row.id)));
+});
+
+test("group due atomically applies snapshot-member advances across controlled insert batches", async () => {
+  const groupId = randomUUID();
+  const memberId = randomUUID();
+  const dueId = randomUUID();
+  const dueNumber = `LD-POOL-${Date.now()}`;
+  const requestKey = randomUUID();
+  await db.insert(labourDues).values({
+    id: dueId, workspaceId: tenant.workspaceId, farmId: tenant.farmId, seasonId: tenant.seasonId,
+    dueNumber, origin: "SETTLEMENT", settlementBasis: "ATTENDANCE", recipientScope: "LABOUR_GROUP",
+    financialScopeKey: `group:${groupId}`, labourGroupId: groupId,
+    recipientSnapshot: { groupName: "Pool Group", memberCalculationSnapshot: [{ labourerId: memberId, calculatedAmount: 90 }] },
+    description: "Group pool persistence", workFromDate: "2026-04-01", workToDate: "2026-04-30",
+    grossAmount: "90.00", idempotencyKey: randomUUID(), createdBy: tenant.userId,
+  });
+  await db.insert(labourDueMemberSnapshots).values({
+    workspaceId: tenant.workspaceId, dueId, labourerId: memberId,
+    snapshot: { labourerName: "Pool Member" }, calculatedAmount: "90.00",
+  });
+  const [advanceAccount] = await db.insert(accounts).values({
+    farmId: tenant.farmId, name: "Pool advance cash", accountType: "cash", active: true,
+  }).returning({ id: accounts.id });
+  assert.ok(advanceAccount?.id);
+  const advances = await db.insert(labourPaymentVouchers).values(Array.from({ length: 45 }, (_, index) => ({
+    workspaceId: tenant.workspaceId, farmId: tenant.farmId, seasonId: tenant.seasonId,
+    voucherNumber: `LAV-POOL-${Date.now()}-${index}`, voucherDate: "2026-03-01", nature: "ADVANCE", status: "POSTED",
+    recipientScope: "INDIVIDUAL", financialScopeKey: `individual:${memberId}`, labourerId: memberId,
+    recipientSnapshot: { recipientName: "Pool Member" }, description: "Member advance", paymentAmount: "2.00",
+    paymentAccountId: advanceAccount!.id, paymentMethod: "CASH",
+    sourceType: "LABOUR_ADVANCE", idempotencyKey: randomUUID(), createdBy: tenant.userId, postedBy: tenant.userId, postedAt: new Date(now),
+  }))).returning({ id: labourPaymentVouchers.id });
+  const vouchersBefore = (await db.select({ id: labourPaymentVouchers.id }).from(labourPaymentVouchers).where(eq(labourPaymentVouchers.workspaceId, tenant.workspaceId))).length;
+  const payload = { farmId: tenant.farmId, seasonId: tenant.seasonId, advancePool: { amount: 90, idempotencyKey: requestKey, settlementDate: "2026-05-01" }, advanceApplications: [] };
+
+  const settled = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/dues/${dueId}/settle`, payload);
+  assertIntegrationResponse(settled, 200, "apply snapshot-member advance pool");
+  assert.equal(settled.json().result.settlementSummary.advanceAmountApplied, 90);
+  assert.equal(settled.json().result.settlementSummary.advanceVoucherCount, 45);
+  assert.equal(settled.json().result.due.outstandingBalance, 0);
+  assert.equal(settled.json().result.due.paymentStatus, "SETTLED_BY_ADVANCE");
+  const applications = await db.select().from(labourAdvanceApplications).where(eq(labourAdvanceApplications.dueId, dueId));
+  assert.equal(applications.length, 45);
+  assert.equal(applications.reduce((sum, row) => sum + Number(row.amount), 0), 90);
+  assert.equal((await db.select({ id: labourPaymentVouchers.id }).from(labourPaymentVouchers).where(eq(labourPaymentVouchers.workspaceId, tenant.workspaceId))).length, vouchersBefore);
+
+  const retried = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/dues/${dueId}/settle`, payload);
+  assertIntegrationResponse(retried, 200, "retry committed snapshot-member pool");
+  assert.equal((await db.select().from(labourAdvanceApplications).where(eq(labourAdvanceApplications.dueId, dueId))).length, 45);
+  assert.equal(advances.length, 45);
 });

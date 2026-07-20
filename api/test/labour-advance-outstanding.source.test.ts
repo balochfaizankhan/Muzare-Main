@@ -161,7 +161,7 @@ test("payments due uses canonical summary and review loads a due-specific aggreg
   assert.match(review, /fetchLabourDueAdvancePool/);
   assert.doesNotMatch(review, /fetchAllLabourPaymentAdvances/);
   assert.match(review, /View allocation details/);
-  assert.match(overview, /pageSize: view === "dues" \? 1 : 20/);
+  assert.match(overview, /pageSize: 1, status: "OPEN"/);
   assert.match(overview, /setAdvanceSummary\(advanceResponse\.summary\)/);
   assert.match(overview, /advanceSummary\.totalOutstanding/);
   assert.match(overview, /advanceSummary\.openCount/);

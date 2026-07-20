@@ -7,6 +7,7 @@ const routeSource = readFileSync(new URL("../src/routes/labour-payments.ts", imp
 const paymentServiceSource = readFileSync(new URL("../src/lib/labour-payments.ts", import.meta.url), "utf8");
 const settlementRouteSource = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
 const migrationSource = readFileSync(new URL("../../database/migrations/0035_unified_labour_payments.sql", import.meta.url), "utf8");
+const groupPoolGuardMigration = readFileSync(new URL("../../database/migrations/0039_group_due_member_advance_applications.sql", import.meta.url), "utf8");
 
 test("an approved attendance settlement creates an unpaid due and rejects immediate cash", () => {
   assert.match(settlementRouteSource, /Settlement approval no longer moves cash/i);
@@ -109,4 +110,14 @@ test("advance issuance and due payments use distinct business voucher registers"
   assert.match(routeSource, /allocateLabourPaymentVoucherNumber/);
   assert.match(routeSource, /allocateLabourAdvanceAdjustmentNumber/);
   assert.match(routeSource, /if \(input\.payment\)/);
+});
+
+test("database guard accepts only immutable snapshot members for group advance pooling", () => {
+  assert.match(groupPoolGuardMigration, /target_due\.recipient_scope = 'LABOUR_GROUP'/);
+  assert.match(groupPoolGuardMigration, /FROM labour_due_member_snapshots member/);
+  assert.match(groupPoolGuardMigration, /member\.labourer_id = target_advance\.labourer_id/);
+  assert.match(groupPoolGuardMigration, /other_applications \+ refunds \+ NEW\.amount > target_advance\.payment_amount/);
+  assert.match(groupPoolGuardMigration, /due_payments \+ due_advances \+ NEW\.amount > payable/);
+  assert.match(routeSource, /advance_application_insert_batch_/);
+  assert.match(routeSource, /sqlState/);
 });
