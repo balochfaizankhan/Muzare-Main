@@ -1079,3 +1079,49 @@ test("advance cutoff, partial allocation, report reconciliation, void restoratio
     voidReason: "Clean up re-settlement verification",
   }), 200, "void re-settlement verification");
 });
+
+test("settlement history returns current, voided legacy, and isolates an explicitly different context", async () => {
+  const currentId = randomUUID();
+  const legacyVoidedId = randomUUID();
+  const otherId = randomUUID();
+  const otherFarmId = randomUUID();
+  const otherSeasonId = randomUUID();
+  await db.insert(farms).values({ id: otherFarmId, workspaceId: tenant.workspaceId, name: "Other Settlement Farm" });
+  await db.insert(seasons).values({
+    id: otherSeasonId, workspaceId: tenant.workspaceId, farmId: otherFarmId, name: "Other Settlement Season",
+    year: 2026, startsOn: "2026-01-01", status: "active",
+  });
+  await db.insert(operationalRecords).values([
+    {
+      workspaceId: tenant.workspaceId, farmId: tenant.farmId, seasonId: tenant.seasonId,
+      clientRecordId: currentId, entityType: "labourWageSettlement", recordedBy: tenant.userId,
+      clientUpdatedAt: new Date(now), payload: settlementPayload({ settlementNumber: "LW-HISTORY-ACTIVE", paidAmount: 0, expenseAmount: 120 }),
+    },
+    {
+      workspaceId: tenant.workspaceId, farmId: null, seasonId: null, sourceType: "old_android",
+      clientRecordId: legacyVoidedId, entityType: "labourWageSettlement", recordedBy: tenant.userId,
+      clientUpdatedAt: new Date(now), payload: settlementPayload({ settlementNumber: "LW-HISTORY-VOIDED", status: "voided", paidAmount: 0, expenseAmount: 80 }),
+    },
+    {
+      workspaceId: tenant.workspaceId, farmId: otherFarmId, seasonId: otherSeasonId,
+      clientRecordId: otherId, entityType: "labourWageSettlement", recordedBy: tenant.userId,
+      clientUpdatedAt: new Date(now), payload: settlementPayload({ settlementNumber: "LW-HISTORY-OTHER", paidAmount: 0, expenseAmount: 60 }),
+    },
+  ]);
+
+  const baseUrl = `/v1/workspace/${tenant.workspaceId}/labour-reconciliation/settlements?farmId=${tenant.farmId}&seasonId=${tenant.seasonId}&page=1&pageSize=100`;
+  const response = await request("GET", baseUrl);
+  assertIntegrationResponse(response, 200, "load settlement history");
+  const body = response.json();
+  const idsReturned = body.settlements.map((row: { id: string }) => row.id);
+  assert.ok(idsReturned.includes(currentId));
+  assert.ok(idsReturned.includes(legacyVoidedId));
+  assert.ok(!idsReturned.includes(otherId));
+  assert.equal(body.settlements.find((row: { id: string }) => row.id === legacyVoidedId)?.integrityStatus, "VOIDED");
+  assert.ok(body.summary.totalCount >= body.settlements.length);
+
+  const legacyResponse = await request("GET", `${baseUrl}&source=LEGACY`);
+  assertIntegrationResponse(legacyResponse, 200, "filter legacy settlement history");
+  assert.ok(legacyResponse.json().settlements.some((row: { id: string }) => row.id === legacyVoidedId));
+  assert.ok(!legacyResponse.json().settlements.some((row: { id: string }) => row.id === currentId));
+});

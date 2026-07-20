@@ -143,7 +143,10 @@ async function listEarnings(workspaceId: string, query: z.infer<typeof listSchem
         (${query.scope ?? null}::text IS NULL OR recipient_scope=${query.scope ?? null})
         AND (${query.status ?? null}::text IS NULL OR earning_status=${query.status ?? null})
         AND (${query.integrity ?? null}::text IS NULL OR integrity_status=${query.integrity ?? null})
-        AND (${query.source ?? null}::text IS NULL OR COALESCE(source_type,'CURRENT')=${query.source ?? null})
+        AND (${query.source ?? null}::text IS NULL
+          OR (${query.source ?? null}='CURRENT' AND source_type IS NULL)
+          OR (${query.source ?? null}='LEGACY' AND source_type IS NOT NULL)
+          OR source_type=${query.source ?? null})
         AND (${query.from ?? null}::date IS NULL OR work_date>=${query.from ?? null}::date)
         AND (${query.to ?? null}::date IS NULL OR work_date<=${query.to ?? null}::date)
         AND (${search}::text IS NULL OR concat_ws(' ',client_record_id,recipient_name,leader_name,payload->>'description',payload->>'earningType',linked_settlement_id,due_number,voucher_numbers::text) ILIKE ${search} ESCAPE '\\')
@@ -180,17 +183,24 @@ async function listSettlements(workspaceId: string, query: z.infer<typeof listSc
         CASE WHEN COALESCE(s.payload->>'grossWages',s.payload->>'totalEarned',s.payload->>'expenseAmount','') ~ '^-?[0-9]+([.][0-9]+)?$' THEN COALESCE(s.payload->>'grossWages',s.payload->>'totalEarned',s.payload->>'expenseAmount')::numeric ELSE 0 END AS gross_amount,
         COALESCE(NULLIF(s.payload->>'status',''),'posted') AS settlement_status,d.id AS due_id,d.due_number,d.payment_status,
         COALESCE(a.applied_amount,0)::numeric AS advances_applied,COALESCE(p.paid_amount,0)::numeric AS payments_made,COALESCE(p.voucher_numbers,'[]'::jsonb) AS voucher_numbers,
-        (SELECT count(*) FROM account_transactions atx WHERE atx.reference_id=s.client_record_id AND atx.source_type='labour_wage_settlement')::int AS account_entry_count,
+        (SELECT count(*) FROM account_transactions atx WHERE atx.reference_id::text=s.client_record_id AND atx.source_type='labour_wage_settlement')::int AS account_entry_count,
         (SELECT count(*) FROM operational_records e WHERE e.workspace_id=s.workspace_id AND e.entity_type='labourEarning' AND e.payload->>'linkedSettlementId'=s.client_record_id)::int AS earning_count,
         coalesce(jsonb_array_length(CASE WHEN jsonb_typeof(s.payload->'sourceAttendanceIds')='array' THEN s.payload->'sourceAttendanceIds' ELSE '[]'::jsonb END),0)::int AS attendance_count
       FROM operational_records s
-      LEFT JOIN labour_dues d ON d.source_record_id=s.id OR (d.workspace_id=s.workspace_id AND d.source_client_record_id=s.client_record_id)
+      LEFT JOIN LATERAL (
+        SELECT candidate.* FROM labour_dues candidate
+        WHERE candidate.workspace_id=s.workspace_id
+          AND (candidate.source_record_id=s.id OR candidate.source_client_record_id=s.client_record_id)
+        ORDER BY (candidate.source_record_id=s.id) DESC,candidate.created_at DESC,candidate.id DESC
+        LIMIT 1
+      ) d ON true
       LEFT JOIN LATERAL (SELECT coalesce(sum(amount) FILTER (WHERE status='ACTIVE'),0)::numeric AS applied_amount FROM labour_advance_applications WHERE due_id=d.id) a ON true
       LEFT JOIN LATERAL (SELECT coalesce(sum(pa.amount) FILTER (WHERE pa.status='ACTIVE' AND v.status='POSTED'),0)::numeric AS paid_amount,coalesce(jsonb_agg(DISTINCT v.voucher_number) FILTER (WHERE v.id IS NOT NULL),'[]'::jsonb) AS voucher_numbers FROM labour_payment_allocations pa JOIN labour_payment_vouchers v ON v.id=pa.voucher_id WHERE pa.due_id=d.id) p ON true
       WHERE s.workspace_id=${workspaceId} AND s.entity_type='labourWageSettlement' AND (s.farm_id=${query.farmId}::uuid OR s.farm_id IS NULL) AND (s.season_id=${query.seasonId}::uuid OR s.season_id IS NULL)
     ), positioned AS (
       SELECT *,greatest(gross_amount-advances_applied-payments_made,0)::numeric AS outstanding_balance,
-        CASE WHEN settlement_status IN ('voided','deleted') OR NULLIF(payload->>'deletedAt','') IS NOT NULL THEN 'VOIDED'
+        CASE WHEN settlement_status='reversed' THEN 'REVERSED'
+          WHEN settlement_status IN ('voided','deleted') OR NULLIF(payload->>'deletedAt','') IS NOT NULL THEN 'VOIDED'
           WHEN due_id IS NULL THEN 'ORPHANED' WHEN payment_status IN ('PAID','SETTLED_BY_ADVANCE') THEN 'PAID'
           WHEN payment_status='PARTIALLY_SETTLED' THEN 'PARTIALLY_PAID' ELSE 'ACTIVE' END AS integrity_status,
         (due_id IS NULL AND account_entry_count=0 AND payments_made=0 AND advances_applied=0) AS source_only_eligible,
@@ -198,7 +208,11 @@ async function listSettlements(workspaceId: string, query: z.infer<typeof listSc
       FROM base
     ), filtered AS (SELECT * FROM positioned WHERE
       (${query.scope ?? null}::text IS NULL OR recipient_scope=${query.scope ?? null}) AND (${query.status ?? null}::text IS NULL OR settlement_status=${query.status ?? null})
-      AND (${query.integrity ?? null}::text IS NULL OR integrity_status=${query.integrity ?? null}) AND (${query.source ?? null}::text IS NULL OR COALESCE(source_type,'CURRENT')=${query.source ?? null})
+      AND (${query.integrity ?? null}::text IS NULL OR integrity_status=${query.integrity ?? null})
+      AND (${query.source ?? null}::text IS NULL
+        OR (${query.source ?? null}='CURRENT' AND source_type IS NULL)
+        OR (${query.source ?? null}='LEGACY' AND source_type IS NOT NULL)
+        OR source_type=${query.source ?? null})
       AND (${query.from ?? null}::date IS NULL OR to_date>=${query.from ?? null}::date) AND (${query.to ?? null}::date IS NULL OR from_date<=${query.to ?? null}::date)
       AND (${search}::text IS NULL OR concat_ws(' ',settlement_number,recipient_name,due_number,voucher_numbers::text,payload->>'notes') ILIKE ${search} ESCAPE '\\'))
     SELECT *,count(*) OVER()::int AS total_count,coalesce(sum(gross_amount) OVER(),0)::numeric AS total_amount,
@@ -301,7 +315,10 @@ export async function labourReconciliationRoutes(app:FastifyInstance):Promise<vo
         AND (r.season_id=${input.seasonId}::uuid OR r.season_id IS NULL)
         AND (${input.scope??null}::text IS NULL OR COALESCE(r.payload->>'earningScope',r.payload->>'settlementMode',CASE WHEN NULLIF(r.payload->>'labourGroupId','') IS NOT NULL THEN 'group' ELSE 'individual' END)=${input.scope??null})
         AND (${input.status??null}::text IS NULL OR COALESCE(r.payload->>'status',CASE WHEN r.entity_type='labourWageSettlement' THEN 'posted' ELSE 'pending_settlement' END)=${input.status??null})
-        AND (${input.source??null}::text IS NULL OR COALESCE(r.source_type,'CURRENT')=${input.source??null})
+        AND (${input.source??null}::text IS NULL
+          OR (${input.source??null}='CURRENT' AND r.source_type IS NULL)
+          OR (${input.source??null}='LEGACY' AND r.source_type IS NOT NULL)
+          OR r.source_type=${input.source??null})
         AND (${input.integrity??null}::text IS NULL OR ${input.integrity??null} = CASE
           WHEN COALESCE(r.payload->>'status','') IN ('voided','deleted','reversed') OR NULLIF(r.payload->>'deletedAt','') IS NOT NULL THEN 'VOIDED'
           WHEN r.entity_type='labourEarning' AND NULLIF(COALESCE(r.payload->>'labourerId',r.payload->>'labourId',r.payload->>'labourGroupId'),'') IS NULL THEN 'MISSING_RECIPIENT'

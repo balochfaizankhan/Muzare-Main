@@ -12,7 +12,7 @@ test("legacy earnings and settlement history are authoritative paginated queries
   assert.match(route, /entity_type='labourEarning'/);
   assert.match(route, /entity_type='labourWageSettlement'/);
   assert.match(route, /LEFT JOIN people/);
-  assert.match(route, /LEFT JOIN labour_dues/);
+  assert.match(route, /LEFT JOIN LATERAL/);
   assert.match(route, /LIMIT \$\{query\.pageSize\} OFFSET/);
   assert.match(route, /count\(\*\) OVER\(\)/);
   assert.match(route, /MISSING_RECIPIENT/);
@@ -81,9 +81,32 @@ test("history UI lazy-loads one server page, aborts stale requests, and exposes 
   assert.match(ui, /pageSize=window\.matchMedia/);
   assert.match(ui, /new AbortController/);
   assert.match(ui, /controller\.abort/);
-  assert.match(ui, /Unable to load labour history/);
-  assert.match(ui, /No records match these filters/);
+  assert.match(ui, /Settlement history could not be loaded/);
+  assert.match(ui, /error\?null:requestSucceeded&&!rows\.length/);
+  assert.match(ui, /No settlement history yet/);
+  assert.match(ui, /No settlements match these filters/);
+  assert.match(ui, /loading\|\|!summary\?"—"/);
+  assert.match(ui, /Selection unavailable/);
+  assert.match(ui, /Clear filters/);
   assert.match(ui, /Preview deletion/);
+});
+
+test("settlement history uses compatible accounting types and a duplicate-safe optional due join", () => {
+  assert.match(route, /atx\.reference_id::text=s\.client_record_id/);
+  assert.doesNotMatch(route, /atx\.reference_id=s\.client_record_id/);
+  assert.match(route, /candidate\.workspace_id=s\.workspace_id/);
+  assert.match(route, /LIMIT 1/);
+  assert.match(route, /settlement_status='reversed' THEN 'REVERSED'/);
+  assert.match(route, /s\.farm_id=\$\{query\.farmId\}::uuid OR s\.farm_id IS NULL/);
+  assert.match(route, /s\.season_id=\$\{query\.seasonId\}::uuid OR s\.season_id IS NULL/);
+});
+
+test("current and legacy classification filters are explicit while blank filters remain omitted", () => {
+  assert.match(route, /'CURRENT' AND source_type IS NULL/);
+  assert.match(route, /'LEGACY' AND source_type IS NOT NULL/);
+  assert.match(ui, /<option value="">Current and legacy<\/option>/);
+  assert.match(ui, /<option value="LEGACY">Legacy<\/option>/);
+  assert.match(ui, /from:from\|\|undefined,to:to\|\|undefined/);
 });
 
 test("Payments Due excludes voided, reversed, deleted, and orphaned settlement sources", () => {
