@@ -14656,6 +14656,24 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 .cleanup-dependencies article div { display: flex; justify-content: space-between; }
 .cleanup-dependencies small { color: #6b756d; }
 .cleanup-dependencies em { justify-self: start; }
+.cleanup-preview-error,.cleanup-success { align-items:center; border-radius:12px; display:flex; gap:10px; padding:10px 12px; }
+.cleanup-preview-error { background:#fff7ed; border:1px solid #fed7aa; color:#9a3412; }
+.cleanup-preview-error span { display:grid; flex:1; gap:2px; }
+.cleanup-preview-error small { color:#7c2d12; }
+.cleanup-preview-error button { background:#fff; border:1px solid #fdba74; border-radius:8px; min-height:36px; padding:0 12px; }
+.cleanup-success { background:#ecfdf3; border:1px solid #bbf7d0; color:#166534; }
+.cleanup-preview-summary { display:grid; gap:6px; grid-template-columns:repeat(5,minmax(0,1fr)); }
+.cleanup-preview-summary span { background:#f7faf8; border:1px solid #e2ebe4; border-radius:9px; color:#64748b; display:grid; font-size:10px; gap:2px; padding:8px; }
+.cleanup-preview-summary strong { color:#183c25; font-size:13px; }
+.cleanup-preview-records { display:grid; gap:8px; max-height:320px; overflow-y:auto; }
+.cleanup-preview-records article { border:1px solid #dce6df; border-radius:11px; display:grid; gap:8px; padding:10px; }
+.cleanup-preview-records article > header { align-items:start; display:flex; gap:10px; justify-content:space-between; }
+.cleanup-preview-records article > header div { display:grid; gap:2px; }
+.cleanup-preview-records article > header span { color:#64748b; font-size:10px; }
+.cleanup-preview-records article > div { display:grid; gap:5px; grid-template-columns:repeat(3,minmax(0,1fr)); }
+.cleanup-preview-records article > div span { color:#64748b; display:grid; font-size:9px; gap:2px; }
+.cleanup-preview-records article b { color:#273b2e; font-size:11px; overflow-wrap:anywhere; }
+.cleanup-preview-records article p { color:#991b1b; font-size:10px; margin:0; }
 .cleanup-modal label { color: #59665b; display: grid; font-size: .75rem; font-weight: 700; gap: 5px; }
 .cleanup-modal textarea { min-height: 72px; resize: vertical; }
 .cleanup-modal .danger-button { background: #a72e28; border-color: #a72e28; color: #fff; }
@@ -14678,6 +14696,8 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .cleanup-modal-backdrop { align-items: flex-end; padding: 0; }
   .cleanup-modal { border-radius: 18px 18px 0 0; max-height: calc(100dvh - 34px); padding-bottom: calc(17px + env(safe-area-inset-bottom,0px)); }
   .cleanup-dependencies { grid-template-columns: 1fr; }
+  .cleanup-preview-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .cleanup-preview-records article > div { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
 .attendance-register-print-page--ultra {
   --attendance-col-index: 22px;

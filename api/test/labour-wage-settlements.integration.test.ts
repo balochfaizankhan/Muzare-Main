@@ -1125,3 +1125,30 @@ test("settlement history returns current, voided legacy, and isolates an explici
   assert.ok(legacyResponse.json().settlements.some((row: { id: string }) => row.id === legacyVoidedId));
   assert.ok(!legacyResponse.json().settlements.some((row: { id: string }) => row.id === currentId));
 });
+
+test("voided settlement cleanup preview accepts the canonical record id and tolerates missing optional links", async () => {
+  const clientRecordId = randomUUID();
+  const [record] = await db.insert(operationalRecords).values({
+    workspaceId: tenant.workspaceId, farmId: tenant.farmId, seasonId: tenant.seasonId,
+    clientRecordId, entityType: "labourWageSettlement", recordedBy: tenant.userId,
+    clientUpdatedAt: new Date(now), payload: settlementPayload({ settlementNumber: "LW-PREVIEW-NULL-SAFE", status: "voided", paidAmount: 0, expenseAmount: 75 }),
+  }).returning({ id: operationalRecords.id });
+  assert.ok(record?.id);
+
+  const payload = { farmId: tenant.farmId, seasonId: tenant.seasonId, targets: [{ entityType: "SETTLEMENT", id: record!.id }] };
+  const preview = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-reconciliation/cleanup/preview`, payload);
+  assertIntegrationResponse(preview, 200, "preview null-safe voided settlement cleanup");
+  assert.equal(preview.json().preview.targets.length, 1);
+  assert.equal(preview.json().preview.targets[0].id, record!.id);
+  assert.equal(preview.json().preview.targets[0].recipient, null);
+  assert.equal(preview.json().preview.targets[0].linkedDue, null);
+  assert.equal(preview.json().preview.targets[0].counts.paymentVouchers, 0);
+  assert.equal(preview.json().preview.targets[0].classification, "ELIGIBLE");
+
+  const deleted = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-reconciliation/cleanup/execute`, {
+    ...payload, mode: "SOURCE_ONLY", reason: "Integration cleanup verification", confirmation: "DELETE LABOUR DATA",
+  });
+  assertIntegrationResponse(deleted, 200, "delete eligible voided settlement");
+  assert.equal(deleted.json().result.deleted[0].id, clientRecordId);
+  assert.equal((await db.select({ id: operationalRecords.id }).from(operationalRecords).where(eq(operationalRecords.id, record!.id))).length, 0);
+});

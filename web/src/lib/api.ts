@@ -2028,10 +2028,10 @@ export type LabourSettlementHistoryRecord = {
 };
 export type LabourCleanupTarget = { entityType: "EARNING" | "SETTLEMENT"; id: string };
 export type LabourCleanupPreview = {
-  targets: Array<{ entityType: string; id: string; reference: string; amount: number; status: string }>;
+  targets: Array<{ entityType: string; id: string; clientId: string; reference: string; recipient: string | null; status: string; period: {from:string;to:string}; amount: number; classification:"ELIGIBLE"|"CASCADE_REQUIRED"|"BLOCKED"|"REQUIRES_REVIEW"; linkedDue:string|null; counts:{dues:number;paymentVouchers:number;paymentAllocations:number;advanceApplications:number;accountingEntries:number};blockers:string[] }>;
   expandedSettlements: Array<{ id: string; reference: string }>;
   dependencies: Array<{ kind: string; count: number; classification: string; message: string }>;
-  counts: Record<string, number>; totalFinancialAmount: number; financialEffects: boolean; requiresCascade: boolean;
+  counts: Record<string, number>; totalGrossAmount:number; totalFinancialAmount: number; financialEffects: boolean; requiresCascade: boolean;
   blocked: boolean; blockedReasons: string[];
 };
 export type LabourReconciliationFilters = { page?: number; pageSize?: number; search?: string; scope?: string; status?: string; integrity?: string; source?: string; from?: string; to?: string; signal?: AbortSignal };

@@ -86,9 +86,39 @@ test("history UI lazy-loads one server page, aborts stale requests, and exposes 
   assert.match(ui, /No settlement history yet/);
   assert.match(ui, /No settlements match these filters/);
   assert.match(ui, /loading\|\|!summary\?"—"/);
-  assert.match(ui, /Selection unavailable/);
+  assert.doesNotMatch(ui, /Selection unavailable/);
   assert.match(ui, /Clear filters/);
   assert.match(ui, /Preview deletion/);
+});
+
+test("settlement selection uses canonical database ids and preview errors preserve the loaded list", () => {
+  assert.match(route, /SELECT r\.id/);
+  assert.match(route, /eq\(operationalRecords\.id,target\.id\)/);
+  assert.match(ui, /selected\.has\(row\.recordId\)/);
+  assert.match(ui, /rows\.map\(\(row\)=>row\.recordId\)/);
+  assert.match(ui, /\[\.\.\.selected\]\.map\(\(id\)=>\(\{entityType:mode,id\}/);
+  assert.match(ui, /setPreviewError/);
+  assert.doesNotMatch(ui.slice(ui.indexOf("const openPreview"),ui.indexOf("const selectMatching")), /setError\(/);
+  assert.match(ui, /The settlement records remain selected/);
+  assert.match(ui, />Retry<\/button>/);
+  assert.match(ui, /requestSucceeded\?<div className="reconciliation-list"/);
+});
+
+test("cleanup preview is null-safe and returns a classification for every selected settlement", () => {
+  assert.match(route, /rowDues=dues\.filter/);
+  assert.match(route, /recipient:.*\|\|null/);
+  assert.match(route, /classification:rowBlocked\?"BLOCKED":rowCascade\?"CASCADE_REQUIRED"/);
+  assert.match(route, /linkedDue:rowDues\[0\]\?\.dueNumber\?\?null/);
+  assert.match(route, /blockers:rowBlocked/);
+  assert.match(route, /preview\.targets\.length!==new Set/);
+});
+
+test("preview and deletion have independent loading and error states", () => {
+  for(const state of ["previewLoading","previewError","deleting","deletionError","deletionSuccess"]) assert.match(ui,new RegExp(state));
+  assert.match(ui, /Review settlement deletion/);
+  assert.match(ui, /Delete eligible records/);
+  assert.match(ui, /Confirm cascade deletion/);
+  assert.match(ui, /Recipient unavailable/);
 });
 
 test("settlement history uses compatible accounting types and a duplicate-safe optional due join", () => {
