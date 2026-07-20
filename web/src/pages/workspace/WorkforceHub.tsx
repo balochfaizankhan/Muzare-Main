@@ -101,7 +101,7 @@ export function LabourPaymentsSectionLayout() {
   const tabs = useMemo(() => {
     const allTabs = [
       { to: `/workspace/labour-payments/overview${query}`, label: "Payments Due", module: "wages" as const },
-      { to: `/workspace/labour-payments/direct-due${query}`, label: "New Direct Due", module: "wages" as const },
+      { to: `/workspace/labour-payments/direct-due${query}`, label: "New Labour Due", module: "wages" as const },
       { to: `/workspace/labour-payments/vouchers${query}`, label: "Payment Vouchers", module: "wages" as const },
       { to: `/workspace/labour-payments/advances${query}`, label: "Outstanding Advances", module: "wages" as const },
       { to: `/workspace/labour-payments/legacy-earnings${query}`, label: "Legacy Earnings", module: "wages" as const },
@@ -239,7 +239,7 @@ export function LabourPaymentsOverview() {
           {[
             { to: `/workspace/labour-payments/advances${query}`, icon: HandCoins, title: "Record Advance", detail: "Cash advance" },
             { to: `/workspace/labour-payments/earnings${query}`, icon: ClipboardList, title: "Record Labour Earning", detail: "Task, bonus, or adjustment" },
-            { to: `/workspace/labour-payments/settlements${query}`, icon: ReceiptText, title: "Create Settlement", detail: "Close a wage period" },
+            { to: `/workspace/labour-payments/direct-due?source=attendance&scope=group`, icon: ReceiptText, title: "Create Attendance Due", detail: "Calculate a wage period" },
           ].map((item) => (
             <button key={item.to} type="button" className="labour-payments-quick-card" onClick={() => navigate(item.to)}>
               <item.icon size={18} />

@@ -1971,11 +1971,22 @@ export const fetchLabourPaymentDue = (token: string, workspaceId: string, dueId:
   apiRequest<{ due: LabourDueRecord & { payments: unknown[]; advances: unknown[] } }>(`/v1/workspace/${workspaceId}/labour-payments/dues/${dueId}?${labourPaymentContextQuery(farmId, seasonId)}`, {}, token);
 export const createDirectLabourDue = (token: string, workspaceId: string, input: {
   farmId: string; seasonId: string; idempotencyKey: string; recipientScope: LabourRecipientScope;
+  source?: "DIRECT" | "ATTENDANCE_PERIOD";
   labourerId?: string | null; labourGroupId?: string | null; contractorReference?: string | null;
   crewReference?: string | null; manualRecipientName?: string | null; batchIdentity?: string | null;
-  description: string; workFromDate: string; workToDate: string; grossAmount: number;
+  description: string; workFromDate: string; workToDate: string; grossAmount?: number;
   authorizedDeductions?: number; leaderAllowance?: number; notes?: string | null; costCategory?: string | null;
 }) => apiRequest<{ due: LabourDueRecord }>(`/v1/workspace/${workspaceId}/labour-payments/dues`, { method: "POST", body: JSON.stringify(input) }, token);
+export type LabourAttendanceDuePreview = {
+  groupId?: string | null; groupName?: string | null; foremanId?: string | null;
+  includedLabourCount: number; excludedAttendanceCount: number; grossWages: number;
+  attendanceTotals: { labourers: number; present: number; halfDay: number; absent: number; payableDays: number };
+  includedLabourRows: Array<{ labourerId: string; labourName: string; presentDays: number; halfDayDays: number; absentDays: number; payableDays: number; wageRateLabel: string | null; attendanceWage: number; labourWorkWage: number; grossWage: number }>;
+  sourceAttendanceIds: string[]; unresolvedRows: Array<{ labourerId: string; labourName: string; date: string; status: string }>;
+};
+export const previewLabourAttendanceDue = (token: string, workspaceId: string, input: {
+  farmId: string; seasonId: string; recipientScope: "INDIVIDUAL" | "LABOUR_GROUP"; labourerId?: string | null; labourGroupId?: string | null; fromDate: string; toDate: string; recordDate: string;
+}) => apiRequest<{ preview: LabourAttendanceDuePreview }>(`/v1/workspace/${workspaceId}/labour-payments/dues/attendance-preview`, { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 60_000, debugLabel: "labour-attendance-due-preview" });
 export const settleLabourPaymentDue = (token: string, workspaceId: string, dueId: string, input: {
   farmId: string; seasonId: string;
   advanceApplications: Array<{ advanceVoucherId: string; amount: number; idempotencyKey: string }>;

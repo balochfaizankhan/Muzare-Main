@@ -31,7 +31,6 @@ const Expenses = lazy(async () => ({ default: (await import("./pages/workspace/E
 const Inventory = lazy(async () => ({ default: (await import("./pages/workspace/Inventory")).Inventory }));
 const LabourAdvances = lazy(async () => ({ default: (await import("./pages/workspace/LabourAdvances")).LabourAdvances }));
 const LabourEarnings = lazy(async () => ({ default: (await import("./pages/workspace/LabourEarnings")).LabourEarnings }));
-const LabourWageSettlements = lazy(async () => ({ default: (await import("./pages/workspace/LabourWageSettlements")).LabourWageSettlements }));
 const LabourPaymentsReportsHub = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).LabourPaymentsReportsHub }));
 const LabourPaymentsSectionLayout = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).LabourPaymentsSectionLayout }));
 const WorkforcePaymentsPage = lazy(async () => ({ default: (await import("./pages/workspace/WorkforcePayments")).WorkforcePaymentsPage }));
@@ -192,8 +191,8 @@ export default function App() {
         <Route path="earnings" element={routeElement(<LabourEarnings />, "Loading labour work")} />
         <Route path="labour-work" element={<Navigate to="/workspace/labour-payments/earnings" replace />} />
         <Route path="direct-payments" element={<Navigate to="/workspace/labour-payments/overview" replace />} />
-        <Route path="settlements" element={routeElement(<LabourWageSettlements />, "Loading wage settlements")} />
-        <Route path="settlement" element={<Navigate to="/workspace/labour-payments/settlements" replace />} />
+        <Route path="settlements" element={<Navigate to="/workspace/labour-payments/direct-due?source=attendance&scope=group" replace />} />
+        <Route path="settlement" element={<Navigate to="/workspace/labour-payments/direct-due?source=attendance&scope=group" replace />} />
         <Route path="reports" element={routeElement(<LabourPaymentsReportsHub />, "Loading labour payment reports")} />
       </Route>
       <Route path="sales" element={routeElement(<Sales />, "Loading sales")} />
@@ -205,7 +204,7 @@ export default function App() {
       <Route path="labour-advances" element={<Navigate to="/workspace/labour-payments/advances" replace />} />
       <Route path="labour-earnings" element={<Navigate to="/workspace/labour-payments/earnings" replace />} />
       <Route path="wage-rates" element={<Navigate to="/workspace/labour-payments/wage-rates" replace />} />
-      <Route path="wage-settlements" element={<Navigate to="/workspace/labour-payments/settlements" replace />} />
+      <Route path="wage-settlements" element={<Navigate to="/workspace/labour-payments/direct-due?source=attendance&scope=group" replace />} />
       <Route path="activity" element={routeElement(<ActivityLog />, "Loading activity log")} />
       <Route path="reports" element={routeElement(<Reports />, "Loading reports")} />
       <Route path="operations-map" element={config.featureFarmMap ? routeElement(<FarmOperationsMap mode="live" />, "Loading operations map") : <FarmMapDisabledRedirect />} />

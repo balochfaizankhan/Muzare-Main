@@ -74,7 +74,7 @@ test("human references, account review states, and all mobile payment tabs remai
   assert.match(page, /Account unavailable/);
   assert.match(page, /Legacy record/);
   assert.doesNotMatch(page.slice(page.indexOf("function AdvancesView"), page.indexOf("function ReviewSettleDialog")), /Legacy account/);
-  for (const label of ["Payments Due", "New Direct Due", "Payment Vouchers", "Outstanding Advances"]) assert.match(hub, new RegExp(label));
+  for (const label of ["Payments Due", "New Labour Due", "Payment Vouchers", "Outstanding Advances"]) assert.match(hub, new RegExp(label));
   assert.match(hub, /scrollIntoView/);
 });
 
@@ -142,9 +142,11 @@ test("the canonical read query resolves historical receivers without current gro
   assert.match(paymentService, /receivedByNameSnapshot: advancePayload\.labourerName/);
 });
 
-test("payments due and review use the complete canonical advance response", () => {
+test("payments due uses canonical summary and review lazily loads complete advances", () => {
   const overview = page.slice(page.indexOf("export function WorkforcePaymentsPage"), page.indexOf("function AdvancesView"));
-  assert.match(overview, /fetchAllLabourPaymentAdvances/);
+  const review = page.slice(page.indexOf("function ReviewSettleDialog"));
+  assert.match(review, /fetchAllLabourPaymentAdvances/);
+  assert.match(overview, /pageSize: view === "dues" \? 1 : 20/);
   assert.match(overview, /setAdvanceSummary\(advanceResponse\.summary\)/);
   assert.match(overview, /advanceSummary\.totalOutstanding/);
   assert.match(overview, /advanceSummary\.openCount/);

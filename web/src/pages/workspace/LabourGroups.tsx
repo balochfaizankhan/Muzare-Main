@@ -406,7 +406,7 @@ export function LabourGroupsPage() {
         </div>
         <div className="workforce-group-card__actions">
           <button type="button" className="workforce-group-card__action workforce-group-card__action--primary" onClick={() => navigate(`/workspace/workforce/labour-groups/${group.id}/members`)}>Manage members</button>
-          <button type="button" className="workforce-group-card__action workforce-group-card__action--primary" onClick={() => navigate(`/workspace/labour-payments/settlements?groupId=${encodeURIComponent(group.id)}`)}>Create settlement</button>
+          <button type="button" className="workforce-group-card__action workforce-group-card__action--primary" onClick={() => navigate(`/workspace/labour-payments/direct-due?source=attendance&scope=group&groupId=${encodeURIComponent(group.id)}`)}>Create labour due</button>
           <button type="button" className="workforce-group-card__action workforce-group-card__action--secondary" onClick={() => navigate(`/workspace/workforce/labour-groups/${group.id}`)}>View details</button>
           <button type="button" className="workforce-group-card__action workforce-group-card__action--secondary" onClick={() => setEditingGroup(group)}>Edit</button>
         </div>
@@ -447,7 +447,7 @@ export function LabourGroupsPage() {
               <div className="module-inline-actions">
                 <button type="button" onClick={() => navigate(`/workspace/workforce/labour-groups/${selectedGroup.id}/members`)}>Manage members</button>
                 <button type="button" onClick={() => setEditingGroup(selectedGroup)}>Edit group</button>
-                <button type="button" onClick={() => navigate(`/workspace/labour-payments/settlements?groupId=${encodeURIComponent(selectedGroup.id)}`)}>Create settlement</button>
+                <button type="button" onClick={() => navigate(`/workspace/labour-payments/direct-due?source=attendance&scope=group&groupId=${encodeURIComponent(selectedGroup.id)}`)}>Create labour due</button>
               </div>
             </div>
             <div className="workforce-group-member-list">

@@ -17434,6 +17434,17 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 .workforce-payment-form__footer strong { color: #64748b; font-size: 10px; text-transform: uppercase; }
 .workforce-payment-form__footer span { color: #153c26; font-size: 16px; font-weight: 800; }
 .workforce-payment-form__footer button { background: #176b38; border: 0; border-radius: 10px; color: #fff; min-height: 44px; padding: 0 15px; }
+.workforce-due-source { background: #f1f5f2; border-radius: 12px; display: grid; gap: 4px; grid-column: 1 / -1; grid-template-columns: 1fr 1fr; padding: 4px; }
+.workforce-due-source button { background: transparent; border: 0; border-radius: 9px; color: #526174; font-weight: 700; min-height: 40px; }
+.workforce-due-source button[aria-selected="true"] { background: #fff; box-shadow: 0 1px 4px rgb(15 23 42 / 10%); color: #185c34; }
+.workforce-attendance-preview { display: grid; gap: 9px; grid-column: 1 / -1; }
+.workforce-attendance-preview section { background: #fbfdfb; border: 1px solid #dbe7df; border-radius: 12px; padding: 12px; }
+.workforce-attendance-preview header,.workforce-attendance-member { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
+.workforce-attendance-preview header div,.workforce-attendance-member span { display: grid; gap: 2px; }
+.workforce-attendance-preview header span,.workforce-attendance-preview p,.workforce-attendance-member small { color: #64748b; font-size: 12px; }
+.workforce-attendance-preview details { border-top: 1px solid #e4ebe6; margin-top: 10px; padding-top: 9px; }
+.workforce-attendance-preview summary { color: #245b39; cursor: pointer; font-size: 13px; font-weight: 700; }
+.workforce-attendance-member { border-top: 1px solid #edf2ee; padding: 9px 0; }
 .workforce-payment-voucher-list,
 .workforce-advance-position-list { display: grid; gap: 9px; }
 .workforce-payment-voucher-list article,

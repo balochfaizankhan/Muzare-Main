@@ -839,7 +839,7 @@ async function resolveSelectedLabourers(
       const scoped = labourers.filter((labourer) =>
         labourer.groupId === selectedGroupId
         || (normalizedGroupName && normalizeGroupKey(labourer.groupName) === normalizedGroupName)
-        || (selection.foremanId && labourer.id === selection.foremanId)
+        || (selectedForemanId && labourer.id === selectedForemanId)
       );
       return {
         labourers: scoped,
@@ -1130,6 +1130,7 @@ export async function previewLabourWageSettlement(
   settlementDate: string,
   excludeSettlementId?: string,
   selection: LabourWageSettlementSelection = {},
+  options: { includeAdvances?: boolean } = {},
 ) {
   const labourScope = await resolveSelectedLabourers(tx, workspaceId, farmId, seasonId, selection);
   const attendanceRows = await tx.select({
@@ -1253,7 +1254,12 @@ export async function previewLabourWageSettlement(
   const individualLabourWorkWages = includedEarnings.filter((row) => row.earningScope === "individual").reduce((sum, row) => sum + row.amount, 0);
   const groupLabourWorkWages = includedEarnings.filter((row) => row.earningScope === "group").reduce((sum, row) => sum + row.amount, 0);
   const labourWorkWages = individualLabourWorkWages + groupLabourWorkWages;
-  const advanceLedger = await resolveLabourAdvanceLedger(
+  const advanceLedger = options.includeAdvances === false ? {
+    rows: [],
+    totals: { totalValidAdvancesToCutoff: 0, previouslyAbsorbedAdvances: 0, availableGroupAdvances: 0, legacyUnallocatedPreviouslyAbsorbedAdvances: 0, ambiguousHistoricalSettlementCount: 0 },
+    includedAdvances: [],
+    ambiguousHistoricalSettlements: [],
+  } : await resolveLabourAdvanceLedger(
     tx,
     {
       workspaceId,

@@ -24,6 +24,7 @@ import { useAuth } from "../../auth/AuthProvider";
 import { LabourSelectCombobox } from "../../components/LabourSelectCombobox";
 import {
   createDirectLabourDue,
+  previewLabourAttendanceDue,
   fetchAllLabourPaymentAdvances,
   fetchLabourPaymentAdvances,
   fetchLabourPaymentDues,
@@ -37,6 +38,7 @@ import {
   type LabourAdvancePosition,
   type LabourAdvanceListResponse,
   type LabourDueRecord,
+  type LabourAttendanceDuePreview,
   type LabourPaymentVoucherRecord,
   type LabourRecipientScope,
 } from "../../lib/api";
@@ -196,10 +198,8 @@ export function WorkforcePaymentsPage() {
       const [dueResponse, voucherResponse, advanceResponse] = await Promise.all(
         [
           fetchLabourPaymentDues(token, workspaceId, { farmId, seasonId }),
-          fetchLabourPaymentVouchers(token, workspaceId, { farmId, seasonId }),
-          view === "dues"
-            ? fetchAllLabourPaymentAdvances(token, workspaceId, farmId, seasonId, { status: "OPEN" })
-            : fetchLabourPaymentAdvances(token, workspaceId, farmId, seasonId, { pageSize: 20, status: "OPEN" }),
+          view === "vouchers" ? fetchLabourPaymentVouchers(token, workspaceId, { farmId, seasonId }) : Promise.resolve({ vouchers: [] }),
+          fetchLabourPaymentAdvances(token, workspaceId, farmId, seasonId, { pageSize: view === "dues" ? 1 : 20, status: "OPEN" }),
         ],
       );
       setDues(dueResponse.dues);
@@ -386,10 +386,10 @@ export function WorkforcePaymentsPage() {
                   className="secondary-action"
                   type="button"
                   onClick={() =>
-                    navigate("/workspace/labour-payments/settlements")
+                    navigate("/workspace/labour-payments/direct-due?source=attendance&scope=group")
                   }
                 >
-                  <ReceiptText size={16} /> Attendance settlement
+                  <ReceiptText size={16} /> Attendance due
                 </button>
                 <button
                   className="secondary-action"
@@ -496,6 +496,11 @@ export function WorkforcePaymentsPage() {
                     <span className="workforce-payment-due-card__recipient">
                       {recipientLabel(due, labourById, groupById)}
                     </span>
+                    {due.recipientScope === "LABOUR_GROUP" && due.settlementBasis === "ATTENDANCE" ? (
+                      <span className="workforce-payment-due-card__description">
+                        Leader: {String(due.recipientSnapshot.foremanName ?? due.recipientSnapshot.leaderName ?? "Unavailable")} · {Number(due.recipientSnapshot.memberCount ?? 0)} workers
+                      </span>
+                    ) : null}
                     <span className="workforce-payment-due-card__description">
                       {due.description}
                     </span>
@@ -591,12 +596,6 @@ export function WorkforcePaymentsPage() {
       {selectedDue ? (
         <ReviewSettleDialog
           due={selectedDue}
-          advances={advances.filter(
-            (advance) =>
-              advance.status === "POSTED" &&
-              advance.outstandingAmount > 0 &&
-              advance.financialScopeKey === selectedDue.financialScopeKey,
-          )}
           accounts={accounts}
           recipient={recipientLabel(selectedDue, labourById, groupById)}
           canManage={canManage}
@@ -641,9 +640,13 @@ function DirectDueForm({
   seasonId: string;
 }) {
   const idempotencyKey = useRef(uuid());
-  const [scope, setScope] = useState<LabourRecipientScope>("INDIVIDUAL");
+  const location = useLocation();
+  const initialAttendance = new URLSearchParams(location.search).get("source") === "attendance";
+  const [source, setSource] = useState<"ATTENDANCE_PERIOD" | "DIRECT">(initialAttendance ? "ATTENDANCE_PERIOD" : "DIRECT");
+  const initialParams = new URLSearchParams(location.search);
+  const [scope, setScope] = useState<LabourRecipientScope>(initialParams.get("scope") === "group" ? "LABOUR_GROUP" : "INDIVIDUAL");
   const [labourerId, setLabourerId] = useState("");
-  const [groupId, setGroupId] = useState("");
+  const [groupId, setGroupId] = useState(initialParams.get("groupId") ?? "");
   const [recipientName, setRecipientName] = useState("");
   const [reference, setReference] = useState("");
   const [description, setDescription] = useState("");
@@ -654,6 +657,19 @@ function DirectDueForm({
   const [deductions, setDeductions] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const [preview, setPreview] = useState<LabourAttendanceDuePreview | null>(null);
+  useEffect(() => setPreview(null), [scope, labourerId, groupId, from, to]);
+  const groupSelectorOptions = useMemo(() => groups.map((group) => ({ ...group, group: "Labour group", dailyWage: 0 } satisfies Labourer)), [groups]);
+  const calculateAttendance = async () => {
+    if (previewing || !["INDIVIDUAL", "LABOUR_GROUP"].includes(scope)) return;
+    setPreviewing(true);
+    try {
+      const response = await previewLabourAttendanceDue(token, workspaceId, { farmId, seasonId, recipientScope: scope as "INDIVIDUAL" | "LABOUR_GROUP", labourerId: scope === "INDIVIDUAL" ? labourerId : null, labourGroupId: scope === "LABOUR_GROUP" ? groupId : null, fromDate: from, toDate: to, recordDate: today() });
+      setPreview(response.preview);
+    } catch (caught) { onError(caught instanceof Error ? caught.message : "Unable to calculate attendance wages."); }
+    finally { setPreviewing(false); }
+  };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!canManage || saving) return;
@@ -667,6 +683,7 @@ function DirectDueForm({
         farmId,
         seasonId,
         idempotencyKey: idempotencyKey.current,
+        source,
         recipientScope: scope,
         labourerId: scope === "INDIVIDUAL" ? labourerId : null,
         labourGroupId: scope === "LABOUR_GROUP" ? groupId : null,
@@ -676,17 +693,17 @@ function DirectDueForm({
           : null,
         manualRecipientName: recipientName || null,
         batchIdentity: scope === "NO_SPECIFIC_RECIPIENT" ? reference : null,
-        description,
+        description: description || (source === "ATTENDANCE_PERIOD" ? `Attendance wages ${from} to ${to}` : ""),
         workFromDate: from,
         workToDate: to,
-        grossAmount: Number(amount),
+        grossAmount: source === "DIRECT" ? Number(amount) : undefined,
         authorizedDeductions: Number(deductions || 0),
         leaderAllowance: Number(leaderAllowance || 0),
         notes,
       });
       idempotencyKey.current = uuid();
       await onSaved(
-        `Direct labour due ${response.due.dueNumber} created. No cash was moved.`,
+        `Labour due ${response.due.dueNumber} created. No cash was moved.`,
       );
     } catch (caught) {
       onError(
@@ -702,7 +719,7 @@ function DirectDueForm({
     <section className="record-panel workforce-payments-panel workforce-direct-due-panel">
       <header className="workforce-payments-panel__header">
         <div>
-          <h2>Create Direct Labour Due</h2>
+          <h2>New Labour Due</h2>
           <p>
             Record the agreed labour obligation first. Payment is posted
             separately.
@@ -713,6 +730,10 @@ function DirectDueForm({
         className="workforce-payment-form"
         onSubmit={(event) => void submit(event)}
       >
+        <div className="workforce-due-source is-full" role="tablist" aria-label="Due source">
+          <button type="button" role="tab" aria-selected={source === "ATTENDANCE_PERIOD"} onClick={() => { setSource("ATTENDANCE_PERIOD"); if (!["INDIVIDUAL", "LABOUR_GROUP"].includes(scope)) setScope("INDIVIDUAL"); }}>Attendance period</button>
+          <button type="button" role="tab" aria-selected={source === "DIRECT"} onClick={() => setSource("DIRECT")}>Direct / lump-sum</button>
+        </div>
         <label>
           <span>Recipient scope</span>
           <select
@@ -721,7 +742,7 @@ function DirectDueForm({
               setScope(event.target.value as LabourRecipientScope)
             }
           >
-            {scopeOptions.map((option) => (
+            {scopeOptions.filter((option) => source === "DIRECT" || ["INDIVIDUAL", "LABOUR_GROUP"].includes(option.value)).map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
@@ -731,35 +752,13 @@ function DirectDueForm({
         {scope === "INDIVIDUAL" ? (
           <label>
             <span>Labourer</span>
-            <select
-              required
-              value={labourerId}
-              onChange={(event) => setLabourerId(event.target.value)}
-            >
-              <option value="">Select labourer</option>
-              {labourers.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
+            <LabourSelectCombobox ariaLabel="Labourer" options={labourers} value={labourerId} onChange={setLabourerId} placeholder="Search labourer" noResultsLabel="No matching labourer" includeInactive />
           </label>
         ) : null}
         {scope === "LABOUR_GROUP" ? (
           <label>
             <span>Labour group</span>
-            <select
-              required
-              value={groupId}
-              onChange={(event) => setGroupId(event.target.value)}
-            >
-              <option value="">Select group</option>
-              {groups.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
+            <LabourSelectCombobox ariaLabel="Labour group" options={groupSelectorOptions} value={groupId} onChange={setGroupId} placeholder="Search labour group" noResultsLabel="No matching labour group" includeInactive />
           </label>
         ) : null}
         {!["INDIVIDUAL", "LABOUR_GROUP"].includes(scope) ? (
@@ -792,10 +791,10 @@ function DirectDueForm({
         <label className="is-full">
           <span>Work description</span>
           <input
-            required
+            required={source === "DIRECT"}
             value={description}
             onChange={(event) => setDescription(event.target.value)}
-            placeholder="e.g. Temporary workers for onion loading"
+            placeholder={source === "ATTENDANCE_PERIOD" ? "Optional attendance due description" : "e.g. Temporary workers for onion loading"}
           />
         </label>
         <label>
@@ -817,7 +816,7 @@ function DirectDueForm({
             onChange={(event) => setTo(event.target.value)}
           />
         </label>
-        <label>
+        {source === "DIRECT" ? <label>
           <span>Final agreed amount (SAR)</span>
           <input
             required
@@ -828,8 +827,8 @@ function DirectDueForm({
             onChange={(event) => setAmount(event.target.value)}
             placeholder="0.00"
           />
-        </label>
-        {scope === "LABOUR_GROUP" ? (
+        </label> : null}
+        {source === "DIRECT" && scope === "LABOUR_GROUP" ? (
           <label>
             <span>Leader allowance (optional)</span>
             <input
@@ -842,7 +841,7 @@ function DirectDueForm({
             />
           </label>
         ) : null}
-        <label>
+        {source === "DIRECT" ? <label>
           <span>Authorized deductions</span>
           <input
             min="0"
@@ -852,7 +851,15 @@ function DirectDueForm({
             onChange={(event) => setDeductions(event.target.value)}
             placeholder="0.00"
           />
-        </label>
+        </label> : null}
+        {source === "ATTENDANCE_PERIOD" ? <div className="workforce-attendance-preview is-full">
+          <button type="button" className="secondary-action" disabled={previewing || !(scope === "INDIVIDUAL" ? labourerId : groupId)} onClick={() => void calculateAttendance()}>{previewing ? "Calculating…" : "Preview attendance wages"}</button>
+          {preview ? <section aria-label="Attendance calculation preview">
+            <header><div><strong>{preview.groupName || labourers.find((item) => item.id === labourerId)?.name || "Attendance due"}</strong><span>{preview.includedLabourCount} worker{preview.includedLabourCount === 1 ? "" : "s"} · {preview.attendanceTotals.payableDays} payable days</span></div><b>{money(preview.grossWages)}</b></header>
+            <p>{preview.attendanceTotals.present} full days · {preview.attendanceTotals.halfDay} half days{preview.excludedAttendanceCount ? ` · ${preview.excludedAttendanceCount} already used` : ""}</p>
+            <details><summary>Member wage breakdown</summary>{preview.includedLabourRows.map((row) => <div className="workforce-attendance-member" key={row.labourerId}><span>{row.labourName}<small>{row.payableDays} days · rate {row.wageRateLabel ?? "missing"}</small></span><strong>{money(row.grossWage)}</strong></div>)}</details>
+          </section> : null}
+        </div> : null}
         <label className="is-full">
           <span>Notes</span>
           <input
@@ -865,15 +872,15 @@ function DirectDueForm({
           <div>
             <strong>Amount due</strong>
             <span>
-              {money(
+              {money(source === "ATTENDANCE_PERIOD" ? (preview?.grossWages ?? 0) :
                 Number(amount || 0) +
                   Number(leaderAllowance || 0) -
                   Number(deductions || 0),
               )}
             </span>
           </div>
-          <button disabled={!canManage || saving} type="submit">
-            {saving ? "Creating…" : "Create unpaid due"}
+          <button disabled={!canManage || saving || (source === "ATTENDANCE_PERIOD" && !preview)} type="submit">
+            {saving ? "Creating…" : "Create labour due"}
           </button>
         </footer>
       </form>
@@ -2385,7 +2392,6 @@ function AdvancesView({
 
 function ReviewSettleDialog({
   due,
-  advances,
   accounts,
   recipient,
   canManage,
@@ -2400,7 +2406,6 @@ function ReviewSettleDialog({
   onError,
 }: {
   due: LabourDueRecord;
-  advances: LabourAdvancePosition[];
   accounts: Account[];
   recipient: string;
   canManage: boolean;
@@ -2415,6 +2420,17 @@ function ReviewSettleDialog({
   onError: (message: string) => void;
 }) {
   const paymentIdempotencyKey = useRef(uuid());
+  const [advances, setEligibleAdvances] = useState<LabourAdvancePosition[]>([]);
+  const [loadingAdvances, setLoadingAdvances] = useState(true);
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoadingAdvances(true);
+    void fetchAllLabourPaymentAdvances(token, workspaceId, farmId, seasonId, { status: "OPEN", signal: controller.signal })
+      .then((response) => setEligibleAdvances(response.advances.filter((advance) => advance.status === "POSTED" && advance.outstandingAmount > 0 && advance.financialScopeKey === due.financialScopeKey)))
+      .catch((caught) => { if (!controller.signal.aborted) onError(caught instanceof Error ? caught.message : "Unable to load eligible advances."); })
+      .finally(() => { if (!controller.signal.aborted) setLoadingAdvances(false); });
+    return () => controller.abort();
+  }, [due.financialScopeKey, farmId, onError, seasonId, token, workspaceId]);
   const advanceIdempotencyKeys = useRef<Record<string, string>>({});
   const [advanceValues, setAdvanceValues] = useState<Record<string, string>>(
     {},
@@ -2635,7 +2651,9 @@ function ReviewSettleDialog({
           {due.paymentStatus !== "ON_HOLD" && due.outstandingBalance > 0 ? (
             <section>
               <h3>Apply advances</h3>
-              {!advances.length ? (
+              {loadingAdvances ? (
+                <p className="workforce-payments-inline-note">Loading eligible group advances…</p>
+              ) : !advances.length ? (
                 <p className="workforce-payments-inline-note">
                   No eligible outstanding advances for this financial scope.
                 </p>

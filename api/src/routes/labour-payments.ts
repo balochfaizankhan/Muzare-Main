@@ -29,7 +29,7 @@ import {
   reverseLabourJournal,
   type LabourRecipientScope,
 } from "../lib/labour-payments.js";
-import { resolveCanonicalPaymentAccountId } from "../lib/labour-wage-settlements.js";
+import { previewLabourWageSettlement, resolveCanonicalPaymentAccountId } from "../lib/labour-wage-settlements.js";
 import { isLabourSelectableForAdvance } from "../lib/labour-eligibility.js";
 import { validateLabourSettlementPaymentAccount } from "../lib/labour-settlement-account-validation.js";
 import { hasModulePermission } from "../permissions.js";
@@ -87,6 +87,7 @@ const recipientScopeSchema = z.enum([
   "NO_SPECIFIC_RECIPIENT",
 ]);
 const directDueSchema = contextSchema.extend({
+  source: z.enum(["DIRECT", "ATTENDANCE_PERIOD"]).default("DIRECT"),
   idempotencyKey: z.string().uuid(),
   recipientScope: recipientScopeSchema,
   labourerId: z.string().uuid().optional().nullable(),
@@ -98,11 +99,19 @@ const directDueSchema = contextSchema.extend({
   description: z.string().trim().min(1).max(500),
   workFromDate: z.string().date(),
   workToDate: z.string().date(),
-  grossAmount: z.coerce.number().positive(),
+  grossAmount: z.coerce.number().positive().optional(),
   authorizedDeductions: z.coerce.number().nonnegative().default(0),
   leaderAllowance: z.coerce.number().nonnegative().default(0),
   notes: z.string().trim().max(1000).optional().nullable(),
   costCategory: z.string().trim().max(200).optional().nullable(),
+});
+const attendanceDuePreviewSchema = contextSchema.extend({
+  recipientScope: z.enum(["INDIVIDUAL", "LABOUR_GROUP"]),
+  labourerId: z.string().uuid().optional().nullable(),
+  labourGroupId: z.string().uuid().optional().nullable(),
+  fromDate: z.string().date(),
+  toDate: z.string().date(),
+  recordDate: z.string().date(),
 });
 const paymentSchema = z.object({
   idempotencyKey: z.string().uuid(),
@@ -671,6 +680,50 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
   );
 
   app.post(
+    "/v1/workspace/:workspaceId/labour-payments/dues/attendance-preview",
+    { preHandler: requireUser },
+    async (request, reply) => {
+      const params = paramsSchema.safeParse(request.params);
+      const body = attendanceDuePreviewSchema.safeParse(request.body);
+      if (!params.success || !body.success || body.data.fromDate > body.data.toDate)
+        return reply.code(400).send({ message: "Select a valid recipient and attendance period." });
+      const { workspaceId } = params.data;
+      const input = body.data;
+      if (!(await requireRequestScope(request, reply, workspaceId, input.farmId, input.seasonId, "view"))) return;
+      try {
+        const preview = await db.transaction((tx) => previewLabourWageSettlement(
+          tx,
+          workspaceId,
+          input.farmId,
+          input.seasonId,
+          input.fromDate,
+          input.toDate,
+          input.recordDate,
+          undefined,
+          input.recipientScope === "LABOUR_GROUP"
+            ? { settlementMode: "group", groupId: input.labourGroupId ?? undefined }
+            : { settlementMode: "individual", labourerId: input.labourerId ?? undefined },
+          { includeAdvances: false },
+        ));
+        const locked = preview.sourceAttendanceIds.length
+          ? await db.select({ clientRecordId: operationalRecords.clientRecordId, payload: operationalRecords.payload })
+              .from(operationalRecords)
+              .where(and(eq(operationalRecords.workspaceId, workspaceId), inArray(operationalRecords.clientRecordId, preview.sourceAttendanceIds)))
+          : [];
+        const lockedIds = new Set(locked.filter((row) => Boolean(row.payload.labourDueId || row.payload.labourWageSettlementId)).map((row) => row.clientRecordId));
+        const eligibleRows = preview.includedLabourRows.filter((row) =>
+          locked.some((source) => !lockedIds.has(source.clientRecordId) && (source.payload.labourerId === row.labourerId || source.payload.labourId === row.labourerId)),
+        );
+        const eligibleAttendanceIds = preview.sourceAttendanceIds.filter((id) => !lockedIds.has(id));
+        const grossAmount = eligibleRows.reduce((sum, row) => sum + row.grossWage, 0);
+        return { preview: { ...preview, includedLabourRows: eligibleRows, includedLabourCount: eligibleRows.length, sourceAttendanceIds: eligibleAttendanceIds, grossWages: grossAmount, totalEarned: grossAmount, totalLabourCost: grossAmount, excludedAttendanceCount: lockedIds.size } };
+      } catch (error) {
+        return reply.code(400).send({ message: error instanceof Error ? error.message : "Unable to calculate attendance wages." });
+      }
+    },
+  );
+
+  app.post(
     "/v1/workspace/:workspaceId/labour-payments/dues",
     { preHandler: requireUser },
     async (request, reply) => {
@@ -682,7 +735,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
         (body.success &&
           (body.data.workFromDate > body.data.workToDate ||
             body.data.authorizedDeductions >
-              body.data.grossAmount + body.data.leaderAllowance))
+              (body.data.grossAmount ?? 0) + body.data.leaderAllowance))
       )
         return reply
           .code(400)
@@ -705,6 +758,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
         return;
       try {
         const due = await db.transaction(async (tx) => {
+          await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`${workspaceId}:${input.idempotencyKey}:labour-due-create`}), 1)`);
           const [existing] = await tx
             .select()
             .from(labourDues)
@@ -722,6 +776,18 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             input.farmId,
             input,
           );
+          const attendancePreview = input.source === "ATTENDANCE_PERIOD"
+            ? await previewLabourWageSettlement(tx, workspaceId, input.farmId, input.seasonId, input.workFromDate, input.workToDate, input.workToDate, undefined,
+                input.recipientScope === "LABOUR_GROUP" ? { settlementMode: "group", groupId: input.labourGroupId ?? undefined } : { settlementMode: "individual", labourerId: input.labourerId ?? undefined }, { includeAdvances: false })
+            : null;
+          if (attendancePreview?.unresolvedRows.length) throw new Error("Add wage rates for all included attendance before creating the due.");
+          const sourceAttendanceIds = attendancePreview?.sourceAttendanceIds ?? [];
+          if (sourceAttendanceIds.length) {
+            const sourceRows = await tx.select({ payload: operationalRecords.payload }).from(operationalRecords).where(and(eq(operationalRecords.workspaceId, workspaceId), inArray(operationalRecords.clientRecordId, sourceAttendanceIds)));
+            if (sourceRows.some((row) => Boolean(row.payload.labourDueId || row.payload.labourWageSettlementId))) throw new Error("Some attendance records are already included in another due or settlement. Refresh the preview.");
+          }
+          const grossAmount = attendancePreview?.grossWages ?? input.grossAmount ?? 0;
+          if (grossAmount <= 0) throw new Error("No payable attendance is available for this due.");
           const dueNumber = await allocateLabourDueNumber(
             tx,
             workspaceId,
@@ -734,8 +800,8 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               farmId: input.farmId,
               seasonId: input.seasonId,
               dueNumber,
-              origin: "DIRECT",
-              settlementBasis: "MANUAL",
+              origin: input.source === "ATTENDANCE_PERIOD" ? "SETTLEMENT" : "DIRECT",
+              settlementBasis: input.source === "ATTENDANCE_PERIOD" ? "ATTENDANCE" : "MANUAL",
               recipientScope: input.recipientScope,
               financialScopeKey: recipient.financialScopeKey,
               labourerId: input.labourerId,
@@ -746,11 +812,20 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
                 ...recipient.snapshot,
                 notes: input.notes,
                 costCategory: input.costCategory,
+                dueSource: input.source,
+                groupName: attendancePreview?.groupName ?? null,
+                foremanId: attendancePreview?.foremanId ?? null,
+                foremanName: attendancePreview?.includedLabourRows.find((row) => row.labourerId === attendancePreview.foremanId)?.labourName ?? null,
+                memberCount: attendancePreview?.includedLabourCount ?? null,
+                attendanceTotals: attendancePreview?.attendanceTotals ?? null,
+                memberCalculationSnapshot: attendancePreview?.includedLabourRows ?? null,
+                sourceAttendanceIds,
+                calculationRules: input.source === "ATTENDANCE_PERIOD" ? "daily wage rate by attendance date; half day = 0.5; leader counted once by labourer ID" : "manual agreed amount",
               },
               description: input.description,
               workFromDate: input.workFromDate,
               workToDate: input.workToDate,
-              grossAmount: input.grossAmount.toFixed(2),
+              grossAmount: grossAmount.toFixed(2),
               adjustmentAmount: input.leaderAllowance.toFixed(2),
               authorizedDeductions: input.authorizedDeductions.toFixed(2),
               calculationStatus: "APPROVED",
@@ -767,7 +842,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             seasonId: input.seasonId,
             dueId: created!.id,
             amount: Math.max(
-              input.grossAmount +
+              grossAmount +
                 input.leaderAllowance -
                 input.authorizedDeductions,
               0,
@@ -786,6 +861,10 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               entityId: created!.id,
               afterJson: created as unknown as Record<string, unknown>,
             });
+          if (sourceAttendanceIds.length) {
+            const attendanceRows = await tx.select({ id: operationalRecords.id, payload: operationalRecords.payload }).from(operationalRecords).where(and(eq(operationalRecords.workspaceId, workspaceId), inArray(operationalRecords.clientRecordId, sourceAttendanceIds)));
+            for (const row of attendanceRows) await tx.update(operationalRecords).set({ payload: { ...row.payload, labourDueId: created!.id, labourDueNumber: dueNumber, labourDueLockedAt: new Date().toISOString() } }).where(eq(operationalRecords.id, row.id));
+          }
           return created!;
         });
         return reply.code(201).send({ due });
@@ -1187,7 +1266,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             .limit(1);
           if (!record) throw new Error("Labour due was not found.");
           if (record.paymentStatus === "VOIDED") return record;
-          if (record.origin === "SETTLEMENT")
+          if (record.origin === "SETTLEMENT" && record.sourceRecordId)
             throw new Error(
               "Void the source Labour Settlement so attendance, expense, and advance eligibility are restored together.",
             );
@@ -1242,6 +1321,18 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             reversalKey: `due-void:${record.id}:${body.data.idempotencyKey}`,
             dueId: record.id,
           });
+          const snapshot = record.recipientSnapshot as Record<string, unknown>;
+          const sourceAttendanceIds = Array.isArray(snapshot.sourceAttendanceIds)
+            ? snapshot.sourceAttendanceIds.filter((value): value is string => typeof value === "string")
+            : [];
+          if (sourceAttendanceIds.length) {
+            const attendanceRows = await tx.select({ id: operationalRecords.id, payload: operationalRecords.payload }).from(operationalRecords).where(and(eq(operationalRecords.workspaceId, params.data.workspaceId), inArray(operationalRecords.clientRecordId, sourceAttendanceIds)));
+            for (const row of attendanceRows) {
+              if (row.payload.labourDueId !== record.id) continue;
+              const { labourDueId: _dueId, labourDueNumber: _dueNumber, labourDueLockedAt: _lockedAt, ...unlockedPayload } = row.payload;
+              await tx.update(operationalRecords).set({ payload: unlockedPayload }).where(eq(operationalRecords.id, row.id));
+            }
+          }
           await tx
             .insert(auditLogs)
             .values({
