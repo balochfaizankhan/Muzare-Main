@@ -41,7 +41,8 @@ test("recipient ownership does not fall back from a group to its leader", () => 
   assert.match(route, /WHEN 'LABOUR_GROUP' THEN COALESCE\(NULLIF\(voucher\.recipient_snapshot->>'labourGroupName'/);
   assert.match(route, /WHEN 'INDIVIDUAL' THEN COALESCE\(NULLIF\(voucher\.recipient_snapshot->>'labourerName'/);
   assert.doesNotMatch(route, /WHEN 'LABOUR_GROUP' THEN COALESCE\([^\n]+leader/i);
-  assert.match(page, /<b>Received by:<\/b>/);
+  assert.match(page, /Receiver unavailable/);
+  assert.match(page, /Received by · for/);
   assert.match(page, /Recipient unavailable/);
   assert.match(page, /Review required/);
 });
@@ -56,7 +57,8 @@ test("mobile advance UX loads twenty rows, debounces search, aborts stale reques
   assert.doesNotMatch(page, />Record Recovery<\/button>/);
   assert.match(page, /max=\{refundAdvance\.outstandingAmount\}/);
   assert.match(page, /Recovery cannot exceed the outstanding advance amount/);
-  assert.match(page, /Group recipients/);
+  assert.match(page, />Grouped<\/button>/);
+  assert.match(page, />Vouchers<\/button>/);
   assert.match(styles, /\.workforce-advance-card \{ max-height: 190px; \}/);
   assert.match(styles, /--mobile-nav-height, 96px/);
 });
@@ -68,4 +70,31 @@ test("human references, account review states, and all mobile payment tabs remai
   assert.doesNotMatch(page.slice(page.indexOf("function AdvancesView"), page.indexOf("function ReviewSettleDialog")), /Legacy account/);
   for (const label of ["Payments Due", "New Direct Due", "Payment Vouchers", "Outstanding Advances"]) assert.match(hub, new RegExp(label));
   assert.match(hub, /scrollIntoView/);
+});
+
+test("record advance uses sectioned searchable selectors and valid-state posting", () => {
+  const advances = page.slice(page.indexOf("function AdvancesView"), page.indexOf("function ReviewSettleDialog"));
+  assert.match(advances, /LabourSelectCombobox ariaLabel="Labourer"/);
+  assert.match(advances, /placeholder="Search active labourers"/);
+  assert.match(advances, /LabourSelectCombobox ariaLabel="Paid from account"/);
+  for (const heading of ["Recipient", "Payment", "Details", "Preview"]) assert.match(advances, new RegExp(`> ${heading}<`));
+  assert.match(advances, /disabled=\{saving\|\|!formValid\}/);
+  assert.match(advances, /Record money paid before final settlement/);
+  assert.match(styles, /env\(safe-area-inset-bottom\)/);
+});
+
+test("advance cards retain explicit owner and receiver hierarchy in both views", () => {
+  assert.match(page, /advance\.recipientScope==="INDIVIDUAL"\?advance\.financialOwnerName/);
+  assert.match(page, /Received by \$\{receivers\[0\]\}/);
+  assert.match(page, /receivers\.length>1/);
+  assert.match(page, /Receiver unavailable/);
+  assert.match(page, /workforce-advance-group-actions/);
+  assert.match(styles, /\.workforce-advance-recover \{ min-height: 34px/);
+});
+
+test("mobile tabs and cards avoid clipped or oversized controls", () => {
+  assert.match(styles, /scroll-snap-type:x mandatory/);
+  assert.match(styles, /\.workforce-shell-panel::after \{ content:none; \}/);
+  assert.match(styles, /\.workforce-advance-group-actions/);
+  assert.match(styles, /\.workforce-advance-view-toggle/);
 });

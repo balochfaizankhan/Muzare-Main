@@ -92,6 +92,7 @@ const advanceSchema = contextSchema.extend({
   recipientScope: recipientScopeSchema,
   labourerId: z.string().uuid().optional().nullable(),
   labourGroupId: z.string().uuid().optional().nullable(),
+  receivedBy: z.string().trim().max(200).optional().nullable(),
   contractorReference: z.string().trim().max(200).optional().nullable(),
   crewReference: z.string().trim().max(200).optional().nullable(),
   manualRecipientName: z.string().trim().max(200).optional().nullable(),
@@ -133,6 +134,7 @@ function recipientSnapshot(input: {
   groupLeaderId?: string | null;
   groupLeaderName?: string | null;
   groupMembers?: Array<{ id: string; name: string }>;
+  receivedBy?: string | null;
 }) {
   return {
     recipientScope: input.recipientScope,
@@ -145,6 +147,7 @@ function recipientSnapshot(input: {
     groupLeaderId: input.groupLeaderId ?? null,
     groupLeaderName: input.groupLeaderName ?? null,
     groupMembers: input.groupMembers ?? [],
+    receivedBy: input.receivedBy ?? null,
   };
 }
 
@@ -152,6 +155,7 @@ async function loadRecipient(tx: DbTransaction, workspaceId: string, farmId: str
   recipientScope: LabourRecipientScope;
   labourerId?: string | null;
   labourGroupId?: string | null;
+  receivedBy?: string | null;
   manualRecipientName?: string | null;
   contractorReference?: string | null;
   crewReference?: string | null;

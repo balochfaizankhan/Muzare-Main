@@ -17444,6 +17444,9 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 .workforce-advance-toolbar .workforce-payments-search { grid-column: auto; }
 .workforce-advance-toolbar > button { background: #fff; border: 1px solid #bcd0c2; color: #166534; min-height: 44px; }
 .workforce-advance-toolbar > button[aria-pressed="true"] { background: #edf7ef; border-color: #7fac8c; }
+.workforce-advance-view-toggle { align-items: center; background: #f1f5f2; border: 1px solid #d5e1d8; border-radius: 10px; display: flex; padding: 3px; }
+.workforce-advance-view-toggle button { background: transparent; border: 0; border-radius: 7px; color: #64748b; font-size: 11px; font-weight: 700; min-height: 36px; padding: 0 10px; }
+.workforce-advance-view-toggle button[aria-pressed="true"] { background: #fff; box-shadow: 0 1px 3px rgba(15,23,42,.1); color: #166534; }
 .workforce-advance-filters { display: grid; gap: 8px; grid-template-columns: repeat(2,minmax(0,1fr)); }
 .workforce-advance-filters select,.workforce-advance-filters input { background: #fff; border: 1px solid #cfded4; border-radius: 10px; min-height: 42px; min-width: 0; padding: 0 9px; }
 .workforce-advance-position-list { gap: 8px; }
@@ -17476,11 +17479,24 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 .workforce-advance-recipient-list strong,.workforce-advance-recipient-list b { color: #1f3828; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workforce-advance-recipient-list b { color: #166534; }
 .workforce-advance-recipient-list span { color: #64748b; font-size: 10px; }
-.workforce-advance-recipient-list button { min-height: 40px; padding-inline: 10px; }
+.workforce-advance-recipient-list button { min-height: 34px; padding-inline: 7px; }
+.workforce-advance-group-actions { display: flex !important; }
 .workforce-advance-skeletons { display: grid; gap: 8px; }
 .workforce-advance-skeleton { animation: workforce-advance-pulse 1.2s ease-in-out infinite; background: linear-gradient(90deg,#f1f5f2,#fafcfb,#f1f5f2); background-size: 200% 100%; border: 1px solid #e3ebe5; border-radius: 13px; height: 154px; }
 @keyframes workforce-advance-pulse { to { background-position: -200% 0; } }
 .workforce-advance-entry-sheet,.workforce-recovery-sheet,.workforce-advance-detail { max-width: 720px; }
+.workforce-advance-entry-body { gap: 12px; padding-block: 12px; }
+.workforce-advance-entry-body > section { border-bottom: 1px solid #edf2ee; padding-bottom: 12px; }
+.workforce-advance-entry-body > section:last-child { border-bottom: 0; padding-bottom: 0; }
+.workforce-advance-entry-body h3 { align-items: center; display: flex; gap: 7px; }
+.workforce-advance-entry-body h3 > span { align-items: center; background: #edf7ef; border-radius: 999px; color: #166534; display: inline-flex; font-size: 9px; height: 20px; justify-content: center; width: 20px; }
+.workforce-advance-entry-body .workforce-payment-form { gap: 8px; }
+.workforce-advance-entry-body .workforce-payment-form input,.workforce-advance-entry-body .workforce-payment-form select { min-height: 42px; }
+.workforce-advance-preview { background: #f6faf7; border: 1px solid #dce9df !important; border-radius: 11px; padding: 10px !important; }
+.workforce-advance-preview dl { display: grid; gap: 7px; grid-template-columns: repeat(2,minmax(0,1fr)); margin: 0; }
+.workforce-advance-preview dl div { display: grid; gap: 2px; }
+.workforce-advance-preview dt { color: #718096; font-size: 9px; text-transform: uppercase; }
+.workforce-advance-preview dd { color: #153c26; font-size: 11px; font-weight: 750; margin: 0; overflow-wrap: anywhere; }
 .workforce-recovery-balance,.workforce-recovery-preview { align-items: center; background: #f2f8f4; border-radius: 11px; display: flex; justify-content: space-between; padding: 10px 12px; }
 .workforce-recovery-balance span,.workforce-recovery-preview span { color: #64748b; font-size: 11px; }
 .workforce-recovery-balance strong,.workforce-recovery-preview strong { color: #166534; font-size: 16px; }
@@ -17547,13 +17563,15 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .app-shell__body { padding-bottom: calc(var(--mobile-nav-height, 96px) + env(safe-area-inset-bottom, 0px) + 16px); }
   .workforce-payments-page { padding-bottom: calc(var(--mobile-nav-height, 96px) + env(safe-area-inset-bottom, 0px) + 28px); scroll-padding-bottom: calc(var(--mobile-nav-height, 96px) + env(safe-area-inset-bottom, 0px) + 28px); }
   .workforce-shell-panel { position: relative; }
-  .workforce-shell-panel::after { background: linear-gradient(90deg,transparent,#fff 78%); content:""; inset-block:0; inset-inline-end:0; pointer-events:none; position:absolute; width:28px; }
-  .workforce-shell-tabs { padding-inline-end: 32px; }
+  .workforce-shell-panel::after { content:none; }
+  .workforce-shell-tabs { mask-image:none; padding-inline: 12px; scroll-padding-inline:12px; scroll-snap-type:x mandatory; }
+  .workforce-shell-tab { scroll-snap-align:start; }
   .workforce-advances-panel { padding: 11px; }
   .workforce-advance-toolbar { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .workforce-advance-toolbar .workforce-payments-search { grid-column: 1/-1; }
+  .workforce-advance-view-toggle { min-width:0; }
   .workforce-advance-recipient-list article { grid-template-columns: minmax(0,1fr) auto; }
-  .workforce-advance-recipient-list article > button { grid-column: 1/-1; }
+  .workforce-advance-group-actions { grid-column:1/-1; justify-content:flex-end; }
   .workforce-advance-summary strong { font-size: 15px; }
   .workforce-advance-card { max-height: 190px; }
 }
