@@ -152,10 +152,14 @@ const attendanceDuePreviewSchema = contextSchema.extend({
   toDate: z.string().date(),
   recordDate: z.string().date(),
 });
+const sarAmountSchema = z.coerce.number().positive().refine(
+  (value) => Math.abs(value * 100 - Math.round(value * 100)) < 0.000001,
+  "Use no more than two decimal places for SAR amounts.",
+);
 const paymentSchema = z.object({
   idempotencyKey: z.string().uuid(),
   voucherDate: z.string().date(),
-  amount: z.coerce.number().positive(),
+  amount: sarAmountSchema,
   paymentAccountId: z.string().min(1),
   paymentMethod: z.string().trim().min(1).max(100),
   transactionReference: z.string().trim().max(200).optional().nullable(),
@@ -163,7 +167,7 @@ const paymentSchema = z.object({
 });
 const settleSchema = contextSchema.extend({
   advancePool: z.object({
-    amount: z.coerce.number().positive(),
+    amount: sarAmountSchema,
     idempotencyKey: z.string().uuid(),
     settlementDate: z.string().date().optional(),
   }).optional().nullable(),
@@ -171,7 +175,7 @@ const settleSchema = contextSchema.extend({
     .array(
       z.object({
         advanceVoucherId: z.string().uuid(),
-        amount: z.coerce.number().positive(),
+        amount: sarAmountSchema,
         idempotencyKey: z.string().uuid(),
       }),
     )
@@ -1518,6 +1522,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           }
           let voucher = null;
           if (input.payment) {
+            persistence.operation = "payment_idempotency_check";
             const [existingVoucher] = await tx
               .select()
               .from(labourPaymentVouchers)
@@ -1563,6 +1568,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
                 position.due.origin === "DIRECT"
                   ? "DIRECT_LABOUR_PAYMENT"
                   : "SETTLEMENT_BALANCE_PAYMENT";
+              persistence.operation = "lpv_insert";
               const [created] = await tx
                 .insert(labourPaymentVouchers)
                 .values({
@@ -1598,6 +1604,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
                   reconciliationStatus: "RECONCILED",
                 })
                 .returning();
+              persistence.operation = "lpv_accounting";
               await postLabourVoucherJournal(tx, {
                 workspaceId,
                 farmId: input.farmId,
@@ -1609,6 +1616,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
                 actorId: request.appUser!.id,
                 dueId,
               });
+              persistence.operation = "funding_account_movement";
               const accountTransactionId = await insertAccountMovement(tx, {
                 farmId: input.farmId,
                 seasonId: input.seasonId,
@@ -1623,6 +1631,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
                 .update(labourPaymentVouchers)
                 .set({ accountTransactionId })
                 .where(eq(labourPaymentVouchers.id, created!.id));
+              persistence.operation = "due_payment_allocation";
               await tx
                 .insert(labourPaymentAllocations)
                 .values({
@@ -1635,6 +1644,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               voucher = { ...created!, accountTransactionId };
             }
           }
+          persistence.operation = "due_status_refresh";
           const refreshed = await refreshLabourDuePaymentStatus(tx, dueId);
           persistence.operation = "settlement_audit";
           const settlementSummary = {
@@ -1692,7 +1702,9 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           .code(409)
           .send({
             message: database
-              ? `Advances were not applied. No balances were changed. Reference: ${request.id}.`
+              ? input.payment
+                ? `Labour Due settlement was not posted. No balances were changed. Reference: ${request.id}.`
+                : `Advances were not applied. No balances were changed. Reference: ${request.id}.`
               : error instanceof Error ? error.message : "Unable to settle the labour due.",
             requestId: request.id,
           });

@@ -1243,3 +1243,67 @@ test("group due atomically applies snapshot-member advances across controlled in
   assert.equal((await db.select().from(labourAdvanceApplications).where(eq(labourAdvanceApplications.dueId, dueId))).length, 45);
   assert.equal(advances.length, 45);
 });
+
+test("cash, bank, and partner LPVs reconcile funding, payable, retry, and reversal atomically", async () => {
+  const cases = [
+    { accountType: "cash", transactionType: "debit", ledgerCode: "CASH_CONTROL" },
+    { accountType: "bank", transactionType: "debit", ledgerCode: "CASH_CONTROL" },
+    { accountType: "partner", transactionType: "credit", ledgerCode: "PARTNER_PAYABLE" },
+  ] as const;
+  for (const [index, funding] of cases.entries()) {
+    const dueId = randomUUID();
+    const paymentKey = randomUUID();
+    const [account] = await db.insert(accounts).values({
+      farmId: tenant.farmId, name: `LPV ${funding.accountType} ${Date.now()} ${index}`,
+      accountType: funding.accountType, active: true,
+    }).returning({ id: accounts.id });
+    assert.ok(account?.id);
+    await db.insert(labourDues).values({
+      id: dueId, workspaceId: tenant.workspaceId, farmId: tenant.farmId, seasonId: tenant.seasonId,
+      dueNumber: `LD-FUND-${Date.now()}-${index}`, origin: "DIRECT", recipientScope: "NO_SPECIFIC_RECIPIENT",
+      financialScopeKey: `batch:funding-${index}-${Date.now()}`, crewReference: `Funding crew ${index}`,
+      recipientSnapshot: { recipientReference: `Funding crew ${index}` }, description: "Funding-source reconciliation",
+      workFromDate: "2026-06-01", workToDate: "2026-06-01", grossAmount: "30.00",
+      idempotencyKey: randomUUID(), createdBy: tenant.userId,
+    });
+    const payload = {
+      farmId: tenant.farmId, seasonId: tenant.seasonId, advanceApplications: [],
+      payment: { idempotencyKey: paymentKey, voucherDate: "2026-06-02", amount: 30, paymentAccountId: account!.id, paymentMethod: "TRANSFER" },
+    };
+    const paid = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/dues/${dueId}/settle`, payload);
+    assertIntegrationResponse(paid, 200, `pay due from ${funding.accountType}`);
+    const voucher = paid.json().result.voucher;
+    assert.equal(voucher.paymentAmount, "30.00");
+    assert.equal(voucher.linkedDueId, dueId);
+    assert.ok(voucher.accountTransactionId);
+    assert.equal(paid.json().result.due.outstandingBalance, 0);
+    const [movement] = await db.select().from(accountTransactions).where(eq(accountTransactions.id, voucher.accountTransactionId));
+    assert.equal(movement?.accountId, account!.id);
+    assert.equal(movement?.referenceId, voucher.id);
+    assert.equal(movement?.type, funding.transactionType);
+    assert.equal(Number(movement?.amount), 30);
+    const journal = await db.select().from(labourAccountingEntries).where(eq(labourAccountingEntries.voucherId, voucher.id));
+    assert.equal(journal.filter((row) => row.ledgerCode === "LABOUR_PAYABLE").reduce((sum, row) => sum + Number(row.debit) - Number(row.credit), 0), 30);
+    assert.equal(journal.filter((row) => row.ledgerCode === funding.ledgerCode).reduce((sum, row) => sum + Number(row.credit) - Number(row.debit), 0), 30);
+    assert.equal(journal.some((row) => row.ledgerCode === "LABOUR_EXPENSE"), false);
+
+    const retried = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/dues/${dueId}/settle`, payload);
+    assertIntegrationResponse(retried, 200, `retry ${funding.accountType} payment`);
+    assert.equal((await db.select().from(labourPaymentVouchers).where(eq(labourPaymentVouchers.idempotencyKey, paymentKey))).length, 1);
+    assert.equal((await db.select().from(accountTransactions).where(eq(accountTransactions.referenceId, voucher.id))).length, 1);
+
+    if (funding.accountType === "cash") {
+      const reversed = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/vouchers/${voucher.id}/void?farmId=${tenant.farmId}&seasonId=${tenant.seasonId}`, {
+        idempotencyKey: randomUUID(), reason: "Funding reconciliation reversal",
+      });
+      assertIntegrationResponse(reversed, 200, "reverse cash-funded LPV");
+      const reversal = reversed.json().result.reversal;
+      const [reverseMovement] = await db.select().from(accountTransactions).where(eq(accountTransactions.id, reversal.accountTransactionId));
+      assert.equal(reverseMovement?.accountId, account!.id);
+      assert.equal(reverseMovement?.type, "credit");
+      assert.equal(Number(reverseMovement?.amount), 30);
+      const [restoredDue] = await db.select().from(labourDues).where(eq(labourDues.id, dueId));
+      assert.equal(restoredDue?.paymentStatus, "UNPAID");
+    }
+  }
+});
