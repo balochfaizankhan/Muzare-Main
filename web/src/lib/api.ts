@@ -1942,7 +1942,18 @@ export type LabourAdvancePosition = LabourPaymentVoucherRecord & {
 };
 export type LabourAdvanceListResponse = {
   advances: LabourAdvancePosition[];
-  summary: { totalOutstanding: number; openCount: number; partiallyAppliedCount: number };
+  summary: {
+    totalOutstanding: number;
+    openCount: number;
+    partiallyAppliedCount: number;
+    totalOriginal?: number;
+    totalApplied?: number;
+    totalRecovered?: number;
+    totalReversed?: number;
+    reviewRequiredCount?: number;
+    legacyCount?: number;
+    currentCount?: number;
+  };
   pageInfo: { page: number; pageSize: number; totalCount: number; hasMore: boolean };
   diagnostics?: { queryCount: number; databaseMs: number; totalMs: number };
 };

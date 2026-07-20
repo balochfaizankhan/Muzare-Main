@@ -27,8 +27,10 @@ test("the advances tab distinguishes loading, request failure, retry, and genuin
 test("the advances endpoint paginates, summarizes, filters, and executes one card-ready query", () => {
   const endpoint = advanceEndpointSource();
   assert.match(route, /pageSize: z\.coerce\.number\(\)\.int\(\)\.min\(1\)\.max\(100\)\.default\(20\)/);
-  assert.match(endpoint, /count\(\*\) OVER\(\)[\s\S]*total_count/);
-  assert.match(endpoint, /sum\(outstanding_amount\) OVER\(\)[\s\S]*total_outstanding/);
+  assert.match(endpoint, /count\(\*\) OVER\(\)[\s\S]*filtered_total_count/);
+  assert.match(endpoint, /context_total_outstanding/);
+  assert.match(endpoint, /context_open_count/);
+  assert.match(endpoint, /context_summary LEFT JOIN paged/);
   assert.match(endpoint, /ORDER BY voucher_date DESC,created_at DESC,id DESC LIMIT/);
   assert.match(endpoint, /financial_owner_name/);
   assert.match(endpoint, /payment_account_name/);
@@ -116,6 +118,16 @@ test("the canonical read query resolves historical receivers without current gro
   assert.doesNotMatch(endpoint, /received_by_name[^;]+groupLeaderName/i);
   assert.match(paymentService, /receivedByLabourerId: advanceLabourerId/);
   assert.match(paymentService, /receivedByNameSnapshot: advancePayload\.labourerName/);
+});
+
+test("payments due and review use the complete canonical advance response", () => {
+  const overview = page.slice(page.indexOf("export function WorkforcePaymentsPage"), page.indexOf("function AdvancesView"));
+  assert.match(overview, /fetchAllLabourPaymentAdvances/);
+  assert.match(overview, /setAdvanceSummary\(advanceResponse\.summary\)/);
+  assert.match(overview, /advanceSummary\.totalOutstanding/);
+  assert.match(overview, /advanceSummary\.openCount/);
+  assert.doesNotMatch(overview, /const outstandingAdvances\s*=\s*advances\.reduce/);
+  assert.match(page, /muzare:advance-list:v2:\$\{workspaceId\}:\$\{farmId\}:\$\{seasonId\}/);
 });
 
 function advanceSchemaSource() {

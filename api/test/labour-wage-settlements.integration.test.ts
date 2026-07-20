@@ -1156,3 +1156,39 @@ test("voided settlement cleanup preview accepts the canonical record id and tole
   assert.equal(deleted.json().result.deleted[0].id, clientRecordId);
   assert.equal((await db.select({ id: operationalRecords.id }).from(operationalRecords).where(eq(operationalRecords.id, record!.id))).length, 0);
 });
+
+test("canonical advance headline summary is independent of pagination and list filters", async () => {
+  const endpoint = `/v1/workspace/${tenant.workspaceId}/labour-payments/advances?farmId=${tenant.farmId}&seasonId=${tenant.seasonId}`;
+  const before = await request("GET", `${endpoint}&status=OPEN&page=1&pageSize=1`);
+  assertIntegrationResponse(before, 200, "load baseline canonical advance summary");
+
+  const inserted = await db.insert(operationalRecords).values([
+    {
+      workspaceId: tenant.workspaceId, farmId: tenant.farmId, seasonId: tenant.seasonId,
+      clientRecordId: randomUUID(), entityType: "advance", recordedBy: tenant.userId,
+      clientUpdatedAt: new Date(now), payload: { amount: 101, date: "2026-06-01", labourerId: randomUUID(), labourerName: "Summary individual", status: "posted" },
+    },
+    {
+      workspaceId: tenant.workspaceId, farmId: tenant.farmId, seasonId: tenant.seasonId,
+      clientRecordId: randomUUID(), entityType: "advance", recordedBy: tenant.userId,
+      clientUpdatedAt: new Date(now), payload: { amount: 202, date: "2026-06-02", labourerId: randomUUID(), labourerName: "Summary receiver", labourGroupId: randomUUID(), labourGroupName: "Summary group", status: "posted" },
+    },
+    {
+      workspaceId: tenant.workspaceId, farmId: null, seasonId: null,
+      clientRecordId: randomUUID(), entityType: "advance", recordedBy: tenant.userId,
+      clientUpdatedAt: new Date(now), payload: { amount: 303, date: "2026-06-03", labourerId: randomUUID(), labourerName: "Compatible legacy", status: "posted" },
+    },
+  ]).returning({ id: operationalRecords.id });
+
+  const page = await request("GET", `${endpoint}&status=OPEN&page=1&pageSize=1`);
+  const filtered = await request("GET", `${endpoint}&status=OPEN&page=1&pageSize=1&search=does-not-match-any-advance`);
+  assertIntegrationResponse(page, 200, "load paginated canonical advance summary");
+  assertIntegrationResponse(filtered, 200, "load filtered canonical advance summary");
+  assert.equal(page.json().advances.length, 1);
+  assert.equal(filtered.json().advances.length, 0);
+  assert.equal(page.json().summary.totalOutstanding, before.json().summary.totalOutstanding + 606);
+  assert.equal(page.json().summary.openCount, before.json().summary.openCount + 3);
+  assert.deepEqual(filtered.json().summary, page.json().summary);
+
+  await db.delete(operationalRecords).where(inArray(operationalRecords.id, inserted.map((row) => row.id)));
+});

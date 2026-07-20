@@ -24,6 +24,7 @@ import { useAuth } from "../../auth/AuthProvider";
 import { LabourSelectCombobox } from "../../components/LabourSelectCombobox";
 import {
   createDirectLabourDue,
+  fetchAllLabourPaymentAdvances,
   fetchLabourPaymentAdvances,
   fetchLabourPaymentDues,
   fetchLabourPaymentVouchers,
@@ -133,6 +134,7 @@ export function WorkforcePaymentsPage() {
   const [dues, setDues] = useState<LabourDueRecord[]>([]);
   const [vouchers, setVouchers] = useState<LabourPaymentVoucherRecord[]>([]);
   const [advances, setAdvances] = useState<LabourAdvancePosition[]>([]);
+  const [advanceSummary, setAdvanceSummary] = useState<LabourAdvanceListResponse["summary"] | null>(null);
   const [labourers, setLabourers] = useState<Labourer[]>([]);
   const [groups, setGroups] = useState<LabourGroup[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -177,14 +179,15 @@ export function WorkforcePaymentsPage() {
         [
           fetchLabourPaymentDues(token, workspaceId, { farmId, seasonId }),
           fetchLabourPaymentVouchers(token, workspaceId, { farmId, seasonId }),
-          fetchLabourPaymentAdvances(token, workspaceId, farmId, seasonId, {
-            pageSize: view === "dues" ? 100 : 20,
-          }),
+          view === "dues"
+            ? fetchAllLabourPaymentAdvances(token, workspaceId, farmId, seasonId, { status: "OPEN" })
+            : fetchLabourPaymentAdvances(token, workspaceId, farmId, seasonId, { pageSize: 20, status: "OPEN" }),
         ],
       );
       setDues(dueResponse.dues);
       setVouchers(voucherResponse.vouchers);
       setAdvances(advanceResponse.advances);
+      setAdvanceSummary(advanceResponse.summary);
       setSelectedDue((current) =>
         current
           ? (dueResponse.dues.find((item) => item.id === current.id) ?? null)
@@ -200,6 +203,11 @@ export function WorkforcePaymentsPage() {
       setLoading(false);
     }
   }, [farmId, seasonId, token, view, workspaceId]);
+
+  useEffect(() => {
+    setAdvanceSummary(null);
+    setAdvances([]);
+  }, [farmId, seasonId, workspaceId]);
 
   useEffect(() => {
     void refresh();
@@ -233,10 +241,6 @@ export function WorkforcePaymentsPage() {
   const partialCount = openDues.filter(
     (due) => due.paymentStatus === "PARTIALLY_SETTLED",
   ).length;
-  const outstandingAdvances = advances.reduce(
-    (sum, advance) => sum + advance.outstandingAmount,
-    0,
-  );
   const filteredDues = useMemo(() => {
     const term = search.trim().toLowerCase();
     return dues.filter((due) => {
@@ -346,7 +350,8 @@ export function WorkforcePaymentsPage() {
             >
               <HandCoins size={17} />
               <span>Outstanding advances</span>
-              <strong>{money(outstandingAdvances)}</strong>
+              <strong>{loading && !advanceSummary ? "—" : advanceSummary ? money(advanceSummary.totalOutstanding) : "Unavailable"}</strong>
+              {advanceSummary ? <small>{advanceSummary.openCount} open</small> : null}
             </button>
           </section>
           <section className="record-panel workforce-payments-panel">
@@ -1181,7 +1186,7 @@ function AdvancesView({
   }, [searchInput]);
   const cacheKey = useMemo(
     () =>
-      `muzare:advance-list:${workspaceId}:${farmId}:${seasonId}:${search}:${scopeFilter}:${statusFilter}:${accountFilter}:${fromFilter}:${toFilter}`,
+      `muzare:advance-list:v2:${workspaceId}:${farmId}:${seasonId}:${search}:${scopeFilter}:${statusFilter}:${accountFilter}:${fromFilter}:${toFilter}`,
     [
       accountFilter,
       farmId,
@@ -1292,6 +1297,11 @@ function AdvancesView({
       );
     };
   }, [cacheKey, loadPage]);
+  useEffect(() => {
+    const refreshAdvances = () => void loadPage(1, false);
+    window.addEventListener("muzare-data-refresh", refreshAdvances);
+    return () => window.removeEventListener("muzare-data-refresh", refreshAdvances);
+  }, [loadPage]);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (saving) return;

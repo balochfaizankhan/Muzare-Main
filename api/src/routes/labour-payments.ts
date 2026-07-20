@@ -1741,6 +1741,19 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           CASE WHEN status='VOIDED' THEN 'VOIDED' WHEN greatest(original_amount-applied_amount-refunded_amount-reversed_amount,0)<=0.005 AND applied_amount>0 THEN 'FULLY_APPLIED' WHEN greatest(original_amount-applied_amount-refunded_amount-reversed_amount,0)<=0.005 AND refunded_amount>0 THEN 'FULLY_REFUNDED' WHEN refunded_amount>0 THEN 'PARTIALLY_REFUNDED' WHEN applied_amount>0 THEN 'PARTIALLY_APPLIED' ELSE 'OUTSTANDING' END AS advance_status,
           (financial_owner_name IS NULL OR payment_account_name IS NULL OR reconciliation_status IN ('NEEDS_REVIEW','LEGACY_UNLINKED')) AS review_required
         FROM source_rows
+      ), context_summary AS (
+        SELECT
+          COALESCE(sum(original_amount),0)::numeric AS context_total_original,
+          COALESCE(sum(applied_amount),0)::numeric AS context_total_applied,
+          COALESCE(sum(refunded_amount),0)::numeric AS context_total_recovered,
+          COALESCE(sum(reversed_amount),0)::numeric AS context_total_reversed,
+          COALESCE(sum(outstanding_amount) FILTER (WHERE status<>'VOIDED' AND outstanding_amount>0.005),0)::numeric AS context_total_outstanding,
+          count(*) FILTER (WHERE status<>'VOIDED' AND outstanding_amount>0.005)::int AS context_open_count,
+          count(*) FILTER (WHERE status<>'VOIDED' AND outstanding_amount>0.005 AND advance_status IN ('PARTIALLY_APPLIED','PARTIALLY_REFUNDED'))::int AS context_partially_applied_count,
+          count(*) FILTER (WHERE status<>'VOIDED' AND outstanding_amount>0.005 AND review_required)::int AS context_review_required_count,
+          count(*) FILTER (WHERE status<>'VOIDED' AND outstanding_amount>0.005 AND legacy)::int AS context_legacy_count,
+          count(*) FILTER (WHERE status<>'VOIDED' AND outstanding_amount>0.005 AND NOT legacy)::int AS context_current_count
+        FROM positioned
       ), filtered AS (
         SELECT * FROM positioned WHERE
           (${query.data.status}='ALL' OR (${query.data.status}='OPEN' AND status<>'VOIDED' AND outstanding_amount>0.005) OR advance_status=${query.data.status})
@@ -1749,14 +1762,17 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           AND (${query.data.from ?? null}::date IS NULL OR voucher_date>=${query.data.from ?? null}::date)
           AND (${query.data.to ?? null}::date IS NULL OR voucher_date<=${query.data.to ?? null}::date)
           AND (${search}::text IS NULL OR concat_ws(' ',display_voucher_number,financial_owner_name,received_by_name,group_leader_snapshot,payment_account_name,description) ILIKE ${search} ESCAPE '\\')
+      ), paged AS (
+        SELECT *,count(*) OVER()::int AS filtered_total_count
+        FROM filtered ORDER BY voucher_date DESC,created_at DESC,id DESC LIMIT ${query.data.pageSize} OFFSET ${offset}
       )
-      SELECT *,count(*) OVER()::int AS total_count,coalesce(sum(outstanding_amount) OVER(),0)::numeric AS total_outstanding,
-        count(*) FILTER (WHERE advance_status IN ('PARTIALLY_APPLIED','PARTIALLY_REFUNDED')) OVER()::int AS partially_applied_count
-      FROM filtered ORDER BY voucher_date DESC,created_at DESC,id DESC LIMIT ${query.data.pageSize} OFFSET ${offset}
+      SELECT paged.*,context_summary.*
+      FROM context_summary LEFT JOIN paged ON true
+      ORDER BY paged.voucher_date DESC,paged.created_at DESC,paged.id DESC
     `);
       const databaseMs = performance.now() - databaseStartedAt;
       const rawRows = result.rows as Array<Record<string, unknown>>;
-      const advances = rawRows.map((row) => ({
+      const advances = rawRows.filter((row) => row.id).map((row) => ({
         id: String(row.canonical_id ?? row.id),
         canonicalId: row.canonical_id ? String(row.canonical_id) : null,
         voucherNumber: String(row.display_voucher_number),
@@ -1838,17 +1854,24 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
         createdByName: row.created_by_name ? String(row.created_by_name) : null,
         createdAt: String(row.created_at),
       }));
-      const totalCount = Number(rawRows[0]?.total_count ?? 0);
-      const totalOutstanding = Number(rawRows[0]?.total_outstanding ?? 0);
+      const totalCount = Number(rawRows[0]?.filtered_total_count ?? 0);
+      const totalOutstanding = Number(rawRows[0]?.context_total_outstanding ?? 0);
       const partiallyAppliedCount = Number(
-        rawRows[0]?.partially_applied_count ?? 0,
+        rawRows[0]?.context_partially_applied_count ?? 0,
       );
       const response = {
         advances,
         summary: {
           totalOutstanding,
-          openCount: totalCount,
+          openCount: Number(rawRows[0]?.context_open_count ?? 0),
           partiallyAppliedCount,
+          totalOriginal: Number(rawRows[0]?.context_total_original ?? 0),
+          totalApplied: Number(rawRows[0]?.context_total_applied ?? 0),
+          totalRecovered: Number(rawRows[0]?.context_total_recovered ?? 0),
+          totalReversed: Number(rawRows[0]?.context_total_reversed ?? 0),
+          reviewRequiredCount: Number(rawRows[0]?.context_review_required_count ?? 0),
+          legacyCount: Number(rawRows[0]?.context_legacy_count ?? 0),
+          currentCount: Number(rawRows[0]?.context_current_count ?? 0),
         },
         pageInfo: {
           page: query.data.page,
