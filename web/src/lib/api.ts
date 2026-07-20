@@ -1921,6 +1921,9 @@ export type LabourAdvancePosition = LabourPaymentVoucherRecord & {
   refundedAmount: number;
   outstandingAmount: number;
   advanceStatus: "OUTSTANDING" | "PARTIALLY_APPLIED" | "FULLY_APPLIED" | "PARTIALLY_REFUNDED" | "FULLY_REFUNDED" | "VOIDED";
+  reversedAmount?: number;
+  paymentAccountName?: string | null;
+  readOnlyLegacy?: boolean;
 };
 
 const labourPaymentContextQuery = (farmId: string, seasonId: string) => new URLSearchParams({ farmId, seasonId }).toString();
