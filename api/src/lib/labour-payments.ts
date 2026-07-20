@@ -293,6 +293,34 @@ export async function allocateLabourPaymentVoucherNumber(tx: DbTransaction, work
   return `LPV-${String(next).padStart(4, "0")}`;
 }
 
+export async function allocateLabourAdvanceVoucherNumber(tx: DbTransaction, workspaceId: string, farmId: string) {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`${workspaceId}:${farmId}:labour-advance-voucher-number`}), 1)`);
+  const rows = await tx.select({ voucherNumber: labourPaymentVouchers.voucherNumber }).from(labourPaymentVouchers).where(and(
+    eq(labourPaymentVouchers.workspaceId, workspaceId),
+    eq(labourPaymentVouchers.farmId, farmId),
+    eq(labourPaymentVouchers.nature, "ADVANCE"),
+  ));
+  const next = rows.reduce((maximum, row) => {
+    const match = /^LAV-(\d+)$/i.exec(row.voucherNumber);
+    return Math.max(maximum, match ? Number(match[1]) : 0);
+  }, 0) + 1;
+  return `LAV-${String(next).padStart(4, "0")}`;
+}
+
+export async function allocateLabourAdvanceAdjustmentNumber(tx: DbTransaction, workspaceId: string, farmId: string) {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`${workspaceId}:${farmId}:labour-advance-adjustment-number`}), 1)`);
+  const rows = await tx.select({ voucherNumber: labourPaymentVouchers.voucherNumber }).from(labourPaymentVouchers).where(and(
+    eq(labourPaymentVouchers.workspaceId, workspaceId),
+    eq(labourPaymentVouchers.farmId, farmId),
+    sql`${labourPaymentVouchers.nature} in ('REFUND_RECOVERY', 'REVERSAL')`,
+  ));
+  const next = rows.reduce((maximum, row) => {
+    const match = /^LAR-(\d+)$/i.exec(row.voucherNumber);
+    return Math.max(maximum, match ? Number(match[1]) : 0);
+  }, 0) + 1;
+  return `LAR-${String(next).padStart(4, "0")}`;
+}
+
 export async function loadLabourDuePosition(tx: DbTransaction, dueId: string) {
   const [due] = await tx.select().from(labourDues).where(eq(labourDues.id, dueId)).limit(1);
   if (!due) return null;

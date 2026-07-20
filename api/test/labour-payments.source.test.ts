@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { calculateAdvancePosition, calculateLabourDuePosition, labourFinancialScopeKey } from "../src/lib/labour-payments.js";
 
 const routeSource = readFileSync(new URL("../src/routes/labour-payments.ts", import.meta.url), "utf8");
+const paymentServiceSource = readFileSync(new URL("../src/lib/labour-payments.ts", import.meta.url), "utf8");
 const settlementRouteSource = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
 const migrationSource = readFileSync(new URL("../../database/migrations/0035_unified_labour_payments.sql", import.meta.url), "utf8");
 
@@ -96,4 +97,16 @@ test("labour subledger distinguishes expense, payable, advance, cash, and partne
   assert.match(routeSource, /postLabourAdvanceApplicationJournal/);
   assert.match(routeSource, /postLabourVoucherJournal/);
   assert.match(routeSource, /reverseLabourJournal/);
+});
+
+test("advance issuance and due payments use distinct business voucher registers", () => {
+  assert.match(routeSource, /allocateLabourAdvanceVoucherNumber/);
+  assert.match(paymentServiceSource, /return `LAV-\$\{String\(next\)\.padStart\(4, "0"\)\}`/);
+  assert.match(paymentServiceSource, /return `LAR-\$\{String\(next\)\.padStart\(4, "0"\)\}`/);
+  assert.match(routeSource, /nature: "ADVANCE"/);
+  assert.match(routeSource, /nature} not in \('ADVANCE', 'REFUND_RECOVERY'\)/);
+  assert.match(routeSource, /original\.nature in \('ADVANCE', 'REFUND_RECOVERY'\)/);
+  assert.match(routeSource, /allocateLabourPaymentVoucherNumber/);
+  assert.match(routeSource, /allocateLabourAdvanceAdjustmentNumber/);
+  assert.match(routeSource, /if \(input\.payment\)/);
 });

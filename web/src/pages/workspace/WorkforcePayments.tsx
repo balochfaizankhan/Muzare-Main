@@ -157,7 +157,6 @@ export function WorkforcePaymentsPage() {
   );
   const [dues, setDues] = useState<LabourDueRecord[]>([]);
   const [vouchers, setVouchers] = useState<LabourPaymentVoucherRecord[]>([]);
-  const [advances, setAdvances] = useState<LabourAdvancePosition[]>([]);
   const [advanceSummary, setAdvanceSummary] = useState<LabourAdvanceListResponse["summary"] | null>(null);
   const [labourers, setLabourers] = useState<Labourer[]>([]);
   const [groups, setGroups] = useState<LabourGroup[]>([]);
@@ -210,12 +209,11 @@ export function WorkforcePaymentsPage() {
         [
           fetchLabourPaymentDues(token, workspaceId, { farmId, seasonId }),
           view === "vouchers" ? fetchLabourPaymentVouchers(token, workspaceId, { farmId, seasonId }) : Promise.resolve({ vouchers: [] }),
-          fetchLabourPaymentAdvances(token, workspaceId, farmId, seasonId, { pageSize: view === "dues" ? 1 : 20, status: "OPEN" }),
+          fetchLabourPaymentAdvances(token, workspaceId, farmId, seasonId, { pageSize: 1, status: "OPEN" }),
         ],
       );
       setDues(dueResponse.dues);
       setVouchers(voucherResponse.vouchers);
-      setAdvances(advanceResponse.advances);
       setAdvanceSummary(advanceResponse.summary);
       setSelectedDue((current) =>
         current
@@ -235,7 +233,6 @@ export function WorkforcePaymentsPage() {
 
   useEffect(() => {
     setAdvanceSummary(null);
-    setAdvances([]);
   }, [farmId, seasonId, workspaceId]);
 
   useEffect(() => {
@@ -578,7 +575,7 @@ export function WorkforcePaymentsPage() {
         <VoucherRegister
           vouchers={vouchers}
           dues={dues}
-          advances={advances}
+          advanceOutstanding={advanceSummary?.totalOutstanding ?? 0}
           accounts={accountById}
           labourById={labourById}
           groupById={groupById}
@@ -593,6 +590,7 @@ export function WorkforcePaymentsPage() {
             await refresh();
           }}
           onError={setError}
+          onViewAdvances={() => navigate("/workspace/labour-payments/advances")}
         />
       ) : null}
       {view === "advances" ? (
@@ -927,7 +925,7 @@ function DirectDueForm({
 function VoucherRegister({
   vouchers,
   dues,
-  advances,
+  advanceOutstanding,
   accounts,
   labourById,
   groupById,
@@ -939,10 +937,11 @@ function VoucherRegister({
   seasonId,
   onSaved,
   onError,
+  onViewAdvances,
 }: {
   vouchers: LabourPaymentVoucherRecord[];
   dues: LabourDueRecord[];
-  advances: LabourAdvancePosition[];
+  advanceOutstanding: number;
   accounts: Map<string, Account>;
   labourById: Map<string, Labourer>;
   groupById: Map<string, LabourGroup>;
@@ -954,6 +953,7 @@ function VoucherRegister({
   seasonId: string;
   onSaved: (message: string) => Promise<void>;
   onError: (message: string) => void;
+  onViewAdvances: () => void;
 }) {
   const [search, setSearch] = useState("");
   const [nature, setNature] = useState("ALL");
@@ -1045,17 +1045,13 @@ function VoucherRegister({
         !["VOIDED", "PAID", "SETTLED_BY_ADVANCE"].includes(due.paymentStatus),
     )
     .reduce((sum, due) => sum + due.outstandingBalance, 0);
-  const advanceOutstanding = advances.reduce(
-    (sum, advance) => sum + advance.outstandingAmount,
-    0,
-  );
   return (
     <section className="record-panel workforce-payments-panel">
       <header className="workforce-payments-panel__header">
         <div>
           <h2>Labour Payment Vouchers</h2>
           <p>
-            One register for advances, final payments, refunds, and reversals.
+            New-money payments against Labour Dues and final obligations.
           </p>
         </div>
       </header>
@@ -1073,12 +1069,10 @@ function VoucherRegister({
           onChange={(event) => setNature(event.target.value)}
         >
           <option value="ALL">All voucher natures</option>
-          <option value="ADVANCE">Advances</option>
           <option value="SETTLEMENT_BALANCE_PAYMENT">
             Settlement payments
           </option>
           <option value="DIRECT_LABOUR_PAYMENT">Direct due payments</option>
-          <option value="REFUND_RECOVERY">Refunds / recoveries</option>
           <option value="REVERSAL">Reversals</option>
         </select>
       </div>
@@ -1088,13 +1082,13 @@ function VoucherRegister({
           <strong>{money(recognizedExpense)}</strong>
         </article>
         <article>
-          <span>Labour cash paid</span>
+          <span>Final labour payments</span>
           <strong>{money(labourCashPaid)}</strong>
         </article>
-        <article>
+        <button type="button" className="workforce-payment-report-card" onClick={onViewAdvances}>
           <span>Outstanding advances</span>
           <strong>{money(advanceOutstanding)}</strong>
-        </article>
+        </button>
         <article>
           <span>Outstanding payables</span>
           <strong>{money(payableOutstanding)}</strong>
@@ -1742,6 +1736,9 @@ function AdvancesView({
               <option value="OUTSTANDING">Outstanding</option>
               <option value="PARTIALLY_APPLIED">Partially applied</option>
               <option value="PARTIALLY_REFUNDED">Partially refunded</option>
+              <option value="FULLY_APPLIED">Fully applied</option>
+              <option value="FULLY_REFUNDED">Recovered / refunded</option>
+              <option value="VOIDED">Voided / reversed</option>
               <option value="ALL">All history</option>
             </select>
             <select

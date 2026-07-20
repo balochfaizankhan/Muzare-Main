@@ -21,6 +21,8 @@ import {
 } from "../db/schema.js";
 import {
   allocateLabourDueNumber,
+  allocateLabourAdvanceVoucherNumber,
+  allocateLabourAdvanceAdjustmentNumber,
   allocateLabourPaymentVoucherNumber,
   calculateLabourAdvancePool,
   calculateAdvancePosition,
@@ -2074,7 +2076,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               },
             })
             .returning();
-          const voucherNumber = await allocateLabourPaymentVoucherNumber(
+          const voucherNumber = await allocateLabourAdvanceVoucherNumber(
             tx,
             workspaceId,
             input.farmId,
@@ -2204,6 +2206,12 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             query.data.status
               ? eq(labourPaymentVouchers.status, query.data.status)
               : undefined,
+            sql`${labourPaymentVouchers.nature} not in ('ADVANCE', 'REFUND_RECOVERY')`,
+            sql`(${labourPaymentVouchers.nature} <> 'REVERSAL' or not exists (
+              select 1 from labour_payment_vouchers original
+              where original.id = ${labourPaymentVouchers.reversalReference}
+                and original.nature in ('ADVANCE', 'REFUND_RECOVERY')
+            ))`,
           ),
         )
         .orderBy(
@@ -2725,7 +2733,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             body.data.farmId,
             body.data.payment.paymentAccountId,
           );
-          const voucherNumber = await allocateLabourPaymentVoucherNumber(
+          const voucherNumber = await allocateLabourAdvanceAdjustmentNumber(
             tx,
             params.data.workspaceId,
             body.data.farmId,
@@ -2892,11 +2900,9 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             query.data.farmId,
             voucher.paymentAccountId,
           );
-          const reversalNumber = await allocateLabourPaymentVoucherNumber(
-            tx,
-            params.data.workspaceId,
-            query.data.farmId,
-          );
+          const reversalNumber = voucher.nature === "ADVANCE" || voucher.nature === "REFUND_RECOVERY"
+            ? await allocateLabourAdvanceAdjustmentNumber(tx, params.data.workspaceId, query.data.farmId)
+            : await allocateLabourPaymentVoucherNumber(tx, params.data.workspaceId, query.data.farmId);
           const now = new Date();
           const [reversal] = await tx
             .insert(labourPaymentVouchers)

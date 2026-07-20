@@ -17364,7 +17364,8 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 .workforce-payment-refund input, .workforce-payment-refund select { background: #fff; border: 1px solid #cfded4; border-radius: 10px; min-height: 44px; min-width: 0; padding: 0 10px; }
 .workforce-payment-refund > div { display: flex; gap: 8px; grid-column: 1 / -1; justify-content: flex-end; }
 .workforce-payment-report-grid { display: grid; gap: 8px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.workforce-payment-report-grid article { background: #f8fbf9; border: 1px solid #dce8e0; border-radius: 11px; display: grid; gap: 4px; padding: 10px; }
+.workforce-payment-report-grid article,.workforce-payment-report-grid button { background: #f8fbf9; border: 1px solid #dce8e0; border-radius: 11px; display: grid; gap: 4px; padding: 10px; text-align: left; }
+.workforce-payment-report-grid button { cursor: pointer; font: inherit; }
 .workforce-payment-report-grid span { color: #64748b; font-size: 10px; }
 .workforce-payment-report-grid strong { color: #17452b; font-size: 14px; overflow-wrap: anywhere; }
 .workforce-payments-empty,

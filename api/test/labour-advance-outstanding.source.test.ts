@@ -101,6 +101,19 @@ test("advance cards retain explicit owner and receiver hierarchy in both views",
   assert.match(styles, /\.workforce-advance-recover \{ min-height: 34px/);
 });
 
+test("payment and advance registers remain separate business documents", () => {
+  const voucherRegister = page.slice(page.indexOf("function VoucherRegister"), page.indexOf("function AdvancesView"));
+  const advanceRegister = page.slice(page.indexOf("function AdvancesView"), page.indexOf("function ReviewSettleDialog"));
+  assert.match(voucherRegister, /New-money payments against Labour Dues/);
+  assert.doesNotMatch(voucherRegister, /<option value="ADVANCE">/);
+  assert.doesNotMatch(voucherRegister, /<option value="REFUND_RECOVERY">/);
+  assert.match(voucherRegister, /Final labour payments/);
+  assert.match(voucherRegister, /onViewAdvances/);
+  assert.match(advanceRegister, /FULLY_APPLIED/);
+  assert.match(advanceRegister, /FULLY_REFUNDED/);
+  assert.match(advanceRegister, /VOIDED/);
+});
+
 test("dashboard quick add deep-links into the canonical record advance dialog", () => {
   const advances = page.slice(page.indexOf("function AdvancesView"), page.indexOf("function ReviewSettleDialog"));
   assert.match(workspaceLayout, /\/workspace\/labour-payments\/advances\?action=record-advance/);
