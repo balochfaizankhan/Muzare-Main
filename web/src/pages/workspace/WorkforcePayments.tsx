@@ -583,6 +583,7 @@ export function WorkforcePaymentsPage() {
           seasonId={seasonId}
           onSaved={async (message) => {
             setSuccess(message);
+            window.dispatchEvent(new Event("muzare-data-refresh"));
           }}
           onError={setError}
         />
@@ -1147,6 +1148,7 @@ function AdvancesView({
   onSaved: (message: string) => Promise<void>;
   onError: (message: string) => void;
 }) {
+  const location = useLocation();
   const [rows, setRows] = useState<LabourAdvancePosition[]>([]);
   const [summary, setSummary] = useState<LabourAdvanceListResponse["summary"]>({
     totalOutstanding: 0,
@@ -1194,10 +1196,99 @@ function AdvancesView({
   const [refunding, setRefunding] = useState(false);
   const idempotencyKey = useRef(uuid());
   const refundIdempotencyKey = useRef(uuid());
+  const recipientScopeRef = useRef<HTMLSelectElement>(null);
+  const recordAdvanceDialogRef = useRef<HTMLFormElement>(null);
+  const recordAdvanceButtonRef = useRef<HTMLButtonElement>(null);
+  const modalHistoryEntryRef = useRef(false);
+  const handledDeepActionRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const abortTimerRef = useRef<number | null>(null);
   const inFlightKeyRef = useRef("");
   const requestSequence = useRef(0);
+  const resetRecordAdvanceForm = useCallback(() => {
+    setScope("INDIVIDUAL");
+    setLabourerId("");
+    setGroupId("");
+    setReceivedByLabourerId("");
+    setReference("");
+    setRecipientName("");
+    setDate(today());
+    setAmount("");
+    setAccountId("");
+    setMethod("Cash");
+    setDescription("");
+    setTransactionReference("");
+    idempotencyKey.current = uuid();
+  }, []);
+  const openRecordAdvance = useCallback((deepAction = false) => {
+    if (showForm) return;
+    resetRecordAdvanceForm();
+    const currentUrl = `${location.pathname}${location.search}${location.hash}`;
+    if (deepAction) {
+      const cleanSearch = new URLSearchParams(location.search);
+      cleanSearch.delete("action");
+      const cleanUrl = `${location.pathname}${cleanSearch.size ? `?${cleanSearch.toString()}` : ""}${location.hash}`;
+      window.history.replaceState(window.history.state, "", cleanUrl);
+      window.history.pushState({ ...window.history.state, muzareRecordAdvance: true }, "", currentUrl);
+    } else {
+      window.history.pushState({ ...window.history.state, muzareRecordAdvance: true }, "", currentUrl);
+    }
+    modalHistoryEntryRef.current = true;
+    setShowForm(true);
+    window.requestAnimationFrame(() => recipientScopeRef.current?.focus());
+  }, [location.hash, location.pathname, location.search, resetRecordAdvanceForm, showForm]);
+  const closeRecordAdvance = useCallback(() => {
+    setShowForm(false);
+    if (modalHistoryEntryRef.current) {
+      modalHistoryEntryRef.current = false;
+      window.history.back();
+    }
+  }, []);
+  useEffect(() => {
+    const action = new URLSearchParams(location.search).get("action");
+    if (action !== "record-advance") {
+      handledDeepActionRef.current = false;
+      return;
+    }
+    if (canManage && !handledDeepActionRef.current && !showForm) {
+      handledDeepActionRef.current = true;
+      openRecordAdvance(true);
+    }
+  }, [canManage, location.search, openRecordAdvance, showForm]);
+  useEffect(() => {
+    if (!showForm) return;
+    window.requestAnimationFrame(() => recipientScopeRef.current?.focus());
+  }, [showForm]);
+  useEffect(() => {
+    const handlePopState = () => {
+      if (!modalHistoryEntryRef.current) return;
+      modalHistoryEntryRef.current = false;
+      setShowForm(false);
+      window.requestAnimationFrame(() => recordAdvanceButtonRef.current?.focus());
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+  useEffect(() => {
+    if (!showForm) return;
+    const dialog = recordAdvanceDialogRef.current;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeRecordAdvance();
+        return;
+      }
+      if (event.key !== "Tab" || !dialog) return;
+      const focusable = [...dialog.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])')];
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    dialog?.addEventListener("keydown", handleKeyDown);
+    return () => dialog?.removeEventListener("keydown", handleKeyDown);
+  }, [closeRecordAdvance, showForm]);
   useEffect(() => {
     const handle = window.setTimeout(() => setSearch(searchInput.trim()), 320);
     return () => window.clearTimeout(handle);
@@ -1361,12 +1452,8 @@ function AdvancesView({
         description,
       });
       idempotencyKey.current = uuid();
-      setShowForm(false);
-      setAmount("");
-      setDescription("");
-      setTransactionReference("");
-      await onSaved(`Advance ${response.voucher.voucherNumber} posted.`);
-      await loadPage(1, false);
+      closeRecordAdvance();
+      await onSaved(`Advance ${response.voucher.voucherNumber} posted successfully.`);
     } catch (caught) {
       onError(
         caught instanceof Error
@@ -1526,9 +1613,10 @@ function AdvancesView({
           </div>
           {canManage ? (
             <button
+              ref={recordAdvanceButtonRef}
               className="primary-action workforce-record-advance"
               type="button"
-              onClick={() => setShowForm(true)}
+              onClick={() => openRecordAdvance(false)}
             >
               <Plus size={16} /> Record advance
             </button>
@@ -1820,22 +1908,26 @@ function AdvancesView({
         <div
           className="worker-dialog-backdrop workforce-payment-review-backdrop"
           role="presentation"
-          onClick={() => setShowForm(false)}
+          onClick={closeRecordAdvance}
         >
           <form
+            ref={recordAdvanceDialogRef}
             className="workforce-payment-review workforce-advance-entry-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="record-advance-title"
             onSubmit={(event) => void submit(event)}
             onClick={(event) => event.stopPropagation()}
           >
             <header>
               <div>
                 <span>Labour payment voucher</span>
-                <h2>Record advance</h2>
+                <h2 id="record-advance-title">Record advance</h2>
                 <p>Record money paid before final settlement</p>
               </div>
               <button
                 type="button"
-                onClick={() => setShowForm(false)}
+                onClick={closeRecordAdvance}
                 aria-label="Close"
               >
                 <X size={18} />
@@ -1850,6 +1942,7 @@ function AdvancesView({
                   <label>
                     <span>Recipient scope</span>
                     <select
+                      ref={recipientScopeRef}
                       value={scope}
                       onChange={(event) =>
                         setScope(event.target.value as LabourRecipientScope)
@@ -2044,7 +2137,7 @@ function AdvancesView({
                 <button
                   className="secondary-action"
                   type="button"
-                  onClick={() => setShowForm(false)}
+                  onClick={closeRecordAdvance}
                 >
                   Cancel
                 </button>

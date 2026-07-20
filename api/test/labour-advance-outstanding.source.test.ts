@@ -6,6 +6,7 @@ const route = readFileSync(new URL("../src/routes/labour-payments.ts", import.me
 const page = readFileSync(new URL("../../web/src/pages/workspace/WorkforcePayments.tsx", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../../web/src/styles.css", import.meta.url), "utf8");
 const hub = readFileSync(new URL("../../web/src/pages/workspace/WorkforceHub.tsx", import.meta.url), "utf8");
+const workspaceLayout = readFileSync(new URL("../../web/src/layouts/WorkspaceLayout.tsx", import.meta.url), "utf8");
 const paymentService = readFileSync(new URL("../src/lib/labour-payments.ts", import.meta.url), "utf8");
 
 test("outstanding endpoint combines canonical and both legacy stores without replaying accounting", () => {
@@ -98,6 +99,25 @@ test("advance cards retain explicit owner and receiver hierarchy in both views",
   assert.match(page, /Paid from:/);
   assert.match(page, /workforce-advance-group-actions/);
   assert.match(styles, /\.workforce-advance-recover \{ min-height: 34px/);
+});
+
+test("dashboard quick add deep-links into the canonical record advance dialog", () => {
+  const advances = page.slice(page.indexOf("function AdvancesView"), page.indexOf("function ReviewSettleDialog"));
+  assert.match(workspaceLayout, /\/workspace\/labour-payments\/advances\?action=record-advance/);
+  assert.match(workspaceLayout, /setMobileSheet\(null\); navigate\(item\.to\)/);
+  assert.match(advances, /new URLSearchParams\(location\.search\)\.get\("action"\)/);
+  assert.match(advances, /action !== "record-advance"/);
+  assert.match(advances, /openRecordAdvance\(true\)/);
+  assert.match(advances, /window\.history\.replaceState/);
+  assert.match(advances, /window\.history\.pushState/);
+  assert.match(advances, /window\.history\.back\(\)/);
+  assert.match(advances, /window\.addEventListener\("popstate", handlePopState\)/);
+  assert.match(advances, /resetRecordAdvanceForm/);
+  assert.match(advances, /recipientScopeRef\.current\?\.focus\(\)/);
+  assert.match(advances, /aria-labelledby="record-advance-title"/);
+  assert.match(advances, /dialog\.querySelectorAll<HTMLElement>/);
+  assert.equal((advances.match(/postLabourAdvanceVoucher\(/g) ?? []).length, 1, "both launch paths use one submit handler");
+  assert.match(advances, /pageSize: 20/);
 });
 
 test("advance creation and recovery use separate canonical identity contracts", () => {

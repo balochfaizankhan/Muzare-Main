@@ -142,7 +142,7 @@ export function WorkspaceLayout() {
   const mobileMoreLinks = filteredNav.filter(([to]) => !quickAddRoutes.includes(to));
   const mobileAddLinks = [
     { to: "/workspace/workforce/attendance", label: "Mark Attendance", icon: Users, allowed: !user || hasModulePermission(user, "attendance", "create") },
-    { to: "/workspace/labour-payments/advances", label: "Record Advance", icon: HandCoins, allowed: !user || hasModulePermission(user, "advances", "create") },
+    { to: "/workspace/labour-payments/advances?action=record-advance", label: "Record Advance", icon: HandCoins, allowed: !user || hasModulePermission(user, "advances", "create") },
     { to: "/workspace/expenses", label: "Add Expense", icon: ReceiptText, allowed: !user || hasModulePermission(user, "expenses", "create") },
     { to: "/workspace/dispatch", label: "New Dispatch", icon: PackageOpen, allowed: !user || hasModulePermission(user, "dispatch", "create") },
     { to: "/workspace/sales", label: "Record Sale", icon: ShoppingBasket, allowed: !user || hasModulePermission(user, "sales", "create") },
