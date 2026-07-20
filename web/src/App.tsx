@@ -35,6 +35,7 @@ const LabourWageSettlements = lazy(async () => ({ default: (await import("./page
 const LabourPaymentsReportsHub = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).LabourPaymentsReportsHub }));
 const LabourPaymentsSectionLayout = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).LabourPaymentsSectionLayout }));
 const WorkforcePaymentsPage = lazy(async () => ({ default: (await import("./pages/workspace/WorkforcePayments")).WorkforcePaymentsPage }));
+const LabourReconciliationPage = lazy(async () => ({ default: (await import("./pages/workspace/LabourReconciliation")).LabourReconciliationPage }));
 const WageRates = lazy(async () => ({ default: (await import("./pages/workspace/WageRates")).WageRates }));
 const WorkforceReportsHub = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).WorkforceReportsHub }));
 const WorkforceSectionLayout = lazy(async () => ({ default: (await import("./pages/workspace/WorkforceHub")).WorkforceSectionLayout }));
@@ -184,6 +185,8 @@ export default function App() {
         <Route path="direct-due" element={routeElement(<WorkforcePaymentsPage />, "Loading direct labour due")} />
         <Route path="vouchers" element={routeElement(<WorkforcePaymentsPage />, "Loading Labour Payment Vouchers")} />
         <Route path="advances" element={routeElement(<WorkforcePaymentsPage />, "Loading outstanding advances")} />
+        <Route path="legacy-earnings" element={routeElement(<LabourReconciliationPage />, "Loading legacy earnings")} />
+        <Route path="settlement-history" element={routeElement(<LabourReconciliationPage />, "Loading settlement history")} />
         <Route path="legacy-advances" element={routeElement(<LabourAdvances />, "Loading legacy advances")} />
         <Route path="wage-rates" element={routeElement(<WageRates />, "Loading wage rates")} />
         <Route path="earnings" element={routeElement(<LabourEarnings />, "Loading labour work")} />

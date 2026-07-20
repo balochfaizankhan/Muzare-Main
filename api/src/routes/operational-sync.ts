@@ -4,7 +4,7 @@ import { z } from "zod";
 import { requireUser, type AuthenticatedUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
-import { auditLogs, expenseVoucherSequences, labourPaymentVouchers, operationalRecords, userSessions } from "../db/schema.js";
+import { auditLogs, expenseVoucherSequences, labourCleanupTombstones, labourPaymentVouchers, operationalRecords, userSessions } from "../db/schema.js";
 import { activeOperationalPayloadSql, isDeletedOperationalPayload } from "../operational-record-state.js";
 import {
   canonicalImportedVoucherNumber,
@@ -953,6 +953,21 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         });
       }
     }
+    const [cleanupTombstone] = await db.select({ id: labourCleanupTombstones.id })
+      .from(labourCleanupTombstones)
+      .where(and(
+        eq(labourCleanupTombstones.workspaceId, parsed.data.workspaceId),
+        eq(labourCleanupTombstones.entityType, parsed.data.entity),
+        eq(labourCleanupTombstones.clientRecordId, parsed.data.record.id),
+      ))
+      .limit(1);
+    if (cleanupTombstone) {
+      return reply.code(410).send({
+        code: "labour_cleanup_tombstone",
+        message: "This labour record was permanently removed by an administrator and cannot be recreated.",
+      });
+    }
+
     let [existing] = await db.select().from(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, parsed.data.workspaceId),
       eq(operationalRecords.entityType, parsed.data.entity),

@@ -104,6 +104,8 @@ export function LabourPaymentsSectionLayout() {
       { to: `/workspace/labour-payments/direct-due${query}`, label: "New Direct Due", module: "wages" as const },
       { to: `/workspace/labour-payments/vouchers${query}`, label: "Payment Vouchers", module: "wages" as const },
       { to: `/workspace/labour-payments/advances${query}`, label: "Outstanding Advances", module: "wages" as const },
+      { to: `/workspace/labour-payments/legacy-earnings${query}`, label: "Legacy Earnings", module: "wages" as const },
+      { to: `/workspace/labour-payments/settlement-history${query}`, label: "Settlement History", module: "wages" as const },
     ];
     return allTabs.filter((tab) => !user || hasModulePermission(user, tab.module, "view", workspaceId));
   }, [query, user, workspaceId]);

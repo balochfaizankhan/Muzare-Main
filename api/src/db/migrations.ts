@@ -38,6 +38,7 @@ const labourWageSettlementAdvanceAllocationsMigrationUrl = new URL("../../../dat
 const labourWageSettlementCreateRequestsMigrationUrl = new URL("../../../database/migrations/0034_labour_wage_settlement_create_requests.sql", import.meta.url);
 const unifiedLabourPaymentsMigrationUrl = new URL("../../../database/migrations/0035_unified_labour_payments.sql", import.meta.url);
 const labourAdvanceListPerformanceMigrationUrl = new URL("../../../database/migrations/0036_labour_advance_list_performance.sql", import.meta.url);
+const labourDataCleanupMigrationUrl = new URL("../../../database/migrations/0037_labour_data_cleanup.sql", import.meta.url);
 
 const STARTUP_LOCK_KEY = "muzare_ensure_workspace_schema";
 const STARTUP_LOCK_TIMEOUT = "10s";
@@ -116,6 +117,7 @@ const deferredMigrationSteps: MigrationStep[] = [
   { key: "0034_labour_wage_settlement_create_requests", kind: "sql", required: true, sourceUrl: labourWageSettlementCreateRequestsMigrationUrl },
   { key: "0035_unified_labour_payments", kind: "sql", required: true, sourceUrl: unifiedLabourPaymentsMigrationUrl },
   { key: "0036_labour_advance_list_performance", kind: "sql", required: true, sourceUrl: labourAdvanceListPerformanceMigrationUrl },
+  { key: "0037_labour_data_cleanup", kind: "sql", required: true, sourceUrl: labourDataCleanupMigrationUrl },
 ];
 
 function logMigrationEvent(event: string, details: Record<string, unknown>) {

@@ -254,10 +254,16 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
     if (!(await requireRequestScope(request, reply, workspaceId, farmId, seasonId, "view"))) return;
     const rows = await db.select().from(labourDues).where(and(
       eq(labourDues.workspaceId, workspaceId), eq(labourDues.farmId, farmId), eq(labourDues.seasonId, seasonId),
-      query.data.status ? eq(labourDues.paymentStatus, query.data.status) : undefined,
+      query.data.status ? eq(labourDues.paymentStatus, query.data.status) : inArray(labourDues.paymentStatus, ["UNPAID", "PARTIALLY_SETTLED", "ON_HOLD"]),
       query.data.origin ? eq(labourDues.origin, query.data.origin) : undefined,
     )).orderBy(desc(labourDues.createdAt));
-    const dues = await db.transaction(async (tx) => Promise.all(rows.map(async (row) => {
+    const settlementSourceIds = rows.filter((row) => row.origin === "SETTLEMENT").map((row) => row.sourceRecordId).filter((value): value is string => Boolean(value));
+    const validSettlementSources = settlementSourceIds.length ? await db.select({ id: operationalRecords.id, payload: operationalRecords.payload }).from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, workspaceId), eq(operationalRecords.entityType, "labourWageSettlement"), inArray(operationalRecords.id, settlementSourceIds),
+    )) : [];
+    const activeSettlementSourceIds = new Set(validSettlementSources.filter((row) => !row.payload.deletedAt && !["voided", "deleted", "reversed"].includes(String(row.payload.status ?? "").toLowerCase())).map((row) => row.id));
+    const validRows = rows.filter((row) => row.origin !== "SETTLEMENT" || (Boolean(row.sourceRecordId) && activeSettlementSourceIds.has(row.sourceRecordId!)));
+    const dues = await db.transaction(async (tx) => Promise.all(validRows.map(async (row) => {
       const position = await loadLabourDuePosition(tx, row.id);
       return { ...row, ...position, due: undefined };
     })));

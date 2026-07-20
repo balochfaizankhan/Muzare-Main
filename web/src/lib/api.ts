@@ -2005,6 +2005,52 @@ export const refundLabourAdvance = (token: string, workspaceId: string, voucherI
   apiRequest<{ voucher: LabourPaymentVoucherRecord }>(`/v1/workspace/${workspaceId}/labour-payments/advances/${voucherId}/refund`, { method: "POST", body: JSON.stringify(input) }, token);
 export const voidLabourPaymentVoucher = (token: string, workspaceId: string, voucherId: string, farmId: string, seasonId: string, input: { idempotencyKey: string; reason: string }) =>
   apiRequest<{ result: { voucher: LabourPaymentVoucherRecord; reversal: LabourPaymentVoucherRecord | null } }>(`/v1/workspace/${workspaceId}/labour-payments/vouchers/${voucherId}/void?${labourPaymentContextQuery(farmId, seasonId)}`, { method: "POST", body: JSON.stringify(input) }, token);
+
+export type LabourReconciliationSummary = {
+  totalCount: number; totalAmount: number; orphanedCount: number; duplicateCandidateCount: number;
+  sourceOnlyEligibleCount: number; cascadeRequiredCount: number; blockedCount: number;
+};
+export type LabourReconciliationPageInfo = { page: number; pageSize: number; totalCount: number; hasMore: boolean };
+export type LegacyLabourEarningRecord = {
+  id: string; recordId: string; reference: string; sourceModule: string; recipientScope: string; recipientName: string | null;
+  leaderName: string | null; description: string; workDate: string; grossAmount: number; quantity: number | null; rate: number | null;
+  earningType: string; settlementReference: string | null; settlementId: string | null; dueReference: string | null;
+  voucherReferences: string[]; paymentStatus: string; voidStatus: boolean; createdAt: string; classification: string;
+  integrityStatus: string; sourceOnlyEligible: boolean; cascadeRequired: boolean; blocked: boolean;
+};
+export type LabourSettlementHistoryRecord = {
+  id: string; recordId: string; settlementNumber: string; settlementType: string; recipientScope: string; recipientName: string | null;
+  leaderSnapshot: string | null; fromDate: string; toDate: string; grossAmount: number; advancesApplied: number; paymentsMade: number;
+  outstandingBalance: number; status: string; paymentStatus: string; dueReference: string | null; voucherReferences: string[];
+  accountEntryCount: number; sourceAttendanceCount: number; sourceEarningCount: number; createdAt: string; classification: string;
+  integrityStatus: string; sourceOnlyEligible: boolean; cascadeRequired: boolean; blocked: boolean;
+};
+export type LabourCleanupTarget = { entityType: "EARNING" | "SETTLEMENT"; id: string };
+export type LabourCleanupPreview = {
+  targets: Array<{ entityType: string; id: string; reference: string; amount: number; status: string }>;
+  expandedSettlements: Array<{ id: string; reference: string }>;
+  dependencies: Array<{ kind: string; count: number; classification: string; message: string }>;
+  counts: Record<string, number>; totalFinancialAmount: number; financialEffects: boolean; requiresCascade: boolean;
+  blocked: boolean; blockedReasons: string[];
+};
+export type LabourReconciliationFilters = { page?: number; pageSize?: number; search?: string; scope?: string; status?: string; integrity?: string; source?: string; from?: string; to?: string; signal?: AbortSignal };
+function reconciliationQuery(farmId:string,seasonId:string,input:LabourReconciliationFilters={}){
+  const query=new URLSearchParams({farmId,seasonId,page:String(input.page??1),pageSize:String(input.pageSize??20)});
+  for(const [key,value] of Object.entries({search:input.search,scope:input.scope,status:input.status,integrity:input.integrity,source:input.source,from:input.from,to:input.to}))if(value)query.set(key,value);
+  return query;
+}
+export const fetchLegacyLabourEarnings=(token:string,workspaceId:string,farmId:string,seasonId:string,input:LabourReconciliationFilters={})=>
+  apiRequest<{earnings:LegacyLabourEarningRecord[];summary:LabourReconciliationSummary;pageInfo:LabourReconciliationPageInfo;diagnostics:{queryCount:number;databaseMs:number}}>(`/v1/workspace/${workspaceId}/labour-reconciliation/earnings?${reconciliationQuery(farmId,seasonId,input)}`,{signal:input.signal},token);
+export const fetchLabourSettlementHistory=(token:string,workspaceId:string,farmId:string,seasonId:string,input:LabourReconciliationFilters={})=>
+  apiRequest<{settlements:LabourSettlementHistoryRecord[];summary:LabourReconciliationSummary;pageInfo:LabourReconciliationPageInfo;diagnostics:{queryCount:number;databaseMs:number}}>(`/v1/workspace/${workspaceId}/labour-reconciliation/settlements?${reconciliationQuery(farmId,seasonId,input)}`,{signal:input.signal},token);
+export const resolveLabourCleanupSelection=(token:string,workspaceId:string,farmId:string,seasonId:string,entityType:LabourCleanupTarget["entityType"],input:LabourReconciliationFilters,selectionMode:"ALL_MATCHING"|"SOURCE_ONLY_ELIGIBLE")=>{
+  const query=reconciliationQuery(farmId,seasonId,{...input,page:1,pageSize:1});query.set("entityType",entityType);query.set("selectionMode",selectionMode);
+  return apiRequest<{targets:LabourCleanupTarget[];totalResolved:number;truncated:boolean}>(`/v1/workspace/${workspaceId}/labour-reconciliation/cleanup/selection?${query}`,{},token);
+};
+export const previewLabourDataCleanup=(token:string,workspaceId:string,input:{farmId:string;seasonId:string;targets:LabourCleanupTarget[]})=>
+  apiRequest<{preview:LabourCleanupPreview}>(`/v1/workspace/${workspaceId}/labour-reconciliation/cleanup/preview`,{method:"POST",body:JSON.stringify(input)},token,{timeoutMs:60_000,debugLabel:"labour-cleanup-preview"});
+export const executeLabourDataCleanup=(token:string,workspaceId:string,input:{farmId:string;seasonId:string;targets:LabourCleanupTarget[];mode:"SOURCE_ONLY"|"FULL_CASCADE";reason:string;confirmation:"DELETE LABOUR DATA";financialConfirmation?:string})=>
+  apiRequest<{result:{cleanupBatchId:string;deleted:Array<{entityType:string;id:string}>;counts:Record<string,number>;accountEffectsRemoved:boolean;advancesRestored:boolean}}>(`/v1/workspace/${workspaceId}/labour-reconciliation/cleanup/execute`,{method:"POST",body:JSON.stringify(input)},token,{timeoutMs:120_000,debugLabel:"labour-cleanup-execute"});
 export const fetchExpenseCategories = (token: string, workspaceId: string) =>
   apiRequest<{ categories: ExpenseCategory[] }>(`/v1/workspace/${workspaceId}/expense-categories`, {}, token);
 export const searchExpenses = (token: string, workspaceId: string, filters: ExpenseSearchFilters) => {

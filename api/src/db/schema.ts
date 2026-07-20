@@ -784,6 +784,47 @@ export const labourAccountingEntries = pgTable(
   ],
 );
 
+export const labourCleanupLogs = pgTable("labour_cleanup_logs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  cleanupBatchId: uuid("cleanup_batch_id").notNull(),
+  workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+  farmId: uuid("farm_id").references(() => farms.id),
+  seasonId: uuid("season_id").references(() => seasons.id),
+  entityType: text("entity_type").notNull(),
+  originalEntityId: text("original_entity_id").notNull(),
+  originalReference: text("original_reference").notNull(),
+  recipientSnapshot: jsonb("recipient_snapshot").$type<Record<string, unknown>>().default({}).notNull(),
+  originalAmount: numeric("original_amount", { precision: 14, scale: 2 }).default("0").notNull(),
+  originalStatus: text("original_status").notNull(),
+  relatedSettlementNumber: text("related_settlement_number"),
+  relatedVoucherNumbers: jsonb("related_voucher_numbers").$type<string[]>().default([]).notNull(),
+  dependentRecordsRemoved: integer("dependent_records_removed").default(0).notNull(),
+  accountEffectsRemoved: boolean("account_effects_removed").default(false).notNull(),
+  partnerEffectsRemoved: boolean("partner_effects_removed").default(false).notNull(),
+  advancesRestored: boolean("advances_restored").default(false).notNull(),
+  deletedBy: uuid("deleted_by").references(() => users.id).notNull(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }).defaultNow().notNull(),
+  reason: text("reason").notNull(),
+  confirmationMode: text("confirmation_mode").notNull(),
+  details: jsonb("details").$type<Record<string, unknown>>().default({}).notNull(),
+});
+
+export const labourCleanupTombstones = pgTable(
+  "labour_cleanup_tombstones",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    cleanupBatchId: uuid("cleanup_batch_id").notNull(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+    farmId: uuid("farm_id").references(() => farms.id),
+    seasonId: uuid("season_id").references(() => seasons.id),
+    entityType: text("entity_type").notNull(),
+    clientRecordId: text("client_record_id").notNull(),
+    deletedBy: uuid("deleted_by").references(() => users.id).notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [unique("labour_cleanup_tombstones_workspace_entity_record_key").on(table.workspaceId, table.entityType, table.clientRecordId)],
+);
+
 export const importBatches = pgTable(
   "import_batches",
   {
