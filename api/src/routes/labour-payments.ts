@@ -22,10 +22,12 @@ import {
 import {
   allocateLabourDueNumber,
   allocateLabourPaymentVoucherNumber,
+  calculateLabourAdvancePool,
   calculateAdvancePosition,
   labourFinancialScopeKey,
   loadLabourDuePosition,
   postLabourAdvanceApplicationJournal,
+  postLabourAdvanceApplicationJournals,
   postLabourDueRecognition,
   postLabourVoucherJournal,
   refreshLabourDuePaymentStatus,
@@ -51,6 +53,11 @@ const advanceApplicationParamsSchema = dueParamsSchema.extend({
 const contextSchema = z.object({
   farmId: z.string().uuid(),
   seasonId: z.string().uuid(),
+});
+const advancePoolQuerySchema = contextSchema.extend({
+  amount: z.coerce.number().min(0).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(25),
 });
 const advanceListQuerySchema = contextSchema.extend({
   page: z.coerce.number().int().min(1).default(1),
@@ -152,6 +159,10 @@ const paymentSchema = z.object({
   description: z.string().trim().max(500).optional().nullable(),
 });
 const settleSchema = contextSchema.extend({
+  advancePool: z.object({
+    amount: z.coerce.number().positive(),
+    idempotencyKey: z.string().uuid(),
+  }).optional().nullable(),
   advanceApplications: z
     .array(
       z.object({
@@ -235,6 +246,70 @@ const voidSchema = z.object({
 const refundSchema = contextSchema.extend({ payment: paymentSchema });
 
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+function allocationIdempotencyKey(poolKey: string, voucherId: string) {
+  const bytes = crypto.createHash("sha256").update(`${poolKey}:${voucherId}`).digest().subarray(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function dueMemberPayableShares(due: typeof labourDues.$inferSelect) {
+  const snapshot = due.recipientSnapshot as Record<string, unknown>;
+  const rows = Array.isArray(snapshot.memberCalculationSnapshot) ? snapshot.memberCalculationSnapshot : [];
+  return rows.flatMap((value) => {
+    if (!value || typeof value !== "object") return [];
+    const row = value as Record<string, unknown>;
+    const labourerId = typeof row.labourerId === "string" ? row.labourerId : "";
+    const amount = Number(row.grossWage ?? row.calculatedAmount ?? row.attendanceWage ?? 0);
+    return labourerId && Number.isFinite(amount) && amount >= 0 ? [{ labourerId, amount }] : [];
+  });
+}
+
+async function loadDueAdvancePool(tx: DbTransaction, due: typeof labourDues.$inferSelect, requestedAmount?: number) {
+  const candidates = await tx.select({
+    id: labourPaymentVouchers.id,
+    voucherNumber: labourPaymentVouchers.voucherNumber,
+    voucherDate: labourPaymentVouchers.voucherDate,
+    createdAt: labourPaymentVouchers.createdAt,
+    financialScopeKey: labourPaymentVouchers.financialScopeKey,
+    labourerId: labourPaymentVouchers.labourerId,
+    recipientSnapshot: labourPaymentVouchers.recipientSnapshot,
+    originalAmount: labourPaymentVouchers.paymentAmount,
+    appliedAmount: sql<number>`coalesce((select sum(a.amount) from labour_advance_applications a where a.advance_voucher_id = ${labourPaymentVouchers.id} and a.status = 'ACTIVE'), 0)::numeric`,
+    refundedAmount: sql<number>`coalesce((select sum(r.payment_amount) from labour_payment_vouchers r where r.related_advance_voucher_id = ${labourPaymentVouchers.id} and r.nature = 'REFUND_RECOVERY' and r.status = 'POSTED'), 0)::numeric`,
+    appliedToDueAmount: sql<number>`coalesce((select sum(a.amount) from labour_advance_applications a where a.advance_voucher_id = ${labourPaymentVouchers.id} and a.due_id = ${due.id} and a.status = 'ACTIVE'), 0)::numeric`,
+  }).from(labourPaymentVouchers).where(and(
+    eq(labourPaymentVouchers.workspaceId, due.workspaceId),
+    eq(labourPaymentVouchers.farmId, due.farmId),
+    eq(labourPaymentVouchers.seasonId, due.seasonId),
+    eq(labourPaymentVouchers.nature, "ADVANCE"),
+    eq(labourPaymentVouchers.status, "POSTED"),
+  ));
+  const normalized = candidates.map((row) => {
+    const snapshot = row.recipientSnapshot as Record<string, unknown>;
+    return {
+      ...row,
+      recipientName: typeof snapshot.receivedByNameSnapshot === "string" ? snapshot.receivedByNameSnapshot
+        : typeof snapshot.labourerName === "string" ? snapshot.labourerName
+        : typeof snapshot.recipientName === "string" ? snapshot.recipientName : null,
+      originalAmount: Number(row.originalAmount),
+      appliedAmount: Number(row.appliedAmount),
+      refundedAmount: Number(row.refundedAmount),
+      appliedToDueAmount: Number(row.appliedToDueAmount),
+    };
+  });
+  const pool = calculateLabourAdvancePool({
+    dueFinancialScopeKey: due.financialScopeKey,
+    dueOutstandingAmount: (await loadLabourDuePosition(tx, due.id))?.outstandingBalance ?? 0,
+    memberPayableShares: due.recipientScope === "LABOUR_GROUP" ? dueMemberPayableShares(due) : [],
+    candidates: normalized,
+    requestedAmount,
+  });
+  const globalOutstanding = normalized.reduce((sum, row) => sum + Math.max(row.originalAmount - row.appliedAmount - row.refundedAmount, 0), 0);
+  return { ...pool, globalOutstanding: Number(globalOutstanding.toFixed(2)) };
+}
 
 async function validateContext(
   request: { appUser?: { workspaceId?: string | null }; sessionId?: string },
@@ -1137,6 +1212,42 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  app.get(
+    "/v1/workspace/:workspaceId/labour-payments/dues/:dueId/advance-pool",
+    { preHandler: requireUser },
+    async (request, reply) => {
+      const params = dueParamsSchema.safeParse(request.params);
+      const query = advancePoolQuerySchema.safeParse(request.query);
+      if (!params.success || !query.success) return reply.code(400).send({ message: "A valid advance-pool request is required." });
+      if (!(await requireRequestScope(request, reply, params.data.workspaceId, query.data.farmId, query.data.seasonId, "view"))) return;
+      const [due] = await db.select().from(labourDues).where(and(
+        eq(labourDues.id, params.data.dueId),
+        eq(labourDues.workspaceId, params.data.workspaceId),
+        eq(labourDues.farmId, query.data.farmId),
+        eq(labourDues.seasonId, query.data.seasonId),
+      )).limit(1);
+      if (!due) return reply.code(404).send({ message: "Labour due was not found." });
+      const pool = await db.transaction((tx) => loadDueAdvancePool(tx, due, query.data.amount));
+      const start = (query.data.page - 1) * query.data.pageSize;
+      const details = query.data.amount == null ? undefined : pool.allocations.slice(start, start + query.data.pageSize);
+      return {
+        pool: {
+          globalOutstanding: pool.globalOutstanding,
+          eligibleTotal: pool.eligibleTotal,
+          eligibleOpenCount: pool.eligibleOpenCount,
+          groupLevelAmount: pool.groupLevelAmount,
+          memberLevelAmount: pool.memberLevelAmount,
+          maximumApplicable: pool.maximumApplicable,
+          defaultApplyAmount: pool.maximumApplicable,
+          proposedApplication: pool.proposedApplication,
+          carriedForwardAmount: pool.carriedForwardAmount,
+          proposedAllocationCount: pool.allocations.length,
+        },
+        ...(details ? { details, pageInfo: { page: query.data.page, pageSize: query.data.pageSize, totalCount: pool.allocations.length, hasMore: start + query.data.pageSize < pool.allocations.length } } : {}),
+      };
+    },
+  );
+
   app.post(
     "/v1/workspace/:workspaceId/labour-payments/dues/:dueId/settle",
     { preHandler: requireUser },
@@ -1146,7 +1257,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
       if (
         !params.success ||
         !body.success ||
-        (!body.data.payment && body.data.advanceApplications.length === 0)
+        (!body.data.payment && !body.data.advancePool && body.data.advanceApplications.length === 0)
       )
         return reply
           .code(400)
@@ -1177,11 +1288,58 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             position.due.seasonId !== input.seasonId
           )
             throw new Error("Labour due was not found.");
+          if (input.advancePool) {
+            const [completed] = await tx.select().from(auditLogs).where(and(
+              eq(auditLogs.workspaceId, workspaceId),
+              eq(auditLogs.action, "labour_due_settled"),
+              eq(auditLogs.entityId, dueId),
+              sql`${auditLogs.details}->'advancePool'->>'idempotencyKey' = ${input.advancePool.idempotencyKey}`,
+            )).limit(1);
+            if (completed) {
+              const details = completed.details as Record<string, unknown>;
+              const poolDetails = details.advancePool as Record<string, unknown> | undefined;
+              if (Math.abs(Number(poolDetails?.requestedAmount ?? 0) - input.advancePool.amount) > 0.005)
+                throw new Error("The settlement idempotency key was already used for a different amount.");
+              const voucherId = typeof details.voucherId === "string" ? details.voucherId : null;
+              const [existingVoucher] = voucherId ? await tx.select().from(labourPaymentVouchers).where(eq(labourPaymentVouchers.id, voucherId)).limit(1) : [];
+              return { due: position, voucher: existingVoucher ?? null };
+            }
+          }
           if (["VOIDED", "ON_HOLD"].includes(position.due.paymentStatus))
             throw new Error(
               "This labour due cannot be settled in its current status.",
             );
-          for (const application of input.advanceApplications) {
+          let requestedApplications = input.advanceApplications;
+          let aggregatePlan: ReturnType<typeof calculateLabourAdvancePool> | null = null;
+          if (input.advancePool) {
+            aggregatePlan = await loadDueAdvancePool(tx, position.due, input.advancePool.amount);
+            if (input.advancePool.amount > aggregatePlan.maximumApplicable + 0.005)
+              throw new Error("Advance application exceeds the eligible advance pool or current due balance.");
+            if (Math.abs(aggregatePlan.proposedApplication - input.advancePool.amount) > 0.005)
+              throw new Error("The requested advance amount could not be allocated to eligible vouchers.");
+            requestedApplications = aggregatePlan.allocations.map((allocation) => ({
+              advanceVoucherId: allocation.id,
+              amount: allocation.proposedAmount,
+              idempotencyKey: allocationIdempotencyKey(input.advancePool!.idempotencyKey, allocation.id),
+            }));
+          }
+          const memberIds = new Set(dueMemberPayableShares(position.due).map((row) => row.labourerId));
+          if (input.advancePool && requestedApplications.length) {
+            const createdApplications = await tx.insert(labourAdvanceApplications).values(requestedApplications.map((application) => ({
+              workspaceId,
+              advanceVoucherId: application.advanceVoucherId,
+              dueId,
+              amount: application.amount.toFixed(2),
+              idempotencyKey: application.idempotencyKey,
+              status: "ACTIVE",
+            }))).returning();
+            await postLabourAdvanceApplicationJournals(tx, {
+              workspaceId, farmId: input.farmId, seasonId: input.seasonId, actorId: request.appUser!.id,
+              applications: createdApplications.map((application) => ({ id: application.id, dueId, amount: Number(application.amount) })),
+            });
+            position = (await loadLabourDuePosition(tx, dueId))!;
+          }
+          for (const application of input.advancePool ? [] : requestedApplications) {
             const [existingApplication] = await tx
               .select()
               .from(labourAdvanceApplications)
@@ -1227,7 +1385,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               advance.status !== "POSTED"
             )
               throw new Error("The selected advance is not available.");
-            if (advance.financialScopeKey !== position.due.financialScopeKey)
+            if (advance.financialScopeKey !== position.due.financialScopeKey && !(position.due.recipientScope === "LABOUR_GROUP" && advance.labourerId && memberIds.has(advance.labourerId)))
               throw new Error(
                 "An advance may only be applied to a due for the same financial scope.",
               );
@@ -1415,7 +1573,13 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               entityId: dueId,
               details: {
                 voucherId: voucher?.id ?? null,
-                advanceApplications: input.advanceApplications,
+                advancePool: input.advancePool ? {
+                  idempotencyKey: input.advancePool.idempotencyKey,
+                  requestedAmount: input.advancePool.amount,
+                  allocationPolicy: "MEMBER_OLDEST_FIRST_THEN_GROUP_OLDEST_FIRST",
+                  allocations: aggregatePlan?.allocations.map((allocation) => ({ voucherId: allocation.id, amount: allocation.proposedAmount, order: allocation.allocationOrder, ownership: allocation.ownership })) ?? [],
+                } : null,
+                advanceApplications: requestedApplications,
                 outstandingBalance: refreshed.outstandingBalance,
               },
             });

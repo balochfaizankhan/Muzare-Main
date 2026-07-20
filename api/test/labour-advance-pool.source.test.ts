@@ -1,0 +1,22 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+
+const route = readFileSync(new URL("../src/routes/labour-payments.ts", import.meta.url), "utf8");
+const ui = readFileSync(new URL("../../web/src/pages/workspace/WorkforcePayments.tsx", import.meta.url), "utf8");
+
+test("review uses a narrow aggregate endpoint and lazy allocation details", () => {
+  assert.match(route, /dues\/:dueId\/advance-pool/);
+  assert.match(route, /query\.data\.amount == null \? undefined/);
+  assert.match(ui, /Eligible for this due/);
+  assert.match(ui, /View allocation details/);
+  assert.doesNotMatch(ui.slice(ui.indexOf("function ReviewSettleDialog")), /fetchAllLabourPaymentAdvances/);
+  assert.doesNotMatch(ui.slice(ui.indexOf("function ReviewSettleDialog")), /advanceValues/);
+});
+
+test("aggregate settlement retains voucher allocations and does not require a payment", () => {
+  assert.match(route, /calculateLabourAdvancePool/);
+  assert.match(route, /allocationPolicy: "MEMBER_OLDEST_FIRST_THEN_GROUP_OLDEST_FIRST"/);
+  assert.match(route, /if \(input\.payment\)/);
+  assert.match(route, /postLabourAdvanceApplicationJournal/);
+});

@@ -26,7 +26,7 @@ import {
   createDirectLabourDue,
   ApiError,
   previewLabourAttendanceDue,
-  fetchAllLabourPaymentAdvances,
+  fetchLabourDueAdvancePool,
   fetchLabourPaymentAdvances,
   fetchLabourPaymentDues,
   fetchLabourPaymentVouchers,
@@ -38,6 +38,8 @@ import {
   voidLabourDue,
   type LabourAdvancePosition,
   type LabourAdvanceListResponse,
+  type LabourDueAdvancePool,
+  type LabourDueAdvanceAllocationDetail,
   type LabourDueRecord,
   type LabourAttendanceDuePreview,
   type LabourPaymentVoucherRecord,
@@ -2454,41 +2456,57 @@ function ReviewSettleDialog({
   onError: (message: string) => void;
 }) {
   const paymentIdempotencyKey = useRef(uuid());
-  const [advances, setEligibleAdvances] = useState<LabourAdvancePosition[]>([]);
+  const poolIdempotencyKey = useRef(uuid());
+  const [advancePool, setAdvancePool] = useState<LabourDueAdvancePool | null>(null);
+  const [allocationDetails, setAllocationDetails] = useState<LabourDueAdvanceAllocationDetail[]>([]);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsLoading, setDetailsLoading] = useState(false);
   const [loadingAdvances, setLoadingAdvances] = useState(true);
   useEffect(() => {
     const controller = new AbortController();
     setLoadingAdvances(true);
-    void fetchAllLabourPaymentAdvances(token, workspaceId, farmId, seasonId, { status: "OPEN", signal: controller.signal })
-      .then((response) => setEligibleAdvances(response.advances.filter((advance) => advance.status === "POSTED" && advance.outstandingAmount > 0 && advance.financialScopeKey === due.financialScopeKey)))
+    void fetchLabourDueAdvancePool(token, workspaceId, due.id, farmId, seasonId, { signal: controller.signal })
+      .then((response) => {
+        setAdvancePool(response.pool);
+        setAdvanceAmount(response.pool.defaultApplyAmount > 0 ? response.pool.defaultApplyAmount.toFixed(2) : "");
+        setPayAmount(Math.max(due.outstandingBalance - response.pool.defaultApplyAmount, 0).toFixed(2));
+      })
       .catch((caught) => { if (!controller.signal.aborted) onError(caught instanceof Error ? caught.message : "Unable to load eligible advances."); })
       .finally(() => { if (!controller.signal.aborted) setLoadingAdvances(false); });
     return () => controller.abort();
-  }, [due.financialScopeKey, farmId, onError, seasonId, token, workspaceId]);
-  const advanceIdempotencyKeys = useRef<Record<string, string>>({});
-  const [advanceValues, setAdvanceValues] = useState<Record<string, string>>(
-    {},
-  );
+  }, [due.id, due.outstandingBalance, farmId, onError, seasonId, token, workspaceId]);
+  const [advanceAmount, setAdvanceAmount] = useState("");
   const [payAmount, setPayAmount] = useState("");
   const [accountId, setAccountId] = useState("");
   const [method, setMethod] = useState("Cash");
   const [reference, setReference] = useState("");
   const [saving, setSaving] = useState(false);
-  const advanceTotal = advances.reduce(
-    (sum, advance) => sum + Number(advanceValues[advance.id] || 0),
-    0,
-  );
+  const advanceTotal = Number(advanceAmount || 0);
   const advanceInvalid =
     advanceTotal > due.outstandingBalance + 0.005 ||
-    advances.some(
-      (advance) =>
-        Number(advanceValues[advance.id] || 0) >
-        advance.outstandingAmount + 0.005,
-    );
+    advanceTotal > (advancePool?.eligibleTotal ?? 0) + 0.005;
   const afterAdvances = Math.max(due.outstandingBalance - advanceTotal, 0);
   const cashNow = Number(payAmount || 0);
   const paymentInvalid = cashNow > afterAdvances + 0.005;
   const remaining = Math.max(afterAdvances - cashNow, 0);
+  const setPoolApplication = (value: number) => {
+    const normalized = Math.max(0, Math.min(value, advancePool?.maximumApplicable ?? 0));
+    setAdvanceAmount(normalized > 0 ? normalized.toFixed(2) : "");
+    setPayAmount(Math.max(due.outstandingBalance - normalized, 0).toFixed(2));
+    setAllocationDetails([]);
+  };
+  const loadAllocationDetails = async () => {
+    if (detailsLoading || allocationDetails.length || advanceTotal <= 0) return;
+    setDetailsLoading(true);
+    try {
+      const response = await fetchLabourDueAdvancePool(token, workspaceId, due.id, farmId, seasonId, { amount: advanceTotal, page: 1, pageSize: 100 });
+      setAllocationDetails(response.details ?? []);
+    } catch (caught) {
+      onError(caught instanceof Error ? caught.message : "Unable to load allocation details.");
+    } finally {
+      setDetailsLoading(false);
+    }
+  };
   const submit = async () => {
     if (!canManage || saving) return;
     setSaving(true);
@@ -2497,20 +2515,6 @@ function ReviewSettleDialog({
         throw new Error(
           "Connect to the internet before posting a financial transaction.",
         );
-      const applications = advances.flatMap((advance) => {
-        const value = Number(advanceValues[advance.id] || 0);
-        if (!advanceIdempotencyKeys.current[advance.id])
-          advanceIdempotencyKeys.current[advance.id] = uuid();
-        return value > 0
-          ? [
-              {
-                advanceVoucherId: advance.id,
-                amount: value,
-                idempotencyKey: advanceIdempotencyKeys.current[advance.id]!,
-              },
-            ]
-          : [];
-      });
       const response = await settleLabourPaymentDue(
         token,
         workspaceId,
@@ -2518,7 +2522,8 @@ function ReviewSettleDialog({
         {
           farmId,
           seasonId,
-          advanceApplications: applications,
+          advancePool: advanceTotal > 0 ? { amount: advanceTotal, idempotencyKey: poolIdempotencyKey.current } : null,
+          advanceApplications: [],
           payment:
             cashNow > 0
               ? {
@@ -2533,7 +2538,7 @@ function ReviewSettleDialog({
         },
       );
       paymentIdempotencyKey.current = uuid();
-      advanceIdempotencyKeys.current = {};
+      poolIdempotencyKey.current = uuid();
       await onSaved(
         response.result.voucher
           ? `${response.result.voucher.voucherNumber} posted. Remaining due: ${money(response.result.due.outstandingBalance)}.`
@@ -2603,12 +2608,10 @@ function ReviewSettleDialog({
         <header>
           <div>
             <span>
-              {due.origin === "SETTLEMENT"
-                ? "Settlement due"
-                : "Direct labour due"}
+              Labour Due
             </span>
             <h2>{due.dueNumber}</h2>
-            <p>{recipient}</p>
+            <p>{recipient}{typeof due.recipientSnapshot.foremanName === "string" ? ` · Leader: ${due.recipientSnapshot.foremanName}` : ""} · {statusLabel(due.paymentStatus)}</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close">
             <X size={18} />
@@ -2684,42 +2687,46 @@ function ReviewSettleDialog({
           </section>
           {due.paymentStatus !== "ON_HOLD" && due.outstandingBalance > 0 ? (
             <section>
-              <h3>Apply advances</h3>
+              <h3>Advance pool</h3>
               {loadingAdvances ? (
-                <p className="workforce-payments-inline-note">Loading eligible group advances…</p>
-              ) : !advances.length ? (
+                <p className="workforce-payments-inline-note">Calculating the eligible advance pool…</p>
+              ) : !advancePool?.eligibleOpenCount ? (
                 <p className="workforce-payments-inline-note">
-                  No eligible outstanding advances for this financial scope.
+                  No eligible outstanding advances for this due.
                 </p>
               ) : (
-                <div className="workforce-payment-advance-options">
-                  {advances.map((advance) => (
-                    <label key={advance.id}>
-                      <span>
-                        <strong>{advance.voucherNumber}</strong>
-                        <small>
-                          Available {money(advance.outstandingAmount)}
-                        </small>
-                      </span>
-                      <input
-                        type="number"
-                        min="0"
-                        max={Math.min(
-                          advance.outstandingAmount,
-                          due.outstandingBalance,
-                        )}
-                        step="0.01"
-                        value={advanceValues[advance.id] ?? ""}
-                        onChange={(event) =>
-                          setAdvanceValues((current) => ({
-                            ...current,
-                            [advance.id]: event.target.value,
-                          }))
-                        }
-                        placeholder="0.00"
-                      />
-                    </label>
-                  ))}
+                <div className="workforce-advance-pool">
+                  <div className="workforce-advance-pool__summary">
+                    <div><span>Eligible for this due</span><strong>{money(advancePool.eligibleTotal)}</strong></div>
+                    <div><span>Open advances</span><strong>{advancePool.eligibleOpenCount}</strong></div>
+                    <div><span>Group-level</span><strong>{money(advancePool.groupLevelAmount)}</strong></div>
+                    <div><span>Member-level</span><strong>{money(advancePool.memberLevelAmount)}</strong></div>
+                    <div><span>Maximum applicable</span><strong>{money(advancePool.maximumApplicable)}</strong></div>
+                    <div><span>Global outstanding</span><strong>{money(advancePool.globalOutstanding)}</strong></div>
+                  </div>
+                  <label className="workforce-advance-pool__amount">
+                    <span>Apply from advance pool</span>
+                    <input type="number" min="0" max={advancePool.maximumApplicable} step="0.01" value={advanceAmount}
+                      onChange={(event) => setPoolApplication(Number(event.target.value || 0))} />
+                  </label>
+                  {advanceInvalid ? <small className="field-error">Application cannot exceed the eligible pool or current due balance.</small> : null}
+                  <div className="workforce-advance-pool__quick-actions">
+                    <button type="button" onClick={() => setPoolApplication(Math.min(due.outstandingBalance, advancePool.eligibleTotal))}>Apply full due</button>
+                    <button type="button" onClick={() => setPoolApplication(advancePool.maximumApplicable)}>Use all available</button>
+                    <button type="button" onClick={() => setPoolApplication(0)}>Clear</button>
+                  </div>
+                  <div className="workforce-advance-pool__carry"><span>Advance carried forward</span><strong>{money(Math.max(advancePool.eligibleTotal - advanceTotal, 0))}</strong></div>
+                  <details onToggle={(event) => { const open = event.currentTarget.open; setDetailsOpen(open); if (open) void loadAllocationDetails(); }}>
+                    <summary>View allocation details</summary>
+                    {detailsLoading ? <p>Loading voucher allocation…</p> : detailsOpen && allocationDetails.length ? (
+                      <div className="workforce-advance-pool__details">
+                        {allocationDetails.map((allocation) => <div key={allocation.id}>
+                          <span><strong>{allocation.voucherNumber}</strong><small>{allocation.ownership === "MEMBER" ? allocation.recipientName || "Included member" : "Group advance"}</small></span>
+                          <span><small>Available {money(allocation.availableAmount)}</small><strong>Apply {money(allocation.proposedAmount)}</strong><small>Remain {money(allocation.remainingAmount)}</small></span>
+                        </div>)}
+                      </div>
+                    ) : <p>No voucher allocation is proposed.</p>}
+                  </details>
                 </div>
               )}
             </section>
@@ -2836,9 +2843,11 @@ function ReviewSettleDialog({
             >
               {saving
                 ? "Posting…"
-                : cashNow > 0
-                  ? "Post payment voucher"
-                  : "Apply advances"}
+                : advanceTotal > 0 && cashNow > 0
+                  ? remaining > 0 ? "Record partial settlement" : "Apply advances and pay"
+                  : advanceTotal > 0
+                    ? remaining > 0 ? "Record partial settlement" : "Settle with advances"
+                    : remaining > 0 ? "Record partial settlement" : "Mark as paid"}
             </button>
           </div>
         </footer>

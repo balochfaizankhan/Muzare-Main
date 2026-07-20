@@ -17564,6 +17564,24 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 .workforce-payment-advance-options label { align-items: center; border: 1px solid #dbe5de; border-radius: 10px; display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) 110px; padding: 8px; }
 .workforce-payment-advance-options label > span { display: grid; gap: 2px; }
 .workforce-payment-advance-options small { color: #64748b; font-size: 10px; }
+.workforce-advance-pool { background: #f8faf9; border: 1px solid #dbe5de; border-radius: 14px; display: grid; gap: 10px; padding: 12px; }
+.workforce-advance-pool__summary { display: grid; gap: 7px; grid-template-columns: repeat(2,minmax(0,1fr)); }
+.workforce-advance-pool__summary div { display: grid; gap: 2px; min-width: 0; }
+.workforce-advance-pool__summary span,.workforce-advance-pool__amount > span,.workforce-advance-pool__carry span { color: #64748b; font-size: 9px; font-weight: 700; text-transform: uppercase; }
+.workforce-advance-pool__summary strong { color: #153c26; font-size: 13px; overflow-wrap: anywhere; }
+.workforce-advance-pool__amount { display: grid; gap: 5px; }
+.workforce-advance-pool__amount input { background: #fff; border: 1px solid #cbd5e1; border-radius: 9px; font-size: 15px; font-weight: 750; min-height: 42px; padding: 8px 10px; width: 100%; }
+.workforce-advance-pool__quick-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.workforce-advance-pool__quick-actions button { background: #fff; border: 1px solid #cbd5e1; border-radius: 999px; color: #166534; font-size: 10px; font-weight: 750; min-height: 32px; padding: 5px 10px; }
+.workforce-advance-pool__carry { align-items: center; background: #edf8f0; border-radius: 9px; display: flex; justify-content: space-between; padding: 9px 10px; }
+.workforce-advance-pool__carry strong { color: #166534; font-size: 14px; }
+.workforce-advance-pool details { border-top: 1px solid #dbe5de; padding-top: 8px; }
+.workforce-advance-pool summary { color: #166534; cursor: pointer; font-size: 11px; font-weight: 750; }
+.workforce-advance-pool__details { display: grid; gap: 6px; margin-top: 8px; max-height: 260px; overflow: auto; }
+.workforce-advance-pool__details > div { align-items: center; background: #fff; border-radius: 8px; display: flex; gap: 8px; justify-content: space-between; padding: 8px; }
+.workforce-advance-pool__details span { display: grid; gap: 2px; min-width: 0; }
+.workforce-advance-pool__details span:last-child { text-align: right; }
+.workforce-advance-pool__details small { color: #64748b; font-size: 9px; }
 .workforce-payment-review-form { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .workforce-payment-review-form label { display: grid; gap: 5px; }
 .workforce-payment-review-form label span { color: #64748b; font-size: 10px; font-weight: 700; }

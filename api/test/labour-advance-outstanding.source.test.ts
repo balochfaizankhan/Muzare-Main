@@ -142,10 +142,12 @@ test("the canonical read query resolves historical receivers without current gro
   assert.match(paymentService, /receivedByNameSnapshot: advancePayload\.labourerName/);
 });
 
-test("payments due uses canonical summary and review lazily loads complete advances", () => {
+test("payments due uses canonical summary and review loads a due-specific aggregate", () => {
   const overview = page.slice(page.indexOf("export function WorkforcePaymentsPage"), page.indexOf("function AdvancesView"));
   const review = page.slice(page.indexOf("function ReviewSettleDialog"));
-  assert.match(review, /fetchAllLabourPaymentAdvances/);
+  assert.match(review, /fetchLabourDueAdvancePool/);
+  assert.doesNotMatch(review, /fetchAllLabourPaymentAdvances/);
+  assert.match(review, /View allocation details/);
   assert.match(overview, /pageSize: view === "dues" \? 1 : 20/);
   assert.match(overview, /setAdvanceSummary\(advanceResponse\.summary\)/);
   assert.match(overview, /advanceSummary\.totalOutstanding/);

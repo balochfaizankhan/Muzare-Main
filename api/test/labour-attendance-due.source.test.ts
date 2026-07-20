@@ -57,10 +57,11 @@ test("legacy settlement creation screen is retired from navigation", () => {
   assert.match(hub, /Create Attendance Due/);
 });
 
-test("review and settle loads advances only after a due opens", () => {
+test("review and settle loads the eligible pool only after a due opens", () => {
   const review = page.slice(page.indexOf("function ReviewSettleDialog"));
-  assert.match(review, /fetchAllLabourPaymentAdvances/);
-  assert.match(review, /advance\.financialScopeKey === due\.financialScopeKey/);
+  assert.match(review, /fetchLabourDueAdvancePool/);
+  assert.doesNotMatch(review, /fetchAllLabourPaymentAdvances/);
+  assert.match(review, /Eligible for this due/);
   assert.match(page, /pageSize: view === "dues" \? 1 : 20/);
 });
 

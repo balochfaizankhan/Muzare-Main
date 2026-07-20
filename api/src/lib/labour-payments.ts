@@ -57,6 +57,105 @@ export function calculateAdvancePosition(input: { originalAmount: unknown; appli
   return { originalAmount, appliedAmount, refundedAmount, outstandingAmount, advanceStatus };
 }
 
+export type LabourAdvancePoolCandidate = {
+  id: string;
+  voucherNumber: string;
+  voucherDate: string;
+  createdAt?: Date | string | null;
+  financialScopeKey: string;
+  labourerId?: string | null;
+  recipientName?: string | null;
+  originalAmount: number;
+  appliedAmount: number;
+  refundedAmount: number;
+  appliedToDueAmount?: number;
+};
+
+export type LabourAdvancePoolAllocation = LabourAdvancePoolCandidate & {
+  ownership: "MEMBER" | "GROUP";
+  availableAmount: number;
+  proposedAmount: number;
+  remainingAmount: number;
+  allocationOrder: number;
+};
+
+const minor = (value: unknown) => Math.round(amount(value) * 100);
+const major = (value: number) => Number((value / 100).toFixed(2));
+
+/** Canonical deterministic plan used by pool preview and final posting. */
+export function calculateLabourAdvancePool(input: {
+  dueFinancialScopeKey: string;
+  dueOutstandingAmount: number;
+  memberPayableShares?: Array<{ labourerId: string; amount: number }>;
+  candidates: LabourAdvancePoolCandidate[];
+  requestedAmount?: number;
+}) {
+  const memberCaps = new Map(input.memberPayableShares?.map((row) => [row.labourerId, minor(row.amount)]) ?? []);
+  const eligible = input.candidates.flatMap((candidate) => {
+    const availableMinor = Math.max(minor(candidate.originalAmount) - minor(candidate.appliedAmount) - minor(candidate.refundedAmount), 0);
+    if (!availableMinor) return [];
+    const isGroup = candidate.financialScopeKey === input.dueFinancialScopeKey;
+    const isMember = !isGroup && !!candidate.labourerId && memberCaps.has(candidate.labourerId);
+    if (!isGroup && !isMember) return [];
+    return [{ ...candidate, ownership: (isMember ? "MEMBER" : "GROUP") as "MEMBER" | "GROUP", availableMinor }];
+  }).sort((left, right) => {
+    if (left.ownership !== right.ownership) return left.ownership === "MEMBER" ? -1 : 1;
+    return left.voucherDate.localeCompare(right.voucherDate)
+      || String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? ""))
+      || left.id.localeCompare(right.id);
+  });
+
+  const memberUsed = new Map<string, number>();
+  for (const candidate of eligible) if (candidate.ownership === "MEMBER" && candidate.labourerId) {
+    memberUsed.set(candidate.labourerId, (memberUsed.get(candidate.labourerId) ?? 0) + minor(candidate.appliedToDueAmount));
+  }
+  const memberEligible = new Map<string, number>();
+  let groupLevelMinor = 0;
+  for (const candidate of eligible) {
+    if (candidate.ownership === "GROUP") groupLevelMinor += candidate.availableMinor;
+    else if (candidate.labourerId) {
+      const remainingCap = Math.max((memberCaps.get(candidate.labourerId) ?? 0) - (memberUsed.get(candidate.labourerId) ?? 0) - (memberEligible.get(candidate.labourerId) ?? 0), 0);
+      memberEligible.set(candidate.labourerId, (memberEligible.get(candidate.labourerId) ?? 0) + Math.min(candidate.availableMinor, remainingCap));
+    }
+  }
+  const memberLevelMinor = [...memberEligible.values()].reduce((sum, value) => sum + value, 0);
+  const eligibleMinor = groupLevelMinor + memberLevelMinor;
+  const maximumMinor = Math.min(minor(input.dueOutstandingAmount), eligibleMinor);
+  const requestedMinor = input.requestedAmount == null ? maximumMinor : Math.min(Math.max(minor(input.requestedAmount), 0), maximumMinor);
+  let remainingToAllocate = requestedMinor;
+  const memberAllocated = new Map<string, number>();
+  const allocations: LabourAdvancePoolAllocation[] = [];
+  for (const candidate of eligible) {
+    if (remainingToAllocate <= 0) break;
+    let allowed = candidate.availableMinor;
+    if (candidate.ownership === "MEMBER" && candidate.labourerId) {
+      const cap = Math.max((memberCaps.get(candidate.labourerId) ?? 0) - (memberUsed.get(candidate.labourerId) ?? 0) - (memberAllocated.get(candidate.labourerId) ?? 0), 0);
+      allowed = Math.min(allowed, cap);
+    }
+    const applied = Math.min(allowed, remainingToAllocate);
+    if (!applied) continue;
+    if (candidate.ownership === "MEMBER" && candidate.labourerId) memberAllocated.set(candidate.labourerId, (memberAllocated.get(candidate.labourerId) ?? 0) + applied);
+    remainingToAllocate -= applied;
+    allocations.push({
+      ...candidate,
+      availableAmount: major(candidate.availableMinor),
+      proposedAmount: major(applied),
+      remainingAmount: major(candidate.availableMinor - applied),
+      allocationOrder: allocations.length + 1,
+    });
+  }
+  return {
+    eligibleTotal: major(eligibleMinor),
+    eligibleOpenCount: eligible.length,
+    groupLevelAmount: major(groupLevelMinor),
+    memberLevelAmount: major(memberLevelMinor),
+    maximumApplicable: major(maximumMinor),
+    proposedApplication: major(requestedMinor - remainingToAllocate),
+    carriedForwardAmount: major(eligibleMinor - (requestedMinor - remainingToAllocate)),
+    allocations,
+  };
+}
+
 async function postBalancedLabourJournal(tx: DbTransaction, input: {
   workspaceId: string; farmId: string; seasonId: string; key: string;
   eventType: "DUE_RECOGNITION" | "ADVANCE_PAYMENT" | "ADVANCE_APPLICATION" | "DUE_PAYMENT" | "ADVANCE_REFUND" | "REVERSAL";
@@ -96,6 +195,25 @@ export async function postLabourAdvanceApplicationJournal(tx: DbTransaction, inp
   workspaceId: string; farmId: string; seasonId: string; dueId: string; advanceApplicationId: string; amount: number; actorId: string; postedAt?: Date;
 }) {
   return postBalancedLabourJournal(tx, { ...input, key: `advance-application:${input.advanceApplicationId}`, eventType: "ADVANCE_APPLICATION", debitCode: "LABOUR_PAYABLE", creditCode: "LABOUR_ADVANCE" });
+}
+
+export async function postLabourAdvanceApplicationJournals(tx: DbTransaction, input: {
+  workspaceId: string; farmId: string; seasonId: string; actorId: string;
+  applications: Array<{ id: string; dueId: string; amount: number }>;
+}) {
+  if (!input.applications.length) return;
+  const postedAt = new Date();
+  await tx.insert(labourAccountingEntries).values(input.applications.flatMap((application) => {
+    const common = {
+      workspaceId: input.workspaceId, farmId: input.farmId, seasonId: input.seasonId,
+      eventType: "ADVANCE_APPLICATION", dueId: application.dueId, advanceApplicationId: application.id,
+      voucherId: null, postedBy: input.actorId, postedAt, status: "POSTED",
+    };
+    return [
+      { ...common, entryKey: `advance-application:${application.id}:debit`, ledgerCode: "LABOUR_PAYABLE", debit: application.amount.toFixed(2), credit: "0" },
+      { ...common, entryKey: `advance-application:${application.id}:credit`, ledgerCode: "LABOUR_ADVANCE", debit: "0", credit: application.amount.toFixed(2) },
+    ];
+  })).onConflictDoNothing();
 }
 
 export async function reverseLabourJournal(tx: DbTransaction, input: {
