@@ -304,6 +304,7 @@ async function runStep(client: PoolClient, step: MigrationStep): Promise<void> {
   logMigrationEvent("MIGRATION_STEP_STARTED", { step: step.key, required: step.required, kind: step.kind });
   const startedAt = Date.now();
   let checksum: string | null = null;
+  let transactionOpen = false;
 
   try {
     if (step.kind === "bootstrap") {
@@ -315,12 +316,28 @@ async function runStep(client: PoolClient, step: MigrationStep): Promise<void> {
     } else {
       const loaded = await loadSqlStep(step);
       checksum = loaded.checksum;
+      await query(client, "BEGIN");
+      transactionOpen = true;
       await query(client, loaded.sql);
     }
     const durationMs = Date.now() - startedAt;
     await markStepApplied(client, step, checksum, durationMs);
+    if (transactionOpen) {
+      await query(client, "COMMIT");
+      transactionOpen = false;
+    }
     logMigrationEvent("MIGRATION_STEP_COMPLETED", { step: step.key, required: step.required, kind: step.kind, durationMs });
   } catch (error) {
+    if (transactionOpen) {
+      try {
+        await query(client, "ROLLBACK");
+      } catch (rollbackError) {
+        logMigrationEvent("MIGRATION_STEP_ROLLBACK_FAILED", {
+          step: step.key,
+          error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+        });
+      }
+    }
     logMigrationEvent("MIGRATION_STEP_FAILED", {
       step: step.key,
       required: step.required,

@@ -36,12 +36,12 @@ CREATE TABLE IF NOT EXISTS labour_dues (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT labour_dues_date_range_check CHECK (work_from_date <= work_to_date),
+  CONSTRAINT labour_dues_source_record_key UNIQUE (source_record_id),
   CONSTRAINT labour_dues_workspace_farm_fk FOREIGN KEY (workspace_id, farm_id) REFERENCES farms(workspace_id, id),
   CONSTRAINT labour_dues_workspace_farm_season_fk FOREIGN KEY (workspace_id, farm_id, season_id) REFERENCES seasons(workspace_id, farm_id, id)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS labour_dues_workspace_farm_number_uidx ON labour_dues(workspace_id, farm_id, due_number);
-CREATE UNIQUE INDEX IF NOT EXISTS labour_dues_source_record_uidx ON labour_dues(source_record_id) WHERE source_record_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS labour_dues_idempotency_uidx ON labour_dues(workspace_id, idempotency_key);
 CREATE INDEX IF NOT EXISTS labour_dues_queue_idx ON labour_dues(workspace_id, farm_id, season_id, payment_status, work_to_date DESC);
 
@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS labour_payment_vouchers (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT labour_payment_vouchers_workspace_farm_season_fk FOREIGN KEY (workspace_id, farm_id, season_id) REFERENCES seasons(workspace_id, farm_id, id),
+  CONSTRAINT labour_payment_vouchers_legacy_source_nature_key UNIQUE (legacy_source_record_id, nature),
   CONSTRAINT labour_payment_vouchers_posted_fields_check CHECK (status <> 'POSTED' OR (posted_at IS NOT NULL AND posted_by IS NOT NULL)),
   -- Historical cash records are retained even when their old free-form account
   -- value cannot be mapped safely. They remain visible as legacy reconciliation
@@ -92,7 +93,6 @@ CREATE TABLE IF NOT EXISTS labour_payment_vouchers (
 
 CREATE UNIQUE INDEX IF NOT EXISTS labour_payment_vouchers_workspace_farm_number_uidx ON labour_payment_vouchers(workspace_id, farm_id, voucher_number);
 CREATE UNIQUE INDEX IF NOT EXISTS labour_payment_vouchers_idempotency_uidx ON labour_payment_vouchers(workspace_id, idempotency_key);
-CREATE UNIQUE INDEX IF NOT EXISTS labour_payment_vouchers_legacy_source_nature_uidx ON labour_payment_vouchers(legacy_source_record_id, nature) WHERE legacy_source_record_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS labour_payment_vouchers_register_idx ON labour_payment_vouchers(workspace_id, farm_id, season_id, status, voucher_date DESC);
 
 CREATE TABLE IF NOT EXISTS labour_payment_allocations (
@@ -106,7 +106,7 @@ CREATE TABLE IF NOT EXISTS labour_payment_allocations (
   reversed_by uuid REFERENCES users(id),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE(voucher_id, due_id)
+  CONSTRAINT labour_payment_allocations_voucher_due_key UNIQUE(voucher_id, due_id)
 );
 
 CREATE TABLE IF NOT EXISTS labour_advance_applications (
@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS labour_advance_applications (
   reversed_by uuid REFERENCES users(id),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE(workspace_id, idempotency_key)
+  CONSTRAINT labour_advance_applications_workspace_idempotency_key UNIQUE(workspace_id, idempotency_key)
 );
 
 CREATE INDEX IF NOT EXISTS labour_payment_allocations_due_idx ON labour_payment_allocations(due_id, status);
@@ -149,11 +149,119 @@ CREATE TABLE IF NOT EXISTS labour_accounting_entries (
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT labour_accounting_entries_one_side_check CHECK ((debit > 0 AND credit = 0) OR (credit > 0 AND debit = 0)),
   CONSTRAINT labour_accounting_entries_context_fk FOREIGN KEY (workspace_id, farm_id, season_id) REFERENCES seasons(workspace_id, farm_id, id),
-  UNIQUE(workspace_id, entry_key)
+  CONSTRAINT labour_accounting_entries_workspace_entry_key UNIQUE(workspace_id, entry_key)
 );
 
 CREATE INDEX IF NOT EXISTS labour_accounting_entries_due_idx ON labour_accounting_entries(due_id, status);
 CREATE INDEX IF NOT EXISTS labour_accounting_entries_voucher_idx ON labour_accounting_entries(voucher_id, status);
+
+-- A failed pre-fix 0035 run can leave the tables and the old partial indexes
+-- behind because the startup runner historically executed SQL migrations in
+-- autocommit mode. Ordinary UNIQUE constraints still allow multiple NULLs, so
+-- they express the intended rules without a partial-index inference hazard:
+-- one due per non-null source record and one legacy voucher nature per non-null
+-- source record. Preserve all rows and install explicit conflict arbiters before
+-- any backfill runs.
+DROP INDEX IF EXISTS labour_dues_source_record_uidx;
+DROP INDEX IF EXISTS labour_payment_vouchers_legacy_source_nature_uidx;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'labour_dues'::regclass
+      AND conname = 'labour_dues_source_record_key'
+      AND contype = 'u'
+  ) THEN
+    ALTER TABLE labour_dues
+      ADD CONSTRAINT labour_dues_source_record_key UNIQUE (source_record_id);
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'labour_dues'::regclass
+      AND conname = 'labour_dues_source_record_key'
+      AND contype = 'u'
+      AND pg_get_constraintdef(oid) = 'UNIQUE (source_record_id)'
+  ) THEN
+    RAISE EXCEPTION 'labour_dues_source_record_key exists with an unexpected definition';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'labour_payment_vouchers'::regclass
+      AND conname = 'labour_payment_vouchers_legacy_source_nature_key'
+      AND contype = 'u'
+  ) THEN
+    ALTER TABLE labour_payment_vouchers
+      ADD CONSTRAINT labour_payment_vouchers_legacy_source_nature_key UNIQUE (legacy_source_record_id, nature);
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'labour_payment_vouchers'::regclass
+      AND conname = 'labour_payment_vouchers_legacy_source_nature_key'
+      AND contype = 'u'
+      AND pg_get_constraintdef(oid) = 'UNIQUE (legacy_source_record_id, nature)'
+  ) THEN
+    RAISE EXCEPTION 'labour_payment_vouchers_legacy_source_nature_key exists with an unexpected definition';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'labour_payment_allocations'::regclass
+      AND conname = 'labour_payment_allocations_voucher_due_key'
+      AND contype = 'u'
+  ) THEN
+    ALTER TABLE labour_payment_allocations
+      ADD CONSTRAINT labour_payment_allocations_voucher_due_key UNIQUE (voucher_id, due_id);
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'labour_payment_allocations'::regclass
+      AND conname = 'labour_payment_allocations_voucher_due_key'
+      AND contype = 'u'
+      AND pg_get_constraintdef(oid) = 'UNIQUE (voucher_id, due_id)'
+  ) THEN
+    RAISE EXCEPTION 'labour_payment_allocations_voucher_due_key exists with an unexpected definition';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'labour_advance_applications'::regclass
+      AND conname = 'labour_advance_applications_workspace_idempotency_key'
+      AND contype = 'u'
+  ) THEN
+    ALTER TABLE labour_advance_applications
+      ADD CONSTRAINT labour_advance_applications_workspace_idempotency_key UNIQUE (workspace_id, idempotency_key);
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'labour_advance_applications'::regclass
+      AND conname = 'labour_advance_applications_workspace_idempotency_key'
+      AND contype = 'u'
+      AND pg_get_constraintdef(oid) = 'UNIQUE (workspace_id, idempotency_key)'
+  ) THEN
+    RAISE EXCEPTION 'labour_advance_applications_workspace_idempotency_key exists with an unexpected definition';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'labour_accounting_entries'::regclass
+      AND conname = 'labour_accounting_entries_workspace_entry_key'
+      AND contype = 'u'
+  ) THEN
+    ALTER TABLE labour_accounting_entries
+      ADD CONSTRAINT labour_accounting_entries_workspace_entry_key UNIQUE (workspace_id, entry_key);
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'labour_accounting_entries'::regclass
+      AND conname = 'labour_accounting_entries_workspace_entry_key'
+      AND contype = 'u'
+      AND pg_get_constraintdef(oid) = 'UNIQUE (workspace_id, entry_key)'
+  ) THEN
+    RAISE EXCEPTION 'labour_accounting_entries_workspace_entry_key exists with an unexpected definition';
+  END IF;
+END $$;
 
 -- Historical settlements become dues. This insert recognizes existing state only;
 -- it does not create or replay any account movement.
@@ -218,7 +326,7 @@ FROM operational_records record
 WHERE record.entity_type = 'labourWageSettlement'
   AND record.farm_id IS NOT NULL
   AND record.season_id IS NOT NULL
-ON CONFLICT (source_record_id) DO NOTHING;
+ON CONFLICT ON CONSTRAINT labour_dues_source_record_key DO NOTHING;
 
 -- Historical advances are registered without replaying their already-visible cash effect.
 WITH ranked_advances AS (
@@ -267,7 +375,7 @@ SELECT
   record.created_at,
   record.updated_at
 FROM ranked_advances record
-ON CONFLICT (legacy_source_record_id, nature) WHERE legacy_source_record_id IS NOT NULL DO NOTHING;
+ON CONFLICT ON CONSTRAINT labour_payment_vouchers_legacy_source_nature_key DO NOTHING;
 
 -- Old standalone labourPayment rows had no due/allocation contract. Preserve
 -- them in the register without guessing a settlement link or replaying cash.
@@ -302,7 +410,7 @@ SELECT record.workspace_id, record.farm_id, record.season_id,
 FROM operational_records record
 WHERE record.entity_type = 'labourPayment' AND record.farm_id IS NOT NULL AND record.season_id IS NOT NULL
   AND NULLIF(record.payload->>'amount', '') ~ '^[0-9]+([.][0-9]+)?$' AND (record.payload->>'amount')::numeric > 0
-ON CONFLICT (legacy_source_record_id, nature) WHERE legacy_source_record_id IS NOT NULL DO NOTHING;
+ON CONFLICT ON CONSTRAINT labour_payment_vouchers_legacy_source_nature_key DO NOTHING;
 
 -- Existing normalized settlement/advance links become advance applications.
 INSERT INTO labour_advance_applications (workspace_id, advance_voucher_id, due_id, amount, idempotency_key, status, created_at, updated_at)
@@ -314,7 +422,13 @@ FROM labour_wage_settlement_advance_allocations allocation
 JOIN labour_dues due ON due.source_record_id = allocation.settlement_record_id
 JOIN labour_payment_vouchers voucher ON voucher.legacy_source_record_id = allocation.advance_record_id AND voucher.nature = 'ADVANCE'
 WHERE allocation.absorbed_amount > 0
-ON CONFLICT (workspace_id, idempotency_key) DO NOTHING;
+  AND NOT EXISTS (
+    SELECT 1
+    FROM labour_advance_applications existing_application
+    WHERE existing_application.workspace_id = allocation.workspace_id
+      AND existing_application.idempotency_key = md5(allocation.workspace_id::text || ':legacy-advance-application:' || allocation.id::text)::uuid
+  )
+ON CONFLICT ON CONSTRAINT labour_advance_applications_workspace_idempotency_key DO NOTHING;
 
 -- Existing settlement cash becomes a legacy voucher linked to the existing account
 -- transaction. No account transaction is inserted by this migration.
@@ -359,7 +473,7 @@ LEFT JOIN account_transactions transaction
   AND transaction.source = 'settlement'
   AND transaction.source_type = 'labour_wage_settlement'
 WHERE record.paid_amount > 0
-ON CONFLICT (legacy_source_record_id, nature) WHERE legacy_source_record_id IS NOT NULL DO NOTHING;
+ON CONFLICT ON CONSTRAINT labour_payment_vouchers_legacy_source_nature_key DO NOTHING;
 
 INSERT INTO labour_payment_allocations (workspace_id, voucher_id, due_id, amount, status, created_at, updated_at)
 SELECT voucher.workspace_id, voucher.id, voucher.linked_due_id, voucher.payment_amount,
@@ -367,7 +481,13 @@ SELECT voucher.workspace_id, voucher.id, voucher.linked_due_id, voucher.payment_
   voucher.created_at, voucher.updated_at
 FROM labour_payment_vouchers voucher
 WHERE voucher.nature = 'SETTLEMENT_BALANCE_PAYMENT' AND voucher.legacy = true AND voucher.linked_due_id IS NOT NULL
-ON CONFLICT (voucher_id, due_id) DO NOTHING;
+  AND NOT EXISTS (
+    SELECT 1
+    FROM labour_payment_allocations existing_allocation
+    WHERE existing_allocation.voucher_id = voucher.id
+      AND existing_allocation.due_id = voucher.linked_due_id
+  )
+ON CONFLICT ON CONSTRAINT labour_payment_allocations_voucher_due_key DO NOTHING;
 
 -- Seed the labour subledger from canonical historical mappings. These entries
 -- recognize existing economic events only; they do not touch cash ledgers.
@@ -375,13 +495,13 @@ INSERT INTO labour_accounting_entries (workspace_id, farm_id, season_id, entry_k
 SELECT due.workspace_id, due.farm_id, due.season_id, 'due:' || due.id || ':expense', 'DUE_RECOGNITION', 'LABOUR_EXPENSE', due.id,
   GREATEST(due.gross_amount + due.adjustment_amount - due.authorized_deductions, 0), 0, due.created_by, COALESCE(due.approved_at, due.created_at)
 FROM labour_dues due WHERE due.calculation_status = 'APPROVED' AND GREATEST(due.gross_amount + due.adjustment_amount - due.authorized_deductions, 0) > 0
-ON CONFLICT (workspace_id, entry_key) DO NOTHING;
+ON CONFLICT ON CONSTRAINT labour_accounting_entries_workspace_entry_key DO NOTHING;
 
 INSERT INTO labour_accounting_entries (workspace_id, farm_id, season_id, entry_key, event_type, ledger_code, due_id, debit, credit, posted_by, posted_at)
 SELECT due.workspace_id, due.farm_id, due.season_id, 'due:' || due.id || ':payable', 'DUE_RECOGNITION', 'LABOUR_PAYABLE', due.id,
   0, GREATEST(due.gross_amount + due.adjustment_amount - due.authorized_deductions, 0), due.created_by, COALESCE(due.approved_at, due.created_at)
 FROM labour_dues due WHERE due.calculation_status = 'APPROVED' AND GREATEST(due.gross_amount + due.adjustment_amount - due.authorized_deductions, 0) > 0
-ON CONFLICT (workspace_id, entry_key) DO NOTHING;
+ON CONFLICT ON CONSTRAINT labour_accounting_entries_workspace_entry_key DO NOTHING;
 
 INSERT INTO labour_accounting_entries (workspace_id, farm_id, season_id, entry_key, event_type, ledger_code, voucher_id, debit, credit, posted_by, posted_at)
 SELECT voucher.workspace_id, voucher.farm_id, voucher.season_id, 'voucher:' || voucher.id || ':debit',
@@ -390,7 +510,7 @@ SELECT voucher.workspace_id, voucher.farm_id, voucher.season_id, 'voucher:' || v
   voucher.id, voucher.payment_amount, 0, voucher.posted_by, voucher.posted_at
 FROM labour_payment_vouchers voucher LEFT JOIN accounts account ON account.id = voucher.payment_account_id
 WHERE voucher.status = 'POSTED' AND voucher.nature <> 'REVERSAL' AND voucher.reconciliation_status = 'RECONCILED' AND voucher.payment_account_id IS NOT NULL AND voucher.posted_by IS NOT NULL AND voucher.posted_at IS NOT NULL
-ON CONFLICT (workspace_id, entry_key) DO NOTHING;
+ON CONFLICT ON CONSTRAINT labour_accounting_entries_workspace_entry_key DO NOTHING;
 
 INSERT INTO labour_accounting_entries (workspace_id, farm_id, season_id, entry_key, event_type, ledger_code, voucher_id, debit, credit, posted_by, posted_at)
 SELECT voucher.workspace_id, voucher.farm_id, voucher.season_id, 'voucher:' || voucher.id || ':credit',
@@ -399,13 +519,13 @@ SELECT voucher.workspace_id, voucher.farm_id, voucher.season_id, 'voucher:' || v
   voucher.id, 0, voucher.payment_amount, voucher.posted_by, voucher.posted_at
 FROM labour_payment_vouchers voucher LEFT JOIN accounts account ON account.id = voucher.payment_account_id
 WHERE voucher.status = 'POSTED' AND voucher.nature <> 'REVERSAL' AND voucher.reconciliation_status = 'RECONCILED' AND voucher.payment_account_id IS NOT NULL AND voucher.posted_by IS NOT NULL AND voucher.posted_at IS NOT NULL
-ON CONFLICT (workspace_id, entry_key) DO NOTHING;
+ON CONFLICT ON CONSTRAINT labour_accounting_entries_workspace_entry_key DO NOTHING;
 
 INSERT INTO labour_accounting_entries (workspace_id, farm_id, season_id, entry_key, event_type, ledger_code, due_id, advance_application_id, debit, credit, posted_by, posted_at)
 SELECT application.workspace_id, due.farm_id, due.season_id, 'advance-application:' || application.id || ':payable', 'ADVANCE_APPLICATION', 'LABOUR_PAYABLE', application.due_id, application.id,
   application.amount, 0, due.created_by, application.created_at
 FROM labour_advance_applications application JOIN labour_dues due ON due.id = application.due_id WHERE application.status = 'ACTIVE'
-ON CONFLICT (workspace_id, entry_key) DO NOTHING;
+ON CONFLICT ON CONSTRAINT labour_accounting_entries_workspace_entry_key DO NOTHING;
 
 CREATE OR REPLACE FUNCTION validate_labour_payment_allocation() RETURNS trigger AS $$
 DECLARE
@@ -495,4 +615,4 @@ INSERT INTO labour_accounting_entries (workspace_id, farm_id, season_id, entry_k
 SELECT application.workspace_id, due.farm_id, due.season_id, 'advance-application:' || application.id || ':advance', 'ADVANCE_APPLICATION', 'LABOUR_ADVANCE', application.due_id, application.id,
   0, application.amount, due.created_by, application.created_at
 FROM labour_advance_applications application JOIN labour_dues due ON due.id = application.due_id WHERE application.status = 'ACTIVE'
-ON CONFLICT (workspace_id, entry_key) DO NOTHING;
+ON CONFLICT ON CONSTRAINT labour_accounting_entries_workspace_entry_key DO NOTHING;

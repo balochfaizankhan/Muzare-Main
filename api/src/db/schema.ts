@@ -10,6 +10,7 @@ import {
   text,
   time,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
@@ -657,7 +658,7 @@ export const labourDues = pgTable(
   },
   (table) => [
     uniqueIndex("labour_dues_workspace_farm_number_uidx").on(table.workspaceId, table.farmId, table.dueNumber),
-    uniqueIndex("labour_dues_source_record_uidx").on(table.sourceRecordId),
+    unique("labour_dues_source_record_key").on(table.sourceRecordId),
     uniqueIndex("labour_dues_idempotency_uidx").on(table.workspaceId, table.idempotencyKey),
     foreignKey({
       columns: [table.workspaceId, table.farmId],
@@ -714,7 +715,7 @@ export const labourPaymentVouchers = pgTable(
   (table) => [
     uniqueIndex("labour_payment_vouchers_workspace_farm_number_uidx").on(table.workspaceId, table.farmId, table.voucherNumber),
     uniqueIndex("labour_payment_vouchers_idempotency_uidx").on(table.workspaceId, table.idempotencyKey),
-    uniqueIndex("labour_payment_vouchers_legacy_source_nature_uidx").on(table.legacySourceRecordId, table.nature),
+    unique("labour_payment_vouchers_legacy_source_nature_key").on(table.legacySourceRecordId, table.nature),
     foreignKey({
       columns: [table.workspaceId, table.farmId, table.seasonId],
       foreignColumns: [seasons.workspaceId, seasons.farmId, seasons.id],
@@ -736,7 +737,7 @@ export const labourPaymentAllocations = pgTable(
     reversedBy: uuid("reversed_by").references(() => users.id),
     ...timestamps,
   },
-  (table) => [uniqueIndex("labour_payment_allocations_voucher_due_uidx").on(table.voucherId, table.dueId)],
+  (table) => [unique("labour_payment_allocations_voucher_due_key").on(table.voucherId, table.dueId)],
 );
 
 export const labourAdvanceApplications = pgTable(
@@ -753,7 +754,7 @@ export const labourAdvanceApplications = pgTable(
     reversedBy: uuid("reversed_by").references(() => users.id),
     ...timestamps,
   },
-  (table) => [uniqueIndex("labour_advance_applications_idempotency_uidx").on(table.workspaceId, table.idempotencyKey)],
+  (table) => [unique("labour_advance_applications_workspace_idempotency_key").on(table.workspaceId, table.idempotencyKey)],
 );
 
 export const labourAccountingEntries = pgTable(
@@ -778,7 +779,7 @@ export const labourAccountingEntries = pgTable(
     ...timestamps,
   },
   (table) => [
-    uniqueIndex("labour_accounting_entries_workspace_key_uidx").on(table.workspaceId, table.entryKey),
+    unique("labour_accounting_entries_workspace_entry_key").on(table.workspaceId, table.entryKey),
     foreignKey({ columns: [table.workspaceId, table.farmId, table.seasonId], foreignColumns: [seasons.workspaceId, seasons.farmId, seasons.id], name: "labour_accounting_entries_context_fk" }),
   ],
 );

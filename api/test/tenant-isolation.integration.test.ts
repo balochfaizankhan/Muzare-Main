@@ -1294,7 +1294,8 @@ test("labour lifecycle hard deletes unused labour and deactivates linked labour 
   const deletedLabourAdvance = await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "advance", randomUUID(), {
     labourerId: unusedLabourerId, date: "2026-08-01", amount: 25, accountId: inactivePaymentAccountId,
   }));
-  assert.equal(deletedLabourAdvance.statusCode, 400);
+  assert.equal(deletedLabourAdvance.statusCode, 403);
+  assert.equal(deletedLabourAdvance.json().details?.code, "entity_not_found");
 
   const linkedLabourerId = randomUUID();
   const linkedPaymentAccountId = await createAccount(alpha, "Historical Worker Cash");

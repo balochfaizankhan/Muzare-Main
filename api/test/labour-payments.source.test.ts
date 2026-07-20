@@ -73,9 +73,9 @@ test("voucher voiding restores allocations and blocks unsafe advance void order"
 
 test("migration maps historical records without replaying cash and enforces normalized integrity", () => {
   assert.match(migrationSource, /No account transaction is inserted by this migration/i);
-  assert.match(migrationSource, /ON CONFLICT \(legacy_source_record_id, nature\).*DO NOTHING/);
+  assert.match(migrationSource, /ON CONFLICT ON CONSTRAINT labour_payment_vouchers_legacy_source_nature_key DO NOTHING/);
   assert.match(migrationSource, /CHECK \(amount > 0\)/);
-  assert.match(migrationSource, /UNIQUE\(workspace_id, idempotency_key\)/);
+  assert.match(migrationSource, /labour_advance_applications_workspace_idempotency_key UNIQUE\(workspace_id, idempotency_key\)/);
   assert.match(migrationSource, /labour_payment_vouchers_workspace_farm_number_uidx/);
   assert.match(migrationSource, /CREATE TABLE IF NOT EXISTS labour_accounting_entries/);
   assert.match(migrationSource, /labour_payment_allocation_guard/);

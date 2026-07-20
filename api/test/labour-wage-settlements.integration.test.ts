@@ -9,9 +9,12 @@ import {
   accounts,
   auditLogs,
   farms,
+  labourAccountingEntries,
+  labourAdvanceApplications,
   labourWageSettlementAdvanceAllocations,
   labourWageSettlementCreateRequests,
   labourDues,
+  labourPaymentAllocations,
   labourPaymentVouchers,
   operationalRecords,
   seasons,
@@ -127,6 +130,11 @@ before(async () => {
 
 after(async () => {
   if (app) await app.close();
+  await db.delete(labourAccountingEntries).where(eq(labourAccountingEntries.workspaceId, tenant.workspaceId));
+  await db.delete(labourPaymentAllocations).where(eq(labourPaymentAllocations.workspaceId, tenant.workspaceId));
+  await db.delete(labourAdvanceApplications).where(eq(labourAdvanceApplications.workspaceId, tenant.workspaceId));
+  await db.delete(labourPaymentVouchers).where(eq(labourPaymentVouchers.workspaceId, tenant.workspaceId));
+  await db.delete(labourDues).where(eq(labourDues.workspaceId, tenant.workspaceId));
   await db.delete(labourWageSettlementAdvanceAllocations).where(inArray(labourWageSettlementAdvanceAllocations.workspaceId, ids));
   await db.delete(accountTransactions).where(inArray(accountTransactions.farmId, [tenant.farmId]));
   await db.delete(labourWageSettlementCreateRequests).where(eq(labourWageSettlementCreateRequests.workspaceId, tenant.workspaceId));
