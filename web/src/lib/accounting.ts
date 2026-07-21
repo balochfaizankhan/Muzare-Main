@@ -5,6 +5,11 @@ import { getActiveVouchers } from "./voucherCollections";
 import { getActiveLabourWageSettlements, getGeneralExpenseVouchers, getLabourWageSettlementCashPaidAmount, resolveLabourWageSettlementAccountId } from "./labourWageSettlements";
 import { buildAccountIdentityLookup, resolveCanonicalAccountId, type AccountIdentityLookup } from "./accountIdentity";
 
+export type CanonicalAccountBalanceEntry = {
+  accountId: string;
+  balanceEffect: number;
+};
+
 export function partnerSettlementEffect(entry: PartnerEntry, accountId: string, accountLookup: AccountIdentityLookup): number {
   if (entry.type !== "settlement") return 0;
   const fromAccountId = resolvePartnerTransferAccountIdentity(entry as Record<string, unknown>, "from", accountLookup).canonicalAccountId ?? entry.fromAccountId ?? null;
@@ -60,4 +65,47 @@ export function calculateAvailableBalance(
   return accounts
     .filter((account) => account.type !== "partner")
     .reduce((sum, account) => sum + calculateAccountBalance(account, sales, vouchers, advances, entries, settlements, accounts), 0);
+}
+
+export function calculateDisplayedAccountBalance(
+  account: Account,
+  sales: Sale[],
+  vouchers: Voucher[],
+  advances: Advance[],
+  entries: PartnerEntry[],
+  settlements: LabourWageSettlement[],
+  allAccounts: Account[],
+  canonicalEntries: CanonicalAccountBalanceEntry[] = [],
+  options: { farmId?: string | null; seasonId?: string | null } = {},
+): number {
+  const localBalance = calculateAccountBalance(account, sales, vouchers, advances, entries, settlements, allAccounts, options);
+  const canonicalBalance = canonicalEntries
+    .filter((entry) => entry.accountId === account.id)
+    .reduce((sum, entry) => sum + entry.balanceEffect, 0);
+  return localBalance + canonicalBalance;
+}
+
+export function calculateScopedCashAccountBalance(
+  accounts: Account[],
+  sales: Sale[],
+  vouchers: Voucher[],
+  advances: Advance[],
+  entries: PartnerEntry[],
+  settlements: LabourWageSettlement[],
+  canonicalEntries: CanonicalAccountBalanceEntry[] = [],
+  options: { farmId?: string | null; seasonId?: string | null } = {},
+): number {
+  return accounts
+    .filter((account) => account.type === "cash")
+    .reduce((sum, account) => sum + calculateDisplayedAccountBalance(
+      account,
+      sales,
+      vouchers,
+      advances,
+      entries,
+      settlements,
+      accounts,
+      canonicalEntries,
+      options,
+    ), 0);
 }

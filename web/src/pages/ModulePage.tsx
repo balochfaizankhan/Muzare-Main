@@ -12,7 +12,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { useAppBack } from "../hooks/useAppBack";
 import { useSyncState } from "../hooks/useSyncState";
 import { useCanonicalLabourFinancials } from "../hooks/useCanonicalLabourFinancials";
-import { calculateAccountBalance } from "../lib/accounting";
+import { calculateDisplayedAccountBalance } from "../lib/accounting";
 import { defaultTransactionGroupExpansion, groupAccountTransactions, type AccountTransactionGroupKey } from "../lib/accountTransactionGroups";
 import { attendanceStatusKey, buildAttendanceStatusMap, previousLocalDateKey, todayLocalDateKey } from "../lib/attendanceStatus";
 import { getCanonicalExpenseCategory, getExpenseAccountingGroup } from "../lib/expenseCategories";
@@ -4386,8 +4386,17 @@ function AccountsModule() {
   const activeAdvances = advances.filter((item) => isActiveOperationalRecord(item) && !replacedLegacySourceIds.has(item.id));
   const activeLabourWageSettlements = labourWageSettlements.filter((item) => isActiveOperationalRecord(item));
   const activeGeneralExpenseVouchers = getGeneralExpenseVouchers(activeVouchers, activeLabourWageSettlements);
-  const balance = (account: Account) => calculateAccountBalance(account, activeSales, activeGeneralExpenseVouchers, activeAdvances, activeEntries, activeLabourWageSettlements, accounts, { farmId, seasonId })
-    + (canonicalFinancials.data?.accountEntries.filter((entry) => entry.accountId === account.id).reduce((sum, entry) => sum + entry.balanceEffect, 0) ?? 0);
+  const balance = (account: Account) => calculateDisplayedAccountBalance(
+    account,
+    activeSales,
+    activeGeneralExpenseVouchers,
+    activeAdvances,
+    activeEntries,
+    activeLabourWageSettlements,
+    accounts,
+    canonicalFinancials.data?.accountEntries ?? [],
+    { farmId, seasonId },
+  );
   const totalAdvances = activeAdvances.reduce((sum, item) => sum + item.amount, 0);
   const canonicalLabourExpense = canonicalFinancials.data?.summary.wageExpense ?? 0;
   const legacyExpenseVouchers = activeGeneralExpenseVouchers.filter((item) => !replacedLegacySourceIds.has(item.id));

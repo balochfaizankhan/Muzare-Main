@@ -14,6 +14,8 @@ test("dashboard financial cards now use one settled snapshot contract", () => {
   assert.match(dashboard, /setFinancialSnapshot\(nextFinancialSnapshot\)/);
   assert.match(dashboard, /dashboardFinancialSnapshotStorageKey/);
   assert.match(dashboard, /financialSnapshotRef\.current/);
+  assert.match(dashboard, /calculateScopedCashAccountBalance/);
+  assert.doesNotMatch(dashboard, /calculateAvailableBalance/);
 });
 
 test("dashboard ignores mid-sync local churn and stale scope responses", () => {
@@ -21,4 +23,5 @@ test("dashboard ignores mid-sync local churn and stale scope responses", () => {
   assert.doesNotMatch(dashboard, /window\.addEventListener\("muzare-local-data-change", scheduleDashboardRefresh\)/);
   assert.match(dashboard, /if \(requestId !== dashboardSnapshotSequence\.current \|\| financialScopeKeyRef\.current !== scopeKey\) return/);
   assert.match(helper, /if \(!input\.canonicalReady\)/);
+  assert.match(dashboard, /Updating balance\.\.\./);
 });

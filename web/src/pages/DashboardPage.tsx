@@ -20,7 +20,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
-import { calculateAvailableBalance } from "../lib/accounting";
+import { calculateScopedCashAccountBalance } from "../lib/accounting";
 import { fetchBootstrap } from "../lib/api";
 import { dashboardFinancialSnapshotStorageKey, isDashboardFinancialScope, settleDashboardFinancialSnapshot, type DashboardFinancialSnapshot } from "../lib/dashboardFinancialSnapshot";
 import { formatDate } from "../lib/format";
@@ -44,7 +44,7 @@ type DashboardTotals = {
   totalSales: number;
   labourAdvances: number;
   totalExpenses: number;
-  netPosition: number;
+  cashBalance: number;
   partnerBalance: number;
 };
 
@@ -76,7 +76,7 @@ export function DashboardPage() {
     totalSales: 0,
     labourAdvances: 0,
     totalExpenses: 0,
-    netPosition: 0,
+    cashBalance: 0,
     partnerBalance: 0,
   };
   const query = useQuery({
@@ -168,7 +168,16 @@ export function DashboardPage() {
       generatedAt: new Date().toISOString(),
       canonicalVersion: String(canonicalFinancials.dataUpdatedAt ?? "offline"),
       financials: {
-        cashBalance: calculateAvailableBalance(activeAccounts, activeSales, cashAffectingVouchers, activeAdvances, activeEntries, activeSettlements) + (canonicalFinancials.data?.summary.accountMovement ?? 0),
+        cashBalance: calculateScopedCashAccountBalance(
+          activeAccounts,
+          activeSales,
+          cashAffectingVouchers,
+          activeAdvances,
+          activeEntries,
+          activeSettlements,
+          canonicalFinancials.data?.accountEntries ?? [],
+          { farmId, seasonId },
+        ),
         totalExpenses: generalExpenseVouchers.reduce((sum, item) => sum + item.amount, 0) + (canonicalFinancials.data?.summary.wageExpense ?? 0),
         outstandingLabourAdvances: canonicalFinancials.data?.summary.outstandingAdvance ?? 0,
         inputVersion: `${activeAccounts.length}:${activeSales.length}:${generalExpenseVouchers.length}:${activeAdvances.length}:${activeEntries.length}:${activeSettlements.length}`,
@@ -205,7 +214,7 @@ export function DashboardPage() {
       totalSales,
       labourAdvances: settledFinancialSnapshot?.outstandingLabourAdvances ?? 0,
       totalExpenses: settledFinancialSnapshot?.totalExpenses ?? 0,
-      netPosition: settledFinancialSnapshot?.cashBalance ?? 0,
+      cashBalance: settledFinancialSnapshot?.cashBalance ?? 0,
       partnerBalance,
     });
 
@@ -270,11 +279,11 @@ export function DashboardPage() {
   const summaryCards = [
     {
       label: "Cash Balance",
-      value: metricsReady ? moneyWhole(totalsValue.netPosition) : "—",
+      value: metricsReady ? moneyWhole(totalsValue.cashBalance) : "—",
       icon: Wallet,
       path: "/workspace/accounts",
-      tone: totalsValue.netPosition >= 0 ? "green" : "orange",
-      detail: hasOperationalContext ? "Available cash position" : "Requires a farm and season",
+      tone: totalsValue.cashBalance >= 0 ? "green" : "orange",
+      detail: hasOperationalContext ? (metricsReady ? "Current cash-account balance" : "Updating balance...") : "Requires a farm and season",
     },
     {
       label: "Total Expenses",
