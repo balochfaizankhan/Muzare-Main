@@ -26,7 +26,6 @@ import { LabourSelectCombobox } from "../../components/LabourSelectCombobox";
 import {
   createDirectLabourDue,
   ApiError,
-  type CanonicalLabourLedgerEntry,
   previewLabourAttendanceDue,
   fetchLabourDueAdvancePool,
   fetchLabourPaymentAdvances,
@@ -39,7 +38,9 @@ import {
   setLabourDueHold,
   settleLabourPaymentDue,
   voidLabourPaymentVoucher,
+  reverseLabourAdvanceApplicationEvent,
   voidLabourDue,
+  type LabourAdvanceApplicationParentRecord,
   type LabourAdvancePosition,
   type LabourAdvanceListResponse,
   type LabourDueAdvancePool,
@@ -47,7 +48,7 @@ import {
   type LabourDueRecord,
   type LabourAttendanceDuePreview,
   type LabourPaymentVoucherRecord,
-  type LabourRecipientScope,
+  type LabourRecipientScope
 } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 import { canCreate, canDelete, canEdit } from "../../lib/permissions";
@@ -579,7 +580,7 @@ export function WorkforcePaymentsPage() {
       {view === "vouchers" ? (
         <VoucherRegister
           vouchers={vouchers}
-          applicationEvents={(canonicalFinancials.data?.labourLedger ?? []).filter((event) => event.advanceApplicationId)}
+          applicationParents={canonicalFinancials.data?.advanceApplicationParents ?? []}
           dues={dues}
           advanceOutstanding={advanceSummary?.totalOutstanding ?? 0}
           accounts={accountById}
@@ -930,7 +931,7 @@ function DirectDueForm({
 
 function VoucherRegister({
   vouchers,
-  applicationEvents,
+  applicationParents,
   dues,
   advanceOutstanding,
   accounts,
@@ -947,7 +948,7 @@ function VoucherRegister({
   onViewAdvances,
 }: {
   vouchers: LabourPaymentVoucherRecord[];
-  applicationEvents: CanonicalLabourLedgerEntry[];
+  applicationParents: LabourAdvanceApplicationParentRecord[];
   dues: LabourDueRecord[];
   advanceOutstanding: number;
   accounts: Map<string, Account>;
@@ -963,23 +964,32 @@ function VoucherRegister({
   onError: (message: string) => void;
   onViewAdvances: () => void;
 }) {
+  const location = useLocation();
+  const initialNature = new URLSearchParams(location.search).get("nature");
   const [search, setSearch] = useState("");
-  const [nature, setNature] = useState("ALL");
+  const [nature, setNature] = useState(
+    initialNature === "ADVANCE_APPLICATION" ||
+      initialNature === "DIRECT_LABOUR_PAYMENT" ||
+      initialNature === "SETTLEMENT_BALANCE_PAYMENT" ||
+      initialNature === "REVERSAL"
+      ? initialNature
+      : "ALL",
+  );
   const [voidingId, setVoidingId] = useState("");
   const voidIdempotencyKeys = useRef<Record<string, string>>({});
   type VoucherRegisterRow =
     | {
         id: string;
-        kind: "application";
-        status: string;
-        nature: "ADVANCE_APPLICATION" | "APPLICATION_REVERSAL";
+        kind: "application_parent";
+        status: LabourAdvanceApplicationParentRecord["status"];
+        nature: "ADVANCE_APPLICATION";
         voucherNumber: string;
         date: string;
         description: string;
         amount: number;
         recipient: string;
         dueNumber?: string | null;
-        sourceAdvanceVoucherNumber?: string | null;
+        parent: LabourAdvanceApplicationParentRecord;
       }
     | {
         id: string;
@@ -995,6 +1005,48 @@ function VoucherRegister({
         sourceAdvanceVoucherNumber?: null;
         voucher: LabourPaymentVoucherRecord;
       };
+  const reverseApplicationParent = async (
+    parent: LabourAdvanceApplicationParentRecord,
+  ) => {
+    const reason = window.prompt(
+      `Reason for reversing ${parent.displayVoucherNumber}:`,
+    );
+    if (!reason?.trim()) return;
+    setVoidingId(parent.id);
+    try {
+      if (!navigator.onLine)
+        throw new Error(
+          "Connect to the internet before reversing a financial transaction.",
+        );
+      if (!voidIdempotencyKeys.current[parent.id])
+        voidIdempotencyKeys.current[parent.id] = uuid();
+      const response = await reverseLabourAdvanceApplicationEvent(
+        token,
+        workspaceId,
+        parent.id,
+        farmId,
+        seasonId,
+        {
+          idempotencyKey: voidIdempotencyKeys.current[parent.id]!,
+          reason: reason.trim(),
+        },
+      );
+      delete voidIdempotencyKeys.current[parent.id];
+      await onSaved(
+        response.result.reversedApplicationCount
+          ? `${parent.displayVoucherNumber} reversed.`
+          : `${parent.displayVoucherNumber} is already reversed.`,
+      );
+    } catch (caught) {
+      onError(
+        caught instanceof Error
+          ? caught.message
+          : "Unable to reverse this applied-advances voucher.",
+      );
+    } finally {
+      setVoidingId("");
+    }
+  };
   const voidVoucher = async (voucher: LabourPaymentVoucherRecord) => {
     const reason = window.prompt(
       `Reason for reversing ${voucher.voucherNumber}:`,
@@ -1035,21 +1087,21 @@ function VoucherRegister({
       setVoidingId("");
     }
   };
-  const applicationRows: VoucherRegisterRow[] = applicationEvents
-    .filter((event) => event.originalEventType === "ADVANCE_APPLICATION" || event.eventType === "ADVANCE_APPLICATION" || (event.eventType === "REVERSAL" && event.originalEventType === "ADVANCE_APPLICATION"))
-    .map((event) => ({
-      id: event.id,
-      kind: "application" as const,
-      status: event.status,
-      nature: event.eventType === "REVERSAL" ? "APPLICATION_REVERSAL" : "ADVANCE_APPLICATION",
-      voucherNumber: `LPA-${(event.advanceApplicationId ?? event.id).slice(0, 8).toUpperCase()}`,
-      date: event.date,
-      description: event.description,
-      amount: Math.abs(event.amount || event.labourAdvanceEffect || event.labourDueEffect),
-      recipient: event.recipientName,
-      dueNumber: event.dueNumber,
-      sourceAdvanceVoucherNumber: event.sourceAdvanceVoucherNumber,
-    }));
+  const applicationRows: VoucherRegisterRow[] = applicationParents.map(
+    (parent) => ({
+      id: parent.id,
+      kind: "application_parent" as const,
+      status: parent.status,
+      nature: "ADVANCE_APPLICATION",
+      voucherNumber: parent.displayVoucherNumber,
+      date: parent.date,
+      description: parent.description,
+      amount: parent.activeAmount,
+      recipient: parent.recipientName,
+      dueNumber: parent.dueNumber,
+      parent,
+    }),
+  );
   const voucherRows: VoucherRegisterRow[] = vouchers.map((voucher) => ({
     id: voucher.id,
     kind: "voucher" as const,
@@ -1071,7 +1123,6 @@ function VoucherRegister({
           row.description,
           row.recipient,
           row.dueNumber,
-          row.sourceAdvanceVoucherNumber,
         ]
           .join(" ")
           .toLowerCase()
@@ -1116,7 +1167,7 @@ function VoucherRegister({
         <div>
           <h2>Labour Payment Vouchers</h2>
           <p>
-            New-money payments against Labour Dues and final obligations.
+            Final cash payments and aggregate applied-advances postings.
           </p>
         </div>
       </header>
@@ -1139,7 +1190,6 @@ function VoucherRegister({
           </option>
           <option value="DIRECT_LABOUR_PAYMENT">Direct due payments</option>
           <option value="ADVANCE_APPLICATION">Advance applied to due — Non-cash</option>
-          <option value="APPLICATION_REVERSAL">Application reversals</option>
           <option value="REVERSAL">Reversals</option>
         </select>
       </div>
@@ -1180,35 +1230,45 @@ function VoucherRegister({
                 </em>
               </header>
               <h3>{row.recipient}</h3>
-              <p>{row.kind === "application"
-                ? `${row.description} · Non-cash application${row.sourceAdvanceVoucherNumber ? ` from ${row.sourceAdvanceVoucherNumber}` : ""}${row.dueNumber ? ` to ${row.dueNumber}` : ""}`
+              <p>{row.kind === "application_parent"
+                ? `${row.description}${row.dueNumber ? ` · Applied to ${row.dueNumber}` : ""} · Non-cash`
                 : row.description}
               </p>
               <dl>
                 <div>
                   <dt>Nature</dt>
-                  <dd>{row.kind === "application" && row.nature === "ADVANCE_APPLICATION" ? "Advance applied to due — Non-cash" : statusLabel(row.nature)}</dd>
+                  <dd>{row.kind === "application_parent" ? "Advance applied to due — Non-cash" : statusLabel(row.nature)}</dd>
                 </div>
                 <div>
                   <dt>Date</dt>
                   <dd>{row.date}</dd>
                 </div>
                 <div>
-                  <dt>{row.kind === "application" ? "Source advance" : "Account"}</dt>
-                  <dd>{row.kind === "application" ? row.sourceAdvanceVoucherNumber ?? "Advance reference unavailable" : (row.voucher.paymentAccountName ?? accounts.get(row.voucher.paymentAccountId ?? "")?.name ?? "Legacy / reconciliation")}</dd>
+                  <dt>{row.kind === "application_parent" ? "Related due" : "Account"}</dt>
+                  <dd>{row.kind === "application_parent" ? row.dueNumber ?? "Due reference unavailable" : (row.voucher.paymentAccountName ?? accounts.get(row.voucher.paymentAccountId ?? "")?.name ?? "Legacy / reconciliation")}</dd>
                 </div>
                 <div>
                   <dt>Amount</dt>
                   <dd>{money(row.amount)}</dd>
                 </div>
               </dl>
-              {row.kind === "application" && row.dueNumber ? (
-                <small>Application reference · {row.dueNumber}</small>
+              {row.kind === "application_parent" ? (
+                <small>
+                  {row.parent.workFromDate && row.parent.workToDate
+                    ? `Work period · ${row.parent.workFromDate} – ${row.parent.workToDate}`
+                    : `Child allocations · ${row.parent.activeChildApplicationIds.length} active of ${row.parent.childApplicationIds.length}`}
+                </small>
               ) : null}
               {row.kind === "voucher" && row.voucher.legacy ? (
                 <small>
                   Legacy mapped record ·{" "}
                   {statusLabel(row.voucher.reconciliationStatus)}
+                </small>
+              ) : null}
+              {row.kind === "application_parent" ? (
+                <small>
+                  Payment method · Applied advances
+                  {row.parent.createdByName ? ` · Created by ${row.parent.createdByName}` : ""}
                 </small>
               ) : null}
               {canVoid &&
@@ -1223,6 +1283,18 @@ function VoucherRegister({
                   onClick={() => void voidVoucher(row.voucher)}
                 >
                   {voidingId === row.voucher.id ? "Reversing…" : "Void / reverse"}
+                </button>
+              ) : null}
+              {canVoid &&
+              row.kind === "application_parent" &&
+              row.parent.status !== "REVERSED" ? (
+                <button
+                  className="secondary-action"
+                  disabled={voidingId === row.parent.id}
+                  type="button"
+                  onClick={() => void reverseApplicationParent(row.parent)}
+                >
+                  {voidingId === row.parent.id ? "Reversing…" : "Void / reverse"}
                 </button>
               ) : null}
             </article>
@@ -1257,6 +1329,8 @@ function AdvancesView({
   onError: (message: string) => void;
 }) {
   const location = useLocation();
+  const navigate = useNavigate();
+  const canonicalFinancials = useCanonicalLabourFinancials();
   const [rows, setRows] = useState<LabourAdvancePosition[]>([]);
   const [summary, setSummary] = useState<LabourAdvanceListResponse["summary"]>({
     totalOutstanding: 0,
@@ -1787,13 +1861,19 @@ function AdvancesView({
             <strong>{money(summary.totalOriginal ?? 0)}</strong>
           </div>
           <div>
-            <span>Outstanding advances</span>
+            <span>Available advance balance</span>
             <strong>{money(summary.totalOutstanding)}</strong>
           </div>
-          <div>
+          <button
+            type="button"
+            className="workforce-payment-report-card"
+            onClick={() =>
+              navigate("/workspace/labour-payments/vouchers?nature=ADVANCE_APPLICATION")
+            }
+          >
             <span>Applied to labour dues</span>
             <strong>{money(summary.totalApplied ?? 0)}</strong>
-          </div>
+          </button>
           <div>
             <span>Recovered / refunded</span>
             <strong>{money(summary.totalRecovered ?? 0)}</strong>
@@ -1986,21 +2066,21 @@ function AdvancesView({
                 >
                   <header>
                     <div>
-                      <span>{receiver ?? "Receiver unavailable"}</span>
+                      <span>{advance.financialOwnerName ?? receiver ?? "Recipient unavailable"}</span>
                       <small>
                         {advance.recipientScope === "LABOUR_GROUP"
-                          ? receiver
-                            ? `Received by · for ${advance.financialOwnerName ?? "Owner unavailable"}`
-                            : `For ${advance.financialOwnerName ?? "Owner unavailable"} · Legacy record · review required`
-                          : "Individual labourer"}
-                        {advance.reviewRequired ? " · Review required" : ""}
+                          ? `Paid to group${receiver ? ` · Received by ${receiver}` : ""}`
+                          : "Paid to labourer"}
+                        {advance.reviewRequired ? " · Needs review" : ""}
                       </small>
                     </div>
-                    <em
-                      className={`workforce-payment-status status-${advance.advanceStatus.toLowerCase()}`}
-                    >
-                      {statusLabel(advance.advanceStatus)}
-                    </em>
+                    {advance.reviewRequired ? (
+                      <em
+                        className={`workforce-payment-status status-${advance.advanceStatus.toLowerCase()}`}
+                      >
+                        Needs review
+                      </em>
+                    ) : null}
                   </header>
                   <div className="workforce-advance-card__reference">
                     <span>{advance.displayVoucherNumber}</span>
@@ -2008,21 +2088,16 @@ function AdvancesView({
                   </div>
                   <div className="workforce-advance-card__money">
                     <div>
-                      <span>Outstanding</span>
-                      <strong>{money(advance.outstandingAmount)}</strong>
+                      <span>Advance amount</span>
+                      <strong>{money(advance.originalAmount)}</strong>
                     </div>
                     <small>
-                      Original {money(advance.originalAmount)}
-                      {advance.appliedAmount > 0
-                        ? ` · Applied ${money(advance.appliedAmount)}`
-                        : ""}
-                      {advance.refundedAmount > 0
-                        ? ` · Recovered ${money(advance.refundedAmount)}`
-                        : ""}
+                      Date · {advance.voucherDate}
+                      {advance.description ? ` · ${advance.description}` : ""}
                     </small>
                   </div>
                   <footer>
-                    <span>Paid from: {advance.paymentAccountName ?? "Account unavailable"}</span>
+                    <span>Paid from: {advance.paymentAccountName ?? advance.fundingAccountName ?? "Account unavailable"}</span>
                     <div>
                       <button
                         type="button"
@@ -2074,6 +2149,32 @@ function AdvancesView({
             })}
           </div>
         )}
+        {canonicalFinancials.data?.advanceApplicationParents?.length ? (
+          <details className="workforce-advance-audit-history">
+            <summary>
+              Applied to Labour Dues history · {canonicalFinancials.data.advanceApplicationParents.filter((item) => item.status !== "REVERSED").length} active posting{canonicalFinancials.data.advanceApplicationParents.filter((item) => item.status !== "REVERSED").length === 1 ? "" : "s"}
+            </summary>
+            <div className="workforce-advance-audit-history__list">
+              {canonicalFinancials.data.advanceApplicationParents.map((item) => (
+                <article key={item.id}>
+                  <strong>{item.displayVoucherNumber}</strong>
+                  <span>{item.recipientName}</span>
+                  <span>{item.dueNumber ?? "Due unavailable"}</span>
+                  <span>{money(item.activeAmount)}</span>
+                  <span>{item.date}</span>
+                  <span>{item.status}</span>
+                  <button
+                    type="button"
+                    className="workforce-advance-link"
+                    onClick={() => navigate("/workspace/labour-payments/vouchers?nature=ADVANCE_APPLICATION")}
+                  >
+                    View payment
+                  </button>
+                </article>
+              ))}
+            </div>
+          </details>
+        ) : null}
         {rows.length ? (
           <div className="workforce-advance-pagination">
             <span>

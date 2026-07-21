@@ -46,10 +46,9 @@ test("recipient ownership does not fall back from a group to its leader", () => 
   assert.match(readModel, /snapshot\.labourerName/);
   assert.doesNotMatch(readModel, /groupLeaderName|leaderName/i);
   assert.match(page, /Receiver unavailable/);
-  assert.match(page, /Received by · for/);
-  assert.match(page, /For \$\{advance\.financialOwnerName \?\? "Owner unavailable"\} · Legacy record · review required/);
+  assert.match(page, /Paid to group/);
   assert.match(page, /Recipient unavailable/);
-  assert.match(page, /Review required/);
+  assert.match(page, /Needs review/);
 });
 
 test("mobile advance UX loads twenty rows, debounces search, aborts stale requests, and uses compact actions", () => {
@@ -73,7 +72,7 @@ test("human references, account review states, and all mobile payment tabs remai
   assert.match(route, /paymentAccountName: row\.fundingAccountName/);
   assert.match(route, /needsReview: row\.needsReview/);
   assert.match(page, /Account unavailable/);
-  assert.match(page, /Legacy record/);
+  assert.match(page, /Needs review/);
   assert.doesNotMatch(page.slice(page.indexOf("function AdvancesView"), page.indexOf("function ReviewSettleDialog")), /Legacy account/);
   for (const label of ["Payments Due", "New Labour Due", "Payment Vouchers", "Advances"]) assert.match(hub, new RegExp(label));
   assert.match(hub, /scrollIntoView/);
@@ -93,7 +92,7 @@ test("record advance uses sectioned searchable selectors and valid-state posting
 });
 
 test("advance cards retain explicit owner and receiver hierarchy in both views", () => {
-  assert.match(page, /advance\.recipientScope === "INDIVIDUAL"\s*\? advance\.financialOwnerName/);
+  assert.match(page, /advance\.financialOwnerName \?\? receiver \?\? "Recipient unavailable"/);
   assert.match(page, /Received by \$\{receivers\[0\]\}/);
   assert.match(page, /receivers\.length > 1/);
   assert.match(page, /Receiver unavailable/);
@@ -105,14 +104,35 @@ test("advance cards retain explicit owner and receiver hierarchy in both views",
 test("payment and advance registers remain separate business documents", () => {
   const voucherRegister = page.slice(page.indexOf("function VoucherRegister"), page.indexOf("function AdvancesView"));
   const advanceRegister = page.slice(page.indexOf("function AdvancesView"), page.indexOf("function ReviewSettleDialog"));
-  assert.match(voucherRegister, /New-money payments against Labour Dues/);
+  assert.match(voucherRegister, /Final cash payments and aggregate applied-advances postings/);
   assert.doesNotMatch(voucherRegister, /<option value="ADVANCE">/);
   assert.doesNotMatch(voucherRegister, /<option value="REFUND_RECOVERY">/);
+  assert.doesNotMatch(voucherRegister, /LPA-\$\{/);
   assert.match(voucherRegister, /Final labour payments/);
   assert.match(voucherRegister, /onViewAdvances/);
-  assert.match(advanceRegister, /FULLY_APPLIED/);
-  assert.match(advanceRegister, /FULLY_REFUNDED/);
-  assert.match(advanceRegister, /VOIDED/);
+  assert.match(advanceRegister, /Advance amount/);
+  assert.match(advanceRegister, /Available advance balance/);
+  assert.match(advanceRegister, /Applied to labour dues/);
+  assert.doesNotMatch(advanceRegister, /<span>Outstanding<\/span>/);
+  assert.doesNotMatch(advanceRegister, /Original \{money\(advance\.originalAmount\)\}/);
+});
+
+test("aggregate applied-advance history is derived from posting events while child allocations stay internal", () => {
+  assert.match(readModel, /aggregateApplicationVoucherNumber/);
+  assert.match(readModel, /action === "labour_due_settled"/);
+  assert.match(readModel, /advanceApplicationParents/);
+  assert.match(page, /applicationParents=\{canonicalFinancials\.data\?\.advanceApplicationParents \?\? \[\]\}/);
+  assert.match(page, /kind: "application_parent"/);
+  assert.match(page, /Advance applied to due — Non-cash/);
+  assert.doesNotMatch(page, /sourceAdvanceVoucherNumber \?\? "Advance reference unavailable"/);
+});
+
+test("aggregate applied-advance reversal targets the parent event instead of individual child rows", () => {
+  assert.match(route, /advance-application-events\/:eventId\/reverse/);
+  assert.match(route, /labour_advance_application_event_reversed/);
+  assert.match(page, /reverseLabourAdvanceApplicationEvent/);
+  assert.match(page, /Void \/ reverse/);
+  assert.doesNotMatch(page, /APPLICATION_REVERSAL/);
 });
 
 test("dashboard quick add deep-links into the canonical record advance dialog", () => {

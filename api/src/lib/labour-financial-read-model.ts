@@ -4,6 +4,7 @@ import {
   accounts,
   accountTransactions,
   advanceRecords,
+  auditLogs,
   labourAccountingEntries,
   labourAdvanceApplications,
   labourDues,
@@ -13,6 +14,7 @@ import {
   labourers,
   labourWageSettlementAdvanceAllocations,
   operationalRecords,
+  users,
 } from "../db/schema.js";
 import { resolveAccountIdentity, type AccountIdentityLike } from "./account-identity.js";
 import { legacyAdvancePosition, mergeAdvancePositions, type LegacyAdvanceReadRow } from "./labour-advance-read-model.js";
@@ -92,6 +94,37 @@ type UnifiedAdvancePosition = {
   reviewReason: string | null;
   legacy: boolean;
   canonical: boolean;
+};
+
+type AdvanceApplicationParent = {
+  id: string;
+  parentVoucherId: string | null;
+  voucherNumber: string;
+  displayVoucherNumber: string;
+  date: string;
+  postedAt: string;
+  dueId: string;
+  dueNumber: string | null;
+  workFromDate: string | null;
+  workToDate: string | null;
+  recipientScope: string | null;
+  labourerId: string | null;
+  labourGroupId: string | null;
+  recipientName: string;
+  description: string;
+  paymentMethod: "Applied advances";
+  originalAmount: number;
+  activeAmount: number;
+  recoveredAmount: number;
+  status: "POSTED" | "PARTIALLY_REVERSED" | "REVERSED";
+  createdAt: string;
+  createdByName: string | null;
+  childApplicationIds: string[];
+  activeChildApplicationIds: string[];
+  childAllocationTotal: number;
+  activeChildAllocationTotal: number;
+  dueOutstandingAfterPosting: number | null;
+  sourceType: "AUDIT_EVENT" | "PARENT_VOUCHER";
 };
 
 function resolveFundingAccount(args: {
@@ -176,6 +209,10 @@ function positionStatus(args: { status: string; outstandingAmount: number; appli
   if (args.recoveredAmount > 0) return "PARTIALLY_REFUNDED";
   if (args.appliedAmount > 0) return "PARTIALLY_APPLIED";
   return "OUTSTANDING";
+}
+
+function aggregateApplicationVoucherNumber(value: string) {
+  return `LPV-AP-${value.slice(0, 8).toUpperCase()}`;
 }
 
 async function loadUnifiedAdvancePositions(input: { workspaceId: string; farmId: string; seasonId: string }, scopedAccounts: typeof accounts.$inferSelect[], transactions: typeof accountTransactions.$inferSelect[], vouchers: typeof labourPaymentVouchers.$inferSelect[]) {
@@ -409,7 +446,7 @@ async function loadVoucherSourceMaps(workspaceId: string, vouchers: typeof labou
 }
 
 export async function loadLabourFinancialReadModel(input: { workspaceId: string; farmId: string; seasonId: string }) {
-  const [scopeAccounts, transactions, vouchers, dues, applications, allocations, journal] = await Promise.all([
+  const [scopeAccounts, transactions, vouchers, dues, applications, allocations, journal, logs, userRows] = await Promise.all([
     db.select().from(accounts).where(eq(accounts.farmId, input.farmId)),
     db.select().from(accountTransactions).where(and(eq(accountTransactions.farmId, input.farmId), eq(accountTransactions.seasonId, input.seasonId))),
     db.select().from(labourPaymentVouchers).where(and(eq(labourPaymentVouchers.workspaceId, input.workspaceId), eq(labourPaymentVouchers.farmId, input.farmId), eq(labourPaymentVouchers.seasonId, input.seasonId))),
@@ -417,6 +454,8 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
     db.select().from(labourAdvanceApplications).where(eq(labourAdvanceApplications.workspaceId, input.workspaceId)),
     db.select().from(labourPaymentAllocations).where(eq(labourPaymentAllocations.workspaceId, input.workspaceId)),
     db.select().from(labourAccountingEntries).where(and(eq(labourAccountingEntries.workspaceId, input.workspaceId), eq(labourAccountingEntries.farmId, input.farmId), eq(labourAccountingEntries.seasonId, input.seasonId))),
+    db.select().from(auditLogs).where(and(eq(auditLogs.workspaceId, input.workspaceId), eq(auditLogs.farmId, input.farmId))),
+    db.select({ id: users.id, displayName: users.displayName, email: users.email }).from(users),
   ]);
   const dueIds = new Set(dues.map((row) => row.id));
   const scopedApplications = applications.filter((row) => dueIds.has(row.dueId));
@@ -426,6 +465,7 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
   const dueById = new Map(dues.map((row) => [row.id, row]));
   const applicationById = new Map(scopedApplications.map((row) => [row.id, row]));
   const transactionById = new Map(transactions.map((row) => [row.id, row]));
+  const userById = new Map(userRows.map((row) => [row.id, row]));
   const advancePositions = await loadUnifiedAdvancePositions(input, scopeAccounts, transactions, vouchers);
   const advanceByVoucherId = new Map(advancePositions.filter((row) => row.canonicalVoucherId).map((row) => [row.canonicalVoucherId!, row]));
   const { sourceById, sourceByClientId } = await loadVoucherSourceMaps(input.workspaceId, vouchers);
@@ -540,6 +580,67 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
     };
   }).sort((left, right) => right.postedAt.localeCompare(left.postedAt) || right.id.localeCompare(left.id));
 
+  const aggregateParentVouchers = vouchers.filter((voucher) => voucher.nature === "ADVANCE_APPLICATION" && voucher.linkedDueId);
+  const advanceApplicationParents: AdvanceApplicationParent[] = logs
+    .filter((row) => row.action === "labour_due_settled" && row.entityType === "labour_due" && row.entityId && dueById.has(row.entityId))
+    .map((row) => {
+      const details = asSnapshot(row.details);
+      const advancePool = asSnapshot(details.advancePool);
+      const requestedAmount = amount(advancePool.requestedAmount);
+      if (requestedAmount <= 0.005) return null;
+      const due = row.entityId ? dueById.get(row.entityId) ?? null : null;
+      if (!due) return null;
+      const dueSnapshot = asSnapshot(due.recipientSnapshot);
+      const applicationSpecs = Array.isArray(details.advanceApplications) ? details.advanceApplications : [];
+      const childApplicationKeys = applicationSpecs
+        .map((value) => (value && typeof value === "object" && typeof (value as Record<string, unknown>).idempotencyKey === "string" ? (value as Record<string, unknown>).idempotencyKey as string : null))
+        .filter((value): value is string => Boolean(value));
+      const childApplications = scopedApplications.filter((application) => application.dueId === due.id && childApplicationKeys.includes(application.idempotencyKey));
+      const activeChildren = childApplications.filter((application) => application.status === "ACTIVE");
+      const activeAmount = amount(activeChildren.reduce((sum, application) => sum + amount(application.amount), 0));
+      const matchingParentVoucher = aggregateParentVouchers.find((voucher) => voucher.linkedDueId === due.id && voucher.sourceId === firstText(advancePool.idempotencyKey));
+      const createdBy = row.actorUserId ? userById.get(row.actorUserId) : row.userId ? userById.get(row.userId) : null;
+      const status: AdvanceApplicationParent["status"] = activeAmount <= 0.005
+        ? "REVERSED"
+        : activeChildren.length === childApplications.length
+          ? "POSTED"
+          : "PARTIALLY_REVERSED";
+      const displayNumber = matchingParentVoucher?.voucherNumber ?? aggregateApplicationVoucherNumber(row.id);
+      const settlementSummary = asSnapshot(details.settlementSummary);
+      return {
+        id: row.id,
+        parentVoucherId: matchingParentVoucher?.id ?? null,
+        voucherNumber: displayNumber,
+        displayVoucherNumber: displayNumber,
+        date: matchingParentVoucher?.voucherDate ?? row.createdAt.toISOString().slice(0, 10),
+        postedAt: matchingParentVoucher?.postedAt?.toISOString() ?? row.createdAt.toISOString(),
+        dueId: due.id,
+        dueNumber: due.dueNumber,
+        workFromDate: due.workFromDate,
+        workToDate: due.workToDate,
+        recipientScope: due.recipientScope,
+        labourerId: due.labourerId,
+        labourGroupId: due.labourGroupId,
+        recipientName: recipientName(dueSnapshot),
+        description: matchingParentVoucher?.description ?? `Applied advances to ${due.dueNumber}`,
+        paymentMethod: "Applied advances",
+        originalAmount: requestedAmount,
+        activeAmount,
+        recoveredAmount: amount(Math.max(requestedAmount - activeAmount, 0)),
+        status,
+        createdAt: row.createdAt.toISOString(),
+        createdByName: createdBy?.displayName ?? createdBy?.email ?? null,
+        childApplicationIds: childApplications.map((application) => application.id),
+        activeChildApplicationIds: activeChildren.map((application) => application.id),
+        childAllocationTotal: amount(childApplications.reduce((sum, application) => sum + amount(application.amount), 0)),
+        activeChildAllocationTotal: activeAmount,
+        dueOutstandingAfterPosting: typeof settlementSummary.remainingDue === "number" ? amount(settlementSummary.remainingDue) : null,
+        sourceType: matchingParentVoucher ? "PARENT_VOUCHER" : "AUDIT_EVENT",
+      } satisfies AdvanceApplicationParent;
+    })
+    .filter((row): row is NonNullable<typeof row> => row !== null)
+    .sort((left, right) => right.postedAt.localeCompare(left.postedAt) || right.id.localeCompare(left.id));
+
   const legacyPartnerAdvanceEntries = advancePositions
     .filter((row) => !row.canonical && row.partnerId && row.status !== "VOIDED")
     .map((row) => ({
@@ -618,6 +719,7 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
     partnerPositions,
     partnerLedger,
     labourLedger,
+    advanceApplicationParents,
     expenses,
     activity,
     currentLedger,

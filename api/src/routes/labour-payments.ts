@@ -63,6 +63,9 @@ const voucherParamsSchema = paramsSchema.extend({
 const advanceApplicationParamsSchema = dueParamsSchema.extend({
   applicationId: z.string().uuid(),
 });
+const advanceApplicationEventParamsSchema = paramsSchema.extend({
+  eventId: z.string().uuid(),
+});
 const contextSchema = z.object({
   farmId: z.string().uuid(),
   seasonId: z.string().uuid(),
@@ -2103,6 +2106,145 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
   );
 
   app.post(
+    "/v1/workspace/:workspaceId/labour-payments/advance-application-events/:eventId/reverse",
+    { preHandler: requireUser },
+    async (request, reply) => {
+      const params = advanceApplicationEventParamsSchema.safeParse(request.params);
+      const query = contextSchema.safeParse(request.query);
+      const body = voidSchema.safeParse(request.body);
+      if (!params.success || !query.success || !body.success)
+        return reply.code(400).send({ message: "A valid aggregate advance application reversal is required." });
+      if (!(await requireRequestScope(request, reply, params.data.workspaceId, query.data.farmId, query.data.seasonId, "edit"))) return;
+      try {
+        const result = await db.transaction(async (tx) => {
+          await tx.execute(
+            sql`SELECT pg_advisory_xact_lock(hashtext(${`${params.data.workspaceId}:${query.data.farmId}:${query.data.seasonId}:labour-payment-posting`}), 1)`,
+          );
+          const [eventLog] = await tx
+            .select()
+            .from(auditLogs)
+            .where(
+              and(
+                eq(auditLogs.id, params.data.eventId),
+                eq(auditLogs.workspaceId, params.data.workspaceId),
+                eq(auditLogs.farmId, query.data.farmId),
+                eq(auditLogs.action, "labour_due_settled"),
+                eq(auditLogs.entityType, "labour_due"),
+              ),
+            )
+            .limit(1);
+          if (!eventLog?.entityId) throw new Error("Aggregate advance application event was not found.");
+          const details = asSnapshot(eventLog.details);
+          const advancePool = asSnapshot(details.advancePool);
+          if (!firstText(advancePool.idempotencyKey)) throw new Error("This event does not contain an aggregate advance application.");
+          const applicationSpecs = Array.isArray(details.advanceApplications) ? details.advanceApplications : [];
+          const applicationKeys = applicationSpecs
+            .map((value) => (value && typeof value === "object" && typeof (value as Record<string, unknown>).idempotencyKey === "string" ? (value as Record<string, unknown>).idempotencyKey as string : null))
+            .filter((value): value is string => Boolean(value));
+          const [due] = await tx
+            .select()
+            .from(labourDues)
+            .where(
+              and(
+                eq(labourDues.id, eventLog.entityId),
+                eq(labourDues.workspaceId, params.data.workspaceId),
+                eq(labourDues.farmId, query.data.farmId),
+                eq(labourDues.seasonId, query.data.seasonId),
+              ),
+            )
+            .limit(1);
+          if (!due) throw new Error("The related labour due was not found.");
+          const childApplications = applicationKeys.length
+            ? await tx
+              .select()
+              .from(labourAdvanceApplications)
+              .where(
+                and(
+                  eq(labourAdvanceApplications.workspaceId, params.data.workspaceId),
+                  eq(labourAdvanceApplications.dueId, due.id),
+                  inArray(labourAdvanceApplications.idempotencyKey, applicationKeys),
+                ),
+              )
+            : [];
+          const activeChildren = childApplications.filter((application) => application.status === "ACTIVE");
+          if (activeChildren.length) {
+            const now = new Date();
+            for (const application of activeChildren) {
+              await tx
+                .update(labourAdvanceApplications)
+                .set({
+                  status: "REVERSED",
+                  reversedAt: now,
+                  reversedBy: request.appUser!.id,
+                  updatedAt: now,
+                })
+                .where(eq(labourAdvanceApplications.id, application.id));
+              await reverseLabourJournal(tx, {
+                workspaceId: params.data.workspaceId,
+                farmId: query.data.farmId,
+                seasonId: query.data.seasonId,
+                actorId: request.appUser!.id,
+                reversalKey: `advance-application-event-reversal:${params.data.eventId}:${body.data.idempotencyKey}:${application.id}`,
+                originalEventKey: `advance-application:${application.id}`,
+              });
+            }
+          }
+          const duePosition = await refreshLabourDuePaymentStatus(tx, due.id);
+          const [existingParentVoucher] = await tx
+            .select()
+            .from(labourPaymentVouchers)
+            .where(
+              and(
+                eq(labourPaymentVouchers.workspaceId, params.data.workspaceId),
+                eq(labourPaymentVouchers.linkedDueId, due.id),
+                eq(labourPaymentVouchers.nature, "ADVANCE_APPLICATION"),
+                eq(labourPaymentVouchers.sourceId, String(advancePool.idempotencyKey)),
+              ),
+            )
+            .limit(1);
+          if (existingParentVoucher && existingParentVoucher.status !== "VOIDED") {
+            await tx
+              .update(labourPaymentVouchers)
+              .set({
+                status: "VOIDED",
+                voidReason: body.data.reason,
+                voidedAt: new Date(),
+                voidedBy: request.appUser!.id,
+                updatedAt: new Date(),
+              })
+              .where(eq(labourPaymentVouchers.id, existingParentVoucher.id));
+          }
+          await tx.insert(auditLogs).values({
+            workspaceId: params.data.workspaceId,
+            farmId: query.data.farmId,
+            userId: request.appUser!.id,
+            actorUserId: request.appUser!.id,
+            action: "labour_advance_application_event_reversed",
+            entityType: "labour_advance_application_event",
+            entityId: params.data.eventId,
+            details: {
+              reason: body.data.reason,
+              idempotencyKey: body.data.idempotencyKey,
+              parentEventId: params.data.eventId,
+              reversedApplicationIds: activeChildren.map((application) => application.id),
+            },
+          });
+          return {
+            eventId: params.data.eventId,
+            reversedApplicationCount: activeChildren.length,
+            due: duePosition,
+          };
+        });
+        return { result };
+      } catch (error) {
+        return reply.code(409).send({
+          message: error instanceof Error ? error.message : "Unable to reverse the aggregate advance application.",
+        });
+      }
+    },
+  );
+
+  app.post(
     "/v1/workspace/:workspaceId/labour-payments/advances",
     { preHandler: requireUser },
     async (request, reply) => {
@@ -2814,7 +2956,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
         ),
       );
       const postedCashVouchers = vouchers.filter(
-        (voucher) => voucher.status === "POSTED",
+        (voucher) => voucher.status === "POSTED" && voucher.nature !== "ADVANCE_APPLICATION",
       );
       const missingAccountTransactions = postedCashVouchers
         .filter((voucher) => !voucher.accountTransactionId && !voucher.legacy)

@@ -2017,12 +2017,43 @@ export type CanonicalLabourLedgerEntry = {
   labourerId?: string | null; labourGroupId?: string | null; recipientName: string; description: string;
   labourDueEffect: number; labourAdvanceEffect: number; expenseEffect: number; partnerEffect: number; cashControlEffect: number; canonical: true;
 };
+export type LabourAdvanceApplicationParentRecord = {
+  id: string;
+  parentVoucherId?: string | null;
+  voucherNumber: string;
+  displayVoucherNumber: string;
+  date: string;
+  postedAt: string;
+  dueId: string;
+  dueNumber?: string | null;
+  workFromDate?: string | null;
+  workToDate?: string | null;
+  recipientScope?: LabourRecipientScope | null;
+  labourerId?: string | null;
+  labourGroupId?: string | null;
+  recipientName: string;
+  description: string;
+  paymentMethod: "Applied advances";
+  originalAmount: number;
+  activeAmount: number;
+  recoveredAmount: number;
+  status: "POSTED" | "PARTIALLY_REVERSED" | "REVERSED";
+  createdAt: string;
+  createdByName?: string | null;
+  childApplicationIds: string[];
+  activeChildApplicationIds: string[];
+  childAllocationTotal: number;
+  activeChildAllocationTotal: number;
+  dueOutstandingAfterPosting?: number | null;
+  sourceType: "AUDIT_EVENT" | "PARENT_VOUCHER";
+};
 export type LabourFinancialReadModel = {
   scope: { workspaceId: string; farmId: string; seasonId: string };
   accountEntries: CanonicalLabourAccountEntry[];
   partnerPositions: Array<{ accountId: string; accountName: string; farmOwesPartner: number; ledgerBalance: number; labourAdvancesPaid: number; directLabourPayments: number; recoveries: number; outstandingLabourAdvances: number; appliedLabourAdvances: number; entryCount: number }>;
   partnerLedger: CanonicalLabourAccountEntry[];
   labourLedger: CanonicalLabourLedgerEntry[];
+  advanceApplicationParents: LabourAdvanceApplicationParentRecord[];
   expenses: Array<{ id: string; dueId?: string | null; dueNumber?: string | null; date: string; recipientScope?: LabourRecipientScope | null; labourerId?: string | null; labourGroupId?: string | null; recipientName: string; description: string; status: string; amount: number; canonical: true }>;
   activity: Array<{ id: string; date: string; module: "labour"; title: string; detail: string; status: string; sourceId?: string | null; canonical: true }>;
   currentLedger: Record<string, number>;
@@ -2108,6 +2139,8 @@ export const refundLabourAdvance = (token: string, workspaceId: string, voucherI
   apiRequest<{ voucher: LabourPaymentVoucherRecord }>(`/v1/workspace/${workspaceId}/labour-payments/advances/${voucherId}/refund`, { method: "POST", body: JSON.stringify(input) }, token);
 export const voidLabourPaymentVoucher = (token: string, workspaceId: string, voucherId: string, farmId: string, seasonId: string, input: { idempotencyKey: string; reason: string }) =>
   apiRequest<{ result: { voucher: LabourPaymentVoucherRecord; reversal: LabourPaymentVoucherRecord | null } }>(`/v1/workspace/${workspaceId}/labour-payments/vouchers/${voucherId}/void?${labourPaymentContextQuery(farmId, seasonId)}`, { method: "POST", body: JSON.stringify(input) }, token);
+export const reverseLabourAdvanceApplicationEvent = (token: string, workspaceId: string, eventId: string, farmId: string, seasonId: string, input: { idempotencyKey: string; reason: string }) =>
+  apiRequest<{ result: { eventId: string; reversedApplicationCount: number; due: LabourDueRecord } }>(`/v1/workspace/${workspaceId}/labour-payments/advance-application-events/${eventId}/reverse?${labourPaymentContextQuery(farmId, seasonId)}`, { method: "POST", body: JSON.stringify(input) }, token);
 
 export type LabourReconciliationSummary = {
   totalCount: number; totalAmount: number; orphanedCount: number; duplicateCandidateCount: number;
