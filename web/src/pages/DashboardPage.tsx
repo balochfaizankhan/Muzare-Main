@@ -22,8 +22,9 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { calculateAvailableBalance } from "../lib/accounting";
 import { fetchBootstrap } from "../lib/api";
+import { dashboardFinancialSnapshotStorageKey, isDashboardFinancialScope, settleDashboardFinancialSnapshot, type DashboardFinancialSnapshot } from "../lib/dashboardFinancialSnapshot";
 import { formatDate } from "../lib/format";
-import { getActiveLabourWageSettlements, getCashAffectingVouchers, getGeneralExpenseVouchers, outstandingLabourAdvances } from "../lib/labourWageSettlements";
+import { getActiveLabourWageSettlements, getCashAffectingVouchers, getGeneralExpenseVouchers } from "../lib/labourWageSettlements";
 import { buildPartnerLiabilityPositions } from "../lib/partnerAccounting";
 import { ensureLocalAccounts, offlineDb, workspaceRecords } from "../lib/offline-db";
 import { isActiveOperationalRecord } from "../lib/operationalRecords";
@@ -60,8 +61,12 @@ export function DashboardPage() {
   const sync = useSyncState();
   const canonicalFinancials = useCanonicalLabourFinancials();
   const [totals, setTotals] = useState<DashboardTotals | null>(null);
+  const [financialSnapshot, setFinancialSnapshot] = useState<DashboardFinancialSnapshot | null>(null);
   const [activities, setActivities] = useState<WorkspaceActivityItem[]>([]);
   const refreshInFlight = useRef(false);
+  const financialSnapshotRef = useRef<DashboardFinancialSnapshot | null>(null);
+  const financialScopeKeyRef = useRef("");
+  const dashboardSnapshotSequence = useRef(0);
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const fallbackTotals: DashboardTotals = {
     presentToday: 0,
@@ -80,7 +85,50 @@ export function DashboardPage() {
     enabled: Boolean(user && token),
     retry: false,
   });
+  const financialScope = {
+    workspaceId: user?.workspaceId ?? "",
+    farmId: sync.farmId ?? "",
+    seasonId: sync.seasonId ?? "",
+  };
+  const financialScopeKey = `${financialScope.workspaceId}:${financialScope.farmId}:${financialScope.seasonId}`;
+  useEffect(() => {
+    financialScopeKeyRef.current = financialScopeKey;
+    if (!financialScope.workspaceId || !financialScope.farmId || !financialScope.seasonId) {
+      financialSnapshotRef.current = null;
+      setFinancialSnapshot(null);
+      return;
+    }
+    const cached = localStorage.getItem(dashboardFinancialSnapshotStorageKey(financialScope));
+    if (!cached) {
+      financialSnapshotRef.current = null;
+      setFinancialSnapshot(null);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(cached) as DashboardFinancialSnapshot;
+      if (!isDashboardFinancialScope(parsed, financialScope)) {
+        financialSnapshotRef.current = null;
+        setFinancialSnapshot(null);
+        return;
+      }
+      financialSnapshotRef.current = parsed;
+      setFinancialSnapshot(parsed);
+    } catch {
+      localStorage.removeItem(dashboardFinancialSnapshotStorageKey(financialScope));
+      financialSnapshotRef.current = null;
+      setFinancialSnapshot(null);
+    }
+  }, [financialScope.farmId, financialScope.seasonId, financialScope.workspaceId, financialScopeKey]);
   const loadLocalDashboard = useCallback(async () => {
+    const scope = {
+      workspaceId: user?.workspaceId ?? "",
+      farmId: sync.farmId ?? "",
+      seasonId: sync.seasonId ?? "",
+    };
+    const scopeKey = `${scope.workspaceId}:${scope.farmId}:${scope.seasonId}`;
+    const requestId = ++dashboardSnapshotSequence.current;
+    const hasScope = Boolean(scope.workspaceId && scope.farmId && scope.seasonId);
+    const canonicalReady = !hasScope || !navigator.onLine || Boolean(canonicalFinancials.data);
     await ensureLocalAccounts();
     const [attendance, dispatches, sales, vouchers, entries, advances, accounts, settlements, recentActivities] = await Promise.all([
       workspaceRecords(offlineDb.attendance),
@@ -93,6 +141,7 @@ export function DashboardPage() {
       workspaceRecords(offlineDb.labourWageSettlements),
       loadWorkspaceActivity(canonicalFinancials.data),
     ]);
+    if (requestId !== dashboardSnapshotSequence.current || financialScopeKeyRef.current !== scopeKey) return;
     const activeAttendance = attendance.filter(isActiveOperationalRecord);
     const activeDispatches = dispatches.filter(isActiveOperationalRecord);
     const activeSales = sales.filter(isActiveOperationalRecord);
@@ -109,10 +158,29 @@ export function DashboardPage() {
     const seasonId = sync.seasonId ?? null;
     const date = today();
     const totalSales = activeSales.reduce((sum, item) => sum + item.amount, 0);
-    const labourAdvances = canonicalFinancials.data?.summary.outstandingAdvance ?? outstandingLabourAdvances(activeAdvances, activeSettlements, { farmId, seasonId });
-    const totalExpenses = generalExpenseVouchers.reduce((sum, item) => sum + item.amount, 0) + (canonicalFinancials.data?.summary.wageExpense ?? 0);
-    const partnerBalance = buildPartnerLiabilityPositions(activeAccounts, cashAffectingVouchers, activeAdvances, activeEntries, activeSales, activeSettlements, { farmId, seasonId })
-      .reduce((sum, item) => sum + item.currentPartnerBalance, 0) + (canonicalFinancials.data?.summary.farmOwesPartner ?? 0);
+    const nextFinancialSnapshot = settleDashboardFinancialSnapshot({
+      scope,
+      previousSnapshot: financialSnapshotRef.current,
+      canonicalReady,
+      generatedAt: new Date().toISOString(),
+      canonicalVersion: String(canonicalFinancials.dataUpdatedAt ?? "offline"),
+      financials: {
+        cashBalance: calculateAvailableBalance(activeAccounts, activeSales, cashAffectingVouchers, activeAdvances, activeEntries, activeSettlements) + (canonicalFinancials.data?.summary.accountMovement ?? 0),
+        totalExpenses: generalExpenseVouchers.reduce((sum, item) => sum + item.amount, 0) + (canonicalFinancials.data?.summary.wageExpense ?? 0),
+        outstandingLabourAdvances: canonicalFinancials.data?.summary.outstandingAdvance ?? 0,
+        inputVersion: `${activeAccounts.length}:${activeSales.length}:${generalExpenseVouchers.length}:${activeAdvances.length}:${activeEntries.length}:${activeSettlements.length}`,
+      },
+    });
+    if (nextFinancialSnapshot && canonicalReady && isDashboardFinancialScope(nextFinancialSnapshot, scope)) {
+      financialSnapshotRef.current = nextFinancialSnapshot;
+      setFinancialSnapshot(nextFinancialSnapshot);
+      localStorage.setItem(dashboardFinancialSnapshotStorageKey(scope), JSON.stringify(nextFinancialSnapshot));
+    }
+    const settledFinancialSnapshot = nextFinancialSnapshot ?? financialSnapshotRef.current;
+    const partnerBalance = canonicalReady
+      ? buildPartnerLiabilityPositions(activeAccounts, cashAffectingVouchers, activeAdvances, activeEntries, activeSales, activeSettlements, { farmId, seasonId })
+        .reduce((sum, item) => sum + item.currentPartnerBalance, 0) + (canonicalFinancials.data?.summary.farmOwesPartner ?? 0)
+      : (totals?.partnerBalance ?? 0);
     const attendanceMarkedToday = activeAttendance.filter((item) => item.date === date).length;
     const presentToday = activeAttendance.filter((item) => item.date === date && item.status === "present").length;
     const dispatchesToday = activeDispatches.filter((item) => item.date === date).length;
@@ -123,18 +191,18 @@ export function DashboardPage() {
       dispatchesToday,
       cartonsToday,
       totalSales,
-      labourAdvances,
-      totalExpenses,
-      netPosition: calculateAvailableBalance(activeAccounts, activeSales, cashAffectingVouchers, activeAdvances, activeEntries, activeSettlements) + (canonicalFinancials.data?.summary.accountMovement ?? 0),
+      labourAdvances: settledFinancialSnapshot?.outstandingLabourAdvances ?? 0,
+      totalExpenses: settledFinancialSnapshot?.totalExpenses ?? 0,
+      netPosition: settledFinancialSnapshot?.cashBalance ?? 0,
       partnerBalance,
     });
 
     setActivities(recentActivities.slice(0, 5));
-  }, [canonicalFinancials.data, sync.farmId, sync.seasonId, t]);
+  }, [canonicalFinancials.data, canonicalFinancials.dataUpdatedAt, sync.farmId, sync.seasonId, t, totals?.partnerBalance, user?.workspaceId]);
   const scheduleDashboardRefresh = useCallback(() => {
     if (refreshInFlight.current) return;
     refreshInFlight.current = true;
-    setDashboardLoading(true);
+    if (!financialSnapshotRef.current) setDashboardLoading(true);
     markStartup("dashboard-refresh-scheduled", { workspaceId: user?.workspaceId, farmId: sync.farmId, seasonId: sync.seasonId });
     void scheduleBackgroundTask(async () => {
       try {
@@ -147,15 +215,13 @@ export function DashboardPage() {
         setDashboardLoading(false);
       }
     }, { timeoutMs: 500 });
-  }, [loadLocalDashboard]);
+  }, [loadLocalDashboard, sync.farmId, sync.seasonId, user?.workspaceId]);
 
   useEffect(() => {
     scheduleDashboardRefresh();
     window.addEventListener("muzare-data-refresh", scheduleDashboardRefresh);
-    window.addEventListener("muzare-local-data-change", scheduleDashboardRefresh);
     return () => {
       window.removeEventListener("muzare-data-refresh", scheduleDashboardRefresh);
-      window.removeEventListener("muzare-local-data-change", scheduleDashboardRefresh);
     };
   }, [scheduleDashboardRefresh]);
 
@@ -185,7 +251,7 @@ export function DashboardPage() {
   const heroStatusCopy = workspaceStatus.heroCopy;
   const heroSyncLabel = workspaceStatus.label;
   const syncNote = workspaceStatus.tone === "offline" ? t("layout.workingOffline") : workspaceStatus.note;
-  const metricsReady = !hydrationPending && !dashboardLoading && Boolean(totals);
+  const metricsReady = !hydrationPending && !dashboardLoading && Boolean(totals) && Boolean(financialSnapshot || !financialScope.farmId || !financialScope.seasonId);
   const attendanceTodayLabel = hydrationPending || dashboardLoading ? "--" : `${totalsValue.attendanceMarkedToday} labour today`;
   const dispatchTodayLabel = hydrationPending || dashboardLoading ? "--" : `${totalsValue.dispatchesToday} today`;
 
