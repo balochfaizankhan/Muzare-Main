@@ -21,9 +21,11 @@ import { getActiveVouchers, loadWorkspaceVouchers } from "../../lib/voucherColle
 import { fetchBootstrap } from "../../lib/api";
 import {
   buildPartnerLiabilityPositions,
+  buildCanonicalPartnerLiabilityPosition,
   calculatePartnerLiabilityBalance,
   getPartnerBalanceState,
   getPartnerAccountingSnapshot,
+  mergePartnerPositionWithCanonical,
   partnerLiabilityGroupDisplayTotal,
   defaultPartnerLiabilityGroupExpansion,
   groupPartnerLiabilityTransactions,
@@ -1341,47 +1343,12 @@ export function Reports() {
     const merged = buildPartnerLiabilityPositions(accounts, cashAffectingVouchers, [], partnerRows, saleRows, [])
       .map((item) => {
         const canonical = item.account?.id ? canonicalFinancials.data?.partnerPositions.find((entry) => entry.accountId === item.account!.id) : undefined;
-        return canonical ? {
-          ...item,
-          directExpensesPaid: item.directExpensesPaid + canonical.farmOwesPartner,
-          labourAdvancesPaid: canonical.labourAdvancesPaid,
-          totalLabourAdvancesPaid: canonical.labourAdvancesPaid,
-          labourWageSettlements: canonical.directLabourPayments,
-          labourSettlementCashPaid: canonical.directLabourPayments,
-          settledAdvances: canonical.appliedLabourAdvances,
-          outstandingLabourAdvances: canonical.outstandingLabourAdvances,
-          moneyReturned: item.moneyReturned + canonical.recoveries,
-          currentPartnerBalance: item.currentPartnerBalance + canonical.farmOwesPartner,
-        } : item;
+        return mergePartnerPositionWithCanonical(item, canonical);
       });
     const representedAccountIds = new Set(merged.map((item) => item.account?.id ?? item.key));
     for (const canonical of canonicalFinancials.data?.partnerPositions ?? []) {
       if (representedAccountIds.has(canonical.accountId)) continue;
-      merged.push({
-        account: accounts.find((item) => item.id === canonical.accountId) ?? null,
-        key: canonical.accountId,
-        name: canonical.accountName,
-        openingBalance: 0,
-        capitalInjected: 0,
-        directExpensesPaid: canonical.farmOwesPartner,
-        purchaseVouchersPaid: 0,
-        businessFundsNet: 0,
-        labourAdvancesPaid: canonical.labourAdvancesPaid,
-        labourWageSettlements: canonical.directLabourPayments,
-        labourSettlementCashPaid: canonical.directLabourPayments,
-        labourSettlementNonCashApplied: 0,
-        totalLabourAdvancesPaid: canonical.labourAdvancesPaid,
-        settledAdvances: canonical.appliedLabourAdvances,
-        outstandingLabourAdvances: canonical.outstandingLabourAdvances,
-        reconciliationDifference: canonical.farmOwesPartner - canonical.ledgerBalance,
-        isConsistent: Math.abs(canonical.farmOwesPartner - canonical.ledgerBalance) < 0.01,
-        transfersIn: 0,
-        transfersOut: 0,
-        moneyReturned: canonical.recoveries,
-        adjustments: 0,
-        currentPartnerBalance: canonical.farmOwesPartner,
-        reconciliationDelta: canonical.farmOwesPartner - canonical.ledgerBalance,
-      });
+      merged.push(buildCanonicalPartnerLiabilityPosition(canonical, accounts.find((item) => item.id === canonical.accountId) ?? null));
     }
     return merged.filter((item) => !accountId || (item.account?.id ?? item.key) === accountId);
   }, [accountId, accountingAdvanceRows, accounts, activeSettlements, canonicalFinancials.data, cashAffectingVouchers, partnerRows, saleRows]);
@@ -1391,17 +1358,22 @@ export function Reports() {
     const legacy = getPartnerAccountingSnapshot(selectedAccountRecord, saleRows, cashAffectingVouchers, [], partnerRows, [], accounts);
     const canonical = canonicalFinancials.data?.partnerPositions.find((item) => item.accountId === selectedAccountRecord.id);
     if (!canonical) return legacy;
+    const merged = mergePartnerPositionWithCanonical(legacy, canonical);
     return {
       ...legacy,
-      directExpensesPaid: legacy.directExpensesPaid + canonical.farmOwesPartner,
-      labourAdvancesPaid: canonical.labourAdvancesPaid,
-      totalLabourAdvancesPaid: canonical.labourAdvancesPaid,
-      settledAdvances: canonical.appliedLabourAdvances,
-      outstandingLabourAdvances: canonical.outstandingLabourAdvances,
-      labourWageSettlements: canonical.directLabourPayments,
-      labourSettlementCashPaid: canonical.directLabourPayments,
-      moneyReturned: legacy.moneyReturned + canonical.recoveries,
-      farmOwesPartner: legacy.farmOwesPartner + canonical.farmOwesPartner,
+      directExpensesPaid: merged.directExpensesPaid,
+      labourAdvancesPaid: merged.labourAdvancesPaid,
+      totalLabourAdvancesPaid: merged.totalLabourAdvancesPaid,
+      settledAdvances: merged.settledAdvances,
+      outstandingLabourAdvances: merged.outstandingLabourAdvances,
+      labourWageSettlements: merged.labourWageSettlements,
+      labourSettlementCashPaid: merged.labourSettlementCashPaid,
+      moneyReturned: merged.moneyReturned,
+      farmOwesPartner: merged.currentPartnerBalance,
+      currentPartnerBalance: merged.currentPartnerBalance,
+      reconciliationDifference: merged.reconciliationDifference,
+      reconciliationDelta: merged.reconciliationDelta,
+      isConsistent: merged.isConsistent,
     };
   }, [accounts, canonicalFinancials.data?.partnerPositions, cashAffectingVouchers, partnerRows, saleRows, selectedAccountRecord]);
 

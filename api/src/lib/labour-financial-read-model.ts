@@ -74,6 +74,8 @@ type UnifiedAdvancePosition = {
   recipientName: string;
   fundingAccountId: string | null;
   fundingAccountName: string | null;
+  accountId: string | null;
+  accountName: string | null;
   fundingType: string | null;
   partnerId: string | null;
   partnerName: string | null;
@@ -223,6 +225,7 @@ async function loadUnifiedAdvancePositions(input: { workspaceId: string; farmId:
     const originalAmount = amount(advance.paymentAmount);
     const outstandingAmount = advance.status === "VOIDED" ? 0 : amount(Math.max(originalAmount - appliedAmount - recoveredAmount, 0));
     return {
+      id: advance.id,
       advancePositionId: `voucher:${advance.id}`,
       canonicalVoucherId: advance.id,
       legacySourceRecordId: advance.legacySourceRecordId ?? null,
@@ -238,10 +241,10 @@ async function loadUnifiedAdvancePositions(input: { workspaceId: string; farmId:
       recipientScope: advance.recipientScope,
       recipientName: recipientName(snapshot),
       fundingAccountId: funding.accountId,
-      fundingAccountName: funding.accountName,
+      fundingAccountName: funding.accountName ?? firstText(snapshot.paymentAccountName, snapshot.sourceAccountName),
       fundingType: funding.accountType ?? advance.paymentMethod ?? null,
       partnerId: funding.partnerId,
-      partnerName: funding.partnerName,
+      partnerName: funding.partnerName ?? firstText(snapshot.partnerName),
       originalAmount,
       appliedAmount: amount(appliedAmount),
       recoveredAmount: amount(recoveredAmount),
@@ -366,6 +369,8 @@ async function loadUnifiedAdvancePositions(input: { workspaceId: string; farmId:
       recipientName: recipientName(sourceSnapshot),
       fundingAccountId: typeof row.fundingAccountId === "string" ? row.fundingAccountId : resolvedFunding?.accountId ?? null,
       fundingAccountName: typeof row.fundingAccountName === "string" ? row.fundingAccountName : resolvedFunding?.accountName ?? (typeof row.paymentAccountName === "string" ? row.paymentAccountName : null),
+      accountId: typeof row.fundingAccountId === "string" ? row.fundingAccountId : resolvedFunding?.accountId ?? null,
+      accountName: typeof row.fundingAccountName === "string" ? row.fundingAccountName : resolvedFunding?.accountName ?? (typeof row.paymentAccountName === "string" ? row.paymentAccountName : null),
       fundingType: typeof row.fundingType === "string" ? row.fundingType : resolvedFunding?.accountType ?? null,
       partnerId: typeof row.partnerId === "string" ? row.partnerId : resolvedFunding?.partnerId ?? null,
       partnerName: typeof row.partnerName === "string" ? row.partnerName : resolvedFunding?.partnerName ?? null,
@@ -384,6 +389,23 @@ async function loadUnifiedAdvancePositions(input: { workspaceId: string; farmId:
       canonical: Boolean(row.canonical ?? row.canonicalVoucherId),
     } satisfies UnifiedAdvancePosition;
   });
+}
+
+async function loadVoucherSourceMaps(workspaceId: string, vouchers: typeof labourPaymentVouchers.$inferSelect[]) {
+  const voucherSourceRecordIds = [...new Set(vouchers.flatMap((row) => [row.legacySourceRecordId]).filter((value): value is string => Boolean(value)))];
+  const voucherSourceClientIds = [...new Set(vouchers.flatMap((row) => [row.sourceId]).filter((value): value is string => Boolean(value)))];
+  const sourceQueries: Array<Promise<typeof operationalRecords.$inferSelect[]>> = [];
+  if (voucherSourceRecordIds.length) {
+    sourceQueries.push(db.select().from(operationalRecords).where(and(eq(operationalRecords.workspaceId, workspaceId), inArray(operationalRecords.id, voucherSourceRecordIds))));
+  }
+  if (voucherSourceClientIds.length) {
+    sourceQueries.push(db.select().from(operationalRecords).where(and(eq(operationalRecords.workspaceId, workspaceId), inArray(operationalRecords.clientRecordId, voucherSourceClientIds))));
+  }
+  const sourceRows = (await Promise.all(sourceQueries)).flat();
+  return {
+    sourceById: new Map(sourceRows.map((row) => [row.id, row])),
+    sourceByClientId: new Map(sourceRows.map((row) => [row.clientRecordId, row])),
+  };
 }
 
 export async function loadLabourFinancialReadModel(input: { workspaceId: string; farmId: string; seasonId: string }) {
@@ -406,11 +428,25 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
   const transactionById = new Map(transactions.map((row) => [row.id, row]));
   const advancePositions = await loadUnifiedAdvancePositions(input, scopeAccounts, transactions, vouchers);
   const advanceByVoucherId = new Map(advancePositions.filter((row) => row.canonicalVoucherId).map((row) => [row.canonicalVoucherId!, row]));
+  const { sourceById, sourceByClientId } = await loadVoucherSourceMaps(input.workspaceId, vouchers);
+  const resolvedFundingByVoucherId = new Map(vouchers.map((voucher) => {
+    const sourceRecord = (voucher.legacySourceRecordId ? sourceById.get(voucher.legacySourceRecordId) : undefined)
+      ?? (voucher.sourceId ? sourceByClientId.get(voucher.sourceId) : undefined);
+    return [voucher.id, resolveFundingAccount({
+      accountById,
+      storedAccountId: voucher.paymentAccountId,
+      transactionAccountId: voucher.accountTransactionId ? transactionById.get(voucher.accountTransactionId)?.accountId ?? null : null,
+      sourceSnapshot: asSnapshot(voucher.recipientSnapshot),
+      sourcePayload: asSnapshot(sourceRecord?.payload),
+    })] as const;
+  }));
 
   const accountEntries = vouchers.flatMap((voucher) => {
     const transaction = voucher.accountTransactionId ? transactionById.get(voucher.accountTransactionId) : undefined;
     const advancePosition = advanceByVoucherId.get(voucher.id);
+    const resolvedFunding = resolvedFundingByVoucherId.get(voucher.id);
     const account = (advancePosition?.fundingAccountId ? accountById.get(advancePosition.fundingAccountId) : undefined)
+      ?? (resolvedFunding?.accountId ? accountById.get(resolvedFunding.accountId) : undefined)
       ?? (voucher.paymentAccountId ? accountById.get(voucher.paymentAccountId) : undefined)
       ?? (transaction?.accountId ? accountById.get(transaction.accountId) : undefined);
     if (!transaction || !account) return [];
@@ -460,6 +496,7 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
     const due = original?.dueId ? dueById.get(original.dueId) : undefined;
     const voucher = original?.voucherId ? voucherById.get(original.voucherId) : undefined;
     const application = original?.advanceApplicationId ? applicationById.get(original.advanceApplicationId) : undefined;
+    const sourceAdvance = application?.advanceVoucherId ? voucherById.get(application.advanceVoucherId) : undefined;
     const snapshot = asSnapshot(due?.recipientSnapshot ?? voucher?.recipientSnapshot ?? {});
     const sum = (code: string, sign: "debit" | "credit") => rows.filter((row) => row.ledgerCode === code).reduce((total, row) => total + amount(row[sign]) - amount(row[sign === "debit" ? "credit" : "debit"]), 0);
     const isReversal = key.startsWith("reversal:");
@@ -484,6 +521,8 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
       voucherId: original?.voucherId ?? null,
       voucherNumber: voucher?.voucherNumber ?? null,
       advanceApplicationId: original?.advanceApplicationId ?? null,
+      sourceAdvanceVoucherId: application?.advanceVoucherId ?? null,
+      sourceAdvanceVoucherNumber: sourceAdvance?.voucherNumber ?? null,
       recipientScope: due?.recipientScope ?? voucher?.recipientScope ?? null,
       financialScopeKey: due?.financialScopeKey ?? voucher?.financialScopeKey ?? null,
       labourerId: due?.labourerId ?? voucher?.labourerId ?? null,
@@ -491,6 +530,7 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
       recipientName: recipientName(snapshot),
       description: voucher?.description ?? due?.description ?? (isReversal ? "Financial reversal" : "Labour financial event"),
       legacy: Boolean(due?.legacy || voucher?.legacy),
+      amount: amount(Math.max(Math.abs(sum("LABOUR_ADVANCE", "debit")), Math.abs(sum("LABOUR_PAYABLE", "credit")), Math.abs(sum("LABOUR_EXPENSE", "debit")))),
       labourDueEffect: sum("LABOUR_PAYABLE", "credit"),
       labourAdvanceEffect: sum("LABOUR_ADVANCE", "debit"),
       expenseEffect: sum("LABOUR_EXPENSE", "debit"),

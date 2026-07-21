@@ -22,9 +22,11 @@ import { canCreate, canDelete, canEdit, hasPermission } from "../lib/permissions
 import { translateExpenseCategory, translateExpenseSubcategory, translatePaymentType, translateSaleType, translateSalesStatus } from "../lib/systemTranslations";
 import {
   buildPartnerLiabilityPositions,
+  buildCanonicalPartnerLiabilityPosition,
   calculatePartnerLiabilityBalance,
   getPartnerBalanceState,
   getPartnerAccountingSnapshot,
+  mergePartnerPositionWithCanonical,
   partnerLiabilityGroupDisplayTotal,
   defaultPartnerLiabilityGroupExpansion,
   groupPartnerLiabilityTransactions,
@@ -4108,27 +4110,22 @@ function PartnerLedgerModule() {
     const byAccount = new Map((canonicalFinancials.data?.partnerPositions ?? []).map((item) => [item.accountId, item]));
     const merged = legacy.map((item) => {
       const canonical = item.account?.id ? byAccount.get(item.account.id) : undefined;
-      if (!canonical) return item;
-      byAccount.delete(canonical.accountId);
-      return {
-        ...item,
-        directExpensesPaid: item.directExpensesPaid + canonical.farmOwesPartner,
-        labourAdvancesPaid: canonical.labourAdvancesPaid,
-        totalLabourAdvancesPaid: canonical.labourAdvancesPaid,
-        labourWageSettlements: canonical.directLabourPayments,
-        labourSettlementCashPaid: canonical.directLabourPayments,
-        settledAdvances: canonical.appliedLabourAdvances,
-        outstandingLabourAdvances: canonical.outstandingLabourAdvances,
-        moneyReturned: item.moneyReturned + canonical.recoveries,
-        currentPartnerBalance: item.currentPartnerBalance + canonical.farmOwesPartner,
-        reconciliationDifference: item.reconciliationDifference + canonical.farmOwesPartner - canonical.ledgerBalance,
-        reconciliationDelta: item.reconciliationDelta + canonical.farmOwesPartner - canonical.ledgerBalance,
-        isConsistent: item.isConsistent && Math.abs(canonical.farmOwesPartner - canonical.ledgerBalance) < 0.01,
-      };
+      if (canonical) {
+        byAccount.delete(canonical.accountId);
+        const canonicalFarmOwesPartner = canonical.farmOwesPartner;
+        const canonicalOutstandingLabourAdvances = canonical.outstandingLabourAdvances;
+        const canonicalAppliedLabourAdvances = canonical.appliedLabourAdvances;
+        const canonicalDirectLabourPayments = canonical.directLabourPayments;
+        void canonicalFarmOwesPartner;
+        void canonicalOutstandingLabourAdvances;
+        void canonicalAppliedLabourAdvances;
+        void canonicalDirectLabourPayments;
+      }
+      return mergePartnerPositionWithCanonical(item, canonical);
     });
     for (const canonical of byAccount.values()) {
       const account = accounts.find((item) => item.id === canonical.accountId) ?? null;
-      merged.push({ account, key: canonical.accountId, name: canonical.accountName, openingBalance: 0, capitalInjected: 0, directExpensesPaid: canonical.farmOwesPartner, purchaseVouchersPaid: 0, businessFundsNet: 0, labourAdvancesPaid: canonical.labourAdvancesPaid, labourWageSettlements: canonical.directLabourPayments, labourSettlementCashPaid: canonical.directLabourPayments, labourSettlementNonCashApplied: 0, totalLabourAdvancesPaid: canonical.labourAdvancesPaid, settledAdvances: canonical.appliedLabourAdvances, outstandingLabourAdvances: canonical.outstandingLabourAdvances, reconciliationDifference: canonical.farmOwesPartner - canonical.ledgerBalance, isConsistent: Math.abs(canonical.farmOwesPartner - canonical.ledgerBalance) < 0.01, transfersIn: 0, transfersOut: 0, moneyReturned: canonical.recoveries, adjustments: 0, currentPartnerBalance: canonical.farmOwesPartner, reconciliationDelta: canonical.farmOwesPartner - canonical.ledgerBalance });
+      merged.push(buildCanonicalPartnerLiabilityPosition(canonical, account));
     }
     return merged;
   }, [accounts, activeEntries, canonicalFinancials.data, farmId, sales, seasonId, vouchers]);
@@ -4486,17 +4483,22 @@ function AccountsModule() {
     const legacy = getPartnerAccountingSnapshot(selectedAccount, sales, legacyExpenseVouchers, [], activeEntries, [], accounts, { farmId, seasonId });
     const canonical = canonicalFinancials.data?.partnerPositions.find((item) => item.accountId === selectedAccount.id);
     if (!canonical) return legacy;
+    const merged = mergePartnerPositionWithCanonical(legacy, canonical);
     return {
       ...legacy,
-      directExpensesPaid: legacy.directExpensesPaid + canonical.farmOwesPartner,
-      labourAdvancesPaid: canonical.labourAdvancesPaid,
-      totalLabourAdvancesPaid: canonical.labourAdvancesPaid,
-      labourWageSettlements: canonical.directLabourPayments,
-      labourSettlementCashPaid: canonical.directLabourPayments,
-      settledAdvances: canonical.appliedLabourAdvances,
-      outstandingLabourAdvances: canonical.outstandingLabourAdvances,
-      moneyReturned: legacy.moneyReturned + canonical.recoveries,
-      farmOwesPartner: legacy.farmOwesPartner + canonical.farmOwesPartner,
+      directExpensesPaid: merged.directExpensesPaid,
+      labourAdvancesPaid: merged.labourAdvancesPaid,
+      totalLabourAdvancesPaid: merged.totalLabourAdvancesPaid,
+      labourWageSettlements: merged.labourWageSettlements,
+      labourSettlementCashPaid: merged.labourSettlementCashPaid,
+      settledAdvances: merged.settledAdvances,
+      outstandingLabourAdvances: merged.outstandingLabourAdvances,
+      moneyReturned: merged.moneyReturned,
+      farmOwesPartner: merged.currentPartnerBalance,
+      currentPartnerBalance: merged.currentPartnerBalance,
+      reconciliationDifference: merged.reconciliationDifference,
+      reconciliationDelta: merged.reconciliationDelta,
+      isConsistent: merged.isConsistent,
     };
   }, [accounts, activeEntries, canonicalFinancials.data?.partnerPositions, farmId, legacyExpenseVouchers, sales, seasonId, selectedAccount]);
   const ledgerGroupTitle = useCallback((groupKey: AccountTransactionGroupKey) => ({

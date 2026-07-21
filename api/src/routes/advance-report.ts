@@ -7,6 +7,7 @@ import { db } from "../db/client.js";
 import { farms, operationalRecords, seasons, userSessions } from "../db/schema.js";
 import { isDeletedOperationalPayload } from "../operational-record-state.js";
 import { listAdvanceLedgerForReport } from "../lib/labour-advance-ledger.js";
+import { loadLabourFinancialReadModel } from "../lib/labour-financial-read-model.js";
 import { hasPermission } from "../permissions.js";
 import { validateTenantReferences } from "../tenant-ownership.js";
 import { hasFarmAccess } from "../workspace-access.js";
@@ -23,6 +24,7 @@ const querySchema = z.object({
 type LabourPayload = { name?: unknown };
 type AccountPayload = { name?: unknown };
 type AdvancePayload = { labourerId?: unknown; date?: unknown; amount?: unknown; notes?: unknown; accountId?: unknown; sourceAccountName?: unknown; deletedAt?: unknown };
+const text = (value: unknown) => typeof value === "string" && value.trim() ? value.trim() : null;
 
 export async function advanceReportRoutes(app: FastifyInstance): Promise<void> {
   app.get("/v1/workspace/:workspaceId/advance/report", { preHandler: requireUser }, async (request, reply) => {
@@ -84,6 +86,12 @@ export async function advanceReportRoutes(app: FastifyInstance): Promise<void> {
       const payload = record.payload as AccountPayload;
       return [record.clientRecordId, typeof payload.name === "string" ? payload.name : "Account"] as const;
     }));
+    const advanceRecords = await db.select().from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, workspaceId),
+      eq(operationalRecords.entityType, "advance"),
+    ));
+    const advanceSourceById = new Map(advanceRecords.map((record) => [record.id, record]));
+    const advanceSourceByClientId = new Map(advanceRecords.map((record) => [record.clientRecordId, record]));
 
     const reportLabourIds = selectedLabourIds.size ? [...selectedLabourIds] : [...labourById.keys()];
     const ledger = await db.transaction((tx) => listAdvanceLedgerForReport(tx, {
@@ -97,22 +105,73 @@ export async function advanceReportRoutes(app: FastifyInstance): Promise<void> {
       labourerId: null,
       labourIds: reportLabourIds,
     }, reportLabourIds));
+    const financials = await loadLabourFinancialReadModel({ workspaceId, farmId, seasonId });
+    const financialByStableId = new Map<string, (typeof financials.advancePositions)[number]>();
+    for (const row of financials.advancePositions) {
+      for (const key of [row.legacySourceRecordId, row.sourceId, row.canonicalVoucherId, row.advancePositionId]) {
+        if (key) financialByStableId.set(key, row);
+      }
+    }
     const records = ledger.rows.flatMap((row) => {
       if (!row.includedInPreview || !row.labourerId || !row.date) return [];
       if (row.date < from || row.date > to) return [];
       const labourName = row.labourerName ?? labourById.get(row.labourerId);
       if (!labourName) return [];
+      const financial = financialByStableId.get(row.advanceId);
       return [{
-        id: row.advanceId,
+        id: financial?.legacySourceRecordId ?? row.advanceId,
         labourerId: row.labourerId,
         labourName,
-        date: row.date,
-        amount: row.originalAmount,
-        notes: "",
-        accountId: row.accountId ?? "",
-        accountName: row.accountName ?? accountById.get(row.accountId ?? "") ?? "",
+        date: financial?.advanceDate ?? row.date,
+        amount: financial?.originalAmount ?? row.originalAmount,
+        notes: financial?.description ?? "",
+        accountId: financial?.fundingAccountId ?? row.accountId ?? "",
+        accountName: financial?.fundingAccountName ?? row.accountName ?? accountById.get(row.accountId ?? "") ?? "",
+        appliedAmount: financial?.appliedAmount ?? 0,
+        recoveredAmount: financial?.recoveredAmount ?? 0,
+        outstandingAmount: financial?.outstandingAmount ?? Math.max(row.originalAmount - (financial?.appliedAmount ?? 0) - (financial?.recoveredAmount ?? 0), 0),
+        status: financial?.status ?? "POSTED",
+        reviewRequired: financial?.needsReview ?? false,
+        reviewReason: financial?.reviewReason ?? null,
+        sourceClassification: financial?.sourceClassification ?? "LEGACY_OPERATIONAL",
+        voucherNumber: financial?.voucherNumber ?? row.advanceId,
       }];
-    }).sort((a, b) => a.labourName.localeCompare(b.labourName) || a.date.localeCompare(b.date));
+    });
+    const coveredIds = new Set<string>();
+    for (const row of records) {
+      coveredIds.add(row.id);
+      const financial = financialByStableId.get(row.id);
+      if (financial) {
+        for (const key of [financial.legacySourceRecordId, financial.sourceId, financial.canonicalVoucherId, financial.advancePositionId]) {
+          if (key) coveredIds.add(key);
+        }
+      }
+    }
+    for (const row of financials.advancePositions) {
+      const stableId = row.legacySourceRecordId ?? row.canonicalVoucherId ?? row.advancePositionId;
+      if (coveredIds.has(stableId)) continue;
+      if (row.advanceDate < from || row.advanceDate > to) continue;
+      if (selectedLabourIds.size && (!row.labourerId || !selectedLabourIds.has(row.labourerId))) continue;
+      records.push({
+        id: stableId,
+        labourerId: row.labourerId ?? row.labourGroupId ?? row.recipientName,
+        labourName: row.labourerName ?? row.labourGroupName ?? row.recipientName,
+        date: row.advanceDate,
+        amount: row.originalAmount,
+        notes: row.description,
+        accountId: row.fundingAccountId ?? "",
+        accountName: row.fundingAccountName ?? accountById.get(row.fundingAccountId ?? "") ?? "",
+        appliedAmount: row.appliedAmount,
+        recoveredAmount: row.recoveredAmount,
+        outstandingAmount: row.outstandingAmount,
+        status: row.status,
+        reviewRequired: row.needsReview,
+        reviewReason: row.reviewReason,
+        sourceClassification: row.sourceClassification,
+        voucherNumber: row.voucherNumber,
+      });
+    }
+    records.sort((a, b) => a.labourName.localeCompare(b.labourName) || a.date.localeCompare(b.date));
 
     const grouped = new Map<string, { labourerId: string; labourName: string; total: number; count: number }>();
     for (const item of records) {
@@ -123,15 +182,18 @@ export async function advanceReportRoutes(app: FastifyInstance): Promise<void> {
     }
     const summaries = [...grouped.values()].sort((a, b) => a.labourName.localeCompare(b.labourName));
     const grandTotal = summaries.reduce((sum, item) => sum + item.total, 0);
-    const settledAdvances = ledger.totals.previouslyAbsorbedAdvances;
-    const outstandingAdvances = ledger.totals.availableGroupAdvances;
+    const activeRows = records.filter((row) => row.status !== "VOIDED");
+    const settledAdvances = activeRows.reduce((sum, row) => sum + row.appliedAmount, 0);
+    const outstandingAdvances = activeRows.reduce((sum, row) => sum + row.outstandingAmount, 0);
     return {
       records,
       summaries,
       grandTotal,
       settledAdvances,
       outstandingAdvances,
-      reconciliationTrace: ledger.rows,
+      recoveredAdvances: activeRows.reduce((sum, row) => sum + row.recoveredAmount, 0),
+      reviewRequiredCount: activeRows.filter((row) => row.reviewRequired).length,
+      reconciliationTrace: records,
       filters: {
         dateRange: { from, to },
         labourIds: [...selectedLabourIds],

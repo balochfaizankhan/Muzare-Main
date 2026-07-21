@@ -21,10 +21,12 @@ import {
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
+import { useCanonicalLabourFinancials } from "../../hooks/useCanonicalLabourFinancials";
 import { LabourSelectCombobox } from "../../components/LabourSelectCombobox";
 import {
   createDirectLabourDue,
   ApiError,
+  type CanonicalLabourLedgerEntry,
   previewLabourAttendanceDue,
   fetchLabourDueAdvancePool,
   fetchLabourPaymentAdvances,
@@ -136,6 +138,7 @@ type View = "dues" | "direct" | "vouchers" | "advances";
 
 export function WorkforcePaymentsPage() {
   const { token, user } = useAuth();
+  const canonicalFinancials = useCanonicalLabourFinancials();
   const location = useLocation();
   const navigate = useNavigate();
   const workspaceId = user?.workspaceId ?? "";
@@ -576,6 +579,7 @@ export function WorkforcePaymentsPage() {
       {view === "vouchers" ? (
         <VoucherRegister
           vouchers={vouchers}
+          applicationEvents={(canonicalFinancials.data?.labourLedger ?? []).filter((event) => event.advanceApplicationId)}
           dues={dues}
           advanceOutstanding={advanceSummary?.totalOutstanding ?? 0}
           accounts={accountById}
@@ -926,6 +930,7 @@ function DirectDueForm({
 
 function VoucherRegister({
   vouchers,
+  applicationEvents,
   dues,
   advanceOutstanding,
   accounts,
@@ -942,6 +947,7 @@ function VoucherRegister({
   onViewAdvances,
 }: {
   vouchers: LabourPaymentVoucherRecord[];
+  applicationEvents: CanonicalLabourLedgerEntry[];
   dues: LabourDueRecord[];
   advanceOutstanding: number;
   accounts: Map<string, Account>;
@@ -961,6 +967,34 @@ function VoucherRegister({
   const [nature, setNature] = useState("ALL");
   const [voidingId, setVoidingId] = useState("");
   const voidIdempotencyKeys = useRef<Record<string, string>>({});
+  type VoucherRegisterRow =
+    | {
+        id: string;
+        kind: "application";
+        status: string;
+        nature: "ADVANCE_APPLICATION" | "APPLICATION_REVERSAL";
+        voucherNumber: string;
+        date: string;
+        description: string;
+        amount: number;
+        recipient: string;
+        dueNumber?: string | null;
+        sourceAdvanceVoucherNumber?: string | null;
+      }
+    | {
+        id: string;
+        kind: "voucher";
+        status: LabourPaymentVoucherRecord["status"];
+        nature: LabourPaymentVoucherRecord["nature"];
+        voucherNumber: string;
+        date: string;
+        description: string;
+        amount: number;
+        recipient: string;
+        dueNumber?: null;
+        sourceAdvanceVoucherNumber?: null;
+        voucher: LabourPaymentVoucherRecord;
+      };
   const voidVoucher = async (voucher: LabourPaymentVoucherRecord) => {
     const reason = window.prompt(
       `Reason for reversing ${voucher.voucherNumber}:`,
@@ -1001,14 +1035,43 @@ function VoucherRegister({
       setVoidingId("");
     }
   };
-  const filtered = vouchers.filter(
-    (voucher) =>
-      (nature === "ALL" || voucher.nature === nature) &&
+  const applicationRows: VoucherRegisterRow[] = applicationEvents
+    .filter((event) => event.originalEventType === "ADVANCE_APPLICATION" || event.eventType === "ADVANCE_APPLICATION" || (event.eventType === "REVERSAL" && event.originalEventType === "ADVANCE_APPLICATION"))
+    .map((event) => ({
+      id: event.id,
+      kind: "application" as const,
+      status: event.status,
+      nature: event.eventType === "REVERSAL" ? "APPLICATION_REVERSAL" : "ADVANCE_APPLICATION",
+      voucherNumber: `LPA-${(event.advanceApplicationId ?? event.id).slice(0, 8).toUpperCase()}`,
+      date: event.date,
+      description: event.description,
+      amount: Math.abs(event.amount || event.labourAdvanceEffect || event.labourDueEffect),
+      recipient: event.recipientName,
+      dueNumber: event.dueNumber,
+      sourceAdvanceVoucherNumber: event.sourceAdvanceVoucherNumber,
+    }));
+  const voucherRows: VoucherRegisterRow[] = vouchers.map((voucher) => ({
+    id: voucher.id,
+    kind: "voucher" as const,
+    status: voucher.status,
+    nature: voucher.nature,
+    voucherNumber: voucher.voucherNumber,
+    date: voucher.voucherDate,
+    description: voucher.description,
+    amount: Number(voucher.paymentAmount),
+    recipient: recipientLabel(voucher, labourById, groupById),
+    voucher,
+  }));
+  const filtered: VoucherRegisterRow[] = [...voucherRows, ...applicationRows].filter(
+    (row) =>
+      (nature === "ALL" || row.nature === nature) &&
       (!search.trim() ||
         [
-          voucher.voucherNumber,
-          voucher.description,
-          recipientLabel(voucher, labourById, groupById),
+          row.voucherNumber,
+          row.description,
+          row.recipient,
+          row.dueNumber,
+          row.sourceAdvanceVoucherNumber,
         ]
           .join(" ")
           .toLowerCase()
@@ -1075,6 +1138,8 @@ function VoucherRegister({
             Settlement payments
           </option>
           <option value="DIRECT_LABOUR_PAYMENT">Direct due payments</option>
+          <option value="ADVANCE_APPLICATION">Advance applied to due — Non-cash</option>
+          <option value="APPLICATION_REVERSAL">Application reversals</option>
           <option value="REVERSAL">Reversals</option>
         </select>
       </div>
@@ -1104,57 +1169,60 @@ function VoucherRegister({
         </p>
       ) : (
         <div className="workforce-payment-voucher-list">
-          {filtered.map((voucher) => (
-            <article key={voucher.id}>
+          {filtered.map((row) => (
+            <article key={row.id}>
               <header>
-                <strong>{voucher.voucherNumber}</strong>
+                <strong>{row.voucherNumber}</strong>
                 <em
-                  className={`workforce-payment-status status-${voucher.status.toLowerCase()}`}
+                  className={`workforce-payment-status status-${row.status.toLowerCase()}`}
                 >
-                  {statusLabel(voucher.status)}
+                  {statusLabel(row.status)}
                 </em>
               </header>
-              <h3>{recipientLabel(voucher, labourById, groupById)}</h3>
-              <p>{voucher.description}</p>
+              <h3>{row.recipient}</h3>
+              <p>{row.kind === "application"
+                ? `${row.description} · Non-cash application${row.sourceAdvanceVoucherNumber ? ` from ${row.sourceAdvanceVoucherNumber}` : ""}${row.dueNumber ? ` to ${row.dueNumber}` : ""}`
+                : row.description}
+              </p>
               <dl>
                 <div>
                   <dt>Nature</dt>
-                  <dd>{statusLabel(voucher.nature)}</dd>
+                  <dd>{row.kind === "application" && row.nature === "ADVANCE_APPLICATION" ? "Advance applied to due — Non-cash" : statusLabel(row.nature)}</dd>
                 </div>
                 <div>
                   <dt>Date</dt>
-                  <dd>{voucher.voucherDate}</dd>
+                  <dd>{row.date}</dd>
                 </div>
                 <div>
-                  <dt>Account</dt>
-                  <dd>
-                    {voucher.paymentAccountName ??
-                      accounts.get(voucher.paymentAccountId ?? "")?.name ??
-                      "Legacy / reconciliation"}
-                  </dd>
+                  <dt>{row.kind === "application" ? "Source advance" : "Account"}</dt>
+                  <dd>{row.kind === "application" ? row.sourceAdvanceVoucherNumber ?? "Advance reference unavailable" : (row.voucher.paymentAccountName ?? accounts.get(row.voucher.paymentAccountId ?? "")?.name ?? "Legacy / reconciliation")}</dd>
                 </div>
                 <div>
                   <dt>Amount</dt>
-                  <dd>{money(Number(voucher.paymentAmount))}</dd>
+                  <dd>{money(row.amount)}</dd>
                 </div>
               </dl>
-              {voucher.legacy ? (
+              {row.kind === "application" && row.dueNumber ? (
+                <small>Application reference · {row.dueNumber}</small>
+              ) : null}
+              {row.kind === "voucher" && row.voucher.legacy ? (
                 <small>
                   Legacy mapped record ·{" "}
-                  {statusLabel(voucher.reconciliationStatus)}
+                  {statusLabel(row.voucher.reconciliationStatus)}
                 </small>
               ) : null}
               {canVoid &&
-              voucher.status === "POSTED" &&
-              voucher.nature !== "REVERSAL" &&
-              !voucher.legacy ? (
+              row.kind === "voucher" &&
+              row.voucher.status === "POSTED" &&
+              row.voucher.nature !== "REVERSAL" &&
+              !row.voucher.legacy ? (
                 <button
                   className="secondary-action"
-                  disabled={voidingId === voucher.id}
+                  disabled={voidingId === row.voucher.id}
                   type="button"
-                  onClick={() => void voidVoucher(voucher)}
+                  onClick={() => void voidVoucher(row.voucher)}
                 >
-                  {voidingId === voucher.id ? "Reversing…" : "Void / reverse"}
+                  {voidingId === row.voucher.id ? "Reversing…" : "Void / reverse"}
                 </button>
               ) : null}
             </article>
@@ -1719,7 +1787,7 @@ function AdvancesView({
             <strong>{money(summary.totalOriginal ?? 0)}</strong>
           </div>
           <div>
-            <span>Advances</span>
+            <span>Outstanding advances</span>
             <strong>{money(summary.totalOutstanding)}</strong>
           </div>
           <div>

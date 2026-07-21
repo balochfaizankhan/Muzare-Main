@@ -25,7 +25,7 @@ import { fetchBootstrap } from "../lib/api";
 import { dashboardFinancialSnapshotStorageKey, isDashboardFinancialScope, settleDashboardFinancialSnapshot, type DashboardFinancialSnapshot } from "../lib/dashboardFinancialSnapshot";
 import { formatDate } from "../lib/format";
 import { getActiveLabourWageSettlements, getCashAffectingVouchers, getGeneralExpenseVouchers } from "../lib/labourWageSettlements";
-import { buildPartnerLiabilityPositions } from "../lib/partnerAccounting";
+import { buildPartnerLiabilityPositions, mergePartnerPositionWithCanonical } from "../lib/partnerAccounting";
 import { ensureLocalAccounts, offlineDb, workspaceRecords } from "../lib/offline-db";
 import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { hasPermission } from "../lib/permissions";
@@ -91,6 +91,7 @@ export function DashboardPage() {
     seasonId: sync.seasonId ?? "",
   };
   const financialScopeKey = `${financialScope.workspaceId}:${financialScope.farmId}:${financialScope.seasonId}`;
+  const syncSnapshotLocked = ["syncing", "pending", "stale_context"].includes(sync.status);
   useEffect(() => {
     financialScopeKeyRef.current = financialScopeKey;
     if (!financialScope.workspaceId || !financialScope.farmId || !financialScope.seasonId) {
@@ -158,7 +159,9 @@ export function DashboardPage() {
     const seasonId = sync.seasonId ?? null;
     const date = today();
     const totalSales = activeSales.reduce((sum, item) => sum + item.amount, 0);
-    const nextFinancialSnapshot = settleDashboardFinancialSnapshot({
+    const nextFinancialSnapshot = syncSnapshotLocked
+      ? financialSnapshotRef.current
+      : settleDashboardFinancialSnapshot({
       scope,
       previousSnapshot: financialSnapshotRef.current,
       canonicalReady,
@@ -179,7 +182,16 @@ export function DashboardPage() {
     const settledFinancialSnapshot = nextFinancialSnapshot ?? financialSnapshotRef.current;
     const partnerBalance = canonicalReady
       ? buildPartnerLiabilityPositions(activeAccounts, cashAffectingVouchers, activeAdvances, activeEntries, activeSales, activeSettlements, { farmId, seasonId })
-        .reduce((sum, item) => sum + item.currentPartnerBalance, 0) + (canonicalFinancials.data?.summary.farmOwesPartner ?? 0)
+        .map((item) => mergePartnerPositionWithCanonical(
+          item,
+          item.account?.id
+            ? canonicalFinancials.data?.partnerPositions.find((position) => position.accountId === item.account!.id)
+            : undefined,
+        ))
+        .reduce((sum, item) => sum + item.currentPartnerBalance, 0)
+        + (canonicalFinancials.data?.partnerPositions ?? [])
+          .filter((position) => !activeAccounts.some((account) => account.id === position.accountId))
+          .reduce((sum, item) => sum + item.farmOwesPartner, 0)
       : (totals?.partnerBalance ?? 0);
     const attendanceMarkedToday = activeAttendance.filter((item) => item.date === date).length;
     const presentToday = activeAttendance.filter((item) => item.date === date && item.status === "present").length;
@@ -198,7 +210,7 @@ export function DashboardPage() {
     });
 
     setActivities(recentActivities.slice(0, 5));
-  }, [canonicalFinancials.data, canonicalFinancials.dataUpdatedAt, sync.farmId, sync.seasonId, t, totals?.partnerBalance, user?.workspaceId]);
+  }, [canonicalFinancials.data, canonicalFinancials.dataUpdatedAt, sync.farmId, sync.seasonId, syncSnapshotLocked, t, totals?.partnerBalance, user?.workspaceId]);
   const scheduleDashboardRefresh = useCallback(() => {
     if (refreshInFlight.current) return;
     refreshInFlight.current = true;

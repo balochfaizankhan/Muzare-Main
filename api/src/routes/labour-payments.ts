@@ -2530,6 +2530,11 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           desc(labourPaymentVouchers.voucherDate),
           desc(labourPaymentVouchers.createdAt),
         );
+      const financials = await loadLabourFinancialReadModel({
+        workspaceId: params.data.workspaceId,
+        farmId: query.data.farmId,
+        seasonId: query.data.seasonId,
+      });
       const transactionIds = vouchers.map((voucher) => voucher.accountTransactionId).filter((value): value is string => Boolean(value));
       const [scopeAccounts, scopeTransactions] = await Promise.all([
         db.select().from(accounts).where(eq(accounts.farmId, query.data.farmId)),
@@ -2539,10 +2544,16 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
       ]);
       const accountById = new Map(scopeAccounts.map((row) => [row.id, row]));
       const transactionById = new Map(scopeTransactions.map((row) => [row.id, row]));
+      const accountEntryByVoucherId = new Map(financials.accountEntries.map((entry) => [entry.voucherId, entry]));
+      const advanceByVoucherId = new Map(financials.advancePositions.filter((row) => row.canonicalVoucherId).map((row) => [row.canonicalVoucherId!, row]));
       return {
         vouchers: vouchers.map((voucher) => {
           const transaction = voucher.accountTransactionId ? transactionById.get(voucher.accountTransactionId) : undefined;
-          const account = (voucher.paymentAccountId ? accountById.get(voucher.paymentAccountId) : undefined)
+          const canonicalEntry = accountEntryByVoucherId.get(voucher.id);
+          const canonicalAdvance = advanceByVoucherId.get(voucher.id);
+          const account = (canonicalEntry?.accountId ? accountById.get(canonicalEntry.accountId) : undefined)
+            ?? (canonicalAdvance?.fundingAccountId ? accountById.get(canonicalAdvance.fundingAccountId) : undefined)
+            ?? (voucher.paymentAccountId ? accountById.get(voucher.paymentAccountId) : undefined)
             ?? (transaction?.accountId ? accountById.get(transaction.accountId) : undefined);
           return {
             ...voucher,

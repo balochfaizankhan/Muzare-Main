@@ -30,6 +30,19 @@ export type PartnerLiabilityPosition = {
   reconciliationDelta: number;
 };
 
+export type CanonicalPartnerPosition = {
+  accountId: string;
+  accountName: string;
+  farmOwesPartner: number;
+  ledgerBalance: number;
+  labourAdvancesPaid: number;
+  directLabourPayments: number;
+  recoveries: number;
+  outstandingLabourAdvances: number;
+  appliedLabourAdvances: number;
+  entryCount: number;
+};
+
 export type PartnerAccountingRowBreakdown = {
   purchaseVouchers: Array<{
     voucherId: string;
@@ -680,6 +693,60 @@ export function buildPartnerLiabilityPositions(
 
   return [...positions.values()]
     .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+export function mergePartnerPositionWithCanonical(
+  legacy: PartnerLiabilityPosition,
+  canonical?: CanonicalPartnerPosition | null,
+): PartnerLiabilityPosition {
+  if (!canonical) return legacy;
+  const nonLabourBalance = legacy.currentPartnerBalance - legacy.labourAdvancesPaid;
+  return {
+    ...legacy,
+    directExpensesPaid: legacy.purchaseVouchersPaid + canonical.labourAdvancesPaid + canonical.directLabourPayments,
+    labourAdvancesPaid: canonical.labourAdvancesPaid,
+    totalLabourAdvancesPaid: canonical.labourAdvancesPaid,
+    labourWageSettlements: canonical.directLabourPayments,
+    labourSettlementCashPaid: canonical.directLabourPayments,
+    settledAdvances: canonical.appliedLabourAdvances,
+    outstandingLabourAdvances: canonical.outstandingLabourAdvances,
+    moneyReturned: canonical.recoveries,
+    currentPartnerBalance: nonLabourBalance + canonical.farmOwesPartner,
+    reconciliationDifference: canonical.farmOwesPartner - canonical.ledgerBalance,
+    reconciliationDelta: canonical.farmOwesPartner - canonical.ledgerBalance,
+    isConsistent: Math.abs(canonical.farmOwesPartner - canonical.ledgerBalance) < 0.01,
+  };
+}
+
+export function buildCanonicalPartnerLiabilityPosition(
+  canonical: CanonicalPartnerPosition,
+  account: Account | null,
+): PartnerLiabilityPosition {
+  return {
+    account,
+    key: canonical.accountId,
+    name: canonical.accountName,
+    openingBalance: 0,
+    capitalInjected: 0,
+    directExpensesPaid: canonical.labourAdvancesPaid + canonical.directLabourPayments,
+    purchaseVouchersPaid: 0,
+    businessFundsNet: 0,
+    labourAdvancesPaid: canonical.labourAdvancesPaid,
+    labourWageSettlements: canonical.directLabourPayments,
+    labourSettlementCashPaid: canonical.directLabourPayments,
+    labourSettlementNonCashApplied: 0,
+    totalLabourAdvancesPaid: canonical.labourAdvancesPaid,
+    settledAdvances: canonical.appliedLabourAdvances,
+    outstandingLabourAdvances: canonical.outstandingLabourAdvances,
+    reconciliationDifference: canonical.farmOwesPartner - canonical.ledgerBalance,
+    isConsistent: Math.abs(canonical.farmOwesPartner - canonical.ledgerBalance) < 0.01,
+    transfersIn: 0,
+    transfersOut: 0,
+    moneyReturned: canonical.recoveries,
+    adjustments: 0,
+    currentPartnerBalance: canonical.farmOwesPartner,
+    reconciliationDelta: canonical.farmOwesPartner - canonical.ledgerBalance,
+  };
 }
 
 export function groupPartnerLiabilityTransactions<T extends PartnerLiabilityGroupableTransaction>(transactions: T[]) {

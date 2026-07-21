@@ -20,7 +20,7 @@ export type DashboardFinancialInputs = {
 };
 
 export function dashboardFinancialSnapshotStorageKey(scope: DashboardFinancialScope) {
-  return `muzare:dashboard-financial-snapshot:v1:${scope.workspaceId}:${scope.farmId}:${scope.seasonId}`;
+  return `muzare:dashboard-financial-snapshot:v2:${scope.workspaceId}:${scope.farmId}:${scope.seasonId}`;
 }
 
 export function isDashboardFinancialScope(

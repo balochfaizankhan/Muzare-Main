@@ -2012,7 +2012,8 @@ export type CanonicalLabourAccountEntry = {
 export type CanonicalLabourLedgerEntry = {
   id: string; eventType: string; originalEventType?: string | null; status: string; date: string; postedAt: string;
   dueId?: string | null; dueNumber?: string | null; voucherId?: string | null; voucherNumber?: string | null;
-  advanceApplicationId?: string | null; recipientScope?: LabourRecipientScope | null; financialScopeKey?: string | null;
+  advanceApplicationId?: string | null; sourceAdvanceVoucherId?: string | null; sourceAdvanceVoucherNumber?: string | null; amount: number;
+  recipientScope?: LabourRecipientScope | null; financialScopeKey?: string | null;
   labourerId?: string | null; labourGroupId?: string | null; recipientName: string; description: string;
   labourDueEffect: number; labourAdvanceEffect: number; expenseEffect: number; partnerEffect: number; cashControlEffect: number; canonical: true;
 };
