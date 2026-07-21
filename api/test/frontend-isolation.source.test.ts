@@ -279,7 +279,7 @@ test("partner settlements transfer matching account and partner positions withou
   assert.match(partnerAccounting, /position\.outstandingLabourAdvances = snapshot\.outstandingLabourAdvances;/);
   assert.match(partnerAccounting, /position\.currentPartnerBalance = snapshot\.currentPartnerBalance;/);
   assert.match(modulePage, /useCanonicalLabourFinancials\(\)/);
-  assert.match(modulePage, /buildPartnerLiabilityPositions\(accounts, vouchers, \[\], activeEntries, sales, \[\], \{ farmId, seasonId \}\)/);
+  assert.match(modulePage, /buildPartnerLiabilityPositions\(\s*accounts,\s*vouchers,\s*activeAdvances,\s*activeEntries,\s*sales,\s*activeLabourWageSettlements,\s*\{ farmId, seasonId \}\s*\)/);
   assert.match(modulePage, /replacedLegacySourceIds/);
   assert.match(modulePage, /canonical\.farmOwesPartner/);
   assert.match(modulePage, /Purchase Vouchers/);
@@ -291,11 +291,13 @@ test("partner settlements transfer matching account and partner positions withou
   assert.match(modulePage, /t\("partnerLedgerPage\.farmOwesPartner"\)/);
   assert.match(modulePage, /t\("partnerLedgerPage\.partnerHoldsBusinessMoney"\)/);
   assert.match(modulePage, /<option value="settlement">\{t\("partnerLedgerPage\.partnerSettlement"\)\}<\/option>/);
-  assert.ok(modulePage.includes("getPartnerAccountingSnapshot(selectedAccount, sales, legacyExpenseVouchers, [], activeEntries, [], accounts, { farmId, seasonId })"));
-  assert.match(modulePage, /outstandingLabourAdvances: canonical\.outstandingLabourAdvances/);
-  assert.match(modulePage, /settledAdvances: canonical\.appliedLabourAdvances/);
+  assert.ok(modulePage.includes("getPartnerAccountingSnapshot(selectedAccount, sales, legacyExpenseVouchers, activeAdvances, activeEntries, activeLabourWageSettlements, accounts, { farmId, seasonId })"));
+  assert.match(modulePage, /outstandingLabourAdvances: merged\.outstandingLabourAdvances/);
+  assert.match(modulePage, /settledAdvances: merged\.settledAdvances/);
   assert.match(modulePage, /canonical\.directLabourPayments/);
   assert.match(modulePage, /outstandingLabourAdvances/);
+  assert.match(modulePage, /mergedPartnerPositionsByAccountId/);
+  assert.match(modulePage, /canonicalPartnerLedgerEntries/);
 });
 
 test("attendance labour directory loads cache-first and keeps cached data during API outages", async () => {

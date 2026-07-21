@@ -3974,11 +3974,13 @@ function PartnerLedgerModule() {
   const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }), []);
   const loadVouchers = useCallback(() => loadWorkspaceVouchers({ includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }), []);
   const loadSales = useCallback(() => workspaceRecords(offlineDb.sales), []);
+  const loadAdvances = useCallback(() => workspaceRecords(offlineDb.advances), []);
   const loadLabourWageSettlements = useCallback(() => workspaceRecords(offlineDb.labourWageSettlements), []);
   const [entries, refresh] = useData(load);
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
   const [vouchers] = useData(loadVouchers);
   const [sales] = useData(loadSales);
+  const [advances] = useData(loadAdvances);
   const [labourWageSettlements] = useData(loadLabourWageSettlements);
   const [date, setDate] = useState(today());
   const [partnerName, setPartnerName] = useState("");
@@ -4098,6 +4100,9 @@ function PartnerLedgerModule() {
   };
   const visibleEntries = entries.filter((item) => (showDeleted || isActiveOperationalRecord(item)) && (entryFilter === "all" || item.type === entryFilter));
   const activeEntries = entries.filter((item) => isActiveOperationalRecord(item));
+  const replacedLegacySourceIds = new Set(canonicalFinancials.data?.replacedLegacySourceIds ?? []);
+  const activeAdvances = advances.filter((item) => isActiveOperationalRecord(item) && !replacedLegacySourceIds.has(item.id));
+  const activeLabourWageSettlements = labourWageSettlements.filter((item) => isActiveOperationalRecord(item));
   const accountLookup = useMemo(() => buildAccountIdentityLookup(accounts), [accounts]);
   const accountName = (id?: string) => {
     const resolvedId = resolveCanonicalAccountId(id ?? null, accountLookup);
@@ -4106,7 +4111,7 @@ function PartnerLedgerModule() {
       : id ? accounts.find((account) => account.id === id)?.name ?? t("expensesPage.unknownAccount") : "-";
   };
   const partnerPositions = useMemo(() => {
-    const legacy = buildPartnerLiabilityPositions(accounts, vouchers, [], activeEntries, sales, [], { farmId, seasonId });
+    const legacy = buildPartnerLiabilityPositions(accounts, vouchers, activeAdvances, activeEntries, sales, activeLabourWageSettlements, { farmId, seasonId });
     const byAccount = new Map((canonicalFinancials.data?.partnerPositions ?? []).map((item) => [item.accountId, item]));
     const merged = legacy.map((item) => {
       const canonical = item.account?.id ? byAccount.get(item.account.id) : undefined;
@@ -4128,7 +4133,7 @@ function PartnerLedgerModule() {
       merged.push(buildCanonicalPartnerLiabilityPosition(canonical, account));
     }
     return merged;
-  }, [accounts, activeEntries, canonicalFinancials.data, farmId, sales, seasonId, vouchers]);
+  }, [accounts, activeAdvances, activeEntries, activeLabourWageSettlements, canonicalFinancials.data, farmId, sales, seasonId, vouchers]);
   const balance = partnerPositions.reduce((sum, item) => sum + item.currentPartnerBalance, 0);
   const selectedPartnerPositionLabourSettlements = useMemo(() => {
     const selectedPartnerAccountId = selectedPartnerPosition?.account?.id ?? null;
@@ -4386,17 +4391,49 @@ function AccountsModule() {
   const activeAdvances = advances.filter((item) => isActiveOperationalRecord(item) && !replacedLegacySourceIds.has(item.id));
   const activeLabourWageSettlements = labourWageSettlements.filter((item) => isActiveOperationalRecord(item));
   const activeGeneralExpenseVouchers = getGeneralExpenseVouchers(activeVouchers, activeLabourWageSettlements);
-  const balance = (account: Account) => calculateDisplayedAccountBalance(
-    account,
-    activeSales,
-    activeGeneralExpenseVouchers,
-    activeAdvances,
-    activeEntries,
-    activeLabourWageSettlements,
-    accounts,
-    canonicalFinancials.data?.accountEntries ?? [],
-    { farmId, seasonId },
+  const canonicalPartnerPositionsByAccountId = useMemo(
+    () => new Map((canonicalFinancials.data?.partnerPositions ?? []).map((item) => [item.accountId, item])),
+    [canonicalFinancials.data?.partnerPositions],
   );
+  const mergedPartnerPositionsByAccountId = useMemo(() => {
+    const positions = new Map<string, PartnerLiabilityPosition>();
+    const legacyPositions = buildPartnerLiabilityPositions(
+      accounts,
+      vouchers,
+      activeAdvances,
+      activeEntries,
+      sales,
+      activeLabourWageSettlements,
+      { farmId, seasonId },
+    );
+    for (const legacy of legacyPositions) {
+      const canonical = legacy.account?.id ? canonicalPartnerPositionsByAccountId.get(legacy.account.id) : undefined;
+      positions.set(legacy.key, mergePartnerPositionWithCanonical(legacy, canonical));
+    }
+    for (const canonical of canonicalPartnerPositionsByAccountId.values()) {
+      if (positions.has(canonical.accountId)) continue;
+      const account = accounts.find((item) => item.id === canonical.accountId) ?? null;
+      positions.set(canonical.accountId, buildCanonicalPartnerLiabilityPosition(canonical, account));
+    }
+    return positions;
+  }, [accounts, activeAdvances, activeEntries, activeLabourWageSettlements, canonicalPartnerPositionsByAccountId, farmId, sales, seasonId, vouchers]);
+  const balance = (account: Account) => {
+    if (account.type === "partner") {
+      const canonicalPartnerSnapshot = mergedPartnerPositionsByAccountId.get(account.id);
+      if (canonicalPartnerSnapshot) return canonicalPartnerSnapshot.currentPartnerBalance;
+    }
+    return calculateDisplayedAccountBalance(
+      account,
+      activeSales,
+      activeGeneralExpenseVouchers,
+      activeAdvances,
+      activeEntries,
+      activeLabourWageSettlements,
+      accounts,
+      canonicalFinancials.data?.accountEntries ?? [],
+      { farmId, seasonId },
+    );
+  };
   const totalAdvances = activeAdvances.reduce((sum, item) => sum + item.amount, 0);
   const canonicalLabourExpense = canonicalFinancials.data?.summary.wageExpense ?? 0;
   const legacyExpenseVouchers = activeGeneralExpenseVouchers.filter((item) => !replacedLegacySourceIds.has(item.id));
@@ -4489,7 +4526,7 @@ function AccountsModule() {
   const selectedAccount = selectedAccountId ? accounts.find((item) => item.id === selectedAccountId) ?? null : null;
   const selectedPartnerSnapshot = useMemo(() => {
     if (selectedAccount?.type !== "partner") return null;
-    const legacy = getPartnerAccountingSnapshot(selectedAccount, sales, legacyExpenseVouchers, [], activeEntries, [], accounts, { farmId, seasonId });
+    const legacy = getPartnerAccountingSnapshot(selectedAccount, sales, legacyExpenseVouchers, activeAdvances, activeEntries, activeLabourWageSettlements, accounts, { farmId, seasonId });
     const canonical = canonicalFinancials.data?.partnerPositions.find((item) => item.accountId === selectedAccount.id);
     if (!canonical) return legacy;
     const merged = mergePartnerPositionWithCanonical(legacy, canonical);
@@ -4544,6 +4581,9 @@ function AccountsModule() {
     if (!selectedAccount) return [];
     const rows: AccountLedgerRow[] = [];
     const selectedIsPartner = selectedAccount.type === "partner";
+    const canonicalPartnerLedgerEntries = selectedIsPartner
+      ? (canonicalFinancials.data?.partnerLedger ?? []).filter((entry) => entry.accountId === selectedAccount.id)
+      : [];
     for (const sale of activeSales.filter((item) => resolveCanonicalAccountId(item.accountId, accountLookup) === selectedAccount.id)) {
       rows.push({
         id: `sale:${sale.id}`,
@@ -4601,7 +4641,7 @@ function AccountsModule() {
         accountId: settlementAccountResolution.canonicalAccountId ?? settlement.linkedAccountId ?? selectedAccount.id,
       });
     }
-    for (const advance of activeAdvances.filter((item) => resolveCanonicalAccountId(item.accountId, accountLookup) === selectedAccount.id)) {
+    for (const advance of activeAdvances.filter((item) => !selectedIsPartner && resolveCanonicalAccountId(item.accountId, accountLookup) === selectedAccount.id)) {
       rows.push({
         id: `advance:${advance.id}`,
         date: advance.date,
@@ -4616,7 +4656,7 @@ function AccountsModule() {
         partnerLiabilityGroup: selectedIsPartner ? "labour_advances_paid" : undefined,
       });
     }
-    for (const entry of canonicalFinancials.data?.accountEntries.filter((item) => item.accountId === selectedAccount.id) ?? []) {
+    for (const entry of selectedIsPartner ? canonicalPartnerLedgerEntries : (canonicalFinancials.data?.accountEntries.filter((item) => item.accountId === selectedAccount.id) ?? [])) {
       rows.push({
         id: `canonical-labour:${entry.id}`,
         date: entry.date,
@@ -4708,7 +4748,7 @@ function AccountsModule() {
       running += row.credit - row.debit;
       return { ...row, runningBalance: running };
     });
-  }, [activeAdvances, activeEntries, activeLabourWageSettlements, activeSales, activeVouchers, accountLookup, accounts, canonicalFinancials.data?.accountEntries, farmId, seasonId, selectedAccount, t]);
+  }, [activeAdvances, activeEntries, activeLabourWageSettlements, activeSales, activeVouchers, accountLookup, accounts, canonicalFinancials.data?.accountEntries, canonicalFinancials.data?.partnerLedger, farmId, seasonId, selectedAccount, t]);
   const filteredLedgerRows = useMemo(() => {
     const term = ledgerSearch.trim().toLowerCase();
     const minAmount = ledgerMinAmount ? Number(ledgerMinAmount) : null;

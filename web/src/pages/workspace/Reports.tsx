@@ -1088,7 +1088,7 @@ export function Reports() {
     appliedAmount: item.appliedAmount,
     recoveredAmount: item.recoveredAmount,
     outstandingAmount: item.outstandingAmount,
-    status: item.status,
+    status: item.status === "VOIDED" ? "VOIDED" : "POSTED",
     reviewRequired: item.needsReview,
     reviewReason: item.reviewReason,
     canonical: true as const,
@@ -1672,7 +1672,7 @@ export function Reports() {
     ]),
   ]);
   const exportAdvanceDetailCsv = () => downloadCsv("labour-advances-detail.csv", [
-    ["Serial", "Labour / Group", "Recipient Type", "Group", "Date", "Source / Paid From", "Description", "Amount SAR", "Applied SAR", "Recovered SAR", "Outstanding SAR", "Status", "Voucher Number"],
+    ["Serial", "Labour / Group", "Recipient Type", "Group", "Date", "Source / Paid From", "Description", "Advance Amount SAR", "Recovered SAR", "Status", "Voucher Number"],
     ...advanceRows.map((item, index) => {
       const labourer = labourById.get(item.labourerId);
       return [
@@ -1684,9 +1684,7 @@ export function Reports() {
         advancePaymentSourceName(item),
         item.notes || "-",
         item.amount,
-        item.appliedAmount,
         item.recoveredAmount,
-        item.outstandingAmount,
         item.status,
         item.voucherNumber,
       ];
@@ -2138,7 +2136,7 @@ export function Reports() {
           <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.labour"), t("reportsPage.transactions"), t("reportsPage.total"), t("reportsPage.netBalance")]} rows={advanceSummary.map((item) => ({ id: item.labourer.id, title: item.labourer.name, value: money(item.total), meta: `${item.records.length} ${t("reportsPage.transactions")} · ${t("reportsPage.netBalance")}: ${money(item.outstanding)}`, cells: [item.labourer.name, item.records.length, money(item.total), money(item.outstanding)], details: [[t("reportsPage.account"), [...new Set(item.records.map((record) => advancePaymentSourceName(record)))].join(", ")], [t("reportsPage.status"), item.labourer.active === false ? t("reportsPage.inactive") : t("reportsPage.active")]] }))} />
         </ReportShell>}
         {views.advances === "log" && <ReportShell title={t("reportsPage.advanceLog")} rangeLabel={rangeLabel} sectionId="advance-log" onPrint={() => printSection("advance-report-print")} onExport={exportAdvanceCsv} printLabel="Export PDF">
-          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.labour"), "Original", "Applied", "Recovered", "Outstanding", t("reportsPage.account"), "Status", t("reportsPage.reference")]} rows={advanceRows.map((item) => ({ id: item.id, title: advanceRecipientName(item), value: money(item.outstandingAmount), meta: `${item.date} · ${advancePaymentSourceName(item)}`, cells: [item.date, advanceRecipientName(item), money(item.amount), money(item.appliedAmount), money(item.recoveredAmount), money(item.outstandingAmount), advancePaymentSourceName(item), item.status, item.voucherNumber], details: [[t("reportsPage.labour"), advanceRecipientName(item)], [t("reportsPage.account"), advancePaymentSourceName(item)], ["Original", money(item.amount)], ["Applied", money(item.appliedAmount)], ["Recovered", money(item.recoveredAmount)], ["Outstanding", money(item.outstandingAmount)], ["Status", item.status], [t("reportsPage.notes"), item.notes || "-"], [t("reportsPage.reference"), item.voucherNumber]], onOpen: () => navigate(`/workspace/labour-advances?recordId=${item.id}`) }))} />
+          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.labour"), "Advance amount", "Recovered", t("reportsPage.account"), "Status", t("reportsPage.reference")]} rows={advanceRows.map((item) => ({ id: item.id, title: advanceRecipientName(item), value: money(item.amount), meta: `${item.date} · ${advancePaymentSourceName(item)}`, cells: [item.date, advanceRecipientName(item), money(item.amount), money(item.recoveredAmount), advancePaymentSourceName(item), item.status, item.voucherNumber], details: [[t("reportsPage.labour"), advanceRecipientName(item)], [t("reportsPage.account"), advancePaymentSourceName(item)], ["Advance amount", money(item.amount)], ["Recovered", money(item.recoveredAmount)], ["Status", item.status], [t("reportsPage.notes"), item.notes || "-"], [t("reportsPage.reference"), item.voucherNumber]], onOpen: () => navigate(`/workspace/labour-advances?recordId=${item.id}`) }))} />
         </ReportShell>}
         <section className="record-panel reports-print-section reports-print-only" data-print-section="advance-report-print" aria-hidden="true">
           <div className="advance-report-print-template">

@@ -2806,7 +2806,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
         fundingAccountName: row.paymentSourceDisplayName,
         paymentMethod: row.fundingType,
         transactionReference: row.sourceId,
-        status: row.status,
+        status: row.status === "VOIDED" ? "VOIDED" : "POSTED",
         nature: "ADVANCE",
         sourceType: row.sourceClassification,
         sourceId: row.sourceId,

@@ -104,6 +104,10 @@ test("advance cards retain explicit owner and receiver hierarchy in both views",
   assert.match(page, /Multiple payment sources/);
   assert.match(page, /workforce-advance-group-actions/);
   assert.match(styles, /\.workforce-advance-recover \{ min-height: 34px/);
+  assert.match(page, /<dt>Paid to<\/dt>/);
+  assert.match(page, /<dt>Recipient type<\/dt>/);
+  assert.doesNotMatch(page, /<dt>Applied<\/dt>/);
+  assert.doesNotMatch(page, /<dt>Outstanding<\/dt>/);
 });
 
 test("payment and advance registers remain separate business documents", () => {
@@ -191,6 +195,11 @@ test("advance reports and exports use the same resolved recipient and payment-so
   assert.match(reports, /advanceRecipientName\(item\)/);
   assert.match(reports, /"Labour \/ Group"/);
   assert.match(reports, /"Source \/ Paid From"/);
+  assert.match(reports, /"Advance Amount SAR"/);
+  assert.doesNotMatch(reports, /"Applied SAR"/);
+  assert.doesNotMatch(reports, /"Outstanding SAR"/);
+  assert.match(reports, /"Advance amount"/);
+  assert.doesNotMatch(reports, /"Fully applied"/i);
 });
 
 test("payments due uses canonical summary and review loads a due-specific aggregate", () => {

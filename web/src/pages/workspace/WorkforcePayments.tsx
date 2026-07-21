@@ -1766,12 +1766,14 @@ function AdvancesView({
               name: advance.financialOwnerName ?? "Recipient unavailable",
               scope: scopeCopy(advance),
               count: 0,
+              total: 0,
               outstanding: 0,
               reviewRequired: false,
               receivers: new Set<string>(),
               paymentSources: new Map<string, number>(),
             };
             current.count += 1;
+            current.total += advance.originalAmount;
             current.outstanding += advance.outstandingAmount;
             current.reviewRequired ||= advance.reviewRequired;
             if (advance.receivedByName)
@@ -1793,7 +1795,7 @@ function AdvancesView({
             );
             map.set(key, current);
             return map;
-          }, new Map<string, { key: string; name: string; scope: string; count: number; outstanding: number; reviewRequired: boolean; receivers: Set<string>; paymentSources: Map<string, number> }>())
+          }, new Map<string, { key: string; name: string; scope: string; count: number; total: number; outstanding: number; reviewRequired: boolean; receivers: Set<string>; paymentSources: Map<string, number> }>())
           .values(),
       ),
     [rows],
@@ -1947,11 +1949,7 @@ function AdvancesView({
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.target.value)}
             >
-              <option value="OPEN">Outstanding & partial</option>
-              <option value="OUTSTANDING">Outstanding</option>
-              <option value="PARTIALLY_APPLIED">Partially applied</option>
               <option value="PARTIALLY_REFUNDED">Partially refunded</option>
-              <option value="FULLY_APPLIED">Fully applied</option>
               <option value="FULLY_REFUNDED">Recovered / refunded</option>
               <option value="VOIDED">Voided / reversed</option>
               <option value="ALL">All history</option>
@@ -2028,7 +2026,7 @@ function AdvancesView({
                     </span>
                   </div>
                   <div>
-                    <b>{money(group.outstanding)} outstanding</b>
+                    <b>{money(group.total)} total advances</b>
                     <span>
                       {group.count} loaded{" "}
                       {group.count === 1 ? "advance" : "advances"}
@@ -2107,6 +2105,10 @@ function AdvancesView({
                         className={`workforce-payment-status status-${advance.advanceStatus.toLowerCase()}`}
                       >
                         Needs review
+                      </em>
+                    ) : advance.status !== "POSTED" ? (
+                      <em className={`workforce-payment-status status-${advance.status.toLowerCase()}`}>
+                        {statusLabel(advance.status)}
                       </em>
                     ) : null}
                   </header>
@@ -2677,21 +2679,28 @@ function AdvancesView({
             <div className="workforce-payment-review__body">
               <dl className="workforce-payment-position">
                 <div>
-                  <dt>Financial owner</dt>
+                  <dt>Paid to</dt>
                   <dd>
                     {selectedAdvance.financialOwnerName ??
                       "Recipient unavailable"}
                   </dd>
                 </div>
                 <div>
-                  <dt>Received by</dt>
+                  <dt>Recipient type</dt>
                   <dd>
-                    {selectedAdvance.receivedByName ??
-                      (selectedAdvance.recipientScope === "INDIVIDUAL"
-                        ? selectedAdvance.financialOwnerName ?? "Receiver unavailable"
-                        : "Receiver unavailable")}
+                    {selectedAdvance.recipientScope === "LABOUR_GROUP"
+                      ? "Labour group"
+                      : selectedAdvance.recipientScope === "INDIVIDUAL"
+                        ? "Individual labourer"
+                        : scopeCopy(selectedAdvance)}
                   </dd>
                 </div>
+                {selectedAdvance.recipientScope === "LABOUR_GROUP" && selectedAdvance.receivedByName ? (
+                  <div>
+                    <dt>Received by</dt>
+                    <dd>{selectedAdvance.receivedByName}</dd>
+                  </div>
+                ) : null}
                 <div>
                   <dt>Date</dt>
                   <dd>{formatDate(selectedAdvance.voucherDate)}</dd>
@@ -2705,20 +2714,8 @@ function AdvancesView({
                   </dd>
                 </div>
                 <div>
-                  <dt>Original</dt>
+                  <dt>Advance amount</dt>
                   <dd>{money(selectedAdvance.originalAmount)}</dd>
-                </div>
-                <div>
-                  <dt>Applied</dt>
-                  <dd>{money(selectedAdvance.appliedAmount)}</dd>
-                </div>
-                <div>
-                  <dt>Recovered</dt>
-                  <dd>{money(selectedAdvance.refundedAmount)}</dd>
-                </div>
-                <div className="is-total">
-                  <dt>Outstanding</dt>
-                  <dd>{money(selectedAdvance.outstandingAmount)}</dd>
                 </div>
               </dl>
               <section>
