@@ -32,22 +32,89 @@ const firstText = (...values: unknown[]) => {
 
 const asSnapshot = (value: unknown) => (value && typeof value === "object" ? value as Record<string, unknown> : {});
 
-const recipientName = (snapshot: Record<string, unknown>) => {
-  const value = firstText(
-    snapshot.labourerName,
-    snapshot.labourGroupName,
+const unresolvedRecipientLabel = "Unresolved recipient";
+const unresolvedPaymentSourceLabel = "Unresolved payment source";
+
+const resolveRecipientDisplayName = (args: {
+  snapshot: Record<string, unknown>;
+  recipientScope?: string | null;
+  labourerName?: string | null;
+  labourGroupName?: string | null;
+}) => {
+  const { snapshot, recipientScope, labourerName, labourGroupName } = args;
+  if (recipientScope === "LABOUR_GROUP") {
+    return firstText(
+      snapshot.labourGroupName,
+      labourGroupName,
+      snapshot.recipientName,
+      snapshot.groupName,
+      snapshot.manualRecipientName,
+      snapshot.crewReference,
+      snapshot.contractorReference,
+      snapshot.batchIdentity,
+      snapshot.recipientReference,
+    ) ?? unresolvedRecipientLabel;
+  }
+  if (recipientScope === "INDIVIDUAL") {
+    return firstText(
+      snapshot.labourerName,
+      labourerName,
+      snapshot.recipientName,
+      snapshot.receivedByNameSnapshot,
+      snapshot.receivedBy,
+      snapshot.manualRecipientName,
+      snapshot.contactPerson,
+      snapshot.recipientReference,
+    ) ?? unresolvedRecipientLabel;
+  }
+  return firstText(
     snapshot.recipientName,
-    snapshot.receivedByNameSnapshot,
-    snapshot.receivedBy,
+    snapshot.manualRecipientName,
     snapshot.contactPerson,
     snapshot.recipientReference,
-    snapshot.manualRecipientName,
     snapshot.crewReference,
     snapshot.contractorReference,
     snapshot.batchIdentity,
-  );
-  return value ?? "Labour";
+    labourGroupName,
+    labourerName,
+    snapshot.labourGroupName,
+    snapshot.labourerName,
+  ) ?? unresolvedRecipientLabel;
 };
+
+const resolveReceivedByDisplayName = (args: {
+  snapshot: Record<string, unknown>;
+  recipientScope?: string | null;
+  labourerName?: string | null;
+  recipientDisplayName: string;
+}) => {
+  const { snapshot, recipientScope, labourerName, recipientDisplayName } = args;
+  if (recipientScope === "LABOUR_GROUP") {
+    return firstText(
+      snapshot.receivedByNameSnapshot,
+      snapshot.receivedBy,
+      snapshot.labourerName,
+      labourerName,
+    );
+  }
+  return recipientDisplayName;
+};
+
+const resolvePaymentSourceDisplayName = (args: {
+  funding: ResolvedFundingAccount;
+  snapshot?: Record<string, unknown>;
+  sourcePayload?: Record<string, unknown>;
+}) =>
+  firstText(
+    args.funding.partnerName,
+    args.funding.accountName,
+    args.snapshot?.paymentAccountName,
+    args.snapshot?.sourceAccountName,
+    args.snapshot?.partnerName,
+    args.sourcePayload?.paymentAccountName,
+    args.sourcePayload?.sourceAccountName,
+    args.sourcePayload?.partnerName,
+  ) ?? unresolvedPaymentSourceLabel;
 
 type ResolvedFundingAccount = {
   accountId: string | null;
@@ -74,8 +141,13 @@ type UnifiedAdvancePosition = {
   labourGroupName: string | null;
   recipientScope: string;
   recipientName: string;
+  recipientDisplayName: string;
+  receivedByDisplayName: string | null;
   fundingAccountId: string | null;
   fundingAccountName: string | null;
+  paymentSourceId: string | null;
+  paymentSourceDisplayName: string;
+  paymentSourceType: string | null;
   accountId: string | null;
   accountName: string | null;
   fundingType: string | null;
@@ -259,6 +331,23 @@ async function loadUnifiedAdvancePositions(input: { workspaceId: string; farmId:
     const snapshot = asSnapshot(advance.recipientSnapshot);
     const labourerName = advance.labourerId && uuidPattern.test(advance.labourerId) ? labourerById.get(advance.labourerId)?.name ?? null : firstText(snapshot.labourerName, snapshot.receivedByNameSnapshot);
     const labourGroupName = advance.labourGroupId && uuidPattern.test(advance.labourGroupId) ? groupById.get(advance.labourGroupId)?.name ?? null : firstText(snapshot.labourGroupName);
+    const recipientDisplayName = resolveRecipientDisplayName({
+      snapshot,
+      recipientScope: advance.recipientScope,
+      labourerName,
+      labourGroupName,
+    });
+    const receivedByDisplayName = resolveReceivedByDisplayName({
+      snapshot,
+      recipientScope: advance.recipientScope,
+      labourerName,
+      recipientDisplayName,
+    });
+    const paymentSourceDisplayName = resolvePaymentSourceDisplayName({
+      funding,
+      snapshot,
+      sourcePayload: asSnapshot(sourceRecord?.payload),
+    });
     const originalAmount = amount(advance.paymentAmount);
     const outstandingAmount = advance.status === "VOIDED" ? 0 : amount(Math.max(originalAmount - appliedAmount - recoveredAmount, 0));
     return {
@@ -276,9 +365,14 @@ async function loadUnifiedAdvancePositions(input: { workspaceId: string; farmId:
       labourGroupId: advance.labourGroupId ?? null,
       labourGroupName,
       recipientScope: advance.recipientScope,
-      recipientName: recipientName(snapshot),
+      recipientName: recipientDisplayName,
+      recipientDisplayName,
+      receivedByDisplayName,
       fundingAccountId: funding.accountId,
-      fundingAccountName: funding.accountName ?? firstText(snapshot.paymentAccountName, snapshot.sourceAccountName),
+      fundingAccountName: paymentSourceDisplayName,
+      paymentSourceId: funding.partnerId ?? funding.accountId,
+      paymentSourceDisplayName,
+      paymentSourceType: funding.accountType ?? advance.paymentMethod ?? null,
       fundingType: funding.accountType ?? advance.paymentMethod ?? null,
       partnerId: funding.partnerId,
       partnerName: funding.partnerName ?? firstText(snapshot.partnerName),
@@ -389,6 +483,33 @@ async function loadUnifiedAdvancePositions(input: { workspaceId: string; farmId:
     const sourceSnapshot = asSnapshot(row.recipientSnapshot);
     const labourerId = typeof row.labourerId === "string" && row.labourerId.trim() ? row.labourerId : null;
     const labourGroupId = typeof row.labourGroupId === "string" && row.labourGroupId.trim() ? row.labourGroupId : null;
+    const labourerName = labourerId && uuidPattern.test(labourerId) ? labourerById.get(labourerId)?.name ?? firstText(sourceSnapshot.labourerName) : firstText(sourceSnapshot.labourerName);
+    const labourGroupName = labourGroupId && uuidPattern.test(labourGroupId) ? groupById.get(labourGroupId)?.name ?? firstText(sourceSnapshot.labourGroupName) : firstText(sourceSnapshot.labourGroupName);
+    const recipientDisplayName = resolveRecipientDisplayName({
+      snapshot: sourceSnapshot,
+      recipientScope: String(row.recipientScope),
+      labourerName,
+      labourGroupName,
+    });
+    const receivedByDisplayName = resolveReceivedByDisplayName({
+      snapshot: sourceSnapshot,
+      recipientScope: String(row.recipientScope),
+      labourerName,
+      recipientDisplayName,
+    });
+    const paymentSourceDisplayName = resolvePaymentSourceDisplayName({
+      funding: resolvedFunding ?? {
+        accountId: null,
+        accountName: typeof row.fundingAccountName === "string" ? row.fundingAccountName : typeof row.paymentAccountName === "string" ? row.paymentAccountName : null,
+        accountType: typeof row.fundingType === "string" ? row.fundingType : null,
+        partnerId: typeof row.partnerId === "string" ? row.partnerId : null,
+        partnerName: typeof row.partnerName === "string" ? row.partnerName : null,
+        needsReview: Boolean(row.needsReview),
+        reviewReason: typeof row.reviewReason === "string" ? row.reviewReason : null,
+      },
+      snapshot: sourceSnapshot,
+      sourcePayload: asSnapshot(sourcePayload),
+    });
     return {
       advancePositionId: row.advancePositionId ?? `legacy:${row.id}`,
       canonicalVoucherId: row.canonicalVoucherId ?? null,
@@ -399,15 +520,20 @@ async function loadUnifiedAdvancePositions(input: { workspaceId: string; farmId:
       voucherDate: String(row.voucherDate),
       advanceDate: String(row.voucherDate),
       labourerId,
-      labourerName: labourerId && uuidPattern.test(labourerId) ? labourerById.get(labourerId)?.name ?? firstText(sourceSnapshot.labourerName) : firstText(sourceSnapshot.labourerName),
+      labourerName,
       labourGroupId,
-      labourGroupName: labourGroupId && uuidPattern.test(labourGroupId) ? groupById.get(labourGroupId)?.name ?? firstText(sourceSnapshot.labourGroupName) : firstText(sourceSnapshot.labourGroupName),
+      labourGroupName,
       recipientScope: String(row.recipientScope),
-      recipientName: recipientName(sourceSnapshot),
+      recipientName: recipientDisplayName,
+      recipientDisplayName,
+      receivedByDisplayName,
       fundingAccountId: typeof row.fundingAccountId === "string" ? row.fundingAccountId : resolvedFunding?.accountId ?? null,
-      fundingAccountName: typeof row.fundingAccountName === "string" ? row.fundingAccountName : resolvedFunding?.accountName ?? (typeof row.paymentAccountName === "string" ? row.paymentAccountName : null),
+      fundingAccountName: paymentSourceDisplayName,
+      paymentSourceId: typeof row.partnerId === "string" ? row.partnerId : typeof row.fundingAccountId === "string" ? row.fundingAccountId : resolvedFunding?.partnerId ?? resolvedFunding?.accountId ?? null,
+      paymentSourceDisplayName,
+      paymentSourceType: typeof row.fundingType === "string" ? row.fundingType : resolvedFunding?.accountType ?? null,
       accountId: typeof row.fundingAccountId === "string" ? row.fundingAccountId : resolvedFunding?.accountId ?? null,
-      accountName: typeof row.fundingAccountName === "string" ? row.fundingAccountName : resolvedFunding?.accountName ?? (typeof row.paymentAccountName === "string" ? row.paymentAccountName : null),
+      accountName: paymentSourceDisplayName,
       fundingType: typeof row.fundingType === "string" ? row.fundingType : resolvedFunding?.accountType ?? null,
       partnerId: typeof row.partnerId === "string" ? row.partnerId : resolvedFunding?.partnerId ?? null,
       partnerName: typeof row.partnerName === "string" ? row.partnerName : resolvedFunding?.partnerName ?? null,
@@ -446,7 +572,7 @@ async function loadVoucherSourceMaps(workspaceId: string, vouchers: typeof labou
 }
 
 export async function loadLabourFinancialReadModel(input: { workspaceId: string; farmId: string; seasonId: string }) {
-  const [scopeAccounts, transactions, vouchers, dues, applications, allocations, journal, logs, userRows] = await Promise.all([
+  const [scopeAccounts, transactions, vouchers, dues, applications, allocations, journal, logs, userRows, labourerRows, groupRows] = await Promise.all([
     db.select().from(accounts).where(eq(accounts.farmId, input.farmId)),
     db.select().from(accountTransactions).where(and(eq(accountTransactions.farmId, input.farmId), eq(accountTransactions.seasonId, input.seasonId))),
     db.select().from(labourPaymentVouchers).where(and(eq(labourPaymentVouchers.workspaceId, input.workspaceId), eq(labourPaymentVouchers.farmId, input.farmId), eq(labourPaymentVouchers.seasonId, input.seasonId))),
@@ -456,6 +582,8 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
     db.select().from(labourAccountingEntries).where(and(eq(labourAccountingEntries.workspaceId, input.workspaceId), eq(labourAccountingEntries.farmId, input.farmId), eq(labourAccountingEntries.seasonId, input.seasonId))),
     db.select().from(auditLogs).where(and(eq(auditLogs.workspaceId, input.workspaceId), eq(auditLogs.farmId, input.farmId))),
     db.select({ id: users.id, displayName: users.displayName, email: users.email }).from(users),
+    db.select().from(labourers),
+    db.select().from(labourGroups),
   ]);
   const dueIds = new Set(dues.map((row) => row.id));
   const scopedApplications = applications.filter((row) => dueIds.has(row.dueId));
@@ -466,6 +594,8 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
   const applicationById = new Map(scopedApplications.map((row) => [row.id, row]));
   const transactionById = new Map(transactions.map((row) => [row.id, row]));
   const userById = new Map(userRows.map((row) => [row.id, row]));
+  const labourerById = new Map(labourerRows.map((row) => [row.id, row]));
+  const groupById = new Map(groupRows.map((row) => [row.id, row]));
   const advancePositions = await loadUnifiedAdvancePositions(input, scopeAccounts, transactions, vouchers);
   const advanceByVoucherId = new Map(advancePositions.filter((row) => row.canonicalVoucherId).map((row) => [row.canonicalVoucherId!, row]));
   const { sourceById, sourceByClientId } = await loadVoucherSourceMaps(input.workspaceId, vouchers);
@@ -516,7 +646,12 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
       recipientScope: voucher.recipientScope,
       labourerId: voucher.labourerId,
       labourGroupId: voucher.labourGroupId,
-      recipientName: recipientName(asSnapshot(voucher.recipientSnapshot)),
+      recipientName: resolveRecipientDisplayName({
+        snapshot: asSnapshot(voucher.recipientSnapshot),
+        recipientScope: voucher.recipientScope,
+        labourerName: voucher.labourerId ? labourerById.get(voucher.labourerId)?.name ?? null : null,
+        labourGroupName: voucher.labourGroupId ? groupById.get(voucher.labourGroupId)?.name ?? null : null,
+      }),
       canonical: !voucher.legacy,
       legacy: voucher.legacy,
     }];
@@ -567,7 +702,16 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
       financialScopeKey: due?.financialScopeKey ?? voucher?.financialScopeKey ?? null,
       labourerId: due?.labourerId ?? voucher?.labourerId ?? null,
       labourGroupId: due?.labourGroupId ?? voucher?.labourGroupId ?? null,
-      recipientName: recipientName(snapshot),
+      recipientName: resolveRecipientDisplayName({
+        snapshot,
+        recipientScope: due?.recipientScope ?? voucher?.recipientScope ?? null,
+        labourerName: (due?.labourerId ?? voucher?.labourerId)
+          ? labourerById.get(due?.labourerId ?? voucher?.labourerId ?? "")?.name ?? null
+          : null,
+        labourGroupName: (due?.labourGroupId ?? voucher?.labourGroupId)
+          ? groupById.get(due?.labourGroupId ?? voucher?.labourGroupId ?? "")?.name ?? null
+          : null,
+      }),
       description: voucher?.description ?? due?.description ?? (isReversal ? "Financial reversal" : "Labour financial event"),
       legacy: Boolean(due?.legacy || voucher?.legacy),
       amount: amount(Math.max(Math.abs(sum("LABOUR_ADVANCE", "debit")), Math.abs(sum("LABOUR_PAYABLE", "credit")), Math.abs(sum("LABOUR_EXPENSE", "debit")))),
@@ -621,7 +765,12 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
         recipientScope: due.recipientScope,
         labourerId: due.labourerId,
         labourGroupId: due.labourGroupId,
-        recipientName: recipientName(dueSnapshot),
+        recipientName: resolveRecipientDisplayName({
+          snapshot: dueSnapshot,
+          recipientScope: due.recipientScope,
+          labourerName: due.labourerId ? labourerById.get(due.labourerId)?.name ?? null : null,
+          labourGroupName: due.labourGroupId ? groupById.get(due.labourGroupId)?.name ?? null : null,
+        }),
         description: matchingParentVoucher?.description ?? `Applied advances to ${due.dueNumber}`,
         paymentMethod: "Applied advances",
         originalAmount: requestedAmount,

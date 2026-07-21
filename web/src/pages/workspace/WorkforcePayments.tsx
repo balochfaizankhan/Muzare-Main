@@ -1769,6 +1769,7 @@ function AdvancesView({
               outstanding: 0,
               reviewRequired: false,
               receivers: new Set<string>(),
+              paymentSources: new Map<string, number>(),
             };
             current.count += 1;
             current.outstanding += advance.outstandingAmount;
@@ -1780,9 +1781,19 @@ function AdvancesView({
               advance.financialOwnerName
             )
               current.receivers.add(advance.financialOwnerName);
+            const paymentSource =
+              advance.paymentSourceDisplayName ??
+              advance.paymentAccountName ??
+              advance.fundingAccountName ??
+              "Unresolved payment source";
+            current.paymentSources.set(
+              paymentSource,
+              (current.paymentSources.get(paymentSource) ?? 0) +
+                advance.originalAmount,
+            );
             map.set(key, current);
             return map;
-          }, new Map<string, { key: string; name: string; scope: string; count: number; outstanding: number; reviewRequired: boolean; receivers: Set<string> }>())
+          }, new Map<string, { key: string; name: string; scope: string; count: number; outstanding: number; reviewRequired: boolean; receivers: Set<string>; paymentSources: Map<string, number> }>())
           .values(),
       ),
     [rows],
@@ -1999,6 +2010,13 @@ function AdvancesView({
           <div className="workforce-advance-recipient-list">
             {recipientGroups.map((group) => {
               const receivers = [...group.receivers];
+              const paymentSources = [...group.paymentSources.entries()].sort(
+                (left, right) => right[1] - left[1] || left[0].localeCompare(right[0]),
+              );
+              const paymentSummary =
+                paymentSources.length > 1
+                  ? "Multiple payment sources"
+                  : paymentSources[0]?.[0] ?? "Unresolved payment source";
               return (
                 <article key={group.key}>
                   <div>
@@ -2006,7 +2024,7 @@ function AdvancesView({
                     <span>
                       {receivers.length
                         ? `Received by ${receivers[0]}${receivers.length > 1 ? ` +${receivers.length - 1}` : ""}`
-                        : "Receiver unavailable"}
+                          : "Receiver unavailable"}
                     </span>
                   </div>
                   <div>
@@ -2016,6 +2034,16 @@ function AdvancesView({
                       {group.count === 1 ? "advance" : "advances"}
                       {group.reviewRequired ? " · Review required" : ""}
                     </span>
+                  </div>
+                  <div className="workforce-advance-group-meta">
+                    <small>Paid from · {paymentSummary}</small>
+                    {paymentSources.length ? (
+                      <small>
+                        {paymentSources
+                          .map(([name, total]) => `${name} ${money(total)}`)
+                          .join(" · ")}
+                      </small>
+                    ) : null}
                   </div>
                   <div className="workforce-advance-group-actions">
                     <button
@@ -2097,7 +2125,7 @@ function AdvancesView({
                     </small>
                   </div>
                   <footer>
-                    <span>Paid from: {advance.paymentAccountName ?? advance.fundingAccountName ?? "Account unavailable"}</span>
+                    <span>Paid from: {advance.paymentSourceDisplayName ?? advance.paymentAccountName ?? advance.fundingAccountName ?? "Unresolved payment source"}</span>
                     <div>
                       <button
                         type="button"
@@ -2472,7 +2500,7 @@ function AdvancesView({
               <dl className="workforce-payment-position">
                 <div><dt>Amount</dt><dd>{money(deleteAdvance.originalAmount)}</dd></div>
                 <div><dt>Recipient</dt><dd>{deleteAdvance.financialOwnerName ?? "Recipient unavailable"}</dd></div>
-                <div><dt>Funding partner/account</dt><dd>{deleteAdvance.paymentAccountName ?? "Account unavailable"}</dd></div>
+                <div><dt>Funding partner/account</dt><dd>{deleteAdvance.paymentSourceDisplayName ?? deleteAdvance.paymentAccountName ?? "Unresolved payment source"}</dd></div>
                 <div><dt>Date</dt><dd>{formatDate(deleteAdvance.voucherDate)}</dd></div>
               </dl>
             </div>
@@ -2669,10 +2697,11 @@ function AdvancesView({
                   <dd>{formatDate(selectedAdvance.voucherDate)}</dd>
                 </div>
                 <div>
-                  <dt>Account</dt>
+                  <dt>Paid from</dt>
                   <dd>
-                    {selectedAdvance.paymentAccountName ??
-                      "Account unavailable"}
+                    {selectedAdvance.paymentSourceDisplayName ??
+                      selectedAdvance.paymentAccountName ??
+                      "Unresolved payment source"}
                   </dd>
                 </div>
                 <div>
