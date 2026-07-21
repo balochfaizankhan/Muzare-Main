@@ -156,6 +156,118 @@ after(async () => {
   await closeDatabaseConnection();
 });
 
+test("operational account creation atomically normalizes payment accounts and legacy compatibility is stable-id only", async () => {
+  const labourerId = randomUUID();
+  await setupRequest("create account-normalization labourer", "POST", "/v1/workspace/operational-records", envelope("labourer", labourerId, {
+    name: "Account normalization labourer",
+    active: true,
+  }));
+
+  const accountIds = {
+    cash: randomUUID(),
+    bank: randomUUID(),
+    partner: randomUUID(),
+  } as const;
+  for (const [type, id] of Object.entries(accountIds)) {
+    const response = await request("POST", "/v1/workspace/operational-records", envelope("account", id, {
+      name: `P1 ${type} ${id}`,
+      type,
+      active: true,
+    }));
+    assertIntegrationResponse(response, 200, `create ${type} operational account`);
+    assert.equal(response.json().record.canonicalAccountId, id);
+    const [normalized] = await db.select().from(accounts).where(eq(accounts.id, id));
+    assert.equal(normalized?.farmId, tenant.farmId);
+    assert.equal(normalized?.accountType, type);
+    assert.equal(normalized?.sourceType, "operational_account");
+
+    const advance = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/advances`, {
+      farmId: tenant.farmId,
+      seasonId: tenant.seasonId,
+      idempotencyKey: randomUUID(),
+      voucherDate: "2026-02-01",
+      recipientScope: "INDIVIDUAL",
+      labourerId,
+      receivedByLabourerId: labourerId,
+      receivedByNameSnapshot: "Account normalization labourer",
+      amount: 5,
+      paymentAccountId: id,
+      paymentMethod: type,
+      description: `P1 ${type} advance`,
+    });
+    assertIntegrationResponse(advance, 201, `${type} UI account funds canonical advance`);
+    assert.equal(advance.json().voucher.paymentAccountId, id);
+  }
+
+  const dueResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/dues`, {
+    farmId: tenant.farmId,
+    seasonId: tenant.seasonId,
+    idempotencyKey: randomUUID(),
+    source: "DIRECT",
+    recipientScope: "INDIVIDUAL",
+    labourerId,
+    description: "P1 account normalization due",
+    workFromDate: "2026-02-01",
+    workToDate: "2026-02-02",
+    agreedGrossAmount: 10,
+    authorizedDeductions: 0,
+  });
+  assertIntegrationResponse(dueResponse, 201, "create account-normalization due");
+  const directPayment = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/dues/${dueResponse.json().due.id}/settle`, {
+    farmId: tenant.farmId,
+    seasonId: tenant.seasonId,
+    advanceApplications: [],
+    payment: {
+      idempotencyKey: randomUUID(),
+      voucherDate: "2026-02-02",
+      amount: 4,
+      paymentAccountId: accountIds.partner,
+      paymentMethod: "partner",
+    },
+  });
+  assertIntegrationResponse(directPayment, 200, "partner UI account funds direct due payment");
+
+  const compatibilityId = randomUUID();
+  await db.insert(operationalRecords).values({
+    workspaceId: tenant.workspaceId,
+    farmId: tenant.farmId,
+    seasonId: tenant.seasonId,
+    clientRecordId: compatibilityId,
+    entityType: "account",
+    sourceType: "account",
+    payload: { id: compatibilityId, name: `Compatibility ${compatibilityId}`, type: "cash", active: true },
+    recordedBy: tenant.userId,
+    clientUpdatedAt: new Date(now),
+  });
+  const compatibilityAdvance = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/advances`, {
+    farmId: tenant.farmId, seasonId: tenant.seasonId, idempotencyKey: randomUUID(), voucherDate: "2026-02-03",
+    recipientScope: "INDIVIDUAL", labourerId, receivedByLabourerId: labourerId,
+    receivedByNameSnapshot: "Account normalization labourer", amount: 3,
+    paymentAccountId: compatibilityId, paymentMethod: "cash", description: "Compatibility advance",
+  });
+  assertIntegrationResponse(compatibilityAdvance, 201, "operational-only account normalizes on exact stable-id use");
+  assert.equal((await db.select().from(accounts).where(eq(accounts.id, compatibilityId)))[0]?.sourceType, "operational_account_compatibility");
+
+  const conflictingName = `Ambiguous ${randomUUID()}`;
+  await db.insert(accounts).values({ farmId: tenant.farmId, name: conflictingName, accountType: "cash", active: true });
+  const ambiguousId = randomUUID();
+  await db.insert(operationalRecords).values({
+    workspaceId: tenant.workspaceId, farmId: tenant.farmId, seasonId: tenant.seasonId,
+    clientRecordId: ambiguousId, entityType: "account", sourceType: "account",
+    payload: { id: ambiguousId, name: conflictingName, type: "cash", active: true },
+    recordedBy: tenant.userId, clientUpdatedAt: new Date(now),
+  });
+  const ambiguousAdvance = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/advances`, {
+    farmId: tenant.farmId, seasonId: tenant.seasonId, idempotencyKey: randomUUID(), voucherDate: "2026-02-04",
+    recipientScope: "INDIVIDUAL", labourerId, receivedByLabourerId: labourerId,
+    receivedByNameSnapshot: "Account normalization labourer", amount: 2,
+    paymentAccountId: ambiguousId, paymentMethod: "cash", description: "Ambiguous account advance",
+  });
+  assert.equal(ambiguousAdvance.statusCode, 400);
+  assert.match(ambiguousAdvance.json().message, /ambiguous/i);
+  assert.equal((await db.select().from(accounts).where(eq(accounts.id, ambiguousId))).length, 0);
+});
+
 test("labour wage settlement create is idempotent, uses canonical allocation FKs, and void restores linked state", async () => {
   const labourerId = randomUUID();
   const labourGroupId = randomUUID();
@@ -1471,8 +1583,9 @@ test("cash, bank, and partner LPVs reconcile funding, payable, retry, and revers
 
 test("layered labour reversals are exact, idempotent, concurrent-safe, and return every ledger to zero", async () => {
   const labourerId = randomUUID();
+  const partnerName = `Layered reversal partner ${Date.now()}`;
   const [partner] = await db.insert(accounts).values({
-    farmId: tenant.farmId, name: `Layered reversal partner ${Date.now()}`, accountType: "partner", active: true,
+    farmId: tenant.farmId, name: partnerName, accountType: "partner", active: true,
   }).returning({ id: accounts.id });
   assert.ok(partner?.id);
   await db.insert(operationalRecords).values({
@@ -1480,6 +1593,13 @@ test("layered labour reversals are exact, idempotent, concurrent-safe, and retur
     clientRecordId: labourerId, entityType: "labourer", recordedBy: tenant.userId,
     clientUpdatedAt: new Date(now), payload: { id: labourerId, name: "Layered reversal labourer", status: "ACTIVE", active: true },
   });
+  const baselineReconciliation = await request("GET", `/v1/workspace/${tenant.workspaceId}/labour-payments/reconciliation?farmId=${tenant.farmId}&seasonId=${tenant.seasonId}`);
+  assertIntegrationResponse(baselineReconciliation, 200, "load layered fixture reconciliation baseline");
+  const baselineReconciliationResult = baselineReconciliation.json().reconciliation;
+  const baselineOutstandingPayables = baselineReconciliationResult.outstandingPayables;
+  const baselineFailures = Object.fromEntries(
+    baselineReconciliationResult.checks.map((check: { name: string; failureCount: number }) => [check.name, check.failureCount]),
+  );
   const advanceResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/advances`, {
     farmId: tenant.farmId, seasonId: tenant.seasonId, idempotencyKey: randomUUID(), voucherDate: "2026-07-01",
     recipientScope: "INDIVIDUAL", labourerId, receivedByLabourerId: labourerId,
@@ -1519,6 +1639,28 @@ test("layered labour reversals are exact, idempotent, concurrent-safe, and retur
   const postedPartnerPosition = postedFinancials.partnerPositions.find((row: { accountId: string }) => row.accountId === partner!.id);
   assert.equal(postedPartnerPosition?.farmOwesPartner, 90);
   assert.equal(postedPartnerPosition?.farmOwesPartner, postedPartnerPosition?.ledgerBalance);
+  assert.equal(postedPartnerPosition?.labourAdvancesPaid, 40);
+  assert.equal(postedPartnerPosition?.directLabourPayments, 50);
+  assert.equal(postedPartnerPosition?.outstandingLabourAdvances, 10);
+  assert.equal(postedPartnerPosition?.appliedLabourAdvances, 30);
+  const postedAdvancePosition = postedFinancials.advancePositions.find((row: { voucherId: string }) => row.voucherId === advance.id);
+  assert.deepEqual({
+    voucherNumber: postedAdvancePosition?.voucherNumber,
+    original: postedAdvancePosition?.originalAmount,
+    applied: postedAdvancePosition?.appliedAmount,
+    recovered: postedAdvancePosition?.recoveredAmount,
+    outstanding: postedAdvancePosition?.outstandingAmount,
+    accountName: postedAdvancePosition?.accountName,
+    canonical: postedAdvancePosition?.canonical,
+  }, {
+    voucherNumber: advance.voucherNumber,
+    original: 40,
+    applied: 30,
+    recovered: 0,
+    outstanding: 10,
+    accountName: partnerName,
+    canonical: true,
+  });
   assert.equal(postedFinancials.accountEntries.filter((row: { voucherId: string }) => row.voucherId === advance.id || row.voucherId === payment.id).reduce((sum: number, row: { balanceEffect: number }) => sum + row.balanceEffect, 0), 90);
   assert.ok(postedFinancials.labourLedger.some((row: { advanceApplicationId?: string }) => row.advanceApplicationId === application!.id));
   assert.ok(postedFinancials.activity.some((row: { sourceId?: string }) => row.sourceId === payment.id));
@@ -1539,6 +1681,7 @@ test("layered labour reversals are exact, idempotent, concurrent-safe, and retur
   assert.equal(paymentReversedLedger.reduce((sum: number, row: { expenseEffect: number }) => sum + row.expenseEffect, 0), 100);
   assert.equal(paymentReversedFinancials.advancePositions.find((row: { voucherId: string }) => row.voucherId === advance.id)?.outstandingAmount, 10);
   assert.equal(paymentReversedFinancials.partnerPositions.find((row: { accountId: string }) => row.accountId === partner!.id)?.farmOwesPartner, 40);
+  assert.equal(paymentReversedFinancials.partnerPositions.find((row: { accountId: string }) => row.accountId === partner!.id)?.directLabourPayments, 0);
 
   const applicationVoidKey = randomUUID();
   const applicationUrl = `/v1/workspace/${tenant.workspaceId}/labour-payments/dues/${due.id}/advance-applications/${application!.id}/reverse?farmId=${tenant.farmId}&seasonId=${tenant.seasonId}`;
@@ -1553,6 +1696,7 @@ test("layered labour reversals are exact, idempotent, concurrent-safe, and retur
   assert.equal(applicationReversedLedger.reduce((sum: number, row: { expenseEffect: number }) => sum + row.expenseEffect, 0), 100);
   assert.equal(applicationReversedFinancials.advancePositions.find((row: { voucherId: string }) => row.voucherId === advance.id)?.outstandingAmount, 40);
   assert.equal(applicationReversedFinancials.partnerPositions.find((row: { accountId: string }) => row.accountId === partner!.id)?.farmOwesPartner, 40);
+  assert.equal(applicationReversedFinancials.partnerPositions.find((row: { accountId: string }) => row.accountId === partner!.id)?.outstandingLabourAdvances, 40);
 
   const advanceVoidUrl = `/v1/workspace/${tenant.workspaceId}/labour-payments/vouchers/${advance.id}/void?farmId=${tenant.farmId}&seasonId=${tenant.seasonId}`;
   assertIntegrationResponse(await request("POST", advanceVoidUrl, { idempotencyKey: randomUUID(), reason: "Layered advance reversal" }), 200, "void layered advance");
@@ -1566,6 +1710,7 @@ test("layered labour reversals are exact, idempotent, concurrent-safe, and retur
   assert.equal(advanceReversedLedger.reduce((sum: number, row: { expenseEffect: number }) => sum + row.expenseEffect, 0), 100);
   assert.equal(advanceReversedFinancials.advancePositions.find((row: { voucherId: string }) => row.voucherId === advance.id)?.outstandingAmount, 0);
   assert.equal(advanceReversedFinancials.partnerPositions.find((row: { accountId: string }) => row.accountId === partner!.id)?.farmOwesPartner, 0);
+  assert.equal(advanceReversedFinancials.partnerPositions.find((row: { accountId: string }) => row.accountId === partner!.id)?.labourAdvancesPaid, 0);
   const dueVoidUrl = `/v1/workspace/${tenant.workspaceId}/labour-payments/dues/${due.id}/void?farmId=${tenant.farmId}&seasonId=${tenant.seasonId}`;
   assertIntegrationResponse(await request("POST", dueVoidUrl, { idempotencyKey: randomUUID(), reason: "Layered due reversal" }), 200, "void layered due");
   assertIntegrationResponse(await request("POST", dueVoidUrl, { idempotencyKey: randomUUID(), reason: "Retry layered due reversal" }), 200, "retry layered due void");
@@ -1606,6 +1751,20 @@ test("layered labour reversals are exact, idempotent, concurrent-safe, and retur
   assert.equal(reversedFinancials.accountEntries.filter((row: { voucherId: string; reversalReference?: string }) => row.voucherId === advance.id || row.voucherId === payment.id || row.reversalReference === advance.id || row.reversalReference === payment.id).reduce((sum: number, row: { balanceEffect: number }) => sum + row.balanceEffect, 0), 0);
   assert.equal(reversedFinancials.expenses.filter((row: { dueId?: string }) => row.dueId === due.id).reduce((sum: number, row: { amount: number }) => sum + row.amount, 0), 0);
   assert.ok(reversedFinancials.activity.some((row: { title: string }) => row.title.startsWith("Reversed")));
+
+  const fullyReversedReconciliation = await request("GET", `/v1/workspace/${tenant.workspaceId}/labour-payments/reconciliation?farmId=${tenant.farmId}&seasonId=${tenant.seasonId}`);
+  assertIntegrationResponse(fullyReversedReconciliation, 200, "reconcile fully reversed layered fixture");
+  const fullyReversedReconciliationResult = fullyReversedReconciliation.json().reconciliation;
+  assert.equal(fullyReversedReconciliationResult.outstandingPayables, baselineOutstandingPayables);
+  assert.deepEqual(
+    Object.fromEntries(fullyReversedReconciliationResult.checks.map((check: { name: string; failureCount: number }) => [check.name, check.failureCount])),
+    baselineFailures,
+  );
+  assert.equal(
+    fullyReversedReconciliationResult.reconciled,
+    baselineReconciliationResult.reconciled,
+    JSON.stringify(fullyReversedReconciliationResult.checks.filter((check: { passed: boolean }) => !check.passed)),
+  );
 
   const paymentReversals = reversals.filter((row) => row.voucherId === payment.id);
   assert.equal(paymentReversals.length, 2);

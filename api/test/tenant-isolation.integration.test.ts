@@ -10,6 +10,8 @@ import { hasModulePermission, hasPermission } from "../src/permissions.js";
 import { assertIntegrationResponse } from "./helpers/integration-response.js";
 import {
   farms,
+  accounts,
+  accountTransactions,
   attendanceImportSessions,
   auditLogs,
   expenseImportSessions,
@@ -137,7 +139,9 @@ after(async () => {
   await db.delete(labourAdvanceApplications).where(inArray(labourAdvanceApplications.workspaceId, ids));
   await db.delete(labourPaymentVouchers).where(inArray(labourPaymentVouchers.workspaceId, ids));
   await db.delete(labourDues).where(inArray(labourDues.workspaceId, ids));
+  await db.delete(accountTransactions).where(inArray(accountTransactions.farmId, [alpha.farmId, alphaSecondary.farmId, bravo.farmId]));
   await db.delete(operationalRecords).where(inArray(operationalRecords.workspaceId, ids));
+  await db.delete(accounts).where(inArray(accounts.farmId, [alpha.farmId, alphaSecondary.farmId, bravo.farmId]));
   await db.delete(userSessions).where(inArray(userSessions.userId, [alpha.userId, bravo.userId, manager.userId, supervisor.userId, accountant.userId, operator.userId, viewer.userId, admin.userId]));
   await db.delete(seasons).where(inArray(seasons.workspaceId, ids));
   await db.delete(farms).where(inArray(farms.workspaceId, ids));
@@ -709,7 +713,7 @@ test("foreign farm, season, account, ledger, and approval references are rejecte
   })).statusCode, 403);
 
   const bravoAccount = randomUUID();
-  assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "account", bravoAccount))).statusCode, 200);
+  assert.equal((await request(bravo.token, "POST", "/v1/workspace/operational-records", envelope(bravo, "account", bravoAccount, { name: `Foreign account ${bravoAccount}`, type: "cash" }))).statusCode, 200);
   assert.equal((await request(alpha.token, "POST", "/v1/workspace/operational-records", envelope(alpha, "sale", randomUUID(), financialRecord(alpha, "sale", { accountId: bravoAccount })))).statusCode, 403);
 
   const bravoLedger = randomUUID();

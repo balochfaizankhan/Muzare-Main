@@ -4114,13 +4114,24 @@ function PartnerLedgerModule() {
       const canonical = item.account?.id ? byAccount.get(item.account.id) : undefined;
       if (!canonical) return item;
       byAccount.delete(canonical.accountId);
-      const outstanding = (canonicalFinancials.data?.advancePositions ?? []).filter((advance) => advance.accountId === canonical.accountId).reduce((sum, advance) => sum + advance.outstandingAmount, 0);
-      return { ...item, labourAdvancesPaid: item.labourAdvancesPaid + canonical.farmOwesPartner, totalLabourAdvancesPaid: item.totalLabourAdvancesPaid + canonical.farmOwesPartner, outstandingLabourAdvances: item.outstandingLabourAdvances + outstanding, currentPartnerBalance: item.currentPartnerBalance + canonical.farmOwesPartner };
+      return {
+        ...item,
+        directExpensesPaid: item.directExpensesPaid + canonical.farmOwesPartner,
+        labourAdvancesPaid: item.labourAdvancesPaid + canonical.labourAdvancesPaid,
+        totalLabourAdvancesPaid: item.totalLabourAdvancesPaid + canonical.labourAdvancesPaid,
+        labourWageSettlements: item.labourWageSettlements + canonical.directLabourPayments,
+        labourSettlementCashPaid: item.labourSettlementCashPaid + canonical.directLabourPayments,
+        settledAdvances: item.settledAdvances + canonical.appliedLabourAdvances,
+        outstandingLabourAdvances: item.outstandingLabourAdvances + canonical.outstandingLabourAdvances,
+        currentPartnerBalance: item.currentPartnerBalance + canonical.farmOwesPartner,
+        reconciliationDifference: item.reconciliationDifference + canonical.farmOwesPartner - canonical.ledgerBalance,
+        reconciliationDelta: item.reconciliationDelta + canonical.farmOwesPartner - canonical.ledgerBalance,
+        isConsistent: item.isConsistent && Math.abs(canonical.farmOwesPartner - canonical.ledgerBalance) < 0.01,
+      };
     });
     for (const canonical of byAccount.values()) {
       const account = accounts.find((item) => item.id === canonical.accountId) ?? null;
-      const outstanding = (canonicalFinancials.data?.advancePositions ?? []).filter((advance) => advance.accountId === canonical.accountId).reduce((sum, advance) => sum + advance.outstandingAmount, 0);
-      merged.push({ account, key: canonical.accountId, name: canonical.accountName, openingBalance: 0, capitalInjected: 0, directExpensesPaid: canonical.farmOwesPartner, purchaseVouchersPaid: 0, businessFundsNet: 0, labourAdvancesPaid: canonical.farmOwesPartner, labourWageSettlements: 0, labourSettlementCashPaid: 0, labourSettlementNonCashApplied: 0, totalLabourAdvancesPaid: canonical.farmOwesPartner, settledAdvances: 0, outstandingLabourAdvances: outstanding, reconciliationDifference: 0, isConsistent: canonical.farmOwesPartner === canonical.ledgerBalance, transfersIn: 0, transfersOut: 0, moneyReturned: 0, adjustments: 0, currentPartnerBalance: canonical.farmOwesPartner, reconciliationDelta: canonical.farmOwesPartner - canonical.ledgerBalance });
+      merged.push({ account, key: canonical.accountId, name: canonical.accountName, openingBalance: 0, capitalInjected: 0, directExpensesPaid: canonical.farmOwesPartner, purchaseVouchersPaid: 0, businessFundsNet: 0, labourAdvancesPaid: canonical.labourAdvancesPaid, labourWageSettlements: canonical.directLabourPayments, labourSettlementCashPaid: canonical.directLabourPayments, labourSettlementNonCashApplied: 0, totalLabourAdvancesPaid: canonical.labourAdvancesPaid, settledAdvances: canonical.appliedLabourAdvances, outstandingLabourAdvances: canonical.outstandingLabourAdvances, reconciliationDifference: canonical.farmOwesPartner - canonical.ledgerBalance, isConsistent: Math.abs(canonical.farmOwesPartner - canonical.ledgerBalance) < 0.01, transfersIn: 0, transfersOut: 0, moneyReturned: canonical.recoveries, adjustments: 0, currentPartnerBalance: canonical.farmOwesPartner, reconciliationDelta: canonical.farmOwesPartner - canonical.ledgerBalance });
     }
     return merged;
   }, [accounts, activeEntries, canonicalFinancials.data, farmId, labourWageSettlements, legacyAdvances, sales, seasonId, vouchers]);
@@ -4229,9 +4240,9 @@ function PartnerLedgerModule() {
       <section className="record-panel">
         <h2>{t("partnerLedgerPage.partnerPosition")}</h2>
         {!partnerPositions.length ? <Empty>{t("partnerLedgerPage.noPartnerPositions")}</Empty> : <div className="partner-position-table">
-          <div className="partner-position-row partner-position-row--header"><span>{t("partnerLedgerPage.partner")}</span><span>Purchase Vouchers</span><span>Funds Given</span><span>Funds Received</span><span>Outstanding Labour Advances</span><span>{t("partnerLedgerPage.currentPartnerBalance")}</span></div>
+          <div className="partner-position-row partner-position-row--header"><span>{t("partnerLedgerPage.partner")}</span><span>Purchase Vouchers</span><span>Funds Given</span><span>Funds Received</span><span>Direct Labour Payments</span><span>Outstanding Labour Advances</span><span>{t("partnerLedgerPage.currentPartnerBalance")}</span></div>
           {partnerPositions.map((item) => <button type="button" className="partner-position-row partner-position-row--interactive" key={item.name} onClick={() => setSelectedPartnerPosition(item)}>
-            <strong>{item.name}</strong><span>{money(item.purchaseVouchersPaid)}</span><span>{money(item.transfersOut)}</span><span>{money(item.transfersIn)}</span><span>{money(item.outstandingLabourAdvances)}</span><b>{money(item.currentPartnerBalance)}</b>
+            <strong>{item.name}</strong><span>{money(item.purchaseVouchersPaid)}</span><span>{money(item.transfersOut)}</span><span>{money(item.transfersIn)}</span><span>{money(item.labourSettlementCashPaid)}</span><span>{money(item.outstandingLabourAdvances)}</span><b>{money(item.currentPartnerBalance)}</b>
           </button>)}
         </div>}
         {!!partnerPositions.length && <div className="partner-position-cards">
@@ -4242,6 +4253,7 @@ function PartnerLedgerModule() {
             <div><span>Funds Given</span><strong>{money(item.transfersOut)}</strong></div>
             <div><span>Funds Received</span><strong>{money(item.transfersIn)}</strong></div>
             <div><span>Total labour advances paid</span><strong>{money(item.totalLabourAdvancesPaid)}</strong></div>
+            <div><span>Direct labour payments</span><strong>{money(item.labourSettlementCashPaid)}</strong></div>
             <div><span>Settled through wages</span><strong>{money(item.settledAdvances)}</strong></div>
             <div><span>Outstanding labour advances</span><strong>{money(item.outstandingLabourAdvances)}</strong></div>
             <div><span>Reconciliation</span><strong>{`Settled ${money(item.settledAdvances)} + Outstanding ${money(item.outstandingLabourAdvances)} = Total ${money(item.totalLabourAdvancesPaid)}`}</strong></div>
@@ -4274,6 +4286,7 @@ function PartnerLedgerModule() {
               <section className="partner-ledger-details__subsection">
                 <h3>Labour Advance Status</h3>
                 <p><strong>Total advances paid</strong><span>{money(selectedPartnerPosition.totalLabourAdvancesPaid)}</span></p>
+                <p><strong>Direct labour payments</strong><span>{money(selectedPartnerPosition.labourSettlementCashPaid)}</span></p>
                 <p><strong>Settled through wage settlements</strong><span>{money(selectedPartnerPosition.settledAdvances)}</span></p>
                 <p><strong>Outstanding labour advances</strong><span>{money(selectedPartnerPosition.outstandingLabourAdvances)}</span></p>
                 {selectedPartnerPositionLabourSettlements.length > 0 && <div className="partner-ledger-details__memo-list">
@@ -4292,7 +4305,7 @@ function PartnerLedgerModule() {
               <p><strong>{t("partnerLedgerPage.moneyReturned")}</strong><span>{money(selectedPartnerPosition.moneyReturned)}</span></p>
               <p><strong>{t("partnerLedgerPage.adjustments")}</strong><span>{money(selectedPartnerPosition.adjustments)}</span></p>
               <p><strong>{t("partnerLedgerPage.farmOwesPartner")}</strong><span>{money(selectedPartnerPosition.currentPartnerBalance)}</span></p>
-              <p><strong>Reconciliation</strong><span>{`Settled ${money(selectedPartnerPosition.settledAdvances)} + Outstanding ${money(selectedPartnerPosition.outstandingLabourAdvances)} = Total ${money(selectedPartnerPosition.totalLabourAdvancesPaid)}. Purchase vouchers ${money(selectedPartnerPosition.purchaseVouchersPaid)} + Funds given ${money(selectedPartnerPosition.transfersOut)} - Funds received ${money(selectedPartnerPosition.transfersIn)} + Total labour advances paid ${money(selectedPartnerPosition.totalLabourAdvancesPaid)} ${selectedPartnerPosition.moneyReturned ? `- Money returned ${money(selectedPartnerPosition.moneyReturned)} ` : ""}${selectedPartnerPosition.adjustments ? `${selectedPartnerPosition.adjustments >= 0 ? "+" : "-"} Adjustments ${money(Math.abs(selectedPartnerPosition.adjustments))} ` : ""}= ${money(selectedPartnerPosition.currentPartnerBalance)}`}</span></p>
+              <p><strong>Reconciliation</strong><span>{`Settled ${money(selectedPartnerPosition.settledAdvances)} + Outstanding ${money(selectedPartnerPosition.outstandingLabourAdvances)} = Total ${money(selectedPartnerPosition.totalLabourAdvancesPaid)}. Purchase vouchers ${money(selectedPartnerPosition.purchaseVouchersPaid)} + Funds given ${money(selectedPartnerPosition.transfersOut)} - Funds received ${money(selectedPartnerPosition.transfersIn)} + Total labour advances paid ${money(selectedPartnerPosition.totalLabourAdvancesPaid)} + Direct labour payments ${money(selectedPartnerPosition.labourSettlementCashPaid)} ${selectedPartnerPosition.moneyReturned ? `- Money returned ${money(selectedPartnerPosition.moneyReturned)} ` : ""}${selectedPartnerPosition.adjustments ? `${selectedPartnerPosition.adjustments >= 0 ? "+" : "-"} Adjustments ${money(Math.abs(selectedPartnerPosition.adjustments))} ` : ""}= ${money(selectedPartnerPosition.currentPartnerBalance)}`}</span></p>
               <footer><button type="button" onClick={() => setSelectedPartnerPosition(null)}>{t("partnerLedgerPage.close")}</button></footer>
             </div>
           </section>
@@ -4382,7 +4395,9 @@ function AccountsModule() {
   const balance = (account: Account) => calculateAccountBalance(account, activeSales, activeGeneralExpenseVouchers, activeAdvances, activeEntries, activeLabourWageSettlements, accounts, { farmId, seasonId })
     + (canonicalFinancials.data?.accountEntries.filter((entry) => entry.accountId === account.id).reduce((sum, entry) => sum + entry.balanceEffect, 0) ?? 0);
   const totalAdvances = activeAdvances.reduce((sum, item) => sum + item.amount, 0);
-  const totalVoucherExpenses = activeGeneralExpenseVouchers.reduce((sum, item) => sum + item.amount, 0);
+  const canonicalLabourExpense = canonicalFinancials.data?.summary.wageExpense ?? 0;
+  const legacyExpenseVouchers = activeGeneralExpenseVouchers.filter((item) => !replacedLegacySourceIds.has(item.id));
+  const totalVoucherExpenses = legacyExpenseVouchers.reduce((sum, item) => sum + item.amount, 0) + canonicalLabourExpense;
   const voucherExpenseDebug = useMemo(() => {
     const settlementById = new Map(activeLabourWageSettlements.map((settlement) => [settlement.id, settlement] as const));
     const tally = {
@@ -4469,12 +4484,23 @@ function AccountsModule() {
     return tally;
   }, [activeGeneralExpenseVouchers, activeLabourWageSettlements, farmId, seasonId, totalVoucherExpenses, vouchers]);
   const selectedAccount = selectedAccountId ? accounts.find((item) => item.id === selectedAccountId) ?? null : null;
-  const selectedPartnerSnapshot = useMemo(
-    () => selectedAccount?.type === "partner"
-      ? getPartnerAccountingSnapshot(selectedAccount, sales, activeGeneralExpenseVouchers, advances, activeEntries, labourWageSettlements, accounts, { farmId, seasonId })
-      : null,
-    [accounts, activeEntries, activeGeneralExpenseVouchers, advances, farmId, labourWageSettlements, sales, seasonId, selectedAccount],
-  );
+  const selectedPartnerSnapshot = useMemo(() => {
+    if (selectedAccount?.type !== "partner") return null;
+    const legacy = getPartnerAccountingSnapshot(selectedAccount, sales, legacyExpenseVouchers, activeAdvances, activeEntries, labourWageSettlements, accounts, { farmId, seasonId });
+    const canonical = canonicalFinancials.data?.partnerPositions.find((item) => item.accountId === selectedAccount.id);
+    if (!canonical) return legacy;
+    return {
+      ...legacy,
+      directExpensesPaid: legacy.directExpensesPaid + canonical.farmOwesPartner,
+      labourAdvancesPaid: legacy.labourAdvancesPaid + canonical.labourAdvancesPaid,
+      totalLabourAdvancesPaid: legacy.totalLabourAdvancesPaid + canonical.labourAdvancesPaid,
+      labourWageSettlements: legacy.labourWageSettlements + canonical.directLabourPayments,
+      labourSettlementCashPaid: legacy.labourSettlementCashPaid + canonical.directLabourPayments,
+      settledAdvances: legacy.settledAdvances + canonical.appliedLabourAdvances,
+      outstandingLabourAdvances: legacy.outstandingLabourAdvances + canonical.outstandingLabourAdvances,
+      farmOwesPartner: legacy.farmOwesPartner + canonical.farmOwesPartner,
+    };
+  }, [accounts, activeAdvances, activeEntries, canonicalFinancials.data?.partnerPositions, farmId, labourWageSettlements, legacyExpenseVouchers, sales, seasonId, selectedAccount]);
   const ledgerGroupTitle = useCallback((groupKey: AccountTransactionGroupKey) => ({
     expenses: t("accountsPage.groupExpenses"),
     advances: t("accountsPage.groupAdvances"),
@@ -4524,7 +4550,7 @@ function AccountsModule() {
         partnerLiabilityGroup: selectedIsPartner ? "adjustments" : undefined,
       });
     }
-    for (const voucher of activeVouchers.filter((item) => resolveCanonicalAccountId(item.accountId, accountLookup) === selectedAccount.id)) {
+    for (const voucher of activeVouchers.filter((item) => !replacedLegacySourceIds.has(item.id) && resolveCanonicalAccountId(item.accountId, accountLookup) === selectedAccount.id)) {
       const settlementVoucher = isLabourWageSettlementVoucher(voucher);
       if (settlementVoucher) continue;
       rows.push({
@@ -4585,15 +4611,15 @@ function AccountsModule() {
       rows.push({
         id: `canonical-labour:${entry.id}`,
         date: entry.date,
-        type: entry.nature === "ADVANCE" ? "advance" : "voucher",
+        type: entry.economicNature === "ADVANCE" ? "advance" : "voucher",
         reference: entry.voucherNumber,
         description: `${entry.nature.toLowerCase().replaceAll("_", " ")} — ${entry.description}`,
         debit: entry.transactionType === "debit" ? entry.amount : 0,
         credit: entry.transactionType === "credit" ? entry.amount : 0,
         source: "labour_advances",
         sourceId: entry.voucherId,
-        classification: entry.nature === "ADVANCE" ? "advance" : "settlement",
-        partnerLiabilityGroup: selectedIsPartner ? (entry.nature === "ADVANCE" ? "labour_advances_paid" : "labour_wage_settlements") : undefined,
+        classification: entry.economicNature === "ADVANCE" ? "advance" : "settlement",
+        partnerLiabilityGroup: selectedIsPartner ? (entry.economicNature === "ADVANCE" ? "labour_advances_paid" : entry.economicNature === "REFUND_RECOVERY" ? "money_returned" : "labour_wage_settlements") : undefined,
       });
     }
     for (const entry of activeEntries) {
@@ -4726,7 +4752,9 @@ function AccountsModule() {
     const settlementSnapshot = selectedPartnerSnapshot;
     byType.labourAdvancesPaid = settlementSnapshot?.totalLabourAdvancesPaid ?? byType.labourAdvancesPaid;
     byType.labourWageSettlements = settlementSnapshot?.labourWageSettlements ?? byType.labourWageSettlements;
-    byType.directExpensesPaid = byType.purchaseVouchersPaid + (settlementSnapshot?.totalLabourAdvancesPaid ?? byType.labourAdvancesPaid);
+    byType.directExpensesPaid = byType.purchaseVouchersPaid
+      + (settlementSnapshot?.totalLabourAdvancesPaid ?? byType.labourAdvancesPaid)
+      + (settlementSnapshot?.labourWageSettlements ?? byType.labourWageSettlements);
     return {
       ...byType,
       netBalance: settlementSnapshot?.farmOwesPartner ?? (byType.capitalInjected
@@ -4744,6 +4772,7 @@ function AccountsModule() {
       purchaseVouchersPaid: 0,
       labourAdvancesPaid: 0,
       outstandingLabourAdvances: 0,
+      settledAdvances: 0,
       labourWageSettlements: 0,
       labourSettlementCashPaid: 0,
       labourSettlementNonCashApplied: 0,
@@ -4767,10 +4796,13 @@ function AccountsModule() {
     const settlementSnapshot = selectedPartnerSnapshot;
     overview.labourAdvancesPaid = settlementSnapshot?.totalLabourAdvancesPaid ?? overview.labourAdvancesPaid;
     overview.outstandingLabourAdvances = settlementSnapshot?.outstandingLabourAdvances ?? overview.outstandingLabourAdvances;
+    overview.settledAdvances = settlementSnapshot?.settledAdvances ?? overview.settledAdvances;
     overview.labourWageSettlements = settlementSnapshot?.labourWageSettlements ?? overview.labourWageSettlements;
     overview.labourSettlementCashPaid = settlementSnapshot?.labourSettlementCashPaid ?? overview.labourSettlementCashPaid;
     overview.labourSettlementNonCashApplied = settlementSnapshot?.labourSettlementNonCashApplied ?? overview.labourSettlementNonCashApplied;
-    overview.directExpensesPaid = overview.purchaseVouchersPaid + (settlementSnapshot?.totalLabourAdvancesPaid ?? overview.labourAdvancesPaid);
+    overview.directExpensesPaid = overview.purchaseVouchersPaid
+      + (settlementSnapshot?.totalLabourAdvancesPaid ?? overview.labourAdvancesPaid)
+      + (settlementSnapshot?.labourWageSettlements ?? overview.labourWageSettlements);
     return {
       ...overview,
       netBalance: settlementSnapshot?.farmOwesPartner ?? calculatePartnerLiabilityBalance(overview),
@@ -4866,6 +4898,7 @@ function AccountsModule() {
         purchaseVouchersPaid: number;
         labourAdvancesPaid: number;
         outstandingLabourAdvances: number;
+        settledAdvances: number;
         labourWageSettlements: number;
         labourSettlementCashPaid: number;
         labourSettlementNonCashApplied: number;
@@ -4959,7 +4992,7 @@ function AccountsModule() {
         <div className="record-list">
           <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("voucher")}><strong>{t("accountsPage.voucherExpenses")}</strong><span>{money(totalVoucherExpenses)}</span><small>{t("accountsPage.viewDetails")}</small></article>
           <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("advance")}><strong>{t("accountsPage.labourAdvances")}</strong><span>{money(totalAdvances)}</span><small>{t("accountsPage.viewDetails")}</small></article>
-          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("combined")}><strong>{t("accountsPage.totalBusinessExpenses")}</strong><span>{money(totalVoucherExpenses + totalAdvances)}</span><small>{t("accountsPage.viewDetails")}</small></article>
+          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("combined")}><strong>{t("accountsPage.totalBusinessExpenses")}</strong><span>{money(totalVoucherExpenses)}</span><small>{t("accountsPage.viewDetails")}</small></article>
         </div>
         {import.meta.env.DEV ? (
           <div className="account-ledger-reconciliation account-ledger-reconciliation--debug">
@@ -4988,7 +5021,7 @@ function AccountsModule() {
       </section>
       <Summary
         label={t("accountsPage.netOperatingPosition")}
-        value={money(activeSales.reduce((sum, item) => sum + item.amount, 0) - totalVoucherExpenses - totalAdvances)}
+        value={money(activeSales.reduce((sum, item) => sum + item.amount, 0) - totalVoucherExpenses)}
       />
       {selectedAccount && <div className="worker-dialog-backdrop worker-action-backdrop" role="presentation" onClick={() => setSelectedAccountId(null)}>
         <section className="worker-action-dialog account-ledger-dialog" role="dialog" aria-modal="true" aria-label={t("accountsPage.accountLedgerDetails")} onClick={(event) => event.stopPropagation()}>
@@ -5004,6 +5037,9 @@ function AccountsModule() {
                   <b>{money(partnerLedgerOverviewView.directExpensesPaid)}</b>
                   <small>Purchase vouchers: {money(partnerLedgerOverviewView.purchaseVouchersPaid)}</small>
                   <small>Labour advances: {money(partnerLedgerOverviewView.labourAdvancesPaid)}</small>
+                  <small>Advances applied: {money(partnerLedgerOverviewView.settledAdvances)}</small>
+                  <small>Outstanding advances: {money(partnerLedgerOverviewView.outstandingLabourAdvances)}</small>
+                  <small>Direct labour payments: {money(partnerLedgerOverviewView.labourWageSettlements)}</small>
                 </article>
                 <article><strong>{t("accountsPage.transfersOut")}</strong><span>{money(partnerLedgerOverviewView.transfersOut)}</span></article>
                 <article><strong>{t("accountsPage.transfersIn")}</strong><span>{money(partnerLedgerOverviewView.transfersIn)}</span></article>

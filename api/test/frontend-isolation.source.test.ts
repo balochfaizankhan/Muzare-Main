@@ -291,7 +291,8 @@ test("partner settlements transfer matching account and partner positions withou
   assert.match(modulePage, /t\("partnerLedgerPage\.farmOwesPartner"\)/);
   assert.match(modulePage, /t\("partnerLedgerPage\.partnerHoldsBusinessMoney"\)/);
   assert.match(modulePage, /<option value="settlement">\{t\("partnerLedgerPage\.partnerSettlement"\)\}<\/option>/);
-  assert.ok(modulePage.includes("getPartnerAccountingSnapshot(selectedAccount, sales, activeGeneralExpenseVouchers, advances, activeEntries, labourWageSettlements, accounts, { farmId, seasonId })"));
+  assert.ok(modulePage.includes("getPartnerAccountingSnapshot(selectedAccount, sales, legacyExpenseVouchers, activeAdvances, activeEntries, labourWageSettlements, accounts, { farmId, seasonId })"));
+  assert.match(modulePage, /canonical\.directLabourPayments/);
   assert.match(modulePage, /outstandingLabourAdvances/);
 });
 

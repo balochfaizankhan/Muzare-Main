@@ -195,9 +195,11 @@ test("non-cash labour settlement stays out of the positive farm owes partner for
   assert.ok(!webPartnerAccounting.includes("+ settlementSnapshot.labourWageSettlements"));
   assert.ok(webPartnerAccounting.includes("+ totalLabourAdvancesPaid"));
   assert.ok(webModulePage.includes("settlementSnapshot?.totalLabourAdvancesPaid ?? byType.labourAdvancesPaid"));
-  assert.ok(webModulePage.includes("overview.directExpensesPaid = overview.purchaseVouchersPaid + (settlementSnapshot?.totalLabourAdvancesPaid ?? overview.labourAdvancesPaid);"));
+  assert.ok(webModulePage.includes("+ (settlementSnapshot?.labourWageSettlements ?? overview.labourWageSettlements)"));
+  assert.ok(!webModulePage.includes("+ settlementSnapshot.labourSettlementNonCashApplied"));
   assert.ok(webReports.includes('if (group.groupKey === "purchase_vouchers_paid") summary.directExpensesPaid += group.totalAmount;'));
-  assert.ok(webReports.includes("overview.directExpensesPaid = overview.purchaseVouchersPaid + (settlementSnapshot?.totalLabourAdvancesPaid ?? overview.labourAdvancesPaid);"));
+  assert.ok(webReports.includes("+ (settlementSnapshot?.labourWageSettlements ?? overview.labourWageSettlements)"));
+  assert.ok(!webReports.includes("+ settlementSnapshot.labourSettlementNonCashApplied"));
 });
 
 test("deleted labour settlements stay deleted in normalization and accounting status", () => {

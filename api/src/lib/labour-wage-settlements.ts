@@ -675,10 +675,59 @@ export async function resolveCanonicalPaymentAccountId(
   } as const;
 
   if (isUuid(trimmed)) {
-    const [account] = await tx.select(selectFields).from(accounts)
+    let [account] = await tx.select(selectFields).from(accounts)
       .innerJoin(farms, and(eq(farms.id, accounts.farmId), eq(farms.workspaceId, workspaceId)))
       .where(eq(accounts.id, trimmed))
       .limit(1);
+    if (account) return account;
+
+    // Compatibility for accounts written by older PWA versions. The exact
+    // operational client id is the mapping; names and amounts are never used.
+    const [operational] = await tx.select({
+      id: operationalRecords.id,
+      farmId: operationalRecords.farmId,
+      payload: operationalRecords.payload,
+    }).from(operationalRecords)
+      .innerJoin(farms, and(eq(farms.id, operationalRecords.farmId), eq(farms.workspaceId, workspaceId)))
+      .where(and(
+        eq(operationalRecords.workspaceId, workspaceId),
+        eq(operationalRecords.farmId, farmId),
+        eq(operationalRecords.entityType, "account"),
+        eq(operationalRecords.clientRecordId, trimmed),
+      ))
+      .limit(1);
+    if (!operational || isDeletedOperationalPayload(operational.payload)) return null;
+    const name = typeof operational.payload.name === "string" ? operational.payload.name.trim() : "";
+    const accountType = typeof operational.payload.type === "string" ? operational.payload.type.trim() : "";
+    if (!name || !["cash", "bank", "partner"].includes(accountType)) return null;
+    const explicitCanonicalId = typeof operational.payload.canonicalAccountId === "string"
+      ? operational.payload.canonicalAccountId.trim()
+      : trimmed;
+    if (!isUuid(explicitCanonicalId)) return null;
+    [account] = await tx.select(selectFields).from(accounts)
+      .innerJoin(farms, and(eq(farms.id, accounts.farmId), eq(farms.workspaceId, workspaceId)))
+      .where(eq(accounts.id, explicitCanonicalId))
+      .limit(1);
+    if (account) {
+      if (account.farmId !== farmId) throw new Error("Payment account is mapped to another farm. Please repair the explicit account mapping.");
+      return account;
+    }
+    try {
+      [account] = await tx.insert(accounts).values({
+        id: explicitCanonicalId,
+        farmId,
+        name,
+        accountType,
+        active: operational.payload.active !== false,
+        oldAndroidId: typeof operational.payload.oldAndroidId === "string" ? operational.payload.oldAndroidId : null,
+        sourceType: "operational_account_compatibility",
+      }).returning(selectFields);
+    } catch (error) {
+      if ((error as { code?: string }).code === "23505") {
+        throw new Error("Payment account mapping is ambiguous. Repair the explicit stable account identity before posting.");
+      }
+      throw error;
+    }
     return account ?? null;
   }
 

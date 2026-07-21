@@ -46,6 +46,10 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
     const account = voucher.paymentAccountId ? accountById.get(voucher.paymentAccountId) : undefined;
     if (!transaction || !account || !canonicalTransactionIds.has(transaction.id)) return [];
     const numericAmount = amount(transaction.amount);
+    const originalVoucher = voucher.nature === "REVERSAL" && voucher.reversalReference
+      ? voucherById.get(voucher.reversalReference)
+      : undefined;
+    const economicNature = originalVoucher?.nature ?? voucher.nature;
     return [{
       id: transaction.id,
       voucherId: voucher.id,
@@ -60,6 +64,7 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
       balanceEffect: transaction.type === "credit" ? numericAmount : -numericAmount,
       date: transaction.transactionDate,
       nature: voucher.nature,
+      economicNature,
       status: voucher.status,
       description: voucher.description,
       reversalReference: voucher.reversalReference,
@@ -125,13 +130,57 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
     };
   }).sort((left, right) => right.postedAt.localeCompare(left.postedAt) || right.id.localeCompare(left.id));
 
+  const advancePositions = vouchers.filter((row) => row.nature === "ADVANCE" && !row.legacy).map((advance) => {
+    const applied = scopedApplications.filter((row) => row.advanceVoucherId === advance.id && row.status === "ACTIVE").reduce((sum, row) => sum + amount(row.amount), 0);
+    const recovered = vouchers.filter((row) => row.relatedAdvanceVoucherId === advance.id && row.nature === "REFUND_RECOVERY" && row.status === "POSTED").reduce((sum, row) => sum + amount(row.paymentAmount), 0);
+    const account = advance.paymentAccountId ? accountById.get(advance.paymentAccountId) : undefined;
+    const snapshot = advance.recipientSnapshot as Record<string, unknown>;
+    return {
+      voucherId: advance.id,
+      voucherNumber: advance.voucherNumber,
+      voucherDate: advance.voucherDate,
+      accountId: advance.paymentAccountId,
+      accountName: account?.name ?? null,
+      fundingType: account?.accountType ?? advance.paymentMethod ?? null,
+      partnerId: account?.accountType === "partner" ? account.id : null,
+      partnerName: account?.accountType === "partner" ? account.name : null,
+      sourceId: advance.sourceId,
+      legacySourceRecordId: advance.legacySourceRecordId,
+      labourerId: advance.labourerId,
+      labourGroupId: advance.labourGroupId,
+      recipientScope: advance.recipientScope,
+      recipientName: recipientName(snapshot),
+      groupName: typeof snapshot.labourGroupName === "string" ? snapshot.labourGroupName : null,
+      originalAmount: amount(advance.paymentAmount),
+      appliedAmount: amount(applied),
+      recoveredAmount: amount(recovered),
+      outstandingAmount: advance.status === "VOIDED" ? 0 : amount(Math.max(amount(advance.paymentAmount) - applied - recovered, 0)),
+      status: advance.status,
+      description: advance.description,
+      relatedApplicationIds: scopedApplications.filter((row) => row.advanceVoucherId === advance.id).map((row) => row.id),
+      relatedRecoveryVoucherIds: vouchers.filter((row) => row.relatedAdvanceVoucherId === advance.id && row.nature === "REFUND_RECOVERY").map((row) => row.id),
+      canonical: true as const,
+    };
+  });
+
   const partnerPositions = scopeAccounts.filter((account) => account.accountType === "partner").map((account) => {
     const ledger = accountEntries.filter((entry) => entry.accountId === account.id);
+    const labourAdvancesPaid = amount(ledger.filter((entry) => entry.economicNature === "ADVANCE").reduce((sum, entry) => sum + entry.balanceEffect, 0));
+    const directLabourPayments = amount(ledger.filter((entry) => entry.economicNature !== "ADVANCE" && entry.economicNature !== "REFUND_RECOVERY").reduce((sum, entry) => sum + entry.balanceEffect, 0));
+    const recoveries = amount(ledger.filter((entry) => entry.economicNature === "REFUND_RECOVERY").reduce((sum, entry) => sum - entry.balanceEffect, 0));
+    const outstandingLabourAdvances = amount(advancePositions.filter((advance) => advance.accountId === account.id).reduce((sum, advance) => sum + advance.outstandingAmount, 0));
+    const appliedLabourAdvances = amount(advancePositions.filter((advance) => advance.accountId === account.id).reduce((sum, advance) => sum + advance.appliedAmount, 0));
+    const farmOwesPartner = amount(ledger.reduce((sum, entry) => sum + entry.balanceEffect, 0));
     return {
       accountId: account.id,
       accountName: account.name,
-      farmOwesPartner: amount(ledger.reduce((sum, entry) => sum + entry.balanceEffect, 0)),
-      ledgerBalance: amount(ledger.reduce((sum, entry) => sum + entry.balanceEffect, 0)),
+      farmOwesPartner,
+      ledgerBalance: farmOwesPartner,
+      labourAdvancesPaid,
+      directLabourPayments,
+      recoveries,
+      outstandingLabourAdvances,
+      appliedLabourAdvances,
       entryCount: ledger.length,
     };
   });
@@ -157,12 +206,6 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
     CASH_CONTROL: amount(canonicalJournalEvents.reduce((sum, event) => sum - event.cashControlEffect, 0)),
     PARTNER_PAYABLE: amount(canonicalJournalEvents.reduce((sum, event) => sum - event.partnerEffect, 0)),
   };
-  const advancePositions = vouchers.filter((row) => row.nature === "ADVANCE").map((advance) => {
-    const applied = scopedApplications.filter((row) => row.advanceVoucherId === advance.id && row.status === "ACTIVE").reduce((sum, row) => sum + amount(row.amount), 0);
-    const recovered = vouchers.filter((row) => row.relatedAdvanceVoucherId === advance.id && row.nature === "REFUND_RECOVERY" && row.status === "POSTED").reduce((sum, row) => sum + amount(row.paymentAmount), 0);
-    return { voucherId: advance.id, voucherNumber: advance.voucherNumber, accountId: advance.paymentAccountId, sourceId: advance.sourceId, legacySourceRecordId: advance.legacySourceRecordId, labourerId: advance.labourerId, labourGroupId: advance.labourGroupId, recipientScope: advance.recipientScope, originalAmount: amount(advance.paymentAmount), appliedAmount: amount(applied), recoveredAmount: amount(recovered), outstandingAmount: advance.status === "VOIDED" ? 0 : amount(Math.max(amount(advance.paymentAmount) - applied - recovered, 0)), status: advance.status };
-  });
-
   return {
     scope: input,
     accountEntries,
@@ -173,7 +216,10 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
     activity,
     currentLedger,
     advancePositions,
-    replacedLegacySourceIds: [...new Set(vouchers.flatMap((voucher) => [voucher.sourceId, voucher.legacySourceRecordId]).filter((id): id is string => Boolean(id)))],
+    replacedLegacySourceIds: [...new Set([
+      ...vouchers.flatMap((voucher) => [voucher.sourceId, voucher.legacySourceRecordId]),
+      ...dues.flatMap((due) => [due.sourceClientRecordId, due.sourceRecordId]),
+    ].filter((id): id is string => Boolean(id)))],
     summary: {
       labourDue: amount(canonicalJournalEvents.reduce((sum, event) => sum + event.labourDueEffect, 0)),
       outstandingAdvance: amount(advancePositions.reduce((sum, position) => sum + position.outstandingAmount, 0)),

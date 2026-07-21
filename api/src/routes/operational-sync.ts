@@ -4,7 +4,7 @@ import { z } from "zod";
 import { requireUser, type AuthenticatedUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
-import { auditLogs, expenseVoucherSequences, labourCleanupTombstones, labourPaymentVouchers, operationalRecords, userSessions } from "../db/schema.js";
+import { accounts, auditLogs, expenseVoucherSequences, labourCleanupTombstones, labourPaymentVouchers, operationalRecords, userSessions } from "../db/schema.js";
 import { activeOperationalPayloadSql, isDeletedOperationalPayload } from "../operational-record-state.js";
 import {
   canonicalImportedVoucherNumber,
@@ -213,6 +213,12 @@ const financialPayloadSchemas = {
   }).passthrough(),
 } as const;
 const masterPayloadSchemas = {
+  account: z.object({
+    name: z.string().trim().min(1),
+    type: z.enum(["cash", "bank", "partner"]),
+    active: z.boolean().optional(),
+    oldAndroidId: z.string().trim().min(1).optional(),
+  }).passthrough(),
   vehicle: z.object({
     number: z.string().trim().min(1),
     driverName: z.string().optional(),
@@ -1302,6 +1308,38 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
               });
               return updated;
             })
+          : parsed.data.entity === "account"
+          ? await db.transaction(async (tx) => {
+              const accountId = z.string().uuid().safeParse(parsed.data.record.id);
+              if (!accountId.success) throw new Error("Account identity must be a UUID before it can be used for financial posting.");
+              const accountPayload = masterPayloadSchemas.account.parse(updatedPayload);
+              const [existingCanonical] = await tx.select({ farmId: accounts.farmId, oldAndroidId: accounts.oldAndroidId, sourceType: accounts.sourceType }).from(accounts).where(eq(accounts.id, accountId.data)).limit(1);
+              if (existingCanonical && existingCanonical.farmId !== parsed.data.farmId) {
+                throw new Error("Account identity is already mapped to another farm.");
+              }
+              const normalized = await tx.insert(accounts).values({
+                id: accountId.data,
+                farmId: parsed.data.farmId!,
+                name: accountPayload.name,
+                accountType: accountPayload.type,
+                active: accountPayload.active ?? true,
+                oldAndroidId: accountPayload.oldAndroidId ?? null,
+                sourceType: "operational_account",
+              }).onConflictDoUpdate({
+                target: accounts.id,
+                set: {
+                  name: accountPayload.name,
+                  accountType: accountPayload.type,
+                  active: accountPayload.active ?? true,
+                  oldAndroidId: accountPayload.oldAndroidId ?? existingCanonical?.oldAndroidId ?? null,
+                  sourceType: existingCanonical?.sourceType ?? "operational_account",
+                  updatedAt: new Date(),
+                },
+              }).returning({ id: accounts.id });
+              const nextPayload = { ...updatedPayload, canonicalAccountId: normalized[0]!.id };
+              return tx.update(operationalRecords).set({ ...values, payload: nextPayload })
+                .where(eq(operationalRecords.id, existing.id)).returning();
+            })
           : await db.update(operationalRecords).set({ ...values, payload: updatedPayload })
             .where(eq(operationalRecords.id, existing.id)).returning()
           : await db.transaction(async (tx) => {
@@ -1327,12 +1365,48 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
               };
             } else if (parsed.data.entity === "partnerEntry") {
               createdPayload = { ...payload, createdBy: request.appUser!.id, updatedBy: request.appUser!.id };
+            } else if (parsed.data.entity === "account") {
+              const accountId = z.string().uuid().parse(parsed.data.record.id);
+              const accountPayload = masterPayloadSchemas.account.parse(payload);
+              const [existingCanonical] = await tx.select({ farmId: accounts.farmId, oldAndroidId: accounts.oldAndroidId, sourceType: accounts.sourceType }).from(accounts).where(eq(accounts.id, accountId)).limit(1);
+              if (existingCanonical && existingCanonical.farmId !== parsed.data.farmId) {
+                throw new Error("Account identity is already mapped to another farm.");
+              }
+              const normalized = await tx.insert(accounts).values({
+                id: accountId,
+                farmId: parsed.data.farmId!,
+                name: accountPayload.name,
+                accountType: accountPayload.type,
+                active: accountPayload.active ?? true,
+                oldAndroidId: accountPayload.oldAndroidId ?? null,
+                sourceType: "operational_account",
+              }).onConflictDoUpdate({
+                target: accounts.id,
+                set: {
+                  name: accountPayload.name,
+                  accountType: accountPayload.type,
+                  active: accountPayload.active ?? true,
+                  oldAndroidId: accountPayload.oldAndroidId ?? existingCanonical?.oldAndroidId ?? null,
+                  sourceType: existingCanonical?.sourceType ?? "operational_account",
+                  updatedAt: new Date(),
+                },
+              }).returning({ id: accounts.id });
+              createdPayload = { ...payload, canonicalAccountId: normalized[0]!.id };
             } else {
               createdPayload = payload;
             }
             return tx.insert(operationalRecords).values({ ...values, payload: createdPayload }).returning();
           });
     } catch (error) {
+      if (error instanceof Error && parsed.data.entity === "account") {
+        if ((error as { code?: string }).code === "23505") {
+          return reply.code(409).send({
+            code: "ambiguous_account_mapping",
+            message: "This account cannot be normalized because its stable identity conflicts with an existing account. Repair the explicit account mapping before posting.",
+          });
+        }
+        return reply.code(400).send({ message: error.message });
+      }
       if (error instanceof Error && parsed.data.entity === "voucher") {
         const duplicateMatch = /^Voucher number (V-\d+) already exists\.$/i.exec(error.message);
         if (duplicateMatch) {

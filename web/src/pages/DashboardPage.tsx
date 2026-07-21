@@ -97,10 +97,11 @@ export function DashboardPage() {
     const activeDispatches = dispatches.filter(isActiveOperationalRecord);
     const activeSales = sales.filter(isActiveOperationalRecord);
     const activeVouchers = vouchers;
-    const generalExpenseVouchers = getGeneralExpenseVouchers(activeVouchers, settlements);
-    const cashAffectingVouchers = getCashAffectingVouchers(activeVouchers, settlements);
-    const activeEntries = entries.filter(isActiveOperationalRecord);
     const replaced = new Set(canonicalFinancials.data?.replacedLegacySourceIds ?? []);
+    const legacyOnlyVouchers = activeVouchers.filter((item) => !replaced.has(item.id));
+    const generalExpenseVouchers = getGeneralExpenseVouchers(legacyOnlyVouchers, settlements);
+    const cashAffectingVouchers = getCashAffectingVouchers(legacyOnlyVouchers, settlements);
+    const activeEntries = entries.filter(isActiveOperationalRecord);
     const activeAdvances = advances.filter((item) => isActiveOperationalRecord(item) && !replaced.has(item.id));
     const activeSettlements = getActiveLabourWageSettlements(settlements);
     const activeAccounts = accounts.filter(isActiveOperationalRecord);

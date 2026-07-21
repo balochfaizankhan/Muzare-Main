@@ -1990,6 +1990,7 @@ export type CanonicalLabourAccountEntry = {
   id: string; voucherId: string; voucherNumber: string; sourceId?: string | null; legacySourceRecordId?: string | null;
   accountId: string; accountName: string; accountType: string; transactionType: "credit" | "debit";
   amount: number; balanceEffect: number; date: string; nature: LabourPaymentVoucherRecord["nature"];
+  economicNature: LabourPaymentVoucherRecord["nature"];
   status: string; description: string; reversalReference?: string | null; recipientScope: LabourRecipientScope;
   labourerId?: string | null; labourGroupId?: string | null; recipientName: string; canonical: true;
 };
@@ -2003,13 +2004,13 @@ export type CanonicalLabourLedgerEntry = {
 export type LabourFinancialReadModel = {
   scope: { workspaceId: string; farmId: string; seasonId: string };
   accountEntries: CanonicalLabourAccountEntry[];
-  partnerPositions: Array<{ accountId: string; accountName: string; farmOwesPartner: number; ledgerBalance: number; entryCount: number }>;
+  partnerPositions: Array<{ accountId: string; accountName: string; farmOwesPartner: number; ledgerBalance: number; labourAdvancesPaid: number; directLabourPayments: number; recoveries: number; outstandingLabourAdvances: number; appliedLabourAdvances: number; entryCount: number }>;
   partnerLedger: CanonicalLabourAccountEntry[];
   labourLedger: CanonicalLabourLedgerEntry[];
   expenses: Array<{ id: string; dueId?: string | null; dueNumber?: string | null; date: string; recipientScope?: LabourRecipientScope | null; labourerId?: string | null; labourGroupId?: string | null; recipientName: string; description: string; status: string; amount: number; canonical: true }>;
   activity: Array<{ id: string; date: string; module: "labour"; title: string; detail: string; status: string; sourceId?: string | null; canonical: true }>;
   currentLedger: Record<string, number>;
-  advancePositions: Array<{ voucherId: string; voucherNumber: string; accountId?: string | null; sourceId?: string | null; legacySourceRecordId?: string | null; labourerId?: string | null; labourGroupId?: string | null; recipientScope: LabourRecipientScope; originalAmount: number; appliedAmount: number; recoveredAmount: number; outstandingAmount: number; status: string }>;
+  advancePositions: Array<{ voucherId: string; voucherNumber: string; voucherDate: string; accountId?: string | null; accountName?: string | null; fundingType?: string | null; partnerId?: string | null; partnerName?: string | null; sourceId?: string | null; legacySourceRecordId?: string | null; labourerId?: string | null; labourGroupId?: string | null; recipientScope: LabourRecipientScope; recipientName: string; groupName?: string | null; originalAmount: number; appliedAmount: number; recoveredAmount: number; outstandingAmount: number; status: string; description: string; relatedApplicationIds: string[]; relatedRecoveryVoucherIds: string[]; canonical: true }>;
   replacedLegacySourceIds: string[];
   summary: { labourDue: number; outstandingAdvance: number; wageExpense: number; farmOwesPartner: number; accountMovement: number; activePaymentAmount: number; activeAdvanceApplied: number };
 };

@@ -2895,7 +2895,11 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
         0,
       );
       const positions = await db.transaction(async (tx) =>
-        Promise.all(dues.map((due) => loadLabourDuePosition(tx, due.id))),
+        Promise.all(
+          dues
+            .filter((due) => due.paymentStatus !== "VOIDED" && due.calculationStatus !== "VOIDED")
+            .map((due) => loadLabourDuePosition(tx, due.id)),
+        ),
       );
       const postedCashVouchers = vouchers.filter(
         (voucher) => voucher.status === "POSTED",
