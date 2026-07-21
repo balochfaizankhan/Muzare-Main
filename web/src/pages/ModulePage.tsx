@@ -3970,13 +3970,11 @@ function PartnerLedgerModule() {
   const [showDeleted, setShowDeleted] = useState(false);
   const load = useCallback(async () => (await workspaceRecords(offlineDb.partnerEntries, { includeDeleted: showDeleted })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [showDeleted]);
   const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }), []);
-  const loadAdvances = useCallback(() => workspaceRecords(offlineDb.advances), []);
   const loadVouchers = useCallback(() => loadWorkspaceVouchers({ includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }), []);
   const loadSales = useCallback(() => workspaceRecords(offlineDb.sales), []);
   const loadLabourWageSettlements = useCallback(() => workspaceRecords(offlineDb.labourWageSettlements), []);
   const [entries, refresh] = useData(load);
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
-  const [advances] = useData(loadAdvances);
   const [vouchers] = useData(loadVouchers);
   const [sales] = useData(loadSales);
   const [labourWageSettlements] = useData(loadLabourWageSettlements);
@@ -4105,10 +4103,8 @@ function PartnerLedgerModule() {
       ? accounts.find((account) => account.id === resolvedId)?.name ?? t("expensesPage.unknownAccount")
       : id ? accounts.find((account) => account.id === id)?.name ?? t("expensesPage.unknownAccount") : "-";
   };
-  const replacedLegacySourceIds = useMemo(() => new Set(canonicalFinancials.data?.replacedLegacySourceIds ?? []), [canonicalFinancials.data?.replacedLegacySourceIds]);
-  const legacyAdvances = useMemo(() => advances.filter((item) => !replacedLegacySourceIds.has(item.id)), [advances, replacedLegacySourceIds]);
   const partnerPositions = useMemo(() => {
-    const legacy = buildPartnerLiabilityPositions(accounts, vouchers, legacyAdvances, activeEntries, sales, labourWageSettlements, { farmId, seasonId });
+    const legacy = buildPartnerLiabilityPositions(accounts, vouchers, [], activeEntries, sales, [], { farmId, seasonId });
     const byAccount = new Map((canonicalFinancials.data?.partnerPositions ?? []).map((item) => [item.accountId, item]));
     const merged = legacy.map((item) => {
       const canonical = item.account?.id ? byAccount.get(item.account.id) : undefined;
@@ -4117,12 +4113,13 @@ function PartnerLedgerModule() {
       return {
         ...item,
         directExpensesPaid: item.directExpensesPaid + canonical.farmOwesPartner,
-        labourAdvancesPaid: item.labourAdvancesPaid + canonical.labourAdvancesPaid,
-        totalLabourAdvancesPaid: item.totalLabourAdvancesPaid + canonical.labourAdvancesPaid,
-        labourWageSettlements: item.labourWageSettlements + canonical.directLabourPayments,
-        labourSettlementCashPaid: item.labourSettlementCashPaid + canonical.directLabourPayments,
-        settledAdvances: item.settledAdvances + canonical.appliedLabourAdvances,
-        outstandingLabourAdvances: item.outstandingLabourAdvances + canonical.outstandingLabourAdvances,
+        labourAdvancesPaid: canonical.labourAdvancesPaid,
+        totalLabourAdvancesPaid: canonical.labourAdvancesPaid,
+        labourWageSettlements: canonical.directLabourPayments,
+        labourSettlementCashPaid: canonical.directLabourPayments,
+        settledAdvances: canonical.appliedLabourAdvances,
+        outstandingLabourAdvances: canonical.outstandingLabourAdvances,
+        moneyReturned: item.moneyReturned + canonical.recoveries,
         currentPartnerBalance: item.currentPartnerBalance + canonical.farmOwesPartner,
         reconciliationDifference: item.reconciliationDifference + canonical.farmOwesPartner - canonical.ledgerBalance,
         reconciliationDelta: item.reconciliationDelta + canonical.farmOwesPartner - canonical.ledgerBalance,
@@ -4134,7 +4131,7 @@ function PartnerLedgerModule() {
       merged.push({ account, key: canonical.accountId, name: canonical.accountName, openingBalance: 0, capitalInjected: 0, directExpensesPaid: canonical.farmOwesPartner, purchaseVouchersPaid: 0, businessFundsNet: 0, labourAdvancesPaid: canonical.labourAdvancesPaid, labourWageSettlements: canonical.directLabourPayments, labourSettlementCashPaid: canonical.directLabourPayments, labourSettlementNonCashApplied: 0, totalLabourAdvancesPaid: canonical.labourAdvancesPaid, settledAdvances: canonical.appliedLabourAdvances, outstandingLabourAdvances: canonical.outstandingLabourAdvances, reconciliationDifference: canonical.farmOwesPartner - canonical.ledgerBalance, isConsistent: Math.abs(canonical.farmOwesPartner - canonical.ledgerBalance) < 0.01, transfersIn: 0, transfersOut: 0, moneyReturned: canonical.recoveries, adjustments: 0, currentPartnerBalance: canonical.farmOwesPartner, reconciliationDelta: canonical.farmOwesPartner - canonical.ledgerBalance });
     }
     return merged;
-  }, [accounts, activeEntries, canonicalFinancials.data, farmId, labourWageSettlements, legacyAdvances, sales, seasonId, vouchers]);
+  }, [accounts, activeEntries, canonicalFinancials.data, farmId, sales, seasonId, vouchers]);
   const balance = partnerPositions.reduce((sum, item) => sum + item.currentPartnerBalance, 0);
   const selectedPartnerPositionLabourSettlements = useMemo(() => {
     const selectedPartnerAccountId = selectedPartnerPosition?.account?.id ?? null;
@@ -4486,21 +4483,22 @@ function AccountsModule() {
   const selectedAccount = selectedAccountId ? accounts.find((item) => item.id === selectedAccountId) ?? null : null;
   const selectedPartnerSnapshot = useMemo(() => {
     if (selectedAccount?.type !== "partner") return null;
-    const legacy = getPartnerAccountingSnapshot(selectedAccount, sales, legacyExpenseVouchers, activeAdvances, activeEntries, labourWageSettlements, accounts, { farmId, seasonId });
+    const legacy = getPartnerAccountingSnapshot(selectedAccount, sales, legacyExpenseVouchers, [], activeEntries, [], accounts, { farmId, seasonId });
     const canonical = canonicalFinancials.data?.partnerPositions.find((item) => item.accountId === selectedAccount.id);
     if (!canonical) return legacy;
     return {
       ...legacy,
       directExpensesPaid: legacy.directExpensesPaid + canonical.farmOwesPartner,
-      labourAdvancesPaid: legacy.labourAdvancesPaid + canonical.labourAdvancesPaid,
-      totalLabourAdvancesPaid: legacy.totalLabourAdvancesPaid + canonical.labourAdvancesPaid,
-      labourWageSettlements: legacy.labourWageSettlements + canonical.directLabourPayments,
-      labourSettlementCashPaid: legacy.labourSettlementCashPaid + canonical.directLabourPayments,
-      settledAdvances: legacy.settledAdvances + canonical.appliedLabourAdvances,
-      outstandingLabourAdvances: legacy.outstandingLabourAdvances + canonical.outstandingLabourAdvances,
+      labourAdvancesPaid: canonical.labourAdvancesPaid,
+      totalLabourAdvancesPaid: canonical.labourAdvancesPaid,
+      labourWageSettlements: canonical.directLabourPayments,
+      labourSettlementCashPaid: canonical.directLabourPayments,
+      settledAdvances: canonical.appliedLabourAdvances,
+      outstandingLabourAdvances: canonical.outstandingLabourAdvances,
+      moneyReturned: legacy.moneyReturned + canonical.recoveries,
       farmOwesPartner: legacy.farmOwesPartner + canonical.farmOwesPartner,
     };
-  }, [accounts, activeAdvances, activeEntries, canonicalFinancials.data?.partnerPositions, farmId, labourWageSettlements, legacyExpenseVouchers, sales, seasonId, selectedAccount]);
+  }, [accounts, activeEntries, canonicalFinancials.data?.partnerPositions, farmId, legacyExpenseVouchers, sales, seasonId, selectedAccount]);
   const ledgerGroupTitle = useCallback((groupKey: AccountTransactionGroupKey) => ({
     expenses: t("accountsPage.groupExpenses"),
     advances: t("accountsPage.groupAdvances"),

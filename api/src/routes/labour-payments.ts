@@ -46,6 +46,15 @@ import { parseSarMinorUnits, sarFromMinorUnits } from "../lib/money.js";
 import { reconcileLabourFinancialScope } from "../lib/labour-financial-reconciliation.js";
 import { loadLabourFinancialReadModel } from "../lib/labour-financial-read-model.js";
 
+const firstText = (...values: unknown[]) => {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+};
+
+const asSnapshot = (value: unknown) => (value && typeof value === "object" ? value as Record<string, unknown> : {});
+
 const paramsSchema = z.object({ workspaceId: z.string().uuid() });
 const dueParamsSchema = paramsSchema.extend({ dueId: z.string().uuid() });
 const voucherParamsSchema = paramsSchema.extend({
@@ -2521,7 +2530,30 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           desc(labourPaymentVouchers.voucherDate),
           desc(labourPaymentVouchers.createdAt),
         );
-      return { vouchers };
+      const transactionIds = vouchers.map((voucher) => voucher.accountTransactionId).filter((value): value is string => Boolean(value));
+      const [scopeAccounts, scopeTransactions] = await Promise.all([
+        db.select().from(accounts).where(eq(accounts.farmId, query.data.farmId)),
+        transactionIds.length
+          ? db.select().from(accountTransactions).where(inArray(accountTransactions.id, transactionIds))
+          : Promise.resolve([]),
+      ]);
+      const accountById = new Map(scopeAccounts.map((row) => [row.id, row]));
+      const transactionById = new Map(scopeTransactions.map((row) => [row.id, row]));
+      return {
+        vouchers: vouchers.map((voucher) => {
+          const transaction = voucher.accountTransactionId ? transactionById.get(voucher.accountTransactionId) : undefined;
+          const account = (voucher.paymentAccountId ? accountById.get(voucher.paymentAccountId) : undefined)
+            ?? (transaction?.accountId ? accountById.get(transaction.accountId) : undefined);
+          return {
+            ...voucher,
+            paymentAccountId: account?.id ?? voucher.paymentAccountId,
+            paymentAccountName: account?.name ?? firstText(
+              asSnapshot(voucher.recipientSnapshot).sourceAccountName,
+              asSnapshot(voucher.recipientSnapshot).paymentAccountName,
+            ),
+          };
+        }),
+      };
     },
   );
 
@@ -2547,252 +2579,121 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
       )
         return;
       const startedAt = performance.now();
-      const search = query.data.search
-        ? `%${query.data.search.replaceAll("%", "\\%").replaceAll("_", "\\_")}%`
-        : null;
+      const financials = await loadLabourFinancialReadModel({
+        workspaceId: params.data.workspaceId,
+        farmId: query.data.farmId,
+        seasonId: query.data.seasonId,
+      });
+      const searchTerm = query.data.search?.trim().toLowerCase() ?? "";
+      const filtered = financials.advancePositions
+        .filter((row) => {
+          if (query.data.status === "ALL") return true;
+          if (query.data.status === "OPEN") return row.status !== "VOIDED" && row.outstandingAmount > 0.005;
+          return row.status === query.data.status;
+        })
+        .filter((row) => !query.data.recipientScope || row.recipientScope === query.data.recipientScope)
+        .filter((row) => !query.data.accountId || row.fundingAccountId === query.data.accountId)
+        .filter((row) => !query.data.from || row.advanceDate >= query.data.from)
+        .filter((row) => !query.data.to || row.advanceDate <= query.data.to)
+        .filter((row) => !searchTerm || [
+          row.voucherNumber,
+          row.recipientName,
+          row.labourerName,
+          row.labourGroupName,
+          row.fundingAccountName,
+          row.partnerName,
+          row.description,
+          row.reviewReason,
+        ].filter(Boolean).join(" ").toLowerCase().includes(searchTerm))
+        .sort((left, right) => right.advanceDate.localeCompare(left.advanceDate) || right.voucherNumber.localeCompare(left.voucherNumber));
       const offset = (query.data.page - 1) * query.data.pageSize;
-      const databaseStartedAt = performance.now();
-      const result = await db.execute(sql`
-      WITH application_totals AS (
-        SELECT advance_voucher_id, sum(amount) FILTER (WHERE status='ACTIVE')::numeric AS applied_amount
-        FROM labour_advance_applications WHERE workspace_id=${params.data.workspaceId} GROUP BY advance_voucher_id
-      ), refund_totals AS (
-        SELECT related_advance_voucher_id, sum(payment_amount) FILTER (WHERE status='POSTED' AND nature='REFUND_RECOVERY')::numeric AS refunded_amount
-        FROM labour_payment_vouchers WHERE workspace_id=${params.data.workspaceId} AND related_advance_voucher_id IS NOT NULL GROUP BY related_advance_voucher_id
-      ), legacy_application_totals AS (
-        SELECT advance_record_id, sum(absorbed_amount)::numeric AS applied_amount
-        FROM labour_wage_settlement_advance_allocations WHERE workspace_id=${params.data.workspaceId} GROUP BY advance_record_id
-      ), operational_people AS (
-        SELECT DISTINCT ON (workspace_id,entity_type,client_record_id) workspace_id,entity_type,client_record_id,payload
-        FROM operational_records WHERE workspace_id=${params.data.workspaceId} AND entity_type IN ('labourer','labourGroup')
-        ORDER BY workspace_id,entity_type,client_record_id,client_updated_at DESC,updated_at DESC
-      ), source_rows AS (
-        SELECT voucher.id::text AS id, voucher.id::text AS canonical_id,
-          CASE WHEN voucher.voucher_number ~ '^LPV-LA-[0-9a-f]{8}$' THEN COALESCE(NULLIF(source_record.payload->>'voucherNumber',''),NULLIF(source_record.payload->>'voucherNo',''),NULLIF(source_record.payload->>'reference',''),'ADV-L-'||lpad(abs(hashtextextended(COALESCE(voucher.source_id,voucher.id::text),0)%10000000)::text,7,'0')) ELSE voucher.voucher_number END AS display_voucher_number,
-          voucher.voucher_date, voucher.created_at, voucher.recipient_scope, voucher.financial_scope_key,
-          voucher.labourer_id AS financial_owner_id, voucher.labour_group_id,
-          CASE voucher.recipient_scope
-            WHEN 'LABOUR_GROUP' THEN COALESCE(NULLIF(voucher.recipient_snapshot->>'labourGroupName',''),NULLIF(group_person.payload->>'name',''),normalized_group.name)
-            WHEN 'INDIVIDUAL' THEN COALESCE(NULLIF(voucher.recipient_snapshot->>'labourerName',''),NULLIF(labour_person.payload->>'name',''),normalized_labour.name)
-            ELSE COALESCE(NULLIF(voucher.recipient_snapshot->>'manualRecipientName',''),NULLIF(voucher.recipient_snapshot->>'crewReference',''),NULLIF(voucher.recipient_snapshot->>'contractorReference',''),NULLIF(voucher.recipient_snapshot->>'batchIdentity',''))
-          END AS financial_owner_name,
-          CASE WHEN voucher.recipient_scope='INDIVIDUAL' THEN voucher.labourer_id ELSE COALESCE(NULLIF(voucher.recipient_snapshot->>'receivedByLabourerId',''),NULLIF(source_record.payload#>>'{recipientSnapshot,receivedByLabourerId}',''),NULLIF(source_record.payload->>'receivedByLabourerId',''),NULLIF(source_record.payload->>'labourerId','')) END AS received_by_id,
-          COALESCE(NULLIF(voucher.recipient_snapshot->>'receivedByNameSnapshot',''),NULLIF(voucher.recipient_snapshot->>'receivedBy',''),NULLIF(receiver_person.payload->>'name',''),normalized_receiver.name,NULLIF(source_record.payload#>>'{recipientSnapshot,receivedByNameSnapshot}',''),NULLIF(source_record.payload#>>'{recipientSnapshot,receivedBy}',''),NULLIF(source_record.payload->>'labourerName',''),NULLIF(source_record.payload->>'recipientName','')) AS received_by_name,
-          NULLIF(voucher.recipient_snapshot->>'leaderSnapshot','') AS group_leader_snapshot,
-          voucher.description, voucher.payment_amount::numeric AS original_amount,
-          COALESCE(applications.applied_amount,0)::numeric AS applied_amount,
-          COALESCE(refunds.refunded_amount,0)::numeric AS refunded_amount,
-          CASE WHEN voucher.status='VOIDED' THEN voucher.payment_amount ELSE 0 END::numeric AS reversed_amount,
-          voucher.status, voucher.payment_account_id::text AS payment_account_id,
-          COALESCE(account.name,NULLIF(voucher.recipient_snapshot->>'sourceAccountName','')) AS payment_account_name,
-          voucher.payment_method, voucher.transaction_reference, voucher.source_type, voucher.source_id,
-          voucher.legacy, voucher.reconciliation_status, voucher.created_by::text AS created_by,
-          creator.display_name AS created_by_name, false AS read_only_legacy
-        FROM labour_payment_vouchers voucher
-        LEFT JOIN application_totals applications ON applications.advance_voucher_id=voucher.id
-        LEFT JOIN refund_totals refunds ON refunds.related_advance_voucher_id=voucher.id
-        LEFT JOIN accounts account ON account.id=voucher.payment_account_id
-        LEFT JOIN operational_records source_record ON source_record.id=voucher.legacy_source_record_id
-        LEFT JOIN operational_people labour_person ON labour_person.workspace_id=voucher.workspace_id AND labour_person.entity_type='labourer' AND labour_person.client_record_id=voucher.labourer_id
-        LEFT JOIN operational_people group_person ON group_person.workspace_id=voucher.workspace_id AND group_person.entity_type='labourGroup' AND group_person.client_record_id=voucher.labour_group_id
-        LEFT JOIN operational_people receiver_person ON receiver_person.workspace_id=voucher.workspace_id AND receiver_person.entity_type='labourer' AND receiver_person.client_record_id=CASE WHEN voucher.recipient_scope='INDIVIDUAL' THEN voucher.labourer_id ELSE COALESCE(NULLIF(voucher.recipient_snapshot->>'receivedByLabourerId',''),NULLIF(source_record.payload#>>'{recipientSnapshot,receivedByLabourerId}',''),NULLIF(source_record.payload->>'receivedByLabourerId',''),NULLIF(source_record.payload->>'labourerId','')) END
-        LEFT JOIN labourers normalized_labour ON normalized_labour.id=CASE WHEN voucher.labourer_id ~* '^[0-9a-f-]{36}$' THEN voucher.labourer_id::uuid END
-        LEFT JOIN labourers normalized_receiver ON normalized_receiver.id=CASE WHEN COALESCE(NULLIF(voucher.recipient_snapshot->>'receivedByLabourerId',''),NULLIF(source_record.payload#>>'{recipientSnapshot,receivedByLabourerId}',''),NULLIF(source_record.payload->>'receivedByLabourerId',''),NULLIF(source_record.payload->>'labourerId','')) ~* '^[0-9a-f-]{36}$' THEN COALESCE(NULLIF(voucher.recipient_snapshot->>'receivedByLabourerId',''),NULLIF(source_record.payload#>>'{recipientSnapshot,receivedByLabourerId}',''),NULLIF(source_record.payload->>'receivedByLabourerId',''),NULLIF(source_record.payload->>'labourerId',''))::uuid END
-        LEFT JOIN labour_groups normalized_group ON normalized_group.id=CASE WHEN voucher.labour_group_id ~* '^[0-9a-f-]{36}$' THEN voucher.labour_group_id::uuid END
-        LEFT JOIN users creator ON creator.id=voucher.created_by
-        WHERE voucher.workspace_id=${params.data.workspaceId} AND voucher.farm_id=${query.data.farmId}::uuid AND voucher.season_id=${query.data.seasonId}::uuid AND voucher.nature='ADVANCE'
-        UNION ALL
-        SELECT advance.id::text, NULL::text,
-          COALESCE(NULLIF(advance.payload->>'voucherNumber',''),NULLIF(advance.payload->>'voucherNo',''),NULLIF(advance.payload->>'reference',''),'ADV-L-'||lpad(abs(hashtextextended(advance.id::text,0)%10000000)::text,7,'0')),
-          COALESCE(NULLIF(advance.payload->>'date','')::date,NULLIF(advance.payload->>'advanceDate','')::date,advance.created_at::date), advance.created_at,
-          CASE WHEN NULLIF(advance.payload->>'labourGroupId','') IS NOT NULL THEN 'LABOUR_GROUP' ELSE 'INDIVIDUAL' END,
-          CASE WHEN NULLIF(advance.payload->>'labourGroupId','') IS NOT NULL THEN 'group:'||(advance.payload->>'labourGroupId') ELSE 'individual:'||COALESCE(NULLIF(advance.payload->>'labourerId',''),NULLIF(advance.payload->>'labourId',''),advance.client_record_id) END,
-          COALESCE(NULLIF(advance.payload->>'labourerId',''),NULLIF(advance.payload->>'labourId','')),NULLIF(advance.payload->>'labourGroupId',''),
-          CASE WHEN NULLIF(advance.payload->>'labourGroupId','') IS NOT NULL THEN COALESCE(NULLIF(advance.payload->>'labourGroupName',''),NULLIF(group_person.payload->>'name','')) ELSE COALESCE(NULLIF(advance.payload->>'labourerName',''),NULLIF(labour_person.payload->>'name','')) END,
-          COALESCE(NULLIF(advance.payload->>'receivedByLabourerId',''),NULLIF(advance.payload#>>'{recipientSnapshot,receivedByLabourerId}',''),NULLIF(advance.payload->>'labourerId',''),NULLIF(advance.payload->>'labourId','')),
-          COALESCE(NULLIF(advance.payload->>'receivedByNameSnapshot',''),NULLIF(advance.payload->>'receivedBy',''),NULLIF(advance.payload#>>'{recipientSnapshot,receivedByNameSnapshot}',''),NULLIF(advance.payload#>>'{recipientSnapshot,receivedBy}',''),CASE WHEN NULLIF(advance.payload->>'labourGroupId','') IS NOT NULL THEN COALESCE(NULLIF(advance.payload->>'labourerName',''),NULLIF(labour_person.payload->>'name','')) END,NULLIF(advance.payload->>'recipientName','')),NULLIF(advance.payload->>'leaderName',''),
-          COALESCE(NULLIF(advance.payload->>'notes',''),'Legacy labour advance'),(advance.payload->>'amount')::numeric,COALESCE(applications.applied_amount,0),0,
-          CASE WHEN NULLIF(advance.payload->>'deletedAt','') IS NOT NULL OR lower(COALESCE(advance.payload->>'status','')) IN ('voided','deleted','reversed') OR NULLIF(advance.payload->>'voidedAt','') IS NOT NULL OR NULLIF(advance.payload->>'reversedAt','') IS NOT NULL THEN (advance.payload->>'amount')::numeric ELSE 0 END,
-          CASE WHEN NULLIF(advance.payload->>'deletedAt','') IS NOT NULL OR lower(COALESCE(advance.payload->>'status','')) IN ('voided','deleted','reversed') THEN 'VOIDED' ELSE 'POSTED' END,
-          CASE WHEN NULLIF(advance.payload->>'accountId','') ~* '^[0-9a-f-]{36}$' THEN advance.payload->>'accountId' ELSE NULL END,
-          COALESCE(account.name,NULLIF(advance.payload->>'sourceAccountName','')),NULLIF(advance.payload->>'paymentMethod',''),advance.client_record_id,'LEGACY_OPERATIONAL_ADVANCE',advance.client_record_id,true,'LEGACY_READ_MODEL',advance.recorded_by::text,creator.display_name,true
-        FROM operational_records advance
-        LEFT JOIN legacy_application_totals applications ON applications.advance_record_id=advance.id
-        LEFT JOIN operational_people labour_person ON labour_person.workspace_id=advance.workspace_id AND labour_person.entity_type='labourer' AND labour_person.client_record_id=COALESCE(NULLIF(advance.payload->>'labourerId',''),NULLIF(advance.payload->>'labourId',''))
-        LEFT JOIN operational_people group_person ON group_person.workspace_id=advance.workspace_id AND group_person.entity_type='labourGroup' AND group_person.client_record_id=NULLIF(advance.payload->>'labourGroupId','')
-        LEFT JOIN accounts account ON account.id::text=NULLIF(advance.payload->>'accountId','')
-        LEFT JOIN users creator ON creator.id=advance.recorded_by
-        WHERE advance.workspace_id=${params.data.workspaceId} AND advance.entity_type='advance'
-          AND NULLIF(advance.payload->>'amount','') ~ '^[0-9]+([.][0-9]+)?$' AND (advance.payload->>'amount')::numeric>0
-          AND (advance.farm_id=${query.data.farmId}::uuid OR advance.farm_id IS NULL) AND (advance.season_id=${query.data.seasonId}::uuid OR advance.season_id IS NULL)
-          AND NOT EXISTS (SELECT 1 FROM labour_payment_vouchers mapped WHERE mapped.nature='ADVANCE' AND (mapped.legacy_source_record_id=advance.id OR mapped.source_id=advance.client_record_id))
-        UNION ALL
-        SELECT advance.id::text,NULL::text,COALESCE(NULLIF(advance.old_android_id,''),'ADV-N-'||lpad(abs(hashtextextended(advance.id::text,0)%10000000)::text,7,'0')),
-          advance.advance_date,advance.created_at,'INDIVIDUAL','individual:'||advance.labourer_id::text,advance.labourer_id::text,NULL::text,labourer.name,advance.labourer_id::text,labourer.name,NULL::text,
-          COALESCE(NULLIF(advance.description,''),'Legacy labour advance'),advance.amount,0,0,0,'POSTED',advance.account_id::text,account.name,NULL::text,NULLIF(advance.old_android_id,''),'LEGACY_NORMALIZED_ADVANCE',advance.id::text,true,'LEGACY_READ_MODEL',advance.created_by::text,creator.display_name,true
-        FROM advance_records advance JOIN farms farm ON farm.id=advance.farm_id
-        LEFT JOIN labourers labourer ON labourer.id=advance.labourer_id LEFT JOIN accounts account ON account.id=advance.account_id LEFT JOIN users creator ON creator.id=advance.created_by
-        WHERE farm.workspace_id=${params.data.workspaceId} AND advance.farm_id=${query.data.farmId}::uuid AND advance.season_id=${query.data.seasonId}::uuid
-          AND NOT EXISTS (SELECT 1 FROM labour_payment_vouchers mapped WHERE mapped.nature='ADVANCE' AND mapped.source_type='LEGACY_ADVANCE_RECORD' AND mapped.source_id=advance.id::text)
-          AND NOT EXISTS (SELECT 1 FROM operational_records operational WHERE operational.workspace_id=${params.data.workspaceId} AND operational.entity_type='advance' AND (operational.payload->>'normalizedAdvanceRecordId'=advance.id::text OR operational.payload->>'oldAndroidId'=advance.old_android_id))
-      ), positioned AS (
-        SELECT *,greatest(original_amount-applied_amount-refunded_amount-reversed_amount,0)::numeric AS outstanding_amount,
-          CASE WHEN status='VOIDED' THEN 'VOIDED' WHEN greatest(original_amount-applied_amount-refunded_amount-reversed_amount,0)<=0.005 AND applied_amount>0 THEN 'FULLY_APPLIED' WHEN greatest(original_amount-applied_amount-refunded_amount-reversed_amount,0)<=0.005 AND refunded_amount>0 THEN 'FULLY_REFUNDED' WHEN refunded_amount>0 THEN 'PARTIALLY_REFUNDED' WHEN applied_amount>0 THEN 'PARTIALLY_APPLIED' ELSE 'OUTSTANDING' END AS advance_status,
-          (financial_owner_name IS NULL OR payment_account_name IS NULL OR reconciliation_status IN ('NEEDS_REVIEW','LEGACY_UNLINKED')) AS review_required
-        FROM source_rows
-      ), context_summary AS (
-        SELECT
-          COALESCE(sum(original_amount),0)::numeric AS context_total_original,
-          COALESCE(sum(applied_amount),0)::numeric AS context_total_applied,
-          COALESCE(sum(refunded_amount),0)::numeric AS context_total_recovered,
-          COALESCE(sum(reversed_amount),0)::numeric AS context_total_reversed,
-          COALESCE(sum(outstanding_amount) FILTER (WHERE status<>'VOIDED' AND outstanding_amount>0.005),0)::numeric AS context_total_outstanding,
-          count(*) FILTER (WHERE status<>'VOIDED' AND outstanding_amount>0.005)::int AS context_open_count,
-          count(*) FILTER (WHERE status<>'VOIDED' AND outstanding_amount>0.005 AND advance_status IN ('PARTIALLY_APPLIED','PARTIALLY_REFUNDED'))::int AS context_partially_applied_count,
-          count(*) FILTER (WHERE status<>'VOIDED' AND outstanding_amount>0.005 AND review_required)::int AS context_review_required_count,
-          count(*) FILTER (WHERE status<>'VOIDED' AND outstanding_amount>0.005 AND legacy)::int AS context_legacy_count,
-          count(*) FILTER (WHERE status<>'VOIDED' AND outstanding_amount>0.005 AND NOT legacy)::int AS context_current_count
-        FROM positioned
-      ), filtered AS (
-        SELECT * FROM positioned WHERE
-          (${query.data.status}='ALL' OR (${query.data.status}='OPEN' AND status<>'VOIDED' AND outstanding_amount>0.005) OR advance_status=${query.data.status})
-          AND (${query.data.recipientScope ?? null}::text IS NULL OR recipient_scope=${query.data.recipientScope ?? null})
-          AND (${query.data.accountId ?? null}::text IS NULL OR payment_account_id=${query.data.accountId ?? null})
-          AND (${query.data.from ?? null}::date IS NULL OR voucher_date>=${query.data.from ?? null}::date)
-          AND (${query.data.to ?? null}::date IS NULL OR voucher_date<=${query.data.to ?? null}::date)
-          AND (${search}::text IS NULL OR concat_ws(' ',display_voucher_number,financial_owner_name,received_by_name,group_leader_snapshot,payment_account_name,description) ILIKE ${search} ESCAPE '\\')
-      ), paged AS (
-        SELECT *,count(*) OVER()::int AS filtered_total_count
-        FROM filtered ORDER BY voucher_date DESC,created_at DESC,id DESC LIMIT ${query.data.pageSize} OFFSET ${offset}
-      )
-      SELECT paged.*,context_summary.*
-      FROM context_summary LEFT JOIN paged ON true
-      ORDER BY paged.voucher_date DESC,paged.created_at DESC,paged.id DESC
-    `);
-      const databaseMs = performance.now() - databaseStartedAt;
-      const rawRows = result.rows as Array<Record<string, unknown>>;
-      const advances = rawRows.filter((row) => row.id).map((row) => ({
-        id: String(row.canonical_id ?? row.id),
-        canonicalId: row.canonical_id ? String(row.canonical_id) : null,
-        voucherNumber: String(row.display_voucher_number),
-        displayVoucherNumber: String(row.display_voucher_number),
-        voucherDate: String(row.voucher_date),
-        recipientScope: String(row.recipient_scope),
-        financialScopeKey: String(row.financial_scope_key),
-        financialOwnerId: row.financial_owner_id
-          ? String(row.financial_owner_id)
-          : null,
-        labourerId:
-          String(row.recipient_scope) === "INDIVIDUAL" && row.financial_owner_id
-            ? String(row.financial_owner_id)
-            : null,
-        labourGroupId: row.labour_group_id ? String(row.labour_group_id) : null,
-        financialOwnerName: row.financial_owner_name
-          ? String(row.financial_owner_name)
-          : null,
-        receivedByLabourerId: row.received_by_id
-          ? String(row.received_by_id)
-          : null,
-        receivedByName: row.received_by_name
-          ? String(row.received_by_name)
-          : null,
-        groupLeaderSnapshot: row.group_leader_snapshot
-          ? String(row.group_leader_snapshot)
-          : null,
+      const advances = filtered.slice(offset, offset + query.data.pageSize).map((row) => ({
+        id: row.canonicalVoucherId ?? row.advancePositionId,
+        advancePositionId: row.advancePositionId,
+        canonicalId: row.canonicalVoucherId,
+        canonicalVoucherId: row.canonicalVoucherId,
+        legacySourceRecordId: row.legacySourceRecordId,
+        sourceClassification: row.sourceClassification,
+        voucherNumber: row.voucherNumber,
+        displayVoucherNumber: row.voucherNumber,
+        voucherDate: row.voucherDate,
+        advanceDate: row.advanceDate,
+        recipientScope: row.recipientScope,
+        financialScopeKey: `${row.recipientScope}:${row.labourGroupId ?? row.labourerId ?? row.recipientName}`,
+        financialOwnerId: row.labourGroupId ?? row.labourerId,
+        labourerId: row.labourerId,
+        labourerName: row.labourerName,
+        labourGroupId: row.labourGroupId,
+        labourGroupName: row.labourGroupName,
+        financialOwnerName: row.recipientName,
+        receivedByLabourerId: row.labourerId,
+        receivedByName: row.recipientName,
+        groupLeaderSnapshot: row.labourGroupName,
         recipientSnapshot: {
-          ...(String(row.recipient_scope) === "INDIVIDUAL" &&
-          row.financial_owner_name
-            ? { labourerName: String(row.financial_owner_name) }
-            : {}),
-          ...(String(row.recipient_scope) === "LABOUR_GROUP" &&
-          row.financial_owner_name
-            ? { labourGroupName: String(row.financial_owner_name) }
-            : {}),
-          ...(!["INDIVIDUAL", "LABOUR_GROUP"].includes(
-            String(row.recipient_scope),
-          ) && row.financial_owner_name
-            ? { manualRecipientName: String(row.financial_owner_name) }
-            : {}),
-          ...(row.received_by_id
-            ? { receivedByLabourerId: String(row.received_by_id) }
-            : {}),
-          ...(row.received_by_name
-            ? {
-                receivedByNameSnapshot: String(row.received_by_name),
-                receivedBy: String(row.received_by_name),
-              }
-            : {}),
+          ...(row.labourerName ? { labourerName: row.labourerName } : {}),
+          ...(row.labourGroupName ? { labourGroupName: row.labourGroupName } : {}),
+          ...(row.recipientName ? { receivedByNameSnapshot: row.recipientName, receivedBy: row.recipientName } : {}),
         },
-        description: String(row.description),
-        originalAmount: Number(row.original_amount),
-        appliedAmount: Number(row.applied_amount),
-        refundedAmount: Number(row.refunded_amount),
-        reversedAmount: Number(row.reversed_amount),
-        outstandingAmount: Number(row.outstanding_amount),
-        advanceStatus: String(row.advance_status),
-        paymentAmount: String(row.original_amount),
-        paymentAccountId: row.payment_account_id
-          ? String(row.payment_account_id)
-          : null,
-        paymentAccountName: row.payment_account_name
-          ? String(row.payment_account_name)
-          : null,
-        paymentMethod: row.payment_method ? String(row.payment_method) : null,
-        transactionReference: row.transaction_reference
-          ? String(row.transaction_reference)
-          : null,
-        status: String(row.status),
+        description: row.description,
+        originalAmount: row.originalAmount,
+        appliedAmount: row.appliedAmount,
+        refundedAmount: row.recoveredAmount,
+        recoveredAmount: row.recoveredAmount,
+        reversedAmount: row.status === "VOIDED" ? row.originalAmount : 0,
+        outstandingAmount: row.outstandingAmount,
+        advanceStatus: row.status,
+        paymentAmount: String(row.originalAmount),
+        paymentAccountId: row.fundingAccountId,
+        fundingAccountId: row.fundingAccountId,
+        paymentAccountName: row.fundingAccountName,
+        fundingAccountName: row.fundingAccountName,
+        paymentMethod: row.fundingType,
+        transactionReference: row.sourceId,
+        status: row.status,
         nature: "ADVANCE",
-        sourceType: String(row.source_type),
-        sourceId: row.source_id ? String(row.source_id) : null,
-        legacy: Boolean(row.legacy),
-        reconciliationStatus: String(row.reconciliation_status),
-        reviewRequired: Boolean(row.review_required),
-        readOnlyLegacy: Boolean(row.read_only_legacy),
-        createdBy: row.created_by ? String(row.created_by) : null,
-        createdByName: row.created_by_name ? String(row.created_by_name) : null,
-        createdAt: String(row.created_at),
+        sourceType: row.sourceClassification,
+        sourceId: row.sourceId,
+        partnerId: row.partnerId,
+        partnerName: row.partnerName,
+        legacy: row.legacy,
+        reconciliationStatus: row.needsReview ? "NEEDS_REVIEW" : "RECONCILED",
+        reviewRequired: row.needsReview,
+        needsReview: row.needsReview,
+        reviewReason: row.reviewReason,
+        readOnlyLegacy: row.legacy,
+        createdBy: null,
+        createdByName: null,
+        createdAt: `${row.advanceDate}T00:00:00.000Z`,
       }));
-      const totalCount = Number(rawRows[0]?.filtered_total_count ?? 0);
-      const totalOutstanding = Number(rawRows[0]?.context_total_outstanding ?? 0);
-      const partiallyAppliedCount = Number(
-        rawRows[0]?.context_partially_applied_count ?? 0,
-      );
       const response = {
         advances,
         summary: {
-          totalOutstanding,
-          openCount: Number(rawRows[0]?.context_open_count ?? 0),
-          partiallyAppliedCount,
-          totalOriginal: Number(rawRows[0]?.context_total_original ?? 0),
-          totalApplied: Number(rawRows[0]?.context_total_applied ?? 0),
-          totalRecovered: Number(rawRows[0]?.context_total_recovered ?? 0),
-          totalReversed: Number(rawRows[0]?.context_total_reversed ?? 0),
-          reviewRequiredCount: Number(rawRows[0]?.context_review_required_count ?? 0),
-          legacyCount: Number(rawRows[0]?.context_legacy_count ?? 0),
-          currentCount: Number(rawRows[0]?.context_current_count ?? 0),
+          totalOutstanding: financials.summary.outstandingAdvance,
+          openCount: financials.advancePositions.filter((row) => row.status !== "VOIDED" && row.outstandingAmount > 0.005).length,
+          partiallyAppliedCount: financials.advancePositions.filter((row) => row.status === "PARTIALLY_APPLIED" || row.status === "PARTIALLY_REFUNDED").length,
+          totalOriginal: financials.summary.totalAdvance,
+          totalApplied: financials.summary.activeAdvanceApplied,
+          totalRecovered: financials.summary.recoveredAdvance,
+          totalReversed: financials.advancePositions.filter((row) => row.status === "VOIDED").reduce((sum, row) => sum + row.originalAmount, 0),
+          reviewRequiredCount: financials.advancePositions.filter((row) => row.needsReview).length,
+          legacyCount: financials.advancePositions.filter((row) => row.legacy).length,
+          currentCount: financials.advancePositions.filter((row) => row.canonical).length,
         },
         pageInfo: {
           page: query.data.page,
           pageSize: query.data.pageSize,
-          totalCount,
-          hasMore: offset + advances.length < totalCount,
+          totalCount: filtered.length,
+          hasMore: offset + advances.length < filtered.length,
         },
         diagnostics: {
           queryCount: 1,
-          databaseMs: Number(databaseMs.toFixed(2)),
+          databaseMs: 0,
           totalMs: Number((performance.now() - startedAt).toFixed(2)),
         },
       };
       const payloadBytes = Buffer.byteLength(JSON.stringify(response));
-      response.diagnostics.totalMs = Number(
-        (performance.now() - startedAt).toFixed(2),
-      );
       reply
-        .header(
-          "Server-Timing",
-          `db;dur=${response.diagnostics.databaseMs}, total;dur=${response.diagnostics.totalMs}`,
-        )
+        .header("Server-Timing", `total;dur=${response.diagnostics.totalMs}`)
         .header("X-Result-Count", String(advances.length))
         .header("X-Payload-Bytes", String(payloadBytes));
       return response;

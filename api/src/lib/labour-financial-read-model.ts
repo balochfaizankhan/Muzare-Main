@@ -1,24 +1,390 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { db } from "../db/client.js";
 import {
   accounts,
   accountTransactions,
+  advanceRecords,
   labourAccountingEntries,
   labourAdvanceApplications,
   labourDues,
+  labourGroups,
   labourPaymentAllocations,
   labourPaymentVouchers,
+  labourers,
+  labourWageSettlementAdvanceAllocations,
+  operationalRecords,
 } from "../db/schema.js";
+import { resolveAccountIdentity, type AccountIdentityLike } from "./account-identity.js";
+import { legacyAdvancePosition, mergeAdvancePositions, type LegacyAdvanceReadRow } from "./labour-advance-read-model.js";
 
 const amount = (value: unknown) => Number(Number(value ?? 0).toFixed(2));
-const recipientName = (snapshot: Record<string, unknown>) => {
-  for (const key of ["labourerName", "labourGroupName", "recipientName", "receivedByNameSnapshot", "contactPerson", "recipientReference"]) {
-    const value = snapshot[key];
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const originalEventBase = (entryKey: string) => entryKey.replace(/:(debit|credit)$/, "");
+
+const firstText = (...values: unknown[]) => {
+  for (const value of values) {
     if (typeof value === "string" && value.trim()) return value.trim();
   }
-  return "Labour";
+  return null;
 };
-const originalEventBase = (entryKey: string) => entryKey.replace(/:(debit|credit)$/, "");
+
+const asSnapshot = (value: unknown) => (value && typeof value === "object" ? value as Record<string, unknown> : {});
+
+const recipientName = (snapshot: Record<string, unknown>) => {
+  const value = firstText(
+    snapshot.labourerName,
+    snapshot.labourGroupName,
+    snapshot.recipientName,
+    snapshot.receivedByNameSnapshot,
+    snapshot.receivedBy,
+    snapshot.contactPerson,
+    snapshot.recipientReference,
+    snapshot.manualRecipientName,
+    snapshot.crewReference,
+    snapshot.contractorReference,
+    snapshot.batchIdentity,
+  );
+  return value ?? "Labour";
+};
+
+type ResolvedFundingAccount = {
+  accountId: string | null;
+  accountName: string | null;
+  accountType: string | null;
+  partnerId: string | null;
+  partnerName: string | null;
+  needsReview: boolean;
+  reviewReason: string | null;
+};
+
+type UnifiedAdvancePosition = {
+  advancePositionId: string;
+  canonicalVoucherId: string | null;
+  legacySourceRecordId: string | null;
+  sourceClassification: "CANONICAL" | "CANONICAL_LINKED_LEGACY" | "LEGACY_OPERATIONAL" | "LEGACY_NORMALIZED";
+  voucherId: string;
+  voucherNumber: string;
+  voucherDate: string;
+  advanceDate: string;
+  labourerId: string | null;
+  labourerName: string | null;
+  labourGroupId: string | null;
+  labourGroupName: string | null;
+  recipientScope: string;
+  recipientName: string;
+  fundingAccountId: string | null;
+  fundingAccountName: string | null;
+  fundingType: string | null;
+  partnerId: string | null;
+  partnerName: string | null;
+  originalAmount: number;
+  appliedAmount: number;
+  recoveredAmount: number;
+  outstandingAmount: number;
+  status: string;
+  description: string;
+  sourceId: string | null;
+  relatedApplicationIds: string[];
+  relatedRecoveryVoucherIds: string[];
+  needsReview: boolean;
+  reviewReason: string | null;
+  legacy: boolean;
+  canonical: boolean;
+};
+
+function resolveFundingAccount(args: {
+  accountById: Map<string, typeof accounts.$inferSelect>;
+  storedAccountId?: string | null;
+  transactionAccountId?: string | null;
+  sourceSnapshot?: Record<string, unknown>;
+  sourcePayload?: Record<string, unknown>;
+}): ResolvedFundingAccount {
+  const accountLike = [...args.accountById.values()] as AccountIdentityLike[];
+  const fromStored = args.storedAccountId ? args.accountById.get(args.storedAccountId) : undefined;
+  if (fromStored) {
+    return {
+      accountId: fromStored.id,
+      accountName: fromStored.name,
+      accountType: fromStored.accountType,
+      partnerId: fromStored.accountType === "partner" ? fromStored.id : null,
+      partnerName: fromStored.accountType === "partner" ? fromStored.name : null,
+      needsReview: false,
+      reviewReason: null,
+    };
+  }
+  const fromTransaction = args.transactionAccountId ? args.accountById.get(args.transactionAccountId) : undefined;
+  if (fromTransaction) {
+    return {
+      accountId: fromTransaction.id,
+      accountName: fromTransaction.name,
+      accountType: fromTransaction.accountType,
+      partnerId: fromTransaction.accountType === "partner" ? fromTransaction.id : null,
+      partnerName: fromTransaction.accountType === "partner" ? fromTransaction.name : null,
+      needsReview: false,
+      reviewReason: null,
+    };
+  }
+  const payload = args.sourcePayload ?? {};
+  const snapshot = args.sourceSnapshot ?? {};
+  const stableCandidates = [
+    firstText(payload.paymentAccountCanonicalId, payload.paymentAccountId, payload.linkedAccountId, payload.accountId, payload.partnerAccountId),
+    firstText(snapshot.paymentAccountCanonicalId, snapshot.paymentAccountId, snapshot.linkedAccountId, snapshot.accountId, snapshot.partnerAccountId),
+    firstText(payload.oldPaymentAccountId, payload.oldAccountId, payload.payment_account_id, payload.account_id),
+    firstText(snapshot.oldPaymentAccountId, snapshot.oldAccountId, snapshot.payment_account_id, snapshot.account_id),
+  ].filter((value): value is string => Boolean(value));
+  for (const candidate of stableCandidates) {
+    const resolved = resolveAccountIdentity(candidate, accountLike);
+    if (!resolved.canonicalAccountId || !resolved.matchedAccount) continue;
+    if (resolved.matchedBy === "name_fallback") break;
+    const account = args.accountById.get(resolved.canonicalAccountId) ?? null;
+    if (!account) continue;
+    return {
+      accountId: account.id,
+      accountName: account.name,
+      accountType: account.accountType,
+      partnerId: account.accountType === "partner" ? account.id : null,
+      partnerName: account.accountType === "partner" ? account.name : null,
+      needsReview: false,
+      reviewReason: null,
+    };
+  }
+  const sourceName = firstText(
+    payload.paymentAccountName,
+    payload.sourceAccountName,
+    payload.partnerName,
+    snapshot.paymentAccountName,
+    snapshot.sourceAccountName,
+    snapshot.partnerName,
+  );
+  return {
+    accountId: null,
+    accountName: sourceName ?? null,
+    accountType: null,
+    partnerId: null,
+    partnerName: null,
+    needsReview: true,
+    reviewReason: sourceName ? "Stable account mapping is missing for this historical funding source." : "Funding account could not be resolved from canonical or preserved legacy identifiers.",
+  };
+}
+
+function positionStatus(args: { status: string; outstandingAmount: number; appliedAmount: number; recoveredAmount: number }) {
+  if (args.status === "VOIDED") return "VOIDED";
+  if (args.outstandingAmount <= 0.005 && args.recoveredAmount > 0) return "FULLY_REFUNDED";
+  if (args.outstandingAmount <= 0.005 && args.appliedAmount > 0) return "FULLY_APPLIED";
+  if (args.recoveredAmount > 0) return "PARTIALLY_REFUNDED";
+  if (args.appliedAmount > 0) return "PARTIALLY_APPLIED";
+  return "OUTSTANDING";
+}
+
+async function loadUnifiedAdvancePositions(input: { workspaceId: string; farmId: string; seasonId: string }, scopedAccounts: typeof accounts.$inferSelect[], transactions: typeof accountTransactions.$inferSelect[], vouchers: typeof labourPaymentVouchers.$inferSelect[]) {
+  const accountById = new Map(scopedAccounts.map((row) => [row.id, row]));
+  const transactionById = new Map(transactions.map((row) => [row.id, row]));
+  const voucherSourceRecordIds = [...new Set(vouchers.flatMap((row) => [row.legacySourceRecordId]).filter((value): value is string => Boolean(value)))];
+  const voucherSourceClientIds = [...new Set(vouchers.flatMap((row) => [row.sourceId]).filter((value): value is string => Boolean(value)))];
+  const sourceQueries: Array<Promise<typeof operationalRecords.$inferSelect[]>> = [];
+  if (voucherSourceRecordIds.length) {
+    sourceQueries.push(db.select().from(operationalRecords).where(and(eq(operationalRecords.workspaceId, input.workspaceId), inArray(operationalRecords.id, voucherSourceRecordIds))));
+  }
+  if (voucherSourceClientIds.length) {
+    sourceQueries.push(db.select().from(operationalRecords).where(and(eq(operationalRecords.workspaceId, input.workspaceId), inArray(operationalRecords.clientRecordId, voucherSourceClientIds))));
+  }
+  sourceQueries.push(
+    db.select().from(operationalRecords).where(and(eq(operationalRecords.workspaceId, input.workspaceId), eq(operationalRecords.entityType, "advance"))),
+  );
+  const [applicationRows, labourerRows, groupRows, legacySettlementApplications, normalizedRows, ...sourceResultSets] = await Promise.all([
+    db.select().from(labourAdvanceApplications).where(eq(labourAdvanceApplications.workspaceId, input.workspaceId)),
+    db.select().from(labourers),
+    db.select().from(labourGroups),
+    db.select().from(labourWageSettlementAdvanceAllocations).where(eq(labourWageSettlementAdvanceAllocations.workspaceId, input.workspaceId)),
+    db.select().from(advanceRecords).where(and(eq(advanceRecords.farmId, input.farmId), eq(advanceRecords.seasonId, input.seasonId))),
+    ...sourceQueries,
+  ]);
+  const sourceRecords = sourceResultSets.flat();
+  const sourceById = new Map(sourceRecords.map((row) => [row.id, row]));
+  const sourceByClientId = new Map(sourceRecords.map((row) => [row.clientRecordId, row]));
+  const labourerById = new Map(labourerRows.map((row) => [row.id, row]));
+  const groupById = new Map(groupRows.map((row) => [row.id, row]));
+  const canonicalAdvances = vouchers.filter((row) => row.nature === "ADVANCE").map((advance) => {
+    const appliedAmount = applicationRows.filter((row) => row.advanceVoucherId === advance.id && row.status === "ACTIVE").reduce((sum, row) => sum + amount(row.amount), 0);
+    const recoveredAmount = vouchers
+      .filter((row) => row.relatedAdvanceVoucherId === advance.id && row.nature === "REFUND_RECOVERY" && row.status === "POSTED")
+      .reduce((sum, row) => sum + amount(row.paymentAmount), 0);
+    const sourceRecord = (advance.legacySourceRecordId ? sourceById.get(advance.legacySourceRecordId) : undefined) ?? (advance.sourceId ? sourceByClientId.get(advance.sourceId) : undefined);
+    const funding = resolveFundingAccount({
+      accountById,
+      storedAccountId: advance.paymentAccountId,
+      transactionAccountId: advance.accountTransactionId ? transactionById.get(advance.accountTransactionId)?.accountId ?? null : null,
+      sourceSnapshot: asSnapshot(advance.recipientSnapshot),
+      sourcePayload: asSnapshot(sourceRecord?.payload),
+    });
+    const snapshot = asSnapshot(advance.recipientSnapshot);
+    const labourerName = advance.labourerId && uuidPattern.test(advance.labourerId) ? labourerById.get(advance.labourerId)?.name ?? null : firstText(snapshot.labourerName, snapshot.receivedByNameSnapshot);
+    const labourGroupName = advance.labourGroupId && uuidPattern.test(advance.labourGroupId) ? groupById.get(advance.labourGroupId)?.name ?? null : firstText(snapshot.labourGroupName);
+    const originalAmount = amount(advance.paymentAmount);
+    const outstandingAmount = advance.status === "VOIDED" ? 0 : amount(Math.max(originalAmount - appliedAmount - recoveredAmount, 0));
+    return {
+      advancePositionId: `voucher:${advance.id}`,
+      canonicalVoucherId: advance.id,
+      legacySourceRecordId: advance.legacySourceRecordId ?? null,
+      sourceClassification: advance.legacySourceRecordId || sourceByClientId.has(advance.sourceId ?? "") ? "CANONICAL_LINKED_LEGACY" : "CANONICAL",
+      voucherId: advance.id,
+      voucherNumber: advance.voucherNumber,
+      voucherDate: advance.voucherDate,
+      advanceDate: advance.voucherDate,
+      labourerId: advance.labourerId ?? null,
+      labourerName,
+      labourGroupId: advance.labourGroupId ?? null,
+      labourGroupName,
+      recipientScope: advance.recipientScope,
+      recipientName: recipientName(snapshot),
+      fundingAccountId: funding.accountId,
+      fundingAccountName: funding.accountName,
+      fundingType: funding.accountType ?? advance.paymentMethod ?? null,
+      partnerId: funding.partnerId,
+      partnerName: funding.partnerName,
+      originalAmount,
+      appliedAmount: amount(appliedAmount),
+      recoveredAmount: amount(recoveredAmount),
+      outstandingAmount,
+      status: positionStatus({ status: advance.status, outstandingAmount, appliedAmount, recoveredAmount }),
+      description: advance.description,
+      sourceId: advance.sourceId ?? null,
+      createdAt: advance.createdAt.toISOString(),
+      relatedApplicationIds: applicationRows.filter((row) => row.advanceVoucherId === advance.id).map((row) => row.id),
+      relatedRecoveryVoucherIds: vouchers.filter((row) => row.relatedAdvanceVoucherId === advance.id && row.nature === "REFUND_RECOVERY").map((row) => row.id),
+      needsReview: funding.needsReview || advance.reconciliationStatus === "NEEDS_REVIEW" || advance.reconciliationStatus === "LEGACY_UNLINKED",
+      reviewReason: funding.reviewReason ?? (advance.reconciliationStatus === "NEEDS_REVIEW" || advance.reconciliationStatus === "LEGACY_UNLINKED" ? "Historical voucher is still marked for reconciliation review." : null),
+      legacy: advance.legacy,
+      canonical: true,
+      accountId: funding.accountId,
+      accountName: funding.accountName,
+      groupName: labourGroupName,
+      partnerAccountId: funding.partnerId,
+    };
+  });
+
+  const coveredLegacyIds = new Set(canonicalAdvances.flatMap((row) => [row.legacySourceRecordId, row.sourceId]).filter((value): value is string => Boolean(value)));
+  const legacyOperationalRows: LegacyAdvanceReadRow[] = sourceRecords
+    .filter((record) => record.entityType === "advance")
+    .filter((record) => {
+      const payload = asSnapshot(record.payload);
+      const amountValue = Number(payload.amount ?? 0);
+      if (!Number.isFinite(amountValue) || amountValue <= 0) return false;
+      const farmMatches = record.farmId === input.farmId || record.farmId === null;
+      const seasonMatches = record.seasonId === input.seasonId || record.seasonId === null;
+      return farmMatches && seasonMatches && !coveredLegacyIds.has(record.id) && !coveredLegacyIds.has(record.clientRecordId);
+    })
+    .map((record) => {
+      const payload = asSnapshot(record.payload);
+      const funding = resolveFundingAccount({
+        accountById,
+        sourcePayload: payload,
+        sourceSnapshot: payload,
+      });
+      return {
+        id: record.id,
+        sourceId: record.id,
+        voucherNumber: firstText(payload.voucherNumber, payload.voucherNo, payload.reference) ?? `ADV-L-${record.clientRecordId.slice(0, 8).toUpperCase()}`,
+        voucherDate: firstText(payload.date, payload.advanceDate) ?? record.createdAt.toISOString().slice(0, 10),
+        recipientScope: firstText(payload.labourGroupId) ? "LABOUR_GROUP" : "INDIVIDUAL",
+        financialScopeKey: firstText(payload.labourGroupId) ? `group:${firstText(payload.labourGroupId)}` : `individual:${firstText(payload.labourerId, payload.labourId, record.clientRecordId)}`,
+        labourerId: firstText(payload.labourerId, payload.labourId),
+        labourGroupId: firstText(payload.labourGroupId),
+        recipientSnapshot: payload,
+        description: firstText(payload.notes) ?? "Legacy labour advance",
+        originalAmount: amount(payload.amount),
+        appliedAmount: legacySettlementApplications.filter((row) => row.advanceRecordId === record.id).reduce((sum, row) => sum + amount(row.absorbedAmount), 0),
+        refundedAmount: 0,
+        reversedAmount: firstText(payload.deletedAt, payload.voidedAt, payload.reversedAt) || ["voided", "deleted", "reversed"].includes(String(payload.status ?? "").toLowerCase()) ? amount(payload.amount) : 0,
+        paymentAccountId: funding.accountId,
+        paymentAccountName: funding.accountName,
+        status: firstText(payload.deletedAt, payload.voidedAt, payload.reversedAt) || ["voided", "deleted", "reversed"].includes(String(payload.status ?? "").toLowerCase()) ? "VOIDED" : "POSTED",
+        createdAt: record.createdAt.toISOString(),
+        sourceKind: "LEGACY_OPERATIONAL",
+      } satisfies LegacyAdvanceReadRow;
+    });
+  const legacyNormalizedRows: LegacyAdvanceReadRow[] = normalizedRows
+    .filter((record) => !coveredLegacyIds.has(record.id))
+    .filter((record) => !sourceRecords.some((source) => source.entityType === "advance" && asSnapshot(source.payload).normalizedAdvanceRecordId === record.id))
+    .map((record) => {
+      const funding = resolveFundingAccount({ accountById, storedAccountId: record.accountId });
+      const labourer = labourerById.get(record.labourerId);
+      return {
+        id: record.id,
+        sourceId: record.id,
+        voucherNumber: `ADV-N-${record.id.slice(0, 8).toUpperCase()}`,
+        voucherDate: record.advanceDate,
+        recipientScope: "INDIVIDUAL",
+        financialScopeKey: `individual:${record.labourerId}`,
+        labourerId: record.labourerId,
+        labourGroupId: null,
+        recipientSnapshot: { labourerName: labourer?.name ?? "Labour" },
+        description: record.description ?? "Legacy labour advance",
+        originalAmount: amount(record.amount),
+        appliedAmount: 0,
+        refundedAmount: 0,
+        reversedAmount: 0,
+        paymentAccountId: funding.accountId,
+        paymentAccountName: funding.accountName,
+        status: "POSTED",
+        createdAt: record.createdAt.toISOString(),
+        sourceKind: "LEGACY_NORMALIZED",
+      } satisfies LegacyAdvanceReadRow;
+    });
+
+  const unified = mergeAdvancePositions(canonicalAdvances, [...legacyOperationalRows.map(legacyAdvancePosition), ...legacyNormalizedRows.map(legacyAdvancePosition)]) as unknown as Array<UnifiedAdvancePosition & Record<string, unknown>>;
+  return unified.map((row) => {
+    const classification = row.canonicalVoucherId
+      ? row.sourceClassification
+      : row.legacySourceRecordId
+        ? "LEGACY_OPERATIONAL"
+        : "LEGACY_NORMALIZED";
+    const sourcePayload = row.legacySourceRecordId ? sourceById.get(row.legacySourceRecordId)?.payload : undefined;
+    const resolvedFunding = row.canonicalVoucherId ? null : resolveFundingAccount({
+      accountById,
+      storedAccountId: typeof row.paymentAccountId === "string" ? row.paymentAccountId : null,
+      sourcePayload: asSnapshot(sourcePayload),
+      sourceSnapshot: asSnapshot(row.recipientSnapshot),
+    });
+    const sourceSnapshot = asSnapshot(row.recipientSnapshot);
+    const labourerId = typeof row.labourerId === "string" && row.labourerId.trim() ? row.labourerId : null;
+    const labourGroupId = typeof row.labourGroupId === "string" && row.labourGroupId.trim() ? row.labourGroupId : null;
+    return {
+      advancePositionId: row.advancePositionId ?? `legacy:${row.id}`,
+      canonicalVoucherId: row.canonicalVoucherId ?? null,
+      legacySourceRecordId: row.legacySourceRecordId ?? (classification === "LEGACY_OPERATIONAL" ? String(row.sourceId ?? row.id) : null),
+      sourceClassification: classification,
+      voucherId: String(row.id),
+      voucherNumber: String(row.voucherNumber),
+      voucherDate: String(row.voucherDate),
+      advanceDate: String(row.voucherDate),
+      labourerId,
+      labourerName: labourerId && uuidPattern.test(labourerId) ? labourerById.get(labourerId)?.name ?? firstText(sourceSnapshot.labourerName) : firstText(sourceSnapshot.labourerName),
+      labourGroupId,
+      labourGroupName: labourGroupId && uuidPattern.test(labourGroupId) ? groupById.get(labourGroupId)?.name ?? firstText(sourceSnapshot.labourGroupName) : firstText(sourceSnapshot.labourGroupName),
+      recipientScope: String(row.recipientScope),
+      recipientName: recipientName(sourceSnapshot),
+      fundingAccountId: typeof row.fundingAccountId === "string" ? row.fundingAccountId : resolvedFunding?.accountId ?? null,
+      fundingAccountName: typeof row.fundingAccountName === "string" ? row.fundingAccountName : resolvedFunding?.accountName ?? (typeof row.paymentAccountName === "string" ? row.paymentAccountName : null),
+      fundingType: typeof row.fundingType === "string" ? row.fundingType : resolvedFunding?.accountType ?? null,
+      partnerId: typeof row.partnerId === "string" ? row.partnerId : resolvedFunding?.partnerId ?? null,
+      partnerName: typeof row.partnerName === "string" ? row.partnerName : resolvedFunding?.partnerName ?? null,
+      originalAmount: amount(row.originalAmount),
+      appliedAmount: amount(row.appliedAmount),
+      recoveredAmount: amount(row.recoveredAmount ?? row.refundedAmount ?? 0),
+      outstandingAmount: amount(row.outstandingAmount),
+      status: String(row.status),
+      description: String(row.description ?? "Labour advance"),
+      sourceId: typeof row.sourceId === "string" ? row.sourceId : null,
+      relatedApplicationIds: Array.isArray(row.relatedApplicationIds) ? row.relatedApplicationIds.map(String) : [],
+      relatedRecoveryVoucherIds: Array.isArray(row.relatedRecoveryVoucherIds) ? row.relatedRecoveryVoucherIds.map(String) : [],
+      needsReview: Boolean(row.needsReview ?? resolvedFunding?.needsReview),
+      reviewReason: typeof row.reviewReason === "string" ? row.reviewReason : resolvedFunding?.reviewReason ?? null,
+      legacy: Boolean(row.legacy ?? !row.canonicalVoucherId),
+      canonical: Boolean(row.canonical ?? row.canonicalVoucherId),
+    } satisfies UnifiedAdvancePosition;
+  });
+}
 
 export async function loadLabourFinancialReadModel(input: { workspaceId: string; farmId: string; seasonId: string }) {
   const [scopeAccounts, transactions, vouchers, dues, applications, allocations, journal] = await Promise.all([
@@ -38,13 +404,16 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
   const dueById = new Map(dues.map((row) => [row.id, row]));
   const applicationById = new Map(scopedApplications.map((row) => [row.id, row]));
   const transactionById = new Map(transactions.map((row) => [row.id, row]));
-  const canonicalTransactionIds = new Set(vouchers.map((row) => row.accountTransactionId).filter((id): id is string => Boolean(id)));
+  const advancePositions = await loadUnifiedAdvancePositions(input, scopeAccounts, transactions, vouchers);
+  const advanceByVoucherId = new Map(advancePositions.filter((row) => row.canonicalVoucherId).map((row) => [row.canonicalVoucherId!, row]));
 
   const accountEntries = vouchers.flatMap((voucher) => {
-    if (voucher.legacy) return [];
     const transaction = voucher.accountTransactionId ? transactionById.get(voucher.accountTransactionId) : undefined;
-    const account = voucher.paymentAccountId ? accountById.get(voucher.paymentAccountId) : undefined;
-    if (!transaction || !account || !canonicalTransactionIds.has(transaction.id)) return [];
+    const advancePosition = advanceByVoucherId.get(voucher.id);
+    const account = (advancePosition?.fundingAccountId ? accountById.get(advancePosition.fundingAccountId) : undefined)
+      ?? (voucher.paymentAccountId ? accountById.get(voucher.paymentAccountId) : undefined)
+      ?? (transaction?.accountId ? accountById.get(transaction.accountId) : undefined);
+    if (!transaction || !account) return [];
     const numericAmount = amount(transaction.amount);
     const originalVoucher = voucher.nature === "REVERSAL" && voucher.reversalReference
       ? voucherById.get(voucher.reversalReference)
@@ -71,8 +440,9 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
       recipientScope: voucher.recipientScope,
       labourerId: voucher.labourerId,
       labourGroupId: voucher.labourGroupId,
-      recipientName: recipientName(voucher.recipientSnapshot),
-      canonical: true as const,
+      recipientName: recipientName(asSnapshot(voucher.recipientSnapshot)),
+      canonical: !voucher.legacy,
+      legacy: voucher.legacy,
     }];
   }).sort((left, right) => right.date.localeCompare(left.date) || right.id.localeCompare(left.id));
 
@@ -90,7 +460,7 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
     const due = original?.dueId ? dueById.get(original.dueId) : undefined;
     const voucher = original?.voucherId ? voucherById.get(original.voucherId) : undefined;
     const application = original?.advanceApplicationId ? applicationById.get(original.advanceApplicationId) : undefined;
-    const snapshot = (due?.recipientSnapshot ?? voucher?.recipientSnapshot ?? {}) as Record<string, unknown>;
+    const snapshot = asSnapshot(due?.recipientSnapshot ?? voucher?.recipientSnapshot ?? {});
     const sum = (code: string, sign: "debit" | "credit") => rows.filter((row) => row.ledgerCode === code).reduce((total, row) => total + amount(row[sign]) - amount(row[sign === "debit" ? "credit" : "debit"]), 0);
     const isReversal = key.startsWith("reversal:");
     const sourceStatus = (() => {
@@ -126,50 +496,46 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
       expenseEffect: sum("LABOUR_EXPENSE", "debit"),
       partnerEffect: sum("PARTNER_PAYABLE", "credit"),
       cashControlEffect: sum("CASH_CONTROL", "credit"),
-      canonical: true as const,
+      canonical: !Boolean(due?.legacy || voucher?.legacy),
     };
   }).sort((left, right) => right.postedAt.localeCompare(left.postedAt) || right.id.localeCompare(left.id));
 
-  const advancePositions = vouchers.filter((row) => row.nature === "ADVANCE" && !row.legacy).map((advance) => {
-    const applied = scopedApplications.filter((row) => row.advanceVoucherId === advance.id && row.status === "ACTIVE").reduce((sum, row) => sum + amount(row.amount), 0);
-    const recovered = vouchers.filter((row) => row.relatedAdvanceVoucherId === advance.id && row.nature === "REFUND_RECOVERY" && row.status === "POSTED").reduce((sum, row) => sum + amount(row.paymentAmount), 0);
-    const account = advance.paymentAccountId ? accountById.get(advance.paymentAccountId) : undefined;
-    const snapshot = advance.recipientSnapshot as Record<string, unknown>;
-    return {
-      voucherId: advance.id,
-      voucherNumber: advance.voucherNumber,
-      voucherDate: advance.voucherDate,
-      accountId: advance.paymentAccountId,
-      accountName: account?.name ?? null,
-      fundingType: account?.accountType ?? advance.paymentMethod ?? null,
-      partnerId: account?.accountType === "partner" ? account.id : null,
-      partnerName: account?.accountType === "partner" ? account.name : null,
-      sourceId: advance.sourceId,
-      legacySourceRecordId: advance.legacySourceRecordId,
-      labourerId: advance.labourerId,
-      labourGroupId: advance.labourGroupId,
-      recipientScope: advance.recipientScope,
-      recipientName: recipientName(snapshot),
-      groupName: typeof snapshot.labourGroupName === "string" ? snapshot.labourGroupName : null,
-      originalAmount: amount(advance.paymentAmount),
-      appliedAmount: amount(applied),
-      recoveredAmount: amount(recovered),
-      outstandingAmount: advance.status === "VOIDED" ? 0 : amount(Math.max(amount(advance.paymentAmount) - applied - recovered, 0)),
-      status: advance.status,
-      description: advance.description,
-      relatedApplicationIds: scopedApplications.filter((row) => row.advanceVoucherId === advance.id).map((row) => row.id),
-      relatedRecoveryVoucherIds: vouchers.filter((row) => row.relatedAdvanceVoucherId === advance.id && row.nature === "REFUND_RECOVERY").map((row) => row.id),
-      canonical: true as const,
-    };
-  });
-
+  const legacyPartnerAdvanceEntries = advancePositions
+    .filter((row) => !row.canonical && row.partnerId && row.status !== "VOIDED")
+    .map((row) => ({
+      id: `legacy-advance:${row.advancePositionId}`,
+      voucherId: row.voucherId,
+      voucherNumber: row.voucherNumber,
+      sourceId: row.sourceId,
+      legacySourceRecordId: row.legacySourceRecordId,
+      accountId: row.partnerId!,
+      accountName: row.partnerName ?? row.fundingAccountName ?? "Partner account",
+      accountType: "partner",
+      transactionType: "credit" as const,
+      amount: row.originalAmount,
+      balanceEffect: row.originalAmount,
+      date: row.advanceDate,
+      nature: "ADVANCE" as const,
+      economicNature: "ADVANCE" as const,
+      status: row.status,
+      description: row.description,
+      reversalReference: null,
+      recipientScope: row.recipientScope,
+      labourerId: row.labourerId,
+      labourGroupId: row.labourGroupId,
+      recipientName: row.recipientName,
+      canonical: false,
+      legacy: true,
+    }));
+  const partnerLedger = [...accountEntries.filter((entry) => entry.accountType === "partner"), ...legacyPartnerAdvanceEntries]
+    .sort((left, right) => right.date.localeCompare(left.date) || right.id.localeCompare(left.id));
   const partnerPositions = scopeAccounts.filter((account) => account.accountType === "partner").map((account) => {
-    const ledger = accountEntries.filter((entry) => entry.accountId === account.id);
+    const ledger = partnerLedger.filter((entry) => entry.accountId === account.id);
     const labourAdvancesPaid = amount(ledger.filter((entry) => entry.economicNature === "ADVANCE").reduce((sum, entry) => sum + entry.balanceEffect, 0));
     const directLabourPayments = amount(ledger.filter((entry) => entry.economicNature !== "ADVANCE" && entry.economicNature !== "REFUND_RECOVERY").reduce((sum, entry) => sum + entry.balanceEffect, 0));
     const recoveries = amount(ledger.filter((entry) => entry.economicNature === "REFUND_RECOVERY").reduce((sum, entry) => sum - entry.balanceEffect, 0));
-    const outstandingLabourAdvances = amount(advancePositions.filter((advance) => advance.accountId === account.id).reduce((sum, advance) => sum + advance.outstandingAmount, 0));
-    const appliedLabourAdvances = amount(advancePositions.filter((advance) => advance.accountId === account.id).reduce((sum, advance) => sum + advance.appliedAmount, 0));
+    const outstandingLabourAdvances = amount(advancePositions.filter((advance) => advance.partnerId === account.id).reduce((sum, advance) => sum + advance.outstandingAmount, 0));
+    const appliedLabourAdvances = amount(advancePositions.filter((advance) => advance.partnerId === account.id).reduce((sum, advance) => sum + advance.appliedAmount, 0));
     const farmOwesPartner = amount(ledger.reduce((sum, entry) => sum + entry.balanceEffect, 0));
     return {
       accountId: account.id,
@@ -210,7 +576,7 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
     scope: input,
     accountEntries,
     partnerPositions,
-    partnerLedger: accountEntries.filter((entry) => entry.accountType === "partner"),
+    partnerLedger,
     labourLedger,
     expenses,
     activity,
@@ -222,12 +588,14 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
     ].filter((id): id is string => Boolean(id)))],
     summary: {
       labourDue: amount(canonicalJournalEvents.reduce((sum, event) => sum + event.labourDueEffect, 0)),
-      outstandingAdvance: amount(advancePositions.reduce((sum, position) => sum + position.outstandingAmount, 0)),
+      outstandingAdvance: amount(advancePositions.filter((position) => position.status !== "VOIDED").reduce((sum, position) => sum + position.outstandingAmount, 0)),
+      totalAdvance: amount(advancePositions.filter((position) => position.status !== "VOIDED").reduce((sum, position) => sum + position.originalAmount, 0)),
+      recoveredAdvance: amount(advancePositions.filter((position) => position.status !== "VOIDED").reduce((sum, position) => sum + position.recoveredAmount, 0)),
       wageExpense: amount(canonicalJournalEvents.reduce((sum, event) => sum + event.expenseEffect, 0)),
       farmOwesPartner: amount(partnerPositions.reduce((sum, position) => sum + position.farmOwesPartner, 0)),
       accountMovement: amount(accountEntries.reduce((sum, entry) => sum + entry.balanceEffect, 0)),
       activePaymentAmount: amount(scopedAllocations.filter((row) => row.status === "ACTIVE").reduce((sum, row) => sum + amount(row.amount), 0)),
-      activeAdvanceApplied: amount(scopedApplications.filter((row) => row.status === "ACTIVE").reduce((sum, row) => sum + amount(row.amount), 0)),
+      activeAdvanceApplied: amount(advancePositions.filter((position) => position.status !== "VOIDED").reduce((sum, position) => sum + position.appliedAmount, 0)),
     },
   };
 }

@@ -279,7 +279,7 @@ test("partner settlements transfer matching account and partner positions withou
   assert.match(partnerAccounting, /position\.outstandingLabourAdvances = snapshot\.outstandingLabourAdvances;/);
   assert.match(partnerAccounting, /position\.currentPartnerBalance = snapshot\.currentPartnerBalance;/);
   assert.match(modulePage, /useCanonicalLabourFinancials\(\)/);
-  assert.match(modulePage, /buildPartnerLiabilityPositions\(accounts, vouchers, legacyAdvances, activeEntries, sales, labourWageSettlements, \{ farmId, seasonId \}\)/);
+  assert.match(modulePage, /buildPartnerLiabilityPositions\(accounts, vouchers, \[\], activeEntries, sales, \[\], \{ farmId, seasonId \}\)/);
   assert.match(modulePage, /replacedLegacySourceIds/);
   assert.match(modulePage, /canonical\.farmOwesPartner/);
   assert.match(modulePage, /Purchase Vouchers/);
@@ -291,7 +291,9 @@ test("partner settlements transfer matching account and partner positions withou
   assert.match(modulePage, /t\("partnerLedgerPage\.farmOwesPartner"\)/);
   assert.match(modulePage, /t\("partnerLedgerPage\.partnerHoldsBusinessMoney"\)/);
   assert.match(modulePage, /<option value="settlement">\{t\("partnerLedgerPage\.partnerSettlement"\)\}<\/option>/);
-  assert.ok(modulePage.includes("getPartnerAccountingSnapshot(selectedAccount, sales, legacyExpenseVouchers, activeAdvances, activeEntries, labourWageSettlements, accounts, { farmId, seasonId })"));
+  assert.ok(modulePage.includes("getPartnerAccountingSnapshot(selectedAccount, sales, legacyExpenseVouchers, [], activeEntries, [], accounts, { farmId, seasonId })"));
+  assert.match(modulePage, /outstandingLabourAdvances: canonical\.outstandingLabourAdvances/);
+  assert.match(modulePage, /settledAdvances: canonical\.appliedLabourAdvances/);
   assert.match(modulePage, /canonical\.directLabourPayments/);
   assert.match(modulePage, /outstandingLabourAdvances/);
 });

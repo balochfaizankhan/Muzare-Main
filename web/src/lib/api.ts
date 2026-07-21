@@ -1908,6 +1908,7 @@ export type LabourPaymentVoucherRecord = {
   description: string;
   paymentAmount: number | string;
   paymentAccountId?: string | null;
+  paymentAccountName?: string | null;
   paymentMethod?: string | null;
   transactionReference?: string | null;
   linkedDueId?: string | null;
@@ -1922,22 +1923,36 @@ export type LabourPaymentVoucherRecord = {
   reconciliationStatus: string;
 };
 export type LabourAdvancePosition = LabourPaymentVoucherRecord & {
+  advancePositionId?: string;
   canonicalId?: string | null;
+  canonicalVoucherId?: string | null;
+  legacySourceRecordId?: string | null;
+  sourceClassification?: "CANONICAL" | "CANONICAL_LINKED_LEGACY" | "LEGACY_OPERATIONAL" | "LEGACY_NORMALIZED";
   displayVoucherNumber: string;
   financialOwnerId?: string | null;
   financialOwnerName: string | null;
   receivedByLabourerId?: string | null;
   receivedByName?: string | null;
   groupLeaderSnapshot?: string | null;
+  advanceDate?: string;
+  labourerName?: string | null;
+  labourGroupName?: string | null;
+  fundingAccountId?: string | null;
+  fundingAccountName?: string | null;
+  partnerId?: string | null;
+  partnerName?: string | null;
   originalAmount: number;
   appliedAmount: number;
   refundedAmount: number;
+  recoveredAmount?: number;
   outstandingAmount: number;
   advanceStatus: "OUTSTANDING" | "PARTIALLY_APPLIED" | "FULLY_APPLIED" | "PARTIALLY_REFUNDED" | "FULLY_REFUNDED" | "VOIDED";
   reversedAmount?: number;
   paymentAccountName?: string | null;
   readOnlyLegacy?: boolean;
   reviewRequired: boolean;
+  needsReview?: boolean;
+  reviewReason?: string | null;
   createdByName?: string | null;
 };
 export type LabourAdvanceListResponse = {
@@ -1992,7 +2007,7 @@ export type CanonicalLabourAccountEntry = {
   amount: number; balanceEffect: number; date: string; nature: LabourPaymentVoucherRecord["nature"];
   economicNature: LabourPaymentVoucherRecord["nature"];
   status: string; description: string; reversalReference?: string | null; recipientScope: LabourRecipientScope;
-  labourerId?: string | null; labourGroupId?: string | null; recipientName: string; canonical: true;
+  labourerId?: string | null; labourGroupId?: string | null; recipientName: string; canonical: boolean; legacy?: boolean;
 };
 export type CanonicalLabourLedgerEntry = {
   id: string; eventType: string; originalEventType?: string | null; status: string; date: string; postedAt: string;
@@ -2010,9 +2025,9 @@ export type LabourFinancialReadModel = {
   expenses: Array<{ id: string; dueId?: string | null; dueNumber?: string | null; date: string; recipientScope?: LabourRecipientScope | null; labourerId?: string | null; labourGroupId?: string | null; recipientName: string; description: string; status: string; amount: number; canonical: true }>;
   activity: Array<{ id: string; date: string; module: "labour"; title: string; detail: string; status: string; sourceId?: string | null; canonical: true }>;
   currentLedger: Record<string, number>;
-  advancePositions: Array<{ voucherId: string; voucherNumber: string; voucherDate: string; accountId?: string | null; accountName?: string | null; fundingType?: string | null; partnerId?: string | null; partnerName?: string | null; sourceId?: string | null; legacySourceRecordId?: string | null; labourerId?: string | null; labourGroupId?: string | null; recipientScope: LabourRecipientScope; recipientName: string; groupName?: string | null; originalAmount: number; appliedAmount: number; recoveredAmount: number; outstandingAmount: number; status: string; description: string; relatedApplicationIds: string[]; relatedRecoveryVoucherIds: string[]; canonical: true }>;
+  advancePositions: Array<{ advancePositionId: string; canonicalVoucherId?: string | null; legacySourceRecordId?: string | null; sourceClassification: "CANONICAL" | "CANONICAL_LINKED_LEGACY" | "LEGACY_OPERATIONAL" | "LEGACY_NORMALIZED"; voucherId: string; voucherNumber: string; voucherDate: string; advanceDate: string; fundingAccountId?: string | null; fundingAccountName?: string | null; fundingType?: string | null; partnerId?: string | null; partnerName?: string | null; sourceId?: string | null; labourerId?: string | null; labourerName?: string | null; labourGroupId?: string | null; labourGroupName?: string | null; recipientScope: LabourRecipientScope; recipientName: string; originalAmount: number; appliedAmount: number; recoveredAmount: number; outstandingAmount: number; status: string; description: string; relatedApplicationIds: string[]; relatedRecoveryVoucherIds: string[]; needsReview: boolean; reviewReason?: string | null; canonical: boolean; legacy: boolean }>;
   replacedLegacySourceIds: string[];
-  summary: { labourDue: number; outstandingAdvance: number; wageExpense: number; farmOwesPartner: number; accountMovement: number; activePaymentAmount: number; activeAdvanceApplied: number };
+  summary: { labourDue: number; outstandingAdvance: number; totalAdvance: number; recoveredAdvance: number; wageExpense: number; farmOwesPartner: number; accountMovement: number; activePaymentAmount: number; activeAdvanceApplied: number };
 };
 export const previewLabourAttendanceDue = (token: string, workspaceId: string, input: {
   farmId: string; seasonId: string; recipientScope: "INDIVIDUAL" | "LABOUR_GROUP"; labourerId?: string | null; labourGroupId?: string | null; fromDate: string; toDate: string; recordDate: string;

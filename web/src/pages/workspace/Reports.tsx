@@ -484,7 +484,7 @@ export function Reports() {
   const [labourers, setLabourers] = useState<Labourer[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
-  const [advances, setAdvances] = useState<Advance[]>([]);
+  const [_advances, setAdvances] = useState<Advance[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [wageRates, setWageRates] = useState<WageRate[]>([]);
   const [labourWageSettlements, setLabourWageSettlements] = useState<LabourWageSettlement[]>([]);
@@ -1063,31 +1063,23 @@ export function Reports() {
     labourerId: item.labourerId ?? "",
     labourGroupId: item.labourGroupId ?? undefined,
     recipientName: item.recipientName,
-    date: item.voucherDate,
+    date: item.advanceDate,
     amount: item.originalAmount,
-    accountId: item.accountId ?? "",
-    sourceAccountName: item.accountName ?? undefined,
+    accountId: item.fundingAccountId ?? "",
+    sourceAccountName: item.fundingAccountName ?? undefined,
     notes: item.description,
-    createdAt: `${item.voucherDate}T00:00:00.000Z`,
-    updatedAt: `${item.voucherDate}T00:00:00.000Z`,
+    createdAt: `${item.advanceDate}T00:00:00.000Z`,
+    updatedAt: `${item.advanceDate}T00:00:00.000Z`,
     voucherNumber: item.voucherNumber,
     appliedAmount: item.appliedAmount,
     recoveredAmount: item.recoveredAmount,
     outstandingAmount: item.outstandingAmount,
     status: item.status,
+    reviewRequired: item.needsReview,
+    reviewReason: item.reviewReason,
     canonical: true as const,
   })), [canonicalFinancials.data?.advancePositions, canonicalFinancials.farmId, canonicalFinancials.seasonId, canonicalFinancials.workspaceId]);
-  const legacyAdvanceRows = useMemo(() => advances.filter((item) => !replacedLegacySourceIds.has(item.id)).map((item) => ({
-    ...item,
-    recipientName: undefined,
-    labourGroupId: undefined,
-    voucherNumber: item.id.slice(0, 8),
-    appliedAmount: 0,
-    recoveredAmount: 0,
-    outstandingAmount: item.amount,
-    status: "POSTED",
-    canonical: false as const,
-  })), [advances, replacedLegacySourceIds]);
+  const legacyAdvanceRows = useMemo(() => [], []);
   const advanceRows = useMemo(() => [...canonicalAdvanceRows, ...legacyAdvanceRows]
     .filter((item) => {
       const labourer = labourById.get(item.labourerId);
@@ -1321,7 +1313,7 @@ export function Reports() {
   // Canonical cash effects are supplied by the shared server read model. A
   // stable source id suppresses only the corresponding IndexedDB mirror.
   const canonicalLabourAccountEntries = canonicalFinancials.data?.accountEntries ?? [];
-  const accountingAdvanceRows = legacyAdvanceRows;
+  const accountingAdvanceRows = canonicalAdvanceRows;
   const positions = useMemo(() => accounts
     .filter((account) => !accountId || account.id === accountId)
     .map((account) => {
@@ -1346,18 +1338,19 @@ export function Reports() {
       };
     }), [accountId, accountingAdvanceRows, accounts, activeSettlements, canonicalLabourAccountEntries, cashAffectingVouchers, partnerRows, saleRows]);
   const partnerLiabilityPositions = useMemo(() => {
-    const merged = buildPartnerLiabilityPositions(accounts, cashAffectingVouchers, accountingAdvanceRows, partnerRows, saleRows, activeSettlements)
+    const merged = buildPartnerLiabilityPositions(accounts, cashAffectingVouchers, [], partnerRows, saleRows, [])
       .map((item) => {
         const canonical = item.account?.id ? canonicalFinancials.data?.partnerPositions.find((entry) => entry.accountId === item.account!.id) : undefined;
         return canonical ? {
           ...item,
           directExpensesPaid: item.directExpensesPaid + canonical.farmOwesPartner,
-          labourAdvancesPaid: item.labourAdvancesPaid + canonical.labourAdvancesPaid,
-          totalLabourAdvancesPaid: item.totalLabourAdvancesPaid + canonical.labourAdvancesPaid,
-          labourWageSettlements: item.labourWageSettlements + canonical.directLabourPayments,
-          labourSettlementCashPaid: item.labourSettlementCashPaid + canonical.directLabourPayments,
-          settledAdvances: item.settledAdvances + canonical.appliedLabourAdvances,
-          outstandingLabourAdvances: item.outstandingLabourAdvances + canonical.outstandingLabourAdvances,
+          labourAdvancesPaid: canonical.labourAdvancesPaid,
+          totalLabourAdvancesPaid: canonical.labourAdvancesPaid,
+          labourWageSettlements: canonical.directLabourPayments,
+          labourSettlementCashPaid: canonical.directLabourPayments,
+          settledAdvances: canonical.appliedLabourAdvances,
+          outstandingLabourAdvances: canonical.outstandingLabourAdvances,
+          moneyReturned: item.moneyReturned + canonical.recoveries,
           currentPartnerBalance: item.currentPartnerBalance + canonical.farmOwesPartner,
         } : item;
       });
@@ -1395,21 +1388,22 @@ export function Reports() {
   const selectedAccountRecord = accountId ? accounts.find((item) => item.id === accountId) ?? null : null;
   const selectedPartnerSnapshot = useMemo(() => {
     if (selectedAccountRecord?.type !== "partner") return null;
-    const legacy = getPartnerAccountingSnapshot(selectedAccountRecord, saleRows, cashAffectingVouchers, accountingAdvanceRows, partnerRows, activeSettlements, accounts);
+    const legacy = getPartnerAccountingSnapshot(selectedAccountRecord, saleRows, cashAffectingVouchers, [], partnerRows, [], accounts);
     const canonical = canonicalFinancials.data?.partnerPositions.find((item) => item.accountId === selectedAccountRecord.id);
     if (!canonical) return legacy;
     return {
       ...legacy,
       directExpensesPaid: legacy.directExpensesPaid + canonical.farmOwesPartner,
-      labourAdvancesPaid: legacy.labourAdvancesPaid + canonical.labourAdvancesPaid,
-      totalLabourAdvancesPaid: legacy.totalLabourAdvancesPaid + canonical.labourAdvancesPaid,
-      settledAdvances: legacy.settledAdvances + canonical.appliedLabourAdvances,
-      outstandingLabourAdvances: legacy.outstandingLabourAdvances + canonical.outstandingLabourAdvances,
-      labourWageSettlements: legacy.labourWageSettlements + canonical.directLabourPayments,
-      labourSettlementCashPaid: legacy.labourSettlementCashPaid + canonical.directLabourPayments,
+      labourAdvancesPaid: canonical.labourAdvancesPaid,
+      totalLabourAdvancesPaid: canonical.labourAdvancesPaid,
+      settledAdvances: canonical.appliedLabourAdvances,
+      outstandingLabourAdvances: canonical.outstandingLabourAdvances,
+      labourWageSettlements: canonical.directLabourPayments,
+      labourSettlementCashPaid: canonical.directLabourPayments,
+      moneyReturned: legacy.moneyReturned + canonical.recoveries,
       farmOwesPartner: legacy.farmOwesPartner + canonical.farmOwesPartner,
     };
-  }, [accountingAdvanceRows, accounts, activeSettlements, canonicalFinancials.data?.partnerPositions, cashAffectingVouchers, partnerRows, saleRows, selectedAccountRecord]);
+  }, [accounts, canonicalFinancials.data?.partnerPositions, cashAffectingVouchers, partnerRows, saleRows, selectedAccountRecord]);
 
   const accountLedgerRows = useMemo(() => {
     const rows: Array<Omit<AccountLedgerReportRow, "running">> = [];

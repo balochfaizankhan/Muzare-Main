@@ -34,3 +34,25 @@ test("canonical coverage prevents a legacy advance from appearing twice and sort
   assert.equal(merged.length, 2);
   assert.equal(merged[0]?.sourceId, "2");
 });
+
+test("similar-looking records are not merged unless a stable legacy or source id matches", () => {
+  const canonical = [{ sourceId: "canonical-client-1", legacySourceRecordId: null, voucherDate: "2026-01-10", createdAt: new Date("2026-01-10"), status: "POSTED", outstandingAmount: 700 }];
+  const sameDisplay = legacyAdvancePosition(row({
+    id: "legacy-operational:display-twin",
+    sourceId: "legacy-display-twin",
+    voucherNumber: "ADV-1",
+    voucherDate: "2026-01-10",
+    originalAmount: 1_000,
+    recipientSnapshot: { labourerName: "Historical worker" },
+  }));
+  const merged = mergeAdvancePositions(canonical, [sameDisplay]);
+  assert.equal(merged.length, 2);
+  assert.equal(merged[1]?.sourceId, "legacy-display-twin");
+});
+
+test("canonical coverage also suppresses legacy normalized mirrors linked by preserved source id", () => {
+  const canonical = [{ sourceId: "legacy-normalized-client-1", legacySourceRecordId: null, voucherDate: "2026-01-11", createdAt: new Date("2026-01-11"), status: "POSTED", outstandingAmount: 500 }];
+  const normalizedMirror = legacyAdvancePosition(row({ id: "legacy-normalized:1", sourceId: "legacy-normalized-client-1", sourceKind: "LEGACY_NORMALIZED" }));
+  const merged = mergeAdvancePositions(canonical, [normalizedMirror]);
+  assert.equal(merged.length, 1);
+});

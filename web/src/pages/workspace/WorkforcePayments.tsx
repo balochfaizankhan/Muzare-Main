@@ -377,7 +377,7 @@ export function WorkforcePaymentsPage() {
               onClick={() => navigate("/workspace/labour-payments/advances")}
             >
               <HandCoins size={17} />
-              <span>Outstanding advances</span>
+              <span>Advances</span>
               <strong>{loading && !advanceSummary ? "—" : advanceSummary ? money(advanceSummary.totalOutstanding) : "Unavailable"}</strong>
               {advanceSummary ? <small>{advanceSummary.openCount} open</small> : null}
             </button>
@@ -1088,7 +1088,7 @@ function VoucherRegister({
           <strong>{money(labourCashPaid)}</strong>
         </article>
         <button type="button" className="workforce-payment-report-card" onClick={onViewAdvances}>
-          <span>Outstanding advances</span>
+          <span>Advances</span>
           <strong>{money(advanceOutstanding)}</strong>
         </button>
         <article>
@@ -1128,7 +1128,8 @@ function VoucherRegister({
                 <div>
                   <dt>Account</dt>
                   <dd>
-                    {accounts.get(voucher.paymentAccountId ?? "")?.name ??
+                    {voucher.paymentAccountName ??
+                      accounts.get(voucher.paymentAccountId ?? "")?.name ??
                       "Legacy / reconciliation"}
                   </dd>
                 </div>
@@ -1203,7 +1204,7 @@ function AdvancesView({
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [scopeFilter, setScopeFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("OPEN");
+  const [statusFilter, setStatusFilter] = useState("ALL");
   const [accountFilter, setAccountFilter] = useState("");
   const [fromFilter, setFromFilter] = useState("");
   const [toFilter, setToFilter] = useState("");
@@ -1426,7 +1427,7 @@ function AdvancesView({
         setLoadError(
           caught instanceof Error
             ? caught.message
-            : "Unable to load outstanding advances.",
+            : "Unable to load advances.",
         );
       } finally {
         if (inFlightKeyRef.current === requestKey) inFlightKeyRef.current = "";
@@ -1694,11 +1695,11 @@ function AdvancesView({
       <section className="record-panel workforce-payments-panel workforce-advances-panel">
         <header className="workforce-payments-panel__header workforce-advances-header">
           <div>
-            <h2>Outstanding Advances</h2>
+            <h2>Advances</h2>
             <p>
               {pageInfo.totalCount
                 ? `${rows.length} of ${pageInfo.totalCount} advances loaded`
-                : "Advance balances by financial owner"}
+                : "Complete advance register across legacy and canonical records"}
             </p>
           </div>
           {canManage ? (
@@ -1714,19 +1715,21 @@ function AdvancesView({
         </header>
         <div className="workforce-advance-summary">
           <div>
-            <span>Total outstanding</span>
+            <span>Total advances</span>
+            <strong>{money(summary.totalOriginal ?? 0)}</strong>
+          </div>
+          <div>
+            <span>Advances</span>
             <strong>{money(summary.totalOutstanding)}</strong>
           </div>
           <div>
-            <span>Open</span>
-            <strong>{summary.openCount}</strong>
+            <span>Applied to labour dues</span>
+            <strong>{money(summary.totalApplied ?? 0)}</strong>
           </div>
-          {summary.partiallyAppliedCount ? (
-            <div>
-              <span>Partial</span>
-              <strong>{summary.partiallyAppliedCount}</strong>
-            </div>
-          ) : null}
+          <div>
+            <span>Recovered / refunded</span>
+            <strong>{money(summary.totalRecovered ?? 0)}</strong>
+          </div>
         </div>
         <div className="workforce-advance-toolbar">
           <label className="workforce-payments-search">
@@ -1823,7 +1826,7 @@ function AdvancesView({
         {initialLoading && !rows.length ? (
           <div
             className="workforce-advance-skeletons"
-            aria-label="Loading outstanding advances"
+            aria-label="Loading advances"
           >
             {Array.from({ length: 4 }, (_, index) => (
               <div key={index} className="workforce-advance-skeleton" />
@@ -1842,7 +1845,7 @@ function AdvancesView({
           </div>
         ) : !rows.length ? (
           <p className="workforce-payments-empty">
-            No outstanding advances match these filters.
+            No advances match these filters.
           </p>
         ) : groupMode ? (
           <div className="workforce-advance-recipient-list">
