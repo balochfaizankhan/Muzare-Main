@@ -29,6 +29,7 @@ import {
   partnerLiabilityGroupDisplayTotal,
   defaultPartnerLiabilityGroupExpansion,
   groupPartnerLiabilityTransactions,
+  resolveCanonicalPartnerPosition,
   resolvePartnerAccountId,
   resolvePartnerTransferAccountIdentity,
   type PartnerLiabilityLedgerGroupKey,
@@ -1382,7 +1383,7 @@ export function Reports() {
   const partnerLiabilityPositions = useMemo(() => {
     const merged = buildPartnerLiabilityPositions(accounts, cashAffectingVouchers, [], partnerRows, saleRows, [])
       .map((item) => {
-        const canonical = item.account?.id ? canonicalFinancials.data?.partnerPositions.find((entry) => entry.accountId === item.account!.id) : undefined;
+        const canonical = resolveCanonicalPartnerPosition(item.account, canonicalFinancials.data?.partnerPositions, accountLookup);
         return mergePartnerPositionWithCanonical(item, canonical);
       });
     const representedAccountIds = new Set(merged.map((item) => item.account?.id ?? item.key));
@@ -1391,7 +1392,7 @@ export function Reports() {
       merged.push(buildCanonicalPartnerLiabilityPosition(canonical, accounts.find((item) => item.id === canonical.accountId) ?? null));
     }
     return merged.filter((item) => !accountId || (item.account?.id ?? item.key) === accountId);
-  }, [accountId, accountingAdvanceRows, accounts, activeSettlements, canonicalFinancials.data, cashAffectingVouchers, partnerRows, saleRows]);
+  }, [accountId, accountLookup, accounts, canonicalFinancials.data?.partnerPositions, cashAffectingVouchers, partnerRows, saleRows]);
   const selectedAccountRecord = accountId ? accounts.find((item) => item.id === accountId) ?? null : null;
   const canonicalAccountLedgerEntries = selectedAccountRecord?.type === "partner"
     ? canonicalFinancials.data?.partnerLedger ?? []
@@ -1399,7 +1400,7 @@ export function Reports() {
   const selectedPartnerSnapshot = useMemo(() => {
     if (selectedAccountRecord?.type !== "partner") return null;
     const legacy = getPartnerAccountingSnapshot(selectedAccountRecord, saleRows, cashAffectingVouchers, [], partnerRows, [], accounts);
-    const canonical = canonicalFinancials.data?.partnerPositions.find((item) => item.accountId === selectedAccountRecord.id);
+    const canonical = resolveCanonicalPartnerPosition(selectedAccountRecord, canonicalFinancials.data?.partnerPositions, accountLookup);
     if (!canonical) return legacy;
     const merged = mergePartnerPositionWithCanonical(legacy, canonical);
     return {
@@ -1418,7 +1419,7 @@ export function Reports() {
       reconciliationDelta: merged.reconciliationDelta,
       isConsistent: merged.isConsistent,
     };
-  }, [accounts, canonicalFinancials.data?.partnerPositions, cashAffectingVouchers, partnerRows, saleRows, selectedAccountRecord]);
+  }, [accountLookup, accounts, canonicalFinancials.data?.partnerPositions, cashAffectingVouchers, partnerRows, saleRows, selectedAccountRecord]);
 
   const accountLedgerRows = useMemo(() => {
     const rows: Array<Omit<AccountLedgerReportRow, "running">> = [];

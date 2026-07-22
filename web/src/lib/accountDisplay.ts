@@ -16,8 +16,8 @@ function normalizeName(value: string) {
 
 function preferredAccountScore(account: Account, canonicalAccountId?: string | null) {
   let score = 0;
+  if (!account.sourceType?.toLowerCase().includes("labour")) score += 300;
   if (canonicalAccountId && account.id === canonicalAccountId) score += 200;
-  if (!account.sourceType?.toLowerCase().includes("labour")) score += 50;
   if (!account.oldAndroidId?.trim()) score += 20;
   if (!account.deletedAt) score += 10;
   return score;

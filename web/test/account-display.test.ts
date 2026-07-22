@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildCanonicalDisplayAccounts } from "../src/lib/accountDisplay.ts";
 import { buildAccountIdentityLookup } from "../src/lib/accountIdentity.ts";
+import { mergePartnerPositionWithCanonical, resolveCanonicalPartnerPosition, type PartnerLiabilityPosition } from "../src/lib/partnerAccounting.ts";
 import type { Account } from "../src/lib/offline-db.ts";
 
 const baseAccount = (overrides: Partial<Account> & Pick<Account, "id" | "name" | "type">): Account => ({
@@ -52,4 +53,63 @@ test("zero-value synthetic partner duplicates are excluded when no real account 
 
   assert.equal(result.length, 1);
   assert.equal(result[0]?.account.name, "Loan");
+});
+
+test("sajid direct labour payment merges into the existing partner account exactly once", () => {
+  const accounts = [
+    baseAccount({ id: "sajid-operational", name: "Sajid Khan", type: "partner", oldAndroidId: "3", sourceType: "operational_account_repair" }),
+    baseAccount({ id: "sajid-labour", name: "Sajid Khan", type: "partner", sourceType: "labour_finance" }),
+  ];
+  const canonicalPartnerPositions = [
+    {
+      accountId: "sajid-labour",
+      accountName: "Sajid Khan",
+      farmOwesPartner: 102030,
+      ledgerBalance: 102030,
+      labourAdvancesPaid: 0,
+      directLabourPayments: 102030,
+      recoveries: 0,
+      outstandingLabourAdvances: 0,
+      appliedLabourAdvances: 0,
+      entryCount: 1,
+    },
+  ];
+  const legacyPosition: PartnerLiabilityPosition = {
+    account: accounts[0],
+    key: "sajid-operational",
+    name: "Sajid Khan",
+    openingBalance: 0,
+    capitalInjected: 0,
+    directExpensesPaid: 113357,
+    purchaseVouchersPaid: 113357,
+    businessFundsNet: 0,
+    labourAdvancesPaid: 0,
+    labourWageSettlements: 0,
+    labourSettlementCashPaid: 0,
+    labourSettlementNonCashApplied: 0,
+    totalLabourAdvancesPaid: 0,
+    settledAdvances: 0,
+    outstandingLabourAdvances: 0,
+    reconciliationDifference: 0,
+    isConsistent: true,
+    transfersIn: 0,
+    transfersOut: 0,
+    moneyReturned: 0,
+    adjustments: 0,
+    currentPartnerBalance: 113357,
+    reconciliationDelta: 0,
+  };
+
+  const canonical = resolveCanonicalPartnerPosition(accounts[0], canonicalPartnerPositions, buildAccountIdentityLookup(accounts));
+  const merged = mergePartnerPositionWithCanonical(legacyPosition, canonical);
+  const displayAccounts = buildCanonicalDisplayAccounts(accounts, buildAccountIdentityLookup(accounts), canonicalPartnerPositions);
+
+  assert.equal(canonical?.accountName, "Sajid Khan");
+  assert.equal(canonical?.directLabourPayments, 102030);
+  assert.equal(merged.labourSettlementCashPaid, 102030);
+  assert.equal(merged.labourWageSettlements, 102030);
+  assert.equal(merged.currentPartnerBalance, 215387);
+  assert.equal(displayAccounts.length, 1);
+  assert.equal(displayAccounts[0]?.account.id, "sajid-operational");
+  assert.deepEqual(displayAccounts[0]?.sourceAccountIds.sort(), ["sajid-labour", "sajid-operational"]);
 });

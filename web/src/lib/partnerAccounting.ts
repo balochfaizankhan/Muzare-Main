@@ -43,6 +43,10 @@ export type CanonicalPartnerPosition = {
   entryCount: number;
 };
 
+function normalizePartnerName(value: string | null | undefined) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
 export type PartnerAccountingRowBreakdown = {
   purchaseVouchers: Array<{
     voucherId: string;
@@ -716,6 +720,25 @@ export function mergePartnerPositionWithCanonical(
     reconciliationDelta: canonical.farmOwesPartner - canonical.ledgerBalance,
     isConsistent: Math.abs(canonical.farmOwesPartner - canonical.ledgerBalance) < 0.01,
   };
+}
+
+export function resolveCanonicalPartnerPosition(
+  account: Account | null | undefined,
+  canonicalPositions: CanonicalPartnerPosition[] | null | undefined,
+  accountLookup: AccountIdentityLookup,
+) {
+  if (!account || account.type !== "partner" || !canonicalPositions?.length) return undefined;
+  const direct = canonicalPositions.find((item) => item.accountId === account.id);
+  if (direct) return direct;
+  const resolvedAccountId = resolveCanonicalAccountId(account.id, accountLookup);
+  if (resolvedAccountId) {
+    const byResolvedId = canonicalPositions.find((item) => item.accountId === resolvedAccountId);
+    if (byResolvedId) return byResolvedId;
+  }
+  const normalizedAccountName = normalizePartnerName(account.name);
+  if (!normalizedAccountName) return undefined;
+  const matches = canonicalPositions.filter((item) => normalizePartnerName(item.accountName) === normalizedAccountName);
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 export function buildCanonicalPartnerLiabilityPosition(

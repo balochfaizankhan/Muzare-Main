@@ -33,6 +33,7 @@ import {
   defaultPartnerLiabilityGroupExpansion,
   groupPartnerLiabilityTransactions,
   partnerAdjustmentEffect,
+  resolveCanonicalPartnerPosition,
   resolvePartnerAccountId,
   resolvePartnerTransferAccountIdentity,
   type PartnerLiabilityPosition,
@@ -4135,7 +4136,7 @@ function PartnerLedgerModule() {
     const legacy = buildPartnerLiabilityPositions(accounts, vouchers, activeAdvances, activeEntries, sales, activeLabourWageSettlements, { farmId, seasonId });
     const byAccount = new Map((canonicalFinancials.data?.partnerPositions ?? []).map((item) => [item.accountId, item]));
     const merged = legacy.map((item) => {
-      const canonical = item.account?.id ? byAccount.get(item.account.id) : undefined;
+      const canonical = resolveCanonicalPartnerPosition(item.account, canonicalFinancials.data?.partnerPositions, accountLookup);
       if (canonical) {
         byAccount.delete(canonical.accountId);
         const canonicalFarmOwesPartner = canonical.farmOwesPartner;
@@ -4154,7 +4155,7 @@ function PartnerLedgerModule() {
       merged.push(buildCanonicalPartnerLiabilityPosition(canonical, account));
     }
     return merged;
-  }, [accounts, activeAdvances, activeEntries, activeLabourWageSettlements, canonicalFinancials.data, farmId, sales, seasonId, vouchers]);
+  }, [accountLookup, accounts, activeAdvances, activeEntries, activeLabourWageSettlements, canonicalFinancials.data?.partnerPositions, farmId, sales, seasonId, vouchers]);
   const balance = partnerPositions.reduce((sum, item) => sum + item.currentPartnerBalance, 0);
   const selectedPartnerPositionLabourSettlements = useMemo(() => {
     const selectedPartnerAccountId = selectedPartnerPosition?.account?.id ?? null;
@@ -4487,6 +4488,7 @@ function AccountsModule() {
   );
   const mergedPartnerPositionsByAccountId = useMemo(() => {
     const positions = new Map<string, PartnerLiabilityPosition>();
+    const canonicalPartnerPositions = canonicalAccountsFinancials?.partnerPositions ?? [];
     const legacyPositions = buildPartnerLiabilityPositions(
       accounts,
       vouchers,
@@ -4497,8 +4499,7 @@ function AccountsModule() {
       { farmId, seasonId },
     );
     for (const legacy of legacyPositions) {
-      const canonicalAccountId = legacy.account?.id ? resolveCanonicalAccountId(legacy.account.id, accountLookup) ?? legacy.account.id : legacy.key;
-      const canonical = canonicalPartnerPositionsByAccountId.get(canonicalAccountId) ?? canonicalPartnerPositionsByAccountId.get(legacy.key);
+      const canonical = resolveCanonicalPartnerPosition(legacy.account, canonicalPartnerPositions, accountLookup);
       positions.set(legacy.key, mergePartnerPositionWithCanonical(legacy, canonical));
       if (canonical) positions.set(canonical.accountId, mergePartnerPositionWithCanonical(legacy, canonical));
     }
@@ -4508,10 +4509,10 @@ function AccountsModule() {
       positions.set(canonical.accountId, buildCanonicalPartnerLiabilityPosition(canonical, account));
     }
     return positions;
-  }, [accountLookup, accounts, activeAdvances, activeEntries, activeLabourWageSettlements, canonicalPartnerPositionsByAccountId, farmId, sales, seasonId, vouchers]);
-  const balance = (account: Account) => {
+  }, [accountLookup, accounts, activeAdvances, activeEntries, activeLabourWageSettlements, canonicalAccountsFinancials?.partnerPositions, canonicalPartnerPositionsByAccountId, farmId, sales, seasonId, vouchers]);
+  const balance = (account: Account, canonicalAccountIdOverride?: string | null) => {
     if (account.type === "partner") {
-      const canonicalAccountId = resolveCanonicalAccountId(account.id, accountLookup) ?? account.id;
+      const canonicalAccountId = canonicalAccountIdOverride ?? resolveCanonicalAccountId(account.id, accountLookup) ?? account.id;
       const canonicalPartnerSnapshot = mergedPartnerPositionsByAccountId.get(canonicalAccountId) ?? mergedPartnerPositionsByAccountId.get(account.id);
       if (canonicalPartnerSnapshot) return canonicalPartnerSnapshot.currentPartnerBalance;
     }
@@ -4622,12 +4623,16 @@ function AccountsModule() {
     }
     return tally;
   }, [activeGeneralExpenseVouchers, activeLabourWageSettlements, farmId, seasonId, totalVoucherExpenses, vouchers]);
-  const selectedAccount = selectedAccountId ? displayAccounts.find((item) => item.id === selectedAccountId)?.account ?? null : null;
+  const selectedDisplayAccount = selectedAccountId
+    ? displayAccounts.find((item) => item.id === selectedAccountId) ?? null
+    : null;
+  const selectedAccount = selectedDisplayAccount?.account ?? null;
   const selectedPartnerSnapshot = useMemo(() => {
     if (selectedAccount?.type !== "partner") return null;
-    const selectedCanonicalAccountId = resolveCanonicalAccountId(selectedAccount.id, accountLookup) ?? selectedAccount.id;
+    const selectedCanonicalAccountId = selectedDisplayAccount?.canonicalAccountId ?? resolveCanonicalAccountId(selectedAccount.id, accountLookup) ?? selectedAccount.id;
     const legacy = getPartnerAccountingSnapshot(selectedAccount, sales, legacyExpenseVouchers, activeAdvances, activeEntries, activeLabourWageSettlements, accounts, { farmId, seasonId });
-    const canonical = canonicalAccountsFinancials?.partnerPositions.find((item) => item.accountId === selectedCanonicalAccountId || item.accountId === selectedAccount.id);
+    const canonical = resolveCanonicalPartnerPosition(selectedAccount, canonicalAccountsFinancials?.partnerPositions, accountLookup)
+      ?? canonicalAccountsFinancials?.partnerPositions.find((item) => item.accountId === selectedCanonicalAccountId || item.accountId === selectedAccount.id);
     if (!canonical) return legacy;
     const merged = mergePartnerPositionWithCanonical(legacy, canonical);
     return {
@@ -4646,7 +4651,7 @@ function AccountsModule() {
       reconciliationDelta: merged.reconciliationDelta,
       isConsistent: merged.isConsistent,
     };
-  }, [accountLookup, accounts, activeEntries, activeAdvances, activeLabourWageSettlements, canonicalAccountsFinancials?.partnerPositions, farmId, legacyExpenseVouchers, sales, seasonId, selectedAccount]);
+  }, [accountLookup, accounts, activeEntries, activeAdvances, activeLabourWageSettlements, canonicalAccountsFinancials?.partnerPositions, farmId, legacyExpenseVouchers, sales, seasonId, selectedAccount, selectedDisplayAccount?.canonicalAccountId]);
   const ledgerGroupTitle = useCallback((groupKey: AccountTransactionGroupKey) => ({
     expenses: t("accountsPage.groupExpenses"),
     advances: t("accountsPage.groupAdvances"),
@@ -4680,7 +4685,7 @@ function AccountsModule() {
     if (!selectedAccount) return [];
     const rows: AccountLedgerRow[] = [];
     const selectedIsPartner = selectedAccount.type === "partner";
-    const selectedCanonicalAccountId = resolveCanonicalAccountId(selectedAccount.id, accountLookup) ?? selectedAccount.id;
+    const selectedCanonicalAccountId = selectedDisplayAccount?.canonicalAccountId ?? resolveCanonicalAccountId(selectedAccount.id, accountLookup) ?? selectedAccount.id;
     const canonicalPartnerLedgerEntries = selectedIsPartner
       ? (canonicalAccountsFinancials?.partnerLedger ?? []).filter((entry) => entry.accountId === selectedCanonicalAccountId || entry.accountId === selectedAccount.id)
       : [];
@@ -4850,7 +4855,7 @@ function AccountsModule() {
       running += row.credit - row.debit;
       return { ...row, runningBalance: running };
     });
-  }, [activeAdvances, activeEntries, activeLabourWageSettlements, activeSales, activeVouchers, accountLookup, accounts, canonicalAccountsFinancials?.accountEntries, canonicalAccountsFinancials?.partnerLedger, farmId, seasonId, selectedAccount, t]);
+  }, [activeAdvances, activeEntries, activeLabourWageSettlements, activeSales, activeVouchers, accountLookup, accounts, canonicalAccountsFinancials?.accountEntries, canonicalAccountsFinancials?.partnerLedger, farmId, seasonId, selectedAccount, selectedDisplayAccount?.canonicalAccountId, t]);
   const filteredLedgerRows = useMemo(() => {
     const term = ledgerSearch.trim().toLowerCase();
     const minAmount = ledgerMinAmount ? Number(ledgerMinAmount) : null;
@@ -5123,7 +5128,7 @@ function AccountsModule() {
       <section className="record-panel">
         <h2>{t("accountsPage.yourAccounts")}</h2>
         <div className="account-grid">
-          {displayAccounts.map(({ id, account }) => (
+          {displayAccounts.map(({ id, account, canonicalAccountId }) => (
             <article key={id} className="account-card-clickable" role="button" tabIndex={0} onClick={() => setSelectedAccountId(id)} onKeyDown={(event) => {
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
@@ -5132,7 +5137,7 @@ function AccountsModule() {
             }}>
               <span>{account.type}</span>
               <strong>{account.name}</strong>
-              <b>{money(balance(account))}</b>
+              <b>{money(balance(account, canonicalAccountId))}</b>
               <small>{t("accountsPage.viewDetails")}</small>
             </article>
           ))}
