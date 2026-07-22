@@ -4950,6 +4950,10 @@ function AccountsModule() {
       if (row.partnerLiabilityGroup === "adjustments") overview.adjustments += row.credit - row.debit;
     }
     const settlementSnapshot = selectedPartnerSnapshot;
+    const canonicalAccountId = selectedDisplayAccount?.canonicalAccountId ?? selectedAccount.id;
+    const cardPosition = mergedPartnerPositionsByAccountId.get(canonicalAccountId) ?? mergedPartnerPositionsByAccountId.get(selectedAccount.id);
+    overview.purchaseVouchersPaid = cardPosition?.purchaseVouchersPaid ?? overview.purchaseVouchersPaid;
+    overview.transfersIn = cardPosition?.transfersIn ?? overview.transfersIn;
     overview.labourAdvancesPaid = settlementSnapshot?.totalLabourAdvancesPaid ?? overview.labourAdvancesPaid;
     overview.outstandingLabourAdvances = settlementSnapshot?.outstandingLabourAdvances ?? overview.outstandingLabourAdvances;
     overview.settledAdvances = settlementSnapshot?.settledAdvances ?? overview.settledAdvances;
@@ -4963,7 +4967,7 @@ function AccountsModule() {
       ...overview,
       netBalance: settlementSnapshot?.farmOwesPartner ?? calculatePartnerLiabilityBalance(overview),
     };
-  }, [ledgerRows, selectedPartnerSnapshot, selectedAccount]);
+  }, [ledgerRows, selectedPartnerSnapshot, selectedAccount, selectedDisplayAccount?.canonicalAccountId, mergedPartnerPositionsByAccountId]);
   const rawStandardLedgerBreakdown = useMemo(() => {
     const byType = {
       salesReceived: 0, voucherExpensesPaid: 0, labourAdvancesPaid: 0,
