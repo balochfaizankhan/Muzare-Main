@@ -5,6 +5,7 @@ import { test } from "node:test";
 const route = readFileSync(new URL("../src/routes/labour-payments.ts", import.meta.url), "utf8");
 const readModel = readFileSync(new URL("../src/lib/labour-financial-read-model.ts", import.meta.url), "utf8");
 const page = readFileSync(new URL("../../web/src/pages/workspace/WorkforcePayments.tsx", import.meta.url), "utf8");
+const modulePage = readFileSync(new URL("../../web/src/pages/ModulePage.tsx", import.meta.url), "utf8");
 const reports = readFileSync(new URL("../../web/src/pages/workspace/Reports.tsx", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../../web/src/styles.css", import.meta.url), "utf8");
 const hub = readFileSync(new URL("../../web/src/pages/workspace/WorkforceHub.tsx", import.meta.url), "utf8");
@@ -218,6 +219,22 @@ test("payments due uses canonical summary and review loads a due-specific aggreg
   assert.match(overview, /advanceSummary\.openCount/);
   assert.doesNotMatch(overview, /const outstandingAdvances\s*=\s*advances\.reduce/);
   assert.match(page, /muzare:advance-list:v2:\$\{workspaceId\}:\$\{farmId\}:\$\{seasonId\}/);
+});
+
+test("accounts expense visibility uses outstanding advance balance and keeps active unpaid dues in the canonical snapshot", () => {
+  assert.match(readModel, /export function shouldIncludeExpenseVisibilityRow/);
+  assert.match(readModel, /\.filter\(shouldIncludeExpenseVisibilityRow\)/);
+  assert.match(modulePage, /summary\.outstandingAdvance/);
+  assert.match(modulePage, /Available advance balance/);
+  assert.doesNotMatch(modulePage, /summary\.totalAdvance/);
+});
+
+test("the canonical read model can backfill a missing direct-payment funding entry without duplicating original partner advances", () => {
+  assert.match(readModel, /export function buildSyntheticVoucherAccountEntry/);
+  assert.match(readModel, /const syntheticFundedVoucherEntries = vouchers/);
+  assert.match(readModel, /voucher\.status === "POSTED" && voucher\.nature !== "ADVANCE_APPLICATION"/);
+  assert.match(readModel, /if \(economicNature === "ADVANCE" && account\.accountType === "partner"\) return \[\];/);
+  assert.match(readModel, /\[\.\.\.transactionBackedAccountEntries, \.\.\.syntheticFundedVoucherEntries, \.\.\.missingOriginalAdvanceEntries\]/);
 });
 
 function advanceSchemaSource() {

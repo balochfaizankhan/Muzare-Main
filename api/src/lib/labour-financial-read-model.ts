@@ -223,6 +223,61 @@ type AdvanceApplicationParent = {
   sourceType: "AUDIT_EVENT" | "PARENT_VOUCHER";
 };
 
+type SyntheticVoucherAccountEntryInput = {
+  voucher: Pick<typeof labourPaymentVouchers.$inferSelect,
+    "id" | "voucherNumber" | "sourceId" | "legacySourceRecordId" | "voucherDate" | "nature" | "status" | "description" | "recipientScope" | "labourerId" | "labourGroupId" | "paymentAmount" | "legacy">;
+  account: Pick<typeof accounts.$inferSelect, "id" | "name" | "accountType">;
+  recipientName: string;
+  economicNature?: string | null;
+  reverse?: boolean;
+};
+
+type ExpenseVisibilityRow = {
+  amount: number;
+  outstandingAmount: number;
+  active: boolean;
+};
+
+export function buildSyntheticVoucherAccountEntry(input: SyntheticVoucherAccountEntryInput) {
+  const numericAmount = amount(input.voucher.paymentAmount);
+  const normalType = input.account.accountType === "partner" ? "credit" : "debit";
+  const transactionType = input.reverse
+    ? normalType === "credit"
+      ? "debit"
+      : "credit"
+    : normalType;
+  return {
+    id: `synthetic-voucher:${input.voucher.id}`,
+    voucherId: input.voucher.id,
+    voucherNumber: input.voucher.voucherNumber,
+    sourceId: input.voucher.sourceId,
+    legacySourceRecordId: input.voucher.legacySourceRecordId,
+    accountId: input.account.id,
+    accountName: input.account.name,
+    accountType: input.account.accountType,
+    transactionType,
+    amount: numericAmount,
+    balanceEffect: transactionType === "credit" ? numericAmount : -numericAmount,
+    date: input.voucher.voucherDate,
+    nature: input.voucher.nature,
+    economicNature: input.economicNature ?? input.voucher.nature,
+    status: input.voucher.status,
+    description: input.voucher.description,
+    reversalReference: null,
+    recipientScope: input.voucher.recipientScope,
+    labourerId: input.voucher.labourerId,
+    labourGroupId: input.voucher.labourGroupId,
+    recipientName: input.recipientName,
+    canonical: !input.voucher.legacy,
+    legacy: input.voucher.legacy,
+    informational: false,
+  };
+}
+
+export function shouldIncludeExpenseVisibilityRow(row: ExpenseVisibilityRow) {
+  return row.active || row.amount !== 0 || row.outstandingAmount !== 0;
+}
+
 function resolveFundingAccount(args: {
   accountById: Map<string, typeof accounts.$inferSelect>;
   storedAccountId?: string | null;
@@ -754,13 +809,39 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
       legacy: voucher.legacy,
     }];
   });
+  const transactionBackedVoucherIds = new Set(transactionBackedAccountEntries.map((entry) => entry.voucherId));
+  const syntheticFundedVoucherEntries = vouchers
+    .filter((voucher) => voucher.status === "POSTED" && voucher.nature !== "ADVANCE_APPLICATION")
+    .filter((voucher) => !transactionBackedVoucherIds.has(voucher.id))
+    .flatMap((voucher) => {
+      const originalVoucher = voucher.nature === "REVERSAL" && voucher.reversalReference
+        ? voucherById.get(voucher.reversalReference)
+        : undefined;
+      const economicNature = originalVoucher?.nature ?? voucher.nature;
+      const resolvedFunding = resolvedFundingByVoucherId.get(voucher.id);
+      const account = resolvedFunding?.accountId ? accountById.get(resolvedFunding.accountId) : undefined;
+      if (!account) return [];
+      if (economicNature === "ADVANCE" && account.accountType === "partner") return [];
+      return [buildSyntheticVoucherAccountEntry({
+        voucher,
+        account,
+        recipientName: resolveRecipientDisplayName({
+          snapshot: asSnapshot(voucher.recipientSnapshot),
+          recipientScope: voucher.recipientScope,
+          labourerName: voucher.labourerId ? labourerById.get(voucher.labourerId)?.name ?? null : null,
+          labourGroupName: voucher.labourGroupId ? groupById.get(voucher.labourGroupId)?.name ?? null : null,
+        }),
+        economicNature,
+        reverse: voucher.nature === "REVERSAL",
+      })];
+    });
   // Historical advances can have a canonical voucher that is linked to the
   // original operational record without having received an account movement.
   // They are still original cash-out events and must remain in the funding
   // partner's liability. Add only the missing event; never use outstanding or
   // applied balances as a substitute for the original amount.
   const transactionBackedAdvanceVoucherIds = new Set(
-    transactionBackedAccountEntries
+    [...transactionBackedAccountEntries, ...syntheticFundedVoucherEntries]
       .filter((entry) => entry.economicNature === "ADVANCE")
       .map((entry) => entry.voucherId),
   );
@@ -793,7 +874,7 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
       legacy: advance.legacy,
       informational: false,
     }));
-  const accountEntries = [...transactionBackedAccountEntries, ...missingOriginalAdvanceEntries]
+  const accountEntries = [...transactionBackedAccountEntries, ...syntheticFundedVoucherEntries, ...missingOriginalAdvanceEntries]
     .sort((left, right) => right.date.localeCompare(left.date) || right.id.localeCompare(left.id));
 
   const originalById = new Map(journal.filter((row) => !row.reversalOf && row.eventType !== "REVERSAL").map((row) => [row.id, row]));
@@ -1032,7 +1113,7 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
         canonical: true as const,
       };
     })
-    .filter((row) => row.amount !== 0 || !row.active);
+    .filter(shouldIncludeExpenseVisibilityRow);
   const expenseAccountAttributions: ExpenseAttributionRow[] = expenses
     .filter((expense) => expense.active)
     .flatMap((expense) => {

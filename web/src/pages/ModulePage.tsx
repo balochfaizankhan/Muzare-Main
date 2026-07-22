@@ -4518,7 +4518,7 @@ function AccountsModule() {
       { farmId, seasonId },
     );
   };
-  const totalAdvances = canonicalAccountsFinancials?.summary.totalAdvance ?? 0;
+  const totalAdvances = canonicalAccountsFinancials?.summary.outstandingAdvance ?? 0;
   const settledLabourWages = (canonicalAccountsFinancials?.expenses ?? [])
     .filter((item) => item.active)
     .reduce((sum, item) => sum + item.amount, 0);
@@ -5134,7 +5134,7 @@ function AccountsModule() {
         <div className="record-list">
           <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("voucher")}><strong>{t("accountsPage.voucherExpenses")}</strong><span>{money(totalVoucherExpenses)}</span><small>{t("accountsPage.viewDetails")}</small></article>
           <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("combined")}><strong>Settled Labour Wages</strong><span>{money(settledLabourWages)}</span><small>{t("accountsPage.viewDetails")}</small></article>
-          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("advance")}><strong>{t("accountsPage.labourAdvances")}</strong><span>{money(totalAdvances)}</span><small>{t("accountsPage.viewDetails")}</small></article>
+          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("advance")}><strong>Available advance balance</strong><span>{money(totalAdvances)}</span><small>{t("accountsPage.viewDetails")}</small></article>
           <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => navigate(`/workspace/labour-payments/payments-due?farmId=${encodeURIComponent(farmId ?? "")}&seasonId=${encodeURIComponent(seasonId ?? "")}`)}><strong>Payments Due</strong><span>{money(paymentsDue)}</span><small>{t("accountsPage.viewDetails")}</small></article>
           <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("combined")}><strong>{t("accountsPage.totalBusinessExpenses")}</strong><span>{money(totalBusinessExpenses)}</span><small>{t("accountsPage.viewDetails")}</small></article>
         </div>
