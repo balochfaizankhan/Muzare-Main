@@ -662,7 +662,8 @@ test("accounts drill-down exposes live ledger totals and source links", async ()
   const accounting = await source("web/src/lib/accounting.ts");
   const i18n = await source("web/src/i18n.ts");
   assert.match(modulePage, /className="account-card-clickable"/);
-  assert.match(modulePage, /setSelectedAccountId\(account\.id\)/);
+  assert.match(modulePage, /displayAccounts\.map\(\(\{ id, account \}\) =>/);
+  assert.match(modulePage, /setSelectedAccountId\(id\)/);
   assert.match(modulePage, /openExpenseVisibility\("voucher"\)/);
   assert.match(modulePage, /openExpenseVisibility\("advance"\)/);
   assert.match(modulePage, /openExpenseVisibility\("combined"\)/);

@@ -13,6 +13,7 @@ import { useAppBack } from "../hooks/useAppBack";
 import { useSyncState } from "../hooks/useSyncState";
 import { useCanonicalLabourFinancials } from "../hooks/useCanonicalLabourFinancials";
 import { calculateDisplayedAccountBalance } from "../lib/accounting";
+import { buildCanonicalDisplayAccounts } from "../lib/accountDisplay";
 import { defaultTransactionGroupExpansion, groupAccountTransactions, type AccountTransactionGroupKey } from "../lib/accountTransactionGroups";
 import { attendanceStatusKey, buildAttendanceStatusMap, previousLocalDateKey, todayLocalDateKey } from "../lib/attendanceStatus";
 import { isAccountsFinancialScope, settleAccountsFinancialSnapshot, type AccountsFinancialSnapshot as AccountsFinancialSnapshotBase } from "../lib/accountsFinancialSnapshot";
@@ -4480,6 +4481,10 @@ function AccountsModule() {
     () => new Map((canonicalAccountsFinancials?.partnerPositions ?? []).map((item) => [item.accountId, item])),
     [canonicalAccountsFinancials?.partnerPositions],
   );
+  const displayAccounts = useMemo(
+    () => buildCanonicalDisplayAccounts(accounts, accountLookup, canonicalAccountsFinancials?.partnerPositions ?? []),
+    [accountLookup, accounts, canonicalAccountsFinancials?.partnerPositions],
+  );
   const mergedPartnerPositionsByAccountId = useMemo(() => {
     const positions = new Map<string, PartnerLiabilityPosition>();
     const legacyPositions = buildPartnerLiabilityPositions(
@@ -4617,7 +4622,7 @@ function AccountsModule() {
     }
     return tally;
   }, [activeGeneralExpenseVouchers, activeLabourWageSettlements, farmId, seasonId, totalVoucherExpenses, vouchers]);
-  const selectedAccount = selectedAccountId ? accounts.find((item) => item.id === selectedAccountId) ?? null : null;
+  const selectedAccount = selectedAccountId ? displayAccounts.find((item) => item.id === selectedAccountId)?.account ?? null : null;
   const selectedPartnerSnapshot = useMemo(() => {
     if (selectedAccount?.type !== "partner") return null;
     const selectedCanonicalAccountId = resolveCanonicalAccountId(selectedAccount.id, accountLookup) ?? selectedAccount.id;
@@ -5118,11 +5123,11 @@ function AccountsModule() {
       <section className="record-panel">
         <h2>{t("accountsPage.yourAccounts")}</h2>
         <div className="account-grid">
-          {accounts.map((account) => (
-            <article key={account.id} className="account-card-clickable" role="button" tabIndex={0} onClick={() => setSelectedAccountId(account.id)} onKeyDown={(event) => {
+          {displayAccounts.map(({ id, account }) => (
+            <article key={id} className="account-card-clickable" role="button" tabIndex={0} onClick={() => setSelectedAccountId(id)} onKeyDown={(event) => {
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
-                setSelectedAccountId(account.id);
+                setSelectedAccountId(id);
               }
             }}>
               <span>{account.type}</span>
