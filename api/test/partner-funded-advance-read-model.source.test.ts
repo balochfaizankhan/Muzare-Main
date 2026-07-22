@@ -16,6 +16,17 @@ test("canonical partner read model retains missing original advance events and k
   assert.match(readModel, /const farmOwesPartner = amount\(ledger\.reduce\(\(sum, entry\) => sum \+ entry\.balanceEffect, 0\)\)/);
 });
 
+test("stable funding identifiers override placeholder transaction accounts before falling back to the transaction row", async () => {
+  const readModel = await source("lib/labour-financial-read-model.ts");
+  assert.match(readModel, /payload\.paidFromAccountId/);
+  assert.match(readModel, /snapshot\.paidFromAccountId/);
+  assert.match(readModel, /payload\.payerAccountId/);
+  const stableCandidatesIndex = readModel.indexOf("const stableCandidates = [");
+  const transactionFallbackIndex = readModel.indexOf("const fromTransaction = args.transactionAccountId");
+  assert.ok(stableCandidatesIndex >= 0, "stable funding candidates should exist");
+  assert.ok(transactionFallbackIndex > stableCandidatesIndex, "transaction fallback should run after stable source-id resolution");
+});
+
 test("expense report includes canonical labour attribution in By Account without adding another expense", async () => {
   const reports = await readFile(new URL("../../web/src/pages/workspace/Reports.tsx", import.meta.url), "utf8");
   assert.match(reports, /canonicalExpenseAccountRows/);

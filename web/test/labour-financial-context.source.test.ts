@@ -39,7 +39,13 @@ test("downstream pages consume the shared canonical labour model", () => {
   assert.match(reports, /!replacedLegacySourceIds\.has\(item\.id\)/);
   assert.match(reports, /activeAdvanceReportRows\.reduce\(\(sum, item\) => sum \+ item\.appliedAmount/);
   assert.match(reports, /activeAdvanceReportRows\.reduce\(\(sum, item\) => sum \+ item\.outstandingAmount/);
-  assert.match(modulePage, /canonicalLabourExpense = canonicalFinancials\.data\?\.summary\.wageExpense/);
+  assert.match(modulePage, /setSettledAccountsSnapshot/);
+  assert.match(modulePage, /settledAccountsSnapshotRef\.current/);
+  assert.match(modulePage, /const canonicalAccountsFinancials = snapshot\?\.canonical \?\? null/);
+  assert.match(modulePage, /const settledLabourWages = \(canonicalAccountsFinancials\?\.expenses \?\? \[\]\)/);
+  assert.match(modulePage, /const paymentsDue = \(canonicalAccountsFinancials\?\.expenses \?\? \[\]\)/);
+  assert.match(modulePage, /const totalBusinessExpenses = totalVoucherExpenses \+ settledLabourWages/);
+  assert.doesNotMatch(modulePage, /canonicalLabourExpense = canonicalFinancials\.data\?\.summary\.wageExpense/);
   assert.match(modulePage, /canonical\.directLabourPayments/);
   assert.match(modulePage, /canonical\.outstandingLabourAdvances/);
   assert.match(modulePage, /Direct Labour Payments/);

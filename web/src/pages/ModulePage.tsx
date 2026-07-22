@@ -15,8 +15,9 @@ import { useCanonicalLabourFinancials } from "../hooks/useCanonicalLabourFinanci
 import { calculateDisplayedAccountBalance } from "../lib/accounting";
 import { defaultTransactionGroupExpansion, groupAccountTransactions, type AccountTransactionGroupKey } from "../lib/accountTransactionGroups";
 import { attendanceStatusKey, buildAttendanceStatusMap, previousLocalDateKey, todayLocalDateKey } from "../lib/attendanceStatus";
+import { isAccountsFinancialScope, settleAccountsFinancialSnapshot, type AccountsFinancialSnapshot as AccountsFinancialSnapshotBase } from "../lib/accountsFinancialSnapshot";
 import { getCanonicalExpenseCategory, getExpenseAccountingGroup } from "../lib/expenseCategories";
-import { ApiError, confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteExpenseAttachment, deleteOrDeactivateLabour, extractExpenseReceipt, fetchExpenseAttachments, fetchExpenseCategories, fetchLabourDeletionPreview, fetchOperationalRecord, openExpenseAttachment, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, uploadExpenseAttachment, validateVoucherNumber, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type ExpenseAttachment, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type ExpenseOcrSuggestion, type ExpenseSearchRecord, type LabourDeletionPreview } from "../lib/api";
+import { ApiError, confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteExpenseAttachment, deleteOrDeactivateLabour, extractExpenseReceipt, fetchExpenseAttachments, fetchExpenseCategories, fetchLabourDeletionPreview, fetchOperationalRecord, openExpenseAttachment, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, uploadExpenseAttachment, validateVoucherNumber, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type ExpenseAttachment, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type ExpenseOcrSuggestion, type ExpenseSearchRecord, type LabourDeletionPreview, type LabourFinancialReadModel } from "../lib/api";
 import { buildDispatchAvailability, dispatchCartons, dispatchItemKey, resolveSaleType, saleProduceLabel, soldQuantityByDispatchItem } from "../lib/dispatch-sales";
 import { canCreate, canDelete, canEdit, hasPermission } from "../lib/permissions";
 import { translateExpenseCategory, translateExpenseSubcategory, translatePaymentType, translateSaleType, translateSalesStatus } from "../lib/systemTranslations";
@@ -65,6 +66,7 @@ import {
   type Labourer,
   type LabourGroup,
   type LabourPayment,
+  type LabourWageSettlement,
   type PartnerEntry,
   type ProductionEntry,
   type Sale,
@@ -107,6 +109,21 @@ type AccountLedgerRow = {
   runningBalance?: number;
   classification?: string;
   partnerLiabilityGroup?: PartnerLiabilityLedgerGroupKey;
+};
+type AccountsOperationalSnapshot = {
+  accounts: Account[];
+  vouchers: Voucher[];
+  sales: Sale[];
+  entries: PartnerEntry[];
+  advances: Advance[];
+  labourWageSettlements: LabourWageSettlement[];
+  inputVersion: string;
+  generatedAt: string;
+};
+
+type AccountsSettledSnapshot = AccountsFinancialSnapshotBase & {
+  operational: AccountsOperationalSnapshot;
+  canonical: LabourFinancialReadModel;
 };
 const paymentTypeLabel = (paymentType: PaymentType | undefined) => translatePaymentType(paymentType ?? "daily_wage");
 
@@ -4354,18 +4371,81 @@ function AccountsModule() {
   const canonicalFinancials = useCanonicalLabourFinancials();
   const canCreateAccounts = Boolean(!sessionRefreshing && user && workspaceId && canCreate(user, "accounts", workspaceId));
   const navigate = useNavigate();
-  const loadAccounts = useCallback(async () => (await workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true })).sort((a, b) => a.createdAt.localeCompare(b.createdAt)), []);
-  const loadVouchers = useCallback(() => loadWorkspaceVouchers({ includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }), []);
-  const loadSales = useCallback(() => workspaceRecords(offlineDb.sales), []);
-  const loadEntries = useCallback(() => workspaceRecords(offlineDb.partnerEntries), []);
-  const loadAdvances = useCallback(() => workspaceRecords(offlineDb.advances), []);
-  const loadLabourWageSettlements = useCallback(() => workspaceRecords(offlineDb.labourWageSettlements), []);
-  const [accounts, refresh] = useData(loadAccounts, ensureLocalAccounts);
-  const [vouchers] = useData(loadVouchers);
-  const [sales] = useData(loadSales);
-  const [entries] = useData(loadEntries);
-  const [advances] = useData(loadAdvances);
-  const [labourWageSettlements] = useData(loadLabourWageSettlements);
+  const accountsRequestSequence = useRef(0);
+  const accountsScopeKeyRef = useRef(`${workspaceId}:${farmId}:${seasonId}`);
+  const settledAccountsSnapshotRef = useRef<AccountsSettledSnapshot | null>(null);
+  const [operationalSnapshot, setOperationalSnapshot] = useState<AccountsOperationalSnapshot | null>(null);
+  const [settledAccountsSnapshot, setSettledAccountsSnapshot] = useState<AccountsSettledSnapshot | null>(null);
+  const refreshOperationalSnapshot = useCallback(async () => {
+    const requestId = ++accountsRequestSequence.current;
+    const scopeKey = `${workspaceId}:${farmId}:${seasonId}`;
+    accountsScopeKeyRef.current = scopeKey;
+    await ensureLocalAccounts();
+    const [nextAccounts, nextVouchers, nextSales, nextEntries, nextAdvances, nextLabourWageSettlements] = await Promise.all([
+      workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }).then((rows) => rows.sort((a, b) => a.createdAt.localeCompare(b.createdAt))),
+      loadWorkspaceVouchers({ includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }),
+      workspaceRecords(offlineDb.sales),
+      workspaceRecords(offlineDb.partnerEntries),
+      workspaceRecords(offlineDb.advances),
+      workspaceRecords(offlineDb.labourWageSettlements),
+    ]);
+    if (requestId !== accountsRequestSequence.current || accountsScopeKeyRef.current !== scopeKey) return;
+    setOperationalSnapshot({
+      accounts: nextAccounts,
+      vouchers: nextVouchers,
+      sales: nextSales,
+      entries: nextEntries,
+      advances: nextAdvances,
+      labourWageSettlements: nextLabourWageSettlements,
+      inputVersion: `${nextAccounts.length}:${nextVouchers.length}:${nextSales.length}:${nextEntries.length}:${nextAdvances.length}:${nextLabourWageSettlements.length}`,
+      generatedAt: new Date().toISOString(),
+    });
+  }, [farmId, seasonId, workspaceId]);
+
+  useEffect(() => {
+    void refreshOperationalSnapshot();
+    const refresh = () => void refreshOperationalSnapshot();
+    window.addEventListener("muzare-data-refresh", refresh);
+    window.addEventListener("muzare-local-data-change", refresh);
+    return () => {
+      window.removeEventListener("muzare-data-refresh", refresh);
+      window.removeEventListener("muzare-local-data-change", refresh);
+    };
+  }, [refreshOperationalSnapshot]);
+
+  useEffect(() => {
+    const scope = { workspaceId, farmId: farmId ?? "", seasonId: seasonId ?? "" };
+    const scopeKey = `${scope.workspaceId}:${scope.farmId}:${scope.seasonId}`;
+    if (!operationalSnapshot || !canonicalFinancials.data) {
+      setSettledAccountsSnapshot(isAccountsFinancialScope(settledAccountsSnapshotRef.current, scope) ? settledAccountsSnapshotRef.current : null);
+      return;
+    }
+    if (canonicalFinancials.workspaceId !== scope.workspaceId || canonicalFinancials.farmId !== scope.farmId || canonicalFinancials.seasonId !== scope.seasonId) return;
+    if (accountsScopeKeyRef.current !== scopeKey) return;
+    const nextSnapshot: AccountsSettledSnapshot = {
+      ...scope,
+      snapshotVersion: `${scopeKey}:${canonicalFinancials.data.summary.accountMovement}:${operationalSnapshot.inputVersion}`,
+      generatedAt: new Date().toISOString(),
+      operational: operationalSnapshot,
+      canonical: canonicalFinancials.data,
+    };
+    const settled = settleAccountsFinancialSnapshot({
+      scope,
+      previousSnapshot: settledAccountsSnapshotRef.current,
+      canonicalReady: true,
+      nextSnapshot,
+    });
+    settledAccountsSnapshotRef.current = settled;
+    setSettledAccountsSnapshot(settled);
+  }, [canonicalFinancials.data, canonicalFinancials.farmId, canonicalFinancials.seasonId, canonicalFinancials.workspaceId, farmId, operationalSnapshot, seasonId, workspaceId]);
+
+  const snapshot = settledAccountsSnapshot;
+  const accounts = snapshot?.operational.accounts ?? [];
+  const vouchers = snapshot?.operational.vouchers ?? [];
+  const sales = snapshot?.operational.sales ?? [];
+  const entries = snapshot?.operational.entries ?? [];
+  const advances = snapshot?.operational.advances ?? [];
+  const labourWageSettlements = snapshot?.operational.labourWageSettlements ?? [];
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [ledgerSearch, setLedgerSearch] = useState("");
   const [ledgerType, setLedgerType] = useState<"all" | "sale" | "voucher" | "advance" | "settlement_sent" | "settlement_received" | "contribution" | "withdrawal" | "adjustment">("all");
@@ -4385,18 +4465,19 @@ function AccountsModule() {
     const record: Account = { ...makeLocalRecord(), name, type };
     await persistOperationalRecord("account", record);
     setName("");
-    await refresh();
+    await refreshOperationalSnapshot();
   };
+  const canonicalAccountsFinancials = snapshot?.canonical ?? null;
   const activeSales = sales.filter((item) => isActiveOperationalRecord(item));
   const activeVouchers = getActiveVouchers(vouchers);
   const activeEntries = entries.filter((item) => isActiveOperationalRecord(item));
-  const replacedLegacySourceIds = new Set(canonicalFinancials.data?.replacedLegacySourceIds ?? []);
-  const activeAdvances = advances.filter((item) => isActiveOperationalRecord(item) && !replacedLegacySourceIds.has(item.id));
+  const replacedLegacySourceIds = new Set(canonicalAccountsFinancials?.replacedLegacySourceIds ?? []);
+  const activeAdvances = advances.filter((item) => isActiveOperationalRecord(item));
   const activeLabourWageSettlements = labourWageSettlements.filter((item) => isActiveOperationalRecord(item));
   const activeGeneralExpenseVouchers = getGeneralExpenseVouchers(activeVouchers, activeLabourWageSettlements);
   const canonicalPartnerPositionsByAccountId = useMemo(
-    () => new Map((canonicalFinancials.data?.partnerPositions ?? []).map((item) => [item.accountId, item])),
-    [canonicalFinancials.data?.partnerPositions],
+    () => new Map((canonicalAccountsFinancials?.partnerPositions ?? []).map((item) => [item.accountId, item])),
+    [canonicalAccountsFinancials?.partnerPositions],
   );
   const mergedPartnerPositionsByAccountId = useMemo(() => {
     const positions = new Map<string, PartnerLiabilityPosition>();
@@ -4433,14 +4514,20 @@ function AccountsModule() {
       activeEntries,
       activeLabourWageSettlements,
       accounts,
-      canonicalFinancials.data?.accountEntries ?? [],
+      canonicalAccountsFinancials?.accountEntries ?? [],
       { farmId, seasonId },
     );
   };
-  const totalAdvances = activeAdvances.reduce((sum, item) => sum + item.amount, 0);
-  const canonicalLabourExpense = canonicalFinancials.data?.summary.wageExpense ?? 0;
+  const totalAdvances = canonicalAccountsFinancials?.summary.totalAdvance ?? 0;
+  const settledLabourWages = (canonicalAccountsFinancials?.expenses ?? [])
+    .filter((item) => item.active)
+    .reduce((sum, item) => sum + item.amount, 0);
+  const paymentsDue = (canonicalAccountsFinancials?.expenses ?? [])
+    .filter((item) => item.active)
+    .reduce((sum, item) => sum + item.outstandingAmount, 0);
   const legacyExpenseVouchers = activeGeneralExpenseVouchers.filter((item) => !replacedLegacySourceIds.has(item.id));
-  const totalVoucherExpenses = legacyExpenseVouchers.reduce((sum, item) => sum + item.amount, 0) + canonicalLabourExpense;
+  const totalVoucherExpenses = legacyExpenseVouchers.reduce((sum, item) => sum + item.amount, 0);
+  const totalBusinessExpenses = totalVoucherExpenses + settledLabourWages;
   const voucherExpenseDebug = useMemo(() => {
     const settlementById = new Map(activeLabourWageSettlements.map((settlement) => [settlement.id, settlement] as const));
     const tally = {
@@ -4530,7 +4617,7 @@ function AccountsModule() {
   const selectedPartnerSnapshot = useMemo(() => {
     if (selectedAccount?.type !== "partner") return null;
     const legacy = getPartnerAccountingSnapshot(selectedAccount, sales, legacyExpenseVouchers, activeAdvances, activeEntries, activeLabourWageSettlements, accounts, { farmId, seasonId });
-    const canonical = canonicalFinancials.data?.partnerPositions.find((item) => item.accountId === selectedAccount.id);
+    const canonical = canonicalAccountsFinancials?.partnerPositions.find((item) => item.accountId === selectedAccount.id);
     if (!canonical) return legacy;
     const merged = mergePartnerPositionWithCanonical(legacy, canonical);
     return {
@@ -4549,7 +4636,7 @@ function AccountsModule() {
       reconciliationDelta: merged.reconciliationDelta,
       isConsistent: merged.isConsistent,
     };
-  }, [accounts, activeEntries, canonicalFinancials.data?.partnerPositions, farmId, legacyExpenseVouchers, sales, seasonId, selectedAccount]);
+  }, [accounts, activeEntries, activeAdvances, activeLabourWageSettlements, canonicalAccountsFinancials?.partnerPositions, farmId, legacyExpenseVouchers, sales, seasonId, selectedAccount]);
   const ledgerGroupTitle = useCallback((groupKey: AccountTransactionGroupKey) => ({
     expenses: t("accountsPage.groupExpenses"),
     advances: t("accountsPage.groupAdvances"),
@@ -4585,7 +4672,7 @@ function AccountsModule() {
     const rows: AccountLedgerRow[] = [];
     const selectedIsPartner = selectedAccount.type === "partner";
     const canonicalPartnerLedgerEntries = selectedIsPartner
-      ? (canonicalFinancials.data?.partnerLedger ?? []).filter((entry) => entry.accountId === selectedAccount.id)
+      ? (canonicalAccountsFinancials?.partnerLedger ?? []).filter((entry) => entry.accountId === selectedAccount.id)
       : [];
     for (const sale of activeSales.filter((item) => resolveCanonicalAccountId(item.accountId, accountLookup) === selectedAccount.id)) {
       rows.push({
@@ -4659,7 +4746,7 @@ function AccountsModule() {
         partnerLiabilityGroup: selectedIsPartner ? "labour_advances_paid" : undefined,
       });
     }
-    for (const entry of selectedIsPartner ? canonicalPartnerLedgerEntries : (canonicalFinancials.data?.accountEntries.filter((item) => item.accountId === selectedAccount.id) ?? [])) {
+    for (const entry of selectedIsPartner ? canonicalPartnerLedgerEntries : (canonicalAccountsFinancials?.accountEntries.filter((item) => item.accountId === selectedAccount.id) ?? [])) {
       const informational = entry.informational === true;
       rows.push({
         id: `canonical-labour:${entry.id}`,
@@ -4753,7 +4840,7 @@ function AccountsModule() {
       running += row.credit - row.debit;
       return { ...row, runningBalance: running };
     });
-  }, [activeAdvances, activeEntries, activeLabourWageSettlements, activeSales, activeVouchers, accountLookup, accounts, canonicalFinancials.data?.accountEntries, canonicalFinancials.data?.partnerLedger, farmId, seasonId, selectedAccount, t]);
+  }, [activeAdvances, activeEntries, activeLabourWageSettlements, activeSales, activeVouchers, accountLookup, accounts, canonicalAccountsFinancials?.accountEntries, canonicalAccountsFinancials?.partnerLedger, farmId, seasonId, selectedAccount, t]);
   const filteredLedgerRows = useMemo(() => {
     const term = ledgerSearch.trim().toLowerCase();
     const minAmount = ledgerMinAmount ? Number(ledgerMinAmount) : null;
@@ -5043,10 +5130,13 @@ function AccountsModule() {
       </section>
       <section className="record-panel">
         <h2>{t("accountsPage.expenseVisibility")}</h2>
+        {!snapshot ? <p className="empty-records">Updating accounts snapshot…</p> : null}
         <div className="record-list">
           <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("voucher")}><strong>{t("accountsPage.voucherExpenses")}</strong><span>{money(totalVoucherExpenses)}</span><small>{t("accountsPage.viewDetails")}</small></article>
+          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("combined")}><strong>Settled Labour Wages</strong><span>{money(settledLabourWages)}</span><small>{t("accountsPage.viewDetails")}</small></article>
           <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("advance")}><strong>{t("accountsPage.labourAdvances")}</strong><span>{money(totalAdvances)}</span><small>{t("accountsPage.viewDetails")}</small></article>
-          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("combined")}><strong>{t("accountsPage.totalBusinessExpenses")}</strong><span>{money(totalVoucherExpenses)}</span><small>{t("accountsPage.viewDetails")}</small></article>
+          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => navigate(`/workspace/labour-payments/payments-due?farmId=${encodeURIComponent(farmId ?? "")}&seasonId=${encodeURIComponent(seasonId ?? "")}`)}><strong>Payments Due</strong><span>{money(paymentsDue)}</span><small>{t("accountsPage.viewDetails")}</small></article>
+          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("combined")}><strong>{t("accountsPage.totalBusinessExpenses")}</strong><span>{money(totalBusinessExpenses)}</span><small>{t("accountsPage.viewDetails")}</small></article>
         </div>
         {import.meta.env.DEV ? (
           <div className="account-ledger-reconciliation account-ledger-reconciliation--debug">
@@ -5075,7 +5165,7 @@ function AccountsModule() {
       </section>
       <Summary
         label={t("accountsPage.netOperatingPosition")}
-        value={money(activeSales.reduce((sum, item) => sum + item.amount, 0) - totalVoucherExpenses)}
+        value={money(activeSales.reduce((sum, item) => sum + item.amount, 0) - totalBusinessExpenses)}
       />
       {selectedAccount && <div className="worker-dialog-backdrop worker-action-backdrop" role="presentation" onClick={() => setSelectedAccountId(null)}>
         <section className="worker-action-dialog account-ledger-dialog" role="dialog" aria-modal="true" aria-label={t("accountsPage.accountLedgerDetails")} onClick={(event) => event.stopPropagation()}>

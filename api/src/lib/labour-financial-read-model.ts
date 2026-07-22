@@ -231,6 +231,8 @@ function resolveFundingAccount(args: {
   sourcePayload?: Record<string, unknown>;
 }): ResolvedFundingAccount {
   const accountLike = [...args.accountById.values()] as AccountIdentityLike[];
+  const payload = args.sourcePayload ?? {};
+  const snapshot = args.sourceSnapshot ?? {};
   const fromStored = args.storedAccountId ? args.accountById.get(args.storedAccountId) : undefined;
   if (fromStored) {
     return {
@@ -243,25 +245,49 @@ function resolveFundingAccount(args: {
       reviewReason: null,
     };
   }
-  const fromTransaction = args.transactionAccountId ? args.accountById.get(args.transactionAccountId) : undefined;
-  if (fromTransaction) {
-    return {
-      accountId: fromTransaction.id,
-      accountName: fromTransaction.name,
-      accountType: fromTransaction.accountType,
-      partnerId: fromTransaction.accountType === "partner" ? fromTransaction.id : null,
-      partnerName: fromTransaction.accountType === "partner" ? fromTransaction.name : null,
-      needsReview: false,
-      reviewReason: null,
-    };
-  }
-  const payload = args.sourcePayload ?? {};
-  const snapshot = args.sourceSnapshot ?? {};
   const stableCandidates = [
-    firstText(payload.paymentAccountCanonicalId, payload.paymentAccountId, payload.linkedAccountId, payload.accountId, payload.partnerAccountId),
-    firstText(snapshot.paymentAccountCanonicalId, snapshot.paymentAccountId, snapshot.linkedAccountId, snapshot.accountId, snapshot.partnerAccountId),
-    firstText(payload.oldPaymentAccountId, payload.oldAccountId, payload.payment_account_id, payload.account_id),
-    firstText(snapshot.oldPaymentAccountId, snapshot.oldAccountId, snapshot.payment_account_id, snapshot.account_id),
+    firstText(
+      payload.paymentAccountCanonicalId,
+      payload.paymentAccountId,
+      payload.linkedAccountId,
+      payload.accountId,
+      payload.partnerAccountId,
+      payload.paidFromAccountId,
+      payload.paid_from_account_id,
+      payload.sourceAccountId,
+      payload.source_account_id,
+      payload.payerAccountId,
+      payload.payer_account_id,
+    ),
+    firstText(
+      snapshot.paymentAccountCanonicalId,
+      snapshot.paymentAccountId,
+      snapshot.linkedAccountId,
+      snapshot.accountId,
+      snapshot.partnerAccountId,
+      snapshot.paidFromAccountId,
+      snapshot.paid_from_account_id,
+      snapshot.sourceAccountId,
+      snapshot.source_account_id,
+      snapshot.payerAccountId,
+      snapshot.payer_account_id,
+    ),
+    firstText(
+      payload.oldPaymentAccountId,
+      payload.oldAccountId,
+      payload.payment_account_id,
+      payload.account_id,
+      payload.oldPaidFromAccountId,
+      payload.old_paid_from_account_id,
+    ),
+    firstText(
+      snapshot.oldPaymentAccountId,
+      snapshot.oldAccountId,
+      snapshot.payment_account_id,
+      snapshot.account_id,
+      snapshot.oldPaidFromAccountId,
+      snapshot.old_paid_from_account_id,
+    ),
   ].filter((value): value is string => Boolean(value));
   for (const candidate of stableCandidates) {
     const resolved = resolveAccountIdentity(candidate, accountLike);
@@ -275,6 +301,18 @@ function resolveFundingAccount(args: {
       accountType: account.accountType,
       partnerId: account.accountType === "partner" ? account.id : null,
       partnerName: account.accountType === "partner" ? account.name : null,
+      needsReview: false,
+      reviewReason: null,
+    };
+  }
+  const fromTransaction = args.transactionAccountId ? args.accountById.get(args.transactionAccountId) : undefined;
+  if (fromTransaction) {
+    return {
+      accountId: fromTransaction.id,
+      accountName: fromTransaction.name,
+      accountType: fromTransaction.accountType,
+      partnerId: fromTransaction.accountType === "partner" ? fromTransaction.id : null,
+      partnerName: fromTransaction.accountType === "partner" ? fromTransaction.name : null,
       needsReview: false,
       reviewReason: null,
     };
