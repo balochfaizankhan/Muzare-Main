@@ -18,6 +18,7 @@ import {
 } from "../db/schema.js";
 import { resolveAccountIdentity, type AccountIdentityLike } from "./account-identity.js";
 import { legacyAdvancePosition, mergeAdvancePositions, type LegacyAdvanceReadRow } from "./labour-advance-read-model.js";
+import { attributeLabourExpense, fundingAttributionTotal, groupFundingSources, type ExpenseAttributionRow } from "./labour-funding-attribution.js";
 
 const amount = (value: unknown) => Number(Number(value ?? 0).toFixed(2));
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -212,6 +213,13 @@ type AdvanceApplicationParent = {
   childAllocationTotal: number;
   activeChildAllocationTotal: number;
   dueOutstandingAfterPosting: number | null;
+  fundingSources: Array<{
+    accountId: string | null;
+    accountName: string;
+    accountType: string | null;
+    amount: number;
+  }>;
+  fundingSourceTotal: number;
   sourceType: "AUDIT_EVENT" | "PARENT_VOUCHER";
 };
 
@@ -663,7 +671,7 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
     })] as const;
   }));
 
-  const accountEntries = vouchers.flatMap((voucher) => {
+  const transactionBackedAccountEntries = vouchers.flatMap((voucher) => {
     const transaction = voucher.accountTransactionId ? transactionById.get(voucher.accountTransactionId) : undefined;
     const advancePosition = advanceByVoucherId.get(voucher.id);
     const resolvedFunding = resolvedFundingByVoucherId.get(voucher.id);
@@ -707,7 +715,48 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
       canonical: !voucher.legacy,
       legacy: voucher.legacy,
     }];
-  }).sort((left, right) => right.date.localeCompare(left.date) || right.id.localeCompare(left.id));
+  });
+  // Historical advances can have a canonical voucher that is linked to the
+  // original operational record without having received an account movement.
+  // They are still original cash-out events and must remain in the funding
+  // partner's liability. Add only the missing event; never use outstanding or
+  // applied balances as a substitute for the original amount.
+  const transactionBackedAdvanceVoucherIds = new Set(
+    transactionBackedAccountEntries
+      .filter((entry) => entry.economicNature === "ADVANCE")
+      .map((entry) => entry.voucherId),
+  );
+  const missingOriginalAdvanceEntries = advancePositions
+    .filter((advance) => advance.status !== "VOIDED" && advance.partnerId)
+    .filter((advance) => !advance.canonicalVoucherId || !transactionBackedAdvanceVoucherIds.has(advance.canonicalVoucherId))
+    .map((advance) => ({
+      id: `original-advance:${advance.advancePositionId}`,
+      voucherId: advance.canonicalVoucherId ?? advance.voucherId,
+      voucherNumber: advance.voucherNumber,
+      sourceId: advance.sourceId,
+      legacySourceRecordId: advance.legacySourceRecordId,
+      accountId: advance.partnerId!,
+      accountName: advance.partnerName ?? advance.fundingAccountName ?? "Partner account",
+      accountType: "partner",
+      transactionType: "credit" as const,
+      amount: advance.originalAmount,
+      balanceEffect: advance.originalAmount,
+      date: advance.advanceDate,
+      nature: "ADVANCE" as const,
+      economicNature: "ADVANCE" as const,
+      status: advance.status,
+      description: advance.description,
+      reversalReference: null,
+      recipientScope: advance.recipientScope,
+      labourerId: advance.labourerId,
+      labourGroupId: advance.labourGroupId,
+      recipientName: advance.recipientName,
+      canonical: Boolean(advance.canonicalVoucherId),
+      legacy: advance.legacy,
+      informational: false,
+    }));
+  const accountEntries = [...transactionBackedAccountEntries, ...missingOriginalAdvanceEntries]
+    .sort((left, right) => right.date.localeCompare(left.date) || right.id.localeCompare(left.id));
 
   const originalById = new Map(journal.filter((row) => !row.reversalOf && row.eventType !== "REVERSAL").map((row) => [row.id, row]));
   const journalGroups = new Map<string, typeof journal>();
@@ -803,6 +852,15 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
           : "PARTIALLY_REVERSED";
       const displayNumber = matchingParentVoucher?.voucherNumber ?? aggregateApplicationVoucherNumber(row.id);
       const settlementSummary = asSnapshot(details.settlementSummary);
+      const fundingSources = groupFundingSources(childApplications.map((application) => {
+        const source = advanceByVoucherId.get(application.advanceVoucherId);
+        return {
+          accountId: source?.fundingAccountId ?? null,
+          accountName: source?.paymentSourceDisplayName ?? source?.fundingAccountName ?? unresolvedPaymentSourceLabel,
+          accountType: source?.paymentSourceType ?? source?.fundingType ?? null,
+          amount: amount(application.amount),
+        };
+      }));
       return {
         id: row.id,
         parentVoucherId: matchingParentVoucher?.id ?? null,
@@ -836,45 +894,50 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
         childAllocationTotal: amount(childApplications.reduce((sum, application) => sum + amount(application.amount), 0)),
         activeChildAllocationTotal: activeAmount,
         dueOutstandingAfterPosting: typeof settlementSummary.remainingDue === "number" ? amount(settlementSummary.remainingDue) : null,
+        fundingSources,
+        fundingSourceTotal: fundingAttributionTotal(fundingSources),
         sourceType: matchingParentVoucher ? "PARENT_VOUCHER" : "AUDIT_EVENT",
       } satisfies AdvanceApplicationParent;
     })
     .filter((row): row is NonNullable<typeof row> => row !== null)
     .sort((left, right) => right.postedAt.localeCompare(left.postedAt) || right.id.localeCompare(left.id));
 
-  const legacyPartnerAdvanceEntries = advancePositions
-    .filter((row) => !row.canonical && row.partnerId && row.status !== "VOIDED")
-    .map((row) => ({
-      id: `legacy-advance:${row.advancePositionId}`,
-      voucherId: row.voucherId,
-      voucherNumber: row.voucherNumber,
-      sourceId: row.sourceId,
-      legacySourceRecordId: row.legacySourceRecordId,
-      accountId: row.partnerId!,
-      accountName: row.partnerName ?? row.fundingAccountName ?? "Partner account",
+  const applicationPartnerAuditEntries = advanceApplicationParents.flatMap((parent) => parent.fundingSources
+    .filter((source) => source.accountId && source.accountType === "partner")
+    .map((source) => ({
+      id: `advance-application-owner:${parent.id}:${source.accountId}`,
+      voucherId: parent.parentVoucherId ?? parent.id,
+      voucherNumber: parent.displayVoucherNumber,
+      sourceId: parent.id,
+      legacySourceRecordId: null,
+      accountId: source.accountId!,
+      accountName: source.accountName,
       accountType: "partner",
       transactionType: "credit" as const,
-      amount: row.originalAmount,
-      balanceEffect: row.originalAmount,
-      date: row.advanceDate,
-      nature: "ADVANCE" as const,
-      economicNature: "ADVANCE" as const,
-      status: row.status,
-      description: row.description,
+      amount: source.amount,
+      balanceEffect: 0,
+      date: parent.date,
+      nature: "ADVANCE_APPLICATION" as const,
+      economicNature: "ADVANCE_APPLICATION" as const,
+      status: parent.status,
+      description: `Advance applied to Labour Due ${parent.dueNumber ?? parent.dueId} — balance effect SAR 0`,
       reversalReference: null,
-      recipientScope: row.recipientScope,
-      labourerId: row.labourerId,
-      labourGroupId: row.labourGroupId,
-      recipientName: row.recipientName,
-      canonical: false,
-      legacy: true,
-    }));
-  const partnerLedger = [...accountEntries.filter((entry) => entry.accountType === "partner"), ...legacyPartnerAdvanceEntries]
+      recipientScope: parent.recipientScope,
+      labourerId: parent.labourerId,
+      labourGroupId: parent.labourGroupId,
+      recipientName: parent.recipientName,
+      canonical: true,
+      legacy: false,
+      informational: true,
+      dueId: parent.dueId,
+      dueNumber: parent.dueNumber,
+    })));
+  const partnerLedger = [...accountEntries.filter((entry) => entry.accountType === "partner"), ...applicationPartnerAuditEntries]
     .sort((left, right) => right.date.localeCompare(left.date) || right.id.localeCompare(left.id));
   const partnerPositions = scopeAccounts.filter((account) => account.accountType === "partner").map((account) => {
     const ledger = partnerLedger.filter((entry) => entry.accountId === account.id);
     const labourAdvancesPaid = amount(ledger.filter((entry) => entry.economicNature === "ADVANCE").reduce((sum, entry) => sum + entry.balanceEffect, 0));
-    const directLabourPayments = amount(ledger.filter((entry) => entry.economicNature !== "ADVANCE" && entry.economicNature !== "REFUND_RECOVERY").reduce((sum, entry) => sum + entry.balanceEffect, 0));
+    const directLabourPayments = amount(ledger.filter((entry) => entry.economicNature !== "ADVANCE" && entry.economicNature !== "ADVANCE_APPLICATION" && entry.economicNature !== "REFUND_RECOVERY").reduce((sum, entry) => sum + entry.balanceEffect, 0));
     const recoveries = amount(ledger.filter((entry) => entry.economicNature === "REFUND_RECOVERY").reduce((sum, entry) => sum - entry.balanceEffect, 0));
     const outstandingLabourAdvances = amount(advancePositions.filter((advance) => advance.partnerId === account.id).reduce((sum, advance) => sum + advance.outstandingAmount, 0));
     const appliedLabourAdvances = amount(advancePositions.filter((advance) => advance.partnerId === account.id).reduce((sum, advance) => sum + advance.appliedAmount, 0));
@@ -929,6 +992,38 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
       };
     })
     .filter((row) => row.amount !== 0 || !row.active);
+  const expenseAccountAttributions: ExpenseAttributionRow[] = expenses
+    .filter((expense) => expense.active)
+    .flatMap((expense) => {
+      const parts: Parameters<typeof attributeLabourExpense>[0]["parts"] = [];
+      for (const allocation of scopedAllocations.filter((row) => row.dueId === expense.dueId && row.status === "ACTIVE")) {
+        const voucher = voucherById.get(allocation.voucherId);
+        const funding = voucher ? resolvedFundingByVoucherId.get(voucher.id) : null;
+        parts.push({
+          id: `${expense.id}:direct:${allocation.id}`,
+          settlementType: "DIRECT_PAYMENT",
+          accountId: funding?.accountId ?? null,
+          accountName: funding?.accountName ?? unresolvedPaymentSourceLabel,
+          accountType: funding?.accountType ?? null,
+          amount: amount(allocation.amount), voucherId: voucher?.id ?? null, advanceApplicationId: null,
+        });
+      }
+      for (const application of scopedApplications.filter((row) => row.dueId === expense.dueId && row.status === "ACTIVE")) {
+        const source = advanceByVoucherId.get(application.advanceVoucherId);
+        parts.push({
+          id: `${expense.id}:advance:${application.id}`,
+          settlementType: "APPLIED_ADVANCE",
+          accountId: source?.fundingAccountId ?? null,
+          accountName: source?.paymentSourceDisplayName ?? source?.fundingAccountName ?? unresolvedPaymentSourceLabel,
+          accountType: source?.paymentSourceType ?? source?.fundingType ?? null,
+          amount: amount(application.amount), voucherId: application.advanceVoucherId, advanceApplicationId: application.id,
+        });
+      }
+      return attributeLabourExpense({
+        dueId: expense.dueId!, dueNumber: expense.dueNumber, date: expense.date,
+        expenseAmount: expense.amount, parts,
+      });
+    });
   const labourLedger = journalEvents.filter((event) => !event.legacy && (event.labourDueEffect !== 0 || event.labourAdvanceEffect !== 0 || event.expenseEffect !== 0));
   const activity = journalEvents.filter((event) => !event.legacy).map((event) => ({
     id: `labour:${event.id}`, date: event.postedAt, module: "labour" as const,
@@ -953,6 +1048,7 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
     labourLedger,
     advanceApplicationParents,
     expenses,
+    expenseAccountAttributions,
     activity,
     currentLedger,
     advancePositions,

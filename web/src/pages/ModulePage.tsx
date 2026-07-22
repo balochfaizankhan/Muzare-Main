@@ -112,9 +112,12 @@ const paymentTypeLabel = (paymentType: PaymentType | undefined) => translatePaym
 
 function useData<T>(load: () => Promise<T[]>, setup?: () => Promise<void>) {
   const [records, setRecords] = useState<T[]>([]);
+  const requestSequence = useRef(0);
   const refresh = useCallback(async () => {
+    const sequence = ++requestSequence.current;
     if (setup) await setup();
-    setRecords(await load());
+    const next = await load();
+    if (sequence === requestSequence.current) setRecords(next);
   }, [load, setup]);
 
   useEffect(() => {
@@ -4657,18 +4660,20 @@ function AccountsModule() {
       });
     }
     for (const entry of selectedIsPartner ? canonicalPartnerLedgerEntries : (canonicalFinancials.data?.accountEntries.filter((item) => item.accountId === selectedAccount.id) ?? [])) {
+      const informational = entry.informational === true;
       rows.push({
         id: `canonical-labour:${entry.id}`,
         date: entry.date,
         type: entry.economicNature === "ADVANCE" ? "advance" : "voucher",
         reference: entry.voucherNumber,
         description: `${entry.nature.toLowerCase().replaceAll("_", " ")} — ${entry.description}`,
-        debit: entry.transactionType === "debit" ? entry.amount : 0,
-        credit: entry.transactionType === "credit" ? entry.amount : 0,
+        debit: informational ? 0 : entry.transactionType === "debit" ? entry.amount : 0,
+        credit: informational ? 0 : entry.transactionType === "credit" ? entry.amount : 0,
+        memoAmount: informational ? entry.amount : undefined,
         source: "labour_advances",
         sourceId: entry.voucherId,
         classification: entry.economicNature === "ADVANCE" ? "advance" : "settlement",
-        partnerLiabilityGroup: selectedIsPartner ? (entry.economicNature === "ADVANCE" ? "labour_advances_paid" : entry.economicNature === "REFUND_RECOVERY" ? "money_returned" : "labour_wage_settlements") : undefined,
+        partnerLiabilityGroup: selectedIsPartner ? (entry.economicNature === "ADVANCE" ? "labour_advances_paid" : entry.economicNature === "REFUND_RECOVERY" ? "money_returned" : entry.economicNature === "ADVANCE_APPLICATION" ? undefined : "labour_wage_settlements") : undefined,
       });
     }
     for (const entry of activeEntries) {

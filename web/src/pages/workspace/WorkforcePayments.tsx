@@ -1259,6 +1259,15 @@ function VoucherRegister({
                   {row.parent.createdByName ? ` · Created by ${row.parent.createdByName}` : ""}
                 </small>
               ) : null}
+              {row.kind === "application_parent" ? (
+                <div className="workforce-payment-funding-sources">
+                  <strong>Funding sources</strong>
+                  {row.parent.fundingSources.map((source) => (
+                    <span key={source.accountId ?? source.accountName}>{source.accountName} — {money(source.amount)}</span>
+                  ))}
+                  <small>Funding source total · {money(row.parent.fundingSourceTotal)} · Cash movement · {money(0)}</small>
+                </div>
+              ) : null}
               {canVoid &&
               row.kind === "voucher" &&
               row.voucher.status === "POSTED" &&

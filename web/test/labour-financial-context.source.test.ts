@@ -9,12 +9,16 @@ test("canonical labour reports refetch by complete context and discard stale res
   const reports = source("pages/workspace/Reports.tsx");
   assert.match(hook, /const sync = useSyncState\(\)/);
   assert.match(hook, /queryKey: \["canonical-labour-financials", token, workspaceId, farmId, seasonId\]/);
-  assert.match(hook, /queryFn: \(\{ signal \}\)/);
+  assert.match(hook, /queryFn: async \(\{ signal \}\)/);
   assert.match(hook, /const farmId = sync\.farmId \?\? ""/);
   assert.match(hook, /const seasonId = sync\.seasonId \?\? ""/);
   assert.match(hook, /placeholderData: undefined/);
+  assert.match(hook, /scope\.workspaceId !== workspaceId \|\| scope\.farmId !== farmId \|\| scope\.seasonId !== seasonId/);
+  assert.match(hook, /invalidateQueries\(\{ queryKey: \["canonical-labour-financials", token, workspaceId, farmId, seasonId\], exact: true \}\)/);
+  assert.match(reports, /queryKey: \["reports-bootstrap", user\?\.workspaceId, sync\.farmId, sync\.seasonId\]/);
+  assert.match(reports, /sequence !== requestSequence/);
   assert.match(reports, /window\.addEventListener\("muzare-data-refresh", reloadScopedRecords\)/);
-  assert.match(reports, /bootstrapQuery\.data\?\.activeFarmId, bootstrapQuery\.data\?\.activeSeasonId, user\?\.workspaceId/);
+  assert.match(reports, /bootstrapQuery\.data\?\.activeFarmId, bootstrapQuery\.data\?\.activeSeasonId, sync\.farmId, sync\.seasonId, user\?\.workspaceId/);
   assert.match(reports, /canonicalFinancials\.data\?\.advancePositions/);
   assert.match(reports, /farmId: canonicalFinancials\.farmId/);
   assert.match(reports, /seasonId: canonicalFinancials\.seasonId/);
@@ -29,6 +33,7 @@ test("downstream pages consume the shared canonical labour model", () => {
   assert.ok((modulePage.match(/useCanonicalLabourFinancials\(\)/g) ?? []).length >= 3);
   assert.match(reports, /canonicalFinancials\.data\?\.accountEntries/);
   assert.match(reports, /canonicalFinancials\.data\?\.expenses/);
+  assert.match(reports, /canonicalFinancials\.data\?\.expenseAccountAttributions/);
   assert.match(reports, /canonicalFinancials\.data\?\.advancePositions/);
   assert.match(reports, /\[\.\.\.canonicalAdvanceRows, \.\.\.legacyAdvanceRows\]/);
   assert.match(reports, /!replacedLegacySourceIds\.has\(item\.id\)/);
@@ -39,6 +44,7 @@ test("downstream pages consume the shared canonical labour model", () => {
   assert.match(modulePage, /canonical\.outstandingLabourAdvances/);
   assert.match(modulePage, /Direct Labour Payments/);
   assert.match(reports, /representedAccountIds/);
+  assert.match(reports, /expenseAccountTotals\.map/);
   assert.match(reports, /Direct labour payments/);
   assert.doesNotMatch(reports, /canonicalAdvanceCoverageComplete/);
   assert.match(activity, /canonical\?\.activity/);

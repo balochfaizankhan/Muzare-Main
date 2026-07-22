@@ -2865,6 +2865,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
       const query = contextSchema.safeParse(request.query);
       if (!params.success || !query.success) return reply.code(400).send({ message: "A valid Labour Payments financial scope is required." });
       if (!(await requireRequestScope(request, reply, params.data.workspaceId, query.data.farmId, query.data.seasonId, "view"))) return;
+      reply.header("Cache-Control", "private, no-store");
       return { financials: await loadLabourFinancialReadModel({ workspaceId: params.data.workspaceId, farmId: query.data.farmId, seasonId: query.data.seasonId }) };
     },
   );
@@ -3002,6 +3003,12 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
         allocations: allocations.filter((row) => dues.some((due) => due.id === row.dueId)),
         vouchers,
       });
+      const canonicalFinancials = await loadLabourFinancialReadModel({ workspaceId: params.data.workspaceId, farmId: query.data.farmId, seasonId: query.data.seasonId });
+      const expenseAttributionTotal = canonicalFinancials.expenseAccountAttributions.reduce((sum, row) => sum + row.amount, 0);
+      const recognizedWageExpense = canonicalFinancials.expenses.filter((row) => row.active).reduce((sum, row) => sum + row.amount, 0);
+      const expenseAttributionPassed = Math.abs(expenseAttributionTotal - recognizedWageExpense) < 0.005;
+      const applicationFundingFailures = canonicalFinancials.advanceApplicationParents.filter((row) => Math.abs(row.fundingSourceTotal - row.originalAmount) >= 0.005);
+      const partnerPositionFailures = canonicalFinancials.partnerPositions.filter((row) => Math.abs(row.farmOwesPartner - row.ledgerBalance) >= 0.005);
       const legacyCoveragePassed = legacyNeedsReview.length === 0 && unmappedLegacyRecords.length === 0;
       return {
         reconciliation: {
@@ -3025,10 +3032,17 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           unmappedLegacyRecords,
           checks: [
             ...structured.checks,
+            { name: "expense-source-attribution", passed: expenseAttributionPassed, checkedCount: canonicalFinancials.expenses.filter((row) => row.active).length, failureCount: expenseAttributionPassed ? 0 : 1 },
+            { name: "application-funding-attribution", passed: applicationFundingFailures.length === 0, checkedCount: canonicalFinancials.advanceApplicationParents.length, failureCount: applicationFundingFailures.length },
+            { name: "canonical-partner-position", passed: partnerPositionFailures.length === 0, checkedCount: canonicalFinancials.partnerPositions.length, failureCount: partnerPositionFailures.length },
             { name: "legacy-coverage", passed: legacyCoveragePassed, checkedCount: legacyOperational.length, failureCount: legacyNeedsReview.length + unmappedLegacyRecords.length },
           ],
           failures: structured.failures,
-          reconciled: structured.reconciled && legacyCoveragePassed,
+          canonicalPartnerPositions: canonicalFinancials.partnerPositions,
+          expenseAccountAttributions: canonicalFinancials.expenseAccountAttributions,
+          expenseAttribution: { recognizedWageExpense, attributedExpense: expenseAttributionTotal, difference: Math.round((recognizedWageExpense - expenseAttributionTotal) * 100) / 100 },
+          applicationFundingFailures: applicationFundingFailures.map((row) => ({ id: row.id, voucherNumber: row.displayVoucherNumber, expected: row.originalAmount, actual: row.fundingSourceTotal })),
+          reconciled: structured.reconciled && legacyCoveragePassed && expenseAttributionPassed && applicationFundingFailures.length === 0 && partnerPositionFailures.length === 0,
         },
       };
     },
