@@ -118,6 +118,9 @@ test("payment and advance registers remain separate business documents", () => {
   assert.doesNotMatch(voucherRegister, /<option value="REFUND_RECOVERY">/);
   assert.doesNotMatch(voucherRegister, /LPA-\$\{/);
   assert.match(voucherRegister, /Final labour payments/);
+  assert.match(voucherRegister, /Applied advances/);
+  assert.match(voucherRegister, /canonicalSummary\?\.activeAdvanceApplied/);
+  assert.match(voucherRegister, /canonicalSummary\?\.wageExpense/);
   assert.match(voucherRegister, /onViewAdvances/);
   assert.match(advanceRegister, /Advance amount/);
   assert.match(advanceRegister, /Available advance balance/);
@@ -190,6 +193,7 @@ test("advance reports and exports use the same resolved recipient and payment-so
   assert.match(reports, /advancePaymentSourceName/);
   assert.match(reports, /paymentSourceDisplayName: item\.paymentSourceDisplayName/);
   assert.match(reports, /recipientDisplayName: item\.recipientDisplayName/);
+  assert.match(reports, /item\.active/);
   assert.match(reports, /Multiple payment sources/);
   assert.match(reports, /advancePaymentSourceName\(item\)/);
   assert.match(reports, /advanceRecipientName\(item\)/);

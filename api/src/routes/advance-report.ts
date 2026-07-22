@@ -117,9 +117,12 @@ export async function advanceReportRoutes(app: FastifyInstance): Promise<void> {
       if (row.date < from || row.date > to) return [];
       const labourName = row.labourerName ?? labourById.get(row.labourerId);
       if (!labourName) return [];
-      const financial = financialByStableId.get(row.advanceId);
+      const sourceAdvance = advanceSourceByClientId.get(row.advanceId) ?? advanceSourceById.get(row.advanceId);
+      const financial = financialByStableId.get(row.advanceId)
+        ?? (sourceAdvance ? financialByStableId.get(sourceAdvance.id) : undefined)
+        ?? (sourceAdvance ? financialByStableId.get(sourceAdvance.clientRecordId) : undefined);
       return [{
-        id: financial?.legacySourceRecordId ?? row.advanceId,
+        id: row.advanceId,
         labourerId: row.labourerId,
         labourName,
         recipientType: financial?.recipientScope ?? "INDIVIDUAL",
@@ -143,6 +146,11 @@ export async function advanceReportRoutes(app: FastifyInstance): Promise<void> {
     const coveredIds = new Set<string>();
     for (const row of records) {
       coveredIds.add(row.id);
+      const sourceAdvance = advanceSourceById.get(row.id) ?? advanceSourceByClientId.get(row.id);
+      if (sourceAdvance) {
+        coveredIds.add(sourceAdvance.id);
+        coveredIds.add(sourceAdvance.clientRecordId);
+      }
       const financial = financialByStableId.get(row.id);
       if (financial) {
         for (const key of [financial.legacySourceRecordId, financial.sourceId, financial.canonicalVoucherId, financial.advancePositionId]) {
@@ -179,8 +187,9 @@ export async function advanceReportRoutes(app: FastifyInstance): Promise<void> {
     }
     records.sort((a, b) => a.labourName.localeCompare(b.labourName) || a.date.localeCompare(b.date));
 
+    const activeRows = records.filter((row) => row.status !== "VOIDED");
     const grouped = new Map<string, { labourerId: string; labourName: string; total: number; count: number }>();
-    for (const item of records) {
+    for (const item of activeRows) {
       const current = grouped.get(item.labourerId) ?? { labourerId: item.labourerId, labourName: item.labourName, total: 0, count: 0 };
       current.total += item.amount;
       current.count += 1;
@@ -188,7 +197,6 @@ export async function advanceReportRoutes(app: FastifyInstance): Promise<void> {
     }
     const summaries = [...grouped.values()].sort((a, b) => a.labourName.localeCompare(b.labourName));
     const grandTotal = summaries.reduce((sum, item) => sum + item.total, 0);
-    const activeRows = records.filter((row) => row.status !== "VOIDED");
     const settledAdvances = activeRows.reduce((sum, row) => sum + row.appliedAmount, 0);
     const outstandingAdvances = activeRows.reduce((sum, row) => sum + row.outstandingAmount, 0);
     return {

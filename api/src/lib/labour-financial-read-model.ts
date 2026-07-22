@@ -32,6 +32,22 @@ const firstText = (...values: unknown[]) => {
 
 const asSnapshot = (value: unknown) => (value && typeof value === "object" ? value as Record<string, unknown> : {});
 
+const mergeSnapshotFields = (...values: unknown[]) => {
+  const merged: Record<string, unknown> = {};
+  const absorb = (value: unknown) => {
+    const snapshot = asSnapshot(value);
+    for (const [key, candidate] of Object.entries(snapshot)) {
+      if (!(key in merged) && !(typeof candidate === "string" && !candidate.trim()) && candidate != null) merged[key] = candidate;
+    }
+    const nested = asSnapshot(snapshot.recipientSnapshot);
+    for (const [key, candidate] of Object.entries(nested)) {
+      if (!(key in merged) && !(typeof candidate === "string" && !candidate.trim()) && candidate != null) merged[key] = candidate;
+    }
+  };
+  for (const value of values) absorb(value);
+  return merged;
+};
+
 const unresolvedRecipientLabel = "Unresolved recipient";
 const unresolvedPaymentSourceLabel = "Unresolved payment source";
 
@@ -302,10 +318,12 @@ async function loadUnifiedAdvancePositions(input: { workspaceId: string; farmId:
   sourceQueries.push(
     db.select().from(operationalRecords).where(and(eq(operationalRecords.workspaceId, input.workspaceId), eq(operationalRecords.entityType, "advance"))),
   );
-  const [applicationRows, labourerRows, groupRows, legacySettlementApplications, normalizedRows, ...sourceResultSets] = await Promise.all([
+  const [applicationRows, labourerRows, groupRows, operationalLabourerRows, operationalGroupRows, legacySettlementApplications, normalizedRows, ...sourceResultSets] = await Promise.all([
     db.select().from(labourAdvanceApplications).where(eq(labourAdvanceApplications.workspaceId, input.workspaceId)),
     db.select().from(labourers),
     db.select().from(labourGroups),
+    db.select({ clientRecordId: operationalRecords.clientRecordId, payload: operationalRecords.payload }).from(operationalRecords).where(and(eq(operationalRecords.workspaceId, input.workspaceId), eq(operationalRecords.farmId, input.farmId), eq(operationalRecords.entityType, "labourer"))),
+    db.select({ clientRecordId: operationalRecords.clientRecordId, payload: operationalRecords.payload }).from(operationalRecords).where(and(eq(operationalRecords.workspaceId, input.workspaceId), eq(operationalRecords.farmId, input.farmId), eq(operationalRecords.entityType, "labourGroup"))),
     db.select().from(labourWageSettlementAdvanceAllocations).where(eq(labourWageSettlementAdvanceAllocations.workspaceId, input.workspaceId)),
     db.select().from(advanceRecords).where(and(eq(advanceRecords.farmId, input.farmId), eq(advanceRecords.seasonId, input.seasonId))),
     ...sourceQueries,
@@ -315,22 +333,38 @@ async function loadUnifiedAdvancePositions(input: { workspaceId: string; farmId:
   const sourceByClientId = new Map(sourceRecords.map((row) => [row.clientRecordId, row]));
   const labourerById = new Map(labourerRows.map((row) => [row.id, row]));
   const groupById = new Map(groupRows.map((row) => [row.id, row]));
+  const operationalLabourerNameByClientId = new Map(operationalLabourerRows.map((row) => [row.clientRecordId, firstText(asSnapshot(row.payload).name) ?? null]));
+  const operationalGroupNameByClientId = new Map(operationalGroupRows.map((row) => [row.clientRecordId, firstText(asSnapshot(row.payload).name) ?? null]));
   const canonicalAdvances = vouchers.filter((row) => row.nature === "ADVANCE").map((advance) => {
     const appliedAmount = applicationRows.filter((row) => row.advanceVoucherId === advance.id && row.status === "ACTIVE").reduce((sum, row) => sum + amount(row.amount), 0);
     const recoveredAmount = vouchers
       .filter((row) => row.relatedAdvanceVoucherId === advance.id && row.nature === "REFUND_RECOVERY" && row.status === "POSTED")
       .reduce((sum, row) => sum + amount(row.paymentAmount), 0);
     const sourceRecord = (advance.legacySourceRecordId ? sourceById.get(advance.legacySourceRecordId) : undefined) ?? (advance.sourceId ? sourceByClientId.get(advance.sourceId) : undefined);
+    const mergedSnapshot = mergeSnapshotFields(advance.recipientSnapshot, sourceRecord?.payload);
     const funding = resolveFundingAccount({
       accountById,
       storedAccountId: advance.paymentAccountId,
       transactionAccountId: advance.accountTransactionId ? transactionById.get(advance.accountTransactionId)?.accountId ?? null : null,
-      sourceSnapshot: asSnapshot(advance.recipientSnapshot),
+      sourceSnapshot: mergedSnapshot,
       sourcePayload: asSnapshot(sourceRecord?.payload),
     });
-    const snapshot = asSnapshot(advance.recipientSnapshot);
-    const labourerName = advance.labourerId && uuidPattern.test(advance.labourerId) ? labourerById.get(advance.labourerId)?.name ?? null : firstText(snapshot.labourerName, snapshot.receivedByNameSnapshot);
-    const labourGroupName = advance.labourGroupId && uuidPattern.test(advance.labourGroupId) ? groupById.get(advance.labourGroupId)?.name ?? null : firstText(snapshot.labourGroupName);
+    const snapshot = mergedSnapshot;
+    const labourerId = advance.labourerId
+      ?? (advance.recipientScope === "INDIVIDUAL" ? firstText(snapshot.labourerId, snapshot.labourId, snapshot.receivedByLabourerId) : null);
+    const labourGroupId = advance.labourGroupId ?? firstText(snapshot.labourGroupId, snapshot.groupId, snapshot.recipientGroupId);
+    const labourerName = firstText(
+      snapshot.labourerName,
+      snapshot.receivedByNameSnapshot,
+      labourerId && uuidPattern.test(labourerId) ? labourerById.get(labourerId)?.name ?? null : null,
+      labourerId ? operationalLabourerNameByClientId.get(labourerId) ?? null : null,
+    );
+    const labourGroupName = firstText(
+      snapshot.labourGroupName,
+      snapshot.groupName,
+      labourGroupId && uuidPattern.test(labourGroupId) ? groupById.get(labourGroupId)?.name ?? null : null,
+      labourGroupId ? operationalGroupNameByClientId.get(labourGroupId) ?? null : null,
+    );
     const recipientDisplayName = resolveRecipientDisplayName({
       snapshot,
       recipientScope: advance.recipientScope,
@@ -360,9 +394,9 @@ async function loadUnifiedAdvancePositions(input: { workspaceId: string; farmId:
       voucherNumber: advance.voucherNumber,
       voucherDate: advance.voucherDate,
       advanceDate: advance.voucherDate,
-      labourerId: advance.labourerId ?? null,
+      labourerId: labourerId ?? null,
       labourerName,
-      labourGroupId: advance.labourGroupId ?? null,
+      labourGroupId: labourGroupId ?? null,
       labourGroupName,
       recipientScope: advance.recipientScope,
       recipientName: recipientDisplayName,
@@ -409,21 +443,23 @@ async function loadUnifiedAdvancePositions(input: { workspaceId: string; farmId:
       return farmMatches && seasonMatches && !coveredLegacyIds.has(record.id) && !coveredLegacyIds.has(record.clientRecordId);
     })
     .map((record) => {
-      const payload = asSnapshot(record.payload);
+      const payload = mergeSnapshotFields(record.payload);
       const funding = resolveFundingAccount({
         accountById,
         sourcePayload: payload,
         sourceSnapshot: payload,
       });
+      const labourGroupId = firstText(payload.labourGroupId, payload.groupId, payload.recipientGroupId);
+      const labourerId = firstText(payload.labourerId, payload.labourId, payload.receivedByLabourerId);
       return {
         id: record.id,
         sourceId: record.id,
         voucherNumber: firstText(payload.voucherNumber, payload.voucherNo, payload.reference) ?? `ADV-L-${record.clientRecordId.slice(0, 8).toUpperCase()}`,
         voucherDate: firstText(payload.date, payload.advanceDate) ?? record.createdAt.toISOString().slice(0, 10),
-        recipientScope: firstText(payload.labourGroupId) ? "LABOUR_GROUP" : "INDIVIDUAL",
-        financialScopeKey: firstText(payload.labourGroupId) ? `group:${firstText(payload.labourGroupId)}` : `individual:${firstText(payload.labourerId, payload.labourId, record.clientRecordId)}`,
-        labourerId: firstText(payload.labourerId, payload.labourId),
-        labourGroupId: firstText(payload.labourGroupId),
+        recipientScope: labourGroupId ? "LABOUR_GROUP" : "INDIVIDUAL",
+        financialScopeKey: labourGroupId ? `group:${labourGroupId}` : `individual:${firstText(labourerId, record.clientRecordId)}`,
+        labourerId,
+        labourGroupId,
         recipientSnapshot: payload,
         description: firstText(payload.notes) ?? "Legacy labour advance",
         originalAmount: amount(payload.amount),
@@ -452,7 +488,7 @@ async function loadUnifiedAdvancePositions(input: { workspaceId: string; farmId:
         financialScopeKey: `individual:${record.labourerId}`,
         labourerId: record.labourerId,
         labourGroupId: null,
-        recipientSnapshot: { labourerName: labourer?.name ?? "Labour" },
+        recipientSnapshot: { labourerName: labourer?.name ?? operationalLabourerNameByClientId.get(record.labourerId) ?? "Labour" },
         description: record.description ?? "Legacy labour advance",
         originalAmount: amount(record.amount),
         appliedAmount: 0,
@@ -478,13 +514,29 @@ async function loadUnifiedAdvancePositions(input: { workspaceId: string; farmId:
       accountById,
       storedAccountId: typeof row.paymentAccountId === "string" ? row.paymentAccountId : null,
       sourcePayload: asSnapshot(sourcePayload),
-      sourceSnapshot: asSnapshot(row.recipientSnapshot),
+      sourceSnapshot: mergeSnapshotFields(row.recipientSnapshot, sourcePayload),
     });
-    const sourceSnapshot = asSnapshot(row.recipientSnapshot);
-    const labourerId = typeof row.labourerId === "string" && row.labourerId.trim() ? row.labourerId : null;
-    const labourGroupId = typeof row.labourGroupId === "string" && row.labourGroupId.trim() ? row.labourGroupId : null;
-    const labourerName = labourerId && uuidPattern.test(labourerId) ? labourerById.get(labourerId)?.name ?? firstText(sourceSnapshot.labourerName) : firstText(sourceSnapshot.labourerName);
-    const labourGroupName = labourGroupId && uuidPattern.test(labourGroupId) ? groupById.get(labourGroupId)?.name ?? firstText(sourceSnapshot.labourGroupName) : firstText(sourceSnapshot.labourGroupName);
+    const sourceSnapshot = mergeSnapshotFields(row.recipientSnapshot, sourcePayload);
+    const labourerId = typeof row.labourerId === "string" && row.labourerId.trim()
+      ? row.labourerId
+      : String(row.recipientScope) === "INDIVIDUAL"
+        ? firstText(sourceSnapshot.labourerId, sourceSnapshot.labourId, sourceSnapshot.receivedByLabourerId)
+        : null;
+    const labourGroupId = typeof row.labourGroupId === "string" && row.labourGroupId.trim()
+      ? row.labourGroupId
+      : firstText(sourceSnapshot.labourGroupId, sourceSnapshot.groupId, sourceSnapshot.recipientGroupId);
+    const labourerName = firstText(
+      sourceSnapshot.labourerName,
+      sourceSnapshot.receivedByNameSnapshot,
+      labourerId && uuidPattern.test(labourerId) ? labourerById.get(labourerId)?.name ?? null : null,
+      labourerId ? operationalLabourerNameByClientId.get(labourerId) ?? null : null,
+    );
+    const labourGroupName = firstText(
+      sourceSnapshot.labourGroupName,
+      sourceSnapshot.groupName,
+      labourGroupId && uuidPattern.test(labourGroupId) ? groupById.get(labourGroupId)?.name ?? null : null,
+      labourGroupId ? operationalGroupNameByClientId.get(labourGroupId) ?? null : null,
+    );
     const recipientDisplayName = resolveRecipientDisplayName({
       snapshot: sourceSnapshot,
       recipientScope: String(row.recipientScope),
@@ -840,12 +892,43 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
       entryCount: ledger.length,
     };
   });
-  const expenses = journalEvents.filter((event) => !event.legacy && event.expenseEffect !== 0).map((event) => ({
-    id: event.id, dueId: event.dueId, dueNumber: event.dueNumber, date: event.date,
-    recipientScope: event.recipientScope, labourerId: event.labourerId, labourGroupId: event.labourGroupId,
-    recipientName: event.recipientName, description: event.description, status: event.status,
-    amount: event.expenseEffect, canonical: true as const,
-  }));
+  const expenses = dues
+    .filter((due) => !due.legacy)
+    .map((due) => {
+      const activePaidAmount = scopedAllocations
+        .filter((row) => row.dueId === due.id && row.status === "ACTIVE")
+        .reduce((sum, row) => sum + amount(row.amount), 0);
+      const activeAppliedAmount = scopedApplications
+        .filter((row) => row.dueId === due.id && row.status === "ACTIVE")
+        .reduce((sum, row) => sum + amount(row.amount), 0);
+      const activeAmount = due.paymentStatus === "VOIDED"
+        ? 0
+        : amount(Number(due.grossAmount) + Number(due.adjustmentAmount) - Number(due.authorizedDeductions));
+      return {
+        id: due.id,
+        dueId: due.id,
+        dueNumber: due.dueNumber,
+        date: due.workToDate,
+        recipientScope: due.recipientScope,
+        labourerId: due.labourerId,
+        labourGroupId: due.labourGroupId,
+        recipientName: resolveRecipientDisplayName({
+          snapshot: asSnapshot(due.recipientSnapshot),
+          recipientScope: due.recipientScope,
+          labourerName: due.labourerId ? labourerById.get(due.labourerId)?.name ?? null : null,
+          labourGroupName: due.labourGroupId ? groupById.get(due.labourGroupId)?.name ?? null : null,
+        }),
+        description: due.description,
+        status: due.paymentStatus,
+        amount: activeAmount,
+        paidAmount: activePaidAmount,
+        appliedAdvanceAmount: activeAppliedAmount,
+        outstandingAmount: amount(Math.max(activeAmount - activePaidAmount - activeAppliedAmount, 0)),
+        active: due.paymentStatus !== "VOIDED",
+        canonical: true as const,
+      };
+    })
+    .filter((row) => row.amount !== 0 || !row.active);
   const labourLedger = journalEvents.filter((event) => !event.legacy && (event.labourDueEffect !== 0 || event.labourAdvanceEffect !== 0 || event.expenseEffect !== 0));
   const activity = journalEvents.filter((event) => !event.legacy).map((event) => ({
     id: `labour:${event.id}`, date: event.postedAt, module: "labour" as const,

@@ -47,6 +47,7 @@ import {
   type LabourDueAdvanceAllocationDetail,
   type LabourDueRecord,
   type LabourAttendanceDuePreview,
+  type LabourFinancialReadModel,
   type LabourPaymentVoucherRecord,
   type LabourRecipientScope
 } from "../../lib/api";
@@ -582,7 +583,7 @@ export function WorkforcePaymentsPage() {
           vouchers={vouchers}
           applicationParents={canonicalFinancials.data?.advanceApplicationParents ?? []}
           dues={dues}
-          advanceOutstanding={advanceSummary?.totalOutstanding ?? 0}
+          canonicalSummary={canonicalFinancials.data?.summary ?? null}
           accounts={accountById}
           labourById={labourById}
           groupById={groupById}
@@ -933,7 +934,7 @@ function VoucherRegister({
   vouchers,
   applicationParents,
   dues,
-  advanceOutstanding,
+  canonicalSummary,
   accounts,
   labourById,
   groupById,
@@ -950,7 +951,7 @@ function VoucherRegister({
   vouchers: LabourPaymentVoucherRecord[];
   applicationParents: LabourAdvanceApplicationParentRecord[];
   dues: LabourDueRecord[];
-  advanceOutstanding: number;
+  canonicalSummary: LabourFinancialReadModel["summary"] | null;
   accounts: Map<string, Account>;
   labourById: Map<string, Labourer>;
   groupById: Map<string, LabourGroup>;
@@ -1128,39 +1129,26 @@ function VoucherRegister({
           .toLowerCase()
           .includes(search.trim().toLowerCase())),
   );
-  const recognizedExpense = dues
-    .filter(
-      (due) =>
-        due.calculationStatus === "APPROVED" && due.paymentStatus !== "VOIDED",
-    )
-    .reduce(
-      (sum, due) =>
-        sum +
-        Math.max(
-          Number(due.grossAmount) +
-            Number(due.adjustmentAmount) -
-            Number(due.authorizedDeductions),
-          0,
+  const recognizedExpense = canonicalSummary?.wageExpense ?? 0;
+  const labourCashPaid = canonicalSummary?.activePaymentAmount ?? 0;
+  const appliedAdvances = canonicalSummary?.activeAdvanceApplied ?? 0;
+  const payableOutstanding = canonicalSummary
+    ? Math.max(
+        0,
+        Number(
+          (
+            canonicalSummary.wageExpense -
+            canonicalSummary.activePaymentAmount -
+            canonicalSummary.activeAdvanceApplied
+          ).toFixed(2),
         ),
-      0,
-    );
-  const labourCashPaid = vouchers
-    .filter((voucher) => voucher.status === "POSTED")
-    .reduce((sum, voucher) => {
-      const amount = Number(voucher.paymentAmount);
-      if (voucher.nature === "REFUND_RECOVERY") return sum - amount;
-      if (voucher.nature !== "REVERSAL") return sum + amount;
-      const original = vouchers.find(
-        (item) => item.id === voucher.reversalReference,
-      );
-      return sum + (original?.nature === "REFUND_RECOVERY" ? amount : -amount);
-    }, 0);
-  const payableOutstanding = dues
-    .filter(
-      (due) =>
-        !["VOIDED", "PAID", "SETTLED_BY_ADVANCE"].includes(due.paymentStatus),
-    )
-    .reduce((sum, due) => sum + due.outstandingBalance, 0);
+      )
+    : dues
+        .filter(
+          (due) =>
+            !["VOIDED", "PAID", "SETTLED_BY_ADVANCE"].includes(due.paymentStatus),
+        )
+        .reduce((sum, due) => sum + due.outstandingBalance, 0);
   return (
     <section className="record-panel workforce-payments-panel">
       <header className="workforce-payments-panel__header">
@@ -1203,8 +1191,8 @@ function VoucherRegister({
           <strong>{money(labourCashPaid)}</strong>
         </article>
         <button type="button" className="workforce-payment-report-card" onClick={onViewAdvances}>
-          <span>Advances</span>
-          <strong>{money(advanceOutstanding)}</strong>
+          <span>Applied advances</span>
+          <strong>{money(appliedAdvances)}</strong>
         </button>
         <article>
           <span>Outstanding payables</span>

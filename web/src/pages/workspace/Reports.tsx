@@ -1187,7 +1187,8 @@ export function Reports() {
   [category, expenseSort, subcategory, voucherBaseRows]);
   const voucherReportLineRows = useMemo(() => voucherRows.flatMap((item) => voucherReportItems(item)), [voucherRows]);
   const canonicalExpenseRows = useMemo(() => (canonicalFinancials.data?.expenses ?? [])
-    .filter((item) => inRange(item.date, from, to)
+    .filter((item) => item.active
+      && inRange(item.date, from, to)
       && (!category || category === "Labour wages")
       && (!subcategory || subcategory === "Canonical labour due")
       && matches(item.date, [item.dueNumber, item.recipientName, item.description, item.status], item.amount))
