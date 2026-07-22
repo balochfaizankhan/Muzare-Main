@@ -780,7 +780,10 @@ export const labourAdvanceApplications = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
-    advanceVoucherId: uuid("advance_voucher_id").references(() => labourPaymentVouchers.id, { onDelete: "cascade" }).notNull(),
+    // Nullable: a canonical pooled application (see validate_labour_advance_application)
+    // has no single source advance voucher, since it draws from the due's aggregate
+    // eligible outstanding pool rather than one specific historical voucher.
+    advanceVoucherId: uuid("advance_voucher_id").references(() => labourPaymentVouchers.id, { onDelete: "cascade" }),
     dueId: uuid("due_id").references(() => labourDues.id, { onDelete: "cascade" }).notNull(),
     amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
     idempotencyKey: uuid("idempotency_key").notNull(),

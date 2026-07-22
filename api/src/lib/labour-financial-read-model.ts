@@ -423,7 +423,7 @@ function resolveFundingAccount(args: {
 type LabourPaymentAttributionInput = {
   expenses: Array<{ dueId: string; dueNumber: string | null; recipientScope: string | null; recipientName: string; date: string; status: string; amount: number; paidAmount: number; appliedAdvanceAmount: number; active: boolean }>;
   allocations: Array<{ dueId: string; status: string; amount: number | string; voucherId: string }>;
-  applications: Array<{ dueId: string; status: string; amount: number | string; advanceVoucherId: string }>;
+  applications: Array<{ dueId: string; status: string; amount: number | string; advanceVoucherId: string | null }>;
   voucherById: Map<string, { id: string; voucherNumber: string; voucherDate: string; status: string }>;
   fundingByVoucherId: Map<string, { accountId: string | null; accountName: string | null }>;
   advanceByVoucherId: Map<string, { voucherNumber: string; voucherDate: string; fundingAccountId: string | null; paymentSourceDisplayName?: string | null; fundingAccountName?: string | null }>;
@@ -454,12 +454,19 @@ export function buildLabourPaymentEntries(input: LabourPaymentAttributionInput):
             accountName: funding?.accountName ?? unresolvedPaymentSourceLabel,
           };
         });
+      // A pooled advance application (advanceVoucherId null — see
+      // validate_labour_advance_application / the aggregate outstanding pool)
+      // has no single source voucher to attribute to a funding owner, by
+      // design: it may aggregate advances originally funded by several
+      // different accounts. It is excluded here rather than misattributed to
+      // an "unresolved" owner; it still counts toward the due's gross applied
+      // amount above via expense.appliedAdvanceAmount.
       const appliedAdvances: LabourPaymentFundingPart[] = input.applications
-        .filter((row) => row.dueId === expense.dueId && row.status === "ACTIVE")
+        .filter((row) => row.dueId === expense.dueId && row.status === "ACTIVE" && row.advanceVoucherId)
         .map((application) => {
-          const source = input.advanceByVoucherId.get(application.advanceVoucherId);
+          const source = input.advanceByVoucherId.get(application.advanceVoucherId!);
           return {
-            voucherId: application.advanceVoucherId,
+            voucherId: application.advanceVoucherId!,
             voucherNumber: source?.voucherNumber ?? null,
             date: source?.voucherDate ?? expense.date,
             status: "APPLIED",
@@ -1080,7 +1087,7 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
       const displayNumber = matchingParentVoucher?.voucherNumber ?? aggregateApplicationVoucherNumber(row.id);
       const settlementSummary = asSnapshot(details.settlementSummary);
       const fundingSources = groupFundingSources(childApplications.map((application) => {
-        const source = advanceByVoucherId.get(application.advanceVoucherId);
+        const source = application.advanceVoucherId ? advanceByVoucherId.get(application.advanceVoucherId) : undefined;
         return {
           accountId: source?.fundingAccountId ?? null,
           accountName: source?.paymentSourceDisplayName ?? source?.fundingAccountName ?? unresolvedPaymentSourceLabel,
@@ -1239,7 +1246,7 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
         });
       }
       for (const application of scopedApplications.filter((row) => row.dueId === expense.dueId && row.status === "ACTIVE")) {
-        const source = advanceByVoucherId.get(application.advanceVoucherId);
+        const source = application.advanceVoucherId ? advanceByVoucherId.get(application.advanceVoucherId) : undefined;
         parts.push({
           id: `${expense.id}:advance:${application.id}`,
           settlementType: "APPLIED_ADVANCE",

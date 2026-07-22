@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireAdmin, requireUser } from "../auth.js";
 import { db } from "../db/client.js";
@@ -314,14 +314,6 @@ function labourPaymentDatabaseError(error: unknown) {
     current = value.cause;
   }
   return null;
-}
-
-function allocationIdempotencyKey(poolKey: string, voucherId: string) {
-  const bytes = crypto.createHash("sha256").update(`${poolKey}:${voucherId}`).digest().subarray(0, 16);
-  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-  const hex = bytes.toString("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function dueMemberPayableShares(due: typeof labourDues.$inferSelect) {
@@ -1464,62 +1456,43 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             throw new Error(
               "This labour due cannot be settled in its current status.",
             );
-          let requestedApplications = input.advanceApplications;
+          const requestedApplications = input.advanceApplications;
           let aggregatePlan: ReturnType<typeof calculateLabourAdvancePool> | null = null;
+          let pooledApplication: typeof labourAdvanceApplications.$inferSelect | null = null;
           if (input.advancePool) {
+            // The requested amount is applied from the due's aggregate eligible
+            // outstanding pool as ONE canonical application row (no source
+            // advance-voucher id, no per-voucher unrolling). loadDueAdvancePool
+            // is still used here purely to produce a friendly pre-check and the
+            // informational settlement summary shown to the user — the database
+            // trigger (validate_labour_advance_application) is the sole
+            // authority for the aggregate-sufficiency check, evaluated with row
+            // locks taken atomically at INSERT time so two concurrent
+            // settlements cannot overconsume the same pool.
             aggregatePlan = await loadDueAdvancePool(tx, position.due, input.advancePool.amount, input.advancePool.settlementDate ?? new Date().toISOString().slice(0, 10));
             if (input.advancePool.amount > aggregatePlan.maximumApplicable + 0.005)
-              throw new Error("Advance application exceeds the eligible advance pool or current due balance.");
+              throw new Error(`Only SAR ${aggregatePlan.maximumApplicable.toFixed(2)} of eligible outstanding advances are currently available.`);
             if (Math.abs(aggregatePlan.proposedApplication - input.advancePool.amount) > 0.005)
-              throw new Error("The requested advance amount could not be allocated to eligible vouchers.");
-            requestedApplications = aggregatePlan.allocations.map((allocation) => ({
-              advanceVoucherId: allocation.id,
-              amount: allocation.proposedAmount,
-              idempotencyKey: allocationIdempotencyKey(input.advancePool!.idempotencyKey, allocation.id),
-            }));
-            persistence.allocationCount = requestedApplications.length;
-            if (requestedApplications.length) {
-              const locked = await tx.select({ id: labourPaymentVouchers.id }).from(labourPaymentVouchers).where(and(
-                eq(labourPaymentVouchers.workspaceId, workspaceId),
-                eq(labourPaymentVouchers.farmId, input.farmId),
-                eq(labourPaymentVouchers.seasonId, input.seasonId),
-                inArray(labourPaymentVouchers.id, requestedApplications.map((application) => application.advanceVoucherId)),
-              )).for("update");
-              if (locked.length !== requestedApplications.length)
-                throw new Error("One or more selected advances are no longer structurally valid.");
-              aggregatePlan = await loadDueAdvancePool(tx, position.due, input.advancePool.amount, input.advancePool.settlementDate ?? new Date().toISOString().slice(0, 10));
-              if (Math.abs(aggregatePlan.proposedApplication - input.advancePool.amount) > 0.005)
-                throw new Error("The usable advance pool changed while posting. Review the refreshed allocation before retrying.");
-              requestedApplications = aggregatePlan.allocations.map((allocation) => ({
-                advanceVoucherId: allocation.id,
-                amount: allocation.proposedAmount,
-                idempotencyKey: allocationIdempotencyKey(input.advancePool!.idempotencyKey, allocation.id),
-              }));
-            }
-          }
-          const memberIds = new Set(dueMemberPayableShares(position.due).map((row) => row.labourerId));
-          if (input.advancePool && requestedApplications.length) {
-            const createdApplications: Array<typeof labourAdvanceApplications.$inferSelect> = [];
-            for (let offset = 0; offset < requestedApplications.length; offset += 40) {
-              const batch = requestedApplications.slice(offset, offset + 40);
-              persistence.operation = `advance_application_insert_batch_${Math.floor(offset / 40) + 1}`;
-              const inserted = await tx.insert(labourAdvanceApplications).values(batch.map((application) => ({
-                workspaceId,
-                advanceVoucherId: application.advanceVoucherId,
-                dueId,
-                amount: application.amount.toFixed(2),
-                idempotencyKey: application.idempotencyKey,
-                status: "ACTIVE",
-              }))).returning();
-              createdApplications.push(...inserted);
-            }
+              throw new Error(`Only SAR ${aggregatePlan.proposedApplication.toFixed(2)} of the requested amount could be allocated from the eligible advance pool.`);
+            persistence.allocationCount = 1;
+            persistence.operation = "advance_application_insert_batch_1";
+            const [inserted] = await tx.insert(labourAdvanceApplications).values({
+              workspaceId,
+              advanceVoucherId: null,
+              dueId,
+              amount: input.advancePool.amount.toFixed(2),
+              idempotencyKey: input.advancePool.idempotencyKey,
+              status: "ACTIVE",
+            }).returning();
+            pooledApplication = inserted!;
             persistence.operation = "advance_application_accounting";
             await postLabourAdvanceApplicationJournals(tx, {
               workspaceId, farmId: input.farmId, seasonId: input.seasonId, actorId: request.appUser!.id,
-              applications: createdApplications.map((application) => ({ id: application.id, dueId, amount: Number(application.amount) })),
+              applications: [{ id: pooledApplication.id, dueId, amount: Number(pooledApplication.amount) }],
             });
             position = (await loadLabourDuePosition(tx, dueId))!;
           }
+          const memberIds = new Set(dueMemberPayableShares(position.due).map((row) => row.labourerId));
           for (const application of input.advancePool ? [] : requestedApplications) {
             const [existingApplication] = await tx
               .select()
@@ -1754,7 +1727,10 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             dueNumber: refreshed.due.dueNumber,
             grossDue: Number(refreshed.due.grossAmount),
             advanceAmountApplied: input.advancePool?.amount ?? requestedApplications.reduce((sum, application) => sum + application.amount, 0),
-            advanceVoucherCount: requestedApplications.length,
+            advanceVoucherCount: input.advancePool ? (pooledApplication ? 1 : 0) : requestedApplications.length,
+            // Informational only: how the eligible pool would have been drawn down under
+            // the canonical FIFO ordering, kept purely for the settlement summary shown
+            // to the user. No per-voucher row is persisted for this — see pooledApplication.
             fullyConsumedAdvanceCount: aggregatePlan?.allocations.filter((allocation) => allocation.remainingAmount <= 0.005).length ?? 0,
             partiallyConsumedAdvanceCount: aggregatePlan?.allocations.filter((allocation) => allocation.remainingAmount > 0.005).length ?? 0,
             advanceAmountCarriedForward: aggregatePlan?.carriedForwardAmount ?? 0,
@@ -1777,8 +1753,9 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
                 advancePool: input.advancePool ? {
                   idempotencyKey: input.advancePool.idempotencyKey,
                   requestedAmount: input.advancePool.amount,
-                  allocationPolicy: "GROUP_OLDEST_FIRST_THEN_MEMBER_OLDEST_FIRST",
-                  allocations: aggregatePlan?.allocations.map((allocation) => ({ voucherId: allocation.id, amount: allocation.proposedAmount, order: allocation.allocationOrder, ownership: allocation.ownership })) ?? [],
+                  applicationModel: "AGGREGATE_POOLED",
+                  applicationId: pooledApplication?.id ?? null,
+                  eligibleTotal: aggregatePlan?.eligibleTotal ?? 0,
                 } : null,
                 advanceApplications: requestedApplications,
                 outstandingBalance: refreshed.outstandingBalance,
@@ -1800,14 +1777,29 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           ...persistence,
           database,
         }, "Labour advance pool persistence failed and was rolled back");
+        // A known business-validation rejection from the aggregate-pool guard
+        // (validate_labour_advance_application) must surface a clear, actionable
+        // message rather than only a request reference — this is the guard that
+        // protects against two concurrent settlements overconsuming the same
+        // pool, so it can legitimately fire even after the pre-check above.
+        const knownPoolValidationMessages = new Set([
+          "Advance applications exceed available advance.",
+          "Advance application exceeds due balance.",
+          "Advance and due financial scopes do not match.",
+          "Advance application amount must be positive.",
+        ]);
+        const knownValidationMessage = database?.sqlState === "P0001" && typeof database.message === "string" && knownPoolValidationMessages.has(database.message)
+          ? "The eligible outstanding advance pool changed while posting. Please refresh the available amount and retry."
+          : null;
         return reply
           .code(409)
           .send({
-            message: database
-              ? input.payment
-                ? `Labour Due settlement was not posted. No balances were changed. Reference: ${request.id}.`
-                : `Advances were not applied. No balances were changed. Reference: ${request.id}.`
-              : error instanceof Error ? error.message : "Unable to settle the labour due.",
+            message: knownValidationMessage
+              ?? (database
+                ? input.payment
+                  ? `Labour Due settlement was not posted. No balances were changed. Reference: ${request.id}.`
+                  : `Advances were not applied. No balances were changed. Reference: ${request.id}.`
+                : error instanceof Error ? error.message : "Unable to settle the labour due."),
             requestId: request.id,
           });
       }
@@ -2155,7 +2147,13 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             )
             .limit(1);
           if (!due) throw new Error("The related labour due was not found.");
-          const childApplications = applicationKeys.length
+          // A settlement is persisted either as one canonical pooled application row
+          // (idempotencyKey === advancePool.idempotencyKey, advanceVoucherId null) or,
+          // for legacy/manual per-voucher requests, as N individual rows keyed by the
+          // derived idempotency keys recorded in details.advanceApplications. Match
+          // whichever shape this event actually produced.
+          const poolIdempotencyKey = firstText(advancePool.idempotencyKey);
+          const childApplications = applicationKeys.length || poolIdempotencyKey
             ? await tx
               .select()
               .from(labourAdvanceApplications)
@@ -2163,7 +2161,12 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
                 and(
                   eq(labourAdvanceApplications.workspaceId, params.data.workspaceId),
                   eq(labourAdvanceApplications.dueId, due.id),
-                  inArray(labourAdvanceApplications.idempotencyKey, applicationKeys),
+                  or(
+                    ...[
+                      applicationKeys.length ? inArray(labourAdvanceApplications.idempotencyKey, applicationKeys) : null,
+                      poolIdempotencyKey ? eq(labourAdvanceApplications.idempotencyKey, poolIdempotencyKey) : null,
+                    ].filter((clause): clause is NonNullable<typeof clause> => clause !== null),
+                  ),
                 ),
               )
             : [];

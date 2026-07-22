@@ -16,19 +16,24 @@ test("review uses a narrow aggregate endpoint and lazy allocation details", () =
   assert.doesNotMatch(ui.slice(ui.indexOf("function ReviewSettleDialog")), /advanceValues/);
 });
 
-test("aggregate settlement retains voucher allocations and does not require a payment", () => {
+test("aggregate settlement uses the pool preview to size the request and does not require a payment", () => {
   assert.match(route, /calculateLabourAdvancePool/);
-  assert.match(route, /allocationPolicy: "GROUP_OLDEST_FIRST_THEN_MEMBER_OLDEST_FIRST"/);
+  assert.match(route, /applicationModel: "AGGREGATE_POOLED"/);
   assert.match(route, /if \(input\.payment\)/);
   assert.match(route, /postLabourAdvanceApplicationJournal/);
 });
 
-test("pooled persistence locks rows, batches writes, and reports safe database diagnostics", () => {
+test("pooled persistence locks the due, persists one canonical application row, and reports safe database diagnostics", () => {
   assert.match(route, /labourDues\.id[\s\S]+\.for\("update"\)/);
-  assert.match(route, /labourPaymentVouchers\.id[\s\S]+\.for\("update"\)/);
-  assert.match(route, /offset \+= 40/);
+  // The aggregate outstanding pool must be applied as ONE row (no source advance
+  // voucher, no per-voucher unrolling) — the database trigger
+  // (validate_labour_advance_application) is the sole authority for the
+  // aggregate-sufficiency check, taking its own row locks at INSERT time.
+  assert.match(route, /const \[inserted\] = await tx\.insert\(labourAdvanceApplications\)\.values\(\{\s*workspaceId,\s*advanceVoucherId: null,/);
+  assert.doesNotMatch(route, /offset \+= 40/, "the pool branch must no longer batch per-voucher inserts");
   assert.match(route, /labourPaymentDatabaseError/);
   assert.match(route, /sqlState/);
+  assert.match(route, /knownPoolValidationMessages/);
   assert.match(route, /No balances were changed\. Reference:/);
   assert.match(route, /settlementSummary/);
   assert.match(route, /await db\.transaction/);
