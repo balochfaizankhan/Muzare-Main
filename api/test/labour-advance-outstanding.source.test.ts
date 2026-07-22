@@ -226,7 +226,8 @@ test("accounts expense visibility uses outstanding advance balance and keeps act
   assert.match(readModel, /\.filter\(shouldIncludeExpenseVisibilityRow\)/);
   assert.match(modulePage, /summary\.outstandingAdvance/);
   assert.match(modulePage, /Available advance balance/);
-  assert.doesNotMatch(modulePage, /summary\.totalAdvance/);
+  assert.match(modulePage, /totalBusinessExpenses = totalVoucherExpenses \+ settledLabourWages \+ totalAdvances/);
+  assert.doesNotMatch(modulePage, /totalBusinessExpenses = totalVoucherExpenses \+ settledLabourWages;/);
 });
 
 test("the canonical read model can backfill a missing direct-payment funding entry without duplicating original partner advances", () => {
@@ -235,6 +236,12 @@ test("the canonical read model can backfill a missing direct-payment funding ent
   assert.match(readModel, /voucher\.status === "POSTED" && voucher\.nature !== "ADVANCE_APPLICATION"/);
   assert.match(readModel, /if \(economicNature === "ADVANCE" && account\.accountType === "partner"\) return \[\];/);
   assert.match(readModel, /\[\.\.\.transactionBackedAccountEntries, \.\.\.syntheticFundedVoucherEntries, \.\.\.missingOriginalAdvanceEntries\]/);
+});
+
+test("accounts partner cards and ledgers resolve canonical labour entries through account identity aliases", () => {
+  assert.match(modulePage, /const canonicalAccountId = resolveCanonicalAccountId\(account\.id, accountLookup\) \?\? account\.id/);
+  assert.match(modulePage, /const selectedCanonicalAccountId = resolveCanonicalAccountId\(selectedAccount\.id, accountLookup\) \?\? selectedAccount\.id/);
+  assert.match(modulePage, /entry\.accountId === selectedCanonicalAccountId \|\| entry\.accountId === selectedAccount\.id/);
 });
 
 function advanceSchemaSource() {

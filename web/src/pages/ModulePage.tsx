@@ -4475,6 +4475,7 @@ function AccountsModule() {
   const activeAdvances = advances.filter((item) => isActiveOperationalRecord(item));
   const activeLabourWageSettlements = labourWageSettlements.filter((item) => isActiveOperationalRecord(item));
   const activeGeneralExpenseVouchers = getGeneralExpenseVouchers(activeVouchers, activeLabourWageSettlements);
+  const accountLookup = useMemo(() => buildAccountIdentityLookup(accounts), [accounts]);
   const canonicalPartnerPositionsByAccountId = useMemo(
     () => new Map((canonicalAccountsFinancials?.partnerPositions ?? []).map((item) => [item.accountId, item])),
     [canonicalAccountsFinancials?.partnerPositions],
@@ -4491,19 +4492,22 @@ function AccountsModule() {
       { farmId, seasonId },
     );
     for (const legacy of legacyPositions) {
-      const canonical = legacy.account?.id ? canonicalPartnerPositionsByAccountId.get(legacy.account.id) : undefined;
+      const canonicalAccountId = legacy.account?.id ? resolveCanonicalAccountId(legacy.account.id, accountLookup) ?? legacy.account.id : legacy.key;
+      const canonical = canonicalPartnerPositionsByAccountId.get(canonicalAccountId) ?? canonicalPartnerPositionsByAccountId.get(legacy.key);
       positions.set(legacy.key, mergePartnerPositionWithCanonical(legacy, canonical));
+      if (canonical) positions.set(canonical.accountId, mergePartnerPositionWithCanonical(legacy, canonical));
     }
     for (const canonical of canonicalPartnerPositionsByAccountId.values()) {
       if (positions.has(canonical.accountId)) continue;
-      const account = accounts.find((item) => item.id === canonical.accountId) ?? null;
+      const account = accounts.find((item) => (resolveCanonicalAccountId(item.id, accountLookup) ?? item.id) === canonical.accountId) ?? null;
       positions.set(canonical.accountId, buildCanonicalPartnerLiabilityPosition(canonical, account));
     }
     return positions;
-  }, [accounts, activeAdvances, activeEntries, activeLabourWageSettlements, canonicalPartnerPositionsByAccountId, farmId, sales, seasonId, vouchers]);
+  }, [accountLookup, accounts, activeAdvances, activeEntries, activeLabourWageSettlements, canonicalPartnerPositionsByAccountId, farmId, sales, seasonId, vouchers]);
   const balance = (account: Account) => {
     if (account.type === "partner") {
-      const canonicalPartnerSnapshot = mergedPartnerPositionsByAccountId.get(account.id);
+      const canonicalAccountId = resolveCanonicalAccountId(account.id, accountLookup) ?? account.id;
+      const canonicalPartnerSnapshot = mergedPartnerPositionsByAccountId.get(canonicalAccountId) ?? mergedPartnerPositionsByAccountId.get(account.id);
       if (canonicalPartnerSnapshot) return canonicalPartnerSnapshot.currentPartnerBalance;
     }
     return calculateDisplayedAccountBalance(
@@ -4527,7 +4531,7 @@ function AccountsModule() {
     .reduce((sum, item) => sum + item.outstandingAmount, 0);
   const legacyExpenseVouchers = activeGeneralExpenseVouchers.filter((item) => !replacedLegacySourceIds.has(item.id));
   const totalVoucherExpenses = legacyExpenseVouchers.reduce((sum, item) => sum + item.amount, 0);
-  const totalBusinessExpenses = totalVoucherExpenses + settledLabourWages;
+  const totalBusinessExpenses = totalVoucherExpenses + settledLabourWages + totalAdvances;
   const voucherExpenseDebug = useMemo(() => {
     const settlementById = new Map(activeLabourWageSettlements.map((settlement) => [settlement.id, settlement] as const));
     const tally = {
@@ -4616,8 +4620,9 @@ function AccountsModule() {
   const selectedAccount = selectedAccountId ? accounts.find((item) => item.id === selectedAccountId) ?? null : null;
   const selectedPartnerSnapshot = useMemo(() => {
     if (selectedAccount?.type !== "partner") return null;
+    const selectedCanonicalAccountId = resolveCanonicalAccountId(selectedAccount.id, accountLookup) ?? selectedAccount.id;
     const legacy = getPartnerAccountingSnapshot(selectedAccount, sales, legacyExpenseVouchers, activeAdvances, activeEntries, activeLabourWageSettlements, accounts, { farmId, seasonId });
-    const canonical = canonicalAccountsFinancials?.partnerPositions.find((item) => item.accountId === selectedAccount.id);
+    const canonical = canonicalAccountsFinancials?.partnerPositions.find((item) => item.accountId === selectedCanonicalAccountId || item.accountId === selectedAccount.id);
     if (!canonical) return legacy;
     const merged = mergePartnerPositionWithCanonical(legacy, canonical);
     return {
@@ -4636,7 +4641,7 @@ function AccountsModule() {
       reconciliationDelta: merged.reconciliationDelta,
       isConsistent: merged.isConsistent,
     };
-  }, [accounts, activeEntries, activeAdvances, activeLabourWageSettlements, canonicalAccountsFinancials?.partnerPositions, farmId, legacyExpenseVouchers, sales, seasonId, selectedAccount]);
+  }, [accountLookup, accounts, activeEntries, activeAdvances, activeLabourWageSettlements, canonicalAccountsFinancials?.partnerPositions, farmId, legacyExpenseVouchers, sales, seasonId, selectedAccount]);
   const ledgerGroupTitle = useCallback((groupKey: AccountTransactionGroupKey) => ({
     expenses: t("accountsPage.groupExpenses"),
     advances: t("accountsPage.groupAdvances"),
@@ -4666,15 +4671,15 @@ function AccountsModule() {
     adjustments: t("accountsPage.adjustments"),
     other: t("accountsPage.groupOther"),
   }[groupKey]), [t]);
-  const accountLookup = useMemo(() => buildAccountIdentityLookup(accounts), [accounts]);
   const ledgerRows = useMemo(() => {
     if (!selectedAccount) return [];
     const rows: AccountLedgerRow[] = [];
     const selectedIsPartner = selectedAccount.type === "partner";
+    const selectedCanonicalAccountId = resolveCanonicalAccountId(selectedAccount.id, accountLookup) ?? selectedAccount.id;
     const canonicalPartnerLedgerEntries = selectedIsPartner
-      ? (canonicalAccountsFinancials?.partnerLedger ?? []).filter((entry) => entry.accountId === selectedAccount.id)
+      ? (canonicalAccountsFinancials?.partnerLedger ?? []).filter((entry) => entry.accountId === selectedCanonicalAccountId || entry.accountId === selectedAccount.id)
       : [];
-    for (const sale of activeSales.filter((item) => resolveCanonicalAccountId(item.accountId, accountLookup) === selectedAccount.id)) {
+    for (const sale of activeSales.filter((item) => resolveCanonicalAccountId(item.accountId, accountLookup) === selectedCanonicalAccountId)) {
       rows.push({
         id: `sale:${sale.id}`,
         date: sale.date,
@@ -4689,7 +4694,7 @@ function AccountsModule() {
         partnerLiabilityGroup: selectedIsPartner ? "adjustments" : undefined,
       });
     }
-    for (const voucher of activeVouchers.filter((item) => !replacedLegacySourceIds.has(item.id) && resolveCanonicalAccountId(item.accountId, accountLookup) === selectedAccount.id)) {
+    for (const voucher of activeVouchers.filter((item) => !replacedLegacySourceIds.has(item.id) && resolveCanonicalAccountId(item.accountId, accountLookup) === selectedCanonicalAccountId)) {
       const settlementVoucher = isLabourWageSettlementVoucher(voucher);
       if (settlementVoucher) continue;
       rows.push({
@@ -4710,7 +4715,7 @@ function AccountsModule() {
       const settlementAccount = resolveLabourWageSettlementAccountIdentity(item, accountLookup).canonicalAccountId;
       const settlementFarmMatches = !farmId || item.farmId === farmId || item.farmId === null;
       const settlementSeasonMatches = !seasonId || item.seasonId === seasonId || item.seasonId === null;
-      return settlementAccount === selectedAccount.id && settlementFarmMatches && settlementSeasonMatches;
+      return settlementAccount === selectedCanonicalAccountId && settlementFarmMatches && settlementSeasonMatches;
     })) {
       const nonCashApplied = getLabourWageSettlementAdvanceOffset(settlement);
       const cashPaid = getLabourWageSettlementCashPaidAmount(settlement);
@@ -4728,10 +4733,10 @@ function AccountsModule() {
         sourceId: settlement.id,
         classification: "labour_wage_settlement_memo",
         partnerLiabilityGroup: undefined,
-        accountId: settlementAccountResolution.canonicalAccountId ?? settlement.linkedAccountId ?? selectedAccount.id,
+        accountId: settlementAccountResolution.canonicalAccountId ?? settlement.linkedAccountId ?? selectedCanonicalAccountId,
       });
     }
-    for (const advance of activeAdvances.filter((item) => !selectedIsPartner && resolveCanonicalAccountId(item.accountId, accountLookup) === selectedAccount.id)) {
+    for (const advance of activeAdvances.filter((item) => !selectedIsPartner && resolveCanonicalAccountId(item.accountId, accountLookup) === selectedCanonicalAccountId)) {
       rows.push({
         id: `advance:${advance.id}`,
         date: advance.date,
@@ -4746,7 +4751,7 @@ function AccountsModule() {
         partnerLiabilityGroup: selectedIsPartner ? "labour_advances_paid" : undefined,
       });
     }
-    for (const entry of selectedIsPartner ? canonicalPartnerLedgerEntries : (canonicalAccountsFinancials?.accountEntries.filter((item) => item.accountId === selectedAccount.id) ?? [])) {
+    for (const entry of selectedIsPartner ? canonicalPartnerLedgerEntries : (canonicalAccountsFinancials?.accountEntries.filter((item) => item.accountId === selectedCanonicalAccountId || item.accountId === selectedAccount.id) ?? [])) {
       const informational = entry.informational === true;
       rows.push({
         id: `canonical-labour:${entry.id}`,
@@ -4765,7 +4770,7 @@ function AccountsModule() {
     }
     for (const entry of activeEntries) {
       const resolvedPartnerAccountId = resolvePartnerAccountId(entry, accounts);
-      if (entry.type === "contribution" && ((selectedIsPartner && resolvedPartnerAccountId === selectedAccount.id) || (!selectedIsPartner && resolveCanonicalAccountId(entry.accountId, accountLookup) === selectedAccount.id))) {
+      if (entry.type === "contribution" && ((selectedIsPartner && resolvedPartnerAccountId === selectedCanonicalAccountId) || (!selectedIsPartner && resolveCanonicalAccountId(entry.accountId, accountLookup) === selectedCanonicalAccountId))) {
         rows.push({
           id: `partner:${entry.id}`,
           date: entry.date,
@@ -4781,7 +4786,7 @@ function AccountsModule() {
           partnerLiabilityGroup: selectedIsPartner ? "capital_injected" : undefined,
         });
       }
-      if (entry.type === "withdrawal" && ((selectedIsPartner && resolvedPartnerAccountId === selectedAccount.id) || (!selectedIsPartner && resolveCanonicalAccountId(entry.accountId, accountLookup) === selectedAccount.id))) {
+      if (entry.type === "withdrawal" && ((selectedIsPartner && resolvedPartnerAccountId === selectedCanonicalAccountId) || (!selectedIsPartner && resolveCanonicalAccountId(entry.accountId, accountLookup) === selectedCanonicalAccountId))) {
         rows.push({
           id: `partner:${entry.id}`,
           date: entry.date,
@@ -4800,7 +4805,7 @@ function AccountsModule() {
       if (entry.type === "settlement") {
         const fromAccountId = resolvePartnerTransferAccountIdentity(entry as Record<string, unknown>, "from", accountLookup).canonicalAccountId;
         const toAccountId = resolvePartnerTransferAccountIdentity(entry as Record<string, unknown>, "to", accountLookup).canonicalAccountId;
-        if (fromAccountId === selectedAccount.id) {
+        if (fromAccountId === selectedCanonicalAccountId) {
           rows.push({
             id: `partner:${entry.id}:sent`,
             date: entry.date,
@@ -4816,7 +4821,7 @@ function AccountsModule() {
             partnerLiabilityGroup: selectedIsPartner ? "transfers_out" : undefined,
           });
         }
-        if (toAccountId === selectedAccount.id) {
+        if (toAccountId === selectedCanonicalAccountId) {
           rows.push({
             id: `partner:${entry.id}:received`,
             date: entry.date,
