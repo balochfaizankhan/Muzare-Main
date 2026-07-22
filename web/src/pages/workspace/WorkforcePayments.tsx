@@ -63,6 +63,7 @@ import {
   type Labourer,
 } from "../../lib/offline-db";
 import { filterLabourSelectableForAdvance, getWorkerDisplayGroup, sortLabourSelectableForAdvance } from "../../lib/workerEligibility";
+import { resolveAdvanceCardIdentity } from "../../lib/labourAdvanceDisplay";
 
 const today = () => {
   const date = new Date();
@@ -611,6 +612,7 @@ export function WorkforcePaymentsPage() {
           workspaceId={workspaceId}
           farmId={farmId}
           seasonId={seasonId}
+          canonicalFinancials={canonicalFinancials}
           onSaved={async (message) => {
             setSuccess(message);
             window.dispatchEvent(new Event("muzare-data-refresh"));
@@ -1311,6 +1313,7 @@ function AdvancesView({
   workspaceId,
   farmId,
   seasonId,
+  canonicalFinancials,
   onSaved,
   onError,
 }: {
@@ -1322,12 +1325,16 @@ function AdvancesView({
   workspaceId: string;
   farmId: string;
   seasonId: string;
+  canonicalFinancials: ReturnType<typeof useCanonicalLabourFinancials>;
   onSaved: (message: string) => Promise<void>;
   onError: (message: string) => void;
 }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const canonicalFinancials = useCanonicalLabourFinancials();
+  const labourerById = useMemo(
+    () => new Map(labourers.map((item) => [item.id, item])),
+    [labourers],
+  );
   const [rows, setRows] = useState<LabourAdvancePosition[]>([]);
   const [summary, setSummary] = useState<LabourAdvanceListResponse["summary"]>({
     totalOutstanding: 0,
@@ -2060,11 +2067,7 @@ function AdvancesView({
         ) : (
           <div className="workforce-advance-position-list">
             {rows.map((advance) => {
-              const receiver =
-                advance.receivedByName ||
-                (advance.recipientScope === "INDIVIDUAL"
-                  ? advance.financialOwnerName
-                  : null);
+              const identity = resolveAdvanceCardIdentity(advance, labourerById);
               const canModifyAdvance =
                 canManage &&
                 !advance.readOnlyLegacy &&
@@ -2073,6 +2076,11 @@ function AdvancesView({
                 advance.refundedAmount <= 0 &&
                 (advance.reversedAmount ?? 0) <= 0 &&
                 !advance.linkedDueId;
+              const subtitle = identity.isGroupAdvance
+                ? `Paid to group${identity.groupLabel ? ` · ${identity.groupLabel}` : ""}`
+                : identity.groupLabel
+                  ? `Group: ${identity.groupLabel}`
+                  : "Paid to labourer";
               return (
                 <article
                   key={advance.id}
@@ -2089,13 +2097,8 @@ function AdvancesView({
                 >
                   <header>
                     <div>
-                      <span>{advance.financialOwnerName ?? receiver ?? "Recipient unavailable"}</span>
-                      <small>
-                        {advance.recipientScope === "LABOUR_GROUP"
-                          ? `Paid to group${receiver ? ` · Received by ${receiver}` : ""}`
-                          : "Paid to labourer"}
-                        {advance.reviewRequired ? " · Needs review" : ""}
-                      </small>
+                      <span>{identity.title}</span>
+                      <strong className="workforce-advance-card__amount">{money(advance.originalAmount)}</strong>
                     </div>
                     {advance.reviewRequired ? (
                       <em
@@ -2113,13 +2116,10 @@ function AdvancesView({
                     <span>{advance.displayVoucherNumber}</span>
                     <time>{formatDate(advance.voucherDate)}</time>
                   </div>
-                  <div className="workforce-advance-card__money">
-                    <div>
-                      <span>Advance amount</span>
-                      <strong>{money(advance.originalAmount)}</strong>
-                    </div>
+                  <div className="workforce-advance-card__meta">
                     <small>
-                      Date · {advance.voucherDate}
+                      {subtitle}
+                      {advance.reviewRequired ? " · Needs review" : ""}
                       {advance.description ? ` · ${advance.description}` : ""}
                     </small>
                   </div>

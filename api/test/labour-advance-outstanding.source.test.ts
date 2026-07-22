@@ -97,7 +97,7 @@ test("record advance uses sectioned searchable selectors and valid-state posting
 });
 
 test("advance cards retain explicit owner and receiver hierarchy in both views", () => {
-  assert.match(page, /advance\.financialOwnerName \?\? receiver \?\? "Recipient unavailable"/);
+  assert.match(page, /resolveAdvanceCardIdentity\(advance, labourerById\)/);
   assert.match(page, /Received by \$\{receivers\[0\]\}/);
   assert.match(page, /receivers\.length > 1/);
   assert.match(page, /Receiver unavailable/);
