@@ -47,6 +47,11 @@ type DashboardTotals = {
   cashBalance: number;
   partnerBalance: number;
 };
+type DashboardScope = {
+  workspaceId: string;
+  farmId: string;
+  seasonId: string;
+};
 
 const today = () => new Date().toISOString().slice(0, 10);
 const moneyWhole = (amount: number) => new Intl.NumberFormat(undefined, {
@@ -84,7 +89,7 @@ export function DashboardPage() {
     partnerBalance: 0,
   };
   const query = useQuery({
-    queryKey: ["bootstrap", user?.workspaceId, sync.farmId, sync.seasonId],
+    queryKey: ["bootstrap", user?.workspaceId],
     queryFn: ({ signal }) => fetchBootstrap(token!, signal),
     enabled: Boolean(user && token && user.workspaceId),
     retry: (failureCount) => navigator.onLine && failureCount < 2,
@@ -104,10 +109,30 @@ export function DashboardPage() {
     && syncFarmId === bootstrapFarmId
     && syncSeasonId === bootstrapSeasonId,
   );
-  const financialScope = {
-    workspaceId,
-    farmId: contextReady ? syncFarmId : "",
-    seasonId: contextReady ? syncSeasonId : "",
+  const [resolvedContext, setResolvedContext] = useState<DashboardScope | null>(null);
+  const resolvedContextKeyRef = useRef("");
+  useEffect(() => {
+    if (!workspaceId) {
+      setResolvedContext(null);
+      return;
+    }
+    if (!contextReady) return;
+    const nextContext = {
+      workspaceId,
+      farmId: syncFarmId,
+      seasonId: syncSeasonId,
+    };
+    setResolvedContext((current) => (
+      current
+      && current.workspaceId === nextContext.workspaceId
+      && current.farmId === nextContext.farmId
+      && current.seasonId === nextContext.seasonId
+    ) ? current : nextContext);
+  }, [contextReady, syncFarmId, syncSeasonId, workspaceId]);
+  const financialScope = resolvedContext ?? {
+    workspaceId: "",
+    farmId: "",
+    seasonId: "",
   };
   const financialScopeKey = `${financialScope.workspaceId}:${financialScope.farmId}:${financialScope.seasonId}`;
   const syncSnapshotLocked = ["syncing", "pending", "stale_context"].includes(sync.status);
@@ -142,18 +167,31 @@ export function DashboardPage() {
   useEffect(() => {
     dashboardSnapshotSequence.current += 1;
     setDashboardError(null);
-    setTotals(null);
-    setActivities([]);
-    if (!contextReady) {
-      setDashboardLoading(Boolean(workspaceId));
+    if (!workspaceId) {
+      resolvedContextKeyRef.current = "";
+      financialSnapshotRef.current = null;
+      setFinancialSnapshot(null);
+      setTotals(null);
+      setActivities([]);
+      setDashboardLoading(false);
+      return;
     }
-  }, [contextReady, financialScopeKey, workspaceId]);
+    if (!financialScope.workspaceId || !financialScope.farmId || !financialScope.seasonId) {
+      if (!financialSnapshotRef.current && !totals) setDashboardLoading(true);
+      return;
+    }
+    const previousScopeKey = resolvedContextKeyRef.current;
+    resolvedContextKeyRef.current = financialScopeKey;
+    if (previousScopeKey && previousScopeKey !== financialScopeKey) {
+      financialSnapshotRef.current = null;
+      setFinancialSnapshot(null);
+      setTotals(null);
+      setActivities([]);
+      setDashboardLoading(true);
+    }
+  }, [financialScope.farmId, financialScope.seasonId, financialScope.workspaceId, financialScopeKey, totals, workspaceId]);
   const loadLocalDashboard = useCallback(async () => {
-    const scope = {
-      workspaceId,
-      farmId: contextReady ? syncFarmId : "",
-      seasonId: contextReady ? syncSeasonId : "",
-    };
+    const scope = financialScope;
     const scopeKey = `${scope.workspaceId}:${scope.farmId}:${scope.seasonId}`;
     const requestId = ++dashboardSnapshotSequence.current;
     const hasScope = Boolean(scope.workspaceId && scope.farmId && scope.seasonId);
@@ -183,8 +221,8 @@ export function DashboardPage() {
     const activeAdvances = advances.filter((item) => isActiveOperationalRecord(item) && !replaced.has(item.id));
     const activeSettlements = getActiveLabourWageSettlements(settlements);
     const activeAccounts = accounts.filter(isActiveOperationalRecord);
-    const farmId = sync.farmId ?? null;
-    const seasonId = sync.seasonId ?? null;
+    const farmId = scope.farmId || null;
+    const seasonId = scope.seasonId || null;
     const date = today();
     const totalSales = activeSales.reduce((sum, item) => sum + item.amount, 0);
     const nextFinancialSnapshot = syncSnapshotLocked
@@ -247,7 +285,7 @@ export function DashboardPage() {
     });
 
     setActivities(recentActivities.slice(0, 5));
-  }, [canonicalFinancials.data, canonicalFinancials.dataUpdatedAt, contextReady, sync.farmId, sync.seasonId, syncFarmId, syncSeasonId, syncSnapshotLocked, t, totals?.partnerBalance, workspaceId]);
+  }, [canonicalFinancials.data, canonicalFinancials.dataUpdatedAt, financialScope, syncSnapshotLocked, t, totals?.partnerBalance]);
   const retryDashboardLoad = useCallback(() => {
     setDashboardError(null);
     setDashboardLoading(true);
@@ -264,11 +302,11 @@ export function DashboardPage() {
       setDashboardLoading(false);
       return;
     }
-    if (bootstrapFarmId && bootstrapSeasonId && !contextReady) {
-      setDashboardLoading(true);
+    if (!financialScope.workspaceId || !financialScope.farmId || !financialScope.seasonId) {
+      if (!financialSnapshotRef.current && !totals) setDashboardLoading(Boolean(workspaceId));
       return;
     }
-    if (contextReady && navigator.onLine && ((canonicalFinancials.isPending && !canonicalFinancials.data) || canonicalFinancials.isFetching)) {
+    if (contextReady && navigator.onLine && !canonicalFinancials.data && !financialSnapshotRef.current) {
       setDashboardLoading(true);
       return;
     }
@@ -302,7 +340,7 @@ export function DashboardPage() {
         setDashboardLoading(false);
       }
     }, { timeoutMs: 500 });
-  }, [bootstrapFarmId, bootstrapSeasonId, canonicalFinancials.data, canonicalFinancials.isFetching, canonicalFinancials.isPending, contextReady, loadLocalDashboard, query, sync.farmId, sync.seasonId, user?.workspaceId, workspaceId]);
+  }, [canonicalFinancials.data, contextReady, financialScope.farmId, financialScope.seasonId, financialScope.workspaceId, loadLocalDashboard, query, sync.farmId, sync.seasonId, totals, user?.workspaceId, workspaceId]);
 
   useEffect(() => {
     scheduleDashboardRefresh();
@@ -314,10 +352,10 @@ export function DashboardPage() {
     };
   }, [scheduleDashboardRefresh]);
   useEffect(() => {
-    if (!contextReady || sync.startupStage !== "ready") return;
+    if (!financialScope.workspaceId || !financialScope.farmId || !financialScope.seasonId || sync.startupStage !== "ready") return;
     void canonicalFinancials.refetch();
     scheduleDashboardRefresh();
-  }, [canonicalFinancials, contextReady, scheduleDashboardRefresh, sync.lastSyncTime, sync.startupStage]);
+  }, [canonicalFinancials, financialScope.farmId, financialScope.seasonId, financialScope.workspaceId, scheduleDashboardRefresh, sync.lastSyncTime, sync.startupStage]);
 
   const workspaceStatus = deriveWorkspaceDisplayStatus({
     sync,

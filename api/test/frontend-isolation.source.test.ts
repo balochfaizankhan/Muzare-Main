@@ -33,7 +33,7 @@ test("accountant role is part of shared frontend role and permission maps", asyn
 test("workspace queries and IndexedDB records carry workspace ownership", async () => {
   const dashboard = await source("web/src/pages/DashboardPage.tsx");
   const offlineDb = await source("web/src/lib/offline-db.ts");
-  assert.match(dashboard, /queryKey: \["bootstrap", user\?\.workspaceId, sync\.farmId, sync\.seasonId\]/);
+  assert.match(dashboard, /queryKey: \["bootstrap", user\?\.workspaceId\]/);
   assert.match(offlineDb, /workspaceId: string;/);
   assert.match(offlineDb, /seasonId\?: string \| null;/);
   assert.match(offlineDb, /table\.where\("workspaceId"\)\.equals\(getActiveWorkspaceId\(\)\)/);
