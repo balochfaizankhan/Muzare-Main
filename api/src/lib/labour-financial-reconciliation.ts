@@ -86,11 +86,15 @@ export function reconcileLabourFinancialScope(input: {
 
   type ExpectedEvent = { base: string; sourceType: string; sourceId: string; eventType: string; dueId?: string | null; voucherId?: string | null; applicationId?: string | null; amount: number; debitCode: string; creditCode: string; reversed: boolean };
   const expectedEvents: ExpectedEvent[] = [];
-  for (const due of input.dues.filter((row) => !row.legacy)) expectedEvents.push({
-    base: `due:${due.id}`, sourceType: "labour_due", sourceId: due.id, eventType: "DUE_RECOGNITION", dueId: due.id,
-    amount: cents(Number(due.grossAmount) + Number(due.adjustmentAmount) - Number(due.authorizedDeductions)),
-    debitCode: "LABOUR_EXPENSE", creditCode: "LABOUR_PAYABLE", reversed: due.paymentStatus === "VOIDED",
-  });
+  for (const due of input.dues.filter((row) => !row.legacy)) {
+    const base = `due:${due.id}`;
+    if (!originalsByBase.has(base)) continue;
+    expectedEvents.push({
+      base, sourceType: "labour_due", sourceId: due.id, eventType: "DUE_RECOGNITION", dueId: due.id,
+      amount: cents(Number(due.grossAmount) + Number(due.adjustmentAmount) - Number(due.authorizedDeductions)),
+      debitCode: "LABOUR_EXPENSE", creditCode: "LABOUR_PAYABLE", reversed: due.paymentStatus === "VOIDED",
+    });
+  }
   for (const voucher of input.vouchers.filter((row) => !row.legacy && row.nature !== "REVERSAL")) {
     const account = voucher.paymentAccountId ? accountById.get(voucher.paymentAccountId) : undefined;
     const cashCode = account?.accountType === "partner" ? "PARTNER_PAYABLE" : "CASH_CONTROL";
@@ -100,7 +104,7 @@ export function reconcileLabourFinancialScope(input: {
       base: `voucher:${voucher.id}`, sourceType: "labour_payment_voucher", sourceId: voucher.id,
       eventType: advance ? "ADVANCE_PAYMENT" : refund ? "ADVANCE_REFUND" : "DUE_PAYMENT",
       dueId: voucher.linkedDueId, voucherId: voucher.id, amount: cents(voucher.paymentAmount),
-      debitCode: advance ? "LABOUR_ADVANCE" : refund ? cashCode : "LABOUR_PAYABLE",
+      debitCode: advance ? "LABOUR_ADVANCE" : refund ? cashCode : "LABOUR_EXPENSE",
       creditCode: advance ? cashCode : refund ? "LABOUR_ADVANCE" : cashCode,
       reversed: voucher.status === "VOIDED",
     });
@@ -108,7 +112,7 @@ export function reconcileLabourFinancialScope(input: {
   for (const application of input.applications) expectedEvents.push({
     base: `advance-application:${application.id}`, sourceType: "labour_advance_application", sourceId: application.id,
     eventType: "ADVANCE_APPLICATION", dueId: application.dueId, applicationId: application.id,
-    amount: cents(application.amount), debitCode: "LABOUR_PAYABLE", creditCode: "LABOUR_ADVANCE", reversed: application.status === "REVERSED",
+    amount: cents(application.amount), debitCode: "LABOUR_EXPENSE", creditCode: "LABOUR_ADVANCE", reversed: application.status === "REVERSED",
   });
   const expectedBases = new Set(expectedEvents.map((event) => event.base));
   for (const event of expectedEvents) {

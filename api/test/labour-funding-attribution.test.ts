@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { attributeLabourExpense, fundingAttributionTotal, groupFundingSources } from "../src/lib/labour-funding-attribution.js";
 
-test("labour expense attribution splits direct, multi-owner advance, and accrued amounts without recognizing another expense", () => {
+test("labour expense attribution includes only settled labour wages and keeps unpaid due amounts out of expenses", () => {
   const rows = attributeLabourExpense({
     dueId: "due-1", dueNumber: "LD-0002", date: "2026-07-01", expenseAmount: 268_573,
     parts: [
@@ -14,9 +14,8 @@ test("labour expense attribution splits direct, multi-owner advance, and accrued
   assert.deepEqual(rows.map((row) => [row.settlementType, row.accountName, row.amount]), [
     ["APPLIED_ADVANCE", "Funding owner A", 127_935],
     ["DIRECT_PAYMENT", "Payment owner B", 102_030],
-    ["ACCRUED_PAYABLE", "Accrued labour payable", 38_608],
   ]);
-  assert.equal(fundingAttributionTotal(rows), 268_573);
+  assert.equal(fundingAttributionTotal(rows), 229_965);
 });
 
 test("multi-owner aggregate applications remain split by original funding account", () => {
@@ -30,7 +29,6 @@ test("multi-owner aggregate applications remain split by original funding accoun
   });
   assert.equal(rows.length, 3);
   assert.equal(fundingAttributionTotal(rows), 30_000);
-  assert.equal(rows.some((row) => row.settlementType === "ACCRUED_PAYABLE"), false);
 });
 
 test("aggregate parent funding sources group many child allocations without creating child vouchers", () => {
@@ -49,7 +47,7 @@ test("aggregate parent funding sources group many child allocations without crea
   assert.equal(fundingAttributionTotal(sources), 30_000);
 });
 
-test("reversed settlement parts are excluded by the caller and the entire wage remains accrued", () => {
+test("reversed settlement parts are excluded by the caller and no expense is attributed until settlement exists", () => {
   const rows = attributeLabourExpense({ dueId: "due-3", dueNumber: "LD-0004", date: "2026-07-03", expenseAmount: 125, parts: [] });
-  assert.deepEqual(rows.map((row) => [row.settlementType, row.amount]), [["ACCRUED_PAYABLE", 125]]);
+  assert.deepEqual(rows, []);
 });

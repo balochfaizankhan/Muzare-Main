@@ -1623,7 +1623,7 @@ test("canonical-linked historical partner advance remains fully owed after aggre
   await db.insert(labourAccountingEntries).values([
     { workspaceId: tenant.workspaceId, farmId: tenant.farmId, seasonId: tenant.seasonId, entryKey: `due:${dueId}:debit`, eventType: "DUE_RECOGNITION", ledgerCode: "LABOUR_EXPENSE", dueId, debit: "100.00", credit: "0.00", postedBy: tenant.userId },
     { workspaceId: tenant.workspaceId, farmId: tenant.farmId, seasonId: tenant.seasonId, entryKey: `due:${dueId}:credit`, eventType: "DUE_RECOGNITION", ledgerCode: "LABOUR_PAYABLE", dueId, debit: "0.00", credit: "100.00", postedBy: tenant.userId },
-    { workspaceId: tenant.workspaceId, farmId: tenant.farmId, seasonId: tenant.seasonId, entryKey: `advance-application:${application!.id}:debit`, eventType: "ADVANCE_APPLICATION", ledgerCode: "LABOUR_PAYABLE", dueId, advanceApplicationId: application!.id, debit: "75.00", credit: "0.00", postedBy: tenant.userId },
+    { workspaceId: tenant.workspaceId, farmId: tenant.farmId, seasonId: tenant.seasonId, entryKey: `advance-application:${application!.id}:debit`, eventType: "ADVANCE_APPLICATION", ledgerCode: "LABOUR_EXPENSE", dueId, advanceApplicationId: application!.id, debit: "75.00", credit: "0.00", postedBy: tenant.userId },
     { workspaceId: tenant.workspaceId, farmId: tenant.farmId, seasonId: tenant.seasonId, entryKey: `advance-application:${application!.id}:credit`, eventType: "ADVANCE_APPLICATION", ledgerCode: "LABOUR_ADVANCE", dueId, advanceApplicationId: application!.id, debit: "0.00", credit: "75.00", postedBy: tenant.userId },
   ]);
   await db.insert(auditLogs).values({
@@ -1656,9 +1656,9 @@ test("canonical-linked historical partner advance remains fully owed after aggre
   assert.deepEqual(parent?.fundingSources.map((row: { accountId: string; amount: number }) => [row.accountId, row.amount]), [[partner!.id, 75]]);
   const expenseSources = financials.expenseAccountAttributions.filter((row: { dueId: string }) => row.dueId === dueId);
   assert.deepEqual(expenseSources.map((row: { settlementType: string; accountId: string | null; amount: number }) => [row.settlementType, row.accountId, row.amount]), [
-    ["APPLIED_ADVANCE", partner!.id, 75], ["ACCRUED_PAYABLE", null, 25],
+    ["APPLIED_ADVANCE", partner!.id, 75],
   ]);
-  assert.equal(expenseSources.reduce((sum: number, row: { amount: number }) => sum + row.amount, 0), 100);
+  assert.equal(expenseSources.reduce((sum: number, row: { amount: number }) => sum + row.amount, 0), 75);
 });
 
 test("layered labour reversals are exact, idempotent, concurrent-safe, and return every ledger to zero", async () => {
@@ -1715,14 +1715,13 @@ test("layered labour reversals are exact, idempotent, concurrent-safe, and retur
   const postedFinancials = postedReadModel.json().financials;
   assert.equal(postedFinancials.labourLedger.filter((row: { dueId?: string }) => row.dueId === due.id).reduce((sum: number, row: { labourDueEffect: number }) => sum + row.labourDueEffect, 0), 20);
   assert.equal(postedFinancials.advancePositions.find((row: { voucherId: string }) => row.voucherId === advance.id)?.outstandingAmount, 10);
-  assert.equal(postedFinancials.expenses.filter((row: { dueId?: string }) => row.dueId === due.id).reduce((sum: number, row: { amount: number }) => sum + row.amount, 0), 100);
+  assert.equal(postedFinancials.expenses.filter((row: { dueId?: string }) => row.dueId === due.id).reduce((sum: number, row: { amount: number }) => sum + row.amount, 0), 80);
   const postedExpenseSources = postedFinancials.expenseAccountAttributions.filter((row: { dueId: string }) => row.dueId === due.id);
   assert.deepEqual(postedExpenseSources.map((row: { settlementType: string; accountId: string | null; amount: number }) => [row.settlementType, row.accountId, row.amount]), [
     ["DIRECT_PAYMENT", partner!.id, 50],
     ["APPLIED_ADVANCE", partner!.id, 30],
-    ["ACCRUED_PAYABLE", null, 20],
   ]);
-  assert.equal(postedExpenseSources.reduce((sum: number, row: { amount: number }) => sum + row.amount, 0), 100);
+  assert.equal(postedExpenseSources.reduce((sum: number, row: { amount: number }) => sum + row.amount, 0), 80);
   const postedPartnerPosition = postedFinancials.partnerPositions.find((row: { accountId: string }) => row.accountId === partner!.id);
   assert.equal(postedPartnerPosition?.farmOwesPartner, 90);
   assert.equal(postedPartnerPosition?.farmOwesPartner, postedPartnerPosition?.ledgerBalance);
@@ -1777,7 +1776,7 @@ test("layered labour reversals are exact, idempotent, concurrent-safe, and retur
   assert.equal(paymentReversedFinancials.partnerPositions.find((row: { accountId: string }) => row.accountId === partner!.id)?.farmOwesPartner, 40);
   assert.equal(paymentReversedFinancials.partnerPositions.find((row: { accountId: string }) => row.accountId === partner!.id)?.directLabourPayments, 0);
   assert.deepEqual(paymentReversedFinancials.expenseAccountAttributions.filter((row: { dueId: string }) => row.dueId === due.id).map((row: { settlementType: string; amount: number }) => [row.settlementType, row.amount]), [
-    ["APPLIED_ADVANCE", 30], ["ACCRUED_PAYABLE", 70],
+    ["APPLIED_ADVANCE", 30],
   ]);
 
   const applicationVoidKey = randomUUID();
@@ -1794,7 +1793,7 @@ test("layered labour reversals are exact, idempotent, concurrent-safe, and retur
   assert.equal(applicationReversedFinancials.advancePositions.find((row: { voucherId: string }) => row.voucherId === advance.id)?.outstandingAmount, 40);
   assert.equal(applicationReversedFinancials.partnerPositions.find((row: { accountId: string }) => row.accountId === partner!.id)?.farmOwesPartner, 40);
   assert.equal(applicationReversedFinancials.partnerPositions.find((row: { accountId: string }) => row.accountId === partner!.id)?.outstandingLabourAdvances, 40);
-  assert.deepEqual(applicationReversedFinancials.expenseAccountAttributions.filter((row: { dueId: string }) => row.dueId === due.id).map((row: { settlementType: string; amount: number }) => [row.settlementType, row.amount]), [["ACCRUED_PAYABLE", 100]]);
+  assert.deepEqual(applicationReversedFinancials.expenseAccountAttributions.filter((row: { dueId: string }) => row.dueId === due.id).map((row: { settlementType: string; amount: number }) => [row.settlementType, row.amount]), []);
 
   const advanceVoidUrl = `/v1/workspace/${tenant.workspaceId}/labour-payments/vouchers/${advance.id}/void?farmId=${tenant.farmId}&seasonId=${tenant.seasonId}`;
   assertIntegrationResponse(await request("POST", advanceVoidUrl, { idempotencyKey: randomUUID(), reason: "Layered advance reversal" }), 200, "void layered advance");

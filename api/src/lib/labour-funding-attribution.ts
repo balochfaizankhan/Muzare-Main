@@ -28,7 +28,7 @@ export type ExpenseAttributionRow = Omit<FundingAttributionPart, "settlementType
   dueId: string;
   dueNumber: string | null;
   date: string;
-  settlementType: "DIRECT_PAYMENT" | "APPLIED_ADVANCE" | "ACCRUED_PAYABLE";
+  settlementType: "DIRECT_PAYMENT" | "APPLIED_ADVANCE";
 };
 
 export function attributeLabourExpense(args: {
@@ -37,7 +37,6 @@ export function attributeLabourExpense(args: {
   date: string;
   expenseAmount: number;
   parts: FundingAttributionPart[];
-  accruedAccountName?: string;
 }): ExpenseAttributionRow[] {
   const grouped = new Map<string, ExpenseAttributionRow>();
   for (const part of args.parts) {
@@ -46,17 +45,11 @@ export function attributeLabourExpense(args: {
     if (current) current.amount = money(current.amount + part.amount);
     else grouped.set(key, { ...part, dueId: args.dueId, dueNumber: args.dueNumber, date: args.date, amount: money(part.amount) });
   }
-  const settled = [...grouped.values()].reduce((sum, row) => sum + row.amount, 0);
-  const outstanding = money(Math.max(args.expenseAmount - settled, 0));
-  if (outstanding > 0.005) {
-    grouped.set("ACCRUED_PAYABLE:canonical", {
-      id: `${args.dueId}:accrued`, dueId: args.dueId, dueNumber: args.dueNumber, date: args.date,
-      settlementType: "ACCRUED_PAYABLE", accountId: null,
-      accountName: args.accruedAccountName ?? "Accrued labour payable", accountType: "liability",
-      amount: outstanding, voucherId: null, advanceApplicationId: null,
-    });
+  const settled = money([...grouped.values()].reduce((sum, row) => sum + row.amount, 0));
+  if (settled > money(args.expenseAmount) + 0.005) {
+    throw new Error(`Settled labour expense ${settled.toFixed(2)} exceeds recognized expense ${money(args.expenseAmount).toFixed(2)} for due ${args.dueId}.`);
   }
-  return [...grouped.values()];
+  return [...grouped.values()].sort((left, right) => left.date.localeCompare(right.date) || left.id.localeCompare(right.id));
 }
 
 export function fundingAttributionTotal(rows: Array<{ amount: number }>) {

@@ -964,9 +964,12 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
       const activeAppliedAmount = scopedApplications
         .filter((row) => row.dueId === due.id && row.status === "ACTIVE")
         .reduce((sum, row) => sum + amount(row.amount), 0);
-      const activeAmount = due.paymentStatus === "VOIDED"
+      const payableAmount = due.paymentStatus === "VOIDED"
         ? 0
         : amount(Number(due.grossAmount) + Number(due.adjustmentAmount) - Number(due.authorizedDeductions));
+      const recognizedAmount = due.paymentStatus === "VOIDED"
+        ? 0
+        : amount(Math.min(payableAmount, activePaidAmount + activeAppliedAmount));
       return {
         id: due.id,
         dueId: due.id,
@@ -983,10 +986,10 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
         }),
         description: due.description,
         status: due.paymentStatus,
-        amount: activeAmount,
+        amount: recognizedAmount,
         paidAmount: activePaidAmount,
         appliedAdvanceAmount: activeAppliedAmount,
-        outstandingAmount: amount(Math.max(activeAmount - activePaidAmount - activeAppliedAmount, 0)),
+        outstandingAmount: amount(Math.max(payableAmount - recognizedAmount, 0)),
         active: due.paymentStatus !== "VOIDED",
         canonical: true as const,
       };
@@ -1034,8 +1037,8 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
   }));
   const canonicalJournalEvents = journalEvents.filter((event) => !event.legacy);
   const currentLedger = {
-    LABOUR_EXPENSE: amount(canonicalJournalEvents.reduce((sum, event) => sum + event.expenseEffect, 0)),
-    LABOUR_PAYABLE: amount(canonicalJournalEvents.reduce((sum, event) => sum - event.labourDueEffect, 0)),
+    LABOUR_EXPENSE: amount(expenses.filter((row) => row.active).reduce((sum, row) => sum + row.amount, 0)),
+    LABOUR_PAYABLE: amount(expenses.filter((row) => row.active).reduce((sum, row) => sum + row.outstandingAmount, 0)),
     LABOUR_ADVANCE: amount(canonicalJournalEvents.reduce((sum, event) => sum + event.labourAdvanceEffect, 0)),
     CASH_CONTROL: amount(canonicalJournalEvents.reduce((sum, event) => sum - event.cashControlEffect, 0)),
     PARTNER_PAYABLE: amount(canonicalJournalEvents.reduce((sum, event) => sum - event.partnerEffect, 0)),
