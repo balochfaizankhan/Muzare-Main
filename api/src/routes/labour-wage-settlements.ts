@@ -2274,6 +2274,7 @@ export async function labourWageSettlementRoutes(app: FastifyInstance): Promise<
         await reverseLabourJournal(tx, {
           workspaceId, farmId: settlement.farmId!, seasonId: settlement.seasonId!, actorId: request.appUser!.id,
           reversalKey: `settlement-void:${settlement.id}:due`, originalEventKey: `due:${linkedDue.id}`,
+          ignoreMissing: true,
         });
         for (const application of applicationsToReverse) await reverseLabourJournal(tx, {
           workspaceId, farmId: settlement.farmId!, seasonId: settlement.seasonId!, actorId: request.appUser!.id,

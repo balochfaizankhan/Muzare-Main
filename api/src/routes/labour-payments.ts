@@ -1955,6 +1955,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             actorId: request.appUser!.id,
             reversalKey: `due-void:${record.id}:${body.data.idempotencyKey}`,
             originalEventKey: `due:${record.id}`,
+            ignoreMissing: true,
           });
           const snapshot = record.recipientSnapshot as Record<string, unknown>;
           const sourceAttendanceIds = Array.isArray(snapshot.sourceAttendanceIds)

@@ -413,7 +413,15 @@ test("labour wage settlement create is idempotent, uses canonical allocation FKs
   });
   assertIntegrationResponse(repeatedPreviewResponse, 200, "repeat read-only settlement preview");
   assert.deepEqual(repeatedPreviewResponse.json().preview, preview);
-  assert.equal((await db.select().from(labourWageSettlementAdvanceAllocations)).length, 0);
+  assert.equal(
+    (
+      await db
+        .select()
+        .from(labourWageSettlementAdvanceAllocations)
+        .where(eq(labourWageSettlementAdvanceAllocations.workspaceId, tenant.workspaceId))
+    ).length,
+    0,
+  );
 
   const createPayload = {
     farmId: tenant.farmId,
@@ -1556,9 +1564,9 @@ test("cash, bank, and partner LPVs reconcile funding, payable, retry, and revers
     assert.equal(movement?.type, funding.transactionType);
     assert.equal(Number(movement?.amount), 30);
     const journal = await db.select().from(labourAccountingEntries).where(eq(labourAccountingEntries.voucherId, voucher.id));
-    assert.equal(journal.filter((row) => row.ledgerCode === "LABOUR_PAYABLE").reduce((sum, row) => sum + Number(row.debit) - Number(row.credit), 0), 30);
+    assert.equal(journal.filter((row) => row.ledgerCode === "LABOUR_EXPENSE").reduce((sum, row) => sum + Number(row.debit) - Number(row.credit), 0), 30);
     assert.equal(journal.filter((row) => row.ledgerCode === funding.ledgerCode).reduce((sum, row) => sum + Number(row.credit) - Number(row.debit), 0), 30);
-    assert.equal(journal.some((row) => row.ledgerCode === "LABOUR_EXPENSE"), false);
+    assert.equal(journal.some((row) => row.ledgerCode === "LABOUR_PAYABLE"), false);
 
     const retried = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/dues/${dueId}/settle`, payload);
     assertIntegrationResponse(retried, 200, `retry ${funding.accountType} payment`);
@@ -1713,14 +1721,19 @@ test("layered labour reversals are exact, idempotent, concurrent-safe, and retur
   const postedReadModel = await request("GET", `/v1/workspace/${tenant.workspaceId}/labour-payments/financial-read-model?farmId=${tenant.farmId}&seasonId=${tenant.seasonId}`);
   assertIntegrationResponse(postedReadModel, 200, "load posted canonical labour financial model");
   const postedFinancials = postedReadModel.json().financials;
-  assert.equal(postedFinancials.labourLedger.filter((row: { dueId?: string }) => row.dueId === due.id).reduce((sum: number, row: { labourDueEffect: number }) => sum + row.labourDueEffect, 0), 20);
+  assert.equal(postedFinancials.labourLedger.filter((row: { dueId?: string }) => row.dueId === due.id).reduce((sum: number, row: { labourDueEffect: number }) => sum + row.labourDueEffect, 0), 0);
   assert.equal(postedFinancials.advancePositions.find((row: { voucherId: string }) => row.voucherId === advance.id)?.outstandingAmount, 10);
   assert.equal(postedFinancials.expenses.filter((row: { dueId?: string }) => row.dueId === due.id).reduce((sum: number, row: { amount: number }) => sum + row.amount, 0), 80);
   const postedExpenseSources = postedFinancials.expenseAccountAttributions.filter((row: { dueId: string }) => row.dueId === due.id);
-  assert.deepEqual(postedExpenseSources.map((row: { settlementType: string; accountId: string | null; amount: number }) => [row.settlementType, row.accountId, row.amount]), [
-    ["DIRECT_PAYMENT", partner!.id, 50],
-    ["APPLIED_ADVANCE", partner!.id, 30],
-  ]);
+  assert.deepEqual(
+    postedExpenseSources
+      .map((row: { settlementType: string; accountId: string | null; amount: number }) => [row.settlementType, row.accountId, row.amount])
+      .sort((left, right) => String(left[0]).localeCompare(String(right[0]))),
+    [
+      ["APPLIED_ADVANCE", partner!.id, 30],
+      ["DIRECT_PAYMENT", partner!.id, 50],
+    ],
+  );
   assert.equal(postedExpenseSources.reduce((sum: number, row: { amount: number }) => sum + row.amount, 0), 80);
   const postedPartnerPosition = postedFinancials.partnerPositions.find((row: { accountId: string }) => row.accountId === partner!.id);
   assert.equal(postedPartnerPosition?.farmOwesPartner, 90);
@@ -1769,9 +1782,9 @@ test("layered labour reversals are exact, idempotent, concurrent-safe, and retur
   assertIntegrationResponse(paymentReversedModel, 200, "load payment-reversed financial model");
   const paymentReversedFinancials = paymentReversedModel.json().financials;
   const paymentReversedLedger = paymentReversedFinancials.labourLedger.filter((row: { dueId?: string; voucherId?: string; advanceApplicationId?: string }) => row.dueId === due.id || row.voucherId === advance.id || row.voucherId === payment.id || row.advanceApplicationId === application!.id);
-  assert.equal(paymentReversedLedger.reduce((sum: number, row: { labourDueEffect: number }) => sum + row.labourDueEffect, 0), 70);
+  assert.equal(paymentReversedLedger.reduce((sum: number, row: { labourDueEffect: number }) => sum + row.labourDueEffect, 0), 0);
   assert.equal(paymentReversedLedger.reduce((sum: number, row: { labourAdvanceEffect: number }) => sum + row.labourAdvanceEffect, 0), 10);
-  assert.equal(paymentReversedLedger.reduce((sum: number, row: { expenseEffect: number }) => sum + row.expenseEffect, 0), 100);
+  assert.equal(paymentReversedLedger.reduce((sum: number, row: { expenseEffect: number }) => sum + row.expenseEffect, 0), 30);
   assert.equal(paymentReversedFinancials.advancePositions.find((row: { voucherId: string }) => row.voucherId === advance.id)?.outstandingAmount, 10);
   assert.equal(paymentReversedFinancials.partnerPositions.find((row: { accountId: string }) => row.accountId === partner!.id)?.farmOwesPartner, 40);
   assert.equal(paymentReversedFinancials.partnerPositions.find((row: { accountId: string }) => row.accountId === partner!.id)?.directLabourPayments, 0);
@@ -1787,9 +1800,9 @@ test("layered labour reversals are exact, idempotent, concurrent-safe, and retur
   assertIntegrationResponse(applicationReversedModel, 200, "load application-reversed financial model");
   const applicationReversedFinancials = applicationReversedModel.json().financials;
   const applicationReversedLedger = applicationReversedFinancials.labourLedger.filter((row: { dueId?: string; voucherId?: string; advanceApplicationId?: string }) => row.dueId === due.id || row.voucherId === advance.id || row.voucherId === payment.id || row.advanceApplicationId === application!.id);
-  assert.equal(applicationReversedLedger.reduce((sum: number, row: { labourDueEffect: number }) => sum + row.labourDueEffect, 0), 100);
+  assert.equal(applicationReversedLedger.reduce((sum: number, row: { labourDueEffect: number }) => sum + row.labourDueEffect, 0), 0);
   assert.equal(applicationReversedLedger.reduce((sum: number, row: { labourAdvanceEffect: number }) => sum + row.labourAdvanceEffect, 0), 40);
-  assert.equal(applicationReversedLedger.reduce((sum: number, row: { expenseEffect: number }) => sum + row.expenseEffect, 0), 100);
+  assert.equal(applicationReversedLedger.reduce((sum: number, row: { expenseEffect: number }) => sum + row.expenseEffect, 0), 0);
   assert.equal(applicationReversedFinancials.advancePositions.find((row: { voucherId: string }) => row.voucherId === advance.id)?.outstandingAmount, 40);
   assert.equal(applicationReversedFinancials.partnerPositions.find((row: { accountId: string }) => row.accountId === partner!.id)?.farmOwesPartner, 40);
   assert.equal(applicationReversedFinancials.partnerPositions.find((row: { accountId: string }) => row.accountId === partner!.id)?.outstandingLabourAdvances, 40);
@@ -1802,9 +1815,9 @@ test("layered labour reversals are exact, idempotent, concurrent-safe, and retur
   assertIntegrationResponse(advanceReversedModel, 200, "load advance-reversed financial model");
   const advanceReversedFinancials = advanceReversedModel.json().financials;
   const advanceReversedLedger = advanceReversedFinancials.labourLedger.filter((row: { dueId?: string; voucherId?: string; advanceApplicationId?: string }) => row.dueId === due.id || row.voucherId === advance.id || row.voucherId === payment.id || row.advanceApplicationId === application!.id);
-  assert.equal(advanceReversedLedger.reduce((sum: number, row: { labourDueEffect: number }) => sum + row.labourDueEffect, 0), 100);
+  assert.equal(advanceReversedLedger.reduce((sum: number, row: { labourDueEffect: number }) => sum + row.labourDueEffect, 0), 0);
   assert.equal(advanceReversedLedger.reduce((sum: number, row: { labourAdvanceEffect: number }) => sum + row.labourAdvanceEffect, 0), 0);
-  assert.equal(advanceReversedLedger.reduce((sum: number, row: { expenseEffect: number }) => sum + row.expenseEffect, 0), 100);
+  assert.equal(advanceReversedLedger.reduce((sum: number, row: { expenseEffect: number }) => sum + row.expenseEffect, 0), 0);
   assert.equal(advanceReversedFinancials.advancePositions.find((row: { voucherId: string }) => row.voucherId === advance.id)?.outstandingAmount, 0);
   assert.equal(advanceReversedFinancials.partnerPositions.find((row: { accountId: string }) => row.accountId === partner!.id)?.farmOwesPartner, 0);
   assert.equal(advanceReversedFinancials.partnerPositions.find((row: { accountId: string }) => row.accountId === partner!.id)?.labourAdvancesPaid, 0);
@@ -1818,11 +1831,11 @@ test("layered labour reversals are exact, idempotent, concurrent-safe, and retur
   const currentByLedger = new Map<string, number>();
   for (const row of relevantJournal) currentByLedger.set(row.ledgerCode, (currentByLedger.get(row.ledgerCode) ?? 0) + Number(row.debit) - Number(row.credit));
   assert.deepEqual(Object.fromEntries([...currentByLedger].sort()), {
-    LABOUR_ADVANCE: 0, LABOUR_EXPENSE: 0, LABOUR_PAYABLE: 0, PARTNER_PAYABLE: 0,
+    LABOUR_ADVANCE: 0, LABOUR_EXPENSE: 0, PARTNER_PAYABLE: 0,
   });
   const reversals = relevantJournal.filter((row) => row.reversalOf);
-  assert.equal(reversals.length, 8);
-  assert.equal(new Set(reversals.map((row) => row.reversalOf)).size, 8);
+  assert.equal(reversals.length, 6);
+  assert.equal(new Set(reversals.map((row) => row.reversalOf)).size, 6);
   assert.equal(reversals.some((row) => relevantJournal.find((candidate) => candidate.id === row.reversalOf)?.reversalOf), false);
   for (const reversal of reversals) {
     const original = relevantJournal.find((row) => row.id === reversal.reversalOf);

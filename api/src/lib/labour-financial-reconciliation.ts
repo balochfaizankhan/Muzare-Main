@@ -201,11 +201,21 @@ export function reconcileLabourFinancialScope(input: {
 
   for (const due of input.dues.filter((row) => !row.legacy)) {
     mark("expense-equation");
-    const sourceRows = originalsByBase.get(`due:${due.id}`) ?? [];
+    const paymentRows = input.vouchers
+      .filter((row) => row.linkedDueId === due.id && row.status === "POSTED" && row.nature !== "ADVANCE" && row.nature !== "REFUND_RECOVERY" && row.nature !== "REVERSAL")
+      .map((row) => `voucher:${row.id}`);
+    const applicationRows = input.applications
+      .filter((row) => row.dueId === due.id && row.status === "ACTIVE")
+      .map((row) => `advance-application:${row.id}`);
+    const sourceBases = new Set([...paymentRows, ...applicationRows]);
+    const sourceRows = [...sourceBases].flatMap((base) => originalsByBase.get(base) ?? []);
     const sourceIds = new Set(sourceRows.map((row) => row.id));
     const currentRows = input.journal.filter((row) => sourceIds.has(row.id) || (row.reversalOf ? sourceIds.has(row.reversalOf) : false));
     const actualExpense = currentRows.filter((row) => row.ledgerCode === "LABOUR_EXPENSE").reduce((sum, row) => sum + cents(row.debit) - cents(row.credit), 0);
-    const expectedExpense = due.paymentStatus === "VOIDED" ? 0 : cents(Number(due.grossAmount) + Number(due.adjustmentAmount) - Number(due.authorizedDeductions));
+    const paid = input.allocations.filter((row) => row.dueId === due.id && row.status === "ACTIVE").reduce((sum, row) => sum + cents(row.amount), 0);
+    const applied = input.applications.filter((row) => row.dueId === due.id && row.status === "ACTIVE").reduce((sum, row) => sum + cents(row.amount), 0);
+    const payable = cents(Number(due.grossAmount) + Number(due.adjustmentAmount) - Number(due.authorizedDeductions));
+    const expectedExpense = due.paymentStatus === "VOIDED" ? 0 : Math.min(payable, paid + applied);
     if (actualExpense !== expectedExpense) fail({ name: "expense-equation", sourceType: "labour_due", sourceId: due.id, ledgerCode: "LABOUR_EXPENSE", expected: money(expectedExpense), actual: money(actualExpense), difference: money(actualExpense - expectedExpense), detail: "Wage expense is missing, duplicated, or active after void." });
   }
 

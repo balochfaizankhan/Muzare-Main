@@ -224,6 +224,7 @@ export async function postLabourAdvanceApplicationJournals(tx: DbTransaction, in
 export async function reverseLabourJournal(tx: DbTransaction, input: {
   workspaceId: string; farmId: string; seasonId: string; actorId: string; reversalKey: string;
   originalEventKey: string;
+  ignoreMissing?: boolean;
 }) {
   // Journal convention: originals remain historical facts (status may become
   // REVERSED), one POSTED inverse references each original, and current
@@ -238,7 +239,10 @@ export async function reverseLabourJournal(tx: DbTransaction, input: {
     inArray(labourAccountingEntries.entryKey, originalKeys),
     isNull(labourAccountingEntries.reversalOf),
   ));
-  if (!rows.length) throw new Error(`Original labour journal event ${input.originalEventKey} was not found.`);
+  if (!rows.length) {
+    if (input.ignoreMissing) return { originalRows: [], alreadyReversed: false, ignoredMissing: true };
+    throw new Error(`Original labour journal event ${input.originalEventKey} was not found.`);
+  }
   if (rows.length !== originalKeys.length || new Set(rows.map((row) => row.entryKey)).size !== originalKeys.length)
     throw new Error(`Original labour journal event ${input.originalEventKey} is incomplete or duplicated.`);
   const existing = await tx.select({ reversalOf: labourAccountingEntries.reversalOf }).from(labourAccountingEntries).where(and(

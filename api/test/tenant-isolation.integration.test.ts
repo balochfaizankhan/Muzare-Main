@@ -201,7 +201,7 @@ test("direct labour due accepts decimal SAR and a canonical historical labour ID
   assert.equal(matching.length, 1);
   assert.equal((await db.select().from(labourPaymentVouchers).where(eq(labourPaymentVouchers.linkedDueId, due.id))).length, 0);
   assert.equal((await db.select().from(labourAdvanceApplications).where(eq(labourAdvanceApplications.dueId, due.id))).length, 0);
-  assert.equal((await db.select().from(labourAccountingEntries).where(eq(labourAccountingEntries.dueId, due.id))).length, 2);
+  assert.equal((await db.select().from(labourAccountingEntries).where(eq(labourAccountingEntries.dueId, due.id))).length, 0);
   await db.update(labourDues).set({ origin: "SETTLEMENT", settlementBasis: "ATTENDANCE", sourceRecordId: null, legacy: false }).where(eq(labourDues.id, due.id));
   const visible = await request(alpha.token, "GET", `/v1/workspace/${alpha.workspaceId}/labour-payments/dues?farmId=${alpha.farmId}&seasonId=${alpha.seasonId}`);
   assertIntegrationResponse(visible, 200, "list canonical attendance due");
