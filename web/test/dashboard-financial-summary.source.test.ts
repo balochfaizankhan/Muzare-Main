@@ -20,8 +20,19 @@ test("dashboard financial cards now use one settled snapshot contract", () => {
 
 test("dashboard ignores mid-sync local churn and stale scope responses", () => {
   assert.match(dashboard, /window\.addEventListener\("muzare-data-refresh", scheduleDashboardRefresh\)/);
+  assert.match(dashboard, /window\.addEventListener\("online", scheduleDashboardRefresh\)/);
   assert.doesNotMatch(dashboard, /window\.addEventListener\("muzare-local-data-change", scheduleDashboardRefresh\)/);
   assert.match(dashboard, /if \(requestId !== dashboardSnapshotSequence\.current \|\| financialScopeKeyRef\.current !== scopeKey\) return/);
   assert.match(helper, /if \(!input\.canonicalReady\)/);
   assert.match(dashboard, /Updating balance\.\.\./);
+});
+
+test("dashboard waits for an exact workspace, farm, and season context before loading cards and exposes retry on failure", () => {
+  assert.match(dashboard, /const contextReady = Boolean\(/);
+  assert.match(dashboard, /syncFarmId === bootstrapFarmId/);
+  assert.match(dashboard, /syncSeasonId === bootstrapSeasonId/);
+  assert.match(dashboard, /queryFn: \(\{ signal \}\) => fetchBootstrap\(token!, signal\)/);
+  assert.match(dashboard, /if \(bootstrapFarmId && bootstrapSeasonId && !contextReady\) \{/);
+  assert.match(dashboard, /Dashboard data could not be loaded for the current farm and season\./);
+  assert.match(dashboard, /<button className="secondary-button" type="button" onClick=\{retryDashboardLoad\}/);
 });

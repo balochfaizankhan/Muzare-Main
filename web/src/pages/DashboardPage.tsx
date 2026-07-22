@@ -54,6 +54,9 @@ const moneyWhole = (amount: number) => new Intl.NumberFormat(undefined, {
   currency: "SAR",
   maximumFractionDigits: 0,
 }).format(amount);
+const dashboardRetryDelay = (attempt: number) => new Promise<void>((resolve) => {
+  window.setTimeout(resolve, 400 * 2 ** attempt);
+});
 
 export function DashboardPage() {
   const { t } = useTranslation();
@@ -63,6 +66,7 @@ export function DashboardPage() {
   const [totals, setTotals] = useState<DashboardTotals | null>(null);
   const [financialSnapshot, setFinancialSnapshot] = useState<DashboardFinancialSnapshot | null>(null);
   const [activities, setActivities] = useState<WorkspaceActivityItem[]>([]);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
   const refreshInFlight = useRef(false);
   const financialSnapshotRef = useRef<DashboardFinancialSnapshot | null>(null);
   const financialScopeKeyRef = useRef("");
@@ -81,14 +85,29 @@ export function DashboardPage() {
   };
   const query = useQuery({
     queryKey: ["bootstrap", user?.workspaceId, sync.farmId, sync.seasonId],
-    queryFn: () => fetchBootstrap(token!),
-    enabled: Boolean(user && token),
-    retry: false,
+    queryFn: ({ signal }) => fetchBootstrap(token!, signal),
+    enabled: Boolean(user && token && user.workspaceId),
+    retry: (failureCount) => navigator.onLine && failureCount < 2,
+    retryDelay: (attemptIndex) => Math.min(1_000 * 2 ** attemptIndex, 4_000),
+    refetchOnMount: "always",
+    refetchOnReconnect: true,
   });
+  const workspaceId = user?.workspaceId ?? "";
+  const bootstrapFarmId = query.data?.activeFarmId ?? "";
+  const bootstrapSeasonId = query.data?.activeSeasonId ?? "";
+  const syncFarmId = sync.farmId ?? "";
+  const syncSeasonId = sync.seasonId ?? "";
+  const contextReady = Boolean(
+    workspaceId
+    && bootstrapFarmId
+    && bootstrapSeasonId
+    && syncFarmId === bootstrapFarmId
+    && syncSeasonId === bootstrapSeasonId,
+  );
   const financialScope = {
-    workspaceId: user?.workspaceId ?? "",
-    farmId: sync.farmId ?? "",
-    seasonId: sync.seasonId ?? "",
+    workspaceId,
+    farmId: contextReady ? syncFarmId : "",
+    seasonId: contextReady ? syncSeasonId : "",
   };
   const financialScopeKey = `${financialScope.workspaceId}:${financialScope.farmId}:${financialScope.seasonId}`;
   const syncSnapshotLocked = ["syncing", "pending", "stale_context"].includes(sync.status);
@@ -120,11 +139,20 @@ export function DashboardPage() {
       setFinancialSnapshot(null);
     }
   }, [financialScope.farmId, financialScope.seasonId, financialScope.workspaceId, financialScopeKey]);
+  useEffect(() => {
+    dashboardSnapshotSequence.current += 1;
+    setDashboardError(null);
+    setTotals(null);
+    setActivities([]);
+    if (!contextReady) {
+      setDashboardLoading(Boolean(workspaceId));
+    }
+  }, [contextReady, financialScopeKey, workspaceId]);
   const loadLocalDashboard = useCallback(async () => {
     const scope = {
-      workspaceId: user?.workspaceId ?? "",
-      farmId: sync.farmId ?? "",
-      seasonId: sync.seasonId ?? "",
+      workspaceId,
+      farmId: contextReady ? syncFarmId : "",
+      seasonId: contextReady ? syncSeasonId : "",
     };
     const scopeKey = `${scope.workspaceId}:${scope.farmId}:${scope.seasonId}`;
     const requestId = ++dashboardSnapshotSequence.current;
@@ -219,32 +247,77 @@ export function DashboardPage() {
     });
 
     setActivities(recentActivities.slice(0, 5));
-  }, [canonicalFinancials.data, canonicalFinancials.dataUpdatedAt, sync.farmId, sync.seasonId, syncSnapshotLocked, t, totals?.partnerBalance, user?.workspaceId]);
+  }, [canonicalFinancials.data, canonicalFinancials.dataUpdatedAt, contextReady, sync.farmId, sync.seasonId, syncFarmId, syncSeasonId, syncSnapshotLocked, t, totals?.partnerBalance, workspaceId]);
+  const retryDashboardLoad = useCallback(() => {
+    setDashboardError(null);
+    setDashboardLoading(true);
+    void query.refetch();
+    void canonicalFinancials.refetch();
+  }, [canonicalFinancials, query]);
   const scheduleDashboardRefresh = useCallback(() => {
     if (refreshInFlight.current) return;
+    if (!workspaceId) {
+      setDashboardLoading(false);
+      return;
+    }
+    if (query.isError) {
+      setDashboardLoading(false);
+      return;
+    }
+    if (bootstrapFarmId && bootstrapSeasonId && !contextReady) {
+      setDashboardLoading(true);
+      return;
+    }
+    if (contextReady && navigator.onLine && ((canonicalFinancials.isPending && !canonicalFinancials.data) || canonicalFinancials.isFetching)) {
+      setDashboardLoading(true);
+      return;
+    }
     refreshInFlight.current = true;
     if (!financialSnapshotRef.current) setDashboardLoading(true);
+    setDashboardError(null);
     markStartup("dashboard-refresh-scheduled", { workspaceId: user?.workspaceId, farmId: sync.farmId, seasonId: sync.seasonId });
     void scheduleBackgroundTask(async () => {
       try {
-        await loadLocalDashboard();
+        let lastError: unknown = null;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          try {
+            await loadLocalDashboard();
+            lastError = null;
+            break;
+          } catch (error) {
+            lastError = error;
+            if (attempt === 2 || !navigator.onLine) {
+              throw error;
+            }
+            await dashboardRetryDelay(attempt);
+          }
+        }
+        if (lastError) throw lastError;
         markStartup("dashboard-data-ready", { workspaceId: user?.workspaceId, farmId: sync.farmId, seasonId: sync.seasonId });
       } catch (error) {
+        setDashboardError(error instanceof Error ? error.message : "Dashboard data could not be loaded.");
         markStartup("dashboard-data-error", { message: error instanceof Error ? error.message : "Unknown dashboard load failure" });
       } finally {
         refreshInFlight.current = false;
         setDashboardLoading(false);
       }
     }, { timeoutMs: 500 });
-  }, [loadLocalDashboard, sync.farmId, sync.seasonId, user?.workspaceId]);
+  }, [bootstrapFarmId, bootstrapSeasonId, canonicalFinancials.data, canonicalFinancials.isFetching, canonicalFinancials.isPending, contextReady, loadLocalDashboard, query, sync.farmId, sync.seasonId, user?.workspaceId, workspaceId]);
 
   useEffect(() => {
     scheduleDashboardRefresh();
     window.addEventListener("muzare-data-refresh", scheduleDashboardRefresh);
+    window.addEventListener("online", scheduleDashboardRefresh);
     return () => {
       window.removeEventListener("muzare-data-refresh", scheduleDashboardRefresh);
+      window.removeEventListener("online", scheduleDashboardRefresh);
     };
   }, [scheduleDashboardRefresh]);
+  useEffect(() => {
+    if (!contextReady || sync.startupStage !== "ready") return;
+    void canonicalFinancials.refetch();
+    scheduleDashboardRefresh();
+  }, [canonicalFinancials, contextReady, scheduleDashboardRefresh, sync.lastSyncTime, sync.startupStage]);
 
   const workspaceStatus = deriveWorkspaceDisplayStatus({
     sync,
@@ -272,6 +345,7 @@ export function DashboardPage() {
   const heroStatusCopy = workspaceStatus.heroCopy;
   const heroSyncLabel = workspaceStatus.label;
   const syncNote = workspaceStatus.tone === "offline" ? t("layout.workingOffline") : workspaceStatus.note;
+  const dashboardLoadError = dashboardError ?? (contextReady && canonicalFinancials.isError ? canonicalFinancials.error.message : null);
   const metricsReady = !hydrationPending && !dashboardLoading && Boolean(totals) && Boolean(financialSnapshot || !financialScope.farmId || !financialScope.seasonId);
   const attendanceTodayLabel = hydrationPending || dashboardLoading ? "--" : `${totalsValue.attendanceMarkedToday} labour today`;
   const dispatchTodayLabel = hydrationPending || dashboardLoading ? "--" : `${totalsValue.dispatchesToday} today`;
@@ -283,7 +357,7 @@ export function DashboardPage() {
       icon: Wallet,
       path: "/workspace/accounts",
       tone: totalsValue.cashBalance >= 0 ? "green" : "orange",
-      detail: hasOperationalContext ? (metricsReady ? "Current cash-account balance" : "Updating balance...") : "Requires a farm and season",
+      detail: hasOperationalContext ? (metricsReady ? "Current cash-account balance" : (dashboardLoadError ? "Balance failed to load. Retry." : "Updating balance...")) : "Requires a farm and season",
     },
     {
       label: "Total Expenses",
@@ -307,7 +381,7 @@ export function DashboardPage() {
       icon: PackageOpen,
       path: "/workspace/dispatch",
       tone: "blue",
-      detail: metricsReady ? `${totalsValue.cartonsToday} cartons today` : "Loading today's dispatches",
+      detail: metricsReady ? `${totalsValue.cartonsToday} cartons today` : (dashboardLoadError ? "Dispatches failed to load. Retry." : "Loading today's dispatches"),
     },
   ];
 
@@ -370,6 +444,20 @@ export function DashboardPage() {
               <p>Workspace context could not be refreshed. Please retry.</p>
             </div>
             <p className="error">{query.error.message}</p>
+          </section>
+        )}
+        {!query.isError && dashboardLoadError && hasOperationalContext && (
+          <section className="dashboard-alert-card" role="alert">
+            <div>
+              <strong>{t("common.dashboard")}</strong>
+              <p>Dashboard data could not be loaded for the current farm and season.</p>
+            </div>
+            <div className="farm-actions">
+              <p className="error">{dashboardLoadError}</p>
+              <button className="secondary-button" type="button" onClick={retryDashboardLoad} disabled={dashboardLoading}>
+                Retry
+              </button>
+            </div>
           </section>
         )}
         {!query.isError && !hydrationPending && query.data?.contextWarning && (

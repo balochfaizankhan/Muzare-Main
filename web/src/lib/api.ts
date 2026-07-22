@@ -1405,7 +1405,7 @@ export const updateMe = (token: string, input: UserProfileInput) =>
   apiRequest<{ user: AppUser }>("/v1/me", { method: "PATCH", body: JSON.stringify(input) }, token);
 export const selectWorkspace = (token: string, workspaceId: string) =>
   apiRequest<{ user: AppUser }>("/v1/session/workspace", { method: "POST", body: JSON.stringify({ workspaceId }) }, token);
-export const fetchBootstrap = (token: string) => apiRequest<BootstrapData>("/v1/bootstrap", {}, token);
+export const fetchBootstrap = (token: string, signal?: AbortSignal) => apiRequest<BootstrapData>("/v1/bootstrap", { signal }, token);
 export const fetchWorkspaceProfile = (token: string, workspaceId: string) =>
   apiRequest<{ workspace: WorkspaceProfile }>(`/v1/workspace/${workspaceId}/profile`, {}, token);
 export const updateWorkspaceProfile = (token: string, workspaceId: string, input: WorkspaceProfileInput) =>

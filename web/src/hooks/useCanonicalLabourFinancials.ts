@@ -24,6 +24,10 @@ export function useCanonicalLabourFinancials() {
     },
     enabled: Boolean(token && workspaceId && farmId && seasonId && navigator.onLine),
     placeholderData: undefined,
+    retry: (failureCount) => navigator.onLine && failureCount < 2,
+    retryDelay: (attemptIndex) => Math.min(1_000 * 2 ** attemptIndex, 4_000),
+    refetchOnMount: "always",
+    refetchOnReconnect: true,
   });
   useEffect(() => {
     const refresh = () => {
