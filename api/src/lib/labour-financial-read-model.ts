@@ -223,6 +223,35 @@ type AdvanceApplicationParent = {
   sourceType: "AUDIT_EVENT" | "PARENT_VOUCHER";
 };
 
+type LabourPaymentFundingPart = {
+  voucherId: string;
+  voucherNumber: string | null;
+  date: string;
+  status: string;
+  amount: number;
+  accountId: string | null;
+  accountName: string;
+};
+
+// Owner attribution: directPayments belong to whoever actually paid the cash (the
+// settlement voucher's funding account); appliedAdvances belong to whoever originally
+// funded the advance being applied — not whoever processes the due. This split feeds
+// the "Labour Payments" partner-position column without touching Farm Owes Partner,
+// which already counts the full original advance once when it was funded.
+type LabourPaymentEntry = {
+  dueId: string;
+  dueNumber: string | null;
+  recipientScope: string | null;
+  recipientName: string;
+  date: string;
+  status: string;
+  grossAmount: number;
+  directAmount: number;
+  appliedAdvanceAmount: number;
+  directPayments: LabourPaymentFundingPart[];
+  appliedAdvances: LabourPaymentFundingPart[];
+};
+
 type SyntheticVoucherAccountEntryInput = {
   voucher: Pick<typeof labourPaymentVouchers.$inferSelect,
     "id" | "voucherNumber" | "sourceId" | "legacySourceRecordId" | "voucherDate" | "nature" | "status" | "description" | "recipientScope" | "labourerId" | "labourGroupId" | "paymentAmount" | "legacy">;
@@ -389,6 +418,85 @@ function resolveFundingAccount(args: {
     needsReview: true,
     reviewReason: sourceName ? "Stable account mapping is missing for this historical funding source." : "Funding account could not be resolved from canonical or preserved legacy identifiers.",
   };
+}
+
+type LabourPaymentAttributionInput = {
+  expenses: Array<{ dueId: string; dueNumber: string | null; recipientScope: string | null; recipientName: string; date: string; status: string; amount: number; paidAmount: number; appliedAdvanceAmount: number; active: boolean }>;
+  allocations: Array<{ dueId: string; status: string; amount: number | string; voucherId: string }>;
+  applications: Array<{ dueId: string; status: string; amount: number | string; advanceVoucherId: string }>;
+  voucherById: Map<string, { id: string; voucherNumber: string; voucherDate: string; status: string }>;
+  fundingByVoucherId: Map<string, { accountId: string | null; accountName: string | null }>;
+  advanceByVoucherId: Map<string, { voucherNumber: string; voucherDate: string; fundingAccountId: string | null; paymentSourceDisplayName?: string | null; fundingAccountName?: string | null }>;
+};
+
+// Owner attribution rules (see LabourPaymentEntry): direct amounts are attributed to
+// whoever paid the direct settlement voucher; applied-advance amounts are attributed to
+// whoever originally funded the advance being applied. A due is only included once it
+// has an active paid or applied amount — unpaid dues, draft/voided/reversed vouchers,
+// and unapplied advances never produce ACTIVE allocation/application rows and so never
+// appear here.
+export function buildLabourPaymentEntries(input: LabourPaymentAttributionInput): LabourPaymentEntry[] {
+  return input.expenses
+    .filter((expense) => expense.active && (expense.paidAmount > 0.005 || expense.appliedAdvanceAmount > 0.005))
+    .map((expense) => {
+      const directPayments: LabourPaymentFundingPart[] = input.allocations
+        .filter((row) => row.dueId === expense.dueId && row.status === "ACTIVE")
+        .map((allocation) => {
+          const voucher = input.voucherById.get(allocation.voucherId);
+          const funding = voucher ? input.fundingByVoucherId.get(voucher.id) : null;
+          return {
+            voucherId: voucher?.id ?? allocation.voucherId,
+            voucherNumber: voucher?.voucherNumber ?? null,
+            date: voucher?.voucherDate ?? expense.date,
+            status: voucher?.status ?? "POSTED",
+            amount: amount(allocation.amount),
+            accountId: funding?.accountId ?? null,
+            accountName: funding?.accountName ?? unresolvedPaymentSourceLabel,
+          };
+        });
+      const appliedAdvances: LabourPaymentFundingPart[] = input.applications
+        .filter((row) => row.dueId === expense.dueId && row.status === "ACTIVE")
+        .map((application) => {
+          const source = input.advanceByVoucherId.get(application.advanceVoucherId);
+          return {
+            voucherId: application.advanceVoucherId,
+            voucherNumber: source?.voucherNumber ?? null,
+            date: source?.voucherDate ?? expense.date,
+            status: "APPLIED",
+            amount: amount(application.amount),
+            accountId: source?.fundingAccountId ?? null,
+            accountName: source?.paymentSourceDisplayName ?? source?.fundingAccountName ?? unresolvedPaymentSourceLabel,
+          };
+        });
+      return {
+        dueId: expense.dueId,
+        dueNumber: expense.dueNumber,
+        recipientScope: expense.recipientScope,
+        recipientName: expense.recipientName,
+        date: expense.date,
+        status: expense.status,
+        grossAmount: expense.amount,
+        directAmount: expense.paidAmount,
+        appliedAdvanceAmount: expense.appliedAdvanceAmount,
+        directPayments,
+        appliedAdvances,
+      };
+    });
+}
+
+// Farm Owes Partner already counts the full original advance once, when the partner
+// funded it (see missingOriginalAdvanceEntries / transactionBackedAccountEntries above).
+// This summary is a separate, additive display total for the "Labour Payments" column
+// and must never be folded back into farmOwesPartner.
+export function summarizeLabourPaymentsByAccount(entries: LabourPaymentEntry[]): Map<string, number> {
+  const totals = new Map<string, number>();
+  for (const entry of entries) {
+    for (const part of [...entry.directPayments, ...entry.appliedAdvances]) {
+      if (!part.accountId) continue;
+      totals.set(part.accountId, amount((totals.get(part.accountId) ?? 0) + part.amount));
+    }
+  }
+  return totals;
 }
 
 function positionStatus(args: { status: string; outstandingAmount: number; appliedAmount: number; recoveredAmount: number }) {
@@ -1146,6 +1254,19 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
         expenseAmount: expense.amount, parts,
       });
     });
+  const labourPaymentEntries = buildLabourPaymentEntries({
+    expenses,
+    allocations: scopedAllocations,
+    applications: scopedApplications,
+    voucherById,
+    fundingByVoucherId: resolvedFundingByVoucherId,
+    advanceByVoucherId,
+  });
+  const labourPaymentsByAccount = summarizeLabourPaymentsByAccount(labourPaymentEntries);
+  const partnerPositionsWithLabourPayments = partnerPositions.map((position) => ({
+    ...position,
+    labourPayments: amount(labourPaymentsByAccount.get(position.accountId) ?? 0),
+  }));
   const labourLedger = journalEvents.filter((event) => !event.legacy && (event.labourDueEffect !== 0 || event.labourAdvanceEffect !== 0 || event.expenseEffect !== 0));
   const activity = journalEvents.filter((event) => !event.legacy).map((event) => ({
     id: `labour:${event.id}`, date: event.postedAt, module: "labour" as const,
@@ -1165,12 +1286,13 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
   return {
     scope: input,
     accountEntries,
-    partnerPositions,
+    partnerPositions: partnerPositionsWithLabourPayments,
     partnerLedger,
     labourLedger,
     advanceApplicationParents,
     expenses,
     expenseAccountAttributions,
+    labourPaymentEntries,
     activity,
     currentLedger,
     advancePositions,

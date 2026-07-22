@@ -14,6 +14,7 @@ export type PartnerLiabilityPosition = {
   purchaseVouchersPaid: number;
   businessFundsNet: number;
   labourAdvancesPaid: number;
+  labourPayments: number;
   labourWageSettlements: number;
   labourSettlementCashPaid: number;
   labourSettlementNonCashApplied: number;
@@ -37,6 +38,7 @@ export type CanonicalPartnerPosition = {
   ledgerBalance: number;
   labourAdvancesPaid: number;
   directLabourPayments: number;
+  labourPayments: number;
   recoveries: number;
   outstandingLabourAdvances: number;
   appliedLabourAdvances: number;
@@ -577,6 +579,7 @@ export function getPartnerAccountingSnapshot(
     purchaseVouchersPaid,
     businessFundsNet: fundsGiven - fundsReceived,
     labourAdvancesPaid: totalLabourAdvancesPaid,
+    labourPayments: 0,
     labourWageSettlements: labourSettlementNonCashApplied,
     totalLabourAdvancesPaid,
     settledAdvances: labourAdvanceBreakdown.settledAdvances,
@@ -650,6 +653,7 @@ export function buildPartnerLiabilityPositions(
       purchaseVouchersPaid: 0,
       businessFundsNet: 0,
       labourAdvancesPaid: 0,
+      labourPayments: 0,
       labourWageSettlements: 0,
       labourSettlementCashPaid: 0,
       labourSettlementNonCashApplied: 0,
@@ -709,6 +713,7 @@ export function mergePartnerPositionWithCanonical(
     ...legacy,
     directExpensesPaid: legacy.purchaseVouchersPaid + canonical.labourAdvancesPaid + canonical.directLabourPayments,
     labourAdvancesPaid: canonical.labourAdvancesPaid,
+    labourPayments: canonical.labourPayments,
     totalLabourAdvancesPaid: canonical.labourAdvancesPaid,
     labourWageSettlements: canonical.directLabourPayments,
     labourSettlementCashPaid: canonical.directLabourPayments,
@@ -755,6 +760,7 @@ export function buildCanonicalPartnerLiabilityPosition(
     purchaseVouchersPaid: 0,
     businessFundsNet: 0,
     labourAdvancesPaid: canonical.labourAdvancesPaid,
+    labourPayments: canonical.labourPayments,
     labourWageSettlements: canonical.directLabourPayments,
     labourSettlementCashPaid: canonical.directLabourPayments,
     labourSettlementNonCashApplied: 0,

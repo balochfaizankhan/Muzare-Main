@@ -2060,15 +2060,25 @@ export type LabourExpenseAccountAttribution = {
   accountId?: string | null; accountName: string; accountType?: string | null; amount: number;
   voucherId?: string | null; advanceApplicationId?: string | null;
 };
+export type LabourPaymentFundingPart = {
+  voucherId: string; voucherNumber?: string | null; date: string; status: string;
+  amount: number; accountId?: string | null; accountName: string;
+};
+export type LabourPaymentEntry = {
+  dueId: string; dueNumber?: string | null; recipientScope?: string | null; recipientName: string;
+  date: string; status: string; grossAmount: number; directAmount: number; appliedAdvanceAmount: number;
+  directPayments: LabourPaymentFundingPart[]; appliedAdvances: LabourPaymentFundingPart[];
+};
 export type LabourFinancialReadModel = {
   scope: { workspaceId: string; farmId: string; seasonId: string };
   accountEntries: CanonicalLabourAccountEntry[];
-  partnerPositions: Array<{ accountId: string; accountName: string; farmOwesPartner: number; ledgerBalance: number; labourAdvancesPaid: number; directLabourPayments: number; recoveries: number; outstandingLabourAdvances: number; appliedLabourAdvances: number; entryCount: number }>;
+  partnerPositions: Array<{ accountId: string; accountName: string; farmOwesPartner: number; ledgerBalance: number; labourAdvancesPaid: number; directLabourPayments: number; labourPayments: number; recoveries: number; outstandingLabourAdvances: number; appliedLabourAdvances: number; entryCount: number }>;
   partnerLedger: CanonicalLabourAccountEntry[];
   labourLedger: CanonicalLabourLedgerEntry[];
   advanceApplicationParents: LabourAdvanceApplicationParentRecord[];
   expenses: Array<{ id: string; dueId?: string | null; dueNumber?: string | null; date: string; recipientScope?: LabourRecipientScope | null; labourerId?: string | null; labourGroupId?: string | null; recipientName: string; description: string; status: string; amount: number; paidAmount: number; appliedAdvanceAmount: number; outstandingAmount: number; active: boolean; canonical: true }>;
   expenseAccountAttributions: LabourExpenseAccountAttribution[];
+  labourPaymentEntries: LabourPaymentEntry[];
   activity: Array<{ id: string; date: string; module: "labour"; title: string; detail: string; status: string; sourceId?: string | null; canonical: true }>;
   currentLedger: Record<string, number>;
   advancePositions: Array<{ advancePositionId: string; canonicalVoucherId?: string | null; legacySourceRecordId?: string | null; sourceClassification: "CANONICAL" | "CANONICAL_LINKED_LEGACY" | "LEGACY_OPERATIONAL" | "LEGACY_NORMALIZED"; voucherId: string; voucherNumber: string; voucherDate: string; advanceDate: string; fundingAccountId?: string | null; fundingAccountName?: string | null; paymentSourceId?: string | null; paymentSourceDisplayName?: string | null; paymentSourceType?: string | null; fundingType?: string | null; partnerId?: string | null; partnerName?: string | null; sourceId?: string | null; labourerId?: string | null; labourerName?: string | null; labourGroupId?: string | null; labourGroupName?: string | null; recipientScope: LabourRecipientScope; recipientName: string; recipientDisplayName?: string; receivedByDisplayName?: string | null; originalAmount: number; appliedAmount: number; recoveredAmount: number; outstandingAmount: number; status: string; description: string; relatedApplicationIds: string[]; relatedRecoveryVoucherIds: string[]; needsReview: boolean; reviewReason?: string | null; canonical: boolean; legacy: boolean }>;

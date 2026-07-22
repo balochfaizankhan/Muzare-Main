@@ -4177,6 +4177,32 @@ function PartnerLedgerModule() {
       }))
       .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
   }, [accountLookup, farmId, labourWageSettlements, seasonId, selectedPartnerPosition?.account?.id]);
+  const selectedPartnerPositionLabourPayments = useMemo(() => {
+    const selectedAccountId = selectedPartnerPosition?.account?.id ?? null;
+    if (!selectedAccountId) return [];
+    const canonicalAccountId = resolveCanonicalAccountId(selectedAccountId, accountLookup) ?? selectedAccountId;
+    const entries = canonicalFinancials.data?.labourPaymentEntries ?? [];
+    return entries
+      .map((entry) => {
+        const direct = entry.directPayments.filter((part) => part.accountId === canonicalAccountId);
+        const applied = entry.appliedAdvances.filter((part) => part.accountId === canonicalAccountId);
+        const directAmount = direct.reduce((sum, part) => sum + part.amount, 0);
+        const appliedAmount = applied.reduce((sum, part) => sum + part.amount, 0);
+        if (directAmount + appliedAmount <= 0.005) return null;
+        return {
+          dueId: entry.dueId,
+          voucherNumber: direct[0]?.voucherNumber ?? applied[0]?.voucherNumber ?? entry.dueNumber ?? "-",
+          recipientName: entry.recipientName,
+          date: direct[0]?.date ?? applied[0]?.date ?? entry.date,
+          grossAmount: entry.grossAmount,
+          directAmount,
+          appliedAmount,
+          status: entry.status,
+        };
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null)
+      .sort((a, b) => b.date.localeCompare(a.date) || a.dueId.localeCompare(b.dueId));
+  }, [accountLookup, canonicalFinancials.data?.labourPaymentEntries, selectedPartnerPosition?.account?.id]);
   const runningBalances = (() => {
     const balances = new Map<string, { name: string; amount: number }>();
     const labels = new Map<string, string>();
@@ -4261,9 +4287,9 @@ function PartnerLedgerModule() {
       <section className="record-panel">
         <h2>{t("partnerLedgerPage.partnerPosition")}</h2>
         {!partnerPositions.length ? <Empty>{t("partnerLedgerPage.noPartnerPositions")}</Empty> : <div className="partner-position-table">
-          <div className="partner-position-row partner-position-row--header"><span>{t("partnerLedgerPage.partner")}</span><span>Purchase Vouchers</span><span>Funds Given</span><span>Funds Received</span><span>Direct Labour Payments</span><span>Outstanding Labour Advances</span><span>{t("partnerLedgerPage.currentPartnerBalance")}</span></div>
+          <div className="partner-position-row partner-position-row--header"><span>{t("partnerLedgerPage.partner")}</span><span>Purchase Vouchers</span><span>Funds Given</span><span>Funds Received</span><span>Labour Payments</span><span>Outstanding Labour Advances</span><span>{t("partnerLedgerPage.currentPartnerBalance")}</span></div>
           {partnerPositions.map((item) => <button type="button" className="partner-position-row partner-position-row--interactive" key={item.name} onClick={() => setSelectedPartnerPosition(item)}>
-            <strong>{item.name}</strong><span>{money(item.purchaseVouchersPaid)}</span><span>{money(item.transfersOut)}</span><span>{money(item.transfersIn)}</span><span>{money(item.labourSettlementCashPaid)}</span><span>{money(item.outstandingLabourAdvances)}</span><b>{money(item.currentPartnerBalance)}</b>
+            <strong>{item.name}</strong><span>{money(item.purchaseVouchersPaid)}</span><span>{money(item.transfersOut)}</span><span>{money(item.transfersIn)}</span><span>{money(item.labourPayments)}</span><span>{money(item.outstandingLabourAdvances)}</span><b>{money(item.currentPartnerBalance)}</b>
           </button>)}
         </div>}
         {!!partnerPositions.length && <div className="partner-position-cards">
@@ -4274,7 +4300,7 @@ function PartnerLedgerModule() {
             <div><span>Funds Given</span><strong>{money(item.transfersOut)}</strong></div>
             <div><span>Funds Received</span><strong>{money(item.transfersIn)}</strong></div>
             <div><span>Total labour advances paid</span><strong>{money(item.totalLabourAdvancesPaid)}</strong></div>
-            <div><span>Direct labour payments</span><strong>{money(item.labourSettlementCashPaid)}</strong></div>
+            <div><span>Labour Payments</span><strong>{money(item.labourPayments)}</strong></div>
             <div><span>Settled through wages</span><strong>{money(item.settledAdvances)}</strong></div>
             <div><span>Outstanding labour advances</span><strong>{money(item.outstandingLabourAdvances)}</strong></div>
             <div><span>Reconciliation</span><strong>{`Settled ${money(item.settledAdvances)} + Outstanding ${money(item.outstandingLabourAdvances)} = Total ${money(item.totalLabourAdvancesPaid)}`}</strong></div>
@@ -4319,6 +4345,25 @@ function PartnerLedgerModule() {
                       <span>Cash paid: {money(settlement.cashPaid)}</span>
                       <span>Effect: changes labour advance breakdown only</span>
                       <span>Effect on Farm Owes Partner: none</span>
+                    </article>
+                  ))}
+                </div>}
+              </section>
+              <section className="partner-ledger-details__subsection">
+                <h3>Labour Payments</h3>
+                <p><strong>Labour Payments (direct + applied advances)</strong><span>{money(selectedPartnerPosition.labourPayments)}</span></p>
+                <p><small>Display total only — applied advances were already counted in Farm Owes Partner when the advance was originally funded, so they are not added again here.</small></p>
+                {selectedPartnerPositionLabourPayments.length > 0 && <div className="partner-ledger-details__memo-list">
+                  {selectedPartnerPositionLabourPayments.map((row) => (
+                    <article key={row.dueId} className="partner-ledger-details__memo-item">
+                      <strong>{row.voucherNumber}</strong>
+                      <span>Labourer/Group: {row.recipientName}</span>
+                      <span>Payment date: {row.date}</span>
+                      <span>Gross labour payment: {money(row.grossAmount)}</span>
+                      <span>Direct payment (this partner): {money(row.directAmount)}</span>
+                      <span>Applied advance (this partner): {money(row.appliedAmount)}</span>
+                      <span>Funding owner: {selectedPartnerPosition.name}</span>
+                      <span>Status: {row.status}</span>
                     </article>
                   ))}
                 </div>}

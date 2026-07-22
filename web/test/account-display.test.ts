@@ -27,8 +27,8 @@ test("display accounts merge canonical partner rows and labour-finance duplicate
     baseAccount({ id: "sajid-labour", name: "Sajid Khan", type: "partner", sourceType: "labour_finance" }),
   ];
   const canonicalPartnerPositions = [
-    { accountId: "younis-canonical", accountName: "Younis Khan", farmOwesPartner: 199569.5, ledgerBalance: 199569.5, labourAdvancesPaid: 150881, directLabourPayments: 0, recoveries: 0, outstandingLabourAdvances: 22946, appliedLabourAdvances: 127935, entryCount: 3 },
-    { accountId: "sajid-canonical", accountName: "Sajid Khan", farmOwesPartner: 215387, ledgerBalance: 215387, labourAdvancesPaid: 0, directLabourPayments: 102030, recoveries: 0, outstandingLabourAdvances: 0, appliedLabourAdvances: 0, entryCount: 2 },
+    { accountId: "younis-canonical", accountName: "Younis Khan", farmOwesPartner: 199569.5, ledgerBalance: 199569.5, labourAdvancesPaid: 150881, directLabourPayments: 0, labourPayments: 0, recoveries: 0, outstandingLabourAdvances: 22946, appliedLabourAdvances: 127935, entryCount: 3 },
+    { accountId: "sajid-canonical", accountName: "Sajid Khan", farmOwesPartner: 215387, ledgerBalance: 215387, labourAdvancesPaid: 0, directLabourPayments: 102030, labourPayments: 102030, recoveries: 0, outstandingLabourAdvances: 0, appliedLabourAdvances: 0, entryCount: 2 },
   ];
 
   const result = buildCanonicalDisplayAccounts(accounts, buildAccountIdentityLookup(accounts), canonicalPartnerPositions);
@@ -45,8 +45,8 @@ test("zero-value synthetic partner duplicates are excluded when no real account 
     baseAccount({ id: "loan-real", name: "Loan", type: "partner" }),
   ];
   const canonicalPartnerPositions = [
-    { accountId: "loan-real", accountName: "Loan", farmOwesPartner: 120000, ledgerBalance: 120000, labourAdvancesPaid: 0, directLabourPayments: 0, recoveries: 0, outstandingLabourAdvances: 0, appliedLabourAdvances: 0, entryCount: 1 },
-    { accountId: "saloom-synthetic", accountName: "Saloom & Algaith", farmOwesPartner: 0, ledgerBalance: 0, labourAdvancesPaid: 0, directLabourPayments: 0, recoveries: 0, outstandingLabourAdvances: 0, appliedLabourAdvances: 0, entryCount: 0 },
+    { accountId: "loan-real", accountName: "Loan", farmOwesPartner: 120000, ledgerBalance: 120000, labourAdvancesPaid: 0, directLabourPayments: 0, labourPayments: 0, recoveries: 0, outstandingLabourAdvances: 0, appliedLabourAdvances: 0, entryCount: 1 },
+    { accountId: "saloom-synthetic", accountName: "Saloom & Algaith", farmOwesPartner: 0, ledgerBalance: 0, labourAdvancesPaid: 0, directLabourPayments: 0, labourPayments: 0, recoveries: 0, outstandingLabourAdvances: 0, appliedLabourAdvances: 0, entryCount: 0 },
   ];
 
   const result = buildCanonicalDisplayAccounts(accounts, buildAccountIdentityLookup(accounts), canonicalPartnerPositions);
@@ -68,6 +68,7 @@ test("sajid direct labour payment merges into the existing partner account exact
       ledgerBalance: 102030,
       labourAdvancesPaid: 0,
       directLabourPayments: 102030,
+      labourPayments: 102030,
       recoveries: 0,
       outstandingLabourAdvances: 0,
       appliedLabourAdvances: 0,
@@ -84,6 +85,7 @@ test("sajid direct labour payment merges into the existing partner account exact
     purchaseVouchersPaid: 113357,
     businessFundsNet: 0,
     labourAdvancesPaid: 0,
+    labourPayments: 0,
     labourWageSettlements: 0,
     labourSettlementCashPaid: 0,
     labourSettlementNonCashApplied: 0,
