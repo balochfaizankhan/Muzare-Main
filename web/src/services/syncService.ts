@@ -7,6 +7,7 @@ import { canonicalizeImportedVoucherRecord, getVoucherDisplayNumber, normalizeVo
 import { getActiveVouchers } from "../lib/voucherCollections";
 import { getGeneralExpenseVouchers } from "../lib/labourWageSettlements";
 import { markStartup, scheduleBackgroundTask } from "../lib/startupPerf";
+import { createChangeCoalescer } from "../lib/eventCoalescing";
 
 export type SyncStatus = "online" | "offline" | "pending" | "syncing" | "error";
 export type SyncStartupStage = "checkingSession" | "loadingWorkspace" | "loadingContext" | "syncingLatestRecords" | "ready";
@@ -370,6 +371,7 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
   syncing = true;
   emit({ status: "syncing" });
   let synced = 0;
+  const changeCoalescer = createChangeCoalescer(() => window.dispatchEvent(new Event("muzare-local-data-change")));
   const pendingRecords = (await offlineDb.pendingMutations.where("workspaceId").equals(context.workspaceId).sortBy("createdAt"))
     .filter((mutation) => mutationMatchesActiveContext(mutation)
       && (mutation.status ?? "pending") !== "resolved"
@@ -405,7 +407,7 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
           payloadSeasonId: payloadScope.seasonId ?? null,
         });
       }
-      window.dispatchEvent(new Event("muzare-local-data-change"));
+      changeCoalescer.markChanged();
       notify(lastError);
       hadPermanentFailures = true;
       continue;
@@ -442,7 +444,7 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
           if (latest?.updatedAt !== mutation.updatedAt) continue;
           await tableFor(mutation.entity).delete(dateTypePayload.id);
           await offlineDb.pendingMutations.delete(mutation.id);
-          window.dispatchEvent(new Event("muzare-local-data-change"));
+          changeCoalescer.markChanged();
           synced += 1;
           continue;
         }
@@ -457,7 +459,7 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
         if (latest?.updatedAt !== mutation.updatedAt) continue;
         await cacheRecord(mutation.entity, response.record, false, mutation.farmId, null);
         await offlineDb.pendingMutations.delete(mutation.id);
-        window.dispatchEvent(new Event("muzare-local-data-change"));
+        changeCoalescer.markChanged();
         synced += 1;
         continue;
       }
@@ -482,7 +484,7 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
             clientRecordId: (mutation.payload as LocalRecord).id,
           });
         }
-        window.dispatchEvent(new Event("muzare-local-data-change"));
+        changeCoalescer.markChanged();
         synced += 1;
         continue;
       }
@@ -506,7 +508,7 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
           voucherNumber: (response.record as Record<string, unknown>).voucherNumber,
         });
       }
-      window.dispatchEvent(new Event("muzare-local-data-change"));
+      changeCoalescer.markChanged();
       synced += 1;
     } catch (error) {
       const permissionDenied = isPermissionDeniedSyncError(error);
@@ -567,7 +569,7 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
           details,
         });
       }
-      window.dispatchEvent(new Event("muzare-local-data-change"));
+      changeCoalescer.markChanged();
       if (staleContext) notify(lastError);
       else if (permissionDenied) notify(lastError);
       else if (!(retryable && attempts < maxAutomaticAttempts)) notify(lastError);
@@ -575,6 +577,7 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
       if (retryable && attempts < maxAutomaticAttempts) continue;
     }
   }
+  changeCoalescer.flush();
   syncing = false;
   const pending = await getPendingCount();
   const failedMutations = (await getContextMutations()).filter((mutation) =>

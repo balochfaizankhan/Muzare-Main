@@ -840,7 +840,36 @@ async function loadVoucherSourceMaps(workspaceId: string, vouchers: typeof labou
   };
 }
 
-export async function loadLabourFinancialReadModel(input: { workspaceId: string; farmId: string; seasonId: string }) {
+/**
+ * Generic in-flight promise coalescer: a second call with the same key while the first is
+ * still pending reuses that pending promise instead of invoking `factory` again. The entry
+ * is released as soon as the shared call settles (resolves or rejects), so it never retains
+ * a completed result — the next call for that key always runs a fresh `factory` invocation.
+ */
+export function coalesceInFlight<T>(cache: Map<string, Promise<T>>, key: string, factory: () => Promise<T>): Promise<T> {
+  const existing = cache.get(key);
+  if (existing) return existing;
+  const promise = factory().finally(() => {
+    if (cache.get(key) === promise) cache.delete(key);
+  });
+  cache.set(key, promise);
+  return promise;
+}
+
+const inFlightLoads = new Map<string, ReturnType<typeof loadLabourFinancialReadModelUncached>>();
+
+/**
+ * Concurrent callers for the same workspace/farm/season (e.g. dues, advances, vouchers
+ * and financial-read-model routes hit in the same burst) share one in-flight computation
+ * instead of each running the full query fan-out independently — this is what let request
+ * storms multiply heap usage.
+ */
+export function loadLabourFinancialReadModel(input: { workspaceId: string; farmId: string; seasonId: string }) {
+  const key = `${input.workspaceId}:${input.farmId}:${input.seasonId}`;
+  return coalesceInFlight(inFlightLoads, key, () => loadLabourFinancialReadModelUncached(input));
+}
+
+async function loadLabourFinancialReadModelUncached(input: { workspaceId: string; farmId: string; seasonId: string }) {
   const [scopeAccounts, transactions, vouchers, dues, applications, allocations, journal, logs, userRows, labourerRows, groupRows] = await Promise.all([
     db.select().from(accounts).where(eq(accounts.farmId, input.farmId)),
     db.select().from(accountTransactions).where(and(eq(accountTransactions.farmId, input.farmId), eq(accountTransactions.seasonId, input.seasonId))),
