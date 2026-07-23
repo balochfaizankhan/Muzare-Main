@@ -78,7 +78,7 @@ const advancePoolQuerySchema = contextSchema.extend({
 });
 const advanceListQuerySchema = contextSchema.extend({
   page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
   search: z.string().trim().max(160).optional(),
   recipientScope: z
     .enum([
@@ -842,6 +842,12 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           status: z.string().optional(),
           origin: z.string().optional(),
           search: z.string().optional(),
+          // page/pageSize/fromDate/toDate are opt-in: omitting page preserves the exact prior
+          // unbounded response shape for any caller that hasn't migrated to pagination yet.
+          page: z.coerce.number().int().min(1).optional(),
+          pageSize: z.coerce.number().int().min(1).max(50).default(20),
+          fromDate: z.string().date().optional(),
+          toDate: z.string().date().optional(),
         })
         .safeParse(request.query);
       if (!params.success || !query.success)
@@ -861,27 +867,44 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
         ))
       )
         return;
-      const rows = await db
+      const paginated = query.data.page != null;
+      const term = (query.data.search ?? "").trim();
+      const baseFilters = [
+        eq(labourDues.workspaceId, workspaceId),
+        eq(labourDues.farmId, farmId),
+        eq(labourDues.seasonId, seasonId),
+        query.data.status
+          ? eq(labourDues.paymentStatus, query.data.status)
+          : inArray(labourDues.paymentStatus, [
+              "UNPAID",
+              "PARTIALLY_SETTLED",
+              "ON_HOLD",
+            ]),
+        query.data.origin
+          ? eq(labourDues.origin, query.data.origin)
+          : undefined,
+        // SQL-side date range overlap on the due's work period, only applied for paginated callers.
+        paginated && query.data.fromDate ? sql`${labourDues.workToDate} >= ${query.data.fromDate}` : undefined,
+        paginated && query.data.toDate ? sql`${labourDues.workFromDate} <= ${query.data.toDate}` : undefined,
+        // SQL-side substring search, only applied for paginated callers — unpaginated callers
+        // keep the original in-JS search below so their response shape never changes.
+        paginated && term
+          ? sql`(${labourDues.dueNumber} ilike ${"%" + term + "%"} or ${labourDues.description} ilike ${"%" + term + "%"} or ${labourDues.recipientSnapshot}::text ilike ${"%" + term + "%"})`
+          : undefined,
+      ];
+      const page = query.data.page ?? 1;
+      const pageSize = query.data.pageSize;
+      const baseQuery = db
         .select()
         .from(labourDues)
-        .where(
-          and(
-            eq(labourDues.workspaceId, workspaceId),
-            eq(labourDues.farmId, farmId),
-            eq(labourDues.seasonId, seasonId),
-            query.data.status
-              ? eq(labourDues.paymentStatus, query.data.status)
-              : inArray(labourDues.paymentStatus, [
-                  "UNPAID",
-                  "PARTIALLY_SETTLED",
-                  "ON_HOLD",
-                ]),
-            query.data.origin
-              ? eq(labourDues.origin, query.data.origin)
-              : undefined,
-          ),
-        )
+        .where(and(...baseFilters))
         .orderBy(desc(labourDues.createdAt));
+      const [rows, totalCountResult] = await Promise.all([
+        paginated ? baseQuery.limit(pageSize).offset((page - 1) * pageSize) : baseQuery,
+        paginated
+          ? db.select({ count: sql<number>`count(*)::int` }).from(labourDues).where(and(...baseFilters))
+          : Promise.resolve([{ count: 0 }]),
+      ]);
       const settlementSourceIds = rows
         .filter((row) => row.origin === "SETTLEMENT")
         .map((row) => row.sourceRecordId)
@@ -919,6 +942,9 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           (Boolean(row.sourceRecordId) &&
             activeSettlementSourceIds.has(row.sourceRecordId!)),
       );
+      // Bounded to the current page's rows (<=pageSize) when paginated, so this per-row
+      // enrichment (unchanged accounting math — see loadLabourDuePosition) never scans the
+      // whole table, unlike the old unbounded path which enriched every matching due.
       const dues = await db.transaction(async (tx) =>
         Promise.all(
           validRows.map(async (row) => {
@@ -927,20 +953,33 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           }),
         ),
       );
-      const term = (query.data.search ?? "").trim().toLowerCase();
+      if (!paginated) {
+        const lowerTerm = term.toLowerCase();
+        return {
+          dues: lowerTerm
+            ? dues.filter((due) =>
+                [
+                  due.dueNumber,
+                  due.description,
+                  JSON.stringify(due.recipientSnapshot),
+                ]
+                  .join(" ")
+                  .toLowerCase()
+                  .includes(lowerTerm),
+              )
+            : dues,
+        };
+      }
+      const totalItems = totalCountResult[0]?.count ?? 0;
       return {
-        dues: term
-          ? dues.filter((due) =>
-              [
-                due.dueNumber,
-                due.description,
-                JSON.stringify(due.recipientSnapshot),
-              ]
-                .join(" ")
-                .toLowerCase()
-                .includes(term),
-            )
-          : dues,
+        dues,
+        pageInfo: {
+          page,
+          pageSize,
+          totalItems,
+          totalPages: Math.max(1, Math.ceil(totalItems / pageSize)),
+          hasNextPage: page * pageSize < totalItems,
+        },
       };
     },
   );
@@ -2631,6 +2670,12 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
         .extend({
           nature: z.string().optional(),
           status: z.string().optional(),
+          search: z.string().optional(),
+          // Opt-in, same as /dues: omitting page preserves the exact prior unbounded response.
+          page: z.coerce.number().int().min(1).optional(),
+          pageSize: z.coerce.number().int().min(1).max(50).default(20),
+          fromDate: z.string().date().optional(),
+          toDate: z.string().date().optional(),
         })
         .safeParse(request.query);
       if (!params.success || !query.success)
@@ -2650,32 +2695,49 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
         ))
       )
         return;
-      const vouchers = await db
+      const paginated = query.data.page != null;
+      const term = (query.data.search ?? "").trim();
+      const voucherFilters = [
+        eq(labourPaymentVouchers.workspaceId, params.data.workspaceId),
+        eq(labourPaymentVouchers.farmId, query.data.farmId),
+        eq(labourPaymentVouchers.seasonId, query.data.seasonId),
+        query.data.nature
+          ? eq(labourPaymentVouchers.nature, query.data.nature)
+          : undefined,
+        query.data.status
+          ? eq(labourPaymentVouchers.status, query.data.status)
+          : undefined,
+        sql`${labourPaymentVouchers.nature} not in ('ADVANCE', 'REFUND_RECOVERY')`,
+        sql`(${labourPaymentVouchers.nature} <> 'REVERSAL' or not exists (
+          select 1 from labour_payment_vouchers original
+          where original.id = ${labourPaymentVouchers.reversalReference}
+            and original.nature in ('ADVANCE', 'REFUND_RECOVERY')
+        ))`,
+        paginated && query.data.fromDate ? sql`${labourPaymentVouchers.voucherDate} >= ${query.data.fromDate}` : undefined,
+        paginated && query.data.toDate ? sql`${labourPaymentVouchers.voucherDate} <= ${query.data.toDate}` : undefined,
+        paginated && term
+          ? sql`(${labourPaymentVouchers.voucherNumber} ilike ${"%" + term + "%"} or ${labourPaymentVouchers.description} ilike ${"%" + term + "%"})`
+          : undefined,
+      ];
+      const page = query.data.page ?? 1;
+      const pageSize = query.data.pageSize;
+      const voucherQuery = db
         .select()
         .from(labourPaymentVouchers)
-        .where(
-          and(
-            eq(labourPaymentVouchers.workspaceId, params.data.workspaceId),
-            eq(labourPaymentVouchers.farmId, query.data.farmId),
-            eq(labourPaymentVouchers.seasonId, query.data.seasonId),
-            query.data.nature
-              ? eq(labourPaymentVouchers.nature, query.data.nature)
-              : undefined,
-            query.data.status
-              ? eq(labourPaymentVouchers.status, query.data.status)
-              : undefined,
-            sql`${labourPaymentVouchers.nature} not in ('ADVANCE', 'REFUND_RECOVERY')`,
-            sql`(${labourPaymentVouchers.nature} <> 'REVERSAL' or not exists (
-              select 1 from labour_payment_vouchers original
-              where original.id = ${labourPaymentVouchers.reversalReference}
-                and original.nature in ('ADVANCE', 'REFUND_RECOVERY')
-            ))`,
-          ),
-        )
+        .where(and(...voucherFilters))
         .orderBy(
           desc(labourPaymentVouchers.voucherDate),
           desc(labourPaymentVouchers.createdAt),
         );
+      const [vouchers, totalCountResult] = await Promise.all([
+        paginated ? voucherQuery.limit(pageSize).offset((page - 1) * pageSize) : voucherQuery,
+        paginated
+          ? db.select({ count: sql<number>`count(*)::int` }).from(labourPaymentVouchers).where(and(...voucherFilters))
+          : Promise.resolve([{ count: 0 }]),
+      ]);
+      // Enrichment (account attribution for legacy/partner-funded vouchers) still uses the
+      // coalesced full read model — safety-first: this display attribution logic is protected,
+      // not re-derived. Only the base voucher query is bounded to the current page.
       const financials = await loadLabourFinancialReadModel({
         workspaceId: params.data.workspaceId,
         farmId: query.data.farmId,
@@ -2692,24 +2754,76 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
       const transactionById = new Map(scopeTransactions.map((row) => [row.id, row]));
       const accountEntryByVoucherId = new Map(financials.accountEntries.map((entry) => [entry.voucherId, entry]));
       const advanceByVoucherId = new Map(financials.advancePositions.filter((row) => row.canonicalVoucherId).map((row) => [row.canonicalVoucherId!, row]));
+      const enrichedVouchers = vouchers.map((voucher) => {
+        const transaction = voucher.accountTransactionId ? transactionById.get(voucher.accountTransactionId) : undefined;
+        const canonicalEntry = accountEntryByVoucherId.get(voucher.id);
+        const canonicalAdvance = advanceByVoucherId.get(voucher.id);
+        const account = (canonicalEntry?.accountId ? accountById.get(canonicalEntry.accountId) : undefined)
+          ?? (canonicalAdvance?.fundingAccountId ? accountById.get(canonicalAdvance.fundingAccountId) : undefined)
+          ?? (voucher.paymentAccountId ? accountById.get(voucher.paymentAccountId) : undefined)
+          ?? (transaction?.accountId ? accountById.get(transaction.accountId) : undefined);
+        return {
+          ...voucher,
+          paymentAccountId: account?.id ?? voucher.paymentAccountId,
+          paymentAccountName: account?.name ?? firstText(
+            asSnapshot(voucher.recipientSnapshot).sourceAccountName,
+            asSnapshot(voucher.recipientSnapshot).paymentAccountName,
+          ),
+        };
+      });
+      if (!paginated) return { vouchers: enrichedVouchers };
+      const totalItems = totalCountResult[0]?.count ?? 0;
       return {
-        vouchers: vouchers.map((voucher) => {
-          const transaction = voucher.accountTransactionId ? transactionById.get(voucher.accountTransactionId) : undefined;
-          const canonicalEntry = accountEntryByVoucherId.get(voucher.id);
-          const canonicalAdvance = advanceByVoucherId.get(voucher.id);
-          const account = (canonicalEntry?.accountId ? accountById.get(canonicalEntry.accountId) : undefined)
-            ?? (canonicalAdvance?.fundingAccountId ? accountById.get(canonicalAdvance.fundingAccountId) : undefined)
-            ?? (voucher.paymentAccountId ? accountById.get(voucher.paymentAccountId) : undefined)
-            ?? (transaction?.accountId ? accountById.get(transaction.accountId) : undefined);
-          return {
-            ...voucher,
-            paymentAccountId: account?.id ?? voucher.paymentAccountId,
-            paymentAccountName: account?.name ?? firstText(
-              asSnapshot(voucher.recipientSnapshot).sourceAccountName,
-              asSnapshot(voucher.recipientSnapshot).paymentAccountName,
-            ),
-          };
-        }),
+        vouchers: enrichedVouchers,
+        pageInfo: {
+          page,
+          pageSize,
+          totalItems,
+          totalPages: Math.max(1, Math.ceil(totalItems / pageSize)),
+          hasNextPage: page * pageSize < totalItems,
+        },
+      };
+    },
+  );
+
+  // P1C: detail-only data (journal entries, reversal-linked vouchers) — loaded solely when a
+  // user opens a specific voucher's drawer/modal, never as part of the list above.
+  app.get(
+    "/v1/workspace/:workspaceId/labour-payments/vouchers/:voucherId",
+    { preHandler: requireUser },
+    async (request, reply) => {
+      const params = voucherParamsSchema.safeParse(request.params);
+      const query = contextSchema.safeParse(request.query);
+      if (!params.success || !query.success) return reply.code(400).send({ message: "A valid Labour Payment Voucher detail request is required." });
+      const { workspaceId, voucherId } = params.data;
+      const { farmId, seasonId } = query.data;
+      if (!(await requireRequestScope(request, reply, workspaceId, farmId, seasonId, "view"))) return;
+      const [voucher] = await db.select().from(labourPaymentVouchers).where(and(
+        eq(labourPaymentVouchers.id, voucherId), eq(labourPaymentVouchers.workspaceId, workspaceId),
+        eq(labourPaymentVouchers.farmId, farmId), eq(labourPaymentVouchers.seasonId, seasonId),
+      )).limit(1);
+      if (!voucher) return reply.code(404).send({ message: "This payment voucher was not found." });
+      const [journalEntries, reversalLinkedVouchers, account, transaction] = await Promise.all([
+        db.select().from(labourAccountingEntries).where(eq(labourAccountingEntries.voucherId, voucherId)).orderBy(desc(labourAccountingEntries.postedAt)),
+        db.select().from(labourPaymentVouchers).where(or(
+          eq(labourPaymentVouchers.reversalReference, voucherId),
+          eq(labourPaymentVouchers.relatedAdvanceVoucherId, voucherId),
+          voucher.reversalReference ? eq(labourPaymentVouchers.id, voucher.reversalReference) : sql`false`,
+        )),
+        voucher.paymentAccountId ? db.select().from(accounts).where(eq(accounts.id, voucher.paymentAccountId)).limit(1).then((rows) => rows[0]) : Promise.resolve(undefined),
+        voucher.accountTransactionId ? db.select().from(accountTransactions).where(eq(accountTransactions.id, voucher.accountTransactionId)).limit(1).then((rows) => rows[0]) : Promise.resolve(undefined),
+      ]);
+      return {
+        voucher: {
+          ...voucher,
+          paymentAccountName: account?.name ?? firstText(
+            asSnapshot(voucher.recipientSnapshot).sourceAccountName,
+            asSnapshot(voucher.recipientSnapshot).paymentAccountName,
+          ),
+        },
+        journalEntries,
+        reversalLinkedVouchers,
+        accountTransaction: transaction ?? null,
       };
     },
   );
@@ -2845,6 +2959,9 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           pageSize: query.data.pageSize,
           totalCount: filtered.length,
           hasMore: offset + advances.length < filtered.length,
+          totalItems: filtered.length,
+          totalPages: Math.max(1, Math.ceil(filtered.length / query.data.pageSize)),
+          hasNextPage: offset + advances.length < filtered.length,
         },
         diagnostics: {
           queryCount: 1,
@@ -2858,6 +2975,95 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
         .header("X-Result-Count", String(advances.length))
         .header("X-Payload-Bytes", String(payloadBytes));
       return response;
+    },
+  );
+
+  // P1C: detail-only data for a single advance, loaded solely when a user opens its
+  // drawer/modal. The position/status/amounts are read from the same coalesced canonical
+  // computation the list above uses (safety-first — see loadLabourFinancialReadModel) so this
+  // never re-derives the protected pooled-advance-application math; only the supplementary
+  // journal/reversal rows are bounded, direct queries.
+  app.get(
+    "/v1/workspace/:workspaceId/labour-payments/advances/:advanceId",
+    { preHandler: requireUser },
+    async (request, reply) => {
+      const params = paramsSchema.extend({ advanceId: z.string().min(1) }).safeParse(request.params);
+      const query = contextSchema.safeParse(request.query);
+      if (!params.success || !query.success) return reply.code(400).send({ message: "A valid advance detail request is required." });
+      const { workspaceId, advanceId } = params.data;
+      const { farmId, seasonId } = query.data;
+      if (!(await requireRequestScope(request, reply, workspaceId, farmId, seasonId, "view"))) return;
+      const financials = await loadLabourFinancialReadModel({ workspaceId, farmId, seasonId });
+      const position = financials.advancePositions.find((row) => row.canonicalVoucherId === advanceId || row.advancePositionId === advanceId);
+      if (!position) return reply.code(404).send({ message: "This advance was not found." });
+      const isCanonicalVoucher = Boolean(position.canonicalVoucherId);
+      const [journalEntries, relatedVouchers] = await Promise.all([
+        isCanonicalVoucher
+          ? db.select().from(labourAccountingEntries).where(eq(labourAccountingEntries.voucherId, position.canonicalVoucherId!)).orderBy(desc(labourAccountingEntries.postedAt))
+          : Promise.resolve([]),
+        isCanonicalVoucher
+          ? db.select().from(labourPaymentVouchers).where(or(
+              eq(labourPaymentVouchers.reversalReference, position.canonicalVoucherId!),
+              eq(labourPaymentVouchers.relatedAdvanceVoucherId, position.canonicalVoucherId!),
+            ))
+          : Promise.resolve([]),
+      ]);
+      return { position, journalEntries, relatedVouchers };
+    },
+  );
+
+  app.get(
+    "/v1/workspace/:workspaceId/labour-payments/summary",
+    { preHandler: requireUser },
+    async (request, reply) => {
+      const params = paramsSchema.safeParse(request.params);
+      const query = contextSchema.safeParse(request.query);
+      if (!params.success || !query.success) return reply.code(400).send({ message: "A valid Labour Payments financial scope is required." });
+      const { workspaceId } = params.data;
+      const { farmId, seasonId } = query.data;
+      if (!(await requireRequestScope(request, reply, workspaceId, farmId, seasonId, "view"))) return;
+      // Safety-first (P1A): the canonical totals below — including pooled advance-application
+      // math — are protected accounting logic. Rather than re-deriving them as independent SQL
+      // aggregates (which could silently drift from the canonical computation with no live
+      // database available to verify parity), this reuses the same coalesced computation the
+      // financial-read-model route uses (see coalesceInFlight in labour-financial-read-model.ts)
+      // and returns only the small summary/count fields the summary cards need. This bounds the
+      // response payload and request count, though not the underlying query fan-out — a true
+      // SQL-aggregate rewrite is deferred until numeric parity can be verified against a real
+      // database.
+      const financials = await loadLabourFinancialReadModel({ workspaceId, farmId, seasonId });
+      const [dueCounts, advanceCounts, voucherCounts] = await Promise.all([
+        db.select({ count: sql<number>`count(*)::int` }).from(labourDues).where(and(
+          eq(labourDues.workspaceId, workspaceId), eq(labourDues.farmId, farmId), eq(labourDues.seasonId, seasonId),
+          inArray(labourDues.paymentStatus, ["UNPAID", "PARTIALLY_SETTLED", "ON_HOLD"]),
+        )),
+        db.select({ count: sql<number>`count(*)::int` }).from(labourAdvanceApplications).where(and(
+          eq(labourAdvanceApplications.workspaceId, workspaceId), eq(labourAdvanceApplications.status, "ACTIVE"),
+        )),
+        db.select({ count: sql<number>`count(*)::int` }).from(labourPaymentVouchers).where(and(
+          eq(labourPaymentVouchers.workspaceId, workspaceId), eq(labourPaymentVouchers.farmId, farmId), eq(labourPaymentVouchers.seasonId, seasonId),
+          sql`${labourPaymentVouchers.nature} not in ('ADVANCE', 'REFUND_RECOVERY')`,
+        )),
+      ]);
+      reply.header("Cache-Control", "private, no-store");
+      return {
+        summary: {
+          recognizedLabourExpense: financials.currentLedger.LABOUR_EXPENSE,
+          outstandingLabourPayable: financials.currentLedger.LABOUR_PAYABLE,
+          directLabourPayments: financials.summary.activePaymentAmount,
+          activeAppliedAdvances: financials.summary.activeAdvanceApplied,
+          aggregateAvailableAdvanceBalance: financials.summary.outstandingAdvance,
+          totalAdvanceFunding: financials.summary.totalAdvance,
+          recoveredAdvance: financials.summary.recoveredAdvance,
+          farmOwesPartner: financials.summary.farmOwesPartner,
+        },
+        counts: {
+          openDues: dueCounts[0]?.count ?? 0,
+          activeAdvanceApplications: advanceCounts[0]?.count ?? 0,
+          vouchers: voucherCounts[0]?.count ?? 0,
+        },
+        scope: { workspaceId, farmId, seasonId },
+      };
     },
   );
 

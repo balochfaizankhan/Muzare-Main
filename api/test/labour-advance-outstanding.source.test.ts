@@ -30,7 +30,7 @@ test("the advances tab distinguishes loading, request failure, retry, and genuin
 
 test("the advances endpoint paginates, summarizes, filters, and serves one shared register projection", () => {
   const endpoint = advanceEndpointSource();
-  assert.match(route, /pageSize: z\.coerce\.number\(\)\.int\(\)\.min\(1\)\.max\(100\)\.default\(20\)/);
+  assert.match(route, /pageSize: z\.coerce\.number\(\)\.int\(\)\.min\(1\)\.max\(50\)\.default\(20\)/);
   assert.match(endpoint, /financials\.advancePositions/);
   assert.match(endpoint, /query\.data\.status === "OPEN"/);
   assert.match(endpoint, /row\.fundingAccountName/);
@@ -253,7 +253,11 @@ function advanceEndpointSource() {
   const createRoute = route.indexOf(path);
   return route.slice(
     route.indexOf(path, createRoute + path.length),
-    route.indexOf('"/v1/workspace/:workspaceId/labour-payments/financial-read-model"'),
+    // Bounded to just the GET list route — the P1C detail route
+    // ("/labour-payments/advances/:advanceId") that follows also calls
+    // loadLabourFinancialReadModel once (by design, see labour-financial-read-model.ts's
+    // coalesceInFlight), which would double-count against this list-only assertion otherwise.
+    route.indexOf('"/v1/workspace/:workspaceId/labour-payments/advances/:advanceId"'),
   );
 }
 
