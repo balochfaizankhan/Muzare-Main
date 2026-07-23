@@ -43,7 +43,7 @@ const canonicalPosition: CanonicalPartnerPosition = {
   accountName: canonicalPartner.name,
   farmOwesPartner: 1234,
   ledgerBalance: 1234,
-  labourAdvancesPaid: 0,
+  labourAdvancesPaid: 1234,
   directLabourPayments: 0,
   labourPayments: 0,
   recoveries: 0,
@@ -98,4 +98,36 @@ test("ModulePage passes a canonical-id calculation account into getPartnerAccoun
   assert.match(source, /getPartnerAccountingSnapshot\(canonicalCalculationAccount, sales, legacyExpenseVouchers, activeAdvances, activeEntries, activeLabourWageSettlements, accounts, \{ farmId, seasonId \}\)/);
   assert.match(source, /account: selectedAccount,\s*key: selectedAccount\.id,\s*name: selectedAccount\.name,/);
   assert.doesNotMatch(source, /getPartnerAccountingSnapshot\(selectedAccount,/);
+});
+
+test("the Accounts partner overview displays every reconciliation field from the authoritative snapshot, including transfersOut (Business Funds Given)", () => {
+  const source = readFileSync(new URL("../src/pages/ModulePage.tsx", import.meta.url), "utf8");
+  assert.match(source, /overview\.transfersOut = settlementSnapshot\?\.transfersOut \?\? cardPosition\?\.transfersOut \?\? overview\.transfersOut;/);
+  assert.match(source, /overview\.transfersIn = settlementSnapshot\?\.transfersIn \?\? cardPosition\?\.transfersIn \?\? overview\.transfersIn;/);
+  assert.match(source, /overview\.capitalInjected = settlementSnapshot\?\.capitalInjected \?\? cardPosition\?\.capitalInjected \?\? overview\.capitalInjected;/);
+  assert.match(source, /overview\.purchaseVouchersPaid = settlementSnapshot\?\.purchaseVouchersPaid \?\? cardPosition\?\.purchaseVouchersPaid \?\? overview\.purchaseVouchersPaid;/);
+  assert.match(source, /overview\.moneyReturned = settlementSnapshot\?\.moneyReturned \?\? cardPosition\?\.moneyReturned \?\? overview\.moneyReturned;/);
+  assert.match(source, /overview\.adjustments = settlementSnapshot\?\.adjustments \?\? cardPosition\?\.adjustments \?\? overview\.adjustments;/);
+  // Farm Owes Partner (netBalance) still comes from the merged canonical snapshot.
+  assert.match(source, /netBalance: settlementSnapshot\?\.farmOwesPartner \?\? calculatePartnerLiabilityBalance\(overview\)/);
+});
+
+test("the Accounts overview reconciliation reproduces the Partner Ledger figures when overridden from the canonical snapshot", () => {
+  // Mirrors rawPartnerLedgerOverview's snapshot-first overrides against the same
+  // alias-selection scenario: the raw ledger-row tally starts at zero for transfers
+  // (the defect), and the snapshot override must surface the canonical amounts
+  // exactly once with Farm Owes Partner unchanged, so that the reconciliation
+  // "direct expenses + funds given - funds received = Farm Owes Partner" holds.
+  const canonicalSnapshot = snapshotFor(canonicalPartner);
+  const merged = mergePartnerPositionWithCanonical(
+    { ...canonicalSnapshot, account: aliasPartner, key: aliasPartner.id, name: aliasPartner.name },
+    canonicalPosition,
+  );
+  const overview = { transfersOut: 0, transfersIn: 0 };
+  overview.transfersOut = canonicalSnapshot.transfersOut ?? overview.transfersOut;
+  overview.transfersIn = canonicalSnapshot.transfersIn ?? overview.transfersIn;
+  assert.equal(overview.transfersOut, fundsGivenAmount, "Business Funds Given must display the canonical amount instead of zero");
+  assert.equal(overview.transfersIn, 0, "Business Funds Received must stay correct");
+  const directExpensesPaid = canonicalSnapshot.purchaseVouchersPaid + merged.totalLabourAdvancesPaid + merged.labourWageSettlements;
+  assert.equal(merged.currentPartnerBalance, directExpensesPaid + overview.transfersOut - overview.transfersIn);
 });

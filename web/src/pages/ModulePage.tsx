@@ -5132,11 +5132,19 @@ function AccountsModule() {
       if (row.partnerLiabilityGroup === "money_returned") overview.moneyReturned += row.debit;
       if (row.partnerLiabilityGroup === "adjustments") overview.adjustments += row.credit - row.debit;
     }
+    // selectedPartnerSnapshot is the authoritative source for the reconciliation
+    // fields: it already calculates against the canonical partner account identity
+    // (and merges the canonical labour position), so every override below prefers
+    // it, then the merged card position, then the raw ledger-row tally.
     const settlementSnapshot = selectedPartnerSnapshot;
     const canonicalAccountId = selectedDisplayAccount?.canonicalAccountId ?? selectedAccount.id;
     const cardPosition = mergedPartnerPositionsByAccountId.get(canonicalAccountId) ?? mergedPartnerPositionsByAccountId.get(selectedAccount.id);
-    overview.purchaseVouchersPaid = cardPosition?.purchaseVouchersPaid ?? overview.purchaseVouchersPaid;
-    overview.transfersIn = cardPosition?.transfersIn ?? overview.transfersIn;
+    overview.capitalInjected = settlementSnapshot?.capitalInjected ?? cardPosition?.capitalInjected ?? overview.capitalInjected;
+    overview.purchaseVouchersPaid = settlementSnapshot?.purchaseVouchersPaid ?? cardPosition?.purchaseVouchersPaid ?? overview.purchaseVouchersPaid;
+    overview.transfersOut = settlementSnapshot?.transfersOut ?? cardPosition?.transfersOut ?? overview.transfersOut;
+    overview.transfersIn = settlementSnapshot?.transfersIn ?? cardPosition?.transfersIn ?? overview.transfersIn;
+    overview.moneyReturned = settlementSnapshot?.moneyReturned ?? cardPosition?.moneyReturned ?? overview.moneyReturned;
+    overview.adjustments = settlementSnapshot?.adjustments ?? cardPosition?.adjustments ?? overview.adjustments;
     overview.labourAdvancesPaid = settlementSnapshot?.totalLabourAdvancesPaid ?? overview.labourAdvancesPaid;
     overview.outstandingLabourAdvances = settlementSnapshot?.outstandingLabourAdvances ?? overview.outstandingLabourAdvances;
     overview.settledAdvances = settlementSnapshot?.settledAdvances ?? overview.settledAdvances;
