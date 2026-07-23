@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { getPartnerAccountingSnapshot, mergePartnerPositionWithCanonical, type CanonicalPartnerPosition } from "../src/lib/partnerAccounting.ts";
-import type { Account, PartnerEntry } from "../src/lib/offline-db.ts";
+import { buildPartnerLiabilityPositions, getPartnerAccountingSnapshot, mergePartnerPositionWithCanonical, type CanonicalPartnerPosition } from "../src/lib/partnerAccounting.ts";
+import type { Account, PartnerEntry, Voucher } from "../src/lib/offline-db.ts";
 
 const baseAccount = (overrides: Partial<Account> & Pick<Account, "id" | "name" | "type">): Account => ({
   workspaceId: "workspace-1",
@@ -100,34 +100,89 @@ test("ModulePage passes a canonical-id calculation account into getPartnerAccoun
   assert.doesNotMatch(source, /getPartnerAccountingSnapshot\(selectedAccount,/);
 });
 
-test("the Accounts partner overview displays every reconciliation field from the authoritative snapshot, including transfersOut (Business Funds Given)", () => {
+test("ModulePage sources the non-labour overview fields from cardPosition, never snapshot-first (a numeric 0 from an incomplete snapshot must not win the ?? chain)", () => {
   const source = readFileSync(new URL("../src/pages/ModulePage.tsx", import.meta.url), "utf8");
-  assert.match(source, /overview\.transfersOut = settlementSnapshot\?\.transfersOut \?\? cardPosition\?\.transfersOut \?\? overview\.transfersOut;/);
-  assert.match(source, /overview\.transfersIn = settlementSnapshot\?\.transfersIn \?\? cardPosition\?\.transfersIn \?\? overview\.transfersIn;/);
-  assert.match(source, /overview\.capitalInjected = settlementSnapshot\?\.capitalInjected \?\? cardPosition\?\.capitalInjected \?\? overview\.capitalInjected;/);
-  assert.match(source, /overview\.purchaseVouchersPaid = settlementSnapshot\?\.purchaseVouchersPaid \?\? cardPosition\?\.purchaseVouchersPaid \?\? overview\.purchaseVouchersPaid;/);
-  assert.match(source, /overview\.moneyReturned = settlementSnapshot\?\.moneyReturned \?\? cardPosition\?\.moneyReturned \?\? overview\.moneyReturned;/);
-  assert.match(source, /overview\.adjustments = settlementSnapshot\?\.adjustments \?\? cardPosition\?\.adjustments \?\? overview\.adjustments;/);
-  // Farm Owes Partner (netBalance) still comes from the merged canonical snapshot.
+  assert.match(source, /overview\.transfersOut = cardPosition\?\.transfersOut \?\? overview\.transfersOut;/);
+  assert.match(source, /overview\.transfersIn = cardPosition\?\.transfersIn \?\? overview\.transfersIn;/);
+  assert.match(source, /overview\.purchaseVouchersPaid = cardPosition\?\.purchaseVouchersPaid \?\? overview\.purchaseVouchersPaid;/);
+  assert.doesNotMatch(source, /overview\.(capitalInjected|purchaseVouchersPaid|transfersOut|transfersIn|moneyReturned|adjustments) = settlementSnapshot/);
+  // Labour fields and the final balance still come from the canonical labour snapshot.
+  assert.match(source, /overview\.labourAdvancesPaid = settlementSnapshot\?\.totalLabourAdvancesPaid \?\? overview\.labourAdvancesPaid;/);
   assert.match(source, /netBalance: settlementSnapshot\?\.farmOwesPartner \?\? calculatePartnerLiabilityBalance\(overview\)/);
 });
 
-test("the Accounts overview reconciliation reproduces the Partner Ledger figures when overridden from the canonical snapshot", () => {
-  // Mirrors rawPartnerLedgerOverview's snapshot-first overrides against the same
-  // alias-selection scenario: the raw ledger-row tally starts at zero for transfers
-  // (the defect), and the snapshot override must surface the canonical amounts
-  // exactly once with Farm Owes Partner unchanged, so that the reconciliation
-  // "direct expenses + funds given - funds received = Farm Owes Partner" holds.
-  const canonicalSnapshot = snapshotFor(canonicalPartner);
-  const merged = mergePartnerPositionWithCanonical(
-    { ...canonicalSnapshot, account: aliasPartner, key: aliasPartner.id, name: aliasPartner.name },
-    canonicalPosition,
-  );
-  const overview = { transfersOut: 0, transfersIn: 0 };
-  overview.transfersOut = canonicalSnapshot.transfersOut ?? overview.transfersOut;
-  overview.transfersIn = canonicalSnapshot.transfersIn ?? overview.transfersIn;
-  assert.equal(overview.transfersOut, fundsGivenAmount, "Business Funds Given must display the canonical amount instead of zero");
-  assert.equal(overview.transfersIn, 0, "Business Funds Received must stay correct");
-  const directExpensesPaid = canonicalSnapshot.purchaseVouchersPaid + merged.totalLabourAdvancesPaid + merged.labourWageSettlements;
-  assert.equal(merged.currentPartnerBalance, directExpensesPaid + overview.transfersOut - overview.transfersIn);
+test("a zero from an incomplete legacy snapshot does not erase correct cardPosition totals, while labour fields and Farm Owes Partner stay canonical", () => {
+  // Behavioral reproduction of the regression: selectedPartnerSnapshot is calculated
+  // from legacyExpenseVouchers, which can exclude valid records, so its non-labour
+  // fields can be numeric zero even though the merged card position holds the correct
+  // amounts. The overview must preserve the cardPosition values.
+  const purchaseVoucherAmount = 700;
+  const purchaseVoucher: Voucher = {
+    id: "voucher-1",
+    workspaceId: "workspace-1",
+    farmId: null,
+    seasonId: null,
+    createdAt: "2026-07-23T00:00:00.000Z",
+    updatedAt: "2026-07-23T00:00:00.000Z",
+    voucherNumber: "PV-1",
+    date: "2026-07-23",
+    category: "Supplies",
+    categoryId: "cat-1",
+    subcategory: "General",
+    subcategoryId: "sub-1",
+    description: "Purchase paid by the partner",
+    amount: purchaseVoucherAmount,
+    accountId: canonicalPartner.id,
+  };
+
+  // 1. The snapshot the modal holds was computed WITHOUT the voucher (excluded from
+  //    legacyExpenseVouchers) -> its purchaseVouchersPaid is numeric zero. Mirror
+  //    ModulePage's selectedPartnerSnapshot shape: the legacy snapshot with the
+  //    labour fields and final balance replaced from the canonical merge.
+  const legacySnapshot = { ...snapshotFor(canonicalPartner), account: aliasPartner, key: aliasPartner.id, name: aliasPartner.name };
+  const mergedSnapshot = mergePartnerPositionWithCanonical(legacySnapshot, canonicalPosition);
+  const incompleteSnapshot = {
+    ...legacySnapshot,
+    totalLabourAdvancesPaid: mergedSnapshot.totalLabourAdvancesPaid,
+    farmOwesPartner: mergedSnapshot.currentPartnerBalance,
+    currentPartnerBalance: mergedSnapshot.currentPartnerBalance,
+  };
+  assert.equal(incompleteSnapshot.purchaseVouchersPaid, 0, "the incomplete snapshot holds numeric zero, not null");
+
+  // 2. The card position pipeline sees the full voucher list and the fund transfer.
+  const legacyPositions = buildPartnerLiabilityPositions(accounts, [purchaseVoucher], [], entries, [], [], { farmId: null, seasonId: null });
+  const canonicalLegacyPosition = legacyPositions.find((position) => position.key === canonicalPartner.id);
+  assert.ok(canonicalLegacyPosition);
+  const cardPosition = mergePartnerPositionWithCanonical(canonicalLegacyPosition!, canonicalPosition);
+  assert.equal(cardPosition.purchaseVouchersPaid, purchaseVoucherAmount);
+  assert.equal(cardPosition.transfersOut, fundsGivenAmount);
+  assert.equal(cardPosition.transfersIn, 0);
+
+  // 3-5. Apply the overview's corrected source hierarchy: cardPosition for non-labour
+  //      fields, the canonical snapshot for labour fields and the final balance.
+  const overview = { capitalInjected: 0, purchaseVouchersPaid: 0, transfersOut: 0, transfersIn: 0, moneyReturned: 0, adjustments: 0, labourAdvancesPaid: 0 };
+  overview.capitalInjected = cardPosition?.capitalInjected ?? overview.capitalInjected;
+  overview.purchaseVouchersPaid = cardPosition?.purchaseVouchersPaid ?? overview.purchaseVouchersPaid;
+  overview.transfersOut = cardPosition?.transfersOut ?? overview.transfersOut;
+  overview.transfersIn = cardPosition?.transfersIn ?? overview.transfersIn;
+  overview.moneyReturned = cardPosition?.moneyReturned ?? overview.moneyReturned;
+  overview.adjustments = cardPosition?.adjustments ?? overview.adjustments;
+  overview.labourAdvancesPaid = incompleteSnapshot?.totalLabourAdvancesPaid ?? overview.labourAdvancesPaid;
+  const netBalance = incompleteSnapshot?.farmOwesPartner ?? incompleteSnapshot?.currentPartnerBalance;
+
+  assert.equal(overview.purchaseVouchersPaid, purchaseVoucherAmount, "cardPosition purchase vouchers must survive; the snapshot's zero must not overwrite them");
+  assert.equal(overview.transfersOut, fundsGivenAmount, "Business Funds Given must display the cardPosition amount, not zero");
+  assert.equal(overview.transfersIn, 0, "Business Funds Received stays correct");
+  assert.equal(overview.labourAdvancesPaid, canonicalPosition.labourAdvancesPaid, "labour fields still come from the canonical labour snapshot");
+
+  // 6. Farm Owes Partner is unchanged: still the merged canonical snapshot balance,
+  //    unaffected by the overview's non-labour overrides.
+  assert.equal(netBalance, incompleteSnapshot.currentPartnerBalance);
+  assert.equal(incompleteSnapshot.currentPartnerBalance, fundsGivenAmount + canonicalPosition.farmOwesPartner);
+
+  // 7. Nothing is counted twice: each total equals its single source record exactly.
+  assert.equal(overview.transfersOut, fundsGivenAmount);
+  assert.notEqual(overview.transfersOut, fundsGivenAmount * 2);
+  assert.equal(overview.purchaseVouchersPaid, purchaseVoucherAmount);
+  assert.notEqual(overview.purchaseVouchersPaid, purchaseVoucherAmount * 2);
 });

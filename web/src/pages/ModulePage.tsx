@@ -5132,19 +5132,21 @@ function AccountsModule() {
       if (row.partnerLiabilityGroup === "money_returned") overview.moneyReturned += row.debit;
       if (row.partnerLiabilityGroup === "adjustments") overview.adjustments += row.credit - row.debit;
     }
-    // selectedPartnerSnapshot is the authoritative source for the reconciliation
-    // fields: it already calculates against the canonical partner account identity
-    // (and merges the canonical labour position), so every override below prefers
-    // it, then the merged card position, then the raw ledger-row tally.
+    // Non-labour reconciliation fields come from the merged card position (which is
+    // built per real account and merged with the canonical partner position), falling
+    // back to the raw ledger-row tally. selectedPartnerSnapshot must NOT be the first
+    // source here: it is calculated from legacyExpenseVouchers, which excludes some
+    // valid records, and its fields are plain numbers — a numeric 0 from an incomplete
+    // snapshot would win the ?? chain and erase the correct cardPosition amount.
     const settlementSnapshot = selectedPartnerSnapshot;
     const canonicalAccountId = selectedDisplayAccount?.canonicalAccountId ?? selectedAccount.id;
     const cardPosition = mergedPartnerPositionsByAccountId.get(canonicalAccountId) ?? mergedPartnerPositionsByAccountId.get(selectedAccount.id);
-    overview.capitalInjected = settlementSnapshot?.capitalInjected ?? cardPosition?.capitalInjected ?? overview.capitalInjected;
-    overview.purchaseVouchersPaid = settlementSnapshot?.purchaseVouchersPaid ?? cardPosition?.purchaseVouchersPaid ?? overview.purchaseVouchersPaid;
-    overview.transfersOut = settlementSnapshot?.transfersOut ?? cardPosition?.transfersOut ?? overview.transfersOut;
-    overview.transfersIn = settlementSnapshot?.transfersIn ?? cardPosition?.transfersIn ?? overview.transfersIn;
-    overview.moneyReturned = settlementSnapshot?.moneyReturned ?? cardPosition?.moneyReturned ?? overview.moneyReturned;
-    overview.adjustments = settlementSnapshot?.adjustments ?? cardPosition?.adjustments ?? overview.adjustments;
+    overview.capitalInjected = cardPosition?.capitalInjected ?? overview.capitalInjected;
+    overview.purchaseVouchersPaid = cardPosition?.purchaseVouchersPaid ?? overview.purchaseVouchersPaid;
+    overview.transfersOut = cardPosition?.transfersOut ?? overview.transfersOut;
+    overview.transfersIn = cardPosition?.transfersIn ?? overview.transfersIn;
+    overview.moneyReturned = cardPosition?.moneyReturned ?? overview.moneyReturned;
+    overview.adjustments = cardPosition?.adjustments ?? overview.adjustments;
     overview.labourAdvancesPaid = settlementSnapshot?.totalLabourAdvancesPaid ?? overview.labourAdvancesPaid;
     overview.outstandingLabourAdvances = settlementSnapshot?.outstandingLabourAdvances ?? overview.outstandingLabourAdvances;
     overview.settledAdvances = settlementSnapshot?.settledAdvances ?? overview.settledAdvances;
