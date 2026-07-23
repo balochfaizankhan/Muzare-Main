@@ -4801,7 +4801,19 @@ function AccountsModule() {
   const selectedPartnerSnapshot = useMemo(() => {
     if (selectedAccount?.type !== "partner") return null;
     const selectedCanonicalAccountId = selectedDisplayAccount?.canonicalAccountId ?? resolveCanonicalAccountId(selectedAccount.id, accountLookup) ?? selectedAccount.id;
-    const legacy = getPartnerAccountingSnapshot(selectedAccount, sales, legacyExpenseVouchers, activeAdvances, activeEntries, activeLabourWageSettlements, accounts, { farmId, seasonId });
+    // getPartnerAccountingSnapshot matches every row by resolved canonical id === account.id,
+    // so the calculation must run against the canonical identity even when the visible
+    // representative (selectedAccount) is an operational alias — otherwise fund transfers
+    // (Business Funds Given / transfersOut) attached to the canonical id never match.
+    const canonicalCalculationAccount = selectedAccount.id === selectedCanonicalAccountId
+      ? selectedAccount
+      : accounts.find((item) => item.id === selectedCanonicalAccountId) ?? { ...selectedAccount, id: selectedCanonicalAccountId };
+    const legacy = {
+      ...getPartnerAccountingSnapshot(canonicalCalculationAccount, sales, legacyExpenseVouchers, activeAdvances, activeEntries, activeLabourWageSettlements, accounts, { farmId, seasonId }),
+      account: selectedAccount,
+      key: selectedAccount.id,
+      name: selectedAccount.name,
+    };
     const canonical = resolveCanonicalPartnerPosition(selectedAccount, canonicalAccountsFinancials?.partnerPositions, accountLookup)
       ?? canonicalAccountsFinancials?.partnerPositions.find((item) => item.accountId === selectedCanonicalAccountId || item.accountId === selectedAccount.id);
     if (!canonical) return legacy;
