@@ -5096,12 +5096,16 @@ function AccountsModule() {
       + (settlementSnapshot?.labourWageSettlements ?? byType.labourWageSettlements);
     return {
       ...byType,
-      netBalance: settlementSnapshot?.farmOwesPartner ?? (byType.capitalInjected
+      // Reconciliation total: always derived from the displayed components above, never
+      // settlementSnapshot.farmOwesPartner — a stale/partial snapshot value would make the
+      // section disagree with its own line items. The card balance is compared separately
+      // through the reconciliation warning.
+      netBalance: byType.capitalInjected
         + byType.directExpensesPaid
         + byType.transfersOut
         - byType.transfersIn
         - byType.moneyReturned
-        + byType.adjustments),
+        + byType.adjustments,
     };
   }, [filteredLedgerRows, selectedPartnerSnapshot, selectedAccount]);
   const rawPartnerLedgerOverview = useMemo(() => {
@@ -5158,7 +5162,11 @@ function AccountsModule() {
       + (settlementSnapshot?.labourWageSettlements ?? overview.labourWageSettlements);
     return {
       ...overview,
-      netBalance: settlementSnapshot?.farmOwesPartner ?? calculatePartnerLiabilityBalance(overview),
+      // Reconciliation total: always derived from the displayed components above, never
+      // settlementSnapshot.farmOwesPartner — a stale/partial snapshot value would make the
+      // section disagree with its own line items. The card balance is compared separately
+      // through the reconciliation warning.
+      netBalance: calculatePartnerLiabilityBalance(overview),
     };
   }, [ledgerRows, selectedPartnerSnapshot, selectedAccount, selectedDisplayAccount?.canonicalAccountId, mergedPartnerPositionsByAccountId]);
   const rawStandardLedgerBreakdown = useMemo(() => {
@@ -5205,7 +5213,11 @@ function AccountsModule() {
     }
     return {
       ...summary,
-      netBalance: settlementSnapshot?.farmOwesPartner ?? (summary.capitalInjected + summary.directExpensesPaid + summary.transfersOut - summary.transfersIn - summary.moneyReturned + summary.adjustments),
+      // Reconciliation total: always derived from the displayed components above, never
+      // settlementSnapshot.farmOwesPartner — a stale/partial snapshot value would make the
+      // section disagree with its own line items. The card balance is compared separately
+      // through the reconciliation warning.
+      netBalance: summary.capitalInjected + summary.directExpensesPaid + summary.transfersOut - summary.transfersIn - summary.moneyReturned + summary.adjustments,
     };
   }, [partnerLedgerGroups, selectedPartnerSnapshot, selectedAccount]);
   const rawStandardLedgerSummary = useMemo(() => {

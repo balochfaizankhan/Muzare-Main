@@ -106,9 +106,11 @@ test("ModulePage sources the non-labour overview fields from cardPosition, never
   assert.match(source, /overview\.transfersIn = cardPosition\?\.transfersIn \?\? overview\.transfersIn;/);
   assert.match(source, /overview\.purchaseVouchersPaid = cardPosition\?\.purchaseVouchersPaid \?\? overview\.purchaseVouchersPaid;/);
   assert.doesNotMatch(source, /overview\.(capitalInjected|purchaseVouchersPaid|transfersOut|transfersIn|moneyReturned|adjustments) = settlementSnapshot/);
-  // Labour fields and the final balance still come from the canonical labour snapshot.
+  // Labour fields still come from the canonical labour snapshot; the reconciliation
+  // total is always derived from the displayed components, never the snapshot balance.
   assert.match(source, /overview\.labourAdvancesPaid = settlementSnapshot\?\.totalLabourAdvancesPaid \?\? overview\.labourAdvancesPaid;/);
-  assert.match(source, /netBalance: settlementSnapshot\?\.farmOwesPartner \?\? calculatePartnerLiabilityBalance\(overview\)/);
+  assert.match(source, /netBalance: calculatePartnerLiabilityBalance\(overview\)/);
+  assert.doesNotMatch(source, /netBalance:\s*settlementSnapshot\?\.farmOwesPartner/);
 });
 
 test("a zero from an incomplete legacy snapshot does not erase correct cardPosition totals, while labour fields and Farm Owes Partner stay canonical", () => {
