@@ -2152,6 +2152,7 @@ export type LabourDueAdvancePool = {
   remainingAfterAdvances: number; allocationPreviewVersion: string;
   proposedAllocationCount: number;
   exclusionTotals: { otherGroups: number; labourersOutsideDue: number; refundedOrVoided: number; differentFinancialContext: number; postedAfterSettlementDate: number; unresolvedOwnership: number };
+  membershipReviewRequired?: boolean;
 };
 export type LabourDueAdvanceAllocationDetail = {
   id: string; voucherNumber: string; voucherDate: string; recipientName?: string | null;

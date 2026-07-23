@@ -3023,13 +3023,17 @@ function ReviewSettleDialog({
               ) : (
                 <div className="workforce-advance-pool">
                   <div className="workforce-advance-pool__summary">
-                    <div><span>{t("workforcePaymentsPage.reviewSettle.totalAvailableForDue")}</span><strong className="bidi-isolate">{money(advancePool.eligibleTotal)}</strong></div>
-                    <div><span>{t("workforcePaymentsPage.reviewSettle.openAdvances")}</span><strong className="bidi-isolate">{advancePool.eligibleOpenCount}</strong></div>
-                    <div><span>{isGroupDue ? t("workforcePaymentsPage.reviewSettle.availableGroupAdvances") : t("workforcePaymentsPage.reviewSettle.eligibleForRecipient")}</span><strong className="bidi-isolate">{money(advancePool.groupLevelAmount)}</strong></div>
-                    {isGroupDue ? <div><span>{t("workforcePaymentsPage.reviewSettle.availableMemberAdvances")}</span><strong className="bidi-isolate">{money(advancePool.memberLevelAmount)}</strong></div> : null}
+                    <div><span>{isGroupDue ? t("workforcePaymentsPage.reviewSettle.availableGroupAdvances") : t("workforcePaymentsPage.reviewSettle.totalAvailableForDue")}</span><strong className="bidi-isolate">{money(advancePool.eligibleTotal)}</strong></div>
+                    <div><span>{t("workforcePaymentsPage.reviewSettle.remainingLabourDue")}</span><strong className="bidi-isolate">{money(due.outstandingBalance)}</strong></div>
                     <div><span>{t("workforcePaymentsPage.reviewSettle.maximumApplicable")}</span><strong className="bidi-isolate">{money(advancePool.maximumApplicable)}</strong></div>
+                    <div><span>{t("workforcePaymentsPage.reviewSettle.openAdvances")}</span><strong className="bidi-isolate">{advancePool.eligibleOpenCount}</strong></div>
+                    {isGroupDue ? <div><span>{t("workforcePaymentsPage.reviewSettle.groupOwnedVouchers")}</span><strong className="bidi-isolate">{money(advancePool.groupLevelAmount)}</strong></div> : <div><span>{t("workforcePaymentsPage.reviewSettle.eligibleForRecipient")}</span><strong className="bidi-isolate">{money(advancePool.groupLevelAmount)}</strong></div>}
+                    {isGroupDue ? <div><span>{t("workforcePaymentsPage.reviewSettle.availableMemberAdvances")}</span><strong className="bidi-isolate">{money(advancePool.memberLevelAmount)}</strong></div> : null}
                     <div><span>{t("workforcePaymentsPage.reviewSettle.farmWideOutstanding")}</span><strong className="bidi-isolate">{money(advancePool.globalOutstanding)}</strong></div>
                   </div>
+                  {advancePool.membershipReviewRequired ? (
+                    <p className="worker-action-warning">{t("workforcePaymentsPage.reviewSettle.membershipEvidenceMissing")}</p>
+                  ) : null}
                   <p className="workforce-advance-pool__note">
                     {isGroupDue
                       ? t("workforcePaymentsPage.reviewSettle.groupAdvanceNote")

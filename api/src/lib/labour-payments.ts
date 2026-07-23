@@ -82,16 +82,86 @@ export type LabourAdvancePoolAllocation = LabourAdvancePoolCandidate & {
 const minor = (value: unknown) => Math.round(amount(value) * 100);
 const major = (value: number) => Number((value / 100).toFixed(2));
 
+/**
+ * Authoritative frozen due-time membership for a labour due. For a LABOUR_GROUP
+ * due the eligible members are the union of:
+ *   1. labour_due_member_snapshots rows (strongest source where present);
+ *   2. recipientSnapshot.groupMembers[].id — the group membership frozen when
+ *      the due was created, required for direct/lump-sum group dues that have
+ *      no wage-calculation rows;
+ *   3. recipientSnapshot.memberCalculationSnapshot[].labourerId — the
+ *      attendance-derived calculation rows (backward-compatible source).
+ * Every source is frozen at due creation: the group's current live membership
+ * must never retroactively change a historical due's advance eligibility.
+ * A group due with none of the three sources has no provable membership —
+ * callers must surface that for reconciliation review instead of guessing.
+ */
+export function resolveDueEligibleMembers(input: {
+  recipientScope: LabourRecipientScope | string;
+  recipientSnapshot: unknown;
+  memberSnapshotLabourerIds?: Array<string | null | undefined>;
+}) {
+  if (input.recipientScope !== "LABOUR_GROUP") {
+    return { memberIds: [] as string[], hasMembershipEvidence: true, sources: { memberSnapshots: 0, groupMembers: 0, memberCalculationSnapshot: 0 } };
+  }
+  const snapshot = input.recipientSnapshot && typeof input.recipientSnapshot === "object" ? input.recipientSnapshot as Record<string, unknown> : {};
+  const memberIds = new Set<string>();
+  const sources = { memberSnapshots: 0, groupMembers: 0, memberCalculationSnapshot: 0 };
+  for (const value of input.memberSnapshotLabourerIds ?? []) {
+    const id = stringValue(value);
+    if (!id) continue;
+    sources.memberSnapshots += 1;
+    memberIds.add(id);
+  }
+  const groupMembers = Array.isArray(snapshot.groupMembers) ? snapshot.groupMembers : [];
+  for (const value of groupMembers) {
+    const id = value && typeof value === "object" ? stringValue((value as Record<string, unknown>).id) : "";
+    if (!id) continue;
+    sources.groupMembers += 1;
+    memberIds.add(id);
+  }
+  const calculationRows = Array.isArray(snapshot.memberCalculationSnapshot) ? snapshot.memberCalculationSnapshot : [];
+  for (const value of calculationRows) {
+    const id = value && typeof value === "object" ? stringValue((value as Record<string, unknown>).labourerId) : "";
+    if (!id) continue;
+    sources.memberCalculationSnapshot += 1;
+    memberIds.add(id);
+  }
+  return {
+    memberIds: [...memberIds],
+    hasMembershipEvidence: memberIds.size > 0,
+    sources,
+  };
+}
+
 /** Canonical deterministic plan used by pool preview and final posting. */
 export function calculateLabourAdvancePool(input: {
   dueFinancialScopeKey: string;
   dueOutstandingAmount: number;
   settlementDate?: string;
   memberPayableShares?: Array<{ labourerId: string; amount: number }>;
+  /**
+   * Frozen due-time member IDs (see resolveDueEligibleMembers). Member-owned
+   * advance eligibility is the union of these IDs and the
+   * memberPayableShares IDs, so a direct/lump-sum group due without
+   * wage-calculation rows still exposes its complete member advance pool.
+   */
+  eligibleMemberIds?: string[];
   candidates: LabourAdvancePoolCandidate[];
   requestedAmount?: number;
+  /**
+   * ACTIVE pooled applications for the same financial scope that predate the
+   * per-voucher source-allocation ledger and so cannot be attributed to any
+   * single candidate. Consumed FIFO from the eligible candidates before
+   * allocation so the preview's availability matches the database guard's
+   * aggregate arithmetic exactly.
+   */
+  unattributedPooledConsumption?: number;
 }) {
-  const memberIds = new Set(input.memberPayableShares?.map((row) => row.labourerId) ?? []);
+  const memberIds = new Set([
+    ...(input.eligibleMemberIds ?? []),
+    ...(input.memberPayableShares?.map((row) => row.labourerId) ?? []),
+  ]);
   const exclusions = { otherGroups: 0, labourersOutsideDue: 0, refundedOrVoided: 0, differentFinancialContext: 0, postedAfterSettlementDate: 0, unresolvedOwnership: 0 };
   const eligible = input.candidates.flatMap((candidate) => {
     const availableMinor = Math.max(minor(candidate.originalAmount) - minor(candidate.appliedAmount) - minor(candidate.refundedAmount), 0);
@@ -116,9 +186,18 @@ export function calculateLabourAdvancePool(input: {
       || left.id.localeCompare(right.id);
   });
 
+  let unattributedMinor = Math.max(minor(input.unattributedPooledConsumption), 0);
+  for (const candidate of eligible) {
+    if (unattributedMinor <= 0) break;
+    const consumed = Math.min(candidate.availableMinor, unattributedMinor);
+    candidate.availableMinor -= consumed;
+    unattributedMinor -= consumed;
+  }
+  const openCandidates = eligible.filter((candidate) => candidate.availableMinor > 0);
+
   let groupLevelMinor = 0;
   let memberLevelMinor = 0;
-  for (const candidate of eligible) {
+  for (const candidate of openCandidates) {
     if (candidate.ownership === "GROUP") groupLevelMinor += candidate.availableMinor;
     else memberLevelMinor += candidate.availableMinor;
   }
@@ -127,7 +206,7 @@ export function calculateLabourAdvancePool(input: {
   const requestedMinor = input.requestedAmount == null ? maximumMinor : Math.min(Math.max(minor(input.requestedAmount), 0), maximumMinor);
   let remainingToAllocate = requestedMinor;
   const allocations: LabourAdvancePoolAllocation[] = [];
-  for (const candidate of eligible) {
+  for (const candidate of openCandidates) {
     if (remainingToAllocate <= 0) break;
     const applied = Math.min(candidate.availableMinor, remainingToAllocate);
     if (!applied) continue;
@@ -142,7 +221,7 @@ export function calculateLabourAdvancePool(input: {
   }
   return {
     eligibleTotal: major(eligibleMinor),
-    eligibleOpenCount: eligible.length,
+    eligibleOpenCount: openCandidates.length,
     groupLevelAmount: major(groupLevelMinor),
     memberLevelAmount: major(memberLevelMinor),
     maximumApplicable: major(maximumMinor),

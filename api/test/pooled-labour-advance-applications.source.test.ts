@@ -41,7 +41,7 @@ test("the migration is registered in the deferred migration steps so it actually
 
 test("the settle route persists exactly one pooled application row instead of unrolling per-voucher allocations", async () => {
   const routes = await source("api/src/routes/labour-payments.ts");
-  const settleHandlerMatch = routes.match(/"\/v1\/workspace\/:workspaceId\/labour-payments\/dues\/:dueId\/settle"[\s\S]*?\n {2}\);\n/);
+  const settleHandlerMatch = routes.match(/"\/v1\/workspace\/:workspaceId\/labour-payments\/dues\/:dueId\/settle"[\s\S]*?\r?\n {2}\);\r?\n/);
   assert.ok(settleHandlerMatch, "settle route handler should exist");
   const handler = settleHandlerMatch![0];
 

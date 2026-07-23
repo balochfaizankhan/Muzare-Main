@@ -7,6 +7,7 @@ import {
   auditLogs,
   labourAccountingEntries,
   labourAdvanceApplications,
+  labourAdvanceApplicationSources,
   labourDues,
   labourGroups,
   labourPaymentAllocations,
@@ -425,7 +426,7 @@ function resolveFundingAccount(args: {
 type LabourPaymentAttributionInput = {
   expenses: Array<{ dueId: string; dueNumber: string | null; recipientScope: string | null; recipientName: string; date: string; status: string; amount: number; paidAmount: number; appliedAdvanceAmount: number; active: boolean }>;
   allocations: Array<{ dueId: string; status: string; amount: number | string; voucherId: string }>;
-  applications: Array<{ dueId: string; status: string; amount: number | string; advanceVoucherId: string | null }>;
+  applications: Array<{ dueId: string; status: string; amount: number | string; advanceVoucherId: string | null; sources?: Array<{ advanceVoucherId: string; amount: number | string }> }>;
   voucherById: Map<string, { id: string; voucherNumber: string; voucherDate: string; status: string }>;
   fundingByVoucherId: Map<string, { accountId: string | null; accountName: string | null }>;
   advanceByVoucherId: Map<string, { voucherNumber: string; voucherDate: string; fundingAccountId: string | null; paymentSourceDisplayName?: string | null; fundingAccountName?: string | null }>;
@@ -458,24 +459,31 @@ export function buildLabourPaymentEntries(input: LabourPaymentAttributionInput):
         });
       // A pooled advance application (advanceVoucherId null — see
       // validate_labour_advance_application / the aggregate outstanding pool)
-      // has no single source voucher to attribute to a funding owner, by
-      // design: it may aggregate advances originally funded by several
-      // different accounts. It is excluded here rather than misattributed to
-      // an "unresolved" owner; it still counts toward the due's gross applied
-      // amount above via expense.appliedAdvanceAmount.
+      // may aggregate advances originally funded by several different
+      // accounts. Its persisted source allocations attribute each portion to
+      // the consumed advance's original funding owner. A pooled row that
+      // predates the source ledger has no determinable owner and stays
+      // excluded rather than misattributed to an "unresolved" one; it still
+      // counts toward the due's gross applied amount above via
+      // expense.appliedAdvanceAmount.
       const appliedAdvances: LabourPaymentFundingPart[] = input.applications
-        .filter((row) => row.dueId === expense.dueId && row.status === "ACTIVE" && row.advanceVoucherId)
-        .map((application) => {
-          const source = input.advanceByVoucherId.get(application.advanceVoucherId!);
-          return {
-            voucherId: application.advanceVoucherId!,
-            voucherNumber: source?.voucherNumber ?? null,
-            date: source?.voucherDate ?? expense.date,
-            status: "APPLIED",
-            amount: amount(application.amount),
-            accountId: source?.fundingAccountId ?? null,
-            accountName: source?.paymentSourceDisplayName ?? source?.fundingAccountName ?? unresolvedPaymentSourceLabel,
-          };
+        .filter((row) => row.dueId === expense.dueId && row.status === "ACTIVE")
+        .flatMap((application) => {
+          const sourceRows = application.advanceVoucherId
+            ? [{ advanceVoucherId: application.advanceVoucherId, amount: application.amount }]
+            : application.sources ?? [];
+          return sourceRows.map((allocation) => {
+            const source = input.advanceByVoucherId.get(allocation.advanceVoucherId);
+            return {
+              voucherId: allocation.advanceVoucherId,
+              voucherNumber: source?.voucherNumber ?? null,
+              date: source?.voucherDate ?? expense.date,
+              status: "APPLIED",
+              amount: amount(allocation.amount),
+              accountId: source?.fundingAccountId ?? null,
+              accountName: source?.paymentSourceDisplayName ?? source?.fundingAccountName ?? unresolvedPaymentSourceLabel,
+            };
+          });
         });
       return {
         dueId: expense.dueId,
@@ -874,7 +882,7 @@ async function loadLabourFinancialReadModelUncached(input: { workspaceId: string
   // Reuses the exact same canonical selector as GET /labour-payments/dues (the Due Payments
   // page) so this card's totals can never independently drift from what that page shows.
   const openLabourDuesPromise = db.transaction((tx) => loadOpenLabourDues(tx, input));
-  const [scopeAccounts, transactions, vouchers, dues, applications, allocations, journal, logs, userRows, labourerRows, groupRows] = await Promise.all([
+  const [scopeAccounts, transactions, vouchers, dues, applications, allocations, journal, logs, userRows, labourerRows, groupRows, applicationSourceRows] = await Promise.all([
     db.select().from(accounts).where(eq(accounts.farmId, input.farmId)),
     db.select().from(accountTransactions).where(and(eq(accountTransactions.farmId, input.farmId), eq(accountTransactions.seasonId, input.seasonId))),
     db.select().from(labourPaymentVouchers).where(and(eq(labourPaymentVouchers.workspaceId, input.workspaceId), eq(labourPaymentVouchers.farmId, input.farmId), eq(labourPaymentVouchers.seasonId, input.seasonId))),
@@ -886,9 +894,19 @@ async function loadLabourFinancialReadModelUncached(input: { workspaceId: string
     db.select({ id: users.id, displayName: users.displayName, email: users.email }).from(users),
     db.select().from(labourers),
     db.select().from(labourGroups),
+    db.select().from(labourAdvanceApplicationSources).where(eq(labourAdvanceApplicationSources.workspaceId, input.workspaceId)),
   ]);
   const dueIds = new Set(dues.map((row) => row.id));
   const scopedApplications = applications.filter((row) => dueIds.has(row.dueId));
+  // Persisted per-voucher source allocations of pooled applications — each
+  // pooled amount is attributed back to the original funding owners of the
+  // advances it consumed.
+  const applicationSourcesByApplicationId = new Map<string, Array<{ advanceVoucherId: string; amount: number }>>();
+  for (const row of applicationSourceRows.sort((left, right) => left.allocationOrder - right.allocationOrder)) {
+    const list = applicationSourcesByApplicationId.get(row.applicationId) ?? [];
+    list.push({ advanceVoucherId: row.advanceVoucherId, amount: amount(row.amount) });
+    applicationSourcesByApplicationId.set(row.applicationId, list);
+  }
   const scopedAllocations = allocations.filter((row) => dueIds.has(row.dueId));
   const accountById = new Map(scopeAccounts.map((row) => [row.id, row]));
   const voucherById = new Map(vouchers.map((row) => [row.id, row]));
@@ -1128,19 +1146,34 @@ async function loadLabourFinancialReadModelUncached(input: { workspaceId: string
           : "PARTIALLY_REVERSED";
       const displayNumber = matchingParentVoucher?.voucherNumber ?? aggregateApplicationVoucherNumber(row.id);
       const settlementSummary = asSnapshot(details.settlementSummary);
-      const fundingSources = groupFundingSources(childApplications.map((application) => {
+      const fundingSources = groupFundingSources(childApplications.flatMap((application) => {
         if (!application.advanceVoucherId) {
-          // A pooled application has no single funding voucher by design —
-          // valid and non-cash, not "unresolved".
-          return { accountId: null, accountName: pooledNonCashAttributionLabel, accountType: "pooled_non_cash", amount: amount(application.amount) };
+          // A pooled application draws from several historical vouchers. Its
+          // persisted source allocations attribute each portion back to the
+          // advance's original funding owner; a pooled row that predates the
+          // source ledger stays in its own non-cash category — valid, not
+          // "unresolved".
+          const sourceAllocations = applicationSourcesByApplicationId.get(application.id) ?? [];
+          if (!sourceAllocations.length) {
+            return [{ accountId: null, accountName: pooledNonCashAttributionLabel, accountType: "pooled_non_cash", amount: amount(application.amount) }];
+          }
+          return sourceAllocations.map((allocation) => {
+            const source = advanceByVoucherId.get(allocation.advanceVoucherId);
+            return {
+              accountId: source?.fundingAccountId ?? null,
+              accountName: source?.paymentSourceDisplayName ?? source?.fundingAccountName ?? unresolvedPaymentSourceLabel,
+              accountType: source?.paymentSourceType ?? source?.fundingType ?? null,
+              amount: allocation.amount,
+            };
+          });
         }
         const source = advanceByVoucherId.get(application.advanceVoucherId);
-        return {
+        return [{
           accountId: source?.fundingAccountId ?? null,
           accountName: source?.paymentSourceDisplayName ?? source?.fundingAccountName ?? unresolvedPaymentSourceLabel,
           accountType: source?.paymentSourceType ?? source?.fundingType ?? null,
           amount: amount(application.amount),
-        };
+        }];
       }));
       return {
         id: row.id,
@@ -1296,19 +1329,35 @@ async function loadLabourFinancialReadModelUncached(input: { workspaceId: string
         });
       }
       for (const application of scopedApplications.filter((row) => row.dueId === expense.dueId && row.status === "ACTIVE")) {
-        // A pooled application (advanceVoucherId null) has no single funding
-        // voucher by design — it may draw from several accounts. It is
-        // valid and non-cash, not "unresolved"; label it as its own
-        // non-cash category rather than misattributing or flagging it.
+        // A pooled application (advanceVoucherId null) may draw from several
+        // accounts. Its persisted source allocations attribute each portion
+        // to the consumed advance's original funding owner; a pooled row that
+        // predates the source ledger stays in its own non-cash category —
+        // valid, not "unresolved".
         if (!application.advanceVoucherId) {
-          parts.push({
-            id: `${expense.id}:advance:${application.id}`,
-            settlementType: "APPLIED_ADVANCE",
-            accountId: null,
-            accountName: pooledNonCashAttributionLabel,
-            accountType: "pooled_non_cash",
-            amount: amount(application.amount), voucherId: null, advanceApplicationId: application.id,
-          });
+          const sourceAllocations = applicationSourcesByApplicationId.get(application.id) ?? [];
+          if (!sourceAllocations.length) {
+            parts.push({
+              id: `${expense.id}:advance:${application.id}`,
+              settlementType: "APPLIED_ADVANCE",
+              accountId: null,
+              accountName: pooledNonCashAttributionLabel,
+              accountType: "pooled_non_cash",
+              amount: amount(application.amount), voucherId: null, advanceApplicationId: application.id,
+            });
+            continue;
+          }
+          for (const allocation of sourceAllocations) {
+            const source = advanceByVoucherId.get(allocation.advanceVoucherId);
+            parts.push({
+              id: `${expense.id}:advance:${application.id}:${allocation.advanceVoucherId}`,
+              settlementType: "APPLIED_ADVANCE",
+              accountId: source?.fundingAccountId ?? null,
+              accountName: source?.paymentSourceDisplayName ?? source?.fundingAccountName ?? unresolvedPaymentSourceLabel,
+              accountType: source?.paymentSourceType ?? source?.fundingType ?? null,
+              amount: allocation.amount, voucherId: allocation.advanceVoucherId, advanceApplicationId: application.id,
+            });
+          }
           continue;
         }
         const source = advanceByVoucherId.get(application.advanceVoucherId);
@@ -1329,7 +1378,7 @@ async function loadLabourFinancialReadModelUncached(input: { workspaceId: string
   const labourPaymentEntries = buildLabourPaymentEntries({
     expenses,
     allocations: scopedAllocations,
-    applications: scopedApplications,
+    applications: scopedApplications.map((row) => ({ ...row, sources: applicationSourcesByApplicationId.get(row.id) })),
     voucherById,
     fundingByVoucherId: resolvedFundingByVoucherId,
     advanceByVoucherId,

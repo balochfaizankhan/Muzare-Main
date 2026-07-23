@@ -4,14 +4,20 @@ import test from "node:test";
 
 const route = readFileSync(new URL("../src/routes/labour-payments.ts", import.meta.url), "utf8");
 const ui = readFileSync(new URL("../../web/src/pages/workspace/WorkforcePayments.tsx", import.meta.url), "utf8");
+const i18n = readFileSync(new URL("../../web/src/i18n.ts", import.meta.url), "utf8");
 
 test("review uses a narrow aggregate endpoint and lazy allocation details", () => {
   assert.match(route, /dues\/:dueId\/advance-pool/);
   assert.match(route, /query\.data\.amount == null \? undefined/);
-  assert.match(ui, /Total available for this due/);
-  assert.match(ui, /View allocation details/);
-  assert.match(ui, /Why are some advances excluded\?/);
-  assert.match(ui, /regardless of the Labour Due work period/);
+  // The review dialog is fully localized; the copy lives in the i18n catalog
+  // and the dialog references it by key.
+  assert.match(ui, /reviewSettle\.totalAvailableForDue/);
+  assert.match(ui, /reviewSettle\.viewAllocationDetails/);
+  assert.match(ui, /reviewSettle\.whyExcluded/);
+  assert.match(i18n, /"totalAvailableForDue": "Total available for this due"/);
+  assert.match(i18n, /"viewAllocationDetails": "View allocation details"/);
+  assert.match(i18n, /"whyExcluded": "Why are some advances excluded\?"/);
+  assert.match(i18n, /regardless of the Labour Due work period/);
   assert.doesNotMatch(ui.slice(ui.indexOf("function ReviewSettleDialog")), /fetchAllLabourPaymentAdvances/);
   assert.doesNotMatch(ui.slice(ui.indexOf("function ReviewSettleDialog")), /advanceValues/);
 });

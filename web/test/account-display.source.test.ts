@@ -6,6 +6,6 @@ const modulePage = readFileSync(new URL("../src/pages/ModulePage.tsx", import.me
 
 test("accounts page renders canonical display accounts instead of raw duplicate partner rows", () => {
   assert.match(modulePage, /buildCanonicalDisplayAccounts\(accounts, accountLookup, canonicalAccountsFinancials\?\.partnerPositions \?\? \[\]\)/);
-  assert.match(modulePage, /displayAccounts\.map\(\(\{ id, account \}\) =>/);
+  assert.match(modulePage, /displayAccounts\.map\(\(\{ id, account(?:, canonicalAccountId)? \}\) =>/);
   assert.doesNotMatch(modulePage, /<div className="account-grid">\s*\{accounts\.map\(/);
 });

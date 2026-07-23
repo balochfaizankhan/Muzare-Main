@@ -9,6 +9,7 @@ import {
   accounts,
   auditLogs,
   labourAdvanceApplications,
+  labourAdvanceApplicationSources,
   labourAccountingEntries,
   labourDueAttendanceSources,
   labourDueMemberSnapshots,
@@ -34,6 +35,7 @@ import {
   postLabourDueRecognition,
   postLabourVoucherJournal,
   refreshLabourDuePaymentStatus,
+  resolveDueEligibleMembers,
   reverseLabourJournal,
   type LabourRecipientScope,
 } from "../lib/labour-payments.js";
@@ -329,6 +331,29 @@ function dueMemberPayableShares(due: typeof labourDues.$inferSelect) {
   });
 }
 
+/**
+ * Frozen due-time membership for a labour due: labour_due_member_snapshots
+ * rows unioned with the membership evidence preserved in the recipient
+ * snapshot (see resolveDueEligibleMembers). Shared by the pool preview, the
+ * settlement posting pre-check, and the per-voucher scope check so all three
+ * apply the exact same eligibility, mirroring labour_advance_matches_due_scope
+ * in PostgreSQL.
+ */
+async function loadDueEligibleMembership(tx: DbTransaction, due: typeof labourDues.$inferSelect) {
+  if (due.recipientScope !== "LABOUR_GROUP") {
+    return resolveDueEligibleMembers({ recipientScope: due.recipientScope, recipientSnapshot: due.recipientSnapshot });
+  }
+  const snapshotRows = await tx.select({ labourerId: labourDueMemberSnapshots.labourerId }).from(labourDueMemberSnapshots).where(and(
+    eq(labourDueMemberSnapshots.workspaceId, due.workspaceId),
+    eq(labourDueMemberSnapshots.dueId, due.id),
+  ));
+  return resolveDueEligibleMembers({
+    recipientScope: due.recipientScope,
+    recipientSnapshot: due.recipientSnapshot,
+    memberSnapshotLabourerIds: snapshotRows.map((row) => row.labourerId),
+  });
+}
+
 async function loadDueAdvancePool(tx: DbTransaction, due: typeof labourDues.$inferSelect, requestedAmount?: number, settlementDate?: string) {
   const candidates = await tx.select({
     id: labourPaymentVouchers.id,
@@ -340,7 +365,11 @@ async function loadDueAdvancePool(tx: DbTransaction, due: typeof labourDues.$inf
     labourGroupId: labourPaymentVouchers.labourGroupId,
     recipientSnapshot: labourPaymentVouchers.recipientSnapshot,
     originalAmount: labourPaymentVouchers.paymentAmount,
-    appliedAmount: sql<number>`coalesce((select sum(a.amount) from labour_advance_applications a where a.advance_voucher_id = ${labourPaymentVouchers.id} and a.status = 'ACTIVE'), 0)::numeric`,
+    // Per-voucher consumption counts both direct per-voucher applications and
+    // the persisted source allocations of ACTIVE pooled applications, exactly
+    // as validate_labour_advance_application does.
+    appliedAmount: sql<number>`(coalesce((select sum(a.amount) from labour_advance_applications a where a.advance_voucher_id = ${labourPaymentVouchers.id} and a.status = 'ACTIVE'), 0)
+      + coalesce((select sum(s.amount) from labour_advance_application_sources s join labour_advance_applications p on p.id = s.application_id where s.advance_voucher_id = ${labourPaymentVouchers.id} and p.status = 'ACTIVE'), 0))::numeric`,
     refundedAmount: sql<number>`coalesce((select sum(r.payment_amount) from labour_payment_vouchers r where r.related_advance_voucher_id = ${labourPaymentVouchers.id} and r.nature = 'REFUND_RECOVERY' and r.status = 'POSTED'), 0)::numeric`,
     appliedToDueAmount: sql<number>`coalesce((select sum(a.amount) from labour_advance_applications a where a.advance_voucher_id = ${labourPaymentVouchers.id} and a.due_id = ${due.id} and a.status = 'ACTIVE'), 0)::numeric`,
   }).from(labourPaymentVouchers).where(and(
@@ -374,16 +403,39 @@ async function loadDueAdvancePool(tx: DbTransaction, due: typeof labourDues.$inf
       appliedToDueAmount: Number(row.appliedToDueAmount),
     };
   });
+  const membership = await loadDueEligibleMembership(tx, due);
+  // Pooled applications that predate the per-voucher source-allocation ledger
+  // still consume this financial scope's pool but cannot be attributed to any
+  // single voucher; subtract them the same way the database guard does.
+  const unattributedPooled = await tx.execute(sql`
+    SELECT coalesce(sum(p.amount), 0) AS total
+    FROM labour_advance_applications p
+    JOIN labour_dues scope_due ON scope_due.id = p.due_id
+    WHERE p.workspace_id = ${due.workspaceId}
+      AND p.advance_voucher_id IS NULL
+      AND p.status = 'ACTIVE'
+      AND scope_due.financial_scope_key = ${due.financialScopeKey}
+      AND NOT EXISTS (SELECT 1 FROM labour_advance_application_sources s WHERE s.application_id = p.id)
+  `);
   const pool = calculateLabourAdvancePool({
     dueFinancialScopeKey: due.financialScopeKey,
     dueOutstandingAmount: (await loadLabourDuePosition(tx, due.id))?.outstandingBalance ?? 0,
     settlementDate,
     memberPayableShares: due.recipientScope === "LABOUR_GROUP" ? dueMemberPayableShares(due) : [],
+    eligibleMemberIds: membership.memberIds,
     candidates: normalized,
     requestedAmount,
+    unattributedPooledConsumption: Number((unattributedPooled.rows[0] as { total?: unknown } | undefined)?.total ?? 0),
   });
   const globalOutstanding = normalized.reduce((sum, row) => sum + Math.max(row.originalAmount - row.appliedAmount - row.refundedAmount, 0), 0);
-  return { ...pool, globalOutstanding: Number(globalOutstanding.toFixed(2)) };
+  return {
+    ...pool,
+    globalOutstanding: Number(globalOutstanding.toFixed(2)),
+    // A group due whose frozen membership cannot be proved from any preserved
+    // source must be surfaced for reconciliation review, never silently
+    // guessed from live group membership.
+    membershipReviewRequired: due.recipientScope === "LABOUR_GROUP" && !membership.hasMembershipEvidence,
+  };
 }
 
 async function validateContext(
@@ -1426,6 +1478,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           allocationPreviewVersion: pool.allocationPreviewVersion,
           proposedAllocationCount: pool.allocations.length,
           exclusionTotals: pool.exclusionTotals,
+          membershipReviewRequired: pool.membershipReviewRequired,
         },
         ...(details ? { details, pageInfo: { page: query.data.page, pageSize: query.data.pageSize, totalCount: pool.allocations.length, hasMore: start + query.data.pageSize < pool.allocations.length } } : {}),
       };
@@ -1532,6 +1585,22 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               status: "ACTIVE",
             }).returning();
             pooledApplication = inserted!;
+            // Persist which historical advance vouchers this pooled amount was
+            // drawn from (the same deterministic FIFO plan the preview showed),
+            // preserving the original funding owner of every consumed advance.
+            // The database trigger remains the sole authority for aggregate
+            // sufficiency; these rows only record the attribution.
+            persistence.operation = "advance_application_source_allocations";
+            const sourceAllocations = aggregatePlan.allocations.filter((allocation) => allocation.proposedAmount > 0.0049);
+            if (sourceAllocations.length) {
+              await tx.insert(labourAdvanceApplicationSources).values(sourceAllocations.map((allocation) => ({
+                workspaceId,
+                applicationId: pooledApplication!.id,
+                advanceVoucherId: allocation.id,
+                amount: allocation.proposedAmount.toFixed(2),
+                allocationOrder: allocation.allocationOrder,
+              })));
+            }
             persistence.operation = "advance_application_accounting";
             await postLabourAdvanceApplicationJournals(tx, {
               workspaceId, farmId: input.farmId, seasonId: input.seasonId, actorId: request.appUser!.id,
@@ -1539,7 +1608,10 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             });
             position = (await loadLabourDuePosition(tx, dueId))!;
           }
-          const memberIds = new Set(dueMemberPayableShares(position.due).map((row) => row.labourerId));
+          // Frozen due-time membership — the same eligibility the pool preview
+          // and the database guard apply, so a member advance accepted by the
+          // preview is never rejected here.
+          const memberIds = new Set((await loadDueEligibleMembership(tx, position.due)).memberIds);
           for (const application of input.advancePool ? [] : requestedApplications) {
             const [existingApplication] = await tx
               .select()

@@ -802,6 +802,29 @@ export const labourAdvanceApplications = pgTable(
   (table) => [unique("labour_advance_applications_workspace_idempotency_key").on(table.workspaceId, table.idempotencyKey)],
 );
 
+export const labourAdvanceApplicationSources = pgTable(
+  "labour_advance_application_sources",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+    // The canonical pooled application row this allocation belongs to. The
+    // rows follow the application's lifecycle: consumption queries join on
+    // the application's status, so reversing the application restores the
+    // exact per-voucher availability while the allocation stays on record.
+    applicationId: uuid("application_id").references(() => labourAdvanceApplications.id, { onDelete: "cascade" }).notNull(),
+    // The historical advance voucher this portion was drawn from — preserves
+    // the original funding owner (partner/cash account) of every consumed
+    // advance in a pooled application.
+    advanceVoucherId: uuid("advance_voucher_id").references(() => labourPaymentVouchers.id, { onDelete: "restrict" }).notNull(),
+    amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+    allocationOrder: integer("allocation_order").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("labour_advance_application_sources_app_voucher_uidx").on(table.applicationId, table.advanceVoucherId),
+  ],
+);
+
 export const labourAccountingEntries = pgTable(
   "labour_accounting_entries",
   {
