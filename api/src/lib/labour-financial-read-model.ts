@@ -19,6 +19,7 @@ import {
 import { resolveAccountIdentity, type AccountIdentityLike } from "./account-identity.js";
 import { legacyAdvancePosition, mergeAdvancePositions, type LegacyAdvanceReadRow } from "./labour-advance-read-model.js";
 import { attributeLabourExpense, fundingAttributionTotal, groupFundingSources, type ExpenseAttributionRow } from "./labour-funding-attribution.js";
+import { loadOpenLabourDues, summarizeOpenLabourDues } from "./labour-payments.js";
 
 const amount = (value: unknown) => Number(Number(value ?? 0).toFixed(2));
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -870,6 +871,9 @@ export function loadLabourFinancialReadModel(input: { workspaceId: string; farmI
 }
 
 async function loadLabourFinancialReadModelUncached(input: { workspaceId: string; farmId: string; seasonId: string }) {
+  // Reuses the exact same canonical selector as GET /labour-payments/dues (the Due Payments
+  // page) so this card's totals can never independently drift from what that page shows.
+  const openLabourDuesPromise = db.transaction((tx) => loadOpenLabourDues(tx, input));
   const [scopeAccounts, transactions, vouchers, dues, applications, allocations, journal, logs, userRows, labourerRows, groupRows] = await Promise.all([
     db.select().from(accounts).where(eq(accounts.farmId, input.farmId)),
     db.select().from(accountTransactions).where(and(eq(accountTransactions.farmId, input.farmId), eq(accountTransactions.seasonId, input.seasonId))),
@@ -1359,6 +1363,11 @@ async function loadLabourFinancialReadModelUncached(input: { workspaceId: string
     CASH_CONTROL: amount(canonicalJournalEvents.reduce((sum, event) => sum - event.cashControlEffect, 0)),
     PARTNER_PAYABLE: amount(canonicalJournalEvents.reduce((sum, event) => sum - event.partnerEffect, 0)),
   };
+  // Canonical Labour Payments Due totals — same selector as the Due Payments page (see
+  // loadOpenLabourDues), so this always reconciles exactly with what that page shows. This is
+  // deliberately not derived from `currentLedger.LABOUR_PAYABLE` above, which excludes legacy
+  // dues and skips the settlement-source-active check the Due Payments page itself applies.
+  const labourPaymentsDue = summarizeOpenLabourDues(await openLabourDuesPromise);
   return {
     scope: input,
     accountEntries,
@@ -1371,6 +1380,7 @@ async function loadLabourFinancialReadModelUncached(input: { workspaceId: string
     labourPaymentEntries,
     activity,
     currentLedger,
+    labourPaymentsDue,
     advancePositions,
     replacedLegacySourceIds: [...new Set([
       ...vouchers.flatMap((voucher) => [voucher.sourceId, voucher.legacySourceRecordId]),

@@ -15,6 +15,9 @@ const settled = (overrides: Partial<DashboardFinancialSnapshot> = {}): Dashboard
   cashBalance: 102330,
   totalExpenses: 653619,
   outstandingLabourAdvances: 22263,
+  outstandingLabourPayments: 45000,
+  outstandingLabourPaymentsCount: 3,
+  overdueLabourPaymentsCount: 1,
   ...overrides,
 });
 
@@ -30,6 +33,9 @@ test("dashboard financial snapshot keeps the last settled values until canonical
       cashBalance: 0,
       totalExpenses: 385046,
       outstandingLabourAdvances: 150198,
+      outstandingLabourPayments: 90000,
+      outstandingLabourPaymentsCount: 5,
+      overdueLabourPaymentsCount: 2,
       inputVersion: "partial",
     },
   });
@@ -41,6 +47,9 @@ test("local-first then canonical-second and canonical-first then local-second co
     cashBalance: 102330,
     totalExpenses: 653619,
     outstandingLabourAdvances: 22263,
+    outstandingLabourPayments: 45000,
+    outstandingLabourPaymentsCount: 3,
+    overdueLabourPaymentsCount: 1,
     inputVersion: "accounts:expenses:labour",
   };
   const localFirst = settleDashboardFinancialSnapshot({
@@ -53,6 +62,9 @@ test("local-first then canonical-second and canonical-first then local-second co
       cashBalance: 0,
       totalExpenses: 385046,
       outstandingLabourAdvances: 150198,
+      outstandingLabourPayments: 90000,
+      outstandingLabourPaymentsCount: 5,
+      overdueLabourPaymentsCount: 2,
       inputVersion: "partial",
     },
   });
@@ -81,6 +93,9 @@ test("local-first then canonical-second and canonical-first then local-second co
       cashBalance: 0,
       totalExpenses: 385046,
       outstandingLabourAdvances: 150198,
+      outstandingLabourPayments: 90000,
+      outstandingLabourPaymentsCount: 5,
+      overdueLabourPaymentsCount: 2,
       inputVersion: "late-partial",
     },
   });

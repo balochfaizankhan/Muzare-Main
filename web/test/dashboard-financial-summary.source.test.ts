@@ -24,7 +24,10 @@ test("dashboard ignores mid-sync local churn and stale scope responses", () => {
   assert.doesNotMatch(dashboard, /window\.addEventListener\("muzare-local-data-change", scheduleDashboardRefresh\)/);
   assert.match(dashboard, /if \(requestId !== dashboardSnapshotSequence\.current \|\| financialScopeKeyRef\.current !== scopeKey\) return/);
   assert.match(helper, /if \(!input\.canonicalReady\)/);
-  assert.match(dashboard, /Updating balance\.\.\./);
+  // The Cash Balance card was replaced by the Labour Payments Due card (see
+  // dashboard-labour-payments-due.source.test.ts); it shows a skeleton instead of a "Updating..."
+  // string while its snapshot isn't ready yet.
+  assert.match(dashboard, /dashboard-kpi-card__skeleton--amount/);
 });
 
 test("dashboard waits for an exact workspace, farm, and season context before loading cards and exposes retry on failure", () => {

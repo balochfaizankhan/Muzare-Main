@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import {
   labourAdvanceApplications,
@@ -371,6 +371,74 @@ export async function loadLabourDuePosition(tx: DbTransaction, dueId: string) {
   return {
     due,
     ...position,
+  };
+}
+
+/** Statuses treated as "open" (unpaid or partially paid) across the Due Payments page and the dashboard. */
+export const OPEN_LABOUR_DUE_PAYMENT_STATUSES = ["UNPAID", "PARTIALLY_SETTLED", "ON_HOLD"] as const;
+
+// There is no due-date field on labour_dues yet, so "overdue" is defined relative to the end of
+// the work period it covers (workToDate) plus a grace period, rather than a stored due date.
+export const LABOUR_PAYMENT_OVERDUE_GRACE_DAYS = 7;
+
+export function isLabourDueOverdue(workToDate: string | Date, referenceDate: Date = new Date()) {
+  const overdueAt = new Date(workToDate);
+  overdueAt.setUTCDate(overdueAt.getUTCDate() + LABOUR_PAYMENT_OVERDUE_GRACE_DAYS);
+  return referenceDate.getTime() > overdueAt.getTime();
+}
+
+export type OpenLabourDuePosition = NonNullable<Awaited<ReturnType<typeof loadLabourDuePosition>>>;
+
+/**
+ * Canonical set of open labour dues (unpaid/partially paid/on-hold, with an active settlement
+ * source) for a workspace/farm/season. This mirrors exactly the default (unpaginated, unfiltered)
+ * query behind GET /labour-payments/dues, which backs the Due Payments page, so any aggregate
+ * computed from this list — including the dashboard's Labour Payments Due card — reconciles
+ * exactly with what that page shows.
+ */
+export async function loadOpenLabourDues(tx: DbTransaction, params: { workspaceId: string; farmId: string; seasonId: string }): Promise<OpenLabourDuePosition[]> {
+  const rows = await tx.select().from(labourDues).where(and(
+    eq(labourDues.workspaceId, params.workspaceId),
+    eq(labourDues.farmId, params.farmId),
+    eq(labourDues.seasonId, params.seasonId),
+    inArray(labourDues.paymentStatus, OPEN_LABOUR_DUE_PAYMENT_STATUSES),
+  )).orderBy(desc(labourDues.createdAt));
+  const settlementSourceIds = rows
+    .filter((row) => row.origin === "SETTLEMENT")
+    .map((row) => row.sourceRecordId)
+    .filter((value): value is string => Boolean(value));
+  const validSettlementSources = settlementSourceIds.length
+    ? await tx.select({ id: operationalRecords.id, payload: operationalRecords.payload }).from(operationalRecords).where(and(
+        eq(operationalRecords.workspaceId, params.workspaceId),
+        eq(operationalRecords.entityType, "labourWageSettlement"),
+        inArray(operationalRecords.id, settlementSourceIds),
+      ))
+    : [];
+  const activeSettlementSourceIds = new Set(
+    validSettlementSources
+      .filter((row) => !row.payload.deletedAt && !["voided", "deleted", "reversed"].includes(String(row.payload.status ?? "").toLowerCase()))
+      .map((row) => row.id),
+  );
+  const validRows = rows.filter((row) => row.origin !== "SETTLEMENT"
+    || (!row.legacy && !row.sourceRecordId)
+    || (Boolean(row.sourceRecordId) && activeSettlementSourceIds.has(row.sourceRecordId!)));
+  const positions = await Promise.all(validRows.map((row) => loadLabourDuePosition(tx, row.id)));
+  return positions.filter((position): position is OpenLabourDuePosition => Boolean(position));
+}
+
+/**
+ * Aggregate totals for the open labour dues list — shared by the Due Payments page and the
+ * dashboard's Labour Payments Due card so the two numbers can never independently drift.
+ * Only dues with a live outstanding balance (> 0) count toward the total/counts, so a due whose
+ * persisted status hasn't been refreshed yet (e.g. immediately after a payment) is still excluded
+ * once it is actually settled.
+ */
+export function summarizeOpenLabourDues(positions: OpenLabourDuePosition[], referenceDate: Date = new Date()) {
+  const outstanding = positions.filter((position) => position.outstandingBalance > 0.005);
+  return {
+    totalOutstanding: amount(outstanding.reduce((sum, position) => sum + position.outstandingBalance, 0)),
+    outstandingCount: outstanding.length,
+    overdueCount: outstanding.filter((position) => isLabourDueOverdue(position.due.workToDate, referenceDate)).length,
   };
 }
 

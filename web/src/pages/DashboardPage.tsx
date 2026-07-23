@@ -7,6 +7,7 @@ import {
   CircleUserRound,
   ClipboardList,
   ChevronRight,
+  ClockAlert,
   HandCoins,
   Leaf,
   ReceiptText,
@@ -46,6 +47,9 @@ type DashboardTotals = {
   totalExpenses: number;
   cashBalance: number;
   partnerBalance: number;
+  outstandingLabourPayments: number;
+  outstandingLabourPaymentsCount: number;
+  overdueLabourPaymentsCount: number;
 };
 type DashboardScope = {
   workspaceId: string;
@@ -87,6 +91,9 @@ export function DashboardPage() {
     totalExpenses: 0,
     cashBalance: 0,
     partnerBalance: 0,
+    outstandingLabourPayments: 0,
+    outstandingLabourPaymentsCount: 0,
+    overdueLabourPaymentsCount: 0,
   };
   const query = useQuery({
     queryKey: ["bootstrap", user?.workspaceId],
@@ -246,6 +253,12 @@ export function DashboardPage() {
         ),
         totalExpenses: generalExpenseVouchers.reduce((sum, item) => sum + item.amount, 0) + (canonicalFinancials.data?.summary.wageExpense ?? 0),
         outstandingLabourAdvances: canonicalFinancials.data?.summary.outstandingAdvance ?? 0,
+        // Falls back to the last reconciled value (not 0) when the canonical read model hasn't
+        // loaded yet — e.g. a fresh offline app open — so the Labour Payments Due card never
+        // flashes a zero it hasn't actually verified. See settleDashboardFinancialSnapshot.
+        outstandingLabourPayments: canonicalFinancials.data?.labourPaymentsDue?.totalOutstanding ?? financialSnapshotRef.current?.outstandingLabourPayments ?? 0,
+        outstandingLabourPaymentsCount: canonicalFinancials.data?.labourPaymentsDue?.outstandingCount ?? financialSnapshotRef.current?.outstandingLabourPaymentsCount ?? 0,
+        overdueLabourPaymentsCount: canonicalFinancials.data?.labourPaymentsDue?.overdueCount ?? financialSnapshotRef.current?.overdueLabourPaymentsCount ?? 0,
         inputVersion: `${activeAccounts.length}:${activeSales.length}:${generalExpenseVouchers.length}:${activeAdvances.length}:${activeEntries.length}:${activeSettlements.length}`,
       },
     });
@@ -282,6 +295,9 @@ export function DashboardPage() {
       totalExpenses: settledFinancialSnapshot?.totalExpenses ?? 0,
       cashBalance: settledFinancialSnapshot?.cashBalance ?? 0,
       partnerBalance,
+      outstandingLabourPayments: settledFinancialSnapshot?.outstandingLabourPayments ?? 0,
+      outstandingLabourPaymentsCount: settledFinancialSnapshot?.outstandingLabourPaymentsCount ?? 0,
+      overdueLabourPaymentsCount: settledFinancialSnapshot?.overdueLabourPaymentsCount ?? 0,
     });
 
     setActivities(recentActivities.slice(0, 5));
@@ -388,15 +404,21 @@ export function DashboardPage() {
   const attendanceTodayLabel = hydrationPending || dashboardLoading ? "--" : `${totalsValue.attendanceMarkedToday} labour today`;
   const dispatchTodayLabel = hydrationPending || dashboardLoading ? "--" : `${totalsValue.dispatchesToday} today`;
 
+  // Labour Payments Due card: has its own snapshot-aware states (skeleton/error/offline) below,
+  // rendered separately from the generic summaryCards map so it can show a retry action and an
+  // overdue badge without special-casing the shared card loop.
+  const labourPaymentsDueHasSnapshot = Boolean(financialSnapshot);
+  const labourPaymentsDueSkeleton = !metricsReady && !labourPaymentsDueHasSnapshot;
+  const labourPaymentsDueLoadFailed = Boolean(dashboardLoadError) && !labourPaymentsDueHasSnapshot;
+  const outstandingLabourPaymentsCount = totalsValue.outstandingLabourPaymentsCount;
+  const overdueLabourPaymentsCount = totalsValue.overdueLabourPaymentsCount;
+  const labourPaymentsDueSupportingText = outstandingLabourPaymentsCount <= 0
+    ? t("dashboard.noOutstandingPayments")
+    : overdueLabourPaymentsCount > 0
+      ? `${t("dashboard.paymentDue", { count: outstandingLabourPaymentsCount })} · ${t("dashboard.overdue", { count: overdueLabourPaymentsCount })}`
+      : t("dashboard.paymentDue", { count: outstandingLabourPaymentsCount });
+
   const summaryCards = [
-    {
-      label: "Cash Balance",
-      value: metricsReady ? moneyWhole(totalsValue.cashBalance) : "—",
-      icon: Wallet,
-      path: "/workspace/accounts",
-      tone: totalsValue.cashBalance >= 0 ? "green" : "orange",
-      detail: hasOperationalContext ? (metricsReady ? "Current cash-account balance" : (dashboardLoadError ? "Balance failed to load. Retry." : "Updating balance...")) : "Requires a farm and season",
-    },
     {
       label: "Total Expenses",
       value: metricsReady ? moneyWhole(totalsValue.totalExpenses) : "—",
@@ -564,6 +586,50 @@ export function DashboardPage() {
         </section>
 
         <section className="dashboard-kpi-grid" aria-label="Key performance indicators">
+          {!hasOperationalContext ? (
+            <div className="dashboard-kpi-card dashboard-kpi-card--amber dashboard-kpi-card--disabled" aria-disabled="true">
+              <div className="dashboard-kpi-card__icon"><ClockAlert size={18} /></div>
+              <span>{t("dashboard.labourPaymentsDue")}</span>
+              <strong>{hydrationPending ? "..." : "--"}</strong>
+              <small>{hydrationPending ? "Preparing workspace data" : "Requires a farm and season"}</small>
+            </div>
+          ) : labourPaymentsDueLoadFailed ? (
+            <div className="dashboard-kpi-card dashboard-kpi-card--amber dashboard-kpi-card--error" role="alert">
+              <div className="dashboard-kpi-card__icon"><ClockAlert size={18} /></div>
+              <span>{t("dashboard.labourPaymentsDue")}</span>
+              <strong className="dashboard-kpi-card__error-text">{t("dashboard.unableToLoad")}</strong>
+              <button type="button" className="dashboard-kpi-card__retry" onClick={retryDashboardLoad} disabled={dashboardLoading}>
+                {t("dashboard.retry")}
+              </button>
+            </div>
+          ) : (
+            <Link
+              className={`dashboard-kpi-card dashboard-kpi-card--amber${overdueLabourPaymentsCount > 0 ? " dashboard-kpi-card--has-overdue" : ""}`}
+              to="/workspace/labour-payments/overview"
+            >
+              <div className="dashboard-kpi-card__header">
+                <div className="dashboard-kpi-card__icon"><ClockAlert size={18} /></div>
+                {!labourPaymentsDueSkeleton && overdueLabourPaymentsCount > 0 && (
+                  <span className="dashboard-kpi-card__overdue-badge">{t("dashboard.overdueBadge")}</span>
+                )}
+              </div>
+              <span>{t("dashboard.labourPaymentsDue")}</span>
+              {labourPaymentsDueSkeleton ? (
+                <>
+                  <span className="dashboard-kpi-card__skeleton dashboard-kpi-card__skeleton--amount" aria-hidden="true" />
+                  <span className="dashboard-kpi-card__skeleton dashboard-kpi-card__skeleton--detail" aria-hidden="true" />
+                </>
+              ) : (
+                <>
+                  <strong>{moneyWhole(totalsValue.outstandingLabourPayments)}</strong>
+                  <small>
+                    {labourPaymentsDueSupportingText}
+                    {sync.status === "offline" && <span className="dashboard-kpi-card__stale-hint"> · {t("dashboard.offlineLastSynced")}</span>}
+                  </small>
+                </>
+              )}
+            </Link>
+          )}
           {summaryCards.map(({ label, value, path, icon: Icon, tone, detail }) => hasOperationalContext ? (
             <Link className={`dashboard-kpi-card dashboard-kpi-card--${tone}`} to={path} key={label}>
               <div className="dashboard-kpi-card__icon"><Icon size={18} /></div>

@@ -28,6 +28,7 @@ import {
   calculateAdvancePosition,
   labourFinancialScopeKey,
   loadLabourDuePosition,
+  loadOpenLabourDues,
   postLabourAdvanceApplicationJournal,
   postLabourAdvanceApplicationJournals,
   postLabourDueRecognition,
@@ -869,6 +870,13 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
         return;
       const paginated = query.data.page != null;
       const term = (query.data.search ?? "").trim();
+      if (!paginated && !query.data.status && !query.data.origin && !term) {
+        // The default, unfiltered call (used by the Due Payments page and the dashboard's
+        // Labour Payments Due card) goes through the shared canonical selector so the two
+        // surfaces can never independently drift — see loadOpenLabourDues.
+        const openPositions = await db.transaction((tx) => loadOpenLabourDues(tx, { workspaceId, farmId, seasonId }));
+        return { dues: openPositions.map((position) => ({ ...position.due, ...position, due: undefined })) };
+      }
       const baseFilters = [
         eq(labourDues.workspaceId, workspaceId),
         eq(labourDues.farmId, farmId),
@@ -3056,6 +3064,8 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           totalAdvanceFunding: financials.summary.totalAdvance,
           recoveredAdvance: financials.summary.recoveredAdvance,
           farmOwesPartner: financials.summary.farmOwesPartner,
+          // Canonical Labour Payments Due card total — same selector as the Due Payments page.
+          labourPaymentsDue: financials.labourPaymentsDue,
         },
         counts: {
           openDues: dueCounts[0]?.count ?? 0,
