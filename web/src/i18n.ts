@@ -4418,7 +4418,445 @@ for (const [language, bundle] of Object.entries(extraResources)) {
   mergeTranslations((resources as Record<string, { translation: Record<string, unknown> }>)[language].translation, bundle.translation as Record<string, unknown>);
 }
 
-const initialLanguage = window.localStorage.getItem("muzare-language") ?? "en";
+const localeParityBackfill = {
+  "ar": {
+    "translation": {
+      "attendanceImport": {
+        "title": "استيراد سجل الحضور من ملف CSV",
+        "closeImport": "إغلاق الاستيراد",
+        "steps": [
+          "رفع ملف CSV",
+          "مطابقة الأعمدة",
+          "مطابقة العمالة",
+          "التحقق",
+          "تأكيد الاستيراد"
+        ],
+        "uploadTitle": "رفع سجل حضور أندرويد القديم",
+        "uploadDescription": "الاستيراد متاح فقط أثناء الاتصال بالإنترنت. مساحة العمل والمزرعة والموسم مقفلة على اختيارك النشط.",
+        "workspace": "مساحة العمل",
+        "farm": "المزرعة",
+        "season": "الموسم",
+        "csvFile": "ملف CSV *",
+        "optional": "اختياري",
+        "dateFrom": "من تاريخ",
+        "dateTo": "إلى تاريخ",
+        "dateRangeNote": "استخدم نطاق تاريخ عندما لا تتضمن عناوين تواريخ ملف CSV السنة.",
+        "detectedColumns": "الأعمدة المكتشفة",
+        "detectedColumnsDescription": "تم اكتشاف اسم العامل وأعمدة التواريخ اليومية تلقائيًا. أعمدة الملخص للتحقق فقط.",
+        "continueMatching": "المتابعة إلى مطابقة العمالة",
+        "matchLabour": "مطابقة العمالة",
+        "matchLabourDescription": "يتم اختيار المطابقات الدقيقة تلقائيًا. أكّد الاقتراحات أو اختر كيفية التعامل مع الأسماء غير المعروفة.",
+        "matchLabourAria": "مطابقة {{name}}",
+        "chooseAction": "اختر إجراءً",
+        "suggested": "مقترح: ",
+        "createNewLabour": "إنشاء عامل جديد",
+        "skipRow": "تخطي هذا الصف",
+        "resolveUnknownRows": "حل كل صف عمالة غير معروف بالمطابقة أو الإنشاء أو التخطي قبل التحقق.",
+        "validateImport": "التحقق من الاستيراد",
+        "validationSummary": "ملخص التحقق",
+        "labourRows": "صفوف العمالة",
+        "dateColumns": "أعمدة التاريخ",
+        "attendanceRecords": "سجلات الحضور",
+        "existingAttendance": "الحضور الحالي",
+        "dailyAdvances": "السلف اليومية",
+        "advanceTotal": "إجمالي السلفة",
+        "advancesToCreate": "السلف المراد إنشاؤها",
+        "duplicateAdvances": "سلف مكررة",
+        "errors": "الأخطاء",
+        "warnings": "التحذيرات",
+        "warningConfirm": "أفهم هذه التحذيرات وأرغب في المتابعة.",
+        "duplicateHandling": "معالجة التكرار",
+        "importMissingOnly": "استيراد السجلات المفقودة فقط",
+        "skipExisting": "تخطي السجلات الحالية",
+        "updateExisting": "تحديث السجلات الحالية",
+        "paymentAccountImportedAdvances": "حساب الدفع للسلف المستوردة *",
+        "selectPaymentAccount": "اختر حساب الدفع",
+        "paymentAccountRequired": "حساب الدفع مطلوب للسلف المستوردة.",
+        "advanceColumnsNote": "أعمدة إجمالي السلفة مرجعية فقط. سيتم استيراد السلف اليومية الموجودة داخل خلايا التاريخ كسجلات سلف منفصلة.",
+        "labour": "العمالة",
+        "csvAdvanceTotal": "إجمالي سلفة CSV",
+        "dailyCellAdvanceTotal": "إجمالي سلفة الخلية اليومية",
+        "importingProgress": "جارٍ استيراد سجلات الحضور والسلف. يرجى الانتظار...",
+        "importing": "جارٍ الاستيراد...",
+        "confirmImport": "تأكيد الاستيراد",
+        "importCompleted": "اكتمل الاستيراد",
+        "labourCreated": "تم إنشاء العامل",
+        "attendanceCreated": "تم إنشاء الحضور",
+        "attendanceSkipped": "تم تخطي الحضور",
+        "attendanceUpdated": "تم تحديث الحضور",
+        "advancesCreated": "تم إنشاء السلف",
+        "duplicateAdvancesSkipped": "تم تخطي السلف المكررة",
+        "totalAdvanceImported": "إجمالي السلفة المستوردة",
+        "close": "إغلاق",
+        "cancel": "إلغاء",
+        "parsing": "جارٍ التحليل...",
+        "previewCsv": "معاينة CSV",
+        "unableImport": "تعذر استيراد الحضور."
+      },
+      "connected": "متصل",
+      "connectedReady": "تم تحميل جلستك وسياق مزرعتك.",
+      "farms": "المزارع",
+      "seasons": "المواسم",
+      "farmsDescription": "مساحة عمل مزرعتك وسياق التشغيل النشط.",
+      "seasonsDescription": "مواسم المحاصيل النشطة المتاحة لهذه المزرعة.",
+      "loadingData": "جارٍ تحميل البيانات...",
+      "locationPending": "لم يتم تسجيل الموقع",
+      "backToDashboard": "العودة إلى لوحة التحكم",
+      "notFound": "الصفحة غير موجودة",
+      "notFoundNotice": "هذا المسار غير موجود في تطبيق الويب التقدمي.",
+      "reportsPage": {
+        "allDates": "كل التواريخ",
+        "quickDateRanges": "نطاقات تاريخ سريعة",
+        "advanceSort": "ترتيب السلف",
+        "expenseSort": "ترتيب المصروفات",
+        "labourName": "اسم العامل",
+        "register": "السجل",
+        "summary": "الملخص",
+        "log": "السجل الزمني",
+        "position": "الوضع",
+        "ledger": "دفتر الأستاذ",
+        "balances": "الأرصدة",
+        "allSaleTypes": "كل أنواع المبيعات",
+        "attendanceRegister": "سجل الحضور",
+        "totalDays": "إجمالي الأيام",
+        "wageRate": "معدل الأجر",
+        "grossWages": "إجمالي الأجور",
+        "saleDeletedSuccessfully": "تم حذف عملية البيع بنجاح."
+      }
+    }
+  },
+  "ur": {
+    "translation": {
+      "attendanceImport": {
+        "title": "حاضری رجسٹر CSV درآمد",
+        "closeImport": "درآمد بند کریں",
+        "steps": [
+          "CSV اپ لوڈ کریں",
+          "کالمز میچ کریں",
+          "مزدور میچ کریں",
+          "تصدیق کریں",
+          "درآمد کی تصدیق کریں"
+        ],
+        "uploadTitle": "پرانا اینڈرائیڈ حاضری رجسٹر اپ لوڈ کریں",
+        "uploadDescription": "درآمد صرف آن لائن دستیاب ہے۔ ورک اسپیس، فارم اور سیزن آپ کے فعال انتخاب پر مقفل ہیں۔",
+        "workspace": "ورک اسپیس",
+        "farm": "فارم",
+        "season": "سیزن",
+        "csvFile": "CSV فائل *",
+        "optional": "اختیاری",
+        "dateFrom": "تاریخ از",
+        "dateTo": "تاریخ تا",
+        "dateRangeNote": "جب CSV تاریخ کے عنوانات میں سال شامل نہ ہو تو تاریخ کی حد استعمال کریں۔",
+        "detectedColumns": "شناخت شدہ کالمز",
+        "detectedColumnsDescription": "مزدور کا نام اور روزانہ تاریخ کے کالمز خودکار طور پر شناخت کر لیے گئے ہیں۔ خلاصہ کالمز صرف تصدیق کے لیے ہیں۔",
+        "continueMatching": "مزدور میچنگ کی طرف جاری رکھیں",
+        "matchLabour": "مزدور میچ کریں",
+        "matchLabourDescription": "درست میچز خودکار طور پر منتخب ہو جاتی ہیں۔ تجاویز کی تصدیق کریں یا نامعلوم ناموں کو سنبھالنے کا طریقہ منتخب کریں۔",
+        "matchLabourAria": "{{name}} میچ کریں",
+        "chooseAction": "عمل منتخب کریں",
+        "suggested": "تجویز کردہ: ",
+        "createNewLabour": "نیا مزدور بنائیں",
+        "skipRow": "یہ قطار نظرانداز کریں",
+        "resolveUnknownRows": "تصدیق سے پہلے ہر نامعلوم مزدور قطار کو میچ کر کے، بنا کر یا نظرانداز کر کے حل کریں۔",
+        "validateImport": "درآمد کی تصدیق کریں",
+        "validationSummary": "تصدیق کا خلاصہ",
+        "labourRows": "مزدور قطاریں",
+        "dateColumns": "تاریخ کالمز",
+        "attendanceRecords": "حاضری ریکارڈز",
+        "existingAttendance": "موجودہ حاضری",
+        "dailyAdvances": "روزانہ ایڈوانس",
+        "advanceTotal": "ایڈوانس کل",
+        "advancesToCreate": "بنائے جانے والے ایڈوانس",
+        "duplicateAdvances": "ڈپلیکیٹ ایڈوانس",
+        "errors": "خرابیاں",
+        "warnings": "انتباہات",
+        "warningConfirm": "میں یہ انتباہات سمجھتا ہوں اور جاری رکھنا چاہتا ہوں۔",
+        "duplicateHandling": "ڈپلیکیٹ کا انتظام",
+        "importMissingOnly": "صرف غائب ریکارڈز درآمد کریں",
+        "skipExisting": "موجودہ ریکارڈز نظرانداز کریں",
+        "updateExisting": "موجودہ ریکارڈز اپ ڈیٹ کریں",
+        "paymentAccountImportedAdvances": "درآمد شدہ ایڈوانس کے لیے ادائیگی اکاؤنٹ *",
+        "selectPaymentAccount": "ادائیگی اکاؤنٹ منتخب کریں",
+        "paymentAccountRequired": "درآمد شدہ ایڈوانس کے لیے ادائیگی اکاؤنٹ ضروری ہے۔",
+        "advanceColumnsNote": "ایڈوانس کل کالمز صرف حوالہ جاتی ہیں۔ تاریخ کے خانوں کے اندر موجود روزانہ ایڈوانس علیحدہ ایڈوانس ریکارڈز کے طور پر درآمد ہوں گے۔",
+        "labour": "مزدور",
+        "csvAdvanceTotal": "CSV ایڈوانس کل",
+        "dailyCellAdvanceTotal": "روزانہ سیل ایڈوانس کل",
+        "importingProgress": "حاضری ریکارڈز اور ایڈوانس درآمد ہو رہے ہیں۔ براہ کرم انتظار کریں...",
+        "importing": "درآمد ہو رہا ہے...",
+        "confirmImport": "درآمد کی تصدیق کریں",
+        "importCompleted": "درآمد مکمل ہوگئی",
+        "labourCreated": "مزدور بن گیا",
+        "attendanceCreated": "حاضری بن گئی",
+        "attendanceSkipped": "حاضری نظرانداز کی گئی",
+        "attendanceUpdated": "حاضری اپ ڈیٹ ہوگئی",
+        "advancesCreated": "ایڈوانس بن گئے",
+        "duplicateAdvancesSkipped": "ڈپلیکیٹ ایڈوانس نظرانداز کیے گئے",
+        "totalAdvanceImported": "کل درآمد شدہ ایڈوانس",
+        "close": "بند کریں",
+        "cancel": "منسوخ کریں",
+        "parsing": "تجزیہ ہو رہا ہے...",
+        "previewCsv": "CSV پیش منظر",
+        "unableImport": "حاضری درآمد نہیں ہو سکی۔"
+      },
+      "connected": "منسلک",
+      "connectedReady": "آپ کا سیشن اور فارم سیاق و سباق لوڈ ہو گیا ہے۔",
+      "farms": "فارمز",
+      "seasons": "سیزنز",
+      "farmsDescription": "آپ کا فارم ورک اسپیس اور فعال آپریٹنگ سیاق و سباق۔",
+      "seasonsDescription": "اس فارم کے لیے دستیاب فعال فصل کے سیزن۔",
+      "loadingData": "ڈیٹا لوڈ ہو رہا ہے...",
+      "locationPending": "مقام ریکارڈ نہیں ہوا",
+      "backToDashboard": "ڈیش بورڈ پر واپس جائیں",
+      "notFound": "صفحہ نہیں ملا",
+      "notFoundNotice": "یہ راستہ PWA میں موجود نہیں ہے۔",
+      "reportsPage": {
+        "allDates": "تمام تاریخیں",
+        "tabs": {
+          "wage-rates": "اجرت کی شرحیں"
+        },
+        "quickDateRanges": "فوری تاریخ کی حدیں",
+        "advanceSort": "ایڈوانس ترتیب",
+        "expenseSort": "اخراجات ترتیب",
+        "labourName": "مزدور کا نام",
+        "register": "رجسٹر",
+        "summary": "خلاصہ",
+        "log": "لاگ",
+        "position": "پوزیشن",
+        "ledger": "لیجر",
+        "balances": "بیلنس",
+        "allSaleTypes": "تمام فروخت کی اقسام",
+        "attendanceRegister": "حاضری رجسٹر",
+        "totalDays": "کل دن",
+        "wageRate": "اجرت کی شرح",
+        "grossWages": "مجموعی اجرت",
+        "mixedRates": "مخلوط",
+        "saleDeletedSuccessfully": "فروخت کامیابی سے حذف ہو گئی۔"
+      },
+      "authSignup": {
+        "kicker": "ورک اسپیس آن بورڈنگ",
+        "title": "اپنا اکاؤنٹ بنائیں اور صاف ورک اسپیس کے ساتھ شروع کریں",
+        "description": "ایک بار سائن اپ کریں اور Muzare فوراً آپ کے لیے ایک ڈیفالٹ ورک اسپیس کھول دے گا۔ اگر آپ دعوت کے ذریعے شامل ہوتے ہیں، تو ہم آپ کو براہ راست دعوت شدہ ورک اسپیس میں رکھیں گے۔",
+        "journeyLabel": "آن بورڈنگ کا سفر",
+        "requestReceived": "اکاؤنٹ بن گیا",
+        "requestPending": "آپ کا اکاؤنٹ تیار ہے۔",
+        "backToLogin": "لاگ ان پر واپس جائیں",
+        "requestWorkspace": "اپنا اکاؤنٹ بنائیں",
+        "requestWorkspaceDescription": "ہم فوری طور پر آپ کے لیے ایک ڈیفالٹ ورک اسپیس بنائیں گے۔ آپ اسے بعد میں ورک اسپیس کی ترتیبات سے دوبارہ نام دے سکتے ہیں۔",
+        "emailHint": "وہ ای میل ایڈریس استعمال کریں جو آپ روزانہ سائن ان کے لیے استعمال کریں گے۔",
+        "workspaceName": "ورک اسپیس کا نام",
+        "workspaceNamePlaceholder": "ڈیفالٹ ورک اسپیس",
+        "ownerName": "آپ کا نام",
+        "ownerNamePlaceholder": "مالک یا مینیجر کا نام",
+        "phonePlaceholder": "+966...",
+        "passwordHint": "کم از کم 8 حروف استعمال کریں۔ سائن اپ کے فوراً بعد آپ اپنے ورک اسپیس میں داخل ہو جائیں گے۔",
+        "submitting": "اکاؤنٹ بن رہا ہے...",
+        "submitForApproval": "اکاؤنٹ بنائیں",
+        "alreadyApproved": "پہلے سے اکاؤنٹ ہے؟",
+        "submitFailed": "آپ کا اکاؤنٹ نہیں بن سکا۔",
+        "validation": {
+          "workspaceNameRequired": "ورک اسپیس کا نام ضروری ہے۔",
+          "ownerNameRequired": "آپ کا نام ضروری ہے۔",
+          "passwordMin": "کم از کم 8 حروف استعمال کریں۔"
+        },
+        "steps": {
+          "createWorkspace": {
+            "title": "ڈیفالٹ ورک اسپیس بنائیں",
+            "description": "ہم ہر خود سائن اپ کا آغاز ایک صاف ورک اسپیس سے کرتے ہیں جسے آپ بعد میں دوبارہ نام دے سکتے ہیں۔"
+          },
+          "adminApproval": {
+            "title": "دعوت شدہ ورک اسپیسز میں صاف طریقے سے شامل ہوں",
+            "description": "دعوتی سائن اپ اضافی خالی ورک اسپیس بنائے بغیر براہ راست مشترکہ ورک اسپیس میں شامل ہوتے ہیں۔"
+          },
+          "startClean": {
+            "title": "صاف شروع کریں",
+            "description": "آپ کے ورک اسپیس کا ڈیٹا ہر دوسرے فارم سے الگ رہتا ہے۔"
+          }
+        }
+      },
+      "adminOverview": {
+        "eyebrow": "پلیٹ فارم کا جائزہ",
+        "title": "سسٹم ایڈمن ڈیش بورڈ",
+        "description": "فارم آپریشنز میں داخل ہوئے بغیر پلیٹ فارم کی صحت، ورک اسپیس لائف سائیکل اور حالیہ ایڈمن سرگرمی کو ٹریک کریں۔",
+        "adminActions": "ایڈمن اعمال",
+        "adminActionsDescription": "ان قطاروں میں براہ راست جائیں جنہیں پلیٹ فارم کی توجہ درکار ہے۔",
+        "pendingApprovals": "زیر التواء منظوریاں",
+        "pendingApprovalsDescription": "فیصلے کے منتظر تازہ ترین ورک اسپیس درخواستیں۔",
+        "openApprovals": "کھلی منظوریاں",
+        "noPendingWorkspaces": "فی الحال کوئی زیر التواء ورک اسپیس نہیں۔",
+        "recentWorkspaces": "حالیہ ورک اسپیسز",
+        "recentWorkspacesDescription": "پلیٹ فارم پر بنائی گئی جدید ترین ورک اسپیسز۔",
+        "noWorkspacesYet": "ابھی تک کوئی ورک اسپیس نہیں بنائی گئی۔",
+        "recentActivity": "حالیہ سرگرمی",
+        "recentActivityDescription": "پلیٹ فارم سطح کے لائف سائیکل اعمال اور آڈٹ ٹریل۔",
+        "fullAuditLog": "مکمل آڈٹ لاگ",
+        "noRecentActivity": "ابھی تک کوئی حالیہ ایڈمن سرگرمی ریکارڈ نہیں ہوئی۔",
+        "suspendedWorkspaces": "معطل ورک اسپیسز",
+        "suspendedWorkspacesDescription": "یہ ورک اسپیسز دوبارہ فعال ہونے تک عام صارفین کے لیے مسدود ہیں۔",
+        "reviewSuspended": "معطل شدہ کا جائزہ لیں",
+        "noSuspendedWorkspaces": "فی الحال کوئی معطل ورک اسپیس نہیں۔",
+        "tenantSafety": "ٹیننٹ سیفٹی",
+        "tenantSafetyDescription": "سسٹم ایڈمن ویوز کو میٹا ڈیٹا اور لائف سائیکل سطح پر رہنا چاہیے۔ ورک اسپیس آپریشنل ریکارڈز عام ٹیننٹ اسکوپڈ ماڈیولز کے پیچھے رہتے ہیں۔",
+        "actions": {
+          "pendingApprovals": "زیر التواء منظوریاں",
+          "reviewWorkspaces": "ورک اسپیسز کا جائزہ لیں",
+          "reviewFarms": "فارمز کا جائزہ لیں",
+          "reviewUsers": "صارفین کا جائزہ لیں",
+          "auditLogs": "آڈٹ لاگز"
+        },
+        "metrics": {
+          "totalUsers": "کل صارفین",
+          "activeUsers": "فعال صارفین",
+          "totalWorkspaces": "کل ورک اسپیسز",
+          "pendingWorkspaces": "زیر التواء ورک اسپیسز",
+          "activeWorkspaces": "فعال ورک اسپیسز",
+          "suspendedWorkspaces": "معطل ورک اسپیسز",
+          "totalFarms": "کل فارمز",
+          "pendingFarmDeletionRequests": "فارم حذف کرنے کی درخواستیں"
+        }
+      },
+      "adminFarms": {
+        "title": "فارمز",
+        "description": "تمام ورک اسپیسز میں فارمز، ریکارڈ کی تعداد، حیثیت اور حذف کرنے کی منظوری کی درخواستوں کا معائنہ کریں۔",
+        "totalFarms": "کل فارمز",
+        "pendingDeletionRequests": "زیر التواء حذف درخواستیں",
+        "archivedFarms": "آرکائیو شدہ / زیر التواء فارمز",
+        "inactiveFarms": "آرکائیو شدہ / زیر التواء / حذف شدہ فارمز",
+        "deleted": "حذف شدہ",
+        "deletionRequests": "حذف درخواستیں",
+        "deletionRequestsDescription": "ڈیٹا رکھنے والی فارم حذف درخواستیں جو سسٹم ایڈمن کے جائزے کی منتظر ہیں۔",
+        "noDeletionRequests": "کوئی زیر التواء فارم حذف درخواست نہیں۔",
+        "farmDirectory": "فارم ڈائریکٹری",
+        "farmDirectoryDescription": "لائف سائیکل حیثیت اور ریکارڈ کی تعداد کے ساتھ کسٹمر ورک اسپیسز میں تمام فارمز۔",
+        "noFarms": "کوئی فارم نہیں ملا۔",
+        "requestedBy": "درخواست دہندہ",
+        "records": "ریکارڈز",
+        "breakdown": "تفصیل",
+        "noReason": "کوئی وجہ فراہم نہیں کی گئی۔",
+        "reviewDeletionRequest": "حذف درخواست کا جائزہ لیں",
+        "recordCounts": "ریکارڈ کی تعداد",
+        "reviewNotes": "جائزہ نوٹس",
+        "approveDeletion": "حذف کرنے کی منظوری دیں",
+        "rejectDeletion": "حذف کرنے سے انکار کریں"
+      },
+      "adminUsers": {
+        "title": "صارفین",
+        "description": "پلیٹ فارم صارفین، رکنیت کی تعداد، آخری لاگ ان سرگرمی اور اکاؤنٹ کی حیثیت ایک ہی جگہ سے جائزہ لیں۔",
+        "platformUsers": "پلیٹ فارم صارفین",
+        "platformUsersDescription": "صارفین، اکاؤنٹ کی حیثیت، آخری لاگ ان، اور ہر شخص کتنی ورک اسپیسز سے تعلق رکھتا ہے۔",
+        "repairInvitedDefaults": "مدعو کردہ ڈیفالٹ ورک اسپیسز کی مرمت کریں",
+        "repairingInvitedDefaults": "مدعو کردہ ڈیفالٹ ورک اسپیسز کی مرمت ہو رہی ہے...",
+        "repairedInvitedDefaults": "{{count}} متاثرہ صارف ورک اسپیسز کی مرمت کر دی گئی۔",
+        "emptyTitle": "ابھی تک کوئی صارف نہیں",
+        "emptyDescription": "اکاؤنٹس بننے کے بعد یہ صفحہ پلیٹ فارم صارفین دکھائے گا۔",
+        "workspaceUser": "ورک اسپیس صارف",
+        "activate": "فعال کریں",
+        "deactivate": "غیر فعال کریں",
+        "never": "کبھی نہیں",
+        "userDetails": "صارف کی تفصیلات",
+        "loadingUserProfile": "صارف پروفائل لوڈ ہو رہا ہے",
+        "workspaceMemberships": "ورک اسپیس رکنیتیں",
+        "noWorkspaceMemberships": "یہ صارف ابھی تک کسی ورک اسپیس میں تفویض نہیں کیا گیا۔",
+        "activeMembership": "فعال رکنیت",
+        "inactiveMembership": "غیر فعال رکنیت",
+        "metrics": {
+          "totalUsers": "کل صارفین",
+          "activeUsers": "فعال صارفین",
+          "inactiveUsers": "غیر فعال صارفین"
+        },
+        "columns": {
+          "user": "صارف",
+          "role": "کردار",
+          "workspaces": "ورک اسپیسز",
+          "created": "بنایا گیا",
+          "lastLogin": "آخری لاگ ان"
+        }
+      },
+      "adminWorkspaces": {
+        "title": "ورک اسپیسز",
+        "description": "زیر التواء ورک اسپیسز کی منظوری دیں، کسٹمرز کو معطل یا دوبارہ فعال کریں، اور رکنیت و حیثیت کی تاریخ کا معائنہ کریں۔",
+        "reviewPendingRequests": "زیر التواء درخواستوں کا جائزہ لیں",
+        "createWorkspace": "ورک اسپیس بنائیں",
+        "createWorkspaceDescription": "پلیٹ فارم کنسول سے براہ راست ایک نئی منظور شدہ ورک اسپیس بنائیں۔",
+        "directoryTitle": "ورک اسپیس ڈائریکٹری",
+        "directoryDescription": "کسٹمر ورک اسپیسز، ملکیت، لائف سائیکل حیثیت اور اکاؤنٹ کی تعداد۔",
+        "statusFilters": "ورک اسپیس حیثیت فلٹرز",
+        "emptyTitle": "کوئی ورک اسپیس نہیں ملی",
+        "emptyDescription": "اس حیثیت میں ابھی تک کوئی ورک اسپیس نہیں ہے۔",
+        "suspend": "معطل کریں",
+        "unsuspend": "معطلی ختم کریں",
+        "workspaceDetails": "ورک اسپیس کی تفصیلات",
+        "loadingWorkspaceMetadata": "ورک اسپیس میٹا ڈیٹا لوڈ ہو رہا ہے",
+        "approved": "منظور شدہ",
+        "slug": "سلگ",
+        "noMembers": "اس ورک اسپیس کے لیے ابھی تک کوئی رکن نہیں ملا۔",
+        "activeMember": "فعال رکن",
+        "suspendedUser": "معطل صارف",
+        "inactiveMember": "غیر فعال رکن",
+        "statusHistory": "حیثیت کی تاریخ",
+        "noStatusHistory": "ابھی تک کوئی حیثیت کی تاریخ ریکارڈ نہیں ہوئی۔",
+        "metrics": {
+          "totalWorkspaces": "کل ورک اسپیسز",
+          "pending": "زیر التواء",
+          "suspended": "معطل"
+        },
+        "filters": {
+          "all": "تمام",
+          "pending": "زیر التواء",
+          "active": "فعال",
+          "suspended": "معطل"
+        },
+        "columns": {
+          "workspace": "ورک اسپیس",
+          "users": "صارفین",
+          "created": "بنایا گیا"
+        }
+      },
+      "adminAudit": {
+        "title": "آڈٹ لاگز",
+        "description": "ٹائم اسٹیمپس اور ایکٹر تفصیلات کے ساتھ لائف سائیکل فیصلوں، سپورٹ مداخلتوں اور پلیٹ فارم اعمال کا جائزہ لیں۔",
+        "recentRecords": "حالیہ آڈٹ ریکارڈز",
+        "recentRecordsDescription": "ورک اسپیس اور صارف انتظامیہ میں تازہ ترین پلیٹ فارم واقعات۔",
+        "emptyTitle": "ابھی تک کوئی آڈٹ ریکارڈ نہیں",
+        "emptyDescription": "یہ صفحہ منظوریوں، معطلیوں اور اکاؤنٹ کی حیثیت کی تبدیلیوں جیسے پلیٹ فارم اعمال دکھائے گا۔",
+        "columns": {
+          "action": "عمل",
+          "workspace": "ورک اسپیس",
+          "actor": "ایکٹر",
+          "entity": "ادارہ",
+          "created": "بنایا گیا"
+        }
+      },
+      "adminSettings": {
+        "title": "پلیٹ فارم کی ترتیبات",
+        "description": "کسٹمر آپریشنز میں داخل ہوئے بغیر Muzare کی وسیع ترتیبات ترتیب دیں۔",
+        "emptyTitle": "پلیٹ فارم کی ترتیبات",
+        "emptyDescription": "اس علاقے کو عالمی گارڈریلز، سپورٹ ڈیفالٹس اور مستقبل کی پلیٹ فارم وسیع ترتیب کے لیے استعمال کریں۔ کسٹمر فارم کا ڈیٹا ورک اسپیس کی ترتیبات میں رہنا چاہیے۔"
+      },
+      "adminBilling": {
+        "title": "بلنگ",
+        "description": "بلنگ ریکارڈز، انوائسز اور ادائیگی کی حیثیت کا انتظام کریں۔",
+        "emptyTitle": "بلنگ کنسول فعال نہیں ہے",
+        "emptyDescription": "یہ علاقہ سبسکرپشن انوائسز، تجدید اور ادائیگی کے فالو اپ کے لیے مخصوص ہے جب پلیٹ فارم بلنگ آن ہو۔"
+      }
+    }
+  }
+} as const;
+
+// Backfills locale-parity gaps found by web/test/i18n-locale-parity.source.test.ts (ar/ur were
+// missing keys that existed only in en). Kept as its own merge source rather than hand-editing
+// the resources/extraResources blocks above, to keep this addition easy to review and remove
+// once folded into the main locale files.
+for (const [language, bundle] of Object.entries(localeParityBackfill)) {
+  mergeTranslations((resources as Record<string, { translation: Record<string, unknown> }>)[language].translation, bundle.translation as Record<string, unknown>);
+}
+
+// Exported so locale-parity tests can inspect the final merged key tree without importing this
+// module's browser-only side effects (window.localStorage, i18n.init) below.
+export { resources };
+
+const isDev = typeof import.meta !== "undefined" && Boolean((import.meta as { env?: { DEV?: boolean } }).env?.DEV);
+const initialLanguage = (typeof window !== "undefined" ? window.localStorage.getItem("muzare-language") : null) ?? "en";
 
 void i18n.use(initReactI18next).init({
   resources,
@@ -4427,7 +4865,7 @@ void i18n.use(initReactI18next).init({
   returnNull: false,
   returnEmptyString: false,
   missingKeyHandler: (_lng, _ns, key) => {
-    if (import.meta.env.DEV) {
+    if (isDev) {
       console.warn(`[i18n] Missing translation key: ${key}`);
     }
   },
