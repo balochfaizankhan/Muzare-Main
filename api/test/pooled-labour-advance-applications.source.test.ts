@@ -72,12 +72,13 @@ test("aggregate advance-application-event reversal recognizes a pooled applicati
   );
 });
 
-test("postLabourAdvanceApplicationJournals (unchanged) posts no cash-control or partner-payable movement for an applied advance", async () => {
+test("postLabourAdvanceApplicationJournals clears the payable already recognized at due creation, without recognizing expense again", async () => {
   const labourPayments = await source("api/src/lib/labour-payments.ts");
   const fn = labourPayments.match(/export async function postLabourAdvanceApplicationJournals\([\s\S]*?onConflictDoNothing\(\);\s*\n\s*\}\s*\n\}/);
   assert.ok(fn, "postLabourAdvanceApplicationJournals should exist");
-  assert.match(fn![0], /ledgerCode: "LABOUR_EXPENSE"/);
+  assert.match(fn![0], /ledgerCode: "LABOUR_PAYABLE"/, "an advance application must debit LABOUR_PAYABLE, not recognize LABOUR_EXPENSE a second time");
   assert.match(fn![0], /ledgerCode: "LABOUR_ADVANCE"/);
+  assert.doesNotMatch(fn![0], /ledgerCode: "LABOUR_EXPENSE"/, "an advance application must never debit LABOUR_EXPENSE — the due already recognized it at creation");
   assert.doesNotMatch(fn![0], /CASH_CONTROL/, "applying an advance must never move cash");
   assert.doesNotMatch(fn![0], /PARTNER_PAYABLE/, "applying an advance must never increase Farm Owes Partner again");
 });

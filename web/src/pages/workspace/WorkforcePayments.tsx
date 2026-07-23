@@ -2186,8 +2186,10 @@ function AdvancesView({
                 <article key={item.id}>
                   <strong>{item.displayVoucherNumber}</strong>
                   <span>{item.recipientName}</span>
+                  <span>{item.description}</span>
                   <span>{item.dueNumber ?? "Due unavailable"}</span>
                   <span>{money(item.activeAmount)}</span>
+                  <span>Non-cash</span>
                   <span>{item.date}</span>
                   <span>{item.status}</span>
                   <button

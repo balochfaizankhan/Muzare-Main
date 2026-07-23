@@ -177,10 +177,11 @@ async function postBalancedLabourJournal(tx: DbTransaction, input: {
 export async function postLabourDueRecognition(tx: DbTransaction, input: {
   workspaceId: string; farmId: string; seasonId: string; dueId: string; amount: number; actorId: string; postedAt?: Date;
 }) {
-  // Unpaid dues are operational obligations only. Expense is recognized only
-  // when a due is settled by a direct payment or an applied advance.
-  void tx;
-  void input;
+  // Canonical Muzare rule: an approved labour due recognizes labour expense
+  // at creation, whether or not it is yet paid. Settlement (direct payment or
+  // applied advance) only clears the payable — it must never debit
+  // LABOUR_EXPENSE again.
+  return postBalancedLabourJournal(tx, { ...input, key: `due:${input.dueId}`, eventType: "DUE_RECOGNITION", debitCode: "LABOUR_EXPENSE", creditCode: "LABOUR_PAYABLE" });
 }
 
 export async function postLabourVoucherJournal(tx: DbTransaction, input: {
@@ -190,13 +191,17 @@ export async function postLabourVoucherJournal(tx: DbTransaction, input: {
   const cashCode: LabourLedgerCode = input.accountType === "partner" ? "PARTNER_PAYABLE" : "CASH_CONTROL";
   if (input.nature === "ADVANCE") return postBalancedLabourJournal(tx, { ...input, key: `voucher:${input.voucherId}`, eventType: "ADVANCE_PAYMENT", debitCode: "LABOUR_ADVANCE", creditCode: cashCode });
   if (input.nature === "REFUND_RECOVERY") return postBalancedLabourJournal(tx, { ...input, key: `voucher:${input.voucherId}`, eventType: "ADVANCE_REFUND", debitCode: cashCode, creditCode: "LABOUR_ADVANCE" });
-  return postBalancedLabourJournal(tx, { ...input, key: `voucher:${input.voucherId}`, eventType: "DUE_PAYMENT", debitCode: "LABOUR_EXPENSE", creditCode: cashCode });
+  // A direct/settlement payment clears the payable already recognized at due
+  // creation — it must not recognize expense a second time.
+  return postBalancedLabourJournal(tx, { ...input, key: `voucher:${input.voucherId}`, eventType: "DUE_PAYMENT", debitCode: "LABOUR_PAYABLE", creditCode: cashCode });
 }
 
 export async function postLabourAdvanceApplicationJournal(tx: DbTransaction, input: {
   workspaceId: string; farmId: string; seasonId: string; dueId: string; advanceApplicationId: string; amount: number; actorId: string; postedAt?: Date;
 }) {
-  return postBalancedLabourJournal(tx, { ...input, key: `advance-application:${input.advanceApplicationId}`, eventType: "ADVANCE_APPLICATION", debitCode: "LABOUR_EXPENSE", creditCode: "LABOUR_ADVANCE" });
+  // An advance application clears the payable already recognized at due
+  // creation — it must not recognize expense a second time.
+  return postBalancedLabourJournal(tx, { ...input, key: `advance-application:${input.advanceApplicationId}`, eventType: "ADVANCE_APPLICATION", debitCode: "LABOUR_PAYABLE", creditCode: "LABOUR_ADVANCE" });
 }
 
 export async function postLabourAdvanceApplicationJournals(tx: DbTransaction, input: {
@@ -214,7 +219,7 @@ export async function postLabourAdvanceApplicationJournals(tx: DbTransaction, in
         voucherId: null, postedBy: input.actorId, postedAt, status: "POSTED",
       };
       return [
-        { ...common, entryKey: `advance-application:${application.id}:debit`, ledgerCode: "LABOUR_EXPENSE", debit: application.amount.toFixed(2), credit: "0" },
+        { ...common, entryKey: `advance-application:${application.id}:debit`, ledgerCode: "LABOUR_PAYABLE", debit: application.amount.toFixed(2), credit: "0" },
         { ...common, entryKey: `advance-application:${application.id}:credit`, ledgerCode: "LABOUR_ADVANCE", debit: "0", credit: application.amount.toFixed(2) },
       ];
     })).onConflictDoNothing();

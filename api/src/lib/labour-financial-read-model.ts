@@ -51,6 +51,7 @@ const mergeSnapshotFields = (...values: unknown[]) => {
 
 const unresolvedRecipientLabel = "Unresolved recipient";
 const unresolvedPaymentSourceLabel = "Unresolved payment source";
+const pooledNonCashAttributionLabel = "Applied advances — pooled/non-cash";
 
 const resolveRecipientDisplayName = (args: {
   snapshot: Record<string, unknown>;
@@ -1071,9 +1072,17 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
       if (!due) return null;
       const dueSnapshot = asSnapshot(due.recipientSnapshot);
       const applicationSpecs = Array.isArray(details.advanceApplications) ? details.advanceApplications : [];
-      const childApplicationKeys = applicationSpecs
+      const legacyChildApplicationKeys = applicationSpecs
         .map((value) => (value && typeof value === "object" && typeof (value as Record<string, unknown>).idempotencyKey === "string" ? (value as Record<string, unknown>).idempotencyKey as string : null))
         .filter((value): value is string => Boolean(value));
+      // A settlement is persisted either as N legacy per-voucher application
+      // rows (keyed by details.advanceApplications[].idempotencyKey) or as
+      // one canonical pooled application row keyed by
+      // details.advancePool.idempotencyKey (advanceVoucherId null). Resolve
+      // both shapes, or a pure pooled settlement's active application is
+      // never found here and always displays as reversed with a zero amount.
+      const poolIdempotencyKey = firstText(advancePool.idempotencyKey);
+      const childApplicationKeys = poolIdempotencyKey ? [...legacyChildApplicationKeys, poolIdempotencyKey] : legacyChildApplicationKeys;
       const childApplications = scopedApplications.filter((application) => application.dueId === due.id && childApplicationKeys.includes(application.idempotencyKey));
       const activeChildren = childApplications.filter((application) => application.status === "ACTIVE");
       const activeAmount = amount(activeChildren.reduce((sum, application) => sum + amount(application.amount), 0));
@@ -1087,7 +1096,12 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
       const displayNumber = matchingParentVoucher?.voucherNumber ?? aggregateApplicationVoucherNumber(row.id);
       const settlementSummary = asSnapshot(details.settlementSummary);
       const fundingSources = groupFundingSources(childApplications.map((application) => {
-        const source = application.advanceVoucherId ? advanceByVoucherId.get(application.advanceVoucherId) : undefined;
+        if (!application.advanceVoucherId) {
+          // A pooled application has no single funding voucher by design —
+          // valid and non-cash, not "unresolved".
+          return { accountId: null, accountName: pooledNonCashAttributionLabel, accountType: "pooled_non_cash", amount: amount(application.amount) };
+        }
+        const source = advanceByVoucherId.get(application.advanceVoucherId);
         return {
           accountId: source?.fundingAccountId ?? null,
           accountName: source?.paymentSourceDisplayName ?? source?.fundingAccountName ?? unresolvedPaymentSourceLabel,
@@ -1201,9 +1215,12 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
       const payableAmount = due.paymentStatus === "VOIDED"
         ? 0
         : amount(Number(due.grossAmount) + Number(due.adjustmentAmount) - Number(due.authorizedDeductions));
-      const recognizedAmount = due.paymentStatus === "VOIDED"
-        ? 0
-        : amount(Math.min(payableAmount, activePaidAmount + activeAppliedAmount));
+      // Canonical Muzare rule: an approved labour due recognizes its full
+      // labour expense at creation, whether or not it is yet paid. A direct
+      // payment or applied advance only clears the payable — it must never
+      // reduce the recognized expense itself.
+      const recognizedAmount = payableAmount;
+      const clearedAmount = amount(Math.min(payableAmount, activePaidAmount + activeAppliedAmount));
       return {
         id: due.id,
         dueId: due.id,
@@ -1223,7 +1240,7 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
         amount: recognizedAmount,
         paidAmount: activePaidAmount,
         appliedAdvanceAmount: activeAppliedAmount,
-        outstandingAmount: amount(Math.max(payableAmount - recognizedAmount, 0)),
+        outstandingAmount: amount(Math.max(payableAmount - clearedAmount, 0)),
         active: due.paymentStatus !== "VOIDED",
         canonical: true as const,
       };
@@ -1246,7 +1263,22 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
         });
       }
       for (const application of scopedApplications.filter((row) => row.dueId === expense.dueId && row.status === "ACTIVE")) {
-        const source = application.advanceVoucherId ? advanceByVoucherId.get(application.advanceVoucherId) : undefined;
+        // A pooled application (advanceVoucherId null) has no single funding
+        // voucher by design — it may draw from several accounts. It is
+        // valid and non-cash, not "unresolved"; label it as its own
+        // non-cash category rather than misattributing or flagging it.
+        if (!application.advanceVoucherId) {
+          parts.push({
+            id: `${expense.id}:advance:${application.id}`,
+            settlementType: "APPLIED_ADVANCE",
+            accountId: null,
+            accountName: pooledNonCashAttributionLabel,
+            accountType: "pooled_non_cash",
+            amount: amount(application.amount), voucherId: null, advanceApplicationId: application.id,
+          });
+          continue;
+        }
+        const source = advanceByVoucherId.get(application.advanceVoucherId);
         parts.push({
           id: `${expense.id}:advance:${application.id}`,
           settlementType: "APPLIED_ADVANCE",
@@ -1283,6 +1315,14 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
     canonical: true as const,
   }));
   const canonicalJournalEvents = journalEvents.filter((event) => !event.legacy);
+  // Aggregate advance concepts are computed independently of any single
+  // funding voucher so a pooled application (advanceVoucherId null) is never
+  // invisible to them — no FIFO/LIFO/proportional attribution back to a
+  // specific voucher is performed or required.
+  const totalAdvanceFunding = amount(advancePositions.filter((position) => position.status !== "VOIDED").reduce((sum, position) => sum + position.originalAmount, 0));
+  const recoveredAdvanceTotal = amount(advancePositions.filter((position) => position.status !== "VOIDED").reduce((sum, position) => sum + position.recoveredAmount, 0));
+  const activeAdvanceAppliedTotal = amount(scopedApplications.filter((row) => row.status === "ACTIVE").reduce((sum, row) => sum + amount(row.amount), 0));
+  const aggregateAvailableAdvanceBalance = amount(Math.max(totalAdvanceFunding - activeAdvanceAppliedTotal - recoveredAdvanceTotal, 0));
   const currentLedger = {
     LABOUR_EXPENSE: amount(expenses.filter((row) => row.active).reduce((sum, row) => sum + row.amount, 0)),
     LABOUR_PAYABLE: amount(expenses.filter((row) => row.active).reduce((sum, row) => sum + row.outstandingAmount, 0)),
@@ -1309,14 +1349,14 @@ export async function loadLabourFinancialReadModel(input: { workspaceId: string;
     ].filter((id): id is string => Boolean(id)))],
     summary: {
       labourDue: amount(canonicalJournalEvents.reduce((sum, event) => sum + event.labourDueEffect, 0)),
-      outstandingAdvance: amount(advancePositions.filter((position) => position.status !== "VOIDED").reduce((sum, position) => sum + position.outstandingAmount, 0)),
-      totalAdvance: amount(advancePositions.filter((position) => position.status !== "VOIDED").reduce((sum, position) => sum + position.originalAmount, 0)),
-      recoveredAdvance: amount(advancePositions.filter((position) => position.status !== "VOIDED").reduce((sum, position) => sum + position.recoveredAmount, 0)),
+      outstandingAdvance: aggregateAvailableAdvanceBalance,
+      totalAdvance: totalAdvanceFunding,
+      recoveredAdvance: recoveredAdvanceTotal,
       wageExpense: amount(canonicalJournalEvents.reduce((sum, event) => sum + event.expenseEffect, 0)),
       farmOwesPartner: amount(partnerPositions.reduce((sum, position) => sum + position.farmOwesPartner, 0)),
       accountMovement: amount(accountEntries.reduce((sum, entry) => sum + entry.balanceEffect, 0)),
       activePaymentAmount: amount(scopedAllocations.filter((row) => row.status === "ACTIVE").reduce((sum, row) => sum + amount(row.amount), 0)),
-      activeAdvanceApplied: amount(advancePositions.filter((position) => position.status !== "VOIDED").reduce((sum, position) => sum + position.appliedAmount, 0)),
+      activeAdvanceApplied: activeAdvanceAppliedTotal,
     },
   };
 }

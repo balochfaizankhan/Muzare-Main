@@ -44,6 +44,7 @@ const groupDueMemberAdvanceApplicationsMigrationUrl = new URL("../../../database
 const legacyIndividualAdvanceApplicationScopeMigrationUrl = new URL("../../../database/migrations/0040_legacy_individual_advance_application_scope.sql", import.meta.url);
 const exactLabourJournalReversalsMigrationUrl = new URL("../../../database/migrations/0041_exact_labour_journal_reversals.sql", import.meta.url);
 const pooledLabourAdvanceApplicationsMigrationUrl = new URL("../../../database/migrations/0042_pooled_labour_advance_applications.sql", import.meta.url);
+const labourSettlementExpenseLedgerCorrectionMigrationUrl = new URL("../../../database/migrations/0043_labour_settlement_expense_ledger_correction.sql", import.meta.url);
 
 const STARTUP_LOCK_KEY = "muzare_ensure_workspace_schema";
 const STARTUP_LOCK_TIMEOUT = "10s";
@@ -128,6 +129,7 @@ const deferredMigrationSteps: MigrationStep[] = [
   { key: "0040_legacy_individual_advance_application_scope", kind: "sql", required: true, sourceUrl: legacyIndividualAdvanceApplicationScopeMigrationUrl },
   { key: "0041_exact_labour_journal_reversals", kind: "sql", required: true, sourceUrl: exactLabourJournalReversalsMigrationUrl },
   { key: "0042_pooled_labour_advance_applications", kind: "sql", required: true, sourceUrl: pooledLabourAdvanceApplicationsMigrationUrl },
+  { key: "0043_labour_settlement_expense_ledger_correction", kind: "sql", required: false, sourceUrl: labourSettlementExpenseLedgerCorrectionMigrationUrl },
 ];
 
 function logMigrationEvent(event: string, details: Record<string, unknown>) {
