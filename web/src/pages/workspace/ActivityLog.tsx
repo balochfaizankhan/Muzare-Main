@@ -1,19 +1,21 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { formatWorkspaceActivityDateTime, loadWorkspaceActivity, type WorkspaceActivityItem, type WorkspaceActivityModule } from "../../lib/workspaceActivity";
 import { useCanonicalLabourFinancials } from "../../hooks/useCanonicalLabourFinancials";
+import type { TFunction } from "i18next";
 
 type PeriodFilter = "today" | "last7" | "month" | "custom";
 
 const moduleOrder: WorkspaceActivityModule[] = ["attendance", "labour", "expenses", "dispatch", "sales", "accounts"];
-const moduleLabels: Record<WorkspaceActivityModule, string> = {
-  attendance: "Attendance",
-  labour: "Labour",
-  expenses: "Expenses",
-  dispatch: "Dispatch",
-  sales: "Sales",
-  accounts: "Accounts",
+const moduleLabelKeys: Record<WorkspaceActivityModule, string> = {
+  attendance: "dashboardModule.attendance",
+  labour: "dashboardModule.labour",
+  expenses: "dashboardModule.expenses",
+  dispatch: "dashboardModule.dispatch",
+  sales: "dashboardModule.sales",
+  accounts: "dashboardModule.accounts",
 };
 const MAX_EXPANDED_CHILDREN = 8;
 
@@ -48,7 +50,7 @@ const getPeriodRange = (period: PeriodFilter, from: string, to: string) => {
   }
 };
 
-function ActivitySummary({ activity, expandable, expanded }: { activity: WorkspaceActivityItem; expandable?: boolean; expanded?: boolean }) {
+function ActivitySummary({ t, activity, expandable, expanded }: { t: TFunction; activity: WorkspaceActivityItem; expandable?: boolean; expanded?: boolean }) {
   const Icon = activity.icon;
   return (
     <>
@@ -60,8 +62,8 @@ function ActivitySummary({ activity, expandable, expanded }: { activity: Workspa
         <span>{activity.detail}</span>
       </div>
       <div className="dashboard-activity-item__meta">
-        <strong>{activity.value}</strong>
-        <small>{formatWorkspaceActivityDateTime(activity.createdAt)}</small>
+        <strong className="bidi-isolate">{activity.value}</strong>
+        <small className="bidi-isolate">{formatWorkspaceActivityDateTime(t, activity.createdAt)}</small>
       </div>
       {expandable ? <ChevronDown size={16} className={`activity-log-item__chevron${expanded ? " is-open" : ""}`} /> : activity.path ? <ChevronRight size={16} className="activity-log-item__chevron" /> : null}
     </>
@@ -69,6 +71,7 @@ function ActivitySummary({ activity, expandable, expanded }: { activity: Workspa
 }
 
 export function ActivityLog() {
+  const { t } = useTranslation();
   const canonicalFinancials = useCanonicalLabourFinancials();
   const [activities, setActivities] = useState<WorkspaceActivityItem[]>([]);
   const [period, setPeriod] = useState<PeriodFilter>("last7");
@@ -78,8 +81,8 @@ export function ActivityLog() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    setActivities(await loadWorkspaceActivity(canonicalFinancials.data));
-  }, [canonicalFinancials.data]);
+    setActivities(await loadWorkspaceActivity(t, canonicalFinancials.data));
+  }, [canonicalFinancials.data, t]);
 
   useEffect(() => {
     void refresh();
@@ -121,19 +124,19 @@ export function ActivityLog() {
         <section className="activity-log-card">
           <header className="activity-log-header">
             <div>
-              <h1>Activity Log</h1>
-              <p>All recent workspace activity</p>
+              <h1>{t("activityLogPage.title")}</h1>
+              <p>{t("activityLogPage.subtitle")}</p>
             </div>
           </header>
 
           <div className="activity-log-filters">
-            <div className="activity-log-chip-row" role="tablist" aria-label="Activity period">
-              {[
-                ["today", "Today"],
-                ["last7", "Last 7 days"],
-                ["month", "This month"],
-                ["custom", "Custom"],
-              ].map(([value, label]) => (
+            <div className="activity-log-chip-row" role="tablist" aria-label={t("activityLogPage.periodAria")}>
+              {([
+                ["today", t("common.today")],
+                ["last7", t("activityLogPage.last7Days")],
+                ["month", t("activityLogPage.thisMonth")],
+                ["custom", t("activityLogPage.custom")],
+              ] as const).map(([value, label]) => (
                 <button
                   key={value}
                   type="button"
@@ -148,18 +151,18 @@ export function ActivityLog() {
             {period === "custom" && (
               <div className="activity-log-date-row">
                 <label>
-                  <span>From</span>
+                  <span>{t("activityLogPage.fromLabel")}</span>
                   <input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} />
                 </label>
                 <label>
-                  <span>To</span>
+                  <span>{t("activityLogPage.toLabel")}</span>
                   <input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} />
                 </label>
               </div>
             )}
 
-            <div className="activity-log-chip-row" role="tablist" aria-label="Activity module">
-              <button type="button" className={moduleFilter === "all" ? "is-active" : ""} onClick={() => setModuleFilter("all")}>All</button>
+            <div className="activity-log-chip-row" role="tablist" aria-label={t("activityLogPage.moduleAria")}>
+              <button type="button" className={moduleFilter === "all" ? "is-active" : ""} onClick={() => setModuleFilter("all")}>{t("common.all")}</button>
               {availableModules.map((module) => (
                 <button
                   key={module}
@@ -167,14 +170,14 @@ export function ActivityLog() {
                   className={moduleFilter === module ? "is-active" : ""}
                   onClick={() => setModuleFilter(module)}
                 >
-                  {moduleLabels[module]}
+                  {t(moduleLabelKeys[module])}
                 </button>
               ))}
             </div>
           </div>
 
           {!filteredActivities.length ? (
-            <p className="activity-empty">No activity found for this period.</p>
+            <p className="activity-empty">{t("activityLogPage.noActivityForPeriod")}</p>
           ) : (
             <div className="activity-log-list">
               {filteredActivities.map((activity) => {
@@ -196,7 +199,7 @@ export function ActivityLog() {
                           aria-expanded={expanded}
                           aria-controls={`activity-details-${activity.id}`}
                         >
-                          <ActivitySummary activity={activity} expandable expanded={expanded} />
+                          <ActivitySummary t={t} activity={activity} expandable expanded={expanded} />
                         </button>
                         {expanded ? (
                           <div className="activity-log-item__details" id={`activity-details-${activity.id}`}>
@@ -205,22 +208,22 @@ export function ActivityLog() {
                                 <article key={child.id} className="activity-log-item__detail-row">
                                   <strong>{child.title}</strong>
                                   <span>{child.detail ?? ""}</span>
-                                  <small>{child.value ?? ""}</small>
+                                  <small className="bidi-isolate">{child.value ?? ""}</small>
                                 </article>
                               ))}
                             </div>
-                            {hiddenChildrenCount > 0 ? <p className="activity-log-item__more">+ {hiddenChildrenCount} more</p> : null}
-                            {activity.path ? <Link className="activity-log-item__open" to={activity.path}>Open {activity.moduleLabel}</Link> : null}
+                            {hiddenChildrenCount > 0 ? <p className="activity-log-item__more">{t("activityLogPage.moreCount", { count: hiddenChildrenCount })}</p> : null}
+                            {activity.path ? <Link className="activity-log-item__open" to={activity.path}>{t("dashboardPage.openModuleNamed", { module: activity.moduleLabel })}</Link> : null}
                           </div>
                         ) : null}
                       </>
                     ) : activity.path ? (
                       <Link to={activity.path} className="dashboard-activity-item activity-log-item">
-                        <ActivitySummary activity={activity} />
+                        <ActivitySummary t={t} activity={activity} />
                       </Link>
                     ) : (
                       <article className="dashboard-activity-item activity-log-item activity-log-item--static">
-                        <ActivitySummary activity={activity} />
+                        <ActivitySummary t={t} activity={activity} />
                       </article>
                     )}
                   </article>

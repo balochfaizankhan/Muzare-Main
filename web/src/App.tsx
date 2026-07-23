@@ -194,6 +194,9 @@ export default function App() {
       </Route>
       <Route path="sales" element={routeElement(<Sales />, "Loading sales")} />
       <Route path="expenses" element={routeElement(<Expenses />, "Loading expenses")} />
+      <Route path="expenses/new" element={routeElement(<Expenses />, "Loading new expense voucher")} />
+      <Route path="expenses/vouchers" element={routeElement(<Expenses />, "Loading expense vouchers")} />
+      <Route path="expenses/summary" element={routeElement(<Expenses />, "Loading expense summary")} />
       <Route path="dispatch" element={routeElement(<Dispatch />, "Loading dispatch")} />
       <Route path="inventory" element={routeElement(<Inventory />, "Loading inventory")} />
       <Route path="attendance" element={<Navigate to="/workspace/workforce/attendance" replace />} />

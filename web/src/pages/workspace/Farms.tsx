@@ -267,7 +267,7 @@ export function Farms() {
                 <div className="settings-section__header">
                   <div>
                     <h2>{t("workspaceProfile.accessTitle")}</h2>
-                    <p>Manage who can access the workspace and review approvals.</p>
+                    <p>{t("workspaceProfile.accessDescription")}</p>
                   </div>
                 </div>
                 <div className="settings-menu-grid">
@@ -327,7 +327,7 @@ export function Farms() {
               <div className="farm-actions">
                 {farms.data.needsRepair && (
                   <button type="button" onClick={() => repairContext.mutate()} disabled={repairContext.isPending}>
-                    {repairContext.isPending ? "Repairing..." : "Repair workspace context"}
+                    {repairContext.isPending ? t("workspaceProfile.repairing") : t("workspaceProfile.repairWorkspaceContext")}
                   </button>
                 )}
                 {!hasUsableFarm && <button type="button" onClick={() => { setEditing(null); setForm(emptyForm); setShowForm(true); }}>{t("farmsPage.createFarm")}</button>}
@@ -422,19 +422,19 @@ export function Farms() {
             <div className="settings-section__header">
               <div>
                 <h2>{t("workspaceProfile.systemTitle")}</h2>
-                <p>View app version details and technical reconciliation tools.</p>
+                <p>{t("workspaceProfile.systemDescription")}</p>
               </div>
             </div>
             <BuildDiagnostics compact />
             <details className="settings-diagnostics-details">
               <summary>
                 <span>
-                  <strong>Accounting Reconciliation Trace</strong>
-                  <small>Inspect labour settlement reconciliation</small>
+                  <strong>{t("workspaceProfile.accountingReconciliationTraceTitle")}</strong>
+                  <small>{t("workspaceProfile.accountingReconciliationTraceDescription")}</small>
                 </span>
                 <ChevronRight size={16} />
               </summary>
-              <Link to="/debug/accounting-reconciliation" className="settings-diagnostics-details__link">Open diagnostics</Link>
+              <Link to="/debug/accounting-reconciliation" className="settings-diagnostics-details__link">{t("workspaceProfile.openDiagnostics")}</Link>
             </details>
           </section>
         )}

@@ -1,5 +1,6 @@
 import { Check, Plus, ArrowLeft } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { SearchInput } from "../../components/SearchInput";
 import { LabourSelectCombobox } from "../../components/LabourSelectCombobox";
@@ -10,6 +11,7 @@ import { getActiveFarmId, getActiveSeasonId, makeLocalRecord, offlineDb, workspa
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
 import { sortWorkersForDisplay } from "../../lib/workerEligibility";
 import { persistOperationalRecord } from "../../services/syncService";
+import { translateStatus } from "../../lib/statusLabels";
 
 const money = formatMoney;
 
@@ -80,6 +82,7 @@ function GroupEditorPanel({
   onClose: () => void;
   onSave: (record: LabourGroup, changedName: boolean) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [form, setForm] = useState<GroupForm>({
     name: initialGroup?.name ?? "",
     phone: initialGroup?.phone ?? "",
@@ -93,12 +96,12 @@ function GroupEditorPanel({
     event.preventDefault();
     const name = form.name.trim();
     if (!name) {
-      setError("Group name is required.");
+      setError(t("labourGroupsPage.groupNameRequired"));
       return;
     }
     const duplicate = groups.some((group) => group.id !== initialGroup?.id && normalize(group.name) === normalize(name));
     if (duplicate) {
-      setError("A labour group with this name already exists.");
+      setError(t("labourGroupsPage.duplicateGroupName"));
       return;
     }
     if (busy) return;
@@ -118,7 +121,7 @@ function GroupEditorPanel({
       }, name !== (initialGroup?.name ?? ""));
       onClose();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to save the group.");
+      setError(caught instanceof Error ? caught.message : t("labourGroupsPage.unableToSaveGroup"));
     } finally {
       setBusy(false);
     }
@@ -128,15 +131,15 @@ function GroupEditorPanel({
       <section className="worker-action-dialog" role="dialog" aria-modal="true" aria-label={title} onClick={(event) => event.stopPropagation()}>
         <header>
           <h2>{title}</h2>
-          <button type="button" aria-label={`Close ${title}`} onClick={onClose}>X</button>
+          <button type="button" aria-label={t("labourGroupsPage.closeDialogAria", { title })} onClick={onClose}>X</button>
         </header>
         <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
-          <label><span>Group name *</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
-          <label><span>Phone / contact</span><input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
+          <label><span>{t("labourGroupsPage.groupNameLabel")}</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+          <label><span>{t("workforcePage.phoneContact")}</span><input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
           <label>
-            <span>Foreman</span>
+            <span>{t("labourGroupsPage.foremanLabel")}</span>
             <LabourSelectCombobox
-              ariaLabel="Select foreman"
+              ariaLabel={t("labourGroupsPage.selectForeman")}
               options={[...labourers].sort((left, right) => {
                 const leftActive = left.active !== false ? 0 : 1;
                 const rightActive = right.active !== false ? 0 : 1;
@@ -144,18 +147,18 @@ function GroupEditorPanel({
               })}
               value={form.foremanId}
               onChange={(value) => setForm({ ...form, foremanId: value })}
-              placeholder="Select foreman"
-              noResultsLabel="No labourers found"
+              placeholder={t("labourGroupsPage.selectForeman")}
+              noResultsLabel={t("labourGroupsPage.noLabourersOption")}
               clearValue=""
             />
           </label>
-          <label><span>Notes</span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
-          <label><span>Status</span><select value={form.active ? "active" : "inactive"} onChange={(event) => setForm({ ...form, active: event.target.value === "active" })}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
-          <p className="context-message">Selecting a foreman will also assign that labourer to the group if needed.</p>
+          <label><span>{t("labourGroupsPage.notesLabel")}</span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
+          <label><span>{t("workforcePage.statusLabel")}</span><select value={form.active ? "active" : "inactive"} onChange={(event) => setForm({ ...form, active: event.target.value === "active" })}><option value="active">{translateStatus(t, "active")}</option><option value="inactive">{translateStatus(t, "inactive")}</option></select></label>
+          <p className="context-message">{t("labourGroupsPage.foremanAssignmentHint")}</p>
           {error ? <p className="worker-action-error">{error}</p> : null}
           <footer>
-            <button type="button" onClick={onClose}>Cancel</button>
-            <button type="submit" disabled={busy}>{busy ? "Saving..." : "Save group"}</button>
+            <button type="button" onClick={onClose}>{t("common.cancel")}</button>
+            <button type="submit" disabled={busy}>{busy ? t("workforcePage.saving") : t("labourGroupsPage.saveGroup")}</button>
           </footer>
         </form>
       </section>
@@ -176,6 +179,7 @@ function ConfirmBulkPanel({
   onClose: () => void;
   onConfirm: () => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const submit = async (event: FormEvent) => {
@@ -187,7 +191,7 @@ function ConfirmBulkPanel({
       await onConfirm();
       onClose();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to complete the bulk update.");
+      setError(caught instanceof Error ? caught.message : t("labourGroupsPage.unableToCompleteBulkUpdate"));
     } finally {
       setBusy(false);
     }
@@ -197,14 +201,14 @@ function ConfirmBulkPanel({
       <section className="worker-action-dialog" role="dialog" aria-modal="true" aria-label={title} onClick={(event) => event.stopPropagation()}>
         <header>
           <h2>{title}</h2>
-          <button type="button" aria-label={`Close ${title}`} onClick={onClose}>X</button>
+          <button type="button" aria-label={t("labourGroupsPage.closeDialogAria", { title })} onClick={onClose}>X</button>
         </header>
         <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
           <p>{details}</p>
           {error ? <p className="worker-action-error">{error}</p> : null}
           <footer>
-            <button type="button" onClick={onClose}>Cancel</button>
-            <button type="submit" disabled={busy}>{busy ? "Applying..." : confirmLabel}</button>
+            <button type="button" onClick={onClose}>{t("common.cancel")}</button>
+            <button type="submit" disabled={busy}>{busy ? t("labourGroupsPage.applying") : confirmLabel}</button>
           </footer>
         </form>
       </section>
@@ -235,6 +239,7 @@ function groupMemberStats(group: LabourGroup, labourers: Labourer[], settlements
 }
 
 export function LabourGroupsPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const params = useParams();
@@ -343,7 +348,7 @@ export function LabourGroupsPage() {
       }
     }
     await refresh();
-    toast(previousGroup ? "Labour group updated." : "Labour group created.");
+    toast(previousGroup ? t("labourGroupsPage.groupUpdatedToast") : t("labourGroupsPage.groupCreatedToast"));
   };
 
   const bulkUpdateMembers = async () => {
@@ -366,10 +371,10 @@ export function LabourGroupsPage() {
     setSelectedIds([]);
     await refresh();
     toast(currentAction === "remove"
-      ? `${affected.length} labourers removed from ${selectedGroup.name}.`
+      ? t("labourGroupsPage.labourersRemovedToast", { count: affected.length, group: selectedGroup.name })
       : currentAction === "move"
-        ? `${affected.length} labourers moved to ${selectedGroup.name}.`
-        : `${affected.length} labourers assigned to ${selectedGroup.name}.`);
+        ? t("labourGroupsPage.labourersMovedToast", { count: affected.length, group: selectedGroup.name })
+        : t("labourGroupsPage.labourersAssignedToast", { count: affected.length, group: selectedGroup.name }));
   };
 
   const selectVisible = () => setSelectedIds((current) => Array.from(new Set([...current, ...visibleLabourers.map((labourer) => labourer.id)])));
@@ -387,28 +392,28 @@ export function LabourGroupsPage() {
         <div className="workforce-group-card__header">
           <div>
             <strong>{group.name}</strong>
-            <span>{group.active !== false ? "Active" : "Inactive"}</span>
+            <span>{translateStatus(t, group.active !== false ? "active" : "inactive")}</span>
           </div>
-          <button type="button" className="secondary-button" onClick={() => navigate(`/workspace/workforce/labour-groups/${group.id}`)}>View</button>
+          <button type="button" className="secondary-button" onClick={() => navigate(`/workspace/workforce/labour-groups/${group.id}`)}>{t("common.view")}</button>
         </div>
         <div className="workforce-group-card__metrics">
-          <article><span>Total members</span><strong>{stats.members.length}</strong></article>
-          <article><span>Active today</span><strong>{stats.activeMembers.length}</strong></article>
-          <article><span>Inactive today</span><strong>{stats.inactiveMembers.length}</strong></article>
+          <article><span>{t("labourGroupsPage.totalMembers")}</span><strong className="bidi-isolate">{stats.members.length}</strong></article>
+          <article><span>{t("labourGroupsPage.activeToday")}</span><strong className="bidi-isolate">{stats.activeMembers.length}</strong></article>
+          <article><span>{t("labourGroupsPage.inactiveToday")}</span><strong className="bidi-isolate">{stats.inactiveMembers.length}</strong></article>
         </div>
         <div className="workforce-group-card__foreman">
-          <span>Foreman</span>
-          <strong>{foreman?.name ?? "No foreman assigned"}</strong>
+          <span>{t("labourGroupsPage.foremanLabel")}</span>
+          <strong>{foreman?.name ?? t("labourGroupsPage.noForemanAssigned")}</strong>
         </div>
         <div className="workforce-group-card__copy">
-          {contact ? <small>Contact: {contact}</small> : null}
+          {contact ? <small>{t("labourGroupsPage.contact")}: <span className="bidi-isolate">{contact}</span></small> : null}
           {notes ? <p>{notes}</p> : null}
         </div>
         <div className="workforce-group-card__actions">
-          <button type="button" className="workforce-group-card__action workforce-group-card__action--primary" onClick={() => navigate(`/workspace/workforce/labour-groups/${group.id}/members`)}>Manage members</button>
-          <button type="button" className="workforce-group-card__action workforce-group-card__action--primary" onClick={() => navigate(`/workspace/labour-payments/direct-due?source=attendance&scope=group&groupId=${encodeURIComponent(group.id)}`)}>Create labour due</button>
-          <button type="button" className="workforce-group-card__action workforce-group-card__action--secondary" onClick={() => navigate(`/workspace/workforce/labour-groups/${group.id}`)}>View details</button>
-          <button type="button" className="workforce-group-card__action workforce-group-card__action--secondary" onClick={() => setEditingGroup(group)}>Edit</button>
+          <button type="button" className="workforce-group-card__action workforce-group-card__action--primary" onClick={() => navigate(`/workspace/workforce/labour-groups/${group.id}/members`)}>{t("labourGroupsPage.manageMembers")}</button>
+          <button type="button" className="workforce-group-card__action workforce-group-card__action--primary" onClick={() => navigate(`/workspace/labour-payments/direct-due?source=attendance&scope=group&groupId=${encodeURIComponent(group.id)}`)}>{t("labourGroupsPage.createLabourDue")}</button>
+          <button type="button" className="workforce-group-card__action workforce-group-card__action--secondary" onClick={() => navigate(`/workspace/workforce/labour-groups/${group.id}`)}>{t("labourGroupsPage.viewDetails")}</button>
+          <button type="button" className="workforce-group-card__action workforce-group-card__action--secondary" onClick={() => setEditingGroup(group)}>{t("common.edit")}</button>
         </div>
       </article>
     );
@@ -419,54 +424,54 @@ export function LabourGroupsPage() {
     const foreman = labourById.get(selectedGroup.foremanId ?? selectedGroup.foremanLabourId ?? "") ?? null;
     return (
       <div className="dashboard-page">
-        <SubpageHeader title="Labour Groups" />
+        <SubpageHeader title={t("labourGroupsPage.pageTitle")} />
         <main className="subpage module-workspace workforce-shell-main">
           <section className="record-panel workforce-group-page-header">
-            <button className="workforce-group-page-header__back" type="button" onClick={backToGroupList} aria-label="Back to labour groups">
+            <button className="workforce-group-page-header__back" type="button" onClick={backToGroupList} aria-label={t("labourGroupsPage.backToGroups")}>
               <ArrowLeft size={18} />
             </button>
             <div className="workforce-group-page-header__copy">
               <h2>{selectedGroup.name}</h2>
-              <p>{selectedGroup.phone || "No contact"} {selectedGroup.notes ? `- ${selectedGroup.notes}` : ""}</p>
+              <p>{selectedGroup.phone ? <span className="bidi-isolate">{selectedGroup.phone}</span> : t("labourGroupsPage.noContact")} {selectedGroup.notes ? `- ${selectedGroup.notes}` : ""}</p>
             </div>
-            <span className={`sync-badge ${selectedGroup.active !== false ? "sync-badge--online" : "sync-badge--error"}`}>{selectedGroup.active !== false ? "Active" : "Inactive"}</span>
+            <span className={`sync-badge ${selectedGroup.active !== false ? "sync-badge--online" : "sync-badge--error"}`}>{translateStatus(t, selectedGroup.active !== false ? "active" : "inactive")}</span>
           </section>
           <section className="record-panel workforce-group-detail-grid">
-            <article><span>Total members</span><strong>{stats.members.length}</strong></article>
-            <article><span>Active today</span><strong>{stats.activeMembers.length}</strong></article>
-            <article><span>Inactive today</span><strong>{stats.inactiveMembers.length}</strong></article>
-            <article><span>Outstanding advances</span><strong>{money(stats.advanceBalance)}</strong></article>
-            <article><span>Unsettled wages</span><strong>{money(stats.unsettledWages)}</strong></article>
-            <article><span>Last settlement</span><strong>{stats.lastSettlement ? stats.lastSettlement.settlementDate : "-"}</strong></article>
-            <article><span>Foreman</span><strong>{foreman?.name ?? "No foreman assigned"}</strong></article>
+            <article><span>{t("labourGroupsPage.totalMembers")}</span><strong className="bidi-isolate">{stats.members.length}</strong></article>
+            <article><span>{t("labourGroupsPage.activeToday")}</span><strong className="bidi-isolate">{stats.activeMembers.length}</strong></article>
+            <article><span>{t("labourGroupsPage.inactiveToday")}</span><strong className="bidi-isolate">{stats.inactiveMembers.length}</strong></article>
+            <article><span>{t("labourGroupsPage.outstandingAdvances")}</span><strong className="bidi-isolate">{money(stats.advanceBalance)}</strong></article>
+            <article><span>{t("labourGroupsPage.unsettledWages")}</span><strong className="bidi-isolate">{money(stats.unsettledWages)}</strong></article>
+            <article><span>{t("labourGroupsPage.lastSettlement")}</span><strong>{stats.lastSettlement ? <span className="bidi-isolate">{stats.lastSettlement.settlementDate}</span> : "-"}</strong></article>
+            <article><span>{t("labourGroupsPage.foremanLabel")}</span><strong>{foreman?.name ?? t("labourGroupsPage.noForemanAssigned")}</strong></article>
           </section>
-          <p className="context-message">Settlement eligibility is based on wage-period attendance, not only the current active status.</p>
+          <p className="context-message">{t("labourGroupsPage.settlementEligibilityNote")}</p>
           <section className="record-panel workforce-group-section">
             <div className="workforce-group-section__heading">
-              <h2>Members</h2>
+              <h2>{t("labourGroupsPage.membersHeading")}</h2>
               <div className="module-inline-actions">
-                <button type="button" onClick={() => navigate(`/workspace/workforce/labour-groups/${selectedGroup.id}/members`)}>Manage members</button>
-                <button type="button" onClick={() => setEditingGroup(selectedGroup)}>Edit group</button>
-                <button type="button" onClick={() => navigate(`/workspace/labour-payments/direct-due?source=attendance&scope=group&groupId=${encodeURIComponent(selectedGroup.id)}`)}>Create labour due</button>
+                <button type="button" onClick={() => navigate(`/workspace/workforce/labour-groups/${selectedGroup.id}/members`)}>{t("labourGroupsPage.manageMembers")}</button>
+                <button type="button" onClick={() => setEditingGroup(selectedGroup)}>{t("labourGroupsPage.editGroup")}</button>
+                <button type="button" onClick={() => navigate(`/workspace/labour-payments/direct-due?source=attendance&scope=group&groupId=${encodeURIComponent(selectedGroup.id)}`)}>{t("labourGroupsPage.createLabourDue")}</button>
               </div>
             </div>
             <div className="workforce-group-member-list">
               {stats.members.length ? stats.members.map((labourer) => {
-                const label = labourer.active !== false ? "Active" : "Inactive";
+                const serial = labourSerial(labourer);
                 return (
                   <article key={labourer.id} className="workforce-group-member-row">
                     <div>
                       <strong>{labourer.name}</strong>
-                      <span>{labourSerial(labourer) || "No serial"} - {label}</span>
+                      <span>{serial ? <span className="bidi-isolate">{serial}</span> : t("labourGroupsPage.noSerial")} - {translateStatus(t, labourer.active !== false ? "active" : "inactive")}</span>
                     </div>
-                    <span>{labourer.phone || labourer.mobile || ""}</span>
+                    <span className="bidi-isolate">{labourer.phone || labourer.mobile || ""}</span>
                   </article>
                 );
-              }) : <p className="empty-records">No labourers are assigned to this group yet.</p>}
+              }) : <p className="empty-records">{t("labourGroupsPage.noMembersAssignedYet")}</p>}
             </div>
           </section>
         </main>
-        {editingGroup ? <GroupEditorPanel title="Edit Labour Group" initialGroup={editingGroup} groups={groups} labourers={labourers} onClose={() => setEditingGroup(null)} onSave={saveGroup} /> : null}
+        {editingGroup ? <GroupEditorPanel title={t("labourGroupsPage.editGroupDialogTitle")} initialGroup={editingGroup} groups={groups} labourers={labourers} onClose={() => setEditingGroup(null)} onSave={saveGroup} /> : null}
       </div>
     );
   }
@@ -474,57 +479,57 @@ export function LabourGroupsPage() {
   if (isMembersView && selectedGroup) {
     const stats = memberStats ?? { members: [], activeMembers: [], inactiveMembers: [], lastSettlement: null, advanceBalance: 0, unsettledWages: 0 };
     const selectionSummary = currentAction === "remove"
-      ? `${selectedIds.length} selected. ${selectedInThisGroup} will be removed from ${selectedGroup.name}.`
+      ? `${t("common.itemsSelectedCount", { count: selectedIds.length })}. ${t("labourGroupsPage.willBeRemovedFromGroup", { count: selectedInThisGroup, group: selectedGroup.name })}`
       : currentAction === "move"
-        ? `${selectedIds.length} selected. ${selectedInAnotherGroup} will be moved to ${selectedGroup.name}.`
-        : `${selectedIds.length} selected. ${selectedNoGroup > 0 ? selectedNoGroup : selectedIds.length} will be assigned to ${selectedGroup.name}.`;
-    const confirmLabel = currentAction === "remove" ? "Remove from group" : currentAction === "move" ? "Move to this group" : "Add to group";
+        ? `${t("common.itemsSelectedCount", { count: selectedIds.length })}. ${t("labourGroupsPage.willBeMovedToGroup", { count: selectedInAnotherGroup, group: selectedGroup.name })}`
+        : `${t("common.itemsSelectedCount", { count: selectedIds.length })}. ${t("labourGroupsPage.willBeAssignedToGroup", { count: selectedNoGroup > 0 ? selectedNoGroup : selectedIds.length, group: selectedGroup.name })}`;
+    const confirmLabel = currentAction === "remove" ? t("labourGroupsPage.removeFromGroup") : currentAction === "move" ? t("labourGroupsPage.moveToThisGroup") : t("labourGroupsPage.addToGroup");
     return (
       <div className="dashboard-page">
-        <SubpageHeader title="Labour Groups" />
+        <SubpageHeader title={t("labourGroupsPage.pageTitle")} />
         <main className="subpage module-workspace workforce-shell-main">
           <section className="record-panel workforce-group-page-header">
-            <button className="workforce-group-page-header__back" type="button" onClick={backToGroupDetail} aria-label="Back to group detail">
+            <button className="workforce-group-page-header__back" type="button" onClick={backToGroupDetail} aria-label={t("labourGroupsPage.backToGroupDetail")}>
               <ArrowLeft size={18} />
             </button>
             <div className="workforce-group-page-header__copy">
               <h2>{selectedGroup.name}</h2>
-              <p>Manage members and bulk assignment.</p>
+              <p>{t("labourGroupsPage.manageMembersIntro")}</p>
             </div>
-            <span className="sync-badge sync-badge--online">{selectedIds.length} selected</span>
+            <span className="sync-badge sync-badge--online">{t("common.itemsSelectedCount", { count: selectedIds.length })}</span>
           </section>
           <section className="record-panel workforce-group-detail-grid">
-            <article><span>Assigned</span><strong>{stats.members.length}</strong></article>
-            <article><span>Active today</span><strong>{stats.activeMembers.length}</strong></article>
-            <article><span>Inactive today</span><strong>{stats.inactiveMembers.length}</strong></article>
-            <article><span>Visible</span><strong>{visibleLabourers.length}</strong></article>
+            <article><span>{t("labourGroupsPage.assigned")}</span><strong className="bidi-isolate">{stats.members.length}</strong></article>
+            <article><span>{t("labourGroupsPage.activeToday")}</span><strong className="bidi-isolate">{stats.activeMembers.length}</strong></article>
+            <article><span>{t("labourGroupsPage.inactiveToday")}</span><strong className="bidi-isolate">{stats.inactiveMembers.length}</strong></article>
+            <article><span>{t("labourGroupsPage.visible")}</span><strong className="bidi-isolate">{visibleLabourers.length}</strong></article>
           </section>
           <section className="record-panel workforce-group-members-panel">
             <div className="workforce-group-members-panel__top">
-              <SearchInput placeholder="Search labour name, phone, or serial" value={search} onChange={setSearch} />
+              <SearchInput placeholder={t("labourGroupsPage.searchMembersPlaceholder")} value={search} onChange={setSearch} />
               <div className="workforce-group-filter-row">
-                <button type="button" className={statusFilter === "all" ? "is-active" : ""} onClick={() => setStatusFilter("all")}>All</button>
-                <button type="button" className={statusFilter === "active" ? "is-active" : ""} onClick={() => setStatusFilter("active")}>Active</button>
-                <button type="button" className={statusFilter === "inactive" ? "is-active" : ""} onClick={() => setStatusFilter("inactive")}>Inactive</button>
+                <button type="button" className={statusFilter === "all" ? "is-active" : ""} onClick={() => setStatusFilter("all")}>{t("common.all")}</button>
+                <button type="button" className={statusFilter === "active" ? "is-active" : ""} onClick={() => setStatusFilter("active")}>{translateStatus(t, "active")}</button>
+                <button type="button" className={statusFilter === "inactive" ? "is-active" : ""} onClick={() => setStatusFilter("inactive")}>{translateStatus(t, "inactive")}</button>
               </div>
               <div className="workforce-group-filter-row">
-                <button type="button" className={membershipFilter === "all" ? "is-active" : ""} onClick={() => setMembershipFilter("all")}>All group statuses</button>
-                <button type="button" className={membershipFilter === "no_group" ? "is-active" : ""} onClick={() => setMembershipFilter("no_group")}>No group</button>
-                <button type="button" className={membershipFilter === "in_group" ? "is-active" : ""} onClick={() => setMembershipFilter("in_group")}>Already in this group</button>
-                <button type="button" className={membershipFilter === "another_group" ? "is-active" : ""} onClick={() => setMembershipFilter("another_group")}>In another group</button>
+                <button type="button" className={membershipFilter === "all" ? "is-active" : ""} onClick={() => setMembershipFilter("all")}>{t("labourGroupsPage.allGroupStatuses")}</button>
+                <button type="button" className={membershipFilter === "no_group" ? "is-active" : ""} onClick={() => setMembershipFilter("no_group")}>{t("labourGroupsPage.noGroup")}</button>
+                <button type="button" className={membershipFilter === "in_group" ? "is-active" : ""} onClick={() => setMembershipFilter("in_group")}>{t("labourGroupsPage.alreadyInThisGroup")}</button>
+                <button type="button" className={membershipFilter === "another_group" ? "is-active" : ""} onClick={() => setMembershipFilter("another_group")}>{t("labourGroupsPage.inAnotherGroup")}</button>
               </div>
               <div className="workforce-group-bulk-actions">
-                <button type="button" onClick={selectVisible}>Select all visible</button>
-                <button type="button" onClick={selectVisibleActive}>Select all active visible</button>
-                <button type="button" onClick={selectVisibleNoGroup}>Select all no-group visible</button>
-                <button type="button" onClick={clearSelection}>Clear selection</button>
+                <button type="button" onClick={selectVisible}>{t("labourGroupsPage.selectAllVisible")}</button>
+                <button type="button" onClick={selectVisibleActive}>{t("labourGroupsPage.selectAllActiveVisible")}</button>
+                <button type="button" onClick={selectVisibleNoGroup}>{t("labourGroupsPage.selectAllNoGroupVisible")}</button>
+                <button type="button" onClick={clearSelection}>{t("common.clearSelection")}</button>
               </div>
             </div>
             <div className="workforce-group-member-list workforce-group-member-list--selectable">
               {visibleLabourers.length ? visibleLabourers.map((labourer) => {
                 const checked = selectedIds.includes(labourer.id);
                 const workerGroup = labourer.groupId ? groupLookup.get(labourer.groupId) ?? null : null;
-                const currentGroupName = workerGroup?.name ?? labourer.group?.trim() ?? "No group";
+                const currentGroupName = workerGroup?.name ?? labourer.group?.trim() ?? "";
                 const serial = labourSerial(labourer);
                 const inOtherGroup = !isLabourerInGroup(labourer, selectedGroup) && Boolean(labourer.groupId || labourer.group?.trim());
                 return (
@@ -536,30 +541,30 @@ export function LabourGroupsPage() {
                   >
                     <span className="workforce-group-select-card__check">{checked ? <Check size={15} /> : null}</span>
                     <span className="workforce-group-select-card__copy">
-                      <strong>{serial ? `${serial} ${labourer.name}` : labourer.name}</strong>
-                      <span>{labourer.active !== false ? "Active" : "Inactive"} - {money(Number(labourer.dailyWage ?? labourer.dailyRate ?? 0) || 0)}/day</span>
-                      <small>Current group: {currentGroupName}</small>
-                      {inOtherGroup ? <em className="status-inactive">In another group</em> : null}
+                      <strong>{serial ? <><span className="bidi-isolate">{serial}</span> {labourer.name}</> : labourer.name}</strong>
+                      <span>{translateStatus(t, labourer.active !== false ? "active" : "inactive")} - <span className="bidi-isolate">{money(Number(labourer.dailyWage ?? labourer.dailyRate ?? 0) || 0)}</span>{t("labourGroupsPage.perDay")}</span>
+                      <small>{t("labourGroupsPage.currentGroup")}: {currentGroupName || t("labourGroupsPage.noGroup")}</small>
+                      {inOtherGroup ? <em className="status-inactive">{t("labourGroupsPage.inAnotherGroup")}</em> : null}
                     </span>
                   </button>
                 );
-              }) : <p className="empty-records">No labourers match the current search and filters.</p>}
+              }) : <p className="empty-records">{t("labourGroupsPage.noLabourersMatchFilters")}</p>}
             </div>
           </section>
         </main>
         {selectedIds.length > 0 ? (
           <div className="workforce-group-sticky-bar" role="status" aria-live="polite">
-            <strong>{selectedIds.length} selected</strong>
+            <strong>{t("common.itemsSelectedCount", { count: selectedIds.length })}</strong>
             <span>{selectionSummary}</span>
             <div className="workforce-group-sticky-bar__actions">
-              <button type="button" className="secondary-button" onClick={clearSelection}>Clear</button>
+              <button type="button" className="secondary-button" onClick={clearSelection}>{t("common.clear")}</button>
               <button type="button" onClick={() => setBulkAction(currentAction)}>{confirmLabel}</button>
             </div>
           </div>
         ) : null}
         {bulkAction ? (
           <ConfirmBulkPanel
-            title={bulkAction === "remove" ? "Remove members" : bulkAction === "move" ? "Move members" : "Add members"}
+            title={bulkAction === "remove" ? t("labourGroupsPage.removeMembersDialogTitle") : bulkAction === "move" ? t("labourGroupsPage.moveMembersDialogTitle") : t("labourGroupsPage.addMembersDialogTitle")}
             details={selectionSummary}
             confirmLabel={confirmLabel}
             onClose={() => setBulkAction(null)}
@@ -572,31 +577,31 @@ export function LabourGroupsPage() {
 
   return (
     <div className="dashboard-page">
-      <SubpageHeader title="Labour Groups" />
+      <SubpageHeader title={t("labourGroupsPage.pageTitle")} />
         <main className="subpage module-workspace workforce-shell-main">
         <section className="record-panel workforce-groups-shell">
           <div className="workforce-group-page-header workforce-group-page-header--stacked">
             <div className="workforce-group-page-header__copy">
-              <h2>Labour Groups / Foremen</h2>
-              <p>Manage group leaders and assign labourers.</p>
+              <h2>{t("labourGroupsPage.groupsForemenHeading")}</h2>
+              <p>{t("labourGroupsPage.manageForemenIntro")}</p>
             </div>
             <button type="button" className="secondary-button" onClick={() => setShowCreate(true)}>
-              <Plus size={16} /> Create group
+              <Plus size={16} /> {t("labourGroupsPage.createGroup")}
             </button>
           </div>
-          <SearchInput placeholder="Search groups" value={search} onChange={setSearch} />
+          <SearchInput placeholder={t("labourGroupsPage.searchGroupsPlaceholder")} value={search} onChange={setSearch} />
           <div className="workforce-group-filter-row">
-            <button type="button" className={statusFilter === "all" ? "is-active" : ""} onClick={() => setStatusFilter("all")}>All</button>
-            <button type="button" className={statusFilter === "active" ? "is-active" : ""} onClick={() => setStatusFilter("active")}>Active</button>
-            <button type="button" className={statusFilter === "inactive" ? "is-active" : ""} onClick={() => setStatusFilter("inactive")}>Inactive</button>
+            <button type="button" className={statusFilter === "all" ? "is-active" : ""} onClick={() => setStatusFilter("all")}>{t("common.all")}</button>
+            <button type="button" className={statusFilter === "active" ? "is-active" : ""} onClick={() => setStatusFilter("active")}>{translateStatus(t, "active")}</button>
+            <button type="button" className={statusFilter === "inactive" ? "is-active" : ""} onClick={() => setStatusFilter("inactive")}>{translateStatus(t, "inactive")}</button>
           </div>
           <div className="workforce-group-list">
-            {visibleGroups.length ? visibleGroups.map((group) => groupCardAction(group)) : <p className="empty-records">No labour groups found.</p>}
+            {visibleGroups.length ? visibleGroups.map((group) => groupCardAction(group)) : <p className="empty-records">{t("labourGroupsPage.noLabourGroupsFound")}</p>}
           </div>
         </section>
       </main>
-      {showCreate ? <GroupEditorPanel title="Create Labour Group" groups={groups} labourers={labourers} onClose={() => setShowCreate(false)} onSave={async (record) => saveGroup(record, false)} /> : null}
-      {editingGroup ? <GroupEditorPanel title="Edit Labour Group" initialGroup={editingGroup} groups={groups} labourers={labourers} onClose={() => setEditingGroup(null)} onSave={saveGroup} /> : null}
+      {showCreate ? <GroupEditorPanel title={t("labourGroupsPage.createGroupDialogTitle")} groups={groups} labourers={labourers} onClose={() => setShowCreate(false)} onSave={async (record) => saveGroup(record, false)} /> : null}
+      {editingGroup ? <GroupEditorPanel title={t("labourGroupsPage.editGroupDialogTitle")} initialGroup={editingGroup} groups={groups} labourers={labourers} onClose={() => setEditingGroup(null)} onSave={saveGroup} /> : null}
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import type { BootstrapData } from "./api";
 import type { SyncState } from "../services/syncService";
 
@@ -20,6 +21,7 @@ export type WorkspaceDisplayStatus = {
 };
 
 type WorkspaceDisplayStatusInput = {
+  t: TFunction;
   sync: SyncState;
   bootstrap?: BootstrapData;
   bootstrapLoading: boolean;
@@ -28,6 +30,7 @@ type WorkspaceDisplayStatusInput = {
 };
 
 export function deriveWorkspaceDisplayStatus({
+  t,
   sync,
   bootstrap,
   bootstrapLoading,
@@ -45,58 +48,60 @@ export function deriveWorkspaceDisplayStatus({
     || sync.startupStage === "loadingContext";
   const setupRequired = bootstrapLoaded && !hydrationPending && (!hasFarm || !hasSeason);
   const syncInProgress = sync.status === "syncing" || (sync.pendingCount ?? 0) > 0 || sync.startupStage === "syncingLatestRecords";
+  const noFarmSelectedShort = t("workspaceStatus.noFarmAvailableShort");
+  const noSeasonSelectedShort = hasFarm ? t("workspaceStatus.noActiveSeasonShort") : t("workspaceStatus.createFarmFirstShort");
 
   if (sync.status === "error" || bootstrapErrored) {
     return {
       tone: "error",
-      label: "Sync Failed",
-      note: "Sync needs attention.",
-      heroStatus: "Sync failed",
-      heroCopy: "We could not finish syncing your latest workspace data.",
+      label: t("workspaceStatus.syncFailedLabel"),
+      note: t("workspaceStatus.syncNeedsAttention"),
+      heroStatus: t("workspaceStatus.heroSyncFailed"),
+      heroCopy: t("workspaceStatus.heroSyncFailedCopy"),
       hydrationPending,
       bootstrapLoaded,
       hasFarm,
       hasSeason,
       hasOperationalContext,
       setupRequired,
-      selectedFarmLabel: hydrationPending ? "Loading farm..." : (farm?.name ?? "No farm available"),
-      selectedSeasonLabel: hydrationPending ? "Loading season..." : (season?.name ?? (hasFarm ? "No active season" : "Create a farm first")),
+      selectedFarmLabel: hydrationPending ? t("workspaceStatus.loadingFarmEllipsis") : (farm?.name ?? noFarmSelectedShort),
+      selectedSeasonLabel: hydrationPending ? t("workspaceStatus.loadingSeasonEllipsis") : (season?.name ?? noSeasonSelectedShort),
     };
   }
 
   if (hydrationPending) {
     return {
       tone: "loading",
-      label: "Loading...",
-      note: "Preparing workspace context",
-      heroStatus: "Loading workspace",
-      heroCopy: "Preparing your farm overview...",
+      label: t("workspaceStatus.loadingLabel"),
+      note: t("workspaceStatus.preparingWorkspaceContext"),
+      heroStatus: t("workspaceStatus.heroLoadingWorkspace"),
+      heroCopy: t("workspaceStatus.heroPreparingOverview"),
       hydrationPending,
       bootstrapLoaded,
       hasFarm,
       hasSeason,
       hasOperationalContext,
       setupRequired,
-      selectedFarmLabel: "Loading farm...",
-      selectedSeasonLabel: "Loading season...",
+      selectedFarmLabel: t("workspaceStatus.loadingFarmEllipsis"),
+      selectedSeasonLabel: t("workspaceStatus.loadingSeasonEllipsis"),
     };
   }
 
   if (sync.status === "offline") {
     return {
       tone: "offline",
-      label: "Offline",
-      note: "Working offline with local data.",
-      heroStatus: "Offline",
-      heroCopy: "Changes will stay local until connectivity returns.",
+      label: t("workspaceStatus.offlineLabel"),
+      note: t("workspaceStatus.workingOfflineLocalData"),
+      heroStatus: t("workspaceStatus.offlineLabel"),
+      heroCopy: t("workspaceStatus.heroOfflineCopy"),
       hydrationPending,
       bootstrapLoaded,
       hasFarm,
       hasSeason,
       hasOperationalContext,
       setupRequired,
-      selectedFarmLabel: farm?.name ?? "No farm available",
-      selectedSeasonLabel: season?.name ?? (hasFarm ? "No active season" : "Create a farm first"),
+      selectedFarmLabel: farm?.name ?? noFarmSelectedShort,
+      selectedSeasonLabel: season?.name ?? noSeasonSelectedShort,
     };
   }
 
@@ -104,18 +109,18 @@ export function deriveWorkspaceDisplayStatus({
     const pendingCount = sync.pendingCount ?? 0;
     return {
       tone: "syncing",
-      label: "Syncing...",
-      note: pendingCount > 0 ? `${pendingCount} change${pendingCount === 1 ? "" : "s"} waiting to sync.` : "Syncing the latest workspace records.",
-      heroStatus: "Syncing",
-      heroCopy: pendingCount > 0 ? `${pendingCount} change${pendingCount === 1 ? "" : "s"} still needs to sync.` : "Syncing the latest workspace records.",
+      label: t("workspaceStatus.syncingLabel"),
+      note: pendingCount > 0 ? t("workspaceStatus.changeWaitingToSync", { count: pendingCount }) : t("workspaceStatus.syncingLatestRecords"),
+      heroStatus: t("workspaceStatus.heroSyncing"),
+      heroCopy: pendingCount > 0 ? t("workspaceStatus.changeStillNeedsSync", { count: pendingCount }) : t("workspaceStatus.syncingLatestRecords"),
       hydrationPending,
       bootstrapLoaded,
       hasFarm,
       hasSeason,
       hasOperationalContext,
       setupRequired,
-      selectedFarmLabel: farm?.name ?? "No farm available",
-      selectedSeasonLabel: season?.name ?? (hasFarm ? "No active season" : "Create a farm first"),
+      selectedFarmLabel: farm?.name ?? noFarmSelectedShort,
+      selectedSeasonLabel: season?.name ?? noSeasonSelectedShort,
     };
   }
 
@@ -123,34 +128,34 @@ export function deriveWorkspaceDisplayStatus({
     const missingSeason = hasFarm && !hasSeason;
     return {
       tone: "setup",
-      label: "Setup required",
-      note: missingSeason ? "No season selected yet." : "No farm selected yet.",
-      heroStatus: "Setup required",
-      heroCopy: missingSeason ? "Select or create a season to unlock the full overview." : "Select or create a farm to unlock the full overview.",
+      label: t("workspaceStatus.setupRequiredLabel"),
+      note: missingSeason ? t("workspaceStatus.noSeasonSelectedYet") : t("workspaceStatus.noFarmSelectedYet"),
+      heroStatus: t("workspaceStatus.setupRequiredLabel"),
+      heroCopy: missingSeason ? t("workspaceStatus.selectSeasonToUnlock") : t("workspaceStatus.selectFarmToUnlock"),
       hydrationPending,
       bootstrapLoaded,
       hasFarm,
       hasSeason,
       hasOperationalContext,
       setupRequired,
-      selectedFarmLabel: farm?.name ?? "No farm available",
-      selectedSeasonLabel: season?.name ?? (hasFarm ? "No active season" : "Create a farm first"),
+      selectedFarmLabel: farm?.name ?? noFarmSelectedShort,
+      selectedSeasonLabel: season?.name ?? noSeasonSelectedShort,
     };
   }
 
   return {
     tone: "synced",
-    label: "Synced",
-    note: "Workspace is synced and ready for today.",
-    heroStatus: "Ready",
-    heroCopy: "Workspace is synced and ready for today.",
+    label: t("workspaceStatus.syncedLabel"),
+    note: t("workspaceStatus.workspaceSyncedReady"),
+    heroStatus: t("workspaceStatus.heroReady"),
+    heroCopy: t("workspaceStatus.workspaceSyncedReady"),
     hydrationPending,
     bootstrapLoaded,
     hasFarm,
     hasSeason,
     hasOperationalContext,
     setupRequired,
-    selectedFarmLabel: farm?.name ?? "No farm available",
-    selectedSeasonLabel: season?.name ?? (hasFarm ? "No active season" : "Create a farm first"),
+    selectedFarmLabel: farm?.name ?? noFarmSelectedShort,
+    selectedSeasonLabel: season?.name ?? noSeasonSelectedShort,
   };
 }

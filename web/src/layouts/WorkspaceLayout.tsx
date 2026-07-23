@@ -96,6 +96,7 @@ export function WorkspaceLayout() {
     setMobileSheet(null);
   }, [location.pathname, location.search]);
   const workspaceStatus = deriveWorkspaceDisplayStatus({
+    t,
     sync,
     bootstrap: bootstrap.data,
     bootstrapLoading: bootstrap.isLoading || (!bootstrap.data && bootstrap.isFetching),
@@ -112,7 +113,7 @@ export function WorkspaceLayout() {
     }
   }, [bootstrap.data?.activeFarmId, bootstrap.data?.activeSeasonId, bootstrap.isSuccess, user?.workspaceId]);
   const statusText = workspaceStatus.tone === "offline"
-    ? "Offline"
+    ? t("workspaceStatus.offlineLabel")
     : workspaceStatus.label;
   const startupVisible = sync.startupInProgress;
   const queueNeedsAttention = (sync.pendingCount ?? 0) > 0 || (sync.failedCount ?? 0) > 0;
@@ -122,11 +123,11 @@ export function WorkspaceLayout() {
     .filter(([to]) => config.featureInventory || to !== "/workspace/inventory")
     .filter(([, , , module]) => !user || hasModulePermission(user, module, "view"));
   const mobilePrimaryNav: Array<MobileNavLink | MobileNavAction> = [
-    { to: "/workspace/dashboard", label: "Home", icon: LayoutDashboard },
-    { to: "/workspace/workforce/labour", label: "Records", icon: ClipboardList },
-    { action: "add" as const, label: "Add", icon: Plus },
-    { to: "/workspace/reports", label: "Reports", icon: BarChart3 },
-    { action: "more" as const, label: "More", icon: MoreHorizontal },
+    { to: "/workspace/dashboard", label: t("layout.mobileNavHome"), icon: LayoutDashboard },
+    { to: "/workspace/workforce/labour", label: t("layout.mobileNavRecords"), icon: ClipboardList },
+    { action: "add" as const, label: t("common.add"), icon: Plus },
+    { to: "/workspace/reports", label: t("layout.reports"), icon: BarChart3 },
+    { action: "more" as const, label: t("layout.mobileNavMore"), icon: MoreHorizontal },
   ];
   const quickAddRoutes = [
     "/workspace/dashboard",
@@ -141,11 +142,11 @@ export function WorkspaceLayout() {
   ];
   const mobileMoreLinks = filteredNav.filter(([to]) => !quickAddRoutes.includes(to));
   const mobileAddLinks = [
-    { to: "/workspace/workforce/attendance", label: "Mark Attendance", icon: Users, allowed: !user || hasModulePermission(user, "attendance", "create") },
-    { to: "/workspace/labour-payments/advances?action=record-advance", label: "Record Advance", icon: HandCoins, allowed: !user || hasModulePermission(user, "advances", "create") },
-    { to: "/workspace/expenses", label: "Add Expense", icon: ReceiptText, allowed: !user || hasModulePermission(user, "expenses", "create") },
-    { to: "/workspace/dispatch", label: "New Dispatch", icon: PackageOpen, allowed: !user || hasModulePermission(user, "dispatch", "create") },
-    { to: "/workspace/sales", label: "Record Sale", icon: ShoppingBasket, allowed: !user || hasModulePermission(user, "sales", "create") },
+    { to: "/workspace/workforce/attendance", label: t("workforcePage.markAttendance"), icon: Users, allowed: !user || hasModulePermission(user, "attendance", "create") },
+    { to: "/workspace/labour-payments/advances?action=record-advance", label: t("dashboard.recordAdvance"), icon: HandCoins, allowed: !user || hasModulePermission(user, "advances", "create") },
+    { to: "/workspace/expenses/new", label: t("dashboard.newExpense"), icon: ReceiptText, allowed: !user || hasModulePermission(user, "expenses", "create") },
+    { to: "/workspace/dispatch", label: t("dashboard.recordDispatch"), icon: PackageOpen, allowed: !user || hasModulePermission(user, "dispatch", "create") },
+    { to: "/workspace/sales", label: t("dashboard.recordSale"), icon: ShoppingBasket, allowed: !user || hasModulePermission(user, "sales", "create") },
   ].filter((item) => item.allowed);
   const queueStatusLabel = (status?: PendingMutation["status"]) => {
     switch (status ?? "pending") {
@@ -220,31 +221,31 @@ export function WorkspaceLayout() {
               return (
               <article key={item.id} className={`sync-queue-item sync-queue-item--${item.status ?? "pending"}`}>
                 <div className="sync-queue-item__meta">
-                  <strong>{isDateTypeQueueItem ? "Date Type could not sync" : `${item.entity} · ${item.operation}`}</strong>
-                  <span>{isDateTypeQueueItem ? "This setting could not sync because of an old app context." : queueStatusLabel(item.status)}</span>
+                  <strong>{isDateTypeQueueItem ? t("sync.dateTypeSyncFailedTitle") : `${item.entity} · ${item.operation}`}</strong>
+                  <span>{isDateTypeQueueItem ? t("sync.dateTypeSyncFailedDetail") : queueStatusLabel(item.status)}</span>
                 </div>
                 <div className="sync-queue-item__facts">
-                  <p><span>Type</span><strong>{isDateTypeQueueItem ? "Date Type" : item.entity}</strong></p>
-                  <p><span>Action</span><strong>{item.operation === "update" ? "Update" : item.operation === "delete" ? "Delete" : "Create"}</strong></p>
-                  <p><span>Created</span><strong>{formatQueueDateTime(item.createdAt)}</strong></p>
-                  <p><span>Last attempted</span><strong>{formatQueueDateTime(item.lastAttemptedAt)}</strong></p>
-                  <p><span>Retry count</span><strong>{item.attempts}</strong></p>
+                  <p><span>{t("sync.typeLabel")}</span><strong>{isDateTypeQueueItem ? t("sync.dateTypeLabel") : item.entity}</strong></p>
+                  <p><span>{t("sync.actionLabel")}</span><strong>{item.operation === "update" ? t("sync.actionUpdate") : item.operation === "delete" ? t("sync.actionDelete") : t("sync.actionCreate")}</strong></p>
+                  <p><span>{t("sync.createdAt")}</span><strong className="bidi-isolate">{formatQueueDateTime(item.createdAt)}</strong></p>
+                  <p><span>{t("sync.lastAttemptedAt")}</span><strong className="bidi-isolate">{formatQueueDateTime(item.lastAttemptedAt)}</strong></p>
+                  <p><span>{t("sync.retryCount")}</span><strong>{item.attempts}</strong></p>
                 </div>
                 {item.status === "permission_denied" ? <p className="sync-queue-item__error">{t("sync.permissionDeniedHint")}</p> : null}
                 {item.status === "stale_context" ? <p className="sync-queue-item__error">{t("sync.staleContextHint")}</p> : null}
                 <details className="sync-queue-item__technical">
-                  <summary>Technical details</summary>
+                  <summary>{t("sync.technicalDetails")}</summary>
                   <div className="sync-queue-item__technical-body">
-                    <p>Queue item: <code>{item.id}</code></p>
-                    <p>Client record: <code>{typeof (item.payload as { id?: unknown })?.id === "string" ? (item.payload as { id: string }).id : "-"}</code></p>
-                    <p>Workspace: <code>{item.workspaceId}</code></p>
-                    <p>Farm: <code>{item.farmId ?? "-"}</code></p>
-                    <p>Season: <code>{item.seasonId ?? "-"}</code></p>
-                    {"errorStatus" in item && item.errorStatus ? <p>HTTP status: <code>{item.errorStatus}</code></p> : null}
-                    {"errorCode" in item && item.errorCode ? <p>Error code: <code>{item.errorCode}</code></p> : null}
-                    {item.lastError ? <p>Last error: <code>{item.lastError}</code></p> : null}
-                    {"errorMessage" in item && item.errorMessage ? <p>Backend message: <code>{item.errorMessage}</code></p> : null}
-                    {"errorDetails" in item && item.errorDetails && typeof item.errorDetails === "object" ? <pre className="sync-queue-item__details">details: {JSON.stringify(item.errorDetails, null, 2)}</pre> : null}
+                    <p>{t("sync.queueItemId")}: <code className="bidi-isolate">{item.id}</code></p>
+                    <p>{t("sync.clientRecordLabel")}: <code className="bidi-isolate">{typeof (item.payload as { id?: unknown })?.id === "string" ? (item.payload as { id: string }).id : "-"}</code></p>
+                    <p>{t("layout.workspace")}: <code className="bidi-isolate">{item.workspaceId}</code></p>
+                    <p>{t("attendanceImport.farm")}: <code className="bidi-isolate">{item.farmId ?? "-"}</code></p>
+                    <p>{t("attendanceImport.season")}: <code className="bidi-isolate">{item.seasonId ?? "-"}</code></p>
+                    {"errorStatus" in item && item.errorStatus ? <p>{t("sync.httpStatusLabel")}: <code className="bidi-isolate">{item.errorStatus}</code></p> : null}
+                    {"errorCode" in item && item.errorCode ? <p>{t("sync.errorCodeLabel")}: <code className="bidi-isolate">{item.errorCode}</code></p> : null}
+                    {item.lastError ? <p>{t("sync.lastError")}: <code className="bidi-isolate">{item.lastError}</code></p> : null}
+                    {"errorMessage" in item && item.errorMessage ? <p>{t("sync.backendMessageLabel")}: <code className="bidi-isolate">{item.errorMessage}</code></p> : null}
+                    {"errorDetails" in item && item.errorDetails && typeof item.errorDetails === "object" ? <pre className="sync-queue-item__details">{t("sync.detailsLabel")}: {JSON.stringify(item.errorDetails, null, 2)}</pre> : null}
                   </div>
                 </details>
                 <div className="sync-queue-item__actions">
@@ -260,11 +261,11 @@ export function WorkspaceLayout() {
         </section>}
         {mobileSheet && (
           <div className="worker-action-backdrop app-mobile-sheet-backdrop" role="presentation" onClick={() => setMobileSheet(null)}>
-            <section className="worker-action-dialog app-mobile-sheet" role="dialog" aria-modal="true" aria-label={mobileSheet === "add" ? "Quick add" : "More modules"} onClick={(event) => event.stopPropagation()}>
+            <section className="worker-action-dialog app-mobile-sheet" role="dialog" aria-modal="true" aria-label={mobileSheet === "add" ? t("layout.mobileSheetQuickAddAria") : t("layout.mobileSheetMoreAria")} onClick={(event) => event.stopPropagation()}>
               <header>
                 <div>
-                  <h2>{mobileSheet === "add" ? "Create New" : "More"}</h2>
-                  <p>{mobileSheet === "add" ? "Choose what you want to record" : "Open the rest of your workspace modules."}</p>
+                  <h2>{mobileSheet === "add" ? t("layout.mobileSheetCreateNew") : t("layout.mobileNavMore")}</h2>
+                  <p>{mobileSheet === "add" ? t("layout.mobileSheetChooseToRecord") : t("layout.mobileSheetOpenModules")}</p>
                 </div>
                 <button type="button" onClick={() => setMobileSheet(null)} aria-label={t("common.close")}><X size={18} /></button>
               </header>
@@ -285,7 +286,7 @@ export function WorkspaceLayout() {
         <Outlet />
         {toast && <div className="saas-toast" role="status">{toast}</div>}
       </div>
-      <nav className="app-mobile-bottom-nav" aria-label="Primary mobile navigation">
+      <nav className="app-mobile-bottom-nav" aria-label={t("layout.primaryMobileNavAria")}>
         {mobilePrimaryNav.map((item) => {
           if ("to" in item) {
             const Icon = item.icon;

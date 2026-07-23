@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { ArrowLeft, CalendarDays, Camera, ChevronDown, ChevronRight, Eye, FileText, ImageIcon, MoreVertical, Package, PackageCheck, PackageMinus, Paperclip, Pencil, Plus, RotateCw, Search, Tag, Trash2, Truck, UploadCloud, X } from "lucide-react";
+import { ArrowLeft, CalendarDays, Camera, ChevronDown, ChevronRight, Eye, FileText, ImageIcon, MoreVertical, Package, PackageCheck, PackageMinus, Paperclip, Pencil, Plus, RotateCw, Search, SlidersHorizontal, Tag, Trash2, Truck, UploadCloud, Wifi, WifiOff, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { NavLink, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { SubpageHeader } from "../components/SubpageHeader";
 import { SearchInput } from "../components/SearchInput";
 import { LabourSelectCombobox } from "../components/LabourSelectCombobox";
 import { ClearableSelect } from "../components/ClearableSelect";
 import { ResponsiveSelectField } from "../components/ResponsivePicker";
+import { eligiblePaymentAccounts, isSyntheticLocalAccount, PaymentAccountSelect } from "../components/PaymentAccountSelect";
 import { useAuth } from "../auth/AuthProvider";
 import { useAppBack } from "../hooks/useAppBack";
 import { useSyncState } from "../hooks/useSyncState";
@@ -47,6 +49,7 @@ import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { getVoucherDisplayNumber, normalizeVoucherNumber, parseVoucherSequenceNumber } from "../lib/vouchers";
 import { getActiveVouchers, getVisibleVouchers, loadWorkspaceVouchers } from "../lib/voucherCollections";
 import { compareWageRates, getWageRateStatus, normalizeHalfDayRate, summarizeAttendanceWages } from "../lib/wageRates";
+import { translateStatus } from "../lib/statusLabels";
 import { getWorkerDisplayGroup, getWorkerWorkingPeriod, isLabourAvailableForEntry, isWorkerEligibleForAttendance, sortWorkersForDisplay } from "../lib/workerEligibility";
 import {
   compareLabourers,
@@ -87,11 +90,11 @@ const signedMoney = (amount: number) => amount < 0 ? `-${money(Math.abs(amount))
 const shortDate = (value: string) => formatDate(value, { day: "numeric", month: "short", year: "numeric" });
 const compactDate = (value: string) => formatDate(value, { day: "numeric", month: "short" });
 const compactDateRange = (fromDate: string, toDate: string) => fromDate === toDate ? compactDate(fromDate) : `${compactDate(fromDate)} - ${compactDate(toDate)}`;
-const formatWageRateRange = (rate: Pick<WageRate, "effectiveFrom" | "effectiveTo">) => {
+const formatWageRateRange = (t: TFunction, rate: Pick<WageRate, "effectiveFrom" | "effectiveTo">) => {
   const from = compactDate(rate.effectiveFrom);
-  return rate.effectiveTo ? `${from} - ${compactDate(rate.effectiveTo)}` : `${from} onward`;
+  return rate.effectiveTo ? `${from} - ${compactDate(rate.effectiveTo)}` : t("wageRatesPage.onwardDate", { date: from });
 };
-const readableSyncTime = (value: string | null) => value ? new Date(value).toLocaleString() : "Not synced yet";
+const readableSyncTime = (t: TFunction, value: string | null) => value ? new Date(value).toLocaleString() : t("workforcePage.notSyncedYet");
 const paymentTypes = ["daily_wage", "production_based", "contract_lump_sum", "monthly_salary", "other"] as const;
 type PaymentType = typeof paymentTypes[number];
 const canMarkAttendanceOn = (labourer: Labourer, date: string) => isWorkerEligibleForAttendance(labourer, date);
@@ -266,7 +269,7 @@ function WorkforceModule({
       setAttendanceSaveState("saved");
     } catch {
       setAttendanceSaveState("error");
-      showToast("Unable to save attendance locally. Please try again.");
+      showToast(t("workforcePage.unableSaveAttendanceRetry"));
     } finally {
       setMarkingLabourers((current) => {
         const next = new Set(current); next.delete(targetLabourerId); return next;
@@ -360,10 +363,10 @@ function WorkforceModule({
   const canonicalLabourPayable = canonicalSelectedLabourLedger.reduce((sum, entry) => sum + entry.labourDueEffect, 0);
   const selectedLabourProfilePayable = canonicalSelectedLabourLedger.length ? canonicalLabourPayable : selectedLabourLedgerSummary?.estimatedPayable ?? 0;
   const selectedLabourProfilePayableStatus = selectedLabourProfilePayable > 0
-    ? { label: "Farm payable to labour", className: "positive" }
+    ? { label: t("workforcePage.farmPayableToLabour"), className: "positive" }
     : selectedLabourProfilePayable < 0
-      ? { label: "Labour owes farm", className: "negative" }
-      : { label: "No payable balance", className: "" };
+      ? { label: t("workforcePage.labourOwesFarm"), className: "negative" }
+      : { label: t("workforcePage.noPayableBalance"), className: "" };
   const selectedLabourRatesSorted = selectedLabourRates.slice().sort(compareWageRates);
   const showEarningsBreakdown = Boolean(selectedLabourLedgerSummary && (selectedLabourLedgerSummary.attendanceSummary.records.length > 0 || selectedLabourLedgerSummary.pendingEarnings.length > 0));
   const canWriteAttendance = Boolean(!sessionRefreshing && user?.workspaceId && canCreate(user, "attendance", user.workspaceId));
@@ -409,16 +412,16 @@ function WorkforceModule({
     await persistOperationalRecord("labourPayment", record);
   };
   const attendanceSaveLabel = attendanceSaveState === "saving" || markingLabourers.size > 0
-    ? "Saving..."
+    ? t("workforcePage.saving")
     : attendanceSaveState === "error"
-      ? "Save failed"
+      ? t("workforcePage.saveFailed")
       : sync.status === "syncing"
-        ? "Syncing..."
+        ? t("workspaceStatus.syncingLabel")
         : sync.status === "offline"
-          ? sync.pendingCount > 0 ? "Saved locally" : "Offline"
+          ? sync.pendingCount > 0 ? t("workforcePage.savedLocally") : t("workspaceStatus.offlineLabel")
           : sync.pendingCount > 0
-            ? "Saved locally. Syncing..."
-            : attendanceSaveState === "saved" ? "Saved" : "Synced";
+            ? t("workforcePage.savedLocallySyncing")
+            : attendanceSaveState === "saved" ? t("workforcePage.savedStatus") : t("workspaceStatus.syncedLabel");
   useEffect(() => {
     if (openAttendanceOnLoad && canWriteAttendance) setShowAttendanceEntry(true);
   }, [canWriteAttendance, openAttendanceOnLoad]);
@@ -449,7 +452,7 @@ function WorkforceModule({
   }, [showAttendanceEntry, newAttendanceLabourId, filteredLabourerIds]);
   const labourerStatusDisplay = (labourer: Labourer) => {
     if (labourer.isArchived) {
-      return { label: "Archived", chipClassName: "status-archived", detailClassName: "negative" };
+      return { label: t("workforcePage.archivedStatus"), chipClassName: "status-archived", detailClassName: "negative" };
     }
     if (getWorkerDisplayGroup(labourer) === "inactive") {
       return { label: t("common.inactive"), chipClassName: "status-inactive", detailClassName: "negative" };
@@ -461,7 +464,7 @@ function WorkforceModule({
     <>
       <section className="record-panel">
         <header className="workforce-page-header">
-          <button className="workforce-page-header__back" type="button" aria-label="Back to dashboard" onClick={backToDashboard}>
+          <button className="workforce-page-header__back" type="button" aria-label={t("backToDashboard")} onClick={backToDashboard}>
             <ArrowLeft size={18} />
           </button>
           <div className="workforce-page-header__copy">
@@ -473,9 +476,9 @@ function WorkforceModule({
             {canWriteAttendance && <button className="workforce-mark-attendance" type="button" onClick={() => setShowAttendanceEntry(true)}>{t("workforcePage.markAttendance")}</button>}
           <div className="workforce-toolbar">
             {canManageLabour && <button type="button" onClick={() => setShowAddLabour(true)}>{t("workforcePage.addLabour")}</button>}
-            <button type="button" onClick={() => navigate("/workspace/labour-payments/overview")}>Labour Payment</button>
-            {canManageLabour && <button type="button" onClick={() => navigate("/workspace/workforce/labour-groups")}>Labour Groups</button>}
-            <button type="button" onClick={() => navigate("/workspace/workforce/reports")}>Reports</button>
+            <button type="button" onClick={() => navigate("/workspace/labour-payments/overview")}>{t("workforcePage.labourPaymentNav")}</button>
+            {canManageLabour && <button type="button" onClick={() => navigate("/workspace/workforce/labour-groups")}>{t("workforcePage.labourGroupsNav")}</button>}
+            <button type="button" onClick={() => navigate("/workspace/workforce/reports")}>{t("reportsPage.title")}</button>
           </div>
         </div>
         <div className="workforce-list-header">
@@ -558,7 +561,7 @@ function WorkforceModule({
           <section className="record-panel daily-attendance-panel attendance-entry-modal-body">
             {(sync.status === "offline" || sync.dataSource === "cache") && <div className="attendance-cache-banner" role="status">
               <strong>{sync.status === "offline" ? t("workforcePage.offlineCachedLabour") : t("workforcePage.cachedLoadingLabour")}</strong>
-              <small>{t("workforcePage.lastSynced")}: {readableSyncTime(sync.lastSyncTime)}</small>
+              <small>{t("workforcePage.lastSynced")}: <span className="bidi-isolate">{readableSyncTime(t, sync.lastSyncTime)}</span></small>
             </div>}
             {sync.pendingCount > 0 && <div className="attendance-cache-banner attendance-cache-banner--pending" role="status">
               <strong>{t("workforcePage.pendingSync", { count: sync.pendingCount })}</strong>
@@ -647,11 +650,11 @@ function WorkforceModule({
                   <span className={`labour-profile-status-chip ${selectedLabourerProfileStatus?.className ?? ""}`}>{selectedLabourerProfileStatus?.label}</span>
                 </div>
                 <div className="labour-profile-header__meta">
-                  <span>{selectedLabourer.group || "General"}</span>
+                  <span>{selectedLabourer.group || t("workforcePage.generalGroup")}</span>
                   <span className="labour-profile-header__dot" aria-hidden="true">•</span>
                   <span>{translatePaymentType(selectedLabourer.paymentType ?? "daily_wage")}</span>
                 </div>
-                {selectedLabourerPeriod?.workerStart ? <small>Joined {shortDate(selectedLabourerPeriod.workerStart)}</small> : null}
+                {selectedLabourerPeriod?.workerStart ? <small>{t("workforcePage.joinedOn", { date: shortDate(selectedLabourerPeriod.workerStart) })}</small> : null}
               </div>
               <button className="labour-profile-header__close" type="button" onClick={() => setSelectedLabourer(null)} aria-label={t("common.close")}>
                 <X size={18} />
@@ -660,13 +663,13 @@ function WorkforceModule({
             <div className="worker-dialog__body labour-profile-body">
               <section className="labour-profile-section labour-profile-section--balance">
                 <div className="labour-profile-section__head">
-                  <h3>Balance Summary</h3>
-                  <span>Quick financial outcome</span>
+                  <h3>{t("workforcePage.balanceSummary")}</h3>
+                  <span>{t("workforcePage.quickFinancialOutcome")}</span>
                 </div>
                 <div className="labour-profile-balance-grid">
                   <article className={`labour-profile-balance-card ${selectedLabourProfilePayable > 0 ? "labour-profile-balance-card--positive" : selectedLabourProfilePayable < 0 ? "labour-profile-balance-card--negative" : "labour-profile-balance-card--neutral"}`}>
-                    <span>Estimated Payable</span>
-                    <strong className={selectedLabourProfilePayable > 0 ? "positive" : selectedLabourProfilePayable < 0 ? "negative" : ""}>{signedMoney(selectedLabourProfilePayable)}</strong>
+                    <span>{t("workforcePage.estimatedPayable")}</span>
+                    <strong className={selectedLabourProfilePayable > 0 ? "positive" : selectedLabourProfilePayable < 0 ? "negative" : ""}><span className="bidi-isolate">{signedMoney(selectedLabourProfilePayable)}</span></strong>
                     <small className={selectedLabourProfilePayableStatus.className}>{selectedLabourProfilePayableStatus.label}</small>
                   </article>
                 </div>
@@ -678,49 +681,49 @@ function WorkforceModule({
               ) : null}
               <section className="labour-profile-section">
                 <div className="labour-profile-section__head">
-                  <h3>Attendance Statistics</h3>
-                  <span>Payable days at a glance</span>
+                  <h3>{t("workforcePage.attendanceStatistics")}</h3>
+                  <span>{t("workforcePage.payableDaysGlance")}</span>
                 </div>
                 <div className="labour-profile-chip-grid">
                   <article className="labour-profile-chip-card">
-                    <span>Present</span>
-                    <strong>{presentCount}</strong>
+                    <span>{t("workforcePage.present")}</span>
+                    <strong className="bidi-isolate">{presentCount}</strong>
                   </article>
                   <article className="labour-profile-chip-card">
-                    <span>Half Day</span>
-                    <strong>{halfDayCount}</strong>
+                    <span>{t("workforcePage.halfDayLabel")}</span>
+                    <strong className="bidi-isolate">{halfDayCount}</strong>
                   </article>
                   <article className="labour-profile-chip-card">
-                    <span>Absent</span>
-                    <strong>{absentCount}</strong>
+                    <span>{t("workforcePage.absent")}</span>
+                    <strong className="bidi-isolate">{absentCount}</strong>
                   </article>
                   <article className="labour-profile-chip-card">
-                    <span>Payable Days</span>
-                    <strong>{selectedAttendanceSummary?.payable ?? 0}</strong>
+                    <span>{t("workforcePage.payableDays")}</span>
+                    <strong className="bidi-isolate">{selectedAttendanceSummary?.payable ?? 0}</strong>
                   </article>
                 </div>
               </section>
               <section className="labour-profile-section">
                 <div className="labour-profile-section__head">
-                  <h3>Financial Summary</h3>
-                  <span>Consolidated values from the existing calculations</span>
+                  <h3>{t("workforcePage.financialSummary")}</h3>
+                  <span>{t("workforcePage.consolidatedValues")}</span>
                 </div>
                 <dl className="labour-profile-summary-grid">
-                  <div><dt>Estimated earnings</dt><dd className="positive">{money(selectedLabourLedgerSummary?.totalEarned ?? totalEarnings)}</dd></div>
-                  <div><dt>Advances Paid</dt><dd className={advanceAmount > 0 ? "negative" : ""}>{money(selectedLabourLedgerSummary?.advancesPaid ?? advanceAmount)}</dd></div>
-                  <div><dt>Payments</dt><dd className={paidAmount > 0 ? "negative" : ""}>{money(paidAmount)}</dd></div>
-                  <div><dt>Estimated payable</dt><dd className={selectedLabourProfilePayable > 0 ? "positive" : selectedLabourProfilePayable < 0 ? "negative" : ""}>{signedMoney(selectedLabourProfilePayable)}</dd></div>
+                  <div><dt>{t("workforcePage.estimatedEarnings")}</dt><dd className="positive bidi-isolate">{money(selectedLabourLedgerSummary?.totalEarned ?? totalEarnings)}</dd></div>
+                  <div><dt>{t("workforcePage.advancesPaid")}</dt><dd className={`bidi-isolate ${advanceAmount > 0 ? "negative" : ""}`}>{money(selectedLabourLedgerSummary?.advancesPaid ?? advanceAmount)}</dd></div>
+                  <div><dt>{t("workforcePage.paymentsLabel")}</dt><dd className={`bidi-isolate ${paidAmount > 0 ? "negative" : ""}`}>{money(paidAmount)}</dd></div>
+                  <div><dt>{t("workforcePage.estimatedPayableLower")}</dt><dd className={`bidi-isolate ${selectedLabourProfilePayable > 0 ? "positive" : selectedLabourProfilePayable < 0 ? "negative" : ""}`}>{signedMoney(selectedLabourProfilePayable)}</dd></div>
                 </dl>
                 {canonicalSelectedLabourLedger.length ? <div className="labour-profile-breakdown">
-                  <strong>Canonical labour ledger</strong>
-                  {canonicalSelectedLabourLedger.map((entry) => <p key={entry.id}><span>{entry.date} · {entry.eventType.replaceAll("_", " ")} · {entry.status}</span><b>{signedMoney(entry.labourDueEffect)}</b></p>)}
+                  <strong>{t("workforcePage.canonicalLabourLedger")}</strong>
+                  {canonicalSelectedLabourLedger.map((entry) => <p key={entry.id}><span><span className="bidi-isolate">{entry.date}</span> · {translateStatus(t, entry.eventType)} · {translateStatus(t, entry.status)}</span><b className="bidi-isolate">{signedMoney(entry.labourDueEffect)}</b></p>)}
                 </div> : null}
               </section>
               {showEarningsBreakdown && (
                 <section className="labour-profile-section">
                   <div className="labour-profile-section__head">
-                    <h3>Earnings Breakdown</h3>
-                    <span>Attendance wages and labour work only</span>
+                    <h3>{t("workforcePage.earningsBreakdown")}</h3>
+                    <span>{t("workforcePage.attendanceWagesLabourOnly")}</span>
                   </div>
                   <div className="labour-profile-breakdown">
                     <button
@@ -730,93 +733,93 @@ function WorkforceModule({
                       aria-expanded={showAttendanceWageBreakdown}
                     >
                       <span className="labour-profile-breakdown-toggle__copy">
-                        <strong>Attendance Wages</strong>
+                        <strong>{t("workforcePage.attendanceWages")}</strong>
                         <small>
                           {selectedLabourLedgerSummary?.attendanceWageBreakdown.available === false
-                            ? "Breakdown unavailable for this period."
-                            : `${selectedLabourLedgerSummary?.attendanceWageBreakdown.rows.length ?? 0} wage periods`}
+                            ? t("workforcePage.breakdownUnavailable")
+                            : t("workforcePage.wagePeriodsCount", { count: selectedLabourLedgerSummary?.attendanceWageBreakdown.rows.length ?? 0 })}
                         </small>
                       </span>
-                      <span className="labour-profile-breakdown-toggle__value">{money(selectedLabourLedgerSummary?.attendanceWageBreakdown.totalWage ?? attendanceEarnings)}</span>
+                      <span className="labour-profile-breakdown-toggle__value bidi-isolate">{money(selectedLabourLedgerSummary?.attendanceWageBreakdown.totalWage ?? attendanceEarnings)}</span>
                       <ChevronDown size={16} className={`labour-profile-breakdown-toggle__icon ${showAttendanceWageBreakdown ? "is-open" : ""}`} aria-hidden="true" />
                     </button>
                     {showAttendanceWageBreakdown && (
                       <div className="labour-profile-breakdown-list">
                         {selectedLabourLedgerSummary?.attendanceWageBreakdown.available === false ? (
-                          <p className="labour-profile-empty-state labour-profile-empty-state--inline">Breakdown unavailable for this period.</p>
+                          <p className="labour-profile-empty-state labour-profile-empty-state--inline">{t("workforcePage.breakdownUnavailable")}</p>
                         ) : selectedLabourLedgerSummary?.attendanceWageBreakdown.rows.length ? (
                           selectedLabourLedgerSummary.attendanceWageBreakdown.rows.map((row) => (
                             <article key={`${row.fromDate}-${row.toDate}-${row.dailyRate}-${row.halfDayRate}`} className="labour-profile-breakdown-row">
                               <div className="labour-profile-breakdown-row__period">
-                                <strong>{compactDateRange(row.fromDate, row.toDate)}</strong>
-                                <span>{row.presentCount} full day x {money(row.dailyRate)} = {money(row.fullDayAmount)}</span>
-                                <span>{row.halfDayCount} half day x {money(row.halfDayRate)} = {money(row.halfDayAmount)}</span>
+                                <strong className="bidi-isolate">{compactDateRange(row.fromDate, row.toDate)}</strong>
+                                <span>{t("workforcePage.fullDayCalc", { count: row.presentCount, rate: money(row.dailyRate), amount: money(row.fullDayAmount) })}</span>
+                                <span>{t("workforcePage.halfDayCalc", { count: row.halfDayCount, rate: money(row.halfDayRate), amount: money(row.halfDayAmount) })}</span>
                               </div>
-                              <strong className="positive">{money(row.subtotal)}</strong>
+                              <strong className="positive bidi-isolate">{money(row.subtotal)}</strong>
                             </article>
                           ))
                         ) : (
-                          <p className="labour-profile-empty-state labour-profile-empty-state--inline">Breakdown unavailable for this period.</p>
+                          <p className="labour-profile-empty-state labour-profile-empty-state--inline">{t("workforcePage.breakdownUnavailable")}</p>
                         )}
                       </div>
                     )}
                     <dl className="labour-profile-summary-grid labour-profile-summary-grid--compact">
-                      <div><dt>Labour work</dt><dd>{money(selectedLabourLedgerSummary?.totalPendingEarnings ?? 0)}</dd></div>
-                      <div><dt>Estimated earnings</dt><dd className="positive">{money(selectedLabourLedgerSummary?.totalEarned ?? totalEarnings)}</dd></div>
+                      <div><dt>{t("workforcePage.labourWork")}</dt><dd className="bidi-isolate">{money(selectedLabourLedgerSummary?.totalPendingEarnings ?? 0)}</dd></div>
+                      <div><dt>{t("workforcePage.estimatedEarnings")}</dt><dd className="positive bidi-isolate">{money(selectedLabourLedgerSummary?.totalEarned ?? totalEarnings)}</dd></div>
                     </dl>
                   </div>
                 </section>
               )}
               <section className="labour-profile-section">
                 <div className="labour-profile-section__head">
-                  <h3>Labour Work</h3>
-                  {selectedLabourLedgerSummary?.pendingEarnings.length ? <span>{selectedLabourLedgerSummary.pendingEarnings.length} records</span> : null}
+                  <h3>{t("workforcePage.labourWorkTitle")}</h3>
+                  {selectedLabourLedgerSummary?.pendingEarnings.length ? <span>{t("workforcePage.recordsCount", { count: selectedLabourLedgerSummary.pendingEarnings.length })}</span> : null}
                 </div>
                 {selectedLabourLedgerSummary?.pendingEarnings.length ? (
                   <div className="labour-profile-work-list">
                     {selectedLabourLedgerSummary.pendingEarnings.map((earning) => (
                       <article key={earning.id} className="labour-profile-work-row">
                         <div className="labour-profile-work-row__main">
-                          <strong>{compactDate(earning.earningDate)}</strong>
-                          <span>{earning.earningType.replaceAll("_", " ")}</span>
+                          <strong className="bidi-isolate">{compactDate(earning.earningDate)}</strong>
+                          <span>{translateStatus(t, earning.earningType)}</span>
                         </div>
                         <div className="labour-profile-work-row__meta">
-                          <strong>{money(earning.amount)}</strong>
+                          <strong className="bidi-isolate">{money(earning.amount)}</strong>
                           <small>{earning.description}</small>
                         </div>
                       </article>
                     ))}
                   </div>
                 ) : (
-                  <p className="labour-profile-empty-state">No labour work records yet.</p>
+                  <p className="labour-profile-empty-state">{t("workforcePage.noLabourWorkRecords")}</p>
                 )}
               </section>
               {(selectedLabourRatesSorted.length > 0 || upcomingWageRate) && (
                 <section className="labour-profile-section">
                   <div className="labour-profile-section__head">
                     <h3>{t("wageRatesPage.history")}</h3>
-                    <span>Daily and half-day rates by period</span>
+                    <span>{t("workforcePage.dailyHalfDayRatesByPeriod")}</span>
                   </div>
                   <div className="labour-profile-rate-list">
                     {upcomingWageRate ? (
                       <article className="labour-profile-rate-row">
                         <div className="labour-profile-rate-row__period">
-                          <strong>{formatWageRateRange(upcomingWageRate)}</strong>
-                          <span>Upcoming rate</span>
+                          <strong className="bidi-isolate">{formatWageRateRange(t, upcomingWageRate)}</strong>
+                          <span>{t("workforcePage.upcomingRateLabel")}</span>
                         </div>
                         <div className="labour-profile-rate-row__rates">
-                          <strong>{money(upcomingWageRate.dailyRate)} / {money(normalizeHalfDayRate(upcomingWageRate))}</strong>
+                          <strong className="bidi-isolate">{money(upcomingWageRate.dailyRate)} / {money(normalizeHalfDayRate(upcomingWageRate))}</strong>
                         </div>
                       </article>
                     ) : null}
                     {selectedLabourRatesSorted.slice(0, 4).map((rate) => (
                       <article key={rate.id} className="labour-profile-rate-row">
                         <div className="labour-profile-rate-row__period">
-                          <strong>{formatWageRateRange(rate)}</strong>
-                          <span>{getWageRateStatus(rate, today()) === "active" ? "Current rate" : t(`wageRatesPage.status.${getWageRateStatus(rate, today())}`)}</span>
+                          <strong className="bidi-isolate">{formatWageRateRange(t, rate)}</strong>
+                          <span>{getWageRateStatus(rate, today()) === "active" ? t("workforcePage.currentRateStatus") : t(`wageRatesPage.status.${getWageRateStatus(rate, today())}`)}</span>
                         </div>
                         <div className="labour-profile-rate-row__rates">
-                          <strong>{money(rate.dailyRate)} / {money(normalizeHalfDayRate(rate))}</strong>
+                          <strong className="bidi-isolate">{money(rate.dailyRate)} / {money(normalizeHalfDayRate(rate))}</strong>
                         </div>
                       </article>
                     ))}
@@ -1086,7 +1089,7 @@ function AddLabourPanel({
         const groupName = form.group.trim();
         const duplicateGroup = groups.some((group) => group.name.trim().toLowerCase() === groupName.toLowerCase());
         if (duplicateGroup) {
-          setError("A labour group with this name already exists.");
+          setError(t("workforcePage.groupNameExists"));
           return;
         }
         const record: LabourGroup = { ...makeLocalRecord(), name: groupName, active: true };
@@ -1128,7 +1131,7 @@ function AddLabourPanel({
   };
   return <ActionPanel title={t("workforcePage.addLabourTitle")} onClose={onClose}>
     <form className="worker-action-form worker-action-form--compact" onSubmit={(event) => void submit(event)}>
-      <label><span>{t("workforcePage.labourName")} *</span><input required placeholder="Enter labour name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+      <label><span>{t("workforcePage.labourName")} *</span><input required placeholder={t("workforcePage.enterLabourNamePlaceholder")} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
       <label><span>{t("workforcePage.dateOfJoining")} *</span><input required type="date" value={form.joinedOn} onChange={(event) => setForm({ ...form, joinedOn: event.target.value })} /></label>
       <LabourPaymentFields form={form} setForm={setForm} />
       <label><span>{t("workforcePage.groupLabel")}</span><select value={form.groupId} onChange={(event) => {
@@ -1141,7 +1144,7 @@ function AddLabourPanel({
         <option value="__new_group__">{t("workforcePage.createNewGroup")}</option>
       </select></label>
       {form.groupId === "__new_group__" && <label><span>{t("workforcePage.newGroupName")} *</span><input required value={form.group} onChange={(event) => setForm({ ...form, group: event.target.value })} /></label>}
-      <label><span>{t("workforcePage.phoneContact")}</span><input placeholder="Optional phone number" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
+      <label><span>{t("workforcePage.phoneContact")}</span><input placeholder={t("workforcePage.optionalPhonePlaceholder")} value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
       <label><span>{t("workforcePage.statusLabel")}</span><select value={form.active ? "active" : "inactive"} onChange={(event) => setForm({ ...form, active: event.target.value === "active" })}><option value="active">{t("common.active")}</option><option value="inactive">{t("common.inactive")}</option></select></label>
       {error && <p className="worker-action-error">{error}</p>}
       <footer><button type="button" onClick={onClose}>{t("common.cancel")}</button><button disabled={busy} type="submit">{busy ? t("workforcePage.saving") : t("workforcePage.saveLabour")}</button></footer>
@@ -1150,32 +1153,38 @@ function AddLabourPanel({
 }
 
 function AddAdvancePanel({ labourer, accounts, onClose, onSave }: { labourer: Labourer; accounts: Account[]; onClose: () => void; onSave: (record: Advance) => Promise<void> }) {
+  const { t } = useTranslation();
   const [form, setForm] = useState({ date: today(), amount: "", accountId: "", paymentMethod: "Cash", notes: "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const amount = Number(form.amount);
-    if (!Number.isFinite(amount) || amount <= 0) { setError("Advance amount must be greater than zero."); return; }
-    if (!form.accountId) { setError("Select the payment account."); return; }
+    if (!Number.isFinite(amount) || amount <= 0) { setError(t("workforcePage.advanceAmountPositive")); return; }
+    if (!form.accountId) { setError(t("workforcePage.selectPaymentAccountError")); return; }
     if (busy) return;
     setBusy(true); setError("");
     try {
       await onSave({ ...makeLocalRecord(), labourerId: labourer.id, date: form.date, amount, accountId: form.accountId, paymentMethod: form.paymentMethod, notes: form.notes.trim() });
       onClose();
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to add advance."); }
+    } catch (caught) { setError(caught instanceof Error ? caught.message : t("workforcePage.unableAddAdvance")); }
     finally { setBusy(false); }
   };
-  return <ActionPanel title="Add Labour Advance" onClose={onClose}>
+  return <ActionPanel title={t("workforcePage.addLabourAdvanceTitle")} onClose={onClose}>
     <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
-      <label><span>Labour name</span><input readOnly value={labourer.name} /></label>
-      <label><span>Advance date *</span><input required type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
-      <label><span>Amount *</span><input required min="0.01" step="0.01" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
-      <label><span>Payment account *</span><select required value={form.accountId} onChange={(event) => setForm({ ...form, accountId: event.target.value })}><option value="">Select account</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
-      <label><span>Payment method</span><select value={form.paymentMethod} onChange={(event) => setForm({ ...form, paymentMethod: event.target.value })}><option>Cash</option><option>Bank Transfer</option><option>Other</option></select></label>
-      <label><span>Notes</span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
+      <label><span>{t("workforcePage.labourName")}</span><input readOnly value={labourer.name} /></label>
+      <label><span>{t("workforcePage.advanceDate")}</span><input required type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
+      <label><span>{t("workforcePage.amountField")}</span><input required min="0.01" step="0.01" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
+      <label><span>{t("workforcePage.paymentAccountField")}</span><PaymentAccountSelect
+        accounts={eligiblePaymentAccounts(accounts)}
+        value={form.accountId}
+        onChange={(accountId) => setForm({ ...form, accountId })}
+        invalid={Boolean(error) && !form.accountId}
+      /></label>
+      <label><span>{t("workforcePage.paymentMethodField")}</span><select value={form.paymentMethod} onChange={(event) => setForm({ ...form, paymentMethod: event.target.value })}><option>{t("workforcePage.paymentMethodCash")}</option><option>{t("workforcePage.paymentMethodBankTransfer")}</option><option>{t("workforcePage.paymentMethodOther")}</option></select></label>
+      <label><span>{t("advancesPage.notesReference")}</span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
       {error && <p className="worker-action-error">{error}</p>}
-      <footer><button type="button" onClick={onClose}>Cancel</button><button disabled={busy} type="submit">{busy ? "Saving..." : "Add Advance"}</button></footer>
+      <footer><button type="button" onClick={onClose}>{t("common.cancel")}</button><button disabled={busy} type="submit">{busy ? t("workforcePage.saving") : t("workforcePage.addAdvanceAction")}</button></footer>
     </form>
   </ActionPanel>;
 }
@@ -1183,6 +1192,7 @@ function AddAdvancePanel({ labourer, accounts, onClose, onSave }: { labourer: La
 function DeactivateLabourPanel({ token, workspaceId, labourer, onClose, onComplete }: {
   token: string; workspaceId: string; labourer: Labourer; onClose: () => void; onComplete: (action: "deleted" | "deactivated") => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [preview, setPreview] = useState<LabourDeletionPreview | null>(null);
   const [confirmation, setConfirmation] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -1197,7 +1207,7 @@ function DeactivateLabourPanel({ token, workspaceId, labourer, onClose, onComple
         setConfirmation("");
         setEndDate("");
       })
-      .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "Unable to inspect protected labour records."); });
+      .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : t("workforcePage.unableInspectLabourRecords")); });
     return () => { active = false; };
   }, [token, workspaceId, labourer.id]);
   const submit = async (event: FormEvent) => {
@@ -1206,7 +1216,7 @@ function DeactivateLabourPanel({ token, workspaceId, labourer, onClose, onComple
     const expectedConfirmationValue = preview.action === "delete" ? "DELETE" : "DEACTIVATE";
     if (confirmation !== expectedConfirmationValue) return;
     if (preview.action === "deactivate" && !endDate) {
-      setError("End date is required to deactivate labour.");
+      setError(t("workforcePage.endDateRequiredToDeactivate"));
       return;
     }
     setBusy(true); setError("");
@@ -1216,33 +1226,33 @@ function DeactivateLabourPanel({ token, workspaceId, labourer, onClose, onComple
         endDate: preview.action === "deactivate" ? endDate : undefined,
       });
       await onComplete(result.action);
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to update labour status."); }
+    } catch (caught) { setError(caught instanceof Error ? caught.message : t("workforcePage.unableUpdateLabourStatus")); }
     finally { setBusy(false); }
   };
-  const title = preview?.action === "delete" ? "Delete Labour Permanently" : "Deactivate Labour";
+  const title = preview?.action === "delete" ? t("workforcePage.deleteLabourPermanentlyTitle") : t("workforcePage.deactivateLabourTitle");
   const expectedConfirmation = preview?.action === "delete" ? "DELETE" : "DEACTIVATE";
-  const actionLabel = preview?.action === "delete" ? "Delete Permanently" : "Deactivate Labour";
+  const actionLabel = preview?.action === "delete" ? t("workforcePage.deletePermanentlyAction") : t("workforcePage.deactivateLabourTitle");
   return <ActionPanel title={title} onClose={onClose} closeDisabled={busy}>
     <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
       <p><strong>{labourer.name}</strong></p>
-      {!preview && !error && <p>Checking protected attendance, advance, and payment history...</p>}
+      {!preview && !error && <p>{t("workforcePage.checkingProtectedRecords")}</p>}
       {preview && (
         <>
           <p>{preview.action === "delete"
-            ? "This labour has no attendance, advance, or payment history and can be permanently deleted."
-            : "This labour has attendance, advance, or payment history. The historical records will remain preserved, but the labour will no longer be available for new entries."}
+            ? t("workforcePage.deleteNoHistoryNotice")
+            : t("workforcePage.deactivateHasHistoryNotice")}
           </p>
           <div className="worker-action-stats">
-            <article><span>Attendance records</span><strong>{preview.attendanceCount}</strong></article>
-            <article><span>Advance records</span><strong>{preview.advanceCount}</strong></article>
-            <article><span>Payment records</span><strong>{preview.paymentCount}</strong></article>
+            <article><span>{t("workforcePage.attendanceRecordsCount")}</span><strong className="bidi-isolate">{preview.attendanceCount}</strong></article>
+            <article><span>{t("workforcePage.advanceRecordsCount")}</span><strong className="bidi-isolate">{preview.advanceCount}</strong></article>
+            <article><span>{t("workforcePage.paymentRecordsCount")}</span><strong className="bidi-isolate">{preview.paymentCount}</strong></article>
           </div>
         </>
       )}
-      {preview?.action === "deactivate" && <label><span>End date *</span><input required type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} /></label>}
-      <label><span>{preview?.action === "delete" ? "Type DELETE to confirm *" : "Type DEACTIVATE to confirm *"}</span><input required autoComplete="off" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
+      {preview?.action === "deactivate" && <label><span>{t("workforcePage.endDateField")}</span><input required type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} /></label>}
+      <label><span>{preview?.action === "delete" ? t("workforcePage.typeDeleteConfirm") : t("workforcePage.typeDeactivateConfirm")}</span><input required autoComplete="off" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
       {error && <p className="worker-action-error">{error}</p>}
-      <footer><button type="button" onClick={onClose} disabled={busy}>Cancel</button><button className="danger-button" disabled={!preview || confirmation !== expectedConfirmation || busy || (preview.action === "deactivate" && !endDate)} type="submit">{busy ? (preview?.action === "delete" ? "Deleting..." : "Deactivating...") : actionLabel}</button></footer>
+      <footer><button type="button" onClick={onClose} disabled={busy}>{t("common.cancel")}</button><button className="danger-button" disabled={!preview || confirmation !== expectedConfirmation || busy || (preview.action === "deactivate" && !endDate)} type="submit">{busy ? (preview?.action === "delete" ? t("workforcePage.deletingAction") : t("workforcePage.deactivatingAction")) : actionLabel}</button></footer>
     </form>
   </ActionPanel>;
 }
@@ -1260,6 +1270,7 @@ function AdvanceEntryPanel({
   onClose: () => void;
   onSave: (record: Advance) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [groupId, setGroupId] = useState("all");
   const [labourerId, setLabourerId] = useState("");
   const [form, setForm] = useState({ date: today(), amount: "", accountId: "", notes: "" });
@@ -1274,9 +1285,9 @@ function AdvanceEntryPanel({
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const amount = Number(form.amount);
-    if (!selectedLabourer) { setError("Select labour."); return; }
-    if (!Number.isFinite(amount) || amount <= 0 || busy) { setError("Advance amount must be greater than zero."); return; }
-    if (!form.accountId) { setError("Select the payment account."); return; }
+    if (!selectedLabourer) { setError(t("workforcePage.selectLabourError")); return; }
+    if (!Number.isFinite(amount) || amount <= 0 || busy) { setError(t("workforcePage.advanceAmountPositive")); return; }
+    if (!form.accountId) { setError(t("workforcePage.selectPaymentAccountError")); return; }
     setBusy(true); setError("");
     try {
       await onSave({ ...makeLocalRecord(), labourerId: selectedLabourer.id, date: form.date, amount, accountId: form.accountId, notes: form.notes.trim() });
@@ -1284,40 +1295,46 @@ function AdvanceEntryPanel({
       setForm((current) => ({ ...current, amount: "", notes: "" }));
       window.requestAnimationFrame(() => labourInputRef.current?.focus());
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to add advance.");
+      setError(caught instanceof Error ? caught.message : t("workforcePage.unableAddAdvance"));
     } finally {
       setBusy(false);
     }
   };
-  return <ActionPanel title="Record Advance" onClose={onClose}>
+  return <ActionPanel title={t("advancesPage.recordAdvance")} onClose={onClose}>
     <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
-      <label><span>Date *</span><input required type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
-      <label><span>Group (optional)</span><select value={groupId} onChange={(event) => {
+      <label><span>{t("workforcePage.dateRequiredField")}</span><input required type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
+      <label><span>{t("workforcePage.groupOptionalField")}</span><select value={groupId} onChange={(event) => {
         setGroupId(event.target.value);
         setLabourerId("");
-      }}><option value="all">All groups</option>{groups.filter((group) => group.active !== false).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
+      }}><option value="all">{t("reportsPage.allGroups")}</option>{groups.filter((group) => group.active !== false).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
       <label>
-        <span>Labour *</span>
+        <span>{t("workforcePage.labourRequiredField")}</span>
         <LabourSelectCombobox
-          ariaLabel="Labour"
+          ariaLabel={t("workforcePage.labourFallback")}
           inputRef={labourInputRef}
           options={filteredLabourers}
-          placeholder="Search labour"
+          placeholder={t("workforcePage.searchLabour")}
           value={labourerId}
           onChange={setLabourerId}
-          noResultsLabel="No matching labour found"
+          noResultsLabel={t("workforcePage.noMatchingLabourFound")}
         />
       </label>
-      <label><span>Advance amount *</span><input required min="0.01" step="0.01" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
-      <label><span>Payment account *</span><select required value={form.accountId} onChange={(event) => setForm({ ...form, accountId: event.target.value })}><option value="">Select account</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
-      <label><span>Notes / reference</span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
+      <label><span>{t("workforcePage.advanceAmountRequiredField")}</span><input required min="0.01" step="0.01" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
+      <label><span>{t("workforcePage.paymentAccountRequiredField")}</span><PaymentAccountSelect
+        accounts={eligiblePaymentAccounts(accounts)}
+        value={form.accountId}
+        onChange={(accountId) => setForm({ ...form, accountId })}
+        invalid={Boolean(error) && !form.accountId}
+      /></label>
+      <label><span>{t("advancesPage.notesReference")}</span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
       {error && <p className="worker-action-error">{error}</p>}
-      <footer><button type="button" onClick={onClose}>Cancel</button><button disabled={busy} type="submit">{busy ? "Saving..." : "Save"}</button></footer>
+      <footer><button type="button" onClick={onClose}>{t("common.cancel")}</button><button disabled={busy} type="submit">{busy ? t("workforcePage.saving") : t("common.save")}</button></footer>
     </form>
   </ActionPanel>;
 }
 
 function AddGroupPanel({ groups, onClose, onSave }: { groups: LabourGroup[]; onClose: () => void; onSave: (record: LabourGroup) => Promise<void> }) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -1326,7 +1343,7 @@ function AddGroupPanel({ groups, onClose, onSave }: { groups: LabourGroup[]; onC
     const trimmed = name.trim();
     if (!trimmed || busy) return;
     if (groups.some((group) => group.name.trim().toLowerCase() === trimmed.toLowerCase())) {
-      setError("A labour group with this name already exists.");
+      setError(t("workforcePage.groupNameExists"));
       return;
     }
     setBusy(true); setError("");
@@ -1334,25 +1351,26 @@ function AddGroupPanel({ groups, onClose, onSave }: { groups: LabourGroup[]; onC
       await onSave({ ...makeLocalRecord(), name: trimmed, active: true });
       onClose();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to save group.");
+      setError(caught instanceof Error ? caught.message : t("workforcePage.unableSaveGroup"));
     } finally {
       setBusy(false);
     }
   };
-  return <ActionPanel title="Add Labour Group" onClose={onClose}>
+  return <ActionPanel title={t("workforcePage.addLabourGroupTitle")} onClose={onClose}>
     <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
-      <label><span>Group name *</span><input required value={name} onChange={(event) => setName(event.target.value)} /></label>
+      <label><span>{t("workforcePage.groupNameRequiredField")}</span><input required value={name} onChange={(event) => setName(event.target.value)} /></label>
       {error && <p className="worker-action-error">{error}</p>}
-      <footer><button type="button" onClick={onClose}>Cancel</button><button disabled={busy} type="submit">{busy ? "Saving..." : "Save Group"}</button></footer>
+      <footer><button type="button" onClick={onClose}>{t("common.cancel")}</button><button disabled={busy} type="submit">{busy ? t("workforcePage.saving") : t("workforcePage.saveGroupAction")}</button></footer>
     </form>
   </ActionPanel>;
 }
 
 function AddProductionPanel({ labourer, onClose, onSave }: { labourer: Labourer; onClose: () => void; onSave: (record: ProductionEntry) => Promise<void> }) {
+  const { t } = useTranslation();
   const [form, setForm] = useState({
     date: today(),
     units: "",
-    productionUnit: labourer.productionUnit === "custom" ? (labourer.customProductionUnit || "Custom") : (labourer.productionUnit || "carton"),
+    productionUnit: labourer.productionUnit === "custom" ? (labourer.customProductionUnit || t("workforcePage.custom")) : (labourer.productionUnit || "carton"),
     unitRate: String(labourer.productionUnitRate ?? 0),
     notes: "",
   });
@@ -1363,7 +1381,7 @@ function AddProductionPanel({ labourer, onClose, onSave }: { labourer: Labourer;
     const units = Number(form.units);
     const unitRate = Number(form.unitRate);
     if (!Number.isFinite(units) || units <= 0 || !Number.isFinite(unitRate) || unitRate < 0 || busy) {
-      setError("Valid units and rate are required.");
+      setError(t("workforcePage.validUnitsRateRequired"));
       return;
     }
     setBusy(true); setError("");
@@ -1380,27 +1398,28 @@ function AddProductionPanel({ labourer, onClose, onSave }: { labourer: Labourer;
       });
       onClose();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to add production entry.");
+      setError(caught instanceof Error ? caught.message : t("workforcePage.unableAddProductionEntry"));
     } finally {
       setBusy(false);
     }
   };
-  return <ActionPanel title="Record Production" onClose={onClose}>
+  return <ActionPanel title={t("workforcePage.recordProductionTitle")} onClose={onClose}>
     <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
-      <label><span>Labour</span><input readOnly value={labourer.name} /></label>
-      <label><span>Date</span><input required type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
-      <label><span>Units produced *</span><input required min="0" step="0.01" type="number" value={form.units} onChange={(event) => setForm({ ...form, units: event.target.value })} /></label>
-      <label><span>Production unit</span><input readOnly value={form.productionUnit} /></label>
-      <label><span>Unit rate</span><input required min="0" step="0.01" type="number" value={form.unitRate} onChange={(event) => setForm({ ...form, unitRate: event.target.value })} /></label>
-      <label><span>Notes</span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
-      <p>Earnings: {money((Number(form.units) || 0) * (Number(form.unitRate) || 0))}</p>
+      <label><span>{t("workforcePage.labourFallback")}</span><input readOnly value={labourer.name} /></label>
+      <label><span>{t("workforcePage.date")}</span><input required type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
+      <label><span>{t("workforcePage.unitsProducedRequiredField")}</span><input required min="0" step="0.01" type="number" value={form.units} onChange={(event) => setForm({ ...form, units: event.target.value })} /></label>
+      <label><span>{t("workforcePage.productionUnit")}</span><input readOnly value={form.productionUnit} /></label>
+      <label><span>{t("workforcePage.unitRate")}</span><input required min="0" step="0.01" type="number" value={form.unitRate} onChange={(event) => setForm({ ...form, unitRate: event.target.value })} /></label>
+      <label><span>{t("workforcePage.notesLabel")}</span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
+      <p>{t("workforcePage.earningsPreview", { amount: money((Number(form.units) || 0) * (Number(form.unitRate) || 0)) })}</p>
       {error && <p className="worker-action-error">{error}</p>}
-      <footer><button type="button" onClick={onClose}>Cancel</button><button disabled={busy} type="submit">{busy ? "Saving..." : "Save Production"}</button></footer>
+      <footer><button type="button" onClick={onClose}>{t("common.cancel")}</button><button disabled={busy} type="submit">{busy ? t("workforcePage.saving") : t("workforcePage.saveProductionAction")}</button></footer>
     </form>
   </ActionPanel>;
 }
 
 function AddPaymentPanel({ labourer, onClose, onSave }: { labourer: Labourer; onClose: () => void; onSave: (record: LabourPayment) => Promise<void> }) {
+  const { t } = useTranslation();
   const [form, setForm] = useState({ date: today(), amount: "", paymentMethod: "Cash", notes: "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -1408,7 +1427,7 @@ function AddPaymentPanel({ labourer, onClose, onSave }: { labourer: Labourer; on
     event.preventDefault();
     const amount = Number(form.amount);
     if (!Number.isFinite(amount) || amount <= 0 || busy) {
-      setError("Payment amount must be greater than zero.");
+      setError(t("workforcePage.paymentAmountPositive"));
       return;
     }
     setBusy(true); setError("");
@@ -1416,29 +1435,30 @@ function AddPaymentPanel({ labourer, onClose, onSave }: { labourer: Labourer; on
       await onSave({ ...makeLocalRecord(), labourerId: labourer.id, date: form.date, amount, paymentMethod: form.paymentMethod, notes: form.notes.trim() || undefined });
       onClose();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to save payment.");
+      setError(caught instanceof Error ? caught.message : t("workforcePage.unableSavePayment"));
     } finally {
       setBusy(false);
     }
   };
-  return <ActionPanel title="Add Labour Payment" onClose={onClose}>
+  return <ActionPanel title={t("workforcePage.addLabourPaymentTitle")} onClose={onClose}>
     <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
-      <label><span>Labour</span><input readOnly value={labourer.name} /></label>
-      <label><span>Date</span><input required type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
-      <label><span>Amount *</span><input required min="0.01" step="0.01" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
-      <label><span>Payment method</span><select value={form.paymentMethod} onChange={(event) => setForm({ ...form, paymentMethod: event.target.value })}><option>Cash</option><option>Bank Transfer</option><option>Other</option></select></label>
-      <label><span>Notes</span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
+      <label><span>{t("workforcePage.labourFallback")}</span><input readOnly value={labourer.name} /></label>
+      <label><span>{t("workforcePage.date")}</span><input required type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
+      <label><span>{t("workforcePage.amountRequiredField")}</span><input required min="0.01" step="0.01" type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
+      <label><span>{t("workforcePage.paymentMethodField")}</span><select value={form.paymentMethod} onChange={(event) => setForm({ ...form, paymentMethod: event.target.value })}><option>{t("workforcePage.paymentMethodCash")}</option><option>{t("workforcePage.paymentMethodBankTransfer")}</option><option>{t("workforcePage.paymentMethodOther")}</option></select></label>
+      <label><span>{t("workforcePage.notesLabel")}</span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
       {error && <p className="worker-action-error">{error}</p>}
-      <footer><button type="button" onClick={onClose}>Cancel</button><button disabled={busy} type="submit">{busy ? "Saving..." : "Save Payment"}</button></footer>
+      <footer><button type="button" onClick={onClose}>{t("common.cancel")}</button><button disabled={busy} type="submit">{busy ? t("workforcePage.saving") : t("workforcePage.savePaymentAction")}</button></footer>
     </form>
   </ActionPanel>;
 }
 
 function ActionPanel({ title, onClose, children, closeDisabled = false }: { title: string; onClose: () => void; children: ReactNode; closeDisabled?: boolean }) {
+  const { t } = useTranslation();
   const handleClose = closeDisabled ? undefined : onClose;
   return <div className="worker-dialog-backdrop worker-action-backdrop" role="presentation" onClick={handleClose}>
     <section className="worker-action-dialog" role="dialog" aria-modal="true" aria-label={title} onClick={(event) => event.stopPropagation()}>
-      <header><h2>{title}</h2><button type="button" aria-label={`Close ${title}`} disabled={closeDisabled} onClick={handleClose}><X size={19} /></button></header>
+      <header><h2>{title}</h2><button type="button" aria-label={t("workforcePage.closeDialogAria", { title })} disabled={closeDisabled} onClick={handleClose}><X size={19} /></button></header>
       {children}
     </section>
   </div>;
@@ -1447,6 +1467,7 @@ function ActionPanel({ title, onClose, children, closeDisabled = false }: { titl
 export function AttendanceImportPanel({ token, workspaceId, farmId, seasonId, onClose, onImported }: {
   token: string; workspaceId: string; farmId: string; seasonId: string; onClose: () => void; onImported: () => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [step, setStep] = useState(1);
   const [file, setFile] = useState<File | null>(null);
   const [from, setFrom] = useState("");
@@ -1465,7 +1486,7 @@ export function AttendanceImportPanel({ token, workspaceId, farmId, seasonId, on
   const setMapping = (mapping: AttendanceImportMapping) => setMappings((current) => [...current.filter((item) => item.rowIndex !== mapping.rowIndex), mapping]);
   const upload = async () => {
     if (!file || !navigator.onLine) {
-      setError("CSV import requires internet connection."); return;
+      setError(t("errors.csvImportOnlineOnly")); return;
     }
     setBusy(true); setError("");
     try {
@@ -1475,73 +1496,79 @@ export function AttendanceImportPanel({ token, workspaceId, farmId, seasonId, on
       setSessionId(response.sessionId); setPreview(response.preview);
       setMappings(response.preview.rows.filter((row) => row.matchedLabourerId).map((row) => ({ rowIndex: row.rowIndex, action: "match", labourerId: row.matchedLabourerId! })));
       setStep(2);
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to preview CSV."); }
+    } catch (caught) { setError(caught instanceof Error ? caught.message : t("modulePageExtra.unablePreviewCsv")); }
     finally { setBusy(false); }
   };
   const confirm = async () => {
-    if (!preview || !navigator.onLine) { setError("CSV import requires internet connection."); return; }
+    if (!preview || !navigator.onLine) { setError(t("errors.csvImportOnlineOnly")); return; }
     setBusy(true); setError("");
     try {
       const response = await confirmAttendanceImport(token, workspaceId, {
         importSessionId: sessionId, farmId, seasonId, duplicateHandlingMode: duplicateMode, warningsAccepted, labourMappings: mappings, accountId: accountId || undefined,
       });
       setResult(response.result); setStep(5); await refreshOperationalData(); await onImported();
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to import attendance."); }
+    } catch (caught) { setError(caught instanceof Error ? caught.message : t("attendanceImport.unableImport")); }
     finally { setBusy(false); }
   };
   const summary = preview?.summary;
+  const importSteps = t("attendanceImport.steps", { returnObjects: true }) as unknown as string[];
   return <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}>
     <section className="attendance-import-dialog" role="dialog" aria-modal="true" aria-labelledby="attendance-import-title" onClick={(event) => event.stopPropagation()}>
-      <header className="attendance-report-header"><div><span>Workforce</span><h2 id="attendance-import-title">Attendance Register CSV Import</h2></div><button className="attendance-report-close" type="button" onClick={onClose} aria-label="Close import"><X size={19} /></button></header>
-      <ol className="attendance-import-steps">{["Upload CSV", "Map Columns", "Match Labour", "Validate", "Confirm Import"].map((label, index) => <li className={step >= index + 1 ? "is-active" : ""} key={label}><b>{index + 1}</b><span>{label}</span></li>)}</ol>
+      <header className="attendance-report-header"><div><span>{t("moduleTitles.workforce")}</span><h2 id="attendance-import-title">{t("attendanceImport.title")}</h2></div><button className="attendance-report-close" type="button" onClick={onClose} aria-label={t("attendanceImport.closeImport")}><X size={19} /></button></header>
+      <ol className="attendance-import-steps">{importSteps.map((label, index) => <li className={step >= index + 1 ? "is-active" : ""} key={label}><b className="bidi-isolate">{index + 1}</b><span>{label}</span></li>)}</ol>
       <div className="attendance-import-body">
         {step === 1 && <section className="attendance-import-card">
-          <h3>Upload old Android attendance register</h3>
-          <p>Import is online-only. Workspace, farm, and season are locked to your active selection.</p>
-          <dl className="attendance-import-context"><div><dt>Workspace</dt><dd>{workspaceId}</dd></div><div><dt>Farm</dt><dd>{farmId}</dd></div><div><dt>Season</dt><dd>{seasonId}</dd></div></dl>
-          <label><span>CSV file *</span><input accept=".csv,text/csv" required type="file" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label>
-          <div className="attendance-import-range"><label><span>Date From <small>(optional)</small></span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label><label><span>Date To <small>(optional)</small></span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label></div>
-          <p className="attendance-import-note">Use a date range when CSV date headings omit the year.</p>
+          <h3>{t("attendanceImport.uploadTitle")}</h3>
+          <p>{t("attendanceImport.uploadDescription")}</p>
+          <dl className="attendance-import-context"><div><dt>{t("attendanceImport.workspace")}</dt><dd className="bidi-isolate">{workspaceId}</dd></div><div><dt>{t("attendanceImport.farm")}</dt><dd className="bidi-isolate">{farmId}</dd></div><div><dt>{t("attendanceImport.season")}</dt><dd className="bidi-isolate">{seasonId}</dd></div></dl>
+          <label><span>{t("attendanceImport.csvFile")}</span><input accept=".csv,text/csv" required type="file" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label>
+          <div className="attendance-import-range"><label><span>{t("attendanceImport.dateFrom")} <small>({t("attendanceImport.optional")})</small></span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label><label><span>{t("attendanceImport.dateTo")} <small>({t("attendanceImport.optional")})</small></span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label></div>
+          <p className="attendance-import-note">{t("attendanceImport.dateRangeNote")}</p>
         </section>}
         {step === 2 && preview && <section className="attendance-import-card">
-          <h3>Detected columns</h3><p>Labour Name and daily date columns were detected automatically. Summary columns are validation-only.</p>
-          <div className="attendance-import-tags">{preview.dateColumns.map((column) => <span key={column.column}>{column.column} → {column.date}</span>)}</div>
-          <button type="button" onClick={() => setStep(3)}>Continue to labour matching</button>
+          <h3>{t("attendanceImport.detectedColumns")}</h3><p>{t("attendanceImport.detectedColumnsDescription")}</p>
+          <div className="attendance-import-tags">{preview.dateColumns.map((column) => <span key={column.column} className="bidi-isolate">{column.column} → {column.date}</span>)}</div>
+          <button type="button" onClick={() => setStep(3)}>{t("attendanceImport.continueMatching")}</button>
         </section>}
         {step === 3 && preview && <section className="attendance-import-card">
-          <h3>Match labour</h3><p>Exact matches are selected automatically. Confirm suggestions or choose how to handle unknown names.</p>
+          <h3>{t("attendanceImport.matchLabour")}</h3><p>{t("attendanceImport.matchLabourDescription")}</p>
           <div className="attendance-import-match-list">{preview.rows.map((row) => {
             const mapping = mappingFor(row.rowIndex);
-            return <article key={row.rowIndex}><strong>{row.labourName}</strong><select aria-label={`Match ${row.labourName}`} value={mapping?.action === "match" ? `match:${mapping.labourerId}` : mapping?.action ?? ""} onChange={(event) => {
+            return <article key={row.rowIndex}><strong>{row.labourName}</strong><select aria-label={t("attendanceImport.matchLabourAria", { name: row.labourName })} value={mapping?.action === "match" ? `match:${mapping.labourerId}` : mapping?.action ?? ""} onChange={(event) => {
               const [action, labourerId] = event.target.value.split(":");
               setMapping({ rowIndex: row.rowIndex, action: action as AttendanceImportMapping["action"], labourerId });
             }}>
-              <option value="">Choose action</option>
-              {preview.labourers.map((labourer) => <option key={labourer.id} value={`match:${labourer.id}`}>{row.suggestedLabourerId === labourer.id ? "Suggested: " : ""}{labourer.name}</option>)}
-              <option value="create">Create new labour</option><option value="skip">Skip this row</option>
+              <option value="">{t("attendanceImport.chooseAction")}</option>
+              {preview.labourers.map((labourer) => <option key={labourer.id} value={`match:${labourer.id}`}>{row.suggestedLabourerId === labourer.id ? t("attendanceImport.suggested") : ""}{labourer.name}</option>)}
+              <option value="create">{t("attendanceImport.createNewLabour")}</option><option value="skip">{t("attendanceImport.skipRow")}</option>
             </select></article>;
           })}</div>
-          {unresolvedLabourRows.length > 0 && <p className="attendance-import-error">Resolve each unknown labour row by matching, creating, or skipping it before validation.</p>}
-          <button disabled={unresolvedLabourRows.length > 0} type="button" onClick={() => setStep(4)}>Validate import</button>
+          {unresolvedLabourRows.length > 0 && <p className="attendance-import-error">{t("attendanceImport.resolveUnknownRows")}</p>}
+          <button disabled={unresolvedLabourRows.length > 0} type="button" onClick={() => setStep(4)}>{t("attendanceImport.validateImport")}</button>
         </section>}
         {step === 4 && preview && summary && <section className="attendance-import-card">
-          <h3>Validation summary</h3>
-          <div className="attendance-import-summary"><span>Labour rows<b>{summary.labourRows}</b></span><span>Date columns<b>{summary.dateColumns}</b></span><span>Attendance records<b>{summary.attendanceRecords}</b></span><span>Existing attendance<b>{summary.duplicateRecords}</b></span><span>Daily advances<b>{summary.dailyAdvances}</b></span><span>Advance total<b>{money(summary.advanceTotal)}</b></span><span>Advances to create<b>{summary.advanceRecordsToCreate}</b></span><span>Duplicate advances<b>{summary.duplicateAdvances}</b></span></div>
-          {summary.errors.length > 0 && <div className="attendance-import-errors"><strong>Errors</strong>{summary.errors.map((message) => <p key={message}>{message}</p>)}</div>}
-          {summary.warnings.length > 0 && <div className="attendance-import-warnings"><strong>Warnings</strong>{summary.warnings.map((message) => <p key={message}>{message}</p>)}<label><input type="checkbox" checked={warningsAccepted} onChange={(event) => setWarningsAccepted(event.target.checked)} /> I understand these warnings and want to continue.</label></div>}
-          <label><span>Duplicate handling</span><select value={duplicateMode} onChange={(event) => setDuplicateMode(event.target.value as typeof duplicateMode)}><option value="missing_only">Import only missing records</option><option value="skip_existing">Skip existing records</option><option value="update_existing">Update existing records</option></select></label>
-          {summary.dailyAdvances > 0 && <label><span>Payment account for imported advances *</span><select required value={accountId} onChange={(event) => setAccountId(event.target.value)}><option value="">Select payment account</option>{preview.accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>}
-          {summary.dailyAdvances > 0 && !accountId && <p className="attendance-import-error">Payment account is required for imported advances.</p>}
-          <p className="attendance-import-note">Advance Total columns are reference-only. Daily advances found inside date cells will be imported as separate advance records.</p>
-          <div className="attendance-import-table-wrap"><table><thead><tr><th>Labour</th><th>CSV Advance Total</th><th>Daily Cell Advance Total</th></tr></thead><tbody>{preview.rows.map((row) => <tr key={row.rowIndex}><th>{row.labourName}</th><td>{row.csvAdvance === null ? "-" : money(row.csvAdvance)}</td><td>{money(row.calculatedAdvance)}</td></tr>)}</tbody></table></div>
-          <div className="attendance-import-table-wrap"><table><thead><tr><th>Labour</th>{preview.dateColumns.map((column) => <th key={column.column}>{column.column}</th>)}</tr></thead><tbody>{preview.rows.slice(0, 20).map((row) => <tr key={row.rowIndex}><th>{row.labourName}</th>{row.cells.map((cell) => <td key={cell.column}><b>{attendanceMark(cell.status ?? undefined)}</b>{cell.advanceAmount !== null && <small>{money(cell.advanceAmount)}</small>}</td>)}</tr>)}</tbody></table></div>
-          {busy && <p className="attendance-import-progress"><span className="attendance-import-spinner" />Importing attendance records and advances. Please wait...</p>}
-          <button disabled={busy || unresolvedLabourRows.length > 0 || summary.errors.length > 0 || (summary.dailyAdvances > 0 && !accountId) || (summary.warnings.length > 0 && !warningsAccepted)} type="button" onClick={() => void confirm()}>{busy ? "Importing..." : "Confirm Import"}</button>
+          <h3>{t("attendanceImport.validationSummary")}</h3>
+          <div className="attendance-import-summary"><span>{t("attendanceImport.labourRows")}<b className="bidi-isolate">{summary.labourRows}</b></span><span>{t("attendanceImport.dateColumns")}<b className="bidi-isolate">{summary.dateColumns}</b></span><span>{t("attendanceImport.attendanceRecords")}<b className="bidi-isolate">{summary.attendanceRecords}</b></span><span>{t("attendanceImport.existingAttendance")}<b className="bidi-isolate">{summary.duplicateRecords}</b></span><span>{t("attendanceImport.dailyAdvances")}<b className="bidi-isolate">{summary.dailyAdvances}</b></span><span>{t("attendanceImport.advanceTotal")}<b className="bidi-isolate">{money(summary.advanceTotal)}</b></span><span>{t("attendanceImport.advancesToCreate")}<b className="bidi-isolate">{summary.advanceRecordsToCreate}</b></span><span>{t("attendanceImport.duplicateAdvances")}<b className="bidi-isolate">{summary.duplicateAdvances}</b></span></div>
+          {summary.errors.length > 0 && <div className="attendance-import-errors"><strong>{t("attendanceImport.errors")}</strong>{summary.errors.map((message) => <p key={message}>{message}</p>)}</div>}
+          {summary.warnings.length > 0 && <div className="attendance-import-warnings"><strong>{t("attendanceImport.warnings")}</strong>{summary.warnings.map((message) => <p key={message}>{message}</p>)}<label><input type="checkbox" checked={warningsAccepted} onChange={(event) => setWarningsAccepted(event.target.checked)} /> {t("attendanceImport.warningConfirm")}</label></div>}
+          <label><span>{t("attendanceImport.duplicateHandling")}</span><select value={duplicateMode} onChange={(event) => setDuplicateMode(event.target.value as typeof duplicateMode)}><option value="missing_only">{t("attendanceImport.importMissingOnly")}</option><option value="skip_existing">{t("attendanceImport.skipExisting")}</option><option value="update_existing">{t("attendanceImport.updateExisting")}</option></select></label>
+          {summary.dailyAdvances > 0 && <label><span>{t("attendanceImport.paymentAccountImportedAdvances")}</span><PaymentAccountSelect
+            accounts={preview.accounts}
+            value={accountId}
+            onChange={setAccountId}
+            invalid={summary.dailyAdvances > 0 && !accountId}
+          /></label>}
+          {summary.dailyAdvances > 0 && !accountId && <p className="attendance-import-error">{t("attendanceImport.paymentAccountRequired")}</p>}
+          <p className="attendance-import-note">{t("attendanceImport.advanceColumnsNote")}</p>
+          <div className="attendance-import-table-wrap"><table><thead><tr><th>{t("attendanceImport.labour")}</th><th>{t("attendanceImport.csvAdvanceTotal")}</th><th>{t("attendanceImport.dailyCellAdvanceTotal")}</th></tr></thead><tbody>{preview.rows.map((row) => <tr key={row.rowIndex}><th>{row.labourName}</th><td className="bidi-isolate">{row.csvAdvance === null ? "-" : money(row.csvAdvance)}</td><td className="bidi-isolate">{money(row.calculatedAdvance)}</td></tr>)}</tbody></table></div>
+          <div className="attendance-import-table-wrap"><table><thead><tr><th>{t("attendanceImport.labour")}</th>{preview.dateColumns.map((column) => <th key={column.column}>{column.column}</th>)}</tr></thead><tbody>{preview.rows.slice(0, 20).map((row) => <tr key={row.rowIndex}><th>{row.labourName}</th>{row.cells.map((cell) => <td key={cell.column}><b>{attendanceMark(cell.status ?? undefined)}</b>{cell.advanceAmount !== null && <small className="bidi-isolate">{money(cell.advanceAmount)}</small>}</td>)}</tr>)}</tbody></table></div>
+          {busy && <p className="attendance-import-progress"><span className="attendance-import-spinner" />{t("attendanceImport.importingProgress")}</p>}
+          <button disabled={busy || unresolvedLabourRows.length > 0 || summary.errors.length > 0 || (summary.dailyAdvances > 0 && !accountId) || (summary.warnings.length > 0 && !warningsAccepted)} type="button" onClick={() => void confirm()}>{busy ? t("attendanceImport.importing") : t("attendanceImport.confirmImport")}</button>
         </section>}
-        {step === 5 && result && <section className="attendance-import-card"><h3>Import completed</h3><div className="attendance-import-summary"><span>Labour created<b>{result.labourersCreated}</b></span><span>Attendance created<b>{result.attendanceCreated}</b></span><span>Attendance skipped<b>{result.attendanceSkipped}</b></span><span>Attendance updated<b>{result.attendanceUpdated}</b></span><span>Advances created<b>{result.advancesCreated}</b></span><span>Duplicate advances skipped<b>{result.duplicateAdvancesSkipped}</b></span><span>Total advance imported<b>{money(result.totalAdvanceImported)}</b></span><span>Errors<b>{result.errors.length}</b></span></div>{result.errors.map((message) => <p className="attendance-import-error" key={message}>{message}</p>)}<button type="button" onClick={onClose}>Close</button></section>}
+        {step === 5 && result && <section className="attendance-import-card"><h3>{t("attendanceImport.importCompleted")}</h3><div className="attendance-import-summary"><span>{t("attendanceImport.labourCreated")}<b className="bidi-isolate">{result.labourersCreated}</b></span><span>{t("attendanceImport.attendanceCreated")}<b className="bidi-isolate">{result.attendanceCreated}</b></span><span>{t("attendanceImport.attendanceSkipped")}<b className="bidi-isolate">{result.attendanceSkipped}</b></span><span>{t("attendanceImport.attendanceUpdated")}<b className="bidi-isolate">{result.attendanceUpdated}</b></span><span>{t("attendanceImport.advancesCreated")}<b className="bidi-isolate">{result.advancesCreated}</b></span><span>{t("attendanceImport.duplicateAdvancesSkipped")}<b className="bidi-isolate">{result.duplicateAdvancesSkipped}</b></span><span>{t("attendanceImport.totalAdvanceImported")}<b className="bidi-isolate">{money(result.totalAdvanceImported)}</b></span><span>{t("attendanceImport.errors")}<b className="bidi-isolate">{result.errors.length}</b></span></div>{result.errors.map((message) => <p className="attendance-import-error" key={message}>{message}</p>)}<button type="button" onClick={onClose}>{t("attendanceImport.close")}</button></section>}
         {error && <p className="attendance-import-error">{error}</p>}
       </div>
-      <footer className="attendance-import-footer"><button type="button" onClick={onClose}>Cancel</button>{step === 1 && <button disabled={!file || busy} type="button" onClick={() => void upload()}>{busy ? "Parsing..." : "Preview CSV"}</button>}</footer>
+      <footer className="attendance-import-footer"><button type="button" onClick={onClose}>{t("attendanceImport.cancel")}</button>{step === 1 && <button disabled={!file || busy} type="button" onClick={() => void upload()}>{busy ? t("attendanceImport.parsing") : t("attendanceImport.previewCsv")}</button>}</footer>
     </section>
   </div>;
 }
@@ -1549,6 +1576,7 @@ export function AttendanceImportPanel({ token, workspaceId, farmId, seasonId, on
 export function ExpenseImportPanel({ token, workspaceId, farmId, seasonId, onClose, onImported }: {
   token: string; workspaceId: string; farmId: string; seasonId: string; onClose: () => void; onImported: () => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [file, setFile] = useState<File | null>(null);
   const [sessionId, setSessionId] = useState("");
   const [preview, setPreview] = useState<ExpenseImportPreview | null>(null);
@@ -1565,14 +1593,14 @@ export function ExpenseImportPanel({ token, workspaceId, farmId, seasonId, onClo
   };
   const previewFile = async (event: FormEvent) => {
     event.preventDefault();
-    if (!file || !navigator.onLine) { setError("Expense CSV import requires internet connection."); return; }
+    if (!file || !navigator.onLine) { setError(t("modulePageExtra.expenseCsvImportOnlineOnly")); return; }
     setBusy(true); setError("");
     try {
       const response = await previewExpenseImport(token, workspaceId, { farmId, seasonId, originalFilename: file.name, csvText: await file.text() });
       setSessionId(response.sessionId); setPreview(response.preview);
       setCategoryMappings({});
       setAccountMappings({});
-    } catch (nextError) { setError(nextError instanceof Error ? nextError.message : "Unable to preview expense CSV."); }
+    } catch (nextError) { setError(nextError instanceof Error ? nextError.message : t("modulePageExtra.unablePreviewExpenseCsv")); }
     finally { setBusy(false); }
   };
   const confirm = async () => {
@@ -1584,36 +1612,36 @@ export function ExpenseImportPanel({ token, workspaceId, farmId, seasonId, onClo
         categoryMappings: Object.values(categoryMappings), accountMappings: Object.values(accountMappings),
       });
       setResult(response.result); await refreshOperationalData(); await onImported();
-    } catch (nextError) { setError(nextError instanceof Error ? nextError.message : "Unable to import expenses."); }
+    } catch (nextError) { setError(nextError instanceof Error ? nextError.message : t("modulePageExtra.unableImportExpenses")); }
     finally { setBusy(false); }
   };
   const unresolved = !preview || preview.summary.missingCategories.some((name) => !categoryMappings[name]) || preview.summary.missingAccounts.some((name) => !accountMappings[name]);
   const readyRows = preview ? Math.max(0, preview.rows.filter((row) => !row.error
     && (row.accountId || accountMappings[row.accountName])
     && (row.subcategoryId || categoryMappings[row.categoryName])).length - preview.summary.duplicateRows) : 0;
-  return <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}><section className="attendance-import-dialog expense-import-dialog" role="dialog" aria-modal="true" aria-label="Expense CSV Import" onClick={(event) => event.stopPropagation()}>
-    <header className="attendance-report-header"><div><h2>Expense CSV Import</h2><p>Recommended: CSV import. PDF import is best-effort for legacy reports.</p></div><button type="button" onClick={onClose}><X size={19} /></button></header>
+  return <div className="worker-dialog-backdrop" role="presentation" onClick={onClose}><section className="attendance-import-dialog expense-import-dialog" role="dialog" aria-modal="true" aria-label={t("modulePageExtra.expenseCsvImportTitle")} onClick={(event) => event.stopPropagation()}>
+    <header className="attendance-report-header"><div><h2>{t("modulePageExtra.expenseCsvImportTitle")}</h2><p>{t("modulePageExtra.expenseCsvImportRecommendation")}</p></div><button type="button" onClick={onClose}><X size={19} /></button></header>
     <div className="attendance-import-body">
-      {!preview && <form className="worker-action-form" onSubmit={(event) => void previewFile(event)}><label><span>CSV expense report *</span><input accept=".csv,text/csv" required type="file" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label><small>Expected: Voucher, Date, Deduction Account, Category, Description, Amount. Blank legacy descriptions are filled automatically.</small><p className="expense-import-note">PDF extraction can be unreliable. Upload CSV to receive a validated preview before import.</p><footer><button type="button" onClick={onClose}>Cancel</button><button disabled={busy || !file} type="submit">{busy ? "Reading CSV..." : "Preview Import"}</button></footer></form>}
+      {!preview && <form className="worker-action-form" onSubmit={(event) => void previewFile(event)}><label><span>{t("modulePageExtra.csvExpenseReportField")}</span><input accept=".csv,text/csv" required type="file" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label><small>{t("modulePageExtra.csvExpenseReportExpectedColumns")}</small><p className="expense-import-note">{t("modulePageExtra.pdfExtractionUnreliableNote")}</p><footer><button type="button" onClick={onClose}>{t("common.cancel")}</button><button disabled={busy || !file} type="submit">{busy ? t("modulePageExtra.readingCsv") : t("modulePageExtra.previewImportAction")}</button></footer></form>}
       {preview && !result && <>
-        <div className="expense-import-summary"><span>Total rows <b>{preview.summary.totalRows}</b></span><span>Ready <b>{readyRows}</b></span><span>Duplicates <b>{preview.summary.duplicateRows}</b></span><span>Grand total <b>{money(preview.summary.grandTotal)}</b></span></div>
+        <div className="expense-import-summary"><span>{t("modulePageExtra.totalRowsLabel")} <b className="bidi-isolate">{preview.summary.totalRows}</b></span><span>{t("modulePageExtra.readyRowsLabel")} <b className="bidi-isolate">{readyRows}</b></span><span>{t("modulePageExtra.duplicatesLabel")} <b className="bidi-isolate">{preview.summary.duplicateRows}</b></span><span>{t("expensesPage.grandTotal")} <b className="bidi-isolate">{money(preview.summary.grandTotal)}</b></span></div>
         {!!preview.summary.errors.length && <div className="worker-action-error">{preview.summary.errors.map((item) => <p key={item}>{item}</p>)}</div>}
-        {!!preview.summary.missingCategories.length && <section className="expense-import-resolution"><header><h3>Missing Categories</h3><button type="button" onClick={() => setCategoryMappings(Object.fromEntries(preview.summary.missingCategories.map((sourceName) => [sourceName, { sourceName, action: "create" as const }])))}>Create all</button></header>{preview.summary.missingCategories.map((name) => <label key={name}><span>{name}</span><select value={categoryMappings[name]?.action === "create" ? "create" : categoryMappings[name]?.targetId ?? ""} onChange={(event) => setResolution("category", name, event.target.value)}><option value="">Resolve category</option><option value="create">Create category</option>{preview.categories.map((item) => <option key={item.id} value={item.id}>Map to {item.label}</option>)}</select></label>)}</section>}
-        {!!preview.summary.missingAccounts.length && <section className="expense-import-resolution"><header><h3>Missing Accounts</h3><button type="button" onClick={() => setAccountMappings(Object.fromEntries(preview.summary.missingAccounts.map((sourceName) => [sourceName, { sourceName, action: "create" as const }])))}>Create all</button></header>{preview.summary.missingAccounts.map((name) => <label key={name}><span>{name}</span><select value={accountMappings[name]?.action === "create" ? "create" : accountMappings[name]?.targetId ?? ""} onChange={(event) => setResolution("account", name, event.target.value)}><option value="">Resolve account</option><option value="create">Create account</option>{preview.accounts.map((item) => <option key={item.id} value={item.id}>Map to {item.name}</option>)}</select></label>)}</section>}
-        <label className="attendance-import-warning-confirm"><input checked={skipDuplicates} type="checkbox" onChange={(event) => setSkipDuplicates(event.target.checked)} /> Skip duplicate rows</label>
-        <div className="attendance-import-table-wrap"><table><thead><tr><th>Voucher</th><th>Date</th><th>Deduction Account</th><th>Category</th><th>Description</th><th>Amount</th><th>Status</th></tr></thead><tbody>{preview.rows.slice(0, 50).map((row) => {
+        {!!preview.summary.missingCategories.length && <section className="expense-import-resolution"><header><h3>{t("modulePageExtra.missingCategoriesTitle")}</h3><button type="button" onClick={() => setCategoryMappings(Object.fromEntries(preview.summary.missingCategories.map((sourceName) => [sourceName, { sourceName, action: "create" as const }])))}>{t("modulePageExtra.createAllAction")}</button></header>{preview.summary.missingCategories.map((name) => <label key={name}><span>{name}</span><select value={categoryMappings[name]?.action === "create" ? "create" : categoryMappings[name]?.targetId ?? ""} onChange={(event) => setResolution("category", name, event.target.value)}><option value="">{t("modulePageExtra.resolveCategoryOption")}</option><option value="create">{t("modulePageExtra.createCategoryOption")}</option>{preview.categories.map((item) => <option key={item.id} value={item.id}>{t("modulePageExtra.mapToOption", { name: item.label })}</option>)}</select></label>)}</section>}
+        {!!preview.summary.missingAccounts.length && <section className="expense-import-resolution"><header><h3>{t("modulePageExtra.missingAccountsTitle")}</h3><button type="button" onClick={() => setAccountMappings(Object.fromEntries(preview.summary.missingAccounts.map((sourceName) => [sourceName, { sourceName, action: "create" as const }])))}>{t("modulePageExtra.createAllAction")}</button></header>{preview.summary.missingAccounts.map((name) => <label key={name}><span>{name}</span><select value={accountMappings[name]?.action === "create" ? "create" : accountMappings[name]?.targetId ?? ""} onChange={(event) => setResolution("account", name, event.target.value)}><option value="">{t("modulePageExtra.resolveAccountOption")}</option><option value="create">{t("accountsPage.createAccount")}</option>{preview.accounts.map((item) => <option key={item.id} value={item.id}>{t("modulePageExtra.mapToOption", { name: item.name })}</option>)}</select></label>)}</section>}
+        <label className="attendance-import-warning-confirm"><input checked={skipDuplicates} type="checkbox" onChange={(event) => setSkipDuplicates(event.target.checked)} /> {t("modulePageExtra.skipDuplicateRows")}</label>
+        <div className="attendance-import-table-wrap"><table><thead><tr><th>{t("expensesPage.voucherLabel")}</th><th>{t("expensesPage.date")}</th><th>{t("modulePageExtra.deductionAccountColumn")}</th><th>{t("expensesPage.category")}</th><th>{t("expensesPage.description")}</th><th>{t("expensesPage.amount")}</th><th>{t("reportsPage.status")}</th></tr></thead><tbody>{preview.rows.slice(0, 50).map((row) => {
           const accountResolved = row.accountId || accountMappings[row.accountName];
           const categoryResolved = row.subcategoryId || categoryMappings[row.categoryName];
-          const status = row.error ? `Row ${row.rowIndex}: ${row.error}`
-            : !accountResolved ? `Row ${row.rowIndex}: Missing account "${row.accountName}"`
-              : !categoryResolved ? `Row ${row.rowIndex}: Missing category "${row.categoryName}"`
-                : "Ready";
-          return <tr key={row.rowIndex}><td>{row.voucherNumber}</td><td>{row.date}</td><td>{row.accountName}</td><td>{row.categoryName}</td><td>{row.description}</td><td>{money(row.amount)}</td><td>{status}</td></tr>;
+          const status = row.error ? t("modulePageExtra.importRowError", { row: row.rowIndex, error: row.error })
+            : !accountResolved ? t("modulePageExtra.importRowMissingAccount", { row: row.rowIndex, account: row.accountName })
+              : !categoryResolved ? t("modulePageExtra.importRowMissingCategory", { row: row.rowIndex, category: row.categoryName })
+                : t("modulePageExtra.importRowReady");
+          return <tr key={row.rowIndex}><td className="bidi-isolate">{row.voucherNumber}</td><td className="bidi-isolate">{row.date}</td><td>{row.accountName}</td><td>{row.categoryName}</td><td>{row.description}</td><td className="bidi-isolate">{money(row.amount)}</td><td>{status}</td></tr>;
         })}</tbody></table></div>
-        <div className="expense-import-totals"><section><h3>Totals by account</h3>{preview.summary.totalsByAccount.map((item) => <p key={item.name}><span>{item.name}</span><b>{money(item.total)}</b></p>)}</section><section><h3>Totals by category</h3>{preview.summary.totalsByCategory.map((item) => <p key={item.name}><span>{item.name}</span><b>{money(item.total)}</b></p>)}</section></div>
-        <footer className="attendance-import-footer"><button type="button" onClick={onClose}>Cancel</button><button disabled={busy || unresolved || preview.summary.errors.length > 0} type="button" onClick={() => void confirm()}>{busy ? "Importing..." : "Import Expenses"}</button></footer>
+        <div className="expense-import-totals"><section><h3>{t("modulePageExtra.totalsByAccountTitle")}</h3>{preview.summary.totalsByAccount.map((item) => <p key={item.name}><span>{item.name}</span><b className="bidi-isolate">{money(item.total)}</b></p>)}</section><section><h3>{t("modulePageExtra.totalsByCategoryTitle")}</h3>{preview.summary.totalsByCategory.map((item) => <p key={item.name}><span>{item.name}</span><b className="bidi-isolate">{money(item.total)}</b></p>)}</section></div>
+        <footer className="attendance-import-footer"><button type="button" onClick={onClose}>{t("common.cancel")}</button><button disabled={busy || unresolved || preview.summary.errors.length > 0} type="button" onClick={() => void confirm()}>{busy ? t("modulePageExtra.importingAction") : t("modulePageExtra.importExpensesAction")}</button></footer>
       </>}
-      {result && <section className="expense-import-result"><h3>Expense import completed</h3><p>Expenses imported: <b>{result.recordsCreated}</b></p><p>Duplicates skipped: <b>{result.duplicatesSkipped}</b></p><p>Imported total: <b>{money(result.grandTotal)}</b></p><button type="button" onClick={onClose}>Close</button></section>}
+      {result && <section className="expense-import-result"><h3>{t("modulePageExtra.expenseImportCompletedTitle")}</h3><p>{t("modulePageExtra.expensesImportedLabel")} <b className="bidi-isolate">{result.recordsCreated}</b></p><p>{t("modulePageExtra.duplicatesSkippedLabel")} <b className="bidi-isolate">{result.duplicatesSkipped}</b></p><p>{t("modulePageExtra.importedTotalLabel")} <b className="bidi-isolate">{money(result.grandTotal)}</b></p><button type="button" onClick={onClose}>{t("common.close")}</button></section>}
       {error && <p className="worker-action-error">{error}</p>}
     </div>
   </section></div>;
@@ -1628,16 +1656,16 @@ const receiptMaxSize = 10 * 1024 * 1024;
 // views continue to work, and the form controls can be restored safely.
 const expenseReceiptUploadEnabled = false;
 
-function fileToBase64(file: File): Promise<string> {
+function fileToBase64(t: TFunction, file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
-    reader.onerror = () => reject(reader.error ?? new Error("Unable to read receipt file."));
+    reader.onerror = () => reject(reader.error ?? new Error(t("expensesPage.unableReadReceiptFile")));
     reader.readAsDataURL(file);
   });
 }
 
-function imageFromFile(file: File): Promise<HTMLImageElement> {
+function imageFromFile(t: TFunction, file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const image = new Image();
@@ -1647,24 +1675,24 @@ function imageFromFile(file: File): Promise<HTMLImageElement> {
     };
     image.onerror = () => {
       URL.revokeObjectURL(url);
-      reject(new Error("Unable to read receipt image."));
+      reject(new Error(t("expensesPage.unableReadReceiptImage")));
     };
     image.src = url;
   });
 }
 
-function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality = 0.86): Promise<Blob> {
+function canvasToBlob(t: TFunction, canvas: HTMLCanvasElement, type: string, quality = 0.86): Promise<Blob> {
   return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Unable to process receipt image.")), type, quality);
+    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error(t("expensesPage.unableProcessReceiptImage"))), type, quality);
   });
 }
 
-async function cropReceiptImage(file: File, crop: CropBox, rotation: number): Promise<{ file: File; metadata: Record<string, unknown> }> {
-  const image = await imageFromFile(file);
+async function cropReceiptImage(t: TFunction, file: File, crop: CropBox, rotation: number): Promise<{ file: File; metadata: Record<string, unknown> }> {
+  const image = await imageFromFile(t, file);
   const normalizedRotation = ((rotation % 360) + 360) % 360;
   const rotatedCanvas = document.createElement("canvas");
   const rotatedContext = rotatedCanvas.getContext("2d");
-  if (!rotatedContext) throw new Error("Image processing is not available.");
+  if (!rotatedContext) throw new Error(t("expensesPage.imageProcessingUnavailable"));
   const sideways = normalizedRotation === 90 || normalizedRotation === 270;
   rotatedCanvas.width = sideways ? image.naturalHeight : image.naturalWidth;
   rotatedCanvas.height = sideways ? image.naturalWidth : image.naturalHeight;
@@ -1684,11 +1712,11 @@ async function cropReceiptImage(file: File, crop: CropBox, rotation: number): Pr
   output.width = sourceWidth;
   output.height = sourceHeight;
   const outputContext = output.getContext("2d");
-  if (!outputContext) throw new Error("Image processing is not available.");
+  if (!outputContext) throw new Error(t("expensesPage.imageProcessingUnavailable"));
   outputContext.filter = "contrast(1.08) saturate(0.98)";
   outputContext.drawImage(rotatedCanvas, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, sourceWidth, sourceHeight);
   const type = file.type === "image/png" ? "image/png" : "image/jpeg";
-  const blob = await canvasToBlob(output, type);
+  const blob = await canvasToBlob(t, output, type);
   const name = file.name.replace(/\.[^.]+$/, "") + "-cropped." + (type === "image/png" ? "png" : "jpg");
   return {
     file: new File([blob], name, { type, lastModified: Date.now() }),
@@ -1741,7 +1769,7 @@ function ReceiptCropReviewModal({ file, onCancel, onAccept }: { file: File; onCa
     setBusy(true);
     setStatus(t("expensesPage.croppingReceipt"));
     try {
-      const result = await cropReceiptImage(file, crop, rotation);
+      const result = await cropReceiptImage(t, file, crop, rotation);
       onAccept({ id: crypto.randomUUID(), file: result.file, originalFile: file, cropMetadata: result.metadata, previewUrl: URL.createObjectURL(result.file) });
     } finally {
       setBusy(false);
@@ -1797,7 +1825,7 @@ function ReceiptAttachmentPicker({ pending, onFiles, onRemove }: { pending: Pend
       {pending.length ? <div className="receipt-preview-grid">{pending.map((item) => (
         <article key={item.id}>
           {item.previewUrl ? <img alt={item.file.name} src={item.previewUrl} /> : <FileText size={28} />}
-          <div><strong>{item.file.name}</strong><small>{Math.round(item.file.size / 1024)} KB{item.originalFile ? ` · ${t("expensesPage.croppedReceipt")}` : ""}</small></div>
+          <div><strong>{item.file.name}</strong><small><span className="bidi-isolate">{Math.round(item.file.size / 1024)} KB</span>{item.originalFile ? ` · ${t("expensesPage.croppedReceipt")}` : ""}</small></div>
           <button aria-label={t("common.delete")} type="button" onClick={() => onRemove(item.id)}><X size={14} /></button>
         </article>
       ))}</div> : null}
@@ -1820,7 +1848,7 @@ function ReceiptAttachmentList({ attachments, onOpen, onOpenOriginal, onDelete, 
       </div> : attachments.map((item) => (
         <article key={item.id}>
           <span>{item.fileType.startsWith("image/") ? <ImageIcon size={18} /> : <FileText size={18} />}</span>
-          <div><strong>{item.fileName}</strong><small>{Math.round(item.fileSize / 1024)} KB · {item.fileType}{item.ocrStatus ? ` · OCR: ${item.ocrStatus}` : ""}</small></div>
+          <div><strong>{item.fileName}</strong><small><span className="bidi-isolate">{Math.round(item.fileSize / 1024)} KB</span> · {item.fileType}{item.ocrStatus ? ` · OCR: ${translateStatus(t, item.ocrStatus)}` : ""}</small></div>
           <button type="button" onClick={() => onOpen(item)}>{t("expensesPage.viewCropped")}</button>
           {onOpenOriginal && <button type="button" onClick={() => onOpenOriginal(item)}>{t("expensesPage.viewOriginal")}</button>}
           {onExtract && <button type="button" onClick={() => onExtract(item)}>{t("expensesPage.extractFromReceipt")}</button>}
@@ -1831,13 +1859,13 @@ function ReceiptAttachmentList({ attachments, onOpen, onOpenOriginal, onDelete, 
       {ocrResult ? <div className="receipt-ocr-result">
         <strong>{t("expensesPage.suggestedExpenseData")}</strong>
         <p>{ocrResult.message || (ocrResult.status === "success" ? t("expensesPage.ocrCompleteReview") : t("expensesPage.ocrFailed"))}</p>
-        <small>{t("expensesPage.confidence")}: {ocrResult.confidence}{ocrResult.provider ? ` · ${ocrResult.provider}` : ""}</small>
+        <small>{t("expensesPage.confidence")}: <span className="bidi-isolate">{ocrResult.confidence}</span>{ocrResult.provider ? ` · ${ocrResult.provider}` : ""}</small>
         {hasSuggestions ? <dl>
-          {fields.date && <><dt>{t("expensesPage.date")}</dt><dd>{fields.date}</dd></>}
+          {fields.date && <><dt>{t("expensesPage.date")}</dt><dd className="bidi-isolate">{fields.date}</dd></>}
           {fields.supplier && <><dt>{t("expensesPage.supplier")}</dt><dd>{fields.supplier}</dd></>}
-          {fields.receiptNumber && <><dt>{t("expensesPage.receiptNumber")}</dt><dd>{fields.receiptNumber}</dd></>}
-          {fields.totalAmount !== undefined && <><dt>{t("expensesPage.amount")}</dt><dd>{formatMoney(fields.totalAmount)}</dd></>}
-          {fields.vatAmount !== undefined && <><dt>{t("expensesPage.vat")}</dt><dd>{formatMoney(fields.vatAmount)}</dd></>}
+          {fields.receiptNumber && <><dt>{t("expensesPage.receiptNumber")}</dt><dd className="bidi-isolate">{fields.receiptNumber}</dd></>}
+          {fields.totalAmount !== undefined && <><dt>{t("expensesPage.amount")}</dt><dd className="bidi-isolate">{formatMoney(fields.totalAmount)}</dd></>}
+          {fields.vatAmount !== undefined && <><dt>{t("expensesPage.vat")}</dt><dd className="bidi-isolate">{formatMoney(fields.vatAmount)}</dd></>}
           {fields.paymentMethod && <><dt>{t("expensesPage.paymentMethod")}</dt><dd>{fields.paymentMethod}</dd></>}
           {fields.description && <><dt>{t("expensesPage.description")}</dt><dd>{fields.description}</dd></>}
           {fields.suggestedCategory && <><dt>{t("expensesPage.category")}</dt><dd>{translateExpenseCategory(fields.suggestedCategory)}</dd></>}
@@ -1853,17 +1881,31 @@ function ReceiptAttachmentList({ attachments, onOpen, onOpenOriginal, onDelete, 
   );
 }
 
+type ExpensesView = "new" | "vouchers" | "summary";
+
 function ExpensesModule() {
   const { t } = useTranslation();
   const { token, user, sessionRefreshing } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const sync = useSyncState();
   const [searchParams, setSearchParams] = useSearchParams();
+  const view: ExpensesView = location.pathname.endsWith("/new")
+    ? "new"
+    : location.pathname.endsWith("/summary")
+      ? "summary"
+      : "vouchers";
+  const [showExpenseFilterSheet, setShowExpenseFilterSheet] = useState(false);
   const load = useCallback(async () => (await loadWorkspaceVouchers({
     mode: "all",
     visibility: "all",
     includeGeneralFarmRecords: true,
     includeImportedAcrossSeasons: true,
   })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
-  const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }), []);
+  // includeDeleted so a voucher whose account was later deactivated can still show/keep that
+  // account while editing that one historical voucher (see selectableExpenseAccounts below) —
+  // eligiblePaymentAccounts is what actually excludes deleted accounts from new selections.
+  const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true, includeDeleted: true }), []);
   const loadLabourWageSettlements = useCallback(() => workspaceRecords(offlineDb.labourWageSettlements, { includeDeleted: true }), []);
   const [vouchers, refresh] = useData(load);
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
@@ -1979,6 +2021,7 @@ function ExpensesModule() {
   const [customVoucherNumberEnabled, setCustomVoucherNumberEnabled] = useState(false);
   const [customVoucherNumber, setCustomVoucherNumber] = useState("");
   const [savingVoucher, setSavingVoucher] = useState(false);
+  const [voucherSubmitAttempted, setVoucherSubmitAttempted] = useState(false);
   const [voucherNumberValidation, setVoucherNumberValidation] = useState<{
     status: "idle" | "checking" | "valid" | "duplicate" | "invalid" | "offline";
     message: string;
@@ -2020,8 +2063,8 @@ function ExpensesModule() {
   const [voucherCategory, setVoucherCategory] = useState("");
   const [voucherSubcategory, setVoucherSubcategory] = useState("");
   const [voucherAccountId, setVoucherAccountId] = useState("");
-  const [showExpenseMoreFilters, setShowExpenseMoreFilters] = useState(false);
   const [showExpenseSubcategoryManager, setShowExpenseSubcategoryManager] = useState(false);
+  const [visibleVoucherCount, setVisibleVoucherCount] = useState(20);
   const voucherFormRef = useRef<HTMLDivElement | null>(null);
   const voucherDateRef = useRef<HTMLInputElement | null>(null);
   const voucherItemCategoryRefs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -2029,22 +2072,28 @@ function ExpensesModule() {
   const voucherSubmitLockRef = useRef(false);
   const pendingVoucherRecordIdRef = useRef<string | null>(null);
   const showToast = (message: string) => window.dispatchEvent(new CustomEvent("muzare-toast", { detail: message }));
-  const isSyntheticLocalAccount = useCallback((value?: string) => Boolean(value?.includes(":local-")), []);
-  const selectableExpenseAccounts = useMemo(() => accounts.filter((account) => !isSyntheticLocalAccount(account.id)), [accounts, isSyntheticLocalAccount]);
-  const resolvedExpenseAccountId = accountId || selectableExpenseAccounts[0]?.id || "";
-  const voucherSearchPlaceholder = "Search vouchers";
+  // The account a voucher currently being edited already points at stays selectable/visible even
+  // if it was deactivated since — every other new selection still excludes deactivated accounts.
+  const selectableExpenseAccounts = useMemo(
+    () => eligiblePaymentAccounts(accounts, { alsoIncludeId: editingVoucher?.accountId ?? null }),
+    [accounts, editingVoucher?.accountId],
+  );
+  // No silent default to the first account: the user must explicitly pick one (or the form
+  // blocks save with a visible "Select a payment account" message — see submitAttempted below).
+  const resolvedExpenseAccountId = accountId;
+  const voucherSearchPlaceholder = t("expensesPage.searchVouchers");
   const activeVoucherFilters = useMemo(() => {
     const filters: string[] = [];
-    if (voucherSearch.trim()) filters.push(`Search: ${voucherSearch.trim()}`);
-    if (voucherFrom || voucherTo) filters.push(`${voucherFrom ? compactDate(voucherFrom) : "Start"} - ${voucherTo ? compactDate(voucherTo) : "End"}`);
+    if (voucherSearch.trim()) filters.push(t("modulePageExtra.searchFilterChip", { query: voucherSearch.trim() }));
+    if (voucherFrom || voucherTo) filters.push(`${voucherFrom ? compactDate(voucherFrom) : t("modulePageExtra.rangeStart")} - ${voucherTo ? compactDate(voucherTo) : t("modulePageExtra.rangeEnd")}`);
     if (voucherCategory) filters.push(translateExpenseCategory(voucherCategory));
     if (voucherSubcategory) filters.push(translateExpenseSubcategory(voucherSubcategory));
     if (voucherAccountId) filters.push(accounts.find((item) => item.id === voucherAccountId)?.name ?? voucherAccountId);
-    if (showDeletedVouchers) filters.push("Deleted / voided");
-    if (!showImportedVouchers) filters.push("Imported off");
-    if (showSettlementVouchers) filters.push("Settlement vouchers");
+    if (showDeletedVouchers) filters.push(t("modulePageExtra.deletedVoidedFilterChip"));
+    if (!showImportedVouchers) filters.push(t("modulePageExtra.importedOffFilterChip"));
+    if (showSettlementVouchers) filters.push(t("modulePageExtra.settlementVouchersFilterChip"));
     return filters;
-  }, [accounts, showDeletedVouchers, showImportedVouchers, showSettlementVouchers, voucherAccountId, voucherCategory, voucherFrom, voucherSearch, voucherSubcategory, voucherTo]);
+  }, [accounts, showDeletedVouchers, showImportedVouchers, showSettlementVouchers, voucherAccountId, voucherCategory, voucherFrom, voucherSearch, voucherSubcategory, voucherTo, t]);
   const advancedVoucherFilterCount = [
     voucherCategory,
     voucherSubcategory,
@@ -2053,8 +2102,9 @@ function ExpensesModule() {
     !showImportedVouchers,
     showSettlementVouchers,
   ].filter(Boolean).length;
-  const expenseSummaryLabel = "Total expenses";
-  const expenseSummarySubtitle = activeVoucherFilters.length > 0 ? "Current filters" : "Current season";
+  // Shown on the Filters button in the Vouchers tab — the date range (moved into the filter
+  // sheet) counts as one active filter, matching how it's already shown as one chip above.
+  const expenseFilterCount = advancedVoucherFilterCount + (voucherFrom || voucherTo ? 1 : 0);
   const resetForm = (options?: { preserveSessionDefaults?: boolean }) => {
     const preserveSessionDefaults = options?.preserveSessionDefaults !== false;
     setDate(preserveSessionDefaults ? expenseSessionDate : today());
@@ -2069,6 +2119,7 @@ function ExpensesModule() {
     setReceiptError("");
     setExpenseVoucherError("");
     setSavingVoucher(false);
+    setVoucherSubmitAttempted(false);
     voucherSubmitLockRef.current = false;
     pendingVoucherRecordIdRef.current = null;
   };
@@ -2088,6 +2139,7 @@ function ExpensesModule() {
     setReceiptError("");
     setExpenseVoucherError("");
     setSavingVoucher(false);
+    setVoucherSubmitAttempted(false);
     voucherSubmitLockRef.current = false;
     pendingVoucherRecordIdRef.current = null;
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2103,7 +2155,7 @@ function ExpensesModule() {
     if (selectableExpenseAccounts.some((account) => account.id === expenseSessionAccountId)) return;
     setExpenseSessionAccountId("");
     if (accountId === expenseSessionAccountId) setAccountId("");
-    showToast("Previously selected payment account is no longer available.");
+    showToast(t("expensesPage.previousAccountNoLongerAvailable"));
   }, [accountId, expenseSessionAccountId, selectableExpenseAccounts, t]);
   const openEdit = (voucher: Voucher) => {
     setSelectedVoucher(null); setEditingVoucher(voucher); setDate(voucher.date);
@@ -2114,7 +2166,11 @@ function ExpensesModule() {
     setVoucherNumberValidation({ status: "idle", message: "" });
     setPendingReceipts([]);
     setReceiptError("");
+    setVoucherSubmitAttempted(false);
     pendingEditFocusRef.current = true;
+    // The edit form only lives on the New Voucher tab — jump there if editing was triggered from
+    // the Vouchers list or a voucher's detail dialog.
+    if (view !== "new") navigate("/workspace/expenses/new");
   };
   useEffect(() => {
     if (!editingVoucher || !voucherItems.length || !pendingEditFocusRef.current) return;
@@ -2317,8 +2373,8 @@ function ExpensesModule() {
         fileName: item.file.name,
         fileType: item.file.type,
         fileSize: item.file.size,
-        contentBase64: await fileToBase64(item.file),
-        originalContentBase64: item.originalFile ? await fileToBase64(item.originalFile) : undefined,
+        contentBase64: await fileToBase64(t, item.file),
+        originalContentBase64: item.originalFile ? await fileToBase64(t, item.originalFile) : undefined,
         originalFileSize: item.originalFile?.size,
         cropMetadata: item.cropMetadata,
       });
@@ -2351,6 +2407,7 @@ function ExpensesModule() {
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (voucherSubmitLockRef.current) return;
+    setVoucherSubmitAttempted(true);
     voucherSubmitLockRef.current = true;
     setSavingVoucher(true);
     setExpenseVoucherError("");
@@ -2429,7 +2486,7 @@ function ExpensesModule() {
       resetForm({ preserveSessionDefaults: true });
       await refresh();
     } catch (caught) {
-      setExpenseVoucherError(caught instanceof Error ? caught.message : "Unable to save voucher.");
+      setExpenseVoucherError(caught instanceof Error ? caught.message : t("modulePageExtra.unableSaveVoucher"));
     } finally {
       voucherSubmitLockRef.current = false;
       setSavingVoucher(false);
@@ -2530,7 +2587,7 @@ function ExpensesModule() {
         return;
       }
       const fetched = await fetchOperationalRecord(token, workspaceId, blocker.id);
-      if (fetched.entity !== "voucher") throw new Error("Blocking record is not an expense voucher.");
+      if (fetched.entity !== "voucher") throw new Error(t("expensesPage.blockingRecordNotVoucher"));
       const opened = {
         ...(fetched.record as unknown as Voucher),
         workspaceId: fetched.workspaceId,
@@ -2596,6 +2653,10 @@ function ExpensesModule() {
       .filter((item) => matchesVoucher(item))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }, [labourWageSettlements, matchesVoucher, showDeletedVouchers, showSettlementVouchers, visibleVoucherSource, voucherSearchQuery.data, vouchers]);
+  // Incremental "Load more" rather than rendering the entire matched history at once; resets
+  // back to the first page whenever the underlying filtered set changes.
+  useEffect(() => setVisibleVoucherCount(20), [filteredVouchers]);
+  const visibleFilteredVouchers = useMemo(() => filteredVouchers.slice(0, visibleVoucherCount), [filteredVouchers, visibleVoucherCount]);
   const voucherLineItems = useMemo(() => filteredVouchers.flatMap((item) => voucherLinesFor(item)), [filteredVouchers, voucherLinesFor]);
   const total = filteredVouchers.reduce((sum, item) => sum + item.amount, 0);
   const grouped = [...voucherLineItems.reduce((map, item) => {
@@ -2627,6 +2688,13 @@ function ExpensesModule() {
     if (voucher) setSelectedVoucher(voucher);
   }, [searchParams, showDeletedVouchers, showSettlementVouchers, vouchers]);
   useEffect(() => {
+    // A ?recordId= deep link (from Reports, the activity feed, etc.) always means "open this one
+    // voucher", which lives on the Vouchers tab — jump there if a different tab is active.
+    if (searchParams.get("recordId") && view !== "vouchers") {
+      navigate({ pathname: "/workspace/expenses/vouchers", search: searchParams.toString() }, { replace: true });
+    }
+  }, [navigate, searchParams, view]);
+  useEffect(() => {
     const forceShowSettlements = searchParams.get("showSettlementVouchers") === "true";
     if (forceShowSettlements !== showSettlementVouchers) {
       setShowSettlementVouchers(forceShowSettlements);
@@ -2638,12 +2706,12 @@ function ExpensesModule() {
   const openReceipt = async (attachment: ExpenseAttachment) => {
     if (!token || !workspaceId || !selectedVoucher) return;
     try { await openExpenseAttachment(token, workspaceId, selectedVoucher.id, attachment); }
-    catch (error) { showToast(error instanceof Error ? error.message : "Unable to open receipt attachment."); }
+    catch (error) { showToast(error instanceof Error ? error.message : t("expensesPage.unableOpenReceiptAttachment")); }
   };
   const openOriginalReceipt = async (attachment: ExpenseAttachment) => {
     if (!token || !workspaceId || !selectedVoucher) return;
     try { await openExpenseAttachment(token, workspaceId, selectedVoucher.id, attachment, "original"); }
-    catch (error) { showToast(error instanceof Error ? error.message : "Unable to open original receipt."); }
+    catch (error) { showToast(error instanceof Error ? error.message : t("expensesPage.unableOpenOriginalReceipt")); }
   };
   const removeReceipt = async (attachment: ExpenseAttachment) => {
     if (!token || !workspaceId || !selectedVoucher || !window.confirm(t("expensesPage.deleteReceiptConfirm"))) return;
@@ -2744,9 +2812,29 @@ function ExpensesModule() {
   };
   const voucherGrandTotal = voucherItems.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
 
+  const expensesTabs: Array<{ to: string; key: ExpensesView; label: string }> = [
+    { to: "/workspace/expenses/new", key: "new", label: t("expensesPage.tabNewVoucher") },
+    { to: "/workspace/expenses/vouchers", key: "vouchers", label: t("expensesPage.tabVouchers") },
+    { to: "/workspace/expenses/summary", key: "summary", label: t("expensesPage.tabSummary") },
+  ];
+  const SyncIcon = sync.status === "offline" ? WifiOff : Wifi;
   return (
-    <div className="expenses-module">
-      {(canCreateVouchers || (editingVoucher && canEditVouchers)) && <FormCard title={<span className="expense-voucher-form__card-title"><span>{editingVoucher ? t("expensesPage.editVoucherAction") : t("expensesPage.newVoucher")}</span><span className="expense-voucher-form__number-display"><span className="expense-voucher-form__number-label">{t("expensesPage.voucherLabel")}</span><span className="expense-voucher-form__number">{displayedNewVoucherNumber}</span>{!editingVoucher && <button
+    <div className={`expenses-module${view === "new" ? " expenses-module--form" : ""}`}>
+      <header className="expenses-page-header">
+        <h1>{t("moduleTitles.expenses")}</h1>
+        <span className={`expenses-sync-chip expenses-sync-chip--${sync.status === "offline" ? "offline" : "online"}`}>
+          <SyncIcon size={13} aria-hidden="true" />
+          {sync.status === "offline" ? t("layout.workingOffline") : t("layout.synced")}
+        </span>
+      </header>
+      <nav className="workforce-shell-tabs expenses-tabs" aria-label={t("moduleTitles.expenses")}>
+        {expensesTabs.map((tab) => (
+          <NavLink key={tab.key} to={tab.to} className={`workforce-shell-tab${view === tab.key ? " is-active" : ""}`}>
+            {tab.label}
+          </NavLink>
+        ))}
+      </nav>
+      {view === "new" && (canCreateVouchers || (editingVoucher && canEditVouchers)) && <FormCard title={<span className="expense-voucher-form__card-title"><span>{editingVoucher ? t("expensesPage.editVoucherAction") : t("expensesPage.newVoucher")}</span><span className="expense-voucher-form__number-display"><span className="expense-voucher-form__number-label">{t("expensesPage.voucherLabel")}</span><span className="expense-voucher-form__number">{displayedNewVoucherNumber}</span>{!editingVoucher && <button
           type="button"
           className="expense-voucher-form__number-trigger"
           onClick={() => {
@@ -2779,23 +2867,14 @@ function ExpensesModule() {
               </label>
               <label>
                 <span>{t("expensesPage.paymentAccount")}</span>
-                <ResponsiveSelectField
-                  ariaLabel={t("expensesPage.paymentAccount")}
-                  title={t("expensesPage.paymentAccount")}
-                  placeholder={t("expensesPage.selectPaymentAccount")}
-                  allLabel={t("expensesPage.selectPaymentAccount")}
-                  allowClear={false}
-                  options={selectableExpenseAccounts.map((account) => ({ value: account.id, label: account.name }))}
+                <PaymentAccountSelect
+                  accounts={selectableExpenseAccounts}
                   value={resolvedExpenseAccountId}
                   onChange={setAccountId}
-                  searchPlaceholder="Search accounts"
+                  invalid={voucherSubmitAttempted && !resolvedExpenseAccountId}
                 />
               </label>
             </div>
-            <label className="expense-voucher-form__notes">
-              <span>{t("expensesPage.notesOptional")}</span>
-              <input value={notes} placeholder={t("expensesPage.notesOptional")} onChange={(event) => setNotes(event.target.value)} />
-            </label>
           </div>
           {customVoucherNumberEnabled && <div className="expense-voucher-form__number-row">
               <label className="expense-voucher-form__number-edit">
@@ -2820,9 +2899,9 @@ function ExpensesModule() {
                 {voucherNumberValidation.status === "duplicate" && voucherNumberValidation.blockingVoucher ? <div className="expense-voucher-form__blocking-voucher">
                   <small>{voucherNumberValidation.blockingVoucher.source === "imported" ? t("expensesPage.blockingImportedVoucher") : t("expensesPage.blockingVoucher")}: {getVoucherDisplayNumber(voucherNumberValidation.blockingVoucher) || voucherNumberValidation.blockingVoucher.voucherNumber} · {voucherNumberValidation.blockingVoucher.date} · {money(voucherNumberValidation.blockingVoucher.amount)}</small>
                   <small>{voucherNumberValidation.blockingVoucher.description || "-"}</small>
-                  <small>ID: {voucherNumberValidation.blockingVoucher.id} · Client: {voucherNumberValidation.blockingVoucher.clientRecordId}</small>
-                  <small>Workspace: {voucherNumberValidation.blockingVoucher.workspaceId} · Farm: {voucherNumberValidation.blockingVoucher.farmId ?? "-"} · Season: {voucherNumberValidation.blockingVoucher.seasonId ?? "-"}</small>
-                  <small>{voucherNumberValidation.blockingVoucher.deletedAt ? `Deleted: ${voucherNumberValidation.blockingVoucher.deletedAt}` : "Deleted: active"}</small>
+                  <small className="bidi-isolate">{t("expensesPage.blockingVoucherIdClient", { id: voucherNumberValidation.blockingVoucher.id, clientId: voucherNumberValidation.blockingVoucher.clientRecordId })}</small>
+                  <small className="bidi-isolate">{t("expensesPage.blockingVoucherWorkspaceFarmSeason", { workspace: voucherNumberValidation.blockingVoucher.workspaceId, farm: voucherNumberValidation.blockingVoucher.farmId ?? "-", season: voucherNumberValidation.blockingVoucher.seasonId ?? "-" })}</small>
+                  <small>{voucherNumberValidation.blockingVoucher.deletedAt ? t("expensesPage.blockingVoucherDeletedAt", { date: voucherNumberValidation.blockingVoucher.deletedAt }) : t("expensesPage.blockingVoucherActive")}</small>
                   <button
                     type="button"
                     className="secondary-action"
@@ -2883,133 +2962,41 @@ function ExpensesModule() {
             </div>
             <div className="expense-voucher-form__actions">
               {editingVoucher && <button className="expense-voucher-form__cancel" type="button" disabled={savingVoucher} onClick={() => { pendingEditFocusRef.current = false; setEditingVoucher(null); resetForm(); }}>{t("expensesPage.cancelEdit")}</button>}
-              <button type="submit" disabled={savingVoucher || !selectableExpenseAccounts.length || voucherNumberSaveBlocked}>{savingVoucher ? "Saving..." : (editingVoucher ? t("expensesPage.updateVoucher") : t("expensesPage.saveVoucher"))}</button>
+              <button type="submit" disabled={savingVoucher || !selectableExpenseAccounts.length || !resolvedExpenseAccountId || voucherNumberSaveBlocked}>{savingVoucher ? t("expensesPage.saving") : (editingVoucher ? t("expensesPage.updateVoucher") : t("expensesPage.saveVoucher"))}</button>
             </div>
           </div>
           </fieldset>
         </form>
       </FormCard>}
+      {view === "vouchers" && <>
       <section className="record-panel expense-search-panel">
-        <h2>{t("expensesPage.searchVouchers")}</h2>
-        <div className="expense-search-filters">
+        <div className="expense-search-row">
           <SearchInput placeholder={voucherSearchPlaceholder} value={voucherSearch} onChange={setVoucherSearch} />
-          <div className="expense-filter-quick-chips" aria-label={t("expensesPage.dateRange")}>
-            <button type="button" className={voucherFrom === today() && voucherTo === today() ? "is-active" : ""} onClick={() => { setVoucherFrom(today()); setVoucherTo(today()); }}>{t("reportsPage.quickToday")}</button>
-            <button type="button" className={!voucherFrom && !voucherTo ? "" : ""} onClick={() => { const now = new Date(); const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay() + 1); const end = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const format = (value: Date) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`; setVoucherFrom(format(start)); setVoucherTo(format(end)); }}>{t("reportsPage.quickThisWeek")}</button>
-            <button type="button" onClick={() => { const now = new Date(); const start = new Date(now.getFullYear(), now.getMonth(), 1); const format = (value: Date) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`; setVoucherFrom(format(start)); setVoucherTo(today()); }}>{t("reportsPage.quickThisMonth")}</button>
-            <button type="button" onClick={clearFilters}>{t("reportsPage.quickClear")}</button>
-          </div>
-          <div className="expense-date-range">
-            <label className="expense-filter-field expense-date-field"><span><CalendarDays size={15} />{t("expensesPage.fromDate")}</span><input aria-label={t("expensesPage.fromDate")} type="date" value={voucherFrom} onChange={(event) => setVoucherFrom(event.target.value)} /></label>
-            <label className="expense-filter-field expense-date-field"><span><CalendarDays size={15} />{t("expensesPage.toDate")}</span><input aria-label={t("expensesPage.toDate")} type="date" value={voucherTo} onChange={(event) => setVoucherTo(event.target.value)} /></label>
-          </div>
-          <button type="button" className="expense-more-filters-toggle" aria-expanded={showExpenseMoreFilters} onClick={() => setShowExpenseMoreFilters((current) => !current)}>
-            <span>More filters</span>
-            {advancedVoucherFilterCount > 0 && <strong>{advancedVoucherFilterCount}</strong>}
-            <ChevronDown size={16} className={showExpenseMoreFilters ? "is-open" : ""} />
+          <button type="button" className="expense-filter-trigger" aria-haspopup="dialog" onClick={() => setShowExpenseFilterSheet(true)}>
+            <SlidersHorizontal size={16} aria-hidden="true" />
+            <span>{t("expensesPage.filters")}{expenseFilterCount > 0 ? ` · ${expenseFilterCount}` : ""}</span>
           </button>
-          {showExpenseMoreFilters && <div className="expense-filter-advanced">
-            <div className="expense-filter-grid">
-              <label className="expense-filter-field">
-                <span>{t("expensesPage.category")}</span>
-                <ResponsiveSelectField
-                  ariaLabel={t("expensesPage.category")}
-                  title={t("expensesPage.category")}
-                  placeholder={t("expensesPage.allCategories")}
-                  allLabel={t("expensesPage.allCategories")}
-                  value={voucherCategory}
-                  onChange={(value) => { setVoucherCategory(value); setVoucherSubcategory(""); }}
-                  options={voucherCategories.map((item) => ({ value: item, label: item }))}
-                  searchPlaceholder="Search categories"
-                />
-              </label>
-              <label className="expense-filter-field">
-                <span>{t("expensesPage.subcategory")}</span>
-                <ResponsiveSelectField
-                  ariaLabel={t("expensesPage.subcategory")}
-                  title={t("expensesPage.subcategory")}
-                  placeholder={t("expensesPage.allSubcategories")}
-                  allLabel={t("expensesPage.allSubcategories")}
-                  value={voucherSubcategory}
-                  onChange={setVoucherSubcategory}
-                  options={[...new Set(voucherSubcategories)].map((name) => ({ value: name, label: translateExpenseSubcategory(name) }))}
-                  searchPlaceholder="Search subcategories"
-                />
-              </label>
-              <label className="expense-filter-field expense-filter-field--account">
-                <span>{t("expensesPage.paymentAccount")}</span>
-                <ResponsiveSelectField
-                  ariaLabel={t("expensesPage.paymentAccount")}
-                  title={t("expensesPage.paymentAccount")}
-                  placeholder={t("expensesPage.allAccounts")}
-                  allLabel={t("expensesPage.allAccounts")}
-                  value={voucherAccountId}
-                  onChange={setVoucherAccountId}
-                  options={accounts.map((item) => ({ value: item.id, label: item.name }))}
-                  searchPlaceholder="Search accounts"
-                />
-              </label>
-            </div>
-            <div className="expense-filter-toggles">
-              <span className="expense-filter-note expense-filter-note--season">Current season only</span>
-              <button type="button" className={showDeletedVouchers ? "is-active" : ""} aria-pressed={showDeletedVouchers} onClick={() => setShowDeletedVouchers((current) => !current)}>{t("expensesPage.showDeletedVouchers")}</button>
-              <button type="button" className={showImportedVouchers ? "is-active" : ""} aria-pressed={showImportedVouchers} onClick={() => setShowImportedVouchers((current) => !current)}>{t("expensesPage.showImportedVouchers")}</button>
-              <button type="button" className={showSettlementVouchers ? "is-active" : ""} aria-pressed={showSettlementVouchers} onClick={() => setShowSettlementVouchers((current) => !current)}>Include settlement vouchers</button>
-              <p className="expense-filter-help">Shows accounting adjustment vouchers. This may change report totals.</p>
-            </div>
-          </div>}
         </div>
-        {activeVoucherFilters.length > 0 && <div className="expense-active-filters">
-          <small>{t("expensesPage.showingCurrentFilters")}</small>
+        <div className="expense-filter-quick-chips" aria-label={t("expensesPage.dateRange")}>
+          <button type="button" className={voucherFrom === today() && voucherTo === today() ? "is-active" : ""} onClick={() => { setVoucherFrom(today()); setVoucherTo(today()); }}>{t("reportsPage.quickToday")}</button>
+          <button type="button" onClick={() => { const now = new Date(); const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay() + 1); const end = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const format = (value: Date) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`; setVoucherFrom(format(start)); setVoucherTo(format(end)); }}>{t("reportsPage.quickThisWeek")}</button>
+          <button type="button" onClick={() => { const now = new Date(); const start = new Date(now.getFullYear(), now.getMonth(), 1); const format = (value: Date) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`; setVoucherFrom(format(start)); setVoucherTo(today()); }}>{t("reportsPage.quickThisMonth")}</button>
+          {(voucherFrom || voucherTo) && <button type="button" onClick={() => { setVoucherFrom(""); setVoucherTo(""); }}>{t("reportsPage.quickClear")}</button>}
+        </div>
+        {activeVoucherFilters.length > 0 ? <div className="expense-active-filters">
           <div className="expense-active-filters__chips">
             {activeVoucherFilters.map((item) => <span key={item}>{item}</span>)}
           </div>
           <button type="button" onClick={clearFilters}>{t("expensesPage.clearFilters")}</button>
-        </div>}
-        {activeVoucherFilters.length === 0 && <small className="expense-season-note">{t("expensesPage.showingSeasonScope")}</small>}
+        </div> : <small className="expense-season-note">{t("expensesPage.currentSeasonScope")}</small>}
         {voucherSearchQuery.isFetching && <small>{t("expensesPage.refreshingMatches")}</small>}
         {!navigator.onLine && <small>{t("expensesPage.offlineShowingCached")}</small>}
         {voucherSearchQuery.isError && <small>{t("expensesPage.apiRefreshFailed")}</small>}
       </section>
-      <section className="summary-card expense-summary-card">
-        <div>
-          <span>{expenseSummaryLabel}</span>
-          <small>{expenseSummarySubtitle}</small>
-        </div>
-        <strong>{money(total)}</strong>
-      </section>
-      <section className="record-panel"><h2>{t("expensesPage.expensesByCategory")}</h2>{!grouped.length ? <Empty>{t("expensesPage.noExpenseTotals")}</Empty> : <div className="expense-category-report">{grouped.map(([category, items]) => { const categoryTotal = [...items.values()].reduce((sum, amount) => sum + amount, 0); return <article key={category}><header><div><h3>{category}</h3><small>{getExpenseAccountingGroup(category)}</small></div><strong>{money(categoryTotal)}</strong></header>{[...items].map(([subcategory, amount]) => <p key={subcategory}><span>{subcategory === "Miscellaneous" ? t("expensesPage.miscellaneous") : translateExpenseSubcategory(subcategory)}</span><strong>{money(amount)}</strong></p>)}<b>{t("expensesPage.categoryTotal")} <span>{money(categoryTotal)}</span></b></article>; })}</div>}</section>
-      {canManage && <section className="record-panel expense-subcategory-manager">
-        <button type="button" className="expense-subcategory-manager__toggle" aria-expanded={showExpenseSubcategoryManager} onClick={() => setShowExpenseSubcategoryManager((current) => !current)}>
-          <div>
-            <h2>{t("expensesPage.customSubcategories")}</h2>
-            <p>Add custom subcategories for expense classification.</p>
-          </div>
-          <ChevronDown size={16} className={showExpenseSubcategoryManager ? "is-open" : ""} />
-        </button>
-        {showExpenseSubcategoryManager && <div className="expense-subcategory-manager__body">
-          <form className="module-form compact-form" onSubmit={(event) => void addCustom(event)}>
-            <ResponsiveSelectField
-              ariaLabel={t("expensesPage.selectCategory")}
-              title={t("expensesPage.selectCategory")}
-              placeholder={t("expensesPage.selectCategory")}
-              allLabel={t("expensesPage.selectCategory")}
-              value={customCategoryId}
-              onChange={setCustomCategoryId}
-              options={categories.data?.categories.map((item) => ({ value: item.id, label: translateExpenseCategory(item.name) })) ?? []}
-              searchPlaceholder="Search categories"
-            />
-            <input required placeholder={t("expensesPage.newSubcategory")} value={customName} onChange={(event) => setCustomName(event.target.value)} />
-            <button type="submit">{t("expensesPage.addSubcategory")}</button>
-          </form>
-          <div className="custom-subcategory-list">{categories.data?.categories.flatMap((item) => item.subcategories.filter((subcategory) => !subcategory.isSystem).map((subcategory) => <span key={subcategory.id}>{translateExpenseCategory(item.name)} / {subcategory.name}<button type="button" onClick={() => { const name = window.prompt(t("expensesPage.renameCustomSubcategory"), subcategory.name); if (token && name?.trim()) void updateExpenseSubcategory(token, workspaceId, subcategory.id, { name: name.trim() }).then(() => categories.refetch()); }}>{t("expensesPage.edit")}</button><button type="button" onClick={() => token && void updateExpenseSubcategory(token, workspaceId, subcategory.id, { active: false }).then(() => categories.refetch())}>{t("expensesPage.disable")}</button></span>))}</div>
-        </div>}
-      </section>}
       <section className="record-panel expense-records">
-        <h2>{t("expensesPage.recentRecords")}</h2>
         {!filteredVouchers.length ? <Empty>{t("expensesPage.noExpensesFound")}</Empty> : (
           <div className="expense-voucher-cards">
-            {filteredVouchers.map((item) => {
+            {visibleFilteredVouchers.map((item) => {
               const lines = voucherLinesFor(item);
               const summary = lines.length > 1
                 ? `${lines[0].category} / ${lines[0].subcategory ? translateExpenseSubcategory(lines[0].subcategory) : t("expensesPage.miscellaneous")} +${lines.length - 1} ${t("expensesPage.moreItems")}`
@@ -3020,18 +3007,17 @@ function ExpensesModule() {
                 <article className="expense-voucher-card" key={item.id}>
                   <div className="expense-voucher-card__top">
                     <div>
-                      <strong>{getVoucherDisplayNumber(item) || item.voucherNumber}</strong>
-                      <small>{shortDate(item.date)}</small>
+                      <strong className="bidi-isolate">{getVoucherDisplayNumber(item) || item.voucherNumber}</strong>
+                      <small><span className="bidi-isolate">{shortDate(item.date)}</span> · {accountName}</small>
                     </div>
-                    <strong className="expense-voucher-card__amount">{money(item.amount)}</strong>
+                    <strong className="expense-voucher-card__amount bidi-isolate">{money(item.amount)}</strong>
                   </div>
                   <div className="expense-voucher-card__body">
                     <p>{summary}</p>
-                    <p>{description || "—"}</p>
-                    <p>{accountName}</p>
+                    <p className="expense-voucher-card__description">{description || "—"}</p>
                   </div>
                   <div className="expense-voucher-card__actions">
-                    <button type="button" onClick={() => setSelectedVoucher(item)}>{t("expensesPage.viewDetails")}</button>
+                    <button type="button" onClick={() => setSelectedVoucher(item)}>{t("expensesPage.view")}</button>
                     {canEditVouchers && <button type="button" onClick={() => openEdit(item)}>{t("expensesPage.edit")}</button>}
                   </div>
                 </article>
@@ -3039,14 +3025,124 @@ function ExpensesModule() {
             })}
           </div>
         )}
+        {filteredVouchers.length > visibleFilteredVouchers.length && (
+          <button type="button" className="expense-records__load-more" onClick={() => setVisibleVoucherCount((current) => current + 20)}>
+            {t("expensesPage.loadMoreVouchers", { count: filteredVouchers.length - visibleFilteredVouchers.length })}
+          </button>
+        )}
       </section>
+      {showExpenseFilterSheet && <div className="report-picker-backdrop" role="presentation" onClick={() => setShowExpenseFilterSheet(false)}>
+        <section className="report-picker-sheet expense-filter-sheet" role="dialog" aria-modal="true" aria-label={t("expensesPage.filters")} onClick={(event) => event.stopPropagation()}>
+          <header className="report-picker-sheet__header">
+            <div><h3>{t("expensesPage.filters")}</h3></div>
+            <button type="button" className="report-picker-sheet__close" aria-label={t("common.close")} onClick={() => setShowExpenseFilterSheet(false)}><X size={18} /></button>
+          </header>
+          <div className="report-picker-sheet__body expense-filter-sheet__body">
+            <div className="expense-date-range">
+              <label className="expense-filter-field expense-date-field"><span><CalendarDays size={15} />{t("expensesPage.fromDate")}</span><input aria-label={t("expensesPage.fromDate")} type="date" value={voucherFrom} onChange={(event) => setVoucherFrom(event.target.value)} /></label>
+              <label className="expense-filter-field expense-date-field"><span><CalendarDays size={15} />{t("expensesPage.toDate")}</span><input aria-label={t("expensesPage.toDate")} type="date" value={voucherTo} onChange={(event) => setVoucherTo(event.target.value)} /></label>
+            </div>
+            <label className="expense-filter-field">
+              <span>{t("expensesPage.category")}</span>
+              <ResponsiveSelectField
+                ariaLabel={t("expensesPage.category")}
+                title={t("expensesPage.category")}
+                placeholder={t("expensesPage.allCategories")}
+                allLabel={t("expensesPage.allCategories")}
+                value={voucherCategory}
+                onChange={(value) => { setVoucherCategory(value); setVoucherSubcategory(""); }}
+                options={voucherCategories.map((item) => ({ value: item, label: item }))}
+                searchPlaceholder={t("modulePageExtra.searchCategoriesPlaceholder")}
+              />
+            </label>
+            <label className="expense-filter-field">
+              <span>{t("expensesPage.subcategory")}</span>
+              <ResponsiveSelectField
+                ariaLabel={t("expensesPage.subcategory")}
+                title={t("expensesPage.subcategory")}
+                placeholder={t("expensesPage.allSubcategories")}
+                allLabel={t("expensesPage.allSubcategories")}
+                value={voucherSubcategory}
+                onChange={setVoucherSubcategory}
+                options={[...new Set(voucherSubcategories)].map((name) => ({ value: name, label: translateExpenseSubcategory(name) }))}
+                searchPlaceholder={t("modulePageExtra.searchSubcategoriesPlaceholder")}
+              />
+            </label>
+            <label className="expense-filter-field expense-filter-field--account">
+              <span>{t("expensesPage.paymentAccount")}</span>
+              <PaymentAccountSelect
+                accounts={accounts}
+                value={voucherAccountId}
+                onChange={setVoucherAccountId}
+                placeholder={t("expensesPage.allAccounts")}
+              />
+            </label>
+            <div className="expense-filter-toggles">
+              <span className="expense-filter-note expense-filter-note--season">{t("expensesPage.currentSeasonScope")}</span>
+              <button type="button" className={showDeletedVouchers ? "is-active" : ""} aria-pressed={showDeletedVouchers} onClick={() => setShowDeletedVouchers((current) => !current)}>{t("expensesPage.showDeletedVouchers")}</button>
+              <button type="button" className={showImportedVouchers ? "is-active" : ""} aria-pressed={showImportedVouchers} onClick={() => setShowImportedVouchers((current) => !current)}>{t("expensesPage.showImportedVouchers")}</button>
+              <button type="button" className={showSettlementVouchers ? "is-active" : ""} aria-pressed={showSettlementVouchers} onClick={() => setShowSettlementVouchers((current) => !current)}>{t("expensesPage.includeSettlementVouchers")}</button>
+              <p className="expense-filter-help">{t("expensesPage.accountingAdjustmentNote")}</p>
+            </div>
+          </div>
+          <footer className="report-picker-sheet__footer">
+            <button type="button" onClick={() => clearFilters()}>{t("expensesPage.clearFilters")}</button>
+            <button type="button" onClick={() => setShowExpenseFilterSheet(false)}>{t("expensesPage.applyFilters")}</button>
+          </footer>
+        </section>
+      </div>}
+      </>}
+      {view === "summary" && <>
+      <section className="summary-card expense-summary-card">
+        <div>
+          <span>{t("expensesPage.totalExpensesLabel")}</span>
+          <small>{activeVoucherFilters.length > 0 ? t("expensesPage.showingCurrentFilters") : t("expensesPage.currentSeasonScope")}</small>
+        </div>
+        <strong className="bidi-isolate">{money(total)}</strong>
+      </section>
+      <section className="record-panel expense-category-panel">
+        <div className="expense-category-panel__head">
+          <h2>{t("expensesPage.expensesByCategory")}</h2>
+          {canManage && <button type="button" className="expense-manage-categories-trigger" onClick={() => setShowExpenseSubcategoryManager(true)}>{t("expensesPage.manageCategories")}</button>}
+        </div>
+        {!grouped.length ? <Empty>{t("expensesPage.noExpenseTotals")}</Empty> : <div className="expense-category-report">{grouped.map(([category, items]) => { const categoryTotal = [...items.values()].reduce((sum, amount) => sum + amount, 0); return <article key={category}><header><div><h3>{category}</h3><small>{getExpenseAccountingGroup(category)}</small></div><strong className="bidi-isolate">{money(categoryTotal)}</strong></header>{[...items].map(([subcategory, amount]) => <p key={subcategory}><span>{subcategory === "Miscellaneous" ? t("expensesPage.miscellaneous") : translateExpenseSubcategory(subcategory)}</span><strong className="bidi-isolate">{money(amount)}</strong></p>)}</article>; })}</div>}
+      </section>
+      </>}
+      {showExpenseSubcategoryManager && <div className="report-picker-backdrop" role="presentation" onClick={() => setShowExpenseSubcategoryManager(false)}>
+        <section className="report-picker-sheet expense-subcategory-manager" role="dialog" aria-modal="true" aria-label={t("expensesPage.customSubcategories")} onClick={(event) => event.stopPropagation()}>
+          <header className="report-picker-sheet__header">
+            <div>
+              <h3>{t("expensesPage.customSubcategories")}</h3>
+              <p>{t("expensesPage.addCustomSubcategoriesDescription")}</p>
+            </div>
+            <button type="button" className="report-picker-sheet__close" aria-label={t("common.close")} onClick={() => setShowExpenseSubcategoryManager(false)}><X size={18} /></button>
+          </header>
+          <div className="report-picker-sheet__body expense-subcategory-manager__body">
+            <form className="module-form compact-form" onSubmit={(event) => void addCustom(event)}>
+              <ResponsiveSelectField
+                ariaLabel={t("expensesPage.selectCategory")}
+                title={t("expensesPage.selectCategory")}
+                placeholder={t("expensesPage.selectCategory")}
+                allLabel={t("expensesPage.selectCategory")}
+                value={customCategoryId}
+                onChange={setCustomCategoryId}
+                options={categories.data?.categories.map((item) => ({ value: item.id, label: translateExpenseCategory(item.name) })) ?? []}
+                searchPlaceholder={t("modulePageExtra.searchCategoriesPlaceholder")}
+              />
+              <input required placeholder={t("expensesPage.newSubcategory")} value={customName} onChange={(event) => setCustomName(event.target.value)} />
+              <button type="submit">{t("expensesPage.addSubcategory")}</button>
+            </form>
+            <div className="custom-subcategory-list">{categories.data?.categories.flatMap((item) => item.subcategories.filter((subcategory) => !subcategory.isSystem).map((subcategory) => <span key={subcategory.id}>{translateExpenseCategory(item.name)} / {subcategory.name}<button type="button" onClick={() => { const name = window.prompt(t("expensesPage.renameCustomSubcategory"), subcategory.name); if (token && name?.trim()) void updateExpenseSubcategory(token, workspaceId, subcategory.id, { name: name.trim() }).then(() => categories.refetch()); }}>{t("expensesPage.edit")}</button><button type="button" onClick={() => token && void updateExpenseSubcategory(token, workspaceId, subcategory.id, { active: false }).then(() => categories.refetch())}>{t("expensesPage.disable")}</button></span>))}</div>
+          </div>
+        </section>
+      </div>}
       {selectedVoucher && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedVoucher(null)}>
         <section className="worker-dialog worker-dialog--wide worker-dialog--record-detail expense-voucher-detail-dialog" role="dialog" aria-modal="true" aria-label={t("expensesPage.voucherDetails")} onClick={(event) => event.stopPropagation()}>
           <header className="worker-dialog__header worker-dialog__header--detail">
             <div className="worker-dialog__title-stack">
-              <h2>{getVoucherDisplayNumber(selectedVoucher) || selectedVoucher.voucherNumber}</h2>
+              <h2 className="bidi-isolate">{getVoucherDisplayNumber(selectedVoucher) || selectedVoucher.voucherNumber}</h2>
               <div className="worker-dialog__header-meta">
-                <span>{shortDate(selectedVoucher.date)}</span>
+                <span className="bidi-isolate">{shortDate(selectedVoucher.date)}</span>
               </div>
             </div>
             <div className="worker-dialog__header-actions">
@@ -3059,8 +3155,8 @@ function ExpensesModule() {
           <div className="worker-dialog__body">
           <section className="worker-dialog__surface expense-voucher-detail__summary">
             <dl className="worker-stats worker-stats--summary">
-              <div><dt>{t("expensesPage.date")}</dt><dd>{shortDate(selectedVoucher.date)}</dd></div>
-              <div><dt>{t("expensesPage.amount")}</dt><dd>{money(selectedVoucher.amount)}</dd></div>
+              <div><dt>{t("expensesPage.date")}</dt><dd className="bidi-isolate">{shortDate(selectedVoucher.date)}</dd></div>
+              <div><dt>{t("expensesPage.amount")}</dt><dd className="bidi-isolate">{money(selectedVoucher.amount)}</dd></div>
               <div><dt>{t("expensesPage.paymentSource")}</dt><dd>{accounts.find((item) => item.id === selectedVoucher.accountId)?.name ?? t("expensesPage.unknownAccount")}</dd></div>
               {selectedVoucher.notes ? <div><dt>{t("expensesPage.reference")}</dt><dd>{selectedVoucher.notes}</dd></div> : null}
             </dl>
@@ -3068,7 +3164,7 @@ function ExpensesModule() {
           <section className="expense-voucher-detail-items">
             <div className="worker-dialog__section-head">
               <h3>{t("expensesPage.voucherItems")}</h3>
-              <span>{(selectedVoucher.items?.length ?? 0) || 1}</span>
+              <span className="bidi-isolate">{(selectedVoucher.items?.length ?? 0) || 1}</span>
             </div>
             {(selectedVoucher.items?.length ? selectedVoucher.items : [{
               id: `${selectedVoucher.id}:legacy`,
@@ -3080,7 +3176,7 @@ function ExpensesModule() {
               <article className="expense-voucher-detail-item" key={item.id}>
                 <div className="expense-voucher-detail-item__header">
                   <strong>{getCanonicalExpenseCategory(item.category)} / {item.subcategory ? translateExpenseSubcategory(item.subcategory) : t("expensesPage.miscellaneous")}</strong>
-                  <b>{money(item.amount)}</b>
+                  <b className="bidi-isolate">{money(item.amount)}</b>
                 </div>
                 <dl className="expense-voucher-detail-item__grid">
                   <div><dt>{t("expensesPage.itemNumber", { number: index + 1 })}</dt><dd>{t("expensesPage.itemNumber", { number: index + 1 })}</dd></div>
@@ -3093,7 +3189,7 @@ function ExpensesModule() {
           </section>
           <section className="expense-voucher-detail__total" aria-label={t("expensesPage.grandTotal")}>
             <span>{t("expensesPage.grandTotal")}</span>
-            <strong>{money(selectedVoucher.amount)}</strong>
+            <strong className="bidi-isolate">{money(selectedVoucher.amount)}</strong>
           </section>
           <ReceiptAttachmentList
             attachments={detailAttachments}
@@ -3166,8 +3262,8 @@ function DispatchModule() {
   const [reportTo, setReportTo] = useState("");
   const activeVehicles = vehicles.filter((item) => item.active);
   const activeDateTypes = dateTypes.filter((item) => item.active);
-  const vehicleName = (id?: string, fallback?: string) => vehicles.find((item) => item.id === id)?.number ?? fallback ?? "Unknown vehicle";
-  const dateTypeName = (id: string, fallback?: string) => dateTypes.find((item) => item.id === id)?.name ?? fallback ?? "Unknown type";
+  const vehicleName = (id?: string, fallback?: string) => vehicles.find((item) => item.id === id)?.number ?? fallback ?? t("modulePageExtra.unknownVehicleFallback");
+  const dateTypeName = (id: string, fallback?: string) => dateTypes.find((item) => item.id === id)?.name ?? fallback ?? t("modulePageExtra.unknownTypeFallback");
   const filteredRecords = records.filter((item) => (!reportFrom || item.date >= reportFrom) && (!reportTo || item.date <= reportTo));
   const soldByItem = useMemo(() => soldQuantityByDispatchItem(sales), [sales]);
   const linkedSalesByDispatch = useMemo(() => sales.reduce((map, sale) => {
@@ -3217,7 +3313,7 @@ function DispatchModule() {
       reset(); await refresh();
       window.dispatchEvent(new CustomEvent("muzare-toast", { detail: editing ? t("dispatchPage.dispatchUpdated") : t("dispatchPage.dispatchSaved") }));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to save dispatch.");
+      setError(reason instanceof Error ? reason.message : t("dispatchPage.unableSaveDispatch"));
     } finally {
       setSaving(false);
     }
@@ -3239,8 +3335,8 @@ function DispatchModule() {
   const totalDispatched = filteredRecords.reduce((sum, item) => sum + dispatchCartons(item), 0);
   const totalSold = filteredRecords.reduce((sum, item) => sum + soldCartonsForDispatch(item), 0);
   const totalRemaining = Math.max(totalDispatched - totalSold, 0);
-  const createDispatchTitle = editing ? t("dispatchPage.updateDispatch") : "Create New Dispatch";
-  const submitDispatchLabel = editing ? t("dispatchPage.updateDispatch") : "Create Dispatch";
+  const createDispatchTitle = editing ? t("dispatchPage.updateDispatch") : t("dispatchPage.createNewDispatch");
+  const submitDispatchLabel = editing ? t("dispatchPage.updateDispatch") : t("dispatchPage.createDispatch");
   const draftTotalCartons = items.reduce((sum, item) => sum + (Number(item.cartons) || 0), 0);
   const validDraftItems = items.filter((item) => item.dateTypeId || item.cartons);
   const hasValidDispatchVehicle = activeVehicles.some((item) => item.id === vehicleId);
@@ -3256,72 +3352,72 @@ function DispatchModule() {
           <ArrowLeft size={18} />
         </button>
         <div>
-          <h1>Dispatch</h1>
-          <p>Vehicle movement and produce carton dispatch</p>
+          <h1>{t("moduleTitles.dispatch")}</h1>
+          <p>{t("moduleDescriptions.dispatch")}</p>
         </div>
       </header>
       <section className="record-panel dispatch-overview-card">
         <div className="dispatch-section-heading dispatch-section-heading--tight">
           <div>
-            <h2>Dispatch Overview</h2>
-            <p>Carton movement at a glance.</p>
+            <h2>{t("modulePageExtra.dispatchOverviewTitle")}</h2>
+            <p>{t("modulePageExtra.cartonMovementGlance")}</p>
           </div>
         </div>
         <div className="dispatch-overview-card__metrics">
           <article className="dispatch-overview-card__metric">
             <Package size={18} />
             <div>
-              <span>Total Dispatched</span>
-              <strong>{totalDispatched}</strong>
+              <span>{t("dispatchPage.totalDispatchedCartons")}</span>
+              <strong className="bidi-isolate">{totalDispatched}</strong>
               <small>{t("dispatchPage.cartons")}</small>
             </div>
           </article>
           <article className="dispatch-overview-card__metric">
             <PackageCheck size={18} />
             <div>
-              <span>Sold Cartons</span>
-              <strong>{totalSold}</strong>
+              <span>{t("salesPage.soldCartons")}</span>
+              <strong className="bidi-isolate">{totalSold}</strong>
               <small>{t("dispatchPage.cartons")}</small>
             </div>
           </article>
           <article className="dispatch-overview-card__metric">
             <PackageMinus size={18} />
             <div>
-              <span>Remaining</span>
-              <strong>{totalRemaining}</strong>
+              <span>{t("salesPage.remainingCartons")}</span>
+              <strong className="bidi-isolate">{totalRemaining}</strong>
               <small>{t("dispatchPage.cartons")}</small>
             </div>
           </article>
         </div>
       </section>
-      {canManageMasters && <div className="dispatch-support-actions" aria-label="Dispatch settings">
-        <button type="button" onClick={() => setShowVehicles(true)}><Truck size={16} />Vehicles</button>
-        <button type="button" onClick={() => setShowDateTypes(true)}><Tag size={16} />Types</button>
+      {canManageMasters && <div className="dispatch-support-actions" aria-label={t("modulePageExtra.dispatchSettingsAria")}>
+        <button type="button" onClick={() => setShowVehicles(true)}><Truck size={16} />{t("modulePageExtra.vehiclesAction")}</button>
+        <button type="button" onClick={() => setShowDateTypes(true)}><Tag size={16} />{t("modulePageExtra.typesAction")}</button>
       </div>}
       {(canCreateDispatch || (editing && canEditDispatch)) && <FormCard className="dispatch-form-card" title={createDispatchTitle}>
         <form className="module-form dispatch-form" onSubmit={(event) => void submit(event)}>
           <div className="dispatch-form__section dispatch-form__section--details">
             <div className="dispatch-section-heading dispatch-section-heading--simple">
               <div>
-                <h3>Dispatch Details</h3>
-                <p>Date, vehicle, and optional notes.</p>
+                <h3>{t("modulePageExtra.dispatchDetailsTitle")}</h3>
+                <p>{t("modulePageExtra.dispatchDetailsSubtitle")}</p>
               </div>
             </div>
             <label className="dispatch-form__field"><span>{t("dispatchPage.dispatchDate")}</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
             <label className="dispatch-form__field"><span>{t("dispatchPage.vehicle")}</span><ClearableSelect required value={vehicleId} onChange={setVehicleId}><option value="">{t("dispatchPage.selectActiveVehicle")}</option>{activeVehicles.map((item) => <option key={item.id} value={item.id}>{item.number}{item.driverName ? ` - ${item.driverName}` : ""}</option>)}</ClearableSelect></label>
-            <label className="dispatch-form__field dispatch-form__field--full"><span>{t("dispatchPage.notes")}</span><input placeholder="Optional notes" value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
+            <label className="dispatch-form__field dispatch-form__field--full"><span>{t("dispatchPage.notes")}</span><input placeholder={t("dispatchPage.optionalNotesPlaceholder")} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
           </div>
           <div className="dispatch-carton-entry">
             <div className="dispatch-section-heading dispatch-section-heading--simple">
               <div>
-                <h3>Carton Entry</h3>
-                <p>Add one date type and carton count per row.</p>
+                <h3>{t("modulePageExtra.cartonEntryTitle")}</h3>
+                <p>{t("modulePageExtra.cartonEntrySubtitle")}</p>
               </div>
             </div>
             <div className="dispatch-items__rows">
               {items.map((item, index) => <article className="dispatch-item-row" key={item.id}>
                 <div className="dispatch-item-row__head">
-                  <span>Item {index + 1}</span>
+                  <span>{t("expensesPage.itemNumber", { number: index + 1 })}</span>
                   {items.length > 1 && <button className="danger-link" type="button" onClick={() => setItems((current) => current.filter((currentItem) => currentItem.id !== item.id))}>{t("dispatchPage.remove")}</button>}
                 </div>
                 <div className="dispatch-item-row__fields">
@@ -3336,14 +3432,14 @@ function DispatchModule() {
           </div>
           <div className="dispatch-added-items">
             <div className="dispatch-section-subhead">
-              <h4>Added Items</h4>
-              {validDraftItems.length ? <p>Review the draft rows before submitting.</p> : null}
+              <h4>{t("modulePageExtra.addedItemsTitle")}</h4>
+              {validDraftItems.length ? <p>{t("modulePageExtra.reviewDraftRowsNote")}</p> : null}
             </div>
-            {!validDraftItems.length ? <p className="dispatch-empty-note">No carton items added yet.</p> : <div className="dispatch-added-items__list">
+            {!validDraftItems.length ? <p className="dispatch-empty-note">{t("modulePageExtra.noCartonItemsAddedYet")}</p> : <div className="dispatch-added-items__list">
               {validDraftItems.map((item, index) => (
                 <div key={item.id} className="dispatch-added-items__row">
-                  <span>{dateTypeName(item.dateTypeId, `Item ${index + 1}`)}</span>
-                  <strong>{Number(item.cartons) || 0} {t("dispatchPage.cartons")}</strong>
+                  <span>{dateTypeName(item.dateTypeId, t("expensesPage.itemNumber", { number: index + 1 }))}</span>
+                  <strong className="bidi-isolate">{t("dashboardPage.cartonsCount", { count: Number(item.cartons) || 0 })}</strong>
                 </div>
               ))}
             </div>}
@@ -3351,9 +3447,9 @@ function DispatchModule() {
           {error && <p className="form-error">{error}</p>}
           <div className="dispatch-submit-footer">
             <div className="dispatch-submit-footer__summary">
-              <span>Total cartons</span>
-              <strong>{draftTotalCartons}</strong>
-              {!dispatchDraftReady && <small>Select vehicle and add cartons to continue.</small>}
+              <span>{t("modulePageExtra.totalCartonsLabel")}</span>
+              <strong className="bidi-isolate">{draftTotalCartons}</strong>
+              {!dispatchDraftReady && <small>{t("modulePageExtra.selectVehicleAddCartonsNote")}</small>}
             </div>
             <div className="dispatch-form-actions"><button disabled={saving || !dispatchDraftReady} type="submit">{saving ? t("advancesPage.saving") : submitDispatchLabel}</button>{editing && <button className="secondary-action" type="button" onClick={reset}>{t("common.close")}</button>}</div>
           </div>
@@ -3362,45 +3458,45 @@ function DispatchModule() {
       <section className="record-panel dispatch-kpi-panel">
         <div className="dispatch-section-heading">
           <div>
-            <h2>Carton KPIs</h2>
-            <p>Filtered totals for this dispatch view.</p>
+            <h2>{t("dispatchPage.cartonKpisTitle")}</h2>
+            <p>{t("dispatchPage.cartonKpisSubtitle")}</p>
           </div>
         </div>
         <div className="dispatch-kpi-grid">
-          <article><Package size={17} /><span>{t("dispatchPage.totalDispatchedCartons")}</span><strong>{totalDispatched}</strong><small>{t("dispatchPage.cartons")}</small></article>
-          <article><PackageCheck size={17} /><span>{t("salesPage.soldCartons")}</span><strong>{totalSold}</strong><small>{t("dispatchPage.cartons")}</small></article>
-          <article><PackageMinus size={17} /><span>{t("salesPage.remainingCartons")}</span><strong>{totalRemaining}</strong><small>{t("dispatchPage.cartons")}</small></article>
+          <article><Package size={17} /><span>{t("dispatchPage.totalDispatchedCartons")}</span><strong className="bidi-isolate">{totalDispatched}</strong><small>{t("dispatchPage.cartons")}</small></article>
+          <article><PackageCheck size={17} /><span>{t("salesPage.soldCartons")}</span><strong className="bidi-isolate">{totalSold}</strong><small>{t("dispatchPage.cartons")}</small></article>
+          <article><PackageMinus size={17} /><span>{t("salesPage.remainingCartons")}</span><strong className="bidi-isolate">{totalRemaining}</strong><small>{t("dispatchPage.cartons")}</small></article>
         </div>
       </section>
       <section className="record-panel dispatch-summary-panel">
         <div className="dispatch-section-heading">
           <div>
             <h2>{t("dispatchPage.dispatchSummary")}</h2>
-            <p>Review dispatch totals by date, vehicle, and type.</p>
+            <p>{t("dispatchPage.dispatchSummarySubtitle")}</p>
           </div>
         </div>
-        <div className="dispatch-summary__filters"><label><span>From</span><input placeholder="Select date" type="date" value={reportFrom} onChange={(event) => setReportFrom(event.target.value)} /></label><label><span>To</span><input placeholder="Select date" type="date" value={reportTo} onChange={(event) => setReportTo(event.target.value)} /></label></div>
+        <div className="dispatch-summary__filters"><label><span>{t("modulePageExtra.fromLabel")}</span><input placeholder={t("modulePageExtra.selectDatePlaceholder")} type="date" value={reportFrom} onChange={(event) => setReportFrom(event.target.value)} /></label><label><span>{t("modulePageExtra.toLabel")}</span><input placeholder={t("modulePageExtra.selectDatePlaceholder")} type="date" value={reportTo} onChange={(event) => setReportTo(event.target.value)} /></label></div>
         <div className="dispatch-summary__groups">
           <div className="dispatch-summary__group">
             <h3>{t("dispatchPage.byVehicle")}</h3>
-            {[...vehicleTotals].length ? [...vehicleTotals].map(([name, total]) => <p key={name}><span>{name}</span><strong>{total} {t("dispatchPage.cartons")}</strong></p>) : <p className="dispatch-empty-note">No vehicle totals yet.</p>}
+            {[...vehicleTotals].length ? [...vehicleTotals].map(([name, total]) => <p key={name}><span>{name}</span><strong className="bidi-isolate">{t("dashboardPage.cartonsCount", { count: total })}</strong></p>) : <p className="dispatch-empty-note">{t("modulePageExtra.noVehicleTotalsYet")}</p>}
           </div>
           <div className="dispatch-summary__group">
             <h3>{t("dispatchPage.byType")}</h3>
-            {[...typeTotals].length ? [...typeTotals].map(([name, total]) => <p key={name}><span>{name}</span><strong>{total} {t("dispatchPage.cartons")}</strong></p>) : <p className="dispatch-empty-note">No type totals yet.</p>}
+            {[...typeTotals].length ? [...typeTotals].map(([name, total]) => <p key={name}><span>{name}</span><strong className="bidi-isolate">{t("dashboardPage.cartonsCount", { count: total })}</strong></p>) : <p className="dispatch-empty-note">{t("modulePageExtra.noTypeTotalsYet")}</p>}
           </div>
         </div>
       </section>
-      <section className="record-panel dispatch-records-panel"><div className="dispatch-section-heading"><div><h2>{t("dispatchPage.dispatchRecords")}</h2><p>Browse recent dispatches and carton breakdowns.</p></div></div>{!filteredRecords.length ? <Empty>{t("dispatchPage.noDispatches")}</Empty> : <div className="dispatch-list">{filteredRecords.map((record) => {
+      <section className="record-panel dispatch-records-panel"><div className="dispatch-section-heading"><div><h2>{t("dispatchPage.dispatchRecords")}</h2><p>{t("modulePageExtra.browseDispatchesNote")}</p></div></div>{!filteredRecords.length ? <Empty>{t("dispatchPage.noDispatches")}</Empty> : <div className="dispatch-list">{filteredRecords.map((record) => {
         const soldCartons = soldCartonsForDispatch(record);
         const remainingCartons = Math.max(dispatchCartons(record) - soldCartons, 0);
         const linkedSales = linkedSalesByDispatch.get(record.id) ?? 0;
         const typeCount = record.items?.length ?? (record.produceType ? 1 : 0);
-        return <article key={record.id} className="dispatch-record-card"><header><div><strong>{dispatchSerialFor(record)}</strong><h3>{record.vehicleNumber ?? vehicleName(record.vehicleId)}</h3><p>{shortDate(record.date)} · {t("dispatchPage.typeCount", { count: typeCount })}</p></div><b>{dispatchCartons(record)} {t("dispatchPage.cartons")}</b></header><div className="dispatch-breakdown">{record.items?.map((item) => {
+        return <article key={record.id} className="dispatch-record-card"><header><div><strong className="bidi-isolate">{dispatchSerialFor(record)}</strong><h3>{record.vehicleNumber ?? vehicleName(record.vehicleId)}</h3><p><span className="bidi-isolate">{shortDate(record.date)}</span> · {t("dispatchPage.typeCount", { count: typeCount })}</p></div><b className="bidi-isolate">{t("dashboardPage.cartonsCount", { count: dispatchCartons(record) })}</b></header><div className="dispatch-breakdown">{record.items?.map((item) => {
           const sold = soldByItem.get(dispatchItemKey(record.id, item.id)) ?? 0;
           const remaining = Math.max(item.cartons - sold, 0);
-          return <span key={item.id}>{dateTypeName(item.dateTypeId, item.dateTypeName)}: {item.cartons} | {t("salesPage.soldCartons")} {sold} | {t("salesPage.remainingCartons")} {remaining}</span>;
-        }) ?? <span>{record.produceType}: {record.cartons}</span>}</div><p className="dispatch-linked-summary">{t("salesPage.soldCartons")} {soldCartons} | {t("salesPage.remainingCartons")} {remainingCartons} | {t("dispatchPage.linkedSales")} {linkedSales}</p><footer>{canEditDispatch && <button type="button" onClick={() => edit(record)}>{t("common.view")}</button>}{canDeleteDispatch && <button className="danger-link" type="button" onClick={() => void remove(record)}>{t("dispatchPage.delete")}</button>}</footer></article>;
+          return <span key={item.id}>{dateTypeName(item.dateTypeId, item.dateTypeName)}: <span className="bidi-isolate">{item.cartons}</span> | {t("salesPage.soldCartons")} <span className="bidi-isolate">{sold}</span> | {t("salesPage.remainingCartons")} <span className="bidi-isolate">{remaining}</span></span>;
+        }) ?? <span>{record.produceType}: <span className="bidi-isolate">{record.cartons}</span></span>}</div><p className="dispatch-linked-summary">{t("salesPage.soldCartons")} <span className="bidi-isolate">{soldCartons}</span> | {t("salesPage.remainingCartons")} <span className="bidi-isolate">{remainingCartons}</span> | {t("dispatchPage.linkedSales")} <span className="bidi-isolate">{linkedSales}</span></p><footer>{canEditDispatch && <button type="button" onClick={() => edit(record)}>{t("common.view")}</button>}{canDeleteDispatch && <button className="danger-link" type="button" onClick={() => void remove(record)}>{t("dispatchPage.delete")}</button>}</footer></article>;
       })}</div>}</section>
       {showVehicles && canManageMasters && <DispatchVehicleManager vehicles={vehicles} dispatches={records} onClose={() => setShowVehicles(false)} onRefresh={refreshVehicles} />}
       {showDateTypes && canManageMasters && <DispatchDateTypeManager dateTypes={dateTypes} dispatches={records} onClose={() => setShowDateTypes(false)} onRefresh={refreshDateTypes} />}
@@ -3547,7 +3643,7 @@ function SalesModule() {
   const canDeleteSales = Boolean(!sessionRefreshing && user && workspaceId && canDelete(user, "sales", workspaceId));
   const [searchParams, setSearchParams] = useSearchParams();
   const load = useCallback(async () => (await workspaceRecords(offlineDb.sales)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
-  const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }), []);
+  const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true, includeDeleted: true }), []);
   const loadDispatches = useCallback(async () => (await workspaceRecords(offlineDb.dispatches)).sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)), []);
   const loadVehicles = useCallback(() => workspaceRecords(offlineDb.vehicles), []);
   const loadDateTypes = useCallback(() => workspaceConfigRecords(offlineDb.dateTypes), []);
@@ -3574,7 +3670,7 @@ function SalesModule() {
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
   const [salePendingDelete, setSalePendingDelete] = useState<Sale | null>(null);
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
-  const vehicleLabel = useCallback((dispatch: Dispatch) => vehicles.find((item) => item.id === dispatch.vehicleId)?.number ?? dispatch.vehicleNumber ?? "Unknown vehicle", [vehicles]);
+  const vehicleLabel = useCallback((dispatch: Dispatch) => vehicles.find((item) => item.id === dispatch.vehicleId)?.number ?? dispatch.vehicleNumber ?? t("modulePageExtra.unknownVehicleFallback"), [vehicles, t]);
   const availability = useMemo(() => buildDispatchAvailability(dispatches, sales, dateTypes, vehicleLabel), [dateTypes, dispatches, sales, vehicleLabel]);
   const activeDateTypes = useMemo(() => dateTypes.filter((item) => item.active !== false), [dateTypes]);
   const editingDispatchKey = editingSale?.dispatchId && editingSale?.dispatchItemId ? dispatchItemKey(editingSale.dispatchId, editingSale.dispatchItemId) : "";
@@ -3740,7 +3836,7 @@ function SalesModule() {
                         <h3>{item.dateTypeName}</h3>
                         <p>{item.vehicleLabel}</p>
                       </div>
-                      <b>{availableCartons} {t("salesPage.remainingCartons").toLowerCase()}</b>
+                      <b className="bidi-isolate">{t("modulePageExtra.remainingCartonsCount", { count: availableCartons })}</b>
                     </header>
                     <p className="dispatch-linked-summary">{t("systemValues.dispatchStatuses.dispatched")} {item.dispatchedCartons} | {t("salesPage.soldCartons")} {item.soldCartons} | {t("salesPage.remainingCartons")} {availableCartons}</p>
                     <footer>{canCreateSales && <button type="button" onClick={() => setSelectedDispatchKey(dispatchItemKey(item.dispatch.id, item.itemId))}>{t("salesPage.selectDispatch")}</button>}</footer>
@@ -3757,10 +3853,12 @@ function SalesModule() {
           <label><span>{t("salesPage.cartonsSold")}</span><input required type="number" min="1" max={currentSaleType === "dispatch_sale" ? selectedDispatchMax : undefined} placeholder={t("reportsPage.quantity")} value={quantity} onChange={(event) => setQuantity(event.target.value)} /></label>
           <label><span>{t("salesPage.ratePrice")}</span><input required type="number" min="0" step="0.01" placeholder={t("reportsPage.rate")} value={unitPrice} onChange={(event) => setUnitPrice(event.target.value)} /></label>
           <label><span>{t("salesPage.totalAmount")}</span><input readOnly value={totalAmount ? money(totalAmount) : money(0)} /></label>
-          <label><span>{t("salesPage.paymentAccount")}</span><ClearableSelect value={accountId || ""} onChange={setAccountId}>
-            <option value="">{t("salesPage.selectPaymentAccount")}</option>
-            {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-          </ClearableSelect></label>
+          <label><span>{t("salesPage.paymentAccount")}</span><PaymentAccountSelect
+            accounts={eligiblePaymentAccounts(accounts, { alsoIncludeId: editingSale?.accountId ?? null })}
+            value={accountId}
+            onChange={setAccountId}
+            placeholder={t("salesPage.selectPaymentAccount")}
+          /></label>
           <label><span>{t("reportsPage.paymentDate")}</span><input type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} /></label>
           <label><span>{t("reportsPage.remarks")}</span><input placeholder={t("dispatchPage.optional")} value={remarks} onChange={(event) => setRemarks(event.target.value)} /></label>
           {currentSaleType === "dispatch_sale" && selectedDispatch ? <p className="dispatch-linked-summary">{t("salesPage.dispatchMeta", { date: selectedDispatch.dispatch.date })} | {selectedDispatch.dateTypeName} | {t("salesPage.remainingCartons")} {selectedDispatchMax ?? selectedDispatch.remainingCartons}</p> : null}
@@ -3786,7 +3884,7 @@ function SalesModule() {
             const paymentStatus = item.paymentStatus ?? "paid";
             return <article className="sales-record-card" key={item.id}>
               <div className="sales-record-card__date">
-                <strong>{shortDate(item.date)}</strong>
+                <strong className="bidi-isolate">{shortDate(item.date)}</strong>
                 <span className={`sales-type-badge sales-type-badge--${resolveSaleType(item)}`}>{saleTypeLabel(item)}</span>
               </div>
               <div className="sales-record-card__body">
@@ -3799,8 +3897,8 @@ function SalesModule() {
                   </small>
                 </div>
                 <div className="sales-record-card__metrics">
-                  <span>{item.quantity} × {money(item.unitPrice)}</span>
-                  <strong>{money(item.amount)}</strong>
+                  <span className="bidi-isolate">{item.quantity} × {money(item.unitPrice)}</span>
+                  <strong className="bidi-isolate">{money(item.amount)}</strong>
                   <small className={`status-badge status-badge--${paymentStatus === "paid" ? "approved" : paymentStatus === "partial" ? "pending" : "rejected"}`}>
                     {translateSalesStatus(paymentStatus)}
                   </small>
@@ -3824,7 +3922,7 @@ function SalesModule() {
           })}
         </div>}
       </section>
-      {selectedSale && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedSale(null)}><section className="worker-dialog worker-dialog--record-detail" role="dialog" aria-modal="true" aria-label={t("salesPage.saleDetails")} onClick={(event) => event.stopPropagation()}><header className="worker-dialog__header"><h2>{t("salesPage.saleDetails")}</h2><button type="button" onClick={() => setSelectedSale(null)}><X size={18} /></button></header><div className="worker-dialog__body"><dl className="worker-stats"><div><dt>{t("salesPage.saleType")}</dt><dd>{saleTypeLabel(selectedSale)}</dd></div><div><dt>{t("reportsPage.date")}</dt><dd>{selectedSale.date}</dd></div><div><dt>{t("reportsPage.invoiceNumber")}</dt><dd>{selectedSale.invoiceNumber ?? "-"}</dd></div><div><dt>{t("reportsPage.dispatchDate")}</dt><dd>{selectedSale.dispatchDate ?? "-"}</dd></div><div><dt>{t("reportsPage.deliveryDate")}</dt><dd>{selectedSale.deliveryDate ?? "-"}</dd></div><div><dt>{t("reportsPage.paymentDate")}</dt><dd>{selectedSale.paymentDate ?? "-"}</dd></div><div><dt>{t("reportsPage.buyer")}</dt><dd>{selectedSale.buyerName ?? "-"}</dd></div><div><dt>{t("reportsPage.plot")}</dt><dd>{selectedSale.plotName ?? "-"}</dd></div><div><dt>{t("reportsPage.product")}</dt><dd>{saleProduceLabel(selectedSale)}</dd></div><div><dt>{t("reportsPage.vehicle")}</dt><dd>{selectedSale.vehicleNumber ?? "-"}</dd></div><div><dt>{t("reportsPage.quantity")}</dt><dd>{selectedSale.quantity}</dd></div><div><dt>{t("reportsPage.rate")}</dt><dd>{money(selectedSale.unitPrice)}</dd></div><div><dt>{t("reportsPage.amount")}</dt><dd>{money(selectedSale.amount)}</dd></div><div><dt>{t("salesPage.paymentAccount")}</dt><dd>{accounts.find((account) => account.id === selectedSale.accountId)?.name ?? "-"}</dd></div><div><dt>{t("reportsPage.remarks")}</dt><dd>{selectedSale.remarks ?? "-"}</dd></div></dl></div><footer className="worker-dialog__footer"><button className="worker-dialog__close" type="button" onClick={() => setSelectedSale(null)}>{t("common.close")}</button>{canEditSales && <button className="worker-dialog__link" type="button" onClick={() => editSale(selectedSale)}>{t("common.edit")}</button>}{canDeleteSales && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => setSalePendingDelete(selectedSale)}>{t("common.delete")}</button>}</footer></section></div>}
+      {selectedSale && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSelectedSale(null)}><section className="worker-dialog worker-dialog--record-detail" role="dialog" aria-modal="true" aria-label={t("salesPage.saleDetails")} onClick={(event) => event.stopPropagation()}><header className="worker-dialog__header"><h2>{t("salesPage.saleDetails")}</h2><button type="button" onClick={() => setSelectedSale(null)}><X size={18} /></button></header><div className="worker-dialog__body"><dl className="worker-stats"><div><dt>{t("salesPage.saleType")}</dt><dd>{saleTypeLabel(selectedSale)}</dd></div><div><dt>{t("reportsPage.date")}</dt><dd className="bidi-isolate">{selectedSale.date}</dd></div><div><dt>{t("reportsPage.invoiceNumber")}</dt><dd className="bidi-isolate">{selectedSale.invoiceNumber ?? "-"}</dd></div><div><dt>{t("reportsPage.dispatchDate")}</dt><dd className="bidi-isolate">{selectedSale.dispatchDate ?? "-"}</dd></div><div><dt>{t("reportsPage.deliveryDate")}</dt><dd className="bidi-isolate">{selectedSale.deliveryDate ?? "-"}</dd></div><div><dt>{t("reportsPage.paymentDate")}</dt><dd className="bidi-isolate">{selectedSale.paymentDate ?? "-"}</dd></div><div><dt>{t("reportsPage.buyer")}</dt><dd>{selectedSale.buyerName ?? "-"}</dd></div><div><dt>{t("reportsPage.plot")}</dt><dd>{selectedSale.plotName ?? "-"}</dd></div><div><dt>{t("reportsPage.product")}</dt><dd>{saleProduceLabel(selectedSale)}</dd></div><div><dt>{t("reportsPage.vehicle")}</dt><dd className="bidi-isolate">{selectedSale.vehicleNumber ?? "-"}</dd></div><div><dt>{t("reportsPage.quantity")}</dt><dd className="bidi-isolate">{selectedSale.quantity}</dd></div><div><dt>{t("reportsPage.rate")}</dt><dd className="bidi-isolate">{money(selectedSale.unitPrice)}</dd></div><div><dt>{t("reportsPage.amount")}</dt><dd className="bidi-isolate">{money(selectedSale.amount)}</dd></div><div><dt>{t("salesPage.paymentAccount")}</dt><dd>{accounts.find((account) => account.id === selectedSale.accountId)?.name ?? "-"}</dd></div><div><dt>{t("reportsPage.remarks")}</dt><dd>{selectedSale.remarks ?? "-"}</dd></div></dl></div><footer className="worker-dialog__footer"><button className="worker-dialog__close" type="button" onClick={() => setSelectedSale(null)}>{t("common.close")}</button>{canEditSales && <button className="worker-dialog__link" type="button" onClick={() => editSale(selectedSale)}>{t("common.edit")}</button>}{canDeleteSales && <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => setSalePendingDelete(selectedSale)}>{t("common.delete")}</button>}</footer></section></div>}
       {salePendingDelete && <div className="worker-dialog-backdrop" role="presentation" onClick={() => setSalePendingDelete(null)}>
         <section className="worker-action-dialog sales-delete-dialog" role="dialog" aria-modal="true" aria-label={t("salesPage.deleteSaleTitle")} onClick={(event) => event.stopPropagation()}>
           <header>
@@ -3993,7 +4091,7 @@ function PartnerLedgerModule() {
   const canDeleteEntries = Boolean(!sessionRefreshing && user && workspaceId && canDelete(user, "accounts", workspaceId));
   const [showDeleted, setShowDeleted] = useState(false);
   const load = useCallback(async () => (await workspaceRecords(offlineDb.partnerEntries, { includeDeleted: showDeleted })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [showDeleted]);
-  const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }), []);
+  const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true, includeDeleted: true }), []);
   const loadVouchers = useCallback(() => loadWorkspaceVouchers({ includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }), []);
   const loadSales = useCallback(() => workspaceRecords(offlineDb.sales), []);
   const loadAdvances = useCallback(() => workspaceRecords(offlineDb.advances), []);
@@ -4024,13 +4122,11 @@ function PartnerLedgerModule() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [entryFilter, setEntryFilter] = useState<"all" | PartnerEntry["type"]>("all");
-  const partnerAccounts = useMemo(() => accounts.filter((account) => account.type === "partner"), [accounts]);
-  const cashBankAccounts = useMemo(() => accounts.filter((account) => account.type === "cash" || account.type === "bank"), [accounts]);
-  const defaultCashAccountId = useMemo(() => cashBankAccounts.find((account) => account.type === "cash")?.id ?? cashBankAccounts[0]?.id ?? "", [cashBankAccounts]);
-  const selectedDepositAccountId = useMemo(
-    () => cashBankAccounts.some((account) => account.id === accountId) ? accountId : defaultCashAccountId,
-    [accountId, cashBankAccounts, defaultCashAccountId],
-  );
+  const partnerAccounts = useMemo(() => eligiblePaymentAccounts(accounts, { types: ["partner"] }), [accounts]);
+  const cashBankAccounts = useMemo(() => eligiblePaymentAccounts(accounts, { types: ["cash", "bank"] }), [accounts]);
+  // No silent default to the first cash/bank account: the user must explicitly pick one, or
+  // submit() blocks with a visible "Select a payment account" message.
+  const selectedDepositAccountId = accountId;
   const partnerEntryLabel = (entry: PartnerEntry) => entry.type === "contribution"
     ? t("partnerLedgerPage.capitalInjected")
     : entry.type === "withdrawal"
@@ -4075,8 +4171,11 @@ function PartnerLedgerModule() {
     } else if (!partnerName.trim() || !partnerAccountId) {
       return setError(t("partnerLedgerPage.pleaseSelectPartner"));
     }
-    if (needsCashBankAccount && !resolvedAccountId) {
+    if (needsCashBankAccount && !cashBankAccounts.length) {
       return setError(t("partnerLedgerPage.noCashBankAccount"));
+    }
+    if (needsCashBankAccount && !resolvedAccountId) {
+      return setError(t("paymentAccountSelect.required"));
     }
     setSaving(true); setError("");
     try {
@@ -4258,8 +4357,18 @@ function PartnerLedgerModule() {
             <option value="adjustment">{t("partnerLedgerPage.adjustments")}</option>
           </ClearableSelect></label>
           {type === "settlement" ? <>
-            <label><span>{t("partnerLedgerPage.fromPartnerAccount")}</span><ClearableSelect required value={fromAccountId} onChange={setFromAccountId}><option value="">{t("partnerLedgerPage.searchPartner")}</option>{partnerAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</ClearableSelect></label>
-            <label><span>{t("partnerLedgerPage.toPartnerAccount")}</span><ClearableSelect required value={toAccountId} onChange={setToAccountId}><option value="">{t("partnerLedgerPage.searchPartner")}</option>{partnerAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</ClearableSelect></label>
+            <label><span>{t("partnerLedgerPage.fromPartnerAccount")}</span><PaymentAccountSelect
+              accounts={eligiblePaymentAccounts(accounts, { types: ["partner"], alsoIncludeId: editing?.fromAccountId ?? null })}
+              value={fromAccountId}
+              onChange={setFromAccountId}
+              placeholder={t("partnerLedgerPage.searchPartner")}
+            /></label>
+            <label><span>{t("partnerLedgerPage.toPartnerAccount")}</span><PaymentAccountSelect
+              accounts={eligiblePaymentAccounts(accounts, { types: ["partner"], alsoIncludeId: editing?.toAccountId ?? null })}
+              value={toAccountId}
+              onChange={setToAccountId}
+              placeholder={t("partnerLedgerPage.searchPartner")}
+            /></label>
           </> : <>
             <PartnerAccountAutocomplete
               accounts={partnerAccounts}
@@ -4280,10 +4389,13 @@ function PartnerLedgerModule() {
           </ClearableSelect></label>}
           <label><span>{type === "adjustment" ? t("partnerLedgerPage.reasonNotes") : t("partnerLedgerPage.notes")}</span><input placeholder={type === "adjustment" ? t("partnerLedgerPage.reasonNotes") : t("partnerLedgerPage.notes")} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
           {(type === "contribution" || type === "withdrawal") && <label><span>{type === "contribution" ? t("partnerLedgerPage.depositTo") : t("partnerLedgerPage.paymentFrom")}</span>
-            {cashBankAccounts.length > 0 ? <ClearableSelect value={selectedDepositAccountId} onChange={setAccountId}>
-              <option value="">{type === "contribution" ? t("partnerLedgerPage.depositToPlaceholder") : t("partnerLedgerPage.paymentFromPlaceholder")}</option>
-              {cashBankAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-            </ClearableSelect> : <p className="worker-action-error">{t("partnerLedgerPage.noCashBankAccount")}</p>}
+            {cashBankAccounts.length > 0 ? <PaymentAccountSelect
+              accounts={eligiblePaymentAccounts(accounts, { types: ["cash", "bank"], alsoIncludeId: editing?.accountId ?? null })}
+              value={selectedDepositAccountId}
+              onChange={setAccountId}
+              placeholder={type === "contribution" ? t("partnerLedgerPage.depositToPlaceholder") : t("partnerLedgerPage.paymentFromPlaceholder")}
+              invalid={Boolean(error) && !selectedDepositAccountId}
+            /> : <p className="worker-action-error">{t("partnerLedgerPage.noCashBankAccount")}</p>}
           </label>}
           <button className="partner-ledger-submit" disabled={saving} type="submit">{saving ? t("partnerLedgerPage.saving") : editing ? t("partnerLedgerPage.updateEntry") : t("partnerLedgerPage.saveEntry")}</button>
           {editing && <button className="secondary-button" disabled={saving} type="button" onClick={resetForm}>{t("partnerLedgerPage.cancelEdit")}</button>}
@@ -4300,23 +4412,23 @@ function PartnerLedgerModule() {
       <section className="record-panel">
         <h2>{t("partnerLedgerPage.partnerPosition")}</h2>
         {!partnerPositions.length ? <Empty>{t("partnerLedgerPage.noPartnerPositions")}</Empty> : <div className="partner-position-table">
-          <div className="partner-position-row partner-position-row--header"><span>{t("partnerLedgerPage.partner")}</span><span>Purchase Vouchers</span><span>Funds Given</span><span>Funds Received</span><span>Labour Payments</span><span>Outstanding Labour Advances</span><span>{t("partnerLedgerPage.currentPartnerBalance")}</span></div>
+          <div className="partner-position-row partner-position-row--header"><span>{t("partnerLedgerPage.partner")}</span><span>{t("partnerLedgerPage.purchaseVouchersColumn")}</span><span>{t("partnerLedgerPage.fundsGivenColumn")}</span><span>{t("partnerLedgerPage.fundsReceivedColumn")}</span><span>{t("partnerLedgerPage.labourPaymentsColumn")}</span><span>{t("partnerLedgerPage.outstandingLabourAdvancesColumn")}</span><span>{t("partnerLedgerPage.currentPartnerBalance")}</span></div>
           {partnerPositions.map((item) => <button type="button" className="partner-position-row partner-position-row--interactive" key={item.name} onClick={() => setSelectedPartnerPosition(item)}>
-            <strong>{item.name}</strong><span>{money(item.purchaseVouchersPaid)}</span><span>{money(item.transfersOut)}</span><span>{money(item.transfersIn)}</span><span>{money(item.labourPayments)}</span><span>{money(item.outstandingLabourAdvances)}</span><b>{money(item.currentPartnerBalance)}</b>
+            <strong>{item.name}</strong><span className="bidi-isolate">{money(item.purchaseVouchersPaid)}</span><span className="bidi-isolate">{money(item.transfersOut)}</span><span className="bidi-isolate">{money(item.transfersIn)}</span><span className="bidi-isolate">{money(item.labourPayments)}</span><span className="bidi-isolate">{money(item.outstandingLabourAdvances)}</span><b className="bidi-isolate">{money(item.currentPartnerBalance)}</b>
           </button>)}
         </div>}
         {!!partnerPositions.length && <div className="partner-position-cards">
           {partnerPositions.map((item) => <article key={`mobile-${item.name}`}>
-            <header><button type="button" className="worker-dialog__link" onClick={() => setSelectedPartnerPosition(item)}><strong>{item.name}</strong></button><b>{money(item.currentPartnerBalance)}</b></header>
+            <header><button type="button" className="worker-dialog__link" onClick={() => setSelectedPartnerPosition(item)}><strong>{item.name}</strong></button><b className="bidi-isolate">{money(item.currentPartnerBalance)}</b></header>
             <p>{getPartnerBalanceState(item.currentPartnerBalance) === "partner_holds_business_money" ? t("partnerLedgerPage.partnerHoldsBusinessMoney") : t("partnerLedgerPage.farmOwesPartner")}</p>
-            <div><span>Purchase Vouchers</span><strong>{money(item.purchaseVouchersPaid)}</strong></div>
-            <div><span>Funds Given</span><strong>{money(item.transfersOut)}</strong></div>
-            <div><span>Funds Received</span><strong>{money(item.transfersIn)}</strong></div>
-            <div><span>Total labour advances paid</span><strong>{money(item.totalLabourAdvancesPaid)}</strong></div>
-            <div><span>Labour Payments</span><strong>{money(item.labourPayments)}</strong></div>
-            <div><span>Settled through wages</span><strong>{money(item.settledAdvances)}</strong></div>
-            <div><span>Outstanding labour advances</span><strong>{money(item.outstandingLabourAdvances)}</strong></div>
-            <div><span>Reconciliation</span><strong>{`Settled ${money(item.settledAdvances)} + Outstanding ${money(item.outstandingLabourAdvances)} = Total ${money(item.totalLabourAdvancesPaid)}`}</strong></div>
+            <div><span>{t("partnerLedgerPage.purchaseVouchersColumn")}</span><strong className="bidi-isolate">{money(item.purchaseVouchersPaid)}</strong></div>
+            <div><span>{t("partnerLedgerPage.fundsGivenColumn")}</span><strong className="bidi-isolate">{money(item.transfersOut)}</strong></div>
+            <div><span>{t("partnerLedgerPage.fundsReceivedColumn")}</span><strong className="bidi-isolate">{money(item.transfersIn)}</strong></div>
+            <div><span>{t("partnerLedgerPage.totalLabourAdvancesPaidRow")}</span><strong className="bidi-isolate">{money(item.totalLabourAdvancesPaid)}</strong></div>
+            <div><span>{t("partnerLedgerPage.labourPaymentsColumn")}</span><strong className="bidi-isolate">{money(item.labourPayments)}</strong></div>
+            <div><span>{t("partnerLedgerPage.settledThroughWagesRow")}</span><strong className="bidi-isolate">{money(item.settledAdvances)}</strong></div>
+            <div><span>{t("partnerLedgerPage.outstandingLabourAdvancesRow")}</span><strong className="bidi-isolate">{money(item.outstandingLabourAdvances)}</strong></div>
+            <div><span>{t("partnerLedgerPage.reconciliationLabel")}</span><strong className="bidi-isolate">{t("partnerLedgerPage.reconciliationShortFormula", { settled: money(item.settledAdvances), outstanding: money(item.outstandingLabourAdvances), total: money(item.totalLabourAdvancesPaid) })}</strong></div>
           </article>)}
         </div>}
       </section>
@@ -4341,51 +4453,51 @@ function PartnerLedgerModule() {
           <section className="worker-action-dialog">
             <header><h2>{selectedPartnerPosition.name}</h2><button aria-label={t("common.close")} type="button" onClick={() => setSelectedPartnerPosition(null)}><X size={19} /></button></header>
             <div className="worker-action-form partner-ledger-details">
-              <p><strong>Purchase Vouchers</strong><span>{money(selectedPartnerPosition.purchaseVouchersPaid)}</span></p>
-              <p><strong>Funds Given</strong><span>{money(selectedPartnerPosition.transfersOut)}</span></p>
-              <p><strong>Funds Received</strong><span>{money(selectedPartnerPosition.transfersIn)}</span></p>
+              <p><strong>{t("partnerLedgerPage.purchaseVouchersColumn")}</strong><span className="bidi-isolate">{money(selectedPartnerPosition.purchaseVouchersPaid)}</span></p>
+              <p><strong>{t("partnerLedgerPage.fundsGivenColumn")}</strong><span className="bidi-isolate">{money(selectedPartnerPosition.transfersOut)}</span></p>
+              <p><strong>{t("partnerLedgerPage.fundsReceivedColumn")}</strong><span className="bidi-isolate">{money(selectedPartnerPosition.transfersIn)}</span></p>
               <section className="partner-ledger-details__subsection">
-                <h3>Labour Advance Status</h3>
-                <p><strong>Total advances paid</strong><span>{money(selectedPartnerPosition.totalLabourAdvancesPaid)}</span></p>
-                <p><strong>Direct labour payments</strong><span>{money(selectedPartnerPosition.labourSettlementCashPaid)}</span></p>
-                <p><strong>Settled through wage settlements</strong><span>{money(selectedPartnerPosition.settledAdvances)}</span></p>
-                <p><strong>Outstanding labour advances</strong><span>{money(selectedPartnerPosition.outstandingLabourAdvances)}</span></p>
+                <h3>{t("partnerLedgerPage.labourAdvanceStatusTitle")}</h3>
+                <p><strong>{t("partnerLedgerPage.totalAdvancesPaidRow")}</strong><span className="bidi-isolate">{money(selectedPartnerPosition.totalLabourAdvancesPaid)}</span></p>
+                <p><strong>{t("partnerLedgerPage.directLabourPaymentsRow")}</strong><span className="bidi-isolate">{money(selectedPartnerPosition.labourSettlementCashPaid)}</span></p>
+                <p><strong>{t("partnerLedgerPage.settledThroughWageSettlementsRow")}</strong><span className="bidi-isolate">{money(selectedPartnerPosition.settledAdvances)}</span></p>
+                <p><strong>{t("partnerLedgerPage.outstandingLabourAdvancesRow")}</strong><span className="bidi-isolate">{money(selectedPartnerPosition.outstandingLabourAdvances)}</span></p>
                 {selectedPartnerPositionLabourSettlements.length > 0 && <div className="partner-ledger-details__memo-list">
                   {selectedPartnerPositionLabourSettlements.map((settlement) => (
                     <article key={settlement.id} className="partner-ledger-details__memo-item">
-                      <strong>{settlement.reference}</strong>
-                      <span>Type: Wage settlement advance applied</span>
-                      <span>Advances applied: {money(settlement.advancesApplied)}</span>
-                      <span>Cash paid: {money(settlement.cashPaid)}</span>
-                      <span>Effect: changes labour advance breakdown only</span>
-                      <span>Effect on Farm Owes Partner: none</span>
+                      <strong className="bidi-isolate">{settlement.reference}</strong>
+                      <span>{t("partnerLedgerPage.wageSettlementAdvanceAppliedType")}</span>
+                      <span>{t("partnerLedgerPage.advancesAppliedLabel", { amount: money(settlement.advancesApplied) })}</span>
+                      <span>{t("partnerLedgerPage.cashPaidLabel", { amount: money(settlement.cashPaid) })}</span>
+                      <span>{t("partnerLedgerPage.effectAdvanceBreakdownOnly")}</span>
+                      <span>{t("partnerLedgerPage.effectOnFarmOwesPartnerNone")}</span>
                     </article>
                   ))}
                 </div>}
               </section>
               <section className="partner-ledger-details__subsection">
-                <h3>Labour Payments</h3>
-                <p><strong>Labour Payments (direct + applied advances)</strong><span>{money(selectedPartnerPosition.labourPayments)}</span></p>
-                <p><small>Display total only — applied advances were already counted in Farm Owes Partner when the advance was originally funded, so they are not added again here.</small></p>
+                <h3>{t("partnerLedgerPage.labourPaymentsColumn")}</h3>
+                <p><strong>{t("partnerLedgerPage.labourPaymentsDirectAppliedRow")}</strong><span className="bidi-isolate">{money(selectedPartnerPosition.labourPayments)}</span></p>
+                <p><small>{t("partnerLedgerPage.displayTotalOnlyNote")}</small></p>
                 {selectedPartnerPositionLabourPayments.length > 0 && <div className="partner-ledger-details__memo-list">
                   {selectedPartnerPositionLabourPayments.map((row) => (
                     <article key={row.dueId} className="partner-ledger-details__memo-item">
-                      <strong>{row.voucherNumber}</strong>
-                      <span>Labourer/Group: {row.recipientName}</span>
-                      <span>Payment date: {row.date}</span>
-                      <span>Gross labour payment: {money(row.grossAmount)}</span>
-                      <span>Direct payment (this partner): {money(row.directAmount)}</span>
-                      <span>Applied advance (this partner): {money(row.appliedAmount)}</span>
-                      <span>Funding owner: {selectedPartnerPosition.name}</span>
-                      <span>Status: {row.status}</span>
+                      <strong className="bidi-isolate">{row.voucherNumber}</strong>
+                      <span>{t("partnerLedgerPage.labourerGroupLabel", { name: row.recipientName })}</span>
+                      <span>{t("partnerLedgerPage.paymentDateLabel", { date: row.date })}</span>
+                      <span>{t("partnerLedgerPage.grossLabourPaymentLabel", { amount: money(row.grossAmount) })}</span>
+                      <span>{t("partnerLedgerPage.directPaymentThisPartnerLabel", { amount: money(row.directAmount) })}</span>
+                      <span>{t("partnerLedgerPage.appliedAdvanceThisPartnerLabel", { amount: money(row.appliedAmount) })}</span>
+                      <span>{t("partnerLedgerPage.fundingOwnerLabel", { name: selectedPartnerPosition.name })}</span>
+                      <span>{t("partnerLedgerPage.statusPrefixLabel", { status: translateStatus(t, row.status) })}</span>
                     </article>
                   ))}
                 </div>}
               </section>
-              <p><strong>{t("partnerLedgerPage.moneyReturned")}</strong><span>{money(selectedPartnerPosition.moneyReturned)}</span></p>
-              <p><strong>{t("partnerLedgerPage.adjustments")}</strong><span>{money(selectedPartnerPosition.adjustments)}</span></p>
-              <p><strong>{t("partnerLedgerPage.farmOwesPartner")}</strong><span>{money(selectedPartnerPosition.currentPartnerBalance)}</span></p>
-              <p><strong>Reconciliation</strong><span>{`Settled ${money(selectedPartnerPosition.settledAdvances)} + Outstanding ${money(selectedPartnerPosition.outstandingLabourAdvances)} = Total ${money(selectedPartnerPosition.totalLabourAdvancesPaid)}. Purchase vouchers ${money(selectedPartnerPosition.purchaseVouchersPaid)} + Funds given ${money(selectedPartnerPosition.transfersOut)} - Funds received ${money(selectedPartnerPosition.transfersIn)} + Total labour advances paid ${money(selectedPartnerPosition.totalLabourAdvancesPaid)} + Direct labour payments ${money(selectedPartnerPosition.labourSettlementCashPaid)} ${selectedPartnerPosition.moneyReturned ? `- Money returned ${money(selectedPartnerPosition.moneyReturned)} ` : ""}${selectedPartnerPosition.adjustments ? `${selectedPartnerPosition.adjustments >= 0 ? "+" : "-"} Adjustments ${money(Math.abs(selectedPartnerPosition.adjustments))} ` : ""}= ${money(selectedPartnerPosition.currentPartnerBalance)}`}</span></p>
+              <p><strong>{t("partnerLedgerPage.moneyReturned")}</strong><span className="bidi-isolate">{money(selectedPartnerPosition.moneyReturned)}</span></p>
+              <p><strong>{t("partnerLedgerPage.adjustments")}</strong><span className="bidi-isolate">{money(selectedPartnerPosition.adjustments)}</span></p>
+              <p><strong>{t("partnerLedgerPage.farmOwesPartner")}</strong><span className="bidi-isolate">{money(selectedPartnerPosition.currentPartnerBalance)}</span></p>
+              <p><strong>{t("partnerLedgerPage.reconciliationLabel")}</strong><span className="bidi-isolate">{`${t("partnerLedgerPage.reconciliationFormulaBase", { settled: money(selectedPartnerPosition.settledAdvances), outstanding: money(selectedPartnerPosition.outstandingLabourAdvances), total: money(selectedPartnerPosition.totalLabourAdvancesPaid), purchaseVouchers: money(selectedPartnerPosition.purchaseVouchersPaid), fundsGiven: money(selectedPartnerPosition.transfersOut), fundsReceived: money(selectedPartnerPosition.transfersIn), totalLabourAdvancesPaid: money(selectedPartnerPosition.totalLabourAdvancesPaid), directLabourPayments: money(selectedPartnerPosition.labourSettlementCashPaid) })}${selectedPartnerPosition.moneyReturned ? t("partnerLedgerPage.reconciliationMoneyReturnedSuffix", { amount: money(selectedPartnerPosition.moneyReturned) }) : ""}${selectedPartnerPosition.adjustments ? (selectedPartnerPosition.adjustments >= 0 ? t("partnerLedgerPage.reconciliationAdjustmentsAddSuffix", { amount: money(Math.abs(selectedPartnerPosition.adjustments)) }) : t("partnerLedgerPage.reconciliationAdjustmentsSubtractSuffix", { amount: money(Math.abs(selectedPartnerPosition.adjustments)) })) : ""}${t("partnerLedgerPage.reconciliationFormulaResult", { result: money(selectedPartnerPosition.currentPartnerBalance) })}`}</span></p>
               <footer><button type="button" onClick={() => setSelectedPartnerPosition(null)}>{t("partnerLedgerPage.close")}</button></footer>
             </div>
           </section>
@@ -4396,10 +4508,10 @@ function PartnerLedgerModule() {
           <section className="worker-action-dialog">
             <header><h2>{t("partnerLedgerPage.detailsTitle")}</h2><button aria-label={t("common.close")} type="button" onClick={() => setViewing(null)}><X size={19} /></button></header>
             <div className="worker-action-form partner-ledger-details">
-              <p><strong>{t("partnerLedgerPage.date")}</strong><span>{viewing.date}</span></p><p><strong>{t("partnerLedgerPage.partner")}</strong><span>{partnerEntryName(viewing, partnerSettlementRoute)}</span></p>
+              <p><strong>{t("partnerLedgerPage.date")}</strong><span className="bidi-isolate">{viewing.date}</span></p><p><strong>{t("partnerLedgerPage.partner")}</strong><span>{partnerEntryName(viewing, partnerSettlementRoute)}</span></p>
               <p><strong>{t("partnerLedgerPage.type")}</strong><span>{partnerEntryLabel(viewing)}</span></p>{viewing.type !== "settlement" && <><p><strong>{t("partnerLedgerPage.partnerAccount")}</strong><span>{accountName(viewing.partnerAccountId ?? resolvePartnerAccountId(viewing, accounts))}</span></p><p><strong>{t("partnerLedgerPage.account")}</strong><span>{accountName(viewing.accountId)}</span></p></>}
-              <p><strong>{t("partnerLedgerPage.amount")}</strong><span>{money(viewing.amount)}</span></p><p><strong>{t("partnerLedgerPage.notes")}</strong><span>{viewing.notes || "-"}</span></p>
-              {viewing.deletedAt && <p><strong>{t("partnerLedgerPage.deleted")}</strong><span>{new Date(viewing.deletedAt).toLocaleString()}</span></p>}
+              <p><strong>{t("partnerLedgerPage.amount")}</strong><span className="bidi-isolate">{money(viewing.amount)}</span></p><p><strong>{t("partnerLedgerPage.notes")}</strong><span>{viewing.notes || "-"}</span></p>
+              {viewing.deletedAt && <p><strong>{t("partnerLedgerPage.deleted")}</strong><span className="bidi-isolate">{new Date(viewing.deletedAt).toLocaleString()}</span></p>}
               <footer><button type="button" onClick={() => setViewing(null)}>{t("partnerLedgerPage.close")}</button></footer>
             </div>
           </section>
@@ -4719,7 +4831,7 @@ function AccountsModule() {
     other: t("accountsPage.groupOther"),
   }[groupKey]), [t]);
   const ledgerTypeLabel = useCallback((row: Pick<AccountLedgerRow, "type" | "classification">) => (
-    row.classification === "labour_wage_settlement_memo" ? "Non-cash labour advance settlement"
+    row.classification === "labour_wage_settlement_memo" ? t("accountsPage.nonCashLabourAdvanceSettlementMemo")
       : row.type === "sale" ? t("accountsPage.saleCredit")
       : row.type === "voucher" ? t("accountsPage.voucherExpense")
         : row.type === "advance" ? t("accountsPage.labourAdvance")
@@ -4731,9 +4843,9 @@ function AccountsModule() {
   ), [t]);
   const partnerLiabilityGroupTitle = useCallback((groupKey: PartnerLiabilityLedgerGroupKey) => ({
     capital_injected: t("accountsPage.capitalInjected"),
-    purchase_vouchers_paid: "Purchase vouchers paid",
-    labour_advances_paid: "Labour advances paid",
-    labour_wage_settlements: "Labour wage settlements",
+    purchase_vouchers_paid: t("accountsPage.purchaseVouchersPaidGroup"),
+    labour_advances_paid: t("accountsPage.labourAdvancesPaid"),
+    labour_wage_settlements: t("accountsPage.labourWageSettlementsGroup"),
     transfers_in: t("accountsPage.transfersIn"),
     transfers_out: t("accountsPage.transfersOut"),
     money_returned: t("accountsPage.moneyReturned"),
@@ -4794,7 +4906,7 @@ function AccountsModule() {
         date: settlement.settlementDate,
         type: "voucher",
         reference: settlement.settlementNumber,
-        description: `Non-cash labour advance settlement — advances applied ${money(nonCashApplied)}${cashPaid ? `, cash paid ${money(cashPaid)}` : ""}`,
+        description: `${t("accountsPage.nonCashSettlementDescriptionBase", { applied: money(nonCashApplied) })}${cashPaid ? t("accountsPage.nonCashSettlementCashPaidSuffix", { cashPaid: money(cashPaid) }) : ""}`,
         debit: 0,
         credit: 0,
         memoAmount: nonCashApplied,
@@ -4827,7 +4939,7 @@ function AccountsModule() {
         date: entry.date,
         type: entry.economicNature === "ADVANCE" ? "advance" : "voucher",
         reference: entry.voucherNumber,
-        description: `${entry.nature.toLowerCase().replaceAll("_", " ")} — ${entry.description}`,
+        description: `${translateStatus(t, entry.nature)} — ${entry.description}`,
         debit: informational ? 0 : entry.transactionType === "debit" ? entry.amount : 0,
         credit: informational ? 0 : entry.transactionType === "credit" ? entry.amount : 0,
         memoAmount: informational ? entry.amount : undefined,
@@ -5208,35 +5320,35 @@ function AccountsModule() {
       </section>
       <section className="record-panel">
         <h2>{t("accountsPage.expenseVisibility")}</h2>
-        {!snapshot ? <p className="empty-records">Updating accounts snapshot…</p> : null}
+        {!snapshot ? <p className="empty-records">{t("accountsPage.updatingAccountsSnapshot")}</p> : null}
         <div className="record-list">
           <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("voucher")}><strong>{t("accountsPage.voucherExpenses")}</strong><span>{money(totalVoucherExpenses)}</span><small>{t("accountsPage.viewDetails")}</small></article>
-          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("combined")}><strong>Settled Labour Wages</strong><span>{money(settledLabourWages)}</span><small>{t("accountsPage.viewDetails")}</small></article>
-          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("advance")}><strong>Available advance balance</strong><span>{money(totalAdvances)}</span><small>{t("accountsPage.viewDetails")}</small></article>
-          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => navigate(`/workspace/labour-payments/payments-due?farmId=${encodeURIComponent(farmId ?? "")}&seasonId=${encodeURIComponent(seasonId ?? "")}`)}><strong>Payments Due</strong><span>{money(paymentsDue)}</span><small>{t("accountsPage.viewDetails")}</small></article>
+          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("combined")}><strong>{t("accountsPage.settledLabourWagesCard")}</strong><span className="bidi-isolate">{money(settledLabourWages)}</span><small>{t("accountsPage.viewDetails")}</small></article>
+          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("advance")}><strong>{t("accountsPage.availableAdvanceBalanceCard")}</strong><span className="bidi-isolate">{money(totalAdvances)}</span><small>{t("accountsPage.viewDetails")}</small></article>
+          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => navigate(`/workspace/labour-payments/payments-due?farmId=${encodeURIComponent(farmId ?? "")}&seasonId=${encodeURIComponent(seasonId ?? "")}`)}><strong>{t("accountsPage.paymentsDueCard")}</strong><span className="bidi-isolate">{money(paymentsDue)}</span><small>{t("accountsPage.viewDetails")}</small></article>
           <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("combined")}><strong>{t("accountsPage.totalBusinessExpenses")}</strong><span>{money(totalBusinessExpenses)}</span><small>{t("accountsPage.viewDetails")}</small></article>
         </div>
         {import.meta.env.DEV ? (
           <div className="account-ledger-reconciliation account-ledger-reconciliation--debug">
-            <h3>Voucher expense reconciliation</h3>
+            <h3>{t("modulePageExtra.debugVoucherExpenseReconciliation")}</h3>
             <div className="account-ledger-reconciliation__rows">
-              <div><span>Included voucher count</span><strong>{voucherExpenseDebug.includedVoucherCount}</strong></div>
-              <div><span>Active settlement voucher count</span><strong>{voucherExpenseDebug.includedActiveSettlementVoucherCount}</strong></div>
-              <div><span>Excluded voided settlement voucher count</span><strong>{voucherExpenseDebug.excludedVoidedSettlementVoucherCount}</strong></div>
-              <div><span>Excluded voided settlement total</span><strong>{money(voucherExpenseDebug.excludedVoidedSettlementTotal)}</strong></div>
-              <div><span>Included voucher expense total</span><strong>{money(voucherExpenseDebug.includedVoucherExpenseTotal)}</strong></div>
-              <div><span>Scope</span><strong>{`${voucherExpenseDebug.scopeFarmId ?? "all farms"} / ${voucherExpenseDebug.scopeSeasonId ?? "all seasons"}`}</strong></div>
+              <div><span>{t("modulePageExtra.debugIncludedVoucherCount")}</span><strong className="bidi-isolate">{voucherExpenseDebug.includedVoucherCount}</strong></div>
+              <div><span>{t("modulePageExtra.debugActiveSettlementVoucherCount")}</span><strong className="bidi-isolate">{voucherExpenseDebug.includedActiveSettlementVoucherCount}</strong></div>
+              <div><span>{t("modulePageExtra.debugExcludedVoidedSettlementVoucherCount")}</span><strong className="bidi-isolate">{voucherExpenseDebug.excludedVoidedSettlementVoucherCount}</strong></div>
+              <div><span>{t("modulePageExtra.debugExcludedVoidedSettlementTotal")}</span><strong className="bidi-isolate">{money(voucherExpenseDebug.excludedVoidedSettlementTotal)}</strong></div>
+              <div><span>{t("modulePageExtra.debugIncludedVoucherExpenseTotal")}</span><strong className="bidi-isolate">{money(voucherExpenseDebug.includedVoucherExpenseTotal)}</strong></div>
+              <div><span>{t("modulePageExtra.debugScope")}</span><strong className="bidi-isolate">{`${voucherExpenseDebug.scopeFarmId ?? t("modulePageExtra.debugAllFarms")} / ${voucherExpenseDebug.scopeSeasonId ?? t("modulePageExtra.debugAllSeasons")}`}</strong></div>
             </div>
             <div className="account-ledger-reconciliation__rows">
-              <div><span>Voided settlement</span><strong>{voucherExpenseDebug.excludedReasons.voidedSettlement}</strong></div>
-              <div><span>Voided voucher</span><strong>{voucherExpenseDebug.excludedReasons.voidedVoucher}</strong></div>
-              <div><span>Deleted voucher</span><strong>{voucherExpenseDebug.excludedReasons.deletedVoucher}</strong></div>
-              <div><span>Reversed voucher</span><strong>{voucherExpenseDebug.excludedReasons.reversedVoucher}</strong></div>
-              <div><span>Wrong farm</span><strong>{voucherExpenseDebug.excludedReasons.wrongFarm}</strong></div>
-              <div><span>Wrong season</span><strong>{voucherExpenseDebug.excludedReasons.wrongSeason}</strong></div>
-              <div><span>Non-expense voucher</span><strong>{voucherExpenseDebug.excludedReasons.nonExpenseVoucher}</strong></div>
-              <div><span>Transfer / fund movement</span><strong>{voucherExpenseDebug.excludedReasons.transferOrFundMovement}</strong></div>
-              <div><span>Labour advance</span><strong>{voucherExpenseDebug.excludedReasons.labourAdvance}</strong></div>
+              <div><span>{t("modulePageExtra.debugVoidedSettlement")}</span><strong className="bidi-isolate">{voucherExpenseDebug.excludedReasons.voidedSettlement}</strong></div>
+              <div><span>{t("modulePageExtra.debugVoidedVoucher")}</span><strong className="bidi-isolate">{voucherExpenseDebug.excludedReasons.voidedVoucher}</strong></div>
+              <div><span>{t("modulePageExtra.debugDeletedVoucher")}</span><strong className="bidi-isolate">{voucherExpenseDebug.excludedReasons.deletedVoucher}</strong></div>
+              <div><span>{t("modulePageExtra.debugReversedVoucher")}</span><strong className="bidi-isolate">{voucherExpenseDebug.excludedReasons.reversedVoucher}</strong></div>
+              <div><span>{t("modulePageExtra.debugWrongFarm")}</span><strong className="bidi-isolate">{voucherExpenseDebug.excludedReasons.wrongFarm}</strong></div>
+              <div><span>{t("modulePageExtra.debugWrongSeason")}</span><strong className="bidi-isolate">{voucherExpenseDebug.excludedReasons.wrongSeason}</strong></div>
+              <div><span>{t("modulePageExtra.debugNonExpenseVoucher")}</span><strong className="bidi-isolate">{voucherExpenseDebug.excludedReasons.nonExpenseVoucher}</strong></div>
+              <div><span>{t("modulePageExtra.debugTransferFundMovement")}</span><strong className="bidi-isolate">{voucherExpenseDebug.excludedReasons.transferOrFundMovement}</strong></div>
+              <div><span>{t("modulePageExtra.debugLabourAdvance")}</span><strong className="bidi-isolate">{voucherExpenseDebug.excludedReasons.labourAdvance}</strong></div>
             </div>
           </div>
         ) : null}
@@ -5344,13 +5456,13 @@ function AccountsModule() {
                         <thead><tr><th>{t("expensesPage.date")}</th><th>{t("partnerLedgerPage.type")}</th><th>{t("accountsPage.reference")}</th><th>{t("expensesPage.description")}</th><th>{t("accountsPage.debit")}</th><th>{t("accountsPage.credit")}</th><th>{t("accountsPage.runningBalance")}</th><th>{t("accountsPage.source")}</th></tr></thead>
                         <tbody>
                           {group.transactions.map((row) => <tr key={row.id}>
-                            <td>{row.date}</td>
+                            <td className="bidi-isolate">{row.date}</td>
                             <td>{ledgerTypeLabel(row)}</td>
-                            <td>{row.reference}</td>
+                            <td className="bidi-isolate">{row.reference}</td>
                             <td>{row.description}{row.counterparty ? ` (${row.counterparty})` : ""}</td>
-                            <td>{row.memoAmount !== undefined ? "-" : (row.debit ? money(row.debit) : "-")}</td>
-                            <td>{row.memoAmount !== undefined ? money(row.memoAmount) : (row.credit ? money(row.credit) : "-")}</td>
-                            <td>{money(row.runningBalance ?? 0)}</td>
+                            <td className="bidi-isolate">{row.memoAmount !== undefined ? "-" : (row.debit ? money(row.debit) : "-")}</td>
+                            <td className="bidi-isolate">{row.memoAmount !== undefined ? money(row.memoAmount) : (row.credit ? money(row.credit) : "-")}</td>
+                            <td className="bidi-isolate">{money(row.runningBalance ?? 0)}</td>
                             <td><button type="button" onClick={() => openSource(row)}>{t("accountsPage.open")}</button></td>
                           </tr>)}
                         </tbody>
@@ -5358,16 +5470,16 @@ function AccountsModule() {
                     </div>
                     <div className="report-mobile-cards">
                       {group.transactions.map((row) => <article className="report-mobile-card" key={`mobile-${row.id}`}>
-                        <header><strong>{row.reference}</strong><b>{row.memoAmount !== undefined ? money(row.memoAmount) : (row.credit ? `+${money(row.credit)}` : `-${money(row.debit)}`)}</b></header>
+                        <header><strong className="bidi-isolate">{row.reference}</strong><b className="bidi-isolate">{row.memoAmount !== undefined ? money(row.memoAmount) : (row.credit ? `+${money(row.credit)}` : `-${money(row.debit)}`)}</b></header>
                         <span>{row.date} | {ledgerTypeLabel(row)}</span>
                         <p>{row.description}{row.counterparty ? ` (${row.counterparty})` : ""}</p>
-                        <div className="report-mobile-card__balance"><span>{t("accountsPage.runningBalance")}</span><strong>{money(row.runningBalance ?? 0)}</strong></div>
+                        <div className="report-mobile-card__balance"><span>{t("accountsPage.runningBalance")}</span><strong className="bidi-isolate">{money(row.runningBalance ?? 0)}</strong></div>
                         <details>
                           <summary>{t("accountsPage.viewDetails")}</summary>
                           <dl>
-                            <div><dt>{t("accountsPage.debit")}</dt><dd>{row.memoAmount !== undefined ? "-" : (row.debit ? money(row.debit) : "-")}</dd></div>
-                            <div><dt>{t("accountsPage.credit")}</dt><dd>{row.memoAmount !== undefined ? money(row.memoAmount) : (row.credit ? money(row.credit) : "-")}</dd></div>
-                            {row.memoAmount !== undefined && <div><dt>Memo</dt><dd>Non-cash labour advance settlement</dd></div>}
+                            <div><dt>{t("accountsPage.debit")}</dt><dd className="bidi-isolate">{row.memoAmount !== undefined ? "-" : (row.debit ? money(row.debit) : "-")}</dd></div>
+                            <div><dt>{t("accountsPage.credit")}</dt><dd className="bidi-isolate">{row.memoAmount !== undefined ? money(row.memoAmount) : (row.credit ? money(row.credit) : "-")}</dd></div>
+                            {row.memoAmount !== undefined && <div><dt>{t("accountsPage.memoLabel")}</dt><dd>{t("accountsPage.nonCashLabourAdvanceSettlementMemo")}</dd></div>}
                           </dl>
                           <button type="button" onClick={() => openSource(row)}>{t("accountsPage.open")}</button>
                         </details>
@@ -5391,13 +5503,13 @@ function AccountsModule() {
                         <thead><tr><th>{t("expensesPage.date")}</th><th>{t("partnerLedgerPage.type")}</th><th>{t("accountsPage.reference")}</th><th>{t("expensesPage.description")}</th><th>{t("accountsPage.debit")}</th><th>{t("accountsPage.credit")}</th><th>{t("accountsPage.runningBalance")}</th><th>{t("accountsPage.source")}</th></tr></thead>
                         <tbody>
                           {group.transactions.map((row) => <tr key={row.id}>
-                            <td>{row.date}</td>
+                            <td className="bidi-isolate">{row.date}</td>
                             <td>{ledgerTypeLabel(row)}</td>
-                            <td>{row.reference}</td>
+                            <td className="bidi-isolate">{row.reference}</td>
                             <td>{row.description}{row.counterparty ? ` (${row.counterparty})` : ""}</td>
-                            <td>{row.memoAmount !== undefined ? "-" : (row.debit ? money(row.debit) : "-")}</td>
-                            <td>{row.memoAmount !== undefined ? money(row.memoAmount) : (row.credit ? money(row.credit) : "-")}</td>
-                            <td>{money(row.runningBalance ?? 0)}</td>
+                            <td className="bidi-isolate">{row.memoAmount !== undefined ? "-" : (row.debit ? money(row.debit) : "-")}</td>
+                            <td className="bidi-isolate">{row.memoAmount !== undefined ? money(row.memoAmount) : (row.credit ? money(row.credit) : "-")}</td>
+                            <td className="bidi-isolate">{money(row.runningBalance ?? 0)}</td>
                             <td><button type="button" onClick={() => openSource(row)}>{t("accountsPage.open")}</button></td>
                           </tr>)}
                         </tbody>
@@ -5405,16 +5517,16 @@ function AccountsModule() {
                     </div>
                     <div className="report-mobile-cards">
                       {group.transactions.map((row) => <article className="report-mobile-card" key={`mobile-${row.id}`}>
-                        <header><strong>{row.reference}</strong><b>{row.memoAmount !== undefined ? money(row.memoAmount) : (row.credit ? `+${money(row.credit)}` : `-${money(row.debit)}`)}</b></header>
+                        <header><strong className="bidi-isolate">{row.reference}</strong><b className="bidi-isolate">{row.memoAmount !== undefined ? money(row.memoAmount) : (row.credit ? `+${money(row.credit)}` : `-${money(row.debit)}`)}</b></header>
                         <span>{row.date} | {ledgerTypeLabel(row)}</span>
                         <p>{row.description}{row.counterparty ? ` (${row.counterparty})` : ""}</p>
-                        <div className="report-mobile-card__balance"><span>{t("accountsPage.runningBalance")}</span><strong>{money(row.runningBalance ?? 0)}</strong></div>
+                        <div className="report-mobile-card__balance"><span>{t("accountsPage.runningBalance")}</span><strong className="bidi-isolate">{money(row.runningBalance ?? 0)}</strong></div>
                         <details>
                           <summary>{t("accountsPage.viewDetails")}</summary>
                           <dl>
-                            <div><dt>{t("accountsPage.debit")}</dt><dd>{row.memoAmount !== undefined ? "-" : (row.debit ? money(row.debit) : "-")}</dd></div>
-                            <div><dt>{t("accountsPage.credit")}</dt><dd>{row.memoAmount !== undefined ? money(row.memoAmount) : (row.credit ? money(row.credit) : "-" )}</dd></div>
-                            {row.memoAmount !== undefined && <div><dt>Memo</dt><dd>Non-cash labour advance settlement</dd></div>}
+                            <div><dt>{t("accountsPage.debit")}</dt><dd className="bidi-isolate">{row.memoAmount !== undefined ? "-" : (row.debit ? money(row.debit) : "-")}</dd></div>
+                            <div><dt>{t("accountsPage.credit")}</dt><dd className="bidi-isolate">{row.memoAmount !== undefined ? money(row.memoAmount) : (row.credit ? money(row.credit) : "-" )}</dd></div>
+                            {row.memoAmount !== undefined && <div><dt>{t("accountsPage.memoLabel")}</dt><dd>{t("accountsPage.nonCashLabourAdvanceSettlementMemo")}</dd></div>}
                           </dl>
                           <button type="button" onClick={() => openSource(row)}>{t("accountsPage.openSource")}</button>
                         </details>
@@ -5470,7 +5582,7 @@ export function ModulePage({
   const moduleDescription = workforceMode === "advance"
     ? t("advancesPage.introDescription")
     : t(`moduleDescriptions.${module}`);
-  const showSharedModuleHeader = module !== "dispatch" && module !== "workforce";
+  const showSharedModuleHeader = module !== "dispatch" && module !== "workforce" && module !== "expenses";
 
   return (
     <div className="dashboard-page">

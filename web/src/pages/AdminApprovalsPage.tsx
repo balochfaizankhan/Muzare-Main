@@ -38,7 +38,7 @@ export function AdminApprovalsPage() {
           <span className="admin-hero__badge">{t("adminApprovals.adminOnly")}</span>
         </section>
 
-        <section className="approval-summary" aria-label="Approval summary">
+        <section className="approval-summary" aria-label={t("adminApprovals.approvalSummaryAria")}>
           <article>
             <Inbox size={18} />
             <div>
@@ -73,7 +73,7 @@ export function AdminApprovalsPage() {
           </section>
         )}
 
-        <section className="approval-list" aria-label="Pending workspace requests">
+        <section className="approval-list" aria-label={t("adminApprovals.pendingRequestsAria")}>
           {approvals.data?.requests.map((request) => (
             <article className="approval-item" key={request.userId}>
               <div className="approval-item__icon">

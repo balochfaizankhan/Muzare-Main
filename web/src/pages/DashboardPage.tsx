@@ -24,7 +24,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { calculateScopedCashAccountBalance } from "../lib/accounting";
 import { fetchBootstrap } from "../lib/api";
 import { dashboardFinancialSnapshotStorageKey, isDashboardFinancialScope, settleDashboardFinancialSnapshot, type DashboardFinancialSnapshot } from "../lib/dashboardFinancialSnapshot";
-import { formatDate } from "../lib/format";
+import { formatDate, formatMoney } from "../lib/format";
 import { getActiveLabourWageSettlements, getCashAffectingVouchers, getGeneralExpenseVouchers } from "../lib/labourWageSettlements";
 import { buildPartnerLiabilityPositions, mergePartnerPositionWithCanonical } from "../lib/partnerAccounting";
 import { ensureLocalAccounts, offlineDb, workspaceRecords } from "../lib/offline-db";
@@ -58,11 +58,7 @@ type DashboardScope = {
 };
 
 const today = () => new Date().toISOString().slice(0, 10);
-const moneyWhole = (amount: number) => new Intl.NumberFormat(undefined, {
-  style: "currency",
-  currency: "SAR",
-  maximumFractionDigits: 0,
-}).format(amount);
+const moneyWhole = formatMoney;
 const dashboardRetryDelay = (attempt: number) => new Promise<void>((resolve) => {
   window.setTimeout(resolve, 400 * 2 ** attempt);
 });
@@ -213,7 +209,7 @@ export function DashboardPage() {
       workspaceRecords(offlineDb.advances),
       workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }),
       workspaceRecords(offlineDb.labourWageSettlements),
-      loadWorkspaceActivity(canonicalFinancials.data),
+      loadWorkspaceActivity(t, canonicalFinancials.data),
     ]);
     if (requestId !== dashboardSnapshotSequence.current || financialScopeKeyRef.current !== scopeKey) return;
     const activeAttendance = attendance.filter(isActiveOperationalRecord);
@@ -349,14 +345,14 @@ export function DashboardPage() {
         if (lastError) throw lastError;
         markStartup("dashboard-data-ready", { workspaceId: user?.workspaceId, farmId: sync.farmId, seasonId: sync.seasonId });
       } catch (error) {
-        setDashboardError(error instanceof Error ? error.message : "Dashboard data could not be loaded.");
+        setDashboardError(error instanceof Error ? error.message : t("dashboardPage.dashboardDataLoadFailedForContext"));
         markStartup("dashboard-data-error", { message: error instanceof Error ? error.message : "Unknown dashboard load failure" });
       } finally {
         refreshInFlight.current = false;
         setDashboardLoading(false);
       }
     }, { timeoutMs: 500 });
-  }, [canonicalFinancials.data, contextReady, financialScope.farmId, financialScope.seasonId, financialScope.workspaceId, loadLocalDashboard, query, sync.farmId, sync.seasonId, totals, user?.workspaceId, workspaceId]);
+  }, [canonicalFinancials.data, contextReady, financialScope.farmId, financialScope.seasonId, financialScope.workspaceId, loadLocalDashboard, query, sync.farmId, sync.seasonId, t, totals, user?.workspaceId, workspaceId]);
 
   useEffect(() => {
     scheduleDashboardRefresh();
@@ -374,6 +370,7 @@ export function DashboardPage() {
   }, [canonicalFinancials, financialScope.farmId, financialScope.seasonId, financialScope.workspaceId, scheduleDashboardRefresh, sync.lastSyncTime, sync.startupStage]);
 
   const workspaceStatus = deriveWorkspaceDisplayStatus({
+    t,
     sync,
     bootstrap: query.data,
     bootstrapLoading: query.isLoading || (!query.data && query.isFetching),
@@ -401,8 +398,8 @@ export function DashboardPage() {
   const syncNote = workspaceStatus.tone === "offline" ? t("layout.workingOffline") : workspaceStatus.note;
   const dashboardLoadError = dashboardError ?? (contextReady && canonicalFinancials.isError ? canonicalFinancials.error.message : null);
   const metricsReady = !hydrationPending && !dashboardLoading && Boolean(totals) && Boolean(financialSnapshot || !financialScope.farmId || !financialScope.seasonId);
-  const attendanceTodayLabel = hydrationPending || dashboardLoading ? "--" : `${totalsValue.attendanceMarkedToday} labour today`;
-  const dispatchTodayLabel = hydrationPending || dashboardLoading ? "--" : `${totalsValue.dispatchesToday} today`;
+  const attendanceTodayLabel = hydrationPending || dashboardLoading ? "--" : t("dashboardPage.labourTodayCount", { count: totalsValue.attendanceMarkedToday });
+  const dispatchTodayLabel = hydrationPending || dashboardLoading ? "--" : t("dashboardPage.dispatchesTodayCount", { count: totalsValue.dispatchesToday });
 
   // Labour Payments Due card: has its own snapshot-aware states (skeleton/error/offline) below,
   // rendered separately from the generic summaryCards map so it can show a retry action and an
@@ -420,38 +417,41 @@ export function DashboardPage() {
 
   const summaryCards = [
     {
-      label: "Total Expenses",
+      label: t("dashboard.totalExpenses"),
       value: metricsReady ? moneyWhole(totalsValue.totalExpenses) : "—",
       icon: BanknoteArrowDown,
       path: "/workspace/reports?report=expenditures",
       tone: "orange",
-      detail: "This season",
+      detail: t("dashboardPage.thisSeason"),
+      isMoney: true,
     },
     {
-      label: "Labour Advances",
+      label: t("dashboard.labourAdvances"),
       value: metricsReady ? moneyWhole(totalsValue.labourAdvances) : "—",
       icon: HandCoins,
       path: "/workspace/labour-payments/advances",
       tone: "purple",
-      detail: "Outstanding balance",
+      detail: t("dashboardPage.outstandingBalance"),
+      isMoney: true,
     },
     {
-      label: "Dispatches",
+      label: t("dashboard.dispatchesLabel"),
       value: metricsReady ? String(totalsValue.dispatchesToday) : "—",
       icon: PackageOpen,
       path: "/workspace/dispatch",
       tone: "blue",
-      detail: metricsReady ? `${totalsValue.cartonsToday} cartons today` : (dashboardLoadError ? "Dispatches failed to load. Retry." : "Loading today's dispatches"),
+      detail: metricsReady ? t("dashboardPage.cartonsTodayCount", { count: totalsValue.cartonsToday }) : (dashboardLoadError ? t("dashboardPage.dispatchLoadFailedRetry") : t("dashboardPage.loadingDispatches")),
+      isMoney: false,
     },
   ];
 
   const quickActions = [
-    { to: "/workspace/workforce/labour", icon: UsersRound, title: "Workforce" },
-    { to: "/workspace/expenses", icon: ReceiptText, title: "Expenses" },
-    { to: "/workspace/dispatch", icon: PackageOpen, title: "Dispatch" },
-    { to: "/workspace/partner-ledger", icon: BookOpenText, title: "Partner Ledger" },
-    { to: "/workspace/accounts", icon: Wallet, title: "Accounts" },
-    { to: "/workspace/reports", icon: ClipboardList, title: "Reports" },
+    { to: "/workspace/workforce/labour", icon: UsersRound, title: t("layout.workforce") },
+    { to: "/workspace/expenses", icon: ReceiptText, title: t("layout.expenses") },
+    { to: "/workspace/dispatch", icon: PackageOpen, title: t("layout.dispatch") },
+    { to: "/workspace/partner-ledger", icon: BookOpenText, title: t("partnerLedger") },
+    { to: "/workspace/accounts", icon: Wallet, title: t("layout.accounts") },
+    { to: "/workspace/reports", icon: ClipboardList, title: t("layout.reports") },
   ];
 
   return (
@@ -471,11 +471,11 @@ export function DashboardPage() {
               {heroSyncLabel}
             </span>
             <div className="dashboard-mobile-header__actions">
-              <Link className="dashboard-mobile-header__icon" to="/workspace/reports" aria-label="Notifications">
+              <Link className="dashboard-mobile-header__icon" to="/workspace/reports" aria-label={t("dashboardPage.notificationsAria")}>
                 <Bell size={18} />
                 {sync.pendingCount > 0 && <span className="dashboard-mobile-header__badge">{sync.pendingCount}</span>}
               </Link>
-              <Link className="dashboard-mobile-header__icon" to="/workspace/settings" aria-label="Profile">
+              <Link className="dashboard-mobile-header__icon" to="/workspace/settings" aria-label={t("dashboardPage.profileAria")}>
                 <CircleUserRound size={18} />
               </Link>
             </div>
@@ -501,7 +501,7 @@ export function DashboardPage() {
           <section className="dashboard-alert-card">
             <div>
               <strong>{t("common.dashboard")}</strong>
-              <p>Workspace context could not be refreshed. Please retry.</p>
+              <p>{t("dashboardPage.workspaceContextRefreshFailed")}</p>
             </div>
             <p className="error">{query.error.message}</p>
           </section>
@@ -510,19 +510,19 @@ export function DashboardPage() {
           <section className="dashboard-alert-card" role="alert">
             <div>
               <strong>{t("common.dashboard")}</strong>
-              <p>Dashboard data could not be loaded for the current farm and season.</p>
+              <p>{t("dashboardPage.dashboardDataLoadFailedForContext")}</p>
             </div>
             <div className="farm-actions">
               <p className="error">{dashboardLoadError}</p>
               <button className="secondary-button" type="button" onClick={retryDashboardLoad} disabled={dashboardLoading}>
-                Retry
+                {t("dashboard.retry")}
               </button>
             </div>
           </section>
         )}
         {!query.isError && !hydrationPending && query.data?.contextWarning && (
           <section className="dashboard-alert-card">
-            <p className="context-message">{query.isFetching ? "Loading workspace..." : query.data.contextWarning}</p>
+            <p className="context-message">{query.isFetching ? t("dashboardPage.loadingWorkspaceEllipsis") : query.data.contextWarning}</p>
             {user?.workspaceId && (
               <div className="farm-actions">
                 {!hasFarm && canManageFarms && <Link className="secondary-button" to="/workspace/farms?create=1">{t("dashboardPage.createNewFarm")}</Link>}
@@ -539,7 +539,7 @@ export function DashboardPage() {
         {!hydrationPending && !hasFarm && noAccessibleFarms && <p className="context-message">{t("dashboardPage.noAccessibleFarmMessage")}</p>}
         {!hydrationPending && hasFarm && !hasSeason && <p className="context-message">{t("dashboardPage.noActiveSeason")}</p>}
 
-        <section className="dashboard-context-grid" aria-label="Current workspace context">
+        <section className="dashboard-context-grid" aria-label={t("dashboardPage.currentWorkspaceContextAria")}>
           <Link className="dashboard-context-card" to="/workspace/farms">
             <Leaf size={18} />
             <div>
@@ -561,23 +561,23 @@ export function DashboardPage() {
         <section className="dashboard-hero-card">
           <div className="dashboard-hero-card__content">
             <div className="dashboard-hero-card__copy">
-              <span className="dashboard-hero-card__eyebrow">Today's Farm Pulse</span>
-              <h2>Farm Overview</h2>
-              <p className="dashboard-hero-card__status-label">Operations Health: {heroStatus}</p>
+              <span className="dashboard-hero-card__eyebrow">{t("dashboardPage.todayFarmPulse")}</span>
+              <h2>{t("dashboardPage.farmOverview")}</h2>
+              <p className="dashboard-hero-card__status-label">{t("dashboardPage.operationsHealth", { status: heroStatus })}</p>
               <span>{heroStatusCopy}</span>
             </div>
             <div className="dashboard-hero-card__stats">
               <article className="dashboard-hero-card__stat">
                 <UsersRound size={18} />
                 <div>
-                  <span>Attendance</span>
+                  <span>{t("dashboard.attendanceLabel")}</span>
                   <strong>{attendanceTodayLabel}</strong>
                 </div>
               </article>
               <article className="dashboard-hero-card__stat">
                 <PackageOpen size={18} />
                 <div>
-                  <span>Dispatches</span>
+                  <span>{t("dashboard.dispatchesLabel")}</span>
                   <strong>{dispatchTodayLabel}</strong>
                 </div>
               </article>
@@ -585,13 +585,13 @@ export function DashboardPage() {
           </div>
         </section>
 
-        <section className="dashboard-kpi-grid" aria-label="Key performance indicators">
+        <section className="dashboard-kpi-grid" aria-label={t("dashboardPage.kpiGridAria")}>
           {!hasOperationalContext ? (
             <div className="dashboard-kpi-card dashboard-kpi-card--amber dashboard-kpi-card--disabled" aria-disabled="true">
               <div className="dashboard-kpi-card__icon"><ClockAlert size={18} /></div>
               <span>{t("dashboard.labourPaymentsDue")}</span>
               <strong>{hydrationPending ? "..." : "--"}</strong>
-              <small>{hydrationPending ? "Preparing workspace data" : "Requires a farm and season"}</small>
+              <small>{hydrationPending ? t("dashboardPage.preparingWorkspaceDataShort") : t("dashboardPage.requiresFarmAndSeason")}</small>
             </div>
           ) : labourPaymentsDueLoadFailed ? (
             <div className="dashboard-kpi-card dashboard-kpi-card--amber dashboard-kpi-card--error" role="alert">
@@ -621,7 +621,7 @@ export function DashboardPage() {
                 </>
               ) : (
                 <>
-                  <strong>{moneyWhole(totalsValue.outstandingLabourPayments)}</strong>
+                  <strong className="bidi-isolate">{moneyWhole(totalsValue.outstandingLabourPayments)}</strong>
                   <small>
                     {labourPaymentsDueSupportingText}
                     {sync.status === "offline" && <span className="dashboard-kpi-card__stale-hint"> · {t("dashboard.offlineLastSynced")}</span>}
@@ -630,11 +630,11 @@ export function DashboardPage() {
               )}
             </Link>
           )}
-          {summaryCards.map(({ label, value, path, icon: Icon, tone, detail }) => hasOperationalContext ? (
+          {summaryCards.map(({ label, value, path, icon: Icon, tone, detail, isMoney }) => hasOperationalContext ? (
             <Link className={`dashboard-kpi-card dashboard-kpi-card--${tone}`} to={path} key={label}>
               <div className="dashboard-kpi-card__icon"><Icon size={18} /></div>
               <span>{label}</span>
-              <strong>{value}</strong>
+              <strong className={isMoney ? "bidi-isolate" : undefined}>{value}</strong>
               <small>{detail}</small>
             </Link>
           ) : (
@@ -642,14 +642,14 @@ export function DashboardPage() {
               <div className="dashboard-kpi-card__icon"><Icon size={18} /></div>
               <span>{label}</span>
               <strong>{hydrationPending ? "..." : "--"}</strong>
-              <small>{hydrationPending ? "Preparing workspace data" : detail}</small>
+              <small>{hydrationPending ? t("dashboardPage.preparingWorkspaceDataShort") : detail}</small>
             </div>
           ))}
         </section>
 
         <section className="dashboard-quick-section">
           <div className="dashboard-section-heading">
-            <h2>Quick Actions</h2>
+            <h2>{t("dashboardPage.quickActions")}</h2>
           </div>
           <div className="dashboard-quick-grid">
             {quickActions.map(({ to, icon: Icon, title }) => (
@@ -667,12 +667,12 @@ export function DashboardPage() {
               <div className="dashboard-section-heading dashboard-section-heading--split">
                 <div>
                   <h2>{t("dashboard.recentActivity")}</h2>
-                  <p>{dashboardLoading ? "Loading recent workspace activity..." : (activities.length ? "Recent operational records from the current workspace." : "Activity will appear here as soon as records are saved.")}</p>
+                  <p>{dashboardLoading ? t("dashboardPage.loadingActivity") : (activities.length ? t("dashboardPage.recentActivityDescription") : t("dashboardPage.activityWillAppear"))}</p>
                 </div>
-            <Link className="dashboard-section-link" to="/workspace/activity"><span>View all</span><ChevronRight size={14} /></Link>
+            <Link className="dashboard-section-link" to="/workspace/activity"><span>{t("dashboardPage.viewAll")}</span><ChevronRight size={14} /></Link>
               </div>
               {dashboardLoading ? (
-                <p className="activity-empty">Loading activity...</p>
+                <p className="activity-empty">{t("dashboardPage.loadingActivity")}</p>
               ) : activities.length === 0 ? (
                 <p className="activity-empty">{t("dashboard.noActivity")}</p>
               ) : (
@@ -689,8 +689,8 @@ export function DashboardPage() {
                           <span>{activity.detail}</span>
                         </div>
                         <div className="dashboard-activity-item__meta">
-                          <strong>{activity.value}</strong>
-                          <small>{formatWorkspaceActivityDateTime(activity.createdAt)}</small>
+                          <strong className="bidi-isolate">{activity.value}</strong>
+                          <small className="bidi-isolate">{formatWorkspaceActivityDateTime(t, activity.createdAt)}</small>
                         </div>
                       </Link>
                     );

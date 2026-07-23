@@ -43,5 +43,5 @@ test("dashboard refresh is batched and rendered with a loading skeleton", () => 
   assert.ok(dashboardSource.includes("scheduleBackgroundTask(async () => {"));
   assert.ok(dashboardSource.includes("refreshInFlight.current"));
   assert.ok(dashboardSource.includes("dashboard-data-ready"));
-  assert.ok(dashboardSource.includes("dashboardLoading ? \"Loading recent workspace activity...\""));
+  assert.ok(dashboardSource.includes("dashboardLoading ? t(\"dashboardPage.loadingActivity\")"));
 });

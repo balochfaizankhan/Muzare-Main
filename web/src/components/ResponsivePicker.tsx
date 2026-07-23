@@ -20,6 +20,9 @@ type ResponsiveSelectFieldProps = {
   searchPlaceholder?: string;
   clearValue?: string;
   allowClear?: boolean;
+  /** Default true (existing behavior). Set false to avoid popping the mobile keyboard open
+   * the instant the sheet appears — only focus the search field once the user taps it. */
+  autoFocusSearch?: boolean;
 };
 
 type ResponsiveMultiSelectFieldProps = {
@@ -53,11 +56,13 @@ function MobilePickerShell({
   title,
   onClose,
   children,
+  autoFocusSearch = true,
 }: {
   open: boolean;
   title: string;
   onClose: () => void;
   children: ReactNode;
+  autoFocusSearch?: boolean;
 }) {
   const sheetRef = useRef<HTMLElement>(null);
 
@@ -71,12 +76,14 @@ function MobilePickerShell({
   }, [onClose, open]);
 
   useEffect(() => {
-    if (!open) return;
+    // Some callers (e.g. PaymentAccountSelect) don't want the mobile keyboard to pop open
+    // just from opening the sheet — only once the user actually taps the search field.
+    if (!open || !autoFocusSearch) return;
     window.requestAnimationFrame(() => {
       const firstInput = sheetRef.current?.querySelector<HTMLInputElement>("input");
       firstInput?.focus();
     });
-  }, [open]);
+  }, [autoFocusSearch, open]);
 
   if (!open) return null;
 
@@ -107,12 +114,13 @@ export function ResponsiveSelectField({
   searchPlaceholder,
   clearValue = "",
   allowClear = true,
+  autoFocusSearch = true,
 }: ResponsiveSelectFieldProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
-  const resolvedAllLabel = allLabel ?? "All";
+  const resolvedAllLabel = allLabel ?? t("common.all");
   const resolvedPlaceholder = placeholder ?? resolvedAllLabel;
   const resolvedAriaLabel = ariaLabel ?? title;
   const selected = useMemo(() => options.find((option) => option.value === value), [options, value]);
@@ -162,7 +170,7 @@ export function ResponsiveSelectField({
         </span>
       </button>
 
-      <MobilePickerShell open={open} title={title} onClose={close}>
+      <MobilePickerShell open={open} title={title} onClose={close} autoFocusSearch={autoFocusSearch}>
         <header className="report-picker-sheet__header">
           <div>
             <h3>{title}</h3>
@@ -226,17 +234,17 @@ export function ResponsiveMultiSelectField({
   const [query, setQuery] = useState("");
   const [draftIds, setDraftIds] = useState<string[]>(selectedIds);
   const deferredQuery = useDeferredValue(query);
-  const resolvedAllLabel = allLabel ?? "All";
+  const resolvedAllLabel = allLabel ?? t("common.all");
   const resolvedPlaceholder = placeholder ?? resolvedAllLabel;
   const resolvedAriaLabel = ariaLabel ?? title;
-  const resolvedNoResults = noResultsLabel ?? "No results found";
+  const resolvedNoResults = noResultsLabel ?? t("common.noResultsFound");
   const selectedSet = useMemo(() => new Set(draftIds), [draftIds]);
   const selectedCount = selectedIds.length;
   const summaryLabel = selectedCount === 0
     ? resolvedPlaceholder
     : selectedCount === 1
-      ? (options.find((option) => option.value === selectedIds[0])?.label ?? "1 selected")
-      : `${selectedCount} selected`;
+      ? (options.find((option) => option.value === selectedIds[0])?.label ?? t("common.itemsSelectedCount", { count: 1 }))
+      : t("common.itemsSelectedCount", { count: selectedCount });
   const filtered = useMemo(
     () => options.filter((option) => matchOption(option, deferredQuery)),
     [deferredQuery, options],

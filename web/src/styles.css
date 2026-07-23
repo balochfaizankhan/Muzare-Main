@@ -1,7 +1,10 @@
 :root {
   --font-default: Inter, system-ui, Arial, sans-serif;
-  --font-arabic: "Noto Naskh Arabic", "Geeza Pro", "Tahoma", sans-serif;
-  --font-urdu: "Noto Nastaliq Urdu", "Noto Naskh Arabic", "Geeza Pro", "Tahoma", serif;
+  --font-arabic: "Noto Sans Arabic", "Noto Naskh Arabic", "Geeza Pro", Tahoma, sans-serif;
+  /* Noto Sans Urdu (not the calligraphic Noto Nastaliq Urdu) — Nastaliq scripts need very tall
+     line-height and clip diacritics at compact UI sizes, so a Naskh/sans UI face is used for
+     controls, forms, and dashboards instead. */
+  --font-urdu: "Noto Sans Urdu", "Noto Sans Arabic", "Geeza Pro", Tahoma, sans-serif;
   --brand-primary: #2e7d32;
   --brand-secondary: #2e7d32;
   --brand-accent: #4caf50;
@@ -69,6 +72,56 @@ html[lang="ur"] input,
 html[lang="ur"] select,
 html[lang="ur"] textarea {
   font-family: var(--font-urdu);
+}
+
+html[lang="ur"] body,
+html[lang="ar"] body {
+  letter-spacing: 0;
+}
+
+html[lang="ur"] p,
+html[lang="ur"] span,
+html[lang="ur"] small,
+html[lang="ur"] strong,
+html[lang="ur"] em,
+html[lang="ur"] li,
+html[lang="ur"] label,
+html[lang="ur"] button,
+html[lang="ur"] input,
+html[lang="ur"] select,
+html[lang="ur"] textarea,
+html[lang="ar"] p,
+html[lang="ar"] span,
+html[lang="ar"] small,
+html[lang="ar"] strong,
+html[lang="ar"] em,
+html[lang="ar"] li,
+html[lang="ar"] label,
+html[lang="ar"] button,
+html[lang="ar"] input,
+html[lang="ar"] select,
+html[lang="ar"] textarea {
+  line-height: 1.6;
+}
+
+html[lang="ur"] h1,
+html[lang="ur"] h2,
+html[lang="ur"] h3,
+html[lang="ur"] h4,
+html[lang="ar"] h1,
+html[lang="ar"] h2,
+html[lang="ar"] h3,
+html[lang="ar"] h4 {
+  font-weight: 700;
+  line-height: 1.45;
+  text-transform: none;
+}
+
+/* Isolates a value with its own text direction so RTL context can never reorder digits,
+   punctuation, or Latin codes inside it (voucher numbers, amounts, dates, phone/email, IDs). */
+.bidi-isolate {
+  direction: ltr;
+  unicode-bidi: isolate;
 }
 
 button,
@@ -2155,7 +2208,7 @@ button {
   min-width: 18px;
   padding: 0 4px;
   position: absolute;
-  right: -4px;
+  inset-inline-end: -4px;
   top: -4px;
 }
 
@@ -3735,7 +3788,9 @@ a.dashboard-kpi-card:active {
 }
 
 [dir="rtl"] .quick-action svg:last-child,
-[dir="rtl"] .operation-card svg:last-child {
+[dir="rtl"] .operation-card svg:last-child,
+[dir="rtl"] .dashboard-context-card svg:last-child,
+[dir="rtl"] .dashboard-section-link svg:last-child {
   transform: rotate(180deg);
 }
 
@@ -5864,7 +5919,131 @@ a.dashboard-kpi-card:active {
 .expenses-module {
   display: grid;
   gap: 12px;
+}
+
+/* Only the New Voucher tab has a sticky Save bar, so only it needs the extra bottom padding
+   to keep the last field / Add another item button from being covered by that bar. */
+.expenses-module--form {
   padding-bottom: calc(132px + env(safe-area-inset-bottom, 0px));
+}
+
+.expenses-page-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 2px 0;
+}
+
+.expenses-page-header h1 {
+  font-size: 1.14rem;
+  margin: 0;
+}
+
+.expenses-sync-chip {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: .72rem;
+  font-weight: 700;
+  gap: 5px;
+  padding: 4px 10px;
+}
+
+.expenses-sync-chip--online {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.expenses-sync-chip--offline {
+  background: rgba(217, 119, 6, .12);
+  color: #b45309;
+}
+
+.expenses-tabs.workforce-shell-tabs {
+  padding: 0;
+}
+
+.expense-search-row {
+  align-items: stretch;
+  display: flex;
+  gap: 8px;
+}
+
+.expense-search-row .search-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.expense-filter-trigger {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-primary);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: .82rem;
+  font-weight: 700;
+  gap: 6px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.expense-category-panel__head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 15px;
+}
+
+.expense-category-panel__head h2 {
+  margin: 0;
+}
+
+.payment-account-select {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.payment-account-select--invalid .report-picker__trigger {
+  border-color: var(--danger, #dc2626);
+}
+
+.payment-account-select__error {
+  color: var(--danger, #dc2626);
+  font-size: .74rem;
+}
+
+.expense-manage-categories-trigger {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--brand-primary);
+  font-size: .76rem;
+  font-weight: 700;
+  padding: 6px 12px;
+  white-space: nowrap;
+}
+
+.expense-voucher-card__description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  overflow: hidden;
+}
+
+.expense-records__load-more {
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  color: var(--brand-primary);
+  font-size: .82rem;
+  font-weight: 700;
+  justify-self: center;
+  margin-top: 8px;
+  min-height: 40px;
+  padding: 0 16px;
 }
 
 .expenses-module .workspace-intro {

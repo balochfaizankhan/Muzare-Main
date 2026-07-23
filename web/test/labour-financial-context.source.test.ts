@@ -48,10 +48,10 @@ test("downstream pages consume the shared canonical labour model", () => {
   assert.doesNotMatch(modulePage, /canonicalLabourExpense = canonicalFinancials\.data\?\.summary\.wageExpense/);
   assert.match(modulePage, /canonical\.directLabourPayments/);
   assert.match(modulePage, /canonical\.outstandingLabourAdvances/);
-  assert.match(modulePage, /Labour Payments/);
+  assert.match(modulePage, /t\("accountsPage\.labourWageSettlementsGroup"\)/);
   assert.match(reports, /representedAccountIds/);
   assert.match(reports, /expenseAccountTotals\.map/);
-  assert.match(reports, /Direct labour payments/);
+  assert.match(reports, /t\("reportsPage\.directLabourPayments"\)/);
   assert.doesNotMatch(reports, /canonicalAdvanceCoverageComplete/);
   assert.match(activity, /canonical\?\.activity/);
   assert.match(activity, /replacedLegacySourceIds/);

@@ -6,13 +6,13 @@ test("labour wage settlement diagnostics are not exposed in the production PWA",
   const pageSource = readFileSync(new URL("../src/pages/workspace/LabourWageSettlements.tsx", import.meta.url), "utf8");
   const apiSource = readFileSync(new URL("../src/lib/api.ts", import.meta.url), "utf8");
 
-  const previewStart = pageSource.indexOf("Settlement preview");
+  const previewStart = pageSource.indexOf('t("wageSettlementsPage.settlementPreviewTitle")');
   const formEnd = pageSource.lastIndexOf("</form>", previewStart);
   assert.ok(formEnd >= 0);
   assert.ok(previewStart > formEnd);
   assert.match(
     pageSource.slice(formEnd + "</form>".length, previewStart),
-    /^\s*<\/section>\s*<section className="record-panel labour-settlement-preview-panel">\s*<div className="advances-heading">\s*<h2>$/,
+    /^\s*<\/section>\s*<section className="record-panel labour-settlement-preview-panel">\s*<div className="advances-heading">\s*<h2>\{$/,
   );
 
   assert.ok(!pageSource.includes("Admin diagnostics - read only"));
@@ -30,5 +30,5 @@ test("labour wage settlement diagnostics are not exposed in the production PWA",
   assert.ok(pageSource.includes("openSettlement(settlement)"));
   assert.ok(pageSource.includes("onClick={() => window.print()}"));
   assert.ok(pageSource.includes("onClick={exportRegister}"));
-  assert.ok(pageSource.includes("Labour settlement register"));
+  assert.ok(pageSource.includes('t("wageSettlementsPage.settlementRegisterTitle")'));
 });

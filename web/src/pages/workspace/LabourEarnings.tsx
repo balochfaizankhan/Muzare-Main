@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { SearchInput } from "../../components/SearchInput";
@@ -10,6 +11,7 @@ import {
   sumLabourEarnings,
 } from "../../lib/labourEarnings";
 import { canCreate } from "../../lib/permissions";
+import { translateStatus } from "../../lib/statusLabels";
 import {
   compareLabourers,
   getActiveFarmId,
@@ -27,28 +29,15 @@ import { persistOperationalRecord } from "../../services/syncService";
 
 const money = formatMoney;
 const today = () => new Date().toISOString().slice(0, 10);
-const labourEarningStatusLabel = (status: string) => {
-  switch (status) {
-    case "pending_settlement":
-      return "Pending settlement";
-    case "settled":
-      return "Settled";
-    case "voided":
-      return "Voided";
-    case "cancelled":
-      return "Cancelled";
-    default:
-      return status;
-  }
-};
 
 const labourEarningTargetLabel = (
+  t: TFunction,
   earning: LabourEarning,
   labourer: Labourer | null,
   group: LabourGroup | null,
 ) => {
-  if (earning.earningScope === "group") return group?.name ?? earning.labourGroupName ?? "Labour earning";
-  return labourer?.name ?? "Labour earning";
+  if (earning.earningScope === "group") return group?.name ?? earning.labourGroupName ?? t("labourEarningsPage.labourEarningFallback");
+  return labourer?.name ?? t("labourEarningsPage.labourEarningFallback");
 };
 
 export function LabourEarnings() {
@@ -156,30 +145,30 @@ export function LabourEarnings() {
     }
     const numericAmount = Number(amount);
     if (!Number.isFinite(numericAmount) || numericAmount <= 0 || !description.trim()) {
-      setError("Enter a valid amount and description before saving.");
+      setError(t("labourEarningsPage.validAmountDescriptionRequired"));
       return;
     }
     if (!formType) {
-      setError("Select a work type.");
+      setError(t("labourEarningsPage.selectWorkType"));
       return;
     }
     if (earningScope === "individual") {
       if (!workTargetId) {
-        setError("Select a labourer.");
+        setError(t("labourEarningsPage.selectLabourerError"));
         return;
       }
       const labourer = labourById.get(workTargetId);
       if (!labourer) {
-        setError("Select an existing labourer.");
+        setError(t("labourEarningsPage.selectExistingLabourer"));
         return;
       }
     } else {
       if (!workTargetId) {
-        setError("Select a labour group.");
+        setError(t("labourEarningsPage.selectLabourGroupError"));
         return;
       }
       if (!selectedGroupForemanId) {
-        setError("The selected group has no assigned foreman.");
+        setError(t("labourEarningsPage.groupNoForeman"));
         return;
       }
     }
@@ -209,9 +198,9 @@ export function LabourEarnings() {
       setAmount("");
       setDescription("");
       setNotes("");
-      setSuccess("Labour earning recorded. It will be included in the next wage settlement.");
+      setSuccess(t("labourEarningsPage.earningRecorded"));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to record this labour earning.");
+      setError(caught instanceof Error ? caught.message : t("labourEarningsPage.unableToRecord"));
     } finally {
       setSaving(false);
     }
@@ -220,7 +209,7 @@ export function LabourEarnings() {
   const voidPendingEarning = async (earning: LabourEarning) => {
     if (!canManage) return;
     if (earning.status === "settled") {
-      setError("Settled labour earnings must be reversed through settlement or adjustment workflow.");
+      setError(t("labourEarningsPage.settledCannotVoid"));
       return;
     }
     await persistOperationalRecord("labourEarning", {
@@ -235,52 +224,52 @@ export function LabourEarnings() {
     <>
       <section className="record-panel workforce-shell-intro workforce-shell-intro--nested">
         <div>
-          <h2>Labour Earnings Ledger</h2>
-          <p>Record non-attendance labour earnings for an individual labourer or an entire labour group, then settle them with wage settlement and advances.</p>
+          <h2>{t("labourEarningsPage.heading")}</h2>
+          <p>{t("labourEarningsPage.introDescription")}</p>
         </div>
       </section>
 
       <section className="record-panel">
         <div className="advances-heading">
-          <h2>Record Labour Earning</h2>
-          <span>These entries do not touch cash, accounts, or partner ledgers until settlement.</span>
+          <h2>{t("labourEarningsPage.recordTitle")}</h2>
+          <span>{t("labourEarningsPage.recordDescription")}</span>
         </div>
         <form className="module-form labour-earnings-form" onSubmit={(event) => void submit(event)}>
           <div className="advances-filter-row">
             <label className="advances-filter-field">
-              <span>Earnings for</span>
+              <span>{t("labourEarningsPage.earningsFor")}</span>
               <select value={earningScope} onChange={(event) => {
                 const nextScope = event.target.value === "group" ? "group" : "individual";
                 setEarningScope(nextScope);
                 setWorkTargetId("");
                 setSelectedForemanId("");
               }}>
-                <option value="individual">Individual labour</option>
-                <option value="group">Labour group</option>
+                <option value="individual">{t("labourEarningsPage.individualLabourOption")}</option>
+                <option value="group">{t("labourEarningsPage.labourGroup")}</option>
               </select>
             </label>
             <label className="advances-filter-field">
-              <span>Date</span>
+              <span>{t("labourEarningsPage.dateLabel")}</span>
               <input required type="date" value={earningDate} onChange={(event) => setEarningDate(event.target.value)} />
             </label>
             {earningScope === "individual" ? (
               <label className="advances-filter-field">
-                <span>Labourer</span>
+                <span>{t("labourEarningsPage.labourerLabel")}</span>
                 <select required value={workTargetId} onChange={(event) => setWorkTargetId(event.target.value)}>
-                  <option value="">Select labourer</option>
+                  <option value="">{t("labourEarningsPage.selectLabourerPlaceholder")}</option>
                   {labourers.map((labourer) => <option key={labourer.id} value={labourer.id}>{labourer.name}</option>)}
                 </select>
               </label>
             ) : (
               <label className="advances-filter-field">
-                <span>Labour group</span>
+                <span>{t("labourEarningsPage.labourGroup")}</span>
                 <select required value={workTargetId} onChange={(event) => {
                   const nextGroupId = event.target.value;
                   setWorkTargetId(nextGroupId);
                   const nextGroup = groupById.get(nextGroupId) ?? null;
                   setSelectedForemanId(nextGroup?.foremanId ?? nextGroup?.foremanLabourId ?? "");
                 }}>
-                  <option value="">Select group</option>
+                  <option value="">{t("labourEarningsPage.selectGroupPlaceholder")}</option>
                   {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
                 </select>
               </label>
@@ -288,79 +277,79 @@ export function LabourEarnings() {
           </div>
           <div className="advances-filter-row">
             <label className="advances-filter-field">
-              <span>Assigned foreman</span>
-              <input readOnly value={earningScope === "group" ? selectedGroupForeman?.name ?? "" : (selectedTargetLabourer?.group ? "" : "")} placeholder={earningScope === "group" ? "Resolved from selected group" : "Not required"} />
+              <span>{t("labourEarningsPage.assignedForeman")}</span>
+              <input readOnly value={earningScope === "group" ? selectedGroupForeman?.name ?? "" : (selectedTargetLabourer?.group ? "" : "")} placeholder={earningScope === "group" ? t("labourEarningsPage.resolvedFromGroup") : t("labourEarningsPage.notRequired")} />
             </label>
             <label className="advances-filter-field">
-              <span>Earnings type</span>
+              <span>{t("labourEarningsPage.earningsType")}</span>
               <select value={formType} onChange={(event) => setFormType(event.target.value as LabourEarning["earningType"])}>{["lump_sum", "task", "bonus", "incentive", "adjustment", "other"].map((type) => <option key={type} value={type}>{labourEarningTypeLabel(type as LabourEarning["earningType"])}</option>)}</select>
             </label>
             <label className="advances-filter-field">
-              <span>Earnings amount</span>
+              <span>{t("labourEarningsPage.earningsAmount")}</span>
               <input required type="number" min="0" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} />
             </label>
           </div>
           <div className="advances-filter-row">
             <label className="advances-filter-field advances-filter-field--full">
-              <span>Description</span>
-              <input required value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What was earned?" />
+              <span>{t("labourEarningsPage.descriptionLabel")}</span>
+              <input required value={description} onChange={(event) => setDescription(event.target.value)} placeholder={t("labourEarningsPage.descriptionPlaceholder")} />
             </label>
           </div>
           <label className="advances-filter-field advances-filter-field--full">
-            <span>Notes</span>
-            <input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional notes" />
+            <span>{t("farmsPage.notes")}</span>
+            <input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder={t("labourEarningsPage.notesPlaceholder")} />
           </label>
           {error ? <p className="form-error">{error}</p> : null}
           {success ? <p className="context-message">{success}</p> : null}
-          <button disabled={!canManage || saving} type="submit">{saving ? "Saving..." : earningScope === "group" ? "Record group earning" : "Record labour earning"}</button>
+          <button disabled={!canManage || saving} type="submit">{saving ? t("labourEarningsPage.savingEllipsis") : earningScope === "group" ? t("labourEarningsPage.recordGroupEarning") : t("labourEarningsPage.recordLabourEarning")}</button>
         </form>
       </section>
 
       <section className="record-panel">
         <div className="advances-heading">
-          <h2>Labour earnings ledger</h2>
-          <span>{visibleEarnings.length} entries</span>
+          <h2>{t("labourEarningsPage.ledgerTitle")}</h2>
+          <span className="bidi-isolate">{t("labourEarningsPage.entriesCount", { count: visibleEarnings.length })}</span>
         </div>
         <div className="labour-earnings-filters">
           <div className="labour-earnings-filter-row labour-earnings-filter-row--full">
-            <SearchInput placeholder="Search earnings" value={search} onChange={setSearch} />
+            <SearchInput placeholder={t("labourEarningsPage.searchPlaceholder")} value={search} onChange={setSearch} />
           </div>
           <div className="labour-earnings-filter-row labour-earnings-filter-row--full">
             <label className="advances-filter-field">
-              <span>Scope</span>
+              <span>{t("labourEarningsPage.scopeLabel")}</span>
               <select value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value as "all" | "individual" | "group")}>
-                <option value="all">All scopes</option>
-                <option value="individual">Individual</option>
-                <option value="group">Group</option>
+                <option value="all">{t("labourEarningsPage.allScopes")}</option>
+                <option value="individual">{t("labourEarningsPage.individualOption")}</option>
+                <option value="group">{t("labourEarningsPage.groupOption")}</option>
               </select>
             </label>
           </div>
           <div className="labour-earnings-filter-row">
-            <label className="advances-filter-field"><span>Labourer</span><select value={selectedLabourerId} onChange={(event) => setSelectedLabourerId(event.target.value)}><option value="">All labourers</option>{labourers.map((labourer) => <option key={labourer.id} value={labourer.id}>{labourer.name}</option>)}</select></label>
-            <label className="advances-filter-field"><span>Labour group</span><select value={selectedGroupId} onChange={(event) => setSelectedGroupId(event.target.value)}><option value="">All groups</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
+            <label className="advances-filter-field"><span>{t("labourEarningsPage.labourerLabel")}</span><select value={selectedLabourerId} onChange={(event) => setSelectedLabourerId(event.target.value)}><option value="">{t("labourEarningsPage.allLabourers")}</option>{labourers.map((labourer) => <option key={labourer.id} value={labourer.id}>{labourer.name}</option>)}</select></label>
+            <label className="advances-filter-field"><span>{t("labourEarningsPage.labourGroup")}</span><select value={selectedGroupId} onChange={(event) => setSelectedGroupId(event.target.value)}><option value="">{t("labourEarningsPage.allGroups")}</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
           </div>
           <div className="labour-earnings-filter-row">
-            <label className="advances-filter-field"><span>Type</span><select value={earningType} onChange={(event) => setEarningType(event.target.value as LabourEarning["earningType"] | "")}><option value="">All types</option>{["lump_sum", "task", "bonus", "incentive", "adjustment", "other"].map((type) => <option key={type} value={type}>{labourEarningTypeLabel(type as LabourEarning["earningType"])}</option>)}</select></label>
-            <label className="advances-filter-field"><span>Status</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">All status</option><option value="pending_settlement">Pending settlement</option><option value="settled">Settled</option><option value="voided">Voided</option></select></label>
+            <label className="advances-filter-field"><span>{t("labourEarningsPage.typeLabel")}</span><select value={earningType} onChange={(event) => setEarningType(event.target.value as LabourEarning["earningType"] | "")}><option value="">{t("labourEarningsPage.allTypes")}</option>{["lump_sum", "task", "bonus", "incentive", "adjustment", "other"].map((type) => <option key={type} value={type}>{labourEarningTypeLabel(type as LabourEarning["earningType"])}</option>)}</select></label>
+            <label className="advances-filter-field"><span>{t("labourEarningsPage.statusLabel")}</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">{t("labourEarningsPage.allStatus")}</option><option value="pending_settlement">{t("status.pending_settlement")}</option><option value="settled">{t("status.settled")}</option><option value="voided">{t("status.voided")}</option></select></label>
           </div>
           <div className="labour-earnings-filter-row">
-            <label className="advances-filter-field"><span>From</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
-            <label className="advances-filter-field"><span>To</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
+            <label className="advances-filter-field"><span>{t("labourEarningsPage.fromLabel")}</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
+            <label className="advances-filter-field"><span>{t("labourEarningsPage.toLabel")}</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
           </div>
           <div className="labour-earnings-filter-row">
-            <label className="advances-filter-field"><span>Min amount</span><input type="number" min="0" step="0.01" value={minAmount} onChange={(event) => setMinAmount(event.target.value)} /></label>
-            <label className="advances-filter-field"><span>Max amount</span><input type="number" min="0" step="0.01" value={maxAmount} onChange={(event) => setMaxAmount(event.target.value)} /></label>
+            <label className="advances-filter-field"><span>{t("labourEarningsPage.minAmount")}</span><input type="number" min="0" step="0.01" value={minAmount} onChange={(event) => setMinAmount(event.target.value)} /></label>
+            <label className="advances-filter-field"><span>{t("labourEarningsPage.maxAmount")}</span><input type="number" min="0" step="0.01" value={maxAmount} onChange={(event) => setMaxAmount(event.target.value)} /></label>
           </div>
         </div>
         <div className="reports-kpis labour-earnings-kpis">
-          <article><span>Individual earnings</span><strong>{money(totals.individual)}</strong></article>
-          <article><span>Group earnings</span><strong>{money(totals.group)}</strong></article>
-          <article><span>Pending earnings</span><strong>{money(sumLabourEarnings(pending))}</strong></article>
-          <article><span>Settled earnings</span><strong>{money(sumLabourEarnings(settled))}</strong></article>
-          <article><span>Voided earnings</span><strong>{money(sumLabourEarnings(voided))}</strong></article>
+          <article><span>{t("labourEarningsPage.individualEarnings")}</span><strong className="bidi-isolate">{money(totals.individual)}</strong></article>
+          <article><span>{t("labourEarningsPage.groupEarnings")}</span><strong className="bidi-isolate">{money(totals.group)}</strong></article>
+          <article><span>{t("labourEarningsPage.pendingEarnings")}</span><strong className="bidi-isolate">{money(sumLabourEarnings(pending))}</strong></article>
+          <article><span>{t("labourEarningsPage.settledEarnings")}</span><strong className="bidi-isolate">{money(sumLabourEarnings(settled))}</strong></article>
+          <article><span>{t("labourEarningsPage.voidedEarnings")}</span><strong className="bidi-isolate">{money(sumLabourEarnings(voided))}</strong></article>
         </div>
         {!visibleEarnings.length ? (
-          <p className="context-message">No labour earnings entries match this filter yet.</p>
+          <p className="context-message">{t("labourEarningsPage.emptyState")}</p>
         ) : (
           <div className="labour-earnings-list">
             <div className="labour-earnings-mobile-list">
@@ -368,48 +357,48 @@ export function LabourEarnings() {
                 const labourer = earning.labourerId ? labourById.get(earning.labourerId) ?? null : null;
                 const group = earning.labourGroupId ? groupById.get(earning.labourGroupId) ?? null : null;
                 const foreman = earning.foremanId ? labourById.get(earning.foremanId) ?? null : null;
-                const title = labourEarningTargetLabel(earning, labourer, group);
+                const title = labourEarningTargetLabel(t, earning, labourer, group);
                 return (
                   <article className="labour-earnings-card" key={earning.id}>
                     <header className="labour-earnings-card__header">
                       <div className="labour-earnings-card__title">
                         <strong>{title}</strong>
-                        <span>{earning.earningDate} · {labourEarningScopeLabel(earning)} · {labourEarningTypeLabel(earning.earningType)}</span>
+                        <span><span className="bidi-isolate">{earning.earningDate}</span> · {labourEarningScopeLabel(earning)} · {labourEarningTypeLabel(earning.earningType)}</span>
                       </div>
-                      <strong className="labour-earnings-card__amount">{money(earning.amount)}</strong>
+                      <strong className="labour-earnings-card__amount bidi-isolate">{money(earning.amount)}</strong>
                     </header>
                     <div className="labour-earnings-card__status-row">
-                      <span className={`labour-earnings-status-chip labour-earnings-status-chip--${earning.status}`}>{labourEarningStatusLabel(earning.status)}</span>
+                      <span className={`labour-earnings-status-chip labour-earnings-status-chip--${earning.status}`}>{translateStatus(t, earning.status)}</span>
                     </div>
                     <details>
-                      <summary>View details</summary>
+                      <summary>{t("labourEarningsPage.viewDetails")}</summary>
                       <dl>
                         <div>
-                          <dt>Scope</dt>
+                          <dt>{t("labourEarningsPage.scopeLabel")}</dt>
                           <dd>{labourEarningScopeLabel(earning)}</dd>
                         </div>
                         <div>
-                          <dt>Type</dt>
+                          <dt>{t("labourEarningsPage.typeLabel")}</dt>
                           <dd>{labourEarningTypeLabel(earning.earningType)}</dd>
                         </div>
                         <div>
-                          <dt>Reference</dt>
-                          <dd>{earning.linkedSettlementId ?? "No reference"}</dd>
+                          <dt>{t("labourEarningsPage.referenceLabel")}</dt>
+                          <dd>{earning.linkedSettlementId ? <span className="bidi-isolate">{earning.linkedSettlementId}</span> : t("labourEarningsPage.noReference")}</dd>
                         </div>
                         <div>
-                          <dt>Source ID</dt>
-                          <dd>{earning.id}</dd>
+                          <dt>{t("labourEarningsPage.sourceIdLabel")}</dt>
+                          <dd><span className="bidi-isolate">{earning.id}</span></dd>
                         </div>
                         <div>
-                          <dt>Notes</dt>
-                          <dd>{earning.notes?.trim() ? earning.notes : "No notes"}</dd>
+                          <dt>{t("farmsPage.notes")}</dt>
+                          <dd>{earning.notes?.trim() ? earning.notes : t("labourEarningsPage.noNotes")}</dd>
                         </div>
                         {earning.earningScope === "group" && <div>
-                          <dt>Foreman</dt>
-                          <dd>{foreman?.name ?? earning.foremanId ?? "No foreman"}</dd>
+                          <dt>{t("labourEarningsPage.foremanLabel")}</dt>
+                          <dd>{foreman?.name ?? (earning.foremanId ? <span className="bidi-isolate">{earning.foremanId}</span> : t("labourEarningsPage.noForeman"))}</dd>
                         </div>}
                       </dl>
-                      <button type="button" onClick={() => navigate("/workspace/labour-payments/earnings")}>Open source record</button>
+                      <button type="button" onClick={() => navigate("/workspace/labour-payments/earnings")}>{t("labourEarningsPage.openSourceRecord")}</button>
                     </details>
                   </article>
                 );
@@ -419,16 +408,16 @@ export function LabourEarnings() {
             <table className="report-data-table">
               <thead>
                 <tr>
-                  <th>Date</th>
-                  <th>Scope</th>
-                  <th>Labour / Group</th>
-                  <th>Foreman</th>
-                  <th>Type</th>
-                  <th>Description</th>
-                  <th>Amount</th>
-                  <th>Status</th>
-                  <th>Settlement</th>
-                  <th>Actions</th>
+                  <th>{t("labourEarningsPage.dateLabel")}</th>
+                  <th>{t("labourEarningsPage.scopeLabel")}</th>
+                  <th>{t("labourEarningsPage.labourOrGroupColumn")}</th>
+                  <th>{t("labourEarningsPage.foremanLabel")}</th>
+                  <th>{t("labourEarningsPage.typeLabel")}</th>
+                  <th>{t("labourEarningsPage.descriptionLabel")}</th>
+                  <th>{t("labourEarningsPage.amountLabel")}</th>
+                  <th>{t("labourEarningsPage.statusLabel")}</th>
+                  <th>{t("labourEarningsPage.settlementLabel")}</th>
+                  <th>{t("labourEarningsPage.actionsLabel")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -438,16 +427,18 @@ export function LabourEarnings() {
                   const foreman = earning.foremanId ? labourById.get(earning.foremanId) ?? null : null;
                   return (
                     <tr key={earning.id}>
-                      <td>{earning.earningDate}</td>
+                      <td><span className="bidi-isolate">{earning.earningDate}</span></td>
                       <td><span className={`status-chip status-chip--${earning.earningScope}`}>{labourEarningScopeLabel(earning)}</span></td>
-                      <td>{earning.earningScope === "group" ? group?.name ?? earning.labourGroupName ?? "Labour group" : labourer?.name ?? earning.labourerId ?? "Labourer"}</td>
-                      <td>{earning.earningScope === "group" ? foreman?.name ?? earning.foremanId ?? "-" : "-"}</td>
+                      <td>{earning.earningScope === "group"
+                        ? group?.name ?? earning.labourGroupName ?? t("labourEarningsPage.labourGroup")
+                        : labourer?.name ?? (earning.labourerId ? <span className="bidi-isolate">{earning.labourerId}</span> : t("labourEarningsPage.labourerLabel"))}</td>
+                      <td>{earning.earningScope === "group" ? foreman?.name ?? (earning.foremanId ? <span className="bidi-isolate">{earning.foremanId}</span> : "-") : "-"}</td>
                       <td>{labourEarningTypeLabel(earning.earningType)}</td>
                       <td>{earning.description}</td>
-                      <td>{money(earning.amount)}</td>
-                      <td><span className={`labour-earnings-status-chip labour-earnings-status-chip--${earning.status}`}>{labourEarningStatusLabel(earning.status)}</span></td>
-                      <td>{earning.linkedSettlementId ?? "-"}</td>
-                      <td>{earning.status === "pending_settlement" && canManage ? <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => void voidPendingEarning(earning)}>Void</button> : "-"}</td>
+                      <td><span className="bidi-isolate">{money(earning.amount)}</span></td>
+                      <td><span className={`labour-earnings-status-chip labour-earnings-status-chip--${earning.status}`}>{translateStatus(t, earning.status)}</span></td>
+                      <td>{earning.linkedSettlementId ? <span className="bidi-isolate">{earning.linkedSettlementId}</span> : "-"}</td>
+                      <td>{earning.status === "pending_settlement" && canManage ? <button className="worker-dialog__link worker-dialog__link--danger" type="button" onClick={() => void voidPendingEarning(earning)}>{t("labourEarningsPage.voidAction")}</button> : "-"}</td>
                     </tr>
                   );
                 })}

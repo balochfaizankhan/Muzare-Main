@@ -125,11 +125,11 @@ export function WageRates() {
     return counts;
   }, { all: 0, active: 0, expired: 0, upcoming: 0 }), [historyRows]);
   const historyStatusTabs = useMemo(() => ([
-    { value: "all" as const, label: "All", count: historyCounts.all },
-    { value: "active" as const, label: "Current", count: historyCounts.active },
-    { value: "expired" as const, label: "Expired", count: historyCounts.expired },
-    { value: "upcoming" as const, label: "Future", count: historyCounts.upcoming },
-  ]), [historyCounts]);
+    { value: "all" as const, label: t("common.all"), count: historyCounts.all },
+    { value: "active" as const, label: t("wageRatesPage.status.active"), count: historyCounts.active },
+    { value: "expired" as const, label: t("wageRatesPage.status.expired"), count: historyCounts.expired },
+    { value: "upcoming" as const, label: t("wageRatesPage.status.upcoming"), count: historyCounts.upcoming },
+  ]), [historyCounts, t]);
   const filteredLabourers = useMemo(() => sortWorkersForDisplay(labourers.filter((labourer) => {
     const term = search.trim().toLowerCase();
     return isWorkerEligibleForWageRatePeriod(labourer, effectiveFrom, wageRangeTo)
@@ -281,10 +281,10 @@ export function WageRates() {
   }, []);
 
   const formatHistoryRange = useCallback((rate: WageRate, status: WageRateHistoryStatus) => {
-    if (status === "upcoming") return `Starts ${formatHistoryDate(rate.effectiveFrom)}`;
-    if (rate.effectiveTo) return `${formatHistoryDate(rate.effectiveFrom)} – ${formatHistoryDate(rate.effectiveTo)}`;
-    return `${formatHistoryDate(rate.effectiveFrom)} – Current`;
-  }, [formatHistoryDate]);
+    if (status === "upcoming") return t("wageRatesPage.startsOn", { date: formatHistoryDate(rate.effectiveFrom) });
+    if (rate.effectiveTo) return t("wageRatesPage.effectiveRange", { from: formatHistoryDate(rate.effectiveFrom), to: formatHistoryDate(rate.effectiveTo) });
+    return t("wageRatesPage.effectiveRange", { from: formatHistoryDate(rate.effectiveFrom), to: t("status.current") });
+  }, [formatHistoryDate, t]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -380,7 +380,7 @@ export function WageRates() {
             <button className="farm-card__secondary-action wage-rates-management-actions__history" type="button" onClick={() => setHistoryOpen(true)}>
               <span>
                 <strong>{t("wageRatesPage.history")}</strong>
-                <small>{historicalRateCount} previous rates</small>
+                <small>{t("wageRatesPage.previousRatesCount", { count: historicalRateCount })}</small>
               </span>
               <ChevronRight size={16} />
             </button>
@@ -395,15 +395,15 @@ export function WageRates() {
           <div className="wage-rates-active-toolbar">
             <SearchInput placeholder={t("wageRatesPage.searchLabour")} value={activeSearch} onChange={setActiveSearch} />
             {groupOptions.length ? (
-              <ClearableSelect aria-label="Group filter" value={activeGroupFilter} onChange={setActiveGroupFilter}>
-                <option value="">All groups</option>
+              <ClearableSelect aria-label={t("wageRatesPage.groupFilterLabel")} value={activeGroupFilter} onChange={setActiveGroupFilter}>
+                <option value="">{t("wageRatesPage.allGroups")}</option>
                 {groupOptions.map((group) => (
                   <option key={group.value} value={group.value}>{group.label}</option>
                 ))}
               </ClearableSelect>
             ) : null}
           </div>
-          {(activeSearch || activeGroupFilter) ? <p className="wage-rates-active-note">Showing {filteredCurrentRates.length} of {currentRates.length} active rates</p> : null}
+          {(activeSearch || activeGroupFilter) ? <p className="wage-rates-active-note">{t("wageRatesPage.showingActiveRates", { shown: filteredCurrentRates.length, total: currentRates.length })}</p> : null}
           {!filteredCurrentRates.length ? <p className="context-message">{t("wageRatesPage.noCurrentRates")}</p> : (
             <div className="wage-rate-active-list">
               {filteredCurrentRates.map(({ labourer, rate }) => (
@@ -411,9 +411,9 @@ export function WageRates() {
                   <div className="wage-rate-active-card__copy">
                     <div className="wage-rate-active-card__head">
                       <strong>{labourer.name}</strong>
-                      <span>{money(rate.dailyRate)}</span>
+                      <span className="bidi-isolate">{money(rate.dailyRate)}</span>
                     </div>
-                    <small>{labourer.group || "-"} · Effective {displayDate(rate.effectiveFrom)}</small>
+                    <small>{labourer.group || "-"} · <span className="bidi-isolate">{t("wageRatesPage.effectiveDateLabel", { date: displayDate(rate.effectiveFrom) })}</span></small>
                   </div>
                 </article>
               ))}
@@ -428,14 +428,14 @@ export function WageRates() {
             className="worker-dialog worker-dialog--wide wage-rates-editor-dialog"
             role="dialog"
             aria-modal="true"
-            aria-label={editingRateId ? "Update wage rates" : "Add / Update Rates"}
+            aria-label={editingRateId ? t("wageRatesPage.updateRates") : t("wageRatesPage.addUpdateRatesTitle")}
             onClick={(event) => event.stopPropagation()}
           >
             <header className="worker-dialog__header wage-rates-editor__header">
               <div className="worker-dialog__title-stack">
-                <span className="worker-dialog__eyebrow">Wage Rate Management</span>
-                <h2>Add / Update Rates</h2>
-                <p>Select multiple labourers, set effective dates, and save rate updates together.</p>
+                <span className="worker-dialog__eyebrow">{t("wageRatesPage.heading")}</span>
+                <h2>{t("wageRatesPage.addUpdateRatesTitle")}</h2>
+                <p>{t("wageRatesPage.bulkEntryDescription")}</p>
               </div>
               <button type="button" className="worker-dialog__icon-button" aria-label={t("common.close")} disabled={saving} onClick={() => { if (!saving) { setEditorOpen(false); resetEditor(); } }}>
                 <X size={18} />
@@ -461,8 +461,8 @@ export function WageRates() {
 
                 <section className="wage-rates-editor-section">
                   <div className="advances-heading">
-                    <h3>Rate details</h3>
-                    <span>Set the values that will apply to the selected labourers.</span>
+                    <h3>{t("wageRatesPage.rateDetailsHeading")}</h3>
+                    <span>{t("wageRatesPage.rateDetailsDescription")}</span>
                   </div>
                   <div className="advances-filter-row wage-rates-toolbar">
                     <label className="advances-filter-field"><span>{t("wageRatesPage.effectiveFrom")}</span><input required type="date" value={effectiveFrom} onChange={(event) => setEffectiveFrom(event.target.value)} /></label>
@@ -478,7 +478,7 @@ export function WageRates() {
                     <label className="compact-checkbox wage-rates-toggle-row"><input type="checkbox" checked={closePrevious} onChange={(event) => setClosePrevious(event.target.checked)} /><span>{t("wageRatesPage.closePrevious")}</span></label>
                     <label className="compact-checkbox wage-rates-toggle-row"><input type="checkbox" checked={replaceExisting} onChange={(event) => setReplaceExisting(event.target.checked)} /><span>{t("wageRatesPage.replaceExisting")}</span></label>
                   </div>
-                  <button className="secondary-action wage-rates-apply-button" disabled={selectedCount === 0} type="button" onClick={applyBulkToSelected}>Apply values</button>
+                  <button className="secondary-action wage-rates-apply-button" disabled={selectedCount === 0} type="button" onClick={applyBulkToSelected}>{t("wageRatesPage.applyBulkRate")}</button>
                   {replaceExisting ? (
                     <label className="advances-filter-field advances-filter-field--full">
                       <span>{t("wageRatesPage.changeReason")}</span>
@@ -490,15 +490,15 @@ export function WageRates() {
                 <section className="wage-rates-editor-section">
                   <div className="wage-rates-selection-bar wage-rates-selection-bar--editor">
                     <div>
-                      <strong>{selectedCount} selected from {filteredLabourers.length} labourers</strong>
-                      <span>{filteredSelectedCount} matching labourers in the current search</span>
+                      <strong>{t("wageRatesPage.filteredSelectionCount", { count: selectedCount, total: filteredLabourers.length })}</strong>
+                      <span>{t("wageRatesPage.matchingLabourersInSearch", { count: filteredSelectedCount })}</span>
                     </div>
                     <div className="wage-rates-selection-actions">
-                      <button className="secondary-action" disabled={filteredLabourers.length === 0} type="button" onClick={selectAllFiltered}>Select all filtered</button>
-                      <button className="secondary-action" disabled={filteredSelectedCount === 0} type="button" onClick={deselectAllFiltered}>Clear filtered</button>
+                      <button className="secondary-action" disabled={filteredLabourers.length === 0} type="button" onClick={selectAllFiltered}>{t("wageRatesPage.selectAll")}</button>
+                      <button className="secondary-action" disabled={filteredSelectedCount === 0} type="button" onClick={deselectAllFiltered}>{t("wageRatesPage.deselectAll")}</button>
                     </div>
                   </div>
-                  <SearchInput placeholder="Search labour" value={search} onChange={setSearch} />
+                  <SearchInput placeholder={t("wageRatesPage.searchLabour")} value={search} onChange={setSearch} />
                   <div className="wage-rate-labour-list">
                     {filteredLabourers.map((labourer) => {
                       const draft = drafts[labourer.id] ?? emptyDraft;
@@ -512,16 +512,16 @@ export function WageRates() {
                               <input type="checkbox" checked={selected} onChange={() => toggleLabour(labourer.id)} />
                               <span className="wage-rate-labour-summary__copy">
                                 <strong>{labourer.name}</strong>
-                                <span>{labourer.group || "-"} · {workingPeriod.workerEnd ? `${workingPeriod.workerStart} to ${workingPeriod.workerEnd}` : "Current"} · {latestRate ? money(latestRate.dailyRate) : t("wageRatesPage.noCurrentRate")}</span>
+                                <span>{labourer.group || "-"} · <span className="bidi-isolate">{workingPeriod.workerEnd ? t("wageRatesPage.effectiveRange", { from: workingPeriod.workerStart, to: workingPeriod.workerEnd }) : t("status.current")}</span> · {latestRate ? <span className="bidi-isolate">{money(latestRate.dailyRate)}</span> : t("wageRatesPage.noCurrentRate")}</span>
                               </span>
                             </span>
-                            <span className="wage-rate-labour-summary-rate">{latestRate ? money(latestRate.dailyRate) : "-"}</span>
+                            <span className="wage-rate-labour-summary-rate bidi-isolate">{latestRate ? money(latestRate.dailyRate) : "-"}</span>
                           </button>
                           {selected ? (
                             <div className="wage-rate-entry-grid">
-                              <input aria-label={`${labourer.name} ${t("wageRatesPage.dailyRate")}`} inputMode="decimal" type="number" min="0" step="0.01" value={draft.dailyRate} onChange={(event) => updateDraft(labourer.id, { dailyRate: event.target.value })} placeholder={t("wageRatesPage.dailyRate")} />
-                              <input aria-label={`${labourer.name} ${t("wageRatesPage.halfDayRate")}`} inputMode="decimal" type="number" min="0" step="0.01" value={draft.halfDayRate} onChange={(event) => updateDraft(labourer.id, { halfDayRate: event.target.value })} placeholder={t("wageRatesPage.halfDayRate")} />
-                              <input aria-label={`${labourer.name} ${t("wageRatesPage.notes")}`} value={draft.notes} onChange={(event) => updateDraft(labourer.id, { notes: event.target.value })} placeholder={t("wageRatesPage.notes")} />
+                              <input aria-label={t("wageRatesPage.fieldLabelForLabourer", { field: t("wageRatesPage.dailyRate"), name: labourer.name })} inputMode="decimal" type="number" min="0" step="0.01" value={draft.dailyRate} onChange={(event) => updateDraft(labourer.id, { dailyRate: event.target.value })} placeholder={t("wageRatesPage.dailyRate")} />
+                              <input aria-label={t("wageRatesPage.fieldLabelForLabourer", { field: t("wageRatesPage.halfDayRate"), name: labourer.name })} inputMode="decimal" type="number" min="0" step="0.01" value={draft.halfDayRate} onChange={(event) => updateDraft(labourer.id, { halfDayRate: event.target.value })} placeholder={t("wageRatesPage.halfDayRate")} />
+                              <input aria-label={t("wageRatesPage.fieldLabelForLabourer", { field: t("wageRatesPage.notes"), name: labourer.name })} value={draft.notes} onChange={(event) => updateDraft(labourer.id, { notes: event.target.value })} placeholder={t("wageRatesPage.notes")} />
                             </div>
                           ) : null}
                         </article>
@@ -539,12 +539,12 @@ export function WageRates() {
                             <strong>{item.labourName ?? item.labourerId}</strong>
                             <span>{t("wageRatesPage.affectedAttendance", { count: item.affectedAttendanceCount })}</span>
                           </div>
-                          <small>{t("wageRatesPage.overlapAffectedDates", { from: item.affectedFrom, to: item.affectedTo || t("common.current") })}</small>
+                          <small className="bidi-isolate">{t("wageRatesPage.overlapAffectedDates", { from: item.affectedFrom, to: item.affectedTo || t("status.current") })}</small>
                           <ul>
                             {item.overlaps.map((overlap) => (
                               <li key={overlap.id}>
-                                <span>{t("wageRatesPage.effectiveRange", { from: overlap.effectiveFrom, to: overlap.effectiveTo || t("common.current") })}</span>
-                                <strong>{money(overlap.dailyRate)} / {money(overlap.halfDayRate)}</strong>
+                                <span className="bidi-isolate">{t("wageRatesPage.effectiveRange", { from: overlap.effectiveFrom, to: overlap.effectiveTo || t("status.current") })}</span>
+                                <strong className="bidi-isolate">{money(overlap.dailyRate)} / {money(overlap.halfDayRate)}</strong>
                               </li>
                             ))}
                           </ul>
@@ -558,7 +558,7 @@ export function WageRates() {
                 {success ? <p className="context-message">{success}</p> : null}
               </div>
               <footer className="worker-dialog__footer wage-rates-submit-bar wage-rates-submit-bar--sticky">
-                <span>{selectedCount === 0 ? "Select labourers and enter rates to continue." : `${selectedCount} selected`}</span>
+                <span>{selectedCount === 0 ? t("wageRatesPage.noSelectionReady") : t("wageRatesPage.selectedCount", { count: selectedCount })}</span>
                 <button disabled={saving || !canManage || selectedCount === 0} type="submit">{saving ? t("advancesPage.saving") : editingRateId ? t("wageRatesPage.updateRates") : t("wageRatesPage.saveRates")}</button>
               </footer>
             </form>
@@ -602,10 +602,10 @@ export function WageRates() {
                 </nav>
                 <section className="wage-rates-history-filters">
                   <div className="wage-rates-history-filters__row">
-                    <SearchInput placeholder="Search labour" value={historySearch} onChange={setHistorySearch} />
+                    <SearchInput placeholder={t("wageRatesPage.searchLabour")} value={historySearch} onChange={setHistorySearch} />
                     {groupOptions.length ? (
-                      <ClearableSelect aria-label="Group filter" value={historyGroupFilter} onChange={setHistoryGroupFilter}>
-                        <option value="">All groups</option>
+                      <ClearableSelect aria-label={t("wageRatesPage.groupFilterLabel")} value={historyGroupFilter} onChange={setHistoryGroupFilter}>
+                        <option value="">{t("wageRatesPage.allGroups")}</option>
                         {groupOptions.map((group) => (
                           <option key={group.value} value={group.value}>{group.label}</option>
                         ))}
@@ -617,28 +617,22 @@ export function WageRates() {
 
               {!filteredHistoryRows.length ? (
                 <div className="wage-rates-history-empty">
-                  <p className="context-message">{historyHasFilters ? "No wage rates found. Try changing the search or filters." : "No wage rate history found."}</p>
-                  {historyHasFilters ? <button type="button" className="secondary-action wage-rates-history-empty__clear" onClick={() => { setHistorySearch(""); setHistoryGroupFilter(""); setHistoryStatusFilter("all"); }}>Clear filters</button> : null}
+                  <p className="context-message">{historyHasFilters ? t("wageRatesPage.noHistoryMatchingFilters") : t("wageRatesPage.noHistory")}</p>
+                  {historyHasFilters ? <button type="button" className="secondary-action wage-rates-history-empty__clear" onClick={() => { setHistorySearch(""); setHistoryGroupFilter(""); setHistoryStatusFilter("all"); }}>{t("wageRatesPage.clearFilters")}</button> : null}
                 </div>
               ) : (
                 <div className="wage-rates-history-list">
                   {filteredHistoryRows.map(({ rate, status }) => {
                     const labourer = labourers.find((item) => item.id === rate.labourerId);
-                    const statusLabel = status === "active"
-                      ? "Current"
-                      : status === "expired"
-                        ? "Expired"
-                        : status === "upcoming"
-                          ? "Future"
-                          : "Inactive";
+                    const statusLabel = t(`wageRatesPage.status.${status}`);
                     const rowContent = (
                       <>
                         <div className="wage-rates-history-row__head">
                           <strong>{labourer?.name ?? rate.labourerId}</strong>
-                          <span>{money(rate.dailyRate)}</span>
+                          <span className="bidi-isolate">{money(rate.dailyRate)}</span>
                         </div>
                         <div className="wage-rates-history-row__meta">
-                          <small>{labourer?.group || "-"} · {formatHistoryRange(rate, status)}</small>
+                          <small>{labourer?.group || "-"} · <span className="bidi-isolate">{formatHistoryRange(rate, status)}</span></small>
                           <span className={`status-badge status-badge--${status}`}>{statusLabel}</span>
                           {canManage ? <span className="wage-rates-history-row__action" aria-hidden="true"><Pencil size={14} /></span> : null}
                         </div>
@@ -649,7 +643,7 @@ export function WageRates() {
                         key={rate.id}
                         type="button"
                         className={`wage-rates-history-row wage-rates-history-row--${status}`}
-                        aria-label={`Edit wage rate for ${labourer?.name ?? rate.labourerId}`}
+                        aria-label={t("wageRatesPage.editWageRateFor", { name: labourer?.name ?? rate.labourerId })}
                         onClick={() => { setHistoryOpen(false); startEditingRate(rate); }}
                       >
                         {rowContent}

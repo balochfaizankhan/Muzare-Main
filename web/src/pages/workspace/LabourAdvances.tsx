@@ -6,6 +6,7 @@ import { useAuth } from "../../auth/AuthProvider";
 import { ClearableSelect } from "../../components/ClearableSelect";
 import { LabourMultiSelectFilter } from "../../components/LabourMultiSelectFilter";
 import { LabourSelectCombobox } from "../../components/LabourSelectCombobox";
+import { eligiblePaymentAccounts, PaymentAccountSelect } from "../../components/PaymentAccountSelect";
 import { SearchInput } from "../../components/SearchInput";
 import { todayLocalDateKey } from "../../lib/attendanceStatus";
 import { formatMoney } from "../../lib/format";
@@ -71,7 +72,9 @@ export function LabourAdvances() {
     const [nextAdvances, nextLabourers, nextAccounts] = await Promise.all([
       workspaceRecords(offlineDb.advances),
       workspaceRecords(offlineDb.labourers, { includeDeleted: true }),
-      workspaceRecords(offlineDb.accounts),
+      // includeDeleted so a historical advance's account name still resolves, and so
+      // EditAdvance can keep a deactivated account selectable for that one record.
+      workspaceRecords(offlineDb.accounts, { includeDeleted: true }),
     ]);
     setAdvances(nextAdvances);
     setLabourers(nextLabourers.sort(compareLabourers));
@@ -232,10 +235,13 @@ export function LabourAdvances() {
               </div>}
             /></label>
             <label className="advances-filter-field"><span>{t("advancesPage.amount")}</span><input required min="0.01" step="0.01" type="number" value={entryAmount} onChange={(event) => setEntryAmount(event.target.value)} /></label>
-            <label className="advances-filter-field"><span>{t("advancesPage.paidFromAccount")}</span><ClearableSelect required value={selectedEntryAccountId} onChange={setEntryAccountId}>
-              <option value="">{t("advancesPage.selectAccount")}</option>
-              {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-            </ClearableSelect></label>
+            <label className="advances-filter-field"><span>{t("advancesPage.paidFromAccount")}</span><PaymentAccountSelect
+              accounts={eligiblePaymentAccounts(accounts)}
+              value={selectedEntryAccountId}
+              onChange={setEntryAccountId}
+              placeholder={t("advancesPage.selectAccount")}
+              invalid={Boolean(entryError) && !selectedEntryAccountId}
+            /></label>
             <label className="advances-filter-field advances-filter-field--full"><span>{t("advancesPage.notesReference")}</span><input value={entryNotes} placeholder={t("advancesPage.notesReference")} onChange={(event) => setEntryNotes(event.target.value)} /></label>
             {entryError ? <p className="form-error">{entryError}</p> : null}
             <button disabled={saving} type="submit">{saving ? t("advancesPage.saving") : t("advancesPage.saveAdvance")}</button>
@@ -340,7 +346,12 @@ function EditAdvance({ advance, accounts, onClose, onSave }: { advance: Advance;
     <header><h2>{t("advancesPage.editAdvance")}</h2><button type="button" onClick={onClose} aria-label={t("advancesPage.closeEditAdvance")}><X size={18} /></button></header>
     <form className="worker-action-form" onSubmit={(event) => void submit(event)}><label><span>{t("advancesPage.date")} *</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
       <label><span>{t("advancesPage.amount")} *</span><input required min="0.01" step="0.01" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
-      <label><span>{t("advancesPage.paidFromAccount")} *</span><ClearableSelect required value={accountId} onChange={setAccountId}><option value="">{t("advancesPage.selectAccount")}</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</ClearableSelect></label>
+      <label><span>{t("advancesPage.paidFromAccount")} *</span><PaymentAccountSelect
+        accounts={eligiblePaymentAccounts(accounts, { alsoIncludeId: advance.accountId ?? null })}
+        value={accountId}
+        onChange={setAccountId}
+        invalid={Boolean(error) && !accountId}
+      /></label>
       <label><span>{t("advancesPage.notesReference")}</span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} /></label>{error && <p className="worker-action-error">{error}</p>}
       <footer><button type="button" onClick={onClose}>{t("common.close")}</button><button disabled={busy} type="submit">{busy ? t("advancesPage.saving") : t("advancesPage.saveChanges")}</button></footer>
     </form></section></div>;

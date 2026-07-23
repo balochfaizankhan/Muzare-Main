@@ -39,6 +39,6 @@ test("dashboard waits for an exact workspace, farm, and season context before lo
   assert.match(dashboard, /const \[resolvedContext, setResolvedContext\] = useState<DashboardScope \| null>\(null\)/);
   assert.match(dashboard, /if \(!financialScope\.workspaceId \|\| !financialScope\.farmId \|\| !financialScope\.seasonId\) \{/);
   assert.doesNotMatch(dashboard, /setTotals\(null\);\s+setActivities\(\[\]\);\s+if \(!contextReady\)/);
-  assert.match(dashboard, /Dashboard data could not be loaded for the current farm and season\./);
+  assert.match(dashboard, /t\("dashboardPage\.dashboardDataLoadFailedForContext"\)/);
   assert.match(dashboard, /<button className="secondary-button" type="button" onClick=\{retryDashboardLoad\}/);
 });

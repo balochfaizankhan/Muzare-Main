@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import {
   BookOpenText,
   ClipboardList,
@@ -10,7 +11,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { getCanonicalExpenseCategory } from "./expenseCategories";
-import { formatMoney } from "./format";
+import { formatDate, formatMoney } from "./format";
 import { getActiveLabourWageSettlements, getGeneralExpenseVouchers } from "./labourWageSettlements";
 import { offlineDb, workspaceRecords } from "./offline-db";
 import type {
@@ -26,6 +27,7 @@ import type {
   Voucher,
 } from "./offline-db";
 import { isActiveOperationalRecord } from "./operationalRecords";
+import { translateStatus } from "./statusLabels";
 import { loadWorkspaceVouchers } from "./voucherCollections";
 import { getVoucherDisplayNumber } from "./vouchers";
 import type { LabourFinancialReadModel } from "./api";
@@ -64,16 +66,14 @@ const money = formatMoney;
 const ATTENDANCE_GROUP_WINDOW_MINUTES = 20;
 const LABOUR_BATCH_WINDOW_MINUTES = 5;
 
-const capitalize = (value: string) => value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-
 const formatShortRange = (start: string, end: string) => {
   const startDate = new Date(start);
   const endDate = new Date(end);
   if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return `${start} – ${end}`;
   const sameYear = startDate.getFullYear() === endDate.getFullYear();
-  const shortFormatter = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
-  const longFormatter = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
-  return sameYear ? `${shortFormatter.format(startDate)} – ${longFormatter.format(endDate)}` : `${longFormatter.format(startDate)} – ${longFormatter.format(endDate)}`;
+  return sameYear
+    ? `${formatDate(startDate, { month: "short", day: "numeric" })} – ${formatDate(endDate, { month: "short", day: "numeric", year: "numeric" })}`
+    : `${formatDate(startDate, { month: "short", day: "numeric", year: "numeric" })} – ${formatDate(endDate, { month: "short", day: "numeric", year: "numeric" })}`;
 };
 
 const resolveActivityTimestamp = (activityDate: string, createdAt: string) => {
@@ -91,21 +91,21 @@ const isToday = (value: Date) => {
   return value.getFullYear() === now.getFullYear() && value.getMonth() === now.getMonth() && value.getDate() === now.getDate();
 };
 
-const toDateLabel = (value: string) => {
+const toDateLabel = (t: TFunction, value: string) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   if (isToday(date)) {
-    return `Today, ${date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+    return t("dashboard.todayAt", { time: formatDate(date, { hour: "numeric", minute: "2-digit" }) });
   }
   const sameYear = date.getFullYear() === new Date().getFullYear();
-  return date.toLocaleString([], sameYear
+  return formatDate(date, sameYear
     ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }
     : { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 };
 
-const labourerName = (labourerById: Map<string, Labourer>, labourerId: string) => labourerById.get(labourerId)?.name ?? "Labour";
+const labourerName = (t: TFunction, labourerById: Map<string, Labourer>, labourerId: string) => labourerById.get(labourerId)?.name ?? t("workforcePage.labourFallback");
 
-const accountName = (accountById: Map<string, Account>, accountId?: string | null) => accountId ? (accountById.get(accountId)?.name ?? "Account") : "Account";
+const accountName = (t: TFunction, accountById: Map<string, Account>, accountId?: string | null) => accountId ? (accountById.get(accountId)?.name ?? t("dashboardModule.account")) : t("dashboardModule.account");
 
 const sameTimedBatch = (left: RawWorkspaceActivity, right: RawWorkspaceActivity) =>
   left.module === right.module
@@ -113,7 +113,7 @@ const sameTimedBatch = (left: RawWorkspaceActivity, right: RawWorkspaceActivity)
   && left.groupWindowMinutes === right.groupWindowMinutes
   && Math.abs(parseTimestamp(left.createdAt) - parseTimestamp(right.createdAt)) <= (left.groupWindowMinutes ?? 0) * 60_000;
 
-const attendanceSummary = (group: RawWorkspaceActivity[]) => {
+const attendanceSummary = (t: TFunction, group: RawWorkspaceActivity[]) => {
   const counts = new Map<string, number>();
   group.forEach((item) => {
     const key = item.value.toLowerCase();
@@ -121,13 +121,13 @@ const attendanceSummary = (group: RawWorkspaceActivity[]) => {
   });
   const pieces = [...counts.entries()]
     .sort((left, right) => right[1] - left[1])
-    .map(([label, count]) => `${count} ${label}`);
+    .map(([status, count]) => t("dashboard.statusCount", { count, status: translateStatus(t, status) }));
   return pieces.join(" • ");
 };
 
 const uniqueLabourCount = (group: RawWorkspaceActivity[]) => new Set(group.map((item) => item.children?.[0]?.title ?? item.detail)).size;
 
-const groupAttendanceActivities = (items: RawWorkspaceActivity[]) => {
+const groupAttendanceActivities = (t: TFunction, items: RawWorkspaceActivity[]) => {
   const ascending = items.slice().sort((left, right) => parseTimestamp(left.createdAt) - parseTimestamp(right.createdAt));
   const groups: RawWorkspaceActivity[][] = [];
   ascending.forEach((item) => {
@@ -144,9 +144,9 @@ const groupAttendanceActivities = (items: RawWorkspaceActivity[]) => {
     return {
       ...latest,
       id: `attendance-group:${group[0].id}:${group.length}`,
-      title: "Attendance marked",
-      detail: `${group.length} labour`,
-      value: attendanceSummary(group),
+      title: t("dashboard.attendanceMarkedTitle"),
+      detail: t("dashboard.labourCount", { count: group.length }),
+      value: attendanceSummary(t, group),
       children: group.map((item) => ({
         id: item.id,
         title: item.children?.[0]?.title ?? item.detail,
@@ -157,7 +157,7 @@ const groupAttendanceActivities = (items: RawWorkspaceActivity[]) => {
   });
 };
 
-const groupLabourBatchActivities = (items: RawWorkspaceActivity[], groupedTitle: string) => {
+const groupLabourBatchActivities = (items: RawWorkspaceActivity[], groupedTitle: string, t: TFunction) => {
   const ascending = items.slice().sort((left, right) => parseTimestamp(left.createdAt) - parseTimestamp(right.createdAt));
   const groups: RawWorkspaceActivity[][] = [];
   ascending.forEach((item) => {
@@ -176,8 +176,8 @@ const groupLabourBatchActivities = (items: RawWorkspaceActivity[], groupedTitle:
       ...latest,
       id: `${latest.module}-group:${group[0].id}:${group.length}`,
       title: groupedTitle,
-      detail: `${uniqueLabourCount(group)} labour`,
-      value: `-${money(Math.abs(total))}`,
+      detail: t("dashboard.labourCount", { count: uniqueLabourCount(group) }),
+      value: money(-Math.abs(total)),
       children: group.map((item) => ({
         id: item.id,
         title: item.children?.[0]?.title ?? item.detail,
@@ -188,7 +188,7 @@ const groupLabourBatchActivities = (items: RawWorkspaceActivity[], groupedTitle:
   });
 };
 
-export async function loadWorkspaceActivity(canonical?: LabourFinancialReadModel): Promise<WorkspaceActivityItem[]> {
+export async function loadWorkspaceActivity(t: TFunction, canonical?: LabourFinancialReadModel): Promise<WorkspaceActivityItem[]> {
   const [labourers, attendance, dispatches, sales, advances, payments, settlements, partnerEntries, accounts, vouchers] = await Promise.all([
     workspaceRecords(offlineDb.labourers),
     workspaceRecords(offlineDb.attendance),
@@ -215,14 +215,14 @@ export async function loadWorkspaceActivity(canonical?: LabourFinancialReadModel
   const labourerById = new Map(labourers.filter(isActiveOperationalRecord).map((item) => [item.id, item]));
   const accountById = new Map(activeAccounts.map((item) => [item.id, item]));
 
-  const attendanceActivities = groupAttendanceActivities(activeAttendance.map((item: Attendance) => ({
+  const attendanceActivities = groupAttendanceActivities(t, activeAttendance.map((item: Attendance) => ({
     id: `attendance:${item.id}`,
     module: "attendance" as const,
-    moduleLabel: "Attendance",
+    moduleLabel: t("dashboardModule.attendance"),
     path: "/workspace/workforce/attendance",
-    title: "Attendance marked",
-    detail: `${labourerName(labourerById, item.labourerId)} · ${item.date}`,
-    value: capitalize(item.status),
+    title: t("dashboard.attendanceMarkedTitle"),
+    detail: `${labourerName(t, labourerById, item.labourerId)} · ${formatDate(item.date)}`,
+    value: translateStatus(t, item.status),
     createdAt: resolveActivityTimestamp(item.date, item.createdAt),
     activityDate: item.date,
     icon: UsersRound,
@@ -230,19 +230,19 @@ export async function loadWorkspaceActivity(canonical?: LabourFinancialReadModel
     groupWindowMinutes: ATTENDANCE_GROUP_WINDOW_MINUTES,
     children: [{
       id: item.id,
-      title: labourerName(labourerById, item.labourerId),
-      detail: capitalize(item.status),
+      title: labourerName(t, labourerById, item.labourerId),
+      detail: translateStatus(t, item.status),
     }],
   })));
 
   const advanceActivities = groupLabourBatchActivities(activeAdvances.map((item: Advance) => ({
     id: `advance:${item.id}`,
     module: "labour" as const,
-    moduleLabel: "Labour",
+    moduleLabel: t("dashboardModule.labour"),
     path: "/workspace/labour-payments/advances",
-    title: "Labour advance paid",
-    detail: `${labourerName(labourerById, item.labourerId)}${item.paymentMethod ? ` · ${item.paymentMethod}` : ""}`,
-    value: `-${money(item.amount)}`,
+    title: t("dashboard.labourAdvancePaid"),
+    detail: `${labourerName(t, labourerById, item.labourerId)}${item.paymentMethod ? ` · ${translateStatus(t, item.paymentMethod)}` : ""}`,
+    value: money(-item.amount),
     createdAt: resolveActivityTimestamp(item.date, item.createdAt),
     activityDate: item.date,
     icon: HandCoins,
@@ -250,19 +250,19 @@ export async function loadWorkspaceActivity(canonical?: LabourFinancialReadModel
     groupWindowMinutes: LABOUR_BATCH_WINDOW_MINUTES,
     children: [{
       id: item.id,
-      title: labourerName(labourerById, item.labourerId),
-      value: `-${money(item.amount)}`,
+      title: labourerName(t, labourerById, item.labourerId),
+      value: money(-item.amount),
     }],
-  })), "Labour advances paid");
+  })), t("dashboard.labourAdvancesPaidGroup"), t);
 
   const paymentActivities = groupLabourBatchActivities(activePayments.map((item: LabourPayment) => ({
     id: `labour-payment:${item.id}`,
     module: "labour" as const,
-    moduleLabel: "Labour",
+    moduleLabel: t("dashboardModule.labour"),
     path: "/workspace/labour-payments/overview",
-    title: "Labour payment posted",
-    detail: `${labourerName(labourerById, item.labourerId)}${item.paymentMethod ? ` · ${item.paymentMethod}` : ""}`,
-    value: `-${money(item.amount)}`,
+    title: t("dashboard.labourPaymentPosted"),
+    detail: `${labourerName(t, labourerById, item.labourerId)}${item.paymentMethod ? ` · ${translateStatus(t, item.paymentMethod)}` : ""}`,
+    value: money(-item.amount),
     createdAt: resolveActivityTimestamp(item.date, item.createdAt),
     activityDate: item.date,
     icon: Wallet,
@@ -270,18 +270,18 @@ export async function loadWorkspaceActivity(canonical?: LabourFinancialReadModel
     groupWindowMinutes: LABOUR_BATCH_WINDOW_MINUTES,
     children: [{
       id: item.id,
-      title: labourerName(labourerById, item.labourerId),
-      value: `-${money(item.amount)}`,
+      title: labourerName(t, labourerById, item.labourerId),
+      value: money(-item.amount),
     }],
-  })), "Labour payments posted");
+  })), t("dashboard.labourPaymentsPostedGroup"), t);
 
   const individualActivities: WorkspaceActivityItem[] = [
     ...activeSettlements.map((item: LabourWageSettlement) => ({
       id: `settlement:${item.id}`,
       module: "labour" as const,
-      moduleLabel: "Labour",
+      moduleLabel: t("dashboardModule.labour"),
       path: "/workspace/labour-payments/settlements",
-      title: "Wage settlement posted",
+      title: t("dashboard.wageSettlementPosted"),
       detail: formatShortRange(item.fromDate, item.toDate),
       value: money(item.expenseAmount),
       createdAt: resolveActivityTimestamp(item.settlementDate, item.createdAt),
@@ -292,11 +292,11 @@ export async function loadWorkspaceActivity(canonical?: LabourFinancialReadModel
     ...generalExpenseVouchers.map((item: Voucher) => ({
       id: `expense:${item.id}`,
       module: "expenses" as const,
-      moduleLabel: "Expenses",
+      moduleLabel: t("dashboardModule.expenses"),
       path: "/workspace/expenses",
-      title: "Expense recorded",
+      title: t("dashboard.expenseRecorded"),
       detail: `${getVoucherDisplayNumber(item) || item.voucherNumber} · ${getCanonicalExpenseCategory(item.category)}`,
-      value: `-${money(item.amount)}`,
+      value: money(-item.amount),
       createdAt: resolveActivityTimestamp(item.date, item.createdAt),
       activityDate: item.date,
       icon: ReceiptText,
@@ -305,11 +305,11 @@ export async function loadWorkspaceActivity(canonical?: LabourFinancialReadModel
     ...activeDispatches.map((item: Dispatch) => ({
       id: `dispatch:${item.id}`,
       module: "dispatch" as const,
-      moduleLabel: "Dispatch",
+      moduleLabel: t("dashboardModule.dispatch"),
       path: "/workspace/dispatch",
-      title: item.status === "delivered" || item.status === "sold" ? "Dispatch completed" : "Dispatch created",
-      detail: item.vehicleNumber ?? item.destination ?? "Dispatch",
-      value: `${item.items?.reduce((sum, entry) => sum + entry.cartons, 0) ?? item.cartons ?? 0} cartons`,
+      title: item.status === "delivered" || item.status === "sold" ? t("dashboard.dispatchCompleted") : t("dashboard.dispatchCreated"),
+      detail: item.vehicleNumber ?? item.destination ?? t("dashboardModule.dispatch"),
+      value: t("dashboard.cartonsCount", { count: item.items?.reduce((sum, entry) => sum + entry.cartons, 0) ?? item.cartons ?? 0 }),
       createdAt: resolveActivityTimestamp(item.date, item.createdAt),
       activityDate: item.date,
       icon: PackageOpen,
@@ -318,9 +318,9 @@ export async function loadWorkspaceActivity(canonical?: LabourFinancialReadModel
     ...activeSales.map((item: Sale) => ({
       id: `sale:${item.id}`,
       module: "sales" as const,
-      moduleLabel: "Sales",
+      moduleLabel: t("dashboardModule.sales"),
       path: "/workspace/sales",
-      title: "Sale recorded",
+      title: t("dashboard.saleRecorded"),
       detail: item.buyerName ?? item.produceType,
       value: money(item.amount),
       createdAt: resolveActivityTimestamp(item.date, item.createdAt),
@@ -331,11 +331,11 @@ export async function loadWorkspaceActivity(canonical?: LabourFinancialReadModel
     ...activePartnerEntries.map((item: PartnerEntry) => ({
       id: `partner-entry:${item.id}`,
       module: "accounts" as const,
-      moduleLabel: "Accounts",
+      moduleLabel: t("dashboardModule.accounts"),
       path: "/workspace/partner-ledger",
-      title: item.type === "settlement" ? "Partner settlement posted" : `${capitalize(item.type)} recorded`,
-      detail: item.partnerName ?? accountName(accountById, item.accountId),
-      value: `${item.type === "withdrawal" ? "-" : ""}${money(item.amount)}`,
+      title: item.type === "settlement" ? t("dashboard.partnerSettlement") : item.type === "withdrawal" ? t("dashboard.partnerWithdrawal") : t("dashboard.partnerContribution"),
+      detail: item.partnerName ?? accountName(t, accountById, item.accountId),
+      value: item.type === "withdrawal" ? money(-item.amount) : money(item.amount),
       createdAt: resolveActivityTimestamp(item.date, item.createdAt),
       activityDate: item.date,
       icon: BookOpenText,
@@ -346,11 +346,11 @@ export async function loadWorkspaceActivity(canonical?: LabourFinancialReadModel
   const canonicalActivities: WorkspaceActivityItem[] = (canonical?.activity ?? []).map((item) => ({
     id: item.id,
     module: "labour",
-    moduleLabel: "Labour",
+    moduleLabel: t("dashboardModule.labour"),
     path: "/workspace/labour-payments/vouchers",
     title: item.title,
-    detail: `${item.detail} · ${capitalize(item.status)}`,
-    value: capitalize(item.status),
+    detail: `${item.detail} · ${translateStatus(t, item.status)}`,
+    value: translateStatus(t, item.status),
     createdAt: item.date,
     activityDate: item.date.slice(0, 10),
     icon: ClipboardList,
@@ -361,6 +361,6 @@ export async function loadWorkspaceActivity(canonical?: LabourFinancialReadModel
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
-export function formatWorkspaceActivityDateTime(value: string) {
-  return toDateLabel(value);
+export function formatWorkspaceActivityDateTime(t: TFunction, value: string) {
+  return toDateLabel(t, value);
 }

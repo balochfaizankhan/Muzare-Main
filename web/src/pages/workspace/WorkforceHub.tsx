@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { ArrowLeft, CalendarCheck, ChevronRight, HandCoins, ReceiptText, WalletCards } from "lucide-react";
 import { NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../../auth/AuthProvider";
 import { SubpageHeader } from "../../components/SubpageHeader";
 import { useAppBack } from "../../hooks/useAppBack";
@@ -26,6 +27,7 @@ function WorkforceShell({
   compactMobileHeader?: boolean;
   children: ReactNode;
 }) {
+  const { t } = useTranslation();
   const location = useLocation();
   const backToWorkforce = useAppBack("/workspace/workforce/labour");
   const tabsRef = useRef<HTMLElement | null>(null);
@@ -39,7 +41,7 @@ function WorkforceShell({
       <main className={`subpage module-workspace workforce-shell-main${compactMobileHeader ? " workforce-shell-main--labour-payments" : ""}`}>
         {compactMobileHeader ? (
           <section className="labour-payments-mobile-header" aria-label={`${title} overview`}>
-            <button className="labour-payments-mobile-header__back" type="button" aria-label="Back to workforce" onClick={backToWorkforce}>
+            <button className="labour-payments-mobile-header__back" type="button" aria-label={t("workforceHubPage.backToWorkforce")} onClick={backToWorkforce}>
               <ArrowLeft size={18} />
             </button>
             <div className="labour-payments-mobile-header__copy">
@@ -81,25 +83,26 @@ export function WorkforceSectionLayout() {
 }
 
 export function LabourPaymentsSectionLayout() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const workspaceId = user?.workspaceId ?? "";
   const [searchParams] = useSearchParams();
   const query = workforceQuery(searchParams);
   const tabs = useMemo(() => {
     const allTabs = [
-      { to: `/workspace/labour-payments/overview${query}`, label: "Payments Due", module: "wages" as const },
-      { to: `/workspace/labour-payments/direct-due${query}`, label: "New Labour Due", module: "wages" as const },
-      { to: `/workspace/labour-payments/wage-rates${query}`, label: "Wage Rates", module: "wages" as const },
-      { to: `/workspace/labour-payments/vouchers${query}`, label: "Payment Vouchers", module: "wages" as const },
-      { to: `/workspace/labour-payments/advances${query}`, label: "Advances", module: "wages" as const },
+      { to: `/workspace/labour-payments/overview${query}`, label: t("workforceHubPage.paymentsDueTab"), module: "wages" as const },
+      { to: `/workspace/labour-payments/direct-due${query}`, label: t("workforceHubPage.newLabourDueTab"), module: "wages" as const },
+      { to: `/workspace/labour-payments/wage-rates${query}`, label: t("layout.wages"), module: "wages" as const },
+      { to: `/workspace/labour-payments/vouchers${query}`, label: t("workforceHubPage.paymentVouchersTab"), module: "wages" as const },
+      { to: `/workspace/labour-payments/advances${query}`, label: t("layout.advances"), module: "wages" as const },
     ];
     return allTabs.filter((tab) => !user || hasModulePermission(user, tab.module, "view", workspaceId));
-  }, [query, user, workspaceId]);
+  }, [query, user, workspaceId, t]);
   return (
     <WorkforceShell
-      title="Labour Payments"
-      description="Review labour dues, apply advances, and post every cash movement through one Labour Payment Voucher register."
-      subtitle="Due → Review → Apply advance or pay → Post"
+      title={t("layout.labourPayments")}
+      description={t("workforceHubPage.labourPaymentsDescription")}
+      subtitle={t("workforceHubPage.labourPaymentsSubtitle")}
       tabs={tabs}
       compactMobileHeader
     >
@@ -121,13 +124,14 @@ function WorkforceReportLinks({
   compactRows?: boolean;
   backTo?: string;
 }) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const back = useAppBack(backTo ?? "/workspace/workforce/labour");
   return (
     <section className={`record-panel${compactRows ? " workforce-reports-panel" : ""}`}>
       <div className={compactRows ? "workforce-reports-header" : "advances-heading"}>
         {compactRows && backTo ? (
-          <button type="button" className="workforce-reports-header__back" aria-label="Back to workforce" onClick={back}>
+          <button type="button" className="workforce-reports-header__back" aria-label={t("workforceHubPage.backToWorkforce")} onClick={back}>
             <ArrowLeft size={18} />
           </button>
         ) : null}
@@ -153,30 +157,32 @@ function WorkforceReportLinks({
 }
 
 export function WorkforceReportsHub() {
+  const { t } = useTranslation();
   return (
     <WorkforceReportLinks
-      title="Workforce Reports"
-      description="Choose a workforce report to review"
+      title={t("workforceHubPage.workforceReportsTitle")}
+      description={t("workforceHubPage.workforceReportsDescription")}
       compactRows
       backTo="/workspace/workforce/labour"
       links={[
-        { to: "/workspace/reports?report=attendance", title: "Attendance", detail: "Register, payable days, and totals", icon: CalendarCheck },
-        { to: "/workspace/reports?report=advances", title: "Advances", detail: "Summary and log by labour", icon: HandCoins },
-        { to: "/workspace/reports?report=wage-rates", title: "Wage Rates", detail: "Current, expired, and upcoming rates", icon: WalletCards },
+        { to: "/workspace/reports?report=attendance", title: t("layout.attendance"), detail: t("workforceHubPage.attendanceReportDetail"), icon: CalendarCheck },
+        { to: "/workspace/reports?report=advances", title: t("layout.advances"), detail: t("workforceHubPage.advancesReportDetail"), icon: HandCoins },
+        { to: "/workspace/reports?report=wage-rates", title: t("layout.wages"), detail: t("workforceHubPage.wageRatesReportDetail"), icon: WalletCards },
       ]}
     />
   );
 }
 
 export function LabourPaymentsReportsHub() {
+  const { t } = useTranslation();
   return (
     <WorkforceReportLinks
-        title="Labour Payments Reports"
-        description="Keep labour-payment reporting grouped with advances, wage rates, Labour Dues, and payment vouchers."
+        title={t("workforceHubPage.labourPaymentsReportsTitle")}
+        description={t("workforceHubPage.labourPaymentsReportsDescription")}
         links={[
-          { to: "/workspace/reports?report=advances", title: "Advance Report", detail: "Track advances, outstanding balances, and recent transactions.", icon: HandCoins },
-          { to: "/workspace/reports?report=wage-rates", title: "Wage Rate Report", detail: "Audit active and historical wage-rate assignments.", icon: WalletCards },
-          { to: "/workspace/labour-payments/overview", title: "Payments Due", detail: "Review Labour Dues and settlement progress.", icon: ReceiptText },
+          { to: "/workspace/reports?report=advances", title: t("workforcePage.advanceReport"), detail: t("workforceHubPage.advanceReportDetail"), icon: HandCoins },
+          { to: "/workspace/reports?report=wage-rates", title: t("wageRatesPage.reportTitle"), detail: t("workforceHubPage.wageRateReportDetail"), icon: WalletCards },
+          { to: "/workspace/labour-payments/overview", title: t("workforceHubPage.paymentsDueTab"), detail: t("workforceHubPage.paymentsDueReportDetail"), icon: ReceiptText },
         ]}
       />
     );

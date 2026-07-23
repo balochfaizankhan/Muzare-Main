@@ -15,6 +15,7 @@ import { buildInclusiveDateKeys, chunkAttendanceDateKeys, formatLocalDateKey, no
 import { formatMoney, formatNumber } from "../../lib/format";
 import { getActiveLabourWageSettlements, getCashAffectingVouchers, getGeneralExpenseVouchers, getLabourWageSettlementAdvanceOffset, getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher } from "../../lib/labourWageSettlements";
 import { translateExpenseCategory, translateExpenseSubcategory, translatePaymentType, translateSaleType, translateSalesStatus } from "../../lib/systemTranslations";
+import { translateStatus } from "../../lib/statusLabels";
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
 import { getVoucherDisplayNumber } from "../../lib/vouchers";
 import { getActiveVouchers, loadWorkspaceVouchers } from "../../lib/voucherCollections";
@@ -438,7 +439,7 @@ function ReportShell({
       </div>
       <div className="reports-actions">
         <button type="button" onClick={onExport}>{exportLabel ?? t("reportsPage.exportCsv")}</button>
-        {onPdfExport ? <button type="button" onClick={onPdfExport}>{pdfLabel ?? "Export PDF"}</button> : null}
+        {onPdfExport ? <button type="button" onClick={onPdfExport}>{pdfLabel ?? t("reportsPage.exportPdf")}</button> : null}
         <button type="button" onClick={onPrint}>{printLabel ?? t("reportsPage.print")}</button>
       </div>
     </header>
@@ -517,7 +518,10 @@ export function Reports() {
     }
   }, [normalizedRequestedReport, requestedReport, searchParams]);
   const deleteSaleRecord = async (sale: Sale) => {
-    if (!window.confirm(`Delete sale${sale.invoiceNumber ? ` ${sale.invoiceNumber}` : ""}?`)) return;
+    const confirmMessage = sale.invoiceNumber
+      ? t("reportsPage.confirmDeleteSale", { reference: sale.invoiceNumber })
+      : t("reportsPage.confirmDeleteSaleGeneric");
+    if (!window.confirm(confirmMessage)) return;
     await deleteOperationalRecord("sale", sale);
     setSales((current) => current.filter((item) => item.id !== sale.id));
     setSelectedSaleRecord(null);
@@ -589,7 +593,7 @@ export function Reports() {
     recipientDisplayName?: string | null;
     recipientName?: string | null;
     labourerId?: string | null;
-  }) => record.recipientDisplayName || record.recipientName || (record.labourerId ? labourName(record.labourerId) : "Unresolved recipient");
+  }) => record.recipientDisplayName || record.recipientName || (record.labourerId ? labourName(record.labourerId) : t("reportsPage.unresolvedRecipient"));
   const advancePaymentSourceName = (record: {
     paymentSourceDisplayName?: string | null;
     sourceAccountName?: string | null;
@@ -604,9 +608,9 @@ export function Reports() {
   }[groupKey]);
   const partnerLiabilityGroupTitle = (groupKey: PartnerLiabilityLedgerGroupKey) => ({
     capital_injected: t("reportsPage.capitalInjected"),
-    purchase_vouchers_paid: "Purchase vouchers paid",
-    labour_advances_paid: "Labour advances paid",
-    labour_wage_settlements: "Labour wage settlements",
+    purchase_vouchers_paid: t("reportsPage.purchaseVouchersPaid"),
+    labour_advances_paid: t("reportsPage.labourAdvancesPaidGroup"),
+    labour_wage_settlements: t("reportsPage.labourWageSettlementsGroup"),
     transfers_out: t("reportsPage.transfersOut"),
     transfers_in: t("reportsPage.transfersIn"),
     money_returned: t("reportsPage.moneyReturned"),
@@ -735,36 +739,36 @@ export function Reports() {
         <header className="attendance-register-print-header">
           <div className="attendance-register-print-brand">
             <strong>Muzare</strong>
-            <span>Attendance Register</span>
+            <span>{t("reportsPage.attendanceRegister")}</span>
           </div>
           <div className="attendance-register-print-title">
             <h2>{t("reportsPage.attendanceRegister")}</h2>
-            <p>{printRangeLabel}</p>
+            <p className="bidi-isolate">{printRangeLabel}</p>
           </div>
           <dl className="attendance-register-print-meta">
-            <div><dt>Farm</dt><dd>{bootstrapFarm?.name ?? "All farms"}</dd></div>
-            <div><dt>Season</dt><dd>{bootstrapSeason?.name ?? "All seasons"}</dd></div>
-            <div><dt>Group</dt><dd>{labourGroupLabel}</dd></div>
-            <div><dt>Labour</dt><dd>{labourLabel}</dd></div>
-            <div><dt>Dates shown</dt><dd>{shownDateRangeLabel}</dd></div>
-            <div><dt>Generated</dt><dd>{printGeneratedAt}</dd></div>
-            <div><dt>By</dt><dd>{printGeneratedBy}</dd></div>
-            <div><dt>Page</dt><dd>{page.pageNumber} of {page.totalPages}</dd></div>
+            <div><dt>{t("reportsPage.farm")}</dt><dd>{bootstrapFarm?.name ?? t("reportsPage.allFarms")}</dd></div>
+            <div><dt>{t("reportsPage.season")}</dt><dd>{bootstrapSeason?.name ?? t("reportsPage.allSeasons")}</dd></div>
+            <div><dt>{t("reportsPage.group")}</dt><dd>{labourGroupLabel}</dd></div>
+            <div><dt>{t("reportsPage.labour")}</dt><dd>{labourLabel}</dd></div>
+            <div><dt>{t("reportsPage.datesShown")}</dt><dd className="bidi-isolate">{shownDateRangeLabel}</dd></div>
+            <div><dt>{t("reportsPage.generated")}</dt><dd className="bidi-isolate">{printGeneratedAt}</dd></div>
+            <div><dt>{t("reportsPage.by")}</dt><dd>{printGeneratedBy}</dd></div>
+            <div><dt>{t("reportsPage.page")}</dt><dd className="bidi-isolate">{t("reportsPage.pageOf", { current: page.pageNumber, total: page.totalPages })}</dd></div>
           </dl>
         </header>
         <section className="attendance-register-print-summary">
-          <article><span>Labour count</span><strong>{attendanceTotals.labourCount}</strong></article>
-          <article><span>Present total</span><strong>{attendanceTotals.present}</strong></article>
-          <article><span>Half-day total</span><strong>{attendanceTotals.halfDay}</strong></article>
-          <article><span>Absent total</span><strong>{attendanceTotals.absent}</strong></article>
-          <article><span>Payable days</span><strong>{formatNumber(attendanceTotals.payableDays)}</strong></article>
-          <article><span>Attendance wages</span><strong>{money(attendanceTotals.wages)}</strong></article>
+          <article><span>{t("reportsPage.labourCount")}</span><strong>{attendanceTotals.labourCount}</strong></article>
+          <article><span>{t("reportsPage.presentTotal")}</span><strong>{attendanceTotals.present}</strong></article>
+          <article><span>{t("reportsPage.halfDayTotal")}</span><strong>{attendanceTotals.halfDay}</strong></article>
+          <article><span>{t("reportsPage.absentTotal")}</span><strong>{attendanceTotals.absent}</strong></article>
+          <article><span>{t("reportsPage.payableDays")}</span><strong>{formatNumber(attendanceTotals.payableDays)}</strong></article>
+          <article><span>{t("reportsPage.attendanceWages")}</span><strong>{money(attendanceTotals.wages)}</strong></article>
         </section>
         <section className="attendance-register-print-legend">
-          <span><b>P</b> Present</span>
-          <span><b>½</b> Half-day</span>
-          <span><b>A</b> Absent</span>
-          <span><b>-</b> No entry</span>
+          <span><b>P</b> {t("reportsPage.present")}</span>
+          <span><b>½</b> {t("reportsPage.halfDay")}</span>
+          <span><b>A</b> {t("reportsPage.absent")}</span>
+          <span><b>-</b> {t("reportsPage.noEntry")}</span>
         </section>
         <div className="attendance-register-print-table-wrap">
           <table className="attendance-register-print-table report-data-table">
@@ -782,13 +786,13 @@ export function Reports() {
             <thead>
               <tr>
                 <th>#</th>
-                <th>Labour Name</th>
-                <th>Group</th>
+                <th>{t("reportsPage.labourName")}</th>
+                <th>{t("reportsPage.group")}</th>
                 <th>P</th>
                 <th>1/2</th>
                 <th>A</th>
-                <th>Payable Days</th>
-                <th>Wages (SAR)</th>
+                <th>{t("reportsPage.payableDays")}</th>
+                <th>{t("reportsPage.wagesSar")}</th>
                 {page.dateBlock.map((date) => <th className="attendance-register-print-date-heading" key={date}><span>{formatShortDate(date)}</span></th>)}
               </tr>
             </thead>
@@ -814,13 +818,13 @@ export function Reports() {
                 </tr>
               )) : (
                 <tr>
-                  <td className="attendance-register-print-empty" colSpan={8 + page.dateBlock.length}>No attendance records found for the selected filters.</td>
+                  <td className="attendance-register-print-empty" colSpan={8 + page.dateBlock.length}>{t("reportsPage.noAttendanceRecordsFound")}</td>
                 </tr>
               )}
             </tbody>
             <tfoot>
               <tr className="attendance-register-print-total-row">
-                <th colSpan={3}>Full-period totals (shown labour)</th>
+                <th colSpan={3}>{t("reportsPage.fullPeriodTotals")}</th>
                 <td>{formatNumber(page.pageTotals.present)}</td>
                 <td>{formatNumber(page.pageTotals.halfDay)}</td>
                 <td>{formatNumber(page.pageTotals.absent)}</td>
@@ -829,7 +833,7 @@ export function Reports() {
                 {page.dateBlock.map((date, index) => <td key={`${page.id}:total:${date}:${index}`} />)}
               </tr>
               <tr className="attendance-register-print-daily-row">
-                <th colSpan={8}>Daily payable totals (shown dates)</th>
+                <th colSpan={8}>{t("reportsPage.dailyPayableTotals")}</th>
                 {page.dateTotals.map((total, index) => <td key={`${page.id}:${page.dateBlock[index]}`}>{formatNumber(total)}</td>)}
               </tr>
             </tfoot>
@@ -837,8 +841,8 @@ export function Reports() {
         </div>
         <footer className="attendance-register-print-footer">
           <span>Muzare</span>
-          <span>Page {page.pageNumber} of {page.totalPages}</span>
-          <span>{printRangeLabel}</span>
+          <span className="bidi-isolate">{t("reportsPage.pageOf", { current: page.pageNumber, total: page.totalPages })}</span>
+          <span className="bidi-isolate">{printRangeLabel}</span>
         </footer>
       </section>
     );
@@ -849,38 +853,38 @@ export function Reports() {
       <header className="advance-report-print-header">
         <div className="advance-report-print-brand">
           <strong>Muzare</strong>
-          <span>Labour Advances Report</span>
+          <span>{t("reportsPage.advancesReportBrand")}</span>
         </div>
         <div className="advance-report-print-title">
           <h2>{t("reportsPage.advanceSummary")}</h2>
-          <p>{rangeLabel}</p>
+          <p className="bidi-isolate">{rangeLabel}</p>
         </div>
         <dl className="advance-report-print-meta">
-          <div><dt>Farm</dt><dd>{bootstrapFarm?.name ?? "All farms"}</dd></div>
-          <div><dt>Season</dt><dd>{bootstrapSeason?.name ?? "All seasons"}</dd></div>
-          <div><dt>Group</dt><dd>{advanceHeaderGroupLabel}</dd></div>
-          <div><dt>Labour</dt><dd>{advanceHeaderLabourLabel}</dd></div>
-          <div><dt>Paid from</dt><dd>{advanceHeaderSourceLabel}</dd></div>
-          <div><dt>Generated</dt><dd>{advanceReportGeneratedAt}</dd></div>
-          <div><dt>By</dt><dd>{printGeneratedBy}</dd></div>
+          <div><dt>{t("reportsPage.farm")}</dt><dd>{bootstrapFarm?.name ?? t("reportsPage.allFarms")}</dd></div>
+          <div><dt>{t("reportsPage.season")}</dt><dd>{bootstrapSeason?.name ?? t("reportsPage.allSeasons")}</dd></div>
+          <div><dt>{t("reportsPage.group")}</dt><dd>{advanceHeaderGroupLabel}</dd></div>
+          <div><dt>{t("reportsPage.labour")}</dt><dd>{advanceHeaderLabourLabel}</dd></div>
+          <div><dt>{t("reportsPage.paidFrom")}</dt><dd>{advanceHeaderSourceLabel}</dd></div>
+          <div><dt>{t("reportsPage.generated")}</dt><dd className="bidi-isolate">{advanceReportGeneratedAt}</dd></div>
+          <div><dt>{t("reportsPage.by")}</dt><dd>{printGeneratedBy}</dd></div>
         </dl>
       </header>
       <section className="advance-report-print-summary">
-        <article><span>Total advances</span><strong>{money(advanceReportTotals.totalAdvances)}</strong></article>
-        <article><span>Unique labourers</span><strong>{formatNumber(advanceReportTotals.uniqueLabourers)}</strong></article>
-        <article><span>Transactions</span><strong>{formatNumber(advanceReportTotals.transactions)}</strong></article>
-        <article><span>Adjusted in settlements</span><strong>{money(advanceReportTotals.adjustedInSettlements)}</strong></article>
-        <article><span>Recovered / refunded</span><strong>{money(advanceReportTotals.recoveredAdvances)}</strong></article>
-        <article><span>Outstanding advances</span><strong>{money(advanceReportTotals.outstandingAdvances)}</strong></article>
-        <article><span>Posted settlements</span><strong>{formatNumber(advanceReportTotals.postedSettlements)}</strong></article>
+        <article><span>{t("reportsPage.totalAdvances")}</span><strong>{money(advanceReportTotals.totalAdvances)}</strong></article>
+        <article><span>{t("reportsPage.uniqueLabourers")}</span><strong>{formatNumber(advanceReportTotals.uniqueLabourers)}</strong></article>
+        <article><span>{t("reportsPage.transactions")}</span><strong>{formatNumber(advanceReportTotals.transactions)}</strong></article>
+        <article><span>{t("reportsPage.adjustedInSettlements")}</span><strong>{money(advanceReportTotals.adjustedInSettlements)}</strong></article>
+        <article><span>{t("reportsPage.recoveredRefunded")}</span><strong>{money(advanceReportTotals.recoveredAdvances)}</strong></article>
+        <article><span>{t("reportsPage.outstandingAdvances")}</span><strong>{money(advanceReportTotals.outstandingAdvances)}</strong></article>
+        <article><span>{t("reportsPage.postedSettlements")}</span><strong>{formatNumber(advanceReportTotals.postedSettlements)}</strong></article>
       </section>
       <div className="advance-report-print-note">
-        <p>Labour advances are grouped by labourer. Each section shows the labour total and the transactions included in the selected period.</p>
+        <p>{t("reportsPage.advanceGroupedNote")}</p>
       </div>
       <footer className="advance-report-print-footer advance-report-print-footer--summary">
         <span>Muzare</span>
-        <span>Page 1 of {Math.max(1, advanceReportLabourSections.length + 1)}</span>
-        <span>{advanceReportGeneratedAt}</span>
+        <span className="bidi-isolate">{t("reportsPage.pageOf", { current: 1, total: Math.max(1, advanceReportLabourSections.length + 1) })}</span>
+        <span className="bidi-isolate">{advanceReportGeneratedAt}</span>
       </footer>
       <div className="advance-report-print-labours">
         {advanceReportLabourSections.length > 0 ? advanceReportLabourSections.map((section, index) => (
@@ -890,42 +894,42 @@ export function Reports() {
                 <h3>{section.labourer.name}</h3>
                 <p>{section.paymentTypeLabel} · {section.groupLabel}</p>
               </div>
-              <strong>Total: {money(section.total)}</strong>
+              <strong>{t("reportsPage.totalLabelColon")} <span className="bidi-isolate">{money(section.total)}</span></strong>
             </header>
             <div className="advance-report-print-labour-meta">
-              <span>Transactions: {formatNumber(section.transactionCount)}</span>
-              <span>Adjusted in settlements: {money(section.settled)}</span>
-              <span>Outstanding: {money(section.outstanding)}</span>
-              <span>Last advance: {section.lastAdvanceDate || "-"}</span>
+              <span>{t("reportsPage.transactions")}: <span className="bidi-isolate">{formatNumber(section.transactionCount)}</span></span>
+              <span>{t("reportsPage.adjustedInSettlements")}: <span className="bidi-isolate">{money(section.settled)}</span></span>
+              <span>{t("reportsPage.outstanding")}: <span className="bidi-isolate">{money(section.outstanding)}</span></span>
+              <span>{t("reportsPage.lastAdvanceLabel")}: <span className="bidi-isolate">{section.lastAdvanceDate || "-"}</span></span>
             </div>
             <table className="advance-report-print-table">
               <thead>
                 <tr>
-                  <th>Date</th>
-                  <th>Source / Paid From</th>
-                  <th>Description</th>
-                  <th className="is-amount">Amount (SAR)</th>
+                  <th>{t("reportsPage.date")}</th>
+                  <th>{t("reportsPage.sourcePaidFrom")}</th>
+                  <th>{t("reportsPage.description")}</th>
+                  <th className="is-amount">{t("reportsPage.amountSar")}</th>
                 </tr>
               </thead>
               <tbody>
                 {section.records.map((record) => (
                   <tr key={record.id}>
-                    <td>{record.date}</td>
+                    <td className="bidi-isolate">{record.date}</td>
                     <td>{advancePaymentSourceName(record)}</td>
                     <td>{record.notes || "-"}</td>
-                    <td className="is-amount">{formatNumber(record.amount)}</td>
+                    <td className="is-amount bidi-isolate">{formatNumber(record.amount)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
             <footer className="advance-report-print-footer advance-report-print-footer--labour">
               <span>Muzare</span>
-              <span>Page {index + 2} of {Math.max(1, advanceReportLabourSections.length + 1)}</span>
-              <span>{advanceReportGeneratedAt}</span>
+              <span className="bidi-isolate">{t("reportsPage.pageOf", { current: index + 2, total: Math.max(1, advanceReportLabourSections.length + 1) })}</span>
+              <span className="bidi-isolate">{advanceReportGeneratedAt}</span>
             </footer>
           </article>
         )) : (
-          <div className="advance-report-print-empty">No advances found for the selected filters.</div>
+          <div className="advance-report-print-empty">{t("reportsPage.noAdvancesFound")}</div>
         )}
       </div>
     </section>
@@ -1064,7 +1068,7 @@ export function Reports() {
   const bootstrapFarm = bootstrapQuery.data?.farms.find((farm) => farm.id === bootstrapQuery.data?.activeFarmId) ?? null;
   const bootstrapSeason = bootstrapQuery.data?.seasons.find((season) => season.id === bootstrapQuery.data?.activeSeasonId) ?? null;
   const printGeneratedAt = useMemo(() => printTimestampFormatter.format(new Date()), [attendanceTotals, attendanceDates.length, report, from, to, groupFilter, selectedLabourerIds.join(","), bootstrapQuery.dataUpdatedAt, user?.displayName, user?.email]);
-  const printGeneratedBy = user?.displayName ?? user?.email ?? "Unknown";
+  const printGeneratedBy = user?.displayName ?? user?.email ?? t("reportsPage.unknown");
   const selectedLabourNames = selectedLabourerIds.map((id) => labourById.get(id)?.name).filter(Boolean).join(", ");
   const attendanceRegisterGroupLabel = groupFilter === ungroupedValue ? t("reportsPage.ungrouped") : groupFilter || t("reportsPage.allGroups");
   const attendanceRegisterLabourLabel = selectedLabourNames || t("reportsPage.allLabour");
@@ -1149,7 +1153,7 @@ export function Reports() {
     const records = item.records.slice().sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
     const lastAdvanceDate = records[0]?.date ?? "";
     const sourceNames = [...new Set(records.map((record) => advancePaymentSourceName(record)).filter(Boolean))];
-    const sourceLabel = sourceNames.length > 1 ? "Multiple payment sources" : sourceNames[0] ?? "-";
+    const sourceLabel = sourceNames.length > 1 ? t("reportsPage.multiplePaymentSources") : sourceNames[0] ?? "-";
     return {
       labourer: item.labourer,
       paymentTypeLabel: paymentTypeDisplayLabel(item.labourer),
@@ -1438,9 +1442,13 @@ export function Reports() {
         accountId: voucher.accountId,
         accountName: accountName(voucher.accountId),
         type: "voucher",
-        typeLabel: settlementVoucher ? "Non-cash labour advance settlement" : t("reportsPage.voucherExpense"),
+        typeLabel: settlementVoucher ? t("reportsPage.nonCashLabourAdvanceSettlement") : t("reportsPage.voucherExpense"),
         reference: settlementVoucher ? (settlementRecord?.settlementNumber ?? getVoucherDisplayNumber(voucher) ?? voucher.voucherNumber) : (getVoucherDisplayNumber(voucher) || voucher.voucherNumber),
-        description: settlementVoucher ? `Non-cash labour advance settlement — advances applied ${money(nonCashApplied)}${cashPaid ? `, cash paid ${money(cashPaid)}` : ""}` : voucher.description,
+        description: settlementVoucher
+          ? (cashPaid
+            ? t("reportsPage.nonCashSettlementDescriptionWithCash", { applied: money(nonCashApplied), cash: money(cashPaid) })
+            : t("reportsPage.nonCashSettlementDescription", { applied: money(nonCashApplied) }))
+          : voucher.description,
         debit: 0,
         credit: 0,
         memoAmount: settlementVoucher ? nonCashApplied : undefined,
@@ -1461,9 +1469,9 @@ export function Reports() {
         id: `labour-payment-voucher:${voucher.id}`,
         date: voucher.date,
         accountId: voucher.accountId,
-        accountName: account?.name ?? "Payment account",
+        accountName: account?.name ?? t("reportsPage.paymentAccountFallback"),
         type: "labour_payment_voucher",
-        typeLabel: voucher.nature.toLowerCase().replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase()),
+        typeLabel: translateStatus(t, voucher.nature),
         reference: voucher.voucherNumber,
         description: voucher.description,
         debit: informational ? 0 : voucher.transactionType === "debit" ? voucher.amount : 0,
@@ -1639,14 +1647,14 @@ export function Reports() {
   const exportAttendanceRegister = () => {
     const rows = [
       [
-        "Serial",
+        t("reportsPage.serial"),
         t("reportsPage.labourName"),
         t("reportsPage.group"),
         t("reportsPage.present"),
         t("reportsPage.halfDay"),
         t("reportsPage.absent"),
         t("reportsPage.payableDays"),
-        "Wages SAR",
+        t("reportsPage.wagesSarShort"),
         ...attendanceDates.map(formatCsvDate),
       ],
       ...attendanceSummary.map((item, index) => [
@@ -1661,7 +1669,7 @@ export function Reports() {
         ...attendanceDates.map((date) => attendancePrintMark(item.records.find((record) => record.date === date)?.status)),
       ]),
       [
-        "Grand Total",
+        t("reportsPage.grandTotal"),
         "",
         "",
         attendanceTotals.present,
@@ -1672,7 +1680,7 @@ export function Reports() {
         ...attendanceDates.map(() => ""),
       ],
       [
-        "Daily Total Presents",
+        t("reportsPage.dailyTotalPresents"),
         "",
         "",
         "",
@@ -1689,7 +1697,7 @@ export function Reports() {
     ...attendanceSummary.map((item) => [item.labourer.name, item.present, item.halfDay, item.absent, formatNumber(item.payable), item.wage]),
   ]);
   const exportAdvanceSummaryCsv = () => downloadCsv("labour-advances-summary.csv", [
-    ["Serial", "Labour / Group", "Recipient Type", "Group", "Payment Sources", "Total Advances SAR", "Adjusted in Settlements SAR", "Recovered / Refunded SAR", "Outstanding Advances SAR", "Transaction Count", "Last Advance Date"],
+    [t("reportsPage.serial"), t("reportsPage.labourGroupColumn"), t("reportsPage.recipientType"), t("reportsPage.group"), t("reportsPage.paymentSources"), t("reportsPage.totalAdvancesSar"), t("reportsPage.adjustedInSettlementsSar"), t("reportsPage.recoveredRefundedSar"), t("reportsPage.outstandingAdvancesSar"), t("reportsPage.transactionCountColumn"), t("reportsPage.lastAdvanceDate")],
     ...advanceReportLabourSections.map((section, index) => [
       index + 1,
       section.labourer.name,
@@ -1705,7 +1713,7 @@ export function Reports() {
     ]),
   ]);
   const exportAdvanceDetailCsv = () => downloadCsv("labour-advances-detail.csv", [
-    ["Serial", "Labour / Group", "Recipient Type", "Group", "Date", "Source / Paid From", "Description", "Advance Amount SAR", "Recovered SAR", "Status", "Voucher Number"],
+    [t("reportsPage.serial"), t("reportsPage.labourGroupColumn"), t("reportsPage.recipientType"), t("reportsPage.group"), t("reportsPage.date"), t("reportsPage.sourcePaidFrom"), t("reportsPage.description"), t("reportsPage.advanceAmountSar"), t("reportsPage.recoveredSar"), t("reportsPage.status"), t("reportsPage.voucherNumber")],
     ...advanceRows.map((item, index) => {
       const labourer = labourById.get(item.labourerId);
       return [
@@ -1718,7 +1726,7 @@ export function Reports() {
         item.notes || "-",
         item.amount,
         item.recoveredAmount,
-        item.status,
+        translateStatus(t, item.status),
         item.voucherNumber,
       ];
     }),
@@ -1726,7 +1734,7 @@ export function Reports() {
   const exportAdvanceCsv = () => (views.advances === "summary" ? exportAdvanceSummaryCsv() : exportAdvanceDetailCsv());
   const exportExpenseSummary = () => {
     const categoryTotals = [...new Set(voucherReportLineRows.map((item) => item.category))].map((name) => [translateExpenseCategory(name), voucherReportLineRows.filter((item) => item.category === name).reduce((sum, item) => sum + item.amount, 0)]);
-    if (canonicalExpenseRows.length) categoryTotals.push(["Labour wages", canonicalExpenseRows.reduce((sum, item) => sum + item.amount, 0)]);
+    if (canonicalExpenseRows.length) categoryTotals.push([t("reportsPage.labourWagesCategory"), canonicalExpenseRows.reduce((sum, item) => sum + item.amount, 0)]);
     const accountTotals = expenseAccountTotals;
     downloadCsv("expense-summary.csv", [
       [t("reportsPage.dateRange"), rangeLabel],
@@ -1745,11 +1753,11 @@ export function Reports() {
     ...voucherRows.flatMap((voucher) => voucherReportItems(voucher).map((item, index) => [index === 0 ? (getVoucherDisplayNumber(voucher) || voucher.voucherNumber) : "", index === 0 ? voucher.date : "", item.description, expenseLabel(item.category, item.subcategory), index === 0 ? accountName(voucher.accountId) : "", item.amount])),
     ...canonicalExpenseRows.map((item) => {
       const sources = canonicalExpenseAccountsByDue.get(item.id) ?? [];
-      return [item.dueNumber ?? item.id, item.date, item.description, "Labour wages", sources.map((source) => `${source.accountName} — ${money(source.amount)}`).join("; ") || "Unattributed", item.amount];
+      return [item.dueNumber ?? item.id, item.date, item.description, t("reportsPage.labourWagesCategory"), sources.map((source) => `${source.accountName} — ${money(source.amount)}`).join("; ") || t("reportsPage.unattributed"), item.amount];
     }),
   ]);
   const exportPartnerPosition = () => downloadCsv("partner-position.csv", [
-    [t("reportsPage.partner"), t("reportsPage.openingBalance"), t("reportsPage.capitalInjected"), "Purchase vouchers", "Total labour advances paid", "Settled through wage settlements", "Outstanding labour advances", "Labour settlements cash paid", t("reportsPage.transfersOut"), t("reportsPage.transfersIn"), t("reportsPage.moneyReturned"), t("reportsPage.adjustments"), t("reportsPage.currentPartnerBalance")],
+    [t("reportsPage.partner"), t("reportsPage.openingBalance"), t("reportsPage.capitalInjected"), t("reportsPage.purchaseVouchersColumn"), t("reportsPage.totalLabourAdvancesPaidColumn"), t("reportsPage.settledThroughWageSettlementsColumn"), t("reportsPage.outstandingLabourAdvancesColumn"), t("reportsPage.labourSettlementsCashPaidColumn"), t("reportsPage.transfersOut"), t("reportsPage.transfersIn"), t("reportsPage.moneyReturned"), t("reportsPage.adjustments"), t("reportsPage.currentPartnerBalance")],
     ...partnerLiabilityPositions.map((item) => [item.name, item.openingBalance, item.capitalInjected, item.purchaseVouchersPaid, item.totalLabourAdvancesPaid, item.labourSettlementNonCashApplied, item.outstandingLabourAdvances, item.labourSettlementCashPaid, item.transfersOut, item.transfersIn, item.moneyReturned, item.adjustments, item.currentPartnerBalance]),
   ]);
   const exportPartnerLedger = () => downloadCsv("partner-ledger.csv", [
@@ -1815,7 +1823,7 @@ export function Reports() {
               report === "attendance"
                 ? `${t("reportsPage.labour")} / ${t("reportsPage.group")}`
               : report === "advances"
-                  ? "Search advances"
+                  ? t("reportsPage.searchAdvancesPlaceholder")
                   : report === "sales"
                     ? `${t("reportsPage.invoiceNumber")} / ${t("reportsPage.buyerName")} / ${t("reportsPage.product")} / ${t("reportsPage.quantity")}`
                     : report === "dispatch"
@@ -1849,7 +1857,7 @@ export function Reports() {
               if (report === "attendance") setAttendanceMoreFiltersOpen((current) => !current);
               else setAdvanceMoreFiltersOpen((current) => !current);
             }}>
-              <span>More filters</span>
+              <span>{t("reportsPage.moreFilters")}</span>
               {advancedFilterCount > 0 ? <b>{advancedFilterCount}</b> : null}
               {(report === "attendance" ? attendanceMoreFiltersOpen : advanceMoreFiltersOpen) ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
             </summary>
@@ -1857,23 +1865,23 @@ export function Reports() {
               {report === "attendance" && <>
                 <ResponsiveSelectField
                   ariaLabel={t("reportsPage.group")}
-                  title="Select labour group"
+                  title={t("reportsPage.selectLabourGroup")}
                   value={groupFilter}
                   onChange={setGroupFilter}
                   placeholder={t("reportsPage.allGroups")}
                   allLabel={t("reportsPage.allGroups")}
-                  searchPlaceholder="Search groups"
+                  searchPlaceholder={t("reportsPage.searchGroups")}
                   clearValue=""
                   options={[...labourGroupOptions, { value: ungroupedValue, label: t("reportsPage.ungrouped") }]}
                 />
                 <ResponsiveMultiSelectField
                   ariaLabel={t("reportsPage.labour")}
-                  title="Select labour"
+                  title={t("reportsPage.selectLabour")}
                   selectedIds={selectedLabourerIds}
                   onChange={setSelectedLabourerIds}
                   placeholder={t("common.allLabour")}
                   allLabel={t("reportsPage.allLabour")}
-                  searchPlaceholder="Search labour"
+                  searchPlaceholder={t("reportsPage.searchLabour")}
                   noResultsLabel={t("common.noMatchingLabour")}
                   options={reportLabourOptionsWithLabel}
                 />
@@ -1881,43 +1889,43 @@ export function Reports() {
               {report === "advances" && <>
                 <ResponsiveSelectField
                   ariaLabel={t("reportsPage.group")}
-                  title="Select labour group"
+                  title={t("reportsPage.selectLabourGroup")}
                   value={groupFilter}
                   onChange={setGroupFilter}
                   placeholder={t("reportsPage.allGroups")}
                   allLabel={t("reportsPage.allGroups")}
-                  searchPlaceholder="Search groups"
+                  searchPlaceholder={t("reportsPage.searchGroups")}
                   clearValue=""
                   options={[...labourGroupOptions, { value: ungroupedValue, label: t("reportsPage.ungrouped") }]}
                 />
                 <ResponsiveMultiSelectField
                   ariaLabel={t("reportsPage.labour")}
-                  title="Select labour"
+                  title={t("reportsPage.selectLabour")}
                   selectedIds={selectedLabourerIds}
                   onChange={setSelectedLabourerIds}
                   placeholder={t("common.allLabour")}
                   allLabel={t("reportsPage.allLabour")}
-                  searchPlaceholder="Search labour"
+                  searchPlaceholder={t("reportsPage.searchLabour")}
                   noResultsLabel={t("common.noMatchingLabour")}
                   options={reportLabourOptionsWithLabel}
                 />
                 <ResponsiveSelectField
                   ariaLabel={t("reportsPage.account")}
-                  title="Paid from account"
+                  title={t("reportsPage.paidFromAccount")}
                   value={accountId}
                   onChange={setAccountId}
-                  placeholder="All accounts"
-                  allLabel="All accounts"
-                  searchPlaceholder="Search accounts"
+                  placeholder={t("reportsPage.allAccounts")}
+                  allLabel={t("reportsPage.allAccounts")}
+                  searchPlaceholder={t("reportsPage.searchAccounts")}
                   clearValue=""
                   options={accountOptions}
                 />
                 <label className="reports-filter-group">
-                  <span>Minimum Amount</span>
+                  <span>{t("reportsPage.minimumAmount")}</span>
                   <input aria-label={t("reportsPage.minimumAmount")} inputMode="decimal" placeholder={t("reportsPage.minimumAmount")} value={amountMin} onChange={(event) => setAmountMin(event.target.value)} />
                 </label>
                 <label className="reports-filter-group">
-                  <span>Maximum Amount</span>
+                  <span>{t("reportsPage.maximumAmount")}</span>
                   <input aria-label={t("reportsPage.maximumAmount")} inputMode="decimal" placeholder={t("reportsPage.maximumAmount")} value={amountMax} onChange={(event) => setAmountMax(event.target.value)} />
                 </label>
               </>}
@@ -1929,7 +1937,7 @@ export function Reports() {
               : (["dispatchDate", "saleDate", "createdDate"] as DispatchDateType[]).map((item) => <option key={item} value={item}>{t(`reportsPage.dispatchDateTypes.${item}`)}</option>)}
           </ClearableSelect>}
 
-          {report === "attendance" && views.attendance === "summary" && <ResponsiveSelectField ariaLabel={t("reportsPage.status")} title="Select attendance status" value={status} onChange={setStatus} placeholder={t("reportsPage.allStatuses")} allLabel={t("reportsPage.allStatuses")} searchPlaceholder="Search status" clearValue="" options={[
+          {report === "attendance" && views.attendance === "summary" && <ResponsiveSelectField ariaLabel={t("reportsPage.status")} title={t("reportsPage.selectAttendanceStatus")} value={status} onChange={setStatus} placeholder={t("reportsPage.allStatuses")} allLabel={t("reportsPage.allStatuses")} searchPlaceholder={t("reportsPage.searchStatus")} clearValue="" options={[
             { value: "present", label: t("reportsPage.present") },
             { value: "half_day", label: t("reportsPage.halfDay") },
             { value: "absent", label: t("reportsPage.absent") },
@@ -2015,8 +2023,8 @@ export function Reports() {
           onPrint={() => printSection("attendance-register-print")}
           onPdfExport={() => printSection("attendance-register-print")}
           onExport={exportAttendanceRegister}
-          printLabel="Print Register"
-          pdfLabel="Export PDF"
+          printLabel={t("reportsPage.printRegister")}
+          pdfLabel={t("reportsPage.exportPdf")}
         >
           {attendanceRegisterSwitch}
           <div className="attendance-register-kpis">
@@ -2025,7 +2033,7 @@ export function Reports() {
           <div className="attendance-register-mobile-list">
             {attendanceSummary.map((item) => {
               const expanded = attendanceRegisterExpandedLabourerId === item.labourer.id;
-              const summaryText = `Present ${item.present} • Half-day ${item.halfDay} • Payable ${formatNumber(item.payable)}`;
+              const summaryText = t("reportsPage.attendanceSummaryLine", { present: item.present, halfDay: item.halfDay, payable: formatNumber(item.payable) });
               return (
                 <article className="attendance-register-mobile-card" key={item.labourer.id}>
                   <button
@@ -2069,7 +2077,7 @@ export function Reports() {
               );
             })}
           </div>
-          <p className="reports-scroll-hint">Swipe horizontally to view dates.</p>
+          <p className="reports-scroll-hint">{t("reportsPage.swipeHorizontally")}</p>
           <div className="attendance-register-preview">
             <div className="reports-register-shell">
               <p>{t("reportsPage.rangeShown", { range: rangeLabel })}</p>
@@ -2149,30 +2157,30 @@ export function Reports() {
           <button className={views.advances === "summary" ? "is-active" : ""} type="button" onClick={() => switchView("advances", "summary")}>{t("reportsPage.summary")}</button>
           <button className={views.advances === "log" ? "is-active" : ""} type="button" onClick={() => switchView("advances", "log")}>{t("reportsPage.log")}</button>
         </section>
-        {views.advances === "summary" && <ReportShell title={t("reportsPage.advanceSummary")} rangeLabel={rangeLabel} sectionId="advance-summary" onPrint={() => printSection("advance-report-print")} onExport={exportAdvanceCsv} printLabel="Export PDF">
+        {views.advances === "summary" && <ReportShell title={t("reportsPage.advanceSummary")} rangeLabel={rangeLabel} sectionId="advance-summary" onPrint={() => printSection("advance-report-print")} onExport={exportAdvanceCsv} printLabel={t("reportsPage.exportPdf")}>
           <Kpis values={[
-            ["Total advances", money(advanceReportTotals.totalAdvances)],
-            ["Unique labourers", formatNumber(advanceReportTotals.uniqueLabourers)],
-            ["Transactions", formatNumber(advanceReportTotals.transactions)],
-            ["Adjusted in settlements", money(advanceReportTotals.adjustedInSettlements)],
-            ["Outstanding advances", money(advanceReportTotals.outstandingAdvances)],
-            ["Posted settlements", formatNumber(advanceReportTotals.postedSettlements)],
+            [t("reportsPage.totalAdvances"), money(advanceReportTotals.totalAdvances)],
+            [t("reportsPage.uniqueLabourers"), formatNumber(advanceReportTotals.uniqueLabourers)],
+            [t("reportsPage.transactions"), formatNumber(advanceReportTotals.transactions)],
+            [t("reportsPage.adjustedInSettlements"), money(advanceReportTotals.adjustedInSettlements)],
+            [t("reportsPage.outstandingAdvances"), money(advanceReportTotals.outstandingAdvances)],
+            [t("reportsPage.postedSettlements"), formatNumber(advanceReportTotals.postedSettlements)],
           ]} />
           {activeSettlements.length > 0 && <div className="reports-summary-list">
             {activeSettlements.map((settlement) => (
               <article key={settlement.id} className="reports-advance-settlement-card">
                 <div className="reports-advance-settlement-card__text">
-                  <strong>{settlement.settlementNumber}</strong>
-                  <span>{formatSettlementCardRange(settlement.fromDate, settlement.toDate)}</span>
+                  <strong className="bidi-isolate">{settlement.settlementNumber}</strong>
+                  <span className="bidi-isolate">{formatSettlementCardRange(settlement.fromDate, settlement.toDate)}</span>
                 </div>
-                <strong className="reports-advance-settlement-card__amount">Adjusted {money(settlement.settledAdvanceAmount)}</strong>
+                <strong className="reports-advance-settlement-card__amount">{t("reportsPage.adjustedAmountLabel")} <span className="bidi-isolate">{money(settlement.settledAdvanceAmount)}</span></strong>
               </article>
             ))}
           </div>}
-          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.labour"), t("reportsPage.transactions"), t("reportsPage.total"), t("reportsPage.netBalance")]} rows={advanceSummary.map((item) => ({ id: item.labourer.id, title: item.labourer.name, value: money(item.total), meta: `${item.records.length} ${t("reportsPage.transactions")} · ${t("reportsPage.netBalance")}: ${money(item.outstanding)}`, cells: [item.labourer.name, item.records.length, money(item.total), money(item.outstanding)], details: [[t("reportsPage.account"), [...new Set(item.records.map((record) => advancePaymentSourceName(record)))].join(", ")], [t("reportsPage.status"), item.labourer.active === false ? t("reportsPage.inactive") : t("reportsPage.active")]] }))} />
+          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.labour"), t("reportsPage.transactions"), t("reportsPage.total"), t("reportsPage.netBalance")]} rows={advanceSummary.map((item) => ({ id: item.labourer.id, title: item.labourer.name, value: money(item.total), meta: `${item.records.length} ${t("reportsPage.transactions")} · ${t("reportsPage.netBalance")}: ${money(item.outstanding)}`, cells: [item.labourer.name, item.records.length, money(item.total), money(item.outstanding)], details: [[t("reportsPage.account"), [...new Set(item.records.map((record) => advancePaymentSourceName(record)))].join(", ")], [t("reportsPage.status"), translateStatus(t, item.labourer.active === false ? "inactive" : "active")]] }))} />
         </ReportShell>}
-        {views.advances === "log" && <ReportShell title={t("reportsPage.advanceLog")} rangeLabel={rangeLabel} sectionId="advance-log" onPrint={() => printSection("advance-report-print")} onExport={exportAdvanceCsv} printLabel="Export PDF">
-          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.labour"), "Advance amount", "Recovered", t("reportsPage.account"), "Status", t("reportsPage.reference")]} rows={advanceRows.map((item) => ({ id: item.id, title: advanceRecipientName(item), value: money(item.amount), meta: `${item.date} · ${advancePaymentSourceName(item)}`, cells: [item.date, advanceRecipientName(item), money(item.amount), money(item.recoveredAmount), advancePaymentSourceName(item), item.status, item.voucherNumber], details: [[t("reportsPage.labour"), advanceRecipientName(item)], [t("reportsPage.account"), advancePaymentSourceName(item)], ["Advance amount", money(item.amount)], ["Recovered", money(item.recoveredAmount)], ["Status", item.status], [t("reportsPage.notes"), item.notes || "-"], [t("reportsPage.reference"), item.voucherNumber]], onOpen: () => navigate(`/workspace/labour-advances?recordId=${item.id}`) }))} />
+        {views.advances === "log" && <ReportShell title={t("reportsPage.advanceLog")} rangeLabel={rangeLabel} sectionId="advance-log" onPrint={() => printSection("advance-report-print")} onExport={exportAdvanceCsv} printLabel={t("reportsPage.exportPdf")}>
+          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.advanceAmount"), t("reportsPage.recovered"), t("reportsPage.account"), t("reportsPage.status"), t("reportsPage.reference")]} rows={advanceRows.map((item) => ({ id: item.id, title: advanceRecipientName(item), value: money(item.amount), meta: `${item.date} · ${advancePaymentSourceName(item)}`, cells: [item.date, advanceRecipientName(item), money(item.amount), money(item.recoveredAmount), advancePaymentSourceName(item), translateStatus(t, item.status), item.voucherNumber], details: [[t("reportsPage.labour"), advanceRecipientName(item)], [t("reportsPage.account"), advancePaymentSourceName(item)], [t("reportsPage.advanceAmount"), money(item.amount)], [t("reportsPage.recovered"), money(item.recoveredAmount)], [t("reportsPage.status"), translateStatus(t, item.status)], [t("reportsPage.notes"), item.notes || "-"], [t("reportsPage.reference"), item.voucherNumber]], onOpen: () => navigate(`/workspace/labour-advances?recordId=${item.id}`) }))} />
         </ReportShell>}
         <section className="record-panel reports-print-section reports-print-only" data-print-section="advance-report-print" aria-hidden="true">
           <div className="advance-report-print-template">
@@ -2226,7 +2234,7 @@ export function Reports() {
               <h3>{t("reportsPage.byCategory")}</h3>
               <div className="reports-summary-list">
                 {[...new Set(voucherReportLineRows.map((item) => item.category))].map((name) => <article key={name}><span>{translateExpenseCategory(name)}</span><strong>{money(voucherReportLineRows.filter((item) => item.category === name).reduce((sum, item) => sum + item.amount, 0))}</strong></article>)}
-                {canonicalExpenseRows.length ? <article><span>Labour wages</span><strong>{money(canonicalExpenseRows.reduce((sum, item) => sum + item.amount, 0))}</strong></article> : null}
+                {canonicalExpenseRows.length ? <article><span>{t("reportsPage.labourWagesCategory")}</span><strong>{money(canonicalExpenseRows.reduce((sum, item) => sum + item.amount, 0))}</strong></article> : null}
               </div>
             </div>
             <div>
@@ -2259,8 +2267,8 @@ export function Reports() {
             };
           }), ...canonicalExpenseRows.map((item) => {
             const sources = canonicalExpenseAccountsByDue.get(item.id) ?? [];
-            const sourceLabel = sources.map((source) => `${source.accountName} — ${money(source.amount)}`).join("; ") || "Unattributed";
-            return { id: item.id, title: item.dueNumber ?? item.recipientName, value: money(item.amount), meta: item.date, cells: [item.dueNumber ?? "-", item.date, item.description, "Labour wages", sourceLabel, money(item.amount)], details: [["Status", item.status], ["Recipient", item.recipientName], ...sources.map((source) => [source.settlementType.replaceAll("_", " "), `${source.accountName} — ${money(source.amount)}`] as [string, ReactNode])] as [string, ReactNode][] };
+            const sourceLabel = sources.map((source) => `${source.accountName} — ${money(source.amount)}`).join("; ") || t("reportsPage.unattributed");
+            return { id: item.id, title: item.dueNumber ?? item.recipientName, value: money(item.amount), meta: item.date, cells: [item.dueNumber ?? "-", item.date, item.description, t("reportsPage.labourWagesCategory"), sourceLabel, money(item.amount)], details: [[t("reportsPage.status"), translateStatus(t, item.status)], [t("reportsPage.recipient"), item.recipientName], ...sources.map((source) => [translateStatus(t, source.settlementType), `${source.accountName} — ${money(source.amount)}`] as [string, ReactNode])] as [string, ReactNode][] };
           })]} />
         </ReportShell>}
       </>}
@@ -2316,10 +2324,10 @@ export function Reports() {
           <button className={views["partner-position"] === "ledger" ? "is-active" : ""} type="button" onClick={() => switchView("partner-position", "ledger")}>{t("reportsPage.ledger")}</button>
         </section>
         {views["partner-position"] === "position" && <ReportShell title={t("reportsPage.partnerPositionTitle")} rangeLabel={rangeLabel} sectionId="partner-position" onPrint={() => printSection("partner-position")} onExport={exportPartnerPosition}>
-          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.partner"), "Purchase vouchers", "Funds given", "Funds received", "Direct labour payments", "Outstanding labour advances", t("reportsPage.currentPartnerBalance")]} rows={partnerLiabilityPositions.map((item) => ({ id: item.key, title: item.name, value: money(item.currentPartnerBalance), meta: getPartnerBalanceState(item.currentPartnerBalance) === "partner_holds_business_money" ? t("reportsPage.partnerHoldsBusinessMoney") : t("reportsPage.farmOwesPartner"), cells: [item.name, money(item.purchaseVouchersPaid), money(item.transfersOut), money(item.transfersIn), money(item.labourSettlementCashPaid), money(item.outstandingLabourAdvances), money(item.currentPartnerBalance)], details: [[t("reportsPage.adjustments"), money(item.adjustments)], ["Funds given", money(item.transfersOut)], ["Funds received", money(item.transfersIn)], ["Total labour advances paid", money(item.totalLabourAdvancesPaid)], ["Direct labour payments", money(item.labourSettlementCashPaid)], ["Settled through wages", money(item.settledAdvances)], ["Outstanding labour advances", money(item.outstandingLabourAdvances)], [t("reportsPage.moneyReturned"), money(item.moneyReturned)]] }))} />
+          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.partner"), t("reportsPage.purchaseVouchersColumn"), t("reportsPage.fundsGiven"), t("reportsPage.fundsReceived"), t("reportsPage.directLabourPayments"), t("reportsPage.outstandingLabourAdvancesColumn"), t("reportsPage.currentPartnerBalance")]} rows={partnerLiabilityPositions.map((item) => ({ id: item.key, title: item.name, value: money(item.currentPartnerBalance), meta: getPartnerBalanceState(item.currentPartnerBalance) === "partner_holds_business_money" ? t("reportsPage.partnerHoldsBusinessMoney") : t("reportsPage.farmOwesPartner"), cells: [item.name, money(item.purchaseVouchersPaid), money(item.transfersOut), money(item.transfersIn), money(item.labourSettlementCashPaid), money(item.outstandingLabourAdvances), money(item.currentPartnerBalance)], details: [[t("reportsPage.adjustments"), money(item.adjustments)], [t("reportsPage.fundsGiven"), money(item.transfersOut)], [t("reportsPage.fundsReceived"), money(item.transfersIn)], [t("reportsPage.totalLabourAdvancesPaidColumn"), money(item.totalLabourAdvancesPaid)], [t("reportsPage.directLabourPayments"), money(item.labourSettlementCashPaid)], [t("reportsPage.settledThroughWagesColumn"), money(item.settledAdvances)], [t("reportsPage.outstandingLabourAdvancesColumn"), money(item.outstandingLabourAdvances)], [t("reportsPage.moneyReturned"), money(item.moneyReturned)]] }))} />
         </ReportShell>}
         {views["partner-position"] === "ledger" && <ReportShell title={t("reportsPage.partnerLedger")} rangeLabel={rangeLabel} sectionId="partner-ledger" onPrint={() => printSection("partner-ledger")} onExport={exportPartnerLedger}>
-          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.partner"), t("reportsPage.type"), t("reportsPage.amount"), t("reportsPage.notes")]} rows={partnerRows.map((item) => ({ id: item.id, title: item.partnerName ?? `${item.fromPartner ?? "-"} → ${item.toPartner ?? "-"}`, value: money(item.amount), meta: item.date, cells: [item.date, item.partnerName ?? `${item.fromPartner ?? "-"} → ${item.toPartner ?? "-"}`, item.type, money(item.amount), item.notes || "-"], details: [[t("reportsPage.type"), item.type], [t("reportsPage.notes"), item.notes || "-"]], onOpen: () => navigate(`/workspace/partner-ledger?recordId=${item.id}`) }))} />
+          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.partner"), t("reportsPage.type"), t("reportsPage.amount"), t("reportsPage.notes")]} rows={partnerRows.map((item) => ({ id: item.id, title: item.partnerName ?? `${item.fromPartner ?? "-"} → ${item.toPartner ?? "-"}`, value: money(item.amount), meta: item.date, cells: [item.date, item.partnerName ?? `${item.fromPartner ?? "-"} → ${item.toPartner ?? "-"}`, translateStatus(t, item.type), money(item.amount), item.notes || "-"], details: [[t("reportsPage.type"), translateStatus(t, item.type)], [t("reportsPage.notes"), item.notes || "-"]], onOpen: () => navigate(`/workspace/partner-ledger?recordId=${item.id}`) }))} />
         </ReportShell>}
       </>}
 
@@ -2346,8 +2354,8 @@ export function Reports() {
                 <article className="account-ledger-breakdown__expenses-card">
                   <strong>{t("reportsPage.directExpensesPaid")}</strong>
                   <b>{money(partnerAccountLedgerOverviewView.directExpensesPaid)}</b>
-                  <small>Purchase vouchers: {money(partnerAccountLedgerOverviewView.purchaseVouchersPaid)}</small>
-                  <small>Labour advances: {money(partnerAccountLedgerOverviewView.labourAdvancesPaid)}</small>
+                  <small>{t("reportsPage.purchaseVouchersColumn")}: <span className="bidi-isolate">{money(partnerAccountLedgerOverviewView.purchaseVouchersPaid)}</span></small>
+                  <small>{t("reportsPage.labourAdvance")}: <span className="bidi-isolate">{money(partnerAccountLedgerOverviewView.labourAdvancesPaid)}</span></small>
                 </article>
                 <article><strong>{t("reportsPage.transfersOut")}</strong><span>{money(partnerAccountLedgerOverviewView.transfersOut)}</span></article>
                 <article><strong>{t("reportsPage.transfersIn")}</strong><span>{money(partnerAccountLedgerOverviewView.transfersIn)}</span></article>
@@ -2389,7 +2397,7 @@ export function Reports() {
                   <span className="account-transaction-group__title">{expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}{partnerLiabilityGroupTitle(group.groupKey)}</span>
                   <span className="account-transaction-group__meta"><strong>{money(partnerLiabilityGroupDisplayTotal(group.groupKey, group.totalAmount))}</strong><small>{t("reportsPage.transactionCount", { count: group.count })}</small></span>
                 </button>
-                {expanded && <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.account"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.debit"), t("reportsPage.credit"), t("reportsPage.runningBalance")]} rows={group.transactions.map((item) => ({ id: item.id, title: item.reference, value: item.memoAmount !== undefined ? money(item.memoAmount) : (item.credit ? `+${money(item.credit)}` : `-${money(item.debit)}`), meta: `${item.date} | ${item.accountName}`, cells: [item.date, item.accountName, item.typeLabel, item.reference, item.memoAmount !== undefined ? "-" : (item.debit ? money(item.debit) : "-"), item.memoAmount !== undefined ? money(item.memoAmount) : (item.credit ? money(item.credit) : "-"), money(item.running)], details: [[t("reportsPage.description"), item.description], [t("reportsPage.runningBalance"), money(item.running)], ...(item.memoAmount !== undefined ? [["Memo", "Non-cash labour advance settlement"] as [string, ReactNode]] : [])], onOpen: () => navigate(item.path) }))} />}
+                {expanded && <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.account"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.debit"), t("reportsPage.credit"), t("reportsPage.runningBalance")]} rows={group.transactions.map((item) => ({ id: item.id, title: item.reference, value: item.memoAmount !== undefined ? money(item.memoAmount) : (item.credit ? `+${money(item.credit)}` : `-${money(item.debit)}`), meta: `${item.date} | ${item.accountName}`, cells: [item.date, item.accountName, item.typeLabel, item.reference, item.memoAmount !== undefined ? "-" : (item.debit ? money(item.debit) : "-"), item.memoAmount !== undefined ? money(item.memoAmount) : (item.credit ? money(item.credit) : "-"), money(item.running)], details: [[t("reportsPage.description"), item.description], [t("reportsPage.runningBalance"), money(item.running)], ...(item.memoAmount !== undefined ? [[t("reportsPage.memo"), t("reportsPage.nonCashLabourAdvanceSettlement")] as [string, ReactNode]] : [])], onOpen: () => navigate(item.path) }))} />}
               </section>;
             })}
           </div>)
@@ -2401,7 +2409,7 @@ export function Reports() {
                   <span className="account-transaction-group__title">{expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}{ledgerGroupTitle(group.groupKey)}</span>
                   <span className="account-transaction-group__meta"><strong>{money(group.totalAmount)}</strong><small>{t("reportsPage.transactionCount", { count: group.count })}</small></span>
                 </button>
-                {expanded && <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.account"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.debit"), t("reportsPage.credit"), t("reportsPage.runningBalance")]} rows={group.transactions.map((item) => ({ id: item.id, title: item.reference, value: item.memoAmount !== undefined ? money(item.memoAmount) : (item.credit ? `+${money(item.credit)}` : `-${money(item.debit)}`), meta: `${item.date} | ${item.accountName}`, cells: [item.date, item.accountName, item.typeLabel, item.reference, item.memoAmount !== undefined ? "-" : (item.debit ? money(item.debit) : "-"), item.memoAmount !== undefined ? money(item.memoAmount) : (item.credit ? money(item.credit) : "-"), money(item.running)], details: [[t("reportsPage.description"), item.description], [t("reportsPage.runningBalance"), money(item.running)], ...(item.memoAmount !== undefined ? [["Memo", "Non-cash labour advance settlement"] as [string, ReactNode]] : [])], onOpen: () => navigate(item.path) }))} />}
+                {expanded && <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.account"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.debit"), t("reportsPage.credit"), t("reportsPage.runningBalance")]} rows={group.transactions.map((item) => ({ id: item.id, title: item.reference, value: item.memoAmount !== undefined ? money(item.memoAmount) : (item.credit ? `+${money(item.credit)}` : `-${money(item.debit)}`), meta: `${item.date} | ${item.accountName}`, cells: [item.date, item.accountName, item.typeLabel, item.reference, item.memoAmount !== undefined ? "-" : (item.debit ? money(item.debit) : "-"), item.memoAmount !== undefined ? money(item.memoAmount) : (item.credit ? money(item.credit) : "-"), money(item.running)], details: [[t("reportsPage.description"), item.description], [t("reportsPage.runningBalance"), money(item.running)], ...(item.memoAmount !== undefined ? [[t("reportsPage.memo"), t("reportsPage.nonCashLabourAdvanceSettlement")] as [string, ReactNode]] : [])], onOpen: () => navigate(item.path) }))} />}
               </section>;
             })}
           </div>)}
