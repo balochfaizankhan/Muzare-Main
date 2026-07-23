@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { ArrowLeft, CalendarDays, Camera, ChevronDown, ChevronRight, Eye, FileText, ImageIcon, MoreVertical, Package, PackageCheck, PackageMinus, Paperclip, Pencil, Plus, RotateCw, Search, SlidersHorizontal, Tag, Trash2, Truck, UploadCloud, Wifi, WifiOff, X } from "lucide-react";
+import { ArrowLeft, CalendarDays, Camera, ChevronDown, ChevronRight, Eye, FileText, ImageIcon, MoreVertical, Package, PackageCheck, PackageMinus, Paperclip, Pencil, Plus, RotateCw, SlidersHorizontal, Tag, Trash2, Truck, UploadCloud, Wifi, WifiOff, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useQuery } from "@tanstack/react-query";
@@ -3075,6 +3075,7 @@ function ExpensesModule() {
                 value={voucherAccountId}
                 onChange={setVoucherAccountId}
                 placeholder={t("expensesPage.allAccounts")}
+                clearOptionLabel={t("expensesPage.allAccounts")}
               />
             </label>
             <div className="expense-filter-toggles">
@@ -3957,127 +3958,6 @@ const partnerEntryBalanceEffect = (entry: PartnerEntry) => entry.type === "contr
       ? partnerAdjustmentEffect(entry)
       : 0;
 
-function PartnerAccountAutocomplete({
-  accounts,
-  label,
-  noResultsLabel,
-  onSelect,
-  placeholder,
-  value,
-}: {
-  accounts: Account[];
-  label: string;
-  noResultsLabel: string;
-  onSelect: (account: Account | null) => void;
-  placeholder: string;
-  value: string;
-}) {
-  const rootRef = useRef<HTMLLabelElement | null>(null);
-  const selected = accounts.find((account) => account.id === value) ?? null;
-  const [query, setQuery] = useState(selected?.name ?? "");
-  const [open, setOpen] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(0);
-
-  useEffect(() => {
-    if (!open) setQuery(selected?.name ?? "");
-  }, [open, selected?.name]);
-
-  useEffect(() => {
-    const close = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, []);
-
-  const normalizedQuery = query.trim().toLowerCase();
-  const matches = useMemo(() => {
-    const score = (account: Account) => {
-      const name = account.name.toLowerCase();
-      const email = String((account as Account & { email?: string }).email ?? "").toLowerCase();
-      if (!normalizedQuery) return 1;
-      if (name === normalizedQuery || email === normalizedQuery) return 0;
-      if (name.startsWith(normalizedQuery) || email.startsWith(normalizedQuery)) return 1;
-      if (name.split(/\s+/).some((word) => word.startsWith(normalizedQuery))) return 2;
-      if (name.includes(normalizedQuery) || email.includes(normalizedQuery)) return 3;
-      return 99;
-    };
-    return accounts
-      .map((account) => ({ account, score: score(account) }))
-      .filter((item) => item.score < 99)
-      .sort((a, b) => a.score - b.score || a.account.name.localeCompare(b.account.name))
-      .slice(0, 8)
-      .map((item) => item.account);
-  }, [accounts, normalizedQuery]);
-
-  useEffect(() => setActiveIndex(0), [normalizedQuery]);
-
-  const select = (account: Account) => {
-    onSelect(account);
-    setQuery(account.name);
-    setOpen(false);
-  };
-  const clear = () => {
-    onSelect(null);
-    setQuery("");
-    setOpen(false);
-  };
-
-  return (
-    <label className="partner-autocomplete" ref={rootRef}>
-      <span>{label}</span>
-      <div className="partner-autocomplete__control">
-        <Search size={16} aria-hidden="true" />
-        <input
-          autoComplete="off"
-          placeholder={placeholder}
-          value={query}
-          onChange={(event) => { setQuery(event.target.value); setOpen(true); }}
-          onFocus={() => setOpen(true)}
-          onKeyDown={(event) => {
-            if (event.key === "ArrowDown") {
-              event.preventDefault();
-              setOpen(true);
-              setActiveIndex((current) => Math.min(current + 1, Math.max(matches.length - 1, 0)));
-            }
-            if (event.key === "ArrowUp") {
-              event.preventDefault();
-              setActiveIndex((current) => Math.max(current - 1, 0));
-            }
-            if (event.key === "Enter" && open && matches[activeIndex]) {
-              event.preventDefault();
-              select(matches[activeIndex]);
-            }
-            if (event.key === "Escape") setOpen(false);
-          }}
-        />
-        {(query || selected) && <button
-          type="button"
-          aria-label={label}
-          onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); }}
-          onClick={(event) => { event.preventDefault(); event.stopPropagation(); clear(); }}
-        ><X size={15} /></button>}
-      </div>
-      {open && <div className="partner-autocomplete__menu" role="listbox">
-        {matches.length ? matches.map((account, index) => (
-          <button
-            className={index === activeIndex ? "is-active" : ""}
-            key={account.id}
-            type="button"
-            role="option"
-            aria-selected={account.id === value}
-            onMouseEnter={() => setActiveIndex(index)}
-            onClick={() => select(account)}
-          >
-            <strong>{account.name}</strong>
-            <small>{account.type}</small>
-          </button>
-        )) : <p>{noResultsLabel}</p>}
-      </div>}
-    </label>
-  );
-}
-
 function PartnerLedgerModule() {
   const { t } = useTranslation();
   const { user, sessionRefreshing } = useAuth();
@@ -4122,7 +4002,6 @@ function PartnerLedgerModule() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [entryFilter, setEntryFilter] = useState<"all" | PartnerEntry["type"]>("all");
-  const partnerAccounts = useMemo(() => eligiblePaymentAccounts(accounts, { types: ["partner"] }), [accounts]);
   const cashBankAccounts = useMemo(() => eligiblePaymentAccounts(accounts, { types: ["cash", "bank"] }), [accounts]);
   // No silent default to the first cash/bank account: the user must explicitly pick one, or
   // submit() blocks with a visible "Select a payment account" message.
@@ -4361,26 +4240,26 @@ function PartnerLedgerModule() {
               accounts={eligiblePaymentAccounts(accounts, { types: ["partner"], alsoIncludeId: editing?.fromAccountId ?? null })}
               value={fromAccountId}
               onChange={setFromAccountId}
-              placeholder={t("partnerLedgerPage.searchPartner")}
+              placeholder={t("partnerLedgerPage.selectPartner")}
             /></label>
             <label><span>{t("partnerLedgerPage.toPartnerAccount")}</span><PaymentAccountSelect
               accounts={eligiblePaymentAccounts(accounts, { types: ["partner"], alsoIncludeId: editing?.toAccountId ?? null })}
               value={toAccountId}
               onChange={setToAccountId}
-              placeholder={t("partnerLedgerPage.searchPartner")}
+              placeholder={t("partnerLedgerPage.selectPartner")}
             /></label>
           </> : <>
-            <PartnerAccountAutocomplete
-              accounts={partnerAccounts}
-              label={t("partnerLedgerPage.partner")}
-              noResultsLabel={t("partnerLedgerPage.noPartnerMatches")}
-              placeholder={t("partnerLedgerPage.searchPartner")}
+            <label><span>{t("partnerLedgerPage.partner")}</span><PaymentAccountSelect
+              accounts={eligiblePaymentAccounts(accounts, { types: ["partner"], alsoIncludeId: editing?.partnerAccountId ?? null })}
               value={partnerAccountId}
-              onSelect={(account) => {
-                setPartnerAccountId(account?.id ?? "");
-                setPartnerName(account?.name ?? "");
+              onChange={(nextId) => {
+                setPartnerAccountId(nextId);
+                setPartnerName(accounts.find((account) => account.id === nextId)?.name ?? "");
               }}
-            />
+              label={t("partnerLedgerPage.partner")}
+              placeholder={t("partnerLedgerPage.selectPartner")}
+              invalid={Boolean(error) && !partnerAccountId}
+            /></label>
           </>}
           <label><span>{t("partnerLedgerPage.amount")}</span><input required type="number" min="0.01" step="0.01" placeholder={t("partnerLedgerPage.amount")} value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
           {type === "adjustment" && <label><span>{t("partnerLedgerPage.adjustmentDirection")}</span><ClearableSelect allowClear={false} value={adjustmentDirection} onChange={(value) => setAdjustmentDirection(value as NonNullable<PartnerEntry["adjustmentDirection"]>)}>

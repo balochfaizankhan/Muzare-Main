@@ -2,26 +2,33 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-const picker = readFileSync(new URL("../src/components/ResponsivePicker.tsx", import.meta.url), "utf8");
 const select = readFileSync(new URL("../src/components/PaymentAccountSelect.tsx", import.meta.url), "utf8");
 const modulePage = readFileSync(new URL("../src/pages/ModulePage.tsx", import.meta.url), "utf8");
 const workforcePayments = readFileSync(new URL("../src/pages/workspace/WorkforcePayments.tsx", import.meta.url), "utf8");
 const labourAdvances = readFileSync(new URL("../src/pages/workspace/LabourAdvances.tsx", import.meta.url), "utf8");
 const labourWageSettlements = readFileSync(new URL("../src/pages/workspace/LabourWageSettlements.tsx", import.meta.url), "utf8");
 
-test("ResponsiveSelectField supports opting out of auto-focusing the search box, defaulting to the existing (unchanged) behavior", () => {
-  assert.match(picker, /autoFocusSearch\?: boolean/);
-  assert.match(picker, /autoFocusSearch = true,/);
-  assert.match(picker, /if \(!open \|\| !autoFocusSearch\) return;/);
+test("PaymentAccountSelect is selection-only: no search box, no text input, no mobile keyboard", () => {
+  // The sheet is self-contained: it must not pull in the searchable picker or any text input.
+  assert.doesNotMatch(select, /ResponsiveSelectField/);
+  assert.doesNotMatch(select, /SearchInput/);
+  assert.doesNotMatch(select, /<input/);
+  // The trigger is a read-only button that opens the dialog sheet.
+  assert.match(select, /aria-haspopup="dialog"/);
+  assert.match(select, /t\("paymentAccountSelect\.required"\)/);
+  assert.match(select, /t\("paymentAccountSelect\.empty"\)/);
 });
 
-test("PaymentAccountSelect is selection-only: it never lets onChange fire with typed free text, and it suppresses auto-focus", () => {
-  assert.match(select, /allowClear=\{false\}/);
-  assert.match(select, /autoFocusSearch=\{false\}/);
-  // onChange is wired straight from ResponsiveSelectField's onChange, which only ever calls back
-  // with an option's own `value` (see choose() in ResponsivePicker.tsx) — never raw query text.
-  assert.match(select, /onChange=\{onChange\}/);
-  assert.match(select, /t\("paymentAccountSelect\.required"\)/);
+test("AccountSelectionSheet selects on tap with no confirm step, and exposes radio semantics", () => {
+  assert.match(select, /role="radiogroup"/);
+  assert.match(select, /role="radio"/);
+  assert.match(select, /aria-checked=\{selected\}/);
+  // Choosing a row fires onChange with the account id and closes immediately — no Apply/Done.
+  assert.match(select, /onChange\(accountId\);\s*\n\s*close\(\);/);
+  assert.doesNotMatch(select, /common\.apply/);
+  // Escape closes and focus returns to the trigger field.
+  assert.match(select, /event\.key === "Escape"/);
+  assert.match(select, /triggerRef\.current\?\.focus\(\)/);
 });
 
 test("every rollout site imports the shared PaymentAccountSelect instead of a bespoke account control", () => {
@@ -37,9 +44,14 @@ test("every rollout site imports the shared PaymentAccountSelect instead of a be
 
 test("ModulePage rolls PaymentAccountSelect out to Expenses, Sales, PartnerLedger, and the labour advance/attendance-import panels", () => {
   const occurrences = (modulePage.match(/<PaymentAccountSelect/g) ?? []).length;
-  // Expenses (voucher form + advanced filter), Sales, PartnerLedger (from/to/deposit), the two
-  // labour-advance panels, and the attendance-import payment account — at least 8 call sites.
-  assert.ok(occurrences >= 8, `expected at least 8 <PaymentAccountSelect usages in ModulePage.tsx, found ${occurrences}`);
+  // Expenses (voucher form + advanced filter), Sales, PartnerLedger (partner/from/to/deposit),
+  // the two labour-advance panels, and the attendance-import payment account — at least 9 sites.
+  assert.ok(occurrences >= 9, `expected at least 9 <PaymentAccountSelect usages in ModulePage.tsx, found ${occurrences}`);
+});
+
+test("the partner ledger no longer uses a typing autocomplete to pick the partner account", () => {
+  assert.doesNotMatch(modulePage, /PartnerAccountAutocomplete/);
+  assert.match(modulePage, /alsoIncludeId: editing\?\.partnerAccountId/);
 });
 
 test("Expenses voucher form and Sales/PartnerLedger no longer silently default to the first account", () => {

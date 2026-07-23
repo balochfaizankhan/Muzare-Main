@@ -76,8 +76,8 @@ function MobilePickerShell({
   }, [onClose, open]);
 
   useEffect(() => {
-    // Some callers (e.g. PaymentAccountSelect) don't want the mobile keyboard to pop open
-    // just from opening the sheet — only once the user actually taps the search field.
+    // Some callers don't want the mobile keyboard to pop open just from opening the
+    // sheet — only once the user actually taps the search field.
     if (!open || !autoFocusSearch) return;
     window.requestAnimationFrame(() => {
       const firstInput = sheetRef.current?.querySelector<HTMLInputElement>("input");
