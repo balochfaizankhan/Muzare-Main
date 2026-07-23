@@ -38,6 +38,21 @@ test("a new advance for a labourer who belongs to a group is recorded into the g
   assert.match(routes, /must belong to the selected labour group/);
   // Received-by is optional for group advances now.
   assert.doesNotMatch(routes, /Select the labourer who received this group advance\.",\s*\n\s*\}\);\s*\n\s*if \(/);
+  // There is no standalone individual advance pool: a labourer with no group
+  // cannot receive a new advance at all.
+  assert.match(routes, /Assign this labourer to a labour group before recording an advance\./);
+});
+
+test("recording an advance is one workflow: the form selects the recipient labourer, resolves the group automatically, and never asks for a group-advance entry", async () => {
+  const ui = await source("web/src/pages/workspace/WorkforcePayments.tsx");
+  assert.match(ui, /advancesView\.recipientLabourerLabel/);
+  assert.match(ui, /advancesView\.recipientGroupLabel/, "the resolved labour group is displayed after selecting the recipient labourer");
+  assert.match(ui, /advancesView\.assignGroupBeforeAdvance/, "a group-less labourer blocks posting with the assignment message");
+  assert.match(ui, /labourerId && \(editingAdvance \|\| recipientGroup\)/, "a new advance cannot be submitted without a resolved labour group");
+  assert.doesNotMatch(ui, /openRecordAdvance\(false\); setScope\("LABOUR_GROUP"\)/, "pool cards must open the single Record advance form, not a group-advance variant");
+  const i18n = await source("web/src/i18n.ts");
+  assert.match(i18n, /No group advances recorded yet\./);
+  assert.doesNotMatch(i18n, /Record a group advance to open one\./, "the empty state must not instruct recording a separate group advance");
 });
 
 test("migration 0046 stamps preserved group ownership, backfills FIFO source allocations idempotently, and parks queued attendance requests", async () => {

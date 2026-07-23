@@ -345,3 +345,20 @@ test("two concurrent settlements cannot overspend one group pool", { skip }, asy
   assert.ok(applied <= remaining + 0.005, "combined applications never exceed the pool");
   if (statuses[1] !== 200) assert.equal(statuses[1], 409, "the loser is rejected rather than overspending");
 });
+
+test("a new advance for a labourer with no labour group is blocked — no standalone individual advance pool exists", { skip }, async () => {
+  const ungroupedId = randomUUID();
+  await setupRequest("create ungrouped labourer", "POST", "/v1/workspace/operational-records", envelope("labourer", ungroupedId, { name: "Ungrouped Worker", active: true }));
+  const response = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/advances`, {
+    farmId: tenant.farmId, seasonId: tenant.seasonId, idempotencyKey: randomUUID(), voucherDate: "2026-07-04",
+    recipientScope: "INDIVIDUAL", labourerId: ungroupedId, amount: 750, paymentAccountId: cashAccountId,
+    paymentMethod: "cash", description: "Blocked ungrouped advance",
+  });
+  assert.equal(response.statusCode, 400, "posting must be blocked, not recorded as an individual advance");
+  assert.equal(response.json().message, "Assign this labourer to a labour group before recording an advance.");
+  const vouchers = await db.select().from(labourPaymentVouchers).where(and(
+    eq(labourPaymentVouchers.workspaceId, tenant.workspaceId),
+    eq(labourPaymentVouchers.labourerId, ungroupedId),
+  ));
+  assert.equal(vouchers.length, 0, "a blocked advance must leave no voucher behind");
+});

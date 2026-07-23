@@ -45,6 +45,7 @@ const tenant = {
 };
 let app: Awaited<ReturnType<typeof buildApp>>;
 let labourerId: string;
+let groupId: string;
 let paymentAccountId: string;
 
 const hash = (token: string) => createHash("sha256").update(token).digest("hex");
@@ -85,7 +86,7 @@ async function createAdvance(amount: number, voucherDate: string) {
 async function createDue(grossAmount: number, workFromDate: string, workToDate: string) {
   const response = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/dues`, {
     farmId: tenant.farmId, seasonId: tenant.seasonId, idempotencyKey: randomUUID(), source: "DIRECT",
-    recipientScope: "INDIVIDUAL", labourerId, description: "Ledger correction due",
+    recipientScope: "LABOUR_GROUP", labourGroupId: groupId, description: "Ledger correction due",
     workFromDate, workToDate, agreedGrossAmount: grossAmount, authorizedDeductions: 0,
   });
   assertIntegrationResponse(response, 201, `create due ${grossAmount}`);
@@ -118,8 +119,12 @@ before(async () => {
   await db.insert(seasons).values({ id: tenant.seasonId, workspaceId: tenant.workspaceId, farmId: tenant.farmId, name: "Ledger Correction Season", year: 2026, startsOn: "2026-01-01", status: "active" });
   await db.insert(userSessions).values({ userId: tenant.userId, workspaceId: tenant.workspaceId, activeFarmId: tenant.farmId, activeSeasonId: tenant.seasonId, tokenHash: hash(tenant.token), expiresAt: new Date(Date.now() + 900_000) });
   app = await buildApp();
+  // Advances only exist inside a labour group's aggregate pool, so the
+  // worker leads their own group and dues are group dues drawing on it.
   labourerId = randomUUID();
-  await setupRequest("create labourer", "POST", "/v1/workspace/operational-records", envelope("labourer", labourerId, { name: "Ledger Correction Worker", active: true }));
+  groupId = randomUUID();
+  await setupRequest("create labourer", "POST", "/v1/workspace/operational-records", envelope("labourer", labourerId, { name: "Ledger Correction Worker", active: true, groupId }));
+  await setupRequest("create labour group", "POST", "/v1/workspace/operational-records", envelope("labourGroup", groupId, { name: "Ledger Correction Group", active: true, foremanLabourId: labourerId }));
   const [account] = await db.insert(accounts).values({ farmId: tenant.farmId, name: "Ledger Correction Cash Account", accountType: "cash", active: true }).returning({ id: accounts.id });
   assertPersistedUuid(account?.id, "create payment account");
   paymentAccountId = account.id;

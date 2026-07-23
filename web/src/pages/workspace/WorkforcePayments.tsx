@@ -1372,12 +1372,27 @@ function AdvancesView({
   const [refundMethod, setRefundMethod] = useState("Recovery");
   const [refundNotes, setRefundNotes] = useState("");
   const [refunding, setRefunding] = useState(false);
-  const advanceGroupLeaderName = useMemo(() => {
-    const group = groups.find((item) => item.id === groupId);
-    const leaderId = (group as { foremanLabourId?: string } | undefined)?.foremanLabourId
-      ?? (group as { foremanId?: string } | undefined)?.foremanId;
+  const groupLeaderName = useCallback((group?: LabourGroup | null) => {
+    const leaderId = (group as { foremanLabourId?: string } | null | undefined)?.foremanLabourId
+      ?? (group as { foremanId?: string } | null | undefined)?.foremanId;
     return leaderId ? labourerById.get(leaderId)?.name ?? null : null;
-  }, [groups, groupId, labourerById]);
+  }, [labourerById]);
+  const advanceGroupLeaderName = useMemo(
+    () => groupLeaderName(groups.find((item) => item.id === groupId)),
+    [groupLeaderName, groups, groupId],
+  );
+  // The labour group (and its leader) resolved automatically from the
+  // selected recipient labourer — the pool a new advance belongs to. There is
+  // no group to pick and no separate group-advance entry: recording any
+  // advance to a group member funds that group's aggregate pool.
+  const recipientGroup = useMemo(() => {
+    const worker = labourers.find((item) => item.id === labourerId);
+    return worker?.groupId ? groups.find((item) => item.id === worker.groupId) ?? null : null;
+  }, [groups, labourerId, labourers]);
+  const recipientGroupLeaderName = useMemo(
+    () => groupLeaderName(recipientGroup),
+    [groupLeaderName, recipientGroup],
+  );
   const idempotencyKey = useRef(uuid());
   const refundIdempotencyKey = useRef(uuid());
   const recipientScopeRef = useRef<HTMLSelectElement>(null);
@@ -1390,7 +1405,10 @@ function AdvancesView({
   const inFlightKeyRef = useRef("");
   const requestSequence = useRef(0);
   const resetRecordAdvanceForm = useCallback(() => {
-    setScope("LABOUR_GROUP");
+    // A new advance always starts from the recipient labourer; the server
+    // resolves their labour group and records the amount into that group's
+    // pool automatically.
+    setScope("INDIVIDUAL");
     setLabourerId("");
     setGroupId("");
     setReceivedByLabourerId("");
@@ -1831,15 +1849,19 @@ function AdvancesView({
       ),
     [groups],
   );
+  // A new advance is owned by the recipient's group pool; the labourer is the
+  // informational received-by. Editing keeps the voucher's recorded identity.
   const selectedOwner =
     scope === "INDIVIDUAL"
-      ? labourers.find((item) => item.id === labourerId)?.name
+      ? (!editingAdvance && recipientGroup
+          ? recipientGroup.name
+          : labourers.find((item) => item.id === labourerId)?.name)
       : scope === "LABOUR_GROUP"
         ? groups.find((item) => item.id === groupId)?.name
         : recipientName || reference;
   const selectedReceiver =
     scope === "INDIVIDUAL"
-      ? selectedOwner
+      ? labourers.find((item) => item.id === labourerId)?.name
       : scope === "LABOUR_GROUP"
         ? labourers.find((item) => item.id === receivedByLabourerId)?.name
         : "";
@@ -1852,7 +1874,7 @@ function AdvancesView({
     accountId &&
     method &&
     (scope === "INDIVIDUAL"
-      ? labourerId
+      ? labourerId && (editingAdvance || recipientGroup)
       : scope === "LABOUR_GROUP"
         ? groupId
         : reference) &&
@@ -1933,7 +1955,7 @@ function AdvancesView({
                   </dl>
                   <div className="workforce-group-pool-card__actions">
                     {canManage ? (
-                      <button type="button" className="secondary-action" onClick={() => { openRecordAdvance(false); setScope("LABOUR_GROUP"); setGroupId(pool.labourGroupId); }}>
+                      <button type="button" className="secondary-action" onClick={() => openRecordAdvance(false)}>
                         {t("workforcePaymentsPage.advancesView.addAdvance")}
                       </button>
                     ) : null}
@@ -2327,10 +2349,11 @@ function AdvancesView({
                   <span>1</span> {t("workforcePaymentsPage.advancesView.recipientStep")}
                 </h3>
                 <div className="workforce-payment-form">
-                  {/* New advances are group-pool advances: the group's leader
-                      owns the aggregate pool regardless of who received the
-                      money, so there is no individual advance scope to pick.
-                      Editing a historical voucher keeps its recorded scope. */}
+                  {/* A new advance is entered against its recipient labourer;
+                      the labour group and leader are resolved automatically
+                      and the amount joins that group's aggregate pool — no
+                      scope to pick, no separate group-advance entry. Editing
+                      a historical voucher keeps its recorded scope. */}
                   {editingAdvance ? (
                     <label>
                       <span>{t("workforcePaymentsPage.recipientScope")}</span>
@@ -2351,9 +2374,9 @@ function AdvancesView({
                   ) : null}
                   {scope === "INDIVIDUAL" ? (
                     <label>
-                      <span>{t("workforcePaymentsPage.labourer")}</span>
+                      <span>{editingAdvance ? t("workforcePaymentsPage.labourer") : t("workforcePaymentsPage.advancesView.recipientLabourerLabel")}</span>
                       <LabourSelectCombobox
-                        ariaLabel={t("workforcePaymentsPage.labourer")}
+                        ariaLabel={editingAdvance ? t("workforcePaymentsPage.labourer") : t("workforcePaymentsPage.advancesView.recipientLabourerLabel")}
                         options={selectableLabourers}
                         value={labourerId}
                         onChange={setLabourerId}
@@ -2364,6 +2387,16 @@ function AdvancesView({
                       />
                       {selectedIndividualLabourer && advanceLabourStatus(selectedIndividualLabourer) !== "active" ? (
                         <small className="workforce-advance-inactive-note">{t("workforcePaymentsPage.advancesView.inactiveLabourerNote")}</small>
+                      ) : null}
+                      {!editingAdvance && labourerId ? (
+                        recipientGroup ? (
+                          <small className="workforce-payments-inline-note">
+                            {t("workforcePaymentsPage.advancesView.recipientGroupLabel", { name: recipientGroup.name })}
+                            {recipientGroupLeaderName ? ` · ${t("workforcePaymentsPage.groupLeaderLabel", { name: recipientGroupLeaderName })}` : ""}
+                          </small>
+                        ) : (
+                          <small className="workforce-advance-inactive-note">{t("workforcePaymentsPage.advancesView.assignGroupBeforeAdvance")}</small>
+                        )
                       ) : null}
                     </label>
                   ) : null}

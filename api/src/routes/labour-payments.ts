@@ -2291,8 +2291,10 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           // taken by the leader for that group. An advance recorded for a
           // labourer who belongs to a group therefore enters the group's pool
           // with the member kept as informational received-by only — there is
-          // no separate individual advance scope for group members. Labourers
-          // with no group keep the individual scope.
+          // no separate individual advance scope, no standalone individual
+          // advance pool, and no separate group-advance transaction type: the
+          // pool is a calculated position over ordinary advances. A labourer
+          // with no group cannot receive a new advance at all.
           if (input.recipientScope === "INDIVIDUAL" && input.labourerId) {
             const [memberRecord] = await tx
               .select({ payload: operationalRecords.payload })
@@ -2314,6 +2316,10 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               input.labourGroupId = memberGroupId;
               input.receivedByLabourerId = input.receivedByLabourerId ?? input.labourerId;
               input.labourerId = null;
+            } else {
+              throw new Error(
+                "Assign this labourer to a labour group before recording an advance.",
+              );
             }
           }
           const recipient = await loadRecipient(tx, workspaceId, input.farmId, {
