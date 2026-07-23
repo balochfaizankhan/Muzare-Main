@@ -18,9 +18,10 @@ test("the group-member advance guard migration runs during API startup", () => {
   assert.match(startupMigrationSource, /key: "0040_legacy_individual_advance_application_scope"[\s\S]*required: true/);
 });
 
-test("an approved attendance settlement creates an unpaid due and rejects immediate cash", () => {
-  assert.match(settlementRouteSource, /Settlement approval no longer moves cash/i);
-  assert.match(settlementRouteSource, /ensureSettlementLabourDue/);
+test("attendance settlement creation is retired; historical dues keep the unpaid-by-default contract", () => {
+  // The former create flow (the only caller of ensureSettlementLabourDue)
+  // now rejects with the clear retirement message and never moves cash.
+  assert.match(settlementRouteSource, /ATTENDANCE_DUES_RETIRED_MESSAGE/);
   assert.match(migrationSource, /payment_status text NOT NULL DEFAULT 'UNPAID'/);
 });
 

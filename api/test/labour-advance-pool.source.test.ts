@@ -10,14 +10,13 @@ test("review uses a narrow aggregate endpoint and lazy allocation details", () =
   assert.match(route, /dues\/:dueId\/advance-pool/);
   assert.match(route, /query\.data\.amount == null \? undefined/);
   // The review dialog is fully localized; the copy lives in the i18n catalog
-  // and the dialog references it by key.
+  // and the dialog references it by key. Under the group-pool model the
+  // dialog shows the aggregate group position — there is no per-voucher
+  // allocation or exclusion browser.
   assert.match(ui, /reviewSettle\.totalAvailableForDue/);
-  assert.match(ui, /reviewSettle\.viewAllocationDetails/);
-  assert.match(ui, /reviewSettle\.whyExcluded/);
+  assert.match(ui, /reviewSettle\.groupOutstandingAdvances/);
   assert.match(i18n, /"totalAvailableForDue": "Total available for this due"/);
-  assert.match(i18n, /"viewAllocationDetails": "View allocation details"/);
-  assert.match(i18n, /"whyExcluded": "Why are some advances excluded\?"/);
-  assert.match(i18n, /regardless of the Labour Due work period/);
+  assert.doesNotMatch(ui, /reviewSettle\.viewAllocationDetails|reviewSettle\.whyExcluded/);
   assert.doesNotMatch(ui.slice(ui.indexOf("function ReviewSettleDialog")), /fetchAllLabourPaymentAdvances/);
   assert.doesNotMatch(ui.slice(ui.indexOf("function ReviewSettleDialog")), /advanceValues/);
 });

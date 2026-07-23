@@ -53,7 +53,6 @@ const mergeSnapshotFields = (...values: unknown[]) => {
 
 const unresolvedRecipientLabel = "Unresolved recipient";
 const unresolvedPaymentSourceLabel = "Unresolved payment source";
-const pooledNonCashAttributionLabel = "Applied advances — pooled/non-cash";
 
 const resolveRecipientDisplayName = (args: {
   snapshot: Record<string, unknown>;
@@ -1150,12 +1149,12 @@ async function loadLabourFinancialReadModelUncached(input: { workspaceId: string
         if (!application.advanceVoucherId) {
           // A pooled application draws from several historical vouchers. Its
           // persisted source allocations attribute each portion back to the
-          // advance's original funding owner; a pooled row that predates the
-          // source ledger stays in its own non-cash category — valid, not
-          // "unresolved".
+          // advance's original funding owner. A pooled row whose sources
+          // could not be proved (rare after the 0046 backfill) is a genuine
+          // reconciliation-review case — never a fake payment account.
           const sourceAllocations = applicationSourcesByApplicationId.get(application.id) ?? [];
           if (!sourceAllocations.length) {
-            return [{ accountId: null, accountName: pooledNonCashAttributionLabel, accountType: "pooled_non_cash", amount: amount(application.amount) }];
+            return [{ accountId: null, accountName: unresolvedPaymentSourceLabel, accountType: null, amount: amount(application.amount) }];
           }
           return sourceAllocations.map((allocation) => {
             const source = advanceByVoucherId.get(allocation.advanceVoucherId);
@@ -1331,20 +1330,14 @@ async function loadLabourFinancialReadModelUncached(input: { workspaceId: string
       for (const application of scopedApplications.filter((row) => row.dueId === expense.dueId && row.status === "ACTIVE")) {
         // A pooled application (advanceVoucherId null) may draw from several
         // accounts. Its persisted source allocations attribute each portion
-        // to the consumed advance's original funding owner; a pooled row that
-        // predates the source ledger stays in its own non-cash category —
-        // valid, not "unresolved".
+        // to the consumed advance's original funding owner. A pooled row
+        // whose sources could not be proved (rare after the 0046 backfill)
+        // contributes no funding-account attribution — group ownership is
+        // reported through the group pool position instead, never through a
+        // fake "pooled/non-cash" payment account.
         if (!application.advanceVoucherId) {
           const sourceAllocations = applicationSourcesByApplicationId.get(application.id) ?? [];
           if (!sourceAllocations.length) {
-            parts.push({
-              id: `${expense.id}:advance:${application.id}`,
-              settlementType: "APPLIED_ADVANCE",
-              accountId: null,
-              accountName: pooledNonCashAttributionLabel,
-              accountType: "pooled_non_cash",
-              amount: amount(application.amount), voucherId: null, advanceApplicationId: application.id,
-            });
             continue;
           }
           for (const allocation of sourceAllocations) {

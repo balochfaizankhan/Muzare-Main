@@ -47,6 +47,7 @@ const pooledLabourAdvanceApplicationsMigrationUrl = new URL("../../../database/m
 const labourSettlementExpenseLedgerCorrectionMigrationUrl = new URL("../../../database/migrations/0043_labour_settlement_expense_ledger_correction.sql", import.meta.url);
 const registrationApprovalMigrationUrl = new URL("../../../database/migrations/0044_registration_approval.sql", import.meta.url);
 const groupPoolFrozenMembershipAndSourcesMigrationUrl = new URL("../../../database/migrations/0045_group_pool_frozen_membership_and_sources.sql", import.meta.url);
+const groupAdvancePoolsAndAttendanceDueRetirementMigrationUrl = new URL("../../../database/migrations/0046_group_advance_pools_and_attendance_due_retirement.sql", import.meta.url);
 
 const STARTUP_LOCK_KEY = "muzare_ensure_workspace_schema";
 const STARTUP_LOCK_TIMEOUT = "10s";
@@ -134,6 +135,7 @@ const deferredMigrationSteps: MigrationStep[] = [
   { key: "0043_labour_settlement_expense_ledger_correction", kind: "sql", required: false, sourceUrl: labourSettlementExpenseLedgerCorrectionMigrationUrl },
   { key: "0044_registration_approval", kind: "sql", required: true, sourceUrl: registrationApprovalMigrationUrl },
   { key: "0045_group_pool_frozen_membership_and_sources", kind: "sql", required: true, sourceUrl: groupPoolFrozenMembershipAndSourcesMigrationUrl },
+  { key: "0046_group_advance_pools_and_attendance_due_retirement", kind: "sql", required: true, sourceUrl: groupAdvancePoolsAndAttendanceDueRetirementMigrationUrl },
 ];
 
 function logMigrationEvent(event: string, details: Record<string, unknown>) {

@@ -38,6 +38,7 @@ const tenant = {
 let app: Awaited<ReturnType<typeof buildApp>>;
 let groupId: string;
 let otherGroupId: string;
+let leaderId: string;
 let memberOneId: string;
 let memberTwoId: string;
 let outsiderId: string;
@@ -57,27 +58,24 @@ const envelope = (entity: string, id: string, record: Record<string, unknown>) =
 
 async function createAdvance(input: {
   amount: number; voucherDate: string; paymentAccountId: string;
-  scope: "GROUP" | "MEMBER"; labourerId?: string; groupId?: string;
+  scope: "GROUP" | "MEMBER"; labourerId?: string; groupId?: string; receivedById?: string;
 }) {
   const payload = input.scope === "GROUP"
-    ? {
-        recipientScope: "LABOUR_GROUP", labourGroupId: input.groupId,
-        receivedByLabourerId: memberOneId, receivedByNameSnapshot: "Member One",
-      }
-    : { recipientScope: "INDIVIDUAL", labourerId: input.labourerId, receivedByLabourerId: input.labourerId };
+    ? { recipientScope: "LABOUR_GROUP", labourGroupId: input.groupId, receivedByLabourerId: input.receivedById ?? null }
+    : { recipientScope: "INDIVIDUAL", labourerId: input.labourerId };
   const response = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/advances`, {
     farmId: tenant.farmId, seasonId: tenant.seasonId, idempotencyKey: randomUUID(), voucherDate: input.voucherDate,
     ...payload, amount: input.amount, paymentAccountId: input.paymentAccountId, paymentMethod: "cash",
     description: `Group pool ${input.scope} advance ${input.amount}`,
   });
   assertIntegrationResponse(response, 201, `create ${input.scope} advance ${input.amount}`);
-  return response.json().voucher as { id: string; paymentAmount: string };
+  return response.json().voucher as { id: string; paymentAmount: string; recipientScope: string; labourGroupId: string | null; financialScopeKey: string };
 }
 
-async function createGroupDue(grossAmount: number) {
+async function createGroupDue(grossAmount: number, forGroupId = groupId) {
   const response = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/dues`, {
     farmId: tenant.farmId, seasonId: tenant.seasonId, idempotencyKey: randomUUID(), source: "DIRECT",
-    recipientScope: "LABOUR_GROUP", labourGroupId: groupId, description: "Direct lump-sum group due",
+    recipientScope: "LABOUR_GROUP", labourGroupId: forGroupId, description: "Direct lump-sum group due",
     workFromDate: "2026-07-05", workToDate: "2026-07-09", agreedGrossAmount: grossAmount, authorizedDeductions: 0,
   });
   assertIntegrationResponse(response, 201, `create group due ${grossAmount}`);
@@ -91,7 +89,11 @@ async function fetchPool(dueId: string, options: { amount?: number; settlementDa
   const response = await request("GET", `/v1/workspace/${tenant.workspaceId}/labour-payments/dues/${dueId}/advance-pool?${query}`);
   assertIntegrationResponse(response, 200, `fetch pool for ${dueId}`);
   return response.json() as {
-    pool: { eligibleTotal: number; maximumApplicable: number; groupLevelAmount: number; memberLevelAmount: number; carriedForwardAmount: number; remainingAfterAdvances: number; membershipReviewRequired?: boolean; exclusionTotals: Record<string, number> };
+    pool: {
+      eligibleTotal: number; maximumApplicable: number; carriedForwardAmount: number; remainingAfterAdvances: number;
+      membershipReviewRequired?: boolean; exclusionTotals: Record<string, number>;
+      groupPool: { labourGroupId: string; groupLeaderName: string | null; totalAdvances: number; appliedAdvances: number; refundedAdvances: number; outstandingAdvances: number } | null;
+    };
     details?: Array<{ id: string; proposedAmount: number; allocationOrder: number }>;
   };
 }
@@ -114,10 +116,12 @@ before(async () => {
   app = await buildApp();
   groupId = randomUUID();
   otherGroupId = randomUUID();
+  leaderId = randomUUID();
   memberOneId = randomUUID();
   memberTwoId = randomUUID();
   outsiderId = randomUUID();
-  await setupRequest("create labour group", "POST", "/v1/workspace/operational-records", envelope("labourGroup", groupId, { name: "Pool Group", active: true }));
+  await setupRequest("create leader", "POST", "/v1/workspace/operational-records", envelope("labourer", leaderId, { name: "Saleem", active: true, groupId }));
+  await setupRequest("create labour group", "POST", "/v1/workspace/operational-records", envelope("labourGroup", groupId, { name: "Saleem Group", active: true, foremanLabourId: leaderId }));
   await setupRequest("create other labour group", "POST", "/v1/workspace/operational-records", envelope("labourGroup", otherGroupId, { name: "Other Group", active: true }));
   await setupRequest("create member one", "POST", "/v1/workspace/operational-records", envelope("labourer", memberOneId, { name: "Member One", active: true, groupId }));
   await setupRequest("create member two", "POST", "/v1/workspace/operational-records", envelope("labourer", memberTwoId, { name: "Member Two", active: true, groupId }));
@@ -156,68 +160,88 @@ after(async () => {
   await closeDatabaseConnection();
 });
 
-test("a direct/lump-sum group due exposes group-level AND member-owned advances, excludes other groups, freezes membership, matches preview to posting, preserves funding owners, and reverses cleanly", { skip }, async () => {
-  // Mixed funding: partner A funds the group advance, partner B and cash fund
-  // the members', and the outsider's advance must never become eligible.
-  const groupAdvance = await createAdvance({ amount: 5_000, voucherDate: "2026-07-01", paymentAccountId: partnerAccountAId, scope: "GROUP", groupId });
+test("attendance-based dues are rejected while a direct group due works without any attendance", { skip }, async () => {
+  const attendanceResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/dues`, {
+    farmId: tenant.farmId, seasonId: tenant.seasonId, idempotencyKey: randomUUID(), source: "ATTENDANCE_PERIOD",
+    recipientScope: "LABOUR_GROUP", labourGroupId: groupId, description: "Attendance due",
+    workFromDate: "2026-07-01", workToDate: "2026-07-05", authorizedDeductions: 0,
+  });
+  assert.equal(attendanceResponse.statusCode, 400);
+  assert.equal(attendanceResponse.json().message, "Attendance-based Labour Dues are no longer supported. Create a direct labour group due instead.");
+  const previewResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/dues/attendance-preview`, {
+    farmId: tenant.farmId, seasonId: tenant.seasonId, recipientScope: "LABOUR_GROUP", labourGroupId: groupId,
+    fromDate: "2026-07-01", toDate: "2026-07-05", recordDate: "2026-07-05",
+  });
+  assert.equal(previewResponse.statusCode, 400);
+  assert.match(previewResponse.json().message, /no longer supported/);
+  const settlementCreate = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-wage-settlements`, {
+    farmId: tenant.farmId, seasonId: tenant.seasonId, fromDate: "2026-07-01", toDate: "2026-07-05",
+    settlementDate: "2026-07-05", settlementMode: "group", groupId,
+  });
+  assert.equal(settlementCreate.statusCode, 400);
+  assert.match(settlementCreate.json().message, /no longer supported/);
+
+  // A brand-new attendance record stays financially unlinked after due creation.
+  const attendanceId = randomUUID();
+  await setupRequest("create attendance", "POST", "/v1/workspace/operational-records", envelope("attendance", attendanceId, { labourId: memberOneId, date: "2026-07-06", status: "present" }));
+  const due = await createGroupDue(1_000);
+  assertPersistedUuid(due.id, "direct group due without attendance");
+  const [attendanceRecord] = await db.select().from(operationalRecords).where(and(eq(operationalRecords.workspaceId, tenant.workspaceId), eq(operationalRecords.clientRecordId, attendanceId)));
+  assert.equal(attendanceRecord?.payload.labourDueId, undefined, "new attendance records are never financially locked");
+  assert.equal(attendanceRecord?.payload.labourDueLockedAt, undefined);
+});
+
+test("advances to the leader and to any member — from several accounts — aggregate into one group pool that settles the due", { skip }, async () => {
+  // Partner A funds a leader-level advance; partner B and cash fund advances
+  // physically received by different members (recorded as INDIVIDUAL by an
+  // old client and auto-elevated to the group pool); the outsider's advance
+  // belongs to the other group.
+  const leaderAdvance = await createAdvance({ amount: 5_000, voucherDate: "2026-07-01", paymentAccountId: partnerAccountAId, scope: "GROUP", groupId, receivedById: leaderId });
   const memberOneAdvance = await createAdvance({ amount: 9_000, voucherDate: "2026-07-02", paymentAccountId: partnerAccountBId, scope: "MEMBER", labourerId: memberOneId });
   const memberTwoAdvance = await createAdvance({ amount: 6_000, voucherDate: "2026-07-03", paymentAccountId: cashAccountId, scope: "MEMBER", labourerId: memberTwoId });
   await createAdvance({ amount: 2_500, voucherDate: "2026-07-03", paymentAccountId: cashAccountId, scope: "MEMBER", labourerId: outsiderId });
-  // Posted after the settlement date used by every preview/settlement below —
-  // must stay excluded even though it belongs to a frozen member.
+  // Excluded by the settlement-date rule even though it belongs to the group.
   await createAdvance({ amount: 800, voucherDate: "2026-07-20", paymentAccountId: cashAccountId, scope: "MEMBER", labourerId: memberOneId });
 
-  const due = await createGroupDue(15_340);
-  const [persistedDue] = await db.select().from(labourDues).where(eq(labourDues.id, due.id));
-  const dueSnapshot = persistedDue!.recipientSnapshot as Record<string, unknown>;
-  assert.ok(Array.isArray(dueSnapshot.groupMembers) && dueSnapshot.groupMembers.length === 2, "the direct due froze the group membership at creation");
-  assert.equal(dueSnapshot.memberCalculationSnapshot, null, "a direct/lump-sum due has no wage-calculation rows");
+  assert.equal(memberOneAdvance.recipientScope, "LABOUR_GROUP", "a member advance is operationally an advance taken by the leader for the group");
+  assert.equal(memberOneAdvance.labourGroupId, groupId);
+  assert.equal(memberOneAdvance.financialScopeKey, `group:${groupId}`);
 
-  // Membership changes AFTER due creation must not affect the frozen pool:
-  // member two leaves the live group, a brand-new member joins it.
-  await setupRequest("member two leaves the live group", "POST", "/v1/workspace/operational-records", {
-    ...envelope("labourer", memberTwoId, { name: "Member Two", active: true, groupId: otherGroupId }),
-    record: { id: memberTwoId, createdAt: now, updatedAt: new Date("2026-07-10T00:00:00.000Z").toISOString(), name: "Member Two", active: true, groupId: otherGroupId },
-  });
+  // Membership churn after funding must not change pool ownership: member two
+  // moves to the other group; a brand-new labourer joins.
+  await setupRequest("member two leaves the live group", "POST", "/v1/workspace/operational-records", envelope("labourer", memberTwoId, { name: "Member Two", active: true, groupId: otherGroupId }));
   const joinedLaterId = randomUUID();
   await setupRequest("new member joins the live group", "POST", "/v1/workspace/operational-records", envelope("labourer", joinedLaterId, { name: "Joined Later", active: true, groupId }));
-  await createAdvance({ amount: 1_200, voucherDate: "2026-07-04", paymentAccountId: cashAccountId, scope: "MEMBER", labourerId: joinedLaterId });
 
-  // Acceptance: 20,000 valid pool vs 15,340 due.
+  const due = await createGroupDue(15_340);
   const preview = await fetchPool(due.id, { amount: 15_340 });
-  assert.equal(preview.pool.eligibleTotal, 20_000, "group advances (5,000) + member one (9,000) + departed-but-frozen member two (6,000)");
-  assert.equal(preview.pool.groupLevelAmount, 5_000);
-  assert.equal(preview.pool.memberLevelAmount, 15_000);
+  assert.equal(preview.pool.eligibleTotal, 20_000, "leader 5,000 + member one 9,000 + member two 6,000 (ownership was stamped at funding time)");
   assert.equal(preview.pool.maximumApplicable, 15_340);
   assert.equal(preview.pool.carriedForwardAmount, 4_660);
   assert.equal(preview.pool.remainingAfterAdvances, 0);
   assert.equal(preview.pool.membershipReviewRequired, false);
-  assert.ok((preview.pool.exclusionTotals.labourersOutsideDue ?? 0) >= 2_500 + 1_200, "the outsider and the joined-later member stay excluded");
-  assert.ok((preview.pool.exclusionTotals.postedAfterSettlementDate ?? 0) >= 800, "an advance posted after the settlement date stays excluded");
+  assert.equal(preview.pool.groupPool?.labourGroupId, groupId);
+  assert.equal(preview.pool.groupPool?.groupLeaderName, "Saleem", "the leader owns the pool");
+  assert.equal(preview.pool.groupPool?.totalAdvances, 20_800, "pool totals include the post-settlement-date advance");
+  assert.ok((preview.pool.exclusionTotals.otherGroups ?? 0) >= 2_500, "the outsider's advance stays with the other group");
+  assert.ok((preview.pool.exclusionTotals.postedAfterSettlementDate ?? 0) >= 800);
   const previewedAllocations = preview.details ?? [];
-  assert.ok(previewedAllocations.length >= 3, "the preview allocates across group and member vouchers");
 
-  // Preview and posting must match: the persisted source allocations are the
-  // exact allocations the preview showed.
   const settle = await settlePool(due.id, 15_340);
   assertIntegrationResponse(settle, 200, "settle the full maximum applicable");
   const [application] = await db.select().from(labourAdvanceApplications).where(and(eq(labourAdvanceApplications.dueId, due.id), eq(labourAdvanceApplications.status, "ACTIVE")));
   assertPersistedUuid(application?.id, "locate the pooled application");
   const sources = await db.select().from(labourAdvanceApplicationSources).where(eq(labourAdvanceApplicationSources.applicationId, application!.id));
-  assert.equal(
-    sources.reduce((sum, row) => sum + Number(row.amount), 0),
-    15_340,
-    "the persisted source allocations account for the entire applied amount",
-  );
+  assert.equal(sources.reduce((sum, row) => sum + Number(row.amount), 0), 15_340);
   assert.deepEqual(
     sources.map((row) => [row.advanceVoucherId, Number(row.amount)]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
     previewedAllocations.map((row) => [row.id, row.proposedAmount]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
-    "posting persisted exactly the allocations the preview proposed",
+    "preview and final posting produce the same allocations",
   );
 
-  // Pooled attribution: each consumed portion stays with its original funder.
+  // Mixed partner funding keeps each original owner.
   const voucherAccount = new Map([
-    [groupAdvance.id, partnerAccountAId],
+    [leaderAdvance.id, partnerAccountAId],
     [memberOneAdvance.id, partnerAccountBId],
     [memberTwoAdvance.id, cashAccountId],
   ]);
@@ -226,20 +250,31 @@ test("a direct/lump-sum group due exposes group-level AND member-owned advances,
     const accountId = voucherAccount.get(row.advanceVoucherId)!;
     byAccount.set(accountId, (byAccount.get(accountId) ?? 0) + Number(row.amount));
   }
-  assert.equal(byAccount.get(partnerAccountAId), 5_000, "Partner A's group advance is fully consumed and stays attributed to Partner A");
-  assert.equal(byAccount.get(partnerAccountBId), 9_000, "Partner B's member advance stays attributed to Partner B");
-  assert.equal(byAccount.get(cashAccountId), 1_340, "the FIFO remainder draws from the cash-funded advance");
+  assert.equal(byAccount.get(partnerAccountAId), 5_000);
+  assert.equal(byAccount.get(partnerAccountBId), 9_000);
+  assert.equal(byAccount.get(cashAccountId), 1_340);
 
-  // Applying an advance never moves cash and never re-credits a partner:
-  // the only account movements are the original advance payments themselves.
+  // No duplicate expense, no cash movement, no repeated Farm Owes Partner.
+  const applicationEntries = await db.select().from(labourAccountingEntries).where(and(
+    eq(labourAccountingEntries.workspaceId, tenant.workspaceId),
+    eq(labourAccountingEntries.advanceApplicationId, application!.id),
+  ));
+  assert.deepEqual(applicationEntries.map((row) => row.ledgerCode).sort(), ["LABOUR_ADVANCE", "LABOUR_PAYABLE"], "an application clears the payable against the advance — never expense, cash, or partner payable");
   const movements = await db.select().from(accountTransactions).where(eq(accountTransactions.farmId, tenant.farmId));
-  assert.equal(movements.filter((row) => row.sourceType === "labour_payment_voucher").length, 6, "six advances were paid; settlement added no movement");
+  assert.equal(movements.filter((row) => row.sourceType === "labour_payment_voucher").length, 6, "only the six funding advances moved money; settlement added none");
 
   const [settledDue] = await db.select().from(labourDues).where(eq(labourDues.id, due.id));
   assert.equal(settledDue?.paymentStatus, "SETTLED_BY_ADVANCE");
 
-  // Reversal restores the exact availability; the source rows remain on
-  // record attached to the reversed application.
+  // Idempotent posting: repeating the same idempotency key changes nothing.
+  const repeatKey = randomUUID();
+  const dueTwo = await createGroupDue(500);
+  assertIntegrationResponse(await settlePool(dueTwo.id, 300, repeatKey), 200, "first posting");
+  assertIntegrationResponse(await settlePool(dueTwo.id, 300, repeatKey), 200, "idempotent repeat");
+  const dueTwoApplications = await db.select().from(labourAdvanceApplications).where(and(eq(labourAdvanceApplications.dueId, dueTwo.id), eq(labourAdvanceApplications.status, "ACTIVE")));
+  assert.equal(dueTwoApplications.length, 1, "the repeat posted no second application");
+
+  // Reversal restores the due and the pool availability exactly.
   const [settledEvent] = await db.select().from(auditLogs).where(and(
     eq(auditLogs.workspaceId, tenant.workspaceId),
     eq(auditLogs.action, "labour_due_settled"),
@@ -255,30 +290,41 @@ test("a direct/lump-sum group due exposes group-level AND member-owned advances,
   const [reversedApplication] = await db.select().from(labourAdvanceApplications).where(eq(labourAdvanceApplications.id, application!.id));
   assert.equal(reversedApplication?.status, "REVERSED");
   const survivingSources = await db.select().from(labourAdvanceApplicationSources).where(eq(labourAdvanceApplicationSources.applicationId, application!.id));
-  assert.equal(survivingSources.length, sources.length, "reversal keeps the exact source allocations on record");
+  assert.equal(survivingSources.length, sources.length, "the exact source allocations stay on record");
   const restored = await fetchPool(due.id);
-  assert.equal(restored.pool.eligibleTotal, 20_000, "the full group availability is restored after reversal");
+  assert.equal(restored.pool.eligibleTotal, 20_000 - 300, "availability returns apart from the still-active 300 on the second due");
+  const [reopenedDue] = await db.select().from(labourDues).where(eq(labourDues.id, due.id));
+  assert.equal(reopenedDue?.paymentStatus, "UNPAID", "the reversed due is payable again");
 });
 
-test("when the eligible group pool is smaller than the due, the full pool applies and the remainder stays payable", { skip }, async () => {
-  // Fresh scope: a second due against what remains for this group after the
-  // reversal above restored the 20,000 pool. Consume it down to a known
-  // small pool first, then verify the pool-limited settlement.
-  const due = await createGroupDue(40_000);
-  const preview = await fetchPool(due.id);
-  const available = preview.pool.eligibleTotal;
-  assert.ok(available > 0 && available < 40_000, "the pool is genuinely smaller than the due");
-  assert.equal(preview.pool.maximumApplicable, available, "maximum applicable equals the full group pool");
-  const overRequest = await settlePool(due.id, available + 1);
-  assert.equal(overRequest.statusCode, 409, "requesting more than the pool is rejected");
-  const settle = await settlePool(due.id, available);
-  assertIntegrationResponse(settle, 200, "apply the complete pool");
-  const [settledDue] = await db.select().from(labourDues).where(eq(labourDues.id, due.id));
-  assert.equal(settledDue?.paymentStatus, "PARTIALLY_SETTLED", "the remainder of the due stays payable by cash or another method");
+test("the advance-pools endpoint reports one pool per group and farm-wide totals equal the sum of pools", { skip }, async () => {
+  const response = await request("GET", `/v1/workspace/${tenant.workspaceId}/labour-payments/advance-pools?farmId=${tenant.farmId}&seasonId=${tenant.seasonId}`);
+  assertIntegrationResponse(response, 200, "list group advance pools");
+  const body = response.json() as {
+    pools: Array<{ labourGroupId: string; groupName: string; groupLeaderName: string | null; totalAdvances: number; appliedAdvances: number; refundedAdvances: number; outstandingAdvances: number }>;
+    reviewAdvances: unknown[];
+    farmWide: { totalAdvances: number; appliedAdvances: number; refundedAdvances: number; outstandingAdvances: number };
+  };
+  const saleemPool = body.pools.find((pool) => pool.labourGroupId === groupId);
+  assert.ok(saleemPool, "the Saleem Group pool exists");
+  assert.equal(saleemPool!.groupName, "Saleem Group");
+  assert.equal(saleemPool!.groupLeaderName, "Saleem");
+  assert.equal(
+    Number(saleemPool!.outstandingAdvances.toFixed(2)),
+    Number((saleemPool!.totalAdvances - saleemPool!.appliedAdvances - saleemPool!.refundedAdvances).toFixed(2)),
+  );
+  assert.equal(body.reviewAdvances.length, 0, "every advance in this workspace has provable group ownership");
+  const summed = body.pools.reduce((sums, pool) => ({
+    total: sums.total + pool.totalAdvances,
+    applied: sums.applied + pool.appliedAdvances,
+    refunded: sums.refunded + pool.refundedAdvances,
+  }), { total: 0, applied: 0, refunded: 0 });
+  assert.equal(Number(summed.total.toFixed(2)), body.farmWide.totalAdvances);
+  assert.equal(Number(summed.applied.toFixed(2)), body.farmWide.appliedAdvances);
+  assert.equal(Number(summed.refunded.toFixed(2)), body.farmWide.refundedAdvances);
 });
 
-test("two concurrent settlements cannot consume the same group availability", { skip }, async () => {
-  await createAdvance({ amount: 2_000, voucherDate: "2026-07-05", paymentAccountId: cashAccountId, scope: "MEMBER", labourerId: memberOneId });
+test("two concurrent settlements cannot overspend one group pool", { skip }, async () => {
   const dueOne = await createGroupDue(4_000);
   const dueTwo = await createGroupDue(4_000);
   const poolBefore = await fetchPool(dueOne.id);
@@ -291,15 +337,11 @@ test("two concurrent settlements cannot consume the same group availability", { 
   ]);
   const statuses = [first.statusCode, second.statusCode].sort();
   assert.equal(statuses[0], 200, "one settlement wins");
-  if (statuses[1] === 200) {
-    // Both fit only if together they do not exceed the pool.
-    const applications = await db.select().from(labourAdvanceApplications).where(and(
-      inArray(labourAdvanceApplications.dueId, [dueOne.id, dueTwo.id]),
-      eq(labourAdvanceApplications.status, "ACTIVE"),
-    ));
-    const applied = applications.reduce((sum, row) => sum + Number(row.amount), 0);
-    assert.ok(applied <= remaining + 0.005, "combined applications never exceed the available pool");
-  } else {
-    assert.equal(statuses[1], 409, "the loser is rejected rather than overconsuming");
-  }
+  const applications = await db.select().from(labourAdvanceApplications).where(and(
+    inArray(labourAdvanceApplications.dueId, [dueOne.id, dueTwo.id]),
+    eq(labourAdvanceApplications.status, "ACTIVE"),
+  ));
+  const applied = applications.reduce((sum, row) => sum + Number(row.amount), 0);
+  assert.ok(applied <= remaining + 0.005, "combined applications never exceed the pool");
+  if (statuses[1] !== 200) assert.equal(statuses[1], 409, "the loser is rejected rather than overspending");
 });

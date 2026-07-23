@@ -211,7 +211,7 @@ test("a pooled application is included in active applied advances and reduces th
   );
 });
 
-test("a pooled application never displays as an unresolved payment source", { skip }, async () => {
+test("a pooled application attributes to the original funding account — never an unresolved source or a fake pooled/non-cash account", { skip }, async () => {
   await createAdvance(1200, "2026-07-01");
   const due = await createDue(900, "2026-07-10", "2026-07-14");
   const settleResponse = await settlePool(due.id, 900);
@@ -221,11 +221,15 @@ test("a pooled application never displays as an unresolved payment source", { sk
   assert.ok(attribution.length > 0, "the settled due must have a funding attribution row");
   assert.ok(
     attribution.every((row) => row.accountName !== "Unresolved payment source"),
-    "a pooled, non-cash application must never be labelled as an unresolved payment source",
+    "a pooled application must never be labelled as an unresolved payment source",
   );
   assert.ok(
-    attribution.some((row) => row.accountName === "Applied advances — pooled/non-cash"),
-    "a pooled application must be labelled as its own non-cash category",
+    attribution.every((row) => row.accountName !== "Applied advances — pooled/non-cash"),
+    "no fake pooled/non-cash payment account may appear in expense reports",
+  );
+  assert.ok(
+    attribution.some((row) => row.accountName === "Ledger Correction Cash Account" && Math.abs(row.amount - 900) < 0.005),
+    "the pooled amount is attributed to the account that originally funded the consumed advance",
   );
 });
 

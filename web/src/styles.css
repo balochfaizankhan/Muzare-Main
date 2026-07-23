@@ -17890,6 +17890,27 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 .workforce-payment-advance-options label { align-items: center; border: 1px solid #dbe5de; border-radius: 10px; display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) 110px; padding: 8px; }
 .workforce-payment-advance-options label > span { display: grid; gap: 2px; }
 .workforce-payment-advance-options small { color: #64748b; font-size: 10px; }
+.workforce-group-pools { display: grid; gap: 8px; }
+.workforce-group-pools > h3 { color: #153c26; font-size: 13px; margin: 0; }
+.workforce-group-pool-cards { display: grid; gap: 8px; }
+.workforce-group-pool-card { background: #f8faf9; border: 1px solid #dbe5de; border-radius: 14px; padding: 10px 12px; }
+.workforce-group-pool-card > summary { align-items: center; cursor: pointer; display: flex; gap: 8px; justify-content: space-between; list-style: none; }
+.workforce-group-pool-card > summary::-webkit-details-marker { display: none; }
+.workforce-group-pool-card > summary span { display: grid; gap: 2px; min-width: 0; }
+.workforce-group-pool-card > summary span:last-child { text-align: end; }
+.workforce-group-pool-card > summary small { color: #64748b; font-size: 10px; }
+.workforce-group-pool-card > summary strong { color: #153c26; font-size: 14px; overflow-wrap: anywhere; }
+.workforce-group-pool-card__totals { display: grid; gap: 6px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 10px 0 0; }
+.workforce-group-pool-card__totals div { display: grid; gap: 2px; }
+.workforce-group-pool-card__totals dt { color: #64748b; font-size: 9px; font-weight: 700; text-transform: uppercase; }
+.workforce-group-pool-card__totals dd { color: #153c26; font-size: 13px; font-weight: 750; margin: 0; }
+.workforce-group-pool-card__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.workforce-group-pool-review { background: #fffaf3; border: 1px solid #f1e0c5; border-radius: 12px; padding: 9px 11px; }
+.workforce-group-pool-review > summary { color: #92600a; cursor: pointer; font-size: 11px; font-weight: 750; }
+.workforce-group-pool-review__row { align-items: center; display: flex; gap: 8px; justify-content: space-between; padding: 6px 0; }
+.workforce-group-pool-review__row span { display: grid; gap: 2px; min-width: 0; }
+.workforce-group-pool-review__row small { color: #64748b; font-size: 10px; overflow-wrap: anywhere; }
+.workforce-advance-history-title { color: #153c26; font-size: 13px; margin: 4px 0 0; }
 .workforce-advance-pool { background: #f8faf9; border: 1px solid #dbe5de; border-radius: 14px; display: grid; gap: 10px; padding: 12px; }
 .workforce-advance-pool__summary { display: grid; gap: 7px; grid-template-columns: repeat(2,minmax(0,1fr)); }
 .workforce-advance-pool__summary div { display: grid; gap: 2px; min-width: 0; }

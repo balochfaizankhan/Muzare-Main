@@ -13,6 +13,16 @@ import {
 import { isDeletedOperationalPayload } from "../operational-record-state.js";
 
 export type LabourRecipientScope = "INDIVIDUAL" | "LABOUR_GROUP" | "CONTRACTOR_FOREMAN" | "TEMPORARY_CREW" | "UNREGISTERED_LABOUR" | "NO_SPECIFIC_RECIPIENT";
+
+/**
+ * Attendance-generated Labour Dues are retired for all future use. Attendance
+ * remains an independent operational module (recording, reports, history);
+ * every new Labour Due is a direct labour-group liability. Historical
+ * attendance-generated dues stay visible, payable, and reversible — only new
+ * creation is rejected, always with this exact message and never by silently
+ * converting the request into a direct due.
+ */
+export const ATTENDANCE_DUES_RETIRED_MESSAGE = "Attendance-based Labour Dues are no longer supported. Create a direct labour group due instead.";
 export type LabourDuePaymentStatus = "UNPAID" | "PARTIALLY_SETTLED" | "PAID" | "SETTLED_BY_ADVANCE" | "ON_HOLD" | "VOIDED";
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type LabourLedgerCode = "LABOUR_EXPENSE" | "LABOUR_PAYABLE" | "LABOUR_ADVANCE" | "CASH_CONTROL" | "PARTNER_PAYABLE";
@@ -64,12 +74,36 @@ export type LabourAdvancePoolCandidate = {
   createdAt?: Date | string | null;
   financialScopeKey: string;
   labourerId?: string | null;
+  labourGroupId?: string | null;
   recipientName?: string | null;
   originalAmount: number;
   appliedAmount: number;
   refundedAmount: number;
   appliedToDueAmount?: number;
 };
+
+/**
+ * The labour group that owns an advance's aggregate pool. Every labour group
+ * has ONE pool, operationally owned by its leader — it does not matter which
+ * member physically received the money. Ownership is proved only from the
+ * evidence preserved on the funding transaction itself (stored group id,
+ * snapshot group id, or a group-scoped financial scope key), never from a
+ * worker's current group membership.
+ */
+export function resolveAdvancePoolGroupId(advance: {
+  labourGroupId?: string | null;
+  financialScopeKey?: string | null;
+  recipientSnapshot?: unknown;
+}) {
+  const direct = stringValue(advance.labourGroupId);
+  if (direct) return direct;
+  const snapshot = advance.recipientSnapshot && typeof advance.recipientSnapshot === "object" ? advance.recipientSnapshot as Record<string, unknown> : {};
+  const fromSnapshot = stringValue(snapshot.labourGroupId) || stringValue(snapshot.groupId);
+  if (fromSnapshot) return fromSnapshot;
+  const scopeKey = stringValue(advance.financialScopeKey);
+  if (scopeKey.startsWith("group:")) return scopeKey.slice("group:".length);
+  return null;
+}
 
 export type LabourAdvancePoolAllocation = LabourAdvancePoolCandidate & {
   ownership: "MEMBER" | "GROUP";
@@ -83,74 +117,27 @@ const minor = (value: unknown) => Math.round(amount(value) * 100);
 const major = (value: number) => Number((value / 100).toFixed(2));
 
 /**
- * Authoritative frozen due-time membership for a labour due. For a LABOUR_GROUP
- * due the eligible members are the union of:
- *   1. labour_due_member_snapshots rows (strongest source where present);
- *   2. recipientSnapshot.groupMembers[].id — the group membership frozen when
- *      the due was created, required for direct/lump-sum group dues that have
- *      no wage-calculation rows;
- *   3. recipientSnapshot.memberCalculationSnapshot[].labourerId — the
- *      attendance-derived calculation rows (backward-compatible source).
- * Every source is frozen at due creation: the group's current live membership
- * must never retroactively change a historical due's advance eligibility.
- * A group due with none of the three sources has no provable membership —
- * callers must surface that for reconciliation review instead of guessing.
+ * Canonical deterministic plan used by pool preview and final posting.
+ *
+ * For a LABOUR_GROUP due (dueLabourGroupId set) the eligible pool is the
+ * group's ONE aggregate advance pool: every active posted advance whose
+ * preserved evidence proves it belongs to that group (see
+ * resolveAdvancePoolGroupId), no matter which member physically received it.
+ * The pool is never restricted by attendance, memberCalculationSnapshot,
+ * member payable shares, the due's work period, or which members appeared in
+ * the due. Advances with no provable group ownership are surfaced as an
+ * exclusion for reconciliation review — never guessed from a worker's current
+ * group. Non-group dues keep the exact financial-scope-key match.
  */
-export function resolveDueEligibleMembers(input: {
-  recipientScope: LabourRecipientScope | string;
-  recipientSnapshot: unknown;
-  memberSnapshotLabourerIds?: Array<string | null | undefined>;
-}) {
-  if (input.recipientScope !== "LABOUR_GROUP") {
-    return { memberIds: [] as string[], hasMembershipEvidence: true, sources: { memberSnapshots: 0, groupMembers: 0, memberCalculationSnapshot: 0 } };
-  }
-  const snapshot = input.recipientSnapshot && typeof input.recipientSnapshot === "object" ? input.recipientSnapshot as Record<string, unknown> : {};
-  const memberIds = new Set<string>();
-  const sources = { memberSnapshots: 0, groupMembers: 0, memberCalculationSnapshot: 0 };
-  for (const value of input.memberSnapshotLabourerIds ?? []) {
-    const id = stringValue(value);
-    if (!id) continue;
-    sources.memberSnapshots += 1;
-    memberIds.add(id);
-  }
-  const groupMembers = Array.isArray(snapshot.groupMembers) ? snapshot.groupMembers : [];
-  for (const value of groupMembers) {
-    const id = value && typeof value === "object" ? stringValue((value as Record<string, unknown>).id) : "";
-    if (!id) continue;
-    sources.groupMembers += 1;
-    memberIds.add(id);
-  }
-  const calculationRows = Array.isArray(snapshot.memberCalculationSnapshot) ? snapshot.memberCalculationSnapshot : [];
-  for (const value of calculationRows) {
-    const id = value && typeof value === "object" ? stringValue((value as Record<string, unknown>).labourerId) : "";
-    if (!id) continue;
-    sources.memberCalculationSnapshot += 1;
-    memberIds.add(id);
-  }
-  return {
-    memberIds: [...memberIds],
-    hasMembershipEvidence: memberIds.size > 0,
-    sources,
-  };
-}
-
-/** Canonical deterministic plan used by pool preview and final posting. */
 export function calculateLabourAdvancePool(input: {
   dueFinancialScopeKey: string;
+  dueLabourGroupId?: string | null;
   dueOutstandingAmount: number;
   settlementDate?: string;
-  memberPayableShares?: Array<{ labourerId: string; amount: number }>;
-  /**
-   * Frozen due-time member IDs (see resolveDueEligibleMembers). Member-owned
-   * advance eligibility is the union of these IDs and the
-   * memberPayableShares IDs, so a direct/lump-sum group due without
-   * wage-calculation rows still exposes its complete member advance pool.
-   */
-  eligibleMemberIds?: string[];
   candidates: LabourAdvancePoolCandidate[];
   requestedAmount?: number;
   /**
-   * ACTIVE pooled applications for the same financial scope that predate the
+   * ACTIVE pooled applications for the same pool that predate the
    * per-voucher source-allocation ledger and so cannot be attributed to any
    * single candidate. Consumed FIFO from the eligible candidates before
    * allocation so the preview's availability matches the database guard's
@@ -158,10 +145,6 @@ export function calculateLabourAdvancePool(input: {
    */
   unattributedPooledConsumption?: number;
 }) {
-  const memberIds = new Set([
-    ...(input.eligibleMemberIds ?? []),
-    ...(input.memberPayableShares?.map((row) => row.labourerId) ?? []),
-  ]);
   const exclusions = { otherGroups: 0, labourersOutsideDue: 0, refundedOrVoided: 0, differentFinancialContext: 0, postedAfterSettlementDate: 0, unresolvedOwnership: 0 };
   const eligible = input.candidates.flatMap((candidate) => {
     const availableMinor = Math.max(minor(candidate.originalAmount) - minor(candidate.appliedAmount) - minor(candidate.refundedAmount), 0);
@@ -170,15 +153,21 @@ export function calculateLabourAdvancePool(input: {
       exclusions.postedAfterSettlementDate += availableMinor;
       return [];
     }
-    const isGroup = candidate.financialScopeKey === input.dueFinancialScopeKey;
-    const isMember = !isGroup && !!candidate.labourerId && memberIds.has(candidate.labourerId);
-    if (!isGroup && !isMember) {
-      if (candidate.financialScopeKey.startsWith("group:")) exclusions.otherGroups += availableMinor;
+    const candidateGroupId = resolveAdvancePoolGroupId(candidate);
+    const inPool = input.dueLabourGroupId
+      ? candidateGroupId === input.dueLabourGroupId
+      : candidate.financialScopeKey === input.dueFinancialScopeKey;
+    if (!inPool) {
+      if (candidateGroupId) exclusions.otherGroups += availableMinor;
       else if (candidate.labourerId) exclusions.labourersOutsideDue += availableMinor;
       else exclusions.unresolvedOwnership += availableMinor;
       return [];
     }
-    return [{ ...candidate, ownership: (isMember ? "MEMBER" : "GROUP") as "MEMBER" | "GROUP", availableMinor }];
+    // Ownership is informational for audit only: whether the funding voucher
+    // was recorded at group level or physically received by a member. It has
+    // no effect on eligibility.
+    const ownership = (input.dueLabourGroupId && !candidate.financialScopeKey.startsWith("group:") ? "MEMBER" : "GROUP") as "MEMBER" | "GROUP";
+    return [{ ...candidate, ownership, availableMinor }];
   }).sort((left, right) => {
     if (left.ownership !== right.ownership) return left.ownership === "GROUP" ? -1 : 1;
     return left.voucherDate.localeCompare(right.voucherDate)
@@ -228,7 +217,7 @@ export function calculateLabourAdvancePool(input: {
     proposedApplication: major(requestedMinor - remainingToAllocate),
     carriedForwardAmount: major(eligibleMinor - (requestedMinor - remainingToAllocate)),
     remainingAfterAdvances: major(Math.max(minor(input.dueOutstandingAmount) - (requestedMinor - remainingToAllocate), 0)),
-    allocationPreviewVersion: "GROUP_POOL_FIFO_V2",
+    allocationPreviewVersion: "GROUP_POOL_FIFO_V3",
     exclusionTotals: Object.fromEntries(Object.entries(exclusions).map(([key, value]) => [key, major(value)])) as Record<keyof typeof exclusions, number>,
     allocations,
   };

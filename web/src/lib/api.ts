@@ -2153,7 +2153,26 @@ export type LabourDueAdvancePool = {
   proposedAllocationCount: number;
   exclusionTotals: { otherGroups: number; labourersOutsideDue: number; refundedOrVoided: number; differentFinancialContext: number; postedAfterSettlementDate: number; unresolvedOwnership: number };
   membershipReviewRequired?: boolean;
+  groupPool?: LabourGroupAdvancePool | null;
 };
+export type LabourGroupAdvancePool = {
+  labourGroupId: string;
+  groupName: string | null;
+  groupLeaderId: string | null;
+  groupLeaderName: string | null;
+  totalAdvances: number;
+  appliedAdvances: number;
+  refundedAdvances: number;
+  outstandingAdvances: number;
+};
+export type LabourAdvancePoolsResponse = {
+  pools: LabourGroupAdvancePool[];
+  reviewAdvances: Array<{ id: string; voucherNumber: string; voucherDate: string; amount: number; outstandingAmount: number; labourerId: string | null; recipientName: string | null; reason: string }>;
+  reviewPooledConsumption: number;
+  farmWide: { totalAdvances: number; appliedAdvances: number; refundedAdvances: number; outstandingAdvances: number };
+};
+export const fetchLabourAdvancePools = (token: string, workspaceId: string, farmId: string, seasonId: string, options: { signal?: AbortSignal } = {}) =>
+  apiRequest<LabourAdvancePoolsResponse>(`/v1/workspace/${workspaceId}/labour-payments/advance-pools?${new URLSearchParams({ farmId, seasonId })}`, { signal: options.signal }, token);
 export type LabourDueAdvanceAllocationDetail = {
   id: string; voucherNumber: string; voucherDate: string; recipientName?: string | null;
   ownership: "MEMBER" | "GROUP"; availableAmount: number; proposedAmount: number;

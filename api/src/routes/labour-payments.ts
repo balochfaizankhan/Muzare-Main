@@ -12,7 +12,6 @@ import {
   labourAdvanceApplicationSources,
   labourAccountingEntries,
   labourDueAttendanceSources,
-  labourDueMemberSnapshots,
   labourDues,
   labourPaymentAllocations,
   labourPaymentVouchers,
@@ -21,6 +20,7 @@ import {
   userSessions,
 } from "../db/schema.js";
 import {
+  ATTENDANCE_DUES_RETIRED_MESSAGE,
   allocateLabourDueNumber,
   allocateLabourAdvanceVoucherNumber,
   allocateLabourAdvanceAdjustmentNumber,
@@ -35,11 +35,11 @@ import {
   postLabourDueRecognition,
   postLabourVoucherJournal,
   refreshLabourDuePaymentStatus,
-  resolveDueEligibleMembers,
+  resolveAdvancePoolGroupId,
   reverseLabourJournal,
   type LabourRecipientScope,
 } from "../lib/labour-payments.js";
-import { previewLabourWageSettlement, resolveCanonicalPaymentAccountId } from "../lib/labour-wage-settlements.js";
+import { resolveCanonicalPaymentAccountId } from "../lib/labour-wage-settlements.js";
 import { isLabourSelectableForAdvance } from "../lib/labour-eligibility.js";
 import { validateLabourSettlementPaymentAccount } from "../lib/labour-settlement-account-validation.js";
 import { hasModulePermission } from "../permissions.js";
@@ -161,14 +161,6 @@ const directDueSchema = contextSchema.extend({
   agreedGrossAmount: value.agreedGrossAmount == null ? undefined : sarFromMinorUnits(value.agreedGrossAmount),
   authorizedDeductions: sarFromMinorUnits(value.authorizedDeductions),
 }));
-const attendanceDuePreviewSchema = contextSchema.extend({
-  recipientScope: z.enum(["INDIVIDUAL", "LABOUR_GROUP"]),
-  labourerId: z.string().uuid().optional().nullable(),
-  labourGroupId: z.string().uuid().optional().nullable(),
-  fromDate: z.string().date(),
-  toDate: z.string().date(),
-  recordDate: z.string().date(),
-});
 const sarAmountSchema = z.coerce.number().positive().refine(
   (value) => Math.abs(value * 100 - Math.round(value * 100)) < 0.000001,
   "Use no more than two decimal places for SAR amounts.",
@@ -237,12 +229,8 @@ const advanceSchema = contextSchema
         path: ["labourGroupId"],
         message: "Select a labour group for this advance.",
       });
-    if (value.recipientScope === "LABOUR_GROUP" && !value.receivedByLabourerId)
-      context.addIssue({
-        code: "custom",
-        path: ["receivedByLabourerId"],
-        message: "Select the labourer who received this group advance.",
-      });
+    // Received-by is informational only: the group's leader owns the pool
+    // regardless of which member physically received the money.
     if (
       [
         "CONTRACTOR_FOREMAN",
@@ -319,39 +307,15 @@ function labourPaymentDatabaseError(error: unknown) {
   return null;
 }
 
-function dueMemberPayableShares(due: typeof labourDues.$inferSelect) {
-  const snapshot = due.recipientSnapshot as Record<string, unknown>;
-  const rows = Array.isArray(snapshot.memberCalculationSnapshot) ? snapshot.memberCalculationSnapshot : [];
-  return rows.flatMap((value) => {
-    if (!value || typeof value !== "object") return [];
-    const row = value as Record<string, unknown>;
-    const labourerId = typeof row.labourerId === "string" ? row.labourerId : "";
-    const amount = Number(row.grossWage ?? row.calculatedAmount ?? row.attendanceWage ?? 0);
-    return labourerId && Number.isFinite(amount) && amount >= 0 ? [{ labourerId, amount }] : [];
-  });
-}
-
 /**
- * Frozen due-time membership for a labour due: labour_due_member_snapshots
- * rows unioned with the membership evidence preserved in the recipient
- * snapshot (see resolveDueEligibleMembers). Shared by the pool preview, the
- * settlement posting pre-check, and the per-voucher scope check so all three
- * apply the exact same eligibility, mirroring labour_advance_matches_due_scope
- * in PostgreSQL.
+ * The pool a labour due draws from. For a LABOUR_GROUP due that is the group's
+ * ONE aggregate advance pool (see resolveAdvancePoolGroupId) — never restricted
+ * by attendance, memberCalculationSnapshot, member payable shares, or the
+ * due's work period. A group due without a preserved labourGroupId has no
+ * provable pool and is surfaced for reconciliation review.
  */
-async function loadDueEligibleMembership(tx: DbTransaction, due: typeof labourDues.$inferSelect) {
-  if (due.recipientScope !== "LABOUR_GROUP") {
-    return resolveDueEligibleMembers({ recipientScope: due.recipientScope, recipientSnapshot: due.recipientSnapshot });
-  }
-  const snapshotRows = await tx.select({ labourerId: labourDueMemberSnapshots.labourerId }).from(labourDueMemberSnapshots).where(and(
-    eq(labourDueMemberSnapshots.workspaceId, due.workspaceId),
-    eq(labourDueMemberSnapshots.dueId, due.id),
-  ));
-  return resolveDueEligibleMembers({
-    recipientScope: due.recipientScope,
-    recipientSnapshot: due.recipientSnapshot,
-    memberSnapshotLabourerIds: snapshotRows.map((row) => row.labourerId),
-  });
+function duePoolGroupId(due: typeof labourDues.$inferSelect) {
+  return due.recipientScope === "LABOUR_GROUP" ? due.labourGroupId ?? null : null;
 }
 
 async function loadDueAdvancePool(tx: DbTransaction, due: typeof labourDues.$inferSelect, requestedAmount?: number, settlementDate?: string) {
@@ -391,6 +355,7 @@ async function loadDueAdvancePool(tx: DbTransaction, due: typeof labourDues.$inf
     return {
       ...row,
       labourerId: historicalLabourerId,
+      labourGroupId: historicalGroupId,
       financialScopeKey: historicalGroupId && row.financialScopeKey.startsWith("legacy:") ? `group:${historicalGroupId}`
         : historicalLabourerId && row.financialScopeKey.startsWith("legacy:") ? `individual:${historicalLabourerId}`
         : row.financialScopeKey,
@@ -403,10 +368,10 @@ async function loadDueAdvancePool(tx: DbTransaction, due: typeof labourDues.$inf
       appliedToDueAmount: Number(row.appliedToDueAmount),
     };
   });
-  const membership = await loadDueEligibleMembership(tx, due);
+  const poolGroupId = duePoolGroupId(due);
   // Pooled applications that predate the per-voucher source-allocation ledger
-  // still consume this financial scope's pool but cannot be attributed to any
-  // single voucher; subtract them the same way the database guard does.
+  // still consume this pool but cannot be attributed to any single voucher;
+  // subtract them the same way the database guard does.
   const unattributedPooled = await tx.execute(sql`
     SELECT coalesce(sum(p.amount), 0) AS total
     FROM labour_advance_applications p
@@ -417,24 +382,46 @@ async function loadDueAdvancePool(tx: DbTransaction, due: typeof labourDues.$inf
       AND scope_due.financial_scope_key = ${due.financialScopeKey}
       AND NOT EXISTS (SELECT 1 FROM labour_advance_application_sources s WHERE s.application_id = p.id)
   `);
+  const unattributedPooledConsumption = Number((unattributedPooled.rows[0] as { total?: unknown } | undefined)?.total ?? 0);
   const pool = calculateLabourAdvancePool({
     dueFinancialScopeKey: due.financialScopeKey,
+    dueLabourGroupId: poolGroupId,
     dueOutstandingAmount: (await loadLabourDuePosition(tx, due.id))?.outstandingBalance ?? 0,
     settlementDate,
-    memberPayableShares: due.recipientScope === "LABOUR_GROUP" ? dueMemberPayableShares(due) : [],
-    eligibleMemberIds: membership.memberIds,
     candidates: normalized,
     requestedAmount,
-    unattributedPooledConsumption: Number((unattributedPooled.rows[0] as { total?: unknown } | undefined)?.total ?? 0),
+    unattributedPooledConsumption,
   });
   const globalOutstanding = normalized.reduce((sum, row) => sum + Math.max(row.originalAmount - row.appliedAmount - row.refundedAmount, 0), 0);
+  // Authoritative group-pool position (labour-side ownership): every active
+  // funding transaction proved to belong to this group, with no
+  // settlement-date filter — Total − Applied − Refunded = Outstanding.
+  // Derived from transactions, never from per-voucher OPEN/APPLIED statuses.
+  const groupCandidates = poolGroupId ? normalized.filter((row) => resolveAdvancePoolGroupId(row) === poolGroupId) : [];
+  const groupTotals = groupCandidates.reduce((sums, row) => ({
+    total: sums.total + row.originalAmount,
+    applied: sums.applied + row.appliedAmount,
+    refunded: sums.refunded + row.refundedAmount,
+  }), { total: 0, applied: 0, refunded: 0 });
+  const dueSnapshot = asSnapshot(due.recipientSnapshot);
+  const groupPool = poolGroupId ? {
+    labourGroupId: poolGroupId,
+    groupName: firstText(dueSnapshot.labourGroupName, dueSnapshot.groupName),
+    groupLeaderId: firstText(dueSnapshot.groupLeaderId, dueSnapshot.foremanId),
+    groupLeaderName: firstText(dueSnapshot.groupLeaderName, dueSnapshot.foremanName),
+    totalAdvances: Number(groupTotals.total.toFixed(2)),
+    appliedAdvances: Number((groupTotals.applied + unattributedPooledConsumption).toFixed(2)),
+    refundedAdvances: Number(groupTotals.refunded.toFixed(2)),
+    outstandingAdvances: Number(Math.max(groupTotals.total - groupTotals.applied - unattributedPooledConsumption - groupTotals.refunded, 0).toFixed(2)),
+  } : null;
   return {
     ...pool,
     globalOutstanding: Number(globalOutstanding.toFixed(2)),
-    // A group due whose frozen membership cannot be proved from any preserved
-    // source must be surfaced for reconciliation review, never silently
-    // guessed from live group membership.
-    membershipReviewRequired: due.recipientScope === "LABOUR_GROUP" && !membership.hasMembershipEvidence,
+    groupPool,
+    // A group due without a preserved labour-group identity has no provable
+    // pool; surface it for reconciliation review, never guess from a worker's
+    // current group.
+    membershipReviewRequired: due.recipientScope === "LABOUR_GROUP" && !poolGroupId,
   };
 }
 
@@ -630,6 +617,15 @@ async function loadRecipient(
       if (!receiverRow)
         throw new Error(
           "The selected receiving labourer was not found in this farm.",
+        );
+      // Received-by is informational only, but it must be a member (or the
+      // leader) of the selected group — never a labourer from another group.
+      if (
+        receiverRow.payload.groupId !== input.labourGroupId &&
+        receiverRow.clientRecordId !== groupLeaderId
+      )
+        throw new Error(
+          "The selected received-by labourer must belong to the selected labour group.",
         );
       input.receivedByNameSnapshot =
         typeof receiverRow.payload.name === "string"
@@ -1109,81 +1105,14 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // Attendance-generated Labour Dues are retired for all future use. The
+  // preview route remains registered so old clients receive the clear
+  // business rejection rather than a generic 404. Attendance itself stays a
+  // fully independent operational module.
   app.post(
     "/v1/workspace/:workspaceId/labour-payments/dues/attendance-preview",
     { preHandler: requireUser },
-    async (request, reply) => {
-      const params = paramsSchema.safeParse(request.params);
-      const body = attendanceDuePreviewSchema.safeParse(request.body);
-      if (!params.success || !body.success || body.data.fromDate > body.data.toDate)
-        return reply.code(400).send({ message: "Select a valid recipient and attendance period." });
-      const { workspaceId } = params.data;
-      const input = body.data;
-      if (!(await requireRequestScope(request, reply, workspaceId, input.farmId, input.seasonId, "view"))) return;
-      try {
-        const selection = input.recipientScope === "LABOUR_GROUP"
-          ? { settlementMode: "group" as const, groupId: input.labourGroupId ?? undefined }
-          : { settlementMode: "individual" as const, labourerId: input.labourerId ?? undefined };
-        const unfiltered = await db.transaction((tx) => previewLabourWageSettlement(
-          tx, workspaceId, input.farmId, input.seasonId, input.fromDate, input.toDate,
-          input.recordDate, undefined, selection, { includeAdvances: false },
-        ));
-        const sourceIds = unfiltered.sourceAttendanceIds;
-        const ownershipRows = sourceIds.length ? await db.execute(sql`
-          SELECT s.attendance_client_record_id AS attendance_id,
-                 d.id::text AS owner_id, d.due_number AS owner_number,
-                 'LABOUR_DUE'::text AS owner_type, d.payment_status AS owner_status,
-                 d.work_from_date::text AS from_date, d.work_to_date::text AS to_date,
-                 d.gross_amount::text AS amount
-          FROM labour_due_attendance_sources s
-          JOIN labour_dues d ON d.id = s.due_id
-          WHERE s.workspace_id = ${workspaceId} AND s.farm_id = ${input.farmId}
-            AND s.season_id = ${input.seasonId}
-            AND s.attendance_client_record_id IN (${sql.join(sourceIds.map((id) => sql`${id}`), sql`, `)})
-            AND d.calculation_status = 'APPROVED'
-            AND d.payment_status NOT IN ('VOIDED', 'CANCELLED')
-          UNION ALL
-          SELECT a.client_record_id AS attendance_id,
-                 s.id::text AS owner_id,
-                 coalesce(s.payload->>'settlementNumber', s.client_record_id) AS owner_number,
-                 'HISTORICAL_SETTLEMENT'::text AS owner_type,
-                 coalesce(s.payload->>'status', 'posted') AS owner_status,
-                 s.payload->>'fromDate' AS from_date, s.payload->>'toDate' AS to_date,
-                 coalesce(s.payload->>'grossWagesEarned', s.payload->>'grossAmount', '0') AS amount
-          FROM operational_records a
-          JOIN operational_records s ON s.workspace_id = a.workspace_id
-            AND s.entity_type = 'labourWageSettlement'
-            AND (s.client_record_id = coalesce(a.payload->>'linkedSettlementId', a.payload->>'labourWageSettlementId')
-              OR s.id::text = coalesce(a.payload->>'linkedSettlementId', a.payload->>'labourWageSettlementId'))
-          WHERE a.workspace_id = ${workspaceId} AND a.farm_id = ${input.farmId}
-            AND a.season_id = ${input.seasonId} AND a.entity_type = 'attendance'
-            AND a.client_record_id IN (${sql.join(sourceIds.map((id) => sql`${id}`), sql`, `)})
-            AND s.payload->>'deletedAt' IS NULL
-            AND lower(coalesce(s.payload->>'status', 'posted')) NOT IN ('voided', 'deleted', 'reversed')
-        `) : { rows: [] };
-        const ownership = ownershipRows.rows as Array<Record<string, unknown>>;
-        const lockedIds = new Set(ownership.map((row) => String(row.attendance_id)));
-        const preview = lockedIds.size
-          ? await db.transaction((tx) => previewLabourWageSettlement(
-              tx, workspaceId, input.farmId, input.seasonId, input.fromDate, input.toDate,
-              input.recordDate, undefined, selection,
-              { includeAdvances: false, excludedAttendanceClientIds: lockedIds },
-            ))
-          : unfiltered;
-        const ownerMap = new Map<string, { ownerId: string; ownerNumber: string; ownerType: string; ownerStatus: string; fromDate: string | null; toDate: string | null; amount: number; attendanceCount: number }>();
-        for (const row of ownership) {
-          const key = `${row.owner_type}:${row.owner_id}`;
-          const current = ownerMap.get(key);
-          if (current) current.attendanceCount += 1;
-          else ownerMap.set(key, { ownerId: String(row.owner_id), ownerNumber: String(row.owner_number), ownerType: String(row.owner_type), ownerStatus: String(row.owner_status), fromDate: row.from_date ? String(row.from_date) : null, toDate: row.to_date ? String(row.to_date) : null, amount: Number(row.amount ?? 0), attendanceCount: 1 });
-        }
-        const flagged = sourceIds.length ? await db.select({ clientRecordId: operationalRecords.clientRecordId, payload: operationalRecords.payload }).from(operationalRecords).where(and(eq(operationalRecords.workspaceId, workspaceId), inArray(operationalRecords.clientRecordId, sourceIds))) : [];
-        const orphanedAttendanceCount = flagged.filter((row) => Boolean(row.payload.labourDueId || row.payload.labourWageSettlementId || row.payload.linkedSettlementId) && !lockedIds.has(row.clientRecordId)).length;
-        return { preview: { ...preview, excludedAttendanceCount: lockedIds.size, excludedOwners: [...ownerMap.values()], orphanedAttendanceCount } };
-      } catch (error) {
-        return reply.code(400).send({ message: error instanceof Error ? error.message : "Unable to calculate attendance wages." });
-      }
-    },
+    async (request, reply) => reply.code(400).send({ message: ATTENDANCE_DUES_RETIRED_MESSAGE }),
   );
 
   app.post(
@@ -1229,6 +1158,11 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
       }
       const { workspaceId } = params.data;
       const input = body.data;
+      // Attendance-generated Labour Dues are retired: every new Labour Due is
+      // a direct labour-group liability. Old clients and queued retries get
+      // the clear business rejection — never a silent conversion to DIRECT.
+      if (input.source === "ATTENDANCE_PERIOD")
+        return reply.code(400).send({ message: ATTENDANCE_DUES_RETIRED_MESSAGE, errors: { source: ATTENDANCE_DUES_RETIRED_MESSAGE } });
       request.log.info({ event: "labour_due_create_contract", values: {
         source: input.source, recipientScope: input.recipientScope,
         labourerId: input.labourerId ?? null, labourGroupId: input.labourGroupId ?? null,
@@ -1251,8 +1185,6 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
       )
         return;
       try {
-        let attendanceCount = 0;
-        let memberCount = 0;
         const transactionStartedAt = performance.now();
         const due = await db.transaction(async (tx) => {
           await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`${workspaceId}:${input.idempotencyKey}:labour-due-create`}), 1)`);
@@ -1273,46 +1205,13 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             input.farmId,
             input,
           );
-          const revalidationStartedAt = performance.now();
-          const attendancePreview = input.source === "ATTENDANCE_PERIOD"
-            ? await previewLabourWageSettlement(tx, workspaceId, input.farmId, input.seasonId, input.workFromDate, input.workToDate, input.workToDate, undefined,
-                input.recipientScope === "LABOUR_GROUP" ? { settlementMode: "group", groupId: input.labourGroupId ?? undefined } : { settlementMode: "individual", labourerId: input.labourerId ?? undefined }, { includeAdvances: false })
-            : null;
-          phases.attendanceRevalidation = performance.now() - revalidationStartedAt;
-          if (attendancePreview?.unresolvedRows.length) throw new Error("Add wage rates for all included attendance before creating the due.");
-          const sourceAttendanceIds = attendancePreview?.sourceAttendanceIds ?? [];
-          attendanceCount = sourceAttendanceIds.length;
-          memberCount = attendancePreview?.includedLabourCount ?? 0;
-          let sourceRows: Array<{ id: string; clientRecordId: string; payload: Record<string, unknown> }> = [];
-          if (sourceAttendanceIds.length) {
-            const sourceCheckStartedAt = performance.now();
-            sourceRows = await tx.select({ id: operationalRecords.id, clientRecordId: operationalRecords.clientRecordId, payload: operationalRecords.payload }).from(operationalRecords).where(and(eq(operationalRecords.workspaceId, workspaceId), eq(operationalRecords.farmId, input.farmId), eq(operationalRecords.seasonId, input.seasonId), eq(operationalRecords.entityType, "attendance"), inArray(operationalRecords.clientRecordId, sourceAttendanceIds)));
-            if (sourceRows.length !== sourceAttendanceIds.length) throw new Error("Some previewed attendance records are no longer available. Refresh the preview.");
-            const owned = await tx.execute(sql`
-              SELECT s.attendance_client_record_id
-              FROM labour_due_attendance_sources s
-              JOIN labour_dues d ON d.id = s.due_id
-              WHERE s.workspace_id = ${workspaceId}
-                AND s.attendance_client_record_id IN (${sql.join(sourceAttendanceIds.map((id) => sql`${id}`), sql`, `)})
-                AND d.calculation_status = 'APPROVED'
-                AND d.payment_status NOT IN ('VOIDED', 'CANCELLED')
-              UNION
-              SELECT a.client_record_id
-              FROM operational_records a
-              JOIN operational_records s ON s.workspace_id = a.workspace_id
-                AND s.entity_type = 'labourWageSettlement'
-                AND (s.client_record_id = coalesce(a.payload->>'linkedSettlementId', a.payload->>'labourWageSettlementId')
-                  OR s.id::text = coalesce(a.payload->>'linkedSettlementId', a.payload->>'labourWageSettlementId'))
-              WHERE a.workspace_id = ${workspaceId}
-                AND a.client_record_id IN (${sql.join(sourceAttendanceIds.map((id) => sql`${id}`), sql`, `)})
-                AND s.payload->>'deletedAt' IS NULL
-                AND lower(coalesce(s.payload->>'status', 'posted')) NOT IN ('voided', 'deleted', 'reversed')
-            `);
-            if (owned.rows.length) throw new Error("Some attendance records are already included in another due or settlement. Refresh the preview.");
-            phases.sourceValidation = performance.now() - sourceCheckStartedAt;
-          }
-          const grossAmount = attendancePreview?.grossWages ?? input.agreedGrossAmount ?? 0;
-          if (grossAmount <= 0) throw new Error("No payable attendance is available for this due.");
+          // Every new Labour Due is a direct labour-group liability: the
+          // amount is the agreed gross amount, never calculated from
+          // attendance days, wage rates, or member calculation snapshots. The
+          // work dates are descriptive only, and no attendance record is
+          // financially linked or locked.
+          const grossAmount = input.agreedGrossAmount ?? 0;
+          if (grossAmount <= 0) throw new Error("Enter the agreed gross amount for this labour due.");
           const dueNumber = await allocateLabourDueNumber(
             tx,
             workspaceId,
@@ -1326,8 +1225,8 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               farmId: input.farmId,
               seasonId: input.seasonId,
               dueNumber,
-              origin: input.source === "ATTENDANCE_PERIOD" ? "SETTLEMENT" : "DIRECT",
-              settlementBasis: input.source === "ATTENDANCE_PERIOD" ? "ATTENDANCE" : "MANUAL",
+              origin: "DIRECT",
+              settlementBasis: "MANUAL",
               recipientScope: input.recipientScope,
               financialScopeKey: recipient.financialScopeKey,
               labourerId: input.labourerId,
@@ -1338,15 +1237,8 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
                 ...recipient.snapshot,
                 notes: input.notes,
                 costCategory: input.costCategory,
-                dueSource: input.source,
-                groupName: attendancePreview?.groupName ?? null,
-                foremanId: attendancePreview?.foremanId ?? null,
-                foremanName: attendancePreview?.includedLabourRows.find((row) => row.labourerId === attendancePreview.foremanId)?.labourName ?? null,
-                memberCount: attendancePreview?.includedLabourCount ?? null,
-                attendanceTotals: attendancePreview?.attendanceTotals ?? null,
-                memberCalculationSnapshot: attendancePreview?.includedLabourRows ?? null,
-                sourceAttendanceIds,
-                calculationRules: input.source === "ATTENDANCE_PERIOD" ? "daily wage rate by attendance date; half day = 0.5; leader counted once by labourer ID" : "manual agreed amount",
+                dueSource: "DIRECT",
+                calculationRules: "manual agreed amount",
               },
               description: input.description,
               workFromDate: input.workFromDate,
@@ -1363,34 +1255,6 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             })
             .returning();
           phases.dueInsert = performance.now() - dueInsertStartedAt;
-          if (attendancePreview?.includedLabourRows.length) {
-            const memberInsertStartedAt = performance.now();
-            await tx.insert(labourDueMemberSnapshots).values(attendancePreview.includedLabourRows.map((row) => ({
-              workspaceId,
-              dueId: created!.id,
-              labourerId: row.labourerId,
-              snapshot: row as unknown as Record<string, unknown>,
-              calculatedAmount: row.grossWage.toFixed(2),
-            })));
-            phases.memberSnapshotInsert = performance.now() - memberInsertStartedAt;
-          }
-          if (sourceRows.length) {
-            const sourceLinkStartedAt = performance.now();
-            try {
-              await tx.insert(labourDueAttendanceSources).values(sourceRows.map((row) => ({
-                workspaceId,
-                farmId: input.farmId,
-                seasonId: input.seasonId,
-                dueId: created!.id,
-                attendanceRecordId: row.id,
-                attendanceClientRecordId: row.clientRecordId,
-              })));
-            } catch (error) {
-              if (error instanceof Error && /unique|duplicate/i.test(error.message)) throw new Error("Some attendance records were already consumed by another labour due. Refresh the preview.");
-              throw error;
-            }
-            phases.attendanceSourceInsert = performance.now() - sourceLinkStartedAt;
-          }
           const accountingStartedAt = performance.now();
           await postLabourDueRecognition(tx, {
             workspaceId,
@@ -1416,11 +1280,6 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               entityId: created!.id,
               afterJson: created as unknown as Record<string, unknown>,
             });
-          if (sourceRows.length) {
-            const attendanceLockStartedAt = performance.now();
-            await tx.execute(sql`UPDATE operational_records SET payload = payload || jsonb_build_object('labourDueId', ${created!.id}, 'labourDueNumber', ${dueNumber}, 'labourDueLockedAt', ${new Date().toISOString()}), updated_at = now() WHERE workspace_id = ${workspaceId} AND id IN (${sql.join(sourceRows.map((row) => sql`${row.id}::uuid`), sql`, `)})`);
-            phases.attendanceBulkLock = performance.now() - attendanceLockStartedAt;
-          }
           return created!;
         });
         phases.transaction = performance.now() - transactionStartedAt;
@@ -1430,8 +1289,8 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           : { ...due, outstandingBalance: Math.max(Number(due.grossAmount) - Number(due.authorizedDeductions), 0), previousPayments: 0, advancesApplied: 0 };
         const total = performance.now() - requestStartedAt;
         reply.header("Server-Timing", Object.entries(phases).map(([name, duration]) => `${name};dur=${duration.toFixed(1)}`).concat(`total;dur=${total.toFixed(1)}`).join(", "));
-        request.log.info({ event: "labour_due_create_timing", dueId: due.id, source: input.source, memberCount, attendanceCount, phases, totalMs: total, sqlShape: "fixed-set-based" });
-        return reply.code(201).send({ due: responseDue, performance: { totalMs: total, transactionMs: phases.transaction, attendanceCount, memberCount, sqlShape: "fixed-set-based" } });
+        request.log.info({ event: "labour_due_create_timing", dueId: due.id, source: "DIRECT", phases, totalMs: total, sqlShape: "fixed-set-based" });
+        return reply.code(201).send({ due: responseDue, performance: { totalMs: total, transactionMs: phases.transaction, sqlShape: "fixed-set-based" } });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unable to create the labour due.";
         const recipientField = /labourer/i.test(message) ? "labourerId" : /group/i.test(message) ? "labourGroupId" : /recipient|crew|contractor|batch identity/i.test(message) ? "recipientReference" : null;
@@ -1479,6 +1338,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           proposedAllocationCount: pool.allocations.length,
           exclusionTotals: pool.exclusionTotals,
           membershipReviewRequired: pool.membershipReviewRequired,
+          groupPool: pool.groupPool,
         },
         ...(details ? { details, pageInfo: { page: query.data.page, pageSize: query.data.pageSize, totalCount: pool.allocations.length, hasMore: start + query.data.pageSize < pool.allocations.length } } : {}),
       };
@@ -1608,10 +1468,6 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             });
             position = (await loadLabourDuePosition(tx, dueId))!;
           }
-          // Frozen due-time membership — the same eligibility the pool preview
-          // and the database guard apply, so a member advance accepted by the
-          // preview is never rejected here.
-          const memberIds = new Set((await loadDueEligibleMembership(tx, position.due)).memberIds);
           for (const application of input.advancePool ? [] : requestedApplications) {
             const [existingApplication] = await tx
               .select()
@@ -1658,9 +1514,16 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               advance.status !== "POSTED"
             )
               throw new Error("The selected advance is not available.");
-            if (advance.financialScopeKey !== position.due.financialScopeKey && !(position.due.recipientScope === "LABOUR_GROUP" && advance.labourerId && memberIds.has(advance.labourerId)))
+            // Same pool rule as the preview and the database guard: a group
+            // due draws from its group's ONE aggregate pool (any advance whose
+            // preserved evidence proves that group), other dues require the
+            // exact financial scope.
+            const advanceInDuePool = position.due.recipientScope === "LABOUR_GROUP"
+              ? Boolean(position.due.labourGroupId) && resolveAdvancePoolGroupId(advance) === position.due.labourGroupId
+              : advance.financialScopeKey === position.due.financialScopeKey;
+            if (!advanceInDuePool)
               throw new Error(
-                "An advance may only be applied to a due for the same financial scope.",
+                "An advance may only be applied to a due for the same labour group or financial scope.",
               );
             const [applied] = await tx
               .select({
@@ -2423,9 +2286,39 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               );
             return existing;
           }
+          // One aggregate advance pool per labour group, operationally owned
+          // by the group's leader: money received by any member is an advance
+          // taken by the leader for that group. An advance recorded for a
+          // labourer who belongs to a group therefore enters the group's pool
+          // with the member kept as informational received-by only — there is
+          // no separate individual advance scope for group members. Labourers
+          // with no group keep the individual scope.
+          if (input.recipientScope === "INDIVIDUAL" && input.labourerId) {
+            const [memberRecord] = await tx
+              .select({ payload: operationalRecords.payload })
+              .from(operationalRecords)
+              .where(
+                and(
+                  eq(operationalRecords.workspaceId, workspaceId),
+                  eq(operationalRecords.farmId, input.farmId),
+                  eq(operationalRecords.entityType, "labourer"),
+                  eq(operationalRecords.clientRecordId, input.labourerId),
+                ),
+              )
+              .limit(1);
+            const memberGroupId = typeof memberRecord?.payload.groupId === "string" && memberRecord.payload.groupId.trim()
+              ? memberRecord.payload.groupId.trim()
+              : null;
+            if (memberGroupId) {
+              input.recipientScope = "LABOUR_GROUP";
+              input.labourGroupId = memberGroupId;
+              input.receivedByLabourerId = input.receivedByLabourerId ?? input.labourerId;
+              input.labourerId = null;
+            }
+          }
           const recipient = await loadRecipient(tx, workspaceId, input.farmId, {
             ...input,
-            requireReceivedBy: true,
+            requireReceivedBy: false,
           });
           const account = await validatedAccount(
             tx,
@@ -3089,6 +2982,139 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           : Promise.resolve([]),
       ]);
       return { position, journalEntries, relatedVouchers };
+    },
+  );
+
+  app.get(
+    "/v1/workspace/:workspaceId/labour-payments/advance-pools",
+    { preHandler: requireUser },
+    async (request, reply) => {
+      const params = paramsSchema.safeParse(request.params);
+      const query = contextSchema.safeParse(request.query);
+      if (!params.success || !query.success) return reply.code(400).send({ message: "A valid advance-pool request is required." });
+      const { workspaceId } = params.data;
+      const { farmId, seasonId } = query.data;
+      if (!(await requireRequestScope(request, reply, workspaceId, farmId, seasonId, "view"))) return;
+      // Authoritative labour-side pool positions: one aggregate pool per
+      // labour group, derived from active funding transactions, applications
+      // and refunds — never from per-voucher OPEN/APPLIED statuses.
+      const [advances, groupRecords, labourerRecords, unattributedPooledRows] = await Promise.all([
+        db.select({
+          id: labourPaymentVouchers.id,
+          voucherNumber: labourPaymentVouchers.voucherNumber,
+          voucherDate: labourPaymentVouchers.voucherDate,
+          financialScopeKey: labourPaymentVouchers.financialScopeKey,
+          labourerId: labourPaymentVouchers.labourerId,
+          labourGroupId: labourPaymentVouchers.labourGroupId,
+          recipientSnapshot: labourPaymentVouchers.recipientSnapshot,
+          originalAmount: labourPaymentVouchers.paymentAmount,
+          appliedAmount: sql<number>`(coalesce((select sum(a.amount) from labour_advance_applications a where a.advance_voucher_id = ${labourPaymentVouchers.id} and a.status = 'ACTIVE'), 0)
+            + coalesce((select sum(s.amount) from labour_advance_application_sources s join labour_advance_applications p on p.id = s.application_id where s.advance_voucher_id = ${labourPaymentVouchers.id} and p.status = 'ACTIVE'), 0))::numeric`,
+          refundedAmount: sql<number>`coalesce((select sum(r.payment_amount) from labour_payment_vouchers r where r.related_advance_voucher_id = ${labourPaymentVouchers.id} and r.nature = 'REFUND_RECOVERY' and r.status = 'POSTED'), 0)::numeric`,
+        }).from(labourPaymentVouchers).where(and(
+          eq(labourPaymentVouchers.workspaceId, workspaceId),
+          eq(labourPaymentVouchers.farmId, farmId),
+          eq(labourPaymentVouchers.seasonId, seasonId),
+          eq(labourPaymentVouchers.nature, "ADVANCE"),
+          eq(labourPaymentVouchers.status, "POSTED"),
+        )),
+        db.select({ clientRecordId: operationalRecords.clientRecordId, payload: operationalRecords.payload }).from(operationalRecords).where(and(
+          eq(operationalRecords.workspaceId, workspaceId), eq(operationalRecords.farmId, farmId), eq(operationalRecords.entityType, "labourGroup"),
+        )),
+        db.select({ clientRecordId: operationalRecords.clientRecordId, payload: operationalRecords.payload }).from(operationalRecords).where(and(
+          eq(operationalRecords.workspaceId, workspaceId), eq(operationalRecords.farmId, farmId), eq(operationalRecords.entityType, "labourer"),
+        )),
+        // Pooled applications that predate the per-voucher source ledger:
+        // attributed to their due's group pool (or to review when the due has
+        // no preserved group identity).
+        db.execute(sql`
+          SELECT scope_due.labour_group_id AS group_id, coalesce(sum(p.amount), 0) AS total
+          FROM labour_advance_applications p
+          JOIN labour_dues scope_due ON scope_due.id = p.due_id
+          WHERE p.workspace_id = ${workspaceId}
+            AND scope_due.farm_id = ${farmId} AND scope_due.season_id = ${seasonId}
+            AND p.advance_voucher_id IS NULL AND p.status = 'ACTIVE'
+            AND NOT EXISTS (SELECT 1 FROM labour_advance_application_sources s WHERE s.application_id = p.id)
+          GROUP BY scope_due.labour_group_id
+        `),
+      ]);
+      const groupById = new Map(groupRecords.map((row) => [row.clientRecordId, row.payload]));
+      const labourerNameById = new Map(labourerRecords.map((row) => [row.clientRecordId, firstText(row.payload.name)]));
+      const money = (value: number) => Number(value.toFixed(2));
+      type PoolTotals = { total: number; applied: number; refunded: number };
+      const poolsByGroup = new Map<string, PoolTotals>();
+      const reviewAdvances: Array<{ id: string; voucherNumber: string; voucherDate: string; amount: number; outstandingAmount: number; labourerId: string | null; recipientName: string | null; reason: string }> = [];
+      const farmWide: PoolTotals = { total: 0, applied: 0, refunded: 0 };
+      for (const advance of advances) {
+        const originalAmount = Number(advance.originalAmount);
+        const appliedAmount = Number(advance.appliedAmount);
+        const refundedAmount = Number(advance.refundedAmount);
+        farmWide.total += originalAmount;
+        farmWide.applied += appliedAmount;
+        farmWide.refunded += refundedAmount;
+        const groupId = resolveAdvancePoolGroupId(advance);
+        if (!groupId) {
+          // No provable group ownership: never guessed from the worker's
+          // current group — surfaced for reconciliation review instead.
+          const snapshot = asSnapshot(advance.recipientSnapshot);
+          reviewAdvances.push({
+            id: advance.id,
+            voucherNumber: advance.voucherNumber,
+            voucherDate: advance.voucherDate,
+            amount: money(originalAmount),
+            outstandingAmount: money(Math.max(originalAmount - appliedAmount - refundedAmount, 0)),
+            labourerId: advance.labourerId,
+            recipientName: firstText(snapshot.receivedByNameSnapshot, snapshot.labourerName, snapshot.recipientName),
+            reason: advance.labourerId
+              ? "No preserved labour-group evidence exists for this advance."
+              : "The group or member ownership of this advance cannot be proved.",
+          });
+          continue;
+        }
+        const pool = poolsByGroup.get(groupId) ?? { total: 0, applied: 0, refunded: 0 };
+        pool.total += originalAmount;
+        pool.applied += appliedAmount;
+        pool.refunded += refundedAmount;
+        poolsByGroup.set(groupId, pool);
+      }
+      let reviewPooledConsumption = 0;
+      for (const row of unattributedPooledRows.rows as Array<{ group_id: string | null; total: unknown }>) {
+        const total = Number(row.total ?? 0);
+        farmWide.applied += total;
+        if (row.group_id && poolsByGroup.has(row.group_id)) {
+          poolsByGroup.get(row.group_id)!.applied += total;
+        } else if (row.group_id) {
+          poolsByGroup.set(row.group_id, { total: 0, applied: total, refunded: 0 });
+        } else {
+          reviewPooledConsumption += total;
+        }
+      }
+      const pools = [...poolsByGroup.entries()].map(([groupId, totals]) => {
+        const groupPayload = groupById.get(groupId);
+        const leaderId = firstText(groupPayload?.foremanLabourId, groupPayload?.foremanId);
+        return {
+          labourGroupId: groupId,
+          groupName: firstText(groupPayload?.name) ?? "Labour Group",
+          groupLeaderId: leaderId,
+          groupLeaderName: leaderId ? labourerNameById.get(leaderId) ?? null : null,
+          totalAdvances: money(totals.total),
+          appliedAdvances: money(totals.applied),
+          refundedAdvances: money(totals.refunded),
+          outstandingAdvances: money(Math.max(totals.total - totals.applied - totals.refunded, 0)),
+        };
+      }).sort((left, right) => left.groupName.localeCompare(right.groupName) || left.labourGroupId.localeCompare(right.labourGroupId));
+      reply.header("Cache-Control", "private, no-store");
+      return {
+        pools,
+        reviewAdvances,
+        reviewPooledConsumption: money(reviewPooledConsumption),
+        farmWide: {
+          totalAdvances: money(farmWide.total),
+          appliedAdvances: money(farmWide.applied),
+          refundedAdvances: money(farmWide.refunded),
+          outstandingAdvances: money(Math.max(farmWide.total - farmWide.applied - farmWide.refunded, 0)),
+        },
+      };
     },
   );
 

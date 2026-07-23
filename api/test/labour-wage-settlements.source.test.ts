@@ -73,7 +73,7 @@ test("calculateGroupAdvancePoolTotals excludes prior voided settlements by using
   assert.equal(totals.remainingAdvanceCarryForward, 10_000);
 });
 
-test("labour wage settlements use settlement numbering instead of reserving expense voucher numbers", () => {
+test("labour wage settlements never reserve expense voucher numbers (creation itself is retired)", () => {
   const source = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
   assert.ok(!source.includes('import { allocateVoucherNumber } from "../lib/voucher-numbers.js";'));
   assert.ok(!source.includes("voucherPurpose: \"labour_wage_settlement\""));
@@ -81,8 +81,7 @@ test("labour wage settlements use settlement numbering instead of reserving expe
   assert.ok(!source.includes("voucherPayload"));
   assert.ok(!source.includes("const voucherId ="));
   assert.ok(!source.includes("clientRecordId: voucherId"));
-  assert.ok(source.includes('linkedVoucherId: ""'));
-  assert.ok(source.includes("linkedVoucherNumber: settlementNumber"));
+  assert.ok(source.includes("ATTENDANCE_DUES_RETIRED_MESSAGE"), "the create route now rejects with the retirement message");
 });
 
 test("labour wage settlements resolve canonical payment accounts and accept legacy android account ids", () => {
@@ -114,7 +113,6 @@ test("labour wage settlements repair missing accounting transactions through the
   assert.ok(source.includes('"/v1/workspace/:workspaceId/labour-wage-settlements/:settlementId/void"'));
   assert.ok(source.includes("repairPostedSettlementAccounting"));
   assert.ok(source.includes('action: "labour_wage_settlement_accounting_repaired"'));
-  assert.ok(source.includes('action: "labour_wage_settlement_updated"'));
   assert.ok(source.includes('action: "labour_wage_settlement_voided"'));
   assert.ok(libSource.includes('source: "settlement"'));
   assert.ok(libSource.includes('sourceType: "labour_wage_settlement"'));
@@ -122,37 +120,21 @@ test("labour wage settlements repair missing accounting transactions through the
   assert.ok(libSource.includes('return "posted" as const;'));
 });
 
-test("labour wage settlement create requests reuse a client request id and narrow linked record updates", () => {
+test("settlement creation is retired: the route rejects immediately while the status probe still answers old clients", () => {
   const source = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
-  const libSource = readFileSync(new URL("../src/lib/labour-wage-settlements.ts", import.meta.url), "utf8");
   const webSource = readFileSync(new URL("../../web/src/pages/workspace/LabourWageSettlements.tsx", import.meta.url), "utf8");
   const apiSource = readFileSync(new URL("../../web/src/lib/api.ts", import.meta.url), "utf8");
-  assert.ok(source.includes("clientRequestId: z.string().uuid().optional()"));
-  assert.ok(source.includes("findSettlementByClientRequestId"));
-  assert.ok(source.includes("pg_advisory_xact_lock"));
-  assert.ok(source.includes("labourWageSettlementCreateRequests"));
-  assert.ok(source.includes("updateCreateRequestState(\"request_received\")"));
-  assert.ok(source.includes("updateCreateRequestState(\"transaction_started\")"));
-  assert.ok(source.includes("updateCreateRequestState(\"attendance_linked\""));
-  assert.ok(source.includes("updateCreateRequestState(\"accounting_posted\""));
-  assert.ok(source.includes("SET LOCAL statement_timeout = '90s'"));
-  assert.ok(source.includes("updateCreateRequestState(\"rolled_back\""));
-  assert.ok(source.includes("inArray(operationalRecords.clientRecordId, includedEarningIds)"));
-  assert.ok(source.includes("inArray(operationalRecords.clientRecordId, includedAttendanceIds)"));
-  assert.ok(source.includes("labour wage settlement create request completed"));
-  assert.ok(libSource.includes("clientRequestId?: string | null;"));
-  assert.ok(webSource.includes("pendingRequestId"));
+  const migration = readFileSync(new URL("../../database/migrations/0046_group_advance_pools_and_attendance_due_retirement.sql", import.meta.url), "utf8");
+  assert.match(source, /app\.post\("\/v1\/workspace\/:workspaceId\/labour-wage-settlements", \{ preHandler: requireUser \}, async \(request, reply\) => \{[\s\S]{0,700}ATTENDANCE_DUES_RETIRED_MESSAGE/);
+  assert.doesNotMatch(source, /updateCreateRequestState\("request_received"\)/, "no creation state machine runs any more");
+  assert.ok(source.includes('app.get("/v1/workspace/:workspaceId/labour-wage-settlements/status"'));
   assert.ok(webSource.includes("resolveSettlementCreateStatus"));
   assert.ok(apiSource.includes("The request is taking longer than expected. Checking settlement status..."));
-  assert.ok(source.includes('paymentAccountId: z.string().min(1).optional()'));
-  assert.ok(source.includes('accountId: z.string().min(1).optional()'));
-  assert.ok(source.includes('Settlement approval no longer moves cash.'));
-  assert.ok(source.includes('const effectivePaidAmount = 0;'));
-  assert.ok(webSource.includes('paidAmount: 0'));
-  assert.ok(webSource.includes('Pay it later from Payments Due with a Labour Payment Voucher.'));
+  // Anything still queued is parked for review instead of being posted.
+  assert.match(migration, /UPDATE labour_wage_settlement_create_requests/);
 });
 
-test("labour wage settlement allocations persist canonical advance UUIDs and log safe allocation failures", () => {
+test("historical settlement advance allocations keep canonical advance UUIDs; no route inserts new allocations", () => {
   const routeSource = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
   const ledgerSource = readFileSync(new URL("../src/lib/labour-advance-ledger.ts", import.meta.url), "utf8");
   assert.ok(ledgerSource.includes("advanceRecordId: row.id"));
@@ -161,18 +143,9 @@ test("labour wage settlement allocations persist canonical advance UUIDs and log
   assert.ok(ledgerSource.includes("allocationsBySettlementId.get(settlement.id)"));
   assert.ok(ledgerSource.includes("legacyUnallocatedPreviouslyAbsorbedAdvances"));
   assert.doesNotMatch(ledgerSource, /eligibleAdvances\[0\]/);
-  assert.ok(routeSource.includes("canonicalAdvanceRecordId: row.advanceRecordId"));
-  assert.ok(routeSource.includes("sourceAdvanceId: row.sourceAdvanceId"));
-  assert.ok(routeSource.includes("failingAllocationIndex"));
-  assert.ok(routeSource.includes("postgresCode"));
-  assert.ok(routeSource.includes("postgresConstraint"));
-  assert.ok(routeSource.includes("postgresTable"));
-  assert.ok(routeSource.includes("postgresColumn"));
-  assert.ok(routeSource.includes("labour_wage_settlement_allocation_insert_failed"));
-  assert.ok(routeSource.includes("Settlement could not be created because its advance records could not be linked. No changes were saved."));
-  assert.ok(routeSource.includes("One or more advance records are no longer available. Please preview again."));
-  assert.doesNotMatch(routeSource, /const canonicalAdvanceRecordId = typeof row\.advanceRecordId === "string" && row\.advanceRecordId\.trim\(\)\s*\?\s*row\.advanceRecordId\.trim\(\)\s*:\s*row\.advanceId/);
-  assert.doesNotMatch(routeSource, /labourWageSettlementAdvanceAllocations\)\.values\(\s*advanceAbsorptionRows\.map/);
+  // Creation is retired: nothing in the routes inserts settlement advance
+  // allocations any more; the table remains readable for history.
+  assert.doesNotMatch(routeSource, /insert\(labourWageSettlementAdvanceAllocations\)/);
 });
 
 test("labour wage settlement preview remains read-only and never inserts advance allocations", () => {
@@ -281,12 +254,11 @@ test("labour settlement preview computes prior settled advances separately from 
   assert.ok(!source.includes("const previouslySettledAdvances = Math.max(rawAdvancesUpToSettlementDate - availableAdvanceBalanceBeforeSettlement, 0);"));
 });
 
-test("group settlement posting preserves pooled advance totals without individual advance allocations", () => {
+test("pooled group advance totals stay in the calculation library while route-level settlement posting is retired", () => {
   const source = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
-  assert.ok(source.includes("effectiveAdvanceAdjustmentForPosting"));
-  assert.ok(source.includes("rawAdvancesUpToSettlementDate: preview.rawAdvancesUpToSettlementDate"));
-  assert.ok(source.includes("previouslySettledAdvances: preview.previouslySettledAdvances"));
-  assert.ok(source.includes("advanceAdjustmentAllocations: [],"));
+  const libSource = readFileSync(new URL("../src/lib/labour-wage-settlements.ts", import.meta.url), "utf8");
+  assert.ok(libSource.includes("calculateGroupAdvancePoolTotals"));
+  assert.doesNotMatch(source, /rawAdvancesUpToSettlementDate: preview\.rawAdvancesUpToSettlementDate/, "no route posts a new settlement from an attendance preview");
 });
 
 test("settlement create status endpoint reuses the client request id and processing lock", () => {
@@ -318,13 +290,8 @@ test("settlement status lookup is read-only and does not run accounting repair",
   assert.doesNotMatch(statusBlock, /tx\.delete\(/);
 });
 
-test("settlement payload stores immutable payment account identity snapshots", () => {
-  const routeSource = readFileSync(new URL("../src/routes/labour-wage-settlements.ts", import.meta.url), "utf8");
+test("historical settlement payloads keep immutable payment account identity snapshots readable", () => {
   const libSource = readFileSync(new URL("../src/lib/labour-wage-settlements.ts", import.meta.url), "utf8");
-  assert.ok(routeSource.includes("paymentAccountCanonicalId: paymentAccountIdValue"));
-  assert.ok(routeSource.includes("paymentAccountLegacyId: resolvedAccount?.oldAndroidId ?? null"));
-  assert.ok(routeSource.includes("paymentAccountName: account?.name ?? resolvedAccount?.name ?? \"\""));
-  assert.ok(routeSource.includes("paymentAccountType: account?.accountType ?? resolvedAccount?.accountType ?? null"));
   assert.ok(libSource.includes("paymentAccountCanonicalId?: string | null;"));
   assert.ok(libSource.includes("paymentAccountLegacyId?: string | null;"));
   assert.ok(libSource.includes("paymentAccountName?: string | null;"));
@@ -392,7 +359,6 @@ test("group settlement preview resolves the persisted foreman relation server-si
   assert.ok(routeSource.includes("The selected labour group has no foreman assigned. Assign a foreman in Labour Groups before creating a settlement."));
   assert.ok(routeSource.includes("The assigned foreman record is invalid. Reassign the group foreman."));
   assert.ok(routeSource.includes("The submitted foreman does not match the selected labour group."));
-  assert.ok(routeSource.includes("resolvedSelection = await db.transaction((tx) => resolveSettlementSelection(tx, workspaceId, farmId, {"));
   assert.ok(groupsPage.includes("foremanLabourId: normalizedForemanId"));
   assert.ok(syncRoute.includes("foremanId: foremanLabourId || undefined"));
   assert.ok(syncRoute.includes("foremanLabourId: foremanLabourId || undefined"));

@@ -207,8 +207,8 @@ export default function App() {
         <Route path="earnings" element={<Navigate to="/workspace/labour-payments/direct-due" replace />} />
         <Route path="labour-work" element={<Navigate to="/workspace/labour-payments/direct-due" replace />} />
         <Route path="direct-payments" element={<Navigate to="/workspace/labour-payments/overview" replace />} />
-        <Route path="settlements" element={<Navigate to="/workspace/labour-payments/direct-due?source=attendance&scope=group" replace />} />
-        <Route path="settlement" element={<Navigate to="/workspace/labour-payments/direct-due?source=attendance&scope=group" replace />} />
+        <Route path="settlements" element={<Navigate to="/workspace/labour-payments/direct-due?scope=group" replace />} />
+        <Route path="settlement" element={<Navigate to="/workspace/labour-payments/direct-due?scope=group" replace />} />
         <Route path="reports" element={routeElement(<LabourPaymentsReportsHub />, "Loading labour payment reports")} />
       </Route>
       <Route path="sales" element={routeElement(<Sales />, "Loading sales")} />
@@ -223,7 +223,7 @@ export default function App() {
       <Route path="labour-advances" element={<Navigate to="/workspace/labour-payments/advances" replace />} />
       <Route path="labour-earnings" element={<Navigate to="/workspace/labour-payments/direct-due" replace />} />
       <Route path="wage-rates" element={<Navigate to="/workspace/labour-payments/wage-rates" replace />} />
-      <Route path="wage-settlements" element={<Navigate to="/workspace/labour-payments/direct-due?source=attendance&scope=group" replace />} />
+      <Route path="wage-settlements" element={<Navigate to="/workspace/labour-payments/direct-due?scope=group" replace />} />
       <Route path="activity" element={routeElement(<ActivityLog />, "Loading activity log")} />
       <Route path="reports" element={routeElement(<Reports />, "Loading reports")} />
       <Route path="operations-map" element={config.featureFarmMap ? routeElement(<FarmOperationsMap mode="live" />, "Loading operations map") : <FarmMapDisabledRedirect />} />
