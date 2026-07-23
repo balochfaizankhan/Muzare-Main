@@ -332,10 +332,10 @@ async function loadDueAdvancePool(tx: DbTransaction, due: typeof labourDues.$inf
     // Per-voucher consumption counts both direct per-voucher applications and
     // the persisted source allocations of ACTIVE pooled applications, exactly
     // as validate_labour_advance_application does.
-    appliedAmount: sql<number>`(coalesce((select sum(a.amount) from labour_advance_applications a where a.advance_voucher_id = ${labourPaymentVouchers.id} and a.status = 'ACTIVE'), 0)
-      + coalesce((select sum(s.amount) from labour_advance_application_sources s join labour_advance_applications p on p.id = s.application_id where s.advance_voucher_id = ${labourPaymentVouchers.id} and p.status = 'ACTIVE'), 0))::numeric`,
-    refundedAmount: sql<number>`coalesce((select sum(r.payment_amount) from labour_payment_vouchers r where r.related_advance_voucher_id = ${labourPaymentVouchers.id} and r.nature = 'REFUND_RECOVERY' and r.status = 'POSTED'), 0)::numeric`,
-    appliedToDueAmount: sql<number>`coalesce((select sum(a.amount) from labour_advance_applications a where a.advance_voucher_id = ${labourPaymentVouchers.id} and a.due_id = ${due.id} and a.status = 'ACTIVE'), 0)::numeric`,
+    appliedAmount: sql<number>`(coalesce((select sum(a.amount) from labour_advance_applications a where a.advance_voucher_id = ${sql.raw('"labour_payment_vouchers"."id"')} and a.status = 'ACTIVE'), 0)
+      + coalesce((select sum(s.amount) from labour_advance_application_sources s join labour_advance_applications p on p.id = s.application_id where s.advance_voucher_id = ${sql.raw('"labour_payment_vouchers"."id"')} and p.status = 'ACTIVE'), 0))::numeric`,
+    refundedAmount: sql<number>`coalesce((select sum(r.payment_amount) from labour_payment_vouchers r where r.related_advance_voucher_id = ${sql.raw('"labour_payment_vouchers"."id"')} and r.nature = 'REFUND_RECOVERY' and r.status = 'POSTED'), 0)::numeric`,
+    appliedToDueAmount: sql<number>`coalesce((select sum(a.amount) from labour_advance_applications a where a.advance_voucher_id = ${sql.raw('"labour_payment_vouchers"."id"')} and a.due_id = ${due.id} and a.status = 'ACTIVE'), 0)::numeric`,
   }).from(labourPaymentVouchers).where(and(
     eq(labourPaymentVouchers.workspaceId, due.workspaceId),
     eq(labourPaymentVouchers.farmId, due.farmId),
@@ -3014,9 +3014,9 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           labourGroupId: labourPaymentVouchers.labourGroupId,
           recipientSnapshot: labourPaymentVouchers.recipientSnapshot,
           originalAmount: labourPaymentVouchers.paymentAmount,
-          appliedAmount: sql<number>`(coalesce((select sum(a.amount) from labour_advance_applications a where a.advance_voucher_id = ${labourPaymentVouchers.id} and a.status = 'ACTIVE'), 0)
-            + coalesce((select sum(s.amount) from labour_advance_application_sources s join labour_advance_applications p on p.id = s.application_id where s.advance_voucher_id = ${labourPaymentVouchers.id} and p.status = 'ACTIVE'), 0))::numeric`,
-          refundedAmount: sql<number>`coalesce((select sum(r.payment_amount) from labour_payment_vouchers r where r.related_advance_voucher_id = ${labourPaymentVouchers.id} and r.nature = 'REFUND_RECOVERY' and r.status = 'POSTED'), 0)::numeric`,
+          appliedAmount: sql<number>`(coalesce((select sum(a.amount) from labour_advance_applications a where a.advance_voucher_id = ${sql.raw('"labour_payment_vouchers"."id"')} and a.status = 'ACTIVE'), 0)
+            + coalesce((select sum(s.amount) from labour_advance_application_sources s join labour_advance_applications p on p.id = s.application_id where s.advance_voucher_id = ${sql.raw('"labour_payment_vouchers"."id"')} and p.status = 'ACTIVE'), 0))::numeric`,
+          refundedAmount: sql<number>`coalesce((select sum(r.payment_amount) from labour_payment_vouchers r where r.related_advance_voucher_id = ${sql.raw('"labour_payment_vouchers"."id"')} and r.nature = 'REFUND_RECOVERY' and r.status = 'POSTED'), 0)::numeric`,
         }).from(labourPaymentVouchers).where(and(
           eq(labourPaymentVouchers.workspaceId, workspaceId),
           eq(labourPaymentVouchers.farmId, farmId),
