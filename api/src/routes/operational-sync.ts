@@ -72,10 +72,23 @@ const financialDeleteSchema = z.object({
   workspaceId: z.string().uuid(),
   farmId: z.string().uuid(),
   seasonId: z.string().uuid().nullable(),
-  entity: z.enum(["partnerEntry", "advance", "voucher"]),
+  entity: z.enum(["partnerEntry", "advance", "voucher", "sale"]),
   recordId: z.string().min(1),
   reason: z.string().trim().max(500).optional(),
 });
+const restoreRecordSchema = z.object({
+  workspaceId: z.string().uuid(),
+  farmId: z.string().uuid(),
+  seasonId: z.string().uuid().nullable(),
+  entity: z.enum(["partnerEntry", "advance", "voucher", "sale"]),
+  recordId: z.string().min(1),
+});
+const softDeleteAuditAction: Record<"partnerEntry" | "advance" | "voucher" | "sale", { deleted: string; restored: string }> = {
+  partnerEntry: { deleted: "partner_ledger_deleted", restored: "partner_ledger_restored" },
+  advance: { deleted: "labour_advance_deleted", restored: "labour_advance_restored" },
+  voucher: { deleted: "expense_voucher_deleted", restored: "expense_voucher_restored" },
+  sale: { deleted: "sale_deleted", restored: "sale_restored" },
+};
 const operationalDeleteSchema = z.object({
   workspaceId: z.string().uuid(),
   farmId: z.string().uuid(),
@@ -1529,13 +1542,15 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       const deletedAt = new Date();
       const deletionReason = parsed.data.reason ?? "";
       const payload = { ...entry.payload, deletedAt: deletedAt.toISOString(), deletedBy: request.appUser.id, deletionReason };
+      const entityForAudit = parsed.data.entity as keyof typeof softDeleteAuditAction;
       await db.transaction(async (tx) => {
         await tx.update(operationalRecords).set({ payload, clientUpdatedAt: deletedAt, updatedAt: deletedAt }).where(eq(operationalRecords.id, entry.id));
         await tx.insert(auditLogs).values({
           workspaceId: parsed.data.workspaceId, userId: request.appUser!.id, farmId: parsed.data.farmId,
-          action: parsed.data.entity === "partnerEntry" ? "partner_ledger_deleted" : parsed.data.entity === "voucher" ? "expense_voucher_deleted" : "labour_advance_deleted",
+          action: softDeleteAuditAction[entityForAudit].deleted,
           entityType: parsed.data.entity, entityId: entry.id,
-          details: { clientRecordId: parsed.data.recordId, before: entry.payload, after: payload, reason: deletionReason },
+          beforeJson: entry.payload, afterJson: payload,
+          details: { clientRecordId: parsed.data.recordId, reason: deletionReason },
         });
       });
       return reply.code(204).send();
@@ -1555,5 +1570,64 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       });
     }
     return reply.code(204).send();
+  });
+
+  // Restores a soft-deleted record (partnerEntry/advance/voucher/sale) — the mirror image of
+  // the soft-delete branch above. Idempotent: restoring an already-active record is a no-op,
+  // so repeated clicks/retries never duplicate the restore or the audit trail.
+  app.post("/v1/workspace/operational-records/restore", { preHandler: requireUser }, async (request, reply) => {
+    if (!request.appUser) return reply;
+    const parsed = restoreRecordSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ message: "A valid operational record restore request is required." });
+    if (!requireWorkspaceWrite(request.appUser, parsed.data.workspaceId, parsed.data.entity)) {
+      return reply.code(403).send({ message: "Workspace record submission permission is required." });
+    }
+    if (request.appUser.workspaceId !== parsed.data.workspaceId) {
+      return reply.code(403).send({ message: "Select this workspace before restoring records." });
+    }
+    if (!requireEntityDelete(request.appUser, parsed.data.workspaceId, parsed.data.entity)) {
+      return reply.code(403).send({ message: "Module delete permission is required." });
+    }
+    if (!hasFarmAccess(request.appUser, parsed.data.workspaceId, parsed.data.farmId)) {
+      return reply.code(403).send({ message: "You do not have access to this farm." });
+    }
+    const selected = await sessionContext(request.sessionId);
+    if (!selected?.activeFarmId || parsed.data.farmId !== selected.activeFarmId) {
+      return reply.code(403).send({ message: "Select the active farm before restoring records." });
+    }
+    const requestSeasonId = parsed.data.seasonId ?? null;
+    const generalFarmExpenseRestore = parsed.data.entity === "voucher" && requestSeasonId === null;
+    if (!generalFarmExpenseRestore && (!selected.activeSeasonId || requestSeasonId !== selected.activeSeasonId)) {
+      return reply.code(403).send({ message: "Select an active season before restoring records." });
+    }
+    const ownershipError = await validateTenantReferences(parsed.data.workspaceId, { farmId: parsed.data.farmId, seasonId: requestSeasonId });
+    if (ownershipError) return reply.code(403).send({ message: ownershipError });
+    if (!hasPermission(request.appUser, "MANAGE_RECORDS", parsed.data.workspaceId)) {
+      return reply.code(403).send({ message: "Workspace record management permission is required to restore financial records." });
+    }
+    const seasonCondition = requestSeasonId ? eq(operationalRecords.seasonId, requestSeasonId) : isNull(operationalRecords.seasonId);
+    const [entry] = await db.select().from(operationalRecords).where(and(
+      eq(operationalRecords.workspaceId, parsed.data.workspaceId),
+      eq(operationalRecords.farmId, parsed.data.farmId),
+      eq(operationalRecords.entityType, parsed.data.entity),
+      eq(operationalRecords.clientRecordId, parsed.data.recordId),
+      seasonCondition,
+    )).limit(1);
+    if (!entry) return reply.code(404).send({ message: "This record was not found." });
+    if (!isDeletedOperationalPayload(entry.payload)) return reply.code(204).send();
+    const restoredAt = new Date();
+    const payload = { ...entry.payload, deletedAt: null, deletedBy: null, deletionReason: null };
+    const entityForAudit = parsed.data.entity as keyof typeof softDeleteAuditAction;
+    await db.transaction(async (tx) => {
+      await tx.update(operationalRecords).set({ payload, clientUpdatedAt: restoredAt, updatedAt: restoredAt }).where(eq(operationalRecords.id, entry.id));
+      await tx.insert(auditLogs).values({
+        workspaceId: parsed.data.workspaceId, userId: request.appUser!.id, farmId: parsed.data.farmId,
+        action: softDeleteAuditAction[entityForAudit].restored,
+        entityType: parsed.data.entity, entityId: entry.id,
+        beforeJson: entry.payload, afterJson: payload,
+        details: { clientRecordId: parsed.data.recordId },
+      });
+    });
+    return reply.code(200).send({ restored: true });
   });
 }

@@ -77,7 +77,7 @@ import {
   type Voucher,
   type VoucherItem,
 } from "../lib/offline-db";
-import { deleteOperationalRecord, persistOperationalRecord, refreshOperationalData } from "../services/syncService";
+import { deleteOperationalRecord, persistOperationalRecord, refreshOperationalData, restoreOperationalRecord } from "../services/syncService";
 
 export type ModuleKey = "workforce" | "expenses" | "sales" | "dispatch" | "accounts" | "partnerLedger";
 
@@ -4120,6 +4120,19 @@ function PartnerLedgerModule() {
       setSaving(false);
     }
   };
+  const [restoring, setRestoring] = useState<string | null>(null);
+  const restore = async (item: PartnerEntry) => {
+    setRestoring(item.id);
+    try {
+      await restoreOperationalRecord("partnerEntry", item);
+      window.dispatchEvent(new CustomEvent("muzare-toast", { detail: t("partnerLedgerPage.entryRestored") }));
+      await refresh();
+    } catch (reason) {
+      window.dispatchEvent(new CustomEvent("muzare-toast", { detail: reason instanceof Error ? reason.message : t("partnerLedgerPage.restoreFailed") }));
+    } finally {
+      setRestoring(null);
+    }
+  };
   const visibleEntries = entries.filter((item) => (showDeleted || isActiveOperationalRecord(item)) && (entryFilter === "all" || item.type === entryFilter));
   const activeEntries = entries.filter((item) => isActiveOperationalRecord(item));
   const replacedLegacySourceIds = new Set(canonicalFinancials.data?.replacedLegacySourceIds ?? []);
@@ -4319,6 +4332,7 @@ function PartnerLedgerModule() {
             <button type="button" onClick={() => setViewing(item)}>{t("partnerLedgerPage.view")}</button>
             {canEditEntries && isActiveOperationalRecord(item) && <button type="button" onClick={() => edit(item)}>{t("partnerLedgerPage.edit")}</button>}
             {canDeleteEntries && isActiveOperationalRecord(item) && <button className="danger-button" type="button" onClick={() => { setDeleting(item); setDeletionReason(""); }}>{t("partnerLedgerPage.delete")}</button>}
+            {canDeleteEntries && !isActiveOperationalRecord(item) && <button type="button" disabled={restoring === item.id} onClick={() => void restore(item)}>{restoring === item.id ? t("partnerLedgerPage.restoring") : t("partnerLedgerPage.restore")}</button>}
           </div>
         ))}
       />

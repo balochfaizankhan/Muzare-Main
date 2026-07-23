@@ -1,4 +1,4 @@
-import { ApiError, deleteOperationalRecord as deleteOperationalRecordFromApi, fetchBootstrap, fetchOperationalRecords, saveOperationalRecord, validateVoucherNumber, type BootstrapData, type OperationalEntity, type OperationalRecordEnvelope } from "../lib/api";
+import { ApiError, deleteOperationalRecord as deleteOperationalRecordFromApi, fetchBootstrap, fetchOperationalRecords, restoreOperationalRecord as restoreOperationalRecordFromApi, saveOperationalRecord, validateVoucherNumber, type BootstrapData, type OperationalEntity, type OperationalRecordEnvelope } from "../lib/api";
 import { clearCachedData, offlineDb, setActiveFarmId, setActiveSeasonId, setActiveWorkspaceId, type LocalRecord, type PendingMutation } from "../lib/offline-db";
 import { canQueueOperationalMutation } from "../lib/permissions";
 import type { Table } from "dexie";
@@ -360,6 +360,24 @@ export async function deleteOperationalRecord(entity: OperationalEntity, record:
   notify(navigator.onLine ? i18n.t("sync.deletedLocallySyncing", { item: translatedLabel }) : i18n.t("sync.deletedLocallyOffline", { item: translatedLabel }));
   window.dispatchEvent(new Event("muzare-local-data-change"));
   if (navigator.onLine) void syncPendingRecords();
+}
+
+/**
+ * Restores a soft-deleted record. Unlike delete, this is not queued offline — it calls the
+ * server directly and requires connectivity, since undoing a delete only makes sense against
+ * the already-synced server record. The server-side restore is idempotent (a no-op if the
+ * record is not currently deleted), so this is safe to retry.
+ */
+export async function restoreOperationalRecord(entity: "partnerEntry" | "advance" | "voucher" | "sale", record: LocalRecord): Promise<void> {
+  if (!context) throw new Error(i18n.t("sync.workspaceSyncNotInitialized"));
+  if (!navigator.onLine) throw new Error(i18n.t("sync.workingOfflineRefreshRetry"));
+  const workspaceId = record.workspaceId || context.workspaceId;
+  const farmId = record.farmId ?? context.farmId;
+  const seasonId = record.seasonId ?? context.seasonId;
+  await restoreOperationalRecordFromApi(context.token, { workspaceId, farmId, seasonId, entity, recordId: record.id });
+  const restoredAt = new Date().toISOString();
+  await tableFor(entity).put({ ...record, deletedAt: null, deletedBy: null, deletionReason: null, updatedAt: restoredAt, pendingSync: false } as LocalRecord);
+  window.dispatchEvent(new Event("muzare-local-data-change"));
 }
 
 export async function syncPendingRecords(options: { force?: boolean } = {}): Promise<{ synced: number; pending: number }> {

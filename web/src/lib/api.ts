@@ -1627,6 +1627,8 @@ export const validateVoucherNumber = (token: string, workspaceId: string, input:
 };
 export const deleteOperationalRecord = (token: string, input: Omit<OperationalRecordEnvelope, "record"> & { recordId: string; reason?: string }) =>
   apiRequest<void>("/v1/workspace/operational-records", { method: "DELETE", body: JSON.stringify(input) }, token, { debugLabel: `operational-record-delete:${input.entity}` });
+export const restoreOperationalRecord = (token: string, input: Omit<OperationalRecordEnvelope, "record"> & { recordId: string }) =>
+  apiRequest<void>("/v1/workspace/operational-records/restore", { method: "POST", body: JSON.stringify(input) }, token, { debugLabel: `operational-record-restore:${input.entity}` });
 export const fetchOperationalRecords = (token: string, workspaceId: string) =>
   apiRequest<OperationalSnapshot>(`/v1/workspace/${workspaceId}/operational-records`, {}, token);
 export const fetchOperationalRecord = (token: string, workspaceId: string, recordId: string) =>

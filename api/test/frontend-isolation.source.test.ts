@@ -245,7 +245,8 @@ test("partner ledger supports audited edits and offline soft deletes without dup
   const offlineDb = await source("web/src/lib/offline-db.ts");
   const sync = await source("web/src/services/syncService.ts");
   assert.match(route, /action: "partner_ledger_updated"/);
-  assert.match(route, /parsed\.data\.entity === "partnerEntry" \? "partner_ledger_deleted"/);
+  assert.match(route, /partnerEntry: \{ deleted: "partner_ledger_deleted", restored: "partner_ledger_restored" \}/);
+  assert.match(route, /action: softDeleteAuditAction\[entityForAudit\]\.deleted/);
   assert.match(route, /deletedAt: deletedAt\.toISOString\(\), deletedBy: request\.appUser\.id, deletionReason/);
   assert.match(route, /hasPermission\(request\.appUser, "MANAGE_RECORDS", parsed\.data\.workspaceId\)/);
   assert.match(offlineDb, /Boolean\(options\.includeDeleted\) \|\| isActiveOperationalRecord\(record as LocalRecord & Record<string, unknown>\)/);
@@ -692,7 +693,7 @@ test("financial sync hardening validates money records and preserves soft-delete
   const sync = await source("web/src/services/syncService.ts");
   assert.match(route, /financialPayloadSchemas/);
   assert.match(route, /positiveAmountSchema/);
-  assert.match(route, /entity: z\.enum\(\["partnerEntry", "advance", "voucher"\]\)/);
+  assert.match(route, /entity: z\.enum\(\["partnerEntry", "advance", "voucher", "sale"\]\)/);
   assert.match(route, /expense_voucher_deleted/);
   assert.match(route, /labour_advance_deleted/);
   assert.match(imports, /Payment account is required for imported advances\./);
