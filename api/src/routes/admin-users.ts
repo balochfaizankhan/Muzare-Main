@@ -206,37 +206,58 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
     const params = userIdSchema.safeParse(request.params);
     const body = userStatusSchema.safeParse(request.body);
     if (!params.success || !body.success) return reply.code(400).send({ message: "Valid user status details are required." });
+    if (!request.appUser) return reply;
+    if (!body.data.active && params.data.userId === request.appUser.id) {
+      return reply.code(409).send({ message: "You cannot suspend your own account." });
+    }
 
     const [userRow] = await db.select().from(users).where(eq(users.id, params.data.userId)).limit(1);
     if (!userRow) return reply.code(404).send({ message: "User not found." });
 
     const nextStatus = body.data.active ? "approved" : "suspended";
+    const now = new Date();
 
     await db.update(users).set({
       active: body.data.active,
       status: nextStatus,
-      updatedAt: new Date(),
+      updatedAt: now,
+      ...(body.data.active
+        ? { suspendedAt: null, suspendedBy: null }
+        : { suspendedAt: now, suspendedBy: request.appUser.id }),
     }).where(eq(users.id, params.data.userId));
 
     const memberships = await db.select({ workspaceId: workspaceMemberships.workspaceId })
       .from(workspaceMemberships)
       .where(eq(workspaceMemberships.userId, params.data.userId));
 
-    await Promise.all(memberships.map((membership) =>
-      db.insert(auditLogs).values({
-        workspaceId: membership.workspaceId,
-        userId: request.appUser?.id,
-        action: body.data.active ? "admin.user.reactivated" : "admin.user.suspended",
+    const auditDetails = {
+      previousActive: userRow.active,
+      nextActive: body.data.active,
+      previousStatus: userRow.status,
+      nextStatus,
+    };
+    const auditAction = body.data.active ? "account.reactivated" : "account.suspended";
+
+    if (memberships.length) {
+      await Promise.all(memberships.map((membership) =>
+        db.insert(auditLogs).values({
+          workspaceId: membership.workspaceId,
+          userId: request.appUser?.id,
+          action: auditAction,
+          entityType: "user",
+          entityId: params.data.userId,
+          details: auditDetails,
+        }),
+      ));
+    } else {
+      await db.insert(auditLogs).values({
+        userId: request.appUser.id,
+        action: auditAction,
         entityType: "user",
         entityId: params.data.userId,
-        details: {
-          previousActive: userRow.active,
-          nextActive: body.data.active,
-          previousStatus: userRow.status,
-          nextStatus,
-        },
-      }),
-    ));
+        details: auditDetails,
+      });
+    }
 
     return reply.code(204).send();
   });

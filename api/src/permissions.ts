@@ -14,7 +14,8 @@ export type PlatformPermission =
   | "MANAGE_BILLING"
   | "MANAGE_PLATFORM_SETTINGS"
   | "VIEW_AUDIT_LOGS"
-  | "VIEW_SYSTEM_HEALTH";
+  | "VIEW_SYSTEM_HEALTH"
+  | "MANAGE_REGISTRATIONS";
 
 export type WorkspacePermission =
   | "APPROVE_EXPENSE"
@@ -80,7 +81,7 @@ function selectWorkspaceMembership(user: PermissionUser, workspaceId: string) {
 const platformPermissions: Record<PlatformRole, readonly PlatformPermission[]> = {
   platform_admin: [
     "CREATE_WORKSPACE", "DELETE_WORKSPACE", "VIEW_WORKSPACES", "VIEW_USERS", "MANAGE_SUBSCRIPTIONS",
-    "MANAGE_BILLING", "MANAGE_PLATFORM_SETTINGS", "VIEW_AUDIT_LOGS", "VIEW_SYSTEM_HEALTH",
+    "MANAGE_BILLING", "MANAGE_PLATFORM_SETTINGS", "VIEW_AUDIT_LOGS", "VIEW_SYSTEM_HEALTH", "MANAGE_REGISTRATIONS",
   ],
   platform_support: ["VIEW_WORKSPACES", "VIEW_USERS", "VIEW_AUDIT_LOGS", "VIEW_SYSTEM_HEALTH"],
 };
@@ -219,4 +220,5 @@ const platformPermissionSet: Record<PlatformPermission, true> = {
   MANAGE_PLATFORM_SETTINGS: true,
   VIEW_AUDIT_LOGS: true,
   VIEW_SYSTEM_HEALTH: true,
+  MANAGE_REGISTRATIONS: true,
 };

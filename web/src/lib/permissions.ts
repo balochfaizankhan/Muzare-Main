@@ -1,9 +1,9 @@
-import type { AppUser, Permission, WorkspaceModule, WorkspaceModuleAction, WorkspaceRole } from "./api";
+import type { AccountStatus, AppUser, Permission, WorkspaceModule, WorkspaceModuleAction, WorkspaceRole } from "./api";
 import type { PendingMutation } from "./offline-db";
 
 const platformPermissions = new Set<Permission>([
   "CREATE_WORKSPACE", "DELETE_WORKSPACE", "VIEW_WORKSPACES", "VIEW_USERS", "MANAGE_SUBSCRIPTIONS",
-  "MANAGE_BILLING", "MANAGE_PLATFORM_SETTINGS", "VIEW_AUDIT_LOGS", "VIEW_SYSTEM_HEALTH",
+  "MANAGE_BILLING", "MANAGE_PLATFORM_SETTINGS", "VIEW_AUDIT_LOGS", "VIEW_SYSTEM_HEALTH", "MANAGE_REGISTRATIONS",
 ]);
 
 const permissionsByRole: Record<AppUser["role"], readonly Permission[]> = {
@@ -146,4 +146,16 @@ export const canManagePermissions = (user: AppUser, workspaceId = user.workspace
   hasModulePermission(user, "team", "approve", workspaceId) || hasModulePermission(user, "team", "edit", workspaceId);
 
 export const isPlatformUser = (user: AppUser) => Boolean(user.platformRole);
-export const getHomePath = (user: AppUser) => isPlatformUser(user) ? "/admin/dashboard" : "/workspace/dashboard";
+
+export const getHomePath = (user: AppUser) => {
+  if (!isPlatformUser(user) && !user.workspaceId) return "/onboarding";
+  return isPlatformUser(user) ? "/admin/dashboard" : "/workspace/dashboard";
+};
+
+const accountStatusPaths: Partial<Record<AccountStatus, string>> = {
+  pending: "/pending-approval",
+  rejected: "/account-rejected",
+  suspended: "/account-suspended",
+};
+
+export const getAccountStatusPath = (user: AppUser): string | null => accountStatusPaths[user.status] ?? null;

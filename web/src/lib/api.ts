@@ -1,10 +1,17 @@
 import { config } from "../config";
 
 export class ApiError extends Error {
+  readonly code?: string;
   constructor(message: string, readonly status: number, readonly details?: unknown, readonly responseBody?: unknown) {
     super(message);
+    this.code = (responseBody as { code?: string } | null | undefined)?.code;
   }
 }
+
+export const accountBlockCodes = ["ACCOUNT_PENDING_APPROVAL", "ACCOUNT_REJECTED", "ACCOUNT_SUSPENDED"] as const;
+export type AccountBlockCode = (typeof accountBlockCodes)[number];
+export const isAccountBlockedError = (error: unknown): error is ApiError & { code: AccountBlockCode } =>
+  error instanceof ApiError && accountBlockCodes.includes(error.code as AccountBlockCode);
 
 export type HealthResponse = {
   status: "ok" | "degraded";
@@ -36,9 +43,11 @@ export type FarmAccessMode = "all" | "assigned";
 export type AppRole = PlatformRole | WorkspaceRole;
 export type Permission =
   | "CREATE_WORKSPACE" | "DELETE_WORKSPACE" | "VIEW_WORKSPACES" | "VIEW_USERS" | "MANAGE_SUBSCRIPTIONS"
-  | "MANAGE_BILLING" | "MANAGE_PLATFORM_SETTINGS" | "VIEW_AUDIT_LOGS" | "VIEW_SYSTEM_HEALTH"
+  | "MANAGE_BILLING" | "MANAGE_PLATFORM_SETTINGS" | "VIEW_AUDIT_LOGS" | "VIEW_SYSTEM_HEALTH" | "MANAGE_REGISTRATIONS"
   | "APPROVE_EXPENSE" | "APPROVE_ATTENDANCE" | "APPROVE_SALE" | "APPROVE_DISPATCH"
   | "MANAGE_TEAM" | "MANAGE_FARMS" | "MANAGE_SEASONS" | "MANAGE_EXPENSE_CATEGORIES" | "IMPORT_ATTENDANCE" | "MANAGE_RECORDS" | "SUBMIT_RECORDS" | "VIEW_REPORTS";
+
+export type AccountStatus = "pending" | "approved" | "rejected" | "suspended";
 
 export type AppUser = {
   id: string;
@@ -59,7 +68,7 @@ export type AppUser = {
     farmAccessMode?: FarmAccessMode;
     farmIds?: string[];
   }>;
-  status: "pending" | "approved" | "rejected" | "suspended";
+  status: AccountStatus;
 };
 
 export type Session = {
@@ -76,25 +85,58 @@ export type LoginResult = {
 };
 
 export type SignupRequest = {
-  workspaceName?: string;
   ownerName: string;
   email: string;
   phone?: string;
   password: string;
+  language?: string;
+};
+
+export type SignupResponse = {
+  status: "pending";
+  message: string;
 };
 
 export type UserProfileInput = {
   displayName: string;
 };
 
-export type PendingApproval = {
+export type RegistrationStatusFilter = AccountStatus | "all";
+
+export type RegistrationRequest = {
   userId: string;
-  workspaceId: string;
-  workspaceName: string;
-  ownerName: string | null;
   email: string;
+  displayName: string | null;
   phone: string | null;
+  status: AccountStatus;
+  active: boolean;
   createdAt: string;
+  registrationLanguage: string | null;
+  registrationSource: string;
+  approvedAt: string | null;
+  approvedBy: string | null;
+  rejectedAt: string | null;
+  rejectedBy: string | null;
+  suspendedAt: string | null;
+  suspendedBy: string | null;
+  internalReviewNote: string | null;
+  emailVerificationStatus: "not_applicable";
+};
+
+export type RegistrationListResult = {
+  registrations: RegistrationRequest[];
+  page: number;
+  pageSize: number;
+  total: number;
+};
+
+export type RegistrationListFilters = {
+  status?: RegistrationStatusFilter;
+  search?: string;
+  from?: string;
+  to?: string;
+  page?: number;
+  pageSize?: number;
 };
 
 export type BootstrapData = {
@@ -1392,10 +1434,13 @@ export const login = (email: string, password: string) =>
   });
 
 export const signup = (input: SignupRequest) =>
-  apiRequest<{ status: "approved"; message: string; token: string; user: AppUser }>("/v1/auth/signup", {
+  apiRequest<SignupResponse>("/v1/auth/signup", {
     method: "POST",
     body: JSON.stringify(input),
   });
+
+export const submitOnboardingWorkspace = (token: string, input: { name: string; contactPhone?: string }) =>
+  apiRequest<{ user: AppUser }>("/v1/workspace/onboarding", { method: "POST", body: JSON.stringify(input) }, token);
 
 export const logout = (token: string) => apiRequest<void>("/v1/auth/logout", { method: "POST" }, token);
 export const fetchSession = (token: string) => apiRequest<Session>("/v1/session", {}, token);
@@ -1611,12 +1656,21 @@ export const cancelAndCleanMigrationImport = (token: string, input: {
 );
 export const fetchImportVisibilityAudit = (token: string, workspaceId: string) =>
   apiRequest<ImportVisibilityAudit>(`/v1/workspace/${workspaceId}/import-visibility-audit`, {}, token, { timeoutMs: 30_000, debugLabel: "import-visibility-audit" });
-export const fetchApprovals = (token: string) =>
-  apiRequest<{ requests: PendingApproval[] }>("/v1/admin/approvals", {}, token);
-export const approveSignup = (token: string, userId: string) =>
-  apiRequest<void>("/v1/admin/approvals/approve", { method: "POST", body: JSON.stringify({ userId }) }, token);
-export const rejectSignup = (token: string, userId: string) =>
-  apiRequest<void>("/v1/admin/approvals/reject", { method: "POST", body: JSON.stringify({ userId }) }, token);
+export const fetchRegistrations = (token: string, filters: RegistrationListFilters = {}) => {
+  const params = new URLSearchParams();
+  if (filters.status) params.set("status", filters.status);
+  if (filters.search) params.set("search", filters.search);
+  if (filters.from) params.set("from", filters.from);
+  if (filters.to) params.set("to", filters.to);
+  if (filters.page) params.set("page", String(filters.page));
+  if (filters.pageSize) params.set("pageSize", String(filters.pageSize));
+  const query = params.toString();
+  return apiRequest<RegistrationListResult>(`/v1/admin/registrations${query ? `?${query}` : ""}`, {}, token);
+};
+export const approveRegistrationRequest = (token: string, userId: string) =>
+  apiRequest<void>(`/v1/admin/registrations/${userId}/approve`, { method: "POST" }, token);
+export const rejectRegistrationRequest = (token: string, userId: string, reason?: string) =>
+  apiRequest<void>(`/v1/admin/registrations/${userId}/reject`, { method: "POST", body: JSON.stringify({ reason }) }, token);
 export const saveOperationalRecord = (token: string, input: OperationalRecordEnvelope) =>
   apiRequest<{ record: OperationalRecordEnvelope["record"]; conflict: boolean }>("/v1/workspace/operational-records", { method: "POST", body: JSON.stringify(input) }, token, { debugLabel: `operational-record-save:${input.entity}` });
 export const validateVoucherNumber = (token: string, workspaceId: string, input: { voucherNumber: string; recordId?: string; farmId?: string }) => {

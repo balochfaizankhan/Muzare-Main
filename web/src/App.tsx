@@ -3,9 +3,14 @@ import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./auth/AuthProvider";
 import { config } from "./config";
-import { getHomePath, isPlatformUser } from "./lib/permissions";
+import type { AppUser } from "./lib/api";
+import { getAccountStatusPath, getHomePath, isPlatformUser } from "./lib/permissions";
+import { AccountRejectedPage } from "./pages/AccountRejectedPage";
+import { AccountSuspendedPage } from "./pages/AccountSuspendedPage";
 import { LoginPage } from "./pages/LoginPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
+import { OnboardingPage } from "./pages/OnboardingPage";
+import { PendingApprovalPage } from "./pages/PendingApprovalPage";
 import { SignupPage } from "./pages/SignupPage";
 import { AcceptInvitationPage } from "./pages/AcceptInvitationPage";
 
@@ -93,12 +98,17 @@ function routeElement(element: ReactNode, detail: string) {
   return <Suspense fallback={<RouteFallback detail={detail} />}>{element}</Suspense>;
 }
 
+function blockedRedirect(user: AppUser) {
+  const blockedPath = getAccountStatusPath(user);
+  return blockedPath ? <Navigate to={blockedPath} replace /> : null;
+}
+
 function RequireAuth({ children }: PropsWithChildren) {
   const { t } = useTranslation();
   const { user, loading } = useAuth();
   if (loading) return <StartupScreen title="Muzare" detail={t("sync.checkingSession")} />;
   if (!user) return <Navigate to="/login" replace />;
-  return children;
+  return blockedRedirect(user) ?? children;
 }
 
 function RequirePlatform({ children }: PropsWithChildren) {
@@ -106,6 +116,8 @@ function RequirePlatform({ children }: PropsWithChildren) {
   const { user, loading } = useAuth();
   if (loading) return <StartupScreen title="Muzare" detail={t("sync.checkingSession")} />;
   if (!user) return <Navigate to="/login" replace />;
+  const blocked = blockedRedirect(user);
+  if (blocked) return blocked;
   if (!isPlatformUser(user)) return <Navigate to="/workspace/dashboard" replace />;
   return children;
 }
@@ -115,7 +127,10 @@ function RequireWorkspace({ children }: PropsWithChildren) {
   const { user, loading } = useAuth();
   if (loading) return <StartupScreen title="Muzare" detail={t("sync.loadingWorkspace")} />;
   if (!user) return <Navigate to="/login" replace />;
-  if (isPlatformUser(user) || !user.workspaceId) return <Navigate to="/admin/dashboard" replace />;
+  const blocked = blockedRedirect(user);
+  if (blocked) return blocked;
+  if (isPlatformUser(user)) return <Navigate to="/admin/dashboard" replace />;
+  if (!user.workspaceId) return <Navigate to="/onboarding" replace />;
   return children;
 }
 
@@ -143,6 +158,10 @@ export default function App() {
   return <Routes>
     <Route path="/login" element={<LoginPage />} />
     <Route path="/signup" element={<SignupPage />} />
+    <Route path="/pending-approval" element={<PendingApprovalPage />} />
+    <Route path="/account-rejected" element={<AccountRejectedPage />} />
+    <Route path="/account-suspended" element={<AccountSuspendedPage />} />
+    <Route path="/onboarding" element={<RequireAuth><OnboardingPage /></RequireAuth>} />
     <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
     <Route path="/" element={<RequireAuth><HomeRedirect /></RequireAuth>} />
     <Route path="/admin" element={<RequirePlatform>{routeElement(<AdminLayout />, "Loading admin workspace")}</RequirePlatform>}>

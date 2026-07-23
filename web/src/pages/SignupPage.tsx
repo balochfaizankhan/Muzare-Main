@@ -5,9 +5,7 @@ import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { z } from "zod";
-import { useAuth } from "../auth/AuthProvider";
 import { LanguageSwitch } from "../components/LanguageSwitch";
-import { getHomePath } from "../lib/permissions";
 import { signup } from "../lib/api";
 
 const schema = z.object({
@@ -20,9 +18,8 @@ const schema = z.object({
 type SignupFields = z.infer<typeof schema>;
 
 export function SignupPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
-  const { completeSession } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const {
     register,
@@ -35,13 +32,12 @@ export function SignupPage() {
 
   const submit = async (fields: SignupFields) => {
     setError(null);
-    const result = await signup(fields).catch((caught) => {
+    const result = await signup({ ...fields, language: i18n.resolvedLanguage }).catch((caught) => {
       setError(caught instanceof Error ? caught.message : t("authSignup.submitFailed"));
       return null;
     });
     if (!result) return;
-    await completeSession(result.token, result.user);
-    navigate(getHomePath(result.user), { replace: true });
+    navigate("/pending-approval", { replace: true, state: { email: fields.email } });
   };
 
   return (

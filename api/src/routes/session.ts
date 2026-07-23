@@ -1,22 +1,19 @@
 import type { FastifyInstance } from "fastify";
-import { desc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 import {
-  approveUserAndWorkspace,
+  accountBlockMessages,
+  authenticateRequest,
   authenticateUser,
-  createApprovedWorkspaceOwner,
-  createRejectedLoginMessage,
+  createPendingUser,
   createSession,
-  rejectUserAndWorkspace,
-  requireAdmin,
-  requirePlatformAdmin,
   requireUser,
   revokeSession,
   serializeUser,
 } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
-import { users, userSessions, workspaceMemberships, workspaces } from "../db/schema.js";
+import { users, userSessions } from "../db/schema.js";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -24,15 +21,11 @@ const loginSchema = z.object({
 });
 
 const signupSchema = z.object({
-  workspaceName: z.string().trim().min(2).max(120).optional(),
   ownerName: z.string().trim().min(2).max(120),
   email: z.string().email(),
   phone: z.string().trim().max(40).optional(),
   password: z.string().min(8).max(128),
-});
-
-const approvalSchema = z.object({
-  userId: z.string().uuid(),
+  language: z.string().trim().max(10).optional(),
 });
 
 const workspaceSelectionSchema = z.object({
@@ -52,13 +45,10 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
     const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
     if (existing) return reply.code(409).send({ message: "An account already exists for this email." });
 
-    const created = await createApprovedWorkspaceOwner({ ...parsed.data, email });
-    const token = await createSession(created.user.id, created.workspace.id);
+    await createPendingUser({ ...parsed.data, email });
     return reply.code(201).send({
-      status: "approved",
-      message: "Your account is ready. We created a default workspace you can rename any time.",
-      token,
-      user: await serializeUser(created.user, created.workspace.id),
+      status: "pending",
+      message: "Thanks for registering. A platform administrator will review your request before you can sign in.",
     });
   });
 
@@ -66,36 +56,31 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
     const parsed = loginSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ message: "Valid email and password are required." });
 
-    const user = await authenticateUser(parsed.data.email, parsed.data.password);
-    if (!user) {
-      const message = localDevelopmentMode ? "Invalid email or password." : await createRejectedLoginMessage(parsed.data.email);
-      return reply.code(401).send({ message });
+    const outcome = await authenticateUser(parsed.data.email, parsed.data.password);
+    if (!outcome.ok) {
+      if (outcome.blocked) return reply.code(403).send({ code: outcome.blocked, message: accountBlockMessages[outcome.blocked] });
+      return reply.code(401).send({ message: "Invalid email or password." });
     }
 
-    const token = await createSession(user.id, user.workspaceId);
-    return {
-      token,
-      user: {
-        ...user,
-      },
-    };
+    const token = await createSession(outcome.user.id, outcome.user.workspaceId);
+    return { token, user: outcome.user };
   });
 
-  app.post("/v1/auth/logout", { preHandler: requireUser }, async (request, reply) => {
+  app.post("/v1/auth/logout", { preHandler: authenticateRequest }, async (request, reply) => {
     if (!request.appUser) return reply;
     const token = request.headers.authorization?.replace(/^Bearer\s+/i, "");
     if (token) await revokeSession(token);
     return reply.code(204).send();
   });
 
-  app.get("/v1/session", { preHandler: requireUser }, async (request, reply) => {
+  app.get("/v1/session", { preHandler: authenticateRequest }, async (request, reply) => {
     if (!request.appUser) return reply;
 
     return {
       user: request.appUser,
       permissions: {
-        canWrite: !request.appUser.platformRole && request.appUser.role !== "viewer",
-        canAdminister: request.appUser.platformRole === "platform_admin",
+        canWrite: !request.appUser.platformRole && request.appUser.role !== "viewer" && request.appUser.status === "approved",
+        canAdminister: request.appUser.platformRole === "platform_admin" && request.appUser.status === "approved",
       },
     };
   });
@@ -138,55 +123,5 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
     }).where(eq(users.id, request.appUser.id)).returning();
     if (!user) return reply.code(404).send({ message: "User not found." });
     return { user: await serializeUser(user, request.appUser.workspaceId) };
-  });
-
-  app.get("/v1/admin/approvals", { preHandler: requireAdmin }, async (_request, _reply) => {
-    if (localDevelopmentMode) {
-      return {
-        requests: [{
-          userId: "00000000-0000-0000-0000-000000000201",
-          workspaceId: "00000000-0000-0000-0000-000000000200",
-          workspaceName: "Green Valley Farms",
-          ownerName: "Pending Owner",
-          email: "owner@example.com",
-          phone: "+966 555 0101",
-          createdAt: new Date().toISOString(),
-        }],
-      };
-    }
-
-    const requests = await db
-      .select({
-        userId: users.id,
-        workspaceId: workspaces.id,
-        workspaceName: workspaces.name,
-        ownerName: users.displayName,
-        email: users.email,
-        phone: workspaces.contactPhone,
-        createdAt: users.createdAt,
-      })
-      .from(users)
-      .innerJoin(workspaceMemberships, eq(workspaceMemberships.userId, users.id))
-      .innerJoin(workspaces, eq(workspaces.id, workspaceMemberships.workspaceId))
-      .where(eq(users.status, "pending"))
-      .orderBy(desc(users.createdAt));
-
-    return { requests };
-  });
-
-  app.post("/v1/admin/approvals/approve", { preHandler: requirePlatformAdmin }, async (request, reply) => {
-    const parsed = approvalSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ message: "A valid user id is required." });
-    if (!request.appUser) return reply;
-    if (!localDevelopmentMode) await approveUserAndWorkspace(parsed.data.userId, request.appUser.id);
-    return reply.code(204).send();
-  });
-
-  app.post("/v1/admin/approvals/reject", { preHandler: requirePlatformAdmin }, async (request, reply) => {
-    const parsed = approvalSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ message: "A valid user id is required." });
-    if (!request.appUser) return reply;
-    if (!localDevelopmentMode) await rejectUserAndWorkspace(parsed.data.userId, request.appUser.id);
-    return reply.code(204).send();
   });
 }

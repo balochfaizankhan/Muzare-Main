@@ -3,11 +3,12 @@ import { ArrowRight, Building2, Eye, EyeOff, Layers3, LockKeyhole, Mail, ShieldC
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import { Link, Navigate, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { z } from "zod";
 import { LanguageSwitch } from "../components/LanguageSwitch";
 import { useAuth } from "../auth/AuthProvider";
-import { getHomePath } from "../lib/permissions";
+import { isAccountBlockedError } from "../lib/api";
+import { getAccountStatusPath, getHomePath } from "../lib/permissions";
 
 const schema = z.object({
   email: z.email(),
@@ -19,6 +20,7 @@ type LoginFields = z.infer<typeof schema>;
 export function LoginPage() {
   const { t } = useTranslation();
   const { user, login: signIn } = useAuth();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [authError, setAuthError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -31,13 +33,25 @@ export function LoginPage() {
     defaultValues: { email: "", password: "" },
   });
 
-  if (user) return <Navigate to={searchParams.get("redirect") || getHomePath(user)} replace />;
+  if (user) {
+    const blockedPath = getAccountStatusPath(user);
+    return <Navigate to={blockedPath ?? searchParams.get("redirect") ?? getHomePath(user)} replace />;
+  }
 
   const login = async (fields: LoginFields) => {
     setAuthError(null);
     try {
       await signIn(fields.email, fields.password);
     } catch (error) {
+      if (isAccountBlockedError(error)) {
+        const path = error.code === "ACCOUNT_PENDING_APPROVAL"
+          ? "/pending-approval"
+          : error.code === "ACCOUNT_REJECTED"
+            ? "/account-rejected"
+            : "/account-suspended";
+        navigate(path, { state: { email: fields.email } });
+        return;
+      }
       setAuthError(error instanceof Error ? error.message : t("errors.authFailed"));
     }
   };

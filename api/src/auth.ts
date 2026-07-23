@@ -50,6 +50,9 @@ type LoadedWorkspaceMembership = WorkspaceMembership & {
   updatedAt: Date | null;
 };
 
+export type AccountStatus = "pending" | "approved" | "rejected" | "suspended";
+export type AccountBlockCode = "ACCOUNT_PENDING_APPROVAL" | "ACCOUNT_REJECTED" | "ACCOUNT_SUSPENDED";
+
 export type AuthenticatedUser = {
   id: string;
   workspaceId: string | null;
@@ -60,7 +63,20 @@ export type AuthenticatedUser = {
   role: AppRole;
   platformRole: PlatformRole | null;
   memberships: WorkspaceMembership[];
-  status: "pending" | "approved" | "rejected" | "suspended";
+  status: AccountStatus;
+};
+
+function accountBlockCode(account: { status: AccountStatus; active: boolean }): AccountBlockCode | null {
+  if (account.status === "pending") return "ACCOUNT_PENDING_APPROVAL";
+  if (account.status === "rejected") return "ACCOUNT_REJECTED";
+  if (account.status === "suspended" || !account.active) return "ACCOUNT_SUSPENDED";
+  return null;
+}
+
+export const accountBlockMessages: Record<AccountBlockCode, string> = {
+  ACCOUNT_PENDING_APPROVAL: "Your account is waiting for platform administrator approval.",
+  ACCOUNT_REJECTED: "This account request was not approved.",
+  ACCOUNT_SUSPENDED: "This account is suspended. Contact support.",
 };
 
 const localUser: AuthenticatedUser = {
@@ -277,6 +293,46 @@ export async function serializeUser(user: typeof users.$inferSelect, workspaceId
   };
 }
 
+async function loadSessionRow(token: string) {
+  const [row] = await db
+    .select({ sessionId: userSessions.id, workspaceId: userSessions.workspaceId, user: users })
+    .from(userSessions)
+    .innerJoin(users, eq(users.id, userSessions.userId))
+    .where(and(eq(userSessions.tokenHash, hashToken(token)), gt(userSessions.expiresAt, new Date())))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * Authenticates the bearer token regardless of account status (pending,
+ * rejected, and suspended accounts included). Only endpoints that a blocked
+ * account must still be able to reach — reading its own status and signing
+ * out — should use this instead of requireUser.
+ */
+export async function authenticateRequest(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const token = request.headers.authorization?.replace(/^Bearer\s+/i, "");
+  if (!token) {
+    await reply.code(401).send({ message: "Authentication token is required." });
+    return;
+  }
+  if (localDevelopmentMode) {
+    const expiry = localSessions.get(hashToken(token));
+    if (!expiry || expiry <= new Date()) {
+      await reply.code(401).send({ message: "Your session is invalid or expired." });
+      return;
+    }
+    request.appUser = localUser;
+    return;
+  }
+  const row = await loadSessionRow(token);
+  if (!row) {
+    await reply.code(401).send({ message: "Your session is invalid or expired." });
+    return;
+  }
+  request.sessionId = row.sessionId;
+  request.appUser = await serializeUser(row.user, row.workspaceId);
+}
+
 export async function requireUser(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const token = request.headers.authorization?.replace(/^Bearer\s+/i, "");
   if (!token) {
@@ -292,14 +348,14 @@ export async function requireUser(request: FastifyRequest, reply: FastifyReply):
     request.appUser = localUser;
     return;
   }
-  const [row] = await db
-    .select({ sessionId: userSessions.id, workspaceId: userSessions.workspaceId, user: users })
-    .from(userSessions)
-    .innerJoin(users, eq(users.id, userSessions.userId))
-    .where(and(eq(userSessions.tokenHash, hashToken(token)), gt(userSessions.expiresAt, new Date())))
-    .limit(1);
-  if (!row || !row.user.active || row.user.status !== "approved") {
+  const row = await loadSessionRow(token);
+  if (!row) {
     await reply.code(401).send({ message: "Your session is invalid or expired." });
+    return;
+  }
+  const code = accountBlockCode(row.user);
+  if (code) {
+    await reply.code(403).send({ code, message: accountBlockMessages[code] });
     return;
   }
   request.sessionId = row.sessionId;
@@ -313,12 +369,7 @@ export async function authenticateToken(token: string): Promise<{ user: Authenti
     if (!expiry || expiry <= new Date()) return null;
     return { user: localUser, sessionId: null };
   }
-  const [row] = await db
-    .select({ sessionId: userSessions.id, workspaceId: userSessions.workspaceId, user: users })
-    .from(userSessions)
-    .innerJoin(users, eq(users.id, userSessions.userId))
-    .where(and(eq(userSessions.tokenHash, hashToken(token)), gt(userSessions.expiresAt, new Date())))
-    .limit(1);
+  const row = await loadSessionRow(token);
   if (!row || !row.user.active || row.user.status !== "approved") return null;
   return {
     user: await serializeUser(row.user, row.workspaceId),
@@ -338,99 +389,110 @@ export function requirePermission(permission: Permission, workspaceId?: (request
 
 export const requireAdmin = requirePermission("VIEW_WORKSPACES");
 export const requirePlatformAdmin = requirePermission("CREATE_WORKSPACE");
+export const requireRegistrationAdmin = requirePermission("MANAGE_REGISTRATIONS");
 
-export async function createRejectedLoginMessage(email: string): Promise<string> {
-  const [user] = await db.select().from(users).where(eq(users.email, email.toLowerCase())).limit(1);
-  if (!user) return "Invalid email or password.";
-  if (user.status === "pending") return "Your account request is waiting for platform approval.";
-  if (user.status === "rejected") return "This account request was not approved.";
-  if (user.status === "suspended") return "This account is suspended. Contact support.";
-  if (!user.active) return "This account is inactive.";
-  return "Invalid email or password.";
-}
-
-export async function approveUserAndWorkspace(userId: string, approvedBy: string): Promise<void> {
-  const [membership] = await db.select().from(workspaceMemberships).where(eq(workspaceMemberships.userId, userId)).limit(1);
-  if (!membership) throw new Error("Workspace owner membership not found.");
+/**
+ * Approves a pending registration. Idempotent: calling this a second time on
+ * an already-approved account is a safe no-op (alreadyApproved: true) rather
+ * than a duplicate side effect. The pending -> approved transition is done
+ * as a single conditional UPDATE (WHERE status = 'pending') so concurrent
+ * approval requests for the same account can never both "win".
+ */
+export async function approveRegistration(userId: string, approvedBy: string): Promise<{ alreadyApproved: boolean }> {
   const now = new Date();
-  await db.update(workspaces).set({ status: "approved", approvedAt: now, approvedBy }).where(eq(workspaces.id, membership.workspaceId));
-  await db.update(users).set({ status: "approved", active: true, approvedAt: now, approvedBy }).where(eq(users.id, userId));
-}
-
-export async function rejectUserAndWorkspace(userId: string, approvedBy: string): Promise<void> {
-  const [membership] = await db.select().from(workspaceMemberships).where(eq(workspaceMemberships.userId, userId)).limit(1);
-  if (!membership) throw new Error("Workspace owner membership not found.");
-  const now = new Date();
-  await db.update(workspaces).set({ status: "rejected", approvedAt: now, approvedBy }).where(eq(workspaces.id, membership.workspaceId));
-  await db.update(users).set({ status: "rejected", active: false, approvedAt: now, approvedBy }).where(eq(users.id, userId));
-}
-
-export async function createPendingWorkspaceOwner(input: {
-  workspaceName: string; ownerName: string; email: string; password: string; phone?: string;
-}): Promise<void> {
-  const email = input.email.toLowerCase();
-  const baseSlug = input.workspaceName.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "workspace";
-  const [workspace] = await db.insert(workspaces).values({
-    name: input.workspaceName.trim(),
-    slug: `${baseSlug}-${randomBytes(3).toString("hex")}`,
-    contactEmail: email,
-    contactPhone: input.phone?.trim() || null,
-    status: "pending",
-  }).returning();
-  if (!workspace) throw new Error("Unable to create workspace request.");
-  const [user] = await db.insert(users).values({
-    email,
-    passwordHash: await hashPassword(input.password),
-    displayName: input.ownerName.trim(),
-    status: "pending",
-    active: true,
-  }).returning({ id: users.id });
-  if (!user) throw new Error("Unable to create workspace owner.");
-  await db.insert(workspaceMemberships).values({ workspaceId: workspace.id, userId: user.id, role: "workspace_owner" });
-}
-
-export async function createApprovedWorkspaceOwner(input: {
-  ownerName: string; email: string; password: string; phone?: string | null;
-}): Promise<{ user: typeof users.$inferSelect; workspace: typeof workspaces.$inferSelect }> {
-  const email = input.email.toLowerCase();
-  const workspaceName = "Default Workspace";
-  const baseSlug = workspaceName.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "workspace";
-  const now = new Date();
-  const [workspace] = await db.insert(workspaces).values({
-    name: workspaceName,
-    slug: `${baseSlug}-${randomBytes(3).toString("hex")}`,
-    contactEmail: email,
-    contactPhone: input.phone?.trim() || null,
+  const [updated] = await db.update(users).set({
     status: "approved",
+    active: true,
     approvedAt: now,
-  }).returning();
-  if (!workspace) throw new Error("Unable to create default workspace.");
+    approvedBy,
+    updatedAt: now,
+  }).where(and(eq(users.id, userId), eq(users.status, "pending"))).returning({ id: users.id });
+
+  if (!updated) {
+    const [existing] = await db.select({ status: users.status }).from(users).where(eq(users.id, userId)).limit(1);
+    if (!existing) throw new Error("User not found.");
+    if (existing.status !== "approved") throw new Error(`Cannot approve a registration with status "${existing.status}".`);
+    return { alreadyApproved: true };
+  }
+
+  // Legacy compatibility: earlier builds paired a pending user with a pending
+  // workspace-ownership request. New pending registrations never have one,
+  // but if this account still does, keep the two in sync.
+  const [membership] = await db.select({ workspaceId: workspaceMemberships.workspaceId })
+    .from(workspaceMemberships).where(eq(workspaceMemberships.userId, userId)).limit(1);
+  if (membership) {
+    await db.update(workspaces).set({ status: "approved", approvedAt: now, approvedBy })
+      .where(and(eq(workspaces.id, membership.workspaceId), eq(workspaces.status, "pending")));
+  }
+  return { alreadyApproved: false };
+}
+
+/**
+ * Rejects a pending registration. Idempotent for the same reasons as
+ * approveRegistration. The account row is never deleted.
+ */
+export async function rejectRegistration(userId: string, rejectedBy: string, reason?: string | null): Promise<{ alreadyRejected: boolean }> {
+  const now = new Date();
+  const [updated] = await db.update(users).set({
+    status: "rejected",
+    active: false,
+    rejectedAt: now,
+    rejectedBy,
+    internalReviewNote: reason?.trim() || null,
+    updatedAt: now,
+  }).where(and(eq(users.id, userId), eq(users.status, "pending"))).returning({ id: users.id });
+
+  if (!updated) {
+    const [existing] = await db.select({ status: users.status }).from(users).where(eq(users.id, userId)).limit(1);
+    if (!existing) throw new Error("User not found.");
+    if (existing.status !== "rejected") throw new Error(`Cannot reject a registration with status "${existing.status}".`);
+    return { alreadyRejected: true };
+  }
+
+  const [membership] = await db.select({ workspaceId: workspaceMemberships.workspaceId })
+    .from(workspaceMemberships).where(eq(workspaceMemberships.userId, userId)).limit(1);
+  if (membership) {
+    await db.update(workspaces).set({ status: "rejected", approvedAt: now, approvedBy: rejectedBy })
+      .where(and(eq(workspaces.id, membership.workspaceId), eq(workspaces.status, "pending")));
+  }
+  return { alreadyRejected: false };
+}
+
+/**
+ * Public self-registration: creates only the account row, in PENDING_APPROVAL
+ * (status "pending"). No workspace, membership, farm, or season is created —
+ * those only happen once a platform administrator approves the account and
+ * the user completes onboarding.
+ */
+export async function createPendingUser(input: {
+  ownerName: string; email: string; password: string; phone?: string; language?: string;
+}): Promise<{ id: string }> {
+  const email = input.email.toLowerCase();
   const [user] = await db.insert(users).values({
     email,
     passwordHash: await hashPassword(input.password),
     displayName: input.ownerName.trim(),
     phone: input.phone?.trim() || null,
-    status: "approved",
+    status: "pending",
     active: true,
-    approvedAt: now,
-    workspaceId: workspace.id,
-  }).returning();
-  if (!user) throw new Error("Unable to create user account.");
-  await db.insert(workspaceMemberships).values({
-    workspaceId: workspace.id,
-    userId: user.id,
-    role: "workspace_owner",
-    active: true,
-    farmAccessMode: "all",
-  });
-  return { user, workspace };
+    registrationSource: "self_service",
+    registrationLanguage: input.language?.trim().slice(0, 10) || null,
+  }).returning({ id: users.id });
+  if (!user) throw new Error("Unable to create account request.");
+  return user;
 }
 
-export async function authenticateUser(email: string, password: string): Promise<AuthenticatedUser | null> {
+export async function authenticateUser(email: string, password: string): Promise<
+  | { ok: true; user: AuthenticatedUser }
+  | { ok: false; blocked: AccountBlockCode | null }
+> {
   if (localDevelopmentMode) {
-    return email.toLowerCase() === localUser.email && password === config.LOCAL_ADMIN_PASSWORD ? localUser : null;
+    const ok = email.toLowerCase() === localUser.email && password === config.LOCAL_ADMIN_PASSWORD;
+    return ok ? { ok: true, user: localUser } : { ok: false, blocked: null };
   }
   const [user] = await db.select().from(users).where(eq(users.email, email.toLowerCase())).limit(1);
-  if (!user || !user.active || user.status !== "approved" || !(await verifyPassword(password, user.passwordHash))) return null;
-  return serializeUser(user);
+  if (!user || !(await verifyPassword(password, user.passwordHash))) return { ok: false, blocked: null };
+  const code = accountBlockCode(user);
+  if (code) return { ok: false, blocked: code };
+  return { ok: true, user: await serializeUser(user) };
 }

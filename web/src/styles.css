@@ -9629,6 +9629,34 @@ a.dashboard-kpi-card:active {
   width: 100%;
 }
 
+.onboarding-shell--single {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 460px;
+}
+
+.account-status-panel__email {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  margin: 0 0 12px;
+}
+
+.account-status-panel__actions {
+  display: flex;
+  margin: 16px 0;
+}
+
+.account-status-panel__signout {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.account-status-panel__support {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
 .onboarding-story,
 .onboarding-panel,
 .approval-empty,
@@ -17800,6 +17828,11 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 .workforce-advance-pagination { align-items: center; display: flex; gap: 10px; justify-content: space-between; padding: 4px 1px; }
 .workforce-advance-pagination span,.workforce-advance-pagination small { color: #64748b; font-size: 11px; }
 .workforce-advance-pagination button { min-height: 40px; }
+
+.registration-pagination { align-items: center; display: flex; gap: 10px; justify-content: space-between; margin-top: 12px; padding: 4px 1px; }
+.registration-pagination span { color: #64748b; font-size: 0.8rem; }
+.registration-pagination div { display: flex; gap: 8px; }
+.registration-pagination button { align-items: center; display: inline-flex; gap: 4px; min-height: 36px; }
 .workforce-advance-recipient-list { display: grid; gap: 8px; }
 .workforce-advance-recipient-list article { align-items: center; background: #fff; border: 1px solid #dbe5de; border-radius: 13px; display: grid; gap: 10px; grid-template-columns: minmax(0,1fr) auto auto; padding: 10px 11px; }
 .workforce-advance-recipient-list article > div { display: grid; gap: 2px; min-width: 0; }

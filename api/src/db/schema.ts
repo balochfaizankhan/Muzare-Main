@@ -73,6 +73,13 @@ export const users = pgTable("users", {
   active: boolean("active").default(true).notNull(),
   approvedAt: timestamp("approved_at", { withTimezone: true }),
   approvedBy: uuid("approved_by"),
+  rejectedAt: timestamp("rejected_at", { withTimezone: true }),
+  rejectedBy: uuid("rejected_by"),
+  suspendedAt: timestamp("suspended_at", { withTimezone: true }),
+  suspendedBy: uuid("suspended_by"),
+  internalReviewNote: text("internal_review_note"),
+  registrationSource: text("registration_source").default("self_service").notNull(),
+  registrationLanguage: text("registration_language"),
   ...timestamps,
 });
 

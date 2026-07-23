@@ -9773,6 +9773,223 @@ for (const [language, bundle] of Object.entries(fullLocalizationBackfill)) {
   mergeTranslations((resources as Record<string, { translation: Record<string, unknown> }>)[language].translation, bundle.translation as Record<string, unknown>);
 }
 
+// Administrator approval for public self-registration: new pending/rejected/suspended
+// interstitials, self-service workspace onboarding, and the Registration Requests admin
+// page. Kept as its own merge source (same pattern as the backfills above).
+const registrationApprovalBackfill = {
+  en: { translation: {
+    common: { previous: "Previous", next: "Next" },
+    accountStatus: {
+      signOut: "Sign out",
+      contactSupport: "Need help? Contact support",
+      pending: {
+        title: "Registration received",
+        description: "Thanks for registering. A platform administrator will review your request before you can sign in.",
+        awaitingApproval: "Awaiting administrator approval",
+      },
+      rejected: {
+        title: "Account request not approved",
+        description: "Your account request was not approved. If you believe this is a mistake, contact support.",
+      },
+      suspended: {
+        title: "Account suspended",
+        description: "This account has been suspended. Contact support for more information.",
+      },
+    },
+    onboardingPage: {
+      welcomeTitle: "Welcome to Muzare",
+      welcomeDescription: "Your account is approved. Let's set up your first workspace.",
+      workspaceName: "Workspace name",
+      workspaceNamePlaceholder: "e.g. Green Valley Farms",
+      createWorkspace: "Create workspace",
+      submitting: "Creating workspace...",
+      submitFailed: "Unable to create your workspace. Please try again.",
+      validation: { nameRequired: "A workspace name is required." },
+    },
+    authSignup: {
+      title: "Request an account",
+      description: "Submit your details below. A platform administrator will review your request before you can sign in and set up your workspace.",
+      requestWorkspace: "Request your account",
+      requestWorkspaceDescription: "Submit your details for review. You'll be notified once a platform administrator approves your request.",
+      passwordHint: "Use at least 8 characters. You can sign in once your request is approved.",
+      submitting: "Submitting request...",
+      submitForApproval: "Submit for approval",
+      steps: {
+        createWorkspace: { title: "Submit your request", description: "Tell us who you are and how to reach you." },
+        adminApproval: { title: "Platform admin review", description: "A platform administrator reviews every new registration before granting access." },
+        startClean: { title: "Set up your workspace", description: "Once approved, create your own workspace and start clean." },
+      },
+    },
+    adminApprovals: {
+      title: "Registration Requests",
+      subtitle: "Review, approve, reject, or suspend public self-registrations.",
+      workspaceApprovals: "Registration requests",
+      resultsInView: "Results in view",
+      statusFilters: "Status filters",
+      filters: { pending: "Pending", approved: "Approved", rejected: "Rejected", suspended: "Suspended", all: "All" },
+      searchPlaceholder: "Search by name or email",
+      fromDate: "From date",
+      toDate: "To date",
+      columns: { applicant: "Applicant", registered: "Registered", language: "Language" },
+      suspend: "Suspend",
+      reactivate: "Reactivate",
+      pageIndicator: "Page {{page}} of {{totalPages}}",
+      registrationDetails: "Registration details",
+      emailVerification: "Email verification",
+      emailVerificationNotApplicable: "Not applicable",
+      rejectedAt: "Rejected",
+      suspendedAt: "Suspended",
+      internalNote: "Internal note",
+      confirmRejectTitle: "Reject this registration?",
+      confirmRejectDescription: "The applicant will be notified that their request was not approved. The account record is kept, not deleted.",
+      internalNoteOptional: "Internal note (optional, not shown to the applicant)",
+      confirmReject: "Reject registration",
+    },
+  } },
+  ar: { translation: {
+    common: { previous: "السابق", next: "التالي" },
+    accountStatus: {
+      signOut: "تسجيل الخروج",
+      contactSupport: "تحتاج مساعدة؟ تواصل مع الدعم",
+      pending: {
+        title: "تم استلام التسجيل",
+        description: "شكرًا لتسجيلك. سيقوم مسؤول المنصة بمراجعة طلبك قبل أن تتمكن من تسجيل الدخول.",
+        awaitingApproval: "في انتظار موافقة المسؤول",
+      },
+      rejected: {
+        title: "لم تتم الموافقة على طلب الحساب",
+        description: "لم تتم الموافقة على طلب حسابك. إذا كنت تعتقد أن هذا خطأ، تواصل مع الدعم.",
+      },
+      suspended: {
+        title: "الحساب معلّق",
+        description: "تم تعليق هذا الحساب. تواصل مع الدعم لمزيد من المعلومات.",
+      },
+    },
+    onboardingPage: {
+      welcomeTitle: "مرحبًا بك في مزارع",
+      welcomeDescription: "تم اعتماد حسابك. لنقم بإعداد مساحة عملك الأولى.",
+      workspaceName: "اسم مساحة العمل",
+      workspaceNamePlaceholder: "مثال: مزارع الوادي الأخضر",
+      createWorkspace: "إنشاء مساحة العمل",
+      submitting: "جارٍ إنشاء مساحة العمل...",
+      submitFailed: "تعذّر إنشاء مساحة عملك. حاول مرة أخرى.",
+      validation: { nameRequired: "اسم مساحة العمل مطلوب." },
+    },
+    authSignup: {
+      title: "طلب حساب",
+      description: "أدخل بياناتك أدناه. سيقوم مسؤول المنصة بمراجعة طلبك قبل أن تتمكن من تسجيل الدخول وإعداد مساحة عملك.",
+      requestWorkspace: "طلب حسابك",
+      requestWorkspaceDescription: "أرسل بياناتك للمراجعة. سيتم إشعارك عند موافقة مسؤول المنصة على طلبك.",
+      passwordHint: "استخدم 8 أحرف على الأقل. يمكنك تسجيل الدخول بعد الموافقة على طلبك.",
+      submitting: "جارٍ إرسال الطلب...",
+      submitForApproval: "إرسال للموافقة",
+      steps: {
+        createWorkspace: { title: "أرسل طلبك", description: "أخبرنا من أنت وكيفية التواصل معك." },
+        adminApproval: { title: "مراجعة مسؤول المنصة", description: "يراجع مسؤول المنصة كل تسجيل جديد قبل منح الوصول." },
+        startClean: { title: "أعدّ مساحة عملك", description: "بعد الموافقة، أنشئ مساحة عملك الخاصة وابدأ من جديد." },
+      },
+    },
+    adminApprovals: {
+      title: "طلبات التسجيل",
+      subtitle: "راجع واعتمد وارفض أو علّق طلبات التسجيل العامة.",
+      workspaceApprovals: "طلبات التسجيل",
+      resultsInView: "النتائج المعروضة",
+      statusFilters: "مرشحات الحالة",
+      filters: { pending: "قيد الانتظار", approved: "معتمد", rejected: "مرفوض", suspended: "معلّق", all: "الكل" },
+      searchPlaceholder: "البحث بالاسم أو البريد الإلكتروني",
+      fromDate: "من تاريخ",
+      toDate: "إلى تاريخ",
+      columns: { applicant: "مقدّم الطلب", registered: "تاريخ التسجيل", language: "اللغة" },
+      suspend: "تعليق",
+      reactivate: "إعادة التفعيل",
+      pageIndicator: "صفحة {{page}} من {{totalPages}}",
+      registrationDetails: "تفاصيل التسجيل",
+      emailVerification: "التحقق من البريد الإلكتروني",
+      emailVerificationNotApplicable: "غير منطبق",
+      rejectedAt: "تاريخ الرفض",
+      suspendedAt: "تاريخ التعليق",
+      internalNote: "ملاحظة داخلية",
+      confirmRejectTitle: "هل تريد رفض هذا الطلب؟",
+      confirmRejectDescription: "سيتم إشعار مقدّم الطلب بأن طلبه لم يُعتمد. يُحتفظ بسجل الحساب ولا يُحذف.",
+      internalNoteOptional: "ملاحظة داخلية (اختياري، لا تُعرض لمقدّم الطلب)",
+      confirmReject: "رفض الطلب",
+    },
+  } },
+  ur: { translation: {
+    common: { previous: "پچھلا", next: "اگلا" },
+    accountStatus: {
+      signOut: "سائن آؤٹ",
+      contactSupport: "مدد درکار ہے؟ سپورٹ سے رابطہ کریں",
+      pending: {
+        title: "رجسٹریشن موصول ہوگئی",
+        description: "رجسٹریشن کا شکریہ۔ سائن ان کرنے سے پہلے ایک پلیٹ فارم ایڈمنسٹریٹر آپ کی درخواست کا جائزہ لے گا۔",
+        awaitingApproval: "ایڈمنسٹریٹر کی منظوری کا انتظار ہے",
+      },
+      rejected: {
+        title: "اکاؤنٹ کی درخواست منظور نہیں ہوئی",
+        description: "آپ کے اکاؤنٹ کی درخواست منظور نہیں ہوئی۔ اگر آپ کو لگتا ہے کہ یہ غلطی ہے تو سپورٹ سے رابطہ کریں۔",
+      },
+      suspended: {
+        title: "اکاؤنٹ معطل ہے",
+        description: "یہ اکاؤنٹ معطل کر دیا گیا ہے۔ مزید معلومات کے لیے سپورٹ سے رابطہ کریں۔",
+      },
+    },
+    onboardingPage: {
+      welcomeTitle: "مزارع میں خوش آمدید",
+      welcomeDescription: "آپ کا اکاؤنٹ منظور ہوگیا ہے۔ آئیے آپ کا پہلا ورک اسپیس بناتے ہیں۔",
+      workspaceName: "ورک اسپیس کا نام",
+      workspaceNamePlaceholder: "مثلاً: گرین ویلی فارمز",
+      createWorkspace: "ورک اسپیس بنائیں",
+      submitting: "ورک اسپیس بنایا جا رہا ہے...",
+      submitFailed: "آپ کا ورک اسپیس نہیں بن سکا۔ دوبارہ کوشش کریں۔",
+      validation: { nameRequired: "ورک اسپیس کا نام درکار ہے۔" },
+    },
+    authSignup: {
+      title: "اکاؤنٹ کی درخواست دیں",
+      description: "ذیل میں اپنی تفصیلات درج کریں۔ سائن ان کرنے اور ورک اسپیس بنانے سے پہلے ایک پلیٹ فارم ایڈمنسٹریٹر آپ کی درخواست کا جائزہ لے گا۔",
+      requestWorkspace: "اپنے اکاؤنٹ کی درخواست دیں",
+      requestWorkspaceDescription: "جائزے کے لیے اپنی تفصیلات جمع کریں۔ پلیٹ فارم ایڈمنسٹریٹر کی منظوری کے بعد آپ کو مطلع کیا جائے گا۔",
+      passwordHint: "کم از کم 8 حروف استعمال کریں۔ منظوری کے بعد آپ سائن ان کر سکتے ہیں۔",
+      submitting: "درخواست جمع کی جا رہی ہے...",
+      submitForApproval: "منظوری کے لیے جمع کریں",
+      steps: {
+        createWorkspace: { title: "اپنی درخواست جمع کریں", description: "ہمیں بتائیں کہ آپ کون ہیں اور آپ سے کیسے رابطہ کیا جائے۔" },
+        adminApproval: { title: "پلیٹ فارم ایڈمن کا جائزہ", description: "رسائی دینے سے پہلے پلیٹ فارم ایڈمنسٹریٹر ہر نئی رجسٹریشن کا جائزہ لیتا ہے۔" },
+        startClean: { title: "اپنا ورک اسپیس بنائیں", description: "منظوری کے بعد، اپنا ورک اسپیس بنائیں اور نئے سرے سے شروع کریں۔" },
+      },
+    },
+    adminApprovals: {
+      title: "رجسٹریشن کی درخواستیں",
+      subtitle: "عوامی سیلف رجسٹریشن کا جائزہ لیں، منظور کریں، مسترد کریں یا معطل کریں۔",
+      workspaceApprovals: "رجسٹریشن کی درخواستیں",
+      resultsInView: "نظر آنے والے نتائج",
+      statusFilters: "اسٹیٹس فلٹرز",
+      filters: { pending: "زیر التوا", approved: "منظور شدہ", rejected: "مسترد", suspended: "معطل", all: "تمام" },
+      searchPlaceholder: "نام یا ای میل سے تلاش کریں",
+      fromDate: "تاریخ سے",
+      toDate: "تاریخ تک",
+      columns: { applicant: "درخواست دہندہ", registered: "رجسٹریشن کی تاریخ", language: "زبان" },
+      suspend: "معطل کریں",
+      reactivate: "دوبارہ فعال کریں",
+      pageIndicator: "صفحہ {{page}} از {{totalPages}}",
+      registrationDetails: "رجسٹریشن کی تفصیلات",
+      emailVerification: "ای میل کی تصدیق",
+      emailVerificationNotApplicable: "قابل اطلاق نہیں",
+      rejectedAt: "مسترد کرنے کی تاریخ",
+      suspendedAt: "معطلی کی تاریخ",
+      internalNote: "اندرونی نوٹ",
+      confirmRejectTitle: "کیا آپ اس درخواست کو مسترد کرنا چاہتے ہیں؟",
+      confirmRejectDescription: "درخواست دہندہ کو مطلع کیا جائے گا کہ ان کی درخواست منظور نہیں ہوئی۔ اکاؤنٹ کا ریکارڈ محفوظ رکھا جاتا ہے، حذف نہیں کیا جاتا۔",
+      internalNoteOptional: "اندرونی نوٹ (اختیاری، درخواست دہندہ کو نہیں دکھایا جاتا)",
+      confirmReject: "درخواست مسترد کریں",
+    },
+  } },
+} as const;
+
+for (const [language, bundle] of Object.entries(registrationApprovalBackfill)) {
+  mergeTranslations((resources as Record<string, { translation: Record<string, unknown> }>)[language].translation, bundle.translation as Record<string, unknown>);
+}
+
 // Exported so locale-parity tests can inspect the final merged key tree without importing this
 // module's browser-only side effects (window.localStorage, i18n.init) below.
 export { resources };

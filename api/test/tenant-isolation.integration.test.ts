@@ -1942,7 +1942,7 @@ test("accepting the same invitation twice does not create duplicate workspace me
   assert.equal(Number(membershipCount?.count ?? 0), 1);
 });
 
-test("normal signup creates an approved user with a single default workspace and active session", async () => {
+test("normal signup creates a PENDING_APPROVAL account only: no workspace, no membership, no session token", async () => {
   const email = `signup-${randomUUID()}@example.test`;
   const response = await app.inject({
     method: "POST",
@@ -1952,27 +1952,149 @@ test("normal signup creates an approved user with a single default workspace and
       email,
       phone: "+966500001111",
       password: "Password123!",
+      language: "en",
     },
   });
   assert.equal(response.statusCode, 201);
-  assert.equal(response.json().status, "approved");
-  assert.ok(response.json().token);
-  assert.equal(response.json().user.workspaceName, "Default Workspace");
+  const body = response.json();
+  assert.equal(body.status, "pending");
+  assert.equal(body.token, undefined);
+  assert.equal(body.user, undefined);
 
   const [createdUser] = await db.select().from(users).where(eq(users.email, email)).limit(1);
   assert.ok(createdUser);
-  assert.equal(createdUser?.workspaceId, response.json().user.workspaceId);
+  assert.equal(createdUser?.status, "pending");
+  assert.equal(createdUser?.active, true);
+  assert.equal(createdUser?.workspaceId, null);
+  assert.equal(createdUser?.platformRole, null);
+  assert.equal(createdUser?.registrationSource, "self_service");
+  assert.equal(createdUser?.registrationLanguage, "en");
 
   const memberships = await db.select({
     workspaceId: workspaceMemberships.workspaceId,
-    role: workspaceMemberships.role,
   }).from(workspaceMemberships).where(eq(workspaceMemberships.userId, createdUser!.id));
-  assert.equal(memberships.length, 1);
-  assert.equal(memberships[0]?.role, "workspace_owner");
+  assert.equal(memberships.length, 0);
+});
 
-  const [workspace] = await db.select().from(workspaces).where(eq(workspaces.id, memberships[0]!.workspaceId)).limit(1);
-  assert.equal(workspace?.name, "Default Workspace");
-  assert.equal(workspace?.status, "approved");
+test("a PENDING_APPROVAL user cannot log in, cannot reach bootstrap, and cannot self-service a workspace", async () => {
+  // Inserted directly (rather than via POST /v1/auth/signup) so this test — and the
+  // approve/reject/suspend tests below it — do not collide with the signup route's
+  // own rate limit (max 4/minute), which is exercised on its own in the signup test above.
+  const email = `pending-blocked-${randomUUID()}@example.test`;
+  await db.insert(users).values({ email, passwordHash: await hashPassword("Password123!"), displayName: "Pending Blocked", status: "pending", active: true });
+
+  const login = await app.inject({ method: "POST", url: "/v1/auth/login", payload: { email, password: "Password123!" } });
+  assert.equal(login.statusCode, 403);
+  assert.equal(login.json().code, "ACCOUNT_PENDING_APPROVAL");
+  assert.equal(login.json().token, undefined);
+
+  const [pendingUser] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  const forgedToken = `forged-${randomUUID()}`;
+  await db.insert(userSessions).values({ userId: pendingUser!.id, tokenHash: hash(forgedToken), expiresAt: new Date(Date.now() + 60_000) });
+
+  const bootstrap = await request(forgedToken, "GET", "/v1/bootstrap");
+  assert.equal(bootstrap.statusCode, 403);
+  assert.equal(bootstrap.json().code, "ACCOUNT_PENDING_APPROVAL");
+
+  const onboarding = await request(forgedToken, "POST", "/v1/workspace/onboarding", { name: "Should Not Exist" });
+  assert.equal(onboarding.statusCode, 403);
+  assert.equal(onboarding.json().code, "ACCOUNT_PENDING_APPROVAL");
+
+  const createWorkspace = await request(forgedToken, "POST", "/v1/admin/workspaces", { name: "Bypass Attempt", contactEmail: email });
+  assert.equal(createWorkspace.statusCode, 403);
+
+  const workspacesAfter = await db.select().from(workspaces).where(eq(workspaces.contactEmail, email));
+  assert.equal(workspacesAfter.length, 0);
+
+  // /v1/session still works (weak gate) so the frontend can render the pending screen and sign out.
+  const session = await request(forgedToken, "GET", "/v1/session");
+  assert.equal(session.statusCode, 200);
+  assert.equal(session.json().user.status, "pending");
+  const logout = await request(forgedToken, "POST", "/v1/auth/logout");
+  assert.equal(logout.statusCode, 204);
+});
+
+test("a non-platform-admin cannot approve a registration; a platform admin can, exactly once, idempotently, with an audit event and onboarding access", async () => {
+  const email = `approve-flow-${randomUUID()}@example.test`;
+  const [pendingUser] = await db.insert(users).values({ email, passwordHash: await hashPassword("Password123!"), displayName: "Approve Flow", status: "pending", active: true }).returning();
+
+  const deniedApprove = await request(supervisor.token, "POST", `/v1/admin/registrations/${pendingUser!.id}/approve`);
+  assert.equal(deniedApprove.statusCode, 403);
+  const [stillPending] = await db.select({ status: users.status }).from(users).where(eq(users.id, pendingUser!.id)).limit(1);
+  assert.equal(stillPending?.status, "pending");
+
+  const approve = await request(admin.token, "POST", `/v1/admin/registrations/${pendingUser!.id}/approve`);
+  assert.equal(approve.statusCode, 204);
+
+  const [approvedUser] = await db.select().from(users).where(eq(users.id, pendingUser!.id)).limit(1);
+  assert.equal(approvedUser?.status, "approved");
+  assert.equal(approvedUser?.active, true);
+  assert.ok(approvedUser?.approvedAt);
+  assert.equal(approvedUser?.approvedBy, admin.userId);
+
+  const auditRows = await db.select().from(auditLogs).where(and(eq(auditLogs.entityType, "user"), eq(auditLogs.entityId, pendingUser!.id), eq(auditLogs.action, "account.registration_approved")));
+  assert.equal(auditRows.length, 1);
+
+  const repeatApprove = await request(admin.token, "POST", `/v1/admin/registrations/${pendingUser!.id}/approve`);
+  assert.equal(repeatApprove.statusCode, 204);
+  const auditRowsAfterRepeat = await db.select().from(auditLogs).where(and(eq(auditLogs.entityType, "user"), eq(auditLogs.entityId, pendingUser!.id), eq(auditLogs.action, "account.registration_approved")));
+  assert.equal(auditRowsAfterRepeat.length, 1, "repeated approval must not create a duplicate audit event");
+
+  const login = await app.inject({ method: "POST", url: "/v1/auth/login", payload: { email, password: "Password123!" } });
+  assert.equal(login.statusCode, 200);
+  assert.equal(login.json().user.workspaceId, null);
+
+  const onboarding = await request(login.json().token, "POST", "/v1/workspace/onboarding", { name: "Approved Owner Workspace" });
+  assert.equal(onboarding.statusCode, 201);
+  assert.equal(onboarding.json().user.workspaceId !== null, true);
+
+  const workspaceRows = await db.select().from(workspaceMemberships).where(eq(workspaceMemberships.userId, pendingUser!.id));
+  assert.equal(workspaceRows.length, 1, "onboarding must create exactly one membership, not duplicates");
+});
+
+test("rejecting a registration blocks access, preserves the account row, and does not leak the internal note to the API response", async () => {
+  const email = `reject-flow-${randomUUID()}@example.test`;
+  const [pendingUser] = await db.insert(users).values({ email, passwordHash: await hashPassword("Password123!"), displayName: "Reject Flow", status: "pending", active: true }).returning();
+
+  const reject = await request(admin.token, "POST", `/v1/admin/registrations/${pendingUser!.id}/reject`, { reason: "Could not verify business details." });
+  assert.equal(reject.statusCode, 204);
+
+  const [rejectedUser] = await db.select().from(users).where(eq(users.id, pendingUser!.id)).limit(1);
+  assert.equal(rejectedUser?.status, "rejected");
+  assert.equal(rejectedUser?.active, false);
+  assert.ok(rejectedUser?.rejectedAt);
+  assert.equal(rejectedUser?.rejectedBy, admin.userId);
+  assert.equal(rejectedUser?.internalReviewNote, "Could not verify business details.");
+  assert.equal(rejectedUser?.email, email, "the account row must be preserved, not deleted");
+
+  const login = await app.inject({ method: "POST", url: "/v1/auth/login", payload: { email, password: "Password123!" } });
+  assert.equal(login.statusCode, 403);
+  assert.equal(login.json().code, "ACCOUNT_REJECTED");
+  assert.doesNotMatch(JSON.stringify(login.json()), /Could not verify business details/);
+});
+
+test("suspending an already-approved user blocks protected APIs immediately, even on a session token minted before the suspension", async () => {
+  const email = `suspend-flow-${randomUUID()}@example.test`;
+  const [pendingUser] = await db.insert(users).values({ email, passwordHash: await hashPassword("Password123!"), displayName: "Suspend Flow", status: "pending", active: true }).returning();
+  await request(admin.token, "POST", `/v1/admin/registrations/${pendingUser!.id}/approve`);
+
+  const login = await app.inject({ method: "POST", url: "/v1/auth/login", payload: { email, password: "Password123!" } });
+  assert.equal(login.statusCode, 200);
+  const liveToken = login.json().token as string;
+
+  const beforeSuspend = await request(liveToken, "GET", "/v1/session");
+  assert.equal(beforeSuspend.statusCode, 200);
+
+  const suspend = await request(admin.token, "PATCH", `/v1/admin/users/${pendingUser!.id}/status`, { active: false });
+  assert.equal(suspend.statusCode, 204);
+
+  const afterSuspend = await request(liveToken, "GET", "/v1/bootstrap");
+  assert.equal(afterSuspend.statusCode, 403);
+  assert.equal(afterSuspend.json().code, "ACCOUNT_SUSPENDED");
+
+  const sessionStillReadable = await request(liveToken, "GET", "/v1/session");
+  assert.equal(sessionStillReadable.statusCode, 200);
+  assert.equal(sessionStillReadable.json().user.status, "suspended");
 });
 
 test("invitation signup creates only the invited workspace membership and no default workspace", async () => {
