@@ -9,12 +9,14 @@ import "./styles.css";
 import "./sales-polish.css";
 import "./sales-date-sync.css";
 import "./sales-date-sync";
+import { installSystemTextLocalizationGuard } from "./lib/systemTextLocalization";
 import { queryClient } from "./lib/query-client";
 import { markStartup, scheduleBackgroundTask } from "./lib/startupPerf";
 
 function RootShell() {
   useEffect(() => {
     markStartup("app-shell-mounted");
+    return installSystemTextLocalizationGuard();
   }, []);
 
   return (
