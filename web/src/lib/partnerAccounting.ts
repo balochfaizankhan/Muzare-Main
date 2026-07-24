@@ -547,12 +547,21 @@ export function getPartnerAccountingSnapshot(
     .filter((entry) => isActiveOperationalRecord(entry) && entry.type === "contribution" && resolveCanonicalAccountId(entry.partnerAccountId ?? entry.accountId ?? null, accountLookup) === account.id)
     .reduce((sum, entry) => sum + entry.amount, 0);
 
-  const farmOwesPartner = purchaseVouchersPaid
-    + fundsGiven
-    - fundsReceived
-    + totalLabourAdvancesPaid
-    + adjustment
-    - moneyReturned;
+  // F-2 fix: the partner balance must go through the single authoritative liability
+  // selector, calculatePartnerLiabilityBalance, so capital contributions are included
+  // consistently. Previously farmOwesPartner omitted capitalInjected while the ledger
+  // overview/summary totals (which use calculatePartnerLiabilityBalance) included it,
+  // causing the two partner-reconciliation warnings to fire whenever a partner had any
+  // capital contribution. Routing through the shared selector removes that divergence.
+  const farmOwesPartner = calculatePartnerLiabilityBalance({
+    openingBalance: 0,
+    capitalInjected,
+    directExpensesPaid: purchaseVouchersPaid + totalLabourAdvancesPaid,
+    transfersIn: fundsReceived,
+    transfersOut: fundsGiven,
+    moneyReturned,
+    adjustments: adjustment,
+  });
 
   const currentPartnerBalance = farmOwesPartner;
 
@@ -701,6 +710,71 @@ export function buildPartnerLiabilityPositions(
 
   return [...positions.values()]
     .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+export function emptyPartnerLiabilityPosition(
+  identity: { account: Account | null; key: string; name: string },
+): PartnerLiabilityPosition {
+  return {
+    account: identity.account,
+    key: identity.key,
+    name: identity.name,
+    openingBalance: 0,
+    capitalInjected: 0,
+    directExpensesPaid: 0,
+    purchaseVouchersPaid: 0,
+    businessFundsNet: 0,
+    labourAdvancesPaid: 0,
+    labourPayments: 0,
+    labourWageSettlements: 0,
+    labourSettlementCashPaid: 0,
+    labourSettlementNonCashApplied: 0,
+    totalLabourAdvancesPaid: 0,
+    settledAdvances: 0,
+    outstandingLabourAdvances: 0,
+    reconciliationDifference: 0,
+    isConsistent: true,
+    transfersIn: 0,
+    transfersOut: 0,
+    moneyReturned: 0,
+    adjustments: 0,
+    currentPartnerBalance: 0,
+    reconciliationDelta: 0,
+  };
+}
+
+// Sum every legacy position that collapses into a single canonical partner. Each
+// underlying transaction resolves to exactly one account id, so the member positions
+// are disjoint and additive — this never double counts a record.
+export function aggregatePartnerLiabilityPositions(
+  positions: PartnerLiabilityPosition[],
+  identity: { account: Account | null; key: string; name: string },
+): PartnerLiabilityPosition {
+  const base = emptyPartnerLiabilityPosition(identity);
+  for (const position of positions) {
+    base.openingBalance += position.openingBalance;
+    base.capitalInjected += position.capitalInjected;
+    base.directExpensesPaid += position.directExpensesPaid;
+    base.purchaseVouchersPaid += position.purchaseVouchersPaid;
+    base.businessFundsNet += position.businessFundsNet;
+    base.labourAdvancesPaid += position.labourAdvancesPaid;
+    base.labourPayments += position.labourPayments;
+    base.labourWageSettlements += position.labourWageSettlements;
+    base.labourSettlementCashPaid += position.labourSettlementCashPaid;
+    base.labourSettlementNonCashApplied += position.labourSettlementNonCashApplied;
+    base.totalLabourAdvancesPaid += position.totalLabourAdvancesPaid;
+    base.settledAdvances += position.settledAdvances;
+    base.outstandingLabourAdvances += position.outstandingLabourAdvances;
+    base.reconciliationDifference += position.reconciliationDifference;
+    base.transfersIn += position.transfersIn;
+    base.transfersOut += position.transfersOut;
+    base.moneyReturned += position.moneyReturned;
+    base.adjustments += position.adjustments;
+    base.currentPartnerBalance += position.currentPartnerBalance;
+    base.reconciliationDelta += position.reconciliationDelta;
+    base.isConsistent = base.isConsistent && position.isConsistent;
+  }
+  return base;
 }
 
 export function mergePartnerPositionWithCanonical(

@@ -46,6 +46,7 @@ import { buildLabourEarningsProfileSummary } from "../lib/labourEarnings";
 import { getGeneralExpenseVouchers, getLabourWageSettlementAdvanceOffset, getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher, isVoidedLabourWageSettlement, resolveLabourWageSettlementAccountIdentity } from "../lib/labourWageSettlements";
 import { buildAccountIdentityLookup, resolveCanonicalAccountId } from "../lib/accountIdentity";
 import { isActiveOperationalRecord } from "../lib/operationalRecords";
+import { buildReplacedSourceIdSet, selectActiveDedupedAdvances } from "../lib/financialInputs";
 import { getVoucherDisplayNumber, normalizeVoucherNumber, parseVoucherSequenceNumber } from "../lib/vouchers";
 import { getActiveVouchers, getVisibleVouchers, loadWorkspaceVouchers } from "../lib/voucherCollections";
 import { compareWageRates, getWageRateStatus, normalizeHalfDayRate, summarizeAttendanceWages } from "../lib/wageRates";
@@ -4119,8 +4120,8 @@ function PartnerLedgerModule() {
   };
   const visibleEntries = entries.filter((item) => (showDeleted || isActiveOperationalRecord(item)) && (entryFilter === "all" || item.type === entryFilter));
   const activeEntries = entries.filter((item) => isActiveOperationalRecord(item));
-  const replacedLegacySourceIds = new Set(canonicalFinancials.data?.replacedLegacySourceIds ?? []);
-  const activeAdvances = advances.filter((item) => isActiveOperationalRecord(item) && !replacedLegacySourceIds.has(item.id));
+  const replacedLegacySourceIds = buildReplacedSourceIdSet(canonicalFinancials.data?.replacedLegacySourceIds);
+  const activeAdvances = selectActiveDedupedAdvances(advances, replacedLegacySourceIds);
   const activeLabourWageSettlements = labourWageSettlements.filter((item) => isActiveOperationalRecord(item));
   const accountLookup = useMemo(() => buildAccountIdentityLookup(accounts), [accounts]);
   const accountName = (id?: string) => {
@@ -4529,8 +4530,13 @@ function AccountsModule() {
   const activeSales = sales.filter((item) => isActiveOperationalRecord(item));
   const activeVouchers = getActiveVouchers(vouchers);
   const activeEntries = entries.filter((item) => isActiveOperationalRecord(item));
-  const replacedLegacySourceIds = new Set(canonicalAccountsFinancials?.replacedLegacySourceIds ?? []);
-  const activeAdvances = advances.filter((item) => isActiveOperationalRecord(item));
+  const replacedLegacySourceIds = buildReplacedSourceIdSet(canonicalAccountsFinancials?.replacedLegacySourceIds);
+  // F-3 fix: dedupe Accounts advances against replacedLegacySourceIds, exactly as the
+  // Dashboard and Partner Ledger paths do. A migrated labour advance is otherwise counted
+  // twice in the per-account balance/ledger — once as the legacy mirror and once through the
+  // canonical account entries — so this aligns Accounts outstanding-advance values with every
+  // other surface.
+  const activeAdvances = selectActiveDedupedAdvances(advances, replacedLegacySourceIds);
   const activeLabourWageSettlements = labourWageSettlements.filter((item) => isActiveOperationalRecord(item));
   const activeGeneralExpenseVouchers = getGeneralExpenseVouchers(activeVouchers, activeLabourWageSettlements);
   const accountLookup = useMemo(() => buildAccountIdentityLookup(accounts), [accounts]);

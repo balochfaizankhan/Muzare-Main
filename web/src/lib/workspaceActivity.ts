@@ -27,6 +27,7 @@ import type {
   Voucher,
 } from "./offline-db";
 import { isActiveOperationalRecord } from "./operationalRecords";
+import { buildReplacedSourceIdSet, selectActiveDedupedRecords } from "./financialInputs";
 import { translateLabourEventType, translateStatus } from "./statusLabels";
 import { loadWorkspaceVouchers } from "./voucherCollections";
 import { getVoucherDisplayNumber } from "./vouchers";
@@ -205,9 +206,9 @@ export async function loadWorkspaceActivity(t: TFunction, canonical?: LabourFina
   const activeAttendance = attendance.filter(isActiveOperationalRecord);
   const activeDispatches = dispatches.filter(isActiveOperationalRecord);
   const activeSales = sales.filter(isActiveOperationalRecord);
-  const replaced = new Set(canonical?.replacedLegacySourceIds ?? []);
-  const activeAdvances = advances.filter((item) => isActiveOperationalRecord(item) && !replaced.has(item.id));
-  const activePayments = payments.filter((item) => isActiveOperationalRecord(item) && !replaced.has(item.id));
+  const replaced = buildReplacedSourceIdSet(canonical?.replacedLegacySourceIds);
+  const activeAdvances = selectActiveDedupedRecords(advances, replaced);
+  const activePayments = selectActiveDedupedRecords(payments, replaced);
   const activeSettlements = getActiveLabourWageSettlements(settlements);
   const activePartnerEntries = partnerEntries.filter(isActiveOperationalRecord);
   const activeAccounts = accounts.filter(isActiveOperationalRecord);

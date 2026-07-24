@@ -1,0 +1,387 @@
+/* Accounts report: compact, mobile-first SaaS presentation.
+   Scoped to the account balances / ledger report so other reports are unaffected. */
+
+@media screen {
+  .reports-page:has([data-print-section="account-balances"]),
+  .reports-page:has([data-print-section="account-ledger"]) {
+    gap: 12px;
+    padding-bottom: calc(116px + env(safe-area-inset-bottom, 0px));
+    scroll-padding-bottom: calc(116px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .reports-page:has([data-print-section="account-balances"]) > .record-panel,
+  .reports-page:has([data-print-section="account-ledger"]) > .record-panel {
+    border: 1px solid color-mix(in srgb, var(--border, #dfe5e1) 88%, white);
+    border-radius: 18px;
+    box-shadow: 0 8px 28px rgba(20, 48, 35, 0.045);
+  }
+
+  /* Report category rail */
+  .reports-page:has([data-print-section="account-balances"]) > .reports-tabs,
+  .reports-page:has([data-print-section="account-ledger"]) > .reports-tabs {
+    display: flex;
+    gap: 7px;
+    overflow-x: auto;
+    padding: 7px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+
+  .reports-page:has([data-print-section="account-balances"]) > .reports-tabs::-webkit-scrollbar,
+  .reports-page:has([data-print-section="account-ledger"]) > .reports-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .reports-page:has([data-print-section="account-balances"]) > .reports-tabs button,
+  .reports-page:has([data-print-section="account-ledger"]) > .reports-tabs button {
+    flex: 0 0 auto;
+    min-height: 40px;
+    padding: 0 14px;
+    border-radius: 11px;
+    scroll-snap-align: center;
+    white-space: nowrap;
+  }
+
+  /* Filter card */
+  .reports-page:has([data-print-section="account-balances"]) > .reports-filter-panel,
+  .reports-page:has([data-print-section="account-ledger"]) > .reports-filter-panel {
+    padding: 15px;
+  }
+
+  .reports-page:has([data-print-section="account-balances"]) .reports-filter-heading,
+  .reports-page:has([data-print-section="account-ledger"]) .reports-filter-heading {
+    align-items: center;
+    margin-bottom: 11px;
+  }
+
+  .reports-page:has([data-print-section="account-balances"]) .reports-filter-heading h2,
+  .reports-page:has([data-print-section="account-ledger"]) .reports-filter-heading h2 {
+    font-size: 1rem;
+    line-height: 1.2;
+    margin: 0;
+  }
+
+  .reports-page:has([data-print-section="account-balances"]) .reports-filter-heading button,
+  .reports-page:has([data-print-section="account-ledger"]) .reports-filter-heading button {
+    min-height: 34px;
+    padding: 0 10px;
+    border-radius: 9px;
+    font-size: 0.75rem;
+  }
+
+  .reports-page:has([data-print-section="account-balances"]) .reports-filters,
+  .reports-page:has([data-print-section="account-ledger"]) .reports-filters {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .reports-page:has([data-print-section="account-balances"]) .reports-filters > .search-input,
+  .reports-page:has([data-print-section="account-ledger"]) .reports-filters > .search-input,
+  .reports-page:has([data-print-section="account-balances"]) .reports-filters > .reports-date-row,
+  .reports-page:has([data-print-section="account-ledger"]) .reports-filters > .reports-date-row,
+  .reports-page:has([data-print-section="account-balances"]) .reports-filters > .reports-range-actions,
+  .reports-page:has([data-print-section="account-ledger"]) .reports-filters > .reports-range-actions,
+  .reports-page:has([data-print-section="account-balances"]) .reports-filters > .clearable-select,
+  .reports-page:has([data-print-section="account-ledger"]) .reports-filters > .clearable-select {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+
+  .reports-page:has([data-print-section="account-balances"]) .reports-filters input,
+  .reports-page:has([data-print-section="account-ledger"]) .reports-filters input,
+  .reports-page:has([data-print-section="account-balances"]) .reports-filters select,
+  .reports-page:has([data-print-section="account-ledger"]) .reports-filters select,
+  .reports-page:has([data-print-section="account-balances"]) .reports-date-field,
+  .reports-page:has([data-print-section="account-ledger"]) .reports-date-field {
+    min-height: 48px;
+    border-radius: 12px;
+    background: var(--surface, #fff);
+    box-shadow: none;
+  }
+
+  .reports-page:has([data-print-section="account-balances"]) .reports-filters input,
+  .reports-page:has([data-print-section="account-ledger"]) .reports-filters input,
+  .reports-page:has([data-print-section="account-balances"]) .reports-filters select,
+  .reports-page:has([data-print-section="account-ledger"]) .reports-filters select {
+    font-size: 0.9rem;
+    min-width: 0;
+  }
+
+  .reports-page:has([data-print-section="account-balances"]) .reports-filters input::placeholder,
+  .reports-page:has([data-print-section="account-ledger"]) .reports-filters input::placeholder {
+    font-size: 0.86rem;
+  }
+
+  .reports-page:has([data-print-section="account-balances"]) .reports-date-row,
+  .reports-page:has([data-print-section="account-ledger"]) .reports-date-row {
+    gap: 10px;
+  }
+
+  .reports-page:has([data-print-section="account-balances"]) .reports-date-field,
+  .reports-page:has([data-print-section="account-ledger"]) .reports-date-field {
+    padding-inline: 13px;
+  }
+
+  .reports-page:has([data-print-section="account-balances"]) .reports-date-field__value,
+  .reports-page:has([data-print-section="account-ledger"]) .reports-date-field__value {
+    font-size: 0.88rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .reports-page:has([data-print-section="account-balances"]) .reports-range-actions,
+  .reports-page:has([data-print-section="account-ledger"]) .reports-range-actions {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .reports-page:has([data-print-section="account-balances"]) .reports-range-actions button,
+  .reports-page:has([data-print-section="account-ledger"]) .reports-range-actions button {
+    min-width: 0;
+    min-height: 38px;
+    padding: 0 7px;
+    border-radius: 999px;
+    font-size: 0.73rem;
+    white-space: nowrap;
+  }
+
+  .reports-page:has([data-print-section="account-balances"]) .reports-filters > .clearable-select,
+  .reports-page:has([data-print-section="account-ledger"]) .reports-filters > .clearable-select {
+    width: 100%;
+  }
+
+  .reports-page:has([data-print-section="account-balances"]) .reports-filters > .clearable-select select,
+  .reports-page:has([data-print-section="account-ledger"]) .reports-filters > .clearable-select select {
+    width: 100%;
+    padding-inline-end: 44px;
+  }
+
+  /* Balances / ledger segmented control */
+  .reports-page:has([data-print-section="account-balances"]) > .reports-subtabs,
+  .reports-page:has([data-print-section="account-ledger"]) > .reports-subtabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+    padding: 4px;
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--surface-soft, #f3f6f3) 92%, white);
+  }
+
+  .reports-page:has([data-print-section="account-balances"]) > .reports-subtabs button,
+  .reports-page:has([data-print-section="account-ledger"]) > .reports-subtabs button {
+    min-height: 43px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--text-secondary, #667085);
+    box-shadow: none;
+    font-size: 0.87rem;
+    font-weight: 750;
+  }
+
+  .reports-page:has([data-print-section="account-balances"]) > .reports-subtabs button.is-active,
+  .reports-page:has([data-print-section="account-ledger"]) > .reports-subtabs button.is-active {
+    background: var(--brand-primary, #267d35);
+    color: #fff;
+    box-shadow: 0 5px 14px rgba(28, 104, 52, 0.2);
+  }
+
+  /* Report surface and action hierarchy */
+  [data-print-section="account-balances"],
+  [data-print-section="account-ledger"] {
+    padding: 16px;
+  }
+
+  [data-print-section="account-balances"] .reports-view-header,
+  [data-print-section="account-ledger"] .reports-view-header {
+    align-items: start;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  [data-print-section="account-balances"] .reports-view-header h2,
+  [data-print-section="account-ledger"] .reports-view-header h2 {
+    margin: 0 0 3px;
+    font-size: 1.08rem;
+    line-height: 1.2;
+  }
+
+  [data-print-section="account-balances"] .reports-view-header p,
+  [data-print-section="account-ledger"] .reports-view-header p {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--text-secondary, #667085);
+  }
+
+  [data-print-section="account-balances"] .reports-actions,
+  [data-print-section="account-ledger"] .reports-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(92px, 1fr));
+    gap: 8px;
+  }
+
+  [data-print-section="account-balances"] .reports-actions button,
+  [data-print-section="account-ledger"] .reports-actions button {
+    min-height: 42px;
+    padding: 0 14px;
+    border-radius: 11px;
+    font-size: 0.82rem;
+    font-weight: 750;
+    white-space: nowrap;
+  }
+
+  [data-print-section="account-balances"] .reports-actions button:first-child,
+  [data-print-section="account-ledger"] .reports-actions button:first-child {
+    border-color: var(--brand-primary, #267d35);
+    background: var(--brand-primary, #267d35);
+    color: #fff;
+  }
+
+  [data-print-section="account-balances"] .reports-actions button:last-child,
+  [data-print-section="account-ledger"] .reports-actions button:last-child {
+    background: var(--surface, #fff);
+    color: var(--brand-primary, #267d35);
+  }
+
+  /* Account balance rows */
+  [data-print-section="account-balances"] > .reports-kpis {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 9px;
+  }
+
+  [data-print-section="account-balances"] > .reports-kpis .account-card-clickable {
+    align-items: center;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "name amount"
+      "hint amount";
+    gap: 3px 14px;
+    min-height: 72px;
+    padding: 12px 14px;
+    border: 1px solid color-mix(in srgb, var(--border, #dfe5e1) 88%, white);
+    border-radius: 14px;
+    background: var(--surface, #fff);
+    box-shadow: 0 3px 12px rgba(20, 48, 35, 0.035);
+    text-align: start;
+    transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+  }
+
+  [data-print-section="account-balances"] > .reports-kpis .account-card-clickable:hover,
+  [data-print-section="account-balances"] > .reports-kpis .account-card-clickable:focus-visible {
+    border-color: color-mix(in srgb, var(--brand-primary, #267d35) 40%, var(--border, #dfe5e1));
+    box-shadow: 0 8px 22px rgba(20, 82, 43, 0.09);
+    outline: none;
+    transform: translateY(-1px);
+  }
+
+  [data-print-section="account-balances"] > .reports-kpis .account-card-clickable:active {
+    transform: scale(0.995);
+  }
+
+  [data-print-section="account-balances"] > .reports-kpis .account-card-clickable span {
+    grid-area: name;
+    min-width: 0;
+    color: var(--text-secondary, #667085);
+    font-size: 0.8rem;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+  }
+
+  [data-print-section="account-balances"] > .reports-kpis .account-card-clickable strong {
+    grid-area: amount;
+    align-self: center;
+    color: var(--text-primary, #1f2937);
+    font-size: 1.02rem;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  [data-print-section="account-balances"] > .reports-kpis .account-card-clickable small {
+    grid-area: hint;
+    color: var(--brand-primary, #267d35);
+    font-size: 0.73rem;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+
+  /* Ledger view */
+  [data-print-section="account-ledger"] .account-ledger-breakdown {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-breakdown article,
+  [data-print-section="account-ledger"] .account-ledger-reconciliation {
+    border-radius: 14px;
+    box-shadow: none;
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-breakdown article {
+    min-width: 0;
+    padding: 12px;
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-breakdown article strong,
+  [data-print-section="account-ledger"] .account-ledger-breakdown article span,
+  [data-print-section="account-ledger"] .account-ledger-breakdown article b {
+    overflow-wrap: anywhere;
+  }
+}
+
+@media screen and (max-width: 767px) {
+  .reports-page:has([data-print-section="account-balances"]),
+  .reports-page:has([data-print-section="account-ledger"]) {
+    gap: 10px;
+    padding-top: 10px;
+  }
+
+  .reports-page:has([data-print-section="account-balances"]) > .record-panel,
+  .reports-page:has([data-print-section="account-ledger"]) > .record-panel {
+    border-radius: 16px;
+  }
+
+  [data-print-section="account-balances"] .reports-view-header,
+  [data-print-section="account-ledger"] .reports-view-header {
+    grid-template-columns: 1fr;
+  }
+
+  [data-print-section="account-balances"] .reports-actions,
+  [data-print-section="account-ledger"] .reports-actions {
+    width: 100%;
+  }
+
+  [data-print-section="account-balances"] .reports-actions button,
+  [data-print-section="account-ledger"] .reports-actions button {
+    width: 100%;
+  }
+}
+
+@media screen and (max-width: 390px) {
+  .reports-page:has([data-print-section="account-balances"]) .reports-range-actions,
+  .reports-page:has([data-print-section="account-ledger"]) .reports-range-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .reports-page:has([data-print-section="account-balances"]) .reports-filters,
+  .reports-page:has([data-print-section="account-ledger"]) .reports-filters {
+    gap: 8px;
+  }
+
+  [data-print-section="account-balances"],
+  [data-print-section="account-ledger"] {
+    padding: 14px;
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-breakdown {
+    grid-template-columns: 1fr;
+  }
+}

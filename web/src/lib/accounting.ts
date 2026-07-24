@@ -10,6 +10,20 @@ export type CanonicalAccountBalanceEntry = {
   balanceEffect: number;
 };
 
+/**
+ * Sum the canonical (server read-model) labour cash effect attributed to a single account.
+ * Shared so every surface derives the canonical component of a balance the same way instead
+ * of re-inlining the filter+reduce.
+ */
+export function sumCanonicalAccountBalanceEffect(
+  accountId: string,
+  canonicalEntries: readonly CanonicalAccountBalanceEntry[] = [],
+): number {
+  return canonicalEntries
+    .filter((entry) => entry.accountId === accountId)
+    .reduce((sum, entry) => sum + entry.balanceEffect, 0);
+}
+
 export function partnerSettlementEffect(entry: PartnerEntry, accountId: string, accountLookup: AccountIdentityLookup): number {
   if (entry.type !== "settlement") return 0;
   const fromAccountId = resolvePartnerTransferAccountIdentity(entry as Record<string, unknown>, "from", accountLookup).canonicalAccountId ?? entry.fromAccountId ?? null;
@@ -79,9 +93,7 @@ export function calculateDisplayedAccountBalance(
   options: { farmId?: string | null; seasonId?: string | null } = {},
 ): number {
   const localBalance = calculateAccountBalance(account, sales, vouchers, advances, entries, settlements, allAccounts, options);
-  const canonicalBalance = canonicalEntries
-    .filter((entry) => entry.accountId === account.id)
-    .reduce((sum, entry) => sum + entry.balanceEffect, 0);
+  const canonicalBalance = sumCanonicalAccountBalanceEffect(account.id, canonicalEntries);
   return localBalance + canonicalBalance;
 }
 

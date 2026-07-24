@@ -1,0 +1,81 @@
+/* Expense summary drill-down cards: interactive, accessible and mobile-first. */
+@media screen {
+  [data-print-section="expense-summary"] .reports-summary-list {
+    align-content: start;
+  }
+
+  [data-print-section="expense-summary"] .reports-summary-drilldown {
+    align-items: center;
+    appearance: none;
+    background: var(--surface, #fff);
+    border: 1px solid color-mix(in srgb, var(--border, #dfe5e1) 88%, white);
+    border-radius: 11px;
+    color: var(--text-primary, #102a1c);
+    cursor: pointer;
+    display: grid;
+    font: inherit;
+    gap: 9px;
+    grid-template-columns: minmax(0, 1fr) auto 16px;
+    min-height: 44px;
+    padding: 9px 10px;
+    text-align: start;
+    transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+    width: 100%;
+  }
+
+  [data-print-section="expense-summary"] .reports-summary-drilldown span {
+    color: var(--text-secondary, #667085);
+    font-size: 0.78rem;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  [data-print-section="expense-summary"] .reports-summary-drilldown strong {
+    color: var(--text-primary, #102a1c);
+    font-size: 0.86rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  [data-print-section="expense-summary"] .reports-summary-drilldown svg {
+    color: var(--brand-primary, #267d35);
+    transition: transform 0.16s ease;
+  }
+
+  [data-print-section="expense-summary"] .reports-summary-drilldown:hover,
+  [data-print-section="expense-summary"] .reports-summary-drilldown:focus-visible {
+    background: color-mix(in srgb, var(--surface-tint, #f5faef) 75%, white);
+    border-color: color-mix(in srgb, var(--brand-primary, #267d35) 40%, var(--border, #dfe5e1));
+    box-shadow: 0 7px 18px rgba(20, 82, 43, 0.08);
+    outline: none;
+    transform: translateY(-1px);
+  }
+
+  [data-print-section="expense-summary"] .reports-summary-drilldown:hover svg,
+  [data-print-section="expense-summary"] .reports-summary-drilldown:focus-visible svg {
+    transform: translateX(2px);
+  }
+
+  [data-print-section="expense-summary"] .reports-summary-drilldown:active {
+    box-shadow: none;
+    transform: scale(0.995);
+  }
+}
+
+@media screen and (max-width: 640px) {
+  [data-print-section="expense-summary"] .reports-summary-drilldown {
+    min-height: 48px;
+    padding: 10px 11px;
+  }
+}
+
+[dir="rtl"] [data-print-section="expense-summary"] .reports-summary-drilldown svg {
+  transform: scaleX(-1);
+}
+
+[dir="rtl"] [data-print-section="expense-summary"] .reports-summary-drilldown:hover svg,
+[dir="rtl"] [data-print-section="expense-summary"] .reports-summary-drilldown:focus-visible svg {
+  transform: scaleX(-1) translateX(2px);
+}

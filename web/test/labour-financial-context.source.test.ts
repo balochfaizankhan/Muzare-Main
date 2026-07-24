@@ -36,7 +36,12 @@ test("downstream pages consume the shared canonical labour model", () => {
   assert.match(reports, /canonicalFinancials\.data\?\.expenseAccountAttributions/);
   assert.match(reports, /canonicalFinancials\.data\?\.advancePositions/);
   assert.match(reports, /\[\.\.\.canonicalAdvanceRows, \.\.\.legacyAdvanceRows\]/);
-  assert.match(reports, /!replacedLegacySourceIds\.has\(item\.id\)/);
+  // Canonical-superseded record de-duplication now originates from the shared financial layer,
+  // consumed by Reports rather than re-inlined here.
+  assert.match(reports, /selectDedupedExpenseVouchers\(activeVouchers, activeSettlements, replacedLegacySourceIds\)/);
+  const financialInputs = source("lib/financialInputs.ts");
+  assert.match(financialInputs, /!replaced\.has\(voucher\.id\)/);
+  assert.match(financialInputs, /!replaced\.has\(record\.id\)/);
   assert.match(reports, /activeAdvanceReportRows\.reduce\(\(sum, item\) => sum \+ item\.appliedAmount/);
   assert.match(reports, /activeAdvanceReportRows\.reduce\(\(sum, item\) => sum \+ item\.outstandingAmount/);
   assert.match(modulePage, /setSettledAccountsSnapshot/);
@@ -49,7 +54,11 @@ test("downstream pages consume the shared canonical labour model", () => {
   assert.match(modulePage, /canonical\.directLabourPayments/);
   assert.match(modulePage, /canonical\.outstandingLabourAdvances/);
   assert.match(modulePage, /t\("accountsPage\.labourWageSettlementsGroup"\)/);
-  assert.match(reports, /representedAccountIds/);
+  // Partner Status cards are grouped by canonical account id (one card per canonical
+  // partner), never appended by raw represented-account ids.
+  assert.match(reports, /buildCanonicalDisplayAccounts\(accounts, accountLookup, canonicalPartnerPositions\)/);
+  assert.match(reports, /aggregatePartnerLiabilityPositions\(/);
+  assert.doesNotMatch(reports, /representedAccountIds/);
   assert.match(reports, /expenseAccountTotals\.map/);
   assert.match(reports, /t\("reportsPage\.directLabourPayments"\)/);
   assert.doesNotMatch(reports, /canonicalAdvanceCoverageComplete/);
