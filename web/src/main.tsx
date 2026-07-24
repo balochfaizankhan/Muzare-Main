@@ -6,6 +6,7 @@ import App from "./App";
 import { AuthProvider } from "./auth/AuthProvider";
 import "./i18n";
 import "./styles.css";
+import "./reports-account-polish.css";
 import "./sales-polish.css";
 import "./sales-date-sync.css";
 import "./sales-date-sync";
