@@ -37,3 +37,5 @@ jobs:
           git add web/src/pages/workspace/Reports.tsx web/src/main.tsx web/src/reports-expenditure-drilldown.css
           git commit -m "feat: make expense breakdown cards interactive"
           git push origin HEAD:dev
+
+# trigger: 2
