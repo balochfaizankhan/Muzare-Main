@@ -1149,11 +1149,12 @@ export function Reports() {
     [reportLabourOptions, t],
   );
   const accountOptions = useMemo(() => accounts.map((account) => ({ value: account.id, label: account.name, secondary: account.type })), [accounts]);
+  const allActiveSettlements = useMemo(() => getActiveLabourWageSettlements(labourWageSettlements), [labourWageSettlements]);
   const activeSettlements = useMemo(
-    () => getActiveLabourWageSettlements(labourWageSettlements)
+    () => allActiveSettlements
       .filter((settlement) => !from || settlement.settlementDate >= from)
       .filter((settlement) => !to || settlement.settlementDate <= to),
-    [from, labourWageSettlements, to],
+    [allActiveSettlements, from, to],
   );
   const activeAdvanceReportRows = useMemo(() => advanceRows.filter((item) => item.status !== "VOIDED"), [advanceRows]);
   const advanceReportTotals = useMemo(() => ({
@@ -1189,8 +1190,8 @@ export function Reports() {
   const advanceReportGeneratedAt = useMemo(() => formatPrintTimestamp(new Date()), [advanceReportTotals.adjustedInSettlements, advanceReportTotals.outstandingAdvances, advanceReportTotals.postedSettlements, advanceReportTotals.totalAdvances, advanceReportTotals.transactions, advanceReportTotals.uniqueLabourers]);
   const activeVouchers = useMemo(() => getActiveVouchers(vouchers), [vouchers]);
   const { generalExpenseVouchers, cashAffectingVouchers } = useMemo(
-    () => selectDedupedExpenseVouchers(activeVouchers, activeSettlements, replacedLegacySourceIds),
-    [activeSettlements, activeVouchers, replacedLegacySourceIds],
+    () => selectDedupedExpenseVouchers(activeVouchers, allActiveSettlements, replacedLegacySourceIds),
+    [allActiveSettlements, activeVouchers, replacedLegacySourceIds],
   );
 
   const selectedExpenseAccountId = accountId ? resolveCanonicalAccountId(accountId, accountLookup) ?? accountId : "";
@@ -1221,8 +1222,8 @@ export function Reports() {
     const grouped = new Map<string, Set<string>>();
     for (const row of canonicalExpenseAttributions) {
       const rawAccountId = (row as { accountId?: string | null }).accountId;
-      const fallbackAccountId = accounts.find((account) => account.name === row.accountName)?.id ?? null;
-      const resolvedAccountId = resolveCanonicalAccountId(rawAccountId ?? fallbackAccountId, accountLookup) ?? rawAccountId ?? fallbackAccountId;
+      const fallbackAccountId = accounts.find((account) => account.name.trim().toLowerCase() === row.accountName.trim().toLowerCase())?.id ?? null;
+      const resolvedAccountId = resolveCanonicalAccountId(rawAccountId, accountLookup) ?? resolveCanonicalAccountId(fallbackAccountId, accountLookup) ?? fallbackAccountId ?? rawAccountId;
       if (!resolvedAccountId) continue;
       const accountIds = grouped.get(row.dueId) ?? new Set<string>();
       accountIds.add(resolvedAccountId);
@@ -1251,8 +1252,8 @@ export function Reports() {
   const expenseAccountTotals = useMemo(() => {
     const totals = new Map<string, { accountId: string; name: string; value: number }>();
     const addAmount = (rawAccountId: string | null | undefined, sourceName: string, amount: number) => {
-      const fallbackAccountId = accounts.find((account) => account.name === sourceName)?.id ?? null;
-      const resolvedAccountId = resolveCanonicalAccountId(rawAccountId ?? fallbackAccountId, accountLookup) ?? rawAccountId ?? fallbackAccountId;
+      const fallbackAccountId = accounts.find((account) => account.name.trim().toLowerCase() === sourceName.trim().toLowerCase())?.id ?? null;
+      const resolvedAccountId = resolveCanonicalAccountId(rawAccountId, accountLookup) ?? resolveCanonicalAccountId(fallbackAccountId, accountLookup) ?? fallbackAccountId ?? rawAccountId;
       if (!resolvedAccountId) return;
       const resolvedName = localizeSystemPlaceholder(t, accountName(resolvedAccountId)) || localizeSystemPlaceholder(t, sourceName) || sourceName;
       const current = totals.get(resolvedAccountId);
@@ -1285,17 +1286,10 @@ export function Reports() {
     if (!voucherSubcategories.includes(subcategory)) setSubcategory("");
   }, [subcategory, voucherSubcategories]);
 
-  const partnerRows = entries
-    .filter((item) => isActiveOperationalRecord(item)
-      && (!accountId || item.accountId === accountId || item.fromAccountId === accountId || item.toAccountId === accountId)
-      && matches(item.date, [item.partnerName, item.fromPartner, item.toPartner, item.type, item.notes], item.amount))
-    .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
-  const saleRows = sales
-    .filter((item) => isActiveOperationalRecord(item)
-      && (!accountId || item.accountId === accountId)
-      && (!saleTypeFilter || saleTypeFilter === "all" || resolveSaleType(item) === saleTypeFilter)
-      && matches(item.date, [item.buyerName, item.invoiceNumber, saleProduceLabel(item), saleTypeLabel(item), item.dispatchDate, item.vehicleNumber, accountName(item.accountId), item.paymentDate], item.amount))
-    .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+  const allActivePartnerRows = useMemo(() => entries.filter(isActiveOperationalRecord).sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)), [entries]);
+  const partnerRows = allActivePartnerRows.filter((item) => (!accountId || item.accountId === accountId || item.fromAccountId === accountId || item.toAccountId === accountId) && matches(item.date, [item.partnerName, item.fromPartner, item.toPartner, item.type, item.notes], item.amount));
+  const allActiveSaleRows = useMemo(() => sales.filter(isActiveOperationalRecord).sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)), [sales]);
+  const saleRows = allActiveSaleRows.filter((item) => (!accountId || item.accountId === accountId) && (!saleTypeFilter || saleTypeFilter === "all" || resolveSaleType(item) === saleTypeFilter) && matches(item.date, [item.buyerName, item.invoiceNumber, saleProduceLabel(item), saleTypeLabel(item), item.dispatchDate, item.vehicleNumber, accountName(item.accountId), item.paymentDate], item.amount));
   const salesByDispatchKey = useMemo(() => {
     const map = new Map<string, Sale[]>();
     for (const sale of sales.filter((item) => isActiveOperationalRecord(item) && item.dispatchId && item.dispatchItemId)) {
@@ -1408,11 +1402,11 @@ export function Reports() {
     .map((account) => {
       const voucherExpenses = cashAffectingVouchers.filter((item) => resolveCanonicalAccountId(item.accountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
       const labourAdvances = accountingAdvanceRows.filter((item) => resolveCanonicalAccountId(item.accountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
-      const contributions = partnerRows.filter((item) => item.type === "contribution" && resolveCanonicalAccountId(item.accountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
-      const withdrawals = partnerRows.filter((item) => item.type === "withdrawal" && resolveCanonicalAccountId(item.accountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
-      const settlementsSent = partnerRows.filter((item) => item.type === "settlement" && resolveCanonicalAccountId(item.fromAccountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
-      const settlementsReceived = partnerRows.filter((item) => item.type === "settlement" && resolveCanonicalAccountId(item.toAccountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
-      const salesReceived = saleRows.filter((item) => resolveCanonicalAccountId(item.accountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
+      const contributions = allActivePartnerRows.filter((item) => item.type === "contribution" && resolveCanonicalAccountId(item.accountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
+      const withdrawals = allActivePartnerRows.filter((item) => item.type === "withdrawal" && resolveCanonicalAccountId(item.accountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
+      const settlementsSent = allActivePartnerRows.filter((item) => item.type === "settlement" && resolveCanonicalAccountId(item.fromAccountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
+      const settlementsReceived = allActivePartnerRows.filter((item) => item.type === "settlement" && resolveCanonicalAccountId(item.toAccountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
+      const salesReceived = allActiveSaleRows.filter((item) => resolveCanonicalAccountId(item.accountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
       const canonicalLabourCashEffect = sumCanonicalAccountBalanceEffect(account.id, canonicalLabourAccountEntries);
       return {
         account,
@@ -1423,14 +1417,14 @@ export function Reports() {
         settlementsSent,
         settlementsReceived,
         salesReceived,
-        net: calculateAccountBalance(account, saleRows, cashAffectingVouchers, accountingAdvanceRows, partnerRows, activeSettlements, accounts) + canonicalLabourCashEffect,
+        net: calculateAccountBalance(account, allActiveSaleRows, cashAffectingVouchers, accountingAdvanceRows, allActivePartnerRows, allActiveSettlements, accounts) + canonicalLabourCashEffect,
       };
-    }), [accountId, accountingAdvanceRows, accounts, activeSettlements, canonicalLabourAccountEntries, cashAffectingVouchers, partnerRows, saleRows]);
+    }), [accountId, accountingAdvanceRows, accounts, allActiveSettlements, canonicalLabourAccountEntries, cashAffectingVouchers, allActivePartnerRows, allActiveSaleRows]);
   const partnerLiabilityPositions = useMemo(() => {
     const canonicalPartnerPositions = canonicalFinancials.data?.partnerPositions ?? [];
     // Legacy positions are keyed by raw account id. A single canonical partner can span
     // several of these (an operational account, a labour-finance alias, an old Android id).
-    const legacyPositions = buildPartnerLiabilityPositions(accounts, cashAffectingVouchers, [], partnerRows, saleRows, []);
+    const legacyPositions = buildPartnerLiabilityPositions(accounts, cashAffectingVouchers, [], allActivePartnerRows, allActiveSaleRows, []);
     const legacyByAccountId = new Map(legacyPositions.map((item) => [item.account?.id ?? item.key, item] as const));
     const canonicalById = new Map(canonicalPartnerPositions.map((item) => [item.accountId, item] as const));
 
@@ -1468,14 +1462,20 @@ export function Reports() {
         || sourceAccountIds.includes(accountId))
       .map(({ position }) => position)
       .sort((left, right) => left.name.localeCompare(right.name));
-  }, [accountId, accountLookup, accounts, canonicalFinancials.data?.partnerPositions, cashAffectingVouchers, partnerRows, saleRows]);
+  }, [accountId, accountLookup, accounts, allActivePartnerRows, allActiveSaleRows, canonicalFinancials.data?.partnerPositions, cashAffectingVouchers]);
+  const displayedPositions = useMemo(() => positions.map((item) => {
+    if (item.account.type !== "partner") return item;
+    const canonicalId = resolveCanonicalAccountId(item.account.id, accountLookup) ?? item.account.id;
+    const partner = partnerLiabilityPositions.find((position) => position.key === canonicalId || position.account?.id === item.account.id);
+    return partner ? { ...item, net: partner.currentPartnerBalance } : item;
+  }), [accountLookup, partnerLiabilityPositions, positions]);
   const selectedAccountRecord = accountId ? accounts.find((item) => item.id === accountId) ?? null : null;
   const canonicalAccountLedgerEntries = selectedAccountRecord?.type === "partner"
     ? canonicalFinancials.data?.partnerLedger ?? []
     : canonicalLabourAccountEntries;
   const selectedPartnerSnapshot = useMemo(() => {
     if (selectedAccountRecord?.type !== "partner") return null;
-    const legacy = getPartnerAccountingSnapshot(selectedAccountRecord, saleRows, cashAffectingVouchers, [], partnerRows, [], accounts);
+    const legacy = getPartnerAccountingSnapshot(selectedAccountRecord, allActiveSaleRows, cashAffectingVouchers, [], allActivePartnerRows, [], accounts);
     const canonical = resolveCanonicalPartnerPosition(selectedAccountRecord, canonicalFinancials.data?.partnerPositions, accountLookup);
     if (!canonical) return legacy;
     const merged = mergePartnerPositionWithCanonical(legacy, canonical);
@@ -1495,7 +1495,7 @@ export function Reports() {
       reconciliationDelta: merged.reconciliationDelta,
       isConsistent: merged.isConsistent,
     };
-  }, [accountLookup, accounts, canonicalFinancials.data?.partnerPositions, cashAffectingVouchers, partnerRows, saleRows, selectedAccountRecord]);
+  }, [accountLookup, accounts, allActivePartnerRows, allActiveSaleRows, canonicalFinancials.data?.partnerPositions, cashAffectingVouchers, selectedAccountRecord]);
 
   const accountLedgerRows = useMemo(() => {
     const rows: Array<Omit<AccountLedgerReportRow, "running">> = [];
@@ -1644,7 +1644,7 @@ export function Reports() {
     return { ...summary, netBalance: summary.income - summary.expenses - summary.advances + summary.settlements + summary.other };
   }, [groupedAccountLedgerRows]);
   const accountLedgerSummary = selectedAccountRecord?.type === "partner" ? rawPartnerAccountLedgerSummary : rawStandardAccountLedgerSummary;
-  const currentLedgerBalance = selectedAccountRecord ? positions.find((item) => item.account.id === selectedAccountRecord.id)?.net ?? 0 : accountLedgerSummary.netBalance;
+  const currentLedgerBalance = selectedAccountRecord ? displayedPositions.find((item) => item.account.id === selectedAccountRecord.id)?.net ?? 0 : accountLedgerSummary.netBalance;
   const reportLedgerDelta = Math.round((currentLedgerBalance - accountLedgerSummary.netBalance) * 100) / 100;
   const showReportLedgerWarning = selectedAccountRecord && Math.abs(reportLedgerDelta) > 0.009;
   const showReportNoVisibleTransactionsWarning = selectedAccountRecord && accountLedgerRows.length === 0 && Math.abs(currentLedgerBalance) > 0.009;
@@ -1844,7 +1844,7 @@ export function Reports() {
   ]);
   const exportAccountBalances = () => downloadCsv("account-balances.csv", [
     [t("reportsPage.account"), t("reportsPage.voucherExpenses"), t("reportsPage.labourAdvance"), t("reportsPage.totalCredit"), t("reportsPage.totalDebit"), t("reportsPage.closingBalance")],
-    ...positions.map((item) => [item.account.name, item.voucherExpenses, item.labourAdvances, item.salesReceived + item.contributions + item.settlementsReceived, item.withdrawals + item.settlementsSent, item.net]),
+    ...displayedPositions.map((item) => [item.account.name, item.voucherExpenses, item.labourAdvances, item.salesReceived + item.contributions + item.settlementsReceived, item.withdrawals + item.settlementsSent, item.net]),
   ]);
   const exportAccountLedger = () => {
     const rows: unknown[][] = [[t("reportsPage.account"), selectedAccountRecord?.name ?? t("reportsPage.allAccounts")], [t("reportsPage.netPosition"), currentLedgerBalance], []];
@@ -2419,7 +2419,7 @@ export function Reports() {
           <button className={views["account-ledger"] === "ledger" ? "is-active" : ""} type="button" onClick={() => switchView("account-ledger", "ledger")}>{t("reportsPage.ledger")}</button>
         </section>
         {views["account-ledger"] === "balances" && <ReportShell title={t("reportsPage.accountBalances")} rangeLabel={rangeLabel} sectionId="account-balances" onPrint={() => printSection("account-balances")} onExport={exportAccountBalances}>
-          <div className="reports-kpis">{positions.map((item) => <article className="account-card-clickable" key={item.account.id} role="button" tabIndex={0} onClick={() => openAccountLedger(item.account.id)} onKeyDown={(event) => {
+          <div className="reports-kpis account-balance-list">{displayedPositions.map((item) => <article className="account-card-clickable" key={item.account.id} role="button" tabIndex={0} onClick={() => openAccountLedger(item.account.id)} onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
               openAccountLedger(item.account.id);
@@ -2429,34 +2429,19 @@ export function Reports() {
         {views["account-ledger"] === "ledger" && <ReportShell title={t("reportsPage.accountLedgerTitle")} rangeLabel={rangeLabel} sectionId="account-ledger" onPrint={() => printSection("account-ledger")} onExport={exportAccountLedger}>
           {isPartnerLedgerReport && partnerAccountLedgerOverviewView
             ? <>
-              <div className="account-ledger-breakdown account-ledger-breakdown--partner">
-                <article><strong>{t("reportsPage.account")}</strong><b>{selectedAccountRecord?.name ?? t("reportsPage.allAccounts")}</b></article>
-                <article><strong>{t("reportsPage.currentPartnerBalance")}</strong><b>{money(currentLedgerBalance)}</b></article>
-                <article><strong>{t("reportsPage.capitalInjected")}</strong><span>{money(partnerAccountLedgerOverviewView.capitalInjected)}</span></article>
-                <article className="account-ledger-breakdown__expenses-card">
-                  <strong>{t("reportsPage.directExpensesPaid")}</strong>
-                  <b>{money(partnerAccountLedgerOverviewView.directExpensesPaid)}</b>
-                  <small>{t("reportsPage.purchaseVouchersColumn")}: <span className="bidi-isolate">{money(partnerAccountLedgerOverviewView.purchaseVouchersPaid)}</span></small>
-                  <small>{t("reportsPage.labourAdvance")}: <span className="bidi-isolate">{money(partnerAccountLedgerOverviewView.labourAdvancesPaid)}</span></small>
-                </article>
-                <article><strong>{t("reportsPage.transfersOut")}</strong><span>{money(partnerAccountLedgerOverviewView.transfersOut)}</span></article>
-                <article><strong>{t("reportsPage.transfersIn")}</strong><span>{money(partnerAccountLedgerOverviewView.transfersIn)}</span></article>
-                <article><strong>{t("reportsPage.moneyReturned")}</strong><span>{money(partnerAccountLedgerOverviewView.moneyReturned)}</span></article>
-                <article><strong>{t("reportsPage.adjustments")}</strong><span>{money(partnerAccountLedgerOverviewView.adjustments)}</span></article>
-              </div>
-              <section className="account-ledger-reconciliation">
-                <h3>{t("reportsPage.reconciliationTitle")}</h3>
-                <div className="account-ledger-reconciliation__rows">
-                  <div><span>{t("reportsPage.capitalInjected")}</span><strong>{money(partnerAccountLedgerOverviewView.capitalInjected)}</strong></div>
-                  <div><span>+ {t("reportsPage.directExpensesPaid")}</span><strong>{money(partnerAccountLedgerOverviewView.directExpensesPaid)}</strong></div>
-                  <div><span>+ {t("reportsPage.transfersOut")}</span><strong>{money(partnerAccountLedgerOverviewView.transfersOut)}</strong></div>
-                  <div><span>- {t("reportsPage.transfersIn")}</span><strong>{money(partnerAccountLedgerOverviewView.transfersIn)}</strong></div>
-                  <div><span>- {t("reportsPage.moneyReturned")}</span><strong>{money(partnerAccountLedgerOverviewView.moneyReturned)}</strong></div>
-                  <div><span>+/- {t("reportsPage.adjustments")}</span><strong>{money(partnerAccountLedgerOverviewView.adjustments)}</strong></div>
-                  <div className="account-ledger-reconciliation__total"><span>= {t("reportsPage.reconciliationComputed")}</span><strong>{money(partnerAccountLedgerOverviewView.netBalance)}</strong></div>
-                </div>
-                {Math.abs(partnerAccountLedgerOverviewView.netBalance - currentLedgerBalance) > 0.009 && <p className="worker-action-warning">{t("reportsPage.reconciliationComponentsWarning")}</p>}
+              <section className={`account-ledger-hero account-ledger-hero--${getPartnerBalanceState(currentLedgerBalance)}`}>
+                <div><small>{t("reportsPage.partnerAccount", { defaultValue: "Partner account" })}</small><h3>{selectedAccountRecord?.name ?? t("reportsPage.allAccounts")}</h3><span>{getPartnerBalanceState(currentLedgerBalance) === "partner_holds_business_money" ? t("reportsPage.partnerHoldsBusinessMoney") : getPartnerBalanceState(currentLedgerBalance) === "settled" ? t("reportsPage.settled", { defaultValue: "Settled" }) : t("reportsPage.farmOwesPartner")}</span></div>
+                <strong>{money(Math.abs(currentLedgerBalance))}</strong>
               </section>
+              <div className="account-ledger-metric-grid">
+                <article className="account-ledger-metric account-ledger-metric--wide"><header><span>{t("reportsPage.directExpensesPaid")}</span><strong>{money(partnerAccountLedgerOverviewView.directExpensesPaid)}</strong></header><dl><div><dt>{t("reportsPage.purchaseVouchersColumn")}</dt><dd>{money(partnerAccountLedgerOverviewView.purchaseVouchersPaid)}</dd></div><div><dt>{t("reportsPage.totalLabourAdvancesPaidColumn")}</dt><dd>{money(partnerAccountLedgerOverviewView.labourAdvancesPaid)}</dd></div><div><dt>{t("reportsPage.adjustedInSettlements")}</dt><dd>{money(partnerAccountLedgerOverviewView.labourSettlementNonCashApplied)}</dd></div><div><dt>{t("reportsPage.outstandingLabourAdvancesColumn")}</dt><dd>{money(partnerAccountLedgerOverviewView.outstandingLabourAdvances)}</dd></div></dl><p>{t("reportsPage.appliedAdvancePartnerLiabilityNote", { defaultValue: "Applied advances reduce labour outstanding only; they remain owed to the funding partner." })}</p></article>
+                <article className="account-ledger-metric"><span>{t("reportsPage.capitalInjected")}</span><strong>{money(partnerAccountLedgerOverviewView.capitalInjected)}</strong></article>
+                <article className="account-ledger-metric"><span>{t("reportsPage.transfersOut")}</span><strong>{money(partnerAccountLedgerOverviewView.transfersOut)}</strong></article>
+                <article className="account-ledger-metric"><span>{t("reportsPage.transfersIn")}</span><strong>{money(partnerAccountLedgerOverviewView.transfersIn)}</strong></article>
+                <article className="account-ledger-metric"><span>{t("reportsPage.moneyReturned")}</span><strong>{money(partnerAccountLedgerOverviewView.moneyReturned)}</strong></article>
+                <article className="account-ledger-metric"><span>{t("reportsPage.adjustments")}</span><strong>{money(partnerAccountLedgerOverviewView.adjustments)}</strong></article>
+              </div>
+              <details className={`account-ledger-reconciliation account-ledger-reconciliation--compact${showReportLedgerWarning ? " is-warning" : ""}`} open={showReportLedgerWarning || undefined}><summary><span>{t("reportsPage.reconciliationTitle")}</span><strong>{showReportLedgerWarning ? t("reportsPage.needsReview", { defaultValue: "Needs review" }) : t("reportsPage.reconciled", { defaultValue: "Reconciled" })}</strong></summary><div className="account-ledger-reconciliation__rows"><div><span>{t("reportsPage.capitalInjected")}</span><strong>{money(partnerAccountLedgerOverviewView.capitalInjected)}</strong></div><div><span>+ {t("reportsPage.directExpensesPaid")}</span><strong>{money(partnerAccountLedgerOverviewView.directExpensesPaid)}</strong></div><div><span>+ {t("reportsPage.transfersOut")}</span><strong>{money(partnerAccountLedgerOverviewView.transfersOut)}</strong></div><div><span>- {t("reportsPage.transfersIn")}</span><strong>{money(partnerAccountLedgerOverviewView.transfersIn)}</strong></div><div><span>- {t("reportsPage.moneyReturned")}</span><strong>{money(partnerAccountLedgerOverviewView.moneyReturned)}</strong></div><div><span>+/- {t("reportsPage.adjustments")}</span><strong>{money(partnerAccountLedgerOverviewView.adjustments)}</strong></div><div className="account-ledger-reconciliation__total"><span>= {t("reportsPage.reconciliationComputed")}</span><strong>{money(partnerAccountLedgerOverviewView.netBalance)}</strong></div></div>{showReportLedgerWarning && <p className="worker-action-warning">{t("reportsPage.reconciliationComponentsWarning")}</p>}</details>
             </>
             : <Kpis values={[
               [t("reportsPage.account"), selectedAccountRecord?.name ?? t("reportsPage.allAccounts")],
@@ -2467,7 +2452,7 @@ export function Reports() {
               [t("reportsPage.incomeFundsSales"), money(standardAccountLedgerSummaryView?.income ?? 0)],
               [t("reportsPage.netPosition"), money(standardAccountLedgerSummaryView?.netBalance ?? 0)],
             ]} />}
-          {showReportLedgerWarning && <p className="worker-action-warning">{t("reportsPage.groupedReconciliationWarning", { delta: money(reportLedgerDelta) })}</p>}
+          {showReportLedgerWarning && !isPartnerLedgerReport && <p className="worker-action-warning">{t("reportsPage.groupedReconciliationWarning", { delta: money(reportLedgerDelta) })}</p>}
           {showReportNoVisibleTransactionsWarning && <p className="worker-action-warning">{t("reportsPage.noVisibleTransactionsWarning")}</p>}
           <label className="account-ledger-toggle"><input type="checkbox" checked={showEmptyLedgerGroups} onChange={(event) => setShowEmptyLedgerGroups(event.target.checked)} />{t("reportsPage.showEmptyGroups")}</label>
           {isPartnerLedgerReport

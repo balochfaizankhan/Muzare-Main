@@ -783,6 +783,9 @@ export function mergePartnerPositionWithCanonical(
 ): PartnerLiabilityPosition {
   if (!canonical) return legacy;
   const nonLabourBalance = legacy.currentPartnerBalance - legacy.labourAdvancesPaid;
+  const restoredAppliedAdvances = canonical.appliedLabourAdvances;
+  const partnerBalance = canonical.farmOwesPartner + restoredAppliedAdvances;
+  const ledgerBalance = canonical.ledgerBalance + restoredAppliedAdvances;
   return {
     ...legacy,
     directExpensesPaid: legacy.purchaseVouchersPaid + canonical.labourAdvancesPaid + canonical.directLabourPayments,
@@ -791,13 +794,14 @@ export function mergePartnerPositionWithCanonical(
     totalLabourAdvancesPaid: canonical.labourAdvancesPaid,
     labourWageSettlements: canonical.directLabourPayments,
     labourSettlementCashPaid: canonical.directLabourPayments,
+    labourSettlementNonCashApplied: canonical.appliedLabourAdvances,
     settledAdvances: canonical.appliedLabourAdvances,
     outstandingLabourAdvances: canonical.outstandingLabourAdvances,
     moneyReturned: canonical.recoveries,
-    currentPartnerBalance: nonLabourBalance + canonical.farmOwesPartner,
-    reconciliationDifference: canonical.farmOwesPartner - canonical.ledgerBalance,
-    reconciliationDelta: canonical.farmOwesPartner - canonical.ledgerBalance,
-    isConsistent: Math.abs(canonical.farmOwesPartner - canonical.ledgerBalance) < 0.01,
+    currentPartnerBalance: nonLabourBalance + partnerBalance,
+    reconciliationDifference: partnerBalance - ledgerBalance,
+    reconciliationDelta: partnerBalance - ledgerBalance,
+    isConsistent: Math.abs(partnerBalance - ledgerBalance) < 0.01,
   };
 }
 
@@ -824,6 +828,9 @@ export function buildCanonicalPartnerLiabilityPosition(
   canonical: CanonicalPartnerPosition,
   account: Account | null,
 ): PartnerLiabilityPosition {
+  const restoredAppliedAdvances = canonical.appliedLabourAdvances;
+  const partnerBalance = canonical.farmOwesPartner + restoredAppliedAdvances;
+  const ledgerBalance = canonical.ledgerBalance + restoredAppliedAdvances;
   return {
     account,
     key: canonical.accountId,
@@ -837,18 +844,18 @@ export function buildCanonicalPartnerLiabilityPosition(
     labourPayments: canonical.labourPayments,
     labourWageSettlements: canonical.directLabourPayments,
     labourSettlementCashPaid: canonical.directLabourPayments,
-    labourSettlementNonCashApplied: 0,
+    labourSettlementNonCashApplied: canonical.appliedLabourAdvances,
     totalLabourAdvancesPaid: canonical.labourAdvancesPaid,
     settledAdvances: canonical.appliedLabourAdvances,
     outstandingLabourAdvances: canonical.outstandingLabourAdvances,
-    reconciliationDifference: canonical.farmOwesPartner - canonical.ledgerBalance,
-    isConsistent: Math.abs(canonical.farmOwesPartner - canonical.ledgerBalance) < 0.01,
+    reconciliationDifference: partnerBalance - ledgerBalance,
+    isConsistent: Math.abs(partnerBalance - ledgerBalance) < 0.01,
     transfersIn: 0,
     transfersOut: 0,
     moneyReturned: canonical.recoveries,
     adjustments: 0,
-    currentPartnerBalance: canonical.farmOwesPartner,
-    reconciliationDelta: canonical.farmOwesPartner - canonical.ledgerBalance,
+    currentPartnerBalance: partnerBalance,
+    reconciliationDelta: partnerBalance - ledgerBalance,
   };
 }
 
