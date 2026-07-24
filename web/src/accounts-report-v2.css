@@ -1,0 +1,199 @@
+/* MUZARE_ACCOUNTS_REPORT_V2 */
+@media screen {
+  [data-print-section="account-balances"] .account-balance-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+  }
+
+  [data-print-section="account-balances"] .account-balance-list .account-card-clickable {
+    min-height: 84px;
+    padding: 13px 14px;
+    border-radius: 14px;
+    background: var(--surface, #fff);
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 11px;
+    padding: 15px;
+    border: 1px solid color-mix(in srgb, var(--brand-primary, #267d35) 24%, var(--border, #dfe5e1));
+    border-radius: 16px;
+    background: linear-gradient(135deg, color-mix(in srgb, var(--brand-primary, #267d35) 10%, white), var(--surface, #fff));
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-hero small {
+    color: var(--text-secondary, #667085);
+    font-size: .7rem;
+    font-weight: 700;
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-hero h3 {
+    margin: 3px 0;
+    color: var(--text-primary, #1f2937);
+    font-size: 1.05rem;
+    line-height: 1.2;
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-hero span {
+    color: var(--brand-primary, #267d35);
+    font-size: .74rem;
+    font-weight: 750;
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-hero > strong {
+    color: var(--text-primary, #1f2937);
+    font-size: 1.35rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-metric-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+    margin-bottom: 10px;
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-metric {
+    display: grid;
+    align-content: start;
+    gap: 6px;
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid color-mix(in srgb, var(--border, #dfe5e1) 88%, white);
+    border-radius: 13px;
+    background: var(--surface, #fff);
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-metric--wide {
+    grid-column: 1 / -1;
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-metric span,
+  [data-print-section="account-ledger"] .account-ledger-metric dt {
+    color: var(--text-secondary, #667085);
+    font-size: .7rem;
+    font-weight: 650;
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-metric strong,
+  [data-print-section="account-ledger"] .account-ledger-metric dd {
+    color: var(--text-primary, #1f2937);
+    font-variant-numeric: tabular-nums;
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-metric > strong,
+  [data-print-section="account-ledger"] .account-ledger-metric header strong {
+    font-size: .98rem;
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-metric header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-metric dl {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px 14px;
+    margin: 3px 0 0;
+    padding-top: 9px;
+    border-top: 1px solid var(--border, #dfe5e1);
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-metric dl div {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-metric dt,
+  [data-print-section="account-ledger"] .account-ledger-metric dd {
+    margin: 0;
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-metric dd {
+    font-size: .7rem;
+    font-weight: 750;
+    white-space: nowrap;
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-metric p {
+    margin: 2px 0 0;
+    padding: 8px 9px;
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--brand-primary, #267d35) 7%, white);
+    color: var(--text-secondary, #667085);
+    font-size: .67rem;
+    line-height: 1.4;
+  }
+
+  [data-print-section="account-ledger"] details.account-ledger-reconciliation--compact {
+    margin: 0 0 12px;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--border, #dfe5e1) 88%, white);
+    border-radius: 13px;
+    background: var(--surface, #fff);
+  }
+
+  [data-print-section="account-ledger"] details.account-ledger-reconciliation--compact > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 13px;
+    cursor: pointer;
+    list-style: none;
+    font-size: .78rem;
+    font-weight: 780;
+  }
+
+  [data-print-section="account-ledger"] details.account-ledger-reconciliation--compact > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  [data-print-section="account-ledger"] details.account-ledger-reconciliation--compact > summary strong {
+    color: var(--brand-primary, #267d35);
+    font-size: .68rem;
+  }
+
+  [data-print-section="account-ledger"] details.account-ledger-reconciliation--compact.is-warning > summary strong {
+    color: #b42318;
+  }
+
+  [data-print-section="account-ledger"] details.account-ledger-reconciliation--compact .account-ledger-reconciliation__rows {
+    padding: 0 13px 13px;
+  }
+}
+
+@media screen and (max-width: 767px) {
+  [data-print-section="account-balances"] .account-balance-list {
+    grid-template-columns: 1fr;
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-hero {
+    padding: 14px;
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-hero > strong {
+    font-size: 1.18rem;
+  }
+
+  [data-print-section="account-ledger"] .account-ledger-metric dl {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media screen and (max-width: 360px) {
+  [data-print-section="account-ledger"] .account-ledger-hero {
+    grid-template-columns: 1fr;
+  }
+}
