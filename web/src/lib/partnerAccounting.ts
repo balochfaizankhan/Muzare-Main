@@ -547,12 +547,21 @@ export function getPartnerAccountingSnapshot(
     .filter((entry) => isActiveOperationalRecord(entry) && entry.type === "contribution" && resolveCanonicalAccountId(entry.partnerAccountId ?? entry.accountId ?? null, accountLookup) === account.id)
     .reduce((sum, entry) => sum + entry.amount, 0);
 
-  const farmOwesPartner = purchaseVouchersPaid
-    + fundsGiven
-    - fundsReceived
-    + totalLabourAdvancesPaid
-    + adjustment
-    - moneyReturned;
+  // F-2 fix: the partner balance must go through the single authoritative liability
+  // selector, calculatePartnerLiabilityBalance, so capital contributions are included
+  // consistently. Previously farmOwesPartner omitted capitalInjected while the ledger
+  // overview/summary totals (which use calculatePartnerLiabilityBalance) included it,
+  // causing the two partner-reconciliation warnings to fire whenever a partner had any
+  // capital contribution. Routing through the shared selector removes that divergence.
+  const farmOwesPartner = calculatePartnerLiabilityBalance({
+    openingBalance: 0,
+    capitalInjected,
+    directExpensesPaid: purchaseVouchersPaid + totalLabourAdvancesPaid,
+    transfersIn: fundsReceived,
+    transfersOut: fundsGiven,
+    moneyReturned,
+    adjustments: adjustment,
+  });
 
   const currentPartnerBalance = farmOwesPartner;
 

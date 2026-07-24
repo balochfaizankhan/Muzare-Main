@@ -1627,7 +1627,9 @@ export function Reports() {
     }
     return {
       ...summary,
-      netBalance: settlementSnapshot?.farmOwesPartner ?? (summary.capitalInjected + summary.directExpensesPaid + summary.transfersOut - summary.transfersIn - summary.moneyReturned + summary.adjustments),
+      // F-1: derived from the displayed components, never a stale settlementSnapshot.farmOwesPartner
+      // (matches ModulePage's partner ledger summary). Keeps Reports and Partner Ledger identical.
+      netBalance: summary.capitalInjected + summary.directExpensesPaid + summary.transfersOut - summary.transfersIn - summary.moneyReturned + summary.adjustments,
     };
   }, [groupedPartnerLedgerRows, selectedAccountRecord, selectedPartnerSnapshot]);
   const rawStandardAccountLedgerSummary = useMemo(() => {
@@ -1685,7 +1687,11 @@ export function Reports() {
       + (settlementSnapshot?.labourWageSettlements ?? overview.labourWageSettlements);
     return {
       ...overview,
-      netBalance: settlementSnapshot?.farmOwesPartner ?? calculatePartnerLiabilityBalance(overview),
+      // F-1: derive the partner reconciliation total from the displayed components via the
+      // single authoritative selector, never from a stale settlementSnapshot.farmOwesPartner
+      // (the same fix already applied to ModulePage's partner ledger overview). This keeps the
+      // Reports partner balance identical to the Partner Ledger for the same data.
+      netBalance: calculatePartnerLiabilityBalance(overview),
     };
   }, [accountLedgerRows, selectedAccountRecord, selectedPartnerSnapshot]);
   const partnerAccountLedgerOverviewView = isPartnerLedgerReport

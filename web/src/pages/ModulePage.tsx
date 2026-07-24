@@ -4531,11 +4531,12 @@ function AccountsModule() {
   const activeVouchers = getActiveVouchers(vouchers);
   const activeEntries = entries.filter((item) => isActiveOperationalRecord(item));
   const replacedLegacySourceIds = buildReplacedSourceIdSet(canonicalAccountsFinancials?.replacedLegacySourceIds);
-  // Phase 1 (architecture only) preserves this surface's current behaviour exactly: unlike the
-  // Dashboard/Partner Ledger paths, the Accounts card/ledger advances are NOT deduped against
-  // replacedLegacySourceIds here. Aligning it changes displayed balances, so it is deferred to a
-  // behaviour-changing later phase rather than folded silently into this refactor.
-  const activeAdvances = advances.filter((item) => isActiveOperationalRecord(item));
+  // F-3 fix: dedupe Accounts advances against replacedLegacySourceIds, exactly as the
+  // Dashboard and Partner Ledger paths do. A migrated labour advance is otherwise counted
+  // twice in the per-account balance/ledger — once as the legacy mirror and once through the
+  // canonical account entries — so this aligns Accounts outstanding-advance values with every
+  // other surface.
+  const activeAdvances = selectActiveDedupedAdvances(advances, replacedLegacySourceIds);
   const activeLabourWageSettlements = labourWageSettlements.filter((item) => isActiveOperationalRecord(item));
   const activeGeneralExpenseVouchers = getGeneralExpenseVouchers(activeVouchers, activeLabourWageSettlements);
   const accountLookup = useMemo(() => buildAccountIdentityLookup(accounts), [accounts]);
