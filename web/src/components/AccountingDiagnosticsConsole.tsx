@@ -11,7 +11,6 @@ import {
   fetchWorkspaceAccounts,
 } from "../lib/api";
 import { formatMoney } from "../lib/format";
-import { translateRecordType } from "../locales/adminLocalizationBundle";
 import { BuildDiagnostics } from "./BuildDiagnostics";
 
 const money = formatMoney;
