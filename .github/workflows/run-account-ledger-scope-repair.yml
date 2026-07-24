@@ -22,20 +22,44 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Apply ledger scope repair
-        run: python3 .github/scripts/patch_account_ledger_scope.py
-      - name: Install dependencies
-        run: npm ci
-      - name: Type-check web app
-        run: npm run check --workspace web
-      - name: Build web app
-        run: npm run build --workspace web
-      - name: Commit and push verified repair
+      - name: Apply, verify, and publish result
+        shell: bash
         run: |
+          set +e
+          LOG=/tmp/account-ledger-scope-repair.log
+          STATUS=0
+          {
+            echo "Applying account ledger scope repair..."
+            python3 .github/scripts/patch_account_ledger_scope.py || STATUS=$?
+            if [ "$STATUS" -eq 0 ]; then
+              echo "Installing dependencies..."
+              npm ci || STATUS=$?
+            fi
+            if [ "$STATUS" -eq 0 ]; then
+              echo "Type-checking web app..."
+              npm run check --workspace web || STATUS=$?
+            fi
+            if [ "$STATUS" -eq 0 ]; then
+              echo "Building web app..."
+              npm run build --workspace web || STATUS=$?
+            fi
+          } >"$LOG" 2>&1
+
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A web/src/pages/workspace/Reports.tsx .github/scripts/patch_account_ledger_scope.py
-          git commit -m "fix: normalize account ledger filter scope"
-          git push origin HEAD:dev
 
-# Retrigger after workflow registration.
+          if [ "$STATUS" -eq 0 ]; then
+            rm -f .github/account-ledger-scope-repair.log
+            git add -A web/src/pages/workspace/Reports.tsx .github/scripts/patch_account_ledger_scope.py .github/account-ledger-scope-repair.log
+            git commit -m "fix: normalize account ledger filter scope"
+            git push origin HEAD:dev
+            exit 0
+          fi
+
+          git checkout HEAD -- web/src/pages/workspace/Reports.tsx .github/scripts/patch_account_ledger_scope.py
+          cp "$LOG" .github/account-ledger-scope-repair.log
+          git add .github/account-ledger-scope-repair.log
+          git commit -m "chore: record account ledger repair failure"
+          git push origin HEAD:dev
+          cat "$LOG"
+          exit "$STATUS"
