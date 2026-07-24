@@ -22,7 +22,7 @@ import { getActiveVouchers, loadWorkspaceVouchers } from "../../lib/voucherColle
 import { fetchBootstrap } from "../../lib/api";
 import {
   buildPartnerLiabilityPositions,
-  buildCanonicalPartnerLiabilityPosition,
+  aggregatePartnerLiabilityPositions,
   calculatePartnerLiabilityBalance,
   getPartnerBalanceState,
   getPartnerAccountingSnapshot,
@@ -34,7 +34,9 @@ import {
   resolvePartnerAccountId,
   resolvePartnerTransferAccountIdentity,
   type PartnerLiabilityLedgerGroupKey,
+  type PartnerLiabilityPosition,
 } from "../../lib/partnerAccounting";
+import { buildCanonicalDisplayAccounts } from "../../lib/accountDisplay";
 import { resolveSaleType, saleProduceLabel } from "../../lib/dispatch-sales";
 import {
   compareLabourers,
@@ -1389,17 +1391,47 @@ export function Reports() {
       };
     }), [accountId, accountingAdvanceRows, accounts, activeSettlements, canonicalLabourAccountEntries, cashAffectingVouchers, partnerRows, saleRows]);
   const partnerLiabilityPositions = useMemo(() => {
-    const merged = buildPartnerLiabilityPositions(accounts, cashAffectingVouchers, [], partnerRows, saleRows, [])
-      .map((item) => {
-        const canonical = resolveCanonicalPartnerPosition(item.account, canonicalFinancials.data?.partnerPositions, accountLookup);
-        return mergePartnerPositionWithCanonical(item, canonical);
+    const canonicalPartnerPositions = canonicalFinancials.data?.partnerPositions ?? [];
+    // Legacy positions are keyed by raw account id. A single canonical partner can span
+    // several of these (an operational account, a labour-finance alias, an old Android id).
+    const legacyPositions = buildPartnerLiabilityPositions(accounts, cashAffectingVouchers, [], partnerRows, saleRows, []);
+    const legacyByAccountId = new Map(legacyPositions.map((item) => [item.account?.id ?? item.key, item] as const));
+    const canonicalById = new Map(canonicalPartnerPositions.map((item) => [item.accountId, item] as const));
+
+    // Collapse every account id, alias, legacy id and canonical partner position into a
+    // single canonical display account, then emit exactly one card per canonical partner.
+    // Grouping is by canonical account id, never by display name alone.
+    const partnerDisplayAccounts = buildCanonicalDisplayAccounts(accounts, accountLookup, canonicalPartnerPositions)
+      .filter((display) => display.account.type === "partner");
+
+    const cards = partnerDisplayAccounts.map((display) => {
+      const memberLegacyPositions = display.sourceAccountIds
+        .map((id) => legacyByAccountId.get(id))
+        .filter((item): item is PartnerLiabilityPosition => Boolean(item));
+      const aggregatedLegacy = aggregatePartnerLiabilityPositions(memberLegacyPositions, {
+        account: display.account,
+        key: display.canonicalAccountId,
+        name: display.account.name,
       });
-    const representedAccountIds = new Set(merged.map((item) => item.account?.id ?? item.key));
-    for (const canonical of canonicalFinancials.data?.partnerPositions ?? []) {
-      if (representedAccountIds.has(canonical.accountId)) continue;
-      merged.push(buildCanonicalPartnerLiabilityPosition(canonical, accounts.find((item) => item.id === canonical.accountId) ?? null));
-    }
-    return merged.filter((item) => !accountId || (item.account?.id ?? item.key) === accountId);
+      const canonical = canonicalById.get(display.canonicalAccountId)
+        ?? resolveCanonicalPartnerPosition(display.account, canonicalPartnerPositions, accountLookup);
+      const position: PartnerLiabilityPosition = {
+        ...mergePartnerPositionWithCanonical(aggregatedLegacy, canonical),
+        key: display.canonicalAccountId,
+        name: display.account.name,
+        account: display.account,
+      };
+      return { position, sourceAccountIds: display.sourceAccountIds };
+    });
+
+    const selectedCanonicalId = accountId ? resolveCanonicalAccountId(accountId, accountLookup) ?? accountId : null;
+    return cards
+      .filter(({ position, sourceAccountIds }) => !accountId
+        || position.key === selectedCanonicalId
+        || position.account?.id === accountId
+        || sourceAccountIds.includes(accountId))
+      .map(({ position }) => position)
+      .sort((left, right) => left.name.localeCompare(right.name));
   }, [accountId, accountLookup, accounts, canonicalFinancials.data?.partnerPositions, cashAffectingVouchers, partnerRows, saleRows]);
   const selectedAccountRecord = accountId ? accounts.find((item) => item.id === accountId) ?? null : null;
   const canonicalAccountLedgerEntries = selectedAccountRecord?.type === "partner"

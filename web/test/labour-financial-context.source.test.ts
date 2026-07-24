@@ -49,7 +49,11 @@ test("downstream pages consume the shared canonical labour model", () => {
   assert.match(modulePage, /canonical\.directLabourPayments/);
   assert.match(modulePage, /canonical\.outstandingLabourAdvances/);
   assert.match(modulePage, /t\("accountsPage\.labourWageSettlementsGroup"\)/);
-  assert.match(reports, /representedAccountIds/);
+  // Partner Status cards are grouped by canonical account id (one card per canonical
+  // partner), never appended by raw represented-account ids.
+  assert.match(reports, /buildCanonicalDisplayAccounts\(accounts, accountLookup, canonicalPartnerPositions\)/);
+  assert.match(reports, /aggregatePartnerLiabilityPositions\(/);
+  assert.doesNotMatch(reports, /representedAccountIds/);
   assert.match(reports, /expenseAccountTotals\.map/);
   assert.match(reports, /t\("reportsPage\.directLabourPayments"\)/);
   assert.doesNotMatch(reports, /canonicalAdvanceCoverageComplete/);
