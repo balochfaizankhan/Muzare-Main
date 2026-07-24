@@ -6,6 +6,7 @@ import App from "./App";
 import { AuthProvider } from "./auth/AuthProvider";
 import "./i18n";
 import "./styles.css";
+import "./sales-polish.css";
 import { queryClient } from "./lib/query-client";
 import { markStartup, scheduleBackgroundTask } from "./lib/startupPerf";
 
