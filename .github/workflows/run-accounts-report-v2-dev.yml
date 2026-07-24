@@ -1,0 +1,40 @@
+name: Repair accounts report v2 on dev
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - .github/workflows/run-accounts-report-v2-dev.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-dev:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply accounts report repair
+        run: python3 .github/scripts/patch_accounts_report_v2.py
+      - name: Install dependencies
+        run: npm ci
+      - name: Type-check web app
+        run: npm run check --workspace web
+      - name: Build web app
+        run: npm run build --workspace web
+      - name: Commit and push verified repair
+        run: |
+          rm -f .github/workflows/run-accounts-report-v2-dev.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A web/src/pages/workspace/Reports.tsx web/src/lib/partnerAccounting.ts web/src/main.tsx web/src/accounts-report-v2.css .github/scripts/patch_accounts_report_v2.py .github/workflows/run-accounts-report-v2-dev.yml
+          git commit -m "fix: reconcile and redesign accounts report"
+          git push origin HEAD:dev
