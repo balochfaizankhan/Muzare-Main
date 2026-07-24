@@ -1,1 +1,0 @@
-Apply the expense summary category/account drilldown patch once.
