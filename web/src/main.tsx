@@ -11,6 +11,7 @@ import "./accounts-report-v2.css";
 import "./reports-expenditure-drilldown.css";
 import "./sales-polish.css";
 import "./sales-date-sync.css";
+import "./dispatch-records-dialogs.css";
 import "./sales-date-sync";
 import { installSystemTextLocalizationGuard } from "./lib/systemTextLocalization";
 import { queryClient } from "./lib/query-client";
