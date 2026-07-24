@@ -37,3 +37,5 @@ jobs:
           git add -A web/src/pages/workspace/Reports.tsx .github/scripts/patch_account_ledger_scope.py
           git commit -m "fix: normalize account ledger filter scope"
           git push origin HEAD:dev
+
+# Retrigger after workflow registration.
