@@ -9,11 +9,12 @@ import { ClearableSelect } from "../../components/ClearableSelect";
 import { ResponsiveMultiSelectField, ResponsiveSelectField } from "../../components/ResponsivePicker";
 import { SubpageHeader } from "../../components/SubpageHeader";
 import { defaultTransactionGroupExpansion, groupAccountTransactions, type AccountTransactionGroupKey } from "../../lib/accountTransactionGroups";
-import { calculateAccountBalance } from "../../lib/accounting";
+import { calculateAccountBalance, sumCanonicalAccountBalanceEffect } from "../../lib/accounting";
 import { getCanonicalExpenseCategory } from "../../lib/expenseCategories";
 import { buildInclusiveDateKeys, chunkAttendanceDateKeys, formatLocalDateKey, normalizeDateKey } from "../../lib/dateOnly";
 import { formatDate, formatMoney, formatNumber } from "../../lib/format";
-import { getActiveLabourWageSettlements, getCashAffectingVouchers, getGeneralExpenseVouchers, getLabourWageSettlementAdvanceOffset, getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher } from "../../lib/labourWageSettlements";
+import { getActiveLabourWageSettlements, getLabourWageSettlementAdvanceOffset, getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher } from "../../lib/labourWageSettlements";
+import { buildReplacedSourceIdSet, selectDedupedExpenseVouchers } from "../../lib/financialInputs";
 import { translateExpenseCategory, translateExpenseSubcategory, translatePaymentType, translateSaleType, translateSalesStatus } from "../../lib/systemTranslations";
 import { localizeSystemPlaceholder, translateStatus } from "../../lib/statusLabels";
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
@@ -1092,7 +1093,7 @@ export function Reports() {
     setAttendanceRegisterExpandedLabourerId((current) => current && attendanceSummary.some((item) => item.labourer.id === current) ? current : null);
   }, [attendanceSummary]);
 
-  const replacedLegacySourceIds = useMemo(() => new Set(canonicalFinancials.data?.replacedLegacySourceIds ?? []), [canonicalFinancials.data?.replacedLegacySourceIds]);
+  const replacedLegacySourceIds = useMemo(() => buildReplacedSourceIdSet(canonicalFinancials.data?.replacedLegacySourceIds), [canonicalFinancials.data?.replacedLegacySourceIds]);
   const canonicalAdvanceRows = useMemo(() => (canonicalFinancials.data?.advancePositions ?? []).map((item) => ({
     id: item.voucherId,
     workspaceId: canonicalFinancials.workspaceId,
@@ -1187,9 +1188,10 @@ export function Reports() {
   const advanceHeaderSourceLabel = accountId ? accountName(accountId) : t("reportsPage.allAccounts");
   const advanceReportGeneratedAt = useMemo(() => formatPrintTimestamp(new Date()), [advanceReportTotals.adjustedInSettlements, advanceReportTotals.outstandingAdvances, advanceReportTotals.postedSettlements, advanceReportTotals.totalAdvances, advanceReportTotals.transactions, advanceReportTotals.uniqueLabourers]);
   const activeVouchers = useMemo(() => getActiveVouchers(vouchers), [vouchers]);
-  const legacyOnlyVouchers = useMemo(() => activeVouchers.filter((item) => !replacedLegacySourceIds.has(item.id)), [activeVouchers, replacedLegacySourceIds]);
-  const generalExpenseVouchers = useMemo(() => getGeneralExpenseVouchers(legacyOnlyVouchers, activeSettlements), [activeSettlements, legacyOnlyVouchers]);
-  const cashAffectingVouchers = useMemo(() => getCashAffectingVouchers(legacyOnlyVouchers, activeSettlements), [activeSettlements, legacyOnlyVouchers]);
+  const { generalExpenseVouchers, cashAffectingVouchers } = useMemo(
+    () => selectDedupedExpenseVouchers(activeVouchers, activeSettlements, replacedLegacySourceIds),
+    [activeSettlements, activeVouchers, replacedLegacySourceIds],
+  );
 
   const selectedExpenseAccountId = accountId ? resolveCanonicalAccountId(accountId, accountLookup) ?? accountId : "";
   const voucherBaseRows = useMemo(() => generalExpenseVouchers
@@ -1411,7 +1413,7 @@ export function Reports() {
       const settlementsSent = partnerRows.filter((item) => item.type === "settlement" && resolveCanonicalAccountId(item.fromAccountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
       const settlementsReceived = partnerRows.filter((item) => item.type === "settlement" && resolveCanonicalAccountId(item.toAccountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
       const salesReceived = saleRows.filter((item) => resolveCanonicalAccountId(item.accountId, accountLookup) === account.id).reduce((sum, item) => sum + item.amount, 0);
-      const canonicalLabourCashEffect = canonicalLabourAccountEntries.filter((entry) => entry.accountId === account.id).reduce((sum, entry) => sum + entry.balanceEffect, 0);
+      const canonicalLabourCashEffect = sumCanonicalAccountBalanceEffect(account.id, canonicalLabourAccountEntries);
       return {
         account,
         voucherExpenses,

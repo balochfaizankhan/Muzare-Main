@@ -36,7 +36,12 @@ test("downstream pages consume the shared canonical labour model", () => {
   assert.match(reports, /canonicalFinancials\.data\?\.expenseAccountAttributions/);
   assert.match(reports, /canonicalFinancials\.data\?\.advancePositions/);
   assert.match(reports, /\[\.\.\.canonicalAdvanceRows, \.\.\.legacyAdvanceRows\]/);
-  assert.match(reports, /!replacedLegacySourceIds\.has\(item\.id\)/);
+  // Canonical-superseded record de-duplication now originates from the shared financial layer,
+  // consumed by Reports rather than re-inlined here.
+  assert.match(reports, /selectDedupedExpenseVouchers\(activeVouchers, activeSettlements, replacedLegacySourceIds\)/);
+  const financialInputs = source("lib/financialInputs.ts");
+  assert.match(financialInputs, /!replaced\.has\(voucher\.id\)/);
+  assert.match(financialInputs, /!replaced\.has\(record\.id\)/);
   assert.match(reports, /activeAdvanceReportRows\.reduce\(\(sum, item\) => sum \+ item\.appliedAmount/);
   assert.match(reports, /activeAdvanceReportRows\.reduce\(\(sum, item\) => sum \+ item\.outstandingAmount/);
   assert.match(modulePage, /setSettledAccountsSnapshot/);
