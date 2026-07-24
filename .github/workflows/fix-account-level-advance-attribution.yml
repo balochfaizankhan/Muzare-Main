@@ -1,0 +1,183 @@
+name: Apply account-level advance attribution fix
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - .github/workflows/fix-account-level-advance-attribution.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Patch account-level advance attribution
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('api/src/lib/labour-financial-read-model.ts')
+          text = path.read_text()
+
+          text = text.replace('  labourAdvanceApplicationSources,\n', '')
+          text = text.replace(', groupRows, applicationSourceRows] = await Promise.all([', ', groupRows] = await Promise.all([')
+          text = text.replace('    db.select().from(labourAdvanceApplicationSources).where(eq(labourAdvanceApplicationSources.workspaceId, input.workspaceId)),\n', '')
+
+          old_sources = '''  // Persisted per-voucher source allocations of pooled applications — each
+  // pooled amount is attributed back to the original funding owners of the
+  // advances it consumed.
+  const applicationSourcesByApplicationId = new Map<string, Array<{ advanceVoucherId: string; amount: number }>>();
+  for (const row of applicationSourceRows.sort((left, right) => left.allocationOrder - right.allocationOrder)) {
+    const list = applicationSourcesByApplicationId.get(row.applicationId) ?? [];
+    list.push({ advanceVoucherId: row.advanceVoucherId, amount: amount(row.amount) });
+    applicationSourcesByApplicationId.set(row.applicationId, list);
+  }
+'''
+          if old_sources not in text:
+              raise SystemExit('old persisted source block not found')
+          text = text.replace(old_sources, '')
+
+          anchor = '  const advanceByVoucherId = new Map(advancePositions.filter((row) => row.canonicalVoucherId).map((row) => [row.canonicalVoucherId!, row]));\n'
+          if anchor not in text:
+              raise SystemExit('advance map anchor not found')
+          allocator = r'''  type ApplicationFundingSource = {
+    accountId: string | null;
+    accountName: string;
+    accountType: string | null;
+    amount: number;
+  };
+  const applicationFundingById = new Map<string, ApplicationFundingSource[]>();
+  const poolKeyFor = (value: { recipientScope?: string | null; labourGroupId?: string | null; labourerId?: string | null }) =>
+    value.recipientScope === "LABOUR_GROUP" && value.labourGroupId
+      ? `group:${value.labourGroupId}`
+      : value.labourerId
+        ? `individual:${value.labourerId}`
+        : null;
+  const fundingBalancesByPool = new Map<string, Map<string, ApplicationFundingSource>>();
+  for (const advance of advancePositions.filter((row) => row.status !== "VOIDED" && row.fundingAccountId)) {
+    const poolKey = poolKeyFor(advance);
+    if (!poolKey) continue;
+    const accountId = advance.fundingAccountId!;
+    const pool = fundingBalancesByPool.get(poolKey) ?? new Map<string, ApplicationFundingSource>();
+    const existing = pool.get(accountId);
+    const available = amount(Math.max(advance.originalAmount - advance.recoveredAmount, 0));
+    pool.set(accountId, {
+      accountId,
+      accountName: advance.paymentSourceDisplayName ?? advance.fundingAccountName ?? "Payment account",
+      accountType: advance.paymentSourceType ?? advance.fundingType ?? null,
+      amount: amount((existing?.amount ?? 0) + available),
+    });
+    fundingBalancesByPool.set(poolKey, pool);
+  }
+  for (const application of [...scopedApplications]
+    .filter((row) => row.status === "ACTIVE")
+    .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime() || left.id.localeCompare(right.id))) {
+    if (application.advanceVoucherId) {
+      const source = advanceByVoucherId.get(application.advanceVoucherId);
+      if (source?.fundingAccountId) {
+        applicationFundingById.set(application.id, [{
+          accountId: source.fundingAccountId,
+          accountName: source.paymentSourceDisplayName ?? source.fundingAccountName ?? "Payment account",
+          accountType: source.paymentSourceType ?? source.fundingType ?? null,
+          amount: amount(application.amount),
+        }]);
+      }
+      continue;
+    }
+    const due = dueById.get(application.dueId);
+    const poolKey = due ? poolKeyFor(due) : null;
+    const pool = poolKey ? fundingBalancesByPool.get(poolKey) : null;
+    if (!pool) continue;
+    let remaining = amount(application.amount);
+    const parts: ApplicationFundingSource[] = [];
+    for (const source of [...pool.values()].sort((left, right) =>
+      left.accountName.localeCompare(right.accountName) || String(left.accountId).localeCompare(String(right.accountId)))) {
+      if (remaining <= 0.005 || source.amount <= 0.005) continue;
+      const applied = amount(Math.min(source.amount, remaining));
+      parts.push({ ...source, amount: applied });
+      source.amount = amount(source.amount - applied);
+      remaining = amount(remaining - applied);
+    }
+    if (remaining > 0.005) {
+      parts.push({ accountId: null, accountName: unresolvedPaymentSourceLabel, accountType: null, amount: remaining });
+    }
+    applicationFundingById.set(application.id, parts);
+  }
+'''
+          text = text.replace(anchor, anchor + allocator)
+
+          text = text.replace(
+            '  applications: Array<{ dueId: string; status: string; amount: number | string; advanceVoucherId: string | null; sources?: Array<{ advanceVoucherId: string; amount: number | string }> }>;\n',
+            '  applications: Array<{ dueId: string; status: string; amount: number | string; advanceVoucherId: string | null; sources?: Array<{ accountId: string | null; accountName: string; accountType: string | null; amount: number | string }> }>;\n'
+          )
+
+          start = text.index('      // A pooled advance application (advanceVoucherId null — see')
+          end = text.index('      return {', start)
+          replacement = '''      // Applied advances are attributed only to aggregate funding accounts.
+      // A due payment never stores or exposes a link to an individual advance voucher.
+      const appliedAdvances: LabourPaymentFundingPart[] = input.applications
+        .filter((row) => row.dueId === expense.dueId && row.status === "ACTIVE")
+        .flatMap((application) => (application.sources ?? []).map((source) => ({
+          voucherId: `advance-account:${source.accountId ?? "unresolved"}`,
+          voucherNumber: null,
+          date: expense.date,
+          status: "APPLIED",
+          amount: amount(source.amount),
+          accountId: source.accountId,
+          accountName: source.accountName,
+        })));
+'''
+          text = text[:start] + replacement + text[end:]
+
+          old_parent_start = '      const fundingSources = groupFundingSources(childApplications.flatMap((application) => {'
+          ps = text.index(old_parent_start)
+          pe = text.index('      return {', ps)
+          text = text[:ps] + '      const fundingSources = groupFundingSources(childApplications.flatMap((application) => applicationFundingById.get(application.id) ?? []));\n' + text[pe:]
+
+          loop_start = '      for (const application of scopedApplications.filter((row) => row.dueId === expense.dueId && row.status === "ACTIVE")) {'
+          ls = text.index(loop_start)
+          le = text.index('      return attributeLabourExpense({', ls)
+          new_loop = '''      for (const application of scopedApplications.filter((row) => row.dueId === expense.dueId && row.status === "ACTIVE")) {
+        for (const source of applicationFundingById.get(application.id) ?? []) {
+          parts.push({
+            id: `${expense.id}:advance:${application.id}:${source.accountId ?? "unresolved"}`,
+            settlementType: "APPLIED_ADVANCE",
+            accountId: source.accountId,
+            accountName: source.accountName,
+            accountType: source.accountType,
+            amount: source.amount,
+            voucherId: null,
+            advanceApplicationId: application.id,
+          });
+        }
+      }
+'''
+          text = text[:ls] + new_loop + text[le:]
+
+          old_call = '    applications: scopedApplications.map((row) => ({ ...row, sources: applicationSourcesByApplicationId.get(row.id) })),\n'
+          if old_call not in text:
+              raise SystemExit('labour payment call source mapping not found')
+          text = text.replace(old_call, '    applications: scopedApplications.map((row) => ({ ...row, sources: applicationFundingById.get(row.id) })),\n')
+
+          path.write_text(text)
+          PY
+      - run: npm ci
+      - run: npm run build --workspace @muzare/api
+      - name: Commit fix
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add api/src/lib/labour-financial-read-model.ts
+          git commit -m "fix: attribute pooled advances by funding account" || exit 0
+          git push origin dev
