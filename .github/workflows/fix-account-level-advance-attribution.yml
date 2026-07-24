@@ -181,3 +181,5 @@ jobs:
           git add api/src/lib/labour-financial-read-model.ts
           git commit -m "fix: attribute pooled advances by funding account" || exit 0
           git push origin dev
+
+# trigger: 2
