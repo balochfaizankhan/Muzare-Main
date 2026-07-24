@@ -2,6 +2,7 @@ import { ChevronDown, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { localizeSystemPlaceholder } from "../lib/statusLabels";
 
 export type PaymentAccountOption = {
   id: string;
@@ -225,7 +226,8 @@ export function PaymentAccountSelect({
   const options = useMemo<SheetOption[]>(() => {
     const rows = accounts.map((account) => ({
       value: account.id,
-      label: account.name,
+      // System-seeded account names ("Cash", "Partner Capital") localize; user names pass through.
+      label: localizeSystemPlaceholder(t, account.name),
       secondary: account.type && ACCOUNT_TYPE_LABEL_KEYS[account.type]
         ? t(ACCOUNT_TYPE_LABEL_KEYS[account.type]) + (account.deletedAt ? ` · ${t("paymentAccountSelect.inactive")}` : "")
         : account.deletedAt ? t("paymentAccountSelect.inactive") : undefined,
@@ -255,7 +257,7 @@ export function PaymentAccountSelect({
           onClick={() => setOpen(true)}
         >
           <span className={`report-picker__trigger-text${selected ? " is-filled" : ""}`}>
-            {selected ? selected.name : resolvedPlaceholder}
+            {selected ? localizeSystemPlaceholder(t, selected.name) : resolvedPlaceholder}
           </span>
           <span className="report-picker__trigger-actions">
             <ChevronDown size={16} aria-hidden="true" />

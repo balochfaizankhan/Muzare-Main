@@ -1,14 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { fetchHealth } from "../lib/api";
+import { formatDate } from "../lib/format";
 
 export function BuildDiagnostics({ compact = false }: { compact?: boolean }) {
+  const { t } = useTranslation();
   const health = useQuery({
     queryKey: ["health"],
     queryFn: fetchHealth,
     staleTime: 60_000,
   });
 
-  const apiCommit = health.data?.gitCommit ?? "loading";
+  const apiCommit = health.data?.gitCommit ?? t("common.loading");
   const apiVersion = health.data?.appVersion ?? "-";
   const apiBuildTime = health.data?.buildTime ?? "-";
   const frontendVersion = __APP_VERSION__;
@@ -17,15 +20,7 @@ export function BuildDiagnostics({ compact = false }: { compact?: boolean }) {
     if (!value || value === "-") return "-";
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
-    const formatted = new Intl.DateTimeFormat("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(date);
-    const parts = formatted.split(", ");
-    return parts.length >= 3 ? `${parts[0]}, ${parts[1]} · ${parts.slice(2).join(", ")}` : formatted;
+    return formatDate(date, { dateStyle: "medium", timeStyle: "short" });
   };
   const displayBuildTime = formatBuildTime(apiBuildTime !== "-" ? apiBuildTime : frontendBuildTime);
 
@@ -33,42 +28,42 @@ export function BuildDiagnostics({ compact = false }: { compact?: boolean }) {
     <section className={`record-panel build-diagnostics ${compact ? "build-diagnostics--compact" : ""}`}>
       <div className="build-diagnostics__heading">
         <div>
-          <h2>App Version</h2>
-          <p>Front-end and API release information.</p>
+          <h2>{t("buildDiagnostics.title")}</h2>
+          <p>{t("buildDiagnostics.description")}</p>
         </div>
-        <span>{apiVersion === frontendVersion ? "Matched" : "Check build"}</span>
+        <span>{apiVersion === frontendVersion ? t("buildDiagnostics.matched") : t("buildDiagnostics.checkBuild")}</span>
       </div>
       <div className="build-diagnostics__grid">
         <article>
-          <span>Frontend version</span>
+          <span>{t("buildDiagnostics.frontendVersion")}</span>
           <strong>{frontendVersion}</strong>
         </article>
         <article>
-          <span>API version</span>
+          <span>{t("buildDiagnostics.apiVersion")}</span>
           <strong>{apiVersion}</strong>
         </article>
         <article>
-          <span>Last update</span>
+          <span>{t("buildDiagnostics.lastUpdate")}</span>
           <strong>{displayBuildTime}</strong>
         </article>
       </div>
       <details className="build-diagnostics__details">
-        <summary>Technical details</summary>
+        <summary>{t("buildDiagnostics.technicalDetails")}</summary>
         <div className="build-diagnostics__grid build-diagnostics__grid--technical">
           <article>
-            <span>Frontend commit</span>
+            <span>{t("buildDiagnostics.frontendCommit")}</span>
             <strong>{__GIT_COMMIT_HASH__}</strong>
           </article>
           <article>
-            <span>Frontend build</span>
+            <span>{t("buildDiagnostics.frontendBuild")}</span>
             <strong>{frontendBuildTime}</strong>
           </article>
           <article>
-            <span>API commit</span>
+            <span>{t("buildDiagnostics.apiCommit")}</span>
             <strong>{apiCommit}</strong>
           </article>
           <article>
-            <span>API build</span>
+            <span>{t("buildDiagnostics.apiBuild")}</span>
             <strong>{apiBuildTime}</strong>
           </article>
         </div>

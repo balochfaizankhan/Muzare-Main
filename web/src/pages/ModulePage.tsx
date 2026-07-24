@@ -19,7 +19,7 @@ import { buildCanonicalDisplayAccounts } from "../lib/accountDisplay";
 import { defaultTransactionGroupExpansion, groupAccountTransactions, type AccountTransactionGroupKey } from "../lib/accountTransactionGroups";
 import { attendanceStatusKey, buildAttendanceStatusMap, previousLocalDateKey, todayLocalDateKey } from "../lib/attendanceStatus";
 import { isAccountsFinancialScope, settleAccountsFinancialSnapshot, type AccountsFinancialSnapshot as AccountsFinancialSnapshotBase } from "../lib/accountsFinancialSnapshot";
-import { getCanonicalExpenseCategory, getExpenseAccountingGroup } from "../lib/expenseCategories";
+import { getCanonicalExpenseCategory, getExpenseAccountingGroupLabel, getExpenseCategoryLabel } from "../lib/expenseCategories";
 import { ApiError, confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteExpenseAttachment, deleteOrDeactivateLabour, extractExpenseReceipt, fetchExpenseAttachments, fetchExpenseCategories, fetchLabourDeletionPreview, fetchOperationalRecord, openExpenseAttachment, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, uploadExpenseAttachment, validateVoucherNumber, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type ExpenseAttachment, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type ExpenseOcrSuggestion, type ExpenseSearchRecord, type LabourDeletionPreview, type LabourFinancialReadModel } from "../lib/api";
 import { buildDispatchAvailability, dispatchCartons, dispatchItemKey, resolveSaleType, saleProduceLabel, soldQuantityByDispatchItem } from "../lib/dispatch-sales";
 import { canCreate, canDelete, canEdit, hasPermission } from "../lib/permissions";
@@ -49,7 +49,7 @@ import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { getVoucherDisplayNumber, normalizeVoucherNumber, parseVoucherSequenceNumber } from "../lib/vouchers";
 import { getActiveVouchers, getVisibleVouchers, loadWorkspaceVouchers } from "../lib/voucherCollections";
 import { compareWageRates, getWageRateStatus, normalizeHalfDayRate, summarizeAttendanceWages } from "../lib/wageRates";
-import { translateStatus } from "../lib/statusLabels";
+import { localizeSystemPlaceholder, translateStatus } from "../lib/statusLabels";
 import { getWorkerDisplayGroup, getWorkerWorkingPeriod, isLabourAvailableForEntry, isWorkerEligibleForAttendance, sortWorkersForDisplay } from "../lib/workerEligibility";
 import {
   compareLabourers,
@@ -94,7 +94,13 @@ const formatWageRateRange = (t: TFunction, rate: Pick<WageRate, "effectiveFrom" 
   const from = compactDate(rate.effectiveFrom);
   return rate.effectiveTo ? `${from} - ${compactDate(rate.effectiveTo)}` : t("wageRatesPage.onwardDate", { date: from });
 };
-const readableSyncTime = (t: TFunction, value: string | null) => value ? new Date(value).toLocaleString() : t("workforcePage.notSyncedYet");
+const readableSyncTime = (t: TFunction, value: string | null) => value ? formatDate(value, { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }) : t("workforcePage.notSyncedYet");
+// Labour records store the literal default group "General"; render it localized while letting
+// every user-created group name pass through untranslated.
+const displayLabourGroupName = (t: TFunction, group?: string | null) => {
+  const name = group?.trim() ?? "";
+  return !name || name === "General" ? t("workforcePage.generalGroup") : name;
+};
 const paymentTypes = ["daily_wage", "production_based", "contract_lump_sum", "monthly_salary", "other"] as const;
 type PaymentType = typeof paymentTypes[number];
 const canMarkAttendanceOn = (labourer: Labourer, date: string) => isWorkerEligibleForAttendance(labourer, date);
@@ -521,7 +527,7 @@ function WorkforceModule({
                   <span className="workforce-row__index">{index + 1}</span>
                   <span className="workforce-row__body">
                     <strong>{labourer.name}</strong>
-                    <span>{labourer.group} • {paymentTypeLabel(labourer.paymentType)}</span>
+                    <span>{displayLabourGroupName(t, labourer.group)} • {paymentTypeLabel(labourer.paymentType)}</span>
                     <em className={statusDisplay.chipClassName}>{statusDisplay.label}</em>
                     {(() => {
                       const period = getWorkerWorkingPeriod(labourer);
@@ -650,7 +656,7 @@ function WorkforceModule({
                   <span className={`labour-profile-status-chip ${selectedLabourerProfileStatus?.className ?? ""}`}>{selectedLabourerProfileStatus?.label}</span>
                 </div>
                 <div className="labour-profile-header__meta">
-                  <span>{selectedLabourer.group || t("workforcePage.generalGroup")}</span>
+                  <span>{displayLabourGroupName(t, selectedLabourer.group)}</span>
                   <span className="labour-profile-header__dot" aria-hidden="true">•</span>
                   <span>{translatePaymentType(selectedLabourer.paymentType ?? "daily_wage")}</span>
                 </div>
@@ -2086,9 +2092,9 @@ function ExpensesModule() {
     const filters: string[] = [];
     if (voucherSearch.trim()) filters.push(t("modulePageExtra.searchFilterChip", { query: voucherSearch.trim() }));
     if (voucherFrom || voucherTo) filters.push(`${voucherFrom ? compactDate(voucherFrom) : t("modulePageExtra.rangeStart")} - ${voucherTo ? compactDate(voucherTo) : t("modulePageExtra.rangeEnd")}`);
-    if (voucherCategory) filters.push(translateExpenseCategory(voucherCategory));
+    if (voucherCategory) filters.push(getExpenseCategoryLabel(voucherCategory));
     if (voucherSubcategory) filters.push(translateExpenseSubcategory(voucherSubcategory));
-    if (voucherAccountId) filters.push(accounts.find((item) => item.id === voucherAccountId)?.name ?? voucherAccountId);
+    if (voucherAccountId) filters.push(localizeSystemPlaceholder(t, accounts.find((item) => item.id === voucherAccountId)?.name) || voucherAccountId);
     if (showDeletedVouchers) filters.push(t("modulePageExtra.deletedVoidedFilterChip"));
     if (!showImportedVouchers) filters.push(t("modulePageExtra.importedOffFilterChip"));
     if (showSettlementVouchers) filters.push(t("modulePageExtra.settlementVouchersFilterChip"));
@@ -2999,10 +3005,10 @@ function ExpensesModule() {
             {visibleFilteredVouchers.map((item) => {
               const lines = voucherLinesFor(item);
               const summary = lines.length > 1
-                ? `${lines[0].category} / ${lines[0].subcategory ? translateExpenseSubcategory(lines[0].subcategory) : t("expensesPage.miscellaneous")} +${lines.length - 1} ${t("expensesPage.moreItems")}`
-                : `${getCanonicalExpenseCategory(item.category)} / ${item.subcategory ? translateExpenseSubcategory(item.subcategory) : t("expensesPage.miscellaneous")}`;
+                ? `${getExpenseCategoryLabel(lines[0].category)} / ${lines[0].subcategory ? translateExpenseSubcategory(lines[0].subcategory) : t("expensesPage.miscellaneous")} +${lines.length - 1} ${t("expensesPage.moreItems")}`
+                : `${getExpenseCategoryLabel(item.category)} / ${item.subcategory ? translateExpenseSubcategory(item.subcategory) : t("expensesPage.miscellaneous")}`;
               const description = lines.length > 1 ? `${lines[0].description} +${lines.length - 1} ${t("expensesPage.moreItems")}` : item.description;
-              const accountName = accountById.get(item.accountId) ?? t("expensesPage.unknownAccount");
+              const accountName = localizeSystemPlaceholder(t, accountById.get(item.accountId)) || t("expensesPage.unknownAccount");
               return (
                 <article className="expense-voucher-card" key={item.id}>
                   <div className="expense-voucher-card__top">
@@ -3051,7 +3057,7 @@ function ExpensesModule() {
                 allLabel={t("expensesPage.allCategories")}
                 value={voucherCategory}
                 onChange={(value) => { setVoucherCategory(value); setVoucherSubcategory(""); }}
-                options={voucherCategories.map((item) => ({ value: item, label: item }))}
+                options={voucherCategories.map((item) => ({ value: item, label: getExpenseCategoryLabel(item) }))}
                 searchPlaceholder={t("modulePageExtra.searchCategoriesPlaceholder")}
               />
             </label>
@@ -3106,7 +3112,7 @@ function ExpensesModule() {
           <h2>{t("expensesPage.expensesByCategory")}</h2>
           {canManage && <button type="button" className="expense-manage-categories-trigger" onClick={() => setShowExpenseSubcategoryManager(true)}>{t("expensesPage.manageCategories")}</button>}
         </div>
-        {!grouped.length ? <Empty>{t("expensesPage.noExpenseTotals")}</Empty> : <div className="expense-category-report">{grouped.map(([category, items]) => { const categoryTotal = [...items.values()].reduce((sum, amount) => sum + amount, 0); return <article key={category}><header><div><h3>{category}</h3><small>{getExpenseAccountingGroup(category)}</small></div><strong className="bidi-isolate">{money(categoryTotal)}</strong></header>{[...items].map(([subcategory, amount]) => <p key={subcategory}><span>{subcategory === "Miscellaneous" ? t("expensesPage.miscellaneous") : translateExpenseSubcategory(subcategory)}</span><strong className="bidi-isolate">{money(amount)}</strong></p>)}</article>; })}</div>}
+        {!grouped.length ? <Empty>{t("expensesPage.noExpenseTotals")}</Empty> : <div className="expense-category-report">{grouped.map(([category, items]) => { const categoryTotal = [...items.values()].reduce((sum, amount) => sum + amount, 0); return <article key={category}><header><div><h3>{getExpenseCategoryLabel(category)}</h3><small>{getExpenseAccountingGroupLabel(category)}</small></div><strong className="bidi-isolate">{money(categoryTotal)}</strong></header>{[...items].map(([subcategory, amount]) => <p key={subcategory}><span>{subcategory === "Miscellaneous" ? t("expensesPage.miscellaneous") : translateExpenseSubcategory(subcategory)}</span><strong className="bidi-isolate">{money(amount)}</strong></p>)}</article>; })}</div>}
       </section>
       </>}
       {showExpenseSubcategoryManager && <div className="report-picker-backdrop" role="presentation" onClick={() => setShowExpenseSubcategoryManager(false)}>
@@ -3158,7 +3164,7 @@ function ExpensesModule() {
             <dl className="worker-stats worker-stats--summary">
               <div><dt>{t("expensesPage.date")}</dt><dd className="bidi-isolate">{shortDate(selectedVoucher.date)}</dd></div>
               <div><dt>{t("expensesPage.amount")}</dt><dd className="bidi-isolate">{money(selectedVoucher.amount)}</dd></div>
-              <div><dt>{t("expensesPage.paymentSource")}</dt><dd>{accounts.find((item) => item.id === selectedVoucher.accountId)?.name ?? t("expensesPage.unknownAccount")}</dd></div>
+              <div><dt>{t("expensesPage.paymentSource")}</dt><dd>{localizeSystemPlaceholder(t, accounts.find((item) => item.id === selectedVoucher.accountId)?.name) || t("expensesPage.unknownAccount")}</dd></div>
               {selectedVoucher.notes ? <div><dt>{t("expensesPage.reference")}</dt><dd>{selectedVoucher.notes}</dd></div> : null}
             </dl>
           </section>
@@ -3176,7 +3182,7 @@ function ExpensesModule() {
             }]).map((item, index) => (
               <article className="expense-voucher-detail-item" key={item.id}>
                 <div className="expense-voucher-detail-item__header">
-                  <strong>{getCanonicalExpenseCategory(item.category)} / {item.subcategory ? translateExpenseSubcategory(item.subcategory) : t("expensesPage.miscellaneous")}</strong>
+                  <strong>{getExpenseCategoryLabel(item.category)} / {item.subcategory ? translateExpenseSubcategory(item.subcategory) : t("expensesPage.miscellaneous")}</strong>
                   <b className="bidi-isolate">{money(item.amount)}</b>
                 </div>
                 <dl className="expense-voucher-detail-item__grid">
@@ -4120,8 +4126,8 @@ function PartnerLedgerModule() {
   const accountName = (id?: string) => {
     const resolvedId = resolveCanonicalAccountId(id ?? null, accountLookup);
     return resolvedId
-      ? accounts.find((account) => account.id === resolvedId)?.name ?? t("expensesPage.unknownAccount")
-      : id ? accounts.find((account) => account.id === id)?.name ?? t("expensesPage.unknownAccount") : "-";
+      ? localizeSystemPlaceholder(t, accounts.find((account) => account.id === resolvedId)?.name) || t("expensesPage.unknownAccount")
+      : id ? localizeSystemPlaceholder(t, accounts.find((account) => account.id === id)?.name) || t("expensesPage.unknownAccount") : "-";
   };
   const partnerPositions = useMemo(() => {
     const legacy = buildPartnerLiabilityPositions(accounts, vouchers, activeAdvances, activeEntries, sales, activeLabourWageSettlements, { farmId, seasonId });
@@ -4390,7 +4396,7 @@ function PartnerLedgerModule() {
               <p><strong>{t("partnerLedgerPage.date")}</strong><span className="bidi-isolate">{viewing.date}</span></p><p><strong>{t("partnerLedgerPage.partner")}</strong><span>{partnerEntryName(viewing, partnerSettlementRoute)}</span></p>
               <p><strong>{t("partnerLedgerPage.type")}</strong><span>{partnerEntryLabel(viewing)}</span></p>{viewing.type !== "settlement" && <><p><strong>{t("partnerLedgerPage.partnerAccount")}</strong><span>{accountName(viewing.partnerAccountId ?? resolvePartnerAccountId(viewing, accounts))}</span></p><p><strong>{t("partnerLedgerPage.account")}</strong><span>{accountName(viewing.accountId)}</span></p></>}
               <p><strong>{t("partnerLedgerPage.amount")}</strong><span className="bidi-isolate">{money(viewing.amount)}</span></p><p><strong>{t("partnerLedgerPage.notes")}</strong><span>{viewing.notes || "-"}</span></p>
-              {viewing.deletedAt && <p><strong>{t("partnerLedgerPage.deleted")}</strong><span className="bidi-isolate">{new Date(viewing.deletedAt).toLocaleString()}</span></p>}
+              {viewing.deletedAt && <p><strong>{t("partnerLedgerPage.deleted")}</strong><span className="bidi-isolate">{formatDate(viewing.deletedAt, { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })}</span></p>}
               <footer><button type="button" onClick={() => setViewing(null)}>{t("partnerLedgerPage.close")}</button></footer>
             </div>
           </section>
@@ -4774,7 +4780,7 @@ function AccountsModule() {
         date: voucher.date,
         type: "voucher",
         reference: getVoucherDisplayNumber(voucher) || voucher.voucherNumber,
-        description: `${getCanonicalExpenseCategory(voucher.category)} / ${voucher.subcategory} - ${voucher.description}`,
+        description: `${getExpenseCategoryLabel(voucher.category)} / ${translateExpenseSubcategory(voucher.subcategory)} - ${voucher.description}`,
         debit: selectedIsPartner ? 0 : voucher.amount,
         credit: selectedIsPartner ? voucher.amount : 0,
         source: "expenses",
@@ -5223,8 +5229,8 @@ function AccountsModule() {
                 setSelectedAccountId(id);
               }
             }}>
-              <span>{account.type}</span>
-              <strong>{account.name}</strong>
+              <span>{t(`accountsPage.${account.type}`)}</span>
+              <strong>{localizeSystemPlaceholder(t, account.name)}</strong>
               <b>{money(balance(account, canonicalAccountId))}</b>
               <small>{t("accountsPage.viewDetails")}</small>
             </article>

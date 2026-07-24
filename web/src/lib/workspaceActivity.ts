@@ -27,7 +27,7 @@ import type {
   Voucher,
 } from "./offline-db";
 import { isActiveOperationalRecord } from "./operationalRecords";
-import { translateStatus } from "./statusLabels";
+import { translateLabourEventType, translateStatus } from "./statusLabels";
 import { loadWorkspaceVouchers } from "./voucherCollections";
 import { getVoucherDisplayNumber } from "./vouchers";
 import type { LabourFinancialReadModel } from "./api";
@@ -343,19 +343,27 @@ export async function loadWorkspaceActivity(t: TFunction, canonical?: LabourFina
     })),
   ];
 
-  const canonicalActivities: WorkspaceActivityItem[] = (canonical?.activity ?? []).map((item) => ({
-    id: item.id,
-    module: "labour",
-    moduleLabel: t("dashboardModule.labour"),
-    path: "/workspace/labour-payments/vouchers",
-    title: item.title,
-    detail: `${item.detail} · ${translateStatus(t, item.status)}`,
-    value: translateStatus(t, item.status),
-    createdAt: item.date,
-    activityDate: item.date.slice(0, 10),
-    icon: ClipboardList,
-    tone: item.status === "VOIDED" || item.status === "REVERSED" ? "slate" : "purple",
-  }));
+  // Canonical labour activity arrives as structured fields (eventType/status/reference
+  // numbers) — never as prebuilt backend sentences — so the whole row re-renders in the
+  // active language. The stored due/voucher description is user-editable free text and is
+  // deliberately NOT shown here; record pages display it verbatim where it belongs.
+  const canonicalActivities: WorkspaceActivityItem[] = (canonical?.activity ?? []).map((item) => {
+    const reference = item.dueNumber ?? item.voucherNumber ?? null;
+    const detailParts = [reference, item.recipientName].filter((part): part is string => Boolean(part && part.trim()));
+    return {
+      id: item.id,
+      module: "labour" as const,
+      moduleLabel: t("dashboardModule.labour"),
+      path: "/workspace/labour-payments/vouchers",
+      title: translateLabourEventType(t, item.eventType, item.originalEventType),
+      detail: detailParts.join(" · ") || translateStatus(t, item.status),
+      value: translateStatus(t, item.status),
+      createdAt: item.date,
+      activityDate: (item.eventDate ?? item.date).slice(0, 10),
+      icon: ClipboardList,
+      tone: (item.status === "VOIDED" || item.status === "REVERSED" ? "slate" : "purple") as "slate" | "purple",
+    };
+  });
 
   return [...canonicalActivities, ...attendanceActivities, ...advanceActivities, ...paymentActivities, ...individualActivities]
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));

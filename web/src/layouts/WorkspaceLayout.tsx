@@ -10,6 +10,7 @@ import { config } from "../config";
 import type { PendingMutation } from "../lib/offline-db";
 import { useSyncState } from "../hooks/useSyncState";
 import { fetchBootstrap } from "../lib/api";
+import { formatDate } from "../lib/format";
 import { deriveWorkspaceDisplayStatus } from "../lib/workspaceStatus";
 import { discardSyncQueueItem, getSyncQueueItems, refreshOperationalData, repairStaleSyncQueueItem, resolveSyncQueueItem, retrySyncQueueItem, startSyncService, stopSyncService, syncNow } from "../services/syncService";
 import { setActiveWorkspaceId } from "../lib/offline-db";
@@ -162,8 +163,14 @@ export function WorkspaceLayout() {
   const formatQueueDateTime = (value?: string | null) => {
     if (!value) return "-";
     const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? value : date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    return Number.isNaN(date.getTime()) ? value : formatDate(date, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   };
+  // Queue entities are raw offline-db table identifiers ("labourer", "voucher", ...); render
+  // them through the syncQueue.entity dictionary, falling back to the raw value for any entity
+  // added to offline-db before its label exists.
+  const queueEntityLabel = (entity: PendingMutation["entity"]) => t(`syncQueue.entity.${entity}`, { defaultValue: entity });
+  const queueOperationLabel = (operation: PendingMutation["operation"]) =>
+    operation === "update" ? t("sync.actionUpdate") : operation === "delete" ? t("sync.actionDelete") : t("sync.actionCreate");
   return (
     <div className={`app-shell${isDashboardHome ? " app-shell--dashboard-home" : ""}`}>
       <aside className="app-sidebar">
@@ -221,12 +228,12 @@ export function WorkspaceLayout() {
               return (
               <article key={item.id} className={`sync-queue-item sync-queue-item--${item.status ?? "pending"}`}>
                 <div className="sync-queue-item__meta">
-                  <strong>{isDateTypeQueueItem ? t("sync.dateTypeSyncFailedTitle") : `${item.entity} · ${item.operation}`}</strong>
+                  <strong>{isDateTypeQueueItem ? t("sync.dateTypeSyncFailedTitle") : `${queueEntityLabel(item.entity)} · ${queueOperationLabel(item.operation)}`}</strong>
                   <span>{isDateTypeQueueItem ? t("sync.dateTypeSyncFailedDetail") : queueStatusLabel(item.status)}</span>
                 </div>
                 <div className="sync-queue-item__facts">
-                  <p><span>{t("sync.typeLabel")}</span><strong>{isDateTypeQueueItem ? t("sync.dateTypeLabel") : item.entity}</strong></p>
-                  <p><span>{t("sync.actionLabel")}</span><strong>{item.operation === "update" ? t("sync.actionUpdate") : item.operation === "delete" ? t("sync.actionDelete") : t("sync.actionCreate")}</strong></p>
+                  <p><span>{t("sync.typeLabel")}</span><strong>{isDateTypeQueueItem ? t("sync.dateTypeLabel") : queueEntityLabel(item.entity)}</strong></p>
+                  <p><span>{t("sync.actionLabel")}</span><strong>{queueOperationLabel(item.operation)}</strong></p>
                   <p><span>{t("sync.createdAt")}</span><strong className="bidi-isolate">{formatQueueDateTime(item.createdAt)}</strong></p>
                   <p><span>{t("sync.lastAttemptedAt")}</span><strong className="bidi-isolate">{formatQueueDateTime(item.lastAttemptedAt)}</strong></p>
                   <p><span>{t("sync.retryCount")}</span><strong>{item.attempts}</strong></p>

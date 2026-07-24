@@ -12,10 +12,10 @@ import { defaultTransactionGroupExpansion, groupAccountTransactions, type Accoun
 import { calculateAccountBalance } from "../../lib/accounting";
 import { getCanonicalExpenseCategory } from "../../lib/expenseCategories";
 import { buildInclusiveDateKeys, chunkAttendanceDateKeys, formatLocalDateKey, normalizeDateKey } from "../../lib/dateOnly";
-import { formatMoney, formatNumber } from "../../lib/format";
+import { formatDate, formatMoney, formatNumber } from "../../lib/format";
 import { getActiveLabourWageSettlements, getCashAffectingVouchers, getGeneralExpenseVouchers, getLabourWageSettlementAdvanceOffset, getLabourWageSettlementCashPaidAmount, isLabourWageSettlementVoucher } from "../../lib/labourWageSettlements";
 import { translateExpenseCategory, translateExpenseSubcategory, translatePaymentType, translateSaleType, translateSalesStatus } from "../../lib/systemTranslations";
-import { translateStatus } from "../../lib/statusLabels";
+import { localizeSystemPlaceholder, translateStatus } from "../../lib/statusLabels";
 import { isActiveOperationalRecord } from "../../lib/operationalRecords";
 import { getVoucherDisplayNumber } from "../../lib/vouchers";
 import { getActiveVouchers, loadWorkspaceVouchers } from "../../lib/voucherCollections";
@@ -134,16 +134,14 @@ const inRange = (date: string, from: string, to: string) => {
   const toKey = normalizeDateKey(to);
   return (!fromKey || dateKey >= fromKey) && (!toKey || dateKey <= toKey);
 };
-const attendanceMark = (status?: Attendance["status"]) => status === "present" ? "P" : status === "half_day" ? "H" : status === "absent" ? "A" : "-";
-const attendancePrintMark = (status?: Attendance["status"]) => status === "present" ? "P" : status === "half_day" ? "½" : status === "absent" ? "A" : "-";
+const attendanceMark = (status?: Attendance["status"]) => status === "present" ? i18n.t("reportsPage.presentMark") : status === "half_day" ? i18n.t("reportsPage.halfDayMark") : status === "absent" ? i18n.t("reportsPage.absentMark") : "-";
+const attendancePrintMark = (status?: Attendance["status"]) => status === "present" ? i18n.t("reportsPage.presentMark") : status === "half_day" ? i18n.t("reportsPage.halfDayPrintMark") : status === "absent" ? i18n.t("reportsPage.absentMark") : "-";
 const attendanceStatusClass = (status?: Attendance["status"]) => status ? `register-status register-status--${status}` : "register-status register-status--empty";
 const attendancePayable = (status?: Attendance["status"]) => status === "present" ? 1 : status === "half_day" ? 0.5 : 0;
-const formatShortDate = (date: string) => date.length >= 10 ? `${date.slice(8, 10)}/${date.slice(5, 7)}` : date;
+const formatShortDate = (date: string) => date.length >= 10 ? formatDate(`${date.slice(0, 10)}T00:00:00`, { day: "2-digit", month: "2-digit" }) : date;
 const formatCsvDate = (date: string) => date.length >= 10 ? `${date.slice(8, 10)}/${date.slice(5, 7)}/${date.slice(0, 4)}` : date;
-const formatRangeLabel = (from: string, to: string) => from && to ? `${from} - ${to}` : from ? `${i18n.t("reportsPage.fromDate")} ${from}` : to ? `${i18n.t("reportsPage.toDate")} ${to}` : i18n.t("reportsPage.allDates");
-const settlementCardDateFormatter = new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" });
-const settlementCardShortDateFormatter = new Intl.DateTimeFormat("en", { month: "short", day: "numeric" });
-const printTimestampFormatter = new Intl.DateTimeFormat("en-GB", {
+const formatRangeLabel = (from: string, to: string) => from && to ? `${formatReportDateValue(from)} - ${formatReportDateValue(to)}` : from ? `${i18n.t("reportsPage.fromDate")} ${formatReportDateValue(from)}` : to ? `${i18n.t("reportsPage.toDate")} ${formatReportDateValue(to)}` : i18n.t("reportsPage.allDates");
+const formatPrintTimestamp = (value: Date) => formatDate(value, {
   day: "2-digit",
   month: "short",
   year: "numeric",
@@ -154,7 +152,7 @@ const formatSettlementCardDate = (value: string) => {
   if (!value) return value;
   const date = new Date(`${value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return value;
-  return settlementCardDateFormatter.format(date);
+  return formatDate(date, { month: "short", day: "numeric", year: "numeric" });
 };
 const formatSettlementCardRange = (from: string, to: string) => {
   if (!from || !to) return `${formatSettlementCardDate(from || to)}${from && to ? ` – ${formatSettlementCardDate(to)}` : ""}`;
@@ -163,8 +161,8 @@ const formatSettlementCardRange = (from: string, to: string) => {
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return `${formatSettlementCardDate(from)} – ${formatSettlementCardDate(to)}`;
   const sameYear = start.getFullYear() === end.getFullYear();
   return sameYear
-    ? `${settlementCardShortDateFormatter.format(start)} – ${settlementCardDateFormatter.format(end)}`
-    : `${settlementCardDateFormatter.format(start)} – ${settlementCardDateFormatter.format(end)}`;
+    ? `${formatDate(start, { month: "short", day: "numeric" })} – ${formatDate(end, { month: "short", day: "numeric", year: "numeric" })}`
+    : `${formatDate(start, { month: "short", day: "numeric", year: "numeric" })} – ${formatDate(end, { month: "short", day: "numeric", year: "numeric" })}`;
 };
 const normalizeText = (value?: string | null) => value?.trim() ?? "";
 const paymentTypeDisplayLabel = (labourer?: Labourer | null) => translatePaymentType(labourer?.paymentType ?? "daily_wage");
@@ -234,17 +232,23 @@ const voucherReportItems = (voucher: Voucher): VoucherReportLine[] => {
   }];
 };
 
-const reportDateFormatter = new Intl.DateTimeFormat("en-GB", {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-});
-
 function formatReportDateValue(value: string) {
   if (!value) return "";
-  const date = new Date(`${value}T00:00:00`);
+  const date = new Date(`${value.slice(0, 10)}T00:00:00`);
   if (Number.isNaN(date.getTime())) return value;
-  return reportDateFormatter.format(date);
+  return formatDate(date, { day: "2-digit", month: "short", year: "numeric" });
+}
+
+const wageRateTypeLabelKeys: Record<string, string> = {
+  daily: "wageRatesPage.dailyRateType",
+  half_day: "wageRatesPage.halfDayRateType",
+  monthly: "wageRatesPage.monthlyRateType",
+  custom: "wageRatesPage.customRateType",
+};
+
+function wageRateTypeLabel(rateType: string) {
+  const key = wageRateTypeLabelKeys[rateType];
+  return key ? i18n.t(key) : rateType;
 }
 
 function formatAttendanceBlockRange(dates: string[]) {
@@ -593,12 +597,12 @@ export function Reports() {
     recipientDisplayName?: string | null;
     recipientName?: string | null;
     labourerId?: string | null;
-  }) => record.recipientDisplayName || record.recipientName || (record.labourerId ? labourName(record.labourerId) : t("reportsPage.unresolvedRecipient"));
+  }) => localizeSystemPlaceholder(t, record.recipientDisplayName || record.recipientName || null) || (record.labourerId ? labourName(record.labourerId) : t("reportsPage.unresolvedRecipient"));
   const advancePaymentSourceName = (record: {
     paymentSourceDisplayName?: string | null;
     sourceAccountName?: string | null;
     accountId?: string | null;
-  }) => record.paymentSourceDisplayName || record.sourceAccountName || accountName(record.accountId ?? "");
+  }) => localizeSystemPlaceholder(t, record.paymentSourceDisplayName || record.sourceAccountName || null) || accountName(record.accountId ?? "");
   const ledgerGroupTitle = (groupKey: AccountTransactionGroupKey) => ({
     expenses: t("reportsPage.groupExpenses"),
     advances: t("reportsPage.groupAdvances"),
@@ -765,9 +769,9 @@ export function Reports() {
           <article><span>{t("reportsPage.attendanceWages")}</span><strong>{money(attendanceTotals.wages)}</strong></article>
         </section>
         <section className="attendance-register-print-legend">
-          <span><b>P</b> {t("reportsPage.present")}</span>
-          <span><b>½</b> {t("reportsPage.halfDay")}</span>
-          <span><b>A</b> {t("reportsPage.absent")}</span>
+          <span><b>{t("reportsPage.presentMark")}</b> {t("reportsPage.present")}</span>
+          <span><b>{t("reportsPage.halfDayPrintMark")}</b> {t("reportsPage.halfDay")}</span>
+          <span><b>{t("reportsPage.absentMark")}</b> {t("reportsPage.absent")}</span>
           <span><b>-</b> {t("reportsPage.noEntry")}</span>
         </section>
         <div className="attendance-register-print-table-wrap">
@@ -788,9 +792,9 @@ export function Reports() {
                 <th>#</th>
                 <th>{t("reportsPage.labourName")}</th>
                 <th>{t("reportsPage.group")}</th>
-                <th>P</th>
-                <th>1/2</th>
-                <th>A</th>
+                <th>{t("reportsPage.presentMark")}</th>
+                <th>{t("reportsPage.halfDayPrintMark")}</th>
+                <th>{t("reportsPage.absentMark")}</th>
                 <th>{t("reportsPage.payableDays")}</th>
                 <th>{t("reportsPage.wagesSar")}</th>
                 {page.dateBlock.map((date) => <th className="attendance-register-print-date-heading" key={date}><span>{formatShortDate(date)}</span></th>)}
@@ -900,7 +904,7 @@ export function Reports() {
               <span>{t("reportsPage.transactions")}: <span className="bidi-isolate">{formatNumber(section.transactionCount)}</span></span>
               <span>{t("reportsPage.adjustedInSettlements")}: <span className="bidi-isolate">{money(section.settled)}</span></span>
               <span>{t("reportsPage.outstanding")}: <span className="bidi-isolate">{money(section.outstanding)}</span></span>
-              <span>{t("reportsPage.lastAdvanceLabel")}: <span className="bidi-isolate">{section.lastAdvanceDate || "-"}</span></span>
+              <span>{t("reportsPage.lastAdvanceLabel")}: <span className="bidi-isolate">{section.lastAdvanceDate ? formatReportDateValue(section.lastAdvanceDate) : "-"}</span></span>
             </div>
             <table className="advance-report-print-table">
               <thead>
@@ -914,7 +918,7 @@ export function Reports() {
               <tbody>
                 {section.records.map((record) => (
                   <tr key={record.id}>
-                    <td className="bidi-isolate">{record.date}</td>
+                    <td className="bidi-isolate">{formatReportDateValue(record.date)}</td>
                     <td>{advancePaymentSourceName(record)}</td>
                     <td>{record.notes || "-"}</td>
                     <td className="is-amount bidi-isolate">{formatNumber(record.amount)}</td>
@@ -1067,7 +1071,7 @@ export function Reports() {
   }, [attendanceDateBlocks, attendanceLabourBlockSize, attendanceLabourBlocks, attendanceSummary]);
   const bootstrapFarm = bootstrapQuery.data?.farms.find((farm) => farm.id === bootstrapQuery.data?.activeFarmId) ?? null;
   const bootstrapSeason = bootstrapQuery.data?.seasons.find((season) => season.id === bootstrapQuery.data?.activeSeasonId) ?? null;
-  const printGeneratedAt = useMemo(() => printTimestampFormatter.format(new Date()), [attendanceTotals, attendanceDates.length, report, from, to, groupFilter, selectedLabourerIds.join(","), bootstrapQuery.dataUpdatedAt, user?.displayName, user?.email]);
+  const printGeneratedAt = useMemo(() => formatPrintTimestamp(new Date()), [attendanceTotals, attendanceDates.length, report, from, to, groupFilter, selectedLabourerIds.join(","), bootstrapQuery.dataUpdatedAt, user?.displayName, user?.email]);
   const printGeneratedBy = user?.displayName ?? user?.email ?? t("reportsPage.unknown");
   const selectedLabourNames = selectedLabourerIds.map((id) => labourById.get(id)?.name).filter(Boolean).join(", ");
   const attendanceRegisterGroupLabel = groupFilter === ungroupedValue ? t("reportsPage.ungrouped") : groupFilter || t("reportsPage.allGroups");
@@ -1170,7 +1174,7 @@ export function Reports() {
   const advanceHeaderGroupLabel = groupFilter === ungroupedValue ? t("reportsPage.ungrouped") : groupFilter || t("reportsPage.allGroups");
   const advanceHeaderLabourLabel = selectedLabourerIds.length > 0 ? selectedLabourerIds.map((id) => labourById.get(id)?.name).filter(Boolean).join(", ") : t("reportsPage.allLabour");
   const advanceHeaderSourceLabel = accountId ? accountName(accountId) : t("reportsPage.allAccounts");
-  const advanceReportGeneratedAt = useMemo(() => printTimestampFormatter.format(new Date()), [advanceReportTotals.adjustedInSettlements, advanceReportTotals.outstandingAdvances, advanceReportTotals.postedSettlements, advanceReportTotals.totalAdvances, advanceReportTotals.transactions, advanceReportTotals.uniqueLabourers]);
+  const advanceReportGeneratedAt = useMemo(() => formatPrintTimestamp(new Date()), [advanceReportTotals.adjustedInSettlements, advanceReportTotals.outstandingAdvances, advanceReportTotals.postedSettlements, advanceReportTotals.totalAdvances, advanceReportTotals.transactions, advanceReportTotals.uniqueLabourers]);
   const activeVouchers = useMemo(() => getActiveVouchers(vouchers), [vouchers]);
   const legacyOnlyVouchers = useMemo(() => activeVouchers.filter((item) => !replacedLegacySourceIds.has(item.id)), [activeVouchers, replacedLegacySourceIds]);
   const generalExpenseVouchers = useMemo(() => getGeneralExpenseVouchers(legacyOnlyVouchers, activeSettlements), [activeSettlements, legacyOnlyVouchers]);
@@ -2180,7 +2184,7 @@ export function Reports() {
           <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.labour"), t("reportsPage.transactions"), t("reportsPage.total"), t("reportsPage.netBalance")]} rows={advanceSummary.map((item) => ({ id: item.labourer.id, title: item.labourer.name, value: money(item.total), meta: `${item.records.length} ${t("reportsPage.transactions")} · ${t("reportsPage.netBalance")}: ${money(item.outstanding)}`, cells: [item.labourer.name, item.records.length, money(item.total), money(item.outstanding)], details: [[t("reportsPage.account"), [...new Set(item.records.map((record) => advancePaymentSourceName(record)))].join(", ")], [t("reportsPage.status"), translateStatus(t, item.labourer.active === false ? "inactive" : "active")]] }))} />
         </ReportShell>}
         {views.advances === "log" && <ReportShell title={t("reportsPage.advanceLog")} rangeLabel={rangeLabel} sectionId="advance-log" onPrint={() => printSection("advance-report-print")} onExport={exportAdvanceCsv} printLabel={t("reportsPage.exportPdf")}>
-          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.advanceAmount"), t("reportsPage.recovered"), t("reportsPage.account"), t("reportsPage.status"), t("reportsPage.reference")]} rows={advanceRows.map((item) => ({ id: item.id, title: advanceRecipientName(item), value: money(item.amount), meta: `${item.date} · ${advancePaymentSourceName(item)}`, cells: [item.date, advanceRecipientName(item), money(item.amount), money(item.recoveredAmount), advancePaymentSourceName(item), translateStatus(t, item.status), item.voucherNumber], details: [[t("reportsPage.labour"), advanceRecipientName(item)], [t("reportsPage.account"), advancePaymentSourceName(item)], [t("reportsPage.advanceAmount"), money(item.amount)], [t("reportsPage.recovered"), money(item.recoveredAmount)], [t("reportsPage.status"), translateStatus(t, item.status)], [t("reportsPage.notes"), item.notes || "-"], [t("reportsPage.reference"), item.voucherNumber]], onOpen: () => navigate(`/workspace/labour-advances?recordId=${item.id}`) }))} />
+          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.advanceAmount"), t("reportsPage.recovered"), t("reportsPage.account"), t("reportsPage.status"), t("reportsPage.reference")]} rows={advanceRows.map((item) => ({ id: item.id, title: advanceRecipientName(item), value: money(item.amount), meta: `${formatReportDateValue(item.date)} · ${advancePaymentSourceName(item)}`, cells: [formatReportDateValue(item.date), advanceRecipientName(item), money(item.amount), money(item.recoveredAmount), advancePaymentSourceName(item), translateStatus(t, item.status), item.voucherNumber], details: [[t("reportsPage.labour"), advanceRecipientName(item)], [t("reportsPage.account"), advancePaymentSourceName(item)], [t("reportsPage.advanceAmount"), money(item.amount)], [t("reportsPage.recovered"), money(item.recoveredAmount)], [t("reportsPage.status"), translateStatus(t, item.status)], [t("reportsPage.notes"), item.notes || "-"], [t("reportsPage.reference"), item.voucherNumber]], onOpen: () => navigate(`/workspace/labour-advances?recordId=${item.id}`) }))} />
         </ReportShell>}
         <section className="record-panel reports-print-section reports-print-only" data-print-section="advance-report-print" aria-hidden="true">
           <div className="advance-report-print-template">
@@ -2211,13 +2215,13 @@ export function Reports() {
             meta: `${t("wageRatesPage.halfDayRate")}: ${money(normalizeHalfDayRate(rate))}`,
             cells: [
               labourName(rate.labourerId),
-              rate.effectiveFrom,
-              rate.effectiveTo || "-",
+              formatReportDateValue(rate.effectiveFrom),
+              rate.effectiveTo ? formatReportDateValue(rate.effectiveTo) : "-",
               money(rate.dailyRate),
               money(normalizeHalfDayRate(rate)),
               t(`wageRatesPage.status.${getWageRateStatus(rate, todayKey())}`),
             ],
-            details: [[t("wageRatesPage.rateType"), rate.rateType], [t("reportsPage.notes"), rate.notes || "-"]],
+            details: [[t("wageRatesPage.rateType"), wageRateTypeLabel(rate.rateType)], [t("reportsPage.notes"), rate.notes || "-"]],
           }))}
         />
       </ReportShell>}
@@ -2240,7 +2244,7 @@ export function Reports() {
             <div>
               <h3>{t("reportsPage.byAccount")}</h3>
               <div className="reports-summary-list">
-                {expenseAccountTotals.map(([name, value]) => <article key={name}><span>{name}</span><strong>{money(value)}</strong></article>)}
+                {expenseAccountTotals.map(([name, value]) => <article key={name}><span>{localizeSystemPlaceholder(t, name)}</span><strong>{money(value)}</strong></article>)}
               </div>
             </div>
           </div>
@@ -2253,10 +2257,10 @@ export function Reports() {
               id: item.id,
               title: getVoucherDisplayNumber(item) || item.voucherNumber,
               value: money(item.amount),
-              meta: item.date,
+              meta: formatReportDateValue(item.date),
               cells: [
                 getVoucherDisplayNumber(item) || item.voucherNumber,
-                item.date,
+                formatReportDateValue(item.date),
                 lines.length > 1 ? `${firstLine?.description ?? item.description} +${lines.length - 1} ${t("expensesPage.moreItems")}` : item.description,
                 firstLine ? expenseLabel(firstLine.category, firstLine.subcategory) : expenseLabel(item.category, item.subcategory),
                 accountName(item.accountId),
@@ -2267,8 +2271,8 @@ export function Reports() {
             };
           }), ...canonicalExpenseRows.map((item) => {
             const sources = canonicalExpenseAccountsByDue.get(item.id) ?? [];
-            const sourceLabel = sources.map((source) => `${source.accountName} — ${money(source.amount)}`).join("; ") || t("reportsPage.unattributed");
-            return { id: item.id, title: item.dueNumber ?? item.recipientName, value: money(item.amount), meta: item.date, cells: [item.dueNumber ?? "-", item.date, item.description, t("reportsPage.labourWagesCategory"), sourceLabel, money(item.amount)], details: [[t("reportsPage.status"), translateStatus(t, item.status)], [t("reportsPage.recipient"), item.recipientName], ...sources.map((source) => [translateStatus(t, source.settlementType), `${source.accountName} — ${money(source.amount)}`] as [string, ReactNode])] as [string, ReactNode][] };
+            const sourceLabel = sources.map((source) => `${localizeSystemPlaceholder(t, source.accountName)} — ${money(source.amount)}`).join("; ") || t("reportsPage.unattributed");
+            return { id: item.id, title: item.dueNumber ?? localizeSystemPlaceholder(t, item.recipientName), value: money(item.amount), meta: formatReportDateValue(item.date), cells: [item.dueNumber ?? "-", formatReportDateValue(item.date), item.description, t("reportsPage.labourWagesCategory"), sourceLabel, money(item.amount)], details: [[t("reportsPage.status"), translateStatus(t, item.status)], [t("reportsPage.recipient"), localizeSystemPlaceholder(t, item.recipientName)], ...sources.map((source) => [translateStatus(t, source.settlementType), `${localizeSystemPlaceholder(t, source.accountName)} — ${money(source.amount)}`] as [string, ReactNode])] as [string, ReactNode][] };
           })]} />
         </ReportShell>}
       </>}
@@ -2284,8 +2288,8 @@ export function Reports() {
           id: item.sale.id,
           title: item.invoiceNumber === "-" ? item.product : item.invoiceNumber,
           value: money(item.sale.amount),
-          meta: `${item.sale.date} | ${item.buyerName}`,
-          cells: [item.saleType, item.sale.date, item.invoiceNumber, item.buyerName, item.plot, item.dispatchReference, item.product, formatNumber(item.sale.quantity), item.unit, money(item.sale.unitPrice), money(item.sale.amount), item.paymentAccount, item.sale.paymentDate || "-", translateSalesStatus(item.paymentStatus), item.sale.remarks || "-"],
+          meta: `${formatReportDateValue(item.sale.date)} | ${item.buyerName}`,
+          cells: [item.saleType, formatReportDateValue(item.sale.date), item.invoiceNumber, item.buyerName, item.plot, item.dispatchReference, item.product, formatNumber(item.sale.quantity), item.unit, money(item.sale.unitPrice), money(item.sale.amount), item.paymentAccount, item.sale.paymentDate ? formatReportDateValue(item.sale.paymentDate) : "-", translateSalesStatus(item.paymentStatus), item.sale.remarks || "-"],
             details: [
               [t("reportsPage.saleType"), item.saleType],
             [t("reportsPage.dispatchReference"), item.dispatchReference],
@@ -2307,8 +2311,8 @@ export function Reports() {
           id: item.id,
           title: item.dispatchNumber,
           value: `${formatNumber(item.quantity)} ${item.unit}`,
-          meta: `${item.dispatch.date} | ${item.product}`,
-          cells: [item.dispatch.date, item.dispatchNumber, item.product, formatNumber(item.quantity), item.unit, item.vehicle, item.driver, item.linkedSales.map((sale) => invoiceReference(sale)).join(", ") || "-", formatNumber(item.soldQuantity), formatNumber(item.remainingQuantity), item.dispatch.remarks || item.dispatch.notes || "-"],
+          meta: `${formatReportDateValue(item.dispatch.date)} | ${item.product}`,
+          cells: [formatReportDateValue(item.dispatch.date), item.dispatchNumber, item.product, formatNumber(item.quantity), item.unit, item.vehicle, item.driver, item.linkedSales.map((sale) => invoiceReference(sale)).join(", ") || "-", formatNumber(item.soldQuantity), formatNumber(item.remainingQuantity), item.dispatch.remarks || item.dispatch.notes || "-"],
           details: [
             [t("reportsPage.soldQuantity"), formatNumber(item.soldQuantity)],
             [t("reportsPage.remainingQuantity"), formatNumber(item.remainingQuantity)],
@@ -2327,7 +2331,7 @@ export function Reports() {
           <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.partner"), t("reportsPage.purchaseVouchersColumn"), t("reportsPage.fundsGiven"), t("reportsPage.fundsReceived"), t("reportsPage.directLabourPayments"), t("reportsPage.outstandingLabourAdvancesColumn"), t("reportsPage.currentPartnerBalance")]} rows={partnerLiabilityPositions.map((item) => ({ id: item.key, title: item.name, value: money(item.currentPartnerBalance), meta: getPartnerBalanceState(item.currentPartnerBalance) === "partner_holds_business_money" ? t("reportsPage.partnerHoldsBusinessMoney") : t("reportsPage.farmOwesPartner"), cells: [item.name, money(item.purchaseVouchersPaid), money(item.transfersOut), money(item.transfersIn), money(item.labourSettlementCashPaid), money(item.outstandingLabourAdvances), money(item.currentPartnerBalance)], details: [[t("reportsPage.adjustments"), money(item.adjustments)], [t("reportsPage.fundsGiven"), money(item.transfersOut)], [t("reportsPage.fundsReceived"), money(item.transfersIn)], [t("reportsPage.totalLabourAdvancesPaidColumn"), money(item.totalLabourAdvancesPaid)], [t("reportsPage.directLabourPayments"), money(item.labourSettlementCashPaid)], [t("reportsPage.settledThroughWagesColumn"), money(item.settledAdvances)], [t("reportsPage.outstandingLabourAdvancesColumn"), money(item.outstandingLabourAdvances)], [t("reportsPage.moneyReturned"), money(item.moneyReturned)]] }))} />
         </ReportShell>}
         {views["partner-position"] === "ledger" && <ReportShell title={t("reportsPage.partnerLedger")} rangeLabel={rangeLabel} sectionId="partner-ledger" onPrint={() => printSection("partner-ledger")} onExport={exportPartnerLedger}>
-          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.partner"), t("reportsPage.type"), t("reportsPage.amount"), t("reportsPage.notes")]} rows={partnerRows.map((item) => ({ id: item.id, title: item.partnerName ?? `${item.fromPartner ?? "-"} → ${item.toPartner ?? "-"}`, value: money(item.amount), meta: item.date, cells: [item.date, item.partnerName ?? `${item.fromPartner ?? "-"} → ${item.toPartner ?? "-"}`, translateStatus(t, item.type), money(item.amount), item.notes || "-"], details: [[t("reportsPage.type"), translateStatus(t, item.type)], [t("reportsPage.notes"), item.notes || "-"]], onOpen: () => navigate(`/workspace/partner-ledger?recordId=${item.id}`) }))} />
+          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.partner"), t("reportsPage.type"), t("reportsPage.amount"), t("reportsPage.notes")]} rows={partnerRows.map((item) => ({ id: item.id, title: item.partnerName ?? `${item.fromPartner ?? "-"} → ${item.toPartner ?? "-"}`, value: money(item.amount), meta: formatReportDateValue(item.date), cells: [formatReportDateValue(item.date), item.partnerName ?? `${item.fromPartner ?? "-"} → ${item.toPartner ?? "-"}`, translateStatus(t, item.type), money(item.amount), item.notes || "-"], details: [[t("reportsPage.type"), translateStatus(t, item.type)], [t("reportsPage.notes"), item.notes || "-"]], onOpen: () => navigate(`/workspace/partner-ledger?recordId=${item.id}`) }))} />
         </ReportShell>}
       </>}
 
@@ -2397,7 +2401,7 @@ export function Reports() {
                   <span className="account-transaction-group__title">{expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}{partnerLiabilityGroupTitle(group.groupKey)}</span>
                   <span className="account-transaction-group__meta"><strong>{money(partnerLiabilityGroupDisplayTotal(group.groupKey, group.totalAmount))}</strong><small>{t("reportsPage.transactionCount", { count: group.count })}</small></span>
                 </button>
-                {expanded && <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.account"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.debit"), t("reportsPage.credit"), t("reportsPage.runningBalance")]} rows={group.transactions.map((item) => ({ id: item.id, title: item.reference, value: item.memoAmount !== undefined ? money(item.memoAmount) : (item.credit ? `+${money(item.credit)}` : `-${money(item.debit)}`), meta: `${item.date} | ${item.accountName}`, cells: [item.date, item.accountName, item.typeLabel, item.reference, item.memoAmount !== undefined ? "-" : (item.debit ? money(item.debit) : "-"), item.memoAmount !== undefined ? money(item.memoAmount) : (item.credit ? money(item.credit) : "-"), money(item.running)], details: [[t("reportsPage.description"), item.description], [t("reportsPage.runningBalance"), money(item.running)], ...(item.memoAmount !== undefined ? [[t("reportsPage.memo"), t("reportsPage.nonCashLabourAdvanceSettlement")] as [string, ReactNode]] : [])], onOpen: () => navigate(item.path) }))} />}
+                {expanded && <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.account"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.debit"), t("reportsPage.credit"), t("reportsPage.runningBalance")]} rows={group.transactions.map((item) => ({ id: item.id, title: item.reference, value: item.memoAmount !== undefined ? money(item.memoAmount) : (item.credit ? `+${money(item.credit)}` : `-${money(item.debit)}`), meta: `${formatReportDateValue(item.date)} | ${item.accountName}`, cells: [formatReportDateValue(item.date), item.accountName, item.typeLabel, item.reference, item.memoAmount !== undefined ? "-" : (item.debit ? money(item.debit) : "-"), item.memoAmount !== undefined ? money(item.memoAmount) : (item.credit ? money(item.credit) : "-"), money(item.running)], details: [[t("reportsPage.description"), item.description], [t("reportsPage.runningBalance"), money(item.running)], ...(item.memoAmount !== undefined ? [[t("reportsPage.memo"), t("reportsPage.nonCashLabourAdvanceSettlement")] as [string, ReactNode]] : [])], onOpen: () => navigate(item.path) }))} />}
               </section>;
             })}
           </div>)
@@ -2409,7 +2413,7 @@ export function Reports() {
                   <span className="account-transaction-group__title">{expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}{ledgerGroupTitle(group.groupKey)}</span>
                   <span className="account-transaction-group__meta"><strong>{money(group.totalAmount)}</strong><small>{t("reportsPage.transactionCount", { count: group.count })}</small></span>
                 </button>
-                {expanded && <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.account"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.debit"), t("reportsPage.credit"), t("reportsPage.runningBalance")]} rows={group.transactions.map((item) => ({ id: item.id, title: item.reference, value: item.memoAmount !== undefined ? money(item.memoAmount) : (item.credit ? `+${money(item.credit)}` : `-${money(item.debit)}`), meta: `${item.date} | ${item.accountName}`, cells: [item.date, item.accountName, item.typeLabel, item.reference, item.memoAmount !== undefined ? "-" : (item.debit ? money(item.debit) : "-"), item.memoAmount !== undefined ? money(item.memoAmount) : (item.credit ? money(item.credit) : "-"), money(item.running)], details: [[t("reportsPage.description"), item.description], [t("reportsPage.runningBalance"), money(item.running)], ...(item.memoAmount !== undefined ? [[t("reportsPage.memo"), t("reportsPage.nonCashLabourAdvanceSettlement")] as [string, ReactNode]] : [])], onOpen: () => navigate(item.path) }))} />}
+                {expanded && <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.account"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.debit"), t("reportsPage.credit"), t("reportsPage.runningBalance")]} rows={group.transactions.map((item) => ({ id: item.id, title: item.reference, value: item.memoAmount !== undefined ? money(item.memoAmount) : (item.credit ? `+${money(item.credit)}` : `-${money(item.debit)}`), meta: `${formatReportDateValue(item.date)} | ${item.accountName}`, cells: [formatReportDateValue(item.date), item.accountName, item.typeLabel, item.reference, item.memoAmount !== undefined ? "-" : (item.debit ? money(item.debit) : "-"), item.memoAmount !== undefined ? money(item.memoAmount) : (item.credit ? money(item.credit) : "-"), money(item.running)], details: [[t("reportsPage.description"), item.description], [t("reportsPage.runningBalance"), money(item.running)], ...(item.memoAmount !== undefined ? [[t("reportsPage.memo"), t("reportsPage.nonCashLabourAdvanceSettlement")] as [string, ReactNode]] : [])], onOpen: () => navigate(item.path) }))} />}
               </section>;
             })}
           </div>)}
@@ -2427,10 +2431,10 @@ export function Reports() {
               <div><dt>{t("reportsPage.invoiceNumber")}</dt><dd>{selectedSaleRecord.invoiceNumber}</dd></div>
               <div><dt>{t("reportsPage.buyerName")}</dt><dd>{selectedSaleRecord.buyerName}</dd></div>
               <div><dt>{t("reportsPage.saleType")}</dt><dd>{selectedSaleRecord.saleType}</dd></div>
-              <div><dt>{t("reportsPage.saleDate")}</dt><dd>{selectedSaleRecord.sale.date}</dd></div>
-              <div><dt>{t("reportsPage.dispatchDate")}</dt><dd>{selectedSaleRecord.sale.dispatchDate ?? "-"}</dd></div>
-              <div><dt>{t("reportsPage.deliveryDate")}</dt><dd>{selectedSaleRecord.sale.deliveryDate ?? "-"}</dd></div>
-              <div><dt>{t("reportsPage.paymentDate")}</dt><dd>{selectedSaleRecord.sale.paymentDate ?? "-"}</dd></div>
+              <div><dt>{t("reportsPage.saleDate")}</dt><dd>{formatReportDateValue(selectedSaleRecord.sale.date)}</dd></div>
+              <div><dt>{t("reportsPage.dispatchDate")}</dt><dd>{selectedSaleRecord.sale.dispatchDate ? formatReportDateValue(selectedSaleRecord.sale.dispatchDate) : "-"}</dd></div>
+              <div><dt>{t("reportsPage.deliveryDate")}</dt><dd>{selectedSaleRecord.sale.deliveryDate ? formatReportDateValue(selectedSaleRecord.sale.deliveryDate) : "-"}</dd></div>
+              <div><dt>{t("reportsPage.paymentDate")}</dt><dd>{selectedSaleRecord.sale.paymentDate ? formatReportDateValue(selectedSaleRecord.sale.paymentDate) : "-"}</dd></div>
               <div><dt>{t("reportsPage.plot")}</dt><dd>{selectedSaleRecord.plot}</dd></div>
               <div><dt>{t("reportsPage.product")}</dt><dd>{selectedSaleRecord.product}</dd></div>
               <div><dt>{t("reportsPage.quantity")}</dt><dd>{formatNumber(selectedSaleRecord.sale.quantity)} {selectedSaleRecord.unit}</dd></div>
@@ -2465,7 +2469,7 @@ export function Reports() {
           <div className="worker-dialog__body">
             <dl className="worker-stats">
               <div><dt>{t("reportsPage.dispatchNumber")}</dt><dd>{selectedDispatchRecord.dispatchNumber}</dd></div>
-              <div><dt>{t("reportsPage.dispatchDate")}</dt><dd>{selectedDispatchRecord.dispatch.date}</dd></div>
+              <div><dt>{t("reportsPage.dispatchDate")}</dt><dd>{formatReportDateValue(selectedDispatchRecord.dispatch.date)}</dd></div>
               <div><dt>{t("reportsPage.product")}</dt><dd>{selectedDispatchRecord.product}</dd></div>
               <div><dt>{t("reportsPage.quantity")}</dt><dd>{formatNumber(selectedDispatchRecord.quantity)} {selectedDispatchRecord.unit}</dd></div>
               <div><dt>{t("reportsPage.vehicle")}</dt><dd>{selectedDispatchRecord.vehicle}</dd></div>

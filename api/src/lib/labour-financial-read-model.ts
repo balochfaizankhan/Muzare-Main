@@ -1382,10 +1382,20 @@ async function loadLabourFinancialReadModelUncached(input: { workspaceId: string
     labourPayments: amount(labourPaymentsByAccount.get(position.accountId) ?? 0),
   }));
   const labourLedger = journalEvents.filter((event) => !event.legacy && (event.labourDueEffect !== 0 || event.labourAdvanceEffect !== 0 || event.expenseEffect !== 0));
+  // Activity items carry structured fields only — no prebuilt English sentences. The PWA
+  // composes the localized title/detail from eventType/status/reference fields through its
+  // i18n dictionaries; `description` is the stored due/voucher description (user-editable
+  // free text), surfaced separately so the client can render it verbatim when it wants to.
   const activity = journalEvents.filter((event) => !event.legacy).map((event) => ({
     id: `labour:${event.id}`, date: event.postedAt, module: "labour" as const,
-    title: event.eventType === "REVERSAL" ? `Reversed ${event.originalEventType?.toLowerCase().replaceAll("_", " ") ?? "labour event"}` : event.eventType.toLowerCase().replaceAll("_", " "),
-    detail: `${event.dueNumber ?? event.voucherNumber ?? event.recipientName} · ${event.description}`,
+    eventType: event.eventType,
+    originalEventType: event.originalEventType,
+    dueNumber: event.dueNumber,
+    voucherNumber: event.voucherNumber,
+    recipientName: event.recipientName,
+    amount: event.amount,
+    eventDate: event.date,
+    description: event.description,
     status: event.status, sourceId: event.voucherId ?? event.dueId ?? event.advanceApplicationId,
     canonical: true as const,
   }));

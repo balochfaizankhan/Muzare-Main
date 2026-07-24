@@ -3,6 +3,8 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth/AuthProvider";
 import { fetchImportVisibilityAudit } from "../lib/api";
+import { formatDate } from "../lib/format";
+import { translateRecordType } from "../locales/adminLocalizationBundle";
 import { offlineDb } from "../lib/offline-db";
 import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { getActiveVouchers } from "../lib/voucherCollections";
@@ -94,53 +96,57 @@ export function ImportVisibilityAuditPanel({ workspaceId, title }: Props) {
   });
 
   const rows = useMemo(() => audit.data ? [
-    ["Workforce", audit.data.statuses.workforce, audit.data.ui.workforce],
-    ["Attendance", audit.data.statuses.attendance, audit.data.ui.attendance],
-    ["Expenses", audit.data.statuses.expenses, audit.data.ui.expenses],
-    ["Advances", audit.data.statuses.advances, audit.data.ui.advances],
-    ["Reports", audit.data.statuses.reports, audit.data.ui.reports],
-  ] : [], [audit.data]);
+    [t("systemValues.permissions.workforce"), audit.data.statuses.workforce, audit.data.ui.workforce],
+    [t("systemValues.permissions.attendance"), audit.data.statuses.attendance, audit.data.ui.attendance],
+    [t("systemValues.permissions.expenses"), audit.data.statuses.expenses, audit.data.ui.expenses],
+    [t("systemValues.permissions.advances"), audit.data.statuses.advances, audit.data.ui.advances],
+    [t("systemValues.permissions.reports"), audit.data.statuses.reports, audit.data.ui.reports],
+  ] : [], [audit.data, t]);
+
+  const lastSyncLabel = sync.lastSyncTime
+    ? formatDate(new Date(sync.lastSyncTime), { dateStyle: "medium", timeStyle: "short" })
+    : t("importVisibilityAudit.notYetSynced");
 
   return (
     <section className="panel">
       <div className="panel-heading">
         <div>
-          <h2>{title ?? "Import Visibility Audit"}</h2>
-          <p>Identify whether a visibility issue is caused by import, sync, IndexedDB hydration, or active farm/season context.</p>
+          <h2>{title ?? t("importVisibilityAudit.title")}</h2>
+          <p>{t("importVisibilityAudit.description")}</p>
         </div>
         <button type="button" className="secondary-button" onClick={() => void audit.refetch()} disabled={audit.isFetching || !token || !workspaceId}>
-          {audit.isFetching ? "Running..." : "Run Visibility Audit"}
+          {audit.isFetching ? t("importVisibilityAudit.running") : t("importVisibilityAudit.run")}
         </button>
       </div>
-      {audit.error ? <p className="error">{audit.error instanceof Error ? audit.error.message : "Unable to run visibility audit."}</p> : null}
-      {!audit.data ? <p className="context-message">{t("layout.lastSuccessfulSync", { value: sync.lastSyncTime ? new Date(sync.lastSyncTime).toLocaleString() : "Not yet synchronized" })}</p> : null}
+      {audit.error ? <p className="error">{audit.error instanceof Error ? audit.error.message : t("importVisibilityAudit.failed")}</p> : null}
+      {!audit.data ? <p className="context-message">{t("layout.lastSuccessfulSync", { value: lastSyncLabel })}</p> : null}
       {audit.data ? (
         <div className="migration-issues">
-          <h3>Server Import Status</h3>
-          <p><b>Import batch id</b> {audit.data.server.latestImport.batchId ?? "-"}</p>
-          <p><b>Source file hash</b> {audit.data.server.latestImport.fileHash ?? "-"}</p>
-          <p><b>Farms imported</b> {audit.data.server.server.farmsImported}</p>
-          <p><b>Seasons imported</b> {audit.data.server.server.seasonsImported}</p>
-          <p><b>Operational records by entity</b> {audit.data.server.server.operationalRecordsByEntity.length ? audit.data.server.server.operationalRecordsByEntity.map((item) => `${item.entityType}: ${item.count}`).join(" · ") : "-"}</p>
-          <p><b>Active context</b> {audit.data.server.context.activeFarmName ?? "No farm"} · {audit.data.server.context.activeSeasonName ?? "No season"}</p>
+          <h3>{t("importVisibilityAudit.serverImportStatus")}</h3>
+          <p><b>{t("importVisibilityAudit.importBatchId")}</b> {audit.data.server.latestImport.batchId ?? "-"}</p>
+          <p><b>{t("importVisibilityAudit.sourceFileHash")}</b> {audit.data.server.latestImport.fileHash ?? "-"}</p>
+          <p><b>{t("importVisibilityAudit.farmsImported")}</b> {audit.data.server.server.farmsImported}</p>
+          <p><b>{t("importVisibilityAudit.seasonsImported")}</b> {audit.data.server.server.seasonsImported}</p>
+          <p><b>{t("importVisibilityAudit.operationalRecordsByEntity")}</b> {audit.data.server.server.operationalRecordsByEntity.length ? audit.data.server.server.operationalRecordsByEntity.map((item) => `${translateRecordType(t, item.entityType)}: ${item.count}`).join(" · ") : "-"}</p>
+          <p><b>{t("importVisibilityAudit.activeContext")}</b> {audit.data.server.context.activeFarmName ?? t("importVisibilityAudit.noFarm")} · {audit.data.server.context.activeSeasonName ?? t("importVisibilityAudit.noSeason")}</p>
           {audit.data.server.context.contextWarning ? <p className="context-message">{audit.data.server.context.contextWarning}</p> : null}
 
-          <h3>Client Sync Status</h3>
-          <p><b>Last sync time</b> {sync.lastSyncTime ? new Date(sync.lastSyncTime).toLocaleString() : "Not yet synchronized"}</p>
-          <p><b>Operational records downloaded</b> {audit.data.client.downloaded}</p>
-          <p><b>IndexedDB counts</b> labourers: {audit.data.client.labourers} · attendance: {audit.data.client.attendance} · advances: {audit.data.client.advances} · vouchers: {audit.data.client.vouchers} · sales: {audit.data.client.sales} · dispatches: {audit.data.client.dispatches} · accounts: {audit.data.client.accounts}</p>
+          <h3>{t("importVisibilityAudit.clientSyncStatus")}</h3>
+          <p><b>{t("importVisibilityAudit.lastSyncTime")}</b> {lastSyncLabel}</p>
+          <p><b>{t("importVisibilityAudit.recordsDownloaded")}</b> {audit.data.client.downloaded}</p>
+          <p><b>{t("importVisibilityAudit.indexedDbCounts")}</b> {t("adminRecordTypes.labourers")}: {audit.data.client.labourers} · {t("adminRecordTypes.attendance")}: {audit.data.client.attendance} · {t("adminRecordTypes.advances")}: {audit.data.client.advances} · {t("adminRecordTypes.vouchers")}: {audit.data.client.vouchers} · {t("adminRecordTypes.sales")}: {audit.data.client.sales} · {t("adminRecordTypes.dispatches")}: {audit.data.client.dispatches} · {t("adminRecordTypes.accounts")}: {audit.data.client.accounts}</p>
 
-          <h3>UI Visibility Status</h3>
+          <h3>{t("importVisibilityAudit.uiVisibilityStatus")}</h3>
           <div className="migration-visibility-grid">
             {rows.map(([label, status, count]) => {
               const item = status as { imported: boolean; synced: boolean; visible: boolean };
               return (
                 <article key={String(label)} className="migration-visibility-card">
                   <strong>{String(label)}</strong>
-                  <span>Visible count: {String(count)}</span>
-                  <small>{item.imported ? "✓" : "✗"} Imported to server</small>
-                  <small>{item.synced ? "✓" : "✗"} Synced to device</small>
-                  <small>{item.visible ? "✓" : "✗"} Visible in module</small>
+                  <span>{t("importVisibilityAudit.visibleCount", { count: Number(count) })}</span>
+                  <small>{item.imported ? "✓" : "✗"} {t("importVisibilityAudit.importedToServer")}</small>
+                  <small>{item.synced ? "✓" : "✗"} {t("importVisibilityAudit.syncedToDevice")}</small>
+                  <small>{item.visible ? "✓" : "✗"} {t("importVisibilityAudit.visibleInModule")}</small>
                 </article>
               );
             })}

@@ -19,6 +19,8 @@ import {
   type WorkspaceRole,
   type WorkspaceTeamMember,
 } from "../../lib/api";
+import { formatDate } from "../../lib/format";
+import { translateStatus } from "../../lib/statusLabels";
 import { roleModulePermissions } from "../../lib/permissions";
 
 const modules: WorkspaceModule[] = ["dashboard", "workforce", "attendance", "advances", "wages", "expenses", "sales", "dispatch", "inventory", "accounts", "reports", "settings", "team"];
@@ -185,7 +187,7 @@ export function WorkspaceTeam() {
       {activityMember && <div className="worker-dialog-backdrop"><section className="worker-action-dialog permission-dialog"><header><div><h2>{t("workspaceTeam.activity")}</h2><p>{activityMember.name || activityMember.email}</p></div><button type="button" onClick={() => setActivityMember(null)}>×</button></header><div className="worker-action-dialog__body">
         {activity.isLoading && <p>{t("workspaceTeam.loadingActivity")}</p>}
         {activity.isError && <p className="error">{activity.error.message}</p>}
-        {activity.data?.activity.map((item) => <article className="team-activity" key={item.id}><strong>{item.action}</strong><span>{item.entityType}</span><small>{new Date(item.createdAt).toLocaleString()}</small></article>)}
+        {activity.data?.activity.map((item) => <article className="team-activity" key={item.id}><strong>{t(`teamActivity.${item.action}`, { defaultValue: translateStatus(t, item.action) })}</strong><span>{t(`teamActivity.${item.entityType}`, { defaultValue: translateStatus(t, item.entityType) })}</span><small>{formatDate(item.createdAt, { day: "2-digit", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })}</small></article>)}
         {activity.data?.activity.length === 0 && <p>{t("workspaceTeam.noActivity")}</p>}
       </div><footer><button className="secondary-button" type="button" onClick={() => setActivityMember(null)}>{t("common.close")}</button></footer></section></div>}
     </main>

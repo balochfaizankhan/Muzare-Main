@@ -535,7 +535,9 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
       const errorStatus = error instanceof ApiError ? error.status : undefined;
       const errorCode = syncErrorCode(error);
       const errorMessage = error instanceof Error ? error.message : "Unknown sync failure.";
-      if (error instanceof Error && error.message.includes("PostgreSQL is the primary workspace database")) {
+      // ApiError.message is localized for display; the programmatic check must use the raw
+      // backend text preserved on serverMessage (message kept as a fallback for non-ApiErrors).
+      if (error instanceof Error && ((error instanceof ApiError && error.serverMessage?.includes("PostgreSQL is the primary workspace database")) || error.message.includes("PostgreSQL is the primary workspace database"))) {
         if (mutation.operation === "delete") await tableFor(mutation.entity).delete((mutation.payload as LocalRecord).id);
         else await tableFor(mutation.entity).update((mutation.payload as LocalRecord).id, { pendingSync: false });
         await offlineDb.pendingMutations.delete(mutation.id);

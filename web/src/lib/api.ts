@@ -1,10 +1,15 @@
 import { config } from "../config";
+import i18n from "../i18n";
+import { localizeApiErrorMessage, localizeMissingFieldsSuffix } from "./apiErrorLocalization";
 
 export class ApiError extends Error {
   readonly code?: string;
-  constructor(message: string, readonly status: number, readonly details?: unknown, readonly responseBody?: unknown) {
+  /** Raw backend English message, preserved for programmatic checks and support logs. `message` itself is localized for display. */
+  readonly serverMessage?: string;
+  constructor(message: string, readonly status: number, readonly details?: unknown, readonly responseBody?: unknown, serverMessage?: string) {
     super(message);
     this.code = (responseBody as { code?: string } | null | undefined)?.code;
+    this.serverMessage = serverMessage;
   }
 }
 
@@ -1403,10 +1408,10 @@ async function apiRequest<T>(path: string, options: RequestInit = {}, token?: st
       const isMigrationImport = requestOptions.debugLabel === "migration-import-import";
       const isSettlementCreate = requestOptions.debugLabel === "labour-wage-settlement-create";
       throw new Error(isMigrationImport
-        ? "Import is still running. Attendance is processing in the background."
+        ? i18n.t("apiErrors.timeoutImportRunning")
         : isSettlementCreate
-          ? "The request is taking longer than expected. Checking settlement status..."
-          : "Request is taking longer than expected. Please try again.");
+          ? i18n.t("apiErrors.timeoutSettlementCreate")
+          : i18n.t("apiErrors.timeoutRetry"));
     }
     throw error;
   } finally {
@@ -1417,8 +1422,11 @@ async function apiRequest<T>(path: string, options: RequestInit = {}, token?: st
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { message?: string; fields?: string[]; details?: unknown } | null;
     if (import.meta.env.DEV && requestOptions.debugLabel) console.error(`[${requestOptions.debugLabel}] response`, response.status, body);
-    const fields = body?.fields?.length ? ` Missing or invalid fields: ${body.fields.join(", ")}.` : "";
-    throw new ApiError(`${body?.message ?? `Request failed with status ${response.status}.`}${fields}`, response.status, body?.details, body);
+    // Localize at the boundary: every page renders ApiError.message verbatim in toasts, so the
+    // backend's English text must be resolved to the active language exactly once, here. The
+    // untranslated original stays available as ApiError.serverMessage.
+    const localizedMessage = localizeApiErrorMessage(body?.message, response.status);
+    throw new ApiError(`${localizedMessage}${localizeMissingFieldsSuffix(body?.fields)}`, response.status, body?.details, body, body?.message);
   }
 
   if (response.status === 204) return undefined as T;
@@ -2139,7 +2147,14 @@ export type LabourFinancialReadModel = {
   expenses: Array<{ id: string; dueId?: string | null; dueNumber?: string | null; date: string; recipientScope?: LabourRecipientScope | null; labourerId?: string | null; labourGroupId?: string | null; recipientName: string; description: string; status: string; amount: number; paidAmount: number; appliedAdvanceAmount: number; outstandingAmount: number; active: boolean; canonical: true }>;
   expenseAccountAttributions: LabourExpenseAccountAttribution[];
   labourPaymentEntries: LabourPaymentEntry[];
-  activity: Array<{ id: string; date: string; module: "labour"; title: string; detail: string; status: string; sourceId?: string | null; canonical: true }>;
+  activity: Array<{
+    id: string; date: string; module: "labour";
+    eventType: string; originalEventType?: string | null;
+    dueNumber?: string | null; voucherNumber?: string | null;
+    recipientName?: string | null; amount?: number | null; eventDate?: string | null;
+    description?: string | null;
+    status: string; sourceId?: string | null; canonical: true;
+  }>;
   currentLedger: Record<string, number>;
   labourPaymentsDue: { totalOutstanding: number; outstandingCount: number; overdueCount: number };
   advancePositions: Array<{ advancePositionId: string; canonicalVoucherId?: string | null; legacySourceRecordId?: string | null; sourceClassification: "CANONICAL" | "CANONICAL_LINKED_LEGACY" | "LEGACY_OPERATIONAL" | "LEGACY_NORMALIZED"; voucherId: string; voucherNumber: string; voucherDate: string; advanceDate: string; fundingAccountId?: string | null; fundingAccountName?: string | null; paymentSourceId?: string | null; paymentSourceDisplayName?: string | null; paymentSourceType?: string | null; fundingType?: string | null; partnerId?: string | null; partnerName?: string | null; sourceId?: string | null; labourerId?: string | null; labourerName?: string | null; labourGroupId?: string | null; labourGroupName?: string | null; recipientScope: LabourRecipientScope; recipientName: string; recipientDisplayName?: string; receivedByDisplayName?: string | null; originalAmount: number; appliedAmount: number; recoveredAmount: number; outstandingAmount: number; status: string; description: string; relatedApplicationIds: string[]; relatedRecoveryVoucherIds: string[]; needsReview: boolean; reviewReason?: string | null; canonical: boolean; legacy: boolean }>;
@@ -2391,7 +2406,7 @@ export async function openExpenseAttachment(token: string, workspaceId: string, 
   const response = await fetch(`${config.apiUrl}/v1/workspace/${workspaceId}/expenses/${expenseId}/attachments/${attachment.id}${suffix}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!response.ok) throw new ApiError("Unable to open receipt attachment.", response.status);
+  if (!response.ok) throw new ApiError(i18n.t("apiErrors.openReceiptFailed"), response.status);
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
   window.open(url, "_blank", "noopener,noreferrer");
@@ -2404,7 +2419,7 @@ export async function downloadMigrationImportFailures(token: string, jobId: stri
   });
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { message?: string } | null;
-    throw new ApiError(body?.message ?? "Unable to download migration import failures.", response.status);
+    throw new ApiError(body?.message ? localizeApiErrorMessage(body.message, response.status) : i18n.t("apiErrors.downloadImportFailuresFailed"), response.status, undefined, body, body?.message);
   }
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);

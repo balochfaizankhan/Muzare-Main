@@ -1,7 +1,14 @@
+import i18n from "../i18n";
 import type { LabourAdvancePosition } from "./api";
 import type { Labourer } from "./offline-db";
 
 const UNRESOLVED_SENTINELS = new Set(["Unresolved recipient", "Recipient unavailable"]);
+
+// Localized fallback titles for cards with no resolvable recipient. English stays the source of
+// truth for the backend sentinel wording; these keys mirror it per language (see backendSentinel
+// in src/i18n.ts).
+const unknownRecipientTitle = () => i18n.t("backendSentinel.unknownLabourRecipient");
+const groupAdvanceTitle = () => i18n.t("backendSentinel.groupAdvance");
 
 const cleanName = (value?: string | null) => {
   const trimmed = value?.trim();
@@ -37,7 +44,7 @@ export function resolveAdvanceCardIdentity(
     const name = cleanName(advance.labourerName) ?? cleanName(advance.financialOwnerName);
     const ownGroupName = advance.labourerId ? labourerById.get(advance.labourerId)?.group : undefined;
     return {
-      title: name ?? "Unknown labour recipient",
+      title: name ?? unknownRecipientTitle(),
       isGroupAdvance: false,
       groupLabel: cleanName(ownGroupName),
     };
@@ -46,9 +53,9 @@ export function resolveAdvanceCardIdentity(
     const individual = cleanName(advance.receivedByName);
     const groupLabel = cleanName(advance.labourGroupName) ?? cleanName(advance.financialOwnerName);
     if (individual) return { title: individual, isGroupAdvance: false, groupLabel };
-    if (groupLabel) return { title: "Group advance", isGroupAdvance: true, groupLabel };
-    return { title: "Unknown labour recipient", isGroupAdvance: false, groupLabel: null };
+    if (groupLabel) return { title: groupAdvanceTitle(), isGroupAdvance: true, groupLabel };
+    return { title: unknownRecipientTitle(), isGroupAdvance: false, groupLabel: null };
   }
   const name = cleanName(advance.financialOwnerName);
-  return { title: name ?? "Unknown labour recipient", isGroupAdvance: false, groupLabel: null };
+  return { title: name ?? unknownRecipientTitle(), isGroupAdvance: false, groupLabel: null };
 }

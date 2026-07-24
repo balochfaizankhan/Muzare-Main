@@ -1,3 +1,4 @@
+import i18n from "../i18n";
 import type { DateType, Dispatch, Sale } from "./offline-db";
 import { isActiveOperationalRecord } from "./operationalRecords";
 
@@ -23,7 +24,8 @@ export const saleDispatchKey = (sale: Pick<Sale, "dispatchId" | "dispatchItemId"
   dispatchItemKey(sale.dispatchId, sale.dispatchItemId);
 
 export const saleProduceLabel = (sale: Pick<Sale, "dateTypeName" | "produceType" | "dispatchId">) =>
-  sale.dateTypeName?.trim() || sale.produceType?.trim() || (sale.dispatchId ? "Dispatch sale" : "Unlinked sale");
+  sale.dateTypeName?.trim() || sale.produceType?.trim()
+  || (sale.dispatchId ? i18n.t("dispatchSales.dispatchSale") : i18n.t("dispatchSales.unlinkedSale"));
 
 export const resolveSaleType = (sale: Pick<Sale, "saleType" | "dispatchId">) =>
   sale.saleType ?? (sale.dispatchId ? "dispatch_sale" : "farm_direct_sale");
@@ -56,7 +58,7 @@ export function buildDispatchAvailability(
       const key = dispatchItemKey(dispatch.id, item.id);
       const soldCartons = soldByItem.get(key) ?? 0;
       const remainingCartons = Math.max(item.cartons - soldCartons, 0);
-      const dateTypeName = item.dateTypeName ?? dateTypeNames.get(item.dateTypeId) ?? "Unknown type";
+      const dateTypeName = item.dateTypeName ?? dateTypeNames.get(item.dateTypeId) ?? i18n.t("dispatchSales.unknownType");
       const vehicle = vehicleLabel(dispatch);
       rows.push({
         dispatch,

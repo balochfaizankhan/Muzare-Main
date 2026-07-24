@@ -1,5 +1,11 @@
 import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
+import { adminLocalizationBundle } from "./locales/adminLocalizationBundle";
+import { apiErrorCatalog, apiErrorPatternCatalog } from "./locales/apiErrorCatalog";
+import { apiErrorCatalogExtra, apiErrorPatternCatalogExtra } from "./locales/apiErrorCatalogExtra";
+import { coreUiLocalizationBundle } from "./locales/coreUiLocalizationBundle";
+import { reportsLocalizationBundle } from "./locales/reportsLocalizationBundle";
+import { workforceLocalizationBundle } from "./locales/workforceLocalizationBundle";
 
 const resources = {
   en: {
@@ -8739,8 +8745,8 @@ const fullLocalizationBackfill = {
     "createSettlementDueButton": "سیٹلمنٹ واجب الادا بنائیں",
     "createdSuccessfully": "سیٹلمنٹ {{number}} کامیابی سے بنا دی گئی۔",
     "creatingSettlementDueEllipsis": "سیٹلمنٹ واجب الادا بنائی جا رہی ہے...",
-    "creatingSettlementDueHint": "یہ سیٹلمنٹ بنانے سے مزدور کی واجب الادا رقم طے ہو جاتی ہے۔ اس سے نقدی منتقل نہیں ہوتی۔ اسے بعد میں Payments Due سے لیبر پیمنٹ واؤچر کے ذریعے ادا کریں۔",
-    "creationProcessingLeavePage": "سیٹلمنٹ کی تخلیق ابھی جاری ہے۔ آپ یہ صفحہ چھوڑ سکتے ہیں اور تھوڑی دیر بعد Settlements میں چیک کر سکتے ہیں۔ اسے دوبارہ نہ بنائیں۔",
+    "creatingSettlementDueHint": "یہ سیٹلمنٹ بنانے سے مزدور کی واجب الادا رقم طے ہو جاتی ہے۔ اس سے نقدی منتقل نہیں ہوتی۔ اسے بعد میں «واجب الادا ادائیگیاں» سے لیبر پیمنٹ واؤچر کے ذریعے ادا کریں۔",
+    "creationProcessingLeavePage": "سیٹلمنٹ کی تخلیق ابھی جاری ہے۔ آپ یہ صفحہ چھوڑ سکتے ہیں اور تھوڑی دیر بعد «سیٹلمنٹس» میں چیک کر سکتے ہیں۔ اسے دوبارہ نہ بنائیں۔",
     "creationStillProcessing": "سیٹلمنٹ کی تخلیق ابھی جاری ہے۔ اسے دوبارہ جمع نہ کریں۔",
     "dateColumn": "تاریخ",
     "deleteSettlement": "سیٹلمنٹ حذف کریں",
@@ -9780,7 +9786,7 @@ const fullLocalizationBackfill = {
   },
   "dispatchPage": {
     "cartonKpisSubtitle": "اس ڈسپیچ ویو کے فلٹر کردہ ٹوٹل۔",
-    "cartonKpisTitle": "کارٹن KPIs",
+    "cartonKpisTitle": "کارٹن کے اہم اعداد و شمار",
     "createDispatch": "ڈسپیچ بنائیں",
     "createNewDispatch": "نیا ڈسپیچ بنائیں",
     "dispatchSummarySubtitle": "تاریخ، گاڑی، اور قسم کے لحاظ سے ڈسپیچ ٹوٹل کا جائزہ لیں۔",
@@ -10257,11 +10263,265 @@ for (const [language, bundle] of Object.entries(registrationApprovalBackfill)) {
   mergeTranslations((resources as Record<string, { translation: Record<string, unknown> }>)[language].translation, bundle.translation as Record<string, unknown>);
 }
 
+// Full-app localization pass (2026-07-24): canonical labour journal event types, voucher
+// natures, statuses that previously fell back to title-cased English ("Applied",
+// "Refunded"), and the client-side API error localization keys. Same merge pattern as the
+// backfills above.
+const systemLocalizationBackfill = {
+  en: { translation: {
+    labourEvent: {
+      DUE_RECOGNITION: "Labour due recorded",
+      DUE_PAYMENT: "Due payment",
+      ADVANCE_PAYMENT: "Advance payment",
+      ADVANCE_APPLICATION: "Advance applied",
+      ADVANCE_REFUND: "Advance refund",
+      ADVANCE_RECORDED: "Advance recorded",
+      APPLIED_TO_DUE: "Applied to due",
+      APPLICATION_REVERSED: "Application reversed",
+      RECOVERY_RECORDED: "Recovery recorded",
+      VOUCHER_REVERSED: "Voucher reversed",
+      reversalOf: "Reversed: {{event}}",
+      fallback: "Labour financial event",
+    },
+    voucherNature: {
+      ADVANCE: "Advance",
+      FINAL_PAYMENT: "Final payment",
+      SETTLEMENT_BALANCE_PAYMENT: "Settlement balance payment",
+      DIRECT_LABOUR_PAYMENT: "Direct labour payment",
+      ADVANCE_APPLICATION: "Advance application",
+      REFUND_RECOVERY: "Advance recovery",
+      REVERSAL: "Reversal",
+    },
+    status: {
+      applied: "Applied",
+      refunded: "Refunded",
+      partially_settled: "Partially settled",
+      settled_by_advance: "Settled by advance",
+      on_hold: "On hold",
+      needs_review: "Needs review",
+      synced: "Synced",
+      ready: "Ready",
+    },
+    backendSentinel: {
+      unresolvedRecipient: "Unresolved recipient",
+      recipientUnavailable: "Recipient unavailable",
+      unknownLabourRecipient: "Unknown labour recipient",
+      unresolvedPaymentSource: "Unresolved payment source",
+      partnerAccount: "Partner account",
+      appliedAdvances: "Applied advances",
+      labourAdvance: "Labour advance",
+      groupAdvance: "Group advance",
+      financialReversal: "Financial reversal",
+      cashAccount: "Cash",
+      partnerCapitalAccount: "Partner Capital",
+      advanceAppliedToDue: "Advance applied to Labour Due {{dueNumber}} — no cash movement",
+      appliedAdvancesTo: "Applied advances to {{dueNumber}}",
+      reversalOfSettlement: "Reversal of Labour Wage Settlement {{settlementNumber}}",
+      reversalOfVoucherWithReason: "Reversal of {{voucherNumber}}: {{reason}}",
+      labourWageSettlement: "Labour Wage Settlement {{settlementNumber}}",
+      voidedSettlement: "Voided settlement",
+    },
+    apiErrors: {
+      requestFailedGeneric: "The request could not be completed. Please try again.",
+      requestFailedWithStatus: "Request failed with status {{status}}.",
+      missingFields: "Missing or invalid fields: {{fields}}.",
+      timeoutRetry: "Request is taking longer than expected. Please try again.",
+      timeoutImportRunning: "Import is still running. Attendance is processing in the background.",
+      timeoutSettlementCreate: "The request is taking longer than expected. Checking settlement status...",
+      openReceiptFailed: "Unable to open receipt attachment.",
+      downloadImportFailuresFailed: "Unable to download migration import failures.",
+    },
+  } },
+  ar: { translation: {
+    labourEvent: {
+      DUE_RECOGNITION: "تم تسجيل مستحق العمالة",
+      DUE_PAYMENT: "دفع مستحق",
+      ADVANCE_PAYMENT: "دفع سلفة",
+      ADVANCE_APPLICATION: "تطبيق سلفة",
+      ADVANCE_REFUND: "استرداد سلفة",
+      ADVANCE_RECORDED: "تم تسجيل السلفة",
+      APPLIED_TO_DUE: "طُبقت على المستحق",
+      APPLICATION_REVERSED: "تم عكس التطبيق",
+      RECOVERY_RECORDED: "تم تسجيل الاسترداد",
+      VOUCHER_REVERSED: "تم عكس السند",
+      reversalOf: "معكوس: {{event}}",
+      fallback: "حدث مالي للعمالة",
+    },
+    voucherNature: {
+      ADVANCE: "سلفة",
+      FINAL_PAYMENT: "دفعة نهائية",
+      SETTLEMENT_BALANCE_PAYMENT: "دفعة رصيد التسوية",
+      DIRECT_LABOUR_PAYMENT: "دفعة عمالة مباشرة",
+      ADVANCE_APPLICATION: "تطبيق سلفة",
+      REFUND_RECOVERY: "استرداد سلفة",
+      REVERSAL: "عكس القيد",
+    },
+    status: {
+      applied: "مُطبَّق",
+      refunded: "مُسترد",
+      partially_settled: "مُسوّى جزئيًا",
+      settled_by_advance: "مُسوّى بالسلفة",
+      on_hold: "قيد الانتظار",
+      needs_review: "يحتاج إلى مراجعة",
+      synced: "متزامن",
+      ready: "جاهز",
+    },
+    backendSentinel: {
+      unresolvedRecipient: "مستلم غير محدد",
+      recipientUnavailable: "المستلم غير متاح",
+      unknownLabourRecipient: "مستلم عمالة غير معروف",
+      unresolvedPaymentSource: "مصدر دفع غير محدد",
+      partnerAccount: "حساب شريك",
+      appliedAdvances: "سلف مطبقة",
+      labourAdvance: "سلفة عمالة",
+      groupAdvance: "سلفة مجموعة",
+      financialReversal: "عكس مالي",
+      cashAccount: "نقد",
+      partnerCapitalAccount: "رأس مال الشريك",
+      advanceAppliedToDue: "سلفة مطبقة على مستحق العمالة {{dueNumber}} — بدون حركة نقدية",
+      appliedAdvancesTo: "سلف مطبقة على {{dueNumber}}",
+      reversalOfSettlement: "عكس تسوية أجور العمالة {{settlementNumber}}",
+      reversalOfVoucherWithReason: "عكس {{voucherNumber}}: {{reason}}",
+      labourWageSettlement: "تسوية أجور العمالة {{settlementNumber}}",
+      voidedSettlement: "تسوية ملغاة",
+    },
+    apiErrors: {
+      requestFailedGeneric: "تعذّر إكمال الطلب. حاول مرة أخرى.",
+      requestFailedWithStatus: "فشل الطلب برمز الحالة {{status}}.",
+      missingFields: "حقول ناقصة أو غير صالحة: {{fields}}.",
+      timeoutRetry: "يستغرق الطلب وقتًا أطول من المتوقع. حاول مرة أخرى.",
+      timeoutImportRunning: "لا يزال الاستيراد قيد التشغيل. تتم معالجة الحضور في الخلفية.",
+      timeoutSettlementCreate: "يستغرق الطلب وقتًا أطول من المتوقع. جارٍ التحقق من حالة التسوية...",
+      openReceiptFailed: "تعذّر فتح مرفق الإيصال.",
+      downloadImportFailuresFailed: "تعذّر تنزيل إخفاقات استيراد البيانات.",
+    },
+  } },
+  ur: { translation: {
+    labourEvent: {
+      DUE_RECOGNITION: "مزدوری واجب درج ہوئی",
+      DUE_PAYMENT: "واجب کی ادائیگی",
+      ADVANCE_PAYMENT: "ایڈوانس ادائیگی",
+      ADVANCE_APPLICATION: "ایڈوانس کا اطلاق",
+      ADVANCE_REFUND: "ایڈوانس کی واپسی",
+      ADVANCE_RECORDED: "ایڈوانس درج ہوا",
+      APPLIED_TO_DUE: "واجب پر لاگو ہوا",
+      APPLICATION_REVERSED: "اطلاق منسوخ ہوا",
+      RECOVERY_RECORDED: "وصولی درج ہوئی",
+      VOUCHER_REVERSED: "واؤچر منسوخ ہوا",
+      reversalOf: "منسوخ شدہ: {{event}}",
+      fallback: "مزدوری کا مالی اندراج",
+    },
+    voucherNature: {
+      ADVANCE: "ایڈوانس",
+      FINAL_PAYMENT: "حتمی ادائیگی",
+      SETTLEMENT_BALANCE_PAYMENT: "تصفیہ بقایا ادائیگی",
+      DIRECT_LABOUR_PAYMENT: "براہِ راست مزدوری ادائیگی",
+      ADVANCE_APPLICATION: "ایڈوانس اطلاق",
+      REFUND_RECOVERY: "ایڈوانس وصولی",
+      REVERSAL: "منسوخی",
+    },
+    status: {
+      applied: "لاگو شدہ",
+      refunded: "واپس شدہ",
+      partially_settled: "جزوی تصفیہ شدہ",
+      settled_by_advance: "ایڈوانس سے تصفیہ شدہ",
+      on_hold: "روکا گیا",
+      needs_review: "جائزہ درکار",
+      synced: "ہم آہنگ شدہ",
+      ready: "تیار",
+    },
+    backendSentinel: {
+      unresolvedRecipient: "غیر متعین وصول کنندہ",
+      recipientUnavailable: "وصول کنندہ دستیاب نہیں",
+      unknownLabourRecipient: "نامعلوم مزدور وصول کنندہ",
+      unresolvedPaymentSource: "غیر متعین ادائیگی ذریعہ",
+      partnerAccount: "پارٹنر اکاؤنٹ",
+      appliedAdvances: "لاگو شدہ ایڈوانسز",
+      labourAdvance: "مزدوری ایڈوانس",
+      groupAdvance: "گروپ ایڈوانس",
+      financialReversal: "مالی منسوخی",
+      cashAccount: "نقد",
+      partnerCapitalAccount: "پارٹنر سرمایہ",
+      advanceAppliedToDue: "مزدوری واجب {{dueNumber}} پر ایڈوانس لاگو — کوئی نقدی منتقل نہیں ہوئی",
+      appliedAdvancesTo: "{{dueNumber}} پر ایڈوانسز لاگو",
+      reversalOfSettlement: "لیبر ویج سیٹلمنٹ {{settlementNumber}} کی منسوخی",
+      reversalOfVoucherWithReason: "{{voucherNumber}} کی منسوخی: {{reason}}",
+      labourWageSettlement: "لیبر ویج سیٹلمنٹ {{settlementNumber}}",
+      voidedSettlement: "منسوخ شدہ تصفیہ",
+    },
+    apiErrors: {
+      requestFailedGeneric: "درخواست مکمل نہیں ہو سکی۔ دوبارہ کوشش کریں۔",
+      requestFailedWithStatus: "درخواست ناکام رہی، اسٹیٹس {{status}}۔",
+      missingFields: "غائب یا غلط خانے: {{fields}}۔",
+      timeoutRetry: "درخواست میں توقع سے زیادہ وقت لگ رہا ہے۔ دوبارہ کوشش کریں۔",
+      timeoutImportRunning: "امپورٹ ابھی جاری ہے۔ حاضری پس منظر میں پروسیس ہو رہی ہے۔",
+      timeoutSettlementCreate: "درخواست میں توقع سے زیادہ وقت لگ رہا ہے۔ تصفیہ کی صورتحال چیک کی جا رہی ہے...",
+      openReceiptFailed: "رسید کا منسلکہ نہیں کھل سکا۔",
+      downloadImportFailuresFailed: "مائیگریشن امپورٹ کی ناکامیاں ڈاؤن لوڈ نہیں ہو سکیں۔",
+    },
+  } },
+} as const;
+
+for (const [language, bundle] of Object.entries(systemLocalizationBackfill)) {
+  mergeTranslations((resources as Record<string, { translation: Record<string, unknown> }>)[language].translation, bundle.translation as Record<string, unknown>);
+}
+
+// Per-area translation bundles from the 2026-07 full-localization pass live in ./locales so
+// independent areas can grow without touching this file. Same merge semantics as the backfills.
+for (const areaBundle of [workforceLocalizationBundle, reportsLocalizationBundle, coreUiLocalizationBundle, adminLocalizationBundle]) {
+  for (const [language, bundle] of Object.entries(areaBundle as Record<string, { translation: Record<string, unknown> }>)) {
+    mergeTranslations((resources as Record<string, { translation: Record<string, unknown> }>)[language].translation, bundle.translation);
+  }
+}
+
+// Backend API error message catalogs (exact-match + pattern templates). Each catalog file
+// resolves under its own namespace so the two files can grow independently.
+for (const language of ["en", "ar", "ur"] as const) {
+  mergeTranslations(
+    (resources as Record<string, { translation: Record<string, unknown> }>)[language].translation,
+    { apiErrors: {
+      catalog: { ...apiErrorCatalog[language], ...apiErrorPatternCatalog[language] },
+      catalogExtra: { ...apiErrorCatalogExtra[language], ...apiErrorPatternCatalogExtra[language] },
+    } },
+  );
+}
+
+// Arabic selects six CLDR plural categories (zero/one/two/few/many/other) but the dictionaries
+// historically defined only _one/_other. i18next does NOT fall back from a missing plural form
+// to _other within the same language — it falls straight through to the fallback language, so
+// Arabic counts of 0, 2, 3–10, and 11–99 rendered ENGLISH. Fill every missing plural form from
+// the closest defined form of the SAME locale so a plural lookup can never leave the active
+// language. Applied to every locale identically so the locale-parity test's key-set equality
+// still holds.
+const pluralSuffixPattern = /^(.*)_(zero|one|two|few|many|other)$/;
+function fillMissingPluralForms(node: Record<string, unknown>) {
+  const formsByBase = new Map<string, string[]>();
+  for (const [key, value] of Object.entries(node)) {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      fillMissingPluralForms(value as Record<string, unknown>);
+      continue;
+    }
+    const match = key.match(pluralSuffixPattern);
+    if (match && typeof value === "string") {
+      formsByBase.set(match[1], [...(formsByBase.get(match[1]) ?? []), match[2]]);
+    }
+  }
+  for (const [base, present] of formsByBase) {
+    const source = ["other", "many", "few", "two", "one", "zero"].find((suffix) => present.includes(suffix));
+    if (!source) continue;
+    for (const suffix of ["zero", "one", "two", "few", "many", "other"]) {
+      if (!present.includes(suffix)) node[`${base}_${suffix}`] = node[`${base}_${source}`];
+    }
+  }
+}
+for (const language of Object.keys(resources)) {
+  fillMissingPluralForms((resources as Record<string, { translation: Record<string, unknown> }>)[language].translation);
+}
+
 // Exported so locale-parity tests can inspect the final merged key tree without importing this
 // module's browser-only side effects (window.localStorage, i18n.init) below.
 export { resources };
 
-const isDev = typeof import.meta !== "undefined" && Boolean((import.meta as { env?: { DEV?: boolean } }).env?.DEV);
 const initialLanguage = (typeof window !== "undefined" ? window.localStorage.getItem("muzare-language") : null) ?? "en";
 
 void i18n.use(initReactI18next).init({
@@ -10270,10 +10530,10 @@ void i18n.use(initReactI18next).init({
   fallbackLng: "en",
   returnNull: false,
   returnEmptyString: false,
-  missingKeyHandler: (_lng, _ns, key) => {
-    if (isDev) {
-      console.warn(`[i18n] Missing translation key: ${key}`);
-    }
+  // A missing key is a localization defect in every environment — never silently fall back.
+  // Development additionally gets the noisier per-render warning stream to catch keys early.
+  missingKeyHandler: (lng, _ns, key) => {
+    console.warn(`[i18n] Missing translation key for "${Array.isArray(lng) ? lng.join(",") : lng}": ${key}`);
   },
   parseMissingKeyHandler: (key) => key.split(".").pop()?.replace(/([A-Z])/g, " $1").replace(/^./, (value) => value.toUpperCase()) ?? key,
   interpolation: { escapeValue: false },

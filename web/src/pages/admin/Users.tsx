@@ -5,9 +5,14 @@ import { useTranslation } from "react-i18next";
 import { useAuth } from "../../auth/AuthProvider";
 import { fetchAdminUser, fetchAdminUsers, repairInvitedDefaultWorkspaces, updateAdminUserStatus } from "../../lib/api";
 import { formatDate, formatNumber } from "../../lib/format";
+import { translateStatus } from "../../lib/statusLabels";
+import { translateRole } from "../../lib/systemTranslations";
 
 export function Users() {
   const { t } = useTranslation();
+  // Platform-level roles ("platform_admin") live outside the workspace role dictionary, so try
+  // the adminRoles bundle first and fall back to the shared workspace-role translator.
+  const platformRoleLabel = (role: string) => t(`adminRoles.${role}`, { defaultValue: translateRole(role) });
   const { user, token } = useAuth();
   const canManage = user?.platformRole === "platform_admin";
   const client = useQueryClient();
@@ -95,9 +100,9 @@ export function Users() {
                 <strong>{item.displayName ?? item.email}</strong>
                 <span>{item.email}</span>
               </td>
-              <td>{item.platformRole ?? t("adminUsers.workspaceUser")}</td>
+              <td>{item.platformRole ? platformRoleLabel(item.platformRole) : t("adminUsers.workspaceUser")}</td>
               <td>{formatNumber(item.workspaceCount)}</td>
-              <td><span className={`status-badge status-badge--${item.active ? "approved" : "suspended"}`}>{item.active ? t("common.active") : item.status}</span></td>
+              <td><span className={`status-badge status-badge--${item.active ? "approved" : "suspended"}`}>{item.active ? t("common.active") : translateStatus(t, item.status)}</span></td>
               <td>{formatDate(item.createdAt, { dateStyle: "medium" })}</td>
               <td>{item.lastLoginAt ? formatDate(item.lastLoginAt, { dateStyle: "medium", timeStyle: "short" }) : t("adminUsers.never")}</td>
               <td>
@@ -127,8 +132,8 @@ export function Users() {
           {detail.data?.user && <>
             <section className="admin-detail-section">
               <dl className="worker-stats admin-detail-stats">
-                <div><dt>{t("common.status")}</dt><dd><span className={`status-badge status-badge--${detail.data.user.active ? "approved" : "suspended"}`}>{detail.data.user.active ? t("common.active") : detail.data.user.status}</span></dd></div>
-                <div><dt>{t("adminUsers.columns.role")}</dt><dd>{detail.data.user.platformRole ?? "-"}</dd></div>
+                <div><dt>{t("common.status")}</dt><dd><span className={`status-badge status-badge--${detail.data.user.active ? "approved" : "suspended"}`}>{detail.data.user.active ? t("common.active") : translateStatus(t, detail.data.user.status)}</span></dd></div>
+                <div><dt>{t("adminUsers.columns.role")}</dt><dd>{detail.data.user.platformRole ? platformRoleLabel(detail.data.user.platformRole) : "-"}</dd></div>
                 <div><dt>{t("workspaceTeam.phone")}</dt><dd>{detail.data.user.phone ?? "-"}</dd></div>
                 <div><dt>{t("adminUsers.columns.created")}</dt><dd>{formatDate(detail.data.user.createdAt, { dateStyle: "medium", timeStyle: "short" })}</dd></div>
                 <div><dt>{t("adminUsers.columns.lastLogin")}</dt><dd>{detail.data.user.lastLoginAt ? formatDate(detail.data.user.lastLoginAt, { dateStyle: "medium", timeStyle: "short" }) : t("adminUsers.never")}</dd></div>
@@ -141,7 +146,7 @@ export function Users() {
                 {detail.data.user.workspaces.map((workspace) => <article key={workspace.id}>
                   <div>
                     <strong>{workspace.workspaceName}</strong>
-                    <span>{workspace.role}</span>
+                    <span>{translateRole(workspace.role)}</span>
                   </div>
                   <small>{workspace.active ? t("adminUsers.activeMembership") : t("adminUsers.inactiveMembership")}</small>
                 </article>)}

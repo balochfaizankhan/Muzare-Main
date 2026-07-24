@@ -131,7 +131,7 @@ function GroupEditorPanel({
       <section className="worker-action-dialog" role="dialog" aria-modal="true" aria-label={title} onClick={(event) => event.stopPropagation()}>
         <header>
           <h2>{title}</h2>
-          <button type="button" aria-label={t("labourGroupsPage.closeDialogAria", { title })} onClick={onClose}>X</button>
+          <button type="button" aria-label={t("labourGroupsPage.closeDialogAria", { title })} onClick={onClose}>✕</button>
         </header>
         <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
           <label><span>{t("labourGroupsPage.groupNameLabel")}</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
@@ -201,7 +201,7 @@ function ConfirmBulkPanel({
       <section className="worker-action-dialog" role="dialog" aria-modal="true" aria-label={title} onClick={(event) => event.stopPropagation()}>
         <header>
           <h2>{title}</h2>
-          <button type="button" aria-label={t("labourGroupsPage.closeDialogAria", { title })} onClick={onClose}>X</button>
+          <button type="button" aria-label={t("labourGroupsPage.closeDialogAria", { title })} onClick={onClose}>✕</button>
         </header>
         <form className="worker-action-form" onSubmit={(event) => void submit(event)}>
           <p>{details}</p>

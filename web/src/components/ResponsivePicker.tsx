@@ -185,7 +185,7 @@ export function ResponsiveSelectField({
             value={query}
             onChange={setQuery}
             placeholder={searchPlaceholder ?? t("common.search")}
-            aria-label={`${title} search`}
+            aria-label={t("common.pickerSearchAria", { title })}
           />
         </div>
         <div className="report-picker-sheet__body">
@@ -318,7 +318,7 @@ export function ResponsiveMultiSelectField({
             value={query}
             onChange={setQuery}
             placeholder={searchPlaceholder ?? t("common.search")}
-            aria-label={`${title} search`}
+            aria-label={t("common.pickerSearchAria", { title })}
           />
         </div>
         <div className="report-picker-sheet__toolbar">

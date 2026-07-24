@@ -3,11 +3,13 @@ import { CheckCircle2, ShieldAlert, XCircle } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../auth/AuthProvider";
+import type { TFunction } from "i18next";
 import { approveAdminFarmDeletionRequest, fetchAdminFarms, rejectAdminFarmDeletionRequest, type AdminFarmDeletionRequest } from "../../lib/api";
 import { formatDate, formatNumber } from "../../lib/format";
+import { translateRecordType } from "../../locales/adminLocalizationBundle";
 
-function countSummary(counts: Record<string, number>) {
-  return Object.entries(counts).filter(([, value]) => Number(value) > 0).map(([key, value]) => `${key}: ${value}`).join(" · ");
+function countSummary(t: TFunction, counts: Record<string, number>) {
+  return Object.entries(counts).filter(([, value]) => Number(value) > 0).map(([key, value]) => `${translateRecordType(t, key)}: ${value}`).join(" · ");
 }
 
 function farmStatusLabel(t: (key: string) => string, status: string) {
@@ -66,7 +68,7 @@ export function AdminFarms() {
             <td><strong>{request.farmName}</strong><span>{request.reason ?? t("adminFarms.noReason")}</span></td>
             <td>{request.workspaceName}</td>
             <td>{request.requestedByEmail}</td>
-            <td>{countSummary(request.recordCounts) || "0"}</td>
+            <td>{countSummary(t, request.recordCounts) || "0"}</td>
             <td>{formatDate(request.createdAt, { dateStyle: "medium", timeStyle: "short" })}</td>
             <td><div className="record-list__actions admin-row-actions"><button type="button" onClick={() => setSelectedRequest(request)}>{t("common.view")}</button></div></td>
           </tr>)}</tbody>
@@ -85,7 +87,7 @@ export function AdminFarms() {
             <td>{farm.workspaceName}</td>
             <td><span className={`status-badge status-badge--${farm.status === "delete_pending" ? "pending" : farm.status}`}>{farmStatusLabel(t, farm.status)}</span></td>
             <td>{formatNumber(farm.totalRecords)}</td>
-            <td>{Object.entries(farm.counts).map(([key, value]) => `${key}: ${value}`).join(" · ")}</td>
+            <td>{Object.entries(farm.counts).map(([key, value]) => `${translateRecordType(t, key)}: ${value}`).join(" · ")}</td>
             <td>{formatDate(farm.createdAt, { dateStyle: "medium" })}</td>
           </tr>)}</tbody>
         </table>
@@ -98,7 +100,7 @@ export function AdminFarms() {
         <div className="worker-action-form admin-detail-body">
           <section className="admin-detail-section">
             <h3>{t("adminFarms.recordCounts")}</h3>
-            <p>{countSummary(selectedRequest.recordCounts) || "0"}</p>
+            <p>{countSummary(t, selectedRequest.recordCounts) || "0"}</p>
             <p>{selectedRequest.reason ?? t("adminFarms.noReason")}</p>
           </section>
           {canManage && <div className="record-list__actions">

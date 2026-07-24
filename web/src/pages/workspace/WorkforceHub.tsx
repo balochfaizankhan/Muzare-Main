@@ -40,7 +40,7 @@ function WorkforceShell({
       {!compactMobileHeader ? <SubpageHeader title={title} /> : null}
       <main className={`subpage module-workspace workforce-shell-main${compactMobileHeader ? " workforce-shell-main--labour-payments" : ""}`}>
         {compactMobileHeader ? (
-          <section className="labour-payments-mobile-header" aria-label={`${title} overview`}>
+          <section className="labour-payments-mobile-header" aria-label={t("workforceHubPage.overviewAria", { title })}>
             <button className="labour-payments-mobile-header__back" type="button" aria-label={t("workforceHubPage.backToWorkforce")} onClick={backToWorkforce}>
               <ArrowLeft size={18} />
             </button>
@@ -58,7 +58,7 @@ function WorkforceShell({
           </section>
         )}
         <section className="record-panel workforce-shell-panel">
-          <nav ref={tabsRef} className="workforce-shell-tabs" aria-label={`${title} navigation`}>
+          <nav ref={tabsRef} className="workforce-shell-tabs" aria-label={t("workforceHubPage.navigationAria", { title })}>
             {tabs.map((tab) => (
               <NavLink
                 key={tab.to}

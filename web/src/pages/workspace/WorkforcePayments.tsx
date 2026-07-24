@@ -26,7 +26,7 @@ import { useAuth } from "../../auth/AuthProvider";
 import { useCanonicalLabourFinancials } from "../../hooks/useCanonicalLabourFinancials";
 import { LabourSelectCombobox } from "../../components/LabourSelectCombobox";
 import { eligiblePaymentAccounts, PaymentAccountSelect } from "../../components/PaymentAccountSelect";
-import { translateStatus } from "../../lib/statusLabels";
+import { localizeSystemPlaceholder, translateStatus } from "../../lib/statusLabels";
 import {
   createDirectLabourDue,
   ApiError,
@@ -55,7 +55,7 @@ import {
   type LabourPaymentVoucherRecord,
   type LabourRecipientScope
 } from "../../lib/api";
-import { formatMoney } from "../../lib/format";
+import { formatDate as formatLocalizedDate, formatMoney } from "../../lib/format";
 import { canCreate, canDelete, canEdit } from "../../lib/permissions";
 import {
   getActiveFarmId,
@@ -75,6 +75,19 @@ const today = () => {
 };
 const money = formatMoney;
 const uuid = () => crypto.randomUUID();
+
+// Renders a backend calendar date ("YYYY-MM-DD") in the active locale. The value is anchored to
+// UTC midnight and formatted in UTC so the displayed day never shifts with the viewer's timezone.
+const displayDate = (value: string) => {
+  const date = new Date(`${value.slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return value;
+  return formatLocalizedDate(date, { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+};
+
+// Localizes backend sentinel display strings ("Unresolved recipient", "Partner account", ...)
+// while passing real user data through untouched; falls back when the field is empty.
+const localizedNameOr = (t: TFunction, value: string | null | undefined, fallback: string) =>
+  value ? localizeSystemPlaceholder(t, value) : fallback;
 
 function scopeOptions(t: TFunction): Array<{ value: LabourRecipientScope; label: string }> {
   return [
@@ -532,7 +545,7 @@ export function WorkforcePaymentsPage() {
                           : t("workforcePaymentsPage.directLabourDue")}
                       </i>
                       <i className="bidi-isolate">
-                        {due.workFromDate} – {due.workToDate}
+                        {displayDate(due.workFromDate)} – {displayDate(due.workToDate)}
                       </i>
                     </span>
                     <span className="workforce-payment-due-card__amounts">
@@ -691,7 +704,7 @@ function DirectDueForm({
   const recipientReferenceRef = useRef<HTMLInputElement>(null);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
-  const groupSelectorOptions = useMemo(() => groups.map((group) => ({ ...group, group: "Labour group", dailyWage: 0 } satisfies Labourer)), [groups]);
+  const groupSelectorOptions = useMemo(() => groups.map((group) => ({ ...group, group: t("workforcePaymentsPage.recipientScopeOptions.labourGroup"), dailyWage: 0 } satisfies Labourer)), [groups, t]);
   const selectedGroup = useMemo(() => groups.find((group) => group.id === groupId) ?? null, [groups, groupId]);
   const groupLeaderName = useMemo(() => {
     const leaderId = (selectedGroup as { foremanLabourId?: string; foremanId?: string } | null)?.foremanLabourId
@@ -1077,7 +1090,7 @@ function VoucherRegister({
       date: parent.date,
       description: parent.description,
       amount: parent.activeAmount,
-      recipient: parent.recipientName,
+      recipient: localizeSystemPlaceholder(t, parent.recipientName),
       dueNumber: parent.dueNumber,
       parent,
     }),
@@ -1210,11 +1223,11 @@ function VoucherRegister({
                 </div>
                 <div>
                   <dt>{t("workforcePaymentsPage.voucherRegister.dateLabel")}</dt>
-                  <dd className="bidi-isolate">{row.date}</dd>
+                  <dd className="bidi-isolate">{displayDate(row.date)}</dd>
                 </div>
                 <div>
                   <dt>{row.kind === "application_parent" ? t("workforcePaymentsPage.voucherRegister.relatedDue") : t("workforcePaymentsPage.voucherRegister.accountLabel")}</dt>
-                  <dd className={row.kind === "application_parent" ? "bidi-isolate" : undefined}>{row.kind === "application_parent" ? row.dueNumber ?? t("workforcePaymentsPage.voucherRegister.dueReferenceUnavailable") : (row.voucher.paymentAccountName ?? accounts.get(row.voucher.paymentAccountId ?? "")?.name ?? t("workforcePaymentsPage.voucherRegister.legacyReconciliation"))}</dd>
+                  <dd className={row.kind === "application_parent" ? "bidi-isolate" : undefined}>{row.kind === "application_parent" ? row.dueNumber ?? t("workforcePaymentsPage.voucherRegister.dueReferenceUnavailable") : localizedNameOr(t, row.voucher.paymentAccountName, accounts.get(row.voucher.paymentAccountId ?? "")?.name ?? t("workforcePaymentsPage.voucherRegister.legacyReconciliation"))}</dd>
                 </div>
                 <div>
                   <dt>{t("workforcePaymentsPage.voucherRegister.amountLabel")}</dt>
@@ -1224,7 +1237,7 @@ function VoucherRegister({
               {row.kind === "application_parent" ? (
                 <small className="bidi-isolate">
                   {row.parent.workFromDate && row.parent.workToDate
-                    ? t("workforcePaymentsPage.voucherRegister.workPeriodRange", { from: row.parent.workFromDate, to: row.parent.workToDate })
+                    ? t("workforcePaymentsPage.voucherRegister.workPeriodRange", { from: displayDate(row.parent.workFromDate), to: displayDate(row.parent.workToDate) })
                     : t("workforcePaymentsPage.voucherRegister.childAllocations", { active: row.parent.activeChildApplicationIds.length, total: row.parent.childApplicationIds.length })}
                 </small>
               ) : null}
@@ -1244,7 +1257,7 @@ function VoucherRegister({
                 <div className="workforce-payment-funding-sources">
                   <strong>{t("workforcePaymentsPage.voucherRegister.fundingSources")}</strong>
                   {row.parent.fundingSources.map((source) => (
-                    <span key={source.accountId ?? source.accountName}>{source.accountName} — <span className="bidi-isolate">{money(source.amount)}</span></span>
+                    <span key={source.accountId ?? source.accountName}>{localizeSystemPlaceholder(t, source.accountName)} — <span className="bidi-isolate">{money(source.amount)}</span></span>
                   ))}
                   <small className="bidi-isolate">{t("workforcePaymentsPage.voucherRegister.fundingSourceTotal", { total: money(row.parent.fundingSourceTotal), cash: money(0) })}</small>
                 </div>
@@ -1784,13 +1797,7 @@ function AdvancesView({
       setDeleting(false);
     }
   };
-  const formatDate = (value: string) =>
-    new Intl.DateTimeFormat(undefined, {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-      timeZone: "UTC",
-    }).format(new Date(`${value}T00:00:00Z`));
+  const formatDate = displayDate;
   const scopeCopy = (advance: LabourAdvancePosition) =>
     advance.recipientScope === "INDIVIDUAL"
       ? t("workforcePaymentsPage.recipientScopeOptions.individual")
@@ -2174,7 +2181,7 @@ function AdvancesView({
                     <div className="workforce-advance-card__meta">
                       <small>
                         {contextGroup ? `${contextGroup} · ` : ""}
-                        {t("workforcePaymentsPage.advancesView.paidFrom", { source: advance.paymentSourceDisplayName ?? advance.paymentAccountName ?? advance.fundingAccountName ?? t("workforcePaymentsPage.unresolvedPaymentSource") })}
+                        {t("workforcePaymentsPage.advancesView.paidFrom", { source: localizedNameOr(t, advance.paymentSourceDisplayName ?? advance.paymentAccountName ?? advance.fundingAccountName, t("workforcePaymentsPage.unresolvedPaymentSource")) })}
                       </small>
                       {advance.description ? (
                         <small className="workforce-advance-card__description">{advance.description}</small>
@@ -2294,12 +2301,12 @@ function AdvancesView({
                     {selectedPoolVouchers.map((voucher) => (
                       <article key={voucher.id} className="workforce-pool-voucher-row">
                         <header>
-                          <span>{voucher.recipientName ?? voucher.labourerName ?? t("workforcePaymentsPage.recipientUnavailable")}</span>
+                          <span>{localizedNameOr(t, voucher.recipientName ?? voucher.labourerName, t("workforcePaymentsPage.recipientUnavailable"))}</span>
                           <strong className="bidi-isolate">{money(voucher.amount)}</strong>
                         </header>
                         <small className="bidi-isolate">{voucher.voucherNumber} · {formatDate(voucher.voucherDate)}</small>
                         {voucher.paymentAccountName ? (
-                          <small>{t("workforcePaymentsPage.advancesView.paidFrom", { source: voucher.paymentAccountName })}</small>
+                          <small>{t("workforcePaymentsPage.advancesView.paidFrom", { source: localizeSystemPlaceholder(t, voucher.paymentAccountName) })}</small>
                         ) : null}
                         {voucher.description ? (
                           <small className="workforce-advance-card__description">{voucher.description}</small>
@@ -2324,7 +2331,15 @@ function AdvancesView({
                             {event.voucherNumber ? ` · ${event.voucherNumber}` : ""}
                             {event.dueNumber ? ` · ${event.dueNumber}` : ""}
                           </small>
-                          {event.description ? <small className="workforce-advance-card__description">{event.description}</small> : null}
+                          {/* Advance and recovery descriptions are user-entered data; the other
+                              event types carry backend-composed English text, so those rows rely
+                              on the localized structured line (type + reference + date + amount).
+                              Server-defaulted recovery descriptions are backend text too. */}
+                          {event.description
+                            && (event.type === "ADVANCE_RECORDED"
+                              || (event.type === "RECOVERY_RECORDED" && !event.description.startsWith("Advance recovery from ")))
+                            ? <small className="workforce-advance-card__description">{event.description}</small>
+                            : null}
                         </div>
                         <strong className={`bidi-isolate${event.direction < 0 ? " is-outflow" : " is-inflow"}`}>
                           {event.direction < 0 ? "− " : "+ "}
@@ -2397,7 +2412,7 @@ function AdvancesView({
                 {pools.reviewAdvances.map((advance) => (
                   <article key={advance.id} className="workforce-pool-voucher-row">
                     <header>
-                      <span>{advance.recipientName ?? t("workforcePaymentsPage.recipientUnavailable")}</span>
+                      <span>{localizedNameOr(t, advance.recipientName, t("workforcePaymentsPage.recipientUnavailable"))}</span>
                       <strong className="bidi-isolate">{money(advance.amount)}</strong>
                     </header>
                     <small className="bidi-isolate">{advance.voucherNumber} · {formatDate(advance.voucherDate)}</small>
@@ -2636,11 +2651,11 @@ function AdvancesView({
             <div className="workforce-payment-review__body">
               <dl className="workforce-payment-position">
                 <div><dt>{t("workforcePaymentsPage.voucherRegister.amountLabel")}</dt><dd className="bidi-isolate">{money(deleteAdvance.originalAmount)}</dd></div>
-                <div><dt>{t("workforcePaymentsPage.recipient")}</dt><dd>{deleteAdvance.financialOwnerName ?? t("workforcePaymentsPage.recipientUnavailable")}</dd></div>
+                <div><dt>{t("workforcePaymentsPage.recipient")}</dt><dd>{localizedNameOr(t, deleteAdvance.financialOwnerName, t("workforcePaymentsPage.recipientUnavailable"))}</dd></div>
                 {deleteAdvance.currentGroupName ? (
                   <div><dt>{t("workforcePaymentsPage.advancesView.currentGroupLabel")}</dt><dd>{deleteAdvance.currentGroupName}</dd></div>
                 ) : null}
-                <div><dt>{t("workforcePaymentsPage.advancesView.fundingPartnerAccount")}</dt><dd>{deleteAdvance.paymentSourceDisplayName ?? deleteAdvance.paymentAccountName ?? t("workforcePaymentsPage.unresolvedPaymentSource")}</dd></div>
+                <div><dt>{t("workforcePaymentsPage.advancesView.fundingPartnerAccount")}</dt><dd>{localizedNameOr(t, deleteAdvance.paymentSourceDisplayName ?? deleteAdvance.paymentAccountName, t("workforcePaymentsPage.unresolvedPaymentSource"))}</dd></div>
                 <div><dt>{t("workforcePaymentsPage.voucherRegister.dateLabel")}</dt><dd className="bidi-isolate">{formatDate(deleteAdvance.voucherDate)}</dd></div>
               </dl>
               <p className="workforce-payments-inline-note">{t("workforcePaymentsPage.advancesView.deleteAdvancePoolNote")}</p>
@@ -2809,8 +2824,7 @@ function AdvancesView({
                 <div>
                   <dt>{t("workforcePaymentsPage.advancesView.paidTo")}</dt>
                   <dd>
-                    {selectedAdvance.financialOwnerName ??
-                      t("workforcePaymentsPage.recipientUnavailable")}
+                    {localizedNameOr(t, selectedAdvance.financialOwnerName, t("workforcePaymentsPage.recipientUnavailable"))}
                   </dd>
                 </div>
                 <div>
@@ -2841,9 +2855,7 @@ function AdvancesView({
                 <div>
                   <dt>{t("workforcePaymentsPage.paidFrom")}</dt>
                   <dd>
-                    {selectedAdvance.paymentSourceDisplayName ??
-                      selectedAdvance.paymentAccountName ??
-                      t("workforcePaymentsPage.unresolvedPaymentSource")}
+                    {localizedNameOr(t, selectedAdvance.paymentSourceDisplayName ?? selectedAdvance.paymentAccountName, t("workforcePaymentsPage.unresolvedPaymentSource"))}
                   </dd>
                 </div>
                 <div>
@@ -3146,7 +3158,7 @@ function ReviewSettleDialog({
               <div>
                 <dt>{t("workforcePaymentsPage.reviewSettle.workPeriod")}</dt>
                 <dd className="bidi-isolate">
-                  {due.workFromDate} – {due.workToDate}
+                  {displayDate(due.workFromDate)} – {displayDate(due.workToDate)}
                 </dd>
               </div>
               <div>

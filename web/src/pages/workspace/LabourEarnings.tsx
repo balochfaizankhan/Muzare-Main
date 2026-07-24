@@ -3,7 +3,7 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { SearchInput } from "../../components/SearchInput";
-import { formatMoney } from "../../lib/format";
+import { formatDate, formatMoney } from "../../lib/format";
 import {
   labourEarningScopeLabel,
   labourEarningTypeLabel,
@@ -29,6 +29,7 @@ import { persistOperationalRecord } from "../../services/syncService";
 
 const money = formatMoney;
 const today = () => new Date().toISOString().slice(0, 10);
+const displayDate = (value: string) => formatDate(`${value.slice(0, 10)}T00:00:00`, { day: "numeric", month: "short", year: "numeric" });
 
 const labourEarningTargetLabel = (
   t: TFunction,
@@ -363,7 +364,7 @@ export function LabourEarnings() {
                     <header className="labour-earnings-card__header">
                       <div className="labour-earnings-card__title">
                         <strong>{title}</strong>
-                        <span><span className="bidi-isolate">{earning.earningDate}</span> · {labourEarningScopeLabel(earning)} · {labourEarningTypeLabel(earning.earningType)}</span>
+                        <span><span className="bidi-isolate">{displayDate(earning.earningDate)}</span> · {labourEarningScopeLabel(earning)} · {labourEarningTypeLabel(earning.earningType)}</span>
                       </div>
                       <strong className="labour-earnings-card__amount bidi-isolate">{money(earning.amount)}</strong>
                     </header>
@@ -427,7 +428,7 @@ export function LabourEarnings() {
                   const foreman = earning.foremanId ? labourById.get(earning.foremanId) ?? null : null;
                   return (
                     <tr key={earning.id}>
-                      <td><span className="bidi-isolate">{earning.earningDate}</span></td>
+                      <td><span className="bidi-isolate">{displayDate(earning.earningDate)}</span></td>
                       <td><span className={`status-chip status-chip--${earning.earningScope}`}>{labourEarningScopeLabel(earning)}</span></td>
                       <td>{earning.earningScope === "group"
                         ? group?.name ?? earning.labourGroupName ?? t("labourEarningsPage.labourGroup")

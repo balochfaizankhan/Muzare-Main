@@ -3,6 +3,7 @@ import { useAuth } from "../../auth/AuthProvider";
 import { fetchAdminAuditLogs } from "../../lib/api";
 import { formatDate } from "../../lib/format";
 import { useTranslation } from "react-i18next";
+import { translateRecordType } from "../../locales/adminLocalizationBundle";
 import i18n from "../../i18n";
 
 export function AuditLogs() {
@@ -45,7 +46,7 @@ export function AuditLogs() {
               <td><strong>{humanizeAction(record.action)}</strong></td>
               <td>{record.workspaceName ?? "-"}</td>
               <td>{record.actorName ?? t("common.system")}</td>
-              <td>{record.entityType}{record.entityId ? ` • ${record.entityId.slice(0, 8)}` : ""}</td>
+              <td>{translateRecordType(t, record.entityType)}{record.entityId ? ` • ${record.entityId.slice(0, 8)}` : ""}</td>
               <td>{formatDate(record.createdAt, { dateStyle: "medium", timeStyle: "short" })}</td>
             </tr>)}
           </tbody>

@@ -15,9 +15,15 @@ import {
   type Season,
   type SeasonInput,
 } from "../../lib/api";
+import { formatDate } from "../../lib/format";
 import { hasPermission } from "../../lib/permissions";
 
 const emptyForm: SeasonInput = { name: "", cropType: "", startsOn: "", expectedEndsOn: "", actualEndsOn: "", status: "planned", notes: "" };
+const displayDate = (value: string) => {
+  const date = new Date(`${value.slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return formatDate(date, { day: "numeric", month: "short", year: "numeric" });
+};
 
 export function Seasons() {
   const { t } = useTranslation();
@@ -116,8 +122,8 @@ export function Seasons() {
                 <article className={`farm-card ${current ? "farm-card--active" : ""}`} key={season.id}>
                   <header><div><strong>{season.name}</strong><span>{t(`seasonsPage.${season.status}`)}</span></div>{current && <b><CheckCircle2 size={15} />{t("seasonsPage.currentSeason")}</b>}</header>
                   <p><Leaf size={15} />{season.cropType || t("seasonsPage.cropTypeNotRecorded")}</p>
-                  <p><CalendarCheck size={15} />{season.startsOn} {t("reports.to")} {season.expectedEndsOn || t("seasonsPage.openEnded")}</p>
-                  {season.actualEndsOn && <small>{t("seasonsPage.actualEnd")}: {season.actualEndsOn}</small>}
+                  <p><CalendarCheck size={15} />{displayDate(season.startsOn)} {t("reports.to")} {season.expectedEndsOn ? displayDate(season.expectedEndsOn) : t("seasonsPage.openEnded")}</p>
+                  {season.actualEndsOn && <small>{t("seasonsPage.actualEnd")}: {displayDate(season.actualEndsOn)}</small>}
                   {season.notes && <small>{season.notes}</small>}
                   <footer>
                     {season.status !== "archived" && !current && <button type="button" onClick={() => select.mutate(season.id)}><CheckCircle2 size={15} />{t("seasonsPage.setActive")}</button>}

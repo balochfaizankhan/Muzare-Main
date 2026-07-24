@@ -7,7 +7,7 @@ import { ClearableSelect } from "../../components/ClearableSelect";
 import { bulkUpsertWageRates, fetchWageRates, validateWageRateOverlap, type WageRateBulkRowInput, type WageRateOverlapPreview } from "../../lib/api";
 import { getActiveFarmId, getActiveSeasonId, offlineDb, workspaceRecords, type Labourer, type WageRate } from "../../lib/offline-db";
 import { canCreate, canEdit } from "../../lib/permissions";
-import { formatMoney } from "../../lib/format";
+import { formatDate, formatMoney } from "../../lib/format";
 import { compareWageRates, getWageRateStatus, normalizeHalfDayRate } from "../../lib/wageRates";
 import { useAuth } from "../../auth/AuthProvider";
 import { getWorkerWorkingPeriod, isWorkerEligibleForWageRatePeriod, sortWorkersForDisplay } from "../../lib/workerEligibility";
@@ -17,7 +17,7 @@ const money = formatMoney;
 const displayDate = (value: string) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" }).format(date);
+  return formatDate(date, { day: "numeric", month: "short", year: "numeric" });
 };
 
 type RowDraft = {
@@ -274,11 +274,7 @@ export function WageRates() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const formatHistoryDate = useCallback((value: string) => {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" }).format(date);
-  }, []);
+  const formatHistoryDate = useCallback((value: string) => displayDate(value), []);
 
   const formatHistoryRange = useCallback((rate: WageRate, status: WageRateHistoryStatus) => {
     if (status === "upcoming") return t("wageRatesPage.startsOn", { date: formatHistoryDate(rate.effectiveFrom) });
@@ -512,7 +508,7 @@ export function WageRates() {
                               <input type="checkbox" checked={selected} onChange={() => toggleLabour(labourer.id)} />
                               <span className="wage-rate-labour-summary__copy">
                                 <strong>{labourer.name}</strong>
-                                <span>{labourer.group || "-"} · <span className="bidi-isolate">{workingPeriod.workerEnd ? t("wageRatesPage.effectiveRange", { from: workingPeriod.workerStart, to: workingPeriod.workerEnd }) : t("status.current")}</span> · {latestRate ? <span className="bidi-isolate">{money(latestRate.dailyRate)}</span> : t("wageRatesPage.noCurrentRate")}</span>
+                                <span>{labourer.group || "-"} · <span className="bidi-isolate">{workingPeriod.workerEnd ? t("wageRatesPage.effectiveRange", { from: displayDate(workingPeriod.workerStart), to: displayDate(workingPeriod.workerEnd) }) : t("status.current")}</span> · {latestRate ? <span className="bidi-isolate">{money(latestRate.dailyRate)}</span> : t("wageRatesPage.noCurrentRate")}</span>
                               </span>
                             </span>
                             <span className="wage-rate-labour-summary-rate bidi-isolate">{latestRate ? money(latestRate.dailyRate) : "-"}</span>
@@ -539,11 +535,11 @@ export function WageRates() {
                             <strong>{item.labourName ?? item.labourerId}</strong>
                             <span>{t("wageRatesPage.affectedAttendance", { count: item.affectedAttendanceCount })}</span>
                           </div>
-                          <small className="bidi-isolate">{t("wageRatesPage.overlapAffectedDates", { from: item.affectedFrom, to: item.affectedTo || t("status.current") })}</small>
+                          <small className="bidi-isolate">{t("wageRatesPage.overlapAffectedDates", { from: displayDate(item.affectedFrom), to: item.affectedTo ? displayDate(item.affectedTo) : t("status.current") })}</small>
                           <ul>
                             {item.overlaps.map((overlap) => (
                               <li key={overlap.id}>
-                                <span className="bidi-isolate">{t("wageRatesPage.effectiveRange", { from: overlap.effectiveFrom, to: overlap.effectiveTo || t("status.current") })}</span>
+                                <span className="bidi-isolate">{t("wageRatesPage.effectiveRange", { from: displayDate(overlap.effectiveFrom), to: overlap.effectiveTo ? displayDate(overlap.effectiveTo) : t("status.current") })}</span>
                                 <strong className="bidi-isolate">{money(overlap.dailyRate)} / {money(overlap.halfDayRate)}</strong>
                               </li>
                             ))}

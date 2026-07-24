@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth/AuthProvider";
 import { config } from "../config";
 import {
@@ -10,6 +11,7 @@ import {
   fetchWorkspaceAccounts,
 } from "../lib/api";
 import { formatMoney } from "../lib/format";
+import { translateRecordType } from "../locales/adminLocalizationBundle";
 import { BuildDiagnostics } from "./BuildDiagnostics";
 
 const money = formatMoney;
@@ -86,6 +88,7 @@ function labelWithId(name?: string | null, id?: string | null) {
 }
 
 export function AccountingDiagnosticsConsole({ initialWorkspaceId = "" }: { initialWorkspaceId?: string }) {
+  const { t } = useTranslation();
   const { token, user } = useAuth();
   const isAdmin = user?.platformRole === "platform_admin";
   const [workspaceId, setWorkspaceId] = useState("");
@@ -184,7 +187,7 @@ export function AccountingDiagnosticsConsole({ initialWorkspaceId = "" }: { init
   const runAudit = async () => {
     if (!token) return;
     if (!workspaceId) {
-      setAuditError("Select a workspace first.");
+      setAuditError(t("accountingDiagnosticsConsole.selectWorkspaceFirst"));
       return;
     }
     setAuditLoading(true);
@@ -250,7 +253,7 @@ export function AccountingDiagnosticsConsole({ initialWorkspaceId = "" }: { init
       setAuditRows(rows);
       setAuditSummary(summary);
     } catch (error) {
-      setAuditError(error instanceof Error ? error.message : "Unable to run parity audit.");
+      setAuditError(error instanceof Error ? error.message : t("accountingDiagnosticsConsole.parityAuditFailed"));
     } finally {
       setAuditLoading(false);
     }

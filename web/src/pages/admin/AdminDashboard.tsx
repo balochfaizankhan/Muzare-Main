@@ -6,6 +6,8 @@ import { useEffect } from "react";
 import { useAuth } from "../../auth/AuthProvider";
 import { fetchAdminOverview } from "../../lib/api";
 import { formatDate, formatNumber } from "../../lib/format";
+import { translateStatus } from "../../lib/statusLabels";
+import { translateRecordType } from "../../locales/adminLocalizationBundle";
 import i18n from "../../i18n";
 import { markStartup } from "../../lib/startupPerf";
 
@@ -109,7 +111,7 @@ export function AdminDashboard() {
               <span>{workspace.contactEmail}</span>
             </div>
             <div className="admin-activity-list__meta">
-              <span className={`status-badge status-badge--${workspace.status}`}>{workspace.status}</span>
+              <span className={`status-badge status-badge--${workspace.status}`}>{translateStatus(t, workspace.status)}</span>
               <small>{formatDate(workspace.createdAt, { dateStyle: "medium" })}</small>
             </div>
           </article>)}
@@ -128,7 +130,7 @@ export function AdminDashboard() {
           {data.recentActivity.map((item) => <article key={item.id}>
             <div>
               <strong>{humanizeAction(item.action)}</strong>
-              <span>{item.workspaceName ?? item.entityType}</span>
+              <span>{item.workspaceName ?? translateRecordType(t, item.entityType)}</span>
             </div>
             <small>{item.actorName ?? t("common.system")} • {formatDate(item.createdAt, { dateStyle: "medium", timeStyle: "short" })}</small>
           </article>)}

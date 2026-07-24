@@ -196,7 +196,7 @@ function parseKmlToPreviewRows(t: TFunction, kmlText: string) {
   const placemarks = localChildren(documentXml, "Placemark");
   const rows: ImportPreviewRow[] = [];
   placemarks.forEach((placemark, placemarkIndex) => {
-    const name = firstLocalText(placemark, "name") || `Placemark ${placemarkIndex + 1}`;
+    const name = firstLocalText(placemark, "name") || t("farmMap.importedPlacemarkName", { index: placemarkIndex + 1 });
     localChildren(placemark, "Polygon").forEach((polygon, index) => {
       const rings = localChildren(polygon, "LinearRing")
         .map((ring) => closeRing(parseKmlCoordinates(firstLocalText(ring, "coordinates"))))
@@ -207,7 +207,7 @@ function parseKmlToPreviewRows(t: TFunction, kmlText: string) {
         id: `${placemarkIndex}:polygon:${index}`,
         selected: true,
         sourceName: name,
-        featureName: index ? `${name} polygon ${index + 1}` : name,
+        featureName: index ? t("farmMap.importedPolygonName", { name, index: index + 1 }) : name,
         geometryType,
         featureType: defaultFeatureType(geometryType),
         geojson: { type: "Polygon", coordinates: rings },
@@ -221,7 +221,7 @@ function parseKmlToPreviewRows(t: TFunction, kmlText: string) {
         id: `${placemarkIndex}:line:${index}`,
         selected: true,
         sourceName: name,
-        featureName: index ? `${name} path ${index + 1}` : name,
+        featureName: index ? t("farmMap.importedPathName", { name, index: index + 1 }) : name,
         geometryType,
         featureType: defaultFeatureType(geometryType),
         geojson: { type: "LineString", coordinates },
@@ -235,7 +235,7 @@ function parseKmlToPreviewRows(t: TFunction, kmlText: string) {
         id: `${placemarkIndex}:point:${index}`,
         selected: true,
         sourceName: name,
-        featureName: index ? `${name} marker ${index + 1}` : name,
+        featureName: index ? t("farmMap.importedMarkerName", { name, index: index + 1 }) : name,
         geometryType,
         featureType: defaultFeatureType(geometryType),
         geojson: { type: "Point", coordinates },

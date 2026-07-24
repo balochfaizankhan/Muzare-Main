@@ -1,4 +1,6 @@
 import Dexie, { type EntityTable } from "dexie";
+// Safe: ../i18n only imports i18next and static locale bundles, never this module.
+import i18n from "../i18n";
 import { isActiveOperationalRecord, isImportedAccountRecord, isImportedVoucherRecord } from "./operationalRecords";
 
 export type LocalRecord = {
@@ -648,7 +650,7 @@ export function setActiveWorkspaceId(workspaceId: string | null) {
 }
 
 export function getActiveWorkspaceId() {
-  if (!activeWorkspaceId) throw new Error("Select a workspace before accessing cached data.");
+  if (!activeWorkspaceId) throw new Error(i18n.t("offlineDb.workspaceNotSelected"));
   return activeWorkspaceId;
 }
 
@@ -729,13 +731,13 @@ export async function clearCachedData() {
 
 export function makeLocalRecord(id?: string) {
   const now = new Date().toISOString();
-  if (!activeFarmId || !activeSeasonId) throw new Error("Select an active farm and season before entering records.");
+  if (!activeFarmId || !activeSeasonId) throw new Error(i18n.t("offlineDb.farmSeasonNotSelected"));
   return { id: id ?? crypto.randomUUID(), workspaceId: getActiveWorkspaceId(), farmId: activeFarmId, seasonId: activeSeasonId, createdAt: now, updatedAt: now, pendingSync: false };
 }
 
 export function makeConfigRecord(id?: string) {
   const now = new Date().toISOString();
-  if (!activeFarmId) throw new Error("Select an active farm before entering records.");
+  if (!activeFarmId) throw new Error(i18n.t("offlineDb.farmNotSelected"));
   return { id: id ?? crypto.randomUUID(), workspaceId: getActiveWorkspaceId(), farmId: activeFarmId, seasonId: null, createdAt: now, updatedAt: now, pendingSync: false };
 }
 

@@ -89,13 +89,16 @@ function StartupScreen({ title, detail }: { title: string; detail: string }) {
   );
 }
 
-function RouteFallback({ detail }: { detail: string }) {
+function RouteFallback({ detailKey }: { detailKey: string }) {
   const { t } = useTranslation();
-  return <StartupScreen title="Muzare" detail={detail || t("common.loading")} />;
+  return <StartupScreen title="Muzare" detail={detailKey ? t(detailKey) : t("common.loading")} />;
 }
 
-function routeElement(element: ReactNode, detail: string) {
-  return <Suspense fallback={<RouteFallback detail={detail} />}>{element}</Suspense>;
+// `detailKey` is a translation key (routeLoading.*) rather than display text: this module renders
+// route elements once at module scope, so the fallback component resolves the key with
+// useTranslation at render time and stays in sync with language switches.
+function routeElement(element: ReactNode, detailKey: string) {
+  return <Suspense fallback={<RouteFallback detailKey={detailKey} />}>{element}</Suspense>;
 }
 
 function blockedRedirect(user: AppUser) {
@@ -164,43 +167,43 @@ export default function App() {
     <Route path="/onboarding" element={<RequireAuth><OnboardingPage /></RequireAuth>} />
     <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
     <Route path="/" element={<RequireAuth><HomeRedirect /></RequireAuth>} />
-    <Route path="/admin" element={<RequirePlatform>{routeElement(<AdminLayout />, "Loading admin workspace")}</RequirePlatform>}>
-      <Route path="dashboard" element={routeElement(<AdminDashboard />, "Loading admin dashboard")} />
-      <Route path="workspaces" element={routeElement(<Workspaces />, "Loading workspaces")} />
-      <Route path="farms" element={routeElement(<AdminFarms />, "Loading farms")} />
-      <Route path="suspended" element={routeElement(<Workspaces defaultStatusFilter="suspended" />, "Loading workspaces")} />
-      <Route path="users" element={routeElement(<Users />, "Loading users")} />
-      <Route path="subscriptions" element={routeElement(<AdminSection title={t("layout.subscriptions")} description={t("adminSections.subscriptionsDescription")} emptyDescription={t("adminSections.subscriptionsDescription")} />, "Loading subscriptions")} />
-      <Route path="billing" element={routeElement(<Billing />, "Loading billing")} />
-      <Route path="audit-logs" element={routeElement(<AuditLogs />, "Loading audit logs")} />
-      <Route path="migration-import" element={routeElement(<MigrationImport />, "Loading migration import")} />
-      <Route path="accounting-diagnostics" element={routeElement(<AccountingDiagnostics />, "Loading accounting diagnostics")} />
-      <Route path="accounting-reconciliation-debug" element={routeElement(<AccountingReconciliationDebug />, "Loading accounting reconciliation trace")} />
-      <Route path="imports/:jobId" element={routeElement(<MigrationImport />, "Loading import history")} />
-      <Route path="reports" element={routeElement(<AdminSection title={t("layout.reports")} description={t("adminSections.reportsDescription")} emptyDescription={t("adminSections.reportsDescription")} />, "Loading reports")} />
-      <Route path="settings" element={routeElement(<Settings />, "Loading settings")} />
-      <Route path="approvals" element={routeElement(<AdminApprovalsPage />, "Loading approvals")} />
+    <Route path="/admin" element={<RequirePlatform>{routeElement(<AdminLayout />, "routeLoading.adminWorkspace")}</RequirePlatform>}>
+      <Route path="dashboard" element={routeElement(<AdminDashboard />, "routeLoading.adminDashboard")} />
+      <Route path="workspaces" element={routeElement(<Workspaces />, "routeLoading.workspaces")} />
+      <Route path="farms" element={routeElement(<AdminFarms />, "routeLoading.farms")} />
+      <Route path="suspended" element={routeElement(<Workspaces defaultStatusFilter="suspended" />, "routeLoading.workspaces")} />
+      <Route path="users" element={routeElement(<Users />, "routeLoading.users")} />
+      <Route path="subscriptions" element={routeElement(<AdminSection title={t("layout.subscriptions")} description={t("adminSections.subscriptionsDescription")} emptyDescription={t("adminSections.subscriptionsDescription")} />, "routeLoading.subscriptions")} />
+      <Route path="billing" element={routeElement(<Billing />, "routeLoading.billing")} />
+      <Route path="audit-logs" element={routeElement(<AuditLogs />, "routeLoading.auditLogs")} />
+      <Route path="migration-import" element={routeElement(<MigrationImport />, "routeLoading.migrationImport")} />
+      <Route path="accounting-diagnostics" element={routeElement(<AccountingDiagnostics />, "routeLoading.accountingDiagnostics")} />
+      <Route path="accounting-reconciliation-debug" element={routeElement(<AccountingReconciliationDebug />, "routeLoading.accountingReconciliationTrace")} />
+      <Route path="imports/:jobId" element={routeElement(<MigrationImport />, "routeLoading.importHistory")} />
+      <Route path="reports" element={routeElement(<AdminSection title={t("layout.reports")} description={t("adminSections.reportsDescription")} emptyDescription={t("adminSections.reportsDescription")} />, "routeLoading.reports")} />
+      <Route path="settings" element={routeElement(<Settings />, "routeLoading.settings")} />
+      <Route path="approvals" element={routeElement(<AdminApprovalsPage />, "routeLoading.approvals")} />
     </Route>
-    <Route path="/workspace" element={<RequireWorkspace>{routeElement(<WorkspaceLayout />, "Loading workspace shell")}</RequireWorkspace>}>
-      <Route path="dashboard" element={routeElement(<WorkspaceDashboard />, "Loading dashboard")} />
-      <Route path="workforce" element={routeElement(<WorkforceSectionLayout />, "Loading workforce")}>
+    <Route path="/workspace" element={<RequireWorkspace>{routeElement(<WorkspaceLayout />, "routeLoading.workspaceShell")}</RequireWorkspace>}>
+      <Route path="dashboard" element={routeElement(<WorkspaceDashboard />, "routeLoading.dashboard")} />
+      <Route path="workforce" element={routeElement(<WorkforceSectionLayout />, "routeLoading.workforce")}>
         <Route index element={<Navigate to="labour" replace />} />
-        <Route path="labour" element={routeElement(<ModulePage module="workforce" />, "Loading labour")} />
-        <Route path="labour-groups" element={routeElement(<LabourGroupsPage />, "Loading labour groups")} />
-        <Route path="labour-groups/:groupId" element={routeElement(<LabourGroupsPage />, "Loading labour group")} />
-        <Route path="labour-groups/:groupId/members" element={routeElement(<LabourGroupsPage />, "Loading labour group members")} />
-        <Route path="attendance" element={routeElement(<Attendance />, "Loading attendance")} />
-        <Route path="reports" element={routeElement(<WorkforceReportsHub />, "Loading workforce reports")} />
+        <Route path="labour" element={routeElement(<ModulePage module="workforce" />, "routeLoading.labour")} />
+        <Route path="labour-groups" element={routeElement(<LabourGroupsPage />, "routeLoading.labourGroups")} />
+        <Route path="labour-groups/:groupId" element={routeElement(<LabourGroupsPage />, "routeLoading.labourGroup")} />
+        <Route path="labour-groups/:groupId/members" element={routeElement(<LabourGroupsPage />, "routeLoading.labourGroupMembers")} />
+        <Route path="attendance" element={routeElement(<Attendance />, "routeLoading.attendance")} />
+        <Route path="reports" element={routeElement(<WorkforceReportsHub />, "routeLoading.workforceReports")} />
         <Route path="labour-payments" element={<Navigate to="/workspace/labour-payments/overview" replace />} />
       </Route>
-      <Route path="labour-payments" element={routeElement(<LabourPaymentsSectionLayout />, "Loading labour payments")}>
+      <Route path="labour-payments" element={routeElement(<LabourPaymentsSectionLayout />, "routeLoading.labourPayments")}>
         <Route index element={<Navigate to="overview" replace />} />
-        <Route path="overview" element={routeElement(<WorkforcePaymentsPage />, "Loading payments due")} />
+        <Route path="overview" element={routeElement(<WorkforcePaymentsPage />, "routeLoading.paymentsDue")} />
         <Route path="payments-due" element={<Navigate to="/workspace/labour-payments/overview" replace />} />
-        <Route path="direct-due" element={routeElement(<WorkforcePaymentsPage />, "Loading direct labour due")} />
-        <Route path="wage-rates" element={routeElement(<WageRates />, "Loading wage rates")} />
-        <Route path="vouchers" element={routeElement(<WorkforcePaymentsPage />, "Loading Labour Payment Vouchers")} />
-        <Route path="advances" element={routeElement(<WorkforcePaymentsPage />, "Loading outstanding advances")} />
+        <Route path="direct-due" element={routeElement(<WorkforcePaymentsPage />, "routeLoading.directLabourDue")} />
+        <Route path="wage-rates" element={routeElement(<WageRates />, "routeLoading.wageRates")} />
+        <Route path="vouchers" element={routeElement(<WorkforcePaymentsPage />, "routeLoading.labourPaymentVouchers")} />
+        <Route path="advances" element={routeElement(<WorkforcePaymentsPage />, "routeLoading.outstandingAdvances")} />
         <Route path="legacy-earnings" element={<Navigate to="/workspace/labour-payments/direct-due" replace />} />
         <Route path="settlement-history" element={<Navigate to="/workspace/labour-payments/vouchers" replace />} />
         <Route path="legacy-advances" element={<Navigate to="/workspace/labour-payments/advances" replace />} />
@@ -209,37 +212,37 @@ export default function App() {
         <Route path="direct-payments" element={<Navigate to="/workspace/labour-payments/overview" replace />} />
         <Route path="settlements" element={<Navigate to="/workspace/labour-payments/direct-due?scope=group" replace />} />
         <Route path="settlement" element={<Navigate to="/workspace/labour-payments/direct-due?scope=group" replace />} />
-        <Route path="reports" element={routeElement(<LabourPaymentsReportsHub />, "Loading labour payment reports")} />
+        <Route path="reports" element={routeElement(<LabourPaymentsReportsHub />, "routeLoading.labourPaymentReports")} />
       </Route>
-      <Route path="sales" element={routeElement(<Sales />, "Loading sales")} />
-      <Route path="expenses" element={routeElement(<Expenses />, "Loading expenses")} />
-      <Route path="expenses/new" element={routeElement(<Expenses />, "Loading new expense voucher")} />
-      <Route path="expenses/vouchers" element={routeElement(<Expenses />, "Loading expense vouchers")} />
-      <Route path="expenses/summary" element={routeElement(<Expenses />, "Loading expense summary")} />
-      <Route path="dispatch" element={routeElement(<Dispatch />, "Loading dispatch")} />
-      <Route path="inventory" element={routeElement(<Inventory />, "Loading inventory")} />
+      <Route path="sales" element={routeElement(<Sales />, "routeLoading.sales")} />
+      <Route path="expenses" element={routeElement(<Expenses />, "routeLoading.expenses")} />
+      <Route path="expenses/new" element={routeElement(<Expenses />, "routeLoading.newExpenseVoucher")} />
+      <Route path="expenses/vouchers" element={routeElement(<Expenses />, "routeLoading.expenseVouchers")} />
+      <Route path="expenses/summary" element={routeElement(<Expenses />, "routeLoading.expenseSummary")} />
+      <Route path="dispatch" element={routeElement(<Dispatch />, "routeLoading.dispatch")} />
+      <Route path="inventory" element={routeElement(<Inventory />, "routeLoading.inventory")} />
       <Route path="attendance" element={<Navigate to="/workspace/workforce/attendance" replace />} />
       <Route path="advances" element={<Navigate to="/workspace/labour-payments/advances" replace />} />
       <Route path="labour-advances" element={<Navigate to="/workspace/labour-payments/advances" replace />} />
       <Route path="labour-earnings" element={<Navigate to="/workspace/labour-payments/direct-due" replace />} />
       <Route path="wage-rates" element={<Navigate to="/workspace/labour-payments/wage-rates" replace />} />
       <Route path="wage-settlements" element={<Navigate to="/workspace/labour-payments/direct-due?scope=group" replace />} />
-      <Route path="activity" element={routeElement(<ActivityLog />, "Loading activity log")} />
-      <Route path="reports" element={routeElement(<Reports />, "Loading reports")} />
-      <Route path="operations-map" element={config.featureFarmMap ? routeElement(<FarmOperationsMap mode="live" />, "Loading operations map") : <FarmMapDisabledRedirect />} />
-      <Route path="map-builder" element={config.featureFarmMap ? routeElement(<FarmOperationsMap mode="builder" />, "Loading map builder") : <FarmMapDisabledRedirect />} />
+      <Route path="activity" element={routeElement(<ActivityLog />, "routeLoading.activityLog")} />
+      <Route path="reports" element={routeElement(<Reports />, "routeLoading.reports")} />
+      <Route path="operations-map" element={config.featureFarmMap ? routeElement(<FarmOperationsMap mode="live" />, "routeLoading.operationsMap") : <FarmMapDisabledRedirect />} />
+      <Route path="map-builder" element={config.featureFarmMap ? routeElement(<FarmOperationsMap mode="builder" />, "routeLoading.mapBuilder") : <FarmMapDisabledRedirect />} />
       <Route path="team" element={<Navigate to="/workspace/workforce/labour" replace />} />
-      <Route path="settings" element={routeElement(<Farms />, "Loading workspace settings")} />
-      <Route path="settings/team" element={routeElement(<WorkspaceTeam />, "Loading workspace team")} />
-      <Route path="settings/approvals" element={routeElement(<WorkspaceApprovals />, "Loading approvals")} />
-      <Route path="farms" element={routeElement(<Farms />, "Loading farms")} />
-      <Route path=":workspaceId/farms/:farmId/map-builder" element={config.featureFarmMap ? routeElement(<FarmOperationsMap mode="builder" />, "Loading map builder") : <FarmMapDisabledRedirect />} />
-      <Route path=":workspaceId/farms/:farmId/operations-map" element={config.featureFarmMap ? routeElement(<FarmOperationsMap mode="live" />, "Loading operations map") : <FarmMapDisabledRedirect />} />
-      <Route path="seasons" element={routeElement(<Seasons />, "Loading seasons")} />
-      <Route path="accounts" element={routeElement(<ModulePage module="accounts" />, "Loading accounts")} />
-      <Route path="partner-ledger" element={routeElement(<ModulePage module="partnerLedger" />, "Loading partner ledger")} />
+      <Route path="settings" element={routeElement(<Farms />, "routeLoading.workspaceSettings")} />
+      <Route path="settings/team" element={routeElement(<WorkspaceTeam />, "routeLoading.workspaceTeam")} />
+      <Route path="settings/approvals" element={routeElement(<WorkspaceApprovals />, "routeLoading.approvals")} />
+      <Route path="farms" element={routeElement(<Farms />, "routeLoading.farms")} />
+      <Route path=":workspaceId/farms/:farmId/map-builder" element={config.featureFarmMap ? routeElement(<FarmOperationsMap mode="builder" />, "routeLoading.mapBuilder") : <FarmMapDisabledRedirect />} />
+      <Route path=":workspaceId/farms/:farmId/operations-map" element={config.featureFarmMap ? routeElement(<FarmOperationsMap mode="live" />, "routeLoading.operationsMap") : <FarmMapDisabledRedirect />} />
+      <Route path="seasons" element={routeElement(<Seasons />, "routeLoading.seasons")} />
+      <Route path="accounts" element={routeElement(<ModulePage module="accounts" />, "routeLoading.accounts")} />
+      <Route path="partner-ledger" element={routeElement(<ModulePage module="partnerLedger" />, "routeLoading.partnerLedger")} />
     </Route>
-    <Route path="/debug/accounting-reconciliation" element={<RequireAuth>{routeElement(<WorkspaceAccountingReconciliationDebug />, "Loading accounting reconciliation trace")}</RequireAuth>} />
+    <Route path="/debug/accounting-reconciliation" element={<RequireAuth>{routeElement(<WorkspaceAccountingReconciliationDebug />, "routeLoading.accountingReconciliationTrace")}</RequireAuth>} />
     {["workforce", "advances", "wage-rates", "wage-settlements", "expenses", "sales", "dispatch", "inventory", "accounts", "partner-ledger", "farms", "seasons"].map((path) =>
       <Route key={path} path={`/${path}`} element={<Navigate to={`/workspace/${path === "workforce" ? "workforce/labour" : path}`} replace />} />,
     )}

@@ -6,6 +6,9 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
 import { createAdminWorkspace, deleteAdminWorkspace, fetchAdminWorkspace, fetchAdminWorkspaces, type AdminWorkspace, updateAdminWorkspaceStatus } from "../../lib/api";
 import { formatDate, formatNumber } from "../../lib/format";
+import { translateStatus } from "../../lib/statusLabels";
+import { translateRole } from "../../lib/systemTranslations";
+import { translateRecordType } from "../../locales/adminLocalizationBundle";
 import i18n from "../../i18n";
 
 type WorkspaceStatusFilter = "all" | AdminWorkspace["status"];
@@ -145,7 +148,7 @@ export function Workspaces({ defaultStatusFilter = "all" }: { defaultStatusFilte
                 <strong>{workspace.name}</strong>
                 <span>{workspace.ownerEmail ?? workspace.contactEmail}</span>
               </td>
-              <td><span className={`status-badge status-badge--${workspace.status}`}>{workspace.status}</span></td>
+              <td><span className={`status-badge status-badge--${workspace.status}`}>{translateStatus(t, workspace.status)}</span></td>
               <td>{formatNumber(workspace.usersCount)}</td>
               <td>{formatNumber(workspace.farmsCount)}</td>
               <td>{formatDate(workspace.createdAt, { dateStyle: "medium" })}</td>
@@ -179,7 +182,7 @@ export function Workspaces({ defaultStatusFilter = "all" }: { defaultStatusFilte
           {detail.data?.workspace && <>
             <section className="admin-detail-section">
               <dl className="worker-stats admin-detail-stats">
-                <div><dt>{t("common.status")}</dt><dd><span className={`status-badge status-badge--${detail.data.workspace.status}`}>{detail.data.workspace.status}</span></dd></div>
+                <div><dt>{t("common.status")}</dt><dd><span className={`status-badge status-badge--${detail.data.workspace.status}`}>{translateStatus(t, detail.data.workspace.status)}</span></dd></div>
                 <div><dt>{t("adminWorkspaces.columns.created")}</dt><dd>{formatDate(detail.data.workspace.createdAt, { dateStyle: "medium", timeStyle: "short" })}</dd></div>
                 <div><dt>{t("adminWorkspaces.approved")}</dt><dd>{detail.data.workspace.approvedAt ? formatDate(detail.data.workspace.approvedAt, { dateStyle: "medium", timeStyle: "short" }) : "-"}</dd></div>
                 <div><dt>{t("adminWorkspaces.slug")}</dt><dd>{detail.data.workspace.slug}</dd></div>
@@ -193,7 +196,7 @@ export function Workspaces({ defaultStatusFilter = "all" }: { defaultStatusFilte
                 {detail.data.workspace.members.map((member) => <article key={member.id}>
                   <div>
                     <strong>{member.displayName ?? member.email}</strong>
-                    <span>{member.email} • {member.role}</span>
+                    <span>{member.email} • {translateRole(member.role)}</span>
                   </div>
                   <small>{member.hasWorkspaceAccess ? t("adminWorkspaces.activeMember") : (member.userStatus === "suspended" ? t("adminWorkspaces.suspendedUser") : t("adminWorkspaces.inactiveMember"))}</small>
                 </article>)}
@@ -208,7 +211,7 @@ export function Workspaces({ defaultStatusFilter = "all" }: { defaultStatusFilte
                     <strong>{farm.name}</strong>
                     <span>{farmStatusLabel(t, farm.status)} • {t("adminFarms.records")}: {formatNumber(farm.totalRecords)}</span>
                   </div>
-                  <small>{Object.entries(farm.counts).map(([key, value]) => `${key}: ${value}`).join(" · ")}</small>
+                  <small>{Object.entries(farm.counts).map(([key, value]) => `${translateRecordType(t, key)}: ${value}`).join(" · ")}</small>
                 </article>)}
               </div>}
             </section>
@@ -219,7 +222,7 @@ export function Workspaces({ defaultStatusFilter = "all" }: { defaultStatusFilte
                 {detail.data.workspace.deletionRequests.map((request) => <article key={request.id}>
                   <div>
                     <strong>{request.farmName}</strong>
-                    <span>{request.status} • {request.requestedByEmail}</span>
+                    <span>{translateStatus(t, request.status)} • {request.requestedByEmail}</span>
                   </div>
                   <small>{formatDate(request.createdAt, { dateStyle: "medium", timeStyle: "short" })}</small>
                 </article>)}

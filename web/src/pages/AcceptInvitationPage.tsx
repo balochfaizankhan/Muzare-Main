@@ -176,7 +176,7 @@ export function AcceptInvitationPage() {
           ) : invitation ? (
             <>
               <div className="invite-share invite-share--detail">
-                <p><strong>{invitation.workspaceName ?? "Muzare Workspace"}</strong></p>
+                <p><strong>{invitation.workspaceName ?? t("invitePage.workspaceFallbackName")}</strong></p>
                 <p>{invitedEmail}</p>
                 <p>{t(`workspaceTeam.roles.${invitation.role}`)}</p>
                 <p>{t("workspaceTeam.invitedByLabel")} {invitation.inviterName ?? invitation.inviterEmail ?? "-"}</p>

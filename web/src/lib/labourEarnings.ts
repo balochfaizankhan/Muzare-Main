@@ -1,3 +1,4 @@
+import i18n from "../i18n";
 import type { Advance, Attendance, LabourEarning, LabourPayment, LabourWageSettlement, WageRate } from "./offline-db";
 import { isActiveOperationalRecord } from "./operationalRecords";
 import { normalizeHalfDayRate, resolveApplicableWageRate, summarizeAttendanceWages, wageForAttendanceStatus } from "./wageRates";
@@ -49,14 +50,16 @@ export function sumLabourEarnings(earnings: LabourEarning[]) {
 }
 
 export function labourEarningScopeLabel(earning: LabourEarning) {
-  return earning.earningScope === "group" ? "Group" : "Individual";
+  return earning.earningScope === "group"
+    ? i18n.t("labourEarningsLabels.scopeGroup")
+    : i18n.t("labourEarningsLabels.scopeIndividual");
 }
 
 export function labourEarningScopeTarget(earning: LabourEarning) {
   if (earning.earningScope === "group") {
-    return earning.labourGroupName ?? earning.labourGroupId ?? "Labour group";
+    return earning.labourGroupName ?? earning.labourGroupId ?? i18n.t("labourEarningsLabels.labourGroupFallback");
   }
-  return earning.labourerId ?? "Labourer";
+  return earning.labourerId ?? i18n.t("labourEarningsLabels.labourerFallback");
 }
 
 export function labourEarningsByScope(earnings: LabourEarning[]) {
@@ -166,13 +169,14 @@ export function buildLabourEarningsProfileSummary(args: {
 }
 
 export function labourEarningTypeLabel(type: LabourEarning["earningType"]) {
-  const labels: Record<LabourEarning["earningType"], string> = {
-    adjustment: "Adjustment",
-    bonus: "Bonus",
-    incentive: "Incentive",
-    lump_sum: "Lump sum",
-    other: "Other",
-    task: "Task",
+  const keys: Record<LabourEarning["earningType"], string> = {
+    adjustment: "labourEarningsLabels.typeAdjustment",
+    bonus: "labourEarningsLabels.typeBonus",
+    incentive: "labourEarningsLabels.typeIncentive",
+    lump_sum: "labourEarningsLabels.typeLumpSum",
+    other: "labourEarningsLabels.typeOther",
+    task: "labourEarningsLabels.typeTask",
   };
-  return labels[type] ?? type;
+  const key = keys[type];
+  return key ? i18n.t(key) : type;
 }

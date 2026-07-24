@@ -1,14 +1,65 @@
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronUp, Database, FileJson, UploadCloud } from "lucide-react";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
 import { ImportVisibilityAuditPanel } from "../../components/ImportVisibilityAuditPanel";
 import { cancelAndCleanMigrationImport, downloadMigrationImportFailures, fetchActiveMigrationImportJob, fetchAdminWorkspaces, fetchMigrationImportBatches, fetchMigrationImportCleanupPreview, fetchMigrationImportHistory, fetchMigrationImportJobStatus, fetchMigrationImportProgress, fetchWorkspaceImportContextRepairPreview, importMigrationData, repairDeletedFarmSeasonState, repairDuplicateImportedAccounts, repairImportedVoucherNumbers, repairMigrationImportVisibility, repairWorkspaceImportContext, validateMigrationImport, type MigrationImportBatchRecord, type MigrationImportHistoryRecord, type MigrationImportIssue, type MigrationImportJobDetail, type MigrationImportLogEntry, type MigrationImportProgress, type MigrationImportSummary, type WorkspaceImportContextPreview } from "../../lib/api";
-import { formatMoney } from "../../lib/format";
+import { formatDate, formatMoney } from "../../lib/format";
 import { clearCachedData } from "../../lib/offline-db";
+import { translateRecordType } from "../../locales/adminLocalizationBundle";
+import { translateStatus } from "../../lib/statusLabels";
 
 type StepStatus = "done" | "running" | "waiting" | "failed";
+
+// The backend expects this exact English phrase; the surrounding instructions are localized
+// while the phrase itself stays constant so the API contract keeps working in every language.
+const CLEANUP_CONFIRMATION_PHRASE = "CANCEL AND CLEAN IMPORT";
+
+// English stage identifiers coming from the import/cleanup workers, mapped to translation keys.
+// Matching stays on the raw English strings; only the rendered label is localized.
+const IMPORT_STAGES: Array<[string, string]> = [
+  ["Reading JSON", "readingJson"],
+  ["Validating file", "validatingFile"],
+  ["Importing farms", "importingFarms"],
+  ["Importing seasons", "importingSeasons"],
+  ["Importing accounts", "importingAccounts"],
+  ["Importing partners", "importingPartners"],
+  ["Importing labour", "importingLabour"],
+  ["Importing attendance", "importingAttendance"],
+  ["Importing advances", "importingAdvances"],
+  ["Importing vouchers", "importingVouchers"],
+  ["Importing voucher items", "importingVoucherItems"],
+  ["Repairing references", "repairingReferences"],
+  ["Verifying import", "verifyingImport"],
+  ["Completed", "completed"],
+];
+
+const CLEANUP_STAGES: Array<[string, string]> = [
+  ["Stopping import worker", "stoppingImportWorker"],
+  ["Finding imported records", "findingImportedRecords"],
+  ["Removing operational records", "removingOperationalRecords"],
+  ["Removing import failures", "removingImportFailures"],
+  ["Cleaning seasons", "cleaningSeasons"],
+  ["Cleaning farms", "cleaningFarms"],
+  ["Detaching audit logs", "detachingAuditLogs"],
+  ["Repairing session context", "repairingSessionContext"],
+  ["Updating batch status", "updatingBatchStatus"],
+  ["Completed", "completed"],
+];
+
+const STAGE_KEY_BY_TEXT: Record<string, string> = Object.fromEntries(
+  [...IMPORT_STAGES, ...CLEANUP_STAGES, ["Starting cleanup...", "startingCleanup"] as [string, string]]
+    .map(([text, key]) => [text.toLowerCase(), `migrationImport.stages.${key}`]),
+);
+
+function stageLabel(t: TFunction, raw: string | null | undefined): string {
+  if (!raw) return "-";
+  const key = STAGE_KEY_BY_TEXT[raw.trim().toLowerCase()];
+  return key ? t(key) : raw;
+}
 
 function formatApiError(error: unknown, fallback: string) {
   if (!error) return fallback;
@@ -46,27 +97,27 @@ function buildCleanupStartingProgress(batchId: string): MigrationImportProgress 
 }
 
 function StatusBadge({ status }: { status: string }) {
+  const { t } = useTranslation();
   const normalized = status.toLowerCase();
-  const label = normalized === "in_progress"
-    ? "Importing"
+  const mapped = normalized === "in_progress" || normalized === "queued"
+    ? "importing"
     : normalized === "partial_failed"
-      ? "Failed"
-      : normalized === "queued"
-        ? "Importing"
-        : normalized.charAt(0).toUpperCase() + normalized.slice(1).replace(/_/g, " ");
-  return <span className={`migration-status-badge migration-status-badge--${normalized}`}>{label}</span>;
+      ? "failed"
+      : normalized;
+  return <span className={`migration-status-badge migration-status-badge--${normalized}`}>{translateStatus(t, mapped)}</span>;
 }
 
 function SummaryGrid({ summary }: { summary: MigrationImportSummary }) {
+  const { t } = useTranslation();
   const cards = [
-    ["Farms", summary.counts.farms ?? 0],
-    ["Seasons", summary.counts.seasons ?? 0],
-    ["Labour", summary.counts.labour ?? summary.counts.labours ?? 0],
-    ["Attendance", summary.counts.attendance ?? 0],
-    ["Expenses", summary.counts.expenses ?? 0],
-    ["Expense items", summary.counts.expenseItems ?? 0],
-    ["Accounts", summary.counts.accounts ?? 0],
-    ["Partners", summary.counts.partners ?? 0],
+    [t("migrationImport.counts.farms"), summary.counts.farms ?? 0],
+    [t("migrationImport.counts.seasons"), summary.counts.seasons ?? 0],
+    [t("migrationImport.counts.labour"), summary.counts.labour ?? summary.counts.labours ?? 0],
+    [t("migrationImport.counts.attendance"), summary.counts.attendance ?? 0],
+    [t("migrationImport.counts.expenses"), summary.counts.expenses ?? 0],
+    [t("migrationImport.counts.expenseItems"), summary.counts.expenseItems ?? 0],
+    [t("migrationImport.counts.accounts"), summary.counts.accounts ?? 0],
+    [t("migrationImport.counts.partners"), summary.counts.partners ?? 0],
   ] as const;
   return (
     <div className="migration-summary">
@@ -76,19 +127,20 @@ function SummaryGrid({ summary }: { summary: MigrationImportSummary }) {
           <strong>{value}</strong>
         </article>
       ))}
-      <article><span>Export version</span><strong>{summary.exportVersion ?? "-"}</strong></article>
-      <article><span>Exported at</span><strong>{summary.exportedAt ? new Date(summary.exportedAt).toLocaleString() : "-"}</strong></article>
-      <article><span>Total expenses</span><strong>{formatMoney(summary.totalExpenses)}</strong></article>
-      <article><span>Total advances</span><strong>{formatMoney(summary.totalAdvances)}</strong></article>
+      <article><span>{t("migrationImport.exportVersion")}</span><strong>{summary.exportVersion ?? "-"}</strong></article>
+      <article><span>{t("migrationImport.exportedAt")}</span><strong>{summary.exportedAt ? formatDate(summary.exportedAt, { dateStyle: "medium", timeStyle: "short" }) : "-"}</strong></article>
+      <article><span>{t("migrationImport.totalExpenses")}</span><strong>{formatMoney(summary.totalExpenses)}</strong></article>
+      <article><span>{t("migrationImport.totalAdvances")}</span><strong>{formatMoney(summary.totalAdvances)}</strong></article>
     </div>
   );
 }
 
 function BalanceList({ title, rows }: { title: string; rows: Array<{ name: string; balance: number }> }) {
+  const { t } = useTranslation();
   return (
     <section className="migration-balance-list">
       <h3>{title}</h3>
-      {!rows.length ? <p className="activity-empty">No balances found in the export.</p> : rows.map((row) => (
+      {!rows.length ? <p className="activity-empty">{t("migrationImport.noBalances")}</p> : rows.map((row) => (
         <div key={row.name}>
           <span>{row.name}</span>
           <strong>{formatMoney(row.balance)}</strong>
@@ -99,21 +151,22 @@ function BalanceList({ title, rows }: { title: string; rows: Array<{ name: strin
 }
 
 function JobErrorPanel({ detail, onDownloadFailures }: { detail: MigrationImportJobDetail; onDownloadFailures: () => void }) {
+  const { t } = useTranslation();
   const lastSuccessfulStep = [...detail.steps].reverse().find((step) => step.status === "completed")?.name ?? "-";
   return (
     <section className="admin-section-card migration-issues">
-      <h2>Import Failure</h2>
-      <p className="worker-action-error">{detail.error || detail.message || detail.firstFailureMessage || "Import failed."}</p>
-      <p><b>Job ID</b> {detail.jobId}</p>
-      <p><b>Current step</b> {detail.currentStep}</p>
-      <p><b>Last successful step</b> {lastSuccessfulStep}</p>
-      <p><b>Imported</b> {detail.importedRows} · <b>Updated</b> {detail.updatedRows} · <b>Skipped</b> {detail.skippedRows} · <b>Failed</b> {detail.failedRows}</p>
+      <h2>{t("migrationImport.importFailure")}</h2>
+      <p className="worker-action-error">{detail.error || detail.message || detail.firstFailureMessage || t("migrationImport.importFailed")}</p>
+      <p><b>{t("migrationImport.jobId")}</b> {detail.jobId}</p>
+      <p><b>{t("migrationImport.currentStep")}</b> {stageLabel(t, detail.currentStep)}</p>
+      <p><b>{t("migrationImport.lastSuccessfulStep")}</b> {stageLabel(t, lastSuccessfulStep)}</p>
+      <p><b>{t("migrationImport.imported")}</b> {detail.importedRows} · <b>{t("migrationImport.updated")}</b> {detail.updatedRows} · <b>{t("migrationImport.skipped")}</b> {detail.skippedRows} · <b>{t("migrationImport.failed")}</b> {detail.failedRows}</p>
       <div className="record-list__actions">
-        <button type="button" className="secondary-button" onClick={onDownloadFailures}>Download failure CSV</button>
+        <button type="button" className="secondary-button" onClick={onDownloadFailures}>{t("migrationImport.downloadFailureCsv")}</button>
       </div>
       {detail.failures.slice(0, 10).map((failure) => (
         <p key={failure.id}>
-          <b>{failure.step}</b> {failure.sourceRow ? `· row ${failure.sourceRow}` : ""} · {failure.errorMessage}
+          <b>{failure.step}</b> {failure.sourceRow ? `· ${t("migrationImport.rowNumber", { row: failure.sourceRow })}` : ""} · {failure.errorMessage}
         </p>
       ))}
     </section>
@@ -121,28 +174,29 @@ function JobErrorPanel({ detail, onDownloadFailures }: { detail: MigrationImport
 }
 
 function IssueList({ issues }: { issues: MigrationImportIssue[] }) {
+  const { t } = useTranslation();
   const [showDetails, setShowDetails] = useState(false);
   const errors = issues.filter((issue) => issue.level === "error");
   const warnings = issues.filter((issue) => issue.level === "warning");
   return (
     <section className="migration-issues">
-      <h3>Validation Warnings</h3>
-      {!issues.length ? <p className="positive">No validation errors or warnings.</p> : null}
+      <h3>{t("migrationImport.validationWarnings")}</h3>
+      {!issues.length ? <p className="positive">{t("migrationImport.noValidationIssues")}</p> : null}
       {errors.length ? (
         <div className="migration-callout migration-callout--error">
-          <strong>Validation failed</strong>
-          <p>{errors[0]?.message ?? "Import validation failed."}</p>
+          <strong>{t("migrationImport.validationFailedTitle")}</strong>
+          <p>{errors[0]?.message ?? t("migrationImport.importValidationFailed")}</p>
         </div>
       ) : null}
       {warnings.length ? (
         <div className="migration-callout migration-callout--warning">
-          <strong>{warnings.length} warning{warnings.length === 1 ? "" : "s"}</strong>
-          <p>Warnings were detected. Review the details before importing.</p>
+          <strong>{t("migrationImport.warningCount", { count: warnings.length })}</strong>
+          <p>{t("migrationImport.warningsDetected")}</p>
         </div>
       ) : null}
       {issues.length > 0 ? (
         <button type="button" className="secondary-button" onClick={() => setShowDetails((value) => !value)}>
-          {showDetails ? "Hide details" : "Show details"}
+          {showDetails ? t("migrationImport.hideDetails") : t("migrationImport.showDetails")}
         </button>
       ) : null}
       {showDetails ? (
@@ -170,6 +224,7 @@ const readLogDetails = (record: MigrationImportHistoryRecord) => {
 };
 
 function StepTimeline({ title, rows }: { title: string; rows: Array<{ label: string; status: StepStatus; detail?: string }> }) {
+  const { t } = useTranslation();
   return (
     <section className="migration-step-timeline">
       <h3>{title}</h3>
@@ -177,10 +232,10 @@ function StepTimeline({ title, rows }: { title: string; rows: Array<{ label: str
         {rows.map((row) => (
           <article key={row.label} className={`migration-stage-row migration-stage-row--${row.status}`}>
             <div>
-              <strong>{row.label}</strong>
+              <strong>{stageLabel(t, row.label)}</strong>
               {row.detail ? <p>{row.detail}</p> : null}
             </div>
-            <span>{row.status === "done" ? "Done" : row.status === "running" ? "Running" : row.status === "failed" ? "Failed" : "Waiting"}</span>
+            <span>{translateStatus(t, row.status)}</span>
           </article>
         ))}
       </div>
@@ -189,35 +244,37 @@ function StepTimeline({ title, rows }: { title: string; rows: Array<{ label: str
 }
 
 function ProgressCard({ progress, stageRows, isCleanup }: { progress: MigrationImportProgress; stageRows: Array<{ label: string; status: StepStatus; detail?: string }>; isCleanup: boolean }) {
+  const { t } = useTranslation();
   const staleSeconds = Math.max(0, Math.round((Date.now() - new Date(progress.updatedAt).getTime()) / 1000));
   const appearsStuck = progress.status === "running" && staleSeconds > 300;
   return (
     <section className="admin-section-card migration-progress-card">
       <div className="admin-section-heading">
         <div>
-          <h2>Step 3 - {isCleanup ? "Cleanup Progress" : "Live Import Progress"}</h2>
-          <p>{progress.message || (isCleanup ? "Cleaning the selected import batch." : "Importing Android data into the selected workspace.")}</p>
+          <h2>{isCleanup ? t("migrationImport.step3CleanupTitle") : t("migrationImport.step3ImportTitle")}</h2>
+          <p>{progress.message || (isCleanup ? t("migrationImport.cleanupDefaultMessage") : t("migrationImport.importDefaultMessage"))}</p>
         </div>
         <StatusBadge status={appearsStuck ? "stuck" : progress.status} />
       </div>
       <div className="migration-progress-meta">
         <div className="migration-progress-bar" aria-hidden="true"><div style={{ width: `${Math.max(0, Math.min(100, progress.percentage))}%` }} /></div>
         <div className="migration-progress-stats">
-          <article><span>Progress</span><strong>{progress.percentage}%</strong></article>
-          <article><span>Current stage</span><strong>{progress.stage || "-"}</strong></article>
-          <article><span>Current task</span><strong>{progress.step || "-"}</strong></article>
-          <article><span>Processed</span><strong>{progress.processedCount} / {progress.totalCount || "-"}</strong></article>
-          <article><span>Elapsed</span><strong>{progress.elapsedSeconds}s</strong></article>
-          <article><span>Last updated</span><strong>{new Date(progress.updatedAt).toLocaleTimeString()}</strong></article>
+          <article><span>{t("migrationImport.progress")}</span><strong>{progress.percentage}%</strong></article>
+          <article><span>{t("migrationImport.currentStage")}</span><strong>{stageLabel(t, progress.stage)}</strong></article>
+          <article><span>{t("migrationImport.currentTask")}</span><strong>{stageLabel(t, progress.step)}</strong></article>
+          <article><span>{t("migrationImport.processed")}</span><strong>{progress.processedCount} / {progress.totalCount || "-"}</strong></article>
+          <article><span>{t("migrationImport.elapsed")}</span><strong>{t("migrationImport.secondsShort", { count: progress.elapsedSeconds })}</strong></article>
+          <article><span>{t("migrationImport.lastUpdated")}</span><strong>{formatDate(progress.updatedAt, { timeStyle: "medium" })}</strong></article>
         </div>
       </div>
-      <StepTimeline title="Stages" rows={stageRows} />
-      {appearsStuck ? <p className="worker-action-error">This import appears stuck.</p> : null}
+      <StepTimeline title={t("migrationImport.stagesTitle")} rows={stageRows} />
+      {appearsStuck ? <p className="worker-action-error">{t("migrationImport.importAppearsStuck")}</p> : null}
     </section>
   );
 }
 
 function ResultCard({ validation, importResult, onReset }: { validation: Awaited<ReturnType<typeof validateMigrationImport>> | undefined; importResult: Awaited<ReturnType<typeof importMigrationData>> | undefined; onReset: () => void }) {
+  const { t } = useTranslation();
   if (!validation) return null;
   const result = importResult?.result;
   const audit = result?.postImportAudit;
@@ -225,40 +282,47 @@ function ResultCard({ validation, importResult, onReset }: { validation: Awaited
     <section className="admin-section-card migration-results">
       <div className="admin-section-heading">
         <div>
-          <h2>Step 4 - {result ? "Import Result" : "Validation Result"}</h2>
-          <p>{result ? "Import completed. Review the result summary below." : validation.canImport ? "Validation passed. You can proceed with import." : "Validation finished with issues that need review."}</p>
+          <h2>{result ? t("migrationImport.step4ImportResult") : t("migrationImport.step4ValidationResult")}</h2>
+          <p>{result ? t("migrationImport.importCompletedMessage") : validation.canImport ? t("migrationImport.validationPassedMessage") : t("migrationImport.validationIssuesMessage")}</p>
         </div>
         {result ? <StatusBadge status="completed" /> : <StatusBadge status={validation.canImport ? "ready" : "failed"} />}
       </div>
       <SummaryGrid summary={validation.summary} />
       <div className="migration-balance-grid">
-        <BalanceList title="Partner balances" rows={validation.summary.partnerBalances} />
-        <BalanceList title="Cash / bank balances" rows={validation.summary.cashBankBalances} />
+        <BalanceList title={t("migrationImport.partnerBalances")} rows={validation.summary.partnerBalances} />
+        <BalanceList title={t("migrationImport.cashBankBalances")} rows={validation.summary.cashBankBalances} />
       </div>
       <IssueList issues={validation.issues} />
       {result ? (
         <div className="migration-result-grid">
-          <article><span>Duration</span><strong>{result.startedAt && result.completedAt ? `${Math.max(1, Math.round((new Date(result.completedAt).getTime() - new Date(result.startedAt).getTime()) / 1000))}s` : "-"}</strong></article>
-          <article><span>Imported rows</span><strong>{result.importCounts.reduce((sum, item) => sum + item.count, 0)}</strong></article>
-          <article><span>Updated rows</span><strong>{result.logs?.reduce((sum, item) => sum + (item.updatedRows ?? 0), 0) ?? 0}</strong></article>
-          <article><span>Warnings</span><strong>{validation.issues.filter((issue) => issue.level === "warning").length}</strong></article>
-          <article><span>Failures</span><strong>{typeof result.failedRows === "number" ? result.failedRows : 0}</strong></article>
-          <article><span>Inserted operational records</span><strong>{result.insertedOperationalRecords}</strong></article>
-          {result.importCounts.map((item) => <article key={item.key}><span>{item.label}</span><strong>{item.count}</strong></article>)}
+          <article><span>{t("migrationImport.duration")}</span><strong>{result.startedAt && result.completedAt ? t("migrationImport.secondsShort", { count: Math.max(1, Math.round((new Date(result.completedAt).getTime() - new Date(result.startedAt).getTime()) / 1000)) }) : "-"}</strong></article>
+          <article><span>{t("migrationImport.importedRows")}</span><strong>{result.importCounts.reduce((sum, item) => sum + item.count, 0)}</strong></article>
+          <article><span>{t("migrationImport.updatedRows")}</span><strong>{result.logs?.reduce((sum, item) => sum + (item.updatedRows ?? 0), 0) ?? 0}</strong></article>
+          <article><span>{t("migrationImport.warnings")}</span><strong>{validation.issues.filter((issue) => issue.level === "warning").length}</strong></article>
+          <article><span>{t("migrationImport.failures")}</span><strong>{typeof result.failedRows === "number" ? result.failedRows : 0}</strong></article>
+          <article><span>{t("migrationImport.insertedOperationalRecords")}</span><strong>{result.insertedOperationalRecords}</strong></article>
+          {result.importCounts.map((item) => <article key={item.key}><span>{translateRecordType(t, item.key) || item.label}</span><strong>{item.count}</strong></article>)}
         </div>
       ) : null}
       {audit ? (
         <section className="migration-issues">
-          <h3>Audit Summary</h3>
-          <p><b>Voucher number audit</b> mismatches {audit.voucherNumberAudit.mismatches.length} · duplicates {audit.voucherNumberAudit.duplicateImportedVoucherNumbers.length}</p>
-          <p><b>Relationship audit</b> attendance linked {audit.relationshipAudit.attendanceLinkedToLabour}/{audit.relationshipAudit.attendanceTotal} · advances linked to labour {audit.relationshipAudit.advancesLinkedToLabour}/{audit.relationshipAudit.advancesTotal} · vouchers linked to payment account {audit.relationshipAudit.vouchersLinkedToPaymentAccount}/{audit.relationshipAudit.vouchersTotal}</p>
-          <p><b>Visibility audit</b> farms {audit.tableCounts.farms} · seasons {audit.tableCounts.seasons} · failed batches {audit.tableCounts.failedOrPartialBatches}</p>
+          <h3>{t("migrationImport.auditSummary")}</h3>
+          <p><b>{t("migrationImport.voucherNumberAudit")}</b> {t("migrationImport.voucherNumberAuditLine", { mismatches: audit.voucherNumberAudit.mismatches.length, duplicates: audit.voucherNumberAudit.duplicateImportedVoucherNumbers.length })}</p>
+          <p><b>{t("migrationImport.relationshipAudit")}</b> {t("migrationImport.relationshipAuditLine", {
+            attendanceLinked: audit.relationshipAudit.attendanceLinkedToLabour,
+            attendanceTotal: audit.relationshipAudit.attendanceTotal,
+            advancesLinked: audit.relationshipAudit.advancesLinkedToLabour,
+            advancesTotal: audit.relationshipAudit.advancesTotal,
+            vouchersLinked: audit.relationshipAudit.vouchersLinkedToPaymentAccount,
+            vouchersTotal: audit.relationshipAudit.vouchersTotal,
+          })}</p>
+          <p><b>{t("migrationImport.visibilityAuditLabel")}</b> {t("migrationImport.visibilityAuditLine", { farms: audit.tableCounts.farms, seasons: audit.tableCounts.seasons, failedBatches: audit.tableCounts.failedOrPartialBatches })}</p>
         </section>
       ) : null}
       {result ? (
         <div className="record-list__actions">
-          <Link className="secondary-button" to={result.attendanceJobId ? `/admin/imports/${result.attendanceJobId}` : "#"}>View full report</Link>
-          <button type="button" className="secondary-button" onClick={onReset}>Import another file</button>
+          <Link className="secondary-button" to={result.attendanceJobId ? `/admin/imports/${result.attendanceJobId}` : "#"}>{t("migrationImport.viewFullReport")}</Link>
+          <button type="button" className="secondary-button" onClick={onReset}>{t("migrationImport.importAnotherFile")}</button>
         </div>
       ) : null}
     </section>
@@ -278,6 +342,7 @@ function HistoryTable({
   onSelectBatch: (batchId: string | null) => void;
   workspaceLabel: string;
 }) {
+  const { t } = useTranslation();
   const historyByBatch = records.reduce<Map<string, MigrationImportHistoryRecord[]>>((map, record) => {
     const batch = readLogDetails(record).batch;
     map.set(batch, [...(map.get(batch) ?? []), record]);
@@ -288,37 +353,37 @@ function HistoryTable({
     <section className="admin-section-card migration-history-card">
       <div className="admin-section-heading">
         <div>
-          <h2>Step 6 - Import History</h2>
-          <p>Recent import batches and their status.</p>
+          <h2>{t("migrationImport.step6Title")}</h2>
+          <p>{t("migrationImport.step6Description")}</p>
         </div>
       </div>
-      {!batches.length ? <p className="activity-empty">No migration import history for this workspace yet.</p> : null}
+      {!batches.length ? <p className="activity-empty">{t("migrationImport.noHistory")}</p> : null}
       {batches.length ? (
         <div className="migration-history-table-wrap">
           <table className="migration-history-table">
             <thead>
               <tr>
-                <th>Date</th>
-                <th>File</th>
-                <th>Workspace</th>
-                <th>Status</th>
-                <th>Duration</th>
-                <th>Summary</th>
-                <th>Actions</th>
+                <th>{t("migrationImport.colDate")}</th>
+                <th>{t("migrationImport.colFile")}</th>
+                <th>{t("migrationImport.colWorkspace")}</th>
+                <th>{t("migrationImport.colStatus")}</th>
+                <th>{t("migrationImport.colDuration")}</th>
+                <th>{t("migrationImport.colSummary")}</th>
+                <th>{t("migrationImport.colActions")}</th>
               </tr>
             </thead>
             <tbody>
               {batches.slice(0, 12).map((batch) => {
-                const duration = batch.completedAt ? `${Math.max(1, Math.round((new Date(batch.completedAt).getTime() - new Date(batch.startedAt).getTime()) / 1000))}s` : "-";
+                const duration = batch.completedAt ? t("migrationImport.secondsShort", { count: Math.max(1, Math.round((new Date(batch.completedAt).getTime() - new Date(batch.startedAt).getTime()) / 1000)) }) : "-";
                 return (
                   <tr key={batch.id}>
-                    <td>{new Date(batch.startedAt).toLocaleString()}</td>
-                    <td title={batch.fileName ?? "Imported JSON"}>{batch.fileName ?? "Imported JSON"}</td>
+                    <td>{formatDate(batch.startedAt, { dateStyle: "medium", timeStyle: "short" })}</td>
+                    <td title={batch.fileName ?? t("migrationImport.importedJson")}>{batch.fileName ?? t("migrationImport.importedJson")}</td>
                     <td>{workspaceLabel}</td>
                     <td><StatusBadge status={batch.status} /></td>
                     <td>{duration}</td>
-                    <td>{batch.fileHash.slice(0, 10)}... · updated {new Date(batch.updatedAt).toLocaleTimeString()}</td>
-                    <td><button type="button" className="secondary-button" onClick={() => onSelectBatch(selectedBatchId === batch.id ? null : batch.id)}>View details</button></td>
+                    <td>{t("migrationImport.historyUpdatedCell", { hash: batch.fileHash.slice(0, 10), time: formatDate(batch.updatedAt, { timeStyle: "short" }) })}</td>
+                    <td><button type="button" className="secondary-button" onClick={() => onSelectBatch(selectedBatchId === batch.id ? null : batch.id)}>{t("migrationImport.viewDetails")}</button></td>
                   </tr>
                 );
               })}
@@ -330,22 +395,22 @@ function HistoryTable({
         <div className="migration-history-drawer">
           <div className="migration-history-drawer__header">
             <div>
-              <h3>Batch Details</h3>
+              <h3>{t("migrationImport.batchDetails")}</h3>
               <p>{selectedBatchId}</p>
             </div>
-            <button type="button" className="secondary-button" onClick={() => onSelectBatch(null)}>Close</button>
+            <button type="button" className="secondary-button" onClick={() => onSelectBatch(null)}>{t("common.close")}</button>
           </div>
-          {!selectedRecords.length ? <p className="activity-empty">No detailed log entries found for this batch.</p> : null}
+          {!selectedRecords.length ? <p className="activity-empty">{t("migrationImport.noBatchLogs")}</p> : null}
           {selectedRecords.map((record) => {
             const details = readLogDetails(record);
             return (
               <p key={record.id} className={details.status === "failed" ? "negative" : undefined}>
-                <b>{details.step}</b> {details.status}
-                {typeof details.sourceRows === "number" ? ` · source ${details.sourceRows}` : ""}
-                {typeof details.importedRows === "number" ? ` · imported ${details.importedRows}` : ""}
-                {typeof details.updatedRows === "number" ? ` · updated ${details.updatedRows}` : ""}
-                {typeof details.skippedRows === "number" ? ` · skipped ${details.skippedRows}` : ""}
-                {typeof details.failedRows === "number" ? ` · failed ${details.failedRows}` : ""}
+                <b>{stageLabel(t, details.step)}</b> {translateStatus(t, details.status)}
+                {typeof details.sourceRows === "number" ? ` · ${t("migrationImport.sourceCount", { count: details.sourceRows })}` : ""}
+                {typeof details.importedRows === "number" ? ` · ${t("migrationImport.importedCount", { count: details.importedRows })}` : ""}
+                {typeof details.updatedRows === "number" ? ` · ${t("migrationImport.updatedCount", { count: details.updatedRows })}` : ""}
+                {typeof details.skippedRows === "number" ? ` · ${t("migrationImport.skippedCount", { count: details.skippedRows })}` : ""}
+                {typeof details.failedRows === "number" ? ` · ${t("migrationImport.failedCount", { count: details.failedRows })}` : ""}
                 {details.message ? ` · ${details.message}` : ""}
               </p>
             );
@@ -367,43 +432,49 @@ function ImportContextRepairPreviewCard({
   onBackupConfirmed: (value: boolean) => void;
   repairResult: { repairedByEntity: Array<{ entityType: string; count: number }>; duplicateActiveVoucherNumbersAfter: Array<{ voucherNumber: string }>; voucherNumberMismatchesAfter: number } | null;
 }) {
+  const { t } = useTranslation();
   return (
     <section className="migration-callout">
       <div className="admin-section-heading">
         <div>
-          <h3>Repair Workspace Import Context</h3>
-          <p>Preview the canonical farm/season remap before changing imported records.</p>
+          <h3>{t("migrationImport.repairContextTitle")}</h3>
+          <p>{t("migrationImport.repairContextDescription")}</p>
         </div>
       </div>
       <div className="migration-result-grid">
-        <article><span>Canonical farm</span><strong>{preview.canonicalFarm ? `${preview.canonicalFarm.name}` : "None"}</strong></article>
-        <article><span>Canonical season</span><strong>{preview.canonicalSeason ? `${preview.canonicalSeason.name}` : "Will create fallback"}</strong></article>
-        <article><span>Old farms found</span><strong>{preview.oldFarms.length}</strong></article>
-        <article><span>Old seasons found</span><strong>{preview.oldSeasons.length}</strong></article>
-        <article><span>Voucher mismatches before</span><strong>{preview.voucherNumberMismatchesBefore}</strong></article>
-        <article><span>Deleted vouchers excluded</span><strong>{preview.deletedRecordsExcludedCount}</strong></article>
+        <article><span>{t("migrationImport.canonicalFarm")}</span><strong>{preview.canonicalFarm ? `${preview.canonicalFarm.name}` : t("migrationImport.none")}</strong></article>
+        <article><span>{t("migrationImport.canonicalSeason")}</span><strong>{preview.canonicalSeason ? `${preview.canonicalSeason.name}` : t("migrationImport.willCreateFallback")}</strong></article>
+        <article><span>{t("migrationImport.oldFarmsFound")}</span><strong>{preview.oldFarms.length}</strong></article>
+        <article><span>{t("migrationImport.oldSeasonsFound")}</span><strong>{preview.oldSeasons.length}</strong></article>
+        <article><span>{t("migrationImport.voucherMismatchesBefore")}</span><strong>{preview.voucherNumberMismatchesBefore}</strong></article>
+        <article><span>{t("migrationImport.deletedVouchersExcluded")}</span><strong>{preview.deletedRecordsExcludedCount}</strong></article>
       </div>
       {preview.recordsRemapPreview.length ? (
         <div className="attendance-import-table-wrap">
           <table className="attendance-import-table">
-            <thead><tr><th>Entity</th><th>Records to remap</th></tr></thead>
-            <tbody>{preview.recordsRemapPreview.map((row) => <tr key={row.entityType}><td>{row.entityType}</td><td>{row.count}</td></tr>)}</tbody>
+            <thead><tr><th>{t("migrationImport.colEntity")}</th><th>{t("migrationImport.colRecordsToRemap")}</th></tr></thead>
+            <tbody>{preview.recordsRemapPreview.map((row) => <tr key={row.entityType}><td>{translateRecordType(t, row.entityType)}</td><td>{row.count}</td></tr>)}</tbody>
           </table>
         </div>
-      ) : <p>No imported operational records need farm/season remapping.</p>}
-      {preview.oldFarms.length ? <p className="migration-context"><b>Old farms:</b> {preview.oldFarms.map((farm) => `${farm.name} [${farm.reasons.join(", ")}]`).join(" • ")}</p> : null}
-      {preview.oldSeasons.length ? <p className="migration-context"><b>Old seasons:</b> {preview.oldSeasons.map((season) => `${season.name} [${season.reasons.join(", ")}]`).join(" • ")}</p> : null}
-      {preview.duplicateActiveVoucherNumbersProjected.length ? <p className="worker-action-error">Projected duplicate active voucher numbers after remap: {preview.duplicateActiveVoucherNumbersProjected.map((group) => group.voucherNumber).join(", ")}. These will be left for manual resolution.</p> : null}
+      ) : <p>{t("migrationImport.noRemapNeeded")}</p>}
+      {preview.oldFarms.length ? <p className="migration-context"><b>{t("migrationImport.oldFarmsLabel")}</b> {preview.oldFarms.map((farm) => `${farm.name} [${farm.reasons.join(", ")}]`).join(" • ")}</p> : null}
+      {preview.oldSeasons.length ? <p className="migration-context"><b>{t("migrationImport.oldSeasonsLabel")}</b> {preview.oldSeasons.map((season) => `${season.name} [${season.reasons.join(", ")}]`).join(" • ")}</p> : null}
+      {preview.duplicateActiveVoucherNumbersProjected.length ? <p className="worker-action-error">{t("migrationImport.projectedDuplicates", { list: preview.duplicateActiveVoucherNumbersProjected.map((group) => group.voucherNumber).join(", ") })}</p> : null}
       <label className="inline-checkbox">
         <input type="checkbox" checked={backupConfirmed} onChange={(event) => onBackupConfirmed(event.target.checked)} />
-        <span>I have created a database backup/export before repairing workspace import context.</span>
+        <span>{t("migrationImport.backupConfirmContext")}</span>
       </label>
-      {repairResult ? <p className="positive">Repaired by entity: {repairResult.repairedByEntity.map((row) => `${row.entityType} ${row.count}`).join(" • ") || "0"}. Voucher mismatches after repair: {repairResult.voucherNumberMismatchesAfter}. Duplicate active voucher numbers after repair: {repairResult.duplicateActiveVoucherNumbersAfter.length}.</p> : null}
+      {repairResult ? <p className="positive">{t("migrationImport.repairedByEntityResult", {
+        list: repairResult.repairedByEntity.map((row) => `${translateRecordType(t, row.entityType)} ${row.count}`).join(" • ") || "0",
+        mismatches: repairResult.voucherNumberMismatchesAfter,
+        duplicates: repairResult.duplicateActiveVoucherNumbersAfter.length,
+      })}</p> : null}
     </section>
   );
 }
 
 export function MigrationImport() {
+  const { t } = useTranslation();
   const { token } = useAuth();
   const queryClient = useQueryClient();
   const [workspaceId, setWorkspaceId] = useState("");
@@ -516,7 +587,7 @@ export function MigrationImport() {
     mutationFn: (batchId: string) => cancelAndCleanMigrationImport(token!, {
       workspaceId,
       batchId,
-      confirmationText: "CANCEL AND CLEAN IMPORT",
+      confirmationText: CLEANUP_CONFIRMATION_PHRASE,
       backupConfirmed: true,
       includeEditedImportedRecords: cleanupIncludeEdited,
     }),
@@ -594,13 +665,13 @@ export function MigrationImport() {
     if (!file) return;
     setFileName(file.name);
     if (!file.name.toLowerCase().endsWith(".json")) {
-      setFileError("Please select a .json export file.");
+      setFileError(t("migrationImport.fileNotJson"));
       return;
     }
     try {
       setPayload(JSON.parse(await file.text()) as unknown);
     } catch {
-      setFileError("The selected file is not valid JSON.");
+      setFileError(t("migrationImport.fileInvalidJson"));
     }
   };
 
@@ -632,7 +703,7 @@ export function MigrationImport() {
   }, [blockingOperation, cleanFailedImport.isError, isCleanupRunning, latestBatch, operationIntent, runImport.data?.imported, runImport.isError, validate.isPending]);
 
   const showProgress = Boolean(operationProgress.data || currentImportJob);
-  const cleanupCanSubmit = Boolean(latestBatch && cleanupPreview.data?.preview && cleanupBackupConfirmed && cleanupConfirmationText === "CANCEL AND CLEAN IMPORT" && !cleanFailedImport.isPending);
+  const cleanupCanSubmit = Boolean(latestBatch && cleanupPreview.data?.preview && cleanupBackupConfirmed && cleanupConfirmationText === CLEANUP_CONFIRMATION_PHRASE && !cleanFailedImport.isPending);
   const cleanupProgress = operationIntent === "cleanup"
     ? (operationProgress.data ?? cleanupStartingProgress)
     : null;
@@ -641,7 +712,7 @@ export function MigrationImport() {
     : null;
 
   const buildImportStageRows = (progressSource?: MigrationImportProgress | null) => {
-    const stages = ["Reading JSON", "Validating file", "Importing farms", "Importing seasons", "Importing accounts", "Importing partners", "Importing labour", "Importing attendance", "Importing advances", "Importing vouchers", "Importing voucher items", "Repairing references", "Verifying import", "Completed"];
+    const stages = IMPORT_STAGES.map(([text]) => text);
     const current = (progressSource?.stage || progressSource?.step || currentImportJob?.currentStep || "").toLowerCase();
     let seenCurrent = false;
     return stages.map((stage) => {
@@ -658,7 +729,7 @@ export function MigrationImport() {
   };
 
   const buildCleanupStageRows = (progressSource?: MigrationImportProgress | null) => {
-    const stages = ["Stopping import worker", "Finding imported records", "Removing operational records", "Removing import failures", "Cleaning seasons", "Cleaning farms", "Detaching audit logs", "Repairing session context", "Updating batch status", "Completed"];
+    const stages = CLEANUP_STAGES.map(([text]) => text);
     const current = (progressSource?.stage || progressSource?.step || "").toLowerCase();
     let seenCurrent = false;
     return stages.map((stage) => {
@@ -678,9 +749,9 @@ export function MigrationImport() {
     <main className="admin-page migration-page migration-wizard-page">
       <header className="admin-hero migration-hero">
         <div>
-          <span className="eyebrow">Admin only</span>
-          <h1>Android Migration Import</h1>
-          <p>Import Android JSON data into a selected Muzare workspace.</p>
+          <span className="eyebrow">{t("migrationImport.eyebrow")}</span>
+          <h1>{t("migrationImport.title")}</h1>
+          <p>{t("migrationImport.subtitle")}</p>
         </div>
         <StatusBadge status={pageStatus} />
       </header>
@@ -688,42 +759,42 @@ export function MigrationImport() {
       <section className="admin-section-card migration-form">
         <div className="admin-section-heading">
           <div>
-            <h2>Step 1 - Select Import</h2>
-            <p>Select the target workspace and Android JSON export.</p>
+            <h2>{t("migrationImport.step1Title")}</h2>
+            <p>{t("migrationImport.step1Description")}</p>
           </div>
         </div>
         <label>
-          <span>Target workspace</span>
+          <span>{t("migrationImport.targetWorkspace")}</span>
           <select value={workspaceId} disabled={blockingOperation} onChange={(event) => {
             setWorkspaceId(event.target.value);
             setSelectedHistoryBatchId(null);
           }}>
-            <option value="">Select workspace</option>
-            {workspaceOptions.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name} ({workspace.status})</option>)}
+            <option value="">{t("migrationImport.selectWorkspace")}</option>
+            {workspaceOptions.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name} ({translateStatus(t, workspace.status)})</option>)}
           </select>
         </label>
-        {selectedWorkspace ? <p className="migration-context">Import target: <b>{selectedWorkspace.name}</b> · {selectedWorkspace.contactEmail}</p> : null}
+        {selectedWorkspace ? <p className="migration-context">{t("migrationImport.importTarget")} <b>{selectedWorkspace.name}</b> · {selectedWorkspace.contactEmail}</p> : null}
         <label className={`migration-file-picker${blockingOperation ? " migration-file-picker--disabled" : ""}`}>
           <FileJson size={18} />
-          <span>{fileName || "Choose Android export .json file"}</span>
+          <span>{fileName || t("migrationImport.chooseFile")}</span>
           <input accept="application/json,.json" type="file" disabled={blockingOperation} onChange={(event) => void readFile(event)} />
         </label>
         {fileError ? <p className="worker-action-error">{fileError}</p> : null}
         <label className="inline-checkbox">
           <input type="checkbox" checked={allowSummaryMismatch} disabled={blockingOperation} onChange={(event) => setAllowSummaryMismatch(event.target.checked)} />
-          <span>Allow import if export summary counts do not match actual JSON arrays</span>
+          <span>{t("migrationImport.allowSummaryMismatch")}</span>
         </label>
         <div className="record-list__actions">
-          <button type="button" disabled={!canValidate} onClick={() => validate.mutate()}><UploadCloud size={16} />Validate Import</button>
-          <button type="button" disabled={!canImport} onClick={() => { setOperationIntent("import"); runImport.mutate(); }}><Database size={16} />Import Data</button>
+          <button type="button" disabled={!canValidate} onClick={() => validate.mutate()}><UploadCloud size={16} />{t("migrationImport.validateImport")}</button>
+          <button type="button" disabled={!canImport} onClick={() => { setOperationIntent("import"); runImport.mutate(); }}><Database size={16} />{t("migrationImport.importData")}</button>
         </div>
         {isImportRunning && currentImportJob ? (
           <p className="positive">
-            Import job <b>{currentImportJob.jobId}</b> is running. Progress is shown below.
+            {t("migrationImport.importJobRunning", { jobId: currentImportJob.jobId })}
           </p>
         ) : null}
-        {validate.error ? <p className="worker-action-error">{validate.error instanceof Error ? validate.error.message : "Validation failed."}</p> : null}
-        {runImport.error ? <p className="worker-action-error">{runImport.error instanceof Error ? runImport.error.message : "Import failed."}</p> : null}
+        {validate.error ? <p className="worker-action-error">{validate.error instanceof Error ? validate.error.message : t("migrationImport.validationFailed")}</p> : null}
+        {runImport.error ? <p className="worker-action-error">{runImport.error instanceof Error ? runImport.error.message : t("migrationImport.importFailed")}</p> : null}
       </section>
 
       {validation ? <ResultCard validation={validation} importResult={runImport.data} onReset={resetWizard} /> : null}
@@ -759,53 +830,53 @@ export function MigrationImport() {
         <section className="admin-section-card migration-results">
           <div className="admin-section-heading">
             <div>
-              <h2>Cleanup Result</h2>
+              <h2>{t("migrationImport.cleanupResultTitle")}</h2>
               <p>{cleanFailedImport.data.message}</p>
             </div>
             <StatusBadge status={cleanFailedImport.data.result.batchStatus} />
           </div>
           <div className="migration-result-grid">
-            <article><span>Operational records removed</span><strong>{cleanFailedImport.data.result.operationalRecordsRemoved}</strong></article>
-            <article><span>Import failures removed</span><strong>{cleanFailedImport.data.result.importFailuresRemoved}</strong></article>
-            <article><span>Seasons hard-deleted</span><strong>{cleanFailedImport.data.result.seasonsHardDeleted}</strong></article>
-            <article><span>Seasons soft-deleted</span><strong>{cleanFailedImport.data.result.seasonsSoftDeleted}</strong></article>
-            <article><span>Farms hard-deleted</span><strong>{cleanFailedImport.data.result.farmsHardDeleted}</strong></article>
-            <article><span>Farms soft-deleted</span><strong>{cleanFailedImport.data.result.farmsSoftDeleted}</strong></article>
-            <article><span>Audit logs detached</span><strong>{cleanFailedImport.data.result.auditLogsDetached}</strong></article>
-            <article><span>Protected records skipped</span><strong>{cleanFailedImport.data.result.skippedProtectedRecords}</strong></article>
+            <article><span>{t("migrationImport.operationalRecordsRemoved")}</span><strong>{cleanFailedImport.data.result.operationalRecordsRemoved}</strong></article>
+            <article><span>{t("migrationImport.importFailuresRemoved")}</span><strong>{cleanFailedImport.data.result.importFailuresRemoved}</strong></article>
+            <article><span>{t("migrationImport.seasonsHardDeleted")}</span><strong>{cleanFailedImport.data.result.seasonsHardDeleted}</strong></article>
+            <article><span>{t("migrationImport.seasonsSoftDeleted")}</span><strong>{cleanFailedImport.data.result.seasonsSoftDeleted}</strong></article>
+            <article><span>{t("migrationImport.farmsHardDeleted")}</span><strong>{cleanFailedImport.data.result.farmsHardDeleted}</strong></article>
+            <article><span>{t("migrationImport.farmsSoftDeleted")}</span><strong>{cleanFailedImport.data.result.farmsSoftDeleted}</strong></article>
+            <article><span>{t("migrationImport.auditLogsDetached")}</span><strong>{cleanFailedImport.data.result.auditLogsDetached}</strong></article>
+            <article><span>{t("migrationImport.protectedRecordsSkipped")}</span><strong>{cleanFailedImport.data.result.skippedProtectedRecords}</strong></article>
           </div>
-          {cleanFailedImport.data.result.contextMessage ? <p className="migration-context"><b>Context repair:</b> {cleanFailedImport.data.result.contextMessage}</p> : null}
+          {cleanFailedImport.data.result.contextMessage ? <p className="migration-context"><b>{t("migrationImport.contextRepair")}</b> {cleanFailedImport.data.result.contextMessage}</p> : null}
         </section>
       ) : null}
 
       <section className="admin-section-card migration-advanced-card">
         <button type="button" className="migration-section-toggle" onClick={() => setAdvancedOpen((value) => !value)}>
-          <span>Step 5 - Advanced Recovery Tools</span>
+          <span>{t("migrationImport.step5Title")}</span>
           {advancedOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
         </button>
         {advancedOpen ? (
           <div className="migration-advanced-body">
             <div className="record-list__actions">
               <button type="button" className="secondary-button" disabled={!token || !workspaceId || importContextPreview.isFetching || blockingOperation} onClick={() => { void importContextPreview.refetch(); }}>
-                Preview Repair Workspace Import Context
+                {t("migrationImport.previewRepairContext")}
               </button>
               <button type="button" className="secondary-button" disabled={!token || !workspaceId || !importContextBackupConfirmed || repairImportContext.isPending || blockingOperation} onClick={() => repairImportContext.mutate()}>
-                Repair Workspace Import Context
+                {t("migrationImport.repairContext")}
               </button>
               <button type="button" className="secondary-button" disabled={!token || !workspaceId || repairVisibility.isPending || blockingOperation} onClick={() => repairVisibility.mutate()}>
-                Repair Previous Import Visibility
+                {t("migrationImport.repairVisibility")}
               </button>
               <button type="button" className="secondary-button" disabled={!token || !workspaceId || repairDeletedState.isPending || blockingOperation} onClick={() => repairDeletedState.mutate()}>
-                Repair Deleted Farm/Season State
+                {t("migrationImport.repairDeletedState")}
               </button>
               <button type="button" className="secondary-button" disabled={!token || !workspaceId || repairDuplicateAccounts.isPending || blockingOperation} onClick={() => repairDuplicateAccounts.mutate()}>
-                Repair Duplicate Imported Accounts
+                {t("migrationImport.repairDuplicateAccounts")}
               </button>
               <button type="button" className="secondary-button" disabled={!token || !workspaceId || repairVoucherNumbers.isPending || blockingOperation} onClick={() => repairVoucherNumbers.mutate()}>
-                Repair Imported Voucher Numbers
+                {t("migrationImport.repairVoucherNumbers")}
               </button>
               <button type="button" className="secondary-button" onClick={() => setVisibilityAuditOpen((value) => !value)}>
-                Run Visibility Audit
+                {t("migrationImport.runVisibilityAudit")}
               </button>
             </div>
             {importContextPreview.data?.preview ? <ImportContextRepairPreviewCard
@@ -814,57 +885,57 @@ export function MigrationImport() {
               onBackupConfirmed={setImportContextBackupConfirmed}
               repairResult={repairImportContext.data ?? null}
             /> : null}
-            {repairImportContext.data ? <p className="positive">{repairImportContext.data.message} Remapped records: {repairImportContext.data.repairedOperationalRecords}. Voucher mismatches after repair: {repairImportContext.data.voucherNumberMismatchesAfter}. Duplicate active voucher numbers after repair: {repairImportContext.data.duplicateActiveVoucherNumbersAfter.length}.</p> : null}
-            {repairVisibility.data ? <p className="positive">{repairVisibility.data.message} Repaired records: {repairVisibility.data.repairedRecords}.</p> : null}
-            {repairDeletedState.data ? <p className="positive">{repairDeletedState.data.message} Farms deactivated: {repairDeletedState.data.farmsDeactivated}. Seasons deactivated: {repairDeletedState.data.seasonsDeactivated}.</p> : null}
-            {repairDuplicateAccounts.data ? <p className="positive">{repairDuplicateAccounts.data.message} Duplicate groups before: {repairDuplicateAccounts.data.duplicateGroupsBefore}. Child records remapped: {repairDuplicateAccounts.data.childRecordsRemapped}. Duplicate accounts removed: {repairDuplicateAccounts.data.duplicateAccountsRemoved}.</p> : null}
-            {repairVoucherNumbers.data ? <p className="positive">{repairVoucherNumbers.data.message} Updated vouchers: {repairVoucherNumbers.data.vouchersUpdated}. Mismatches before: {repairVoucherNumbers.data.mismatchesBefore}. Mismatches after: {repairVoucherNumbers.data.mismatchesAfter}.</p> : null}
-            {importContextPreview.error ? <p className="worker-action-error">{importContextPreview.error instanceof Error ? importContextPreview.error.message : "Workspace import context preview failed."}</p> : null}
-            {repairImportContext.error ? <p className="worker-action-error">{repairImportContext.error instanceof Error ? repairImportContext.error.message : "Workspace import context repair failed."}</p> : null}
-            {repairVisibility.error ? <p className="worker-action-error">{repairVisibility.error instanceof Error ? repairVisibility.error.message : "Visibility repair failed."}</p> : null}
-            {repairDeletedState.error ? <p className="worker-action-error">{repairDeletedState.error instanceof Error ? repairDeletedState.error.message : "Deleted farm/season repair failed."}</p> : null}
-            {repairDuplicateAccounts.error ? <p className="worker-action-error">{repairDuplicateAccounts.error instanceof Error ? repairDuplicateAccounts.error.message : "Duplicate account repair failed."}</p> : null}
-            {repairVoucherNumbers.error ? <p className="worker-action-error">{repairVoucherNumbers.error instanceof Error ? repairVoucherNumbers.error.message : "Voucher number repair failed."}</p> : null}
+            {repairImportContext.data ? <p className="positive">{repairImportContext.data.message} {t("migrationImport.repairContextResult", { records: repairImportContext.data.repairedOperationalRecords, mismatches: repairImportContext.data.voucherNumberMismatchesAfter, duplicates: repairImportContext.data.duplicateActiveVoucherNumbersAfter.length })}</p> : null}
+            {repairVisibility.data ? <p className="positive">{repairVisibility.data.message} {t("migrationImport.repairVisibilityResult", { count: repairVisibility.data.repairedRecords })}</p> : null}
+            {repairDeletedState.data ? <p className="positive">{repairDeletedState.data.message} {t("migrationImport.repairDeletedResult", { farms: repairDeletedState.data.farmsDeactivated, seasons: repairDeletedState.data.seasonsDeactivated })}</p> : null}
+            {repairDuplicateAccounts.data ? <p className="positive">{repairDuplicateAccounts.data.message} {t("migrationImport.repairDuplicateResult", { groups: repairDuplicateAccounts.data.duplicateGroupsBefore, remapped: repairDuplicateAccounts.data.childRecordsRemapped, removed: repairDuplicateAccounts.data.duplicateAccountsRemoved })}</p> : null}
+            {repairVoucherNumbers.data ? <p className="positive">{repairVoucherNumbers.data.message} {t("migrationImport.repairVoucherResult", { updated: repairVoucherNumbers.data.vouchersUpdated, before: repairVoucherNumbers.data.mismatchesBefore, after: repairVoucherNumbers.data.mismatchesAfter })}</p> : null}
+            {importContextPreview.error ? <p className="worker-action-error">{importContextPreview.error instanceof Error ? importContextPreview.error.message : t("migrationImport.previewContextFailed")}</p> : null}
+            {repairImportContext.error ? <p className="worker-action-error">{repairImportContext.error instanceof Error ? repairImportContext.error.message : t("migrationImport.contextRepairFailed")}</p> : null}
+            {repairVisibility.error ? <p className="worker-action-error">{repairVisibility.error instanceof Error ? repairVisibility.error.message : t("migrationImport.visibilityRepairFailed")}</p> : null}
+            {repairDeletedState.error ? <p className="worker-action-error">{repairDeletedState.error instanceof Error ? repairDeletedState.error.message : t("migrationImport.deletedStateRepairFailed")}</p> : null}
+            {repairDuplicateAccounts.error ? <p className="worker-action-error">{repairDuplicateAccounts.error instanceof Error ? repairDuplicateAccounts.error.message : t("migrationImport.duplicateAccountsRepairFailed")}</p> : null}
+            {repairVoucherNumbers.error ? <p className="worker-action-error">{repairVoucherNumbers.error instanceof Error ? repairVoucherNumbers.error.message : t("migrationImport.voucherNumbersRepairFailed")}</p> : null}
 
-            {visibilityAuditOpen && workspaceId ? <ImportVisibilityAuditPanel workspaceId={workspaceId} title="Import Visibility Audit" /> : null}
+            {visibilityAuditOpen && workspaceId ? <ImportVisibilityAuditPanel workspaceId={workspaceId} title={t("importVisibilityAudit.title")} /> : null}
 
             {latestBatch ? (
               <div className="migration-danger-zone">
                 <div className="migration-callout migration-callout--danger">
-                  <strong>Cancel and Clean This Import</strong>
-                  <p>This will cancel the selected import and remove incomplete imported data created by this import batch. This cannot be undone without a database backup.</p>
+                  <strong>{t("migrationImport.dangerTitle")}</strong>
+                  <p>{t("migrationImport.dangerDescription")}</p>
                 </div>
                 <div className="record-list__actions">
                   <button type="button" className="secondary-button" disabled={cleanupPreview.isFetching} onClick={() => { void cleanupPreview.refetch(); }}>
-                    Preview Cleanup
+                    {t("migrationImport.previewCleanup")}
                   </button>
                 </div>
                 {cleanupPreview.data?.preview ? (
                   <div className="migration-result-grid">
-                    <article><span>Import batch status</span><strong>{cleanupPreview.data.preview.status}</strong></article>
-                    <article><span>Import failures</span><strong>{cleanupPreview.data.preview.importFailures}</strong></article>
-                    <article><span>Imported farms</span><strong>{cleanupPreview.data.preview.importedFarms}</strong></article>
-                    <article><span>Imported seasons</span><strong>{cleanupPreview.data.preview.importedSeasons}</strong></article>
-                    <article><span>Edited imported records</span><strong>{cleanupPreview.data.preview.editedImportedRecords}</strong></article>
-                    <article><span>Open / failed batches</span><strong>{cleanupPreview.data.preview.openImportBatches}</strong></article>
+                    <article><span>{t("migrationImport.batchStatus")}</span><strong>{translateStatus(t, cleanupPreview.data.preview.status)}</strong></article>
+                    <article><span>{t("migrationImport.importFailuresCount")}</span><strong>{cleanupPreview.data.preview.importFailures}</strong></article>
+                    <article><span>{t("migrationImport.importedFarms")}</span><strong>{cleanupPreview.data.preview.importedFarms}</strong></article>
+                    <article><span>{t("migrationImport.importedSeasons")}</span><strong>{cleanupPreview.data.preview.importedSeasons}</strong></article>
+                    <article><span>{t("migrationImport.editedImportedRecords")}</span><strong>{cleanupPreview.data.preview.editedImportedRecords}</strong></article>
+                    <article><span>{t("migrationImport.openFailedBatches")}</span><strong>{cleanupPreview.data.preview.openImportBatches}</strong></article>
                   </div>
                 ) : null}
                 <label className="inline-checkbox">
                   <input type="checkbox" checked={cleanupBackupConfirmed} onChange={(event) => setCleanupBackupConfirmed(event.target.checked)} />
-                  <span>I have created a database backup/export before cleanup.</span>
+                  <span>{t("migrationImport.backupConfirmCleanup")}</span>
                 </label>
                 <label className="inline-checkbox">
                   <input type="checkbox" checked={cleanupIncludeEdited} onChange={(event) => setCleanupIncludeEdited(event.target.checked)} />
-                  <span>Also remove imported records that were later edited.</span>
+                  <span>{t("migrationImport.includeEditedRecords")}</span>
                 </label>
                 <label className="migration-confirmation-field">
-                  <span>Type this exact confirmation text</span>
-                  <div className="migration-confirmation-hint">CANCEL AND CLEAN IMPORT</div>
+                  <span>{t("migrationImport.typeConfirmation")}</span>
+                  <div className="migration-confirmation-hint">{CLEANUP_CONFIRMATION_PHRASE}</div>
                   <input
                     type="text"
                     value={cleanupConfirmationText}
                     onChange={(event) => setCleanupConfirmationText(event.target.value)}
-                    placeholder="Type: CANCEL AND CLEAN IMPORT"
+                    placeholder={t("migrationImport.confirmationPlaceholder", { phrase: CLEANUP_CONFIRMATION_PHRASE })}
                     autoCapitalize="characters"
                     spellCheck={false}
                   />
@@ -880,19 +951,19 @@ export function MigrationImport() {
                       cleanFailedImport.mutate(latestBatch.id);
                     }}
                   >
-                    {cleanFailedImport.isPending ? "Starting cleanup..." : "Cancel and Clean This Import"}
+                    {cleanFailedImport.isPending ? t("migrationImport.startingCleanup") : t("migrationImport.cancelCleanButton")}
                   </button>
                 </div>
-                {cleanFailedImport.isPending && !operationProgress.data ? <p className="positive">Starting cleanup...</p> : null}
-                {cleanupPreview.error ? <p className="worker-action-error">{cleanupPreview.error instanceof Error ? cleanupPreview.error.message : "Could not load cleanup preview."}</p> : null}
-                {cleanFailedImport.error ? <p className="worker-action-error">{formatApiError(cleanFailedImport.error, "Cleanup failed.")}</p> : null}
+                {cleanFailedImport.isPending && !operationProgress.data ? <p className="positive">{t("migrationImport.startingCleanup")}</p> : null}
+                {cleanupPreview.error ? <p className="worker-action-error">{cleanupPreview.error instanceof Error ? cleanupPreview.error.message : t("migrationImport.cleanupPreviewFailed")}</p> : null}
+                {cleanFailedImport.error ? <p className="worker-action-error">{formatApiError(cleanFailedImport.error, t("migrationImport.cleanupFailed"))}</p> : null}
               </div>
             ) : null}
           </div>
         ) : null}
       </section>
 
-      {workspaceId ? <HistoryTable batches={batches.data?.records ?? []} records={history.data?.records ?? []} selectedBatchId={selectedHistoryBatchId} onSelectBatch={setSelectedHistoryBatchId} workspaceLabel={selectedWorkspace?.name ?? "Selected workspace"} /> : null}
+      {workspaceId ? <HistoryTable batches={batches.data?.records ?? []} records={history.data?.records ?? []} selectedBatchId={selectedHistoryBatchId} onSelectBatch={setSelectedHistoryBatchId} workspaceLabel={selectedWorkspace?.name ?? t("migrationImport.selectedWorkspaceFallback")} /> : null}
 
       {attendanceJob.data?.job.status === "failed" ? (
         <JobErrorPanel
