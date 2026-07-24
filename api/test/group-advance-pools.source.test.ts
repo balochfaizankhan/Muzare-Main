@@ -4,90 +4,104 @@ import { test } from "node:test";
 
 const source = (relativePath: string) => readFile(new URL(`../../${relativePath}`, import.meta.url), "utf8");
 
-test("the pool preview, settlement posting and per-voucher scope check all use group ownership, never member snapshots", async () => {
+test("pool preview, settlement posting and the SQL guard all resolve pools from CURRENT group membership through one canonical resolver", async () => {
   const routes = await source("api/src/routes/labour-payments.ts");
-  assert.match(routes, /function duePoolGroupId\(due: typeof labourDues\.\$inferSelect\)/);
-  assert.match(routes, /dueLabourGroupId: poolGroupId,/);
-  assert.match(routes, /resolveAdvancePoolGroupId\(advance\) === position\.due\.labourGroupId/);
-  assert.doesNotMatch(routes, /snapshot\.memberCalculationSnapshot|memberCalculationSnapshot\)/, "member calculation snapshots must no longer influence advance eligibility");
-  assert.doesNotMatch(routes, /loadDueEligibleMembership|resolveDueEligibleMembers|dueMemberPayableShares/);
-  const lib = await source("api/src/lib/labour-payments.ts");
-  assert.match(lib, /export function resolveAdvancePoolGroupId\(/);
-  assert.doesNotMatch(lib, /memberPayableShares|eligibleMemberIds/, "the pool calculator no longer accepts member restrictions");
+  assert.match(routes, /loadAdvancePoolLedger/);
+  assert.match(routes, /dueAdvancePoolPosition\(ledger, due, settlementDate\)/);
+  assert.doesNotMatch(routes, /resolveAdvancePoolGroupId/, "preserved-evidence ownership is retired");
+  assert.doesNotMatch(routes, /membershipReviewRequired/, "missing historical group evidence is no longer an error");
+  const lib = await source("api/src/lib/labour-advance-pools.ts");
+  assert.match(lib, /export function resolveAdvancePoolOwnership\(/);
+  assert.match(lib, /labourerCurrentPoolKey/);
+  assert.match(lib, /export function duePoolKey\(/);
+  const migration = await source("database/migrations/0047_current_membership_group_advance_pools.sql");
+  assert.match(migration, /CREATE OR REPLACE FUNCTION labour_current_pool_key/);
+  assert.match(migration, /CREATE OR REPLACE FUNCTION labour_advance_pool_key/);
+  assert.match(migration, /CREATE OR REPLACE FUNCTION labour_due_pool_key/);
+  assert.match(migration, /RETURN due_pool IS NOT NULL AND labour_advance_pool_key\(advance\) = due_pool;/);
 });
 
-test("the due pool response exposes the authoritative group-pool position derived from transactions", async () => {
-  const routes = await source("api/src/routes/labour-payments.ts");
-  assert.match(routes, /groupPool: pool\.groupPool,/);
-  assert.match(routes, /totalAdvances: Number\(groupTotals\.total\.toFixed\(2\)\)/);
-  assert.match(routes, /outstandingAdvances: Number\(Math\.max\(groupTotals\.total - groupTotals\.applied - unattributedPooledConsumption - groupTotals\.refunded, 0\)\.toFixed\(2\)\)/);
+test("pool balances are signed: the guard subtracts applications and recoveries without clamping and rejects over-application", async () => {
+  const migration = await source("database/migrations/0047_current_membership_group_advance_pools.sql");
+  assert.match(migration, /IF NEW\.amount > eligible_total - applied_total - recovered_total \+ 0\.005 THEN/);
+  assert.match(migration, /RAISE EXCEPTION 'Advance applications exceed available advance\.';/);
+  assert.doesNotMatch(migration, /GREATEST\(eligible_total/, "the pool availability must never be clamped to zero");
+  const lib = await source("api/src/lib/labour-advance-pools.ts");
+  assert.match(lib, /SIGNED: negative pools are reported, never clamped/);
+  assert.match(lib, /const availableMinor = entry\.total - entry\.applied - entry\.recovered;/);
 });
 
-test("the advance-pools endpoint reports pools per group plus a reconciliation-review list, never guessing from live membership", async () => {
+test("the migration is registered and rewrites only functions — no data rewrites, no voucher changes", async () => {
+  const migration = await source("database/migrations/0047_current_membership_group_advance_pools.sql");
+  assert.doesNotMatch(migration, /UPDATE labour_payment_vouchers|DELETE FROM|DROP TABLE|INSERT INTO labour_/);
+  const migrations = await source("api/src/db/migrations.ts");
+  assert.match(migrations, /\{ key: "0047_current_membership_group_advance_pools", kind: "sql", required: true, sourceUrl: currentMembershipGroupAdvancePoolsMigrationUrl \},/);
+});
+
+test("the advance-pools endpoint returns group pools, individual pools, and only genuinely broken records for review", async () => {
   const routes = await source("api/src/routes/labour-payments.ts");
   assert.match(routes, /"\/v1\/workspace\/:workspaceId\/labour-payments\/advance-pools"/);
-  assert.match(routes, /reviewAdvances\.push\(/);
-  assert.match(routes, /No preserved labour-group evidence exists for this advance\./);
-  assert.match(routes, /outstandingAdvances: money\(Math\.max\(farmWide\.total - farmWide\.applied - farmWide\.refunded, 0\)\)/);
+  assert.match(routes, /const individualPools = \[\.\.\.ledger\.pools\.values\(\)\]/);
+  assert.match(routes, /The recipient labourer no longer exists\./);
+  assert.doesNotMatch(routes, /No preserved labour-group evidence exists/, "absent historical snapshots are not a review reason");
+  assert.match(routes, /memberCount: pool\.memberCount/);
+  assert.match(routes, /voucherCount: pool\.voucherCount/);
 });
 
-test("a new advance for a labourer who belongs to a group is recorded into the group pool, with received-by informational only", async () => {
+test("an advance voucher records its ORIGINAL recipient: no auto-promotion into a group scope and no group-membership requirement", async () => {
   const routes = await source("api/src/routes/labour-payments.ts");
-  assert.match(routes, /input\.recipientScope = "LABOUR_GROUP";\s*\n\s*input\.labourGroupId = memberGroupId;/);
-  assert.match(routes, /input\.receivedByLabourerId = input\.receivedByLabourerId \?\? input\.labourerId;/);
+  assert.doesNotMatch(routes, /input\.recipientScope = "LABOUR_GROUP";\s*\n\s*input\.labourGroupId = memberGroupId;/);
+  assert.doesNotMatch(routes, /Assign this labourer to a labour group before recording an advance\./);
+  assert.match(routes, /resolved dynamically from the recipient's CURRENT group membership/);
+  // Received-by on an explicit group advance must still belong to that group.
   assert.match(routes, /must belong to the selected labour group/);
-  // Received-by is optional for group advances now.
-  assert.doesNotMatch(routes, /Select the labourer who received this group advance\.",\s*\n\s*\}\);\s*\n\s*if \(/);
-  // There is no standalone individual advance pool: a labourer with no group
-  // cannot receive a new advance at all.
-  assert.match(routes, /Assign this labourer to a labour group before recording an advance\./);
 });
 
-test("recording an advance is one workflow: the form selects the recipient labourer, resolves the group automatically, and never asks for a group-advance entry", async () => {
-  const ui = await source("web/src/pages/workspace/WorkforcePayments.tsx");
-  assert.match(ui, /advancesView\.recipientLabourerLabel/);
-  assert.match(ui, /advancesView\.recipientGroupLabel/, "the resolved labour group is displayed after selecting the recipient labourer");
-  assert.match(ui, /advancesView\.assignGroupBeforeAdvance/, "a group-less labourer blocks posting with the assignment message");
-  assert.match(ui, /labourerId && \(editingAdvance \|\| recipientGroup\)/, "a new advance cannot be submitted without a resolved labour group");
-  assert.doesNotMatch(ui, /openRecordAdvance\(false\); setScope\("LABOUR_GROUP"\)/, "pool cards must open the single Record advance form, not a group-advance variant");
-  const i18n = await source("web/src/i18n.ts");
-  assert.match(i18n, /No group advances recorded yet\./);
-  assert.doesNotMatch(i18n, /Record a group advance to open one\./, "the empty state must not instruct recording a separate group advance");
+test("settlement applies ONE pool-level amount: no per-voucher selection path and no persisted source allocations", async () => {
+  const routes = await source("api/src/routes/labour-payments.ts");
+  assert.match(routes, /Per-voucher advance application is no longer supported\./);
+  assert.match(routes, /advanceVoucherId: null,/);
+  assert.doesNotMatch(routes, /tx\.insert\(labourAdvanceApplicationSources\)/, "no per-voucher application allocation may be created");
+  assert.match(routes, /advancePoolSnapshot/, "the posted settlement keeps an immutable pool snapshot");
 });
 
-test("migration 0046 stamps preserved group ownership, backfills FIFO source allocations idempotently, and parks queued attendance requests", async () => {
-  const migration = await source("database/migrations/0046_group_advance_pools_and_attendance_due_retirement.sql");
-  assert.match(migration, /AND labour_group_id IS NULL/, "the ownership backfill only fills missing values (idempotent)");
-  assert.match(migration, /NULLIF\(recipient_snapshot->>'labourGroupId', ''\)/);
-  assert.match(migration, /financial_scope_key LIKE 'group:%'/);
-  assert.match(migration, /IF due\.recipient_scope = 'LABOUR_GROUP' AND due\.labour_group_id IS NOT NULL THEN\s*\n\s*RETURN advance_group_id IS NOT NULL AND advance_group_id = due\.labour_group_id;/);
-  assert.match(migration, /NOT EXISTS \(SELECT 1 FROM labour_advance_application_sources s WHERE s\.application_id = p\.id\)/, "the source backfill skips already-attributed applications (idempotent)");
-  assert.match(migration, /IF remaining > 0\.005 THEN\s*\n\s*DELETE FROM labour_advance_application_sources WHERE application_id = app_row\.id;/, "never partially misattribute an application");
-  assert.match(migration, /UPDATE labour_wage_settlement_create_requests/);
-  assert.match(migration, /Attendance-based Labour Dues are no longer supported\. Create a direct labour group due instead\./);
-  assert.doesNotMatch(migration, /DROP TABLE|DROP COLUMN|DELETE FROM labour_dues|DELETE FROM labour_payment_vouchers/, "the migration is non-destructive");
-  const migrations = await source("api/src/db/migrations.ts");
-  assert.match(migrations, /\{ key: "0046_group_advance_pools_and_attendance_due_retirement", kind: "sql", required: true, sourceUrl: groupAdvancePoolsAndAttendanceDueRetirementMigrationUrl \},/);
+test("recovery is pool-level: the recover endpoint targets a group or individual pool, never a specific advance voucher", async () => {
+  const routes = await source("api/src/routes/labour-payments.ts");
+  assert.match(routes, /"\/v1\/workspace\/:workspaceId\/labour-payments\/advance-pools\/recover"/);
+  assert.match(routes, /relatedAdvanceVoucherId: null,/);
+  assert.match(routes, /sourceType: "ADVANCE_POOL_RECOVERY"/);
+  assert.match(routes, /of the combined advance balance is available to recover/);
+  assert.match(routes, /Record the recovery against the group pool instead\./);
 });
 
-test("no fake 'Applied advances — pooled/non-cash' account exists anywhere in the read model or reports", async () => {
-  const readModel = await source("api/src/lib/labour-financial-read-model.ts");
-  assert.doesNotMatch(readModel, /pooled\/non-cash”|Applied advances — pooled\/non-cash|pooled_non_cash/);
-  assert.match(readModel, /applicationSourcesByApplicationId/, "pooled applications attribute to original funding accounts via persisted sources");
+test("editing, deleting or voiding an advance is blocked when it would leave its current pool over-applied", async () => {
+  const routes = await source("api/src/routes/labour-payments.ts");
+  assert.match(routes, /async function assertAdvancePoolRemainsValid/);
+  assert.match(routes, /This change would leave the pool over-applied by SAR/);
+  const count = (routes.match(/await assertAdvancePoolRemainsValid\(tx, \{/g) ?? []).length;
+  assert.equal(count, 3, "edit, delete and void must all run the pool dependency check");
 });
 
-test("the web advances page shows group pool cards with leader and the four aggregate totals, and 'Use all available' applies min(pool, due)", async () => {
+test("the web advances page leads with tappable group-pool cards showing leader, member count and the combined balance", async () => {
   const ui = await source("web/src/pages/workspace/WorkforcePayments.tsx");
   assert.match(ui, /fetchLabourAdvancePools/);
-  assert.match(ui, /advancesView\.groupPoolsTitle/);
-  assert.match(ui, /pool\.outstandingAdvances/);
-  assert.match(ui, /advancesView\.receivedByInformationalLabel/);
+  assert.match(ui, /advancesView\.groupPoolsTab/);
+  assert.match(ui, /advancesView\.individualTab/);
+  assert.match(ui, /advancesView\.allVouchersTab/);
+  assert.match(ui, /advancesView\.poolsFollowMembershipNote/);
+  assert.match(ui, /advancesView\.combinedPoolNote/, "the leader-responsibility note appears once in the pool details");
+  assert.match(ui, /advancesView\.memberCount/);
+  assert.match(ui, /advancesView\.voucherCount/);
+  assert.match(ui, /recoverLabourAdvancePool/);
+  assert.doesNotMatch(ui, /refundLabourAdvance/, "voucher-level Recover is removed from the page");
+  assert.doesNotMatch(ui, /reviewSettle\.membershipEvidenceMissing/, "missing membership snapshots are no longer surfaced as an error");
   assert.match(ui, /onClick=\{\(\) => setPoolApplication\(advancePool\.maximumApplicable\)\}>\{t\("workforcePaymentsPage\.reviewSettle\.useAllAvailable"\)\}/);
-  assert.doesNotMatch(ui, /setPoolApplication\(advancePool\.globalOutstanding\)/);
-  // The settlement dialog shows the group position and no per-voucher pickers.
-  assert.match(ui, /reviewSettle\.totalGroupAdvances/);
-  assert.match(ui, /reviewSettle\.previouslyAppliedAdvances/);
-  assert.match(ui, /reviewSettle\.groupOutstandingAdvances/);
-  assert.doesNotMatch(ui, /reviewSettle\.viewAllocationDetails|reviewSettle\.whyExcluded|reviewSettle\.exclusions\./, "individual voucher allocation and exclusion sections are removed");
-  assert.match(ui, /reviewSettle\.applyAndPayAmounts/);
+});
+
+test("voucher cards show original transactions only — no applied/outstanding voucher states anywhere in the advances view", async () => {
+  const ui = await source("web/src/pages/workspace/WorkforcePayments.tsx");
+  const advances = ui.slice(ui.indexOf("function AdvancesView"), ui.indexOf("function ReviewSettleDialog"));
+  assert.doesNotMatch(advances, /advance\.appliedAmount|advance\.outstandingAmount/, "vouchers are original audit records, not consumable balances");
+  assert.doesNotMatch(advances, /statusOptions\.partiallyApplied|statusOptions\.fullyApplied/, "no invented voucher-level application states");
+  assert.match(advances, /advancesView\.currentGroupLabel/, "the voucher detail shows the CURRENT group as context");
 });

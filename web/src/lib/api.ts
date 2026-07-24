@@ -2014,6 +2014,10 @@ export type LabourAdvancePosition = LabourPaymentVoucherRecord & {
   needsReview?: boolean;
   reviewReason?: string | null;
   createdByName?: string | null;
+  poolKey?: string | null;
+  poolKind?: "GROUP" | "INDIVIDUAL" | "SCOPE" | "REVIEW";
+  currentGroupId?: string | null;
+  currentGroupName?: string | null;
 };
 export type LabourAdvanceListResponse = {
   advances: LabourAdvancePosition[];
@@ -2146,52 +2150,89 @@ export const previewLabourAttendanceDue = (token: string, workspaceId: string, i
   farmId: string; seasonId: string; recipientScope: "INDIVIDUAL" | "LABOUR_GROUP"; labourerId?: string | null; labourGroupId?: string | null; fromDate: string; toDate: string; recordDate: string;
 }) => apiRequest<{ preview: LabourAttendanceDuePreview }>(`/v1/workspace/${workspaceId}/labour-payments/dues/attendance-preview`, { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 60_000, debugLabel: "labour-attendance-due-preview" });
 export type LabourDueAdvancePool = {
-  globalOutstanding: number; eligibleTotal: number; eligibleOpenCount: number;
-  groupLevelAmount: number; memberLevelAmount: number; maximumApplicable: number;
-  defaultApplyAmount: number; proposedApplication: number; carriedForwardAmount: number;
-  remainingAfterAdvances: number; allocationPreviewVersion: string;
-  proposedAllocationCount: number;
-  exclusionTotals: { otherGroups: number; labourersOutsideDue: number; refundedOrVoided: number; differentFinancialContext: number; postedAfterSettlementDate: number; unresolvedOwnership: number };
-  membershipReviewRequired?: boolean;
+  availableAdvances: number;
+  maximumApplicable: number;
+  defaultApplyAmount: number;
+  proposedApplication: number;
+  carriedForwardAmount: number;
+  remainingAfterAdvances: number;
   groupPool?: LabourGroupAdvancePool | null;
+  individualPool?: LabourIndividualAdvancePool | null;
 };
 export type LabourGroupAdvancePool = {
   labourGroupId: string;
   groupName: string | null;
   groupLeaderId: string | null;
   groupLeaderName: string | null;
+  memberCount?: number;
+  voucherCount?: number;
   totalAdvances: number;
   appliedAdvances: number;
   refundedAdvances: number;
   outstandingAdvances: number;
 };
+export type LabourIndividualAdvancePool = {
+  labourerId: string;
+  labourerName: string | null;
+  voucherCount?: number;
+  totalAdvances: number;
+  appliedAdvances: number;
+  refundedAdvances: number;
+  outstandingAdvances: number;
+};
+export type LabourAdvancePoolVoucher = {
+  id: string;
+  voucherNumber: string;
+  voucherDate: string;
+  amount: number;
+  description: string;
+  paymentAccountName: string | null;
+  recipientName: string | null;
+  labourerId: string | null;
+  labourerName: string | null;
+  poolKey: string | null;
+  currentGroupId: string | null;
+  currentGroupName: string | null;
+};
+export type LabourAdvancePoolActivity = {
+  id: string;
+  poolKey: string | null;
+  type: "ADVANCE_RECORDED" | "APPLIED_TO_DUE" | "APPLICATION_REVERSED" | "RECOVERY_RECORDED" | "VOUCHER_REVERSED";
+  date: string;
+  amount: number;
+  direction: 1 | -1;
+  voucherNumber: string | null;
+  dueNumber: string | null;
+  description: string | null;
+  recipientName: string | null;
+};
 export type LabourAdvancePoolsResponse = {
   pools: LabourGroupAdvancePool[];
-  reviewAdvances: Array<{ id: string; voucherNumber: string; voucherDate: string; amount: number; outstandingAmount: number; labourerId: string | null; recipientName: string | null; reason: string }>;
-  reviewPooledConsumption: number;
+  individualPools: LabourIndividualAdvancePool[];
+  vouchers: LabourAdvancePoolVoucher[];
+  activity: LabourAdvancePoolActivity[];
+  reviewAdvances: Array<{ id: string; voucherNumber: string; voucherDate: string; amount: number; labourerId: string | null; recipientName: string | null; reason: string }>;
   farmWide: { totalAdvances: number; appliedAdvances: number; refundedAdvances: number; outstandingAdvances: number };
 };
 export const fetchLabourAdvancePools = (token: string, workspaceId: string, farmId: string, seasonId: string, options: { signal?: AbortSignal } = {}) =>
   apiRequest<LabourAdvancePoolsResponse>(`/v1/workspace/${workspaceId}/labour-payments/advance-pools?${new URLSearchParams({ farmId, seasonId })}`, { signal: options.signal }, token);
-export type LabourDueAdvanceAllocationDetail = {
-  id: string; voucherNumber: string; voucherDate: string; recipientName?: string | null;
-  ownership: "MEMBER" | "GROUP"; availableAmount: number; proposedAmount: number;
-  remainingAmount: number; allocationOrder: number;
-};
-export const fetchLabourDueAdvancePool = (token: string, workspaceId: string, dueId: string, farmId: string, seasonId: string, input: { amount?: number; settlementDate?: string; page?: number; pageSize?: number; signal?: AbortSignal } = {}) => {
+export const recoverLabourAdvancePool = (token: string, workspaceId: string, input: {
+  farmId: string; seasonId: string;
+  labourGroupId?: string | null; labourerId?: string | null;
+  payment: { idempotencyKey: string; voucherDate: string; amount: number; paymentAccountId: string; paymentMethod: string; transactionReference?: string | null; description?: string | null };
+}) => apiRequest<{ voucher: LabourPaymentVoucherRecord }>(`/v1/workspace/${workspaceId}/labour-payments/advance-pools/recover`, { method: "POST", body: JSON.stringify(input) }, token, { debugLabel: "labour-advance-pool-recover" });
+export const fetchLabourDueAdvancePool = (token: string, workspaceId: string, dueId: string, farmId: string, seasonId: string, input: { amount?: number; settlementDate?: string; signal?: AbortSignal } = {}) => {
   const query = new URLSearchParams({ farmId, seasonId });
   if (input.amount != null) query.set("amount", String(input.amount));
   if (input.settlementDate) query.set("settlementDate", input.settlementDate);
-  if (input.page) query.set("page", String(input.page));
-  if (input.pageSize) query.set("pageSize", String(input.pageSize));
-  return apiRequest<{ pool: LabourDueAdvancePool; details?: LabourDueAdvanceAllocationDetail[]; pageInfo?: { page: number; pageSize: number; totalCount: number; hasMore: boolean } }>(`/v1/workspace/${workspaceId}/labour-payments/dues/${dueId}/advance-pool?${query}`, { signal: input.signal }, token);
+  return apiRequest<{ pool: LabourDueAdvancePool }>(`/v1/workspace/${workspaceId}/labour-payments/dues/${dueId}/advance-pool?${query}`, { signal: input.signal }, token);
 };
 export const settleLabourPaymentDue = (token: string, workspaceId: string, dueId: string, input: {
   farmId: string; seasonId: string;
   advancePool?: { amount: number; idempotencyKey: string; settlementDate?: string } | null;
   advanceApplications?: Array<{ advanceVoucherId: string; amount: number; idempotencyKey: string }>;
   payment?: { idempotencyKey: string; voucherDate: string; amount: number; paymentAccountId: string; paymentMethod: string; transactionReference?: string | null; description?: string | null } | null;
-}) => apiRequest<{ result: { due: LabourDueRecord; voucher: LabourPaymentVoucherRecord | null; settlementSummary: null | { dueId: string; dueNumber: string; grossDue: number; advanceAmountApplied: number; advanceVoucherCount: number; fullyConsumedAdvanceCount: number; partiallyConsumedAdvanceCount: number; advanceAmountCarriedForward: number; cashPaymentPosted: number; remainingDue: number; finalStatus: string } } }>(`/v1/workspace/${workspaceId}/labour-payments/dues/${dueId}/settle`, { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 60_000, debugLabel: "labour-due-settle" });
+}) => apiRequest<{ result: { due: LabourDueRecord; voucher: LabourPaymentVoucherRecord | null; settlementSummary: null | { dueId: string; dueNumber: string; grossDue: number; advanceAmountApplied: number; advanceAmountCarriedForward: number; cashPaymentPosted: number; remainingDue: number; finalStatus: string } } }>(`/v1/workspace/${workspaceId}/labour-payments/dues/${dueId}/settle`, { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 60_000, debugLabel: "labour-due-settle" });
 export const setLabourDueHold = (token: string, workspaceId: string, dueId: string, farmId: string, seasonId: string, input: { hold: boolean; reason?: string | null }) =>
   apiRequest<{ due: LabourDueRecord }>(`/v1/workspace/${workspaceId}/labour-payments/dues/${dueId}/hold?${labourPaymentContextQuery(farmId, seasonId)}`, { method: "PATCH", body: JSON.stringify(input) }, token);
 export const voidLabourDue = (token: string, workspaceId: string, dueId: string, farmId: string, seasonId: string, input: { idempotencyKey: string; reason: string }) =>

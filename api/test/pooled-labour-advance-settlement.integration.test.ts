@@ -177,34 +177,36 @@ test("requesting more than the aggregate eligible pool is rejected with a clear 
   assert.equal(applications.length, 0, "a rejected pool application must leave no persisted rows");
 });
 
-test("a historical individual (legacy) application reduces aggregate availability, and reversing it restores the pool", { skip }, async () => {
+test("per-voucher settle requests are rejected — advances apply only as one pool-level amount, and reversal restores the pool", { skip }, async () => {
   const advance = await createAdvance(2000, "2026-07-01");
   const due = await createDue(2000, "2026-07-10", "2026-07-11");
-  const legacyKey = randomUUID();
-  const legacyResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/dues/${due.id}/settle`, {
+  const perVoucherResponse = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/dues/${due.id}/settle`, {
     farmId: tenant.farmId, seasonId: tenant.seasonId,
-    advanceApplications: [{ advanceVoucherId: advance.id, amount: 500, idempotencyKey: legacyKey }],
+    advanceApplications: [{ advanceVoucherId: advance.id, amount: 500, idempotencyKey: randomUUID() }],
   });
-  assertIntegrationResponse(legacyResponse, 200, "apply a legacy per-voucher application");
-
-  const overRequest = await settlePool(due.id, 1501);
-  assert.equal(overRequest.statusCode, 409, "500 already applied + 1501 requested exceeds the 2000 pool");
+  assert.equal(perVoucherResponse.statusCode, 400, "manual voucher selection is not part of the pool model");
+  assert.match(perVoucherResponse.json().message, /no longer supported/i);
+  assert.equal(
+    (await db.select().from(labourAdvanceApplications).where(eq(labourAdvanceApplications.dueId, due.id))).length,
+    0,
+    "a rejected per-voucher request persists nothing",
+  );
 
   const withinRequest = await settlePool(due.id, 1500);
-  assertIntegrationResponse(withinRequest, 200, "the remaining 1500 is still available after the legacy application");
+  assertIntegrationResponse(withinRequest, 200, "the pool-level application still posts normally");
 
-  const [legacyApplication] = await db.select().from(labourAdvanceApplications).where(and(
+  const [pooledApplication] = await db.select().from(labourAdvanceApplications).where(and(
     eq(labourAdvanceApplications.dueId, due.id),
-    eq(labourAdvanceApplications.idempotencyKey, legacyKey),
+    eq(labourAdvanceApplications.status, "ACTIVE"),
   ));
-  assertPersistedUuid(legacyApplication?.id, "locate the legacy application to reverse");
+  assertPersistedUuid(pooledApplication?.id, "locate the pooled application to reverse");
   const reversal = await request(
     "POST",
-    `/v1/workspace/${tenant.workspaceId}/labour-payments/dues/${due.id}/advance-applications/${legacyApplication.id}/reverse?farmId=${tenant.farmId}&seasonId=${tenant.seasonId}`,
+    `/v1/workspace/${tenant.workspaceId}/labour-payments/dues/${due.id}/advance-applications/${pooledApplication.id}/reverse?farmId=${tenant.farmId}&seasonId=${tenant.seasonId}`,
     { idempotencyKey: randomUUID(), reason: "test reversal restores pool availability" },
   );
-  assertIntegrationResponse(reversal, 200, "reverse the legacy application");
-  const [reversedRow] = await db.select().from(labourAdvanceApplications).where(eq(labourAdvanceApplications.id, legacyApplication.id));
+  assertIntegrationResponse(reversal, 200, "reverse the pooled application");
+  const [reversedRow] = await db.select().from(labourAdvanceApplications).where(eq(labourAdvanceApplications.id, pooledApplication.id));
   assert.equal(reversedRow?.status, "REVERSED");
 });
 

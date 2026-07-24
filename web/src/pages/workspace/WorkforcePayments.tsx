@@ -36,7 +36,7 @@ import {
   fetchLabourPaymentDues,
   fetchLabourPaymentVouchers,
   postLabourAdvanceVoucher,
-  refundLabourAdvance,
+  recoverLabourAdvancePool,
   updateLabourAdvanceVoucher,
   deleteLabourAdvanceVoucher,
   setLabourDueHold,
@@ -47,6 +47,7 @@ import {
   type LabourAdvanceApplicationParentRecord,
   type LabourAdvancePosition,
   type LabourAdvanceListResponse,
+  type LabourAdvancePoolActivity,
   type LabourDueAdvancePool,
   type LabourAdvancePoolsResponse,
   type LabourDueRecord,
@@ -1309,25 +1310,20 @@ function AdvancesView({
 }) {
   const { t } = useTranslation();
   const location = useLocation();
-  const navigate = useNavigate();
+  void canonicalFinancials;
   const labourerById = useMemo(
     () => new Map(labourers.map((item) => [item.id, item])),
     [labourers],
   );
-  const [rows, setRows] = useState<LabourAdvancePosition[]>([]);
-  // (defined below with the form state) — the leader of the selected group,
-  // shown because the leader operationally owns the group's advance pool.
-  // Authoritative group pool positions: one aggregate advance pool per labour
-  // group, owned by its leader — derived from transactions, never from
-  // per-voucher OPEN/APPLIED statuses. Individual funding transactions stay
-  // visible below as history only.
+  // THE canonical pool ledger (GET /labour-payments/advance-pools): pool cards,
+  // pool details, metric strip, voucher context labels and pool activity all
+  // read from this one response — no UI-side recalculation.
   const [pools, setPools] = useState<LabourAdvancePoolsResponse | null>(null);
   const [poolsLoading, setPoolsLoading] = useState(true);
-  const [summary, setSummary] = useState<LabourAdvanceListResponse["summary"]>({
-    totalOutstanding: 0,
-    openCount: 0,
-    partiallyAppliedCount: 0,
-  });
+  const [poolView, setPoolView] = useState<"groups" | "individual" | "vouchers">("groups");
+  const [selectedPoolKey, setSelectedPoolKey] = useState<string | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [rows, setRows] = useState<LabourAdvancePosition[]>([]);
   const [pageInfo, setPageInfo] = useState<
     LabourAdvanceListResponse["pageInfo"]
   >({ page: 1, pageSize: 20, totalCount: 0, hasMore: false });
@@ -1337,12 +1333,11 @@ function AdvancesView({
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [scopeFilter, setScopeFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [statusFilter, setStatusFilter] = useState("VALID");
   const [accountFilter, setAccountFilter] = useState("");
   const [fromFilter, setFromFilter] = useState("");
   const [toFilter, setToFilter] = useState("");
   const [showFilters, setShowFilters] = useState(false);
-  const [groupMode, setGroupMode] = useState(false);
   const [selectedAdvance, setSelectedAdvance] =
     useState<LabourAdvancePosition | null>(null);
   const [editingAdvance, setEditingAdvance] =
@@ -1364,14 +1359,19 @@ function AdvancesView({
   const [description, setDescription] = useState("");
   const [transactionReference, setTransactionReference] = useState("");
   const [saving, setSaving] = useState(false);
-  const [refundAdvance, setRefundAdvance] =
-    useState<LabourAdvancePosition | null>(null);
-  const [refundAmount, setRefundAmount] = useState("");
-  const [refundAccountId, setRefundAccountId] = useState("");
-  const [refundDate, setRefundDate] = useState(today());
-  const [refundMethod, setRefundMethod] = useState("Recovery");
-  const [refundNotes, setRefundNotes] = useState("");
-  const [refunding, setRefunding] = useState(false);
+  // Pool-level recovery only: the target is a group pool or an individual
+  // pool, never a specific advance voucher.
+  const [recoveryTarget, setRecoveryTarget] = useState<
+    { kind: "group"; groupId: string; name: string; available: number }
+    | { kind: "individual"; labourerId: string; name: string; available: number }
+    | null
+  >(null);
+  const [recoveryAmount, setRecoveryAmount] = useState("");
+  const [recoveryAccountId, setRecoveryAccountId] = useState("");
+  const [recoveryDate, setRecoveryDate] = useState(today());
+  const [recoveryMethod, setRecoveryMethod] = useState("Recovery");
+  const [recoveryNotes, setRecoveryNotes] = useState("");
+  const [recovering, setRecovering] = useState(false);
   const groupLeaderName = useCallback((group?: LabourGroup | null) => {
     const leaderId = (group as { foremanLabourId?: string } | null | undefined)?.foremanLabourId
       ?? (group as { foremanId?: string } | null | undefined)?.foremanId;
@@ -1381,10 +1381,9 @@ function AdvancesView({
     () => groupLeaderName(groups.find((item) => item.id === groupId)),
     [groupLeaderName, groups, groupId],
   );
-  // The labour group (and its leader) resolved automatically from the
-  // selected recipient labourer — the pool a new advance belongs to. There is
-  // no group to pick and no separate group-advance entry: recording any
-  // advance to a group member funds that group's aggregate pool.
+  // The recipient's CURRENT group — shown as the pool this advance will
+  // contribute to. An ungrouped labourer's advance stays in their own
+  // individual pool; there is nothing to block.
   const recipientGroup = useMemo(() => {
     const worker = labourers.find((item) => item.id === labourerId);
     return worker?.groupId ? groups.find((item) => item.id === worker.groupId) ?? null : null;
@@ -1394,7 +1393,7 @@ function AdvancesView({
     [groupLeaderName, recipientGroup],
   );
   const idempotencyKey = useRef(uuid());
-  const refundIdempotencyKey = useRef(uuid());
+  const recoveryIdempotencyKey = useRef(uuid());
   const recipientScopeRef = useRef<HTMLSelectElement>(null);
   const recordAdvanceDialogRef = useRef<HTMLFormElement>(null);
   const recordAdvanceButtonRef = useRef<HTMLButtonElement>(null);
@@ -1405,9 +1404,6 @@ function AdvancesView({
   const inFlightKeyRef = useRef("");
   const requestSequence = useRef(0);
   const resetRecordAdvanceForm = useCallback(() => {
-    // A new advance always starts from the recipient labourer; the server
-    // resolves their labour group and records the amount into that group's
-    // pool automatically.
     setScope("INDIVIDUAL");
     setLabourerId("");
     setGroupId("");
@@ -1469,7 +1465,6 @@ function AdvancesView({
     }
     modalHistoryEntryRef.current = true;
     setShowForm(true);
-    window.requestAnimationFrame(() => recipientScopeRef.current?.focus());
   }, [location.hash, location.pathname, location.search, resetRecordAdvanceForm, showForm]);
   const openEditAdvance = useCallback((advance: LabourAdvancePosition) => {
     setSelectedAdvance(null);
@@ -1478,7 +1473,6 @@ function AdvancesView({
     window.history.pushState({ ...window.history.state, muzareRecordAdvance: true }, "", `${location.pathname}${location.search}${location.hash}`);
     modalHistoryEntryRef.current = true;
     setShowForm(true);
-    window.requestAnimationFrame(() => recipientScopeRef.current?.focus());
   }, [location.hash, location.pathname, location.search, populateAdvanceForm]);
   const closeRecordAdvance = useCallback(() => {
     setShowForm(false);
@@ -1501,7 +1495,11 @@ function AdvancesView({
   }, [canManage, location.search, openRecordAdvance, showForm]);
   useEffect(() => {
     if (!showForm) return;
-    window.requestAnimationFrame(() => recipientScopeRef.current?.focus());
+    window.requestAnimationFrame(() => {
+      const target = recipientScopeRef.current
+        ?? recordAdvanceDialogRef.current?.querySelector<HTMLElement>("input, select");
+      target?.focus();
+    });
   }, [showForm]);
   useEffect(() => {
     const handlePopState = () => {
@@ -1539,7 +1537,7 @@ function AdvancesView({
   }, [searchInput]);
   const cacheKey = useMemo(
     () =>
-      `muzare:advance-list:v2:${workspaceId}:${farmId}:${seasonId}:${search}:${scopeFilter}:${statusFilter}:${accountFilter}:${fromFilter}:${toFilter}`,
+      `muzare:advance-list:v3:${workspaceId}:${farmId}:${seasonId}:${search}:${scopeFilter}:${statusFilter}:${accountFilter}:${fromFilter}:${toFilter}`,
     [
       accountFilter,
       farmId,
@@ -1593,7 +1591,6 @@ function AdvancesView({
               ]
             : response.advances,
         );
-        setSummary(response.summary);
         setPageInfo(response.pageInfo);
         if (!append) sessionStorage.setItem(cacheKey, JSON.stringify(response));
       } catch (caught) {
@@ -1635,7 +1632,6 @@ function AdvancesView({
       try {
         const value = JSON.parse(cached) as LabourAdvanceListResponse;
         setRows(value.advances);
-        setSummary(value.summary);
         setPageInfo(value.pageInfo);
         setInitialLoading(false);
       } catch {
@@ -1651,10 +1647,13 @@ function AdvancesView({
     };
   }, [cacheKey, loadPage]);
   useEffect(() => {
-    const refreshAdvances = () => void loadPage(1, false);
+    const refreshAdvances = () => {
+      void loadPage(1, false);
+      void refreshPools();
+    };
     window.addEventListener("muzare-data-refresh", refreshAdvances);
     return () => window.removeEventListener("muzare-data-refresh", refreshAdvances);
-  }, [loadPage]);
+  }, [loadPage, refreshPools]);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (saving) return;
@@ -1719,39 +1718,43 @@ function AdvancesView({
       setSaving(false);
     }
   };
-  const submitRefund = async (event: FormEvent) => {
+  const openRecovery = useCallback((target: NonNullable<typeof recoveryTarget>) => {
+    setRecoveryTarget(target);
+    setRecoveryAmount("");
+    setRecoveryAccountId("");
+    setRecoveryDate(today());
+    setRecoveryMethod("Recovery");
+    setRecoveryNotes("");
+    recoveryIdempotencyKey.current = uuid();
+  }, []);
+  const submitRecovery = async (event: FormEvent) => {
     event.preventDefault();
-    if (!refundAdvance || refunding) return;
-    const recovery = Number(refundAmount);
-    if (recovery > refundAdvance.outstandingAmount + 0.005) {
+    if (!recoveryTarget || recovering) return;
+    const recovery = Number(recoveryAmount);
+    if (recovery > recoveryTarget.available + 0.005) {
       onError(t("workforcePaymentsPage.errors.recoveryExceedsOutstanding"));
       return;
     }
-    setRefunding(true);
+    setRecovering(true);
     try {
-      const response = await refundLabourAdvance(
-        token,
-        workspaceId,
-        refundAdvance.id,
-        {
-          farmId,
-          seasonId,
-          payment: {
-            idempotencyKey: refundIdempotencyKey.current,
-            voucherDate: refundDate,
-            amount: recovery,
-            paymentAccountId: refundAccountId,
-            paymentMethod: refundMethod,
-            description:
-              refundNotes ||
-              t("workforcePaymentsPage.defaultRecoveryDescription", { voucherNumber: refundAdvance.displayVoucherNumber }),
-          },
+      const response = await recoverLabourAdvancePool(token, workspaceId, {
+        farmId,
+        seasonId,
+        labourGroupId: recoveryTarget.kind === "group" ? recoveryTarget.groupId : null,
+        labourerId: recoveryTarget.kind === "individual" ? recoveryTarget.labourerId : null,
+        payment: {
+          idempotencyKey: recoveryIdempotencyKey.current,
+          voucherDate: recoveryDate,
+          amount: recovery,
+          paymentAccountId: recoveryAccountId,
+          paymentMethod: recoveryMethod,
+          description:
+            recoveryNotes ||
+            t("workforcePaymentsPage.advancesView.defaultPoolRecoveryDescription", { name: recoveryTarget.name }),
         },
-      );
-      refundIdempotencyKey.current = uuid();
-      setRefundAdvance(null);
-      setRefundAmount("");
-      setRefundNotes("");
+      });
+      recoveryIdempotencyKey.current = uuid();
+      setRecoveryTarget(null);
       await onSaved(t("workforcePaymentsPage.recoveryPostedSuccess", { voucherNumber: response.voucher.voucherNumber }));
       await loadPage(1, false);
       void refreshPools();
@@ -1762,7 +1765,7 @@ function AdvancesView({
           : t("workforcePaymentsPage.errors.unablePostRecovery"),
       );
     } finally {
-      setRefunding(false);
+      setRecovering(false);
     }
   };
   const submitDeleteAdvance = async () => {
@@ -1774,6 +1777,7 @@ function AdvancesView({
       setSelectedAdvance(null);
       await onSaved(t("workforcePaymentsPage.advanceDeletedSuccess", { voucherNumber: response.result.voucherNumber }));
       await loadPage(1, false);
+      void refreshPools();
     } catch (caught) {
       onError(caught instanceof Error ? caught.message : t("workforcePaymentsPage.errors.unableDeleteAdvance"));
     } finally {
@@ -1793,51 +1797,6 @@ function AdvancesView({
       : advance.recipientScope === "LABOUR_GROUP"
         ? t("workforcePaymentsPage.recipientScopeOptions.labourGroup")
         : scopeLabel(t, advance.recipientScope);
-  const recipientGroups = useMemo(
-    () =>
-      Array.from(
-        rows
-          .reduce((map, advance) => {
-            const key = `${advance.recipientScope}:${advance.financialOwnerId ?? advance.financialOwnerName ?? "unavailable"}`;
-            const current = map.get(key) ?? {
-              key,
-              name: advance.financialOwnerName ?? t("workforcePaymentsPage.recipientUnavailable"),
-              scope: scopeCopy(advance),
-              count: 0,
-              total: 0,
-              outstanding: 0,
-              reviewRequired: false,
-              receivers: new Set<string>(),
-              paymentSources: new Map<string, number>(),
-            };
-            current.count += 1;
-            current.total += advance.originalAmount;
-            current.outstanding += advance.outstandingAmount;
-            current.reviewRequired ||= advance.reviewRequired;
-            if (advance.receivedByName)
-              current.receivers.add(advance.receivedByName);
-            else if (
-              advance.recipientScope === "INDIVIDUAL" &&
-              advance.financialOwnerName
-            )
-              current.receivers.add(advance.financialOwnerName);
-            const paymentSource =
-              advance.paymentSourceDisplayName ??
-              advance.paymentAccountName ??
-              advance.fundingAccountName ??
-              t("workforcePaymentsPage.unresolvedPaymentSource");
-            current.paymentSources.set(
-              paymentSource,
-              (current.paymentSources.get(paymentSource) ?? 0) +
-                advance.originalAmount,
-            );
-            map.set(key, current);
-            return map;
-          }, new Map<string, { key: string; name: string; scope: string; count: number; total: number; outstanding: number; reviewRequired: boolean; receivers: Set<string>; paymentSources: Map<string, number> }>())
-          .values(),
-      ),
-    [rows],
-  );
   const selectableLabourers = useMemo(
     () => sortLabourSelectableForAdvance(filterLabourSelectableForAdvance(labourers, date)),
     [date, labourers],
@@ -1849,23 +1808,6 @@ function AdvancesView({
       ),
     [groups],
   );
-  // A new advance is owned by the recipient's group pool; the labourer is the
-  // informational received-by. Editing keeps the voucher's recorded identity.
-  const selectedOwner =
-    scope === "INDIVIDUAL"
-      ? (!editingAdvance && recipientGroup
-          ? recipientGroup.name
-          : labourers.find((item) => item.id === labourerId)?.name)
-      : scope === "LABOUR_GROUP"
-        ? groups.find((item) => item.id === groupId)?.name
-        : recipientName || reference;
-  const selectedReceiver =
-    scope === "INDIVIDUAL"
-      ? labourers.find((item) => item.id === labourerId)?.name
-      : scope === "LABOUR_GROUP"
-        ? labourers.find((item) => item.id === receivedByLabourerId)?.name
-        : "";
-  const selectedAccount = accounts.find((item) => item.id === accountId)?.name;
   const selectedIndividualLabourer = labourers.find((item) => item.id === labourerId);
   const selectedReceiverLabourer = labourers.find((item) => item.id === receivedByLabourerId);
   const formValid = Boolean(
@@ -1874,23 +1816,76 @@ function AdvancesView({
     accountId &&
     method &&
     (scope === "INDIVIDUAL"
-      ? labourerId && (editingAdvance || recipientGroup)
+      ? labourerId
       : scope === "LABOUR_GROUP"
         ? groupId
         : reference) &&
     description.trim(),
   );
+  const accountNameById = useMemo(() => new Map(accounts.map((item) => [item.id, item.name])), [accounts]);
+  const clearFilters = () => {
+    setScopeFilter("");
+    setStatusFilter("VALID");
+    setAccountFilter("");
+    setFromFilter("");
+    setToFilter("");
+  };
+  const statusFilterLabel = (value: string) =>
+    value === "VALID" ? t("workforcePaymentsPage.advancesView.statusOptions.valid")
+    : value === "VOIDED" ? t("workforcePaymentsPage.advancesView.statusOptions.voidedReversed")
+    : t("workforcePaymentsPage.advancesView.statusOptions.allHistory");
+  const activeFilterChips = [
+    scopeFilter ? { key: "scope", label: scopeLabel(t, scopeFilter as LabourRecipientScope), clear: () => setScopeFilter("") } : null,
+    statusFilter !== "VALID" ? { key: "status", label: statusFilterLabel(statusFilter), clear: () => setStatusFilter("VALID") } : null,
+    accountFilter ? { key: "account", label: accountNameById.get(accountFilter) ?? t("workforcePaymentsPage.paymentAccount"), clear: () => setAccountFilter("") } : null,
+    fromFilter ? { key: "from", label: `${t("workforcePaymentsPage.advancesView.advanceDateFromAria")}: ${formatDate(fromFilter)}`, clear: () => setFromFilter("") } : null,
+    toFilter ? { key: "to", label: `${t("workforcePaymentsPage.advancesView.advanceDateToAria")}: ${formatDate(toFilter)}`, clear: () => setToFilter("") } : null,
+  ].filter((chip): chip is { key: string; label: string; clear: () => void } => chip !== null);
+  const anyQueryActive = activeFilterChips.length > 0 || Boolean(search);
+  const poolSearch = search.toLowerCase();
+  const visibleGroupPools = useMemo(
+    () => (pools?.pools ?? []).filter((pool) =>
+      !poolSearch
+      || pool.groupName?.toLowerCase().includes(poolSearch)
+      || pool.groupLeaderName?.toLowerCase().includes(poolSearch)),
+    [pools, poolSearch],
+  );
+  const visibleIndividualPools = useMemo(
+    () => (pools?.individualPools ?? []).filter((pool) =>
+      !poolSearch || pool.labourerName?.toLowerCase().includes(poolSearch)),
+    [pools, poolSearch],
+  );
+  const selectedGroupPool = selectedPoolKey?.startsWith("group:")
+    ? pools?.pools.find((pool) => pool.labourGroupId === selectedPoolKey.slice("group:".length)) ?? null
+    : null;
+  const selectedIndividualPool = selectedPoolKey?.startsWith("individual:")
+    ? pools?.individualPools.find((pool) => pool.labourerId === selectedPoolKey.slice("individual:".length)) ?? null
+    : null;
+  const selectedPoolVouchers = useMemo(
+    () => (selectedPoolKey ? (pools?.vouchers ?? []).filter((voucher) => voucher.poolKey === selectedPoolKey) : []),
+    [pools, selectedPoolKey],
+  );
+  const selectedPoolActivity = useMemo(
+    () => (selectedPoolKey ? (pools?.activity ?? []).filter((event) => event.poolKey === selectedPoolKey) : []),
+    [pools, selectedPoolKey],
+  );
+  const activityTypeLabel = (type: LabourAdvancePoolActivity["type"]) =>
+    type === "ADVANCE_RECORDED" ? t("workforcePaymentsPage.advancesView.activityAdvanceRecorded")
+    : type === "APPLIED_TO_DUE" ? t("workforcePaymentsPage.advancesView.activityAppliedToDue")
+    : type === "APPLICATION_REVERSED" ? t("workforcePaymentsPage.advancesView.activityApplicationReversed")
+    : type === "RECOVERY_RECORDED" ? t("workforcePaymentsPage.advancesView.activityRecoveryRecorded")
+    : t("workforcePaymentsPage.advancesView.activityVoucherReversed");
+  const metric = (value: number | undefined) =>
+    poolsLoading && !pools ? "—" : money(value ?? 0);
+  const closePoolDetail = () => setSelectedPoolKey(null);
+  const poolDetailOpen = Boolean(selectedGroupPool || selectedIndividualPool);
   return (
     <>
       <section className="record-panel workforce-payments-panel workforce-advances-panel">
         <header className="workforce-payments-panel__header workforce-advances-header">
           <div>
-            <h2>{t("workforcePaymentsPage.summary.advances")}</h2>
-            <p className="bidi-isolate">
-              {pageInfo.totalCount
-                ? t("workforcePaymentsPage.advancesView.loadedCount", { loaded: rows.length, total: pageInfo.totalCount })
-                : t("workforcePaymentsPage.advancesView.completeRegisterSubtitle")}
-            </p>
+            <h2>{t("workforcePaymentsPage.advancesView.pageTitle")}</h2>
+            <p>{t("workforcePaymentsPage.advancesView.pageSubtitle")}</p>
           </div>
           {canManage ? (
             <button
@@ -1903,84 +1898,42 @@ function AdvancesView({
             </button>
           ) : null}
         </header>
-        <div className="workforce-advance-summary">
-          <div>
-            <span>{t("workforcePaymentsPage.advancesView.totalAdvances")}</span>
-            <strong className="bidi-isolate">{money(summary.totalOriginal ?? 0)}</strong>
-          </div>
-          <div>
+        <div className="workforce-advance-summary" role="list" aria-label={t("workforcePaymentsPage.advancesView.summaryAria")}>
+          <div role="listitem" className="is-primary">
             <span>{t("workforcePaymentsPage.advancesView.availableAdvanceBalance")}</span>
-            <strong className="bidi-isolate">{money(summary.totalOutstanding)}</strong>
+            <strong className="bidi-isolate">{metric(pools?.farmWide.outstandingAdvances)}</strong>
           </div>
-          <button
-            type="button"
-            className="workforce-payment-report-card"
-            onClick={() =>
-              navigate("/workspace/labour-payments/vouchers?nature=ADVANCE_APPLICATION")
-            }
-          >
+          <div role="listitem">
             <span>{t("workforcePaymentsPage.advancesView.appliedToLabourDues")}</span>
-            <strong className="bidi-isolate">{money(summary.totalApplied ?? 0)}</strong>
-          </button>
-          <div>
+            <strong className="bidi-isolate">{metric(pools?.farmWide.appliedAdvances)}</strong>
+          </div>
+          <div role="listitem">
+            <span>{t("workforcePaymentsPage.advancesView.totalAdvancesRecorded")}</span>
+            <strong className="bidi-isolate">{metric(pools?.farmWide.totalAdvances)}</strong>
+          </div>
+          <div role="listitem">
             <span>{t("workforcePaymentsPage.advancesView.recoveredRefunded")}</span>
-            <strong className="bidi-isolate">{money(summary.totalRecovered ?? 0)}</strong>
+            <strong className="bidi-isolate">{metric(pools?.farmWide.refundedAdvances)}</strong>
           </div>
         </div>
-        <section className="workforce-group-pools" aria-label={t("workforcePaymentsPage.advancesView.groupPoolsAria")}>
-          <h3>{t("workforcePaymentsPage.advancesView.groupPoolsTitle")}</h3>
-          {poolsLoading ? (
-            <p className="workforce-payments-inline-note">{t("workforcePaymentsPage.advancesView.loadingGroupPools")}</p>
-          ) : !pools?.pools.length ? (
-            <p className="workforce-payments-inline-note">{t("workforcePaymentsPage.advancesView.noGroupPools")}</p>
-          ) : (
-            <div className="workforce-group-pool-cards">
-              {pools.pools.map((pool) => (
-                <details key={pool.labourGroupId} className="workforce-group-pool-card">
-                  <summary>
-                    <span>
-                      <strong>{pool.groupName}</strong>
-                      <small>{pool.groupLeaderName ? t("workforcePaymentsPage.groupLeaderLabel", { name: pool.groupLeaderName }) : t("workforcePaymentsPage.advancesView.noGroupLeader")}</small>
-                    </span>
-                    <span className="bidi-isolate">
-                      <small>{t("workforcePaymentsPage.advancesView.outstandingAdvances")}</small>
-                      <strong>{money(pool.outstandingAdvances)}</strong>
-                    </span>
-                  </summary>
-                  <dl className="workforce-group-pool-card__totals">
-                    <div><dt>{t("workforcePaymentsPage.advancesView.totalAdvances")}</dt><dd className="bidi-isolate">{money(pool.totalAdvances)}</dd></div>
-                    <div><dt>{t("workforcePaymentsPage.advancesView.appliedAdvances")}</dt><dd className="bidi-isolate">{money(pool.appliedAdvances)}</dd></div>
-                    <div><dt>{t("workforcePaymentsPage.advancesView.refundedAdvances")}</dt><dd className="bidi-isolate">{money(pool.refundedAdvances)}</dd></div>
-                    <div><dt>{t("workforcePaymentsPage.advancesView.outstandingAdvances")}</dt><dd className="bidi-isolate">{money(pool.outstandingAdvances)}</dd></div>
-                  </dl>
-                  <div className="workforce-group-pool-card__actions">
-                    {canManage ? (
-                      <button type="button" className="secondary-action" onClick={() => openRecordAdvance(false)}>
-                        {t("workforcePaymentsPage.advancesView.addAdvance")}
-                      </button>
-                    ) : null}
-                    <button type="button" className="secondary-action" onClick={() => { setSearchInput(pool.groupName ?? ""); setGroupMode(false); }}>
-                      {t("workforcePaymentsPage.advancesView.viewTransactionHistory")}
-                    </button>
-                  </div>
-                </details>
-              ))}
-            </div>
-          )}
-          {pools?.reviewAdvances.length ? (
-            <details className="workforce-group-pool-review">
-              <summary>{t("workforcePaymentsPage.advancesView.reviewAdvancesTitle", { count: pools.reviewAdvances.length })}</summary>
-              <p className="workforce-payments-inline-note">{t("workforcePaymentsPage.advancesView.reviewAdvancesNote")}</p>
-              {pools.reviewAdvances.map((advance) => (
-                <div key={advance.id} className="workforce-group-pool-review__row">
-                  <span><strong className="bidi-isolate">{advance.voucherNumber}</strong><small>{advance.recipientName ?? advance.reason}</small></span>
-                  <strong className="bidi-isolate">{money(advance.outstandingAmount)}</strong>
-                </div>
-              ))}
-            </details>
-          ) : null}
-        </section>
-        <h3 className="workforce-advance-history-title">{t("workforcePaymentsPage.advancesView.transactionHistoryTitle")}</h3>
+        {canManage && pools?.reviewAdvances.length ? (
+          <button type="button" className="workforce-advance-review-notice" onClick={() => setReviewOpen(true)}>
+            <AlertCircle size={14} aria-hidden="true" />
+            <span>{t("workforcePaymentsPage.advancesView.recordsRequireReview", { count: pools.reviewAdvances.length })}</span>
+            <strong>{t("workforcePaymentsPage.advancesView.review")}</strong>
+          </button>
+        ) : null}
+        <div className="workforce-advance-view-tabs" role="tablist" aria-label={t("workforcePaymentsPage.advancesView.advanceDisplayAria")}>
+          <button type="button" role="tab" aria-selected={poolView === "groups"} onClick={() => setPoolView("groups")}>
+            {t("workforcePaymentsPage.advancesView.groupPoolsTab")}
+          </button>
+          <button type="button" role="tab" aria-selected={poolView === "individual"} onClick={() => setPoolView("individual")}>
+            {t("workforcePaymentsPage.advancesView.individualTab")}
+          </button>
+          <button type="button" role="tab" aria-selected={poolView === "vouchers"} onClick={() => setPoolView("vouchers")}>
+            {t("workforcePaymentsPage.advancesView.allVouchersTab")}
+          </button>
+        </div>
         <div className="workforce-advance-toolbar">
           <label className="workforce-payments-search">
             <Search size={16} />
@@ -1990,328 +1943,472 @@ function AdvancesView({
               placeholder={t("workforcePaymentsPage.advancesView.searchPlaceholder")}
             />
           </label>
-          <div
-            className="workforce-advance-view-toggle"
-            role="group"
-            aria-label={t("workforcePaymentsPage.advancesView.advanceDisplayAria")}
-          >
-            <button
-              type="button"
-              aria-pressed={groupMode}
-              onClick={() => setGroupMode(true)}
-            >
-              {t("workforcePaymentsPage.advancesView.grouped")}
-            </button>
-            <button
-              type="button"
-              aria-pressed={!groupMode}
-              onClick={() => setGroupMode(false)}
-            >
-              {t("workforcePaymentsPage.advancesView.vouchers")}
-            </button>
-          </div>
-          <button
-            className="secondary-action"
-            type="button"
-            aria-expanded={showFilters}
-            onClick={() => setShowFilters((value) => !value)}
-          >
-            {t("workforcePaymentsPage.advancesView.filtersToggle")}
-          </button>
-        </div>
-        {showFilters ? (
-          <div className="workforce-advance-filters">
-            <select
-              aria-label={t("workforcePaymentsPage.recipientScope")}
-              value={scopeFilter}
-              onChange={(event) => setScopeFilter(event.target.value)}
-            >
-              <option value="">{t("workforcePaymentsPage.scopeOptions.allRecipients")}</option>
-              {scopeOptions(t).map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-            <select
-              aria-label={t("workforcePaymentsPage.advancesView.advanceStatusAria")}
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
-            >
-              <option value="PARTIALLY_REFUNDED">{t("workforcePaymentsPage.advancesView.statusOptions.partiallyRefunded")}</option>
-              <option value="FULLY_REFUNDED">{t("workforcePaymentsPage.advancesView.recoveredRefunded")}</option>
-              <option value="VOIDED">{t("workforcePaymentsPage.advancesView.statusOptions.voidedReversed")}</option>
-              <option value="ALL">{t("workforcePaymentsPage.advancesView.statusOptions.allHistory")}</option>
-            </select>
-            <select
-              aria-label={t("workforcePaymentsPage.paymentAccount")}
-              value={accountFilter}
-              onChange={(event) => setAccountFilter(event.target.value)}
-            >
-              <option value="">{t("workforcePaymentsPage.advancesView.allAccounts")}</option>
-              {accounts.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
-            <input
-              aria-label={t("workforcePaymentsPage.advancesView.advanceDateFromAria")}
-              type="date"
-              value={fromFilter}
-              onChange={(event) => setFromFilter(event.target.value)}
-            />
-            <input
-              aria-label={t("workforcePaymentsPage.advancesView.advanceDateToAria")}
-              type="date"
-              value={toFilter}
-              onChange={(event) => setToFilter(event.target.value)}
-            />
-          </div>
-        ) : null}
-        {initialLoading && !rows.length ? (
-          <div
-            className="workforce-advance-skeletons"
-            aria-label={t("workforcePaymentsPage.advancesView.loadingAdvances")}
-          >
-            {Array.from({ length: 4 }, (_, index) => (
-              <div key={index} className="workforce-advance-skeleton" />
-            ))}
-          </div>
-        ) : loadError && !rows.length ? (
-          <div className="workforce-payments-empty">
-            <p>{loadError}</p>
+          {poolView === "vouchers" ? (
             <button
               className="secondary-action"
               type="button"
-              onClick={() => void loadPage(1, false)}
+              aria-expanded={showFilters}
+              onClick={() => setShowFilters(true)}
             >
-              {t("workforcePaymentsPage.retry")}
+              {t("workforcePaymentsPage.advancesView.filtersToggle")}
+              {activeFilterChips.length ? ` · ${activeFilterChips.length}` : ""}
+            </button>
+          ) : null}
+        </div>
+        {poolView === "vouchers" && activeFilterChips.length ? (
+          <div className="workforce-advance-filter-chip-row">
+            {activeFilterChips.map((chip) => (
+              <button
+                key={chip.key}
+                type="button"
+                className="workforce-advance-filter-chip"
+                aria-label={t("workforcePaymentsPage.advancesView.removeFilter", { filter: chip.label })}
+                onClick={chip.clear}
+              >
+                <span>{chip.label}</span>
+                <X size={12} aria-hidden="true" />
+              </button>
+            ))}
+            <button type="button" className="workforce-advance-link" onClick={clearFilters}>
+              {t("workforcePaymentsPage.advancesView.clearFilters")}
             </button>
           </div>
-        ) : !rows.length ? (
-          <p className="workforce-payments-empty">
-            {t("workforcePaymentsPage.advancesView.noAdvancesMatchFilters")}
-          </p>
-        ) : groupMode ? (
-          <div className="workforce-advance-recipient-list">
-            {recipientGroups.map((group) => {
-              const receivers = [...group.receivers];
-              const paymentSources = [...group.paymentSources.entries()].sort(
-                (left, right) => right[1] - left[1] || left[0].localeCompare(right[0]),
-              );
-              const paymentSummary =
-                paymentSources.length > 1
-                  ? t("workforcePaymentsPage.advancesView.multiplePaymentSources")
-                  : paymentSources[0]?.[0] ?? t("workforcePaymentsPage.unresolvedPaymentSource");
-              return (
-                <article key={group.key}>
-                  <div>
-                    <strong>{group.name}</strong>
-                    <span>
-                      {receivers.length
-                        ? (receivers.length > 1
-                            ? t("workforcePaymentsPage.advancesView.receivedByWithExtra", { name: receivers[0], extraCount: receivers.length - 1 })
-                            : t("workforcePaymentsPage.advancesView.receivedBy", { name: receivers[0] }))
-                          : t("workforcePaymentsPage.advancesView.receiverUnavailable")}
-                    </span>
-                  </div>
-                  <div>
-                    <b className="bidi-isolate">{t("workforcePaymentsPage.advancesView.totalAdvancesAmount", { amount: money(group.total) })}</b>
-                    <span>
-                      {t("workforcePaymentsPage.advancesView.loadedAdvancesCount", { count: group.count })}
-                      {group.reviewRequired ? ` · ${t("workforcePaymentsPage.advancesView.reviewRequired")}` : ""}
-                    </span>
-                  </div>
-                  <div className="workforce-advance-group-meta">
-                    <small className="bidi-isolate">{t("workforcePaymentsPage.advancesView.paidFrom", { source: paymentSummary })}</small>
-                    {paymentSources.length ? (
-                      <small className="bidi-isolate">
-                        {paymentSources
-                          .map(([name, total]) => `${name} ${money(total)}`)
-                          .join(" · ")}
-                      </small>
-                    ) : null}
-                  </div>
-                  <div className="workforce-advance-group-actions">
-                    <button
-                      className="workforce-advance-link"
-                      type="button"
-                      disabled={group.name === t("workforcePaymentsPage.recipientUnavailable")}
-                      onClick={() => {
-                        setGroupMode(false);
-                        setSearchInput(group.name);
-                      }}
-                    >
-                      {t("workforcePaymentsPage.advancesView.viewAdvances")}
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="workforce-advance-position-list">
-            {rows.map((advance) => {
-              const identity = resolveAdvanceCardIdentity(advance, labourerById);
-              const canModifyAdvance =
-                canManage &&
-                !advance.readOnlyLegacy &&
-                advance.status === "POSTED" &&
-                advance.appliedAmount <= 0 &&
-                advance.refundedAmount <= 0 &&
-                (advance.reversedAmount ?? 0) <= 0 &&
-                !advance.linkedDueId;
-              const subtitle = identity.isGroupAdvance
-                ? (identity.groupLabel
-                    ? t("workforcePaymentsPage.advancesView.paidToGroupNamed", { group: identity.groupLabel })
-                    : t("workforcePaymentsPage.advancesView.paidToGroup"))
-                : identity.groupLabel
-                  ? t("workforcePaymentsPage.advancesView.groupLabel", { group: identity.groupLabel })
-                  : t("workforcePaymentsPage.advancesView.paidToLabourer");
-              return (
-                <article
-                  key={advance.id}
-                  className="workforce-advance-card"
-                  tabIndex={0}
-                  role="button"
-                  onClick={() => setSelectedAdvance(advance)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      setSelectedAdvance(advance);
-                    }
-                  }}
-                >
-                  <header>
-                    <div>
-                      <span>{identity.title}</span>
-                      <strong className="workforce-advance-card__amount bidi-isolate">{money(advance.originalAmount)}</strong>
-                    </div>
-                    {advance.reviewRequired ? (
-                      <em
-                        className={`workforce-payment-status status-${advance.advanceStatus.toLowerCase()}`}
-                      >
-                        {t("workforcePaymentsPage.advancesView.needsReview")}
-                      </em>
-                    ) : advance.status !== "POSTED" ? (
-                      <em className={`workforce-payment-status status-${advance.status.toLowerCase()}`}>
-                        {statusLabel(t, advance.status)}
-                      </em>
-                    ) : null}
-                  </header>
-                  <div className="workforce-advance-card__reference">
-                    <span className="bidi-isolate">{advance.displayVoucherNumber}</span>
-                    <time className="bidi-isolate">{formatDate(advance.voucherDate)}</time>
-                  </div>
-                  <div className="workforce-advance-card__meta">
-                    <small>
-                      {subtitle}
-                      {advance.reviewRequired ? ` · ${t("workforcePaymentsPage.advancesView.needsReview")}` : ""}
-                      {advance.description ? ` · ${advance.description}` : ""}
-                    </small>
-                  </div>
-                  <footer>
-                    <span>{t("workforcePaymentsPage.advancesView.paidFromColon", { source: advance.paymentSourceDisplayName ?? advance.paymentAccountName ?? advance.fundingAccountName ?? t("workforcePaymentsPage.unresolvedPaymentSource") })}</span>
-                    <div>
-                      <button
-                        type="button"
-                        className="workforce-advance-link"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setSelectedAdvance(advance);
-                        }}
-                      >
-                        {t("common.details")}
-                      </button>
-                      <details className="workforce-advance-actions-menu" onClick={(event) => event.stopPropagation()}>
-                        <summary>{t("workforcePaymentsPage.advancesView.actions")}</summary>
-                        <div>
-                          <button type="button" onClick={() => setSelectedAdvance(advance)}>
-                            {t("common.view")}
-                          </button>
-                          {canModifyAdvance ? (
-                            <button type="button" onClick={() => openEditAdvance(advance)}>
-                              {t("common.edit")}
-                            </button>
-                          ) : null}
-                          {canModifyAdvance ? (
-                            <button type="button" className="danger-action" onClick={() => setDeleteAdvance(advance)}>
-                              {t("common.delete")}
-                            </button>
-                          ) : null}
-                        </div>
-                      </details>
-                      {canManage &&
-                      !advance.readOnlyLegacy &&
-                      advance.status === "POSTED" ? (
-                        <button
-                          type="button"
-                          className="secondary-action workforce-advance-recover"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setRefundAdvance(advance);
-                            setRefundAmount(String(advance.outstandingAmount));
-                          }}
-                        >
-                          {t("workforcePaymentsPage.advancesView.recover")}
-                        </button>
-                      ) : null}
-                    </div>
-                  </footer>
-                </article>
-              );
-            })}
-          </div>
-        )}
-        {canonicalFinancials.data?.advanceApplicationParents?.length ? (
-          <details className="workforce-advance-audit-history">
-            <summary>
-              {t("workforcePaymentsPage.advancesView.appliedToLabourDuesHistory", { count: canonicalFinancials.data.advanceApplicationParents.filter((item) => item.status !== "REVERSED").length })}
-            </summary>
-            <div className="workforce-advance-audit-history__list">
-              {canonicalFinancials.data.advanceApplicationParents.map((item) => (
-                <article key={item.id}>
-                  <strong className="bidi-isolate">{item.displayVoucherNumber}</strong>
-                  <span>{item.recipientName}</span>
-                  <span>{item.description}</span>
-                  <span className="bidi-isolate">{item.dueNumber ?? t("workforcePaymentsPage.dueUnavailable")}</span>
-                  <span className="bidi-isolate">{money(item.activeAmount)}</span>
-                  <span>{t("workforcePaymentsPage.nonCash")}</span>
-                  <span className="bidi-isolate">{item.date}</span>
-                  <span>{statusLabel(t, item.status)}</span>
-                  <button
-                    type="button"
-                    className="workforce-advance-link"
-                    onClick={() => navigate("/workspace/labour-payments/vouchers?nature=ADVANCE_APPLICATION")}
+        ) : null}
+        {poolView === "groups" ? (
+          <section className="workforce-group-pools" aria-label={t("workforcePaymentsPage.advancesView.groupPoolsAria")}>
+            <p className="workforce-advance-membership-note">
+              {t("workforcePaymentsPage.advancesView.poolsFollowMembershipNote")}
+            </p>
+            {poolsLoading && !pools ? (
+              <p className="workforce-payments-inline-note">{t("workforcePaymentsPage.advancesView.loadingGroupPools")}</p>
+            ) : !visibleGroupPools.length ? (
+              <p className="workforce-payments-inline-note">{t("workforcePaymentsPage.advancesView.noGroupPools")}</p>
+            ) : (
+              <div className="workforce-group-pool-cards">
+                {visibleGroupPools.map((pool) => (
+                  <article
+                    key={pool.labourGroupId}
+                    className="workforce-group-pool-card"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setSelectedPoolKey(`group:${pool.labourGroupId}`)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedPoolKey(`group:${pool.labourGroupId}`);
+                      }
+                    }}
                   >
-                    {t("workforcePaymentsPage.viewPayment")}
-                  </button>
-                </article>
+                    <header>
+                      <strong>{pool.groupName}</strong>
+                      <small>
+                        {pool.groupLeaderName
+                          ? t("workforcePaymentsPage.groupLeaderLabel", { name: pool.groupLeaderName })
+                          : t("workforcePaymentsPage.advancesView.noGroupLeader")}
+                        {" · "}
+                        {t("workforcePaymentsPage.advancesView.memberCount", { count: pool.memberCount ?? 0 })}
+                      </small>
+                    </header>
+                    <div className="workforce-group-pool-card__balance">
+                      <span>{t("workforcePaymentsPage.advancesView.availableAdvanceBalance")}</span>
+                      <strong className={`bidi-isolate${pool.outstandingAdvances < -0.005 ? " is-negative" : ""}`}>{money(pool.outstandingAdvances)}</strong>
+                    </div>
+                    <dl className="workforce-group-pool-card__totals">
+                      <div><dt>{t("workforcePaymentsPage.advancesView.appliedToLabourDues")}</dt><dd className="bidi-isolate">{money(pool.appliedAdvances)}</dd></div>
+                      <div><dt>{t("workforcePaymentsPage.advancesView.totalAdvancesRecorded")}</dt><dd className="bidi-isolate">{money(pool.totalAdvances)}</dd></div>
+                      {pool.refundedAdvances > 0.005 ? (
+                        <div><dt>{t("workforcePaymentsPage.advancesView.recoveredRefunded")}</dt><dd className="bidi-isolate">{money(pool.refundedAdvances)}</dd></div>
+                      ) : null}
+                    </dl>
+                    <footer>
+                      <small>{t("workforcePaymentsPage.advancesView.voucherCount", { count: pool.voucherCount ?? 0 })}</small>
+                      <span className="workforce-advance-link">
+                        {t("workforcePaymentsPage.advancesView.viewPool")} <ArrowRight size={14} aria-hidden="true" />
+                      </span>
+                    </footer>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        ) : null}
+        {poolView === "individual" ? (
+          <section className="workforce-group-pools" aria-label={t("workforcePaymentsPage.advancesView.individualPoolsAria")}>
+            <p className="workforce-advance-membership-note">
+              {t("workforcePaymentsPage.advancesView.individualPoolsNote")}
+            </p>
+            {poolsLoading && !pools ? (
+              <p className="workforce-payments-inline-note">{t("workforcePaymentsPage.advancesView.loadingGroupPools")}</p>
+            ) : !visibleIndividualPools.length ? (
+              <p className="workforce-payments-inline-note">{t("workforcePaymentsPage.advancesView.noIndividualPools")}</p>
+            ) : (
+              <div className="workforce-group-pool-cards">
+                {visibleIndividualPools.map((pool) => (
+                  <article
+                    key={pool.labourerId}
+                    className="workforce-group-pool-card"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setSelectedPoolKey(`individual:${pool.labourerId}`)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedPoolKey(`individual:${pool.labourerId}`);
+                      }
+                    }}
+                  >
+                    <header>
+                      <strong>{pool.labourerName}</strong>
+                      <small>{t("workforcePaymentsPage.advancesView.ungroupedLabourer")}</small>
+                    </header>
+                    <div className="workforce-group-pool-card__balance">
+                      <span>{t("workforcePaymentsPage.advancesView.availableAdvanceBalance")}</span>
+                      <strong className={`bidi-isolate${pool.outstandingAdvances < -0.005 ? " is-negative" : ""}`}>{money(pool.outstandingAdvances)}</strong>
+                    </div>
+                    <dl className="workforce-group-pool-card__totals">
+                      <div><dt>{t("workforcePaymentsPage.advancesView.appliedToLabourDues")}</dt><dd className="bidi-isolate">{money(pool.appliedAdvances)}</dd></div>
+                      <div><dt>{t("workforcePaymentsPage.advancesView.totalAdvancesRecorded")}</dt><dd className="bidi-isolate">{money(pool.totalAdvances)}</dd></div>
+                      {pool.refundedAdvances > 0.005 ? (
+                        <div><dt>{t("workforcePaymentsPage.advancesView.recoveredRefunded")}</dt><dd className="bidi-isolate">{money(pool.refundedAdvances)}</dd></div>
+                      ) : null}
+                    </dl>
+                    <footer>
+                      <small>{t("workforcePaymentsPage.advancesView.voucherCount", { count: pool.voucherCount ?? 0 })}</small>
+                      <span className="workforce-advance-link">
+                        {t("workforcePaymentsPage.advancesView.viewPool")} <ArrowRight size={14} aria-hidden="true" />
+                      </span>
+                    </footer>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        ) : null}
+        {poolView === "vouchers" ? (
+          initialLoading && !rows.length ? (
+            <div
+              className="workforce-advance-skeletons"
+              aria-label={t("workforcePaymentsPage.advancesView.loadingAdvances")}
+            >
+              {Array.from({ length: 4 }, (_, index) => (
+                <div key={index} className="workforce-advance-skeleton" />
               ))}
             </div>
-          </details>
-        ) : null}
-        {rows.length ? (
-          <div className="workforce-advance-pagination">
-            <span className="bidi-isolate">
-              {t("workforcePaymentsPage.advancesView.showingCount", { shown: rows.length, total: pageInfo.totalCount })}
-            </span>
-            {pageInfo.hasMore ? (
+          ) : loadError && !rows.length ? (
+            <div className="workforce-payments-empty">
+              <p>{loadError}</p>
               <button
                 className="secondary-action"
-                disabled={loadingMore}
                 type="button"
-                onClick={() => void loadPage(pageInfo.page + 1, true)}
+                onClick={() => void loadPage(1, false)}
               >
-                {loadingMore ? t("workforcePaymentsPage.loadingMore") : t("workforcePaymentsPage.loadMore")}
+                {t("workforcePaymentsPage.retry")}
               </button>
+            </div>
+          ) : !rows.length ? (
+            anyQueryActive ? (
+              <div className="workforce-payments-empty workforce-advance-empty">
+                <p><strong>{t("workforcePaymentsPage.advancesView.noMatchingAdvancesTitle")}</strong></p>
+                <p>{t("workforcePaymentsPage.advancesView.noMatchingAdvancesBody")}</p>
+                <button
+                  className="secondary-action"
+                  type="button"
+                  onClick={() => {
+                    clearFilters();
+                    setSearchInput("");
+                  }}
+                >
+                  {t("workforcePaymentsPage.advancesView.clearFilters")}
+                </button>
+              </div>
             ) : (
-              <small>{t("workforcePaymentsPage.endOfResults")}</small>
-            )}
+              <div className="workforce-payments-empty workforce-advance-empty">
+                <p><strong>{t("workforcePaymentsPage.advancesView.noAdvancesTitle")}</strong></p>
+                <p>{t("workforcePaymentsPage.advancesView.noAdvancesBody")}</p>
+                {canManage ? (
+                  <button className="primary-action" type="button" onClick={() => openRecordAdvance(false)}>
+                    {t("workforcePaymentsPage.advancesView.recordAdvance")}
+                  </button>
+                ) : null}
+              </div>
+            )
+          ) : (
+            <div className="workforce-advance-position-list">
+              {rows.map((advance) => {
+                const identity = resolveAdvanceCardIdentity(advance, labourerById);
+                const canModifyAdvance =
+                  canManage &&
+                  !advance.readOnlyLegacy &&
+                  advance.status === "POSTED" &&
+                  !advance.linkedDueId;
+                const contextGroup = advance.currentGroupName
+                  ?? (advance.poolKind === "INDIVIDUAL" ? t("workforcePaymentsPage.advancesView.individualPoolLabel") : null);
+                return (
+                  <article
+                    key={advance.id}
+                    className="workforce-advance-card"
+                    tabIndex={0}
+                    role="button"
+                    onClick={() => setSelectedAdvance(advance)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedAdvance(advance);
+                      }
+                    }}
+                  >
+                    <header>
+                      <span>{identity.title}</span>
+                      <strong className="workforce-advance-card__amount bidi-isolate">{money(advance.originalAmount)}</strong>
+                    </header>
+                    <div className="workforce-advance-card__reference">
+                      <span className="bidi-isolate">{advance.displayVoucherNumber}</span>
+                      <span aria-hidden="true">·</span>
+                      <time className="bidi-isolate">{formatDate(advance.voucherDate)}</time>
+                      {advance.status === "VOIDED" ? (
+                        <em className="workforce-payment-status status-voided">
+                          {t("workforcePaymentsPage.advancesView.statusOptions.voidedReversed")}
+                        </em>
+                      ) : null}
+                    </div>
+                    <div className="workforce-advance-card__meta">
+                      <small>
+                        {contextGroup ? `${contextGroup} · ` : ""}
+                        {t("workforcePaymentsPage.advancesView.paidFrom", { source: advance.paymentSourceDisplayName ?? advance.paymentAccountName ?? advance.fundingAccountName ?? t("workforcePaymentsPage.unresolvedPaymentSource") })}
+                      </small>
+                      {advance.description ? (
+                        <small className="workforce-advance-card__description">{advance.description}</small>
+                      ) : null}
+                    </div>
+                    <details
+                      className="workforce-advance-actions-menu"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <summary aria-label={t("workforcePaymentsPage.advancesView.actions")}>⋮</summary>
+                      <div>
+                        <button type="button" onClick={() => setSelectedAdvance(advance)}>
+                          {t("common.view")}
+                        </button>
+                        {canModifyAdvance ? (
+                          <button type="button" onClick={() => openEditAdvance(advance)}>
+                            {t("common.edit")}
+                          </button>
+                        ) : null}
+                        {canModifyAdvance ? (
+                          <button type="button" className="danger-action" onClick={() => setDeleteAdvance(advance)}>
+                            {t("common.delete")}
+                          </button>
+                        ) : null}
+                      </div>
+                    </details>
+                  </article>
+                );
+              })}
+            </div>
+          )
+        ) : null}
+        {poolView === "vouchers" && rows.length && pageInfo.hasMore ? (
+          <div className="workforce-advance-pagination">
+            <button
+              className="secondary-action"
+              disabled={loadingMore}
+              type="button"
+              onClick={() => void loadPage(pageInfo.page + 1, true)}
+            >
+              {loadingMore ? t("workforcePaymentsPage.loadingMore") : t("workforcePaymentsPage.loadMore")}
+            </button>
           </div>
         ) : null}
       </section>
+      {poolDetailOpen ? (
+        <div
+          className="worker-dialog-backdrop workforce-payment-review-backdrop"
+          role="presentation"
+          onClick={closePoolDetail}
+        >
+          <section
+            className="workforce-payment-review workforce-pool-detail"
+            role="dialog"
+            aria-modal="true"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header>
+              <div>
+                <span>
+                  {selectedGroupPool
+                    ? t("workforcePaymentsPage.advancesView.groupPoolTitle")
+                    : t("workforcePaymentsPage.advancesView.individualPoolTitle")}
+                </span>
+                <h2>{selectedGroupPool ? selectedGroupPool.groupName : selectedIndividualPool?.labourerName}</h2>
+                {selectedGroupPool ? (
+                  <p>
+                    {selectedGroupPool.groupLeaderName
+                      ? t("workforcePaymentsPage.groupLeaderLabel", { name: selectedGroupPool.groupLeaderName })
+                      : t("workforcePaymentsPage.advancesView.noGroupLeader")}
+                    {" · "}
+                    {t("workforcePaymentsPage.advancesView.memberCount", { count: selectedGroupPool.memberCount ?? 0 })}
+                  </p>
+                ) : (
+                  <p>{t("workforcePaymentsPage.advancesView.ungroupedLabourer")}</p>
+                )}
+              </div>
+              <button type="button" onClick={closePoolDetail} aria-label={t("common.close")}>
+                <X size={18} />
+              </button>
+            </header>
+            <div className="workforce-payment-review__body">
+              {selectedGroupPool ? (
+                <p className="workforce-advance-membership-note">
+                  {t("workforcePaymentsPage.advancesView.combinedPoolNote")}
+                </p>
+              ) : null}
+              <dl className="workforce-payment-position">
+                <div>
+                  <dt>{t("workforcePaymentsPage.advancesView.totalAdvancesRecorded")}</dt>
+                  <dd className="bidi-isolate">{money((selectedGroupPool ?? selectedIndividualPool)!.totalAdvances)}</dd>
+                </div>
+                <div>
+                  <dt>{t("workforcePaymentsPage.advancesView.appliedToLabourDues")}</dt>
+                  <dd className="bidi-isolate">{money((selectedGroupPool ?? selectedIndividualPool)!.appliedAdvances)}</dd>
+                </div>
+                <div>
+                  <dt>{t("workforcePaymentsPage.advancesView.recoveredRefunded")}</dt>
+                  <dd className="bidi-isolate">{money((selectedGroupPool ?? selectedIndividualPool)!.refundedAdvances)}</dd>
+                </div>
+                <div className="is-total">
+                  <dt>{t("workforcePaymentsPage.advancesView.availableAdvanceBalance")}</dt>
+                  <dd className={`bidi-isolate${(selectedGroupPool ?? selectedIndividualPool)!.outstandingAdvances < -0.005 ? " is-negative" : ""}`}>
+                    {money((selectedGroupPool ?? selectedIndividualPool)!.outstandingAdvances)}
+                  </dd>
+                </div>
+              </dl>
+              {(selectedGroupPool ?? selectedIndividualPool)!.outstandingAdvances < -0.005 ? (
+                <p className="worker-action-warning">{t("workforcePaymentsPage.advancesView.negativePoolWarning")}</p>
+              ) : null}
+              <section>
+                <h3>{t("workforcePaymentsPage.advancesView.advanceVouchersSection", { count: selectedPoolVouchers.length })}</h3>
+                {!selectedPoolVouchers.length ? (
+                  <p className="workforce-payments-inline-note">{t("workforcePaymentsPage.advancesView.noPoolVouchers")}</p>
+                ) : (
+                  <div className="workforce-pool-voucher-list">
+                    {selectedPoolVouchers.map((voucher) => (
+                      <article key={voucher.id} className="workforce-pool-voucher-row">
+                        <header>
+                          <span>{voucher.recipientName ?? voucher.labourerName ?? t("workforcePaymentsPage.recipientUnavailable")}</span>
+                          <strong className="bidi-isolate">{money(voucher.amount)}</strong>
+                        </header>
+                        <small className="bidi-isolate">{voucher.voucherNumber} · {formatDate(voucher.voucherDate)}</small>
+                        {voucher.paymentAccountName ? (
+                          <small>{t("workforcePaymentsPage.advancesView.paidFrom", { source: voucher.paymentAccountName })}</small>
+                        ) : null}
+                        {voucher.description ? (
+                          <small className="workforce-advance-card__description">{voucher.description}</small>
+                        ) : null}
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
+              <section>
+                <h3>{t("workforcePaymentsPage.advancesView.poolActivitySection")}</h3>
+                {!selectedPoolActivity.length ? (
+                  <p className="workforce-payments-inline-note">{t("workforcePaymentsPage.advancesView.noPoolActivity")}</p>
+                ) : (
+                  <div className="workforce-pool-activity-list">
+                    {selectedPoolActivity.map((event) => (
+                      <div key={event.id} className="workforce-pool-activity-row">
+                        <div>
+                          <span>{activityTypeLabel(event.type)}</span>
+                          <small className="bidi-isolate">
+                            {formatDate(event.date)}
+                            {event.voucherNumber ? ` · ${event.voucherNumber}` : ""}
+                            {event.dueNumber ? ` · ${event.dueNumber}` : ""}
+                          </small>
+                          {event.description ? <small className="workforce-advance-card__description">{event.description}</small> : null}
+                        </div>
+                        <strong className={`bidi-isolate${event.direction < 0 ? " is-outflow" : " is-inflow"}`}>
+                          {event.direction < 0 ? "− " : "+ "}
+                          {money(event.amount)}
+                        </strong>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+            <footer>
+              <div className="workforce-payment-review__actions">
+                {canManage ? (
+                  <button
+                    type="button"
+                    className="secondary-action"
+                    onClick={() => {
+                      const pool = selectedGroupPool ?? selectedIndividualPool;
+                      if (!pool) return;
+                      openRecovery(selectedGroupPool
+                        ? { kind: "group", groupId: selectedGroupPool.labourGroupId, name: selectedGroupPool.groupName ?? "", available: selectedGroupPool.outstandingAdvances }
+                        : { kind: "individual", labourerId: selectedIndividualPool!.labourerId, name: selectedIndividualPool!.labourerName ?? "", available: selectedIndividualPool!.outstandingAdvances });
+                    }}
+                  >
+                    {t("workforcePaymentsPage.advancesView.recordRecovery")}
+                  </button>
+                ) : null}
+                {canManage ? (
+                  <button
+                    type="button"
+                    className="primary-action"
+                    onClick={() => {
+                      closePoolDetail();
+                      openRecordAdvance(false);
+                    }}
+                  >
+                    <Plus size={16} /> {t("workforcePaymentsPage.advancesView.recordAdvance")}
+                  </button>
+                ) : null}
+              </div>
+            </footer>
+          </section>
+        </div>
+      ) : null}
+      {reviewOpen && pools ? (
+        <div
+          className="worker-dialog-backdrop workforce-payment-review-backdrop"
+          role="presentation"
+          onClick={() => setReviewOpen(false)}
+        >
+          <section
+            className="workforce-payment-review workforce-pool-detail"
+            role="dialog"
+            aria-modal="true"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header>
+              <div>
+                <span>{t("workforcePaymentsPage.advancesView.dataReviewTitle")}</span>
+                <h2>{t("workforcePaymentsPage.advancesView.recordsRequireReview", { count: pools.reviewAdvances.length })}</h2>
+                <p>{t("workforcePaymentsPage.advancesView.dataReviewNote")}</p>
+              </div>
+              <button type="button" onClick={() => setReviewOpen(false)} aria-label={t("common.close")}>
+                <X size={18} />
+              </button>
+            </header>
+            <div className="workforce-payment-review__body">
+              <div className="workforce-pool-voucher-list">
+                {pools.reviewAdvances.map((advance) => (
+                  <article key={advance.id} className="workforce-pool-voucher-row">
+                    <header>
+                      <span>{advance.recipientName ?? t("workforcePaymentsPage.recipientUnavailable")}</span>
+                      <strong className="bidi-isolate">{money(advance.amount)}</strong>
+                    </header>
+                    <small className="bidi-isolate">{advance.voucherNumber} · {formatDate(advance.voucherDate)}</small>
+                    <small>{advance.reason}</small>
+                  </article>
+                ))}
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
       {showForm ? (
         <div
           className="worker-dialog-backdrop workforce-payment-review-backdrop"
@@ -2329,7 +2426,6 @@ function AdvancesView({
           >
             <header>
               <div>
-                <span>{t("workforcePaymentsPage.labourPaymentVoucher")}</span>
                 <h2 id="record-advance-title">
                   {editingAdvance ? t("workforcePaymentsPage.advancesView.editAdvanceVoucherTitle", { voucherNumber: editingAdvance.displayVoucherNumber }) : t("workforcePaymentsPage.advancesView.recordAdvance")}
                 </h2>
@@ -2344,122 +2440,136 @@ function AdvancesView({
               </button>
             </header>
             <div className="workforce-payment-review__body workforce-advance-entry-body">
-              <section>
-                <h3>
-                  <span>1</span> {t("workforcePaymentsPage.advancesView.recipientStep")}
-                </h3>
-                <div className="workforce-payment-form">
-                  {/* A new advance is entered against its recipient labourer;
-                      the labour group and leader are resolved automatically
-                      and the amount joins that group's aggregate pool — no
-                      scope to pick, no separate group-advance entry. Editing
-                      a historical voucher keeps its recorded scope. */}
-                  {editingAdvance ? (
+              <div className="workforce-advance-entry-fields">
+                {/* The voucher records the original recipient. Pool ownership
+                    follows the recipient's CURRENT group membership, resolved
+                    by the server — the note below only previews it. */}
+                {editingAdvance ? (
+                  <label>
+                    <span>{t("workforcePaymentsPage.recipientScope")}</span>
+                    <select
+                      ref={recipientScopeRef}
+                      value={scope}
+                      onChange={(event) =>
+                        setScope(event.target.value as LabourRecipientScope)
+                      }
+                    >
+                      {scopeOptions(t).slice(0, 5).map((item) => (
+                        <option key={item.value} value={item.value}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+                {scope === "INDIVIDUAL" ? (
+                  <label>
+                    <span>{t("workforcePaymentsPage.labourer")}</span>
+                    <LabourSelectCombobox
+                      ariaLabel={t("workforcePaymentsPage.labourer")}
+                      options={selectableLabourers}
+                      value={labourerId}
+                      onChange={setLabourerId}
+                      placeholder={t("workforcePaymentsPage.advancesView.searchLabourersPlaceholder")}
+                      noResultsLabel={t("workforcePaymentsPage.advancesView.noSelectableLabourersFound")}
+                      includeInactive
+                      renderOption={(option) => renderAdvanceLabourOption(t, option)}
+                    />
+                    {selectedIndividualLabourer && advanceLabourStatus(selectedIndividualLabourer) !== "active" ? (
+                      <small className="workforce-advance-inactive-note">{t("workforcePaymentsPage.advancesView.inactiveLabourerNote")}</small>
+                    ) : null}
+                    {!editingAdvance && labourerId ? (
+                      recipientGroup ? (
+                        <small className="workforce-payments-inline-note">
+                          {t("workforcePaymentsPage.advancesView.recipientGroupLabel", { name: recipientGroup.name })}
+                          {recipientGroupLeaderName ? ` · ${t("workforcePaymentsPage.groupLeaderLabel", { name: recipientGroupLeaderName })}` : ""}
+                        </small>
+                      ) : (
+                        <small className="workforce-payments-inline-note">{t("workforcePaymentsPage.advancesView.individualPoolNote")}</small>
+                      )
+                    ) : null}
+                  </label>
+                ) : null}
+                {scope === "LABOUR_GROUP" ? (
+                  <>
                     <label>
-                      <span>{t("workforcePaymentsPage.recipientScope")}</span>
-                      <select
-                        ref={recipientScopeRef}
-                        value={scope}
-                        onChange={(event) =>
-                          setScope(event.target.value as LabourRecipientScope)
-                        }
-                      >
-                        {scopeOptions(t).slice(0, 5).map((item) => (
-                          <option key={item.value} value={item.value}>
-                            {item.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : null}
-                  {scope === "INDIVIDUAL" ? (
-                    <label>
-                      <span>{editingAdvance ? t("workforcePaymentsPage.labourer") : t("workforcePaymentsPage.advancesView.recipientLabourerLabel")}</span>
+                      <span>{t("workforcePaymentsPage.recipientScopeOptions.labourGroup")}</span>
                       <LabourSelectCombobox
-                        ariaLabel={editingAdvance ? t("workforcePaymentsPage.labourer") : t("workforcePaymentsPage.advancesView.recipientLabourerLabel")}
-                        options={selectableLabourers}
-                        value={labourerId}
-                        onChange={setLabourerId}
-                        placeholder={t("workforcePaymentsPage.advancesView.searchLabourersPlaceholder")}
+                        ariaLabel={t("workforcePaymentsPage.recipientScopeOptions.labourGroup")}
+                        options={groupOptions}
+                        value={groupId}
+                        onChange={setGroupId}
+                        placeholder={t("workforcePaymentsPage.advancesView.searchLabourGroupsPlaceholder")}
+                      />
+                      {advanceGroupLeaderName ? <small className="workforce-payments-inline-note">{t("workforcePaymentsPage.groupLeaderLabel", { name: advanceGroupLeaderName })}</small> : null}
+                    </label>
+                    <label>
+                      <span>{t("workforcePaymentsPage.advancesView.receivedByInformationalLabel")}</span>
+                      <LabourSelectCombobox
+                        ariaLabel={t("workforcePaymentsPage.advancesView.receivedByLabourerAria")}
+                        options={groupId ? selectableLabourers.filter((worker) => worker.groupId === groupId) : selectableLabourers}
+                        value={receivedByLabourerId}
+                        onChange={setReceivedByLabourerId}
+                        placeholder={t("workforcePaymentsPage.advancesView.searchReceivingLabourerPlaceholder")}
                         noResultsLabel={t("workforcePaymentsPage.advancesView.noSelectableLabourersFound")}
                         includeInactive
                         renderOption={(option) => renderAdvanceLabourOption(t, option)}
                       />
-                      {selectedIndividualLabourer && advanceLabourStatus(selectedIndividualLabourer) !== "active" ? (
+                      <small className="workforce-payments-inline-note">{t("workforcePaymentsPage.advancesView.receivedByInformationalNote")}</small>
+                      {selectedReceiverLabourer && advanceLabourStatus(selectedReceiverLabourer) !== "active" ? (
                         <small className="workforce-advance-inactive-note">{t("workforcePaymentsPage.advancesView.inactiveLabourerNote")}</small>
                       ) : null}
-                      {!editingAdvance && labourerId ? (
-                        recipientGroup ? (
-                          <small className="workforce-payments-inline-note">
-                            {t("workforcePaymentsPage.advancesView.recipientGroupLabel", { name: recipientGroup.name })}
-                            {recipientGroupLeaderName ? ` · ${t("workforcePaymentsPage.groupLeaderLabel", { name: recipientGroupLeaderName })}` : ""}
-                          </small>
-                        ) : (
-                          <small className="workforce-advance-inactive-note">{t("workforcePaymentsPage.advancesView.assignGroupBeforeAdvance")}</small>
-                        )
-                      ) : null}
                     </label>
-                  ) : null}
-                  {scope === "LABOUR_GROUP" ? (
-                    <>
-                      <label>
-                        <span>{t("workforcePaymentsPage.recipientScopeOptions.labourGroup")}</span>
-                        <LabourSelectCombobox
-                          ariaLabel={t("workforcePaymentsPage.recipientScopeOptions.labourGroup")}
-                          options={groupOptions}
-                          value={groupId}
-                          onChange={setGroupId}
-                          placeholder={t("workforcePaymentsPage.advancesView.searchLabourGroupsPlaceholder")}
-                        />
-                        {advanceGroupLeaderName ? <small className="workforce-payments-inline-note">{t("workforcePaymentsPage.groupLeaderLabel", { name: advanceGroupLeaderName })}</small> : null}
-                      </label>
-                      <label>
-                        <span>{t("workforcePaymentsPage.advancesView.receivedByInformationalLabel")}</span>
-                        <LabourSelectCombobox
-                          ariaLabel={t("workforcePaymentsPage.advancesView.receivedByLabourerAria")}
-                          options={groupId ? selectableLabourers.filter((worker) => worker.groupId === groupId) : selectableLabourers}
-                          value={receivedByLabourerId}
-                          onChange={setReceivedByLabourerId}
-                          placeholder={t("workforcePaymentsPage.advancesView.searchReceivingLabourerPlaceholder")}
-                          noResultsLabel={t("workforcePaymentsPage.advancesView.noSelectableLabourersFound")}
-                          includeInactive
-                          renderOption={(option) => renderAdvanceLabourOption(t, option)}
-                        />
-                        <small className="workforce-payments-inline-note">{t("workforcePaymentsPage.advancesView.receivedByInformationalNote")}</small>
-                        {selectedReceiverLabourer && advanceLabourStatus(selectedReceiverLabourer) !== "active" ? (
-                          <small className="workforce-advance-inactive-note">{t("workforcePaymentsPage.advancesView.inactiveLabourerNote")}</small>
-                        ) : null}
-                      </label>
-                    </>
-                  ) : null}
-                  {!["INDIVIDUAL", "LABOUR_GROUP"].includes(scope) ? (
-                    <>
-                      <label>
-                        <span>{t("workforcePaymentsPage.advancesView.recipientNameLabel")}</span>
-                        <input
-                          value={recipientName}
-                          onChange={(event) =>
-                            setRecipientName(event.target.value)
-                          }
-                        />
-                      </label>
-                      <label>
-                        <span>{t("workforcePaymentsPage.advancesView.stableReferenceLabel")}</span>
-                        <input
-                          required
-                          value={reference}
-                          onChange={(event) => setReference(event.target.value)}
-                        />
-                      </label>
-                    </>
-                  ) : null}
-                </div>
-              </section>
-              <section>
-                <h3>
-                  <span>2</span> {t("workforcePaymentsPage.advancesView.paymentStep")}
-                </h3>
-                <div className="workforce-payment-form">
+                  </>
+                ) : null}
+                {!["INDIVIDUAL", "LABOUR_GROUP"].includes(scope) ? (
+                  <>
+                    <label>
+                      <span>{t("workforcePaymentsPage.advancesView.recipientNameLabel")}</span>
+                      <input
+                        value={recipientName}
+                        onChange={(event) =>
+                          setRecipientName(event.target.value)
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span>{t("workforcePaymentsPage.advancesView.stableReferenceLabel")}</span>
+                      <input
+                        required
+                        value={reference}
+                        onChange={(event) => setReference(event.target.value)}
+                      />
+                    </label>
+                  </>
+                ) : null}
+                <label>
+                  <span>{t("workforcePaymentsPage.voucherRegister.amountLabel")}</span>
+                  <div className="workforce-advance-amount">
+                    <span aria-hidden="true">SAR</span>
+                    <input
+                      required
+                      min="0.01"
+                      step="0.01"
+                      type="number"
+                      inputMode="decimal"
+                      placeholder="0.00"
+                      aria-label={t("workforcePaymentsPage.amountSar")}
+                      value={amount}
+                      onChange={(event) => setAmount(event.target.value)}
+                    />
+                  </div>
+                </label>
+                <label>
+                  <span>{t("workforcePaymentsPage.description")}</span>
+                  <input
+                    required
+                    value={description}
+                    onChange={(event) => setDescription(event.target.value)}
+                    placeholder={t("workforcePaymentsPage.advancesView.purposeOfAdvancePlaceholder")}
+                  />
+                </label>
+                <div className="workforce-advance-entry-row">
                   <label>
                     <span>{t("workforcePaymentsPage.voucherRegister.dateLabel")}</span>
                     <input
@@ -2470,94 +2580,15 @@ function AdvancesView({
                     />
                   </label>
                   <label>
-                    <span>{t("workforcePaymentsPage.amountSar")}</span>
-                    <input
-                      required
-                      min="0.01"
-                      step="0.01"
-                      type="number"
-                      value={amount}
-                      onChange={(event) => setAmount(event.target.value)}
-                    />
-                  </label>
-                  <label>
                     <span>{t("workforcePaymentsPage.paidFromAccount")}</span>
                     <PaymentAccountSelect
-                      accounts={eligiblePaymentAccounts(accounts)}
+                      accounts={eligiblePaymentAccounts(accounts, { alsoIncludeId: editingAdvance?.paymentAccountId ?? null })}
                       value={accountId}
                       onChange={setAccountId}
                     />
                   </label>
-                  <label>
-                    <span>{t("workforcePaymentsPage.method")}</span>
-                    <select
-                      value={method}
-                      onChange={(event) => setMethod(event.target.value)}
-                    >
-                      <option value="Cash">{translateStatus(t, "CASH")}</option>
-                      <option value="Bank Transfer">{translateStatus(t, "BANK_TRANSFER")}</option>
-                      <option value="Other">{translateStatus(t, "OTHER")}</option>
-                    </select>
-                  </label>
                 </div>
-              </section>
-              <section>
-                <h3>
-                  <span>3</span> {t("workforcePaymentsPage.advancesView.detailsStep")}
-                </h3>
-                <div className="workforce-payment-form">
-                  <label className="is-full">
-                    <span>{t("workforcePaymentsPage.description")}</span>
-                    <input
-                      required
-                      value={description}
-                      onChange={(event) => setDescription(event.target.value)}
-                      placeholder={t("workforcePaymentsPage.advancesView.purposeOfAdvancePlaceholder")}
-                    />
-                  </label>
-                  <label className="is-full">
-                    <span>{t("workforcePaymentsPage.noteReference")}</span>
-                    <input
-                      value={transactionReference}
-                      onChange={(event) =>
-                        setTransactionReference(event.target.value)
-                      }
-                      placeholder={t("workforcePaymentsPage.optional")}
-                    />
-                  </label>
-                </div>
-              </section>
-              {selectedOwner && Number(amount) > 0 && selectedAccount ? (
-                <section className="workforce-advance-preview">
-                  <h3>
-                    <span>4</span> {t("workforcePaymentsPage.preview")}
-                  </h3>
-                  <dl>
-                    <div>
-                      <dt>{t("workforcePaymentsPage.forLabel")}</dt>
-                      <dd>{selectedOwner}</dd>
-                    </div>
-                    {selectedReceiver && selectedReceiver !== selectedOwner ? (
-                      <div>
-                        <dt>{t("workforcePaymentsPage.advancesView.receivedByLabel")}</dt>
-                        <dd>{selectedReceiver}</dd>
-                      </div>
-                    ) : null}
-                    <div>
-                      <dt>{t("workforcePaymentsPage.voucherRegister.amountLabel")}</dt>
-                      <dd className="bidi-isolate">{money(Number(amount))}</dd>
-                    </div>
-                    <div>
-                      <dt>{t("workforcePaymentsPage.paidFrom")}</dt>
-                      <dd>{selectedAccount}</dd>
-                    </div>
-                    <div>
-                      <dt>{t("workforcePaymentsPage.method")}</dt>
-                      <dd>{translateStatus(t, method)}</dd>
-                    </div>
-                  </dl>
-                </section>
-              ) : null}
+              </div>
             </div>
             <footer>
               <div className="workforce-payment-review__actions">
@@ -2606,9 +2637,13 @@ function AdvancesView({
               <dl className="workforce-payment-position">
                 <div><dt>{t("workforcePaymentsPage.voucherRegister.amountLabel")}</dt><dd className="bidi-isolate">{money(deleteAdvance.originalAmount)}</dd></div>
                 <div><dt>{t("workforcePaymentsPage.recipient")}</dt><dd>{deleteAdvance.financialOwnerName ?? t("workforcePaymentsPage.recipientUnavailable")}</dd></div>
+                {deleteAdvance.currentGroupName ? (
+                  <div><dt>{t("workforcePaymentsPage.advancesView.currentGroupLabel")}</dt><dd>{deleteAdvance.currentGroupName}</dd></div>
+                ) : null}
                 <div><dt>{t("workforcePaymentsPage.advancesView.fundingPartnerAccount")}</dt><dd>{deleteAdvance.paymentSourceDisplayName ?? deleteAdvance.paymentAccountName ?? t("workforcePaymentsPage.unresolvedPaymentSource")}</dd></div>
                 <div><dt>{t("workforcePaymentsPage.voucherRegister.dateLabel")}</dt><dd className="bidi-isolate">{formatDate(deleteAdvance.voucherDate)}</dd></div>
               </dl>
+              <p className="workforce-payments-inline-note">{t("workforcePaymentsPage.advancesView.deleteAdvancePoolNote")}</p>
             </div>
             <footer>
               <div className="workforce-payment-review__actions">
@@ -2623,28 +2658,30 @@ function AdvancesView({
           </section>
         </div>
       ) : null}
-      {refundAdvance ? (
+      {recoveryTarget ? (
         <div
           className="worker-dialog-backdrop workforce-payment-review-backdrop"
           role="presentation"
-          onClick={() => setRefundAdvance(null)}
+          onClick={() => setRecoveryTarget(null)}
         >
           <form
             className="workforce-payment-review workforce-recovery-sheet"
-            onSubmit={(event) => void submitRefund(event)}
+            onSubmit={(event) => void submitRecovery(event)}
             onClick={(event) => event.stopPropagation()}
           >
             <header>
               <div>
-                <span className="bidi-isolate">{refundAdvance.displayVoucherNumber}</span>
+                <span>{recoveryTarget.name}</span>
                 <h2>{t("workforcePaymentsPage.advancesView.recordRecovery")}</h2>
                 <p>
-                  {refundAdvance.financialOwnerName ?? t("workforcePaymentsPage.recipientUnavailable")}
+                  {recoveryTarget.kind === "group"
+                    ? t("workforcePaymentsPage.advancesView.poolRecoveryGroupNote")
+                    : t("workforcePaymentsPage.advancesView.poolRecoveryIndividualNote")}
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => setRefundAdvance(null)}
+                onClick={() => setRecoveryTarget(null)}
                 aria-label={t("common.close")}
               >
                 <X size={18} />
@@ -2652,8 +2689,8 @@ function AdvancesView({
             </header>
             <div className="workforce-payment-review__body">
               <div className="workforce-recovery-balance">
-                <span>{t("workforcePaymentsPage.advancesView.currentOutstanding")}</span>
-                <strong className="bidi-isolate">{money(refundAdvance.outstandingAmount)}</strong>
+                <span>{t("workforcePaymentsPage.advancesView.availableAdvanceBalance")}</span>
+                <strong className="bidi-isolate">{money(recoveryTarget.available)}</strong>
               </div>
               <div className="workforce-payment-review-form">
                 <label>
@@ -2662,18 +2699,18 @@ function AdvancesView({
                     required
                     type="number"
                     min="0.01"
-                    max={refundAdvance.outstandingAmount}
+                    max={Math.max(recoveryTarget.available, 0)}
                     step="0.01"
-                    value={refundAmount}
-                    onChange={(event) => setRefundAmount(event.target.value)}
+                    value={recoveryAmount}
+                    onChange={(event) => setRecoveryAmount(event.target.value)}
                   />
                 </label>
                 <label>
                   <span>{t("workforcePaymentsPage.advancesView.receivedIntoAccount")}</span>
                   <PaymentAccountSelect
                     accounts={eligiblePaymentAccounts(accounts)}
-                    value={refundAccountId}
-                    onChange={setRefundAccountId}
+                    value={recoveryAccountId}
+                    onChange={setRecoveryAccountId}
                   />
                 </label>
                 <label>
@@ -2681,15 +2718,15 @@ function AdvancesView({
                   <input
                     required
                     type="date"
-                    value={refundDate}
-                    onChange={(event) => setRefundDate(event.target.value)}
+                    value={recoveryDate}
+                    onChange={(event) => setRecoveryDate(event.target.value)}
                   />
                 </label>
                 <label>
                   <span>{t("workforcePaymentsPage.method")}</span>
                   <select
-                    value={refundMethod}
-                    onChange={(event) => setRefundMethod(event.target.value)}
+                    value={recoveryMethod}
+                    onChange={(event) => setRecoveryMethod(event.target.value)}
                   >
                     <option value="Recovery">{translateStatus(t, "RECOVERY")}</option>
                     <option value="Cash">{translateStatus(t, "CASH")}</option>
@@ -2699,22 +2736,16 @@ function AdvancesView({
                 <label className="is-full">
                   <span>{t("workforcePaymentsPage.notes")}</span>
                   <input
-                    value={refundNotes}
-                    onChange={(event) => setRefundNotes(event.target.value)}
+                    value={recoveryNotes}
+                    onChange={(event) => setRecoveryNotes(event.target.value)}
                     placeholder={t("workforcePaymentsPage.optionalNotes")}
                   />
                 </label>
               </div>
               <div className="workforce-recovery-preview">
-                <span>{t("workforcePaymentsPage.advancesView.outstandingAfterRecovery")}</span>
+                <span>{t("workforcePaymentsPage.advancesView.availableAfterRecovery")}</span>
                 <strong className="bidi-isolate">
-                  {money(
-                    Math.max(
-                      refundAdvance.outstandingAmount -
-                        Number(refundAmount || 0),
-                      0,
-                    ),
-                  )}
+                  {money(recoveryTarget.available - Number(recoveryAmount || 0))}
                 </strong>
               </div>
             </div>
@@ -2723,21 +2754,21 @@ function AdvancesView({
                 <button
                   className="secondary-action"
                   type="button"
-                  onClick={() => setRefundAdvance(null)}
+                  onClick={() => setRecoveryTarget(null)}
                 >
                   {t("common.cancel")}
                 </button>
                 <button
                   className="primary-action"
                   disabled={
-                    refunding ||
-                    Number(refundAmount) <= 0 ||
-                    Number(refundAmount) > refundAdvance.outstandingAmount ||
-                    !refundAccountId
+                    recovering ||
+                    Number(recoveryAmount) <= 0 ||
+                    Number(recoveryAmount) > recoveryTarget.available + 0.005 ||
+                    !recoveryAccountId
                   }
                   type="submit"
                 >
-                  {refunding ? t("workforcePaymentsPage.posting") : t("workforcePaymentsPage.advancesView.confirmRecovery")}
+                  {recovering ? t("workforcePaymentsPage.posting") : t("workforcePaymentsPage.advancesView.confirmRecovery")}
                 </button>
               </div>
             </footer>
@@ -2784,18 +2815,23 @@ function AdvancesView({
                 </div>
                 <div>
                   <dt>{t("workforcePaymentsPage.advancesView.recipientTypeLabel")}</dt>
-                  <dd>
-                    {selectedAdvance.recipientScope === "LABOUR_GROUP"
-                      ? t("workforcePaymentsPage.recipientScopeOptions.labourGroup")
-                      : selectedAdvance.recipientScope === "INDIVIDUAL"
-                        ? t("workforcePaymentsPage.recipientScopeOptions.individual")
-                        : scopeCopy(selectedAdvance)}
-                  </dd>
+                  <dd>{scopeCopy(selectedAdvance)}</dd>
                 </div>
                 {selectedAdvance.recipientScope === "LABOUR_GROUP" && selectedAdvance.receivedByName ? (
                   <div>
                     <dt>{t("workforcePaymentsPage.advancesView.receivedByLabel")}</dt>
                     <dd>{selectedAdvance.receivedByName}</dd>
+                  </div>
+                ) : null}
+                {selectedAdvance.currentGroupName ? (
+                  <div>
+                    <dt>{t("workforcePaymentsPage.advancesView.currentGroupLabel")}</dt>
+                    <dd>{selectedAdvance.currentGroupName}</dd>
+                  </div>
+                ) : selectedAdvance.poolKind === "INDIVIDUAL" ? (
+                  <div>
+                    <dt>{t("workforcePaymentsPage.advancesView.currentGroupLabel")}</dt>
+                    <dd>{t("workforcePaymentsPage.advancesView.individualPoolLabel")}</dd>
                   </div>
                 ) : null}
                 <div>
@@ -2826,15 +2862,95 @@ function AdvancesView({
                   {selectedAdvance.createdByName ?? t("workforcePaymentsPage.creatorUnavailable")}
                 </p>
                 {selectedAdvance.legacy ? (
-                  <p>
-                    {t("workforcePaymentsPage.advancesView.legacySource", { sourceType: selectedAdvance.sourceType })} ·{" "}
-                    {selectedAdvance.reviewRequired
-                      ? t("workforcePaymentsPage.advancesView.reviewRequired")
-                      : t("workforcePaymentsPage.advancesView.mapped")}
-                  </p>
+                  <p>{t("workforcePaymentsPage.advancesView.legacySource", { sourceType: selectedAdvance.sourceType })}</p>
                 ) : null}
               </section>
             </div>
+          </section>
+        </div>
+      ) : null}
+      {showFilters ? (
+        <div className="account-sheet-backdrop" role="presentation" onClick={() => setShowFilters(false)}>
+          <section
+            className="account-sheet workforce-advance-filter-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("workforcePaymentsPage.advancesView.filtersToggle")}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="account-sheet__header">
+              <h3>{t("workforcePaymentsPage.advancesView.filtersToggle")}</h3>
+              <button type="button" className="account-sheet__close" aria-label={t("common.close")} onClick={() => setShowFilters(false)}>
+                <X size={20} aria-hidden="true" />
+              </button>
+            </header>
+            <div className="workforce-advance-filter-sheet__body">
+              <label>
+                <span>{t("workforcePaymentsPage.recipientScope")}</span>
+                <select
+                  value={scopeFilter}
+                  onChange={(event) => setScopeFilter(event.target.value)}
+                >
+                  <option value="">{t("workforcePaymentsPage.scopeOptions.allRecipients")}</option>
+                  {scopeOptions(t).map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>{t("workforcePaymentsPage.advancesView.advanceStatusAria")}</span>
+                <select
+                  value={statusFilter}
+                  onChange={(event) => setStatusFilter(event.target.value)}
+                >
+                  <option value="VALID">{t("workforcePaymentsPage.advancesView.statusOptions.valid")}</option>
+                  <option value="VOIDED">{t("workforcePaymentsPage.advancesView.statusOptions.voidedReversed")}</option>
+                  <option value="ALL">{t("workforcePaymentsPage.advancesView.statusOptions.allHistory")}</option>
+                </select>
+              </label>
+              <label>
+                <span>{t("workforcePaymentsPage.paymentAccount")}</span>
+                <select
+                  value={accountFilter}
+                  onChange={(event) => setAccountFilter(event.target.value)}
+                >
+                  <option value="">{t("workforcePaymentsPage.advancesView.allAccounts")}</option>
+                  {accounts.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="workforce-advance-filter-sheet__row">
+                <label>
+                  <span>{t("workforcePaymentsPage.advancesView.advanceDateFromAria")}</span>
+                  <input
+                    type="date"
+                    value={fromFilter}
+                    onChange={(event) => setFromFilter(event.target.value)}
+                  />
+                </label>
+                <label>
+                  <span>{t("workforcePaymentsPage.advancesView.advanceDateToAria")}</span>
+                  <input
+                    type="date"
+                    value={toFilter}
+                    onChange={(event) => setToFilter(event.target.value)}
+                  />
+                </label>
+              </div>
+            </div>
+            <footer className="workforce-advance-filter-sheet__footer">
+              <button type="button" className="workforce-advance-filter-sheet__clear" onClick={clearFilters}>
+                {t("workforcePaymentsPage.advancesView.clearFilters")}
+              </button>
+              <button type="button" className="primary-action" onClick={() => setShowFilters(false)}>
+                {t("workforcePaymentsPage.advancesView.applyFilters")}
+              </button>
+            </footer>
           </section>
         </div>
       ) : null}
@@ -2899,7 +3015,7 @@ function ReviewSettleDialog({
   const isGroupDue = due.recipientScope === "LABOUR_GROUP";
   const advanceInvalid =
     advanceTotal > due.outstandingBalance + 0.005 ||
-    advanceTotal > (advancePool?.eligibleTotal ?? 0) + 0.005;
+    advanceTotal > (advancePool?.maximumApplicable ?? 0) + 0.005;
   const afterAdvances = Math.max(due.outstandingBalance - advanceTotal, 0);
   const cashNow = Number(payAmount || 0);
   const paymentInvalid = cashNow > afterAdvances + 0.005;
@@ -3092,10 +3208,17 @@ function ReviewSettleDialog({
               <h3>{t("workforcePaymentsPage.reviewSettle.advancePool")}</h3>
               {loadingAdvances ? (
                 <p className="workforce-payments-inline-note">{t("workforcePaymentsPage.reviewSettle.calculatingEligiblePool")}</p>
-              ) : !advancePool?.eligibleOpenCount ? (
-                <p className="workforce-payments-inline-note">
-                  {t("workforcePaymentsPage.reviewSettle.noEligibleAdvances")}
-                </p>
+              ) : !advancePool || advancePool.maximumApplicable <= 0 ? (
+                <>
+                  <p className="workforce-payments-inline-note">
+                    {t("workforcePaymentsPage.reviewSettle.noEligibleAdvances")}
+                  </p>
+                  {advancePool && advancePool.availableAdvances < -0.005 ? (
+                    <p className="worker-action-warning">
+                      {t("workforcePaymentsPage.reviewSettle.negativePoolBlocked", { amount: money(advancePool.availableAdvances) })}
+                    </p>
+                  ) : null}
+                </>
               ) : (
                 <div className="workforce-advance-pool">
                   <div className="workforce-advance-pool__summary">
@@ -3105,15 +3228,16 @@ function ReviewSettleDialog({
                       <div><span>{t("workforcePaymentsPage.reviewSettle.totalGroupAdvances")}</span><strong className="bidi-isolate">{money(advancePool.groupPool.totalAdvances)}</strong></div>
                       <div><span>{t("workforcePaymentsPage.reviewSettle.previouslyAppliedAdvances")}</span><strong className="bidi-isolate">{money(advancePool.groupPool.appliedAdvances)}</strong></div>
                       <div><span>{t("workforcePaymentsPage.reviewSettle.groupOutstandingAdvances")}</span><strong className="bidi-isolate">{money(advancePool.groupPool.outstandingAdvances)}</strong></div>
+                    </> : advancePool.groupPool ? <>
+                      <div><span>{t("workforcePaymentsPage.recipientScopeOptions.labourGroup")}</span><strong>{advancePool.groupPool.groupName ?? recipient}</strong></div>
+                      <div><span>{t("workforcePaymentsPage.reviewSettle.groupLeader")}</span><strong>{advancePool.groupPool.groupLeaderName ?? "—"}</strong></div>
+                      <div><span>{t("workforcePaymentsPage.reviewSettle.groupOutstandingAdvances")}</span><strong className="bidi-isolate">{money(advancePool.groupPool.outstandingAdvances)}</strong></div>
                     </> : (
-                      <div><span>{t("workforcePaymentsPage.reviewSettle.totalAvailableForDue")}</span><strong className="bidi-isolate">{money(advancePool.eligibleTotal)}</strong></div>
+                      <div><span>{t("workforcePaymentsPage.reviewSettle.totalAvailableForDue")}</span><strong className="bidi-isolate">{money(advancePool.availableAdvances)}</strong></div>
                     )}
                     <div><span>{t("workforcePaymentsPage.reviewSettle.remainingLabourDue")}</span><strong className="bidi-isolate">{money(due.outstandingBalance)}</strong></div>
                     <div><span>{t("workforcePaymentsPage.reviewSettle.maximumApplicable")}</span><strong className="bidi-isolate">{money(advancePool.maximumApplicable)}</strong></div>
                   </div>
-                  {advancePool.membershipReviewRequired ? (
-                    <p className="worker-action-warning">{t("workforcePaymentsPage.reviewSettle.membershipEvidenceMissing")}</p>
-                  ) : null}
                   <label className="workforce-advance-pool__amount">
                     <span>{t("workforcePaymentsPage.reviewSettle.applyFromAdvancePool")}</span>
                     <input type="number" min="0" max={advancePool.maximumApplicable} step="0.01" value={advanceAmount}
@@ -3124,7 +3248,7 @@ function ReviewSettleDialog({
                     <button type="button" onClick={() => setPoolApplication(advancePool.maximumApplicable)}>{t("workforcePaymentsPage.reviewSettle.useAllAvailable")}</button>
                     <button type="button" onClick={() => setPoolApplication(0)}>{t("common.clear")}</button>
                   </div>
-                  <div className="workforce-advance-pool__carry"><span>{t("workforcePaymentsPage.reviewSettle.advanceCarriedForward")}</span><strong className="bidi-isolate">{money(Math.max(advancePool.eligibleTotal - advanceTotal, 0))}</strong></div>
+                  <div className="workforce-advance-pool__carry"><span>{t("workforcePaymentsPage.reviewSettle.advanceCarriedForward")}</span><strong className="bidi-isolate">{money(Math.max(advancePool.availableAdvances - advanceTotal, 0))}</strong></div>
                 </div>
               )}
             </section>

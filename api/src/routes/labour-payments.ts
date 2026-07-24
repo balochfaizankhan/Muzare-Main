@@ -9,7 +9,6 @@ import {
   accounts,
   auditLogs,
   labourAdvanceApplications,
-  labourAdvanceApplicationSources,
   labourAccountingEntries,
   labourDueAttendanceSources,
   labourDues,
@@ -25,8 +24,6 @@ import {
   allocateLabourAdvanceVoucherNumber,
   allocateLabourAdvanceAdjustmentNumber,
   allocateLabourPaymentVoucherNumber,
-  calculateLabourAdvancePool,
-  calculateAdvancePosition,
   labourFinancialScopeKey,
   loadLabourDuePosition,
   loadOpenLabourDues,
@@ -35,10 +32,18 @@ import {
   postLabourDueRecognition,
   postLabourVoucherJournal,
   refreshLabourDuePaymentStatus,
-  resolveAdvancePoolGroupId,
   reverseLabourJournal,
   type LabourRecipientScope,
 } from "../lib/labour-payments.js";
+import {
+  dueAdvancePoolPosition,
+  duePoolKey,
+  loadAdvancePoolLedger,
+  loadMembershipDirectory,
+  labourerCurrentPoolKey,
+  resolveAdvancePoolOwnership,
+  type AdvancePoolLedger,
+} from "../lib/labour-advance-pools.js";
 import { resolveCanonicalPaymentAccountId } from "../lib/labour-wage-settlements.js";
 import { isLabourSelectableForAdvance } from "../lib/labour-eligibility.js";
 import { validateLabourSettlementPaymentAccount } from "../lib/labour-settlement-account-validation.js";
@@ -95,6 +100,7 @@ const advanceListQuerySchema = contextSchema.extend({
     .optional(),
   status: z
     .enum([
+      "VALID",
       "OPEN",
       "OUTSTANDING",
       "PARTIALLY_APPLIED",
@@ -104,7 +110,7 @@ const advanceListQuerySchema = contextSchema.extend({
       "VOIDED",
       "ALL",
     ])
-    .default("OPEN"),
+    .default("VALID"),
   accountId: z.string().uuid().optional(),
   from: z.string().date().optional(),
   to: z.string().date().optional(),
@@ -308,120 +314,51 @@ function labourPaymentDatabaseError(error: unknown) {
 }
 
 /**
- * The pool a labour due draws from. For a LABOUR_GROUP due that is the group's
- * ONE aggregate advance pool (see resolveAdvancePoolGroupId) — never restricted
- * by attendance, memberCalculationSnapshot, member payable shares, or the
- * due's work period. A group due without a preserved labourGroupId has no
- * provable pool and is surfaced for reconciliation review.
+ * The pool a labour due settles against, from THE canonical current-membership
+ * pool ledger (lib/labour-advance-pools.ts): a group due settles against its
+ * group's ONE combined pool; an individual due settles against the labourer's
+ * current pool. No per-voucher allocation exists — the result is an aggregate
+ * position plus the maximum that may be applied to this due.
  */
-function duePoolGroupId(due: typeof labourDues.$inferSelect) {
-  return due.recipientScope === "LABOUR_GROUP" ? due.labourGroupId ?? null : null;
-}
-
-async function loadDueAdvancePool(tx: DbTransaction, due: typeof labourDues.$inferSelect, requestedAmount?: number, settlementDate?: string) {
-  const candidates = await tx.select({
-    id: labourPaymentVouchers.id,
-    voucherNumber: labourPaymentVouchers.voucherNumber,
-    voucherDate: labourPaymentVouchers.voucherDate,
-    createdAt: labourPaymentVouchers.createdAt,
-    financialScopeKey: labourPaymentVouchers.financialScopeKey,
-    labourerId: labourPaymentVouchers.labourerId,
-    labourGroupId: labourPaymentVouchers.labourGroupId,
-    recipientSnapshot: labourPaymentVouchers.recipientSnapshot,
-    originalAmount: labourPaymentVouchers.paymentAmount,
-    // Per-voucher consumption counts both direct per-voucher applications and
-    // the persisted source allocations of ACTIVE pooled applications, exactly
-    // as validate_labour_advance_application does.
-    appliedAmount: sql<number>`(coalesce((select sum(a.amount) from labour_advance_applications a where a.advance_voucher_id = ${sql.raw('"labour_payment_vouchers"."id"')} and a.status = 'ACTIVE'), 0)
-      + coalesce((select sum(s.amount) from labour_advance_application_sources s join labour_advance_applications p on p.id = s.application_id where s.advance_voucher_id = ${sql.raw('"labour_payment_vouchers"."id"')} and p.status = 'ACTIVE'), 0))::numeric`,
-    refundedAmount: sql<number>`coalesce((select sum(r.payment_amount) from labour_payment_vouchers r where r.related_advance_voucher_id = ${sql.raw('"labour_payment_vouchers"."id"')} and r.nature = 'REFUND_RECOVERY' and r.status = 'POSTED'), 0)::numeric`,
-    appliedToDueAmount: sql<number>`coalesce((select sum(a.amount) from labour_advance_applications a where a.advance_voucher_id = ${sql.raw('"labour_payment_vouchers"."id"')} and a.due_id = ${due.id} and a.status = 'ACTIVE'), 0)::numeric`,
-  }).from(labourPaymentVouchers).where(and(
-    eq(labourPaymentVouchers.workspaceId, due.workspaceId),
-    eq(labourPaymentVouchers.farmId, due.farmId),
-    eq(labourPaymentVouchers.seasonId, due.seasonId),
-    eq(labourPaymentVouchers.nature, "ADVANCE"),
-    eq(labourPaymentVouchers.status, "POSTED"),
-  ));
-  const normalized = candidates.map((row) => {
-    const snapshot = row.recipientSnapshot as Record<string, unknown>;
-    const historicalLabourerId = row.labourerId
-      || (typeof snapshot.labourerId === "string" ? snapshot.labourerId : null)
-      || (typeof snapshot.advanceLabourerId === "string" ? snapshot.advanceLabourerId : null)
-      || (typeof snapshot.recipientLabourerId === "string" ? snapshot.recipientLabourerId : null);
-    const historicalGroupId = row.labourGroupId
-      || (typeof snapshot.labourGroupId === "string" ? snapshot.labourGroupId : null)
-      || (typeof snapshot.groupId === "string" ? snapshot.groupId : null);
-    return {
-      ...row,
-      labourerId: historicalLabourerId,
-      labourGroupId: historicalGroupId,
-      financialScopeKey: historicalGroupId && row.financialScopeKey.startsWith("legacy:") ? `group:${historicalGroupId}`
-        : historicalLabourerId && row.financialScopeKey.startsWith("legacy:") ? `individual:${historicalLabourerId}`
-        : row.financialScopeKey,
-      recipientName: typeof snapshot.receivedByNameSnapshot === "string" ? snapshot.receivedByNameSnapshot
-        : typeof snapshot.labourerName === "string" ? snapshot.labourerName
-        : typeof snapshot.recipientName === "string" ? snapshot.recipientName : null,
-      originalAmount: Number(row.originalAmount),
-      appliedAmount: Number(row.appliedAmount),
-      refundedAmount: Number(row.refundedAmount),
-      appliedToDueAmount: Number(row.appliedToDueAmount),
-    };
-  });
-  const poolGroupId = duePoolGroupId(due);
-  // Pooled applications that predate the per-voucher source-allocation ledger
-  // still consume this pool but cannot be attributed to any single voucher;
-  // subtract them the same way the database guard does.
-  const unattributedPooled = await tx.execute(sql`
-    SELECT coalesce(sum(p.amount), 0) AS total
-    FROM labour_advance_applications p
-    JOIN labour_dues scope_due ON scope_due.id = p.due_id
-    WHERE p.workspace_id = ${due.workspaceId}
-      AND p.advance_voucher_id IS NULL
-      AND p.status = 'ACTIVE'
-      AND scope_due.financial_scope_key = ${due.financialScopeKey}
-      AND NOT EXISTS (SELECT 1 FROM labour_advance_application_sources s WHERE s.application_id = p.id)
-  `);
-  const unattributedPooledConsumption = Number((unattributedPooled.rows[0] as { total?: unknown } | undefined)?.total ?? 0);
-  const pool = calculateLabourAdvancePool({
-    dueFinancialScopeKey: due.financialScopeKey,
-    dueLabourGroupId: poolGroupId,
-    dueOutstandingAmount: (await loadLabourDuePosition(tx, due.id))?.outstandingBalance ?? 0,
-    settlementDate,
-    candidates: normalized,
-    requestedAmount,
-    unattributedPooledConsumption,
-  });
-  const globalOutstanding = normalized.reduce((sum, row) => sum + Math.max(row.originalAmount - row.appliedAmount - row.refundedAmount, 0), 0);
-  // Authoritative group-pool position (labour-side ownership): every active
-  // funding transaction proved to belong to this group, with no
-  // settlement-date filter — Total − Applied − Refunded = Outstanding.
-  // Derived from transactions, never from per-voucher OPEN/APPLIED statuses.
-  const groupCandidates = poolGroupId ? normalized.filter((row) => resolveAdvancePoolGroupId(row) === poolGroupId) : [];
-  const groupTotals = groupCandidates.reduce((sums, row) => ({
-    total: sums.total + row.originalAmount,
-    applied: sums.applied + row.appliedAmount,
-    refunded: sums.refunded + row.refundedAmount,
-  }), { total: 0, applied: 0, refunded: 0 });
+async function loadDueAdvancePool(tx: DbTransaction, due: typeof labourDues.$inferSelect, requestedAmount?: number, settlementDate?: string, preloadedLedger?: AdvancePoolLedger) {
+  const ledger = preloadedLedger ?? await loadAdvancePoolLedger(tx, { workspaceId: due.workspaceId, farmId: due.farmId, seasonId: due.seasonId });
+  const { poolKey, pool, availableAdvances } = dueAdvancePoolPosition(ledger, due, settlementDate);
+  const outstandingBalance = (await loadLabourDuePosition(tx, due.id))?.outstandingBalance ?? 0;
+  const round = (value: number) => Number(value.toFixed(2));
+  // Never apply more than the payable due or the available pool balance; a
+  // negative pool (legacy data / later group movement) applies nothing until
+  // corrected — the signed balance is reported, never clamped for display.
+  const maximumApplicable = round(Math.min(outstandingBalance, Math.max(availableAdvances, 0)));
+  const proposedApplication = requestedAmount == null
+    ? maximumApplicable
+    : round(Math.min(Math.max(requestedAmount, 0), maximumApplicable));
   const dueSnapshot = asSnapshot(due.recipientSnapshot);
-  const groupPool = poolGroupId ? {
-    labourGroupId: poolGroupId,
-    groupName: firstText(dueSnapshot.labourGroupName, dueSnapshot.groupName),
-    groupLeaderId: firstText(dueSnapshot.groupLeaderId, dueSnapshot.foremanId),
-    groupLeaderName: firstText(dueSnapshot.groupLeaderName, dueSnapshot.foremanName),
-    totalAdvances: Number(groupTotals.total.toFixed(2)),
-    appliedAdvances: Number((groupTotals.applied + unattributedPooledConsumption).toFixed(2)),
-    refundedAdvances: Number(groupTotals.refunded.toFixed(2)),
-    outstandingAdvances: Number(Math.max(groupTotals.total - groupTotals.applied - unattributedPooledConsumption - groupTotals.refunded, 0).toFixed(2)),
-  } : null;
   return {
-    ...pool,
-    globalOutstanding: Number(globalOutstanding.toFixed(2)),
-    groupPool,
-    // A group due without a preserved labour-group identity has no provable
-    // pool; surface it for reconciliation review, never guess from a worker's
-    // current group.
-    membershipReviewRequired: due.recipientScope === "LABOUR_GROUP" && !poolGroupId,
+    poolKey,
+    availableAdvances,
+    maximumApplicable,
+    proposedApplication,
+    remainingAfterAdvances: round(Math.max(outstandingBalance - proposedApplication, 0)),
+    carriedForwardAmount: round(availableAdvances - proposedApplication),
+    groupPool: pool && pool.kind === "GROUP" ? {
+      labourGroupId: pool.groupId!,
+      groupName: pool.groupName ?? firstText(dueSnapshot.labourGroupName, dueSnapshot.groupName),
+      groupLeaderId: pool.groupLeaderId ?? firstText(dueSnapshot.groupLeaderId, dueSnapshot.foremanId),
+      groupLeaderName: pool.groupLeaderName ?? firstText(dueSnapshot.groupLeaderName, dueSnapshot.foremanName),
+      memberCount: pool.memberCount,
+      totalAdvances: pool.totalAdvances,
+      appliedAdvances: pool.appliedAdvances,
+      refundedAdvances: pool.recoveredAdvances,
+      outstandingAdvances: pool.availableAdvances,
+    } : null,
+    individualPool: pool && pool.kind === "INDIVIDUAL" ? {
+      labourerId: pool.labourerId!,
+      labourerName: pool.labourerName,
+      totalAdvances: pool.totalAdvances,
+      appliedAdvances: pool.appliedAdvances,
+      refundedAdvances: pool.recoveredAdvances,
+      outstandingAdvances: pool.availableAdvances,
+    } : null,
   };
 }
 
@@ -749,6 +686,40 @@ async function loadEditableAdvance(tx: DbTransaction, input: {
   if (advance.legacy && (!advance.accountTransactionId || advance.reconciliationStatus !== "RECONCILED"))
     throw new Error("This legacy advance cannot be changed because its linked accounting effect is not uniquely identified.");
   return advance;
+}
+
+/**
+ * Editing, deleting, or reversing an advance voucher must never leave its
+ * current pool over-applied: pool-level applications already posted against
+ * the pool are real financial history, so the voucher's contribution can only
+ * be removed/reduced while the pool's signed available balance stays >= 0.
+ * This is the dependency check shown before destructive actions — the caller
+ * receives a clear business message instead of a silently corrupted pool.
+ */
+async function assertAdvancePoolRemainsValid(tx: DbTransaction, input: {
+  workspaceId: string;
+  farmId: string;
+  seasonId: string;
+  advance: typeof labourPaymentVouchers.$inferSelect;
+  nextAmount: number;
+  nextOwnership?: { labourerId?: string | null; labourGroupId?: string | null; financialScopeKey?: string | null; recipientSnapshot?: unknown } | null;
+}) {
+  const ledger = await loadAdvancePoolLedger(tx, { workspaceId: input.workspaceId, farmId: input.farmId, seasonId: input.seasonId });
+  const currentOwnership = resolveAdvancePoolOwnership(input.advance, ledger.directory);
+  if (!currentOwnership.poolKey) return;
+  const pool = ledger.pools.get(currentOwnership.poolKey);
+  if (!pool) return;
+  const nextPoolKey = input.nextOwnership ? resolveAdvancePoolOwnership(input.nextOwnership, ledger.directory).poolKey : null;
+  const remainingContribution = nextPoolKey === currentOwnership.poolKey ? input.nextAmount : 0;
+  const nextAvailable = pool.availableAdvances - Number(input.advance.paymentAmount) + remainingContribution;
+  if (nextAvailable < -0.005) {
+    const poolName = pool.groupName ?? pool.labourerName ?? "this";
+    throw new Error(
+      `SAR ${pool.appliedAdvances.toFixed(2)} of the ${poolName} advance pool is already applied to labour dues. ` +
+      `This change would leave the pool over-applied by SAR ${Math.abs(nextAvailable).toFixed(2)}. ` +
+      `Reverse the related settlement application first.`,
+    );
+  }
 }
 
 async function requireRequestScope(
@@ -1320,27 +1291,17 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
       )).limit(1);
       if (!due) return reply.code(404).send({ message: "Labour due was not found." });
       const pool = await db.transaction((tx) => loadDueAdvancePool(tx, due, query.data.amount, query.data.settlementDate ?? new Date().toISOString().slice(0, 10)));
-      const start = (query.data.page - 1) * query.data.pageSize;
-      const details = query.data.amount == null ? undefined : pool.allocations.slice(start, start + query.data.pageSize);
       return {
         pool: {
-          globalOutstanding: pool.globalOutstanding,
-          eligibleTotal: pool.eligibleTotal,
-          eligibleOpenCount: pool.eligibleOpenCount,
-          groupLevelAmount: pool.groupLevelAmount,
-          memberLevelAmount: pool.memberLevelAmount,
+          availableAdvances: pool.availableAdvances,
           maximumApplicable: pool.maximumApplicable,
           defaultApplyAmount: pool.maximumApplicable,
           proposedApplication: pool.proposedApplication,
           carriedForwardAmount: pool.carriedForwardAmount,
           remainingAfterAdvances: pool.remainingAfterAdvances,
-          allocationPreviewVersion: pool.allocationPreviewVersion,
-          proposedAllocationCount: pool.allocations.length,
-          exclusionTotals: pool.exclusionTotals,
-          membershipReviewRequired: pool.membershipReviewRequired,
           groupPool: pool.groupPool,
+          individualPool: pool.individualPool,
         },
-        ...(details ? { details, pageInfo: { page: query.data.page, pageSize: query.data.pageSize, totalCount: pool.allocations.length, hasMore: start + query.data.pageSize < pool.allocations.length } } : {}),
       };
     },
   );
@@ -1354,11 +1315,18 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
       if (
         !params.success ||
         !body.success ||
-        (!body.data.payment && !body.data.advancePool && body.data.advanceApplications.length === 0)
+        (!body.data.payment && !body.data.advancePool)
       )
         return reply
           .code(400)
           .send({ message: "Select an advance or enter a payment." });
+      // Advances settle as ONE pool-level application. Individual advance
+      // vouchers are original audit records only — selecting or consuming
+      // specific vouchers is not part of the model.
+      if (body.data.advanceApplications.length)
+        return reply
+          .code(400)
+          .send({ message: "Per-voucher advance application is no longer supported. Apply an amount from the combined advance pool instead." });
       const { workspaceId, dueId } = params.data;
       const input = body.data;
       if (
@@ -1416,24 +1384,21 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             throw new Error(
               "This labour due cannot be settled in its current status.",
             );
-          const requestedApplications = input.advanceApplications;
-          let aggregatePlan: ReturnType<typeof calculateLabourAdvancePool> | null = null;
+          let aggregatePlan: Awaited<ReturnType<typeof loadDueAdvancePool>> | null = null;
           let pooledApplication: typeof labourAdvanceApplications.$inferSelect | null = null;
           if (input.advancePool) {
-            // The requested amount is applied from the due's aggregate eligible
-            // outstanding pool as ONE canonical application row (no source
-            // advance-voucher id, no per-voucher unrolling). loadDueAdvancePool
-            // is still used here purely to produce a friendly pre-check and the
-            // informational settlement summary shown to the user — the database
-            // trigger (validate_labour_advance_application) is the sole
-            // authority for the aggregate-sufficiency check, evaluated with row
-            // locks taken atomically at INSERT time so two concurrent
-            // settlements cannot overconsume the same pool.
+            // The requested amount is applied from the due's combined advance
+            // pool as ONE pool-level application row — no source advance
+            // voucher, no per-voucher unrolling, no allocation records.
+            // loadDueAdvancePool provides a friendly pre-check and the pool
+            // snapshot for the audit trail; the database trigger
+            // (validate_labour_advance_application) is the sole authority for
+            // the signed aggregate-sufficiency check, evaluated with row locks
+            // taken atomically at INSERT time so two concurrent settlements
+            // cannot overconsume the same pool.
             aggregatePlan = await loadDueAdvancePool(tx, position.due, input.advancePool.amount, input.advancePool.settlementDate ?? new Date().toISOString().slice(0, 10));
             if (input.advancePool.amount > aggregatePlan.maximumApplicable + 0.005)
-              throw new Error(`Only SAR ${aggregatePlan.maximumApplicable.toFixed(2)} of eligible outstanding advances are currently available.`);
-            if (Math.abs(aggregatePlan.proposedApplication - input.advancePool.amount) > 0.005)
-              throw new Error(`Only SAR ${aggregatePlan.proposedApplication.toFixed(2)} of the requested amount could be allocated from the eligible advance pool.`);
+              throw new Error(`Only SAR ${aggregatePlan.maximumApplicable.toFixed(2)} of the combined advance pool is currently available.`);
             persistence.allocationCount = 1;
             persistence.operation = "advance_application_insert_batch_1";
             const [inserted] = await tx.insert(labourAdvanceApplications).values({
@@ -1445,135 +1410,10 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               status: "ACTIVE",
             }).returning();
             pooledApplication = inserted!;
-            // Persist which historical advance vouchers this pooled amount was
-            // drawn from (the same deterministic FIFO plan the preview showed),
-            // preserving the original funding owner of every consumed advance.
-            // The database trigger remains the sole authority for aggregate
-            // sufficiency; these rows only record the attribution.
-            persistence.operation = "advance_application_source_allocations";
-            const sourceAllocations = aggregatePlan.allocations.filter((allocation) => allocation.proposedAmount > 0.0049);
-            if (sourceAllocations.length) {
-              await tx.insert(labourAdvanceApplicationSources).values(sourceAllocations.map((allocation) => ({
-                workspaceId,
-                applicationId: pooledApplication!.id,
-                advanceVoucherId: allocation.id,
-                amount: allocation.proposedAmount.toFixed(2),
-                allocationOrder: allocation.allocationOrder,
-              })));
-            }
             persistence.operation = "advance_application_accounting";
             await postLabourAdvanceApplicationJournals(tx, {
               workspaceId, farmId: input.farmId, seasonId: input.seasonId, actorId: request.appUser!.id,
               applications: [{ id: pooledApplication.id, dueId, amount: Number(pooledApplication.amount) }],
-            });
-            position = (await loadLabourDuePosition(tx, dueId))!;
-          }
-          for (const application of input.advancePool ? [] : requestedApplications) {
-            const [existingApplication] = await tx
-              .select()
-              .from(labourAdvanceApplications)
-              .where(
-                and(
-                  eq(labourAdvanceApplications.workspaceId, workspaceId),
-                  eq(
-                    labourAdvanceApplications.idempotencyKey,
-                    application.idempotencyKey,
-                  ),
-                ),
-              )
-              .limit(1);
-            if (existingApplication) {
-              if (
-                existingApplication.dueId !== dueId ||
-                existingApplication.advanceVoucherId !==
-                  application.advanceVoucherId ||
-                Math.abs(
-                  Number(existingApplication.amount) - application.amount,
-                ) > 0.005
-              )
-                throw new Error(
-                  "The advance application idempotency key was already used for a different allocation.",
-                );
-              continue;
-            }
-            const [advance] = await tx
-              .select()
-              .from(labourPaymentVouchers)
-              .where(
-                and(
-                  eq(labourPaymentVouchers.id, application.advanceVoucherId),
-                  eq(labourPaymentVouchers.workspaceId, workspaceId),
-                  eq(labourPaymentVouchers.farmId, input.farmId),
-                  eq(labourPaymentVouchers.seasonId, input.seasonId),
-                ),
-              )
-              .limit(1);
-            if (
-              !advance ||
-              advance.nature !== "ADVANCE" ||
-              advance.status !== "POSTED"
-            )
-              throw new Error("The selected advance is not available.");
-            // Same pool rule as the preview and the database guard: a group
-            // due draws from its group's ONE aggregate pool (any advance whose
-            // preserved evidence proves that group), other dues require the
-            // exact financial scope.
-            const advanceInDuePool = position.due.recipientScope === "LABOUR_GROUP"
-              ? Boolean(position.due.labourGroupId) && resolveAdvancePoolGroupId(advance) === position.due.labourGroupId
-              : advance.financialScopeKey === position.due.financialScopeKey;
-            if (!advanceInDuePool)
-              throw new Error(
-                "An advance may only be applied to a due for the same labour group or financial scope.",
-              );
-            const [applied] = await tx
-              .select({
-                total: sql<number>`coalesce(sum(${labourAdvanceApplications.amount}) filter (where ${labourAdvanceApplications.status} = 'ACTIVE'), 0)::numeric`,
-              })
-              .from(labourAdvanceApplications)
-              .where(
-                eq(labourAdvanceApplications.advanceVoucherId, advance.id),
-              );
-            const [refunded] = await tx
-              .select({
-                total: sql<number>`coalesce(sum(${labourPaymentVouchers.paymentAmount}) filter (where ${labourPaymentVouchers.status} = 'POSTED' and ${labourPaymentVouchers.nature} = 'REFUND_RECOVERY'), 0)::numeric`,
-              })
-              .from(labourPaymentVouchers)
-              .where(
-                eq(labourPaymentVouchers.relatedAdvanceVoucherId, advance.id),
-              );
-            const available = Math.max(
-              Number(advance.paymentAmount) -
-                Number(applied?.total ?? 0) -
-                Number(refunded?.total ?? 0),
-              0,
-            );
-            if (application.amount > available + 0.005)
-              throw new Error(
-                "Advance application exceeds the available advance balance.",
-              );
-            if (application.amount > position.outstandingBalance + 0.005)
-              throw new Error(
-                "Advance application exceeds the current due balance.",
-              );
-            const [createdApplication] = await tx
-              .insert(labourAdvanceApplications)
-              .values({
-                workspaceId,
-                advanceVoucherId: advance.id,
-                dueId,
-                amount: application.amount.toFixed(2),
-                idempotencyKey: application.idempotencyKey,
-                status: "ACTIVE",
-              })
-              .returning();
-            await postLabourAdvanceApplicationJournal(tx, {
-              workspaceId,
-              farmId: input.farmId,
-              seasonId: input.seasonId,
-              dueId,
-              advanceApplicationId: createdApplication!.id,
-              amount: application.amount,
-              actorId: request.appUser!.id,
             });
             position = (await loadLabourDuePosition(tx, dueId))!;
           }
@@ -1708,17 +1548,18 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             dueId,
             dueNumber: refreshed.due.dueNumber,
             grossDue: Number(refreshed.due.grossAmount),
-            advanceAmountApplied: input.advancePool?.amount ?? requestedApplications.reduce((sum, application) => sum + application.amount, 0),
-            advanceVoucherCount: input.advancePool ? (pooledApplication ? 1 : 0) : requestedApplications.length,
-            // Informational only: how the eligible pool would have been drawn down under
-            // the canonical FIFO ordering, kept purely for the settlement summary shown
-            // to the user. No per-voucher row is persisted for this — see pooledApplication.
-            fullyConsumedAdvanceCount: aggregatePlan?.allocations.filter((allocation) => allocation.remainingAmount <= 0.005).length ?? 0,
-            partiallyConsumedAdvanceCount: aggregatePlan?.allocations.filter((allocation) => allocation.remainingAmount > 0.005).length ?? 0,
+            advanceAmountApplied: input.advancePool?.amount ?? 0,
             advanceAmountCarriedForward: aggregatePlan?.carriedForwardAmount ?? 0,
             cashPaymentPosted: input.payment?.amount ?? 0,
             remainingDue: refreshed.outstandingBalance,
             finalStatus: refreshed.paymentStatus,
+            // Immutable snapshot of the pool this settlement was posted
+            // against — later membership changes never rewrite it.
+            advancePoolSnapshot: aggregatePlan ? {
+              poolKey: aggregatePlan.poolKey,
+              groupPool: aggregatePlan.groupPool,
+              individualPool: aggregatePlan.individualPool,
+            } : null,
           };
           await tx
             .insert(auditLogs)
@@ -1737,9 +1578,8 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
                   requestedAmount: input.advancePool.amount,
                   applicationModel: "AGGREGATE_POOLED",
                   applicationId: pooledApplication?.id ?? null,
-                  eligibleTotal: aggregatePlan?.eligibleTotal ?? 0,
+                  availableAdvances: aggregatePlan?.availableAdvances ?? 0,
                 } : null,
-                advanceApplications: requestedApplications,
                 outstandingBalance: refreshed.outstandingBalance,
                 settlementSummary,
               },
@@ -2286,42 +2126,12 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               );
             return existing;
           }
-          // One aggregate advance pool per labour group, operationally owned
-          // by the group's leader: money received by any member is an advance
-          // taken by the leader for that group. An advance recorded for a
-          // labourer who belongs to a group therefore enters the group's pool
-          // with the member kept as informational received-by only — there is
-          // no separate individual advance scope, no standalone individual
-          // advance pool, and no separate group-advance transaction type: the
-          // pool is a calculated position over ordinary advances. A labourer
-          // with no group cannot receive a new advance at all.
-          if (input.recipientScope === "INDIVIDUAL" && input.labourerId) {
-            const [memberRecord] = await tx
-              .select({ payload: operationalRecords.payload })
-              .from(operationalRecords)
-              .where(
-                and(
-                  eq(operationalRecords.workspaceId, workspaceId),
-                  eq(operationalRecords.farmId, input.farmId),
-                  eq(operationalRecords.entityType, "labourer"),
-                  eq(operationalRecords.clientRecordId, input.labourerId),
-                ),
-              )
-              .limit(1);
-            const memberGroupId = typeof memberRecord?.payload.groupId === "string" && memberRecord.payload.groupId.trim()
-              ? memberRecord.payload.groupId.trim()
-              : null;
-            if (memberGroupId) {
-              input.recipientScope = "LABOUR_GROUP";
-              input.labourGroupId = memberGroupId;
-              input.receivedByLabourerId = input.receivedByLabourerId ?? input.labourerId;
-              input.labourerId = null;
-            } else {
-              throw new Error(
-                "Assign this labourer to a labour group before recording an advance.",
-              );
-            }
-          }
+          // The voucher records the ORIGINAL recipient exactly as paid — a
+          // labourer keeps their own identity on the voucher whether or not
+          // they belong to a group. Pool ownership is never stored here: it is
+          // resolved dynamically from the recipient's CURRENT group membership
+          // (lib/labour-advance-pools.ts), so the voucher follows the labourer
+          // through group moves while remaining an immutable audit record.
           const recipient = await loadRecipient(tx, workspaceId, input.farmId, {
             ...input,
             requireReceivedBy: false,
@@ -2483,7 +2293,20 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             seasonId: input.seasonId,
             voucherId: params.data.voucherId,
           });
-          const recipient = await loadRecipient(tx, params.data.workspaceId, input.farmId, { ...input, requireReceivedBy: true });
+          const recipient = await loadRecipient(tx, params.data.workspaceId, input.farmId, { ...input, requireReceivedBy: input.recipientScope === "LABOUR_GROUP" });
+          await assertAdvancePoolRemainsValid(tx, {
+            workspaceId: params.data.workspaceId,
+            farmId: input.farmId,
+            seasonId: input.seasonId,
+            advance,
+            nextAmount: input.amount,
+            nextOwnership: {
+              labourerId: input.recipientScope === "INDIVIDUAL" ? input.labourerId : null,
+              labourGroupId: input.recipientScope === "LABOUR_GROUP" ? input.labourGroupId : null,
+              financialScopeKey: recipient.financialScopeKey,
+              recipientSnapshot: recipient.snapshot,
+            },
+          });
           const account = await validatedAccount(tx, params.data.workspaceId, input.farmId, input.paymentAccountId);
           if (advance.accountTransactionId) {
             await tx.update(labourPaymentVouchers).set({ accountTransactionId: null }).where(eq(labourPaymentVouchers.id, advance.id));
@@ -2606,6 +2429,14 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             farmId: query.data.farmId,
             seasonId: query.data.seasonId,
             voucherId: params.data.voucherId,
+          });
+          await assertAdvancePoolRemainsValid(tx, {
+            workspaceId: params.data.workspaceId,
+            farmId: query.data.farmId,
+            seasonId: query.data.seasonId,
+            advance,
+            nextAmount: 0,
+            nextOwnership: null,
           });
           if (advance.accountTransactionId) {
             await tx.update(labourPaymentVouchers).set({ accountTransactionId: null }).where(eq(labourPaymentVouchers.id, advance.id));
@@ -2829,15 +2660,21 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
       )
         return;
       const startedAt = performance.now();
-      const financials = await loadLabourFinancialReadModel({
-        workspaceId: params.data.workspaceId,
-        farmId: query.data.farmId,
-        seasonId: query.data.seasonId,
-      });
+      const [financials, directory] = await Promise.all([
+        loadLabourFinancialReadModel({
+          workspaceId: params.data.workspaceId,
+          farmId: query.data.farmId,
+          seasonId: query.data.seasonId,
+        }),
+        db.transaction((tx) => loadMembershipDirectory(tx, params.data.workspaceId, query.data.farmId)),
+      ]);
       const searchTerm = query.data.search?.trim().toLowerCase() ?? "";
       const filtered = financials.advancePositions
         .filter((row) => {
           if (query.data.status === "ALL") return true;
+          // Vouchers have no applied/outstanding state in the pool model:
+          // VALID is every non-voided original transaction.
+          if (query.data.status === "VALID") return row.status !== "VOIDED";
           if (query.data.status === "OPEN") return row.status !== "VOIDED" && row.outstandingAmount > 0.005;
           return row.status === query.data.status;
         })
@@ -2857,8 +2694,20 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
         ].filter(Boolean).join(" ").toLowerCase().includes(searchTerm))
         .sort((left, right) => right.advanceDate.localeCompare(left.advanceDate) || right.voucherNumber.localeCompare(left.voucherNumber));
       const offset = (query.data.page - 1) * query.data.pageSize;
-      const advances = filtered.slice(offset, offset + query.data.pageSize).map((row) => ({
+      const advances = filtered.slice(offset, offset + query.data.pageSize).map((row) => {
+        // Same resolver as the pool cards: the group label a voucher shows and
+        // the pool its amount counts toward can never disagree.
+        const ownership = resolveAdvancePoolOwnership({
+          labourerId: row.labourerId,
+          labourGroupId: row.labourGroupId,
+        }, directory);
+        const currentGroupId = ownership.kind === "GROUP" ? ownership.groupId : null;
+        return ({
         id: row.canonicalVoucherId ?? row.advancePositionId,
+        poolKey: ownership.poolKey,
+        poolKind: ownership.kind,
+        currentGroupId,
+        currentGroupName: currentGroupId ? directory.groups.get(currentGroupId)?.name ?? null : null,
         advancePositionId: row.advancePositionId,
         canonicalId: row.canonicalVoucherId,
         canonicalVoucherId: row.canonicalVoucherId,
@@ -2918,7 +2767,8 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
         createdBy: null,
         createdByName: null,
         createdAt: `${row.advanceDate}T00:00:00.000Z`,
-      }));
+      });
+      });
       const response = {
         advances,
         summary: {
@@ -3001,126 +2851,205 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
       const { workspaceId } = params.data;
       const { farmId, seasonId } = query.data;
       if (!(await requireRequestScope(request, reply, workspaceId, farmId, seasonId, "view"))) return;
-      // Authoritative labour-side pool positions: one aggregate pool per
-      // labour group, derived from active funding transactions, applications
-      // and refunds — never from per-voucher OPEN/APPLIED statuses.
-      const [advances, groupRecords, labourerRecords, unattributedPooledRows] = await Promise.all([
-        db.select({
-          id: labourPaymentVouchers.id,
-          voucherNumber: labourPaymentVouchers.voucherNumber,
-          voucherDate: labourPaymentVouchers.voucherDate,
-          financialScopeKey: labourPaymentVouchers.financialScopeKey,
-          labourerId: labourPaymentVouchers.labourerId,
-          labourGroupId: labourPaymentVouchers.labourGroupId,
-          recipientSnapshot: labourPaymentVouchers.recipientSnapshot,
-          originalAmount: labourPaymentVouchers.paymentAmount,
-          appliedAmount: sql<number>`(coalesce((select sum(a.amount) from labour_advance_applications a where a.advance_voucher_id = ${sql.raw('"labour_payment_vouchers"."id"')} and a.status = 'ACTIVE'), 0)
-            + coalesce((select sum(s.amount) from labour_advance_application_sources s join labour_advance_applications p on p.id = s.application_id where s.advance_voucher_id = ${sql.raw('"labour_payment_vouchers"."id"')} and p.status = 'ACTIVE'), 0))::numeric`,
-          refundedAmount: sql<number>`coalesce((select sum(r.payment_amount) from labour_payment_vouchers r where r.related_advance_voucher_id = ${sql.raw('"labour_payment_vouchers"."id"')} and r.nature = 'REFUND_RECOVERY' and r.status = 'POSTED'), 0)::numeric`,
-        }).from(labourPaymentVouchers).where(and(
-          eq(labourPaymentVouchers.workspaceId, workspaceId),
-          eq(labourPaymentVouchers.farmId, farmId),
-          eq(labourPaymentVouchers.seasonId, seasonId),
-          eq(labourPaymentVouchers.nature, "ADVANCE"),
-          eq(labourPaymentVouchers.status, "POSTED"),
-        )),
-        db.select({ clientRecordId: operationalRecords.clientRecordId, payload: operationalRecords.payload }).from(operationalRecords).where(and(
-          eq(operationalRecords.workspaceId, workspaceId), eq(operationalRecords.farmId, farmId), eq(operationalRecords.entityType, "labourGroup"),
-        )),
-        db.select({ clientRecordId: operationalRecords.clientRecordId, payload: operationalRecords.payload }).from(operationalRecords).where(and(
-          eq(operationalRecords.workspaceId, workspaceId), eq(operationalRecords.farmId, farmId), eq(operationalRecords.entityType, "labourer"),
-        )),
-        // Pooled applications that predate the per-voucher source ledger:
-        // attributed to their due's group pool (or to review when the due has
-        // no preserved group identity).
-        db.execute(sql`
-          SELECT scope_due.labour_group_id AS group_id, coalesce(sum(p.amount), 0) AS total
-          FROM labour_advance_applications p
-          JOIN labour_dues scope_due ON scope_due.id = p.due_id
-          WHERE p.workspace_id = ${workspaceId}
-            AND scope_due.farm_id = ${farmId} AND scope_due.season_id = ${seasonId}
-            AND p.advance_voucher_id IS NULL AND p.status = 'ACTIVE'
-            AND NOT EXISTS (SELECT 1 FROM labour_advance_application_sources s WHERE s.application_id = p.id)
-          GROUP BY scope_due.labour_group_id
-        `),
-      ]);
-      const groupById = new Map(groupRecords.map((row) => [row.clientRecordId, row.payload]));
-      const labourerNameById = new Map(labourerRecords.map((row) => [row.clientRecordId, firstText(row.payload.name)]));
-      const money = (value: number) => Number(value.toFixed(2));
-      type PoolTotals = { total: number; applied: number; refunded: number };
-      const poolsByGroup = new Map<string, PoolTotals>();
-      const reviewAdvances: Array<{ id: string; voucherNumber: string; voucherDate: string; amount: number; outstandingAmount: number; labourerId: string | null; recipientName: string | null; reason: string }> = [];
-      const farmWide: PoolTotals = { total: 0, applied: 0, refunded: 0 };
-      for (const advance of advances) {
-        const originalAmount = Number(advance.originalAmount);
-        const appliedAmount = Number(advance.appliedAmount);
-        const refundedAmount = Number(advance.refundedAmount);
-        farmWide.total += originalAmount;
-        farmWide.applied += appliedAmount;
-        farmWide.refunded += refundedAmount;
-        const groupId = resolveAdvancePoolGroupId(advance);
-        if (!groupId) {
-          // No provable group ownership: never guessed from the worker's
-          // current group — surfaced for reconciliation review instead.
-          const snapshot = asSnapshot(advance.recipientSnapshot);
-          reviewAdvances.push({
-            id: advance.id,
-            voucherNumber: advance.voucherNumber,
-            voucherDate: advance.voucherDate,
-            amount: money(originalAmount),
-            outstandingAmount: money(Math.max(originalAmount - appliedAmount - refundedAmount, 0)),
-            labourerId: advance.labourerId,
-            recipientName: firstText(snapshot.receivedByNameSnapshot, snapshot.labourerName, snapshot.recipientName),
-            reason: advance.labourerId
-              ? "No preserved labour-group evidence exists for this advance."
-              : "The group or member ownership of this advance cannot be proved.",
-          });
-          continue;
-        }
-        const pool = poolsByGroup.get(groupId) ?? { total: 0, applied: 0, refunded: 0 };
-        pool.total += originalAmount;
-        pool.applied += appliedAmount;
-        pool.refunded += refundedAmount;
-        poolsByGroup.set(groupId, pool);
-      }
-      let reviewPooledConsumption = 0;
-      for (const row of unattributedPooledRows.rows as Array<{ group_id: string | null; total: unknown }>) {
-        const total = Number(row.total ?? 0);
-        farmWide.applied += total;
-        if (row.group_id && poolsByGroup.has(row.group_id)) {
-          poolsByGroup.get(row.group_id)!.applied += total;
-        } else if (row.group_id) {
-          poolsByGroup.set(row.group_id, { total: 0, applied: total, refunded: 0 });
-        } else {
-          reviewPooledConsumption += total;
-        }
-      }
-      const pools = [...poolsByGroup.entries()].map(([groupId, totals]) => {
-        const groupPayload = groupById.get(groupId);
-        const leaderId = firstText(groupPayload?.foremanLabourId, groupPayload?.foremanId);
-        return {
-          labourGroupId: groupId,
-          groupName: firstText(groupPayload?.name) ?? "Labour Group",
-          groupLeaderId: leaderId,
-          groupLeaderName: leaderId ? labourerNameById.get(leaderId) ?? null : null,
-          totalAdvances: money(totals.total),
-          appliedAdvances: money(totals.applied),
-          refundedAdvances: money(totals.refunded),
-          outstandingAdvances: money(Math.max(totals.total - totals.applied - totals.refunded, 0)),
-        };
-      }).sort((left, right) => left.groupName.localeCompare(right.groupName) || left.labourGroupId.localeCompare(right.labourGroupId));
+      // THE canonical pool positions: one combined pool per labour group based
+      // on CURRENT membership (leader + current members + group-directed
+      // vouchers), individual pools for currently ungrouped labourers, and a
+      // small review list of genuinely broken records only.
+      const ledger = await db.transaction((tx) => loadAdvancePoolLedger(tx, { workspaceId, farmId, seasonId }));
+      const pools = [...ledger.pools.values()]
+        .filter((pool) => pool.kind === "GROUP")
+        .map((pool) => ({
+          labourGroupId: pool.groupId!,
+          groupName: pool.groupName ?? "Labour Group",
+          groupLeaderId: pool.groupLeaderId,
+          groupLeaderName: pool.groupLeaderName,
+          memberCount: pool.memberCount,
+          voucherCount: pool.voucherCount,
+          totalAdvances: pool.totalAdvances,
+          appliedAdvances: pool.appliedAdvances,
+          refundedAdvances: pool.recoveredAdvances,
+          outstandingAdvances: pool.availableAdvances,
+        }))
+        .sort((left, right) => left.groupName.localeCompare(right.groupName) || left.labourGroupId.localeCompare(right.labourGroupId));
+      const individualPools = [...ledger.pools.values()]
+        .filter((pool) => pool.kind === "INDIVIDUAL" && (pool.voucherCount > 0 || Math.abs(pool.appliedAdvances) > 0.005 || Math.abs(pool.recoveredAdvances) > 0.005))
+        .map((pool) => ({
+          labourerId: pool.labourerId!,
+          labourerName: pool.labourerName ?? "Labourer",
+          voucherCount: pool.voucherCount,
+          totalAdvances: pool.totalAdvances,
+          appliedAdvances: pool.appliedAdvances,
+          refundedAdvances: pool.recoveredAdvances,
+          outstandingAdvances: pool.availableAdvances,
+        }))
+        .sort((left, right) => left.labourerName.localeCompare(right.labourerName) || left.labourerId.localeCompare(right.labourerId));
+      const reviewAdvances = ledger.reviewVouchers.map((voucher) => ({
+        id: voucher.id,
+        voucherNumber: voucher.voucherNumber,
+        voucherDate: voucher.voucherDate,
+        amount: voucher.paymentAmount,
+        labourerId: voucher.labourerId,
+        recipientName: voucher.recipientName,
+        reason: voucher.reviewReason === "RECIPIENT_NOT_FOUND"
+          ? "The recipient labourer no longer exists."
+          : voucher.reviewReason === "GROUP_NOT_FOUND"
+            ? "The recipient labour group no longer exists."
+            : "The voucher has no valid recipient reference.",
+      }));
+      const poolVouchers = ledger.vouchers
+        .filter((voucher) => voucher.status === "POSTED")
+        .map((voucher) => ({
+          id: voucher.id,
+          voucherNumber: voucher.voucherNumber,
+          voucherDate: voucher.voucherDate,
+          amount: voucher.paymentAmount,
+          description: voucher.description,
+          paymentAccountName: voucher.paymentAccountName,
+          recipientName: voucher.recipientName,
+          labourerId: voucher.labourerId,
+          labourerName: voucher.labourerName,
+          poolKey: voucher.ownership.poolKey,
+          currentGroupId: voucher.currentGroupId,
+          currentGroupName: voucher.currentGroupName,
+        }));
       reply.header("Cache-Control", "private, no-store");
       return {
         pools,
+        individualPools,
+        vouchers: poolVouchers,
+        activity: ledger.activity,
         reviewAdvances,
-        reviewPooledConsumption: money(reviewPooledConsumption),
         farmWide: {
-          totalAdvances: money(farmWide.total),
-          appliedAdvances: money(farmWide.applied),
-          refundedAdvances: money(farmWide.refunded),
-          outstandingAdvances: money(Math.max(farmWide.total - farmWide.applied - farmWide.refunded, 0)),
+          totalAdvances: ledger.farmWide.totalAdvances,
+          appliedAdvances: ledger.farmWide.appliedAdvances,
+          refundedAdvances: ledger.farmWide.recoveredAdvances,
+          outstandingAdvances: ledger.farmWide.availableAdvances,
         },
       };
+    },
+  );
+
+  app.post(
+    "/v1/workspace/:workspaceId/labour-payments/advance-pools/recover",
+    { preHandler: requireUser },
+    async (request, reply) => {
+      const params = paramsSchema.safeParse(request.params);
+      const body = contextSchema.extend({
+        payment: paymentSchema,
+        labourGroupId: z.string().trim().min(1).max(200).optional().nullable(),
+        labourerId: z.string().trim().min(1).max(200).optional().nullable(),
+      }).safeParse(request.body);
+      if (!params.success || !body.success || (!body.data.labourGroupId && !body.data.labourerId))
+        return reply.code(400).send({ message: "A valid pool recovery request is required." });
+      if (!(await requireRequestScope(request, reply, params.data.workspaceId, body.data.farmId, body.data.seasonId, "create"))) return;
+      const { workspaceId } = params.data;
+      const input = body.data;
+      try {
+        const voucher = await db.transaction(async (tx) => {
+          await tx.execute(
+            sql`SELECT pg_advisory_xact_lock(hashtext(${`${workspaceId}:${input.farmId}:${input.seasonId}:labour-payment-posting`}), 1)`,
+          );
+          const [existing] = await tx.select().from(labourPaymentVouchers).where(and(
+            eq(labourPaymentVouchers.workspaceId, workspaceId),
+            eq(labourPaymentVouchers.idempotencyKey, input.payment.idempotencyKey),
+          )).limit(1);
+          if (existing) {
+            if (existing.nature !== "REFUND_RECOVERY" || Math.abs(Number(existing.paymentAmount) - input.payment.amount) > 0.005)
+              throw new Error("The idempotency key was already used for a different recovery.");
+            return existing;
+          }
+          const ledger = await loadAdvancePoolLedger(tx, { workspaceId, farmId: input.farmId, seasonId: input.seasonId });
+          const poolKey = input.labourGroupId
+            ? `group:${input.labourGroupId}`
+            : labourerCurrentPoolKey(input.labourerId!, ledger.directory) ?? `individual:${input.labourerId}`;
+          if (input.labourerId && poolKey.startsWith("group:"))
+            throw new Error("This labourer belongs to a labour group. Record the recovery against the group pool instead.");
+          const pool = ledger.pools.get(poolKey) ?? null;
+          const available = pool?.availableAdvances ?? 0;
+          if (input.labourGroupId && !ledger.directory.groups.has(input.labourGroupId))
+            throw new Error("The selected labour group was not found in this farm.");
+          if (input.payment.amount > available + 0.005)
+            throw new Error(`Only SAR ${Math.max(available, 0).toFixed(2)} of the combined advance balance is available to recover.`);
+          const account = await validatedAccount(tx, workspaceId, input.farmId, input.payment.paymentAccountId);
+          const voucherNumber = await allocateLabourAdvanceAdjustmentNumber(tx, workspaceId, input.farmId);
+          const group = input.labourGroupId ? ledger.directory.groups.get(input.labourGroupId) ?? null : null;
+          const labourer = input.labourerId ? ledger.directory.labourers.get(input.labourerId) ?? null : null;
+          const [created] = await tx.insert(labourPaymentVouchers).values({
+            workspaceId,
+            farmId: input.farmId,
+            seasonId: input.seasonId,
+            voucherNumber,
+            voucherDate: input.payment.voucherDate,
+            nature: "REFUND_RECOVERY",
+            status: "POSTED",
+            recipientScope: input.labourGroupId ? "LABOUR_GROUP" : "INDIVIDUAL",
+            financialScopeKey: poolKey,
+            labourerId: input.labourerId ?? null,
+            labourGroupId: input.labourGroupId ?? null,
+            recipientSnapshot: {
+              recipientScope: input.labourGroupId ? "LABOUR_GROUP" : "INDIVIDUAL",
+              labourGroupName: group?.name ?? null,
+              groupLeaderId: group?.leaderId ?? null,
+              groupLeaderName: group?.leaderName ?? null,
+              labourerName: labourer?.name ?? null,
+              poolLevelRecovery: true,
+            },
+            description: input.payment.description
+              || (group ? `Advance recovery from ${group.name}` : `Advance recovery from ${labourer?.name ?? "labourer"}`),
+            paymentAmount: input.payment.amount.toFixed(2),
+            paymentAccountId: account.id,
+            paymentMethod: input.payment.paymentMethod,
+            transactionReference: input.payment.transactionReference,
+            sourceType: "ADVANCE_POOL_RECOVERY",
+            sourceId: poolKey,
+            relatedAdvanceVoucherId: null,
+            idempotencyKey: input.payment.idempotencyKey,
+            createdBy: request.appUser!.id,
+            postedBy: request.appUser!.id,
+            postedAt: new Date(),
+            reconciliationStatus: "RECONCILED",
+          }).returning();
+          await postLabourVoucherJournal(tx, {
+            workspaceId,
+            farmId: input.farmId,
+            seasonId: input.seasonId,
+            voucherId: created!.id,
+            nature: "REFUND_RECOVERY",
+            amount: input.payment.amount,
+            accountType: account.accountType,
+            actorId: request.appUser!.id,
+          });
+          const accountTransactionId = await insertAccountMovement(tx, {
+            farmId: input.farmId,
+            seasonId: input.seasonId,
+            voucherId: created!.id,
+            voucherNumber,
+            voucherDate: input.payment.voucherDate,
+            amount: input.payment.amount,
+            account,
+            actorId: request.appUser!.id,
+            reverse: true,
+          });
+          const [updated] = await tx.update(labourPaymentVouchers)
+            .set({ accountTransactionId })
+            .where(eq(labourPaymentVouchers.id, created!.id))
+            .returning();
+          await tx.insert(auditLogs).values({
+            workspaceId,
+            farmId: input.farmId,
+            userId: request.appUser!.id,
+            actorUserId: request.appUser!.id,
+            action: "labour_advance_pool_recovery",
+            entityType: "labour_payment_voucher",
+            entityId: created!.id,
+            details: { poolKey, amount: input.payment.amount, groupName: group?.name ?? null, labourerName: labourer?.name ?? null },
+          });
+          return updated!;
+        });
+        return reply.code(201).send({ voucher });
+      } catch (error) {
+        return reply.code(409).send({ message: error instanceof Error ? error.message : "Unable to record the advance recovery." });
+      }
     },
   );
 
@@ -3607,6 +3536,14 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
               throw new Error(
                 "Reverse active advance applications before voiding this advance voucher.",
               );
+            await assertAdvancePoolRemainsValid(tx, {
+              workspaceId: params.data.workspaceId,
+              farmId: query.data.farmId,
+              seasonId: query.data.seasonId,
+              advance: voucher,
+              nextAmount: 0,
+              nextOwnership: null,
+            });
           }
           const [existingReversal] = await tx
             .select()

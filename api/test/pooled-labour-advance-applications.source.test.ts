@@ -55,7 +55,7 @@ test("the settle route persists exactly one pooled application row instead of un
     /for \(let offset = 0; offset < requestedApplications\.length; offset \+= 40\)/,
     "the old per-voucher batched insert loop must be removed from the pool branch",
   );
-  assert.match(handler, /Only SAR \$\{aggregatePlan\.maximumApplicable\.toFixed\(2\)\} of eligible outstanding advances are currently available\./, "insufficient-pool rejections must quantify the available amount, not just a generic message");
+  assert.match(handler, /Only SAR \$\{aggregatePlan\.maximumApplicable\.toFixed\(2\)\} of the combined advance pool is currently available\./, "insufficient-pool rejections must quantify the available amount, not just a generic message");
   assert.match(handler, /knownPoolValidationMessages/, "a known aggregate-pool database rejection must surface a clear business message, not only a request reference");
 });
 

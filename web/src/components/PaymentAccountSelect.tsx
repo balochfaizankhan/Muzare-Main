@@ -1,5 +1,6 @@
 import { ChevronDown, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 export type PaymentAccountOption = {
@@ -9,9 +10,11 @@ export type PaymentAccountOption = {
   deletedAt?: string | null;
 };
 
+// Row secondary line is the account's role, not payment-method detail: cash and
+// bank accounts both read "Account" (never "Cash · Cash"), partners read "Partner".
 const ACCOUNT_TYPE_LABEL_KEYS: Record<string, string> = {
-  cash: "paymentAccountSelect.typeCash",
-  bank: "paymentAccountSelect.typeBank",
+  cash: "paymentAccountSelect.typeAccount",
+  bank: "paymentAccountSelect.typeAccount",
   partner: "paymentAccountSelect.typePartner",
   liability: "paymentAccountSelect.typeLiability",
 };
@@ -70,6 +73,16 @@ export function AccountSelectionSheet({
   const titleId = useId();
   const sheetRef = useRef<HTMLElement>(null);
 
+  // The page behind the sheet must not scroll while it is open; restore on close.
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -125,7 +138,10 @@ export function AccountSelectionSheet({
     radios[next]?.scrollIntoView({ block: "nearest" });
   };
 
-  return (
+  // Rendered in a body-level portal so page- and form-scoped button styling
+  // (e.g. `.module-form button`) can never restyle the option rows, and the
+  // sheet always stacks above sticky footers and bottom navigation.
+  return createPortal(
     <div className="account-sheet-backdrop" role="presentation" onClick={onClose}>
       <section
         ref={sheetRef}
@@ -165,7 +181,8 @@ export function AccountSelectionSheet({
               })}
             </div>}
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

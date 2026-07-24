@@ -13219,6 +13219,30 @@ a.dashboard-kpi-card:active {
   padding: 7px 11px;
 }
 
+.primary-action {
+  background: var(--brand-primary);
+  border: 1px solid var(--brand-primary);
+  border-radius: 12px;
+  color: #fff;
+  font-weight: 750;
+  min-height: 44px;
+  padding: 7px 14px;
+}
+
+.primary-action:disabled {
+  background: color-mix(in srgb, var(--brand-primary) 55%, #fff);
+  border-color: transparent;
+  color: #fff;
+  cursor: not-allowed;
+}
+
+/* Inside dialog footers the confirm button is the single green action; Cancel is neutral. */
+.workforce-payment-review__actions .secondary-action {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+}
+
 .dispatch-form input,
 .dispatch-form select,
 .dispatch-summary__filters input {
@@ -14167,7 +14191,8 @@ a.dashboard-kpi-card:active {
   justify-content: center;
   padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px));
   position: fixed;
-  z-index: 92;
+  /* Body-level portal: must stack above form dialogs (120), sheets (130), and bottom navigation. */
+  z-index: 140;
 }
 .account-sheet {
   background: var(--surface);
@@ -14207,10 +14232,10 @@ a.dashboard-kpi-card:active {
   cursor: pointer;
   display: inline-flex;
   flex: 0 0 auto;
-  height: 42px;
+  height: 44px;
   justify-content: center;
   padding: 0;
-  width: 42px;
+  width: 44px;
 }
 .account-sheet__close:hover {
   border-color: color-mix(in srgb, var(--brand-primary) 45%, var(--border));
@@ -14238,8 +14263,8 @@ a.dashboard-kpi-card:active {
   display: grid;
   gap: 12px;
   grid-template-columns: auto minmax(0, 1fr);
-  min-height: 52px;
-  padding: 10px 12px;
+  min-height: 68px;
+  padding: 12px 14px;
   text-align: start;
 }
 .account-sheet__option:hover {
@@ -14280,7 +14305,7 @@ a.dashboard-kpi-card:active {
 }
 .account-sheet__option-name {
   color: var(--text-primary);
-  font-size: .9rem;
+  font-size: .94rem;
   font-weight: 650;
   min-width: 0;
   overflow-wrap: anywhere;
@@ -17240,10 +17265,11 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 @media (max-width: 767px) {
   .workforce-shell-tabs {
     gap: .45rem;
+    /* No edge fade mask: it visually clipped the first tab in LTR and the
+       wrong edge in RTL. Edge padding keeps every tab fully visible. */
     padding: .7rem 1rem;
     scroll-padding-inline: 1rem;
     scroll-snap-type: x proximity;
-    mask-image: linear-gradient(to right, transparent, black 18px, black calc(100% - 18px), transparent);
   }
 
   .workforce-shell-tab {
@@ -17294,7 +17320,6 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
     padding: .65rem 1.35rem .8rem;
     scroll-padding-inline: 1.35rem;
     scroll-snap-type: x proximity;
-    mask-image: linear-gradient(90deg, transparent, #000 8px, #000 calc(100% - 8px), transparent);
   }
 
   .workforce-shell-tab {
@@ -17841,22 +17866,41 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 .workforce-advance-position-list article > div b { color: #334155; font-size: 12px; }
 .workforce-advance-position-list article > div .is-outstanding b { color: #166534; }
 .workforce-advances-panel { gap: 10px; }
-.workforce-advances-header p { white-space: nowrap; }
+.workforce-advances-header > div { min-width: 0; }
+.workforce-advances-header p { overflow-wrap: anywhere; }
 .workforce-record-advance { min-height: 40px !important; padding: 0 12px; }
-.workforce-advance-summary { background: #f4f9f5; border: 1px solid #d9e7dd; border-radius: 12px; display: flex; gap: 0; min-height: 62px; }
-.workforce-advance-summary > div { display: grid; flex: 1; gap: 2px; min-width: 0; padding: 9px 11px; }
-.workforce-advance-summary > div + div { border-inline-start: 1px solid #d9e7dd; }
-.workforce-advance-summary span { color: #64748b; font-size: 10px; }
-.workforce-advance-summary strong { color: #16472a; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.workforce-advance-toolbar { display: grid; gap: 8px; grid-template-columns: minmax(0,1fr) auto auto; }
+/* Pool metric grid: two columns on mobile, amounts never truncated. */
+.workforce-advance-summary { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.workforce-advance-summary > div { background: #f4f9f5; border: 1px solid #d9e7dd; border-radius: 12px; display: grid; gap: 3px; min-width: 0; padding: 10px 12px; }
+.workforce-advance-summary > div.is-primary { background: #e9f6ec; border-color: #bcd9c4; }
+.workforce-advance-summary span { color: #64748b; font-size: 10px; font-weight: 700; }
+.workforce-advance-summary strong { color: #16472a; font-size: 16px; line-height: 1.2; overflow-wrap: anywhere; }
+@media (min-width: 720px) { .workforce-advance-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.workforce-advance-filter-chip-row { align-items: center; display: flex; flex-wrap: wrap; gap: 6px; }
+.workforce-advance-filter-chip { align-items: center; background: #edf7ef; border: 1px solid #bcd0c2; border-radius: 999px; color: #14532d; display: inline-flex; font-size: 11px; font-weight: 700; gap: 5px; min-height: 32px; padding: 4px 10px; }
+.workforce-advance-filter-chip span { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workforce-advance-filter-sheet { max-height: min(82dvh, 640px); }
+.workforce-advance-filter-sheet__body { display: grid; gap: 12px; overflow-y: auto; overscroll-behavior: contain; padding: 14px 16px; }
+.workforce-advance-filter-sheet__body label { display: grid; gap: 5px; min-width: 0; }
+.workforce-advance-filter-sheet__body label > span { color: #475569; font-size: 11px; font-weight: 700; }
+.workforce-advance-filter-sheet__body select,
+.workforce-advance-filter-sheet__body input { background: #fff; border: 1px solid #cbd5e1; border-radius: 12px; min-height: 48px; min-width: 0; padding: 0 12px; width: 100%; }
+.workforce-advance-filter-sheet__row { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.workforce-advance-filter-sheet__footer { border-top: 1px solid var(--border); display: grid; gap: 8px; grid-template-columns: auto minmax(0, 1fr); padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px)); }
+.workforce-advance-filter-sheet__clear { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; color: var(--text-primary); font-weight: 750; min-height: 44px; padding: 7px 12px; }
+.workforce-advance-empty { display: grid; gap: 6px; justify-items: center; }
+.workforce-advance-empty p { margin: 0; }
+.workforce-advance-empty button { margin-top: 4px; }
+.workforce-advance-card__balances { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.workforce-advance-card__balances span { color: #64748b; font-size: 11px; }
+.workforce-advance-card__balances b { color: #153c26; font-weight: 750; }
+.workforce-advance-toolbar { display: grid; gap: 8px; grid-template-columns: minmax(0,1fr) auto; }
 .workforce-advance-toolbar .workforce-payments-search { grid-column: auto; }
 .workforce-advance-toolbar > button { background: #fff; border: 1px solid #bcd0c2; color: #166534; min-height: 44px; }
 .workforce-advance-toolbar > button[aria-pressed="true"] { background: #edf7ef; border-color: #7fac8c; }
 .workforce-advance-view-toggle { align-items: center; background: #f1f5f2; border: 1px solid #d5e1d8; border-radius: 10px; display: flex; padding: 3px; }
 .workforce-advance-view-toggle button { background: transparent; border: 0; border-radius: 7px; color: #64748b; font-size: 11px; font-weight: 700; min-height: 36px; padding: 0 10px; }
 .workforce-advance-view-toggle button[aria-pressed="true"] { background: #fff; box-shadow: 0 1px 3px rgba(15,23,42,.1); color: #166534; }
-.workforce-advance-filters { display: grid; gap: 8px; grid-template-columns: repeat(2,minmax(0,1fr)); }
-.workforce-advance-filters select,.workforce-advance-filters input { background: #fff; border: 1px solid #cfded4; border-radius: 10px; min-height: 42px; min-width: 0; padding: 0 9px; }
 .workforce-advance-position-list { gap: 8px; }
 .workforce-advance-position-list .workforce-advance-card { background: #fff; cursor: pointer; display: grid; gap: 6px; min-height: 0; padding: 10px 11px; }
 .workforce-advance-card:focus-visible { box-shadow: 0 0 0 3px rgba(47,133,90,.16); outline: 2px solid #2f855a; }
@@ -17883,9 +17927,55 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 .danger-action:disabled { cursor: not-allowed; opacity: .6; }
 .workforce-advance-link { background: transparent; border: 0; color: #166534; font-size: 11px; font-weight: 750; min-height: 34px; padding: 0 6px; }
 .workforce-advance-recover { min-height: 34px !important; padding: 0 10px !important; width: auto !important; }
-.workforce-advance-pagination { align-items: center; display: flex; gap: 10px; justify-content: space-between; padding: 4px 1px; }
-.workforce-advance-pagination span,.workforce-advance-pagination small { color: #64748b; font-size: 11px; }
-.workforce-advance-pagination button { min-height: 40px; }
+.workforce-advance-pagination { display: grid; padding: 4px 1px; }
+.workforce-advance-pagination button { min-height: 44px; }
+
+/* Primary view tabs: Group pools / Individual / All vouchers. */
+.workforce-advance-view-tabs { background: #f1f5f2; border: 1px solid #d5e1d8; border-radius: 12px; display: grid; gap: 3px; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 3px; }
+.workforce-advance-view-tabs button { background: transparent; border: 0; border-radius: 9px; color: #64748b; font-size: 12px; font-weight: 700; min-height: 44px; overflow: hidden; padding: 0 8px; text-overflow: ellipsis; white-space: nowrap; }
+.workforce-advance-view-tabs button[aria-selected="true"] { background: #fff; box-shadow: 0 1px 3px rgba(15,23,42,.1); color: #166534; }
+
+/* Small admin-only data-review notice — never a large diagnostic list. */
+.workforce-advance-review-notice { align-items: center; background: #fffaf3; border: 1px solid #f1e0c5; border-radius: 12px; color: #92600a; cursor: pointer; display: flex; font-size: 11px; font-weight: 700; gap: 7px; min-height: 44px; padding: 8px 12px; text-align: start; }
+.workforce-advance-review-notice span { flex: 1; min-width: 0; }
+.workforce-advance-review-notice strong { color: #7c4a03; text-decoration: underline; }
+
+.workforce-advance-membership-note { color: #64748b; font-size: 11px; line-height: 1.4; margin: 0; }
+
+/* Pool detail sheet: original vouchers + aggregate pool activity. */
+.workforce-pool-detail { max-width: 720px; }
+.workforce-pool-voucher-list { display: grid; gap: 8px; }
+.workforce-pool-voucher-row { background: #f8faf9; border: 1px solid #e3ebe5; border-radius: 11px; display: grid; gap: 3px; padding: 9px 11px; }
+.workforce-pool-voucher-row > header { align-items: baseline; display: flex; gap: 8px; justify-content: space-between; }
+.workforce-pool-voucher-row > header span { color: #1f3828; font-size: 13px; font-weight: 750; min-width: 0; overflow-wrap: anywhere; }
+.workforce-pool-voucher-row > header strong { color: #166534; font-size: 14px; font-weight: 800; white-space: nowrap; }
+.workforce-pool-voucher-row small { color: #64748b; font-size: 10px; overflow-wrap: anywhere; }
+.workforce-pool-activity-list { display: grid; gap: 6px; }
+.workforce-pool-activity-row { align-items: center; border-bottom: 1px solid #edf2ee; display: flex; gap: 10px; justify-content: space-between; padding: 7px 1px; }
+.workforce-pool-activity-row:last-child { border-bottom: 0; }
+.workforce-pool-activity-row > div { display: grid; gap: 2px; min-width: 0; }
+.workforce-pool-activity-row > div > span { color: #1f3828; font-size: 12px; font-weight: 700; }
+.workforce-pool-activity-row small { color: #64748b; font-size: 10px; overflow-wrap: anywhere; }
+.workforce-pool-activity-row > strong { font-size: 13px; font-weight: 800; white-space: nowrap; }
+.workforce-pool-activity-row > strong.is-inflow { color: #166534; }
+.workforce-pool-activity-row > strong.is-outflow { color: #9a3412; }
+
+/* Compact voucher card: description limited to two lines, one overflow menu. */
+.workforce-advance-card { position: relative; }
+.workforce-advance-card .workforce-advance-card__reference { gap: 6px; justify-content: flex-start; }
+.workforce-advance-card .workforce-advance-card__reference .workforce-payment-status { margin-inline-start: auto; }
+.workforce-advance-card > header { align-items: baseline; display: flex; gap: 8px; justify-content: space-between; padding-inline-end: 30px; }
+.workforce-advance-card__description { -webkit-box-orient: vertical; -webkit-line-clamp: 2; display: -webkit-box; line-clamp: 2; overflow: hidden; }
+.workforce-advance-card .workforce-advance-actions-menu { inset-block-start: 8px; inset-inline-end: 8px; position: absolute; }
+.workforce-advance-card .workforce-advance-actions-menu summary { align-items: center; border-radius: 999px; color: #475569; display: inline-flex; font-size: 17px; height: 32px; justify-content: center; width: 32px; }
+.workforce-advance-card .workforce-advance-actions-menu summary:hover { background: #f1f5f2; }
+[dir="rtl"] .workforce-advance-actions-menu > div { left: 0; right: auto; }
+
+@media (max-width: 767px) {
+  /* The last card and every action must scroll fully above the fixed
+     bottom navigation. */
+  .workforce-advances-panel { margin-bottom: calc(var(--mobile-nav-height, 96px) + env(safe-area-inset-bottom, 0px) + 16px); }
+}
 
 .registration-pagination { align-items: center; display: flex; gap: 10px; justify-content: space-between; margin-top: 12px; padding: 4px 1px; }
 .registration-pagination span { color: #64748b; font-size: 0.8rem; }
@@ -17905,12 +17995,22 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 @keyframes workforce-advance-pulse { to { background-position: -200% 0; } }
 .workforce-advance-entry-sheet,.workforce-recovery-sheet,.workforce-advance-detail { max-width: 720px; }
 .workforce-advance-entry-body { gap: 12px; padding-block: 12px; }
-.workforce-advance-entry-body > section { border-bottom: 1px solid #edf2ee; padding-bottom: 12px; }
-.workforce-advance-entry-body > section:last-child { border-bottom: 0; padding-bottom: 0; }
-.workforce-advance-entry-body h3 { align-items: center; display: flex; gap: 7px; }
-.workforce-advance-entry-body h3 > span { align-items: center; background: #edf7ef; border-radius: 999px; color: #166534; display: inline-flex; font-size: 9px; height: 20px; justify-content: center; width: 20px; }
-.workforce-advance-entry-body .workforce-payment-form { gap: 8px; }
-.workforce-advance-entry-body .workforce-payment-form input,.workforce-advance-entry-body .workforce-payment-form select { min-height: 42px; }
+/* Compact single-column entry form: Labourer → Amount → Description → Date + Account. */
+.workforce-advance-entry-fields { display: grid; gap: 12px; }
+.workforce-advance-entry-fields > label,
+.workforce-advance-entry-row label { display: grid; gap: 5px; min-width: 0; }
+.workforce-advance-entry-fields label > span { color: #475569; font-size: 11px; font-weight: 700; }
+.workforce-advance-entry-fields input,
+.workforce-advance-entry-fields select { background: #fff; border: 1px solid #cbd5e1; border-radius: 12px; min-height: 52px; min-width: 0; padding: 0 12px; width: 100%; }
+.workforce-advance-entry-fields input:focus,
+.workforce-advance-entry-fields select:focus { border-color: #2f855a; box-shadow: 0 0 0 3px rgba(47, 133, 90, .1); outline: 0; }
+.workforce-advance-amount { position: relative; }
+.workforce-advance-amount > span { color: #64748b; font-size: 12px; font-weight: 750; inset-block-start: 50%; inset-inline-start: 12px; position: absolute; transform: translateY(-50%); }
+.workforce-advance-amount input { font-size: 16px; font-weight: 700; padding-inline-start: 46px; }
+/* Date ≈40% / Payment account ≈60%, equal heights, single-line ellipsis on the account. */
+.workforce-advance-entry-row { display: grid; gap: 10px; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); }
+.workforce-advance-entry-row .report-picker__trigger { min-height: 52px; }
+.workforce-advance-entry-row .report-picker__trigger-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workforce-advance-labour-option { align-items: center; display: flex; gap: 7px; min-width: 0; }
 .workforce-advance-labour-option strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workforce-advance-labour-option small { background: #f1f5f9; border-radius: 999px; color: #475569; flex: 0 0 auto; font-size: 9px; font-weight: 750; padding: 3px 6px; }
@@ -17951,23 +18051,25 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 .workforce-group-pools { display: grid; gap: 8px; }
 .workforce-group-pools > h3 { color: #153c26; font-size: 13px; margin: 0; }
 .workforce-group-pool-cards { display: grid; gap: 8px; }
-.workforce-group-pool-card { background: #f8faf9; border: 1px solid #dbe5de; border-radius: 14px; padding: 10px 12px; }
-.workforce-group-pool-card > summary { align-items: center; cursor: pointer; display: flex; gap: 8px; justify-content: space-between; list-style: none; }
-.workforce-group-pool-card > summary::-webkit-details-marker { display: none; }
-.workforce-group-pool-card > summary span { display: grid; gap: 2px; min-width: 0; }
-.workforce-group-pool-card > summary span:last-child { text-align: end; }
-.workforce-group-pool-card > summary small { color: #64748b; font-size: 10px; }
-.workforce-group-pool-card > summary strong { color: #153c26; font-size: 14px; overflow-wrap: anywhere; }
-.workforce-group-pool-card__totals { display: grid; gap: 6px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 10px 0 0; }
+/* Tappable pool cards: available balance is the strongest number. */
+.workforce-group-pool-card { background: #fff; border: 1px solid #dbe5de; border-radius: 14px; cursor: pointer; display: grid; gap: 8px; padding: 12px; }
+.workforce-group-pool-card:focus-visible { box-shadow: 0 0 0 3px rgba(47,133,90,.16); outline: 2px solid #2f855a; }
+.workforce-group-pool-card > header { display: grid; gap: 2px; min-width: 0; }
+.workforce-group-pool-card > header strong { color: #153c26; font-size: 15px; overflow-wrap: anywhere; }
+.workforce-group-pool-card > header small { color: #64748b; font-size: 11px; }
+.workforce-group-pool-card__balance { align-items: baseline; display: flex; gap: 8px; justify-content: space-between; }
+.workforce-group-pool-card__balance span { color: #64748b; font-size: 11px; font-weight: 700; }
+.workforce-group-pool-card__balance strong { color: #166534; font-size: 18px; font-weight: 800; overflow-wrap: anywhere; }
+.workforce-group-pool-card__balance strong.is-negative,
+.workforce-payment-position dd.is-negative { color: #b91c1c; }
+.workforce-group-pool-card__totals { display: grid; gap: 6px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
 .workforce-group-pool-card__totals div { display: grid; gap: 2px; }
 .workforce-group-pool-card__totals dt { color: #64748b; font-size: 9px; font-weight: 700; text-transform: uppercase; }
-.workforce-group-pool-card__totals dd { color: #153c26; font-size: 13px; font-weight: 750; margin: 0; }
-.workforce-group-pool-card__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.workforce-group-pool-review { background: #fffaf3; border: 1px solid #f1e0c5; border-radius: 12px; padding: 9px 11px; }
-.workforce-group-pool-review > summary { color: #92600a; cursor: pointer; font-size: 11px; font-weight: 750; }
-.workforce-group-pool-review__row { align-items: center; display: flex; gap: 8px; justify-content: space-between; padding: 6px 0; }
-.workforce-group-pool-review__row span { display: grid; gap: 2px; min-width: 0; }
-.workforce-group-pool-review__row small { color: #64748b; font-size: 10px; overflow-wrap: anywhere; }
+.workforce-group-pool-card__totals dd { color: #153c26; font-size: 13px; font-weight: 750; margin: 0; overflow-wrap: anywhere; }
+.workforce-group-pool-card > footer { align-items: center; border-top: 1px solid #edf2ee; display: flex; gap: 8px; justify-content: space-between; padding-top: 8px; }
+.workforce-group-pool-card > footer small { color: #64748b; font-size: 11px; }
+.workforce-group-pool-card > footer .workforce-advance-link { align-items: center; display: inline-flex; gap: 4px; }
+[dir="rtl"] .workforce-group-pool-card > footer .workforce-advance-link svg { transform: scaleX(-1); }
 .workforce-advance-history-title { color: #153c26; font-size: 13px; margin: 4px 0 0; }
 .workforce-advance-pool { background: #f8faf9; border: 1px solid #dbe5de; border-radius: 14px; display: grid; gap: 10px; padding: 12px; }
 .workforce-advance-pool__summary { display: grid; gap: 7px; grid-template-columns: repeat(2,minmax(0,1fr)); }
@@ -18040,12 +18142,11 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .workforce-advance-recipient-list article { grid-template-columns: minmax(0,1fr) auto; }
   .workforce-advance-group-actions { grid-column:1/-1; justify-content:flex-end; }
   .workforce-advance-summary strong { font-size: 15px; }
-  .workforce-advance-card { max-height: 190px; }
+  .workforce-advance-card { max-height: 225px; }
 }
 
 @media (min-width: 760px) {
   .workforce-advance-position-list { grid-template-columns: repeat(2,minmax(0,1fr)); }
-  .workforce-advance-filters { grid-template-columns: repeat(5,minmax(0,1fr)); }
 }
 
 @media print {

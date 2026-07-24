@@ -78,7 +78,7 @@ test("posting paths are transactional, locked, idempotent, account-linked, and a
   assert.match(routeSource, /labourAdvanceApplications/);
   assert.match(routeSource, /insertAccountMovement/);
   assert.match(routeSource, /Payment exceeds the current outstanding due balance/);
-  assert.match(routeSource, /Advance application exceeds the available advance balance/);
+  assert.match(routeSource, /of the combined advance pool is currently available/);
 });
 
 test("voucher voiding restores allocations and blocks unsafe advance void order", () => {

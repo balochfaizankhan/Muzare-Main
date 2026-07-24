@@ -21,11 +21,16 @@ test("advances endpoint uses the shared read model to combine canonical and both
   assert.doesNotMatch(route.slice(route.indexOf('app.get("\/v1\/workspace\/:workspaceId\/labour-payments\/advances"'), route.indexOf('app.get("\/v1\/workspace\/:workspaceId\/labour-payments\/reconciliation"')), /insertAccountMovement|postLabourVoucherJournal/);
 });
 
+const i18n = readFileSync(new URL("../../web/src/i18n.ts", import.meta.url), "utf8");
+
 test("the advances tab distinguishes loading, request failure, retry, and genuine empty", () => {
-  assert.match(page, /Loading advances/);
-  assert.match(page, /Unable to load advances/);
-  assert.match(page, />\s*Retry\s*</);
-  assert.match(page, /No advances match these filters/);
+  assert.match(page, /advancesView\.loadingAdvances/);
+  assert.match(page, /errors\.unableLoadAdvances/);
+  assert.match(page, /workforcePaymentsPage\.retry/);
+  assert.match(page, /advancesView\.noMatchingAdvancesTitle/);
+  assert.match(i18n, /"loadingAdvances": "Loading advances"/);
+  assert.match(i18n, /"unableLoadAdvances": "Unable to load advances\."/);
+  assert.match(i18n, /"noMatchingAdvancesTitle": "No matching advances"/);
 });
 
 test("the advances endpoint paginates, summarizes, filters, and serves one shared register projection", () => {
@@ -45,30 +50,28 @@ test("the advances endpoint paginates, summarizes, filters, and serves one share
   assert.doesNotMatch(endpoint, /await db\.execute/);
 });
 
-test("recipient ownership does not fall back from a group to its leader", () => {
+test("recipient display names never fall back from a group to its leader", () => {
   assert.match(readModel, /resolveRecipientDisplayName/);
   assert.match(readModel, /snapshot\.labourGroupName/);
   assert.match(readModel, /snapshot\.labourerName/);
   assert.doesNotMatch(readModel, /groupLeaderName|leaderName/i);
-  assert.match(page, /Receiver unavailable/);
-  assert.match(page, /Paid to group/);
-  assert.match(page, /Recipient unavailable/);
-  assert.match(page, /Needs review/);
+  assert.match(page, /recipientUnavailable/);
 });
 
-test("mobile advance UX loads twenty rows, debounces search, aborts stale requests, and uses compact actions", () => {
+test("mobile advance UX loads twenty rows, debounces search, aborts stale requests, and uses compact pool-level actions", () => {
   assert.match(page, /pageSize: 20/);
   assert.match(page, /setTimeout\(\(\) => setSearch\(searchInput\.trim\(\)\), 320\)/);
   assert.match(page, /new AbortController\(\)/);
-  assert.match(page, /Load more/);
-  assert.match(page, /Showing \{rows\.length\} of \{pageInfo\.totalCount\}/);
-  assert.match(page, /className="secondary-action workforce-advance-recover"/);
-  assert.doesNotMatch(page, />Record Recovery<\/button>/);
-  assert.match(page, /max=\{refundAdvance\.outstandingAmount\}/);
-  assert.match(page, /Recovery cannot exceed the outstanding advance amount/);
-  assert.match(page, />\s*Grouped\s*<\/button>/);
-  assert.match(page, />\s*Vouchers\s*<\/button>/);
-  assert.match(styles, /\.workforce-advance-card \{ max-height: 190px; \}/);
+  assert.match(page, /workforcePaymentsPage\.loadMore/);
+  // Developer-like pagination copy ("N of M advances loaded") is gone.
+  assert.doesNotMatch(page, /Showing \{rows\.length\} of \{pageInfo\.totalCount\}/);
+  // Recovery is pool-level only: the sheet is bounded by the pool's available
+  // balance, never by a single voucher's outstanding amount.
+  assert.match(page, /max=\{Math\.max\(recoveryTarget\.available, 0\)\}/);
+  assert.doesNotMatch(page, /refundAdvance\.outstandingAmount/);
+  // Primary views are Group pools / Individual / All vouchers.
+  assert.match(page, /advancesView\.groupPoolsTab/);
+  assert.match(page, /advancesView\.allVouchersTab/);
   assert.match(styles, /--mobile-nav-height, 96px/);
 });
 
@@ -76,56 +79,55 @@ test("human references, account review states, and all mobile payment tabs remai
   assert.match(readModel, /sourceClassification: "CANONICAL" \| "CANONICAL_LINKED_LEGACY" \| "LEGACY_OPERATIONAL" \| "LEGACY_NORMALIZED"/);
   assert.match(route, /paymentAccountName: row\.paymentSourceDisplayName/);
   assert.match(route, /needsReview: row\.needsReview/);
-  assert.match(page, /Unresolved payment source/);
-  assert.match(page, /Needs review/);
+  assert.match(page, /unresolvedPaymentSource/);
+  assert.match(i18n, /"unresolvedPaymentSource": "Unresolved payment source"/);
   assert.doesNotMatch(page.slice(page.indexOf("function AdvancesView"), page.indexOf("function ReviewSettleDialog")), /Legacy account/);
-  for (const label of ["Payments Due", "New Labour Due", "Payment Vouchers", "Advances"]) assert.match(hub, new RegExp(label));
+  assert.match(hub, /paymentsDueTab/);
+  assert.match(hub, /newLabourDueTab/);
+  assert.match(hub, /paymentVouchersTab/);
+  assert.match(hub, /layout\.advances/);
   assert.match(hub, /scrollIntoView/);
 });
 
-test("record advance uses sectioned searchable selectors and valid-state posting", () => {
+test("record advance uses searchable selectors and valid-state posting", () => {
   const advances = page.slice(page.indexOf("function AdvancesView"), page.indexOf("function ReviewSettleDialog"));
-  assert.match(advances, /<LabourSelectCombobox\s+ariaLabel="Labourer"/);
-  assert.match(advances, /placeholder="Search labourers"/);
+  assert.match(advances, /<LabourSelectCombobox/);
+  assert.match(advances, /advancesView\.searchLabourersPlaceholder/);
   assert.match(advances, /includeInactive/);
-  assert.match(advances, /renderOption=\{renderAdvanceLabourOption\}/);
-  assert.match(advances, /<LabourSelectCombobox\s+ariaLabel="Paid from account"/);
-  for (const heading of ["Recipient", "Payment", "Details", "Preview"]) assert.match(advances, new RegExp(`>\\s*${heading}\\s*<`));
+  assert.match(advances, /renderAdvanceLabourOption\(t, option\)/);
+  assert.match(advances, /PaymentAccountSelect/);
   assert.match(advances, /disabled=\{saving \|\| !formValid\}/);
-  assert.match(advances, /Record money paid before final settlement/);
+  assert.match(advances, /advancesView\.recordMoneyPaidBeforeSettlement/);
+  // An ungrouped labourer can receive an advance; the form previews the
+  // destination pool instead of blocking on group membership.
+  assert.match(advances, /advancesView\.individualPoolNote/);
+  assert.doesNotMatch(advances, /assignGroupBeforeAdvance/);
   assert.match(styles, /env\(safe-area-inset-bottom\)/);
 });
 
-test("advance cards retain explicit owner and receiver hierarchy in both views", () => {
+test("advance voucher cards keep recipient and amount primary with one overflow menu and no application states", () => {
   assert.match(page, /resolveAdvanceCardIdentity\(advance, labourerById\)/);
-  assert.match(page, /Received by \$\{receivers\[0\]\}/);
-  assert.match(page, /receivers\.length > 1/);
-  assert.match(page, /Receiver unavailable/);
-  assert.match(page, /Paid from:/);
-  assert.match(page, /Multiple payment sources/);
-  assert.match(page, /workforce-advance-group-actions/);
-  assert.match(styles, /\.workforce-advance-recover \{ min-height: 34px/);
-  assert.match(page, /<dt>Paid to<\/dt>/);
-  assert.match(page, /<dt>Recipient type<\/dt>/);
-  assert.doesNotMatch(page, /<dt>Applied<\/dt>/);
-  assert.doesNotMatch(page, /<dt>Outstanding<\/dt>/);
+  assert.match(page, /workforce-advance-card__amount/);
+  assert.match(page, /workforce-advance-actions-menu/);
+  assert.match(page, /advancesView\.paidTo/);
+  assert.match(page, /advancesView\.recipientTypeLabel/);
+  const advances = page.slice(page.indexOf("function AdvancesView"), page.indexOf("function ReviewSettleDialog"));
+  assert.doesNotMatch(advances, /appliedLabel|outstandingLabel/, "voucher cards and details never show applied/outstanding voucher states");
+  assert.doesNotMatch(advances, /advancesView\.recover"|advancesView\.recover\b/, "no voucher-level Recover action exists");
 });
 
 test("payment and advance registers remain separate business documents", () => {
   const voucherRegister = page.slice(page.indexOf("function VoucherRegister"), page.indexOf("function AdvancesView"));
   const advanceRegister = page.slice(page.indexOf("function AdvancesView"), page.indexOf("function ReviewSettleDialog"));
-  assert.match(voucherRegister, /Final cash payments and aggregate applied-advances postings/);
   assert.doesNotMatch(voucherRegister, /<option value="ADVANCE">/);
   assert.doesNotMatch(voucherRegister, /<option value="REFUND_RECOVERY">/);
   assert.doesNotMatch(voucherRegister, /LPA-\$\{/);
-  assert.match(voucherRegister, /Final labour payments/);
-  assert.match(voucherRegister, /Applied advances/);
   assert.match(voucherRegister, /canonicalSummary\?\.activeAdvanceApplied/);
   assert.match(voucherRegister, /canonicalSummary\?\.wageExpense/);
   assert.match(voucherRegister, /onViewAdvances/);
-  assert.match(advanceRegister, /Advance amount/);
-  assert.match(advanceRegister, /Available advance balance/);
-  assert.match(advanceRegister, /Applied to labour dues/);
+  assert.match(advanceRegister, /advancesView\.advanceAmountLabel/);
+  assert.match(advanceRegister, /advancesView\.availableAdvanceBalance/);
+  assert.match(advanceRegister, /advancesView\.appliedToLabourDues/);
   assert.doesNotMatch(advanceRegister, /<span>Outstanding<\/span>/);
   assert.doesNotMatch(advanceRegister, /Original \{money\(advance\.originalAmount\)\}/);
 });
@@ -136,7 +138,8 @@ test("aggregate applied-advance history is derived from posting events while chi
   assert.match(readModel, /advanceApplicationParents/);
   assert.match(page, /applicationParents=\{canonicalFinancials\.data\?\.advanceApplicationParents \?\? \[\]\}/);
   assert.match(page, /kind: "application_parent"/);
-  assert.match(page, /Advance applied to due — Non-cash/);
+  assert.match(page, /advanceAppliedNonCash/);
+  assert.match(i18n, /"advanceAppliedNonCash": "Advance applied to due — Non-cash"/);
   assert.doesNotMatch(page, /sourceAdvanceVoucherNumber \?\? "Advance reference unavailable"/);
 });
 
@@ -144,7 +147,8 @@ test("aggregate applied-advance reversal targets the parent event instead of ind
   assert.match(route, /advance-application-events\/:eventId\/reverse/);
   assert.match(route, /labour_advance_application_event_reversed/);
   assert.match(page, /reverseLabourAdvanceApplicationEvent/);
-  assert.match(page, /Void \/ reverse/);
+  assert.match(page, /voucherRegister\.voidReverse/);
+  assert.match(i18n, /"voidReverse": "Void \/ reverse"/);
   assert.doesNotMatch(page, /APPLICATION_REVERSAL/);
 });
 
@@ -160,7 +164,7 @@ test("dashboard quick add deep-links into the canonical record advance dialog", 
   assert.match(advances, /window\.history\.back\(\)/);
   assert.match(advances, /window\.addEventListener\("popstate", handlePopState\)/);
   assert.match(advances, /resetRecordAdvanceForm/);
-  assert.match(advances, /recipientScopeRef\.current\?\.focus\(\)/);
+  assert.match(advances, /recordAdvanceDialogRef\.current\?\.querySelector<HTMLElement>\("input, select"\)/);
   assert.match(advances, /aria-labelledby="record-advance-title"/);
   assert.match(advances, /dialog\.querySelectorAll<HTMLElement>/);
   assert.equal((advances.match(/postLabourAdvanceVoucher\(/g) ?? []).length, 1, "both launch paths use one submit handler");
@@ -212,13 +216,12 @@ test("payments due uses canonical summary and review loads a due-specific aggreg
   const review = page.slice(page.indexOf("function ReviewSettleDialog"));
   assert.match(review, /fetchLabourDueAdvancePool/);
   assert.doesNotMatch(review, /fetchAllLabourPaymentAdvances/);
-  assert.match(review, /View allocation details/);
   assert.match(overview, /pageSize: 1, status: "OPEN"/);
   assert.match(overview, /setAdvanceSummary\(advanceResponse\.summary\)/);
   assert.match(overview, /advanceSummary\.totalOutstanding/);
   assert.match(overview, /advanceSummary\.openCount/);
   assert.doesNotMatch(overview, /const outstandingAdvances\s*=\s*advances\.reduce/);
-  assert.match(page, /muzare:advance-list:v2:\$\{workspaceId\}:\$\{farmId\}:\$\{seasonId\}/);
+  assert.match(page, /muzare:advance-list:v3:\$\{workspaceId\}:\$\{farmId\}:\$\{seasonId\}/);
 });
 
 test("accounts expense visibility uses outstanding advance balance and keeps active unpaid dues in the canonical snapshot", () => {

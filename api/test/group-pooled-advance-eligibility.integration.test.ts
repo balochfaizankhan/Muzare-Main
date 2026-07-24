@@ -191,68 +191,46 @@ test("attendance-based dues are rejected while a direct group due works without 
   assert.equal(attendanceRecord?.payload.labourDueLockedAt, undefined);
 });
 
-test("advances to the leader and to any member — from several accounts — aggregate into one group pool that settles the due", { skip }, async () => {
-  // Partner A funds a leader-level advance; partner B and cash fund advances
-  // physically received by different members (recorded as INDIVIDUAL by an
-  // old client and auto-elevated to the group pool); the outsider's advance
-  // belongs to the other group.
-  const leaderAdvance = await createAdvance({ amount: 5_000, voucherDate: "2026-07-01", paymentAccountId: partnerAccountAId, scope: "GROUP", groupId, receivedById: leaderId });
+test("advances to the leader and to CURRENT members — from several accounts — form one combined pool that settles the due", { skip }, async () => {
+  // Partner A funds a group-directed advance received by the leader; partner B
+  // and cash fund individual advances to members. Each voucher records its
+  // ORIGINAL recipient; pool ownership follows current membership.
+  await createAdvance({ amount: 5_000, voucherDate: "2026-07-01", paymentAccountId: partnerAccountAId, scope: "GROUP", groupId, receivedById: leaderId });
   const memberOneAdvance = await createAdvance({ amount: 9_000, voucherDate: "2026-07-02", paymentAccountId: partnerAccountBId, scope: "MEMBER", labourerId: memberOneId });
-  const memberTwoAdvance = await createAdvance({ amount: 6_000, voucherDate: "2026-07-03", paymentAccountId: cashAccountId, scope: "MEMBER", labourerId: memberTwoId });
+  await createAdvance({ amount: 6_000, voucherDate: "2026-07-03", paymentAccountId: cashAccountId, scope: "MEMBER", labourerId: memberTwoId });
   await createAdvance({ amount: 2_500, voucherDate: "2026-07-03", paymentAccountId: cashAccountId, scope: "MEMBER", labourerId: outsiderId });
   // Excluded by the settlement-date rule even though it belongs to the group.
   await createAdvance({ amount: 800, voucherDate: "2026-07-20", paymentAccountId: cashAccountId, scope: "MEMBER", labourerId: memberOneId });
 
-  assert.equal(memberOneAdvance.recipientScope, "LABOUR_GROUP", "a member advance is operationally an advance taken by the leader for the group");
-  assert.equal(memberOneAdvance.labourGroupId, groupId);
-  assert.equal(memberOneAdvance.financialScopeKey, `group:${groupId}`);
+  assert.equal(memberOneAdvance.recipientScope, "INDIVIDUAL", "the voucher keeps its original recipient identity");
+  assert.equal(memberOneAdvance.labourGroupId, null, "no group ownership is stamped onto the voucher");
+  assert.equal(memberOneAdvance.financialScopeKey, `individual:${memberOneId}`);
 
-  // Membership churn after funding must not change pool ownership: member two
-  // moves to the other group; a brand-new labourer joins.
-  await setupRequest("member two leaves the live group", "POST", "/v1/workspace/operational-records", envelope("labourer", memberTwoId, { name: "Member Two", active: true, groupId: otherGroupId }));
+  // Membership churn moves pool ownership WITH the labourer: member two's
+  // 6,000 follows them to the other group; a brand-new member joins.
+  await setupRequest("member two moves to the other group", "POST", "/v1/workspace/operational-records", envelope("labourer", memberTwoId, { name: "Member Two", active: true, groupId: otherGroupId }));
   const joinedLaterId = randomUUID();
   await setupRequest("new member joins the live group", "POST", "/v1/workspace/operational-records", envelope("labourer", joinedLaterId, { name: "Joined Later", active: true, groupId }));
 
   const due = await createGroupDue(15_340);
   const preview = await fetchPool(due.id, { amount: 15_340 });
-  assert.equal(preview.pool.eligibleTotal, 20_000, "leader 5,000 + member one 9,000 + member two 6,000 (ownership was stamped at funding time)");
-  assert.equal(preview.pool.maximumApplicable, 15_340);
-  assert.equal(preview.pool.carriedForwardAmount, 4_660);
-  assert.equal(preview.pool.remainingAfterAdvances, 0);
-  assert.equal(preview.pool.membershipReviewRequired, false);
+  // Current pool: leader 5,000 (group-directed) + member one 9,000 + the late
+  // 800 — member two's 6,000 now belongs to the other group's pool. The
+  // settlement-date rule keeps the late 800 out of THIS settlement.
+  assert.equal(preview.pool.availableAdvances, 14_000, "leader 5,000 + member one 9,000, date-eligible");
+  assert.equal(preview.pool.maximumApplicable, 14_000);
+  assert.equal(preview.pool.remainingAfterAdvances, 1_340);
   assert.equal(preview.pool.groupPool?.labourGroupId, groupId);
   assert.equal(preview.pool.groupPool?.groupLeaderName, "Saleem", "the leader owns the pool");
-  assert.equal(preview.pool.groupPool?.totalAdvances, 20_800, "pool totals include the post-settlement-date advance");
-  assert.ok((preview.pool.exclusionTotals.otherGroups ?? 0) >= 2_500, "the outsider's advance stays with the other group");
-  assert.ok((preview.pool.exclusionTotals.postedAfterSettlementDate ?? 0) >= 800);
-  const previewedAllocations = preview.details ?? [];
+  assert.equal(preview.pool.groupPool?.totalAdvances, 14_800, "pool totals include the post-settlement-date advance");
 
-  const settle = await settlePool(due.id, 15_340);
+  const settle = await settlePool(due.id, 14_000);
   assertIntegrationResponse(settle, 200, "settle the full maximum applicable");
   const [application] = await db.select().from(labourAdvanceApplications).where(and(eq(labourAdvanceApplications.dueId, due.id), eq(labourAdvanceApplications.status, "ACTIVE")));
   assertPersistedUuid(application?.id, "locate the pooled application");
+  assert.equal(application?.advanceVoucherId, null, "the application is pool-level, not voucher-level");
   const sources = await db.select().from(labourAdvanceApplicationSources).where(eq(labourAdvanceApplicationSources.applicationId, application!.id));
-  assert.equal(sources.reduce((sum, row) => sum + Number(row.amount), 0), 15_340);
-  assert.deepEqual(
-    sources.map((row) => [row.advanceVoucherId, Number(row.amount)]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
-    previewedAllocations.map((row) => [row.id, row.proposedAmount]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
-    "preview and final posting produce the same allocations",
-  );
-
-  // Mixed partner funding keeps each original owner.
-  const voucherAccount = new Map([
-    [leaderAdvance.id, partnerAccountAId],
-    [memberOneAdvance.id, partnerAccountBId],
-    [memberTwoAdvance.id, cashAccountId],
-  ]);
-  const byAccount = new Map<string, number>();
-  for (const row of sources) {
-    const accountId = voucherAccount.get(row.advanceVoucherId)!;
-    byAccount.set(accountId, (byAccount.get(accountId) ?? 0) + Number(row.amount));
-  }
-  assert.equal(byAccount.get(partnerAccountAId), 5_000);
-  assert.equal(byAccount.get(partnerAccountBId), 9_000);
-  assert.equal(byAccount.get(cashAccountId), 1_340);
+  assert.equal(sources.length, 0, "no per-voucher application allocation is created");
 
   // No duplicate expense, no cash movement, no repeated Farm Owes Partner.
   const applicationEntries = await db.select().from(labourAccountingEntries).where(and(
@@ -261,10 +239,10 @@ test("advances to the leader and to any member — from several accounts — agg
   ));
   assert.deepEqual(applicationEntries.map((row) => row.ledgerCode).sort(), ["LABOUR_ADVANCE", "LABOUR_PAYABLE"], "an application clears the payable against the advance — never expense, cash, or partner payable");
   const movements = await db.select().from(accountTransactions).where(eq(accountTransactions.farmId, tenant.farmId));
-  assert.equal(movements.filter((row) => row.sourceType === "labour_payment_voucher").length, 6, "only the six funding advances moved money; settlement added none");
+  assert.equal(movements.filter((row) => row.sourceType === "labour_payment_voucher").length, 5, "only the five funding advances moved money; settlement added none");
 
   const [settledDue] = await db.select().from(labourDues).where(eq(labourDues.id, due.id));
-  assert.equal(settledDue?.paymentStatus, "SETTLED_BY_ADVANCE");
+  assert.equal(settledDue?.paymentStatus, "PARTIALLY_SETTLED", "1,340 remains payable in cash");
 
   // Idempotent posting: repeating the same idempotency key changes nothing.
   const repeatKey = randomUUID();
@@ -274,7 +252,8 @@ test("advances to the leader and to any member — from several accounts — agg
   const dueTwoApplications = await db.select().from(labourAdvanceApplications).where(and(eq(labourAdvanceApplications.dueId, dueTwo.id), eq(labourAdvanceApplications.status, "ACTIVE")));
   assert.equal(dueTwoApplications.length, 1, "the repeat posted no second application");
 
-  // Reversal restores the due and the pool availability exactly.
+  // Reversal restores the due and the pool availability exactly. The posted
+  // settlement itself stayed attached to this group throughout.
   const [settledEvent] = await db.select().from(auditLogs).where(and(
     eq(auditLogs.workspaceId, tenant.workspaceId),
     eq(auditLogs.action, "labour_due_settled"),
@@ -289,10 +268,8 @@ test("advances to the leader and to any member — from several accounts — agg
   assertIntegrationResponse(reversal, 200, "reverse the pooled settlement");
   const [reversedApplication] = await db.select().from(labourAdvanceApplications).where(eq(labourAdvanceApplications.id, application!.id));
   assert.equal(reversedApplication?.status, "REVERSED");
-  const survivingSources = await db.select().from(labourAdvanceApplicationSources).where(eq(labourAdvanceApplicationSources.applicationId, application!.id));
-  assert.equal(survivingSources.length, sources.length, "the exact source allocations stay on record");
   const restored = await fetchPool(due.id);
-  assert.equal(restored.pool.eligibleTotal, 20_000 - 300, "availability returns apart from the still-active 300 on the second due");
+  assert.equal(restored.pool.availableAdvances, 14_000 - 300, "availability returns apart from the still-active 300 on the second due");
   const [reopenedDue] = await db.select().from(labourDues).where(eq(labourDues.id, due.id));
   assert.equal(reopenedDue?.paymentStatus, "UNPAID", "the reversed due is payable again");
 });
@@ -328,7 +305,7 @@ test("two concurrent settlements cannot overspend one group pool", { skip }, asy
   const dueOne = await createGroupDue(4_000);
   const dueTwo = await createGroupDue(4_000);
   const poolBefore = await fetchPool(dueOne.id);
-  const remaining = poolBefore.pool.eligibleTotal;
+  const remaining = poolBefore.pool.availableAdvances;
   assert.ok(remaining > 0, "some availability remains for the concurrency check");
   const half = Math.round((remaining * 0.6 + Number.EPSILON) * 100) / 100;
   const [first, second] = await Promise.all([
@@ -346,19 +323,50 @@ test("two concurrent settlements cannot overspend one group pool", { skip }, asy
   if (statuses[1] !== 200) assert.equal(statuses[1], 409, "the loser is rejected rather than overspending");
 });
 
-test("a new advance for a labourer with no labour group is blocked — no standalone individual advance pool exists", { skip }, async () => {
+test("an ungrouped labourer's advance posts into their individual pool and moves with them when they join a group", { skip }, async () => {
   const ungroupedId = randomUUID();
   await setupRequest("create ungrouped labourer", "POST", "/v1/workspace/operational-records", envelope("labourer", ungroupedId, { name: "Ungrouped Worker", active: true }));
   const response = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/advances`, {
     farmId: tenant.farmId, seasonId: tenant.seasonId, idempotencyKey: randomUUID(), voucherDate: "2026-07-04",
     recipientScope: "INDIVIDUAL", labourerId: ungroupedId, amount: 750, paymentAccountId: cashAccountId,
-    paymentMethod: "cash", description: "Blocked ungrouped advance",
+    paymentMethod: "cash", description: "Individual pool advance",
   });
-  assert.equal(response.statusCode, 400, "posting must be blocked, not recorded as an individual advance");
-  assert.equal(response.json().message, "Assign this labourer to a labour group before recording an advance.");
-  const vouchers = await db.select().from(labourPaymentVouchers).where(and(
-    eq(labourPaymentVouchers.workspaceId, tenant.workspaceId),
-    eq(labourPaymentVouchers.labourerId, ungroupedId),
-  ));
-  assert.equal(vouchers.length, 0, "a blocked advance must leave no voucher behind");
+  assertIntegrationResponse(response, 201, "an ungrouped labourer can receive an advance");
+  const poolsResponse = await request("GET", `/v1/workspace/${tenant.workspaceId}/labour-payments/advance-pools?farmId=${tenant.farmId}&seasonId=${tenant.seasonId}`);
+  assertIntegrationResponse(poolsResponse, 200, "list pools after the individual advance");
+  const withIndividual = poolsResponse.json() as { individualPools: Array<{ labourerId: string; totalAdvances: number; outstandingAdvances: number }> };
+  const individual = withIndividual.individualPools.find((pool) => pool.labourerId === ungroupedId);
+  assert.equal(individual?.totalAdvances, 750, "the advance forms the labourer's individual pool");
+
+  // Joining a group moves the same voucher into that group's combined pool.
+  await setupRequest("labourer joins the group", "POST", "/v1/workspace/operational-records", envelope("labourer", ungroupedId, { name: "Ungrouped Worker", active: true, groupId }));
+  const afterJoin = await request("GET", `/v1/workspace/${tenant.workspaceId}/labour-payments/advance-pools?farmId=${tenant.farmId}&seasonId=${tenant.seasonId}`);
+  assertIntegrationResponse(afterJoin, 200, "list pools after joining");
+  const joined = afterJoin.json() as {
+    pools: Array<{ labourGroupId: string; totalAdvances: number }>;
+    individualPools: Array<{ labourerId: string }>;
+    vouchers: Array<{ labourerId: string | null; currentGroupId: string | null }>;
+  };
+  assert.equal(joined.individualPools.some((pool) => pool.labourerId === ungroupedId), false, "the individual pool disappears once grouped");
+  assert.equal(joined.vouchers.find((voucher) => voucher.labourerId === ungroupedId)?.currentGroupId, groupId, "the voucher context label shows the CURRENT group");
+});
+
+test("pool-level recovery reduces the combined balance without touching any voucher", { skip }, async () => {
+  const before = await request("GET", `/v1/workspace/${tenant.workspaceId}/labour-payments/advance-pools?farmId=${tenant.farmId}&seasonId=${tenant.seasonId}`);
+  assertIntegrationResponse(before, 200, "pools before recovery");
+  const beforePool = (before.json() as { pools: Array<{ labourGroupId: string; outstandingAdvances: number; refundedAdvances: number }> }).pools.find((pool) => pool.labourGroupId === groupId);
+  assert.ok(beforePool && beforePool.outstandingAdvances >= 100, "some balance is available to recover");
+  const recover = await request("POST", `/v1/workspace/${tenant.workspaceId}/labour-payments/advance-pools/recover`, {
+    farmId: tenant.farmId, seasonId: tenant.seasonId, labourGroupId: groupId,
+    payment: { idempotencyKey: randomUUID(), voucherDate: "2026-07-16", amount: 100, paymentAccountId: cashAccountId, paymentMethod: "Recovery" },
+  });
+  assertIntegrationResponse(recover, 201, "record a pool-level recovery");
+  const recoveryVoucher = recover.json().voucher as { nature: string; relatedAdvanceVoucherId: string | null; labourGroupId: string | null };
+  assert.equal(recoveryVoucher.nature, "REFUND_RECOVERY");
+  assert.equal(recoveryVoucher.relatedAdvanceVoucherId, null, "the recovery attaches to the pool, never to a voucher");
+  assert.equal(recoveryVoucher.labourGroupId, groupId);
+  const after = await request("GET", `/v1/workspace/${tenant.workspaceId}/labour-payments/advance-pools?farmId=${tenant.farmId}&seasonId=${tenant.seasonId}`);
+  const afterPool = (after.json() as { pools: Array<{ labourGroupId: string; outstandingAdvances: number; refundedAdvances: number }> }).pools.find((pool) => pool.labourGroupId === groupId);
+  assert.equal(Number((afterPool!.refundedAdvances - beforePool!.refundedAdvances).toFixed(2)), 100);
+  assert.equal(Number((beforePool!.outstandingAdvances - afterPool!.outstandingAdvances).toFixed(2)), 100);
 });

@@ -6,12 +6,11 @@ const route = readFileSync(new URL("../src/routes/labour-payments.ts", import.me
 const ui = readFileSync(new URL("../../web/src/pages/workspace/WorkforcePayments.tsx", import.meta.url), "utf8");
 const i18n = readFileSync(new URL("../../web/src/i18n.ts", import.meta.url), "utf8");
 
-test("review uses a narrow aggregate endpoint and lazy allocation details", () => {
+test("review uses a narrow aggregate endpoint with no per-voucher allocation browser", () => {
   assert.match(route, /dues\/:dueId\/advance-pool/);
-  assert.match(route, /query\.data\.amount == null \? undefined/);
   // The review dialog is fully localized; the copy lives in the i18n catalog
   // and the dialog references it by key. Under the group-pool model the
-  // dialog shows the aggregate group position — there is no per-voucher
+  // dialog shows the aggregate pool position — there is no per-voucher
   // allocation or exclusion browser.
   assert.match(ui, /reviewSettle\.totalAvailableForDue/);
   assert.match(ui, /reviewSettle\.groupOutstandingAdvances/);
@@ -21,8 +20,8 @@ test("review uses a narrow aggregate endpoint and lazy allocation details", () =
   assert.doesNotMatch(ui.slice(ui.indexOf("function ReviewSettleDialog")), /advanceValues/);
 });
 
-test("aggregate settlement uses the pool preview to size the request and does not require a payment", () => {
-  assert.match(route, /calculateLabourAdvancePool/);
+test("aggregate settlement uses the canonical pool ledger to size the request and does not require a payment", () => {
+  assert.match(route, /loadAdvancePoolLedger/);
   assert.match(route, /applicationModel: "AGGREGATE_POOLED"/);
   assert.match(route, /if \(input\.payment\)/);
   assert.match(route, /postLabourAdvanceApplicationJournal/);
