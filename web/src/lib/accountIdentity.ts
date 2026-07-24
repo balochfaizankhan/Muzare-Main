@@ -20,6 +20,13 @@ export type AccountIdentityLookup = {
   nameToAccounts: Map<string, AccountIdentityLike[]>;
 };
 
+export type ExternalAccountIdentity = {
+  accountId?: string | null;
+  accountName?: string | null;
+};
+
+const externalAccountNameById = new Map<string, string>();
+
 function normalize(value: unknown) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
@@ -34,6 +41,33 @@ export function normalizeLegacyAndroidAccountId(value: string | null | undefined
   const androidMatch = /^android:[^:]+:(?:account|partner):(.+)$/i.exec(trimmed);
   if (androidMatch?.[1]?.trim()) return androidMatch[1].trim();
   return trimmed;
+}
+
+/**
+ * Registers account identities supplied by the canonical server read model.
+ * Historical labour records can contain a stable server/partner id that differs
+ * from the local operational account id. The server-provided name lets that id
+ * resolve to one local account only when the name is unique, preventing duplicate
+ * "Unknown account" report buckets without guessing between same-named accounts.
+ */
+export function registerExternalAccountIdentities(rows: ExternalAccountIdentity[]) {
+  for (const row of rows) {
+    const accountId = trimText(row.accountId);
+    const accountName = normalize(row.accountName);
+    if (!accountId || !accountName) continue;
+    externalAccountNameById.set(accountId, accountName);
+    const normalizedAlias = normalizeLegacyAndroidAccountId(accountId);
+    if (normalizedAlias) externalAccountNameById.set(normalizedAlias, accountName);
+  }
+}
+
+function resolveExternalAccountId(value: string, lookup: AccountIdentityLookup) {
+  const alias = normalizeLegacyAndroidAccountId(value);
+  const normalizedName = externalAccountNameById.get(value)
+    ?? (alias ? externalAccountNameById.get(alias) : undefined);
+  if (!normalizedName) return null;
+  const matches = lookup.nameToAccounts.get(normalizedName) ?? [];
+  return matches.length === 1 ? matches[0]!.id : null;
 }
 
 export function buildAccountIdentityLookup(accounts: AccountIdentityLike[]): AccountIdentityLookup {
@@ -67,7 +101,7 @@ export function resolveCanonicalAccountId(
   if (lookup.byId.has(trimmed)) return lookup.byId.get(trimmed)!.id;
   const alias = normalizeLegacyAndroidAccountId(trimmed);
   if (alias && lookup.aliasToId.has(alias)) return lookup.aliasToId.get(alias)!;
-  return null;
+  return resolveExternalAccountId(trimmed, lookup);
 }
 
 export function resolveAccountIdentity(
@@ -94,6 +128,15 @@ export function resolveAccountIdentity(
         matchedBy: "alias",
         matchedAccount: lookup.byId.get(canonicalAccountId) ?? null,
         needsAccountMappingRepair: false,
+      };
+    }
+    const externalAccountId = resolveExternalAccountId(trimmed, lookup);
+    if (externalAccountId) {
+      return {
+        canonicalAccountId: externalAccountId,
+        matchedBy: "name_fallback",
+        matchedAccount: lookup.byId.get(externalAccountId) ?? null,
+        needsAccountMappingRepair: true,
       };
     }
   }
