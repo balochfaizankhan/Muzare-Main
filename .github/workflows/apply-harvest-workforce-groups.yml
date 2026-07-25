@@ -1,0 +1,334 @@
+name: Apply Harvest Workforce Groups
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - .github/workflows/apply-harvest-workforce-groups.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Link workforce groups into harvest
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one match, found {count}")
+              return text.replace(old, new, 1)
+
+          page = Path("web/src/pages/workspace/HarvestPerformance.tsx")
+          text = page.read_text()
+
+          text = replace_once(text,
+          'const toast = (message: string) => window.dispatchEvent(new CustomEvent("muzare-toast", { detail: message }));\n',
+          '''const toast = (message: string) => window.dispatchEvent(new CustomEvent("muzare-toast", { detail: message }));
+
+type HarvestGroupView = HarvestGroup & {
+  source: "harvest" | "labour";
+  linkedMemberCount: number;
+};
+''', "insert HarvestGroupView")
+
+          old_data = '''function useHarvestData() {
+  const [groups, setGroups] = useState<HarvestGroup[]>([]);
+  const [entries, setEntries] = useState<HarvestEntry[]>([]);
+  const [ready, setReady] = useState(false);
+
+  const refresh = useCallback(async () => {
+    const [nextGroups, nextEntries] = await Promise.all([
+      workspaceRecords(offlineDb.harvestGroups),
+      workspaceRecords(offlineDb.harvestEntries),
+    ]);
+    setGroups([...nextGroups].sort((left, right) => left.name.localeCompare(right.name)));
+    setEntries([...nextEntries].sort((left, right) => right.date.localeCompare(left.date) || right.createdAt.localeCompare(left.createdAt)));
+    setReady(true);
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const handle = () => void refresh();
+    window.addEventListener("muzare-data-refresh", handle);
+    window.addEventListener("muzare-local-data-change", handle);
+    return () => {
+      window.removeEventListener("muzare-data-refresh", handle);
+      window.removeEventListener("muzare-local-data-change", handle);
+    };
+  }, [refresh]);
+
+  return { groups, entries, ready, refresh };
+}
+'''
+          new_data = '''function useHarvestData() {
+  const [groups, setGroups] = useState<HarvestGroupView[]>([]);
+  const [harvestGroups, setHarvestGroups] = useState<HarvestGroup[]>([]);
+  const [entries, setEntries] = useState<HarvestEntry[]>([]);
+  const [ready, setReady] = useState(false);
+
+  const refresh = useCallback(async () => {
+    const [nextHarvestGroups, nextEntries, nextLabourGroups, nextLabourers] = await Promise.all([
+      workspaceRecords(offlineDb.harvestGroups),
+      workspaceRecords(offlineDb.harvestEntries),
+      workspaceRecords(offlineDb.labourGroups),
+      workspaceRecords(offlineDb.labourers),
+    ]);
+
+    const labourGroupIdByName = new Map(nextLabourGroups.map((group) => [group.name.trim().toLowerCase(), group.id]));
+    const activeMemberCountByGroup = new Map<string, number>();
+    for (const labourer of nextLabourers) {
+      if (labourer.active === false || labourer.isArchived) continue;
+      const groupId = labourer.groupId || labourGroupIdByName.get((labourer.group ?? "").trim().toLowerCase());
+      if (!groupId) continue;
+      activeMemberCountByGroup.set(groupId, (activeMemberCountByGroup.get(groupId) ?? 0) + 1);
+    }
+
+    const standalone = nextHarvestGroups.map<HarvestGroupView>((group) => ({
+      ...group,
+      source: "harvest",
+      linkedMemberCount: 0,
+    }));
+    const linked = nextLabourGroups.map<HarvestGroupView>((group) => ({
+      ...group,
+      active: group.active !== false,
+      source: "labour",
+      linkedMemberCount: activeMemberCountByGroup.get(group.id) ?? 0,
+    }));
+    const sortGroups = (left: HarvestGroupView, right: HarvestGroupView) => left.name.localeCompare(right.name) || left.source.localeCompare(right.source);
+
+    setHarvestGroups([...nextHarvestGroups].sort((left, right) => left.name.localeCompare(right.name)));
+    setGroups([...linked, ...standalone].sort(sortGroups));
+    setEntries([...nextEntries].sort((left, right) => right.date.localeCompare(left.date) || right.createdAt.localeCompare(left.createdAt)));
+    setReady(true);
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const handle = () => void refresh();
+    window.addEventListener("muzare-data-refresh", handle);
+    window.addEventListener("muzare-local-data-change", handle);
+    return () => {
+      window.removeEventListener("muzare-data-refresh", handle);
+      window.removeEventListener("muzare-local-data-change", handle);
+    };
+  }, [refresh]);
+
+  return { groups, harvestGroups, entries, ready, refresh };
+}
+'''
+          text = replace_once(text, old_data, new_data, "replace useHarvestData")
+
+          text = replace_once(text,
+          '  const { groups, entries, refresh } = useHarvestData();\n  const [search, setSearch] = useState("");',
+          '  const { groups, harvestGroups, entries, refresh } = useHarvestData();\n  const [search, setSearch] = useState("");',
+          "groups page destructure")
+
+          text = replace_once(text,
+          '          <article className="harvest-group-card" key={group.id}>',
+          '          <article className={`harvest-group-card harvest-group-card--${group.source}`} key={`${group.source}:${group.id}`}>',
+          "group card class")
+
+          text = replace_once(text,
+          '''              <strong>{group.name}</strong>
+              <span className={`sync-badge ${group.active !== false ? "sync-badge--online" : "sync-badge--error"}`}>{translateStatus(t, group.active !== false ? "active" : "inactive")}</span>''',
+          '''              <div className="harvest-group-card__identity">
+                <strong>{group.name}</strong>
+                <span className="harvest-group-source-badge">{group.source === "labour" ? t("harvestPage.workforceGroupBadge") : t("harvestPage.harvestOnlyGroupBadge")}</span>
+              </div>
+              <span className={`sync-badge ${group.active !== false ? "sync-badge--online" : "sync-badge--error"}`}>{translateStatus(t, group.active !== false ? "active" : "inactive")}</span>''',
+          "group card identity")
+
+          text = replace_once(text,
+          '            <p className="harvest-group-card__meta">{t("harvestPage.entriesRecorded", { count: entryCountByGroup.get(group.id) ?? 0 })}</p>',
+          '''            <p className="harvest-group-card__meta">{t("harvestPage.entriesRecorded", { count: entryCountByGroup.get(group.id) ?? 0 })}</p>
+            {group.source === "labour" ? <p className="harvest-group-card__linked-note">{t("harvestPage.activeMembers", { count: group.linkedMemberCount })} · {t("harvestPage.managedInWorkforce")}</p> : null}''',
+          "linked group note")
+
+          text = replace_once(text,
+          '            {(perms.canEdit || perms.canDelete) ? (',
+          '            {group.source === "harvest" && (perms.canEdit || perms.canDelete) ? (',
+          "restrict linked actions")
+
+          text = text.replace('groups={groups} onClose={() => setShowCreate(false)}', 'groups={harvestGroups} onClose={() => setShowCreate(false)}')
+          text = text.replace('initialGroup={editingGroup} groups={groups} onClose={() => setEditingGroup(null)}', 'initialGroup={editingGroup} groups={harvestGroups} onClose={() => setEditingGroup(null)}')
+          if 'groups={groups} onClose={() => setShowCreate(false)}' in text or 'initialGroup={editingGroup} groups={groups}' in text:
+              raise SystemExit("group editor source replacement incomplete")
+
+          selectable_anchor = '''  const selectableGroups = useMemo(() => {
+    const active = groups.filter((group) => group.active !== false);
+    // Keep the currently-selected group visible even if it was deactivated mid-edit.
+    if (form.harvestGroupId && !active.some((group) => group.id === form.harvestGroupId)) {
+      const current = groups.find((group) => group.id === form.harvestGroupId);
+      if (current) return [current, ...active];
+    }
+    return active;
+  }, [groups, form.harvestGroupId]);
+
+  const membersCount = Number(form.membersCount) || 0;'''
+          selectable_replacement = '''  const selectableGroups = useMemo(() => {
+    const active = groups.filter((group) => group.active !== false);
+    // Keep the currently-selected group visible even if it was deactivated mid-edit.
+    if (form.harvestGroupId && !active.some((group) => group.id === form.harvestGroupId)) {
+      const current = groups.find((group) => group.id === form.harvestGroupId);
+      if (current) return [current, ...active];
+    }
+    return active;
+  }, [groups, form.harvestGroupId]);
+  const selectedGroup = useMemo(() => groups.find((group) => group.id === form.harvestGroupId) ?? null, [form.harvestGroupId, groups]);
+  const linkedMembersLocked = selectedGroup?.source === "labour";
+
+  useEffect(() => {
+    if (form.id || selectedGroup?.source !== "labour") return;
+    const nextCount = String(selectedGroup.linkedMemberCount);
+    setForm((current) => current.membersCount === nextCount ? current : { ...current, membersCount: nextCount });
+  }, [form.id, selectedGroup?.id, selectedGroup?.linkedMemberCount, selectedGroup?.source]);
+
+  const membersCount = Number(form.membersCount) || 0;'''
+          text = replace_once(text, selectable_anchor, selectable_replacement, "insert linked selection state")
+
+          text = replace_once(text,
+          '                onChange={(value) => setForm({ ...form, harvestGroupId: value })}\n                options={selectableGroups.map((group) => ({ value: group.id, label: group.name }))}',
+          '''                onChange={(value) => {
+                  const nextGroup = groups.find((group) => group.id === value);
+                  setForm({
+                    ...form,
+                    harvestGroupId: value,
+                    membersCount: nextGroup?.source === "labour" ? String(nextGroup.linkedMemberCount) : "",
+                  });
+                }}
+                options={selectableGroups.map((group) => ({
+                  value: group.id,
+                  label: group.source === "labour" ? `${group.name} · ${t("harvestPage.workforceGroupBadge")}` : group.name,
+                }))}''',
+          "group picker linkage")
+
+          text = replace_once(text,
+          '              <input type="number" min={1} inputMode="numeric" required value={form.membersCount} onChange={(event) => setForm({ ...form, membersCount: event.target.value })} />',
+          '''              <input type="number" min={1} inputMode="numeric" required readOnly={linkedMembersLocked} value={form.membersCount} onChange={(event) => setForm({ ...form, membersCount: event.target.value })} />
+              {linkedMembersLocked ? <small className="harvest-entry-form__hint">{selectedGroup && selectedGroup.linkedMemberCount > 0 ? t("harvestPage.linkedMembersHint") : t("harvestPage.linkedGroupNoMembers")}</small> : null}''',
+          "member count locking")
+
+          page.write_text(text)
+
+          locale = Path("web/src/locales/harvestLocalizationBundle.ts")
+          loc = locale.read_text()
+          loc = replace_once(loc,
+          '      groupsIntro: "Manage the harvest crews you record productivity for. Independent of labour and payroll.",',
+          '''      groupsIntro: "Use existing workforce groups or create harvest-only crews for productivity tracking.",
+      workforceGroupBadge: "Workforce group",
+      harvestOnlyGroupBadge: "Harvest-only group",
+      activeMembers: "{{count}} active members",
+      managedInWorkforce: "Managed in Workforce",
+      linkedMembersHint: "Active members are counted automatically from Workforce.",
+      linkedGroupNoMembers: "This workforce group has no active members. Add members in Workforce first.",''',
+          "English translations")
+          loc = replace_once(loc,
+          '      noGroupsFound: "No harvest groups yet.",',
+          '      noGroupsFound: "No groups match this view.",',
+          "English empty state")
+          loc = replace_once(loc,
+          '      groupsIntro: "أدر فرق الحصاد التي تسجّل إنتاجيتها. مستقلة عن العمالة والرواتب.",',
+          '''      groupsIntro: "استخدم مجموعات العمالة الحالية أو أنشئ فرق حصاد مستقلة لتتبع الإنتاجية.",
+      workforceGroupBadge: "مجموعة عمالة",
+      harvestOnlyGroupBadge: "مجموعة حصاد مستقلة",
+      activeMembers: "{{count}} أعضاء نشطون",
+      managedInWorkforce: "تُدار من قسم العمالة",
+      linkedMembersHint: "يتم احتساب الأعضاء النشطين تلقائياً من قسم العمالة.",
+      linkedGroupNoMembers: "لا تضم مجموعة العمالة هذه أعضاء نشطين. أضف الأعضاء في قسم العمالة أولاً.",''',
+          "Arabic translations")
+          loc = replace_once(loc,
+          '      noGroupsFound: "لا توجد مجموعات حصاد بعد.",',
+          '      noGroupsFound: "لا توجد مجموعات تطابق هذا العرض.",',
+          "Arabic empty state")
+          loc = replace_once(loc,
+          '      groupsIntro: "وہ کٹائی ٹیمیں منظم کریں جن کی پیداواری صلاحیت آپ ریکارڈ کرتے ہیں۔ مزدوری اور تنخواہ سے آزاد۔",',
+          '''      groupsIntro: "پیداواری صلاحیت ٹریک کرنے کے لیے موجودہ لیبر گروپ استعمال کریں یا الگ کٹائی گروپ بنائیں۔",
+      workforceGroupBadge: "لیبر گروپ",
+      harvestOnlyGroupBadge: "صرف کٹائی گروپ",
+      activeMembers: "{{count}} فعال اراکین",
+      managedInWorkforce: "ورک فورس میں منظم",
+      linkedMembersHint: "فعال اراکین کی تعداد ورک فورس سے خودکار طور پر لی جاتی ہے۔",
+      linkedGroupNoMembers: "اس لیبر گروپ میں کوئی فعال رکن نہیں۔ پہلے ورک فورس میں اراکین شامل کریں۔",''',
+          "Urdu translations")
+          loc = replace_once(loc,
+          '      noGroupsFound: "ابھی کوئی کٹائی گروپ نہیں۔",',
+          '      noGroupsFound: "اس منظر سے مطابقت رکھنے والا کوئی گروپ نہیں۔",',
+          "Urdu empty state")
+          locale.write_text(loc)
+
+          styles = Path("web/src/styles.css")
+          css = styles.read_text()
+          marker = "/* Harvest linked workforce groups */"
+          if marker not in css:
+              css += '''\n\n/* Harvest linked workforce groups */
+.harvest-group-card--labour {
+  border-color: color-mix(in srgb, var(--primary, #2f7d32) 24%, var(--border-subtle, #dfe6e1));
+  background: color-mix(in srgb, var(--primary, #2f7d32) 3%, var(--surface, #fff));
+}
+.harvest-group-card__identity {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+.harvest-group-source-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary, #2f7d32) 10%, #fff);
+  color: var(--primary, #2f7d32);
+  font-size: .72rem;
+  font-weight: 750;
+  line-height: 1;
+}
+.harvest-group-card__linked-note {
+  margin: 3px 0 0;
+  color: var(--text-secondary, #68717d);
+  font-size: .78rem;
+}
+.harvest-entry-form__hint {
+  display: block;
+  margin-top: 5px;
+  color: var(--text-secondary, #68717d);
+  font-size: .74rem;
+  line-height: 1.35;
+}
+.harvest-entry-form input[readonly] {
+  background: color-mix(in srgb, var(--primary, #2f7d32) 5%, var(--surface, #fff));
+  color: var(--text-primary, #1f2937);
+  cursor: default;
+}
+'''
+              styles.write_text(css)
+          PY
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify web build
+        run: npm run build --workspace web
+      - name: Commit verified change
+        shell: bash
+        run: |
+          rm .github/workflows/apply-harvest-workforce-groups.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: link workforce groups into harvest tracking"
+          git push origin HEAD:dev
