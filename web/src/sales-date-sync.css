@@ -1,3 +1,11 @@
+/* Sales uses one operational date: Sale Date.
+   Payment Date remains hidden by the existing class, and the obsolete Delivery Date
+   control is removed from the form without altering historical records. */
 .sales-form > .sales-payment-date-field--hidden {
+  display: none !important;
+}
+
+/* Form label order: Sale Date, Invoice, Buyer, Delivery Date. */
+.sales-form > label:nth-of-type(4):has(input[type="date"]) {
   display: none !important;
 }
