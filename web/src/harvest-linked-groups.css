@@ -1,0 +1,66 @@
+/* Harvest groups linked from Workforce. Scoped to Harvest group and entry surfaces. */
+.harvest-linked-groups-page .harvest-group-card--labour {
+  border-color: color-mix(in srgb, var(--primary, #2f7d32) 25%, var(--border-subtle, #dfe6e1));
+  background: color-mix(in srgb, var(--primary, #2f7d32) 3%, var(--surface, #fff));
+}
+
+.harvest-group-card__identity {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+
+.harvest-group-card__identity strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.harvest-group-source-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary, #2f7d32) 11%, #fff);
+  color: var(--primary, #2f7d32);
+  font-size: 0.72rem;
+  font-weight: 750;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.harvest-group-card__linked-note {
+  margin: 4px 0 0;
+  color: var(--text-secondary, #68717d);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.harvest-entry-form__hint {
+  display: block;
+  margin-top: 5px;
+  color: var(--text-secondary, #68717d);
+  font-size: 0.74rem;
+  font-style: normal;
+  line-height: 1.35;
+}
+
+.harvest-entry-form input[readonly] {
+  background: color-mix(in srgb, var(--primary, #2f7d32) 5%, var(--surface, #fff));
+  color: var(--text-primary, #1f2937);
+  cursor: default;
+}
+
+@media (max-width: 680px) {
+  .harvest-linked-groups-page .harvest-group-card__header {
+    align-items: flex-start;
+  }
+
+  .harvest-group-source-badge {
+    min-height: 22px;
+    font-size: 0.68rem;
+  }
+}
