@@ -18233,3 +18233,86 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
   .advance-report-print-table { font-size: 7px; }
   .advance-report-print-table .is-amount { width: 68px; }
 }
+
+/* ---------------------------------------------------------------------------
+   Harvest Performance module. Reuses shared tokens (--surface, --border,
+   --brand-*, --text*) and the workforce-shell / record-panel chrome; only the
+   module-specific leaderboard, entry form and cards are defined here.
+--------------------------------------------------------------------------- */
+.harvest-dashboard { display: grid; gap: 12px; }
+.harvest-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+.harvest-leaderboard-panel__heading h2,
+.harvest-leaderboard-panel__heading p { margin: 0; }
+.harvest-leaderboard-panel__heading p { color: var(--text-secondary); font-size: 0.82rem; margin-top: 2px; }
+.harvest-leaderboard-panel__heading { margin-bottom: 10px; }
+
+.harvest-leaderboard-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.harvest-leaderboard { border-collapse: collapse; width: 100%; min-width: 460px; font-size: 0.9rem; }
+.harvest-leaderboard thead th { text-align: start; color: var(--text-secondary); font-size: 0.72rem; font-weight: 800; letter-spacing: 0.03em; text-transform: uppercase; border-bottom: 1px solid var(--border); padding: 8px 10px; white-space: nowrap; }
+.harvest-leaderboard thead th button { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; }
+.harvest-leaderboard thead th button:hover { color: var(--text); }
+.harvest-leaderboard tbody td { border-bottom: 1px solid var(--border); padding: 9px 10px; vertical-align: middle; }
+.harvest-leaderboard tbody tr:last-child td { border-bottom: 0; }
+.harvest-leaderboard tbody tr.is-inactive { opacity: 0.6; }
+.harvest-leaderboard__rank { width: 34px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.harvest-leaderboard__num { text-align: end; font-variant-numeric: tabular-nums; }
+.harvest-leaderboard__num--accent { color: var(--brand-primary); font-weight: 700; }
+.harvest-leaderboard__group { display: flex; align-items: center; gap: 8px; }
+.harvest-leaderboard__tag { background: var(--surface-tint); color: var(--text-secondary); border-radius: 999px; font-size: 0.66rem; font-weight: 700; padding: 2px 8px; text-transform: uppercase; }
+
+.harvest-group-list { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.harvest-group-card { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 12px; display: grid; gap: 6px; align-content: start; }
+.harvest-group-card__header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.harvest-group-card__header strong { font-size: 0.98rem; }
+.harvest-group-card__meta { color: var(--text-secondary); font-size: 0.8rem; margin: 0; }
+.harvest-group-card__notes { color: var(--text-secondary); font-size: 0.82rem; margin: 0; }
+.harvest-group-card__actions { display: flex; gap: 8px; margin-top: 4px; }
+.harvest-group-card__actions button { display: inline-flex; align-items: center; gap: 5px; }
+
+.harvest-entry-layout { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+.harvest-entry-panel__heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.harvest-entry-panel__heading h2 { margin: 0; }
+.harvest-entry-form { display: grid; gap: 12px; }
+.harvest-entry-form__row { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.harvest-entry-form__field { display: grid; gap: 5px; }
+.harvest-entry-form__field > span { font-size: 0.82rem; font-weight: 600; color: var(--text); }
+.harvest-entry-form__field > span em { color: var(--text-secondary); font-style: normal; font-weight: 500; }
+.harvest-entry-form__field--full { grid-column: 1 / -1; }
+.harvest-entry-form__calc { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--surface-soft); border: 1px dashed var(--border); border-radius: 12px; padding: 10px 14px; }
+.harvest-entry-form__calc span { color: var(--text-secondary); font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; }
+.harvest-entry-form__calc strong { font-size: 1.3rem; color: var(--brand-primary); }
+.harvest-entry-form__actions { display: flex; justify-content: flex-end; }
+
+.harvest-recent-panel h2 { margin: 0 0 10px; }
+.harvest-recent-list { display: grid; gap: 8px; }
+.harvest-recent-row { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; align-items: center; }
+.harvest-recent-row__main { display: grid; gap: 2px; }
+.harvest-recent-row__main strong { font-size: 0.92rem; }
+.harvest-recent-row__main span { color: var(--text-secondary); font-size: 0.78rem; }
+.harvest-recent-row__stats { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 12px; color: var(--text-secondary); font-size: 0.78rem; }
+.harvest-recent-row__stats strong { color: var(--text); }
+.harvest-recent-row__actions { grid-row: 1; grid-column: 2; display: flex; gap: 4px; }
+
+.icon-button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 9px; border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); cursor: pointer; padding: 0; }
+.icon-button:hover { color: var(--text); border-color: var(--text-secondary); }
+
+.harvest-reports__filters { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.harvest-report-kpis { margin-bottom: 12px; }
+.harvest-report-subheading { margin: 6px 0 10px; font-size: 0.92rem; }
+
+@media (max-width: 720px) {
+  .harvest-entry-layout { grid-template-columns: minmax(0, 1fr); }
+  .harvest-reports__filters { grid-template-columns: minmax(0, 1fr); }
+}
+@media (min-width: 900px) {
+  .harvest-kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (prefers-color-scheme: dark) {
+  .harvest-group-card,
+  .harvest-recent-row,
+  .icon-button { background: var(--surface); }
+  .harvest-leaderboard__num--accent,
+  .harvest-entry-form__calc strong { color: var(--brand-accent); }
+}

@@ -127,6 +127,7 @@ const canonicalValues: Record<SystemTranslationDomain, Record<string, string>> =
     sales: "sales",
     dispatch: "dispatch",
     inventory: "inventory",
+    harvest: "harvest",
     accounts: "accounts",
     reports: "reports",
     settings: "settings",

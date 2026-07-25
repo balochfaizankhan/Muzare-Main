@@ -1,4 +1,4 @@
-import { BarChart3, BookOpenText, Boxes, ClipboardList, CloudUpload, HandCoins, LayoutDashboard, LogOut, MoreHorizontal, PackageOpen, Plus, ReceiptText, RefreshCw, Satellite, Settings, ShoppingBasket, Users, WalletCards, X, type LucideIcon } from "lucide-react";
+import { BarChart3, BookOpenText, Boxes, ClipboardList, CloudUpload, HandCoins, LayoutDashboard, LogOut, MoreHorizontal, PackageOpen, Plus, ReceiptText, RefreshCw, Satellite, Settings, ShoppingBasket, Sprout, Users, WalletCards, X, type LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
@@ -25,6 +25,7 @@ const nav = [
   ["/workspace/expenses", "layout.expenses", ReceiptText, "expenses"],
   ["/workspace/dispatch", "layout.dispatch", PackageOpen, "dispatch"],
   ["/workspace/inventory", "layout.inventory", Boxes, "inventory"],
+  ["/workspace/harvest/dashboard", "layout.harvest", Sprout, "harvest"],
   ["/workspace/operations-map", "operationsMap", Satellite, "dashboard"],
   ["/workspace/reports", "layout.reports", BarChart3, "reports"],
   ["/workspace/accounts", "layout.accounts", BookOpenText, "accounts"],

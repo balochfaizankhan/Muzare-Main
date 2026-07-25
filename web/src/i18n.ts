@@ -4,6 +4,7 @@ import { adminLocalizationBundle } from "./locales/adminLocalizationBundle";
 import { apiErrorCatalog, apiErrorPatternCatalog } from "./locales/apiErrorCatalog";
 import { apiErrorCatalogExtra, apiErrorPatternCatalogExtra } from "./locales/apiErrorCatalogExtra";
 import { coreUiLocalizationBundle } from "./locales/coreUiLocalizationBundle";
+import { harvestLocalizationBundle } from "./locales/harvestLocalizationBundle";
 import { reportsLocalizationBundle } from "./locales/reportsLocalizationBundle";
 import { workforceLocalizationBundle } from "./locales/workforceLocalizationBundle";
 
@@ -10468,7 +10469,7 @@ for (const [language, bundle] of Object.entries(systemLocalizationBackfill)) {
 
 // Per-area translation bundles from the 2026-07 full-localization pass live in ./locales so
 // independent areas can grow without touching this file. Same merge semantics as the backfills.
-for (const areaBundle of [workforceLocalizationBundle, reportsLocalizationBundle, coreUiLocalizationBundle, adminLocalizationBundle]) {
+for (const areaBundle of [workforceLocalizationBundle, reportsLocalizationBundle, coreUiLocalizationBundle, adminLocalizationBundle, harvestLocalizationBundle]) {
   for (const [language, bundle] of Object.entries(areaBundle as Record<string, { translation: Record<string, unknown> }>)) {
     mergeTranslations((resources as Record<string, { translation: Record<string, unknown> }>)[language].translation, bundle.translation);
   }

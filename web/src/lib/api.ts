@@ -41,7 +41,7 @@ export type AccountingReconciliationAccountOption = {
 
 export type PlatformRole = "platform_admin" | "platform_support";
 export type WorkspaceRole = "workspace_owner" | "workspace_manager" | "supervisor" | "accountant" | "operator" | "viewer";
-export type WorkspaceModule = "dashboard" | "workforce" | "attendance" | "advances" | "wages" | "expenses" | "sales" | "dispatch" | "inventory" | "accounts" | "reports" | "settings" | "team";
+export type WorkspaceModule = "dashboard" | "workforce" | "attendance" | "advances" | "wages" | "expenses" | "sales" | "dispatch" | "inventory" | "harvest" | "accounts" | "reports" | "settings" | "team";
 export type WorkspaceModuleAction = "view" | "create" | "edit" | "delete" | "approve" | "export";
 export type WorkspaceModulePermissions = Partial<Record<WorkspaceModule, Partial<Record<WorkspaceModuleAction, boolean>>>>;
 export type FarmAccessMode = "all" | "assigned";
@@ -704,7 +704,9 @@ export type OperationalEntity =
   | "sale"
   | "voucher"
   | "partnerEntry"
-  | "inventoryEntry";
+  | "inventoryEntry"
+  | "harvestGroup"
+  | "harvestEntry";
 export type OperationalRecordEnvelope = {
   workspaceId: string; farmId?: string | null; seasonId?: string | null; entity: OperationalEntity;
   record: { id: string; createdAt: string; updatedAt: string; [key: string]: unknown };
