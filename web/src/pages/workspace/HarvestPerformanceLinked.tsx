@@ -78,7 +78,7 @@ const todayKey = () => formatLocalDateKey(new Date());
 const cartons = (value: number) => formatNumber(value, { maximumFractionDigits: 0 });
 const ratio = (value: number) => formatNumber(value, { maximumFractionDigits: 1 });
 const toast = (message: string) => window.dispatchEvent(new CustomEvent("muzare-toast", { detail: message }));
-const isLinkedGroup = (group: HarvestGroup): group is LinkedHarvestGroup => Boolean((group as LinkedHarvestGroup).sourceLabourGroupId);
+const isLinkedGroup = (group: HarvestGroup | LinkedHarvestGroup) => Boolean((group as LinkedHarvestGroup).sourceLabourGroupId);
 const emptyEntryForm = (): EntryForm => ({ date: todayKey(), harvestGroupId: "", membersCount: "", cartonsHarvested: "", notes: "" });
 
 function useHarvestPerms() {
