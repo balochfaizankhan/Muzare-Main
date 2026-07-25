@@ -1,0 +1,46 @@
+name: Run Harvest Group Linkage Patch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/run-harvest-link-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Extract and apply patch
+        shell: bash
+        run: |
+          awk '
+            /- name: Link workforce groups into harvest/ { found=1; next }
+            found && /        run: \|/ { capture=1; next }
+            capture && /^      - name:/ { exit }
+            capture { sub(/^          /, ""); print }
+          ' .github/workflows/apply-harvest-workforce-groups.yml > /tmp/apply-harvest-link.sh
+          test -s /tmp/apply-harvest-link.sh
+          bash /tmp/apply-harvest-link.sh
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify web build
+        run: npm run build --workspace web
+      - name: Commit verified code to dev
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/src/pages/workspace/HarvestPerformance.tsx web/src/locales/harvestLocalizationBundle.ts web/src/styles.css
+          git commit -m "feat: link workforce groups into harvest tracking"
+          git push origin HEAD:dev
