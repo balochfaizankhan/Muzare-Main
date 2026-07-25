@@ -49,6 +49,8 @@ const entities = [
   "voucher",
   "partnerEntry",
   "inventoryEntry",
+  "harvestGroup",
+  "harvestEntry",
 ] as const;
 const recordSchema = z.object({
   workspaceId: z.string().uuid(),
@@ -93,7 +95,7 @@ const operationalDeleteSchema = z.object({
   workspaceId: z.string().uuid(),
   farmId: z.string().uuid(),
   seasonId: z.string().uuid().nullable().optional(),
-  entity: z.enum(["dispatch", "vehicle", "dateType"]),
+  entity: z.enum(["dispatch", "vehicle", "dateType", "harvestGroup", "harvestEntry"]),
   recordId: z.string().min(1),
   reason: z.string().trim().max(500).optional(),
 });
@@ -365,6 +367,7 @@ function entityModule(entity: typeof entities[number]): WorkspaceModule {
   if (entity === "sale") return "sales";
   if (["dispatch", "vehicle", "dateType"].includes(entity)) return "dispatch";
   if (entity === "inventoryEntry") return "inventory";
+  if (entity === "harvestGroup" || entity === "harvestEntry") return "harvest";
   return "accounts";
 }
 
@@ -382,6 +385,8 @@ const seasonRequiredEntities = new Set<typeof entities[number]>([
   "voucher",
   "partnerEntry",
   "inventoryEntry",
+  "harvestGroup",
+  "harvestEntry",
 ]);
 
 async function sessionContext(sessionId?: string) {
@@ -1513,7 +1518,8 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         && await dispatchMasterIsUsed(parsed.data.workspaceId, parsed.data.farmId, parsed.data.entity === "dateType" ? null : requestSeasonId, parsed.data.entity, parsed.data.recordId)) {
         return reply.code(409).send({ message: `${parsed.data.entity === "vehicle" ? "Vehicle" : "Date type"} cannot be deleted because it is used by a dispatch.` });
       }
-      if (parsed.data.entity === "dispatch" || parsed.data.entity === "vehicle" || parsed.data.entity === "dateType") {
+      if (parsed.data.entity === "dispatch" || parsed.data.entity === "vehicle" || parsed.data.entity === "dateType"
+        || parsed.data.entity === "harvestGroup" || parsed.data.entity === "harvestEntry") {
         const [deleted] = await db.delete(operationalRecords).where(eq(operationalRecords.id, entry.id)).returning({ id: operationalRecords.id });
         if (deleted) {
           await db.insert(auditLogs).values({

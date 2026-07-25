@@ -41,7 +41,9 @@ export type PendingMutation = LocalRecord & {
     | "sale"
     | "voucher"
     | "partnerEntry"
-    | "inventoryEntry";
+    | "inventoryEntry"
+    | "harvestGroup"
+    | "harvestEntry";
   operation: "create" | "update" | "delete";
   payload: unknown;
   attempts: number;
@@ -429,6 +431,26 @@ export type InventoryEntry = LocalRecord & {
   notes: string;
 };
 
+// Harvest Performance module. Independent of workforce/labour: harvest groups and
+// daily harvest entries only track operational productivity (cartons per person).
+// Both are season-scoped (created with makeLocalRecord, read with workspaceRecords),
+// mirroring labourGroup so they flow through the generic sync path with no special-casing.
+export type HarvestGroup = LocalRecord & {
+  name: string;
+  active: boolean;
+  notes?: string;
+};
+
+export type HarvestEntry = LocalRecord & {
+  date: string;
+  harvestGroupId: string;
+  harvestGroupName?: string;
+  membersCount: number;
+  cartonsHarvested: number;
+  cartonsPerPerson: number;
+  notes?: string;
+};
+
 export const offlineDb = new Dexie("muzare-offline") as Dexie & {
   pendingMutations: EntityTable<PendingMutation, "id">;
   labourers: EntityTable<Labourer, "id">;
@@ -448,6 +470,8 @@ export const offlineDb = new Dexie("muzare-offline") as Dexie & {
   productionEntries: EntityTable<ProductionEntry, "id">;
   labourPayments: EntityTable<LabourPayment, "id">;
   inventoryEntries: EntityTable<InventoryEntry, "id">;
+  harvestGroups: EntityTable<HarvestGroup, "id">;
+  harvestEntries: EntityTable<HarvestEntry, "id">;
 };
 
 offlineDb.version(1).stores({
@@ -639,6 +663,31 @@ offlineDb.version(11).stores({
   productionEntries: "id, workspaceId, farmId, seasonId, labourerId, date, productionUnit, createdAt, updatedAt, pendingSync",
   labourPayments: "id, workspaceId, farmId, seasonId, labourerId, date, createdAt, updatedAt, pendingSync",
   inventoryEntries: "id, workspaceId, farmId, seasonId, date, itemName, createdAt, updatedAt, pendingSync",
+});
+
+// v12 adds the Harvest Performance object stores. This is a purely additive migration
+// (new stores only) with no `.upgrade(clear)`, so all existing cached data survives the upgrade.
+offlineDb.version(12).stores({
+  pendingMutations: "id, workspaceId, farmId, seasonId, entity, operation, createdAt",
+  labourers: "id, workspaceId, farmId, seasonId, name, groupId, createdAt, updatedAt, pendingSync",
+  labourGroups: "id, workspaceId, farmId, seasonId, name, active, createdAt, updatedAt, pendingSync",
+  attendance: "id, workspaceId, farmId, seasonId, labourerId, date, status, createdAt, updatedAt, pendingSync",
+  accounts: "id, workspaceId, farmId, seasonId, name, type, createdAt, updatedAt, pendingSync",
+  vouchers: "id, workspaceId, farmId, seasonId, date, category, accountId, createdAt, updatedAt, pendingSync",
+  vehicles: "id, workspaceId, farmId, seasonId, number, active, createdAt, updatedAt, pendingSync",
+  dateTypes: "id, workspaceId, farmId, seasonId, name, active, createdAt, updatedAt, pendingSync",
+  dispatches: "id, workspaceId, farmId, seasonId, date, vehicleId, createdAt, updatedAt, pendingSync",
+  sales: "id, workspaceId, farmId, seasonId, date, buyerName, accountId, createdAt, updatedAt, pendingSync",
+  partnerEntries: "id, workspaceId, farmId, seasonId, date, partnerName, accountId, createdAt, updatedAt, pendingSync",
+  advances: "id, workspaceId, farmId, seasonId, date, labourerId, createdAt, updatedAt, pendingSync",
+  labourEarnings: "id, workspaceId, farmId, seasonId, labourerId, earningDate, earningType, status, createdAt, updatedAt, pendingSync",
+  labourWageSettlements: "id, workspaceId, farmId, seasonId, settlementDate, fromDate, toDate, settlementNumber, status, createdAt, updatedAt, pendingSync",
+  wageRates: "id, workspaceId, farmId, seasonId, labourerId, effectiveFrom, effectiveTo, active, createdAt, updatedAt, pendingSync",
+  productionEntries: "id, workspaceId, farmId, seasonId, labourerId, date, productionUnit, createdAt, updatedAt, pendingSync",
+  labourPayments: "id, workspaceId, farmId, seasonId, labourerId, date, createdAt, updatedAt, pendingSync",
+  inventoryEntries: "id, workspaceId, farmId, seasonId, date, itemName, createdAt, updatedAt, pendingSync",
+  harvestGroups: "id, workspaceId, farmId, seasonId, name, active, createdAt, updatedAt, pendingSync",
+  harvestEntries: "id, workspaceId, farmId, seasonId, date, harvestGroupId, createdAt, updatedAt, pendingSync",
 });
 
 let activeWorkspaceId: string | null = null;

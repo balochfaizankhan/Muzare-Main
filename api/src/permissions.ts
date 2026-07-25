@@ -32,7 +32,7 @@ export type WorkspacePermission =
   | "VIEW_REPORTS";
 
 export type Permission = PlatformPermission | WorkspacePermission;
-export const workspaceModules = ["dashboard", "workforce", "attendance", "advances", "wages", "expenses", "sales", "dispatch", "inventory", "accounts", "reports", "settings", "team"] as const;
+export const workspaceModules = ["dashboard", "workforce", "attendance", "advances", "wages", "expenses", "sales", "dispatch", "inventory", "harvest", "accounts", "reports", "settings", "team"] as const;
 export const workspaceModuleActions = ["view", "create", "edit", "delete", "approve", "export"] as const;
 export type WorkspaceModule = (typeof workspaceModules)[number];
 export type WorkspaceModuleAction = (typeof workspaceModuleActions)[number];
@@ -110,13 +110,13 @@ export const roleModulePermissions: Record<WorkspaceRole, Record<WorkspaceModule
   workspace_manager: {
     dashboard: { ...viewOnly }, workforce: { ...viewCreateEdit }, attendance: { ...viewCreateEdit, approve: true },
     advances: { ...viewCreateEdit }, wages: { ...viewCreateEdit, export: true }, expenses: { ...viewCreateEdit }, sales: { ...viewCreateEdit }, dispatch: { ...viewCreateEdit },
-    inventory: { ...viewCreateEdit }, accounts: { ...viewOnly }, reports: { ...viewOnly, export: true },
+    inventory: { ...viewCreateEdit }, harvest: { ...viewCreateEdit, delete: true, export: true }, accounts: { ...viewOnly }, reports: { ...viewOnly, export: true },
     settings: { ...viewOnly }, team: { ...viewOnly },
   },
   supervisor: {
     dashboard: { ...viewOnly }, workforce: { ...viewOnly }, attendance: { ...viewCreateEdit }, advances: { ...viewCreateEdit }, wages: { ...viewOnly, export: true },
     expenses: { ...viewCreateEdit }, sales: { ...viewCreateEdit }, dispatch: { ...viewCreateEdit }, inventory: { ...viewCreateEdit },
-    accounts: { ...viewOnly }, reports: { ...viewOnly }, settings: { ...viewOnly }, team: { ...viewOnly },
+    harvest: { ...viewCreateEdit, delete: true, export: true }, accounts: { ...viewOnly }, reports: { ...viewOnly }, settings: { ...viewOnly }, team: { ...viewOnly },
   },
   accountant: {
     dashboard: { ...viewOnly },
@@ -128,6 +128,7 @@ export const roleModulePermissions: Record<WorkspaceRole, Record<WorkspaceModule
     sales: { ...viewOnly },
     dispatch: { ...viewOnly },
     inventory: { ...viewOnly },
+    harvest: { ...viewOnly, export: true },
     accounts: { ...viewCreateEdit, export: true },
     reports: { ...viewOnly, export: true },
     settings: { ...viewOnly, view: false },
@@ -135,7 +136,7 @@ export const roleModulePermissions: Record<WorkspaceRole, Record<WorkspaceModule
   },
   operator: {
     dashboard: { ...viewOnly }, workforce: { ...viewOnly }, attendance: { ...viewCreate }, advances: { ...viewCreate }, wages: { ...viewOnly },
-    expenses: { ...viewCreate }, sales: { ...viewCreate }, dispatch: { ...viewCreate }, inventory: { ...viewCreate },
+    expenses: { ...viewCreate }, sales: { ...viewCreate }, dispatch: { ...viewCreate }, inventory: { ...viewCreate }, harvest: { ...viewCreateEdit },
     accounts: { ...viewOnly, view: false }, reports: { ...viewOnly, view: false }, settings: { ...viewOnly, view: false }, team: { ...viewOnly, view: false },
   },
   viewer: Object.fromEntries(workspaceModules.map((module) => [module, { ...viewOnly }])) as Record<WorkspaceModule, Record<WorkspaceModuleAction, boolean>>,

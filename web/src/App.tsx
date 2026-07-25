@@ -48,6 +48,11 @@ const WorkspaceDashboard = lazy(async () => ({ default: (await import("./pages/w
 const Farms = lazy(async () => ({ default: (await import("./pages/workspace/Farms")).Farms }));
 const FarmOperationsMap = lazy(async () => ({ default: (await import("./pages/workspace/FarmOperationsMap")).FarmOperationsMap }));
 const Seasons = lazy(async () => ({ default: (await import("./pages/workspace/Seasons")).Seasons }));
+const HarvestSectionLayout = lazy(async () => ({ default: (await import("./pages/workspace/HarvestPerformance")).HarvestSectionLayout }));
+const HarvestDashboardPage = lazy(async () => ({ default: (await import("./pages/workspace/HarvestPerformance")).HarvestDashboardPage }));
+const HarvestEntryPage = lazy(async () => ({ default: (await import("./pages/workspace/HarvestPerformance")).HarvestEntryPage }));
+const HarvestGroupsPage = lazy(async () => ({ default: (await import("./pages/workspace/HarvestPerformance")).HarvestGroupsPage }));
+const HarvestReportsPage = lazy(async () => ({ default: (await import("./pages/workspace/HarvestPerformance")).HarvestReportsPage }));
 const WorkspaceApprovals = lazy(async () => ({ default: (await import("./pages/workspace/WorkspaceApprovals")).WorkspaceApprovals }));
 const WorkspaceTeam = lazy(async () => ({ default: (await import("./pages/workspace/WorkspaceTeam")).WorkspaceTeam }));
 
@@ -221,6 +226,13 @@ export default function App() {
       <Route path="expenses/summary" element={routeElement(<Expenses />, "routeLoading.expenseSummary")} />
       <Route path="dispatch" element={routeElement(<Dispatch />, "routeLoading.dispatch")} />
       <Route path="inventory" element={routeElement(<Inventory />, "routeLoading.inventory")} />
+      <Route path="harvest" element={routeElement(<HarvestSectionLayout />, "routeLoading.harvest")}>
+        <Route index element={<Navigate to="dashboard" replace />} />
+        <Route path="dashboard" element={routeElement(<HarvestDashboardPage />, "routeLoading.harvestDashboard")} />
+        <Route path="entry" element={routeElement(<HarvestEntryPage />, "routeLoading.harvestEntry")} />
+        <Route path="groups" element={routeElement(<HarvestGroupsPage />, "routeLoading.harvestGroups")} />
+        <Route path="reports" element={routeElement(<HarvestReportsPage />, "routeLoading.harvestReports")} />
+      </Route>
       <Route path="attendance" element={<Navigate to="/workspace/workforce/attendance" replace />} />
       <Route path="advances" element={<Navigate to="/workspace/labour-payments/advances" replace />} />
       <Route path="labour-advances" element={<Navigate to="/workspace/labour-payments/advances" replace />} />

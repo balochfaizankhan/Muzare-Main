@@ -26,6 +26,10 @@ export default defineConfig({
         manualChunks(id) {
           if (id.includes("node_modules/react") || id.includes("node_modules/@tanstack")) return "react";
           if (id.includes("node_modules/i18next")) return "i18n";
+          // The translation resources (~10k-line i18n.ts + per-area locale bundles) change far
+          // less often than app code and dominate the main entry chunk. Splitting them into a
+          // dedicated chunk shrinks the app-logic chunk and lets translations cache independently.
+          if (id.includes("/src/i18n.ts") || id.includes("/src/locales/")) return "i18n-resources";
           return undefined;
         },
       },
