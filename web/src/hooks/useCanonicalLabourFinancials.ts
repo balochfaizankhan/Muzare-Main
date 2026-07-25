@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../auth/AuthProvider";
 import { useSyncState } from "./useSyncState";
 import { fetchLabourFinancialReadModel } from "../lib/api";
+import { registerExternalAccountIdentities } from "../lib/accountIdentity";
 import { createRefreshDebouncer } from "../lib/eventCoalescing";
 
 /** One scoped canonical source for labour account, partner, ledger, expense and activity consumers. */
@@ -21,6 +22,16 @@ export function useCanonicalLabourFinancials() {
       if (scope.workspaceId !== workspaceId || scope.farmId !== farmId || scope.seasonId !== seasonId) {
         throw new Error("The financial snapshot belongs to a different workspace, farm, or season.");
       }
+      registerExternalAccountIdentities([
+        ...response.financials.partnerPositions.map((position) => ({
+          accountId: position.accountId,
+          accountName: position.accountName,
+        })),
+        ...response.financials.expenseAccountAttributions.map((attribution) => ({
+          accountId: attribution.accountId,
+          accountName: attribution.accountName,
+        })),
+      ]);
       return response;
     },
     enabled: Boolean(token && workspaceId && farmId && seasonId && navigator.onLine),
