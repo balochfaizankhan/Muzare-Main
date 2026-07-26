@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { requireAdmin, requirePermission, serializeUser } from "../auth.js";
+import { hashPassword, requireAdmin, requirePermission, serializeUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
 import { auditLogs } from "../db/schema.js";
@@ -10,6 +10,9 @@ import { userSessions, users, workspaceMemberships, workspaces } from "../db/sch
 const userIdSchema = z.object({ userId: z.string().uuid() });
 const userStatusSchema = z.object({
   active: z.boolean(),
+});
+const userPasswordResetSchema = z.object({
+  password: z.string().min(8).max(128),
 });
 
 async function repairInvitedDefaultWorkspaces(actorUserId: string) {
@@ -258,6 +261,63 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
         details: auditDetails,
       });
     }
+
+    return reply.code(204).send();
+  });
+
+  app.post("/v1/admin/users/:userId/reset-password", { preHandler: requirePermission("CREATE_WORKSPACE") }, async (request, reply) => {
+    if (!request.appUser) return reply;
+    if (localDevelopmentMode) return reply.code(503).send({ message: "Configure PostgreSQL to reset user passwords." });
+
+    const params = userIdSchema.safeParse(request.params);
+    const body = userPasswordResetSchema.safeParse(request.body);
+    if (!params.success) return reply.code(400).send({ message: "A valid user id is required." });
+    if (!body.success) return reply.code(400).send({ message: "The new password must be between 8 and 128 characters." });
+
+    const [targetUser] = await db.select({
+      id: users.id,
+      email: users.email,
+    }).from(users).where(eq(users.id, params.data.userId)).limit(1);
+    if (!targetUser) return reply.code(404).send({ message: "User not found." });
+
+    const memberships = await db.select({ workspaceId: workspaceMemberships.workspaceId })
+      .from(workspaceMemberships)
+      .where(eq(workspaceMemberships.userId, targetUser.id));
+    const workspaceIds = [...new Set(memberships.map((membership) => membership.workspaceId))];
+    const passwordHash = await hashPassword(body.data.password);
+    const resetAt = new Date();
+
+    await db.transaction(async (tx) => {
+      await tx.update(users).set({
+        passwordHash,
+        updatedAt: resetAt,
+      }).where(eq(users.id, targetUser.id));
+      await tx.delete(userSessions).where(eq(userSessions.userId, targetUser.id));
+
+      const auditDetails = {
+        targetUserEmail: targetUser.email,
+        sessionsRevoked: true,
+        resetAt: resetAt.toISOString(),
+      };
+      if (workspaceIds.length) {
+        await tx.insert(auditLogs).values(workspaceIds.map((workspaceId) => ({
+          workspaceId,
+          userId: request.appUser!.id,
+          action: "account.password_reset_by_admin",
+          entityType: "user",
+          entityId: targetUser.id,
+          details: auditDetails,
+        })));
+      } else {
+        await tx.insert(auditLogs).values({
+          userId: request.appUser!.id,
+          action: "account.password_reset_by_admin",
+          entityType: "user",
+          entityId: targetUser.id,
+          details: auditDetails,
+        });
+      }
+    });
 
     return reply.code(204).send();
   });
