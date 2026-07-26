@@ -48,11 +48,11 @@ const WorkspaceDashboard = lazy(async () => ({ default: (await import("./pages/w
 const Farms = lazy(async () => ({ default: (await import("./pages/workspace/Farms")).Farms }));
 const FarmOperationsMap = lazy(async () => ({ default: (await import("./pages/workspace/FarmOperationsMap")).FarmOperationsMap }));
 const Seasons = lazy(async () => ({ default: (await import("./pages/workspace/Seasons")).Seasons }));
-const HarvestSectionLayout = lazy(async () => ({ default: (await import("./pages/workspace/HarvestPerformance")).HarvestSectionLayout }));
-const HarvestDashboardPage = lazy(async () => ({ default: (await import("./pages/workspace/HarvestPerformance")).HarvestDashboardPage }));
-const HarvestEntryPage = lazy(async () => ({ default: (await import("./pages/workspace/HarvestPerformance")).HarvestEntryPage }));
-const HarvestGroupsPage = lazy(async () => ({ default: (await import("./pages/workspace/HarvestPerformance")).HarvestGroupsPage }));
-const HarvestReportsPage = lazy(async () => ({ default: (await import("./pages/workspace/HarvestPerformance")).HarvestReportsPage }));
+const HarvestSectionLayout = lazy(async () => ({ default: (await import("./pages/workspace/HarvestPerformanceLinked")).HarvestSectionLayout }));
+const HarvestDashboardPage = lazy(async () => ({ default: (await import("./pages/workspace/HarvestPerformanceLinked")).HarvestDashboardPage }));
+const HarvestEntryPage = lazy(async () => ({ default: (await import("./pages/workspace/HarvestPerformanceLinked")).HarvestEntryPage }));
+const HarvestGroupsPage = lazy(async () => ({ default: (await import("./pages/workspace/HarvestPerformanceLinked")).HarvestGroupsPage }));
+const HarvestReportsPage = lazy(async () => ({ default: (await import("./pages/workspace/HarvestPerformanceLinked")).HarvestReportsPage }));
 const WorkspaceApprovals = lazy(async () => ({ default: (await import("./pages/workspace/WorkspaceApprovals")).WorkspaceApprovals }));
 const WorkspaceTeam = lazy(async () => ({ default: (await import("./pages/workspace/WorkspaceTeam")).WorkspaceTeam }));
 
