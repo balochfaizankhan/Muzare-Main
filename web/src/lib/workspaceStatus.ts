@@ -39,19 +39,26 @@ export function deriveWorkspaceDisplayStatus({
 }: WorkspaceDisplayStatusInput): WorkspaceDisplayStatus {
   const farm = bootstrap?.farms.find((item) => item.id === bootstrap.activeFarmId) ?? null;
   const season = bootstrap?.seasons.find((item) => item.id === bootstrap.activeSeasonId) ?? null;
-  const hasFarm = Boolean(farm);
-  const hasSeason = Boolean(season);
+  const hasCachedFarm = Boolean(sync.farmId);
+  const hasCachedSeason = Boolean(sync.seasonId);
+  const hasFarm = Boolean(farm) || hasCachedFarm;
+  const hasSeason = Boolean(season) || hasCachedSeason;
   const hasOperationalContext = hasFarm && hasSeason;
-  const hydrationPending = bootstrapLoading
+  const contextLoaded = bootstrapLoaded || hasOperationalContext;
+  const hydrationPending = !hasOperationalContext && (
+    bootstrapLoading
     || !bootstrapLoaded
     || sync.startupStage === "loadingWorkspace"
-    || sync.startupStage === "loadingContext";
-  const setupRequired = bootstrapLoaded && !hydrationPending && (!hasFarm || !hasSeason);
+    || sync.startupStage === "loadingContext"
+  );
+  const setupRequired = contextLoaded && !hydrationPending && (!hasFarm || !hasSeason);
   const syncInProgress = sync.status === "syncing" || (sync.pendingCount ?? 0) > 0 || sync.startupStage === "syncingLatestRecords";
   const noFarmSelectedShort = t("workspaceStatus.noFarmAvailableShort");
   const noSeasonSelectedShort = hasFarm ? t("workspaceStatus.noActiveSeasonShort") : t("workspaceStatus.createFarmFirstShort");
+  const selectedFarmLabel = farm?.name ?? (hasCachedFarm ? t("workspaceStatus.loadingFarmEllipsis") : noFarmSelectedShort);
+  const selectedSeasonLabel = season?.name ?? (hasCachedSeason ? t("workspaceStatus.loadingSeasonEllipsis") : noSeasonSelectedShort);
 
-  if (sync.status === "error" || bootstrapErrored) {
+  if (sync.status === "error" || (bootstrapErrored && !hasOperationalContext)) {
     return {
       tone: "error",
       label: t("workspaceStatus.syncFailedLabel"),
@@ -59,13 +66,13 @@ export function deriveWorkspaceDisplayStatus({
       heroStatus: t("workspaceStatus.heroSyncFailed"),
       heroCopy: t("workspaceStatus.heroSyncFailedCopy"),
       hydrationPending,
-      bootstrapLoaded,
+      bootstrapLoaded: contextLoaded,
       hasFarm,
       hasSeason,
       hasOperationalContext,
       setupRequired,
-      selectedFarmLabel: hydrationPending ? t("workspaceStatus.loadingFarmEllipsis") : (farm?.name ?? noFarmSelectedShort),
-      selectedSeasonLabel: hydrationPending ? t("workspaceStatus.loadingSeasonEllipsis") : (season?.name ?? noSeasonSelectedShort),
+      selectedFarmLabel: hydrationPending ? t("workspaceStatus.loadingFarmEllipsis") : selectedFarmLabel,
+      selectedSeasonLabel: hydrationPending ? t("workspaceStatus.loadingSeasonEllipsis") : selectedSeasonLabel,
     };
   }
 
@@ -77,7 +84,7 @@ export function deriveWorkspaceDisplayStatus({
       heroStatus: t("workspaceStatus.heroLoadingWorkspace"),
       heroCopy: t("workspaceStatus.heroPreparingOverview"),
       hydrationPending,
-      bootstrapLoaded,
+      bootstrapLoaded: contextLoaded,
       hasFarm,
       hasSeason,
       hasOperationalContext,
@@ -95,13 +102,13 @@ export function deriveWorkspaceDisplayStatus({
       heroStatus: t("workspaceStatus.offlineLabel"),
       heroCopy: t("workspaceStatus.heroOfflineCopy"),
       hydrationPending,
-      bootstrapLoaded,
+      bootstrapLoaded: contextLoaded,
       hasFarm,
       hasSeason,
       hasOperationalContext,
       setupRequired,
-      selectedFarmLabel: farm?.name ?? noFarmSelectedShort,
-      selectedSeasonLabel: season?.name ?? noSeasonSelectedShort,
+      selectedFarmLabel,
+      selectedSeasonLabel,
     };
   }
 
@@ -114,13 +121,13 @@ export function deriveWorkspaceDisplayStatus({
       heroStatus: t("workspaceStatus.heroSyncing"),
       heroCopy: pendingCount > 0 ? t("workspaceStatus.changeStillNeedsSync", { count: pendingCount }) : t("workspaceStatus.syncingLatestRecords"),
       hydrationPending,
-      bootstrapLoaded,
+      bootstrapLoaded: contextLoaded,
       hasFarm,
       hasSeason,
       hasOperationalContext,
       setupRequired,
-      selectedFarmLabel: farm?.name ?? noFarmSelectedShort,
-      selectedSeasonLabel: season?.name ?? noSeasonSelectedShort,
+      selectedFarmLabel,
+      selectedSeasonLabel,
     };
   }
 
@@ -133,13 +140,13 @@ export function deriveWorkspaceDisplayStatus({
       heroStatus: t("workspaceStatus.setupRequiredLabel"),
       heroCopy: missingSeason ? t("workspaceStatus.selectSeasonToUnlock") : t("workspaceStatus.selectFarmToUnlock"),
       hydrationPending,
-      bootstrapLoaded,
+      bootstrapLoaded: contextLoaded,
       hasFarm,
       hasSeason,
       hasOperationalContext,
       setupRequired,
-      selectedFarmLabel: farm?.name ?? noFarmSelectedShort,
-      selectedSeasonLabel: season?.name ?? noSeasonSelectedShort,
+      selectedFarmLabel,
+      selectedSeasonLabel,
     };
   }
 
@@ -150,12 +157,12 @@ export function deriveWorkspaceDisplayStatus({
     heroStatus: t("workspaceStatus.heroReady"),
     heroCopy: t("workspaceStatus.workspaceSyncedReady"),
     hydrationPending,
-    bootstrapLoaded,
+    bootstrapLoaded: contextLoaded,
     hasFarm,
     hasSeason,
     hasOperationalContext,
     setupRequired,
-    selectedFarmLabel: farm?.name ?? noFarmSelectedShort,
-    selectedSeasonLabel: season?.name ?? noSeasonSelectedShort,
+    selectedFarmLabel,
+    selectedSeasonLabel,
   };
 }
