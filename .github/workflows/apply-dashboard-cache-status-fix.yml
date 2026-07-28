@@ -1,0 +1,469 @@
+name: Apply dashboard cache and status fix
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - .github/workflows/apply-dashboard-cache-status-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apply guarded source changes
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one match in {path}, found {count}: {old[:120]!r}")
+              file.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          replace_once(
+              "web/src/hooks/useSyncState.ts",
+              '  const cachedContextReady = Boolean(next.farmId && next.seasonId);',
+              '  const cachedContextReady = Boolean(next.farmId && next.seasonId && next.farmName && next.seasonName);',
+          )
+
+          replace_once(
+              "web/src/lib/workspaceStatus.ts",
+              '''  const farm = bootstrap?.farms.find((item) => item.id === bootstrap.activeFarmId) ?? null;
+          const season = bootstrap?.seasons.find((item) => item.id === bootstrap.activeSeasonId) ?? null;
+          const hasCachedFarm = Boolean(sync.farmId);
+          const hasCachedSeason = Boolean(sync.seasonId);
+          const hasFarm = Boolean(farm) || hasCachedFarm;
+          const hasSeason = Boolean(season) || hasCachedSeason;
+          const hasOperationalContext = hasFarm && hasSeason;
+          const contextLoaded = bootstrapLoaded || hasOperationalContext;
+          const hydrationPending = !hasOperationalContext && (
+            bootstrapLoading
+            || !bootstrapLoaded
+            || sync.startupStage === "loadingWorkspace"
+            || sync.startupStage === "loadingContext"
+          );
+          const setupRequired = contextLoaded && !hydrationPending && (!hasFarm || !hasSeason);
+          const syncInProgress = sync.status === "syncing" || (sync.pendingCount ?? 0) > 0 || sync.startupStage === "syncingLatestRecords";
+          const noFarmSelectedShort = t("workspaceStatus.noFarmAvailableShort");
+          const noSeasonSelectedShort = hasFarm ? t("workspaceStatus.noActiveSeasonShort") : t("workspaceStatus.createFarmFirstShort");
+          const selectedFarmLabel = farm?.name ?? (hasCachedFarm ? t("workspaceStatus.loadingFarmEllipsis") : noFarmSelectedShort);
+          const selectedSeasonLabel = season?.name ?? (hasCachedSeason ? t("workspaceStatus.loadingSeasonEllipsis") : noSeasonSelectedShort);''',
+              '''  const farm = bootstrap?.farms.find((item) => item.id === bootstrap.activeFarmId) ?? null;
+          const season = bootstrap?.seasons.find((item) => item.id === bootstrap.activeSeasonId) ?? null;
+          const hasCachedFarm = Boolean(sync.farmId);
+          const hasCachedSeason = Boolean(sync.seasonId);
+          const hasCachedFarmLabel = Boolean(sync.farmId && sync.farmName);
+          const hasCachedSeasonLabel = Boolean(sync.seasonId && sync.seasonName);
+          const hasFarm = Boolean(farm) || hasCachedFarm;
+          const hasSeason = Boolean(season) || hasCachedSeason;
+          const hasOperationalContext = hasFarm && hasSeason;
+          const hasDisplayReadyContext = Boolean(farm && season) || (hasCachedFarmLabel && hasCachedSeasonLabel);
+          const contextLoaded = bootstrapLoaded || hasDisplayReadyContext;
+          const hydrationPending = !hasDisplayReadyContext && (
+            bootstrapLoading
+            || !bootstrapLoaded
+            || sync.startupStage === "loadingWorkspace"
+            || sync.startupStage === "loadingContext"
+          );
+          const setupRequired = contextLoaded && !hydrationPending && (!hasFarm || !hasSeason);
+          const syncInProgress = sync.status === "syncing" || (sync.pendingCount ?? 0) > 0 || sync.startupStage === "syncingLatestRecords";
+          const noFarmSelectedShort = t("workspaceStatus.noFarmAvailableShort");
+          const noSeasonSelectedShort = hasFarm ? t("workspaceStatus.noActiveSeasonShort") : t("workspaceStatus.createFarmFirstShort");
+          const selectedFarmLabel = farm?.name ?? sync.farmName ?? (hasCachedFarm ? t("workspaceStatus.loadingFarmEllipsis") : noFarmSelectedShort);
+          const selectedSeasonLabel = season?.name ?? sync.seasonName ?? (hasCachedSeason ? t("workspaceStatus.loadingSeasonEllipsis") : noSeasonSelectedShort);''',
+          )
+
+          replace_once(
+              "web/src/services/syncService.ts",
+              '  status: SyncStatus; pendingCount: number; lastSyncTime: string | null; farmId?: string; seasonId?: string;',
+              '  status: SyncStatus; pendingCount: number; lastSyncTime: string | null; farmId?: string; seasonId?: string; farmName?: string; seasonName?: string;',
+          )
+
+          replace_once(
+              "web/src/services/syncService.ts",
+              '''function rememberOperationalContext(workspaceId: string, farmId?: string | null, seasonId?: string | null) {
+            if (!farmId) {
+              localStorage.removeItem(operationalContextKey(workspaceId));
+              return;
+            }
+            localStorage.setItem(operationalContextKey(workspaceId), JSON.stringify({ farmId, seasonId: seasonId ?? null }));
+          }
+
+          function restoreOperationalContext(workspaceId: string) {
+            try {
+              return JSON.parse(localStorage.getItem(operationalContextKey(workspaceId)) ?? "null") as { farmId?: string; seasonId?: string | null } | null;
+            } catch {
+              return null;
+            }
+          }
+
+          function applyOperationalContext(token: string, workspaceId: string, farmId?: string, seasonId?: string) {
+            context = { token, workspaceId, farmId, seasonId };
+            setActiveWorkspaceId(workspaceId);
+            setActiveFarmId(farmId ?? null);
+            setActiveSeasonId(seasonId ?? null);
+            emit({ farmId, seasonId });
+            window.dispatchEvent(new Event("muzare-local-data-change"));
+          }''',
+              '''type CachedOperationalContext = {
+            farmId?: string;
+            seasonId?: string | null;
+            farmName?: string;
+            seasonName?: string;
+          };
+
+          function rememberOperationalContext(
+            workspaceId: string,
+            farmId?: string | null,
+            seasonId?: string | null,
+            farmName?: string | null,
+            seasonName?: string | null,
+          ) {
+            if (!farmId) {
+              localStorage.removeItem(operationalContextKey(workspaceId));
+              return;
+            }
+            localStorage.setItem(operationalContextKey(workspaceId), JSON.stringify({
+              farmId,
+              seasonId: seasonId ?? null,
+              farmName: farmName ?? null,
+              seasonName: seasonName ?? null,
+            }));
+          }
+
+          function restoreOperationalContext(workspaceId: string) {
+            try {
+              return JSON.parse(localStorage.getItem(operationalContextKey(workspaceId)) ?? "null") as CachedOperationalContext | null;
+            } catch {
+              return null;
+            }
+          }
+
+          function applyOperationalContext(
+            token: string,
+            workspaceId: string,
+            farmId?: string,
+            seasonId?: string,
+            farmName?: string,
+            seasonName?: string,
+          ) {
+            context = { token, workspaceId, farmId, seasonId };
+            setActiveWorkspaceId(workspaceId);
+            setActiveFarmId(farmId ?? null);
+            setActiveSeasonId(seasonId ?? null);
+            emit({ farmId, seasonId, farmName, seasonName });
+            window.dispatchEvent(new Event("muzare-local-data-change"));
+          }
+
+          export function applyBootstrapSnapshot(token: string, workspaceId: string, bootstrap: BootstrapData) {
+            const farm = bootstrap.farms.find((item) => item.id === bootstrap.activeFarmId);
+            const season = bootstrap.seasons.find((item) => item.id === bootstrap.activeSeasonId);
+            applyOperationalContext(token, workspaceId, farm?.id, season?.id, farm?.name, season?.name);
+            rememberOperationalContext(workspaceId, farm?.id ?? null, season?.id ?? null, farm?.name ?? null, season?.name ?? null);
+            window.dispatchEvent(new Event("muzare-data-refresh"));
+            return { farm, season };
+          }''',
+          )
+
+          replace_once(
+              "web/src/services/syncService.ts",
+              '  applyOperationalContext(token, workspaceId, cached?.farmId ?? undefined, cached?.seasonId ?? undefined);',
+              '  applyOperationalContext(token, workspaceId, cached?.farmId ?? undefined, cached?.seasonId ?? undefined, cached?.farmName, cached?.seasonName);',
+          )
+
+          replace_once(
+              "web/src/services/syncService.ts",
+              '''      const bootstrap = bootstrapSnapshot ?? await fetchBootstrap(token);
+                const farm = bootstrap.farms.find((item) => item.id === bootstrap.activeFarmId);
+                const season = bootstrap.seasons.find((item) => item.id === bootstrap.activeSeasonId);
+                applyOperationalContext(token, workspaceId, farm?.id, season?.id);
+                rememberOperationalContext(workspaceId, farm?.id ?? null, season?.id ?? null);
+                emitStartup("loadingContext", i18n.t("sync.loadingFarmSeason"), {
+                  farmId: farm?.id,
+                  seasonId: season?.id,
+                  dataSource: "cache",
+                });
+                window.dispatchEvent(new Event("muzare-data-refresh"));''',
+              '''      const bootstrap = bootstrapSnapshot ?? await fetchBootstrap(token);
+                const { farm, season } = applyBootstrapSnapshot(token, workspaceId, bootstrap);
+                emitStartup("loadingContext", i18n.t("sync.loadingFarmSeason"), {
+                  farmId: farm?.id,
+                  seasonId: season?.id,
+                  farmName: farm?.name,
+                  seasonName: season?.name,
+                  dataSource: "cache",
+                });''',
+          )
+
+          replace_once(
+              "web/src/layouts/WorkspaceLayout.tsx",
+              'import { discardSyncQueueItem, getSyncQueueItems, refreshOperationalData, repairStaleSyncQueueItem, resolveSyncQueueItem, retrySyncQueueItem, startSyncService, stopSyncService, syncNow } from "../services/syncService";',
+              'import { applyBootstrapSnapshot, discardSyncQueueItem, getSyncQueueItems, refreshOperationalData, repairStaleSyncQueueItem, resolveSyncQueueItem, retrySyncQueueItem, startSyncService, stopSyncService, syncNow } from "../services/syncService";',
+          )
+
+          replace_once(
+              "web/src/layouts/WorkspaceLayout.tsx",
+              '''  const bootstrap = useQuery({
+                queryKey: ["bootstrap", user?.workspaceId, sync.farmId, sync.seasonId],
+                queryFn: () => fetchBootstrap(token!),
+                enabled: Boolean(user && token),
+                retry: false,
+              });''',
+              '''  const bootstrap = useQuery({
+                queryKey: ["bootstrap", user?.workspaceId],
+                queryFn: () => fetchBootstrap(token!),
+                enabled: Boolean(user && token && user.workspaceId),
+                retry: false,
+                staleTime: 5 * 60_000,
+                refetchOnMount: false,
+                refetchOnWindowFocus: false,
+              });''',
+          )
+
+          replace_once(
+              "web/src/layouts/WorkspaceLayout.tsx",
+              '''  useEffect(() => {
+                if (token && user?.workspaceId) void startSyncService(token, user.workspaceId, bootstrap.data ?? null);
+                return stopSyncService;
+              }, [bootstrap.data, token, user?.workspaceId]);
+              useEffect(() => {
+                const reloadSeason = () => {
+                  if (token && user?.workspaceId) void startSyncService(token, user.workspaceId, bootstrap.data ?? null);
+                };
+                window.addEventListener("muzare-season-changed", reloadSeason);
+                return () => window.removeEventListener("muzare-season-changed", reloadSeason);
+              }, [bootstrap.data, token, user?.workspaceId]);
+              useEffect(() => {
+                const reloadFarm = () => {
+                  if (token && user?.workspaceId) void startSyncService(token, user.workspaceId, bootstrap.data ?? null);
+                };
+                window.addEventListener("muzare-farm-changed", reloadFarm);
+                return () => window.removeEventListener("muzare-farm-changed", reloadFarm);
+              }, [bootstrap.data, token, user?.workspaceId]);''',
+              '''  useEffect(() => {
+                if (token && user?.workspaceId) void startSyncService(token, user.workspaceId, bootstrap.data ?? null);
+                return stopSyncService;
+                // Bootstrap updates are applied below without restarting the sync service.
+                // eslint-disable-next-line react-hooks/exhaustive-deps
+              }, [token, user?.workspaceId]);
+              useEffect(() => {
+                if (token && user?.workspaceId && bootstrap.data) {
+                  applyBootstrapSnapshot(token, user.workspaceId, bootstrap.data);
+                }
+              }, [bootstrap.data, token, user?.workspaceId]);
+              useEffect(() => {
+                const reloadContext = () => {
+                  if (!token || !user?.workspaceId) return;
+                  void bootstrap.refetch().then((result) => {
+                    if (result.data) applyBootstrapSnapshot(token, user.workspaceId!, result.data);
+                  });
+                };
+                window.addEventListener("muzare-season-changed", reloadContext);
+                window.addEventListener("muzare-farm-changed", reloadContext);
+                return () => {
+                  window.removeEventListener("muzare-season-changed", reloadContext);
+                  window.removeEventListener("muzare-farm-changed", reloadContext);
+                };
+              }, [bootstrap, token, user?.workspaceId]);''',
+          )
+
+          replace_once(
+              "web/src/pages/DashboardPage.tsx",
+              '''type DashboardScope = {
+            workspaceId: string;
+            farmId: string;
+            seasonId: string;
+          };
+
+          const today = () => new Date().toISOString().slice(0, 10);''',
+              '''type DashboardScope = {
+            workspaceId: string;
+            farmId: string;
+            seasonId: string;
+          };
+          type DashboardViewSnapshot = {
+            scope: DashboardScope;
+            totals: DashboardTotals;
+            activities: WorkspaceActivityItem[];
+            capturedAt: string;
+          };
+
+          const dashboardViewSnapshotKey = (scope: DashboardScope) => `muzare-dashboard-view:${scope.workspaceId}:${scope.farmId}:${scope.seasonId}`;
+          const readDashboardViewSnapshot = (scope: DashboardScope): DashboardViewSnapshot | null => {
+            try {
+              const parsed = JSON.parse(localStorage.getItem(dashboardViewSnapshotKey(scope)) ?? "null") as DashboardViewSnapshot | null;
+              if (!parsed || parsed.scope.workspaceId !== scope.workspaceId || parsed.scope.farmId !== scope.farmId || parsed.scope.seasonId !== scope.seasonId) return null;
+              return parsed;
+            } catch {
+              localStorage.removeItem(dashboardViewSnapshotKey(scope));
+              return null;
+            }
+          };
+          const writeDashboardViewSnapshot = (scope: DashboardScope, totals: DashboardTotals, activities: WorkspaceActivityItem[]) => {
+            localStorage.setItem(dashboardViewSnapshotKey(scope), JSON.stringify({ scope, totals, activities, capturedAt: new Date().toISOString() } satisfies DashboardViewSnapshot));
+          };
+
+          const today = () => new Date().toISOString().slice(0, 10);''',
+          )
+
+          replace_once(
+              "web/src/pages/DashboardPage.tsx",
+              '''  const query = useQuery({
+                queryKey: ["bootstrap", user?.workspaceId],
+                queryFn: ({ signal }) => fetchBootstrap(token!, signal),
+                enabled: Boolean(user && token && user.workspaceId),
+                retry: (failureCount) => navigator.onLine && failureCount < 2,
+                retryDelay: (attemptIndex) => Math.min(1_000 * 2 ** attemptIndex, 4_000),
+                refetchOnMount: "always",
+                refetchOnReconnect: true,
+              });''',
+              '''  const query = useQuery({
+                queryKey: ["bootstrap", user?.workspaceId],
+                queryFn: ({ signal }) => fetchBootstrap(token!, signal),
+                enabled: Boolean(user && token && user.workspaceId),
+                retry: (failureCount) => navigator.onLine && failureCount < 2,
+                retryDelay: (attemptIndex) => Math.min(1_000 * 2 ** attemptIndex, 4_000),
+                staleTime: 5 * 60_000,
+                refetchOnMount: false,
+                refetchOnReconnect: true,
+              });''',
+          )
+
+          replace_once(
+              "web/src/pages/DashboardPage.tsx",
+              '''  const contextReady = Boolean(
+                workspaceId
+                && bootstrapFarmId
+                && bootstrapSeasonId
+                && syncFarmId === bootstrapFarmId
+                && syncSeasonId === bootstrapSeasonId,
+              );''',
+              '''  const contextReady = Boolean(
+                workspaceId
+                && syncFarmId
+                && syncSeasonId
+                && (
+                  !bootstrapFarmId
+                  || !bootstrapSeasonId
+                  || (syncFarmId === bootstrapFarmId && syncSeasonId === bootstrapSeasonId)
+                ),
+              );''',
+          )
+
+          replace_once(
+              "web/src/pages/DashboardPage.tsx",
+              '''    const previousScopeKey = resolvedContextKeyRef.current;
+                resolvedContextKeyRef.current = financialScopeKey;
+                if (previousScopeKey && previousScopeKey !== financialScopeKey) {
+                  financialSnapshotRef.current = null;
+                  setFinancialSnapshot(null);
+                  setTotals(null);
+                  setActivities([]);
+                  setDashboardLoading(true);
+                }
+              }, [financialScope.farmId, financialScope.seasonId, financialScope.workspaceId, financialScopeKey, totals, workspaceId]);''',
+              '''    const previousScopeKey = resolvedContextKeyRef.current;
+                resolvedContextKeyRef.current = financialScopeKey;
+                if (!previousScopeKey || previousScopeKey !== financialScopeKey) {
+                  const cachedView = readDashboardViewSnapshot(financialScope);
+                  if (cachedView) {
+                    setTotals(cachedView.totals);
+                    setActivities(cachedView.activities);
+                    setDashboardLoading(false);
+                  } else if (previousScopeKey) {
+                    financialSnapshotRef.current = null;
+                    setFinancialSnapshot(null);
+                    setTotals(null);
+                    setActivities([]);
+                    setDashboardLoading(true);
+                  }
+                }
+              }, [financialScope.farmId, financialScope.seasonId, financialScope.workspaceId, financialScopeKey, workspaceId]);''',
+          )
+
+          replace_once(
+              "web/src/pages/DashboardPage.tsx",
+              '''    setTotals({
+                presentToday,
+                attendanceMarkedToday,
+                dispatchesToday,
+                cartonsToday,
+                totalSales,
+                labourAdvances: settledFinancialSnapshot?.outstandingLabourAdvances ?? 0,
+                totalExpenses: settledFinancialSnapshot?.totalExpenses ?? 0,
+                cashBalance: settledFinancialSnapshot?.cashBalance ?? 0,
+                partnerBalance,
+                outstandingLabourPayments: settledFinancialSnapshot?.outstandingLabourPayments ?? 0,
+                outstandingLabourPaymentsCount: settledFinancialSnapshot?.outstandingLabourPaymentsCount ?? 0,
+                overdueLabourPaymentsCount: settledFinancialSnapshot?.overdueLabourPaymentsCount ?? 0,
+              });
+
+              setActivities(recentActivities.slice(0, 5));''',
+              '''    const nextTotals: DashboardTotals = {
+                presentToday,
+                attendanceMarkedToday,
+                dispatchesToday,
+                cartonsToday,
+                totalSales,
+                labourAdvances: settledFinancialSnapshot?.outstandingLabourAdvances ?? 0,
+                totalExpenses: settledFinancialSnapshot?.totalExpenses ?? 0,
+                cashBalance: settledFinancialSnapshot?.cashBalance ?? 0,
+                partnerBalance,
+                outstandingLabourPayments: settledFinancialSnapshot?.outstandingLabourPayments ?? 0,
+                outstandingLabourPaymentsCount: settledFinancialSnapshot?.outstandingLabourPaymentsCount ?? 0,
+                overdueLabourPaymentsCount: settledFinancialSnapshot?.overdueLabourPaymentsCount ?? 0,
+              };
+              const nextActivities = recentActivities.slice(0, 5);
+              setTotals(nextTotals);
+              setActivities(nextActivities);
+              writeDashboardViewSnapshot(scope, nextTotals, nextActivities);''',
+          )
+
+          replace_once(
+              "web/src/pages/DashboardPage.tsx",
+              '    if (!financialSnapshotRef.current) setDashboardLoading(true);',
+              '    if (!financialSnapshotRef.current && !totals) setDashboardLoading(true);',
+          )
+
+          replace_once(
+              "web/src/pages/DashboardPage.tsx",
+              '''  const metricsReady = !hydrationPending && !dashboardLoading && Boolean(totals) && Boolean(financialSnapshot || !financialScope.farmId || !financialScope.seasonId);
+              const attendanceTodayLabel = hydrationPending || dashboardLoading ? "--" : t("dashboardPage.labourTodayCount", { count: totalsValue.attendanceMarkedToday });
+              const dispatchTodayLabel = hydrationPending || dashboardLoading ? "--" : t("dashboardPage.dispatchesTodayCount", { count: totalsValue.dispatchesToday });''',
+              '''  const metricsReady = !hydrationPending && Boolean(totals) && Boolean(financialSnapshot || !financialScope.farmId || !financialScope.seasonId);
+              const attendanceTodayLabel = hydrationPending || !totals ? "--" : t("dashboardPage.labourTodayCount", { count: totalsValue.attendanceMarkedToday });
+              const dispatchTodayLabel = hydrationPending || !totals ? "--" : t("dashboardPage.dispatchesTodayCount", { count: totalsValue.dispatchesToday });''',
+          )
+          PY
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify web build
+        run: npm run build --workspace web
+
+      - name: Commit verified fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/src/hooks/useSyncState.ts web/src/lib/workspaceStatus.ts web/src/services/syncService.ts web/src/layouts/WorkspaceLayout.tsx web/src/pages/DashboardPage.tsx
+          git commit -m "fix: keep dashboard context visible while refreshing"
+          git push origin HEAD:dev
