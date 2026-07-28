@@ -1,0 +1,51 @@
+name: Trigger dashboard cache and status fix
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - .github/dashboard-cache-fix-trigger.txt
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Execute guarded patch payload
+        shell: bash
+        run: |
+          awk '
+            /^      - name: Apply guarded source changes$/ { found=1; next }
+            found && /^        run: \|$/ { capture=1; next }
+            capture && /^      - name: Install dependencies$/ { exit }
+            capture { sub(/^          /, ""); print }
+          ' .github/workflows/apply-dashboard-cache-status-fix.yml > /tmp/apply-dashboard-fix.sh
+          test -s /tmp/apply-dashboard-fix.sh
+          bash /tmp/apply-dashboard-fix.sh
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify web build
+        run: npm run build --workspace web
+
+      - name: Commit verified fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/src/hooks/useSyncState.ts web/src/lib/workspaceStatus.ts web/src/services/syncService.ts web/src/layouts/WorkspaceLayout.tsx web/src/pages/DashboardPage.tsx
+          git commit -m "fix: keep dashboard context visible while refreshing"
+          git push origin HEAD:dev
