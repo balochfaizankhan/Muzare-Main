@@ -1,0 +1,1 @@
+Force Render to redeploy the restored last-known-good dev web tree after the white-screen rollback.
