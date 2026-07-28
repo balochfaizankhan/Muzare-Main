@@ -1,0 +1,99 @@
+name: Diagnose persisted workspace shell
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - .github/workflows/diagnose-persisted-workspace-shell.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose-auth-shell:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install browser
+        run: |
+          npm install --no-save --ignore-scripts playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Verify persisted workspace route
+        shell: bash
+        run: |
+          cat > diagnose-auth-shell.mjs <<'JS'
+          import { chromium } from 'playwright';
+          const browser = await chromium.launch({ headless: true });
+          const context = await browser.newContext({ serviceWorkers: 'allow' });
+          const user = {
+            id: 'diagnostic-user',
+            workspaceId: 'diagnostic-workspace',
+            workspaceName: 'Diagnostic workspace',
+            email: 'diagnostic@example.com',
+            displayName: 'Diagnostic User',
+            role: 'workspace_owner',
+            platformRole: null,
+            memberships: [{
+              membershipId: 'diagnostic-membership',
+              workspaceId: 'diagnostic-workspace',
+              workspaceName: 'Diagnostic workspace',
+              role: 'workspace_owner',
+              active: true,
+              permissions: null,
+              farmAccessMode: 'all',
+              farmIds: [],
+            }],
+            status: 'approved',
+          };
+          await context.addInitScript(({ user }) => {
+            localStorage.setItem('muzare-session-token', 'diagnostic-token');
+            localStorage.setItem('muzare-cached-user', JSON.stringify(user));
+            localStorage.setItem('muzare-last-workspace-id', user.workspaceId);
+          }, { user });
+          await context.route('**/v1/**', route => route.abort('failed'));
+          const page = await context.newPage();
+          const events = [];
+          page.on('console', msg => events.push(`CONSOLE ${msg.type()} ${msg.text()}`));
+          page.on('pageerror', err => events.push(`PAGEERROR ${err.stack || err.message}`));
+          page.on('requestfailed', req => events.push(`REQUESTFAILED ${req.url()} ${req.failure()?.errorText || ''}`));
+          page.on('response', res => {
+            if (/\.(?:js|css)(?:\?|$)/.test(res.url()) || res.status() >= 400) {
+              events.push(`RESPONSE ${res.status()} ${res.headers()['content-type'] || ''} ${res.url()}`);
+            }
+          });
+          let failed = false;
+          try {
+            await page.goto('https://muzare-main-dev.onrender.com/workspace/dashboard', { waitUntil: 'networkidle', timeout: 90000 });
+            await page.waitForTimeout(7000);
+            const rootChildren = await page.locator('#root').locator(':scope > *').count();
+            const bodyText = await page.locator('body').innerText();
+            events.push(`URL ${page.url()}`);
+            events.push(`TITLE ${await page.title()}`);
+            events.push(`BODY_TEXT_LENGTH ${bodyText.length}`);
+            events.push(`BODY_TEXT ${bodyText.slice(0, 1200)}`);
+            events.push(`ROOT_CHILDREN ${rootChildren}`);
+            events.push(`ROOT_HTML ${(await page.locator('#root').innerHTML()).slice(0, 1800)}`);
+            const errors = events.filter(line => line.startsWith('PAGEERROR '));
+            failed = rootChildren === 0 || bodyText.length === 0 || errors.length > 0;
+            await page.screenshot({ path: 'persisted-workspace-shell.png', fullPage: true });
+          } catch (error) {
+            failed = true;
+            events.push(`EXCEPTION ${error?.stack || error}`);
+          }
+          console.log(events.join('\n'));
+          await context.close();
+          await browser.close();
+          if (failed) process.exit(1);
+          JS
+          node diagnose-auth-shell.mjs
+      - name: Upload screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: persisted-workspace-shell
+          path: persisted-workspace-shell.png
+          if-no-files-found: warn
