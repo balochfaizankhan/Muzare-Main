@@ -1,1 +1,2 @@
 Trigger the one-time guarded dashboard cache and sync-status correction on dev.
+Retry with the robust standalone patch script.
