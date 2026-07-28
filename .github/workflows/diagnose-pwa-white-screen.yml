@@ -21,111 +21,111 @@ jobs:
         with:
           node-version: 22
 
-      - name: Probe hosts and asset integrity
+      - name: Wait for Render rollback deployment
         shell: bash
         run: |
-          set -uo pipefail
-          mkdir -p diagnostics
-          for base in \
-            "https://muzare-main-dev.onrender.com" \
-            "https://muzare-main-web-git-dev-faizan.vercel.app"
-          do
-            slug=$(echo "$base" | sed 's#https://##; s#[^A-Za-z0-9]#-#g')
-            {
-              echo "=== $base ==="
-              curl -sSIL --max-time 45 "$base/" || true
-              echo
-              curl -sSL --max-time 45 "$base/" -o "diagnostics/${slug}-index.html" || true
-              echo "INDEX_BYTES=$(wc -c < "diagnostics/${slug}-index.html" 2>/dev/null || echo 0)"
-              grep -oE 'src="[^"]+\.js"|href="[^"]+\.css"' "diagnostics/${slug}-index.html" || true
-              echo
-              curl -sSIL --max-time 45 "$base/sw.js" || true
-              curl -sSL --max-time 45 "$base/sw.js" -o "diagnostics/${slug}-sw.js" || true
-              echo "SW_BYTES=$(wc -c < "diagnostics/${slug}-sw.js" 2>/dev/null || echo 0)"
-              echo
-              python - "$base" "diagnostics/${slug}-index.html" <<'PY'
-          import re, sys, urllib.parse, urllib.request
-          base, path = sys.argv[1:]
-          try:
-              html = open(path, encoding='utf-8').read()
-          except Exception as exc:
-              print('INDEX_READ_ERROR', repr(exc))
-              raise SystemExit(0)
-          urls = re.findall(r'(?:src|href)="([^"]+\.(?:js|css))"', html)
-          for rel in urls:
-              url = urllib.parse.urljoin(base + '/', rel)
-              try:
-                  req = urllib.request.Request(url, method='HEAD', headers={'User-Agent':'Muzare-Diagnostic/1.0'})
-                  with urllib.request.urlopen(req, timeout=30) as response:
-                      print('ASSET', response.status, response.headers.get('content-type'), response.headers.get('content-length'), url)
-              except Exception as exc:
-                  print('ASSET_ERROR', url, repr(exc))
-          PY
-            } | tee "diagnostics/${slug}-probe.txt"
+          set -euo pipefail
+          base="https://muzare-main-dev.onrender.com"
+          for attempt in $(seq 1 40); do
+            marker=$(curl -fsSL --max-time 20 "$base/render-redeploy-recovery.txt" 2>/dev/null || true)
+            echo "Attempt $attempt: marker=${marker:-missing}"
+            if echo "$marker" | grep -q "last-known-good dev web tree"; then
+              exit 0
+            fi
+            sleep 15
           done
+          echo "Render did not publish the rollback marker in time." >&2
+          exit 1
+
+      - name: Probe Render assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostics
+          base="https://muzare-main-dev.onrender.com"
+          curl -fsSIL "$base/" | tee diagnostics/render-headers.txt
+          curl -fsSL "$base/" -o diagnostics/render-index.html
+          curl -fsSL "$base/sw.js" -o diagnostics/render-sw.js
+          grep -oE 'src="[^"]+\.js"|href="[^"]+\.css"' diagnostics/render-index.html | tee diagnostics/render-assets.txt
+          python - <<'PY'
+          import re, urllib.parse, urllib.request
+          base='https://muzare-main-dev.onrender.com/'
+          html=open('diagnostics/render-index.html', encoding='utf-8').read()
+          urls=re.findall(r'(?:src|href)="([^"]+\.(?:js|css))"', html)
+          for rel in urls:
+              url=urllib.parse.urljoin(base, rel)
+              req=urllib.request.Request(url, method='HEAD', headers={'User-Agent':'Muzare-Diagnostic/2.0'})
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  content_type=response.headers.get('content-type','')
+                  print(response.status, content_type, url)
+                  if rel.endswith('.js') and 'javascript' not in content_type:
+                      raise SystemExit(f'JavaScript asset has wrong content type: {url} -> {content_type}')
+                  if rel.endswith('.css') and 'css' not in content_type:
+                      raise SystemExit(f'CSS asset has wrong content type: {url} -> {content_type}')
+          PY
 
       - name: Install Playwright Chromium
         run: |
           npm install --no-save --ignore-scripts playwright@1.55.0
           npx playwright install --with-deps chromium
 
-      - name: Run real-browser diagnostics
+      - name: Run real-browser Render diagnostic
         shell: bash
         run: |
-          cat > /tmp/diagnose.mjs <<'JS'
+          cat > diagnose.mjs <<'JS'
           import { chromium } from 'playwright';
           import fs from 'node:fs';
 
-          const targets = [
-            'https://muzare-main-dev.onrender.com/',
-            'https://muzare-main-web-git-dev-faizan.vercel.app/',
-          ];
-
+          const target = 'https://muzare-main-dev.onrender.com/';
           const browser = await chromium.launch({ headless: true });
-          for (const target of targets) {
-            const slug = target.replace(/^https?:\/\//, '').replace(/[^A-Za-z0-9]/g, '-');
-            const context = await browser.newContext({ serviceWorkers: 'allow' });
-            const page = await context.newPage();
-            const events = [];
-            page.on('console', msg => events.push(`CONSOLE ${msg.type()} ${msg.text()}`));
-            page.on('pageerror', err => events.push(`PAGEERROR ${err.stack || err.message}`));
-            page.on('requestfailed', req => events.push(`REQUESTFAILED ${req.url()} ${req.failure()?.errorText || ''}`));
-            page.on('response', async res => {
-              if (res.status() >= 400 || /\.(?:js|css)(?:\?|$)/.test(res.url())) {
-                events.push(`RESPONSE ${res.status()} ${res.headers()['content-type'] || ''} ${res.url()}`);
-              }
-            });
-            try {
-              const response = await page.goto(target, { waitUntil: 'networkidle', timeout: 90000 });
-              events.push(`NAVIGATION ${response?.status()} ${page.url()}`);
-              await page.waitForTimeout(5000);
-              events.push(`TITLE ${await page.title()}`);
-              events.push(`BODY_TEXT_LENGTH ${(await page.locator('body').innerText()).length}`);
-              events.push(`ROOT_CHILDREN ${await page.locator('#root').locator(':scope > *').count()}`);
-              events.push(`ROOT_HTML ${(await page.locator('#root').innerHTML()).slice(0, 1000)}`);
-              const sw = await page.evaluate(async () => ({
-                controller: navigator.serviceWorker?.controller?.scriptURL ?? null,
-                registrations: navigator.serviceWorker ? (await navigator.serviceWorker.getRegistrations()).map(r => ({scope:r.scope, active:r.active?.scriptURL, waiting:r.waiting?.scriptURL, installing:r.installing?.scriptURL})) : [],
-                caches: 'caches' in window ? await caches.keys() : [],
-                location: location.href,
-              }));
-              events.push(`PWA_STATE ${JSON.stringify(sw)}`);
-              await page.screenshot({ path: `diagnostics/${slug}.png`, fullPage: true });
-            } catch (error) {
-              events.push(`DIAGNOSTIC_EXCEPTION ${error?.stack || error}`);
-              try { await page.screenshot({ path: `diagnostics/${slug}-exception.png`, fullPage: true }); } catch {}
+          const context = await browser.newContext({ serviceWorkers: 'allow' });
+          const page = await context.newPage();
+          const events = [];
+          page.on('console', msg => events.push(`CONSOLE ${msg.type()} ${msg.text()}`));
+          page.on('pageerror', err => events.push(`PAGEERROR ${err.stack || err.message}`));
+          page.on('requestfailed', req => events.push(`REQUESTFAILED ${req.url()} ${req.failure()?.errorText || ''}`));
+          page.on('response', res => {
+            if (res.status() >= 400 || /\.(?:js|css)(?:\?|$)/.test(res.url())) {
+              events.push(`RESPONSE ${res.status()} ${res.headers()['content-type'] || ''} ${res.url()}`);
             }
-            fs.writeFileSync(`diagnostics/${slug}.log`, events.join('\n') + '\n');
-            console.log(`\n===== ${target} =====\n${events.join('\n')}`);
-            await context.close();
+          });
+          let failed = false;
+          try {
+            const response = await page.goto(target, { waitUntil: 'networkidle', timeout: 90000 });
+            events.push(`NAVIGATION ${response?.status()} ${page.url()}`);
+            await page.waitForTimeout(5000);
+            const rootChildren = await page.locator('#root').locator(':scope > *').count();
+            const bodyTextLength = (await page.locator('body').innerText()).length;
+            events.push(`TITLE ${await page.title()}`);
+            events.push(`BODY_TEXT_LENGTH ${bodyTextLength}`);
+            events.push(`ROOT_CHILDREN ${rootChildren}`);
+            events.push(`ROOT_HTML ${(await page.locator('#root').innerHTML()).slice(0, 1500)}`);
+            const sw = await page.evaluate(async () => ({
+              controller: navigator.serviceWorker?.controller?.scriptURL ?? null,
+              registrations: navigator.serviceWorker ? (await navigator.serviceWorker.getRegistrations()).map(r => ({scope:r.scope, active:r.active?.scriptURL, waiting:r.waiting?.scriptURL, installing:r.installing?.scriptURL})) : [],
+              caches: 'caches' in window ? await caches.keys() : [],
+              location: location.href,
+            }));
+            events.push(`PWA_STATE ${JSON.stringify(sw)}`);
+            if (rootChildren === 0 || bodyTextLength === 0 || events.some(line => line.startsWith('PAGEERROR '))) failed = true;
+            await page.screenshot({ path: 'diagnostics/render-browser.png', fullPage: true });
+          } catch (error) {
+            failed = true;
+            events.push(`DIAGNOSTIC_EXCEPTION ${error?.stack || error}`);
+            try { await page.screenshot({ path: 'diagnostics/render-browser-exception.png', fullPage: true }); } catch {}
           }
+          fs.writeFileSync('diagnostics/render-browser.log', events.join('\n') + '\n');
+          console.log(events.join('\n'));
+          await context.close();
           await browser.close();
+          if (failed) process.exit(1);
           JS
-          node /tmp/diagnose.mjs
+          node diagnose.mjs
 
       - name: Upload diagnostics
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: pwa-white-screen-diagnostics
           path: diagnostics
-          if-no-files-found: error
+          if-no-files-found: warn
