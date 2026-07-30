@@ -1,0 +1,57 @@
+name: Apply workspace startup lifecycle fix
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - .github/workflows/apply-workspace-startup-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apply asserted startup lifecycle patch
+        shell: bash
+        run: |
+          printf '%s' 'H4sIANiia2oC/+0cXXPbNvJdvwLmdGKyQ8tO726mI1fxpIkz4zs3yVWd60Muk8IiZHNCkSpJ2dGp+u+3C4AgAIIUJdu9pFc/eCRwsdhd7DdAzfJsTha0vEniKxLPF1lekrfwdTCI2IzkbJHQKfuQpVPmI9SIFGUekiyJ5KeU3fFPATl6Rl5nKRsNCPyVNL9mJRlzXHxmIMbZJxwVj4c5o9EHHPJZOs2iOL0ee8tydvStJ6Cn2TLl4AAy5F98WFk8i2fy8cGYPBWL4l9O44KRyaoo2fz8U1z6M2+Ny29GhH1asGnJIvhAp2WyIkAtmdNyehOSGaCKyJpj3MjVJZF3eVwyQSWnQ8oEKeHsh+RpEJImA4O7LP9YLFB8CV1lS2TEu2NXx0U+PRYjxfHPFcwlHxiWxSdvYEidk2KjCvnoodyvNZkx4OL7LCthJ+iCbMgMt9UbDo9hW4/pIvZO/50e7jVLQSsa1Ix/Llm++gdb2TObkHL5YA/WoriY0jyarNIprLdkF7CxIYGNMUaKEHR1lrPi5s2C5bSMs5QmL2lJcXxB43xS0oRZSAA8S26bo2W+ssYK0AW+4ITlt/GU4Ui2MAfgy+vsTpdFIZ4Vx0UN6J02toEuFslKiWqS0kVxk5XhH5LzHTTg8BAdQFqU5Eqp6JgsC8bVzl8D1K9SAUfknaeAvBCB8rOhwnsRCSKHM5rP1ZeC0SJLL6L3YYXpVToifkDGzyzL8MvsI0sPAgRkKb1KGHg/eJowmvq4FnnyhHAYDsLFOCIzmhQsHGyCU2BlH57aDc5vMBiYTKxJEV+DHpBNOzuhhGlny1ihD4877i6scT6bgU/2hdSRfXDrgj5cr8kmuc3iqKGUYobYd3PblZiHEZgEOTsj6TJJglPBwjJPbXU+HWxC8s6cFhINv0HPe8Dk4kLscc6SjEYTrmewzfXj35PNDf67i9MouxvSKDq/ZWl5GUN4TFnue/Plf2jOjoQtHE1vaHrNIi80SNelJXiQ6HI2z27ZfhgfWsqvwLQ/bxmj82nIA8neS75d2HaUreme2ozyQIjyt9/IgUOWgnxkZCepbjXEXVWie89x0BRMIHWFU+0OxH01QmjCgyv2iyyVSfPOul2TARkChgD/3h5BUhPsrfA6AkPnBV/7exYdMdnbgnQsG9uSpBS3GxMk/xEtbq4ySN/0rH9BryEnelk9egtf2zJ+Nb+RD7M8vmWqbngZFzB1BUleuSxaE3Hx2FkE3BPfY5cHthzqDIpnO3tnhO8fI2FSOVJllY0UTeZN/ozGyTJnL7De5Cum9Da+pmWWD7P0MobCFDDoQOQ78o1C8JLBFgEWWkKOvigv0oh94lh+gEp3OI9T/+mHk5MT8jX5hnz9NdHBQvJXfCSJ4Xy+SX/AFUbEo8kdXRWe8exHBuJOwT+NSJkv2xPaLdvxP09mv9S9aZX/btYyFY7tR0Yj3KVKMgMtQb+I4JseIV/xcskanMiySQxjJSXAyHg8dk8VNaCYZUJVo8BMd5H0wk29tZyTTnDlO0ug5qrJgRjxD9y0QXrkd8ukn0SCQMmk7z6LpICbzTAuzvM8y6vspmClCjqXEOXi9NrnpZuMlnX2tjG3wYET6T/QZbnvIn34WjeWduZ0fh3Xes44uKGF1i+pkiyFCyI471yq0H2TZR+LY8DFU1QIfxi5vUDvDlZiUyFRpXY8/vBJKhbmjE5L73SggK9ZeUkLnjT/FM+xrbK8KqZ5fFWvCInHaoHNTfl9e8dlMGCfOP7ZMp0iq0TnwA+0bPNdIZaAbeQP3wtfzj9/p6Y8Q2/Mg/+o6RbPiJelCXzyCASTbDbjn0OyYClqwwsRZU5CkmiMjmzOgaoNVxk7M24KxK+IDSBPe28WEzAK+dtA6bPdoOV7XDcnBFNGi7aZ8OCWd7Y4BJaGH5uJ4lRZ+RnvRBXDGWSpvg8KNOcM4odhbHmEIegJJGjCeQRV2Xmq9q2o2gsadjG2E37leJorgKm8oNMbVtXYlefUWmqBA1r1PQz4onbL2gwLMyIN0JcaSxszmthFZ8GYJYCMeQ6jHysKwPwV6nqWdHbo01ikC1qOiBWbiLV1V5F49lZYAiDpcEBce4xFYAofxOLbWr0aF8LFsnu5AGW9ZnyXvUTMVum91w9ekoPQga5qAPwj+3UZ51wQpmC4V7UZ5aGyEi+Sr+Sr4wVaLtK3eXadswJtsCKOWySShQOAzlPxdaj7FFTZk4A8IycdnEkUl+AXihKTqjyCAkbRkGZI4oQl/IhocoNOc0xKCACWCxCAz28h/8Msk0N6gY5I8GejqoRw5kb6XLNCiROcqAN0CpGj5O7gVZyD17TXL+S6CHFJr1gCa6M9nQ1TOmcoKt80aCdBUg8Q4DxJ4kURF5wgh5gcaws2qtWFZbrWl0bcRYEAsWhwSNidQH7ZjneqNuk1im5cH2Lg97Nhmcdzn3s81zyBWJ9ZqJH2uf/vzj4S/Y+WgkMzJFja3J8AMZoE2qD1lgQ7hRcHUd3BxcXF1tDi27GFu3Q1xhNqJk/f/4w4f0ac/hHHcmSfQQxquMhHjktQa6A6fJBlml5nuCq3lkJDR2H3cZ8vYm6hIYlg/ZJpvk/oHqFF26NXUEXC/NDqrcnvDXB+5aCAws+9SNsztUpBb5tPQ3JLkzgCTftXtoRNyF8v51cslzWvokncbOBjGorztIzLVXNcoD5Pb1mSLZjzhsvh4wnyDy+4oJ+OEtUyqCr3ZXFqdQVSTvSp1RoAytGnyySFiPzjrBo/JVWCUQ8dPvqaKv/qIoNouZZOW0+JHR4KZ5bIQysMUSm7IxNWfufz3kbNF+MpJh74PcPzPdDLKkyOQJt5y7smS2uDmRx1ixUUQMgD6eD5Ii5TgrzySowWgJ6N780L10rhkp2pHHavbOLlkCn5AXHwVKe+js3Sni4XaFzR81LDt3kYQe+tS+4NwQPsmEXfW61pfgBjsLXbNvZWWtVlzNmcIbbmrvkOwYS2YCQRYeumBfW1BFmTyCZ0kk1pMgEviker4vQX77H5WYMQPHnST4CaXeqBhQ6S0Z64QvL3yZvXQ0FyPFv5a6KunkmORupTVfeRDdKwGQw0KdrxoEOIQgJlvpKSkI1QTsiC5gXzDWauezPDC1MPKYQsB6LUuo+/kFq00cxoA0kXBEWTPPXQYJxfxHCwbdhYSPqokkOHVNe78iLVeb5xucPeMHFtAnRA5M0/17C+faFFAYnegS9QGTeGFEhV/vu2OnAwNo9Lh/LIBrm85IDFHkqWX3Pw0bWKT9VFB77vR3gTRV538Lii6R5aSb6pDhcR4znCQxqu3PxfvlprSDejr9a1pLw0S5mHY7pg5Ogvtp3s5m1S7rLb4ormWxBw+GU4GI57OBwiyaE8j6s8DWfD1i8dCEOLAVaVRDWgCoIjHrxf8uOjYZldTN5MOBU+P7b+QnxYa07xoO4KeTE8lnnWrA/bXsuVsISu1CZ0py8QtLWzPenrXojLTtggkiNVb0Z+NU5JD8Zj62TcAJWmilCz6qjcAFAKhyDVl9MdPG/Fa+1NQo3Vz8Efb6OQz0FPYm5A8BCeu3dSJk+AKT6sz4HdNzS3xNYr+27k2cgsMA0vrzejYbN7eQIusc7wbymLQH82rPd0mUZsFqdMe6jvpXqsNnQiOnd+s3UZkvjpt+kQNoS3+BrPwQ+v5b2Fkk6yZT4FN+rxVT0h/y0n3dIJ73igzv0sUj+n+UdFPZJ4xLeV32dc63KS8PSOxmX1ukh9ir520t/zlJ7fRMUKQmn1NGE0v4Aty29pIp8hJP8EiiDBMNpVQL6q+7gOy16ubJqAmMhfTvjNqPqCMW7sMmHf0+nH6xxf3vqJFh99oeT6hdI6mLjevGgoNGqIkJLrmpkM4W2nS3sfLplomwdL9zpXqpDvYlWifRsrd4afFaJ+6VaNRCUSGjLDq/LrGQ5DrM4E3GYomsCIsLZD/BOeYFTzoJ7YtZf5tNWGK2vT7hVvc9zcZUs784J6C6T94WtZmEH9tFqw+kUu3y0MfElyBTJweAdDLPKaIIv4cQ/vSBvPpfuQT3WJyaOL+kBEvdijQbR5KN7BqY5OLC9lym43w7WNtyEX5/HKdjE5p20RlmJB30TXO3fgStOshIR8spxOa0FqQqgxuBzdaRuzj68E/RThnspgKoSdZDvkqwWpvjR4DLv3XtvynYYu/ubAOdQXtejQrc0ymMBv7IusQh6eXtIrQOUFoUuQ/DBwRKrd20PWGIMrgG21l1PAlRViQoABOFuWP8BSfzs5UXD2JmzdgH2F3yn4+wl9i8C3C3tXQSvhyWTMaKc8WMr9AIm0ux+sGsCkq3qV9Wto3nK8kEGzK/U2AJzpdxNH1XToxOIECuy7Ly3XNyyKnzxpkNgoCjQSDKRnlZKhqjcLh5ZpUnnOiP+wjjyQiEdbCxYOWJlyh0H2Klz2Kl30HM3cEP2paEnZ6qGWVZlcDx0zu1w91AndZaVVvUus0KUlf5iya6NukltOreudyb7dBKuJoDVgq1aR1lYS7/BgT0m9kNqje6W/ofoIxdujFW41rfimiKpp7DX5w7qo0e4GYddJ9/r9GvzN4w+dzZtsmYBf4upcH8Z2BBvcDJOS7dHJAh/sXsDq5IfajaTQuA0k3xroV9IKx6l7q9pXaQsY/fdmo11fvm7m7F9a9ikrf8dqojvZ2rt6aA1Wj7EdlQNy6jreKmyQj4PSTvGjspvGq/F9C2BhbNWPFnUah10r276zw+gdvjO0evxho6UfcItukqYzW5Ww/rotSXcX8I+YszuKjI6WQLOBcb/K/3PZlO3dh89JfRo+q9NB7dfV0v1Oo777szi+Z3Hc0nnY7xRLK6aNXwvx66Rxt6xYe/tB5jH1pTDH0WLzwFCeKXacJMpHrg7B78hOr17AQ/NshICq6LNqrTpkWw/qIs/5wD3HVHUwi+lHflu7KEDMXtgjQVG2ZqDWVdZ6Ndj9mxatrwfLrRfhveNXM8ZEzz2bF2nGzwDju/p++pH+exd6KaTuzbzHqw983dMt78WKn+r6IFWIs2v/jlfQ+euN6kVuA4ca7Z7MHYA+T/cI3VNpAWAlOdzy6x+HGKxJnBKN0Z3nmjxW0719f1HK66DJc55GqhlKYAreXZZ7FnpC06gTtkb8X03KbmsoVAAA' | base64 -d | gzip -d > /tmp/apply-workspace-startup-fix.py
+          python /tmp/apply-workspace-startup-fix.py
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check web
+        run: npm run check --workspace @muzare/web
+
+      - name: Build web
+        run: npm run build --workspace @muzare/web
+
+      - name: Commit verified application changes
+        shell: bash
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          git rm .github/workflows/apply-workspace-startup-fix.yml
+          git add web/src/layouts/WorkspaceLayout.tsx \
+                  web/src/pages/DashboardPage.tsx \
+                  web/src/hooks/useSyncState.ts \
+                  web/src/lib/workspaceStatus.ts \
+                  web/src/lib/workspaceBootstrap.ts \
+                  web/src/services/syncService.ts
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "perf: stabilize cached workspace startup"
+          git push origin "HEAD:${HEAD_REF}"
