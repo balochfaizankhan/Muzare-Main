@@ -1,4 +1,4 @@
-import { ApiError, deleteOperationalRecord as deleteOperationalRecordFromApi, fetchBootstrap, fetchOperationalRecords, restoreOperationalRecord as restoreOperationalRecordFromApi, saveOperationalRecord, validateVoucherNumber, type BootstrapData, type OperationalEntity, type OperationalRecordEnvelope } from "../lib/api";
+import { ApiError, deleteOperationalRecord as deleteOperationalRecordFromApi, fetchOperationalRecords, restoreOperationalRecord as restoreOperationalRecordFromApi, saveOperationalRecord, validateVoucherNumber, type BootstrapData, type OperationalEntity, type OperationalRecordEnvelope } from "../lib/api";
 import { clearCachedData, offlineDb, setActiveFarmId, setActiveSeasonId, setActiveWorkspaceId, type LocalRecord, type PendingMutation } from "../lib/offline-db";
 import { canQueueOperationalMutation } from "../lib/permissions";
 import type { Table } from "dexie";
@@ -12,7 +12,7 @@ import { createChangeCoalescer } from "../lib/eventCoalescing";
 export type SyncStatus = "online" | "offline" | "pending" | "syncing" | "error";
 export type SyncStartupStage = "checkingSession" | "loadingWorkspace" | "loadingContext" | "syncingLatestRecords" | "ready";
 export type SyncState = {
-  status: SyncStatus; pendingCount: number; lastSyncTime: string | null; farmId?: string; seasonId?: string;
+  status: SyncStatus; pendingCount: number; lastSyncTime: string | null; farmId?: string; farmName?: string; seasonId?: string; seasonName?: string;
   failedCount?: number;
   dataSource?: "cache" | "server"; message?: string;
   startupStage?: SyncStartupStage;
@@ -24,7 +24,15 @@ const lastSyncKey = (workspaceId?: string) => `muzare-last-successful-sync:${wor
 const operationalContextPrefix = "muzare-operational-context:";
 const operationalContextKey = (workspaceId: string) => `${operationalContextPrefix}${workspaceId}`;
 const listeners = new Set<(state: SyncState) => void>();
-let context: { token: string; workspaceId: string; farmId?: string; seasonId?: string } | null = null;
+type CachedOperationalContext = {
+  farmId?: string;
+  farmName?: string;
+  seasonId?: string | null;
+  seasonName?: string | null;
+  updatedAt?: string;
+};
+let context: { token: string; workspaceId: string; farmId?: string; farmName?: string; seasonId?: string; seasonName?: string } | null = null;
+let appliedBootstrapContextKey: string | null = null;
 let timer: number | null = null;
 let syncing = false;
 let state: SyncState = { status: navigator.onLine ? "online" : "offline", pendingCount: 0, lastSyncTime: null };
@@ -82,29 +90,49 @@ function tableFor(entity: OperationalEntity) {
   return tables[entity] as unknown as Table<LocalRecord, string>;
 }
 
-function rememberOperationalContext(workspaceId: string, farmId?: string | null, seasonId?: string | null) {
-  if (!farmId) {
+function operationalContextIdentity(workspaceId: string, farmId?: string | null, seasonId?: string | null) {
+  return `${workspaceId}:${farmId ?? "none"}:${seasonId ?? "none"}`;
+}
+
+function rememberOperationalContext(workspaceId: string, next: CachedOperationalContext) {
+  if (!next.farmId) {
     localStorage.removeItem(operationalContextKey(workspaceId));
     return;
   }
-  localStorage.setItem(operationalContextKey(workspaceId), JSON.stringify({ farmId, seasonId: seasonId ?? null }));
+  localStorage.setItem(operationalContextKey(workspaceId), JSON.stringify({
+    ...next,
+    seasonId: next.seasonId ?? null,
+    seasonName: next.seasonName ?? null,
+    updatedAt: new Date().toISOString(),
+  }));
 }
 
 function restoreOperationalContext(workspaceId: string) {
   try {
-    return JSON.parse(localStorage.getItem(operationalContextKey(workspaceId)) ?? "null") as { farmId?: string; seasonId?: string | null } | null;
+    return JSON.parse(localStorage.getItem(operationalContextKey(workspaceId)) ?? "null") as CachedOperationalContext | null;
   } catch {
     return null;
   }
 }
 
-function applyOperationalContext(token: string, workspaceId: string, farmId?: string, seasonId?: string) {
-  context = { token, workspaceId, farmId, seasonId };
+function applyOperationalContext(
+  token: string,
+  workspaceId: string,
+  farmId?: string,
+  seasonId?: string,
+  farmName?: string,
+  seasonName?: string,
+) {
+  const contextChanged = !context
+    || context.workspaceId !== workspaceId
+    || context.farmId !== farmId
+    || context.seasonId !== seasonId;
+  context = { token, workspaceId, farmId, farmName, seasonId, seasonName };
   setActiveWorkspaceId(workspaceId);
   setActiveFarmId(farmId ?? null);
   setActiveSeasonId(seasonId ?? null);
-  emit({ farmId, seasonId });
-  window.dispatchEvent(new Event("muzare-local-data-change"));
+  emit({ farmId, farmName, seasonId, seasonName });
+  if (contextChanged) window.dispatchEvent(new Event("muzare-local-data-change"));
 }
 
 function isDateTypeMutation(mutation: PendingMutation) {
@@ -854,56 +882,87 @@ export function subscribeSyncState(listener: (next: SyncState) => void) {
   };
 }
 
-export async function startSyncService(token: string, workspaceId: string, bootstrapSnapshot?: BootstrapData | null) {
+export async function startSyncService(token: string, workspaceId: string) {
   const cached = restoreOperationalContext(workspaceId);
-  applyOperationalContext(token, workspaceId, cached?.farmId ?? undefined, cached?.seasonId ?? undefined);
-  emitStartup("loadingWorkspace", i18n.t("sync.loadingWorkspace"), {
-    dataSource: "cache",
-    lastSyncTime: getLastSyncTime(),
-    status: navigator.onLine ? "online" : "offline",
-  });
-  markStartup("sync-started", { workspaceId });
+  appliedBootstrapContextKey = null;
+  applyOperationalContext(
+    token,
+    workspaceId,
+    cached?.farmId ?? undefined,
+    cached?.seasonId ?? undefined,
+    cached?.farmName ?? undefined,
+    cached?.seasonName ?? undefined,
+  );
+  const cachedContextReady = Boolean(cached?.farmId && cached?.seasonId);
+  emitStartup(
+    cachedContextReady ? "ready" : "loadingWorkspace",
+    cachedContextReady
+      ? (navigator.onLine ? i18n.t("sync.connectedReady") : i18n.t("sync.offlineReady"))
+      : i18n.t("sync.loadingWorkspace"),
+    {
+      dataSource: "cache",
+      lastSyncTime: getLastSyncTime(),
+      status: navigator.onLine ? "online" : "offline",
+      farmId: cached?.farmId,
+      farmName: cached?.farmName,
+      seasonId: cached?.seasonId ?? undefined,
+      seasonName: cached?.seasonName ?? undefined,
+    },
+  );
+  markStartup("sync-started", { workspaceId, cachedContextReady });
   await refreshSyncState({ dataSource: "cache", lastSyncTime: getLastSyncTime() });
   if (timer) window.clearInterval(timer);
   timer = window.setInterval(() => void syncPendingRecords(), 30_000);
+}
+
+export async function applyBootstrapSnapshot(token: string, workspaceId: string, bootstrap: BootstrapData) {
+  if (!context || context.token !== token || context.workspaceId !== workspaceId) return;
+  const farm = bootstrap.farms.find((item) => item.id === bootstrap.activeFarmId);
+  const season = bootstrap.seasons.find((item) => item.id === bootstrap.activeSeasonId);
+  const farmId = farm?.id;
+  const seasonId = season?.id;
+  const nextContextKey = operationalContextIdentity(workspaceId, farmId, seasonId);
+  const shouldRefreshContext = appliedBootstrapContextKey !== nextContextKey;
+  appliedBootstrapContextKey = nextContextKey;
+
+  applyOperationalContext(token, workspaceId, farmId, seasonId, farm?.name, season?.name);
+  rememberOperationalContext(workspaceId, {
+    farmId,
+    farmName: farm?.name,
+    seasonId,
+    seasonName: season?.name,
+  });
+  window.dispatchEvent(new Event("muzare-data-refresh"));
+  await repairDateTypeQueueItems();
+  emitStartup("ready", navigator.onLine ? i18n.t("sync.connectedReady") : i18n.t("sync.offlineReady"), {
+    startupInProgress: false,
+    status: navigator.onLine ? state.status : "offline",
+    dataSource: "cache",
+    farmId,
+    farmName: farm?.name,
+    seasonId,
+    seasonName: season?.name,
+  });
+
+  if (!shouldRefreshContext || !navigator.onLine || !farmId || !seasonId) return;
   void scheduleBackgroundTask(async () => {
+    const expectedContextKey = nextContextKey;
     try {
-      const bootstrap = bootstrapSnapshot ?? await fetchBootstrap(token);
-      const farm = bootstrap.farms.find((item) => item.id === bootstrap.activeFarmId);
-      const season = bootstrap.seasons.find((item) => item.id === bootstrap.activeSeasonId);
-      applyOperationalContext(token, workspaceId, farm?.id, season?.id);
-      rememberOperationalContext(workspaceId, farm?.id ?? null, season?.id ?? null);
-      emitStartup("loadingContext", i18n.t("sync.loadingFarmSeason"), {
-        farmId: farm?.id,
-        seasonId: season?.id,
-        dataSource: "cache",
-      });
-      window.dispatchEvent(new Event("muzare-data-refresh"));
-      await repairDateTypeQueueItems();
-      emitStartup("ready", navigator.onLine ? i18n.t("sync.connectedReady") : i18n.t("sync.offlineReady"), {
+      if (!context || operationalContextIdentity(context.workspaceId, context.farmId, context.seasonId) !== expectedContextKey) return;
+      emit({
+        startupStage: "syncingLatestRecords",
         startupInProgress: false,
-        status: navigator.onLine ? state.status : "offline",
+        lastProgressAt: new Date().toISOString(),
+        message: i18n.t("sync.syncingLatestRecords"),
       });
-      void scheduleBackgroundTask(async () => {
-        try {
-          emitStartup("syncingLatestRecords", navigator.onLine ? i18n.t("sync.syncingLatestRecords") : i18n.t("sync.offlineReady"));
-          await refreshOperationalData({ notifySuccess: false });
-          await syncPendingRecords();
-          emitStartup("ready", navigator.onLine ? i18n.t("sync.connectedReady") : i18n.t("sync.offlineReady"), {
-            startupInProgress: false,
-            status: navigator.onLine ? state.status : "offline",
-          });
-        } catch {
-          await refreshSyncState({
-            status: navigator.onLine ? "error" : "offline",
-            dataSource: "cache",
-            message: i18n.t("workforcePage.cachedLoadingLabour"),
-            startupStage: "ready",
-            startupInProgress: false,
-            lastProgressAt: new Date().toISOString(),
-          });
-        }
-      }, { timeoutMs: 500 });
+      await refreshOperationalData({ notifySuccess: false });
+      if (!context || operationalContextIdentity(context.workspaceId, context.farmId, context.seasonId) !== expectedContextKey) return;
+      await syncPendingRecords();
+      if (!context || operationalContextIdentity(context.workspaceId, context.farmId, context.seasonId) !== expectedContextKey) return;
+      emitStartup("ready", i18n.t("sync.connectedReady"), {
+        startupInProgress: false,
+        status: state.status,
+      });
     } catch {
       await refreshSyncState({
         status: navigator.onLine ? "error" : "offline",
@@ -914,7 +973,7 @@ export async function startSyncService(token: string, workspaceId: string, boots
         lastProgressAt: new Date().toISOString(),
       });
     }
-  });
+  }, { timeoutMs: 500 });
 }
 
 export async function repairStaleSyncQueueItem(mutationId: string) {
@@ -933,9 +992,19 @@ export function stopSyncService() {
   if (timer) window.clearInterval(timer);
   timer = null;
   context = null;
+  appliedBootstrapContextKey = null;
   setActiveWorkspaceId(null);
   setActiveFarmId(null);
   setActiveSeasonId(null);
+  emit({
+    farmId: undefined,
+    farmName: undefined,
+    seasonId: undefined,
+    seasonName: undefined,
+    startupStage: "checkingSession",
+    startupInProgress: false,
+    message: undefined,
+  });
 }
 
 export async function clearWorkspaceCache() {

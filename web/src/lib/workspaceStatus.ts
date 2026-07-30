@@ -39,13 +39,16 @@ export function deriveWorkspaceDisplayStatus({
 }: WorkspaceDisplayStatusInput): WorkspaceDisplayStatus {
   const farm = bootstrap?.farms.find((item) => item.id === bootstrap.activeFarmId) ?? null;
   const season = bootstrap?.seasons.find((item) => item.id === bootstrap.activeSeasonId) ?? null;
+  const cachedFarmName = sync.farmName?.trim() || null;
+  const cachedSeasonName = sync.seasonName?.trim() || null;
   const hasCachedFarm = Boolean(sync.farmId);
   const hasCachedSeason = Boolean(sync.seasonId);
   const hasFarm = Boolean(farm) || hasCachedFarm;
   const hasSeason = Boolean(season) || hasCachedSeason;
   const hasOperationalContext = hasFarm && hasSeason;
-  const contextLoaded = bootstrapLoaded || hasOperationalContext;
-  const hydrationPending = !hasOperationalContext && (
+  const labelsResolved = Boolean((farm?.name || cachedFarmName) && (season?.name || cachedSeasonName));
+  const contextLoaded = bootstrapLoaded || labelsResolved;
+  const hydrationPending = !contextLoaded && (
     bootstrapLoading
     || !bootstrapLoaded
     || sync.startupStage === "loadingWorkspace"
@@ -55,10 +58,10 @@ export function deriveWorkspaceDisplayStatus({
   const syncInProgress = sync.status === "syncing" || (sync.pendingCount ?? 0) > 0 || sync.startupStage === "syncingLatestRecords";
   const noFarmSelectedShort = t("workspaceStatus.noFarmAvailableShort");
   const noSeasonSelectedShort = hasFarm ? t("workspaceStatus.noActiveSeasonShort") : t("workspaceStatus.createFarmFirstShort");
-  const selectedFarmLabel = farm?.name ?? (hasCachedFarm ? t("workspaceStatus.loadingFarmEllipsis") : noFarmSelectedShort);
-  const selectedSeasonLabel = season?.name ?? (hasCachedSeason ? t("workspaceStatus.loadingSeasonEllipsis") : noSeasonSelectedShort);
+  const selectedFarmLabel = farm?.name ?? cachedFarmName ?? (hasCachedFarm ? t("workspaceStatus.loadingFarmEllipsis") : noFarmSelectedShort);
+  const selectedSeasonLabel = season?.name ?? cachedSeasonName ?? (hasCachedSeason ? t("workspaceStatus.loadingSeasonEllipsis") : noSeasonSelectedShort);
 
-  if (sync.status === "error" || (bootstrapErrored && !hasOperationalContext)) {
+  if (sync.status === "error" || (bootstrapErrored && !labelsResolved)) {
     return {
       tone: "error",
       label: t("workspaceStatus.syncFailedLabel"),
