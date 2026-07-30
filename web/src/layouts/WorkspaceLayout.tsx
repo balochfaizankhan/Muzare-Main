@@ -10,9 +10,10 @@ import { config } from "../config";
 import type { PendingMutation } from "../lib/offline-db";
 import { useSyncState } from "../hooks/useSyncState";
 import { fetchBootstrap } from "../lib/api";
+import { workspaceBootstrapQueryKey } from "../lib/workspaceBootstrap";
 import { formatDate } from "../lib/format";
 import { deriveWorkspaceDisplayStatus } from "../lib/workspaceStatus";
-import { discardSyncQueueItem, getSyncQueueItems, refreshOperationalData, repairStaleSyncQueueItem, resolveSyncQueueItem, retrySyncQueueItem, startSyncService, stopSyncService, syncNow } from "../services/syncService";
+import { applyBootstrapSnapshot, discardSyncQueueItem, getSyncQueueItems, refreshOperationalData, repairStaleSyncQueueItem, resolveSyncQueueItem, retrySyncQueueItem, startSyncService, stopSyncService, syncNow } from "../services/syncService";
 import { setActiveWorkspaceId } from "../lib/offline-db";
 import { hasModulePermission } from "../lib/permissions";
 import { markStartup } from "../lib/startupPerf";
@@ -46,32 +47,35 @@ export function WorkspaceLayout() {
   const [queueItems, setQueueItems] = useState<PendingMutation[]>([]);
   const [mobileSheet, setMobileSheet] = useState<null | "add" | "more">(null);
   const bootstrap = useQuery({
-    queryKey: ["bootstrap", user?.workspaceId, sync.farmId, sync.seasonId],
-    queryFn: () => fetchBootstrap(token!),
-    enabled: Boolean(user && token),
+    queryKey: workspaceBootstrapQueryKey(user?.workspaceId),
+    queryFn: ({ signal }) => fetchBootstrap(token!, signal),
+    enabled: Boolean(user?.workspaceId && token),
     retry: false,
   });
   useEffect(() => {
     setActiveWorkspaceId(user?.workspaceId ?? null);
   }, [user?.workspaceId]);
   useEffect(() => {
-    if (token && user?.workspaceId) void startSyncService(token, user.workspaceId, bootstrap.data ?? null);
+    if (!token || !user?.workspaceId) return;
+    void startSyncService(token, user.workspaceId);
     return stopSyncService;
+  }, [token, user?.workspaceId]);
+  useEffect(() => {
+    if (token && user?.workspaceId && bootstrap.data) {
+      void applyBootstrapSnapshot(token, user.workspaceId, bootstrap.data);
+    }
   }, [bootstrap.data, token, user?.workspaceId]);
   useEffect(() => {
-    const reloadSeason = () => {
-      if (token && user?.workspaceId) void startSyncService(token, user.workspaceId, bootstrap.data ?? null);
+    const reloadContext = () => {
+      if (token && user?.workspaceId) void bootstrap.refetch();
     };
-    window.addEventListener("muzare-season-changed", reloadSeason);
-    return () => window.removeEventListener("muzare-season-changed", reloadSeason);
-  }, [bootstrap.data, token, user?.workspaceId]);
-  useEffect(() => {
-    const reloadFarm = () => {
-      if (token && user?.workspaceId) void startSyncService(token, user.workspaceId, bootstrap.data ?? null);
+    window.addEventListener("muzare-season-changed", reloadContext);
+    window.addEventListener("muzare-farm-changed", reloadContext);
+    return () => {
+      window.removeEventListener("muzare-season-changed", reloadContext);
+      window.removeEventListener("muzare-farm-changed", reloadContext);
     };
-    window.addEventListener("muzare-farm-changed", reloadFarm);
-    return () => window.removeEventListener("muzare-farm-changed", reloadFarm);
-  }, [bootstrap.data, token, user?.workspaceId]);
+  }, [bootstrap.refetch, token, user?.workspaceId]);
   useEffect(() => {
     const showToast = (event: Event) => {
       setToast((event as CustomEvent<string>).detail);
