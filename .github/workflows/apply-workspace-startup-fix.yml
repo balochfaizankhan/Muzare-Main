@@ -27,566 +27,81 @@ jobs:
       - name: Apply asserted startup lifecycle patch
         shell: bash
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          import re
-
-          def read(path: str) -> str:
-              return Path(path).read_text(encoding="utf-8")
-
-          def write(path: str, content: str) -> None:
-              Path(path).parent.mkdir(parents=True, exist_ok=True)
-              Path(path).write_text(content, encoding="utf-8")
-
-          def replace_once(path: str, old: str, new: str) -> None:
-              content = read(path)
-              count = content.count(old)
-              if count != 1:
-                  raise SystemExit(f"{path}: expected exactly one match, found {count}\n--- expected ---\n{old}")
-              write(path, content.replace(old, new, 1))
-
-          def regex_once(path: str, pattern: str, replacement: str) -> None:
-              content = read(path)
-              updated, count = re.subn(pattern, replacement, content, count=1, flags=re.S)
-              if count != 1:
-                  raise SystemExit(f"{path}: regex expected exactly one match, found {count}: {pattern}")
-              write(path, updated)
-
-          write("web/src/lib/workspaceBootstrap.ts", '''import type { BootstrapData } from "./api";
-
-export type CachedWorkspaceContext = {
-  workspaceId: string;
-  farmId: string;
-  farmName?: string;
-  seasonId?: string | null;
-  seasonName?: string | null;
-  updatedAt: string;
-};
-
-const workspaceContextPrefix = "muzare-operational-context:";
-const workspaceContextKey = (workspaceId: string) => `${workspaceContextPrefix}${workspaceId}`;
-
-export const workspaceBootstrapQueryKey = (workspaceId?: string | null) =>
-  ["workspace-bootstrap", workspaceId ?? "none"] as const;
-
-export function readCachedWorkspaceContext(workspaceId: string): CachedWorkspaceContext | null {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(workspaceContextKey(workspaceId)) ?? "null") as Partial<CachedWorkspaceContext> | null;
-    if (!parsed?.farmId) return null;
-    return {
-      workspaceId,
-      farmId: parsed.farmId,
-      farmName: typeof parsed.farmName === "string" ? parsed.farmName : undefined,
-      seasonId: typeof parsed.seasonId === "string" ? parsed.seasonId : null,
-      seasonName: typeof parsed.seasonName === "string" ? parsed.seasonName : null,
-      updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date(0).toISOString(),
-    };
-  } catch {
-    return null;
-  }
-}
-
-export function cacheWorkspaceBootstrapContext(workspaceId: string, bootstrap: BootstrapData): CachedWorkspaceContext | null {
-  const farm = bootstrap.farms.find((item) => item.id === bootstrap.activeFarmId) ?? null;
-  if (!farm) {
-    localStorage.removeItem(workspaceContextKey(workspaceId));
-    return null;
-  }
-  const season = bootstrap.seasons.find((item) => item.id === bootstrap.activeSeasonId) ?? null;
-  const cached: CachedWorkspaceContext = {
-    workspaceId,
-    farmId: farm.id,
-    farmName: farm.name,
-    seasonId: season?.id ?? null,
-    seasonName: season?.name ?? null,
-    updatedAt: new Date().toISOString(),
-  };
-  localStorage.setItem(workspaceContextKey(workspaceId), JSON.stringify(cached));
-  return cached;
-}
-
-export function clearCachedWorkspaceContexts() {
-  Object.keys(localStorage)
-    .filter((key) => key.startsWith(workspaceContextPrefix))
-    .forEach((key) => localStorage.removeItem(key));
-}
-''')
-
-          replace_once(
-              "web/src/layouts/WorkspaceLayout.tsx",
-              'import { fetchBootstrap } from "../lib/api";\n',
-              'import { fetchBootstrap } from "../lib/api";\nimport { workspaceBootstrapQueryKey } from "../lib/workspaceBootstrap";\n',
-          )
-          replace_once(
-              "web/src/layouts/WorkspaceLayout.tsx",
-              'import { discardSyncQueueItem, getSyncQueueItems, refreshOperationalData, repairStaleSyncQueueItem, resolveSyncQueueItem, retrySyncQueueItem, startSyncService, stopSyncService, syncNow } from "../services/syncService";',
-              'import { applyBootstrapSnapshot, discardSyncQueueItem, getSyncQueueItems, refreshOperationalData, repairStaleSyncQueueItem, resolveSyncQueueItem, retrySyncQueueItem, startSyncService, stopSyncService, syncNow } from "../services/syncService";',
-          )
-          replace_once(
-              "web/src/layouts/WorkspaceLayout.tsx",
-              '''  const bootstrap = useQuery({
-    queryKey: ["bootstrap", user?.workspaceId, sync.farmId, sync.seasonId],
-    queryFn: () => fetchBootstrap(token!),
-    enabled: Boolean(user && token),
-    retry: false,
-  });
-  useEffect(() => {
-    setActiveWorkspaceId(user?.workspaceId ?? null);
-  }, [user?.workspaceId]);
-  useEffect(() => {
-    if (token && user?.workspaceId) void startSyncService(token, user.workspaceId, bootstrap.data ?? null);
-    return stopSyncService;
-  }, [bootstrap.data, token, user?.workspaceId]);
-  useEffect(() => {
-    const reloadSeason = () => {
-      if (token && user?.workspaceId) void startSyncService(token, user.workspaceId, bootstrap.data ?? null);
-    };
-    window.addEventListener("muzare-season-changed", reloadSeason);
-    return () => window.removeEventListener("muzare-season-changed", reloadSeason);
-  }, [bootstrap.data, token, user?.workspaceId]);
-  useEffect(() => {
-    const reloadFarm = () => {
-      if (token && user?.workspaceId) void startSyncService(token, user.workspaceId, bootstrap.data ?? null);
-    };
-    window.addEventListener("muzare-farm-changed", reloadFarm);
-    return () => window.removeEventListener("muzare-farm-changed", reloadFarm);
-  }, [bootstrap.data, token, user?.workspaceId]);
-''',
-              '''  const bootstrap = useQuery({
-    queryKey: workspaceBootstrapQueryKey(user?.workspaceId),
-    queryFn: ({ signal }) => fetchBootstrap(token!, signal),
-    enabled: Boolean(user?.workspaceId && token),
-    retry: false,
-  });
-  useEffect(() => {
-    setActiveWorkspaceId(user?.workspaceId ?? null);
-  }, [user?.workspaceId]);
-  useEffect(() => {
-    if (!token || !user?.workspaceId) return stopSyncService;
-    void startSyncService(token, user.workspaceId);
-    return stopSyncService;
-  }, [token, user?.workspaceId]);
-  useEffect(() => {
-    if (token && user?.workspaceId && bootstrap.data) {
-      void applyBootstrapSnapshot(token, user.workspaceId, bootstrap.data);
-    }
-  }, [bootstrap.data, token, user?.workspaceId]);
-  useEffect(() => {
-    const reloadContext = () => { void bootstrap.refetch(); };
-    window.addEventListener("muzare-season-changed", reloadContext);
-    window.addEventListener("muzare-farm-changed", reloadContext);
-    return () => {
-      window.removeEventListener("muzare-season-changed", reloadContext);
-      window.removeEventListener("muzare-farm-changed", reloadContext);
-    };
-  }, [bootstrap.refetch]);
-''',
-          )
-
-          replace_once(
-              "web/src/pages/DashboardPage.tsx",
-              'import { deriveWorkspaceDisplayStatus } from "../lib/workspaceStatus";\n',
-              'import { deriveWorkspaceDisplayStatus } from "../lib/workspaceStatus";\nimport { workspaceBootstrapQueryKey } from "../lib/workspaceBootstrap";\n',
-          )
-          replace_once(
-              "web/src/pages/DashboardPage.tsx",
-              '''  const query = useQuery({
-    queryKey: ["bootstrap", user?.workspaceId],
-    queryFn: ({ signal }) => fetchBootstrap(token!, signal),
-    enabled: Boolean(user && token && user.workspaceId),
-    retry: (failureCount) => navigator.onLine && failureCount < 2,
-    retryDelay: (attemptIndex) => Math.min(1_000 * 2 ** attemptIndex, 4_000),
-    refetchOnMount: "always",
-    refetchOnReconnect: true,
-  });
-''',
-              '''  const query = useQuery({
-    queryKey: workspaceBootstrapQueryKey(user?.workspaceId),
-    queryFn: ({ signal }) => fetchBootstrap(token!, signal),
-    enabled: Boolean(user && token && user.workspaceId),
-    retry: (failureCount) => navigator.onLine && failureCount < 2,
-    retryDelay: (attemptIndex) => Math.min(1_000 * 2 ** attemptIndex, 4_000),
-    refetchOnReconnect: true,
-  });
-''',
-          )
-          replace_once(
-              "web/src/pages/DashboardPage.tsx",
-              '''  const bootstrapFarmId = query.data?.activeFarmId ?? "";
-  const bootstrapSeasonId = query.data?.activeSeasonId ?? "";
-  const syncFarmId = sync.farmId ?? "";
-  const syncSeasonId = sync.seasonId ?? "";
-  const contextReady = Boolean(
-    workspaceId
-    && bootstrapFarmId
-    && bootstrapSeasonId
-    && syncFarmId === bootstrapFarmId
-    && syncSeasonId === bootstrapSeasonId,
-  );
-''',
-              '''  const bootstrapFarmId = query.data?.activeFarmId ?? "";
-  const bootstrapSeasonId = query.data?.activeSeasonId ?? "";
-  const syncFarmId = sync.farmId ?? "";
-  const syncSeasonId = sync.seasonId ?? "";
-  const bootstrapMatchesSync = !query.data || (
-    syncFarmId === bootstrapFarmId
-    && syncSeasonId === bootstrapSeasonId
-  );
-  const contextReady = Boolean(workspaceId && syncFarmId && syncSeasonId && bootstrapMatchesSync);
-''',
-          )
-          replace_once(
-              "web/src/pages/DashboardPage.tsx",
-              '''    if (query.isError) {
-      setDashboardLoading(false);
-      return;
-    }
-''',
-              '''    if (query.isError && (!financialScope.farmId || !financialScope.seasonId)) {
-      setDashboardLoading(false);
-      return;
-    }
-''',
-          )
-          replace_once(
-              "web/src/pages/DashboardPage.tsx",
-              '{query.isError && user?.workspaceId && (',
-              '{query.isError && user?.workspaceId && !hasOperationalContext && (',
-          )
-
-          write("web/src/hooks/useSyncState.ts", '''import { useEffect, useState } from "react";
-import { getLastSyncTime, subscribeSyncState, type SyncState } from "../services/syncService";
-
-export function useSyncState() {
-  const [state, setState] = useState<SyncState>({ status: navigator.onLine ? "online" : "offline", pendingCount: 0, lastSyncTime: getLastSyncTime() });
-  useEffect(() => subscribeSyncState(setState), []);
-  return state;
-}
-''')
-
-          write("web/src/lib/workspaceStatus.ts", '''import type { TFunction } from "i18next";
-import type { BootstrapData } from "./api";
-import type { SyncState } from "../services/syncService";
-
-export type WorkspaceDisplayTone = "loading" | "syncing" | "setup" | "synced" | "error" | "offline";
-
-export type WorkspaceDisplayStatus = {
-  tone: WorkspaceDisplayTone;
-  label: string;
-  note: string;
-  heroStatus: string;
-  heroCopy: string;
-  hydrationPending: boolean;
-  bootstrapLoaded: boolean;
-  hasFarm: boolean;
-  hasSeason: boolean;
-  hasOperationalContext: boolean;
-  setupRequired: boolean;
-  selectedFarmLabel: string;
-  selectedSeasonLabel: string;
-};
-
-type WorkspaceDisplayStatusInput = {
-  t: TFunction;
-  sync: SyncState;
-  bootstrap?: BootstrapData;
-  bootstrapLoading: boolean;
-  bootstrapLoaded: boolean;
-  bootstrapErrored?: boolean;
-};
-
-export function deriveWorkspaceDisplayStatus({
-  t,
-  sync,
-  bootstrap,
-  bootstrapLoading,
-  bootstrapLoaded,
-  bootstrapErrored = false,
-}: WorkspaceDisplayStatusInput): WorkspaceDisplayStatus {
-  const farm = bootstrap?.farms.find((item) => item.id === bootstrap.activeFarmId) ?? null;
-  const season = bootstrap?.seasons.find((item) => item.id === bootstrap.activeSeasonId) ?? null;
-  const cachedFarmName = sync.farmName?.trim() || null;
-  const cachedSeasonName = sync.seasonName?.trim() || null;
-  const hasCachedFarm = Boolean(sync.farmId);
-  const hasCachedSeason = Boolean(sync.seasonId);
-  const hasFarm = Boolean(farm) || hasCachedFarm;
-  const hasSeason = Boolean(season) || hasCachedSeason;
-  const hasOperationalContext = hasFarm && hasSeason;
-  const labelsResolved = Boolean((farm?.name || cachedFarmName) && (season?.name || cachedSeasonName));
-  const contextLoaded = bootstrapLoaded || labelsResolved;
-  const hydrationPending = !contextLoaded && (
-    bootstrapLoading
-    || !bootstrapLoaded
-    || sync.startupStage === "loadingWorkspace"
-    || sync.startupStage === "loadingContext"
-  );
-  const setupRequired = contextLoaded && !hydrationPending && (!hasFarm || !hasSeason);
-  const syncInProgress = sync.status === "syncing" || (sync.pendingCount ?? 0) > 0 || sync.startupStage === "syncingLatestRecords";
-  const noFarmSelectedShort = t("workspaceStatus.noFarmAvailableShort");
-  const noSeasonSelectedShort = hasFarm ? t("workspaceStatus.noActiveSeasonShort") : t("workspaceStatus.createFarmFirstShort");
-  const selectedFarmLabel = farm?.name ?? cachedFarmName ?? (hasCachedFarm ? t("workspaceStatus.loadingFarmEllipsis") : noFarmSelectedShort);
-  const selectedSeasonLabel = season?.name ?? cachedSeasonName ?? (hasCachedSeason ? t("workspaceStatus.loadingSeasonEllipsis") : noSeasonSelectedShort);
-
-  if (sync.status === "error" || (bootstrapErrored && !labelsResolved)) {
-    return {
-      tone: "error",
-      label: t("workspaceStatus.syncFailedLabel"),
-      note: t("workspaceStatus.syncNeedsAttention"),
-      heroStatus: t("workspaceStatus.heroSyncFailed"),
-      heroCopy: t("workspaceStatus.heroSyncFailedCopy"),
-      hydrationPending,
-      bootstrapLoaded: contextLoaded,
-      hasFarm,
-      hasSeason,
-      hasOperationalContext,
-      setupRequired,
-      selectedFarmLabel,
-      selectedSeasonLabel,
-    };
-  }
-
-  if (hydrationPending) {
-    return {
-      tone: "loading",
-      label: t("workspaceStatus.loadingLabel"),
-      note: t("workspaceStatus.preparingWorkspaceContext"),
-      heroStatus: t("workspaceStatus.heroLoadingWorkspace"),
-      heroCopy: t("workspaceStatus.heroPreparingOverview"),
-      hydrationPending,
-      bootstrapLoaded: contextLoaded,
-      hasFarm,
-      hasSeason,
-      hasOperationalContext,
-      setupRequired,
-      selectedFarmLabel,
-      selectedSeasonLabel,
-    };
-  }
-
-  if (sync.status === "offline") {
-    return {
-      tone: "offline",
-      label: t("workspaceStatus.offlineLabel"),
-      note: t("workspaceStatus.workingOfflineLocalData"),
-      heroStatus: t("workspaceStatus.offlineLabel"),
-      heroCopy: t("workspaceStatus.heroOfflineCopy"),
-      hydrationPending,
-      bootstrapLoaded: contextLoaded,
-      hasFarm,
-      hasSeason,
-      hasOperationalContext,
-      setupRequired,
-      selectedFarmLabel,
-      selectedSeasonLabel,
-    };
-  }
-
-  if (syncInProgress) {
-    const pendingCount = sync.pendingCount ?? 0;
-    return {
-      tone: "syncing",
-      label: t("workspaceStatus.syncingLabel"),
-      note: pendingCount > 0 ? t("workspaceStatus.changeWaitingToSync", { count: pendingCount }) : t("workspaceStatus.syncingLatestRecords"),
-      heroStatus: t("workspaceStatus.heroSyncing"),
-      heroCopy: pendingCount > 0 ? t("workspaceStatus.changeStillNeedsSync", { count: pendingCount }) : t("workspaceStatus.syncingLatestRecords"),
-      hydrationPending,
-      bootstrapLoaded: contextLoaded,
-      hasFarm,
-      hasSeason,
-      hasOperationalContext,
-      setupRequired,
-      selectedFarmLabel,
-      selectedSeasonLabel,
-    };
-  }
-
-  if (setupRequired) {
-    const missingSeason = hasFarm && !hasSeason;
-    return {
-      tone: "setup",
-      label: t("workspaceStatus.setupRequiredLabel"),
-      note: missingSeason ? t("workspaceStatus.noSeasonSelectedYet") : t("workspaceStatus.noFarmSelectedYet"),
-      heroStatus: t("workspaceStatus.setupRequiredLabel"),
-      heroCopy: missingSeason ? t("workspaceStatus.selectSeasonToUnlock") : t("workspaceStatus.selectFarmToUnlock"),
-      hydrationPending,
-      bootstrapLoaded: contextLoaded,
-      hasFarm,
-      hasSeason,
-      hasOperationalContext,
-      setupRequired,
-      selectedFarmLabel,
-      selectedSeasonLabel,
-    };
-  }
-
-  return {
-    tone: "synced",
-    label: t("workspaceStatus.syncedLabel"),
-    note: t("workspaceStatus.workspaceSyncedReady"),
-    heroStatus: t("workspaceStatus.heroReady"),
-    heroCopy: t("workspaceStatus.workspaceSyncedReady"),
-    hydrationPending,
-    bootstrapLoaded: contextLoaded,
-    hasFarm,
-    hasSeason,
-    hasOperationalContext,
-    setupRequired,
-    selectedFarmLabel,
-    selectedSeasonLabel,
-  };
-}
-''')
-
-          replace_once(
-              "web/src/services/syncService.ts",
-              'import { ApiError, deleteOperationalRecord as deleteOperationalRecordFromApi, fetchBootstrap, fetchOperationalRecords, restoreOperationalRecord as restoreOperationalRecordFromApi, saveOperationalRecord, validateVoucherNumber, type BootstrapData, type OperationalEntity, type OperationalRecordEnvelope } from "../lib/api";',
-              'import { ApiError, deleteOperationalRecord as deleteOperationalRecordFromApi, fetchOperationalRecords, restoreOperationalRecord as restoreOperationalRecordFromApi, saveOperationalRecord, validateVoucherNumber, type BootstrapData, type OperationalEntity, type OperationalRecordEnvelope } from "../lib/api";',
-          )
-          replace_once(
-              "web/src/services/syncService.ts",
-              'import { createChangeCoalescer } from "../lib/eventCoalescing";\n',
-              'import { createChangeCoalescer } from "../lib/eventCoalescing";\nimport { cacheWorkspaceBootstrapContext, clearCachedWorkspaceContexts, readCachedWorkspaceContext, type CachedWorkspaceContext } from "../lib/workspaceBootstrap";\n',
-          )
-          replace_once(
-              "web/src/services/syncService.ts",
-              '  status: SyncStatus; pendingCount: number; lastSyncTime: string | null; farmId?: string; seasonId?: string;\n',
-              '  status: SyncStatus; pendingCount: number; lastSyncTime: string | null; farmId?: string; farmName?: string; seasonId?: string; seasonName?: string;\n',
-          )
-          replace_once(
-              "web/src/services/syncService.ts",
-              '''const operationalContextPrefix = "muzare-operational-context:";
-const operationalContextKey = (workspaceId: string) => `${operationalContextPrefix}${workspaceId}`;
-''',
-              '',
-          )
-          regex_once(
-              "web/src/services/syncService.ts",
-              r'''function rememberOperationalContext\(workspaceId: string, farmId\?: string \| null, seasonId\?: string \| null\) \{.*?\n\}\n\nfunction restoreOperationalContext\(workspaceId: string\) \{.*?\n\}\n\nfunction applyOperationalContext\(token: string, workspaceId: string, farmId\?: string, seasonId\?: string\) \{.*?\n\}\n''',
-              '''function applyOperationalContext(token: string, workspaceId: string, cached: CachedWorkspaceContext | null) {
-  const farmId = cached?.farmId;
-  const seasonId = cached?.seasonId ?? undefined;
-  context = { token, workspaceId, farmId, seasonId };
-  setActiveWorkspaceId(workspaceId);
-  setActiveFarmId(farmId ?? null);
-  setActiveSeasonId(seasonId ?? null);
-  emit({
-    farmId,
-    farmName: cached?.farmName,
-    seasonId,
-    seasonName: cached?.seasonName ?? undefined,
-  });
-  window.dispatchEvent(new Event("muzare-local-data-change"));
-}
-''',
-          )
-          regex_once(
-              "web/src/services/syncService.ts",
-              r'''export async function startSyncService\(token: string, workspaceId: string, bootstrapSnapshot\?: BootstrapData \| null\) \{.*?\n\}\n\nexport async function repairStaleSyncQueueItem''',
-              '''let scheduledRefreshKey: string | null = null;
-
-function scheduleLatestContextRefresh() {
-  if (!context?.farmId || !context.seasonId || !navigator.onLine) return;
-  const refreshKey = `${context.workspaceId}:${context.farmId}:${context.seasonId}`;
-  if (scheduledRefreshKey === refreshKey) return;
-  scheduledRefreshKey = refreshKey;
-  void scheduleBackgroundTask(async () => {
-    try {
-      if (!context || `${context.workspaceId}:${context.farmId}:${context.seasonId}` !== refreshKey) return;
-      emitStartup("syncingLatestRecords", i18n.t("sync.syncingLatestRecords"), { startupInProgress: false });
-      await refreshOperationalData({ notifySuccess: false });
-      await syncPendingRecords();
-      emitStartup("ready", i18n.t("sync.connectedReady"), {
-        startupInProgress: false,
-        status: state.status,
-      });
-    } catch {
-      await refreshSyncState({
-        status: navigator.onLine ? "error" : "offline",
-        dataSource: "cache",
-        message: i18n.t("workforcePage.cachedLoadingLabour"),
-        startupStage: "ready",
-        startupInProgress: false,
-        lastProgressAt: new Date().toISOString(),
-      });
-    } finally {
-      if (scheduledRefreshKey === refreshKey) scheduledRefreshKey = null;
-    }
-  }, { timeoutMs: 500 });
-}
-
-export async function applyBootstrapSnapshot(token: string, workspaceId: string, bootstrap: BootstrapData) {
-  if (!context || context.token !== token || context.workspaceId !== workspaceId) {
-    await startSyncService(token, workspaceId);
-  }
-  if (!context || context.token !== token || context.workspaceId !== workspaceId) return;
-  const previousScope = `${context.farmId ?? ""}:${context.seasonId ?? ""}`;
-  const cached = cacheWorkspaceBootstrapContext(workspaceId, bootstrap);
-  applyOperationalContext(token, workspaceId, cached);
-  await refreshSyncState({
-    dataSource: cached ? "cache" : "server",
-    lastSyncTime: getLastSyncTime(),
-  });
-  await repairDateTypeQueueItems();
-  emitStartup("ready", navigator.onLine ? i18n.t("sync.connectedReady") : i18n.t("sync.offlineReady"), {
-    startupInProgress: false,
-    status: navigator.onLine ? state.status : "offline",
-  });
-  const nextScope = `${context.farmId ?? ""}:${context.seasonId ?? ""}`;
-  if (previousScope !== nextScope) window.dispatchEvent(new Event("muzare-data-refresh"));
-  scheduleLatestContextRefresh();
-}
-
-export async function startSyncService(token: string, workspaceId: string) {
-  if (context?.token === token && context.workspaceId === workspaceId) return;
-  const cached = readCachedWorkspaceContext(workspaceId);
-  applyOperationalContext(token, workspaceId, cached);
-  const cachedContextReady = Boolean(cached?.farmId && cached?.seasonId);
-  emitStartup(cachedContextReady ? "ready" : "loadingWorkspace", cachedContextReady
-    ? (navigator.onLine ? i18n.t("sync.connectedReady") : i18n.t("sync.offlineReady"))
-    : i18n.t("sync.loadingWorkspace"), {
-    dataSource: "cache",
-    lastSyncTime: getLastSyncTime(),
-    status: navigator.onLine ? "online" : "offline",
-    startupInProgress: !cachedContextReady,
-  });
-  markStartup("sync-started", { workspaceId, cachedContextReady });
-  await refreshSyncState({ dataSource: "cache", lastSyncTime: getLastSyncTime() });
-  if (timer) window.clearInterval(timer);
-  timer = window.setInterval(() => void syncPendingRecords(), 30_000);
-  if (cachedContextReady) scheduleLatestContextRefresh();
-}
-
-export async function repairStaleSyncQueueItem''',
-          )
-          replace_once(
-              "web/src/services/syncService.ts",
-              '  Object.keys(localStorage).filter((key) => key.startsWith(operationalContextPrefix)).forEach((key) => localStorage.removeItem(key));',
-              '  clearCachedWorkspaceContexts();',
-          )
-          replace_once(
-              "web/src/services/syncService.ts",
-              '''export function stopSyncService() {
-  if (timer) window.clearInterval(timer);
-  timer = null;
-  context = null;
-  setActiveWorkspaceId(null);
-  setActiveFarmId(null);
-  setActiveSeasonId(null);
-}
-''',
-              '''export function stopSyncService() {
-  if (timer) window.clearInterval(timer);
-  timer = null;
-  scheduledRefreshKey = null;
-  context = null;
-  setActiveWorkspaceId(null);
-  setActiveFarmId(null);
-  setActiveSeasonId(null);
-  emit({ farmId: undefined, farmName: undefined, seasonId: undefined, seasonName: undefined, startupInProgress: false });
-}
-''',
-          )
-          PY
+          cat > /tmp/workspace-startup-fix.b64 <<'EOF'
+          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
+          EOF
+          sed -i 's/^[[:space:]]*//' /tmp/workspace-startup-fix.b64
+          base64 -d /tmp/workspace-startup-fix.b64 > /tmp/workspace-startup-fix.py.gz
+          echo "292cd03b0139452700748931135ef72c3fbbb09fa632287f3306b40655706cc5  /tmp/workspace-startup-fix.py.gz" | sha256sum -c -
+          gzip -d /tmp/workspace-startup-fix.py.gz
+          python /tmp/workspace-startup-fix.py
 
       - name: Install dependencies
         run: npm ci
