@@ -37,6 +37,7 @@ import { useSyncState } from "../hooks/useSyncState";
 import { useCanonicalLabourFinancials } from "../hooks/useCanonicalLabourFinancials";
 import { formatWorkspaceActivityDateTime, loadWorkspaceActivity, type WorkspaceActivityItem } from "../lib/workspaceActivity";
 import { deriveWorkspaceDisplayStatus } from "../lib/workspaceStatus";
+import { workspaceBootstrapQueryKey } from "../lib/workspaceBootstrap";
 import { markStartup, scheduleBackgroundTask } from "../lib/startupPerf";
 
 type DashboardTotals = {
@@ -94,12 +95,11 @@ export function DashboardPage() {
     overdueLabourPaymentsCount: 0,
   };
   const query = useQuery({
-    queryKey: ["bootstrap", user?.workspaceId],
+    queryKey: workspaceBootstrapQueryKey(user?.workspaceId),
     queryFn: ({ signal }) => fetchBootstrap(token!, signal),
     enabled: Boolean(user && token && user.workspaceId),
     retry: (failureCount) => navigator.onLine && failureCount < 2,
     retryDelay: (attemptIndex) => Math.min(1_000 * 2 ** attemptIndex, 4_000),
-    refetchOnMount: "always",
     refetchOnReconnect: true,
   });
   const workspaceId = user?.workspaceId ?? "";
@@ -107,12 +107,12 @@ export function DashboardPage() {
   const bootstrapSeasonId = query.data?.activeSeasonId ?? "";
   const syncFarmId = sync.farmId ?? "";
   const syncSeasonId = sync.seasonId ?? "";
+  const bootstrapContextReady = Boolean(bootstrapFarmId && bootstrapSeasonId);
   const contextReady = Boolean(
     workspaceId
-    && bootstrapFarmId
-    && bootstrapSeasonId
-    && syncFarmId === bootstrapFarmId
-    && syncSeasonId === bootstrapSeasonId,
+    && syncFarmId
+    && syncSeasonId
+    && (!bootstrapContextReady || (syncFarmId === bootstrapFarmId && syncSeasonId === bootstrapSeasonId)),
   );
   const [resolvedContext, setResolvedContext] = useState<DashboardScope | null>(null);
   const resolvedContextKeyRef = useRef("");
@@ -310,7 +310,7 @@ export function DashboardPage() {
       setDashboardLoading(false);
       return;
     }
-    if (query.isError) {
+    if (query.isError && !contextReady) {
       setDashboardLoading(false);
       return;
     }
@@ -497,7 +497,7 @@ export function DashboardPage() {
           </div>
         </section>
 
-        {query.isError && user?.workspaceId && (
+        {query.isError && user?.workspaceId && !hasOperationalContext && (
           <section className="dashboard-alert-card">
             <div>
               <strong>{t("common.dashboard")}</strong>
