@@ -1,0 +1,138 @@
+name: Retry workspace startup lifecycle fix
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - .github/workflows/retry-workspace-startup-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Recover and adapt guarded patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/apply-workspace-startup-fix.yml').read_text(encoding='utf-8')
+          marker = "cat > /tmp/workspace-startup-fix.b64 <<'EOF'\n"
+          start = workflow.index(marker) + len(marker)
+          end = workflow.index('\n          EOF', start)
+          payload = ''.join(line.strip() for line in workflow[start:end].splitlines())
+          Path('/tmp/workspace-startup-fix.b64').write_text(payload, encoding='utf-8')
+          PY
+          base64 -d /tmp/workspace-startup-fix.b64 > /tmp/workspace-startup-fix.py.gz
+          echo "292cd03b0139452700748931135ef72c3fbbb09fa632287f3306b40655706cc5  /tmp/workspace-startup-fix.py.gz" | sha256sum -c -
+          gzip -d /tmp/workspace-startup-fix.py.gz
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('/tmp/workspace-startup-fix.py')
+          lines = path.read_text(encoding='utf-8').splitlines()
+          start = next(index for index, line in enumerate(lines) if line.startswith('def replace_once'))
+          end = next((index for index in range(start + 1, len(lines)) if lines[index].startswith('def ')), len(lines))
+          guard = next(index for index in range(start, end) if lines[index].strip() == 'if count != 1:')
+          indent = lines[guard][:-len(lines[guard].lstrip())]
+          lines[guard:guard] = [
+              f'{indent}if path == "web/src/lib/workspaceStatus.ts" and count == 0:',
+              f'{indent}    return',
+          ]
+          path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          PY
+          python /tmp/workspace-startup-fix.py
+
+      - name: Apply current workspace status adaptation
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('web/src/lib/workspaceStatus.ts')
+          content = path.read_text(encoding='utf-8')
+
+          old = '''  const hasCachedFarm = Boolean(sync.farmId);
+  const hasCachedSeason = Boolean(sync.seasonId);
+  const hasFarm = Boolean(farm) || hasCachedFarm;
+  const hasSeason = Boolean(season) || hasCachedSeason;
+  const hasOperationalContext = hasFarm && hasSeason;
+  const contextLoaded = bootstrapLoaded || hasOperationalContext;
+  const hydrationPending = !hasOperationalContext && (
+    bootstrapLoading
+    || !bootstrapLoaded
+    || sync.startupStage === "loadingWorkspace"
+    || sync.startupStage === "loadingContext"
+  );
+'''
+          new = '''  const cachedFarmName = sync.farmName?.trim() || null;
+  const cachedSeasonName = sync.seasonName?.trim() || null;
+  const hasCachedFarm = Boolean(sync.farmId);
+  const hasCachedSeason = Boolean(sync.seasonId);
+  const hasFarm = Boolean(farm) || hasCachedFarm;
+  const hasSeason = Boolean(season) || hasCachedSeason;
+  const hasOperationalContext = hasFarm && hasSeason;
+  const labelsResolved = Boolean((farm?.name || cachedFarmName) && (season?.name || cachedSeasonName));
+  const contextLoaded = bootstrapLoaded || labelsResolved;
+  const hydrationPending = !contextLoaded && (
+    bootstrapLoading
+    || !bootstrapLoaded
+    || sync.startupStage === "loadingWorkspace"
+    || sync.startupStage === "loadingContext"
+  );
+'''
+          if content.count(old) != 1:
+              raise SystemExit('workspaceStatus context block did not match current dev source')
+          content = content.replace(old, new, 1)
+          content = content.replace(
+              '  const selectedFarmLabel = farm?.name ?? (hasCachedFarm ? t("workspaceStatus.loadingFarmEllipsis") : noFarmSelectedShort);\n  const selectedSeasonLabel = season?.name ?? (hasCachedSeason ? t("workspaceStatus.loadingSeasonEllipsis") : noSeasonSelectedShort);',
+              '  const selectedFarmLabel = farm?.name ?? cachedFarmName ?? (hasCachedFarm ? t("workspaceStatus.loadingFarmEllipsis") : noFarmSelectedShort);\n  const selectedSeasonLabel = season?.name ?? cachedSeasonName ?? (hasCachedSeason ? t("workspaceStatus.loadingSeasonEllipsis") : noSeasonSelectedShort);',
+              1,
+          )
+          content = content.replace(
+              '  if (sync.status === "error" || (bootstrapErrored && !hasOperationalContext)) {',
+              '  if (sync.status === "error" || (bootstrapErrored && !labelsResolved)) {',
+              1,
+          )
+          path.write_text(content, encoding='utf-8')
+          PY
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check web
+        run: npm run check --workspace @muzare/web
+
+      - name: Build web
+        run: npm run build --workspace @muzare/web
+
+      - name: Commit verified application changes
+        shell: bash
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          git rm .github/workflows/apply-workspace-startup-fix.yml .github/workflows/retry-workspace-startup-fix.yml
+          git add web/src/layouts/WorkspaceLayout.tsx \
+                  web/src/pages/DashboardPage.tsx \
+                  web/src/hooks/useSyncState.ts \
+                  web/src/lib/workspaceStatus.ts \
+                  web/src/lib/workspaceBootstrap.ts \
+                  web/src/services/syncService.ts
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "perf: stabilize cached workspace startup"
+          git push origin "HEAD:${HEAD_REF}"
