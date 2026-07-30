@@ -29,7 +29,6 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-
           workflow = Path('.github/workflows/apply-workspace-startup-fix.yml').read_text(encoding='utf-8')
           marker = "cat > /tmp/workspace-startup-fix.b64 <<'EOF'\n"
           start = workflow.index(marker) + len(marker)
@@ -42,17 +41,13 @@ jobs:
           gzip -d /tmp/workspace-startup-fix.py.gz
           python - <<'PY'
           from pathlib import Path
-
           path = Path('/tmp/workspace-startup-fix.py')
           lines = path.read_text(encoding='utf-8').splitlines()
           start = next(index for index, line in enumerate(lines) if line.startswith('def replace_once'))
           end = next((index for index in range(start + 1, len(lines)) if lines[index].startswith('def ')), len(lines))
           guard = next(index for index in range(start, end) if lines[index].strip() == 'if count != 1:')
           indent = lines[guard][:-len(lines[guard].lstrip())]
-          lines[guard:guard] = [
-              f'{indent}if path == "web/src/lib/workspaceStatus.ts" and count == 0:',
-              f'{indent}    return',
-          ]
+          lines[guard:guard] = [f'{indent}if path == "web/src/lib/workspaceStatus.ts" and count == 0:', f'{indent}    return']
           path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
           PY
           python /tmp/workspace-startup-fix.py
@@ -62,52 +57,51 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-
           path = Path('web/src/lib/workspaceStatus.ts')
           content = path.read_text(encoding='utf-8')
-
-          old = '''  const hasCachedFarm = Boolean(sync.farmId);
-  const hasCachedSeason = Boolean(sync.seasonId);
-  const hasFarm = Boolean(farm) || hasCachedFarm;
-  const hasSeason = Boolean(season) || hasCachedSeason;
-  const hasOperationalContext = hasFarm && hasSeason;
-  const contextLoaded = bootstrapLoaded || hasOperationalContext;
-  const hydrationPending = !hasOperationalContext && (
-    bootstrapLoading
-    || !bootstrapLoaded
-    || sync.startupStage === "loadingWorkspace"
-    || sync.startupStage === "loadingContext"
-  );
-'''
-          new = '''  const cachedFarmName = sync.farmName?.trim() || null;
-  const cachedSeasonName = sync.seasonName?.trim() || null;
-  const hasCachedFarm = Boolean(sync.farmId);
-  const hasCachedSeason = Boolean(sync.seasonId);
-  const hasFarm = Boolean(farm) || hasCachedFarm;
-  const hasSeason = Boolean(season) || hasCachedSeason;
-  const hasOperationalContext = hasFarm && hasSeason;
-  const labelsResolved = Boolean((farm?.name || cachedFarmName) && (season?.name || cachedSeasonName));
-  const contextLoaded = bootstrapLoaded || labelsResolved;
-  const hydrationPending = !contextLoaded && (
-    bootstrapLoading
-    || !bootstrapLoaded
-    || sync.startupStage === "loadingWorkspace"
-    || sync.startupStage === "loadingContext"
-  );
-'''
+          old = '\n'.join([
+              '  const hasCachedFarm = Boolean(sync.farmId);',
+              '  const hasCachedSeason = Boolean(sync.seasonId);',
+              '  const hasFarm = Boolean(farm) || hasCachedFarm;',
+              '  const hasSeason = Boolean(season) || hasCachedSeason;',
+              '  const hasOperationalContext = hasFarm && hasSeason;',
+              '  const contextLoaded = bootstrapLoaded || hasOperationalContext;',
+              '  const hydrationPending = !hasOperationalContext && (',
+              '    bootstrapLoading',
+              '    || !bootstrapLoaded',
+              '    || sync.startupStage === "loadingWorkspace"',
+              '    || sync.startupStage === "loadingContext"',
+              '  );',
+          ]) + '\n'
+          new = '\n'.join([
+              '  const cachedFarmName = sync.farmName?.trim() || null;',
+              '  const cachedSeasonName = sync.seasonName?.trim() || null;',
+              '  const hasCachedFarm = Boolean(sync.farmId);',
+              '  const hasCachedSeason = Boolean(sync.seasonId);',
+              '  const hasFarm = Boolean(farm) || hasCachedFarm;',
+              '  const hasSeason = Boolean(season) || hasCachedSeason;',
+              '  const hasOperationalContext = hasFarm && hasSeason;',
+              '  const labelsResolved = Boolean((farm?.name || cachedFarmName) && (season?.name || cachedSeasonName));',
+              '  const contextLoaded = bootstrapLoaded || labelsResolved;',
+              '  const hydrationPending = !contextLoaded && (',
+              '    bootstrapLoading',
+              '    || !bootstrapLoaded',
+              '    || sync.startupStage === "loadingWorkspace"',
+              '    || sync.startupStage === "loadingContext"',
+              '  );',
+          ]) + '\n'
           if content.count(old) != 1:
               raise SystemExit('workspaceStatus context block did not match current dev source')
           content = content.replace(old, new, 1)
-          content = content.replace(
-              '  const selectedFarmLabel = farm?.name ?? (hasCachedFarm ? t("workspaceStatus.loadingFarmEllipsis") : noFarmSelectedShort);\n  const selectedSeasonLabel = season?.name ?? (hasCachedSeason ? t("workspaceStatus.loadingSeasonEllipsis") : noSeasonSelectedShort);',
-              '  const selectedFarmLabel = farm?.name ?? cachedFarmName ?? (hasCachedFarm ? t("workspaceStatus.loadingFarmEllipsis") : noFarmSelectedShort);\n  const selectedSeasonLabel = season?.name ?? cachedSeasonName ?? (hasCachedSeason ? t("workspaceStatus.loadingSeasonEllipsis") : noSeasonSelectedShort);',
-              1,
-          )
-          content = content.replace(
-              '  if (sync.status === "error" || (bootstrapErrored && !hasOperationalContext)) {',
-              '  if (sync.status === "error" || (bootstrapErrored && !labelsResolved)) {',
-              1,
-          )
+          old_labels = '  const selectedFarmLabel = farm?.name ?? (hasCachedFarm ? t("workspaceStatus.loadingFarmEllipsis") : noFarmSelectedShort);\n  const selectedSeasonLabel = season?.name ?? (hasCachedSeason ? t("workspaceStatus.loadingSeasonEllipsis") : noSeasonSelectedShort);'
+          new_labels = '  const selectedFarmLabel = farm?.name ?? cachedFarmName ?? (hasCachedFarm ? t("workspaceStatus.loadingFarmEllipsis") : noFarmSelectedShort);\n  const selectedSeasonLabel = season?.name ?? cachedSeasonName ?? (hasCachedSeason ? t("workspaceStatus.loadingSeasonEllipsis") : noSeasonSelectedShort);'
+          if content.count(old_labels) != 1:
+              raise SystemExit('workspaceStatus label block did not match current dev source')
+          content = content.replace(old_labels, new_labels, 1)
+          old_error = '  if (sync.status === "error" || (bootstrapErrored && !hasOperationalContext)) {'
+          if content.count(old_error) != 1:
+              raise SystemExit('workspaceStatus error condition did not match current dev source')
+          content = content.replace(old_error, '  if (sync.status === "error" || (bootstrapErrored && !labelsResolved)) {', 1)
           path.write_text(content, encoding='utf-8')
           PY
 
