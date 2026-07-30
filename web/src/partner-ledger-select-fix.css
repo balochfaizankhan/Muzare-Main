@@ -1,0 +1,35 @@
+/* Partner Ledger type selector: keep one visual control boundary.
+   The generic ClearableSelect wrapper and its native select previously both received
+   Partner Ledger form borders, producing the nested/double-box appearance on mobile. */
+@media screen {
+  .partner-entry-form .clearable-select {
+    display: flex;
+    align-items: center;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .partner-entry-form .clearable-select > select {
+    width: 100%;
+    min-height: 46px;
+    margin: 0;
+    padding-block: 0;
+    padding-inline-start: 13px;
+    padding-inline-end: 44px !important;
+    border: 0 !important;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--text-primary, #1f2937);
+    box-shadow: none !important;
+  }
+
+  .partner-entry-form .clearable-select > select:focus {
+    border: 0 !important;
+    outline: none;
+    box-shadow: none !important;
+  }
+
+  .partner-entry-form .clearable-select__actions {
+    inset-inline-end: 13px;
+  }
+}
