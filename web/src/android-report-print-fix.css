@@ -1,0 +1,28 @@
+/* Android print services do not consistently allow a visible descendant to escape
+   an ancestor hidden with visibility:hidden. The legacy print stylesheet hides
+   body descendants globally, so explicitly restore the complete Reports route
+   chain for non-attendance documents. Loaded after non-attendance-report-print.css. */
+@media print {
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) #root,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .app-shell,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .app-shell__body,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .dashboard-page,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .reports-page,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .module-workspace,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .reports-print-section.is-print-target,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .reports-print-section.is-print-target * {
+    visibility: visible !important;
+  }
+
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) #root,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .app-shell,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .app-shell__body,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .dashboard-page,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .reports-page,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .module-workspace {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+}
