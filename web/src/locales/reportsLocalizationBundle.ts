@@ -9,6 +9,12 @@ export const reportsLocalizationBundle = {
         halfDayMark: "H",
         absentMark: "A",
         halfDayPrintMark: "½",
+        lineItems: "Line items",
+        shareOfTotal: "Share of total (%)",
+        bySubcategory: "By subcategory",
+        labourDueRecord: "Labour wage due",
+        attributedAmount: "Attributed amount (SAR)",
+        expenseAmount: "Expense amount (SAR)",
       },
       teamActivity: {
         // Audit actions
@@ -93,6 +99,12 @@ export const reportsLocalizationBundle = {
         halfDayMark: "ن",
         absentMark: "غ",
         halfDayPrintMark: "½",
+        lineItems: "بنود المصروفات",
+        shareOfTotal: "النسبة من الإجمالي (%)",
+        bySubcategory: "حسب الفئة الفرعية",
+        labourDueRecord: "استحقاق أجور العمالة",
+        attributedAmount: "المبلغ المنسوب (ر.س)",
+        expenseAmount: "مبلغ المصروف (ر.س)",
       },
       teamActivity: {
         workspace_invitation_accepted: "تم قبول الدعوة",
@@ -175,6 +187,12 @@ export const reportsLocalizationBundle = {
         halfDayMark: "ن",
         absentMark: "غ",
         halfDayPrintMark: "½",
+        lineItems: "اخراجات کی لائن آئٹمز",
+        shareOfTotal: "کل میں حصہ (%)",
+        bySubcategory: "ذیلی زمرے کے لحاظ سے",
+        labourDueRecord: "مزدور اجرت واجب الادا",
+        attributedAmount: "منسوب رقم (ر.س)",
+        expenseAmount: "اخراجات کی رقم (ر.س)",
       },
       teamActivity: {
         workspace_invitation_accepted: "دعوت قبول کر لی گئی",

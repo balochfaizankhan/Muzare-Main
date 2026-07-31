@@ -213,6 +213,26 @@ type VoucherReportLine = {
   notes?: string;
 };
 
+type ExpenseReportExportRow = {
+  key: string;
+  sourceId: string;
+  voucherNumber: string;
+  date: string;
+  lineNumber: number;
+  description: string;
+  categoryKey: string;
+  categoryLabel: string;
+  subcategoryKey: string;
+  subcategoryLabel: string;
+  recordType: string;
+  accountName: string;
+  expenseAmount: number;
+  attributedAmount: number;
+  voucherTotal: number;
+  recipient: string;
+  status: string;
+};
+
 const voucherReportItems = (voucher: Voucher): VoucherReportLine[] => {
   const voucherNumber = getVoucherDisplayNumber(voucher) || voucher.voucherNumber;
   if (voucher.items?.length) {
@@ -761,6 +781,11 @@ export function Reports() {
   const openExpenseCategory = (nextCategory: string) => {
     setCategory(nextCategory);
     setSubcategory("");
+    switchView("expenditures", "log");
+  };
+  const openExpenseSubcategory = (nextCategory: string, nextSubcategory: string) => {
+    setCategory(nextCategory);
+    setSubcategory(nextSubcategory);
     switchView("expenditures", "log");
   };
   const openExpenseAccount = (nextAccountId: string) => {
@@ -1349,6 +1374,131 @@ export function Reports() {
     return [...totals.values()].sort((left, right) => left.name.localeCompare(right.name));
   }, [accountLookup, accountName, accounts, canonicalExpenseAccountRows, t, voucherReportLineRows]);
   const totalRecognizedExpenses = voucherRows.reduce((sum, item) => sum + item.amount, 0) + canonicalExpenseRows.reduce((sum, item) => sum + item.amount, 0);
+  const expenseExportRows = useMemo<ExpenseReportExportRow[]>(() => {
+    const purchaseRows = voucherRows.flatMap((voucher) => voucherReportItems(voucher).map((line, index) => ({
+      key: `${voucher.id}:${line.id}`,
+      sourceId: voucher.id,
+      voucherNumber: getVoucherDisplayNumber(voucher) || voucher.voucherNumber,
+      date: voucher.date,
+      lineNumber: index + 1,
+      description: normalizeText(line.description) || normalizeText(line.remarks) || normalizeText(line.notes) || "-",
+      categoryKey: line.category,
+      categoryLabel: translateExpenseCategory(line.category),
+      subcategoryKey: line.subcategory || "-",
+      subcategoryLabel: line.subcategory ? translateExpenseSubcategory(line.subcategory) : "-",
+      recordType: t("reportsPage.voucherExpense"),
+      accountName: accountName(voucher.accountId),
+      expenseAmount: line.amount,
+      attributedAmount: line.amount,
+      voucherTotal: voucher.amount,
+      recipient: "-",
+      status: t("common.active"),
+    })));
+
+    const labourRows = canonicalExpenseRows.flatMap((item) => {
+      const allSources = canonicalExpenseAccountsByDue.get(item.id) ?? [];
+      const filteredSources = selectedExpenseAccountId
+        ? allSources.filter((source) => {
+          const rawAccountId = (source as { accountId?: string | null }).accountId;
+          const fallbackAccountId = accounts.find((account) => account.name.trim().toLowerCase() === source.accountName.trim().toLowerCase())?.id ?? null;
+          const resolvedAccountId = resolveCanonicalAccountId(rawAccountId, accountLookup)
+            ?? resolveCanonicalAccountId(fallbackAccountId, accountLookup)
+            ?? fallbackAccountId
+            ?? rawAccountId;
+          return resolvedAccountId === selectedExpenseAccountId;
+        })
+        : allSources;
+      const sources = filteredSources.map((source) => ({
+        accountName: localizeSystemPlaceholder(t, source.accountName) || source.accountName,
+        amount: Number(source.amount ?? 0),
+      }));
+      if (!sources.length) sources.push({ accountName: t("reportsPage.unattributed"), amount: item.amount });
+
+      return sources.map((source, index) => ({
+        key: `${item.id}:${index}`,
+        sourceId: item.id,
+        voucherNumber: item.dueNumber ?? item.id,
+        date: item.date,
+        lineNumber: index + 1,
+        description: normalizeText(item.description) || "-",
+        categoryKey: "Labour wages",
+        categoryLabel: t("reportsPage.labourWagesCategory"),
+        subcategoryKey: "Canonical labour due",
+        subcategoryLabel: t("reportsPage.labourDueRecord"),
+        recordType: t("reportsPage.labourDueRecord"),
+        accountName: source.accountName,
+        expenseAmount: index === 0 ? item.amount : 0,
+        attributedAmount: source.amount,
+        voucherTotal: item.amount,
+        recipient: localizeSystemPlaceholder(t, item.recipientName) || item.recipientName || "-",
+        status: translateStatus(t, item.status),
+      }));
+    });
+
+    return [...purchaseRows, ...labourRows].sort((left, right) => {
+      const dateOrder = expenseSort === "desc" ? right.date.localeCompare(left.date) : left.date.localeCompare(right.date);
+      return dateOrder || left.voucherNumber.localeCompare(right.voucherNumber) || left.lineNumber - right.lineNumber;
+    });
+  }, [accountLookup, accountName, accounts, canonicalExpenseAccountsByDue, canonicalExpenseRows, expenseSort, selectedExpenseAccountId, t, voucherRows]);
+
+  const expenseCategorySummaryRows = useMemo(() => {
+    const grouped = new Map<string, { categoryKey: string; label: string; value: number; sourceIds: Set<string> }>();
+    for (const row of expenseExportRows) {
+      const current = grouped.get(row.categoryKey) ?? { categoryKey: row.categoryKey, label: row.categoryLabel, value: 0, sourceIds: new Set<string>() };
+      current.value += row.expenseAmount;
+      current.sourceIds.add(row.sourceId);
+      grouped.set(row.categoryKey, current);
+    }
+    return [...grouped.values()].map((row) => ({
+      categoryKey: row.categoryKey,
+      label: row.label,
+      value: row.value,
+      share: totalRecognizedExpenses ? (row.value / totalRecognizedExpenses) * 100 : 0,
+      voucherCount: row.sourceIds.size,
+    })).sort((left, right) => right.value - left.value || left.label.localeCompare(right.label));
+  }, [expenseExportRows, totalRecognizedExpenses]);
+
+  const expenseSubcategorySummaryRows = useMemo(() => {
+    const grouped = new Map<string, { categoryKey: string; categoryLabel: string; subcategoryKey: string; subcategoryLabel: string; value: number; sourceIds: Set<string> }>();
+    for (const row of expenseExportRows) {
+      const key = `${row.categoryKey}::${row.subcategoryKey}`;
+      const current = grouped.get(key) ?? {
+        categoryKey: row.categoryKey,
+        categoryLabel: row.categoryLabel,
+        subcategoryKey: row.subcategoryKey,
+        subcategoryLabel: row.subcategoryLabel,
+        value: 0,
+        sourceIds: new Set<string>(),
+      };
+      current.value += row.expenseAmount;
+      current.sourceIds.add(row.sourceId);
+      grouped.set(key, current);
+    }
+    return [...grouped.values()].map((row) => ({
+      ...row,
+      share: totalRecognizedExpenses ? (row.value / totalRecognizedExpenses) * 100 : 0,
+      voucherCount: row.sourceIds.size,
+    })).filter((row) => row.value !== 0).sort((left, right) => right.value - left.value || left.subcategoryLabel.localeCompare(right.subcategoryLabel));
+  }, [expenseExportRows, totalRecognizedExpenses]);
+
+  const expenseAccountSummaryRows = useMemo(() => {
+    const grouped = new Map<string, { label: string; value: number; sourceIds: Set<string> }>();
+    for (const row of expenseExportRows) {
+      const current = grouped.get(row.accountName) ?? { label: row.accountName, value: 0, sourceIds: new Set<string>() };
+      current.value += row.attributedAmount;
+      current.sourceIds.add(row.sourceId);
+      grouped.set(row.accountName, current);
+    }
+    return [...grouped.values()].map((row) => ({
+      label: row.label,
+      value: row.value,
+      share: totalRecognizedExpenses ? (row.value / totalRecognizedExpenses) * 100 : 0,
+      voucherCount: row.sourceIds.size,
+    })).sort((left, right) => right.value - left.value || left.label.localeCompare(right.label));
+  }, [expenseExportRows, totalRecognizedExpenses]);
+
+  const expenseVoucherCount = new Set(expenseExportRows.map((row) => row.sourceId)).size;
+  const expenseLineItemCount = voucherReportLineRows.length + canonicalExpenseRows.length;
   const voucherCategories = useMemo(
     () => [...new Set(voucherBaseRows.flatMap((item) => voucherReportItems(item).map((line) => line.category)).filter(Boolean))].sort(),
     [voucherBaseRows],
@@ -1892,29 +2042,68 @@ export function Reports() {
   ]);
   const exportAdvanceCsv = () => (views.advances === "summary" ? exportAdvanceSummaryCsv() : exportAdvanceDetailCsv());
   const exportExpenseSummary = () => {
-    const categoryTotals = [...new Set(voucherReportLineRows.map((item) => item.category))].map((name) => [translateExpenseCategory(name), voucherReportLineRows.filter((item) => item.category === name).reduce((sum, item) => sum + item.amount, 0)]);
-    if (canonicalExpenseRows.length) categoryTotals.push([t("reportsPage.labourWagesCategory"), canonicalExpenseRows.reduce((sum, item) => sum + item.amount, 0)]);
-    const accountTotals = expenseAccountTotals.map((item) => [item.name, item.value]);
-    downloadCsv("expense-summary.csv", [
+    const suffix = from || to ? `${from || "start"}-${to || "end"}` : "all-dates";
+    downloadCsv(`expense-summary-${suffix}.csv`, [
+      [t("reportsPage.expenseSummary"), ""],
       [t("reportsPage.dateRange"), rangeLabel],
+      [t("reportsPage.farm"), reportPrintContext.farm],
+      [t("reportsPage.season"), reportPrintContext.season],
+      [t("reportsPage.generated"), reportPrintContext.generatedAt],
+      [t("reportsPage.by"), reportPrintContext.generatedBy],
       [],
-      [t("reportsPage.category"), t("reportsPage.total")],
-      ...categoryTotals,
+      [t("reportsPage.totalExpenses"), totalRecognizedExpenses],
+      [t("reportsPage.vouchers"), expenseVoucherCount],
+      [t("reportsPage.lineItems"), expenseLineItemCount],
+      [t("reportsPage.categories"), expenseCategorySummaryRows.length],
+      [t("reportsPage.account"), expenseAccountSummaryRows.length],
       [],
-      [t("reportsPage.account"), t("reportsPage.total")],
-      ...accountTotals,
+      [t("reportsPage.category"), t("reportsPage.expenseAmount"), t("reportsPage.shareOfTotal"), t("reportsPage.vouchers")],
+      ...expenseCategorySummaryRows.map((row) => [row.label, row.value, Number(row.share.toFixed(2)), row.voucherCount]),
       [],
-      [t("reportsPage.total"), totalRecognizedExpenses],
+      [t("reportsPage.category"), t("reportsPage.subcategory"), t("reportsPage.expenseAmount"), t("reportsPage.shareOfTotal"), t("reportsPage.vouchers")],
+      ...expenseSubcategorySummaryRows.map((row) => [row.categoryLabel, row.subcategoryLabel, row.value, Number(row.share.toFixed(2)), row.voucherCount]),
+      [],
+      [t("reportsPage.account"), t("reportsPage.attributedAmount"), t("reportsPage.shareOfTotal"), t("reportsPage.vouchers")],
+      ...expenseAccountSummaryRows.map((row) => [row.label, row.value, Number(row.share.toFixed(2)), row.voucherCount]),
+      [],
+      [t("reportsPage.grandTotal"), totalRecognizedExpenses],
     ]);
   };
-  const exportExpenseLog = () => downloadCsv("expense-log.csv", [
-    [t("reportsPage.voucher"), t("reportsPage.date"), t("reportsPage.description"), t("reportsPage.category"), t("reportsPage.account"), t("reportsPage.amount")],
-    ...voucherRows.flatMap((voucher) => voucherReportItems(voucher).map((item, index) => [index === 0 ? (getVoucherDisplayNumber(voucher) || voucher.voucherNumber) : "", index === 0 ? voucher.date : "", item.description, expenseLabel(item.category, item.subcategory), index === 0 ? accountName(voucher.accountId) : "", item.amount])),
-    ...canonicalExpenseRows.map((item) => {
-      const sources = canonicalExpenseAccountsByDue.get(item.id) ?? [];
-      return [item.dueNumber ?? item.id, item.date, item.description, t("reportsPage.labourWagesCategory"), sources.map((source) => `${source.accountName} — ${money(source.amount)}`).join("; ") || t("reportsPage.unattributed"), item.amount];
-    }),
-  ]);
+  const exportExpenseLog = () => {
+    const suffix = from || to ? `${from || "start"}-${to || "end"}` : "all-dates";
+    downloadCsv(`expense-log-${suffix}.csv`, [
+      [
+        t("reportsPage.voucher"),
+        t("reportsPage.date"),
+        t("reportsPage.serial"),
+        t("reportsPage.description"),
+        t("reportsPage.category"),
+        t("reportsPage.subcategory"),
+        t("reportsPage.type"),
+        t("reportsPage.account"),
+        t("reportsPage.expenseAmount"),
+        t("reportsPage.attributedAmount"),
+        `${t("reportsPage.voucher")} ${t("reportsPage.total")}`,
+        t("reportsPage.recipient"),
+        t("reportsPage.status"),
+      ],
+      ...expenseExportRows.map((row) => [
+        row.voucherNumber,
+        row.date,
+        row.lineNumber,
+        row.description,
+        row.categoryLabel,
+        row.subcategoryLabel,
+        row.recordType,
+        row.accountName,
+        row.expenseAmount,
+        row.attributedAmount,
+        row.voucherTotal,
+        row.recipient,
+        row.status,
+      ]),
+    ]);
+  };
   const exportPartnerPosition = () => downloadCsv("partner-position.csv", [
     [t("reportsPage.partner"), t("reportsPage.openingBalance"), t("reportsPage.capitalInjected"), t("reportsPage.purchaseVouchersColumn"), t("reportsPage.totalLabourAdvancesPaidColumn"), t("reportsPage.settledThroughWageSettlementsColumn"), t("reportsPage.outstandingLabourAdvancesColumn"), t("reportsPage.labourSettlementsCashPaidColumn"), t("reportsPage.transfersOut"), t("reportsPage.transfersIn"), t("reportsPage.moneyReturned"), t("reportsPage.adjustments"), t("reportsPage.currentPartnerBalance")],
     ...partnerLiabilityPositions.map((item) => [item.name, item.openingBalance, item.capitalInjected, item.purchaseVouchersPaid, item.totalLabourAdvancesPaid, item.labourSettlementNonCashApplied, item.outstandingLabourAdvances, item.labourSettlementCashPaid, item.transfersOut, item.transfersIn, item.moneyReturned, item.adjustments, item.currentPartnerBalance]),
@@ -2120,6 +2309,7 @@ export function Reports() {
             <ClearableSelect aria-label={t("reportsPage.subcategory")} value={subcategory} onChange={setSubcategory}>
               <option value="">{t("reportsPage.allSubcategories")}</option>
               {voucherSubcategories.map((item) => <option key={item} value={item}>{translateExpenseSubcategory(item)}</option>)}
+              {category === "Labour wages" && <option value="Canonical labour due">{t("reportsPage.labourDueRecord")}</option>}
             </ClearableSelect>
             {views.expenditures === "log" && <ClearableSelect clearValue="desc" aria-label={t("reportsPage.expenseSort")} value={expenseSort} onChange={(value) => setExpenseSort(value as SortOrder)}>
               <option value="desc">{t("advancesPage.newestFirst")}</option>
@@ -2388,51 +2578,112 @@ export function Reports() {
           <button className={views.expenditures === "log" ? "is-active" : ""} type="button" onClick={() => switchView("expenditures", "log")}>{t("reportsPage.log")}</button>
         </section>
         {views.expenditures === "summary" && <ReportShell title={t("reportsPage.expenseSummary")} rangeLabel={rangeLabel} sectionId="expense-summary" printContext={reportPrintContext} printLayout="portrait" onPrint={() => printSection("expense-summary")} onExport={exportExpenseSummary}>
-          <Kpis values={[[t("reportsPage.totalExpenses"), money(totalRecognizedExpenses)], [t("reportsPage.vouchers"), new Set([...voucherRows.map((item) => getVoucherDisplayNumber(item) || item.voucherNumber), ...canonicalExpenseRows.map((item) => item.dueNumber ?? item.id)]).size], [t("reportsPage.categories"), new Set([...voucherReportLineRows.map((item) => item.category), ...(canonicalExpenseRows.length ? ["Labour wages"] : [])]).size], [t("reportsPage.account"), expenseAccountTotals.length]]} />
-          <div className="reports-breakdowns">
+          <Kpis values={[
+            [t("reportsPage.totalExpenses"), money(totalRecognizedExpenses)],
+            [t("reportsPage.vouchers"), expenseVoucherCount],
+            [t("reportsPage.lineItems"), expenseLineItemCount],
+            [t("reportsPage.account"), expenseAccountSummaryRows.length],
+          ]} />
+          <div className="reports-breakdowns expense-summary-breakdowns">
             <div>
               <h3>{t("reportsPage.byCategory")}</h3>
               <div className="reports-summary-list">
-                {[...new Set(voucherReportLineRows.map((item) => item.category))].map((name) => {
-                  const value = voucherReportLineRows.filter((item) => item.category === name).reduce((sum, item) => sum + item.amount, 0);
-                  return <button type="button" className="reports-summary-drilldown" key={name} onClick={() => openExpenseCategory(name)}><span>{translateExpenseCategory(name)}</span><strong>{money(value)}</strong><ChevronRight size={16} aria-hidden="true" /></button>;
-                })}
-                {canonicalExpenseRows.length ? <button type="button" className="reports-summary-drilldown" onClick={() => openExpenseCategory("Labour wages")}><span>{t("reportsPage.labourWagesCategory")}</span><strong>{money(canonicalExpenseRows.reduce((sum, item) => sum + item.amount, 0))}</strong><ChevronRight size={16} aria-hidden="true" /></button> : null}
+                {expenseCategorySummaryRows.map((item) => <button type="button" className="reports-summary-drilldown" key={item.categoryKey} onClick={() => openExpenseCategory(item.categoryKey)}>
+                  <span className="expense-summary-drilldown__label"><b>{item.label}</b><small>{formatNumber(item.share)}% · {item.voucherCount} {t("reportsPage.vouchers")}</small></span>
+                  <strong>{money(item.value)}</strong><ChevronRight size={16} aria-hidden="true" />
+                </button>)}
               </div>
             </div>
             <div>
               <h3>{t("reportsPage.byAccount")}</h3>
               <div className="reports-summary-list">
-                {expenseAccountTotals.map((item) => <button type="button" className="reports-summary-drilldown" key={item.accountId} onClick={() => openExpenseAccount(item.accountId)}><span>{item.name}</span><strong>{money(item.value)}</strong><ChevronRight size={16} aria-hidden="true" /></button>)}
+                {expenseAccountSummaryRows.map((item) => {
+                  const account = expenseAccountTotals.find((candidate) => candidate.name === item.label);
+                  return <button type="button" className="reports-summary-drilldown" key={item.label} onClick={() => account && openExpenseAccount(account.accountId)}>
+                    <span className="expense-summary-drilldown__label"><b>{item.label}</b><small>{formatNumber(item.share)}% · {item.voucherCount} {t("reportsPage.vouchers")}</small></span>
+                    <strong>{money(item.value)}</strong><ChevronRight size={16} aria-hidden="true" />
+                  </button>;
+                })}
+              </div>
+            </div>
+            <div className="reports-breakdowns__full">
+              <h3>{t("reportsPage.bySubcategory")}</h3>
+              <div className="reports-summary-list expense-summary-subcategory-list">
+                {expenseSubcategorySummaryRows.map((item) => <button type="button" className="reports-summary-drilldown" key={`${item.categoryKey}:${item.subcategoryKey}`} onClick={() => openExpenseSubcategory(item.categoryKey, item.subcategoryKey)}>
+                  <span className="expense-summary-drilldown__label"><b>{item.subcategoryLabel}</b><small>{item.categoryLabel} · {formatNumber(item.share)}%</small></span>
+                  <strong>{money(item.value)}</strong><ChevronRight size={16} aria-hidden="true" />
+                </button>)}
               </div>
             </div>
           </div>
         </ReportShell>}
-        {views.expenditures === "log" && <ReportShell title={t("reportsPage.expenseLog")} rangeLabel={rangeLabel} sectionId="expense-log" printContext={reportPrintContext} printLayout="landscape" onPrint={() => printSection("expense-log")} onExport={exportExpenseLog}>
-          <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.voucher"), t("reportsPage.date"), t("reportsPage.description"), t("reportsPage.category"), t("reportsPage.account"), t("reportsPage.amount")]} rows={[...voucherRows.map((item) => {
-            const lines = voucherReportItems(item);
-            const firstLine = lines[0];
-            return {
-              id: item.id,
-              title: getVoucherDisplayNumber(item) || item.voucherNumber,
-              value: money(item.amount),
-              meta: formatReportDateValue(item.date),
-              cells: [
-                getVoucherDisplayNumber(item) || item.voucherNumber,
-                formatReportDateValue(item.date),
-                lines.length > 1 ? `${firstLine?.description ?? item.description} +${lines.length - 1} ${t("expensesPage.moreItems")}` : item.description,
-                firstLine ? expenseLabel(firstLine.category, firstLine.subcategory) : expenseLabel(item.category, item.subcategory),
-                accountName(item.accountId),
-                money(item.amount),
-              ],
-              details: [...lines.map((line, index) => [`${t("expensesPage.itemNumber", { number: index + 1 })}`, `${line.description} • ${expenseLabel(line.category, line.subcategory)} • ${money(line.amount)}`] as [string, ReactNode]), [t("reportsPage.account"), accountName(item.accountId)] as [string, ReactNode]],
-              onOpen: () => navigate(`/workspace/expenses?recordId=${item.id}`),
-            };
-          }), ...canonicalExpenseRows.map((item) => {
-            const sources = canonicalExpenseAccountsByDue.get(item.id) ?? [];
-            const sourceLabel = sources.map((source) => `${localizeSystemPlaceholder(t, source.accountName)} — ${money(source.amount)}`).join("; ") || t("reportsPage.unattributed");
-            return { id: item.id, title: item.dueNumber ?? localizeSystemPlaceholder(t, item.recipientName), value: money(item.amount), meta: formatReportDateValue(item.date), cells: [item.dueNumber ?? "-", formatReportDateValue(item.date), item.description, t("reportsPage.labourWagesCategory"), sourceLabel, money(item.amount)], details: [[t("reportsPage.status"), translateStatus(t, item.status)], [t("reportsPage.recipient"), localizeSystemPlaceholder(t, item.recipientName)], ...sources.map((source) => [translateStatus(t, source.settlementType), `${localizeSystemPlaceholder(t, source.accountName)} — ${money(source.amount)}`] as [string, ReactNode])] as [string, ReactNode][] };
-          })]} />
+        {views.expenditures === "log" && <ReportShell title={t("reportsPage.expenseLog")} rangeLabel={rangeLabel} sectionId="expense-log" printContext={reportPrintContext} printLayout="landscape" printDensity="wide" onPrint={() => printSection("expense-log")} onExport={exportExpenseLog}>
+          <Kpis values={[
+            [t("reportsPage.totalExpenses"), money(totalRecognizedExpenses)],
+            [t("reportsPage.vouchers"), expenseVoucherCount],
+            [t("reportsPage.lineItems"), expenseLineItemCount],
+            [t("reportsPage.account"), expenseAccountSummaryRows.length],
+          ]} />
+          <ReportTable
+            empty={t("reportsPage.noRecords")}
+            columns={[t("reportsPage.voucher"), t("reportsPage.date"), t("reportsPage.description"), t("reportsPage.category"), t("reportsPage.account"), t("reportsPage.amount")]}
+            rows={[...voucherRows.map((item) => {
+              const lines = voucherReportItems(item);
+              const firstLine = lines[0];
+              const firstDescription = normalizeText(firstLine?.description) || normalizeText(firstLine?.remarks) || normalizeText(firstLine?.notes) || "-";
+              return {
+                id: item.id,
+                title: getVoucherDisplayNumber(item) || item.voucherNumber,
+                value: money(item.amount),
+                meta: `${formatReportDateValue(item.date)} · ${lines.length} ${t("reportsPage.lineItems")}`,
+                cells: [
+                  getVoucherDisplayNumber(item) || item.voucherNumber,
+                  formatReportDateValue(item.date),
+                  lines.length > 1 ? `${firstDescription} +${lines.length - 1} ${t("expensesPage.moreItems")}` : firstDescription,
+                  firstLine ? expenseLabel(firstLine.category, firstLine.subcategory) : expenseLabel(item.category, item.subcategory),
+                  accountName(item.accountId),
+                  money(item.amount),
+                ],
+                details: [
+                  ...lines.map((line, index) => [
+                    `${t("expensesPage.itemNumber", { number: index + 1 })}`,
+                    `${normalizeText(line.description) || normalizeText(line.remarks) || normalizeText(line.notes) || "-"} • ${expenseLabel(line.category, line.subcategory)} • ${money(line.amount)}`,
+                  ] as [string, ReactNode]),
+                  [t("reportsPage.account"), accountName(item.accountId)] as [string, ReactNode],
+                ],
+                onOpen: () => navigate(`/workspace/expenses?recordId=${item.id}`),
+              };
+            }), ...canonicalExpenseRows.map((item) => {
+              const sources = canonicalExpenseAccountsByDue.get(item.id) ?? [];
+              const sourceLabel = sources.map((source) => localizeSystemPlaceholder(t, source.accountName) || source.accountName).join(", ") || t("reportsPage.unattributed");
+              return {
+                id: item.id,
+                title: item.dueNumber ?? localizeSystemPlaceholder(t, item.recipientName),
+                value: money(item.amount),
+                meta: formatReportDateValue(item.date),
+                cells: [item.dueNumber ?? "-", formatReportDateValue(item.date), normalizeText(item.description) || "-", t("reportsPage.labourWagesCategory"), sourceLabel, money(item.amount)],
+                details: [
+                  [t("reportsPage.status"), translateStatus(t, item.status)],
+                  [t("reportsPage.recipient"), localizeSystemPlaceholder(t, item.recipientName)],
+                  ...sources.map((source) => [translateStatus(t, source.settlementType), `${localizeSystemPlaceholder(t, source.accountName)} — ${money(source.amount)}`] as [string, ReactNode]),
+                ] as [string, ReactNode][],
+              };
+            })]}
+            printColumns={[
+              `${t("reportsPage.voucher")} / ${t("reportsPage.date")}`,
+              `${t("reportsPage.description")} / ${t("reportsPage.type")}`,
+              `${t("reportsPage.category")} / ${t("reportsPage.subcategory")}`,
+              `${t("reportsPage.account")} / ${t("reportsPage.recipient")}`,
+              `${t("reportsPage.expenseAmount")} / ${t("reportsPage.attributedAmount")}`,
+            ]}
+            printRows={expenseExportRows.map((row) => [
+              <span className="report-print-cell-stack"><strong>{row.voucherNumber}</strong><small className="bidi-isolate">{formatReportDateValue(row.date)} · #{row.lineNumber}</small></span>,
+              <span className="report-print-cell-stack"><strong>{row.description}</strong><small>{row.recordType}</small></span>,
+              <span className="report-print-cell-stack"><strong>{row.categoryLabel}</strong><small>{row.subcategoryLabel}</small></span>,
+              <span className="report-print-cell-stack"><strong>{row.accountName}</strong><small>{row.recipient !== "-" ? row.recipient : row.status}</small></span>,
+              <span className="report-print-cell-stack"><strong className="bidi-isolate">{money(row.expenseAmount || row.attributedAmount)}</strong><small className="bidi-isolate">{t("reportsPage.attributedAmount")}: {money(row.attributedAmount)}</small></span>,
+            ])}
+          />
         </ReportShell>}
       </>}
 
