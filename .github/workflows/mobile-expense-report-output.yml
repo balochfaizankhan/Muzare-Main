@@ -91,7 +91,7 @@ jobs:
             console.log({ state, pngSize, pdfSize });
           })().catch((error) => { console.error(error); process.exit(1); });
           NODE
-          node /tmp/mobile-print-smoke.cjs
+          NODE_PATH="$PWD/node_modules" node /tmp/mobile-print-smoke.cjs
 
       - name: Validate diff
         run: git diff --check
