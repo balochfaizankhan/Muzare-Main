@@ -15,6 +15,7 @@ import "./dispatch-records-dialogs.css";
 import "./partner-ledger-polish.css";
 import "./partner-ledger-select-fix.css";
 import "./non-attendance-report-print.css";
+import "./android-report-print-fix.css";
 import "./sales-date-sync";
 import { installSystemTextLocalizationGuard } from "./lib/systemTextLocalization";
 import { queryClient } from "./lib/query-client";
