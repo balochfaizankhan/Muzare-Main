@@ -1,0 +1,33 @@
+name: Check report print payload
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - .github/workflows/check-print-payload.yml
+      - .github/print-payload/**
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Validate payload chunks
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "3a5d751fc4bf1b8137adb7f59bdad047820b0b10ae5c8f86d3bc296838716bf6  .github/print-payload/patch.00" | sha256sum -c -
+          echo "8c221a9c0de77357ff0088b74ee5aeedb95d1e3214540d1245d034f68d615cfb  .github/print-payload/patch.01" | sha256sum -c -
+          echo "2d9a9cf59254f15008634c1cdc59f47bd6219a40f098505783e67ec4d33b7a4d  .github/print-payload/patch.02" | sha256sum -c -
+          echo "433680514533210225a26756b66e86a6c61a5f2267f34e304fc3179e50296351  .github/print-payload/patch.03" | sha256sum -c -
+          echo "a8c5ba8db4721529098c21acab9d77a3a554100e4d86e9ac5d78b5e69471fdb2  .github/print-payload/patch.04" | sha256sum -c -
+          echo "adef207a86ca3ff8765ccc6cfc644074c7e7e512b50452f4efa45a29e39dd11f  .github/print-payload/patch.05" | sha256sum -c -
+          echo "9303c5c8ea405ada4571cc6ae4864ccc4218cf621c8c4a8c4bc3676f5341eec1  .github/print-payload/patch.06" | sha256sum -c -
+          echo "12dd56f78954ebc904140f4c591ab420dbb183db5e65b55f5e4f6472084334d5  .github/print-payload/script.00" | sha256sum -c -
+          echo "ff126d94493de1d85b8c97496e65bac004b2defa0a87cf62d525b3a6ba278005  .github/print-payload/script.01" | sha256sum -c -
+          echo "7032acbfca7d6b5a701845b009e1d77f1c6e387fd4c45e1f35c240cc3039ff5a  .github/print-payload/script.02" | sha256sum -c -
