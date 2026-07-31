@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { CalendarDays, ChevronDown, ChevronRight, ChevronUp, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -85,6 +86,14 @@ type ReportRow = {
   meta?: ReactNode;
   onOpen?: () => void;
 };
+type ReportPrintContext = {
+  farm: string;
+  season: string;
+  generatedAt: string;
+  generatedBy: string;
+};
+type ReportPrintLayout = "portrait" | "landscape";
+type ReportPrintDensity = "normal" | "wide";
 type AccountLedgerReportRow = {
   id: string;
   date: string;
@@ -329,31 +338,42 @@ function ReportTable({
   empty,
   rows,
   mobileCards = true,
+  printColumns,
+  printRows,
 }: {
   columns: string[];
   empty: string;
   rows: ReportRow[];
   mobileCards?: boolean;
+  printColumns?: string[];
+  printRows?: ReactNode[][];
 }) {
   const { t } = useTranslation();
   if (!rows.length) return <p className="empty-records">{empty}</p>;
+  const hasCompactPrintTable = Boolean(printColumns?.length && printRows?.length);
   return <>
-    <div className="attendance-import-table-wrap report-wide-table">
+    <div className={`attendance-import-table-wrap report-wide-table${hasCompactPrintTable ? " report-wide-table--screen-source" : ""}`}>
       <table className="report-data-table">
         <thead>
           <tr>
             {columns.map((column) => <th key={column}>{column}</th>)}
-            <th>{t("reportsPage.actions")}</th>
+            <th className="report-action-column">{t("reportsPage.actions")}</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => <tr key={row.id}>
             {row.cells.map((cell, index) => <td key={`${row.id}:${index}`}>{cell}</td>)}
-            <td>{row.onOpen && <button type="button" onClick={row.onOpen}>{t("reportsPage.open")}</button>}</td>
+            <td className="report-action-column">{row.onOpen && <button type="button" onClick={row.onOpen}>{t("reportsPage.open")}</button>}</td>
           </tr>)}
         </tbody>
       </table>
     </div>
+    {hasCompactPrintTable && <div className="report-document-only report-print-compact-table-wrap">
+      <table className="report-data-table report-print-compact-table">
+        <thead><tr>{printColumns!.map((column) => <th key={column}>{column}</th>)}</tr></thead>
+        <tbody>{printRows!.map((cells, rowIndex) => <tr key={`print:${rows[rowIndex]?.id ?? rowIndex}`}>{cells.map((cell, cellIndex) => <td key={`print:${rowIndex}:${cellIndex}`}>{cell}</td>)}</tr>)}</tbody>
+      </table>
+    </div>}
     {mobileCards && <div className="report-mobile-cards">
       {rows.map((row) => <article className="report-mobile-card" key={`mobile:${row.id}`}>
         <header><strong>{row.title}</strong>{row.value && <b>{row.value}</b>}</header>
@@ -424,6 +444,9 @@ function ReportShell({
   printLabel,
   exportLabel,
   pdfLabel,
+  printContext,
+  printLayout = "landscape",
+  printDensity = "normal",
   children,
 }: {
   title: string;
@@ -435,10 +458,19 @@ function ReportShell({
   printLabel?: string;
   exportLabel?: string;
   pdfLabel?: string;
+  printContext?: ReportPrintContext;
+  printLayout?: ReportPrintLayout;
+  printDensity?: ReportPrintDensity;
   children: ReactNode;
 }) {
   const { t } = useTranslation();
-  return <section className="record-panel reports-print-section" data-print-section={sectionId}>
+  return <section
+    className="record-panel reports-print-section reports-print-section--document"
+    data-print-section={sectionId}
+    data-print-title={title}
+    data-print-layout={printLayout}
+    data-print-density={printDensity}
+  >
     <header className="reports-view-header">
       <div>
         <h2>{title}</h2>
@@ -450,7 +482,20 @@ function ReportShell({
         <button type="button" onClick={onPrint}>{printLabel ?? t("reportsPage.print")}</button>
       </div>
     </header>
+    {printContext && <header className="report-document-header report-document-only">
+      <div className="report-document-brand"><strong>Muzare</strong><span>{t("reportsPage.title")}</span></div>
+      <div className="report-document-title"><h1>{title}</h1><p className="bidi-isolate">{rangeLabel}</p></div>
+      <dl className="report-document-meta">
+        <div><dt>{t("reportsPage.farm")}</dt><dd>{printContext.farm}</dd></div>
+        <div><dt>{t("reportsPage.season")}</dt><dd>{printContext.season}</dd></div>
+        <div><dt>{t("reportsPage.generated")}</dt><dd className="bidi-isolate">{printContext.generatedAt}</dd></div>
+        <div><dt>{t("reportsPage.by")}</dt><dd>{printContext.generatedBy}</dd></div>
+      </dl>
+    </header>}
     {children}
+    {printContext && <footer className="report-document-footer report-document-only">
+      <span>Muzare</span><span>{title}</span><span className="bidi-isolate">{printContext.generatedAt}</span>
+    </footer>}
   </section>;
 }
 
@@ -727,14 +772,44 @@ export function Reports() {
     const section = document.querySelector<HTMLElement>(`.reports-print-section[data-print-section="${sectionId}"]`);
     if (!section) return;
     const printRoot = document.documentElement;
+    if (sectionId.startsWith("attendance")) {
+      const cleanupAttendanceTarget = () => {
+        section.classList.remove("is-print-target");
+        printRoot.removeAttribute("data-muzare-print-section");
+      };
+      printRoot.setAttribute("data-muzare-print-section", sectionId);
+      section.classList.add("is-print-target");
+      window.addEventListener("afterprint", cleanupAttendanceTarget, { once: true });
+      window.print();
+      return;
+    }
+    const previousDocumentTitle = document.title;
+    const previousAccountGroups = reportGroupExpanded;
+    const previousPartnerGroups = partnerReportGroupExpanded;
+    const restoreCallbacks: Array<() => void> = [];
+
+    if (sectionId === "account-ledger") {
+      flushSync(() => {
+        setReportGroupExpanded(Object.fromEntries(Object.keys(previousAccountGroups).map((key) => [key, true])) as Record<AccountTransactionGroupKey, boolean>);
+        setPartnerReportGroupExpanded(Object.fromEntries(Object.keys(previousPartnerGroups).map((key) => [key, true])) as Record<PartnerLiabilityLedgerGroupKey, boolean>);
+      });
+      restoreCallbacks.push(() => {
+        setReportGroupExpanded(previousAccountGroups);
+        setPartnerReportGroupExpanded(previousPartnerGroups);
+      });
+    }
+
     const cleanupPrintTarget = () => {
       section.classList.remove("is-print-target");
       printRoot.removeAttribute("data-muzare-print-section");
+      document.title = previousDocumentTitle;
+      restoreCallbacks.forEach((restore) => restore());
     };
+    document.title = `Muzare - ${section.dataset.printTitle ?? sectionId}`;
     printRoot.setAttribute("data-muzare-print-section", sectionId);
     section.classList.add("is-print-target");
     window.addEventListener("afterprint", cleanupPrintTarget, { once: true });
-    window.print();
+    requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
   };
 
   const attendanceRegisterSwitch = (
@@ -1085,6 +1160,12 @@ export function Reports() {
   const bootstrapSeason = bootstrapQuery.data?.seasons.find((season) => season.id === bootstrapQuery.data?.activeSeasonId) ?? null;
   const printGeneratedAt = useMemo(() => formatPrintTimestamp(new Date()), [attendanceTotals, attendanceDates.length, report, from, to, groupFilter, selectedLabourerIds.join(","), bootstrapQuery.dataUpdatedAt, user?.displayName, user?.email]);
   const printGeneratedBy = user?.displayName ?? user?.email ?? t("reportsPage.unknown");
+  const reportPrintContext = useMemo<ReportPrintContext>(() => ({
+    farm: bootstrapFarm?.name ?? t("reportsPage.allFarms"),
+    season: bootstrapSeason?.name ?? t("reportsPage.allSeasons"),
+    generatedAt: printGeneratedAt,
+    generatedBy: printGeneratedBy,
+  }), [bootstrapFarm?.name, bootstrapSeason?.name, printGeneratedAt, printGeneratedBy, t]);
   const selectedLabourNames = selectedLabourerIds.map((id) => labourById.get(id)?.name).filter(Boolean).join(", ");
   const attendanceRegisterGroupLabel = groupFilter === ungroupedValue ? t("reportsPage.ungrouped") : groupFilter || t("reportsPage.allGroups");
   const attendanceRegisterLabourLabel = selectedLabourNames || t("reportsPage.allLabour");
@@ -2261,14 +2342,14 @@ export function Reports() {
         {views.advances === "log" && <ReportShell title={t("reportsPage.advanceLog")} rangeLabel={rangeLabel} sectionId="advance-log" onPrint={() => printSection("advance-report-print")} onExport={exportAdvanceCsv} printLabel={t("reportsPage.exportPdf")}>
           <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.labour"), t("reportsPage.advanceAmount"), t("reportsPage.recovered"), t("reportsPage.account"), t("reportsPage.status"), t("reportsPage.reference")]} rows={advanceRows.map((item) => ({ id: item.id, title: advanceRecipientName(item), value: money(item.amount), meta: `${formatReportDateValue(item.date)} · ${advancePaymentSourceName(item)}`, cells: [formatReportDateValue(item.date), advanceRecipientName(item), money(item.amount), money(item.recoveredAmount), advancePaymentSourceName(item), translateStatus(t, item.status), item.voucherNumber], details: [[t("reportsPage.labour"), advanceRecipientName(item)], [t("reportsPage.account"), advancePaymentSourceName(item)], [t("reportsPage.advanceAmount"), money(item.amount)], [t("reportsPage.recovered"), money(item.recoveredAmount)], [t("reportsPage.status"), translateStatus(t, item.status)], [t("reportsPage.notes"), item.notes || "-"], [t("reportsPage.reference"), item.voucherNumber]], onOpen: () => navigate(`/workspace/labour-advances?recordId=${item.id}`) }))} />
         </ReportShell>}
-        <section className="record-panel reports-print-section reports-print-only" data-print-section="advance-report-print" aria-hidden="true">
+        <section className="record-panel reports-print-section reports-print-only" data-print-section="advance-report-print" data-print-title={t("reportsPage.advanceSummary")} data-print-layout="portrait" aria-hidden="true">
           <div className="advance-report-print-template">
             {renderAdvanceReportPrintPage()}
           </div>
         </section>
       </>}
 
-      {report === "wage-rates" && <ReportShell title={t("wageRatesPage.reportTitle")} rangeLabel={rangeLabel} sectionId="wage-rates" onPrint={() => printSection("wage-rates")} onExport={() => downloadCsv("wage-rates.csv", [
+      {report === "wage-rates" && <ReportShell title={t("wageRatesPage.reportTitle")} rangeLabel={rangeLabel} sectionId="wage-rates" printContext={reportPrintContext} printLayout="landscape" onPrint={() => printSection("wage-rates")} onExport={() => downloadCsv("wage-rates.csv", [
         [t("reportsPage.labour"), t("wageRatesPage.effectiveFrom"), t("wageRatesPage.effectiveTo"), t("wageRatesPage.dailyRate"), t("wageRatesPage.halfDayRate"), t("common.status")],
         ...wageRateReportRows.map((rate) => [
           labourName(rate.labourerId),
@@ -2306,7 +2387,7 @@ export function Reports() {
           <button className={views.expenditures === "summary" ? "is-active" : ""} type="button" onClick={() => switchView("expenditures", "summary")}>{t("reportsPage.summary")}</button>
           <button className={views.expenditures === "log" ? "is-active" : ""} type="button" onClick={() => switchView("expenditures", "log")}>{t("reportsPage.log")}</button>
         </section>
-        {views.expenditures === "summary" && <ReportShell title={t("reportsPage.expenseSummary")} rangeLabel={rangeLabel} sectionId="expense-summary" onPrint={() => printSection("expense-summary")} onExport={exportExpenseSummary}>
+        {views.expenditures === "summary" && <ReportShell title={t("reportsPage.expenseSummary")} rangeLabel={rangeLabel} sectionId="expense-summary" printContext={reportPrintContext} printLayout="portrait" onPrint={() => printSection("expense-summary")} onExport={exportExpenseSummary}>
           <Kpis values={[[t("reportsPage.totalExpenses"), money(totalRecognizedExpenses)], [t("reportsPage.vouchers"), new Set([...voucherRows.map((item) => getVoucherDisplayNumber(item) || item.voucherNumber), ...canonicalExpenseRows.map((item) => item.dueNumber ?? item.id)]).size], [t("reportsPage.categories"), new Set([...voucherReportLineRows.map((item) => item.category), ...(canonicalExpenseRows.length ? ["Labour wages"] : [])]).size], [t("reportsPage.account"), expenseAccountTotals.length]]} />
           <div className="reports-breakdowns">
             <div>
@@ -2327,7 +2408,7 @@ export function Reports() {
             </div>
           </div>
         </ReportShell>}
-        {views.expenditures === "log" && <ReportShell title={t("reportsPage.expenseLog")} rangeLabel={rangeLabel} sectionId="expense-log" onPrint={() => printSection("expense-log")} onExport={exportExpenseLog}>
+        {views.expenditures === "log" && <ReportShell title={t("reportsPage.expenseLog")} rangeLabel={rangeLabel} sectionId="expense-log" printContext={reportPrintContext} printLayout="landscape" onPrint={() => printSection("expense-log")} onExport={exportExpenseLog}>
           <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.voucher"), t("reportsPage.date"), t("reportsPage.description"), t("reportsPage.category"), t("reportsPage.account"), t("reportsPage.amount")]} rows={[...voucherRows.map((item) => {
             const lines = voucherReportItems(item);
             const firstLine = lines[0];
@@ -2355,7 +2436,7 @@ export function Reports() {
         </ReportShell>}
       </>}
 
-      {report === "sales" && <ReportShell title={t("reportsPage.salesReport")} rangeLabel={`${t(`reportsPage.salesDateTypes.${salesDateType}`)} • ${rangeLabel}`} sectionId="sales-report" onPrint={() => printSection("sales-report")} onExport={exportSalesReport}>
+      {report === "sales" && <ReportShell title={t("reportsPage.salesReport")} rangeLabel={`${t(`reportsPage.salesDateTypes.${salesDateType}`)} • ${rangeLabel}`} sectionId="sales-report" printContext={reportPrintContext} printLayout="landscape" printDensity="wide" onPrint={() => printSection("sales-report")} onExport={exportSalesReport}>
         <Kpis values={[
           [t("reportsPage.totalSalesAmount"), money(salesReportRows.reduce((sum, item) => sum + item.sale.amount, 0))],
           [t("reportsPage.totalQuantitySold"), formatNumber(salesReportRows.reduce((sum, item) => sum + item.sale.quantity, 0))],
@@ -2375,10 +2456,29 @@ export function Reports() {
             [t("reportsPage.outstanding"), money(item.outstanding)],
           ],
           onOpen: () => setSelectedSaleRecord(item),
-        }))} />
+        }))}
+        printColumns={[
+          t("reportsPage.saleDate"),
+          `${t("reportsPage.invoiceNumber")} / ${t("reportsPage.buyerName")}`,
+          `${t("reportsPage.product")} / ${t("reportsPage.plot")}`,
+          `${t("reportsPage.quantity")} / ${t("reportsPage.unit")}`,
+          `${t("reportsPage.rate")} / ${t("reportsPage.amount")}`,
+          `${t("reportsPage.paymentStatus")} / ${t("expensesPage.paymentAccount")}`,
+          `${t("reportsPage.dispatchReference")} / ${t("reportsPage.remarks")}`,
+        ]}
+        printRows={salesReportRows.map((item) => [
+          <span className="bidi-isolate">{formatReportDateValue(item.sale.date)}</span>,
+          <span className="report-print-cell-stack"><strong>{item.invoiceNumber}</strong><small>{item.buyerName}</small></span>,
+          <span className="report-print-cell-stack"><strong>{item.product}</strong><small>{item.plot}</small></span>,
+          <span className="report-print-cell-stack"><strong className="bidi-isolate">{formatNumber(item.sale.quantity)}</strong><small>{item.unit}</small></span>,
+          <span className="report-print-cell-stack"><strong className="bidi-isolate">{money(item.sale.unitPrice)}</strong><small className="bidi-isolate">{money(item.sale.amount)}</small></span>,
+          <span className="report-print-cell-stack"><strong>{translateSalesStatus(item.paymentStatus)}</strong><small>{item.paymentAccount}</small></span>,
+          <span className="report-print-cell-stack"><strong>{item.dispatchReference}</strong><small>{item.sale.remarks || "-"}</small></span>,
+        ])}
+      />
       </ReportShell>}
 
-      {report === "dispatch" && <ReportShell title={t("reportsPage.dispatchReport")} rangeLabel={`${t(`reportsPage.dispatchDateTypes.${dispatchDateType}`)} • ${rangeLabel}`} sectionId="dispatch-report" onPrint={() => printSection("dispatch-report")} onExport={exportDispatchReport}>
+      {report === "dispatch" && <ReportShell title={t("reportsPage.dispatchReport")} rangeLabel={`${t(`reportsPage.dispatchDateTypes.${dispatchDateType}`)} • ${rangeLabel}`} sectionId="dispatch-report" printContext={reportPrintContext} printLayout="landscape" printDensity="wide" onPrint={() => printSection("dispatch-report")} onExport={exportDispatchReport}>
         <Kpis values={[
           [t("reportsPage.totalDispatches"), new Set(dispatchReportRows.map((item) => item.dispatch.id)).size],
           [t("reportsPage.totalQuantity"), formatNumber(dispatchReportRows.reduce((sum, item) => sum + item.quantity, 0))],
@@ -2397,7 +2497,26 @@ export function Reports() {
             [t("reportsPage.linkedSale"), item.linkedSales.map((sale) => invoiceReference(sale)).join(", ") || "-"],
           ],
           onOpen: () => setSelectedDispatchRecord(item),
-        }))} />
+        }))}
+        printColumns={[
+          `${t("reportsPage.dispatchDate")} / ${t("reportsPage.dispatchNumber")}`,
+          t("reportsPage.product"),
+          `${t("reportsPage.quantity")} / ${t("reportsPage.unit")}`,
+          `${t("reportsPage.vehicle")} / ${t("reportsPage.driver")}`,
+          t("reportsPage.linkedSale"),
+          `${t("reportsPage.soldQuantity")} / ${t("reportsPage.remainingQuantity")}`,
+          t("reportsPage.remarks"),
+        ]}
+        printRows={dispatchReportRows.map((item) => [
+          <span className="report-print-cell-stack"><strong className="bidi-isolate">{formatReportDateValue(item.dispatch.date)}</strong><small>{item.dispatchNumber}</small></span>,
+          item.product,
+          <span className="report-print-cell-stack"><strong className="bidi-isolate">{formatNumber(item.quantity)}</strong><small>{item.unit}</small></span>,
+          <span className="report-print-cell-stack"><strong>{item.vehicle}</strong><small>{item.driver}</small></span>,
+          item.linkedSales.map((sale) => invoiceReference(sale)).join(", ") || "-",
+          <span className="report-print-cell-stack"><strong className="bidi-isolate">{formatNumber(item.soldQuantity)}</strong><small className="bidi-isolate">{formatNumber(item.remainingQuantity)}</small></span>,
+          item.dispatch.remarks || item.dispatch.notes || "-",
+        ])}
+      />
       </ReportShell>}
 
       {report === "partner-position" && <>
@@ -2405,10 +2524,10 @@ export function Reports() {
           <button className={views["partner-position"] === "position" ? "is-active" : ""} type="button" onClick={() => switchView("partner-position", "position")}>{t("reportsPage.position")}</button>
           <button className={views["partner-position"] === "ledger" ? "is-active" : ""} type="button" onClick={() => switchView("partner-position", "ledger")}>{t("reportsPage.ledger")}</button>
         </section>
-        {views["partner-position"] === "position" && <ReportShell title={t("reportsPage.partnerPositionTitle")} rangeLabel={rangeLabel} sectionId="partner-position" onPrint={() => printSection("partner-position")} onExport={exportPartnerPosition}>
+        {views["partner-position"] === "position" && <ReportShell title={t("reportsPage.partnerPositionTitle")} rangeLabel={rangeLabel} sectionId="partner-position" printContext={reportPrintContext} printLayout="landscape" onPrint={() => printSection("partner-position")} onExport={exportPartnerPosition}>
           <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.partner"), t("reportsPage.purchaseVouchersColumn"), t("reportsPage.fundsGiven"), t("reportsPage.fundsReceived"), t("reportsPage.directLabourPayments"), t("reportsPage.outstandingLabourAdvancesColumn"), t("reportsPage.currentPartnerBalance")]} rows={partnerLiabilityPositions.map((item) => ({ id: item.key, title: item.name, value: money(item.currentPartnerBalance), meta: getPartnerBalanceState(item.currentPartnerBalance) === "partner_holds_business_money" ? t("reportsPage.partnerHoldsBusinessMoney") : t("reportsPage.farmOwesPartner"), cells: [item.name, money(item.purchaseVouchersPaid), money(item.transfersOut), money(item.transfersIn), money(item.labourSettlementCashPaid), money(item.outstandingLabourAdvances), money(item.currentPartnerBalance)], details: [[t("reportsPage.adjustments"), money(item.adjustments)], [t("reportsPage.fundsGiven"), money(item.transfersOut)], [t("reportsPage.fundsReceived"), money(item.transfersIn)], [t("reportsPage.totalLabourAdvancesPaidColumn"), money(item.totalLabourAdvancesPaid)], [t("reportsPage.directLabourPayments"), money(item.labourSettlementCashPaid)], [t("reportsPage.settledThroughWagesColumn"), money(item.settledAdvances)], [t("reportsPage.outstandingLabourAdvancesColumn"), money(item.outstandingLabourAdvances)], [t("reportsPage.moneyReturned"), money(item.moneyReturned)]] }))} />
         </ReportShell>}
-        {views["partner-position"] === "ledger" && <ReportShell title={t("reportsPage.partnerLedger")} rangeLabel={rangeLabel} sectionId="partner-ledger" onPrint={() => printSection("partner-ledger")} onExport={exportPartnerLedger}>
+        {views["partner-position"] === "ledger" && <ReportShell title={t("reportsPage.partnerLedger")} rangeLabel={rangeLabel} sectionId="partner-ledger" printContext={reportPrintContext} printLayout="landscape" onPrint={() => printSection("partner-ledger")} onExport={exportPartnerLedger}>
           <ReportTable empty={t("reportsPage.noRecords")} columns={[t("reportsPage.date"), t("reportsPage.partner"), t("reportsPage.type"), t("reportsPage.amount"), t("reportsPage.notes")]} rows={partnerRows.map((item) => ({ id: item.id, title: item.partnerName ?? `${item.fromPartner ?? "-"} → ${item.toPartner ?? "-"}`, value: money(item.amount), meta: formatReportDateValue(item.date), cells: [formatReportDateValue(item.date), item.partnerName ?? `${item.fromPartner ?? "-"} → ${item.toPartner ?? "-"}`, translateStatus(t, item.type), money(item.amount), item.notes || "-"], details: [[t("reportsPage.type"), translateStatus(t, item.type)], [t("reportsPage.notes"), item.notes || "-"]], onOpen: () => navigate(`/workspace/partner-ledger?recordId=${item.id}`) }))} />
         </ReportShell>}
       </>}
@@ -2418,7 +2537,7 @@ export function Reports() {
           <button className={views["account-ledger"] === "balances" ? "is-active" : ""} type="button" onClick={() => switchView("account-ledger", "balances")}>{t("reportsPage.balances")}</button>
           <button className={views["account-ledger"] === "ledger" ? "is-active" : ""} type="button" onClick={() => switchView("account-ledger", "ledger")}>{t("reportsPage.ledger")}</button>
         </section>
-        {views["account-ledger"] === "balances" && <ReportShell title={t("reportsPage.accountBalances")} rangeLabel={rangeLabel} sectionId="account-balances" onPrint={() => printSection("account-balances")} onExport={exportAccountBalances}>
+        {views["account-ledger"] === "balances" && <ReportShell title={t("reportsPage.accountBalances")} rangeLabel={rangeLabel} sectionId="account-balances" printContext={reportPrintContext} printLayout="portrait" onPrint={() => printSection("account-balances")} onExport={exportAccountBalances}>
           <div className="reports-kpis account-balance-list">{displayedPositions.map((item) => <article className="account-card-clickable" key={item.account.id} role="button" tabIndex={0} onClick={() => openAccountLedger(item.account.id)} onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
@@ -2426,7 +2545,7 @@ export function Reports() {
             }
           }}><span>{item.account.name}</span><strong>{money(item.net)}</strong><small>{t("reportsPage.viewLedger")}</small></article>)}</div>
         </ReportShell>}
-        {views["account-ledger"] === "ledger" && <ReportShell title={t("reportsPage.accountLedgerTitle")} rangeLabel={rangeLabel} sectionId="account-ledger" onPrint={() => printSection("account-ledger")} onExport={exportAccountLedger}>
+        {views["account-ledger"] === "ledger" && <ReportShell title={t("reportsPage.accountLedgerTitle")} rangeLabel={rangeLabel} sectionId="account-ledger" printContext={reportPrintContext} printLayout="landscape" printDensity="wide" onPrint={() => printSection("account-ledger")} onExport={exportAccountLedger}>
           {isPartnerLedgerReport && partnerAccountLedgerOverviewView
             ? <>
               <section className={`account-ledger-hero account-ledger-hero--${getPartnerBalanceState(currentLedgerBalance)}`}>
