@@ -8,7 +8,7 @@
 
 .expense-summary-drilldown__label {
   display: grid;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
   text-align: start;
 }
@@ -30,6 +30,24 @@
   line-height: 1.3;
 }
 
+.expense-summary-share-bar {
+  background: rgba(46, 125, 50, .13);
+  border-radius: 999px;
+  display: block;
+  height: 4px;
+  margin-top: 2px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.expense-summary-share-bar i {
+  background: linear-gradient(90deg, #2e7d32, #72ad72);
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+  min-width: 2px;
+}
+
 .expense-summary-breakdowns .reports-summary-drilldown {
   grid-template-columns: minmax(0, 1fr) auto auto !important;
 }
@@ -40,9 +58,155 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.expense-report-footer-summary {
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #dce5df);
+  border-radius: 18px;
+  box-shadow: 0 12px 30px rgba(26, 57, 36, .08);
+  margin-top: 18px;
+  overflow: hidden;
+}
+
+.expense-report-footer-summary__header {
+  align-items: center;
+  background: linear-gradient(135deg, #1f6f37, #358e50);
+  color: #fff;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 18px 20px;
+}
+
+.expense-report-footer-summary__header div {
+  display: grid;
+  gap: 2px;
+}
+
+.expense-report-footer-summary__header span {
+  font-size: .7rem;
+  font-weight: 800;
+  letter-spacing: .08em;
+  opacity: .78;
+  text-transform: uppercase;
+}
+
+.expense-report-footer-summary__header h3,
+.expense-report-footer-summary__header strong {
+  color: inherit;
+  margin: 0;
+}
+
+.expense-report-footer-summary__header h3 {
+  font-size: 1rem;
+}
+
+.expense-report-footer-summary__header > strong {
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.expense-report-footer-summary__kpis {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 14px 16px 0;
+}
+
+.expense-report-footer-summary__kpis article {
+  background: var(--surface-subtle, #f7faf8);
+  border: 1px solid var(--border, #e0e7e2);
+  border-radius: 12px;
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+}
+
+.expense-report-footer-summary__kpis span {
+  color: var(--text-secondary);
+  font-size: .7rem;
+  font-weight: 700;
+}
+
+.expense-report-footer-summary__kpis strong {
+  color: var(--text-primary);
+  font-size: .95rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.expense-report-footer-summary__breakdowns {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 14px 16px 16px;
+}
+
+.expense-report-footer-summary__breakdowns > div {
+  border: 1px solid var(--border, #e0e7e2);
+  border-radius: 14px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.expense-report-footer-summary__breakdowns h4 {
+  color: var(--text-primary);
+  font-size: .78rem;
+  margin: 0 0 9px;
+}
+
+.expense-report-footer-summary__list {
+  display: grid;
+  gap: 7px;
+}
+
+.expense-report-summary-row {
+  align-items: start;
+  background: var(--surface-subtle, #f8faf8);
+  border: 1px solid var(--border, #e3e9e5);
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 9px 10px;
+}
+
+.expense-report-summary-row > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.expense-report-summary-row strong {
+  color: var(--text-primary);
+  font-size: .76rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.expense-report-summary-row small {
+  color: var(--text-secondary);
+  font-size: .64rem;
+  font-weight: 650;
+}
+
+.expense-report-summary-row > b {
+  color: var(--text-primary);
+  font-size: .76rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 @media (max-width: 720px) {
-  .expense-summary-subcategory-list {
+  .expense-summary-subcategory-list,
+  .expense-report-footer-summary__breakdowns,
+  .expense-report-footer-summary__kpis {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .expense-report-footer-summary__header {
+    align-items: start;
+    flex-direction: column;
   }
 }
 
@@ -53,9 +217,14 @@
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 
+  html[data-muzare-print-section="expense-summary"] .reports-print-section.is-print-target button.reports-summary-drilldown {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+  }
+
   html[data-muzare-print-section="expense-summary"] .expense-summary-drilldown__label {
     display: grid !important;
-    gap: .4mm !important;
+    gap: .6mm !important;
   }
 
   html[data-muzare-print-section="expense-summary"] .expense-summary-drilldown__label b {
@@ -68,5 +237,108 @@
     color: #68766c !important;
     display: block !important;
     font-size: 6pt !important;
+  }
+
+  html[data-muzare-print-section^="expense-"] .expense-summary-share-bar {
+    background: #e0ebe2 !important;
+    height: 1.1mm !important;
+    margin-top: .5mm !important;
+  }
+
+  html[data-muzare-print-section^="expense-"] .expense-summary-share-bar i {
+    background: #2e7d32 !important;
+  }
+
+  html[data-muzare-print-section="expense-log"] .expense-report-footer-summary {
+    background: #fff !important;
+    border: .7pt solid #cbd8ce !important;
+    border-radius: 2.5mm !important;
+    box-shadow: none !important;
+    break-inside: auto;
+    margin-top: 5mm !important;
+    overflow: hidden !important;
+  }
+
+  html[data-muzare-print-section="expense-log"] .expense-report-footer-summary__header {
+    background: #246d37 !important;
+    display: flex !important;
+    padding: 3mm 3.5mm !important;
+  }
+
+  html[data-muzare-print-section="expense-log"] .expense-report-footer-summary__header span {
+    font-size: 6pt !important;
+  }
+
+  html[data-muzare-print-section="expense-log"] .expense-report-footer-summary__header h3 {
+    font-size: 9pt !important;
+  }
+
+  html[data-muzare-print-section="expense-log"] .expense-report-footer-summary__header > strong {
+    font-size: 10pt !important;
+  }
+
+  html[data-muzare-print-section="expense-log"] .expense-report-footer-summary__kpis {
+    display: grid !important;
+    gap: 1.8mm !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    padding: 2.5mm 3mm 0 !important;
+  }
+
+  html[data-muzare-print-section="expense-log"] .expense-report-footer-summary__kpis article {
+    background: #f6f9f6 !important;
+    border: .5pt solid #d9e3db !important;
+    border-radius: 1.5mm !important;
+    padding: 2mm !important;
+  }
+
+  html[data-muzare-print-section="expense-log"] .expense-report-footer-summary__kpis span {
+    font-size: 6pt !important;
+  }
+
+  html[data-muzare-print-section="expense-log"] .expense-report-footer-summary__kpis strong {
+    font-size: 8pt !important;
+  }
+
+  html[data-muzare-print-section="expense-log"] .expense-report-footer-summary__breakdowns {
+    display: grid !important;
+    gap: 2.5mm !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    padding: 2.5mm 3mm 3mm !important;
+  }
+
+  html[data-muzare-print-section="expense-log"] .expense-report-footer-summary__breakdowns > div {
+    border: .5pt solid #d9e3db !important;
+    border-radius: 1.5mm !important;
+    padding: 2mm !important;
+  }
+
+  html[data-muzare-print-section="expense-log"] .expense-report-footer-summary__breakdowns h4 {
+    color: #244c31 !important;
+    font-size: 7pt !important;
+    margin-bottom: 1.5mm !important;
+  }
+
+  html[data-muzare-print-section="expense-log"] .expense-report-footer-summary__list {
+    gap: 1mm !important;
+  }
+
+  html[data-muzare-print-section="expense-log"] .expense-report-summary-row {
+    background: #fafcfb !important;
+    border: .4pt solid #e0e7e2 !important;
+    border-radius: 1mm !important;
+    break-inside: avoid;
+    gap: 1.5mm !important;
+    padding: 1.3mm 1.5mm !important;
+  }
+
+  html[data-muzare-print-section="expense-log"] .expense-report-summary-row strong,
+  html[data-muzare-print-section="expense-log"] .expense-report-summary-row > b {
+    color: #26382c !important;
+    font-size: 6.3pt !important;
+  }
+
+  html[data-muzare-print-section="expense-log"] .expense-report-summary-row small {
+    color: #68766c !important;
+    font-size: 5.4pt !important;
   }
 }
