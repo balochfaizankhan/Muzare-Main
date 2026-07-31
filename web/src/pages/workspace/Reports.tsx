@@ -87,6 +87,7 @@ type ReportRow = {
   onOpen?: () => void;
 };
 type ReportPrintContext = {
+  workspace: string;
   farm: string;
   season: string;
   generatedAt: string;
@@ -339,12 +340,16 @@ type DispatchReportRecord = {
 };
 
 function downloadCsv(filename: string, rows: unknown[][]) {
-  const href = URL.createObjectURL(new Blob([rows.map((row) => row.map(csvCell).join(",")).join("\n")], { type: "text/csv;charset=utf-8" }));
+  const csv = rows.map((row) => row.map(csvCell).join(",")).join("\n");
+  const href = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }));
   const link = document.createElement("a");
   link.href = href;
   link.download = filename;
+  link.style.display = "none";
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(href);
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(href), 0);
 }
 
 function buildDateColumns(from: string, to: string, rows: Attendance[]) {
@@ -506,6 +511,7 @@ function ReportShell({
       <div className="report-document-brand"><strong>Muzare</strong><span>{t("reportsPage.title")}</span></div>
       <div className="report-document-title"><h1>{title}</h1><p className="bidi-isolate">{rangeLabel}</p></div>
       <dl className="report-document-meta">
+        <div><dt>{t("teamActivity.workspace")}</dt><dd>{printContext.workspace}</dd></div>
         <div><dt>{t("reportsPage.farm")}</dt><dd>{printContext.farm}</dd></div>
         <div><dt>{t("reportsPage.season")}</dt><dd>{printContext.season}</dd></div>
         <div><dt>{t("reportsPage.generated")}</dt><dd className="bidi-isolate">{printContext.generatedAt}</dd></div>
@@ -824,17 +830,49 @@ export function Reports() {
       });
     }
 
+    const detachedRoot = document.createElement("div");
+    detachedRoot.id = "muzare-detached-print-root";
+    detachedRoot.dir = document.documentElement.dir || "ltr";
+    detachedRoot.lang = document.documentElement.lang || "en";
+    detachedRoot.setAttribute("role", "document");
+    detachedRoot.setAttribute("aria-label", section.dataset.printTitle ?? sectionId);
+
+    const detachedSection = section.cloneNode(true) as HTMLElement;
+    detachedSection.classList.add("is-print-target");
+    detachedSection.removeAttribute("aria-hidden");
+    detachedRoot.appendChild(detachedSection);
+
+    document.title = `Muzare - ${section.dataset.printTitle ?? sectionId}`;
+    printRoot.setAttribute("data-muzare-print-section", sectionId);
+    printRoot.setAttribute("data-muzare-detached-print", "true");
+    document.body.appendChild(detachedRoot);
+
+    let cleanedUp = false;
+    const printMediaQuery = window.matchMedia("print");
     const cleanupPrintTarget = () => {
-      section.classList.remove("is-print-target");
+      if (cleanedUp) return;
+      cleanedUp = true;
+      window.clearTimeout(fallbackCleanup);
+      window.removeEventListener("afterprint", handleAfterPrint);
+      if (typeof printMediaQuery.removeEventListener === "function") printMediaQuery.removeEventListener("change", handlePrintMediaChange);
+      else printMediaQuery.removeListener(handlePrintMediaChange);
+      detachedRoot.remove();
       printRoot.removeAttribute("data-muzare-print-section");
+      printRoot.removeAttribute("data-muzare-detached-print");
       document.title = previousDocumentTitle;
       restoreCallbacks.forEach((restore) => restore());
     };
-    document.title = `Muzare - ${section.dataset.printTitle ?? sectionId}`;
-    printRoot.setAttribute("data-muzare-print-section", sectionId);
-    section.classList.add("is-print-target");
-    window.addEventListener("afterprint", cleanupPrintTarget, { once: true });
-    requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+    const handleAfterPrint = () => window.setTimeout(cleanupPrintTarget, 250);
+    const handlePrintMediaChange = (event: MediaQueryListEvent) => {
+      if (!event.matches) window.setTimeout(cleanupPrintTarget, 250);
+    };
+    window.addEventListener("afterprint", handleAfterPrint, { once: true });
+    if (typeof printMediaQuery.addEventListener === "function") printMediaQuery.addEventListener("change", handlePrintMediaChange);
+    else printMediaQuery.addListener(handlePrintMediaChange);
+    const fallbackCleanup = window.setTimeout(cleanupPrintTarget, 120_000);
+
+    void detachedSection.offsetHeight;
+    requestAnimationFrame(() => requestAnimationFrame(() => window.setTimeout(() => window.print(), 120)));
   };
 
   const attendanceRegisterSwitch = (
@@ -1186,11 +1224,12 @@ export function Reports() {
   const printGeneratedAt = useMemo(() => formatPrintTimestamp(new Date()), [attendanceTotals, attendanceDates.length, report, from, to, groupFilter, selectedLabourerIds.join(","), bootstrapQuery.dataUpdatedAt, user?.displayName, user?.email]);
   const printGeneratedBy = user?.displayName ?? user?.email ?? t("reportsPage.unknown");
   const reportPrintContext = useMemo<ReportPrintContext>(() => ({
+    workspace: bootstrapQuery.data?.user.workspaceName ?? user?.workspaceName ?? t("reportsPage.unknown"),
     farm: bootstrapFarm?.name ?? t("reportsPage.allFarms"),
     season: bootstrapSeason?.name ?? t("reportsPage.allSeasons"),
     generatedAt: printGeneratedAt,
     generatedBy: printGeneratedBy,
-  }), [bootstrapFarm?.name, bootstrapSeason?.name, printGeneratedAt, printGeneratedBy, t]);
+  }), [bootstrapFarm?.name, bootstrapQuery.data?.user.workspaceName, bootstrapSeason?.name, printGeneratedAt, printGeneratedBy, t, user?.workspaceName]);
   const selectedLabourNames = selectedLabourerIds.map((id) => labourById.get(id)?.name).filter(Boolean).join(", ");
   const attendanceRegisterGroupLabel = groupFilter === ungroupedValue ? t("reportsPage.ungrouped") : groupFilter || t("reportsPage.allGroups");
   const attendanceRegisterLabourLabel = selectedLabourNames || t("reportsPage.allLabour");
@@ -1498,7 +1537,39 @@ export function Reports() {
   }, [expenseExportRows, totalRecognizedExpenses]);
 
   const expenseVoucherCount = new Set(expenseExportRows.map((row) => row.sourceId)).size;
-  const expenseLineItemCount = voucherReportLineRows.length + canonicalExpenseRows.length;
+  const expenseLineItemCount = expenseExportRows.length;
+  const expenseCsvHeaderRows = (title: string): unknown[][] => [
+    ["Muzare", title],
+    [t("teamActivity.workspace"), reportPrintContext.workspace],
+    [t("reportsPage.farm"), reportPrintContext.farm],
+    [t("reportsPage.season"), reportPrintContext.season],
+    [t("reportsPage.dateRange"), rangeLabel],
+    [t("reportsPage.generated"), reportPrintContext.generatedAt],
+    [t("reportsPage.by"), reportPrintContext.generatedBy],
+  ];
+  const expenseCsvTotalsRows: unknown[][] = [
+    [],
+    [t("reportsPage.summary"), ""],
+    [t("reportsPage.transactions"), expenseVoucherCount],
+    [t("reportsPage.lineItems"), expenseLineItemCount],
+    [t("reportsPage.totalExpenses"), totalRecognizedExpenses],
+    [t("reportsPage.categories"), expenseCategorySummaryRows.length],
+    [t("reportsPage.account"), expenseAccountSummaryRows.length],
+    [],
+    [t("reportsPage.byCategory"), ""],
+    [t("reportsPage.category"), t("reportsPage.expenseAmount"), t("reportsPage.shareOfTotal"), t("reportsPage.transactions")],
+    ...expenseCategorySummaryRows.map((row) => [row.label, row.value, Number(row.share.toFixed(2)), row.voucherCount]),
+    [],
+    [t("reportsPage.byAccount"), ""],
+    [t("reportsPage.account"), t("reportsPage.attributedAmount"), t("reportsPage.shareOfTotal"), t("reportsPage.transactions")],
+    ...expenseAccountSummaryRows.map((row) => [row.label, row.value, Number(row.share.toFixed(2)), row.voucherCount]),
+    [],
+    [t("reportsPage.bySubcategory"), ""],
+    [t("reportsPage.category"), t("reportsPage.subcategory"), t("reportsPage.expenseAmount"), t("reportsPage.shareOfTotal"), t("reportsPage.transactions")],
+    ...expenseSubcategorySummaryRows.map((row) => [row.categoryLabel, row.subcategoryLabel, row.value, Number(row.share.toFixed(2)), row.voucherCount]),
+    [],
+    [t("reportsPage.grandTotal"), totalRecognizedExpenses],
+  ];
   const voucherCategories = useMemo(
     () => [...new Set(voucherBaseRows.flatMap((item) => voucherReportItems(item).map((line) => line.category)).filter(Boolean))].sort(),
     [voucherBaseRows],
@@ -2044,34 +2115,15 @@ export function Reports() {
   const exportExpenseSummary = () => {
     const suffix = from || to ? `${from || "start"}-${to || "end"}` : "all-dates";
     downloadCsv(`expense-summary-${suffix}.csv`, [
-      [t("reportsPage.expenseSummary"), ""],
-      [t("reportsPage.dateRange"), rangeLabel],
-      [t("reportsPage.farm"), reportPrintContext.farm],
-      [t("reportsPage.season"), reportPrintContext.season],
-      [t("reportsPage.generated"), reportPrintContext.generatedAt],
-      [t("reportsPage.by"), reportPrintContext.generatedBy],
-      [],
-      [t("reportsPage.totalExpenses"), totalRecognizedExpenses],
-      [t("reportsPage.vouchers"), expenseVoucherCount],
-      [t("reportsPage.lineItems"), expenseLineItemCount],
-      [t("reportsPage.categories"), expenseCategorySummaryRows.length],
-      [t("reportsPage.account"), expenseAccountSummaryRows.length],
-      [],
-      [t("reportsPage.category"), t("reportsPage.expenseAmount"), t("reportsPage.shareOfTotal"), t("reportsPage.vouchers")],
-      ...expenseCategorySummaryRows.map((row) => [row.label, row.value, Number(row.share.toFixed(2)), row.voucherCount]),
-      [],
-      [t("reportsPage.category"), t("reportsPage.subcategory"), t("reportsPage.expenseAmount"), t("reportsPage.shareOfTotal"), t("reportsPage.vouchers")],
-      ...expenseSubcategorySummaryRows.map((row) => [row.categoryLabel, row.subcategoryLabel, row.value, Number(row.share.toFixed(2)), row.voucherCount]),
-      [],
-      [t("reportsPage.account"), t("reportsPage.attributedAmount"), t("reportsPage.shareOfTotal"), t("reportsPage.vouchers")],
-      ...expenseAccountSummaryRows.map((row) => [row.label, row.value, Number(row.share.toFixed(2)), row.voucherCount]),
-      [],
-      [t("reportsPage.grandTotal"), totalRecognizedExpenses],
+      ...expenseCsvHeaderRows(t("reportsPage.expenseSummary")),
+      ...expenseCsvTotalsRows,
     ]);
   };
   const exportExpenseLog = () => {
     const suffix = from || to ? `${from || "start"}-${to || "end"}` : "all-dates";
     downloadCsv(`expense-log-${suffix}.csv`, [
+      ...expenseCsvHeaderRows(t("reportsPage.expenseLog")),
+      [],
       [
         t("reportsPage.voucher"),
         t("reportsPage.date"),
@@ -2102,6 +2154,7 @@ export function Reports() {
         row.recipient,
         row.status,
       ]),
+      ...expenseCsvTotalsRows,
     ]);
   };
   const exportPartnerPosition = () => downloadCsv("partner-position.csv", [
@@ -2580,7 +2633,7 @@ export function Reports() {
         {views.expenditures === "summary" && <ReportShell title={t("reportsPage.expenseSummary")} rangeLabel={rangeLabel} sectionId="expense-summary" printContext={reportPrintContext} printLayout="portrait" onPrint={() => printSection("expense-summary")} onExport={exportExpenseSummary}>
           <Kpis values={[
             [t("reportsPage.totalExpenses"), money(totalRecognizedExpenses)],
-            [t("reportsPage.vouchers"), expenseVoucherCount],
+            [t("reportsPage.transactions"), expenseVoucherCount],
             [t("reportsPage.lineItems"), expenseLineItemCount],
             [t("reportsPage.account"), expenseAccountSummaryRows.length],
           ]} />
@@ -2589,7 +2642,7 @@ export function Reports() {
               <h3>{t("reportsPage.byCategory")}</h3>
               <div className="reports-summary-list">
                 {expenseCategorySummaryRows.map((item) => <button type="button" className="reports-summary-drilldown" key={item.categoryKey} onClick={() => openExpenseCategory(item.categoryKey)}>
-                  <span className="expense-summary-drilldown__label"><b>{item.label}</b><small>{formatNumber(item.share)}% · {item.voucherCount} {t("reportsPage.vouchers")}</small></span>
+                  <span className="expense-summary-drilldown__label"><b>{item.label}</b><small>{formatNumber(item.share)}% · {item.voucherCount} {t("reportsPage.vouchers")}</small><span className="expense-summary-share-bar" aria-hidden="true"><i style={{ width: `${Math.min(item.share, 100)}%` }} /></span></span>
                   <strong>{money(item.value)}</strong><ChevronRight size={16} aria-hidden="true" />
                 </button>)}
               </div>
@@ -2600,7 +2653,7 @@ export function Reports() {
                 {expenseAccountSummaryRows.map((item) => {
                   const account = expenseAccountTotals.find((candidate) => candidate.name === item.label);
                   return <button type="button" className="reports-summary-drilldown" key={item.label} onClick={() => account && openExpenseAccount(account.accountId)}>
-                    <span className="expense-summary-drilldown__label"><b>{item.label}</b><small>{formatNumber(item.share)}% · {item.voucherCount} {t("reportsPage.vouchers")}</small></span>
+                    <span className="expense-summary-drilldown__label"><b>{item.label}</b><small>{formatNumber(item.share)}% · {item.voucherCount} {t("reportsPage.vouchers")}</small><span className="expense-summary-share-bar" aria-hidden="true"><i style={{ width: `${Math.min(item.share, 100)}%` }} /></span></span>
                     <strong>{money(item.value)}</strong><ChevronRight size={16} aria-hidden="true" />
                   </button>;
                 })}
@@ -2610,7 +2663,7 @@ export function Reports() {
               <h3>{t("reportsPage.bySubcategory")}</h3>
               <div className="reports-summary-list expense-summary-subcategory-list">
                 {expenseSubcategorySummaryRows.map((item) => <button type="button" className="reports-summary-drilldown" key={`${item.categoryKey}:${item.subcategoryKey}`} onClick={() => openExpenseSubcategory(item.categoryKey, item.subcategoryKey)}>
-                  <span className="expense-summary-drilldown__label"><b>{item.subcategoryLabel}</b><small>{item.categoryLabel} · {formatNumber(item.share)}%</small></span>
+                  <span className="expense-summary-drilldown__label"><b>{item.subcategoryLabel}</b><small>{item.categoryLabel} · {formatNumber(item.share)}%</small><span className="expense-summary-share-bar" aria-hidden="true"><i style={{ width: `${Math.min(item.share, 100)}%` }} /></span></span>
                   <strong>{money(item.value)}</strong><ChevronRight size={16} aria-hidden="true" />
                 </button>)}
               </div>
@@ -2620,7 +2673,7 @@ export function Reports() {
         {views.expenditures === "log" && <ReportShell title={t("reportsPage.expenseLog")} rangeLabel={rangeLabel} sectionId="expense-log" printContext={reportPrintContext} printLayout="landscape" printDensity="wide" onPrint={() => printSection("expense-log")} onExport={exportExpenseLog}>
           <Kpis values={[
             [t("reportsPage.totalExpenses"), money(totalRecognizedExpenses)],
-            [t("reportsPage.vouchers"), expenseVoucherCount],
+            [t("reportsPage.transactions"), expenseVoucherCount],
             [t("reportsPage.lineItems"), expenseLineItemCount],
             [t("reportsPage.account"), expenseAccountSummaryRows.length],
           ]} />
@@ -2684,6 +2737,37 @@ export function Reports() {
               <span className="report-print-cell-stack"><strong className="bidi-isolate">{money(row.expenseAmount)}</strong><small className="bidi-isolate">{t("reportsPage.attributedAmount")}: {money(row.attributedAmount)}</small></span>,
             ])}
           />
+          <section className="expense-report-footer-summary" aria-label={t("reportsPage.summary")}>
+            <header className="expense-report-footer-summary__header">
+              <div><span>{t("reportsPage.summary")}</span><h3>{t("reportsPage.expenseSummary")}</h3></div>
+              <strong>{money(totalRecognizedExpenses)}</strong>
+            </header>
+            <div className="expense-report-footer-summary__kpis">
+              <article><span>{t("reportsPage.transactions")}</span><strong>{formatNumber(expenseVoucherCount)}</strong></article>
+              <article><span>{t("reportsPage.lineItems")}</span><strong>{formatNumber(expenseLineItemCount)}</strong></article>
+              <article><span>{t("reportsPage.totalExpenses")}</span><strong>{money(totalRecognizedExpenses)}</strong></article>
+            </div>
+            <div className="expense-report-footer-summary__breakdowns">
+              <div>
+                <h4>{t("reportsPage.byCategory")}</h4>
+                <div className="expense-report-footer-summary__list">
+                  {expenseCategorySummaryRows.map((item) => <article className="expense-report-summary-row" key={`footer-category:${item.categoryKey}`}>
+                    <div><strong>{item.label}</strong><small>{formatNumber(item.share)}% · {item.voucherCount} {t("reportsPage.transactions")}</small><span className="expense-summary-share-bar" aria-hidden="true"><i style={{ width: `${Math.min(item.share, 100)}%` }} /></span></div>
+                    <b>{money(item.value)}</b>
+                  </article>)}
+                </div>
+              </div>
+              <div>
+                <h4>{t("reportsPage.byAccount")}</h4>
+                <div className="expense-report-footer-summary__list">
+                  {expenseAccountSummaryRows.map((item) => <article className="expense-report-summary-row" key={`footer-account:${item.label}`}>
+                    <div><strong>{item.label}</strong><small>{formatNumber(item.share)}% · {item.voucherCount} {t("reportsPage.transactions")}</small><span className="expense-summary-share-bar" aria-hidden="true"><i style={{ width: `${Math.min(item.share, 100)}%` }} /></span></div>
+                    <b>{money(item.value)}</b>
+                  </article>)}
+                </div>
+              </div>
+            </div>
+          </section>
         </ReportShell>}
       </>}
 

@@ -20,6 +20,8 @@
 
   html[data-muzare-detached-print="true"] #muzare-detached-print-root {
     background: #fff !important;
+    contain: none !important;
+    content-visibility: visible !important;
     display: block !important;
     height: auto !important;
     margin: 0 !important;
