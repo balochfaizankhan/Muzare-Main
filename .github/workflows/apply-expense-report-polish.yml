@@ -27,12 +27,15 @@ jobs:
           else
             python scripts/apply_expense_report_polish.py
           fi
+          python scripts/repair_expense_report_locales.py
       - name: Verify supplied-report defects are removed
         run: |
           ! grep -F 'index === 0 ? (getVoucherDisplayNumber(voucher) || voucher.voucherNumber) : ""' web/src/pages/workspace/Reports.tsx
           ! grep -F 'sources.map((source) => `${source.accountName} — ${money(source.amount)}`).join("; ")' web/src/pages/workspace/Reports.tsx
           grep -F 'expenseSubcategorySummaryRows' web/src/pages/workspace/Reports.tsx
           grep -F 'expense-log-${suffix}.csv' web/src/pages/workspace/Reports.tsx
+          test "$(grep -c 'lineItems:' web/src/locales/reportsLocalizationBundle.ts)" -eq 3
+          test "$(grep -c 'attributedAmount:' web/src/locales/reportsLocalizationBundle.ts)" -eq 3
       - name: Install dependencies
         run: npm install
       - name: Build web application
