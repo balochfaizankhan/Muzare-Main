@@ -2681,7 +2681,7 @@ export function Reports() {
               <span className="report-print-cell-stack"><strong>{row.description}</strong><small>{row.recordType}</small></span>,
               <span className="report-print-cell-stack"><strong>{row.categoryLabel}</strong><small>{row.subcategoryLabel}</small></span>,
               <span className="report-print-cell-stack"><strong>{row.accountName}</strong><small>{row.recipient !== "-" ? row.recipient : row.status}</small></span>,
-              <span className="report-print-cell-stack"><strong className="bidi-isolate">{money(row.expenseAmount || row.attributedAmount)}</strong><small className="bidi-isolate">{t("reportsPage.attributedAmount")}: {money(row.attributedAmount)}</small></span>,
+              <span className="report-print-cell-stack"><strong className="bidi-isolate">{money(row.expenseAmount)}</strong><small className="bidi-isolate">{t("reportsPage.attributedAmount")}: {money(row.attributedAmount)}</small></span>,
             ])}
           />
         </ReportShell>}
