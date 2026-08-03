@@ -477,7 +477,6 @@ const renderHeader = (
   const titleAlign: TextAlign = rtl ? "right" : "left";
   const titleX = rtl ? pageWidth - PAGE_MARGIN : PAGE_MARGIN;
   const rangeAlign: TextAlign = rtl ? "left" : "right";
-  const rangeX = rtl ? PAGE_MARGIN : pageWidth - PAGE_MARGIN;
 
   const headerHeight = firstPage ? 78 : 48;
   const gradient = context.createLinearGradient(0, 0, pageWidth, 0);
@@ -533,13 +532,13 @@ const renderContextCards = (
 ) => {
   if (!surface.firstPage || !spec.context) return;
   const { context } = surface;
-  const contextRows: Array<[string, string]> = [
+  const contextRows = ([
     [labels.workspace, normalizeValue(spec.context.workspace)],
     [labels.farm, normalizeValue(spec.context.farm)],
     [labels.season, normalizeValue(spec.context.season)],
     [labels.generated, normalizeValue(spec.context.generatedAt)],
     [labels.generatedBy, normalizeValue(spec.context.generatedBy)],
-  ].filter(([, value]) => Boolean(value && value !== "—"));
+  ] as Array<[string, string]>).filter(([, value]) => Boolean(value && value !== "—"));
   if (contextRows.length === 0) return;
 
   const availableWidth = pageWidth - PAGE_MARGIN * 2;
