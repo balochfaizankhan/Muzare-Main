@@ -177,7 +177,8 @@ function findActionContainer(button: HTMLElement, form: HTMLFormElement) {
     if (!compactFallback && !nonButtonControls && buttons > 0 && buttons <= 3 && node.children.length <= 5) compactFallback = node;
     node = node.parentElement;
   }
-  return compactFallback ?? button.parentElement;
+  if (compactFallback) return compactFallback;
+  return button.parentElement === form ? button : button.parentElement;
 }
 
 function resolveControlForm(control: HTMLElement) {
@@ -198,8 +199,10 @@ function shouldEnhanceForm(form: HTMLFormElement) {
 
 function collectActions(root: HTMLElement) {
   const found = new Map<HTMLElement, EnhancedAction>();
+  const explicitBars = Array.from(root.querySelectorAll<HTMLElement>(explicitActionSelectors));
+  const standaloneByForm = new Map<HTMLFormElement, EnhancedAction>();
 
-  root.querySelectorAll<HTMLElement>(explicitActionSelectors).forEach((bar) => {
+  explicitBars.forEach((bar) => {
     const submitControl = bar.querySelector<HTMLElement>("button[type='submit'],button:not([type]),input[type='submit']");
     const form = bar.closest<HTMLFormElement>("form") ?? (submitControl ? resolveControlForm(submitControl) : null);
     if (!form || !shouldEnhanceForm(form) || !bar.querySelector("button,input[type='submit']")) return;
@@ -207,13 +210,20 @@ function collectActions(root: HTMLElement) {
   });
 
   root.querySelectorAll<HTMLElement>("form button[type='submit'],form button:not([type]),input[type='submit'],button[form][type='submit']").forEach((button) => {
+    if (explicitBars.some((bar) => bar.contains(button))) return;
     const form = resolveControlForm(button);
     if (!form || !shouldEnhanceForm(form)) return;
     const bar = findActionContainer(button, form);
     if (!bar) return;
-    found.set(bar, { bar, form, variant: bar.closest(dialogSelector) ? "container" : "viewport" });
+    const action = { bar, form, variant: bar.closest(dialogSelector) ? "container" : "viewport" } as const;
+    if (bar === button) {
+      if (!standaloneByForm.has(form)) standaloneByForm.set(form, action);
+      return;
+    }
+    found.set(bar, action);
   });
 
+  standaloneByForm.forEach((action) => found.set(action.bar, action));
   return [...found.values()].filter(({ bar }) => isVisible(bar));
 }
 

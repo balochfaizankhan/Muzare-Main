@@ -1,6 +1,12 @@
 :root {
   --muzare-sticky-action-height: 88px;
-  --muzare-mobile-nav-height: 64px;
+  --muzare-mobile-nav-height: 0px;
+}
+
+@media (max-width: 767px) {
+  .app-shell:not(.app-shell--admin) {
+    --muzare-mobile-nav-height: 64px;
+  }
 }
 
 .muzare-sticky-action-bar {
@@ -22,6 +28,16 @@
 
 .muzare-sticky-action-bar[data-sticky-action-state="inactive"] {
   display: none !important;
+}
+
+.muzare-sticky-action-bar:is(button, input[type="submit"]) {
+  background: var(--brand-primary, #2e7d32) !important;
+  border-color: var(--brand-primary, #2e7d32) !important;
+  color: #fff !important;
+  font-size: 0.94rem;
+  font-weight: 800;
+  justify-content: center;
+  width: auto;
 }
 
 .muzare-sticky-action-bar__summary,
