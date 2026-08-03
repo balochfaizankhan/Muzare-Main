@@ -1,0 +1,405 @@
+name: Apply dashboard sales and PDF polish
+
+on:
+  push:
+    branches:
+      - feat/dashboard-daily-sales-and-report-pdf-polish
+
+permissions:
+  contents: write
+
+jobs:
+  apply-build-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/dashboard-daily-sales-and-report-pdf-polish
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apply guarded application changes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one match, found {count}")
+              return text.replace(old, new, 1)
+
+          dashboard_path = Path("web/src/pages/DashboardPage.tsx")
+          dashboard = dashboard_path.read_text()
+          dashboard = replace_once(dashboard, "  ClipboardList,\n", "", "remove reports icon")
+          dashboard = replace_once(dashboard, "  ClockAlert,\n", "", "remove labour due icon")
+          dashboard = replace_once(dashboard, "  HandCoins,\n", "  HandCoins,\n  TrendingUp,\n", "add sales icon")
+          dashboard = replace_once(
+              dashboard,
+              "  totalSales: number;\n",
+              "  totalSales: number;\n  salesTodayAmount: number;\n  salesTodayCount: number;\n",
+              "dashboard sales fields",
+          )
+          dashboard = replace_once(
+              dashboard,
+              "    totalSales: 0,\n",
+              "    totalSales: 0,\n    salesTodayAmount: 0,\n    salesTodayCount: 0,\n",
+              "dashboard sales fallback",
+          )
+          dashboard = replace_once(
+              dashboard,
+              "    const totalSales = activeSales.reduce((sum, item) => sum + item.amount, 0);\n",
+              "    const totalSales = activeSales.reduce((sum, item) => sum + item.amount, 0);\n    const salesToday = activeSales.filter((item) => item.date === date);\n    const salesTodayAmount = salesToday.reduce((sum, item) => sum + item.amount, 0);\n",
+              "daily sales calculation",
+          )
+          dashboard = replace_once(
+              dashboard,
+              "      totalSales,\n",
+              "      totalSales,\n      salesTodayAmount,\n      salesTodayCount: salesToday.length,\n",
+              "daily sales totals",
+          )
+          dashboard = replace_once(
+              dashboard,
+              '  const dispatchTodayLabel = hydrationPending || dashboardLoading ? "--" : t("dashboardPage.dispatchesTodayCount", { count: totalsValue.dispatchesToday });\n',
+              '  const dispatchTodayLabel = hydrationPending || dashboardLoading ? "--" : t("dashboardPage.cartonsTodayCount", { count: totalsValue.cartonsToday });\n',
+              "hero carton metric",
+          )
+          labour_start = dashboard.index("  // Labour Payments Due card:")
+          summary_start = dashboard.index("  const summaryCards = [", labour_start)
+          dashboard = dashboard[:labour_start] + dashboard[summary_start:]
+          dashboard = replace_once(
+              dashboard,
+              '      value: metricsReady ? String(totalsValue.dispatchesToday) : "—",\n',
+              '      value: metricsReady ? String(totalsValue.cartonsToday) : "—",\n',
+              "dispatch card cartons",
+          )
+          dashboard = replace_once(
+              dashboard,
+              '      detail: metricsReady ? t("dashboardPage.cartonsTodayCount", { count: totalsValue.cartonsToday }) : (dashboardLoadError ? t("dashboardPage.dispatchLoadFailedRetry") : t("dashboardPage.loadingDispatches")),\n',
+              '      detail: metricsReady ? t("common.today") : (dashboardLoadError ? t("dashboardPage.dispatchLoadFailedRetry") : t("dashboardPage.loadingDispatches")),\n',
+              "dispatch card supporting text",
+          )
+          dashboard = replace_once(
+              dashboard,
+              '    { to: "/workspace/reports", icon: ClipboardList, title: t("layout.reports") },\n',
+              '    { to: "/workspace/sales", icon: TrendingUp, title: t("layout.sales") },\n',
+              "sales quick action",
+          )
+          kpi_pattern = re.compile(
+              r'(<section className="dashboard-kpi-grid" aria-label=\{t\("dashboardPage\.kpiGridAria"\)\}>\n).*?(          \{summaryCards\.map)',
+              re.S,
+          )
+          kpi_replacement = '''\\1          {hasOperationalContext ? (
+            <Link className="dashboard-kpi-card dashboard-kpi-card--green" to="/workspace/sales">
+              <div className="dashboard-kpi-card__icon"><TrendingUp size={18} /></div>
+              <span>{t("layout.sales")}</span>
+              <strong className="bidi-isolate">{metricsReady ? moneyWhole(totalsValue.salesTodayAmount) : "—"}</strong>
+              <small>{metricsReady ? t("common.today") : t("dashboardPage.preparingWorkspaceDataShort")}</small>
+            </Link>
+          ) : (
+            <div className="dashboard-kpi-card dashboard-kpi-card--green dashboard-kpi-card--disabled" aria-disabled="true">
+              <div className="dashboard-kpi-card__icon"><TrendingUp size={18} /></div>
+              <span>{t("layout.sales")}</span>
+              <strong>{hydrationPending ? "..." : "--"}</strong>
+              <small>{hydrationPending ? t("dashboardPage.preparingWorkspaceDataShort") : t("dashboardPage.requiresFarmAndSeason")}</small>
+            </div>
+          )}
+\\2'''
+          dashboard, matches = kpi_pattern.subn(kpi_replacement, dashboard, count=1)
+          if matches != 1:
+              raise SystemExit(f"dashboard KPI replacement: expected one match, found {matches}")
+          dashboard_path.write_text(dashboard)
+
+          reports_path = Path("web/src/pages/workspace/Reports.tsx")
+          reports = reports_path.read_text()
+          reports = replace_once(reports, '  pdfVariant = "standard",\n', '  pdfVariant = "minimal",\n', "default minimal report PDF")
+          reports_path.write_text(reports)
+
+          pdf_path = Path("web/src/lib/reportPdf.ts")
+          pdf = pdf_path.read_text()
+          pdf = replace_once(pdf, '  const minimal = spec.variant === "minimal";\n', '  const minimal = spec.variant !== "standard";\n', "minimal PDF default")
+          pdf_path.write_text(pdf)
+
+          harvest_path = Path("web/src/pages/workspace/HarvestPerformance.tsx")
+          harvest = harvest_path.read_text()
+          harvest = replace_once(
+              harvest,
+              'import { formatDate, formatNumber } from "../../lib/format";\n',
+              'import { formatDate, formatNumber } from "../../lib/format";\nimport { exportReportPdf } from "../../lib/reportPdf";\n',
+              "harvest PDF import",
+          )
+          harvest, removed = re.subn(
+              r'\nfunction printSection\(sectionId: string\) \{.*?\n\}\n\nexport function HarvestReportsPage\(\) \{',
+              '\nexport function HarvestReportsPage() {',
+              harvest,
+              count=1,
+              flags=re.S,
+          )
+          if removed != 1:
+              raise SystemExit(f"remove harvest print bridge: expected one match, found {removed}")
+          harvest = replace_once(
+              harvest,
+              'export function HarvestReportsPage() {\n  const { t } = useTranslation();\n  const perms = useHarvestPerms();\n',
+              'export function HarvestReportsPage() {\n  const { t, i18n } = useTranslation();\n  const { user } = useAuth();\n  const perms = useHarvestPerms();\n  const [pdfExporting, setPdfExporting] = useState(false);\n',
+              "harvest PDF state",
+          )
+          harvest = replace_once(
+              harvest,
+              '    downloadCsv(`harvest-report-${todayKey()}.csv`, rows);\n  };\n\n  return (',
+              '''    downloadCsv(`harvest-report-${todayKey()}.csv`, rows);
+  };
+
+  const exportPdf = async () => {
+    if (pdfExporting) return;
+    setPdfExporting(true);
+    try {
+      await exportReportPdf({
+        title: t("harvestPage.reportTitle"),
+        filename: `harvest-report-${todayKey()}.pdf`,
+        rangeLabel: `${rangeLabel}${groupId ? ` · ${printGroupLabel}` : ""}`,
+        context: {
+          workspace: user?.workspaceName ?? t("layout.workspace"),
+          farm: getActiveFarmId() ?? "-",
+          season: getActiveSeasonId() ?? "-",
+          generatedAt: printGeneratedAt,
+          generatedBy: user?.displayName ?? user?.email ?? "-",
+        },
+        orientation: "portrait",
+        variant: "minimal",
+        language: document.documentElement.lang || i18n.language,
+        direction: document.documentElement.dir === "rtl" ? "rtl" : "ltr",
+        rows: [
+          [t("reportsPage.summary"), ""],
+          [t("harvestPage.kpiTotalCartons"), summary.totalCartons],
+          [t("harvestPage.kpiAvgPerPerson"), Number(summary.averageCartonsPerPerson.toFixed(2))],
+          [t("harvestPage.highestProductivity"), highest ? `${highest.groupName} (${highest.cartonsPerPerson.toFixed(2)})` : "-"],
+          [t("harvestPage.lowestProductivity"), lowest ? `${lowest.groupName} (${lowest.cartonsPerPerson.toFixed(2)})` : "-"],
+          [],
+          [t("harvestPage.colDate"), t("harvestPage.colGroup"), t("harvestPage.colMembers"), t("harvestPage.colCartons"), t("harvestPage.colPerPerson")],
+          ...filtered.map((entry) => [
+            entry.date,
+            groupNameById.get(entry.harvestGroupId) ?? entry.harvestGroupName ?? t("harvestPage.unknownGroup"),
+            entry.membersCount,
+            entry.cartonsHarvested,
+            Number((entry.cartonsPerPerson ?? 0).toFixed(2)),
+          ]),
+          [],
+          [t("harvestPage.kpiTotalCartons"), summary.totalCartons],
+        ],
+      });
+    } catch (caught) {
+      console.error("Harvest PDF export failed", caught);
+      toast(t("common.unableToExport"));
+    } finally {
+      setPdfExporting(false);
+    }
+  };
+
+  return (''',
+              "harvest PDF exporter",
+          )
+          harvest = replace_once(
+              harvest,
+              '            <button type="button" onClick={() => printSection("harvest-report")}>{t("harvestPage.print")}</button>\n',
+              '            <button type="button" onClick={() => void exportPdf()} disabled={pdfExporting}>{t("reportsPage.exportPdf")}</button>\n',
+              "harvest PDF button",
+          )
+          harvest_path.write_text(harvest)
+
+          settlements_path = Path("web/src/pages/workspace/LabourWageSettlements.tsx")
+          settlements = settlements_path.read_text()
+          settlements = replace_once(
+              settlements,
+              'import { Search, Printer, Download, X } from "lucide-react";\n',
+              'import { Search, FileDown, Download, X } from "lucide-react";\n',
+              "settlement PDF icon",
+          )
+          settlements = replace_once(
+              settlements,
+              'import { formatDate, formatMoney } from "../../lib/format";\n',
+              'import { formatDate, formatMoney } from "../../lib/format";\nimport { exportReportPdf } from "../../lib/reportPdf";\n',
+              "settlement PDF import",
+          )
+          settlements, replaced = re.subn(
+              r'  const printSettlementRegister = \(\) => \{.*?\n  \};\n  const exportRegister = \(\) => \{',
+              '''  const exportSettlementRegisterPdf = async () => {
+    try {
+      await exportReportPdf({
+        title: t("wageSettlementsPage.settlementRegisterTitle"),
+        filename: `labour-wage-settlements-${activeFarmId ?? "farm"}-${activeSeasonId ?? "season"}.pdf`,
+        rangeLabel: `${registerStatusLabel} · ${registerPaymentAccountLabel}`,
+        context: {
+          workspace: user?.workspaceName ?? t("layout.workspace"),
+          farm: activeFarmId ?? "-",
+          season: activeSeasonId ?? "-",
+          generatedAt: registerPrintGeneratedAt,
+          generatedBy: user?.displayName ?? user?.email ?? "-",
+        },
+        orientation: "landscape",
+        variant: "minimal",
+        language: document.documentElement.lang,
+        direction: document.documentElement.dir === "rtl" ? "rtl" : "ltr",
+        rows: [
+          [t("reportsPage.summary"), ""],
+          [t("reportsPage.transactions"), registerRows.length],
+          [t("wageSettlementsPage.grossWagesEarnedLower"), registerTotals.totalLabourCost],
+          [t("wageSettlementsPage.advanceAbsorbedThisSettlementLower"), registerTotals.appliedAdvances],
+          [t("wageSettlementsPage.paidNowLower"), registerTotals.cashPaid],
+          [],
+          [
+            t("wageSettlementsPage.settlementNoLabel"),
+            t("wageSettlementsPage.settlementDate"),
+            t("wageSettlementsPage.settlementPeriodLower"),
+            t("wageSettlementsPage.foremanGroupLower"),
+            t("wageSettlementsPage.grossWagesEarnedLower"),
+            t("wageSettlementsPage.advanceAbsorbedThisSettlementLower"),
+            t("wageSettlementsPage.paidNowLower"),
+            t("common.status"),
+          ],
+          ...registerRows.map((settlement) => [
+            settlement.settlementNumber,
+            settlement.settlementDate,
+            `${settlement.fromDate} ${t("wageSettlementsPage.periodTo")} ${settlement.toDate}`,
+            labourers.find((labourer) => labourer.id === settlement.foremanId)?.name ?? settlement.groupName ?? settlement.groupId ?? "-",
+            settlement.grossWages ?? settlement.expenseAmount,
+            settlement.advanceAdjustedNow ?? settlement.settledAdvanceAmount,
+            settlement.paidAmount ?? settlement.payableBalance,
+            translateStatus(t, settlementStatus(settlement)),
+          ]),
+          [],
+          [t("wageSettlementsPage.grossWagesEarnedLower"), registerTotals.totalLabourCost],
+        ],
+      });
+    } catch (caught) {
+      console.error("Settlement register PDF export failed", caught);
+      setError(caught instanceof Error ? caught.message : t("common.unableToExport"));
+    }
+  };
+  const exportRegister = () => {''',
+              settlements,
+              count=1,
+              flags=re.S,
+          )
+          if replaced != 1:
+              raise SystemExit(f"settlement PDF function: expected one match, found {replaced}")
+          settlements = replace_once(
+              settlements,
+              '              <button type="button" className="secondary-action" onClick={printSettlementRegister}><Printer size={16} /> {t("wageSettlementsPage.printButton")}</button>\n',
+              '              <button type="button" className="secondary-action" onClick={() => void exportSettlementRegisterPdf()}><FileDown size={16} /> {t("reportsPage.exportPdf")}</button>\n',
+              "settlement PDF button",
+          )
+          settlements_path.write_text(settlements)
+          PY
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web application
+        run: npm run build --workspace @muzare/web
+
+      - name: Prepare browser PDF smoke fixture
+        run: |
+          cat > web/pdf-smoke.html <<'HTML'
+          <!doctype html><html><body><script type="module" src="/src/pdf-smoke.ts"></script></body></html>
+          HTML
+          cat > web/src/pdf-smoke.ts <<'TS'
+          import { createReportPdf } from "./lib/reportPdf";
+
+          declare global { interface Window { __pdfSmoke?: Record<string, string>; __pdfSmokeError?: string } }
+          const base64 = (buffer: ArrayBuffer) => {
+            const bytes = new Uint8Array(buffer);
+            let binary = "";
+            for (let index = 0; index < bytes.length; index += 0x8000) {
+              binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+            }
+            return btoa(binary);
+          };
+          void (async () => {
+            try {
+              const transactions = Array.from({ length: 120 }, (_, index) => [
+                `2026-08-${String((index % 28) + 1).padStart(2, "0")}`,
+                `V-${String(index + 1).padStart(4, "0")}`,
+                `Professional report transaction ${index + 1}`,
+                index % 2 ? "Harvest & Packaging" : "Fuel & Lubricants",
+                index % 3 ? "Operating Account" : "Partner Account",
+                100 + index * 3,
+              ]);
+              const portrait = await createReportPdf({
+                title: "Daily Sales Report",
+                filename: "daily-sales-report.pdf",
+                rangeLabel: "03 Aug 2026",
+                context: { workspace: "Muzare", farm: "Al Owais Farm", season: "2026", generatedAt: "03 Aug 2026, 11:30", generatedBy: "Faizan" },
+                orientation: "portrait",
+                rows: [["Summary", ""], ["Transactions", 120], ["Total sales", 99420], [], ["Date", "Voucher", "Description", "Category", "Account", "Amount"], ...transactions, [], ["Grand total", 99420]],
+              });
+              const landscape = await createReportPdf({
+                title: "Labour Wage Settlement Register",
+                filename: "labour-settlements.pdf",
+                rangeLabel: "Posted · All accounts",
+                context: { workspace: "Muzare", farm: "Al Owais Farm", season: "2026", generatedAt: "03 Aug 2026, 11:30", generatedBy: "Faizan" },
+                orientation: "landscape",
+                direction: "rtl",
+                language: "ur",
+                rows: [["خلاصہ", ""], ["ریکارڈز", 48], ["کل اجرت", 125400], [], ["نمبر", "تاریخ", "مدت", "گروپ", "اجرت", "ایڈوانس", "ادا شدہ", "حالت"], ...Array.from({ length: 48 }, (_, index) => [`SET-${index + 1}`, "2026-08-03", "2026-08-01 - 2026-08-03", `گروپ ${index + 1}`, 2500, 300, 2200, "پوسٹ شدہ"]), [], ["کل اجرت", 125400]],
+              });
+              window.__pdfSmoke = { portrait: base64(portrait), landscape: base64(landscape) };
+            } catch (error) {
+              window.__pdfSmokeError = error instanceof Error ? error.stack || error.message : String(error);
+            }
+          })();
+          TS
+
+      - name: Render representative PDFs
+        run: |
+          npm install --no-save --ignore-scripts playwright@1.54.2
+          npx playwright install chromium
+          (cd web && npm exec vite -- --host 127.0.0.1 --port 4173 > /tmp/muzare-pdf-vite.log 2>&1 & echo $! > /tmp/muzare-pdf-vite.pid)
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:4173/pdf-smoke.html >/dev/null && break; sleep 1; done
+          mkdir -p verification
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import { chromium } from "playwright";
+          const browser = await chromium.launch({ headless: true });
+          const page = await browser.newPage();
+          await page.goto("http://127.0.0.1:4173/pdf-smoke.html", { waitUntil: "networkidle" });
+          await page.waitForFunction(() => window.__pdfSmoke || window.__pdfSmokeError, null, { timeout: 120000 });
+          const result = await page.evaluate(() => ({ data: window.__pdfSmoke, error: window.__pdfSmokeError }));
+          await browser.close();
+          if (result.error || !result.data) throw new Error(result.error || "PDF smoke result missing");
+          for (const [name, encoded] of Object.entries(result.data)) {
+            const bytes = Buffer.from(encoded, "base64");
+            if (bytes.length < 20000) throw new Error(`${name} PDF is unexpectedly small: ${bytes.length}`);
+            fs.writeFileSync(`verification/${name}.pdf`, bytes);
+          }
+          NODE
+          sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
+          for file in verification/*.pdf; do
+            pdfinfo "$file" | tee "$file.info"
+            pdftoppm -f 1 -singlefile -png -r 120 "$file" "${file%.pdf}-page-1"
+            test -s "${file%.pdf}-page-1.png"
+          done
+          rm -f web/pdf-smoke.html web/src/pdf-smoke.ts
+          kill "$(cat /tmp/muzare-pdf-vite.pid)" 2>/dev/null || true
+
+      - name: Commit application changes only
+        run: |
+          git status --short
+          test ! -e web/pdf-smoke.html
+          test ! -e web/src/pdf-smoke.ts
+          git add web/src/pages/DashboardPage.tsx web/src/pages/workspace/Reports.tsx web/src/pages/workspace/HarvestPerformance.tsx web/src/pages/workspace/LabourWageSettlements.tsx web/src/lib/reportPdf.ts
+          git diff --cached --check
+          git config user.name "Muzare Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "feat: add daily sales dashboard and standardize PDF exports"
+          git push origin HEAD:feat/dashboard-daily-sales-and-report-pdf-polish
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-sales-pdf-polish-verification
+          path: verification
+          if-no-files-found: error
