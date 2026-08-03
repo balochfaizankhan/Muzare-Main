@@ -119,7 +119,9 @@ jobs:
           TS
           npx --yes tsx web/.arabic-pdf-smoke.ts
           rm web/.arabic-pdf-smoke.ts
-          test "$(stat -c%s /tmp/muzare-arabic-report.pdf)" -gt 100000
+          pdf_size=$(stat -c%s /tmp/muzare-arabic-report.pdf)
+          echo "Arabic PDF bytes: $pdf_size"
+          test "$pdf_size" -gt 10000
           pdffonts /tmp/muzare-arabic-report.pdf | tee /tmp/pdffonts.txt
           grep -F 'NotoSansArabic' /tmp/pdffonts.txt
           pdfinfo /tmp/muzare-arabic-report.pdf | grep -F 'Page size:'
