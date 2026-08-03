@@ -1,0 +1,419 @@
+name: Verify dashboard sales and PDF polish PR
+
+on:
+  pull_request:
+    branches: [dev]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: write
+
+jobs:
+  apply-build-verify:
+    if: github.event.pull_request.head.ref == 'feat/dashboard-daily-sales-and-report-pdf-polish'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apply guarded application changes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one match, found {count}")
+              return text.replace(old, new, 1)
+
+          dashboard_path = Path("web/src/pages/DashboardPage.tsx")
+          dashboard = dashboard_path.read_text()
+          if "salesTodayAmount" not in dashboard:
+              dashboard = replace_once(dashboard, "  ClipboardList,\n", "", "remove reports icon")
+              dashboard = replace_once(dashboard, "  ClockAlert,\n", "", "remove labour due icon")
+              dashboard = replace_once(dashboard, "  HandCoins,\n", "  HandCoins,\n  TrendingUp,\n", "add sales icon")
+              dashboard = replace_once(dashboard, "  totalSales: number;\n", "  totalSales: number;\n  salesTodayAmount: number;\n", "daily sales field")
+              dashboard = replace_once(dashboard, "    totalSales: 0,\n", "    totalSales: 0,\n    salesTodayAmount: 0,\n", "daily sales fallback")
+              dashboard = replace_once(
+                  dashboard,
+                  "    const totalSales = activeSales.reduce((sum, item) => sum + item.amount, 0);\n",
+                  "    const totalSales = activeSales.reduce((sum, item) => sum + item.amount, 0);\n    const salesTodayAmount = activeSales.filter((item) => item.date === date).reduce((sum, item) => sum + item.amount, 0);\n",
+                  "daily sales calculation",
+              )
+              dashboard = replace_once(dashboard, "      totalSales,\n", "      totalSales,\n      salesTodayAmount,\n", "daily sales total")
+              dashboard = replace_once(
+                  dashboard,
+                  '  const dispatchTodayLabel = hydrationPending || dashboardLoading ? "--" : t("dashboardPage.dispatchesTodayCount", { count: totalsValue.dispatchesToday });\n',
+                  '  const dispatchTodayLabel = hydrationPending || dashboardLoading ? "--" : t("dashboardPage.cartonsTodayCount", { count: totalsValue.cartonsToday });\n',
+                  "hero carton metric",
+              )
+              labour_start = dashboard.index("  // Labour Payments Due card:")
+              summary_start = dashboard.index("  const summaryCards = [", labour_start)
+              dashboard = dashboard[:labour_start] + dashboard[summary_start:]
+              dashboard = replace_once(
+                  dashboard,
+                  '      value: metricsReady ? String(totalsValue.dispatchesToday) : "—",\n',
+                  '      value: metricsReady ? String(totalsValue.cartonsToday) : "—",\n',
+                  "dispatch card cartons",
+              )
+              dashboard = replace_once(
+                  dashboard,
+                  '      detail: metricsReady ? t("dashboardPage.cartonsTodayCount", { count: totalsValue.cartonsToday }) : (dashboardLoadError ? t("dashboardPage.dispatchLoadFailedRetry") : t("dashboardPage.loadingDispatches")),\n',
+                  '      detail: metricsReady ? t("common.today") : (dashboardLoadError ? t("dashboardPage.dispatchLoadFailedRetry") : t("dashboardPage.loadingDispatches")),\n',
+                  "dispatch supporting text",
+              )
+              dashboard = replace_once(
+                  dashboard,
+                  '    { to: "/workspace/reports", icon: ClipboardList, title: t("layout.reports") },\n',
+                  '    { to: "/workspace/sales", icon: TrendingUp, title: t("layout.sales") },\n',
+                  "sales quick action",
+              )
+              section_marker = '        <section className="dashboard-kpi-grid" aria-label={t("dashboardPage.kpiGridAria")}>\n'
+              map_marker = '          {summaryCards.map'
+              section_start = dashboard.index(section_marker) + len(section_marker)
+              map_start = dashboard.index(map_marker, section_start)
+              sales_card = '''          {hasOperationalContext ? (
+            <Link className="dashboard-kpi-card dashboard-kpi-card--green" to="/workspace/sales">
+              <div className="dashboard-kpi-card__icon"><TrendingUp size={18} /></div>
+              <span>{t("layout.sales")}</span>
+              <strong className="bidi-isolate">{metricsReady ? moneyWhole(totalsValue.salesTodayAmount) : "—"}</strong>
+              <small>{metricsReady ? t("common.today") : t("dashboardPage.preparingWorkspaceDataShort")}</small>
+            </Link>
+          ) : (
+            <div className="dashboard-kpi-card dashboard-kpi-card--green dashboard-kpi-card--disabled" aria-disabled="true">
+              <div className="dashboard-kpi-card__icon"><TrendingUp size={18} /></div>
+              <span>{t("layout.sales")}</span>
+              <strong>{hydrationPending ? "..." : "--"}</strong>
+              <small>{hydrationPending ? t("dashboardPage.preparingWorkspaceDataShort") : t("dashboardPage.requiresFarmAndSeason")}</small>
+            </div>
+          )}
+'''
+              dashboard = dashboard[:section_start] + sales_card + dashboard[map_start:]
+              dashboard_path.write_text(dashboard)
+
+          reports_path = Path("web/src/pages/workspace/Reports.tsx")
+          reports = reports_path.read_text()
+          if 'pdfVariant = "minimal"' not in reports:
+              reports = replace_once(reports, '  pdfVariant = "standard",\n', '  pdfVariant = "minimal",\n', "default minimal PDF")
+
+          if "const buildAdvanceSummaryPdf" not in reports:
+              marker = "  const exportAttendanceRegister = () => {\n"
+              helpers = '''  const buildAdvanceSummaryPdf = (): CapturedCsvExport => ({
+    filename: "labour-advances-summary.pdf",
+    rows: [
+      [t("reportsPage.summary"), ""],
+      [t("reportsPage.transactions"), advanceReportTotals.transactions],
+      [t("reportsPage.totalAdvances"), advanceReportTotals.totalAdvances],
+      [t("reportsPage.outstandingAdvances"), advanceReportTotals.outstandingAdvances],
+      [],
+      [t("reportsPage.labourGroupColumn"), t("reportsPage.totalAdvances"), t("reportsPage.adjustedInSettlements"), t("reportsPage.recovered"), t("reportsPage.outstanding"), t("reportsPage.lastAdvanceDate")],
+      ...advanceReportLabourSections.map((section) => [section.labourer.name, section.total, section.settled, section.records.reduce((sum, record) => sum + Number(record.recoveredAmount ?? 0), 0), section.outstanding, section.lastAdvanceDate]),
+      [],
+      [t("reportsPage.grandTotal"), advanceReportTotals.totalAdvances],
+    ],
+  });
+  const buildAdvanceLogPdf = (): CapturedCsvExport => ({
+    filename: "labour-advances-detail.pdf",
+    rows: [
+      [t("reportsPage.summary"), ""],
+      [t("reportsPage.transactions"), advanceRows.length],
+      [t("reportsPage.totalAdvances"), advanceRows.reduce((sum, item) => sum + item.amount, 0)],
+      [],
+      [t("reportsPage.date"), t("reportsPage.labourGroupColumn"), t("reportsPage.sourcePaidFrom"), t("reportsPage.advanceAmount"), t("reportsPage.recovered"), t("reportsPage.status")],
+      ...advanceRows.map((item) => [item.date, advanceRecipientName(item), advancePaymentSourceName(item), item.amount, item.recoveredAmount, translateStatus(t, item.status)]),
+      [],
+      [t("reportsPage.grandTotal"), advanceRows.reduce((sum, item) => sum + item.amount, 0)],
+    ],
+  });
+  const buildWageRatesPdf = (): CapturedCsvExport => ({
+    filename: "wage-rates.pdf",
+    rows: [
+      [t("reportsPage.summary"), ""],
+      [t("reportsPage.labour"), new Set(wageRateReportRows.map((rate) => rate.labourerId)).size],
+      [t("wageRatesPage.activeRates"), wageRateReportRows.filter((rate) => getWageRateStatus(rate, todayKey()) === "active").length],
+      [],
+      [t("reportsPage.labour"), t("wageRatesPage.effectiveFrom"), t("wageRatesPage.effectiveTo"), t("wageRatesPage.dailyRate"), t("common.status")],
+      ...wageRateReportRows.map((rate) => [labourName(rate.labourerId), rate.effectiveFrom, rate.effectiveTo || "-", rate.dailyRate, t(`wageRatesPage.status.${getWageRateStatus(rate, todayKey())}`)]),
+    ],
+  });
+  const buildExpenseSummaryPdf = (): CapturedCsvExport => ({
+    filename: "expense-summary.pdf",
+    rows: [
+      [t("reportsPage.summary"), ""],
+      [t("reportsPage.transactions"), expenseVoucherCount],
+      [t("reportsPage.totalExpenses"), totalRecognizedExpenses],
+      [],
+      [t("reportsPage.byCategory"), ""],
+      [t("reportsPage.category"), t("reportsPage.expenseAmount"), t("reportsPage.shareOfTotal")],
+      ...expenseCategorySummaryRows.map((row) => [row.label, row.value, Number(row.share.toFixed(1))]),
+      [],
+      [t("reportsPage.byAccount"), ""],
+      [t("reportsPage.account"), t("reportsPage.attributedAmount"), t("reportsPage.shareOfTotal")],
+      ...expenseAccountSummaryRows.map((row) => [row.label, row.value, Number(row.share.toFixed(1))]),
+      [],
+      [t("reportsPage.grandTotal"), totalRecognizedExpenses],
+    ],
+  });
+  const buildSalesPdf = (): CapturedCsvExport => ({
+    filename: "sales-report.pdf",
+    rows: [
+      [t("reportsPage.summary"), ""],
+      [t("reportsPage.totalInvoices"), salesReportRows.length],
+      [t("reportsPage.totalSalesAmount"), salesReportRows.reduce((sum, item) => sum + item.sale.amount, 0)],
+      [t("reportsPage.outstandingReceivables"), salesReportRows.reduce((sum, item) => sum + item.outstanding, 0)],
+      [],
+      [t("reportsPage.saleDate"), t("reportsPage.invoiceNumber"), t("reportsPage.buyerName"), t("reportsPage.product"), t("reportsPage.quantity"), t("reportsPage.amount"), t("reportsPage.paymentStatus")],
+      ...salesReportRows.map((item) => [item.sale.date, item.invoiceNumber, item.buyerName, item.product, `${formatNumber(item.sale.quantity)} ${item.unit}`, item.sale.amount, translateSalesStatus(item.paymentStatus)]),
+      [],
+      [t("reportsPage.grandTotal"), salesReportRows.reduce((sum, item) => sum + item.sale.amount, 0)],
+    ],
+  });
+  const buildDispatchPdf = (): CapturedCsvExport => ({
+    filename: "dispatch-report.pdf",
+    rows: [
+      [t("reportsPage.summary"), ""],
+      [t("reportsPage.totalDispatches"), new Set(dispatchReportRows.map((item) => item.dispatch.id)).size],
+      [t("reportsPage.totalQuantity"), dispatchReportRows.reduce((sum, item) => sum + item.quantity, 0)],
+      [],
+      [t("reportsPage.dispatchDate"), t("reportsPage.dispatchNumber"), t("reportsPage.product"), t("reportsPage.quantity"), t("reportsPage.vehicle"), t("reportsPage.soldQuantity"), t("reportsPage.remainingQuantity")],
+      ...dispatchReportRows.map((item) => [item.dispatch.date, item.dispatchNumber, item.product, `${formatNumber(item.quantity)} ${item.unit}`, item.vehicle, item.soldQuantity, item.remainingQuantity]),
+      [],
+      [t("reportsPage.grandTotal"), dispatchReportRows.reduce((sum, item) => sum + item.quantity, 0)],
+    ],
+  });
+  const buildPartnerPositionPdf = (): CapturedCsvExport => ({
+    filename: "partner-position.pdf",
+    rows: [
+      [t("reportsPage.summary"), ""],
+      [t("reportsPage.partner"), partnerLiabilityPositions.length],
+      [t("reportsPage.currentPartnerBalance"), partnerLiabilityPositions.reduce((sum, item) => sum + item.currentPartnerBalance, 0)],
+      [],
+      [t("reportsPage.partner"), t("reportsPage.purchaseVouchersColumn"), t("reportsPage.totalLabourAdvancesPaidColumn"), t("reportsPage.directLabourPayments"), t("reportsPage.transfersOut"), t("reportsPage.transfersIn"), t("reportsPage.currentPartnerBalance")],
+      ...partnerLiabilityPositions.map((item) => [item.name, item.purchaseVouchersPaid, item.totalLabourAdvancesPaid, item.labourSettlementCashPaid, item.transfersOut, item.transfersIn, item.currentPartnerBalance]),
+    ],
+  });
+  const buildPartnerLedgerPdf = (): CapturedCsvExport => ({
+    filename: "partner-ledger.pdf",
+    rows: [[t("reportsPage.date"), t("reportsPage.partner"), t("reportsPage.type"), t("reportsPage.amount"), t("reportsPage.notes")], ...partnerRows.map((item) => [item.date, item.partnerName ?? `${item.fromPartner ?? "-"} → ${item.toPartner ?? "-"}`, translateStatus(t, item.type), item.amount, item.notes || "-"])],
+  });
+  const buildAccountBalancesPdf = (): CapturedCsvExport => ({
+    filename: "account-balances.pdf",
+    rows: [[t("reportsPage.account"), t("reportsPage.voucherExpenses"), t("reportsPage.totalCredit"), t("reportsPage.closingBalance")], ...displayedPositions.map((item) => [item.account.name, item.voucherExpenses, item.salesReceived + item.contributions + item.settlementsReceived, item.net])],
+  });
+  const buildAccountLedgerPdf = (): CapturedCsvExport => ({
+    filename: "account-ledger.pdf",
+    rows: [
+      [t("reportsPage.summary"), ""],
+      [t("reportsPage.account"), selectedAccountRecord?.name ?? t("reportsPage.allAccounts")],
+      [t("reportsPage.currentBalance"), currentLedgerBalance],
+      [],
+      [t("reportsPage.date"), t("reportsPage.type"), t("reportsPage.reference"), t("reportsPage.description"), t("reportsPage.debit"), t("reportsPage.credit"), t("reportsPage.runningBalance")],
+      ...accountLedgerRows.map((item) => [item.date, item.typeLabel, item.reference, item.description, item.debit || "-", item.credit || item.memoAmount || "-", item.running]),
+      [],
+      [t("reportsPage.currentBalance"), currentLedgerBalance],
+    ],
+  });
+
+'''
+              reports = replace_once(reports, marker, helpers + marker, "insert PDF builders")
+
+              replacements = {
+                  'sectionId="advance-summary" onPrint=': 'sectionId="advance-summary" preparePdfExport={buildAdvanceSummaryPdf} onPrint=',
+                  'sectionId="advance-log" onPrint=': 'sectionId="advance-log" preparePdfExport={buildAdvanceLogPdf} onPrint=',
+                  'sectionId="wage-rates" printContext=': 'sectionId="wage-rates" preparePdfExport={buildWageRatesPdf} printContext=',
+                  'sectionId="expense-summary" printContext=': 'sectionId="expense-summary" preparePdfExport={buildExpenseSummaryPdf} printContext=',
+                  'sectionId="sales-report" printContext=': 'sectionId="sales-report" preparePdfExport={buildSalesPdf} printContext=',
+                  'sectionId="dispatch-report" printContext=': 'sectionId="dispatch-report" preparePdfExport={buildDispatchPdf} printContext=',
+                  'sectionId="partner-position" printContext=': 'sectionId="partner-position" preparePdfExport={buildPartnerPositionPdf} printContext=',
+                  'sectionId="partner-ledger" printContext=': 'sectionId="partner-ledger" preparePdfExport={buildPartnerLedgerPdf} printContext=',
+                  'sectionId="account-balances" printContext=': 'sectionId="account-balances" preparePdfExport={buildAccountBalancesPdf} printContext=',
+                  'sectionId="account-ledger" printContext=': 'sectionId="account-ledger" preparePdfExport={buildAccountLedgerPdf} printContext=',
+              }
+              for old, new in replacements.items():
+                  reports = replace_once(reports, old, new, old)
+              reports_path.write_text(reports)
+
+          pdf_path = Path("web/src/lib/reportPdf.ts")
+          pdf = pdf_path.read_text()
+          if 'const minimal = spec.variant !== "standard";' not in pdf:
+              pdf = replace_once(pdf, '  const minimal = spec.variant === "minimal";\n', '  const minimal = spec.variant !== "standard";\n', "minimal PDF default")
+              pdf_path.write_text(pdf)
+
+          harvest_path = Path("web/src/pages/workspace/HarvestPerformance.tsx")
+          harvest = harvest_path.read_text()
+          if "const exportPdf = async" not in harvest:
+              harvest = replace_once(harvest, 'import { formatDate, formatNumber } from "../../lib/format";\n', 'import { formatDate, formatNumber } from "../../lib/format";\nimport { exportReportPdf } from "../../lib/reportPdf";\n', "harvest PDF import")
+              harvest, removed = re.subn(r'\nfunction printSection\(sectionId: string\) \{.*?\n\}\n\nexport function HarvestReportsPage\(\) \{', '\nexport function HarvestReportsPage() {', harvest, count=1, flags=re.S)
+              if removed != 1:
+                  raise SystemExit(f"remove harvest print bridge: expected one match, found {removed}")
+              harvest = replace_once(harvest, 'export function HarvestReportsPage() {\n  const { t } = useTranslation();\n  const perms = useHarvestPerms();\n', 'export function HarvestReportsPage() {\n  const { t, i18n } = useTranslation();\n  const { user } = useAuth();\n  const perms = useHarvestPerms();\n  const [pdfExporting, setPdfExporting] = useState(false);\n', "harvest PDF state")
+              harvest = replace_once(harvest, '    downloadCsv(`harvest-report-${todayKey()}.csv`, rows);\n  };\n\n  return (', '''    downloadCsv(`harvest-report-${todayKey()}.csv`, rows);
+  };
+
+  const exportPdf = async () => {
+    if (pdfExporting) return;
+    setPdfExporting(true);
+    try {
+      await exportReportPdf({
+        title: t("harvestPage.reportTitle"),
+        filename: `harvest-report-${todayKey()}.pdf`,
+        rangeLabel: `${rangeLabel}${groupId ? ` · ${printGroupLabel}` : ""}`,
+        context: {
+          workspace: user?.workspaceName ?? t("layout.workspace"),
+          farm: getActiveFarmId() ?? "-",
+          season: getActiveSeasonId() ?? "-",
+          generatedAt: printGeneratedAt,
+          generatedBy: user?.displayName ?? user?.email ?? "-",
+        },
+        orientation: "portrait",
+        variant: "minimal",
+        language: document.documentElement.lang || i18n.language,
+        direction: document.documentElement.dir === "rtl" ? "rtl" : "ltr",
+        rows: [
+          [t("reportsPage.summary"), ""],
+          [t("harvestPage.kpiTotalCartons"), summary.totalCartons],
+          [t("harvestPage.kpiAvgPerPerson"), Number(summary.averageCartonsPerPerson.toFixed(2))],
+          [t("harvestPage.highestProductivity"), highest ? `${highest.groupName} (${highest.cartonsPerPerson.toFixed(2)})` : "-"],
+          [],
+          [t("harvestPage.colDate"), t("harvestPage.colGroup"), t("harvestPage.colMembers"), t("harvestPage.colCartons"), t("harvestPage.colPerPerson")],
+          ...filtered.map((entry) => [entry.date, groupNameById.get(entry.harvestGroupId) ?? entry.harvestGroupName ?? t("harvestPage.unknownGroup"), entry.membersCount, entry.cartonsHarvested, Number((entry.cartonsPerPerson ?? 0).toFixed(2))]),
+          [],
+          [t("harvestPage.kpiTotalCartons"), summary.totalCartons],
+        ],
+      });
+    } catch (caught) {
+      console.error("Harvest PDF export failed", caught);
+      toast(t("reportsPage.pdfExportFailed", { defaultValue: "PDF export failed. Please try again." }));
+    } finally {
+      setPdfExporting(false);
+    }
+  };
+
+  return (''', "harvest PDF exporter")
+              harvest = replace_once(harvest, '            <button type="button" onClick={() => printSection("harvest-report")}>{t("harvestPage.print")}</button>\n', '            <button type="button" onClick={() => void exportPdf()} disabled={pdfExporting}>{pdfExporting ? t("reportsPage.generatingPdf") : t("reportsPage.exportPdf")}</button>\n', "harvest PDF button")
+              harvest_path.write_text(harvest)
+
+          settlements_path = Path("web/src/pages/workspace/LabourWageSettlements.tsx")
+          settlements = settlements_path.read_text()
+          if "exportSettlementRegisterPdf" not in settlements:
+              settlements = replace_once(settlements, 'import { Search, Printer, Download, X } from "lucide-react";\n', 'import { Search, FileDown, Download, X } from "lucide-react";\n', "settlement PDF icon")
+              settlements = replace_once(settlements, 'import { formatDate, formatMoney } from "../../lib/format";\n', 'import { formatDate, formatMoney } from "../../lib/format";\nimport { exportReportPdf } from "../../lib/reportPdf";\n', "settlement PDF import")
+              settlements, changed = re.subn(r'  const printSettlementRegister = \(\) => \{.*?\n  \};\n  const exportRegister = \(\) => \{', '''  const exportSettlementRegisterPdf = async () => {
+    try {
+      await exportReportPdf({
+        title: t("wageSettlementsPage.settlementRegisterTitle"),
+        filename: `labour-wage-settlements-${activeFarmId ?? "farm"}-${activeSeasonId ?? "season"}.pdf`,
+        rangeLabel: `${registerStatusLabel} · ${registerPaymentAccountLabel}`,
+        context: { workspace: user?.workspaceName ?? t("layout.workspace"), farm: activeFarmId ?? "-", season: activeSeasonId ?? "-", generatedAt: registerPrintGeneratedAt, generatedBy: user?.displayName ?? user?.email ?? "-" },
+        orientation: "landscape",
+        variant: "minimal",
+        language: document.documentElement.lang,
+        direction: document.documentElement.dir === "rtl" ? "rtl" : "ltr",
+        rows: [
+          [t("reportsPage.summary"), ""],
+          [t("reportsPage.transactions"), registerRows.length],
+          [t("wageSettlementsPage.grossWagesEarnedLower"), registerTotals.totalLabourCost],
+          [t("wageSettlementsPage.paidNowLower"), registerTotals.cashPaid],
+          [],
+          [t("wageSettlementsPage.settlementNoLabel"), t("wageSettlementsPage.settlementDate"), t("wageSettlementsPage.settlementPeriodLower"), t("wageSettlementsPage.foremanGroupLower"), t("wageSettlementsPage.grossWagesEarnedLower"), t("wageSettlementsPage.advanceAbsorbedThisSettlementLower"), t("wageSettlementsPage.paidNowLower"), t("common.status")],
+          ...registerRows.map((settlement) => [settlement.settlementNumber, settlement.settlementDate, `${settlement.fromDate} ${t("wageSettlementsPage.periodTo")} ${settlement.toDate}`, labourers.find((labourer) => labourer.id === settlement.foremanId)?.name ?? settlement.groupName ?? settlement.groupId ?? "-", settlement.grossWages ?? settlement.expenseAmount, settlement.advanceAdjustedNow ?? settlement.settledAdvanceAmount, settlement.paidAmount ?? settlement.payableBalance, translateStatus(t, settlementStatus(settlement))]),
+          [],
+          [t("wageSettlementsPage.grossWagesEarnedLower"), registerTotals.totalLabourCost],
+        ],
+      });
+    } catch (caught) {
+      console.error("Settlement register PDF export failed", caught);
+      setError(caught instanceof Error ? caught.message : t("reportsPage.pdfExportFailed"));
+    }
+  };
+  const exportRegister = () => {''', settlements, count=1, flags=re.S)
+              if changed != 1:
+                  raise SystemExit(f"settlement PDF function: expected one match, found {changed}")
+              settlements = replace_once(settlements, '              <button type="button" className="secondary-action" onClick={printSettlementRegister}><Printer size={16} /> {t("wageSettlementsPage.printButton")}</button>\n', '              <button type="button" className="secondary-action" onClick={() => void exportSettlementRegisterPdf()}><FileDown size={16} /> {t("reportsPage.exportPdf")}</button>\n', "settlement PDF button")
+              settlements_path.write_text(settlements)
+          PY
+
+      - name: Install dependencies and build
+        run: |
+          npm ci
+          npm run build --workspace @muzare/web
+
+      - name: Render representative PDFs
+        run: |
+          mkdir -p /tmp/pdf-tools
+          npm install --prefix /tmp/pdf-tools playwright@1.54.2
+          /tmp/pdf-tools/node_modules/.bin/playwright install chromium
+          cat > web/pdf-smoke.html <<'HTML'
+          <!doctype html><html><body><script type="module" src="/src/pdf-smoke.ts"></script></body></html>
+          HTML
+          cat > web/src/pdf-smoke.ts <<'TS'
+          import { createReportPdf } from "./lib/reportPdf";
+          declare global { interface Window { __pdfSmoke?: Record<string, string>; __pdfSmokeError?: string } }
+          const encode = (buffer: ArrayBuffer) => {
+            const bytes = new Uint8Array(buffer); let value = "";
+            for (let i = 0; i < bytes.length; i += 0x8000) value += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+            return btoa(value);
+          };
+          void (async () => {
+            try {
+              const rows = Array.from({ length: 120 }, (_, index) => [`2026-08-${String(index % 28 + 1).padStart(2, "0")}`, `V-${index + 1}`, `Transaction ${index + 1}`, index % 2 ? "Harvest" : "Fuel", "Operating account", 100 + index]);
+              const portrait = await createReportPdf({ title: "Sales report", filename: "sales.pdf", rangeLabel: "03 Aug 2026", context: { workspace: "Muzare", farm: "Farm", season: "2026", generatedAt: "03 Aug 2026", generatedBy: "Faizan" }, orientation: "portrait", rows: [["Summary", ""], ["Transactions", 120], ["Total", 19140], [], ["Date", "Voucher", "Description", "Category", "Account", "Amount"], ...rows, [], ["Grand total", 19140]] });
+              const rtl = await createReportPdf({ title: "مزدور ادائیگی رپورٹ", filename: "settlements.pdf", rangeLabel: "اگست 2026", context: { workspace: "مزارع", farm: "العویش", season: "2026", generatedAt: "03 اگست 2026", generatedBy: "فیضان" }, orientation: "landscape", language: "ur", direction: "rtl", rows: [["خلاصہ", ""], ["ریکارڈز", 48], ["کل", 125400], [], ["نمبر", "تاریخ", "مدت", "گروپ", "اجرت", "ایڈوانس", "ادا شدہ", "حالت"], ...Array.from({ length: 48 }, (_, index) => [`SET-${index + 1}`, "2026-08-03", "01-03 Aug", `گروپ ${index + 1}`, 2500, 300, 2200, "پوسٹ شدہ"]), [], ["کل", 125400]] });
+              window.__pdfSmoke = { portrait: encode(portrait), rtl: encode(rtl) };
+            } catch (error) { window.__pdfSmokeError = error instanceof Error ? error.stack || error.message : String(error); }
+          })();
+          TS
+          (cd web && npm exec vite -- --host 127.0.0.1 --port 4173 >/tmp/pdf-vite.log 2>&1 & echo $! >/tmp/pdf-vite.pid)
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:4173/pdf-smoke.html >/dev/null && break; sleep 1; done
+          mkdir -p verification
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import { chromium } from "/tmp/pdf-tools/node_modules/playwright/index.mjs";
+          const browser = await chromium.launch({ headless: true });
+          const page = await browser.newPage();
+          await page.goto("http://127.0.0.1:4173/pdf-smoke.html", { waitUntil: "networkidle" });
+          await page.waitForFunction(() => window.__pdfSmoke || window.__pdfSmokeError, null, { timeout: 120000 });
+          const result = await page.evaluate(() => ({ data: window.__pdfSmoke, error: window.__pdfSmokeError }));
+          await browser.close();
+          if (result.error || !result.data) throw new Error(result.error || "Missing PDF smoke output");
+          for (const [name, encoded] of Object.entries(result.data)) {
+            const bytes = Buffer.from(encoded, "base64");
+            if (bytes.length < 20000) throw new Error(`${name} PDF is blank or too small: ${bytes.length}`);
+            fs.writeFileSync(`verification/${name}.pdf`, bytes);
+          }
+          NODE
+          sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
+          for pdf in verification/*.pdf; do
+            pdfinfo "$pdf" | tee "$pdf.info"
+            pdftoppm -f 1 -singlefile -png -r 120 "$pdf" "${pdf%.pdf}-page-1"
+            test -s "${pdf%.pdf}-page-1.png"
+          done
+          rm -f web/pdf-smoke.html web/src/pdf-smoke.ts
+          kill "$(cat /tmp/pdf-vite.pid)" 2>/dev/null || true
+
+      - name: Commit verified application changes to PR branch
+        run: |
+          rm -f .github/workflows/apply-dashboard-sales-and-pdf-polish.yml scripts/dashboard-pdf-polish-trigger.txt
+          git add web/src/pages/DashboardPage.tsx web/src/pages/workspace/Reports.tsx web/src/pages/workspace/HarvestPerformance.tsx web/src/pages/workspace/LabourWageSettlements.tsx web/src/lib/reportPdf.ts
+          git add -u .github/workflows/apply-dashboard-sales-and-pdf-polish.yml scripts/dashboard-pdf-polish-trigger.txt || true
+          git diff --cached --check
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name "Muzare Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "feat: add daily sales dashboard and professional PDF exports"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-sales-pdf-polish-verification
+          path: verification
+          if-no-files-found: error
