@@ -8,6 +8,7 @@ import { formatLocalDateKey } from "../lib/dateOnly";
 import { formatMoney } from "../lib/format";
 import { offlineDb, workspaceRecords } from "../lib/offline-db";
 import { isActiveOperationalRecord } from "../lib/operationalRecords";
+import "./DashboardPageEnhancements.css";
 
 type DailyDashboardMetrics = {
   ready: boolean;
@@ -100,7 +101,7 @@ function DashboardEnhancements() {
       const quickGrid = document.querySelector<HTMLElement>(".dashboard-quick-grid");
       if (!grid || !heroStats || !quickGrid) return false;
 
-      const labourDueCard = grid.querySelector<HTMLElement>('.dashboard-kpi-card--amber');
+      const labourDueCard = grid.querySelector<HTMLElement>(".dashboard-kpi-card--amber");
       const labourAdvanceCard = grid.querySelector<HTMLElement>('a[href="/workspace/labour-payments/advances"]');
       const originalDispatchCard = grid.querySelector<HTMLElement>('a[href="/workspace/dispatch"]');
       const heroDispatch = Array.from(heroStats.children).filter((node): node is HTMLElement => node instanceof HTMLElement)[1];
@@ -113,11 +114,10 @@ function DashboardEnhancements() {
       const salesQuickAction = makePortalMount("sales-quick-action");
 
       grid.insertBefore(salesCard, labourDueCard);
-      grid.insertBefore(dispatchCard, originalDispatchCard);
+      grid.insertBefore(dispatchCard, labourDueCard);
       heroStats.insertBefore(replacementHeroDispatch, heroDispatch);
       quickGrid.insertBefore(salesQuickAction, reportsQuickAction);
 
-      hide(labourDueCard);
       hide(labourAdvanceCard);
       hide(originalDispatchCard);
       hide(heroDispatch);
@@ -169,26 +169,19 @@ function DashboardEnhancements() {
       mounts.salesCard,
     )}
     {createPortal(
-      <Link
-        className="dashboard-kpi-card dashboard-kpi-card--blue"
-        to="/workspace/dispatch"
-        style={{ gridColumn: "1 / -1", minHeight: 142 }}
-      >
-        <div style={{ alignItems: "center", display: "flex", gap: 10 }}>
-          <div className="dashboard-kpi-card__icon"><PackageOpen size={18} /></div>
-          <span>{t("dashboard.dispatchesLabel")}</span>
-        </div>
-        <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(2, minmax(0, 1fr))", marginTop: 12 }}>
-          <div style={{ borderInlineEnd: "1px solid var(--border)", display: "grid", gap: 4, paddingInlineEnd: 12 }}>
-            <strong className="bidi-isolate" style={{ fontSize: "1.55rem" }}>{vehicleValue}</strong>
-            <small>{t("reportsPage.vehicle")}</small>
+      <Link className="dashboard-kpi-card dashboard-kpi-card--blue" to="/workspace/dispatch">
+        <div className="dashboard-kpi-card__icon"><PackageOpen size={18} /></div>
+        <span>{t("dashboard.dispatchesLabel")}</span>
+        <div className="dashboard-kpi-card__split-metrics">
+          <div className="dashboard-kpi-card__split-metric">
+            <strong className="dashboard-kpi-card__split-value bidi-isolate">{cartonValue}</strong>
+            <small className="dashboard-kpi-card__split-label">{t("harvestPage.colCartons")}</small>
           </div>
-          <div style={{ display: "grid", gap: 4, paddingInlineStart: 2 }}>
-            <strong className="bidi-isolate" style={{ fontSize: "1.55rem" }}>{cartonValue}</strong>
-            <small>{t("harvestPage.colCartons")}</small>
+          <div className="dashboard-kpi-card__split-metric">
+            <strong className="dashboard-kpi-card__split-value bidi-isolate">{vehicleValue}</strong>
+            <small className="dashboard-kpi-card__split-label">{t("reportsPage.vehicle")}</small>
           </div>
         </div>
-        <small style={{ marginTop: 10 }}>{todayLabel}</small>
       </Link>,
       mounts.dispatchCard,
     )}
