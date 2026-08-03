@@ -96,6 +96,7 @@ type ReportPrintContext = {
 };
 type ReportPrintLayout = "portrait" | "landscape";
 type ReportPrintDensity = "normal" | "wide";
+type ReportPdfVariant = "standard" | "minimal";
 type CapturedCsvExport = { filename: string; rows: unknown[][] };
 const ReportPdfExportContext = createContext<ReportPrintContext | null>(null);
 let csvExportCapture: ((capture: CapturedCsvExport) => void) | null = null;
@@ -480,6 +481,8 @@ function ReportShell({
   printContext,
   printLayout = "landscape",
   printDensity = "normal",
+  pdfVariant = "standard",
+  preparePdfExport,
   children,
 }: {
   title: string;
@@ -494,6 +497,8 @@ function ReportShell({
   printContext?: ReportPrintContext;
   printLayout?: ReportPrintLayout;
   printDensity?: ReportPrintDensity;
+  pdfVariant?: ReportPdfVariant;
+  preparePdfExport?: () => CapturedCsvExport;
   children: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -505,15 +510,18 @@ function ReportShell({
     if (pdfExporting) return;
     setPdfExporting(true);
     try {
-      const captureHolder: { current?: CapturedCsvExport } = {};
-      const previousCapture = csvExportCapture;
-      csvExportCapture = (nextCapture) => { captureHolder.current = nextCapture; };
-      try {
-        onExport();
-      } finally {
-        csvExportCapture = previousCapture;
+      let captured = preparePdfExport?.();
+      if (!captured) {
+        const captureHolder: { current?: CapturedCsvExport } = {};
+        const previousCapture = csvExportCapture;
+        csvExportCapture = (nextCapture) => { captureHolder.current = nextCapture; };
+        try {
+onExport();
+        } finally {
+csvExportCapture = previousCapture;
+        }
+        captured = captureHolder.current;
       }
-      const captured = captureHolder.current;
       if (!captured) throw new Error("The report did not provide structured export rows.");
       await exportReportPdf({
         title,
@@ -524,6 +532,7 @@ function ReportShell({
         rows: captured.rows,
         language: document.documentElement.lang || i18n.language,
         direction: document.documentElement.dir === "rtl" ? "rtl" : "ltr",
+        variant: pdfVariant,
       });
     } catch (error) {
       console.error("Report PDF export failed", error);
@@ -2170,6 +2179,72 @@ export function Reports() {
       ...expenseCsvTotalsRows,
     ]);
   };
+  const buildMinimalExpenseLogPdf = (): CapturedCsvExport => {
+    const suffix = from || to ? `${from || "start"}-${to || "end"}` : "all-dates";
+    const purchaseRows = voucherRows.map((voucher) => {
+      const lines = voucherReportItems(voucher);
+      const descriptions = [...new Set(lines
+        .map((line) => normalizeText(line.description) || normalizeText(line.remarks) || normalizeText(line.notes))
+        .filter(Boolean))];
+      const categories = [...new Set(lines.map((line) => translateExpenseCategory(line.category)).filter(Boolean))];
+      return {
+        voucherNumber: getVoucherDisplayNumber(voucher) || voucher.voucherNumber,
+        date: voucher.date,
+        description: descriptions.length > 1 ? `${descriptions[0]} +${descriptions.length - 1}` : descriptions[0] || "-",
+        category: categories.length > 1 ? `${categories[0]} +${categories.length - 1}` : categories[0] || "-",
+        account: accountName(voucher.accountId),
+        amount: voucher.amount,
+      };
+    });
+    const labourRows = canonicalExpenseRows.map((item) => {
+      const sourceNames = [...new Set((canonicalExpenseAccountsByDue.get(item.id) ?? [])
+        .map((source) => localizeSystemPlaceholder(t, source.accountName) || source.accountName)
+        .filter(Boolean))];
+      const recipient = localizeSystemPlaceholder(t, item.recipientName) || item.recipientName;
+      return {
+        voucherNumber: item.dueNumber ?? item.id,
+        date: item.date,
+        description: normalizeText(item.description) || recipient || "-",
+        category: t("reportsPage.labourWagesCategory"),
+        account: sourceNames.length > 1 ? `${sourceNames[0]} +${sourceNames.length - 1}` : sourceNames[0] || t("reportsPage.unattributed"),
+        amount: item.amount,
+      };
+    });
+    const ledgerRows = [...purchaseRows, ...labourRows].sort((left, right) => {
+      const dateOrder = expenseSort === "desc" ? right.date.localeCompare(left.date) : left.date.localeCompare(right.date);
+      return dateOrder || left.voucherNumber.localeCompare(right.voucherNumber);
+    });
+    return {
+      filename: `expense-log-${suffix}.csv`,
+      rows: [
+        ...expenseCsvHeaderRows(t("reportsPage.expenseLog")),
+        [],
+        [t("reportsPage.summary"), ""],
+        [t("reportsPage.transactions"), expenseVoucherCount],
+        [t("reportsPage.totalExpenses"), totalRecognizedExpenses],
+        [],
+        [
+t("reportsPage.date"),
+t("reportsPage.voucher"),
+t("reportsPage.description"),
+t("reportsPage.category"),
+t("reportsPage.account"),
+t("reportsPage.amount"),
+        ],
+        ...ledgerRows.map((row) => [
+row.date,
+row.voucherNumber,
+row.description,
+row.category,
+row.account,
+row.amount,
+        ]),
+        [],
+        [t("reportsPage.grandTotal"), totalRecognizedExpenses],
+      ],
+    };
+  };
+
   const exportExpenseLog = () => {
     const suffix = from || to ? `${from || "start"}-${to || "end"}` : "all-dates";
     downloadCsv(`expense-log-${suffix}.csv`, [
@@ -2721,7 +2796,7 @@ export function Reports() {
             </div>
           </div>
         </ReportShell>}
-        {views.expenditures === "log" && <ReportShell title={t("reportsPage.expenseLog")} rangeLabel={rangeLabel} sectionId="expense-log" printContext={reportPrintContext} printLayout="landscape" printDensity="wide" onPrint={() => printSection("expense-log")} onExport={exportExpenseLog}>
+        {views.expenditures === "log" && <ReportShell title={t("reportsPage.expenseLog")} rangeLabel={rangeLabel} sectionId="expense-log" printContext={reportPrintContext} printLayout="portrait" pdfVariant="minimal" preparePdfExport={buildMinimalExpenseLogPdf} onPrint={() => printSection("expense-log")} onExport={exportExpenseLog}>
           <Kpis values={[
             [t("reportsPage.totalExpenses"), money(totalRecognizedExpenses)],
             [t("reportsPage.transactions"), expenseVoucherCount],
