@@ -12,6 +12,7 @@ import { isActiveOperationalRecord } from "../lib/operationalRecords";
 type DailyDashboardMetrics = {
   ready: boolean;
   salesAmount: number;
+  dispatches: number;
   cartons: number;
 };
 
@@ -24,12 +25,13 @@ type DashboardEnhancementMounts = {
 
 type HiddenElement = {
   element: HTMLElement;
-  previousDisplay: string;
+  previousStyle: string | null;
 };
 
 const emptyMetrics: DailyDashboardMetrics = {
   ready: false,
   salesAmount: 0,
+  dispatches: 0,
   cartons: 0,
 };
 
@@ -57,13 +59,14 @@ function DashboardEnhancements() {
       setMetrics({
         ready: true,
         salesAmount: activeSales.reduce((sum, sale) => sum + Number(sale.amount || 0), 0),
+        dispatches: activeDispatches.length,
         cartons: activeDispatches.reduce(
           (sum, dispatch) => sum + (dispatch.items?.reduce((itemSum, item) => itemSum + Number(item.cartons || 0), 0) ?? Number(dispatch.cartons || 0)),
           0,
         ),
       });
     } catch (error) {
-      console.error("Dashboard daily sales and carton metrics failed to load", error);
+      console.error("Dashboard daily sales and dispatch metrics failed to load", error);
       setMetrics(emptyMetrics);
     }
   }, []);
@@ -84,9 +87,10 @@ function DashboardEnhancements() {
     let hidden: HiddenElement[] = [];
     let installedMounts: DashboardEnhancementMounts | null = null;
 
-    const hide = (element: HTMLElement) => {
-      hidden.push({ element, previousDisplay: element.style.display });
-      element.style.display = "none";
+    const hide = (element: HTMLElement | null) => {
+      if (!element) return;
+      hidden.push({ element, previousStyle: element.getAttribute("style") });
+      element.style.setProperty("display", "none", "important");
     };
 
     const install = () => {
@@ -96,31 +100,32 @@ function DashboardEnhancements() {
       const quickGrid = document.querySelector<HTMLElement>(".dashboard-quick-grid");
       if (!grid || !heroStats || !quickGrid) return false;
 
-      const originalCards = Array.from(grid.children).filter((node): node is HTMLElement => node instanceof HTMLElement && !node.dataset.dashboardEnhancement);
-      const labourDueCard = originalCards[0];
-      const dispatchCard = originalCards.find((node) => node.matches('a[href="/workspace/dispatch"]')) ?? originalCards[3];
+      const labourDueCard = grid.querySelector<HTMLElement>('.dashboard-kpi-card--amber');
+      const labourAdvanceCard = grid.querySelector<HTMLElement>('a[href="/workspace/labour-payments/advances"]');
+      const originalDispatchCard = grid.querySelector<HTMLElement>('a[href="/workspace/dispatch"]');
       const heroDispatch = Array.from(heroStats.children).filter((node): node is HTMLElement => node instanceof HTMLElement)[1];
       const reportsQuickAction = quickGrid.querySelector<HTMLElement>('a[href="/workspace/reports"]');
-      if (!labourDueCard || !dispatchCard || !heroDispatch || !reportsQuickAction) return false;
+      if (!labourDueCard || !originalDispatchCard || !heroDispatch || !reportsQuickAction) return false;
 
       const salesCard = makePortalMount("sales-card");
-      const replacementDispatchCard = makePortalMount("dispatch-card");
+      const dispatchCard = makePortalMount("dispatch-card");
       const replacementHeroDispatch = makePortalMount("hero-dispatch");
       const salesQuickAction = makePortalMount("sales-quick-action");
 
       grid.insertBefore(salesCard, labourDueCard);
-      grid.insertBefore(replacementDispatchCard, dispatchCard);
+      grid.insertBefore(dispatchCard, originalDispatchCard);
       heroStats.insertBefore(replacementHeroDispatch, heroDispatch);
       quickGrid.insertBefore(salesQuickAction, reportsQuickAction);
 
       hide(labourDueCard);
-      hide(dispatchCard);
+      hide(labourAdvanceCard);
+      hide(originalDispatchCard);
       hide(heroDispatch);
       hide(reportsQuickAction);
 
       installedMounts = {
         salesCard,
-        dispatchCard: replacementDispatchCard,
+        dispatchCard,
         heroDispatch: replacementHeroDispatch,
         salesQuickAction,
       };
@@ -136,8 +141,9 @@ function DashboardEnhancements() {
 
     return () => {
       observer?.disconnect();
-      hidden.forEach(({ element, previousDisplay }) => {
-        element.style.display = previousDisplay;
+      hidden.forEach(({ element, previousStyle }) => {
+        if (previousStyle === null) element.removeAttribute("style");
+        else element.setAttribute("style", previousStyle);
       });
       if (installedMounts) Object.values(installedMounts).forEach((mount) => mount.remove());
       hidden = [];
@@ -148,7 +154,8 @@ function DashboardEnhancements() {
 
   if (!mounts) return null;
   const salesValue = metrics.ready ? formatMoney(metrics.salesAmount) : "—";
-  const cartonsValue = metrics.ready ? String(metrics.cartons) : "—";
+  const vehicleValue = metrics.ready ? String(metrics.dispatches) : "—";
+  const cartonValue = metrics.ready ? String(metrics.cartons) : "—";
   const todayLabel = t("common.today");
 
   return <>
@@ -162,11 +169,26 @@ function DashboardEnhancements() {
       mounts.salesCard,
     )}
     {createPortal(
-      <Link className="dashboard-kpi-card dashboard-kpi-card--blue" to="/workspace/dispatch">
-        <div className="dashboard-kpi-card__icon"><PackageOpen size={18} /></div>
-        <span>{t("dashboard.dispatchesLabel")}</span>
-        <strong className="bidi-isolate">{cartonsValue}</strong>
-        <small>{todayLabel}</small>
+      <Link
+        className="dashboard-kpi-card dashboard-kpi-card--blue"
+        to="/workspace/dispatch"
+        style={{ gridColumn: "1 / -1", minHeight: 142 }}
+      >
+        <div style={{ alignItems: "center", display: "flex", gap: 10 }}>
+          <div className="dashboard-kpi-card__icon"><PackageOpen size={18} /></div>
+          <span>{t("dashboard.dispatchesLabel")}</span>
+        </div>
+        <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(2, minmax(0, 1fr))", marginTop: 12 }}>
+          <div style={{ borderInlineEnd: "1px solid var(--border)", display: "grid", gap: 4, paddingInlineEnd: 12 }}>
+            <strong className="bidi-isolate" style={{ fontSize: "1.55rem" }}>{vehicleValue}</strong>
+            <small>{t("reportsPage.vehicle")}</small>
+          </div>
+          <div style={{ display: "grid", gap: 4, paddingInlineStart: 2 }}>
+            <strong className="bidi-isolate" style={{ fontSize: "1.55rem" }}>{cartonValue}</strong>
+            <small>{t("harvestPage.colCartons")}</small>
+          </div>
+        </div>
+        <small style={{ marginTop: 10 }}>{todayLabel}</small>
       </Link>,
       mounts.dispatchCard,
     )}
