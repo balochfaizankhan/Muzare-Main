@@ -4,6 +4,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { Brand } from "../components/Brand";
 import { LanguageSwitch } from "../components/LanguageSwitch";
+import { StickyActionBarProvider } from "../components/StickyActionBar";
 
 const nav = [
   ["/admin/dashboard", "layout.dashboard", LayoutDashboard],
@@ -33,7 +34,7 @@ export function AdminLayout() {
           <strong>{t("layout.platformAdministration")}</strong>
           <div className="toolbar__actions"><LanguageSwitch /><button className="ghost-icon shell-logout" aria-label={t("common.logout")} onClick={() => void logout()}><LogOut size={18} /></button></div>
         </header>
-        <Outlet />
+        <StickyActionBarProvider><Outlet /></StickyActionBarProvider>
       </div>
     </div>
   );
