@@ -1,0 +1,126 @@
+name: Verify structured report PDF export
+
+on:
+  pull_request:
+    branches: [dev]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-verify:
+    if: github.head_ref == 'fix/export-pdf-reports'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apply guarded report integration
+        run: python scripts/apply_export_pdf_reports.py
+
+      - name: Install PDF dependencies
+        run: npm install --workspace @muzare/web jspdf jspdf-autotable
+
+      - name: Verify source integration
+        run: |
+          grep -F 'exportReportPdf' web/src/pages/workspace/Reports.tsx
+          grep -F 'csvExportCapture' web/src/pages/workspace/Reports.tsx
+          grep -F 'isAttendanceReport' web/src/pages/workspace/Reports.tsx
+          grep -F 'Generating PDF' web/src/pages/workspace/Reports.tsx
+          grep -F 'createReportPdf' web/src/lib/reportPdf.ts
+          grep -F 'jspdf' web/package.json
+          grep -F 'jspdf-autotable' web/package.json
+
+      - name: Build web application
+        run: npm --workspace @muzare/web run build
+
+      - name: Generate and inspect representative PDF
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq poppler-utils
+          cat > web/.report-pdf-smoke.ts <<'TS'
+          import { writeFileSync } from 'node:fs';
+          import { createReportPdf } from './src/lib/reportPdf';
+
+          const detailRows = Array.from({ length: 140 }, (_, index) => [
+            `EXP-${String(index + 1).padStart(4, '0')}`,
+            `2026-07-${String((index % 28) + 1).padStart(2, '0')}`,
+            `Professional report line ${index + 1} with enough text to verify wrapping and pagination`,
+            index % 2 === 0 ? 'Operations' : 'Labour wages',
+            index % 3 === 0 ? 'Fuel' : 'General',
+            `Account ${(index % 5) + 1}`,
+            1250.5 + index,
+          ]);
+
+          const buffer = await createReportPdf({
+            title: 'Expense Log',
+            filename: 'expense-log-smoke.pdf',
+            rangeLabel: '01 Jul 2026 - 31 Jul 2026',
+            orientation: 'landscape',
+            language: 'en',
+            direction: 'ltr',
+            context: {
+              workspace: 'Muzare Workspace',
+              farm: 'North Farm',
+              season: '2026 Harvest',
+              generatedAt: '31 Jul 2026, 1:16 PM',
+              generatedBy: 'Owner',
+            },
+            rows: [
+              ['Muzare', 'Expense Log'],
+              ['Workspace', 'Muzare Workspace'],
+              ['Farm', 'North Farm'],
+              ['Season', '2026 Harvest'],
+              ['Date range', '01 Jul 2026 - 31 Jul 2026'],
+              [],
+              ['Summary', ''],
+              ['Transactions', 140],
+              ['Total expenses', 184870.5],
+              ['Accounts', 5],
+              [],
+              ['Voucher', 'Date', 'Description', 'Category', 'Subcategory', 'Account', 'Expense amount'],
+              ...detailRows,
+              [],
+              ['By category', ''],
+              ['Category', 'Amount', 'Share', 'Transactions'],
+              ['Operations', 96320.5, '52.1%', 70],
+              ['Labour wages', 88550, '47.9%', 70],
+              [],
+              ['Grand total', 184870.5],
+            ],
+          });
+          writeFileSync('/tmp/muzare-expense-report.pdf', Buffer.from(buffer));
+          TS
+          npx --yes tsx web/.report-pdf-smoke.ts
+          rm web/.report-pdf-smoke.ts
+          test "$(stat -c%s /tmp/muzare-expense-report.pdf)" -gt 30000
+          pdfinfo /tmp/muzare-expense-report.pdf | tee /tmp/pdfinfo.txt
+          pdftotext -layout /tmp/muzare-expense-report.pdf /tmp/report.txt
+          grep -F 'Expense Log' /tmp/report.txt
+          grep -F 'Muzare Workspace' /tmp/report.txt
+          grep -F 'Grand total' /tmp/report.txt
+          pages=$(awk '/^Pages:/ {print $2}' /tmp/pdfinfo.txt)
+          test "$pages" -ge 2
+          grep -E 'Page size:.*841.*595|Page size:.*842.*595' /tmp/pdfinfo.txt
+
+      - name: Validate diff
+        run: git diff --check
+
+      - name: Commit verified application changes
+        run: |
+          if git diff --quiet; then
+            echo 'No uncommitted application changes.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add web/src/pages/workspace/Reports.tsx web/package.json package-lock.json
+          git commit -m 'feat: export reports as structured PDFs'
+          git push origin HEAD:${{ github.head_ref }}
