@@ -121,6 +121,6 @@ jobs:
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add web/src/pages/workspace/Reports.tsx web/package.json package-lock.json
+          git add web/src/pages/workspace/Reports.tsx web/src/lib/reportPdf.ts web/package.json package-lock.json
           git commit -m 'feat: export reports as structured PDFs'
           git push origin HEAD:${{ github.head_ref }}
