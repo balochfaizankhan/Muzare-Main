@@ -43,7 +43,7 @@ const GREEN_SOFT: PdfColor = [239, 247, 241];
 const BORDER: PdfColor = [207, 220, 211];
 const TEXT: PdfColor = [38, 55, 44];
 const MUTED: PdfColor = [99, 116, 104];
-const ARABIC_FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansarabic/NotoSansArabic%5Bwdth%2Cwght%5D.ttf";
+const ARABIC_FONT_URL = new URL("../assets/fonts/NotoSansArabic-Regular.ttf", import.meta.url).href;
 const ARABIC_FONT_FILE = "NotoSansArabic.ttf";
 const ARABIC_FONT_FAMILY = "NotoSansArabic";
 
