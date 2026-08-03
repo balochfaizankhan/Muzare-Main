@@ -179,17 +179,26 @@ function findActionContainer(button: HTMLElement, form: HTMLFormElement) {
   return compactFallback ?? button.parentElement;
 }
 
+function resolveControlForm(control: HTMLElement) {
+  const closest = control.closest<HTMLFormElement>("form");
+  if (closest) return closest;
+  const formId = control.getAttribute("form");
+  const associated = formId ? document.getElementById(formId) : null;
+  return associated instanceof HTMLFormElement ? associated : null;
+}
+
 function collectActions(root: HTMLElement) {
   const found = new Map<HTMLElement, EnhancedAction>();
 
   root.querySelectorAll<HTMLElement>(explicitActionSelectors).forEach((bar) => {
-    const form = bar.closest("form");
+    const submitControl = bar.querySelector<HTMLElement>("button[type='submit'],button:not([type]),input[type='submit']");
+    const form = bar.closest<HTMLFormElement>("form") ?? (submitControl ? resolveControlForm(submitControl) : null);
     if (!form || !bar.querySelector("button,input[type='submit']")) return;
     found.set(bar, { bar, form, variant: bar.closest(dialogSelector) ? "container" : "viewport" });
   });
 
-  root.querySelectorAll<HTMLElement>("button[type='submit'],input[type='submit']").forEach((button) => {
-    const form = button.closest("form");
+  root.querySelectorAll<HTMLElement>("form button[type='submit'],form button:not([type]),input[type='submit'],button[form][type='submit']").forEach((button) => {
+    const form = resolveControlForm(button);
     if (!form || form.dataset.stickyActionDisabled === "true") return;
     const bar = findActionContainer(button, form);
     if (!bar) return;
@@ -200,6 +209,7 @@ function collectActions(root: HTMLElement) {
 }
 
 function chooseInitialAction(actions: EnhancedAction[]) {
+  if (actions.some(({ variant }) => variant === "container")) return null;
   const activeElement = document.activeElement;
   if (activeElement instanceof Element) {
     const focused = actions.find(({ form }) => form.contains(activeElement));
@@ -227,13 +237,14 @@ export function StickyActionBarProvider({ children }: PropsWithChildren) {
     };
 
     const activate = (next: EnhancedAction | null) => {
-      active = next;
+      const containerOpen = actions.some(({ variant }) => variant === "container");
+      active = containerOpen ? null : next;
       actions.forEach((item) => {
-        const isActive = item.variant === "container" || item === next;
+        const isActive = item.variant === "container" || (!containerOpen && item === next);
         item.bar.dataset.stickyActionState = isActive ? "active" : "inactive";
         item.form.dataset.stickyActionState = isActive ? "active" : "inactive";
       });
-      document.body.classList.toggle("has-muzare-sticky-action-bar", Boolean(next));
+      document.body.classList.toggle("has-muzare-sticky-action-bar", Boolean(active));
       resizeObserver?.disconnect();
       if (next) {
         resizeObserver = new ResizeObserver(updateHeight);
@@ -261,8 +272,9 @@ export function StickyActionBarProvider({ children }: PropsWithChildren) {
       resetDecorations();
       actions = collectActions(root);
       actions.forEach((item) => {
+        const isNativeComponent = item.bar.dataset.stickyActionBar === "true";
         item.bar.classList.add("muzare-sticky-action-bar");
-        item.bar.dataset.stickyActionManaged = "true";
+        if (!isNativeComponent) item.bar.dataset.stickyActionManaged = "true";
         item.bar.dataset.stickyActionVariant = item.variant;
         item.form.classList.add("muzare-sticky-action-form");
       });
@@ -301,7 +313,12 @@ export function StickyActionBarProvider({ children }: PropsWithChildren) {
     };
 
     const observer = new MutationObserver(scheduleScan);
-    observer.observe(root, { childList: true, subtree: true });
+    observer.observe(root, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["hidden", "aria-hidden", "data-dispatch-tab", "data-tab", "data-state"],
+    });
     root.addEventListener("pointerdown", activateFromEvent, true);
     root.addEventListener("focusin", keepFocusedControlVisible, true);
     window.visualViewport?.addEventListener("resize", updateKeyboardState);
