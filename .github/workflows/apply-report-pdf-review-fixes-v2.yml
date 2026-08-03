@@ -1,0 +1,44 @@
+name: Apply report PDF review fixes v2
+
+on:
+  pull_request:
+    branches: [dev]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build-push:
+    if: github.head_ref == 'fix/professional-report-pdf-layout'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Apply guarded patch
+        run: python scripts/apply_report_pdf_review_fixes.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install and build
+        run: |
+          npm ci
+          npm --workspace @muzare/web run build
+          git diff --check
+
+      - name: Commit application fix
+        run: |
+          if git diff --quiet; then
+            echo 'Review fixes are already applied.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add web/src/lib/reportPdf.ts
+          git commit -m 'fix: load report font and preserve full table values'
+          git push origin HEAD:${{ github.head_ref }}
