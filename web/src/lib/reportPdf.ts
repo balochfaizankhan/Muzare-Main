@@ -15,6 +15,7 @@ type ReportPdfSpec = {
   rows: unknown[][];
   language?: string;
   direction?: "ltr" | "rtl";
+  variant?: "standard" | "minimal";
 };
 
 type NormalizedRow = string[];
@@ -825,6 +826,288 @@ const renderTable = (
   return activeSurface;
 };
 
+const renderMinimalHeader = (
+  surface: PageSurface,
+  spec: ReportPdfSpec,
+  pageWidth: number,
+  rtl: boolean,
+  labels: LocaleLabels,
+) => {
+  const { context, firstPage } = surface;
+  const title = normalizeValue(spec.title) || titleFromFilename(spec.filename);
+  const rangeLabel = normalizeValue(spec.rangeLabel) || labels.allRecords;
+  const titleAlign: TextAlign = rtl ? "right" : "left";
+  const titleX = rtl ? pageWidth - PAGE_MARGIN : PAGE_MARGIN;
+  const secondaryAlign: TextAlign = rtl ? "left" : "right";
+  const secondaryX = rtl ? PAGE_MARGIN : pageWidth - PAGE_MARGIN;
+
+  if (firstPage) {
+    setCanvasFont(context, 7.2, 800);
+    drawTextLines(context, [BRAND.toUpperCase()], titleX, 22, 9, titleAlign, rtl ? "rtl" : "ltr", GREEN_DARK);
+    setCanvasFont(context, 7.2, 600);
+    drawTextLines(context, wrapText(context, rangeLabel, pageWidth * 0.34, 1), secondaryX, 22, 9, secondaryAlign, rtl ? "rtl" : "ltr", MUTED);
+    setCanvasFont(context, 17, 760);
+    drawTextLines(context, wrapText(context, title, pageWidth * 0.72, 2), titleX, 48, 19, titleAlign, rtl ? "rtl" : "ltr", NAVY);
+    context.strokeStyle = rgb(GREEN_DARK);
+    context.lineWidth = 1.4;
+    context.beginPath();
+    context.moveTo(PAGE_MARGIN, 66);
+    context.lineTo(pageWidth - PAGE_MARGIN, 66);
+    context.stroke();
+    surface.cursorY = 78;
+    return;
+  }
+
+  setCanvasFont(context, 8.2, 720);
+  drawTextLines(context, wrapText(context, title, pageWidth * 0.62, 1), titleX, 20, 10, titleAlign, rtl ? "rtl" : "ltr", NAVY);
+  setCanvasFont(context, 6.5, 650);
+  drawTextLines(context, [BRAND], secondaryX, 20, 8, secondaryAlign, rtl ? "rtl" : "ltr", GREEN_DARK);
+  context.strokeStyle = rgb(BORDER);
+  context.lineWidth = 0.7;
+  context.beginPath();
+  context.moveTo(PAGE_MARGIN, 29);
+  context.lineTo(pageWidth - PAGE_MARGIN, 29);
+  context.stroke();
+  surface.cursorY = 39;
+};
+
+const renderMinimalContext = (
+  surface: PageSurface,
+  spec: ReportPdfSpec,
+  pageWidth: number,
+  rtl: boolean,
+  labels: LocaleLabels,
+) => {
+  if (!surface.firstPage || !spec.context) return;
+  const values = ([
+    [labels.workspace, normalizeValue(spec.context.workspace)],
+    [labels.farm, normalizeValue(spec.context.farm)],
+    [labels.season, normalizeValue(spec.context.season)],
+    [labels.generated, normalizeValue(spec.context.generatedAt)],
+    [labels.generatedBy, normalizeValue(spec.context.generatedBy)],
+  ] as Array<[string, string]>).filter(([, value]) => Boolean(value && value !== "—"));
+  if (!values.length) return;
+  const text = values.map(([label, value]) => `${label}: ${value}`).join("  •  ");
+  const availableWidth = pageWidth - PAGE_MARGIN * 2;
+  setCanvasFont(surface.context, 6.8, 500);
+  const lines = wrapText(surface.context, text, availableWidth, 2);
+  const align: TextAlign = rtl ? "right" : "left";
+  const x = rtl ? pageWidth - PAGE_MARGIN : PAGE_MARGIN;
+  drawTextLines(surface.context, lines, x, surface.cursorY + 8, 10, align, rtl ? "rtl" : "ltr", MUTED);
+  surface.cursorY += lines.length * 10 + 10;
+};
+
+const renderMinimalSectionTitle = (
+  surface: PageSurface,
+  title: string | undefined,
+  pageWidth: number,
+  rtl: boolean,
+  continued: boolean,
+  labels: LocaleLabels,
+) => {
+  if (!title) return;
+  const display = continued ? `${title} - ${labels.continued}` : title;
+  const align: TextAlign = rtl ? "right" : "left";
+  const x = rtl ? pageWidth - PAGE_MARGIN : PAGE_MARGIN;
+  setCanvasFont(surface.context, 8.2, 750);
+  drawTextLines(surface.context, [display], x, surface.cursorY + 12, 10, align, rtl ? "rtl" : "ltr", NAVY);
+  surface.context.strokeStyle = rgb(BORDER);
+  surface.context.lineWidth = 0.65;
+  surface.context.beginPath();
+  surface.context.moveTo(PAGE_MARGIN, surface.cursorY + 19);
+  surface.context.lineTo(pageWidth - PAGE_MARGIN, surface.cursorY + 19);
+  surface.context.stroke();
+  surface.cursorY += 27;
+};
+
+const renderMinimalMetrics = (
+  surface: PageSurface,
+  block: MetricsBlock,
+  pageWidth: number,
+  pageHeight: number,
+  rtl: boolean,
+  labels: LocaleLabels,
+  requestNewPage: () => PageSurface,
+) => {
+  let activeSurface = surface;
+  const availableWidth = pageWidth - PAGE_MARGIN * 2;
+  const metricHeight = 43;
+  const requiredHeight = (block.title ? 27 : 0) + metricHeight + 8;
+  if (activeSurface.cursorY + requiredHeight > pageHeight - PAGE_BOTTOM) activeSurface = requestNewPage();
+  renderMinimalSectionTitle(activeSurface, block.title, pageWidth, rtl, false, labels);
+  const count = Math.max(block.rows.length, 1);
+  const width = availableWidth / count;
+  block.rows.forEach(([label, value], index) => {
+    const logicalIndex = rtl ? count - index - 1 : index;
+    const left = PAGE_MARGIN + logicalIndex * width;
+    if (logicalIndex > 0) {
+      activeSurface.context.strokeStyle = rgb(BORDER);
+      activeSurface.context.lineWidth = 0.6;
+      activeSurface.context.beginPath();
+      activeSurface.context.moveTo(left, activeSurface.cursorY + 4);
+      activeSurface.context.lineTo(left, activeSurface.cursorY + metricHeight - 4);
+      activeSurface.context.stroke();
+    }
+    const align: TextAlign = rtl ? "right" : "left";
+    const x = rtl ? left + width - 10 : left + 10;
+    setCanvasFont(activeSurface.context, 6.6, 600);
+    drawTextLines(activeSurface.context, wrapText(activeSurface.context, label, width - 20, 1), x, activeSurface.cursorY + 14, 8, align, rtl ? "rtl" : "ltr", MUTED);
+    setCanvasFont(activeSurface.context, 13.2, 780);
+    drawTextLines(activeSurface.context, wrapText(activeSurface.context, value, width - 20, 1), x, activeSurface.cursorY + 35, 14, align, rtl ? "rtl" : "ltr", NAVY);
+  });
+  activeSurface.cursorY += metricHeight + 10;
+  return activeSurface;
+};
+
+const renderMinimalTotal = (
+  surface: PageSurface,
+  block: TotalBlock,
+  pageWidth: number,
+  pageHeight: number,
+  rtl: boolean,
+  requestNewPage: () => PageSurface,
+) => {
+  let activeSurface = surface;
+  const height = 42;
+  if (activeSurface.cursorY + height > pageHeight - PAGE_BOTTOM) activeSurface = requestNewPage();
+  activeSurface.context.strokeStyle = rgb(GREEN_DARK);
+  activeSurface.context.lineWidth = 1.2;
+  activeSurface.context.beginPath();
+  activeSurface.context.moveTo(PAGE_MARGIN, activeSurface.cursorY);
+  activeSurface.context.lineTo(pageWidth - PAGE_MARGIN, activeSurface.cursorY);
+  activeSurface.context.stroke();
+  const labelAlign: TextAlign = rtl ? "right" : "left";
+  const valueAlign: TextAlign = rtl ? "left" : "right";
+  const labelX = rtl ? pageWidth - PAGE_MARGIN : PAGE_MARGIN;
+  const valueX = rtl ? PAGE_MARGIN : pageWidth - PAGE_MARGIN;
+  setCanvasFont(activeSurface.context, 7.4, 650);
+  drawTextLines(activeSurface.context, [block.label || "Total"], labelX, activeSurface.cursorY + 25, 9, labelAlign, rtl ? "rtl" : "ltr", MUTED);
+  setCanvasFont(activeSurface.context, 15, 800);
+  drawTextLines(activeSurface.context, [block.value || "—"], valueX, activeSurface.cursorY + 27, 16, valueAlign, rtl ? "rtl" : "ltr", NAVY);
+  activeSurface.cursorY += height;
+  return activeSurface;
+};
+
+const renderMinimalTable = (
+  surface: PageSurface,
+  block: TableBlock,
+  pageWidth: number,
+  pageHeight: number,
+  rtl: boolean,
+  orientation: "portrait" | "landscape",
+  labels: LocaleLabels,
+  requestNewPage: () => PageSurface,
+) => {
+  let activeSurface = surface;
+  const availableWidth = pageWidth - PAGE_MARGIN * 2;
+  const columnCount = block.headers.length;
+  const fontSize = orientation === "landscape" ? 6.8 : 7.15;
+  const headerFontSize = 6.8;
+  const widths = calculateColumnWidths(activeSurface.context, block.headers, block.rows, availableWidth, fontSize);
+  const logicalIndices = Array.from({ length: columnCount }, (_, index) => index);
+  const visualIndices = rtl ? [...logicalIndices].reverse() : logicalIndices;
+
+  setCanvasFont(activeSurface.context, headerFontSize, 750);
+  const headerHeight = Math.max(25, Math.max(...block.headers.map((header, index) => wrapText(activeSurface.context, header, widths[index] - TABLE_CELL_PADDING_X * 2, 2).length)) * (headerFontSize + 2) + 8);
+
+  const drawHeader = () => {
+    activeSurface.context.fillStyle = rgb(GREEN_SOFT);
+    activeSurface.context.fillRect(PAGE_MARGIN, activeSurface.cursorY, availableWidth, headerHeight);
+    let x = PAGE_MARGIN;
+    for (const logicalIndex of visualIndices) {
+      const width = widths[logicalIndex];
+      const values = block.rows.slice(0, 20).map((row) => row[logicalIndex]).filter(Boolean);
+      const numeric = values.length > 0 && values.filter(valueLooksNumeric).length / values.length >= 0.7;
+      const align: TextAlign = numeric ? "right" : rtl ? "right" : "left";
+      const textX = align === "right" ? x + width - TABLE_CELL_PADDING_X : x + TABLE_CELL_PADDING_X;
+      setCanvasFont(activeSurface.context, headerFontSize, 750);
+      const lines = wrapText(activeSurface.context, block.headers[logicalIndex], width - TABLE_CELL_PADDING_X * 2, 2);
+      const totalTextHeight = (lines.length - 1) * (headerFontSize + 2);
+      const baseline = activeSurface.cursorY + (headerHeight - totalTextHeight) / 2 + headerFontSize * 0.36;
+      drawTextLines(activeSurface.context, lines, textX, baseline, headerFontSize + 2, align, rtl ? "rtl" : "ltr", NAVY);
+      x += width;
+    }
+    activeSurface.context.strokeStyle = rgb(GREEN_DARK);
+    activeSurface.context.lineWidth = 0.9;
+    activeSurface.context.beginPath();
+    activeSurface.context.moveTo(PAGE_MARGIN, activeSurface.cursorY + headerHeight);
+    activeSurface.context.lineTo(pageWidth - PAGE_MARGIN, activeSurface.cursorY + headerHeight);
+    activeSurface.context.stroke();
+    activeSurface.cursorY += headerHeight;
+  };
+
+  const drawSectionAndHeader = (continued: boolean) => {
+    renderMinimalSectionTitle(activeSurface, block.title, pageWidth, rtl, continued, labels);
+    drawHeader();
+  };
+
+  const requiredTop = (block.title ? 27 : 0) + headerHeight + 24;
+  if (activeSurface.cursorY + requiredTop > pageHeight - PAGE_BOTTOM) activeSurface = requestNewPage();
+  drawSectionAndHeader(false);
+
+  if (!block.rows.length) {
+    setCanvasFont(activeSurface.context, 8.2, 600);
+    drawTextLines(activeSurface.context, [labels.noRecords], rtl ? pageWidth - PAGE_MARGIN : PAGE_MARGIN, activeSurface.cursorY + 24, 10, rtl ? "right" : "left", rtl ? "rtl" : "ltr", MUTED);
+    activeSurface.cursorY += 38;
+    return activeSurface;
+  }
+
+  block.rows.forEach((row, rowIndex) => {
+    setCanvasFont(activeSurface.context, fontSize, 400);
+    const wrapped = block.headers.map((_, columnIndex) => wrapText(activeSurface.context, row[columnIndex] || "—", widths[columnIndex] - TABLE_CELL_PADDING_X * 2));
+    const maximumLines = Math.max(...wrapped.map((lines) => lines.length));
+    const lineHeight = fontSize + 2.1;
+    let lineOffset = 0;
+
+    while (lineOffset < maximumLines) {
+      let availableHeight = pageHeight - PAGE_BOTTOM - activeSurface.cursorY;
+      let linesThatFit = Math.floor((availableHeight - 8) / lineHeight);
+      if (linesThatFit < 1) {
+        activeSurface = requestNewPage();
+        drawSectionAndHeader(true);
+        availableHeight = pageHeight - PAGE_BOTTOM - activeSurface.cursorY;
+        linesThatFit = Math.max(1, Math.floor((availableHeight - 8) / lineHeight));
+      }
+      const chunkLineCount = Math.min(linesThatFit, maximumLines - lineOffset);
+      const rowHeight = Math.max(20, chunkLineCount * lineHeight + 8);
+      if (rowIndex % 2 === 1) {
+        activeSurface.context.fillStyle = rgb(GREEN_FAINT);
+        activeSurface.context.fillRect(PAGE_MARGIN, activeSurface.cursorY, availableWidth, rowHeight);
+      }
+      let x = PAGE_MARGIN;
+      for (const logicalIndex of visualIndices) {
+        const width = widths[logicalIndex];
+        const raw = row[logicalIndex] || "—";
+        const numeric = valueLooksNumeric(raw);
+        const align: TextAlign = numeric ? "right" : rtl ? "right" : "left";
+        const textX = align === "right" ? x + width - TABLE_CELL_PADDING_X : x + TABLE_CELL_PADDING_X;
+        const lines = wrapped[logicalIndex].slice(lineOffset, lineOffset + chunkLineCount);
+        if (lines.length) {
+          const totalTextHeight = (lines.length - 1) * lineHeight;
+          const baseline = activeSurface.cursorY + (rowHeight - totalTextHeight) / 2 + fontSize * 0.36;
+          setCanvasFont(activeSurface.context, fontSize, numeric ? 620 : 420);
+          drawTextLines(activeSurface.context, lines, textX, baseline, lineHeight, align, rtl ? "rtl" : "ltr", TEXT);
+        }
+        x += width;
+      }
+      activeSurface.context.strokeStyle = rgb(BORDER);
+      activeSurface.context.lineWidth = 0.45;
+      activeSurface.context.beginPath();
+      activeSurface.context.moveTo(PAGE_MARGIN, activeSurface.cursorY + rowHeight);
+      activeSurface.context.lineTo(pageWidth - PAGE_MARGIN, activeSurface.cursorY + rowHeight);
+      activeSurface.context.stroke();
+      activeSurface.cursorY += rowHeight;
+      lineOffset += chunkLineCount;
+      if (lineOffset < maximumLines) {
+        activeSurface = requestNewPage();
+        drawSectionAndHeader(true);
+      }
+    }
+  });
+  activeSurface.cursorY += 12;
+  return activeSurface;
+};
+
 export async function createReportPdf(spec: ReportPdfSpec): Promise<ArrayBuffer> {
   if (typeof document === "undefined") throw new Error("Report PDF generation requires a browser environment.");
   await ensureReportFont();
@@ -840,11 +1123,17 @@ export async function createReportPdf(spec: ReportPdfSpec): Promise<ArrayBuffer>
   const pageHeight = doc.internal.pageSize.getHeight();
   let pageIndex = 0;
 
+  const minimal = spec.variant === "minimal";
   const buildSurface = (firstPage: boolean) => {
     const { canvas, context } = createPageCanvas(pageWidth, pageHeight);
     const surface: PageSurface = { canvas, context, cursorY: 0, firstPage };
-    renderHeader(surface, spec, pageWidth, rtl, labels);
-    renderContextCards(surface, spec, pageWidth, rtl, labels, orientation);
+    if (minimal) {
+      renderMinimalHeader(surface, spec, pageWidth, rtl, labels);
+      renderMinimalContext(surface, spec, pageWidth, rtl, labels);
+    } else {
+      renderHeader(surface, spec, pageWidth, rtl, labels);
+      renderContextCards(surface, spec, pageWidth, rtl, labels, orientation);
+    }
     return surface;
   };
 
@@ -866,7 +1155,11 @@ export async function createReportPdf(spec: ReportPdfSpec): Promise<ArrayBuffer>
   };
 
   for (const block of blocks) {
-    if (block.kind === "metrics") surface = renderMetrics(surface, block, pageWidth, pageHeight, rtl, orientation, labels, requestNewPage);
+    if (minimal) {
+      if (block.kind === "metrics") surface = renderMinimalMetrics(surface, block, pageWidth, pageHeight, rtl, labels, requestNewPage);
+      else if (block.kind === "total") surface = renderMinimalTotal(surface, block, pageWidth, pageHeight, rtl, requestNewPage);
+      else surface = renderMinimalTable(surface, block, pageWidth, pageHeight, rtl, orientation, labels, requestNewPage);
+    } else if (block.kind === "metrics") surface = renderMetrics(surface, block, pageWidth, pageHeight, rtl, orientation, labels, requestNewPage);
     else if (block.kind === "total") surface = renderTotal(surface, block, pageWidth, pageHeight, rtl, requestNewPage);
     else surface = renderTable(surface, block, pageWidth, pageHeight, rtl, orientation, labels, requestNewPage);
   }
