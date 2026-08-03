@@ -166,11 +166,15 @@ body.muzare-keyboard-open .app-mobile-bottom-nav {
     bottom: env(safe-area-inset-bottom, 0px) !important;
   }
 
-  .muzare-sticky-action-form[data-sticky-action-state="active"] {
+  .muzare-sticky-action-form[data-sticky-action-state="active"][data-sticky-action-variant="viewport"] {
     padding-block-end: calc(var(--muzare-sticky-action-height) + var(--muzare-mobile-nav-height) + 28px) !important;
   }
 
-  body.muzare-keyboard-open .muzare-sticky-action-form[data-sticky-action-state="active"] {
+  .muzare-sticky-action-form[data-sticky-action-state="active"][data-sticky-action-variant="container"] {
+    padding-block-end: calc(var(--muzare-sticky-action-height) + 16px) !important;
+  }
+
+  body.muzare-keyboard-open .muzare-sticky-action-form[data-sticky-action-state="active"][data-sticky-action-variant="viewport"] {
     padding-block-end: calc(var(--muzare-sticky-action-height) + 24px) !important;
   }
 

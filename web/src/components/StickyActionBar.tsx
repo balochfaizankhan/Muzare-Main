@@ -158,6 +158,7 @@ const explicitActionSelectors = [
 ].join(",");
 
 const actionNamePattern = /(action|footer|submit|save|complete|settle|toolbar|button)/i;
+const excludedFormPattern = /(search|filter|query|pagination|quick-find|toolbar-form)/i;
 const dialogSelector = "[role='dialog'],dialog,.modal,.dialog,.drawer,.bottom-sheet,.sheet";
 
 function isVisible(element: HTMLElement) {
@@ -187,19 +188,27 @@ function resolveControlForm(control: HTMLElement) {
   return associated instanceof HTMLFormElement ? associated : null;
 }
 
+function shouldEnhanceForm(form: HTMLFormElement) {
+  if (form.dataset.stickyActionDisabled === "true" || form.getAttribute("role") === "search") return false;
+  const identity = `${form.className || ""} ${form.id || ""}`;
+  if (excludedFormPattern.test(identity)) return false;
+  if ((form.getAttribute("method") ?? "").toLowerCase() === "get") return false;
+  return true;
+}
+
 function collectActions(root: HTMLElement) {
   const found = new Map<HTMLElement, EnhancedAction>();
 
   root.querySelectorAll<HTMLElement>(explicitActionSelectors).forEach((bar) => {
     const submitControl = bar.querySelector<HTMLElement>("button[type='submit'],button:not([type]),input[type='submit']");
     const form = bar.closest<HTMLFormElement>("form") ?? (submitControl ? resolveControlForm(submitControl) : null);
-    if (!form || !bar.querySelector("button,input[type='submit']")) return;
+    if (!form || !shouldEnhanceForm(form) || !bar.querySelector("button,input[type='submit']")) return;
     found.set(bar, { bar, form, variant: bar.closest(dialogSelector) ? "container" : "viewport" });
   });
 
   root.querySelectorAll<HTMLElement>("form button[type='submit'],form button:not([type]),input[type='submit'],button[form][type='submit']").forEach((button) => {
     const form = resolveControlForm(button);
-    if (!form || form.dataset.stickyActionDisabled === "true") return;
+    if (!form || !shouldEnhanceForm(form)) return;
     const bar = findActionContainer(button, form);
     if (!bar) return;
     found.set(bar, { bar, form, variant: bar.closest(dialogSelector) ? "container" : "viewport" });
@@ -263,6 +272,7 @@ export function StickyActionBarProvider({ children }: PropsWithChildren) {
       root.querySelectorAll<HTMLFormElement>("form.muzare-sticky-action-form").forEach((form) => {
         form.classList.remove("muzare-sticky-action-form");
         delete form.dataset.stickyActionState;
+        delete form.dataset.stickyActionVariant;
       });
     };
 
@@ -277,6 +287,7 @@ export function StickyActionBarProvider({ children }: PropsWithChildren) {
         if (!isNativeComponent) item.bar.dataset.stickyActionManaged = "true";
         item.bar.dataset.stickyActionVariant = item.variant;
         item.form.classList.add("muzare-sticky-action-form");
+        item.form.dataset.stickyActionVariant = item.variant;
       });
       activate(chooseInitialAction(actions));
     };
