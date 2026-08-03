@@ -1,10 +1,33 @@
 from pathlib import Path
 
+pdf_path = Path("web/src/lib/reportPdf.ts")
+pdf_text = pdf_path.read_text(encoding="utf-8")
+if "type PdfColor = [number, number, number];" not in pdf_text:
+    pdf_text = pdf_text.replace(
+        'const BRAND = "Muzare";\n',
+        'type PdfColor = [number, number, number];\n\nconst BRAND = "Muzare";\n',
+        1,
+    )
+    for name, value in [
+        ("GREEN", "[35, 109, 55]"),
+        ("GREEN_DARK", "[28, 83, 44]"),
+        ("GREEN_SOFT", "[239, 247, 241]"),
+        ("BORDER", "[207, 220, 211]"),
+        ("TEXT", "[38, 55, 44]"),
+        ("MUTED", "[99, 116, 104]"),
+    ]:
+        pdf_text = pdf_text.replace(
+            f"const {name} = {value} as const;",
+            f"const {name}: PdfColor = {value};",
+            1,
+        )
+    pdf_path.write_text(pdf_text, encoding="utf-8")
+
 path = Path("web/src/pages/workspace/Reports.tsx")
 text = path.read_text(encoding="utf-8")
 
 if 'from "../../lib/reportPdf"' in text:
-    print("Structured PDF report patch already applied.")
+    print("Structured PDF report integration already applied; verified PDF generator types.")
     raise SystemExit(0)
 
 replacements = [
@@ -53,14 +76,15 @@ shell_replacement = '''  const { t } = useTranslation();
     if (pdfExporting) return;
     setPdfExporting(true);
     try {
-      let captured: CapturedCsvExport | null = null;
+      const captureHolder: { current?: CapturedCsvExport } = {};
       const previousCapture = csvExportCapture;
-      csvExportCapture = (nextCapture) => { captured = nextCapture; };
+      csvExportCapture = (nextCapture) => { captureHolder.current = nextCapture; };
       try {
         onExport();
       } finally {
         csvExportCapture = previousCapture;
       }
+      const captured = captureHolder.current;
       if (!captured) throw new Error("The report did not provide structured export rows.");
       await exportReportPdf({
         title,
