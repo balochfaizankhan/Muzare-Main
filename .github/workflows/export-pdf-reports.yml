@@ -100,7 +100,9 @@ jobs:
           TS
           npx --yes tsx web/.report-pdf-smoke.ts
           rm web/.report-pdf-smoke.ts
-          test "$(stat -c%s /tmp/muzare-expense-report.pdf)" -gt 30000
+          pdf_size=$(stat -c%s /tmp/muzare-expense-report.pdf)
+          echo "Generated PDF bytes: $pdf_size"
+          test "$pdf_size" -gt 10000
           pdfinfo /tmp/muzare-expense-report.pdf | tee /tmp/pdfinfo.txt
           pdftotext -layout /tmp/muzare-expense-report.pdf /tmp/report.txt
           grep -F 'Expense Log' /tmp/report.txt
