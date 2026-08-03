@@ -34,13 +34,15 @@ type TableBlock = {
 
 type ReportBlock = MetricsBlock | TableBlock;
 
+type PdfColor = [number, number, number];
+
 const BRAND = "Muzare";
-const GREEN = [35, 109, 55] as const;
-const GREEN_DARK = [28, 83, 44] as const;
-const GREEN_SOFT = [239, 247, 241] as const;
-const BORDER = [207, 220, 211] as const;
-const TEXT = [38, 55, 44] as const;
-const MUTED = [99, 116, 104] as const;
+const GREEN: PdfColor = [35, 109, 55];
+const GREEN_DARK: PdfColor = [28, 83, 44];
+const GREEN_SOFT: PdfColor = [239, 247, 241];
+const BORDER: PdfColor = [207, 220, 211];
+const TEXT: PdfColor = [38, 55, 44];
+const MUTED: PdfColor = [99, 116, 104];
 const ARABIC_FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansarabic/NotoSansArabic%5Bwdth%2Cwght%5D.ttf";
 const ARABIC_FONT_FILE = "NotoSansArabic.ttf";
 const ARABIC_FONT_FAMILY = "NotoSansArabic";
