@@ -1,0 +1,569 @@
+/* Professional print documents for every Muzare report except attendance.
+   Attendance keeps its dedicated A3 register implementation unchanged. */
+.report-document-only {
+  display: none;
+}
+
+@media print {
+  @page report-portrait { size: A4 portrait; margin: 10mm 9mm 12mm; }
+  @page report-landscape { size: A4 landscape; margin: 8mm 7mm 10mm; }
+  @page advance-report { size: A4 portrait; margin: 9mm 8mm 11mm; }
+
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) {
+    color-scheme: light;
+  }
+
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) body {
+    color: #17231b !important;
+    font-family: Inter, Arial, sans-serif !important;
+    font-size: 8.5pt;
+    line-height: 1.35;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Preserve the target's route ancestors. The original global print rule assumed every
+     report lived directly under .reports-page, which excluded Harvest and settlement pages. */
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .app-shell__body > :has(.reports-print-section.is-print-target),
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .dashboard-page > :has(.reports-print-section.is-print-target),
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .workforce-shell-content:has(.reports-print-section.is-print-target),
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .module-workspace:has(.reports-print-section.is-print-target),
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .subpage:has(.reports-print-section.is-print-target) {
+    background: #fff !important;
+    display: block !important;
+    margin: 0 !important;
+    max-width: none !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    width: auto !important;
+  }
+
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .reports-print-section.is-print-target[data-print-layout="portrait"] {
+    page: report-portrait;
+  }
+
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .reports-print-section.is-print-target[data-print-layout="landscape"] {
+    page: report-landscape;
+  }
+
+  html[data-muzare-print-section="advance-report"] .reports-print-section.is-print-target {
+    page: advance-report;
+  }
+
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .reports-print-section.is-print-target {
+    color: #17231b !important;
+    font-size: 8.5pt;
+  }
+
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .reports-print-section.is-print-target .reports-view-header,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .reports-print-section.is-print-target .report-toolbar,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .reports-print-section.is-print-target .labour-settlement-register-header,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .reports-print-section.is-print-target .labour-settlement-register-toolbar,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .reports-print-section.is-print-target .report-mobile-cards,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .reports-print-section.is-print-target .labour-settlement-mobile-list,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .reports-print-section.is-print-target .report-action-column,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .reports-print-section.is-print-target button:not(.reports-summary-drilldown),
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .reports-print-section.is-print-target svg,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .reports-print-section.is-print-target .reports-scroll-hint {
+    display: none !important;
+  }
+
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .reports-print-section.is-print-target .report-document-only,
+  html[data-muzare-print-section="advance-report"] .reports-print-section.is-print-target .reports-print-only {
+    display: block !important;
+    visibility: visible !important;
+  }
+
+  /* Document masthead */
+  .report-document-header {
+    align-items: start;
+    border-bottom: 1.2pt solid #2e7d32;
+    display: grid !important;
+    gap: 4mm 7mm;
+    grid-template-columns: 30mm minmax(0, 1fr);
+    margin: 0 0 5mm;
+    padding: 0 0 4mm;
+  }
+
+  .report-document-brand {
+    align-content: start;
+    display: grid;
+    gap: 1mm;
+  }
+
+  .report-document-brand strong {
+    color: #185d2d;
+    font-size: 15pt;
+    letter-spacing: -.02em;
+    line-height: 1;
+  }
+
+  .report-document-brand span {
+    color: #66766b;
+    font-size: 7pt;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+
+  .report-document-title h1 {
+    color: #18241c;
+    font-size: 15pt;
+    line-height: 1.12;
+    margin: 0;
+  }
+
+  .report-document-title p {
+    color: #5f6d63;
+    font-size: 8pt;
+    margin: 1.5mm 0 0;
+  }
+
+  .report-document-meta {
+    border: .6pt solid #d8e2da;
+    border-radius: 2mm;
+    display: grid;
+    gap: 0;
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1.35fr) repeat(2, minmax(0, 1fr)) minmax(0, 1.2fr) minmax(0, 1fr);
+    margin: 0;
+    overflow: hidden;
+  }
+
+  .report-document-meta > div {
+    border-inline-end: .6pt solid #d8e2da;
+    display: grid;
+    gap: .6mm;
+    min-width: 0;
+    padding: 2mm 2.5mm;
+  }
+
+  .report-document-meta > div:last-child {
+    border-inline-end: 0;
+  }
+
+  .report-document-meta dt,
+  .report-document-meta dd {
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .report-document-meta dt {
+    color: #6a786e;
+    font-size: 6.5pt;
+    font-weight: 700;
+    letter-spacing: .035em;
+    text-transform: uppercase;
+  }
+
+  .report-document-meta dd {
+    color: #1f2d23;
+    font-size: 7.5pt;
+    font-weight: 700;
+  }
+
+  .report-document-footer {
+    align-items: center;
+    border-top: .6pt solid #d8e2da;
+    color: #68756b;
+    display: flex !important;
+    font-size: 6.5pt;
+    gap: 5mm;
+    justify-content: space-between;
+    margin-top: 5mm;
+    padding-top: 2.2mm;
+  }
+
+  .report-document-footer span:nth-child(2) {
+    color: #34483a;
+    font-weight: 700;
+  }
+
+  /* Summary blocks */
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .reports-kpis {
+    display: grid !important;
+    gap: 2.2mm !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    margin: 0 0 4mm !important;
+  }
+
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .reports-kpis > article,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .reports-kpis > button {
+    background: #f5f9f5 !important;
+    border: .6pt solid #d7e2d9 !important;
+    border-radius: 2mm !important;
+    box-shadow: none !important;
+    break-inside: avoid;
+    display: grid !important;
+    gap: 1mm !important;
+    min-height: 0 !important;
+    padding: 2.4mm 2.7mm !important;
+    text-align: start !important;
+  }
+
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .reports-kpis span {
+    color: #66756a !important;
+    font-size: 6.5pt !important;
+    font-weight: 700 !important;
+  }
+
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .reports-kpis strong {
+    color: #1d3525 !important;
+    font-size: 10pt !important;
+    line-height: 1.15 !important;
+  }
+
+  .reports-breakdowns {
+    display: grid !important;
+    gap: 4mm !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .reports-breakdowns > div,
+  .reports-summary-list > article,
+  .account-ledger-hero,
+  .account-ledger-metric,
+  .account-ledger-reconciliation {
+    background: #fff !important;
+    border: .6pt solid #d9e2dc !important;
+    border-radius: 2mm !important;
+    box-shadow: none !important;
+    break-inside: avoid;
+  }
+
+  .reports-breakdowns > div {
+    padding: 3mm !important;
+  }
+
+  .reports-breakdowns h3 {
+    color: #244c31;
+    font-size: 9pt;
+    margin: 0 0 2mm;
+  }
+
+  .reports-summary-list {
+    display: grid !important;
+    gap: 1.6mm !important;
+  }
+
+  .reports-summary-list > article,
+  .reports-summary-drilldown {
+    align-items: center !important;
+    background: #f8faf8 !important;
+    border: .5pt solid #e0e7e2 !important;
+    border-radius: 1.5mm !important;
+    box-shadow: none !important;
+    break-inside: avoid;
+    display: grid !important;
+    gap: 2mm !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    min-height: 0 !important;
+    padding: 1.8mm 2.2mm !important;
+    text-align: start !important;
+  }
+
+  .reports-summary-list span,
+  .reports-summary-drilldown span {
+    color: #5f6f64 !important;
+    font-size: 7pt !important;
+    white-space: normal !important;
+  }
+
+  .reports-summary-list strong,
+  .reports-summary-drilldown strong {
+    color: #1d3525 !important;
+    font-size: 7.5pt !important;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  /* Tables */
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .report-wide-table {
+    max-width: none !important;
+    overflow: visible !important;
+    width: 100% !important;
+  }
+
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .report-wide-table--screen-source {
+    display: none !important;
+  }
+
+  .report-print-compact-table-wrap {
+    display: block !important;
+    overflow: visible !important;
+    width: 100%;
+  }
+
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .report-data-table,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .harvest-report-table,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .advance-report-print-table {
+    border-collapse: collapse !important;
+    font-size: 7pt !important;
+    table-layout: auto !important;
+    width: 100% !important;
+  }
+
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .report-data-table thead,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .harvest-report-table thead,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .advance-report-print-table thead {
+    display: table-header-group;
+  }
+
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .report-data-table tr,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .harvest-report-table tr,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .advance-report-print-table tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .report-data-table th,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .harvest-report-table th,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .advance-report-print-table th {
+    background: #eaf3eb !important;
+    border: .6pt solid #bdcfbf !important;
+    color: #25432d !important;
+    font-size: 6.5pt !important;
+    font-weight: 800 !important;
+    line-height: 1.2 !important;
+    padding: 1.7mm 1.5mm !important;
+    text-align: start !important;
+    vertical-align: bottom !important;
+    white-space: normal !important;
+  }
+
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .report-data-table td,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .harvest-report-table td,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .advance-report-print-table td {
+    border: .5pt solid #d6dfd8 !important;
+    color: #26342a !important;
+    line-height: 1.28 !important;
+    overflow-wrap: anywhere;
+    padding: 1.6mm 1.5mm !important;
+    vertical-align: top !important;
+    white-space: normal !important;
+  }
+
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .report-data-table tbody tr:nth-child(even) td,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .harvest-report-table tbody tr:nth-child(even) td,
+  html[data-muzare-print-section]:not([data-muzare-print-section^="attendance"]) .advance-report-print-table tbody tr:nth-child(even) td {
+    background: #fafcfb !important;
+  }
+
+  .report-print-cell-stack {
+    display: grid;
+    gap: .5mm;
+  }
+
+  .report-print-cell-stack strong,
+  .report-print-cell-stack span,
+  .report-print-cell-stack small {
+    display: block;
+    line-height: 1.25;
+  }
+
+  .report-print-cell-stack small {
+    color: #68766c;
+    font-size: 6pt;
+  }
+
+  .is-amount,
+  td.bidi-isolate,
+  .report-data-table td:last-child {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .empty-records,
+  .context-message,
+  .labour-settlement-filter-empty {
+    border: .6pt solid #dbe4dd !important;
+    color: #5b685f !important;
+    font-size: 8pt !important;
+    padding: 4mm !important;
+    text-align: center;
+  }
+
+  /* Dense tables receive a slightly smaller but still readable scale. */
+  .reports-print-section.is-print-target[data-print-density="wide"] .report-data-table {
+    font-size: 6.5pt !important;
+  }
+
+  .reports-print-section.is-print-target[data-print-density="wide"] .report-data-table th {
+    font-size: 6pt !important;
+    padding: 1.4mm 1.2mm !important;
+  }
+
+  .reports-print-section.is-print-target[data-print-density="wide"] .report-data-table td {
+    padding: 1.35mm 1.2mm !important;
+  }
+
+  /* Account reports */
+  html[data-muzare-print-section="account-balances"] .account-balance-list {
+    display: grid !important;
+    gap: 2.5mm !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  html[data-muzare-print-section="account-ledger"] .account-ledger-toggle,
+  html[data-muzare-print-section="account-ledger"] .account-transaction-group__header button,
+  html[data-muzare-print-section="partner-ledger"] .account-transaction-group__header button {
+    display: none !important;
+  }
+
+  html[data-muzare-print-section="account-ledger"] details,
+  html[data-muzare-print-section="partner-ledger"] details {
+    display: block !important;
+  }
+
+  html[data-muzare-print-section="account-ledger"] details > summary,
+  html[data-muzare-print-section="partner-ledger"] details > summary {
+    list-style: none;
+  }
+
+  html[data-muzare-print-section="account-ledger"] details > :not(summary),
+  html[data-muzare-print-section="partner-ledger"] details > :not(summary) {
+    display: block !important;
+  }
+
+  .account-transaction-groups {
+    display: grid !important;
+    gap: 3mm !important;
+  }
+
+  .account-transaction-group {
+    border: .6pt solid #d4ded6 !important;
+    border-radius: 2mm !important;
+    break-inside: auto;
+    overflow: visible !important;
+  }
+
+  .account-transaction-group__header {
+    background: #edf5ee !important;
+    border-bottom: .6pt solid #cbd8ce !important;
+    display: grid !important;
+    gap: 2mm !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    padding: 2mm 2.5mm !important;
+  }
+
+  .account-transaction-group__title strong {
+    color: #20432b !important;
+    font-size: 8pt !important;
+  }
+
+  .account-transaction-group__meta {
+    color: #5d6c62 !important;
+    font-size: 6.5pt !important;
+  }
+
+  /* Advances: professional portrait summary followed by one labour section per page. */
+  html[data-muzare-print-section="advance-report"] .advance-report-print-page {
+    margin: 0 !important;
+    min-height: 0 !important;
+    page: advance-report;
+  }
+
+  html[data-muzare-print-section="advance-report"] .advance-report-print-header {
+    border-bottom: 1.2pt solid #2e7d32;
+    display: grid !important;
+    gap: 4mm 7mm !important;
+    grid-template-columns: 30mm minmax(0, 1fr) !important;
+    margin-bottom: 5mm !important;
+    padding-bottom: 4mm !important;
+  }
+
+  html[data-muzare-print-section="advance-report"] .advance-report-print-meta {
+    border: .6pt solid #d8e2da;
+    display: grid !important;
+    gap: 0 !important;
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    margin: 0 !important;
+  }
+
+  html[data-muzare-print-section="advance-report"] .advance-report-print-meta > div {
+    border-bottom: .5pt solid #d8e2da;
+    padding: 2mm 2.5mm !important;
+  }
+
+  html[data-muzare-print-section="advance-report"] .advance-report-print-summary {
+    display: grid !important;
+    gap: 2mm !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  html[data-muzare-print-section="advance-report"] .advance-report-print-summary article {
+    background: #f5f9f5 !important;
+    border: .6pt solid #d7e2d9 !important;
+    border-radius: 2mm !important;
+    padding: 2.5mm !important;
+  }
+
+  html[data-muzare-print-section="advance-report"] .advance-report-print-note {
+    border-inline-start: 2pt solid #2e7d32 !important;
+    color: #536158 !important;
+    font-size: 7.5pt !important;
+    margin-top: 4mm !important;
+    padding: 2.5mm 3mm !important;
+  }
+
+  html[data-muzare-print-section="advance-report"] .advance-report-print-labours {
+    break-before: page;
+  }
+
+  html[data-muzare-print-section="advance-report"] .advance-report-print-labour {
+    break-after: page;
+    break-inside: auto !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+  }
+
+  html[data-muzare-print-section="advance-report"] .advance-report-print-labour:last-child {
+    break-after: auto;
+  }
+
+  html[data-muzare-print-section="advance-report"] .advance-report-print-labour-header {
+    border-bottom: 1pt solid #2e7d32 !important;
+    margin-bottom: 3mm !important;
+    padding-bottom: 2.5mm !important;
+  }
+
+  html[data-muzare-print-section="advance-report"] .advance-report-print-labour-meta {
+    display: grid !important;
+    gap: 1.5mm !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    margin-bottom: 3mm !important;
+  }
+
+  html[data-muzare-print-section="advance-report"] .advance-report-print-footer {
+    border-top: .6pt solid #d8e2da !important;
+    color: #68756b !important;
+    display: flex !important;
+    font-size: 6.5pt !important;
+    justify-content: space-between !important;
+    margin-top: 4mm !important;
+    padding-top: 2mm !important;
+  }
+
+  /* Harvest and settlement registers use the same document system. */
+  html[data-muzare-print-section="harvest-report"] .harvest-report-kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+
+  html[data-muzare-print-section="harvest-report"] .harvest-report-subheading {
+    color: #244c31 !important;
+    font-size: 9pt !important;
+    margin: 4mm 0 2mm !important;
+  }
+
+  html[data-muzare-print-section="labour-settlement-register"] .labour-settlement-register-kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+
+  html[data-muzare-print-section="labour-settlement-register"] .labour-settlement-print-table td:nth-child(4),
+  html[data-muzare-print-section="labour-settlement-register"] .labour-settlement-print-table td:nth-child(5),
+  html[data-muzare-print-section="labour-settlement-register"] .labour-settlement-print-table td:nth-child(6) {
+    text-align: end !important;
+  }
+}

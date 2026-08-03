@@ -572,17 +572,19 @@ function downloadCsv(filename: string, rows: unknown[][]) {
 
 function printSection(sectionId: string) {
   document.querySelectorAll(".reports-print-section.is-print-target").forEach((node) => node.classList.remove("is-print-target"));
-  const section = document.querySelector(`.reports-print-section[data-print-section="${sectionId}"]`);
+  const section = document.querySelector<HTMLElement>(`.reports-print-section[data-print-section="${sectionId}"]`);
   if (!section) return;
+  const previousTitle = document.title;
   section.classList.add("is-print-target");
   document.documentElement.setAttribute("data-muzare-print-section", sectionId);
+  document.title = `Muzare - ${section.dataset.printTitle ?? sectionId}`;
   const cleanup = () => {
     section.classList.remove("is-print-target");
     document.documentElement.removeAttribute("data-muzare-print-section");
-    window.removeEventListener("afterprint", cleanup);
+    document.title = previousTitle;
   };
   window.addEventListener("afterprint", cleanup, { once: true });
-  window.print();
+  requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
 }
 
 export function HarvestReportsPage() {
@@ -610,6 +612,8 @@ export function HarvestReportsPage() {
   const rangeLabel = fromDate || toDate
     ? `${fromDate ? formatDate(fromDate, { dateStyle: "medium" }) : "…"} – ${toDate ? formatDate(toDate, { dateStyle: "medium" }) : "…"}`
     : t("harvestPage.allDates");
+  const printGeneratedAt = formatDate(new Date(), { dateStyle: "medium", timeStyle: "short" });
+  const printGroupLabel = groupId ? (groupNameById.get(groupId) ?? t("harvestPage.unknownGroup")) : t("harvestPage.allGroups");
 
   const clearFilters = () => { setGroupId(""); setFromDate(""); setToDate(""); };
 
@@ -668,7 +672,7 @@ export function HarvestReportsPage() {
         </div>
       </section>
 
-      <section className="record-panel reports-print-section harvest-report-section" data-print-section="harvest-report">
+      <section className="record-panel reports-print-section reports-print-section--document harvest-report-section" data-print-section="harvest-report" data-print-title={t("harvestPage.reportTitle")} data-print-layout="portrait">
         <header className="reports-view-header">
           <div>
             <h2>{t("harvestPage.reportTitle")}</h2>
@@ -678,6 +682,15 @@ export function HarvestReportsPage() {
             {perms.canExport ? <button type="button" onClick={exportCsv}>{t("harvestPage.exportCsv")}</button> : null}
             <button type="button" onClick={() => printSection("harvest-report")}>{t("harvestPage.print")}</button>
           </div>
+        </header>
+        <header className="report-document-header report-document-only">
+          <div className="report-document-brand"><strong>Muzare</strong><span>{t("harvestPage.reportTitle")}</span></div>
+          <div className="report-document-title"><h1>{t("harvestPage.reportTitle")}</h1><p className="bidi-isolate">{rangeLabel}</p></div>
+          <dl className="report-document-meta">
+            <div><dt>{t("harvestPage.groupLabel")}</dt><dd>{printGroupLabel}</dd></div>
+            <div><dt>{t("reportsPage.transactions")}</dt><dd className="bidi-isolate">{filtered.length}</dd></div>
+            <div><dt>{t("reportsPage.generated")}</dt><dd className="bidi-isolate">{printGeneratedAt}</dd></div>
+          </dl>
         </header>
         <div className="reports-kpis harvest-report-kpis">
           <article><span>{t("harvestPage.kpiTotalCartons")}</span><strong className="bidi-isolate">{cartons(summary.totalCartons)}</strong></article>
@@ -712,6 +725,7 @@ export function HarvestReportsPage() {
             </table>
           </div>
         ) : <p className="empty-records">{t("harvestPage.noEntriesForFilters")}</p>}
+        <footer className="report-document-footer report-document-only"><span>Muzare</span><span>{t("harvestPage.reportTitle")}</span><span className="bidi-isolate">{printGeneratedAt}</span></footer>
       </section>
     </div>
   );

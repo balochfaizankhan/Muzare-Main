@@ -1,0 +1,54 @@
+/* Non-attendance reports are printed from a detached document root appended directly to
+   <body>. This avoids Android print-service failures caused by the legacy global
+   `body * { visibility: hidden; }` rule and hidden route ancestors. */
+#muzare-detached-print-root {
+  display: none;
+}
+
+@media print {
+  html[data-muzare-detached-print="true"] body {
+    background: #fff !important;
+    height: auto !important;
+    margin: 0 !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  html[data-muzare-detached-print="true"] body > *:not(#muzare-detached-print-root) {
+    display: none !important;
+  }
+
+  html[data-muzare-detached-print="true"] #muzare-detached-print-root {
+    background: #fff !important;
+    contain: none !important;
+    content-visibility: visible !important;
+    display: block !important;
+    height: auto !important;
+    margin: 0 !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    position: static !important;
+    visibility: visible !important;
+    width: auto !important;
+  }
+
+  html[data-muzare-detached-print="true"] #muzare-detached-print-root,
+  html[data-muzare-detached-print="true"] #muzare-detached-print-root * {
+    visibility: visible !important;
+  }
+
+  html[data-muzare-detached-print="true"] #muzare-detached-print-root .reports-print-section.is-print-target {
+    display: block !important;
+    height: auto !important;
+    inset: auto !important;
+    margin: 0 !important;
+    max-width: none !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    position: static !important;
+    transform: none !important;
+    width: auto !important;
+  }
+}

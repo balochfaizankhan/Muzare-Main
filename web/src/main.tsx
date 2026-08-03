@@ -14,8 +14,12 @@ import "./sales-date-sync.css";
 import "./dispatch-records-dialogs.css";
 import "./partner-ledger-polish.css";
 import "./partner-ledger-select-fix.css";
+import "./non-attendance-report-print.css";
+import "./expense-report-polish.css";
+import "./android-report-print-fix.css";
 import "./sales-date-sync";
 import { installSystemTextLocalizationGuard } from "./lib/systemTextLocalization";
+import { installDetachedReportPrintBridge } from "./lib/detachedReportPrint";
 import { queryClient } from "./lib/query-client";
 import { markStartup, scheduleBackgroundTask } from "./lib/startupPerf";
 
@@ -36,6 +40,7 @@ function RootShell() {
   );
 }
 
+installDetachedReportPrintBridge();
 markStartup("react-root-render-start");
 void scheduleBackgroundTask(async () => {
   const { registerSW } = await import("virtual:pwa-register");

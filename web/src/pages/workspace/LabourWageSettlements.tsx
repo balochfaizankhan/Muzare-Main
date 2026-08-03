@@ -5,7 +5,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthProvider";
 import { eligiblePaymentAccounts, PaymentAccountSelect } from "../../components/PaymentAccountSelect";
 import { ApiError, createLabourWageSettlement, deleteLabourWageSettlement, fetchLabourWageSettlement, fetchLabourWageSettlementCreateStatus, fetchLabourWageSettlementPaymentAccounts, fetchLabourWageSettlements, previewLabourWageSettlement, repairLabourWageSettlementAccounting, updateLabourWageSettlement, voidLabourWageSettlement, type LabourWageSettlementDetail, type LabourWageSettlementPaymentAccount, type LabourWageSettlementPreview, type LabourWageSettlementRecord } from "../../lib/api";
-import { formatMoney } from "../../lib/format";
+import { formatDate, formatMoney } from "../../lib/format";
 import { getActiveFarmId, getActiveSeasonId, offlineDb, workspaceRecords, type Account, type LabourGroup, type LabourWageSettlement, type Labourer } from "../../lib/offline-db";
 import { canCreate } from "../../lib/permissions";
 import { translateStatus } from "../../lib/statusLabels";
@@ -1037,6 +1037,28 @@ export function LabourWageSettlements() {
     carryForward: 0,
     cashPaid: 0,
   }), [registerTotalRows]);
+  const registerPrintGeneratedAt = useMemo(() => formatDate(new Date(), { dateStyle: "medium", timeStyle: "short" }), [registerRows.length, statusFilter, paymentAccountFilter]);
+  const registerStatusLabel = statusFilter === "all" ? t("common.all") : translateStatus(t, statusFilter);
+  const registerPaymentAccountLabel = paymentAccountFilter === "all"
+    ? t("wageSettlementsPage.allAccountsOption")
+    : paymentAccounts.find((account) => account.id === paymentAccountFilter)?.name ?? t("wageSettlementsPage.allAccountsOption");
+  const printSettlementRegister = () => {
+    const section = document.getElementById("labour-settlement-register");
+    if (!section) return;
+    const root = document.documentElement;
+    const previousTitle = document.title;
+    const cleanup = () => {
+      section.classList.remove("is-print-target");
+      root.removeAttribute("data-muzare-print-section");
+      document.title = previousTitle;
+    };
+    document.querySelectorAll(".reports-print-section.is-print-target").forEach((node) => node.classList.remove("is-print-target"));
+    root.setAttribute("data-muzare-print-section", "labour-settlement-register");
+    section.classList.add("is-print-target");
+    document.title = `${t("wageSettlementsPage.settlementRegisterTitle")} - Muzare`;
+    window.addEventListener("afterprint", cleanup, { once: true });
+    requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+  };
   const exportRegister = () => {
     const header = [
       t("wageSettlementsPage.settlementNoLabel"),
@@ -1396,17 +1418,27 @@ export function LabourWageSettlements() {
           ) : null}
         </section>
 
-        <section id="labour-settlement-register" className="record-panel labour-settlement-register-panel">
+        <section id="labour-settlement-register" className="record-panel reports-print-section reports-print-section--document labour-settlement-register-panel" data-print-section="labour-settlement-register" data-print-title={t("wageSettlementsPage.settlementRegisterTitle")} data-print-layout="landscape" data-print-density="wide">
           <div className="advances-heading labour-settlement-register-header">
             <div>
               <h2>{t("wageSettlementsPage.settlementRegisterTitle")}</h2>
               <span>{historyLoading ? t("wageSettlementsPage.refreshingRegister") : t("wageSettlementsPage.settlementsInFarmSeasonCount", { count: settlements.length })}</span>
             </div>
             <div className="module-inline-actions">
-              <button type="button" className="secondary-action" onClick={() => window.print()}><Printer size={16} /> {t("wageSettlementsPage.printButton")}</button>
+              <button type="button" className="secondary-action" onClick={printSettlementRegister}><Printer size={16} /> {t("wageSettlementsPage.printButton")}</button>
               <button type="button" className="secondary-action" onClick={exportRegister}><Download size={16} /> {t("wageSettlementsPage.exportCsvButton")}</button>
             </div>
           </div>
+          <header className="report-document-header report-document-only">
+            <div className="report-document-brand"><strong>Muzare</strong><span>{t("wageSettlementsPage.settlementRegisterTitle")}</span></div>
+            <div className="report-document-title"><h1>{t("wageSettlementsPage.settlementRegisterTitle")}</h1><p>{t("wageSettlementsPage.settlementsInFarmSeasonCount", { count: registerRows.length })}</p></div>
+            <dl className="report-document-meta">
+              <div><dt>{t("common.status")}</dt><dd>{registerStatusLabel}</dd></div>
+              <div><dt>{t("wageSettlementsPage.paidFromAccountLower")}</dt><dd>{registerPaymentAccountLabel}</dd></div>
+              <div><dt>{t("reportsPage.generated")}</dt><dd className="bidi-isolate">{registerPrintGeneratedAt}</dd></div>
+              <div><dt>{t("reportsPage.by")}</dt><dd>{user?.displayName ?? user?.email ?? "-"}</dd></div>
+            </dl>
+          </header>
           {!settlements.length ? <p className="context-message">{t("wageSettlementsPage.noSettlementsFound")}</p> : (
             <>
               <div className="reports-kpis labour-settlement-register-kpis">
@@ -1445,7 +1477,7 @@ export function LabourWageSettlements() {
                   </select>
                 </label>
               </div>
-            <div className="attendance-import-table-wrap report-wide-table labour-settlement-table-wrap">
+            <div className="attendance-import-table-wrap report-wide-table report-wide-table--screen-source labour-settlement-table-wrap">
               <table className="report-data-table">
                 <thead>
                   <tr>
@@ -1464,7 +1496,7 @@ export function LabourWageSettlements() {
                     <th>{t("wageSettlementsPage.paidFromAccountLower")}</th>
                     <th>{t("wageSettlementsPage.accountingReferenceLower")}</th>
                     <th>{t("common.status")}</th>
-                    <th>{t("wageSettlementsPage.actionsLabel")}</th>
+                    <th className="report-action-column">{t("wageSettlementsPage.actionsLabel")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1486,7 +1518,7 @@ export function LabourWageSettlements() {
                         <td>{settlementPaymentAccountById.get(settlement.paymentAccountId ?? settlement.linkedAccountId)?.name ?? accountById.get(settlement.paymentAccountId ?? settlement.linkedAccountId)?.name ?? "-"}</td>
                         <td className="bidi-isolate">{settlement.linkedVoucherNumber || settlement.settlementNumber || t("wageSettlementsPage.referenceUnavailable")}</td>
                         <td>{translateStatus(t, settlementStatus(settlement))}</td>
-                        <td>
+                        <td className="report-action-column">
                           <div className="stacked-inline-actions">
                             <button type="button" className="secondary-action" onClick={() => openSettlement(settlement)}>{t("wageSettlementsPage.viewDetails")}</button>
                             <button type="button" className="secondary-action" onClick={() => openSettlementVoucher(settlement)}>{t("wageSettlementsPage.openVoucher")}</button>
@@ -1532,6 +1564,32 @@ export function LabourWageSettlements() {
                     );
                   })}
                 </tbody>
+              </table>
+            </div>
+            <div className="report-document-only report-print-compact-table-wrap labour-settlement-print-table-wrap">
+              <table className="report-data-table report-print-compact-table labour-settlement-print-table">
+                <thead><tr>
+                  <th>{t("wageSettlementsPage.settlementNoLabel")} / {t("wageSettlementsPage.settlementDate")}</th>
+                  <th>{t("wageSettlementsPage.settlementPeriodLower")} / {t("wageSettlementsPage.modeLabel")}</th>
+                  <th>{t("wageSettlementsPage.foremanGroupLower")} / {t("wageSettlementsPage.labourersLabel")}</th>
+                  <th>{t("wageSettlementsPage.grossWagesEarnedLower")}</th>
+                  <th>{t("wageSettlementsPage.advanceAbsorbedThisSettlementLower")} / {t("wageSettlementsPage.outstandingGroupAdvanceLower")}</th>
+                  <th>{t("wageSettlementsPage.paidNowLower")} / {t("wageSettlementsPage.paidFromAccountLower")}</th>
+                  <th>{t("wageSettlementsPage.accountingReferenceLower")} / {t("common.status")}</th>
+                </tr></thead>
+                <tbody>{registerRows.map((settlement) => {
+                  const foremanOrGroup = labourers.find((labourer) => labourer.id === settlement.foremanId)?.name ?? settlement.groupName ?? settlement.groupId ?? "-";
+                  const paymentAccount = settlementPaymentAccountById.get(settlement.paymentAccountId ?? settlement.linkedAccountId)?.name ?? accountById.get(settlement.paymentAccountId ?? settlement.linkedAccountId)?.name ?? "-";
+                  return <tr key={`print:${settlement.id}`}>
+                    <td><span className="report-print-cell-stack"><strong className="bidi-isolate">{settlement.settlementNumber}</strong><small className="bidi-isolate">{settlement.settlementDate}</small></span></td>
+                    <td><span className="report-print-cell-stack"><span className="bidi-isolate">{settlement.fromDate} {t("wageSettlementsPage.periodTo")} {settlement.toDate}</span><small>{translateStatus(t, settlement.settlementMode ?? "individual")}</small></span></td>
+                    <td><span className="report-print-cell-stack"><strong>{foremanOrGroup}</strong><small>{t("wageSettlementsPage.includedLabourers")}: {settlement.includedLabourIds?.length ?? "-"}</small></span></td>
+                    <td className="bidi-isolate is-amount">{money(settlement.grossWages ?? settlement.expenseAmount)}</td>
+                    <td><span className="report-print-cell-stack"><strong className="bidi-isolate">{money(settlement.advanceAdjustedNow ?? settlement.settledAdvanceAmount)}</strong><small className="bidi-isolate">{money(settlement.remainingAdvanceCarryForward ?? settlement.carryForwardAdvance)}</small></span></td>
+                    <td><span className="report-print-cell-stack"><strong className="bidi-isolate">{money(settlement.paidAmount ?? settlement.payableBalance)}</strong><small>{paymentAccount}</small></span></td>
+                    <td><span className="report-print-cell-stack"><strong className="bidi-isolate">{settlement.linkedVoucherNumber || settlement.settlementNumber || t("wageSettlementsPage.referenceUnavailable")}</strong><small>{translateStatus(t, settlementStatus(settlement))}</small></span></td>
+                  </tr>;
+                })}</tbody>
               </table>
             </div>
             {registerRows.length ? (
@@ -1593,6 +1651,7 @@ export function LabourWageSettlements() {
             )}
             </>
           )}
+          <footer className="report-document-footer report-document-only"><span>Muzare</span><span>{t("wageSettlementsPage.settlementRegisterTitle")}</span><span className="bidi-isolate">{registerPrintGeneratedAt}</span></footer>
         </section>
         {selectedSettlement ? (() => {
           return (
