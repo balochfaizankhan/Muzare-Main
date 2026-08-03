@@ -826,7 +826,6 @@ const renderTable = (
   return activeSurface;
 };
 
-
 const renderMinimalHeader = (
   surface: PageSurface,
   spec: ReportPdfSpec,
@@ -1084,10 +1083,10 @@ const renderMinimalTable = (
         const textX = align === "right" ? x + width - TABLE_CELL_PADDING_X : x + TABLE_CELL_PADDING_X;
         const lines = wrapped[logicalIndex].slice(lineOffset, lineOffset + chunkLineCount);
         if (lines.length) {
-const totalTextHeight = (lines.length - 1) * lineHeight;
-const baseline = activeSurface.cursorY + (rowHeight - totalTextHeight) / 2 + fontSize * 0.36;
-setCanvasFont(activeSurface.context, fontSize, numeric ? 620 : 420);
-drawTextLines(activeSurface.context, lines, textX, baseline, lineHeight, align, rtl ? "rtl" : "ltr", TEXT);
+          const totalTextHeight = (lines.length - 1) * lineHeight;
+          const baseline = activeSurface.cursorY + (rowHeight - totalTextHeight) / 2 + fontSize * 0.36;
+          setCanvasFont(activeSurface.context, fontSize, numeric ? 620 : 420);
+          drawTextLines(activeSurface.context, lines, textX, baseline, lineHeight, align, rtl ? "rtl" : "ltr", TEXT);
         }
         x += width;
       }

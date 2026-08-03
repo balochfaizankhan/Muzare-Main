@@ -516,9 +516,9 @@ function ReportShell({
         const previousCapture = csvExportCapture;
         csvExportCapture = (nextCapture) => { captureHolder.current = nextCapture; };
         try {
-onExport();
+          onExport();
         } finally {
-csvExportCapture = previousCapture;
+          csvExportCapture = previousCapture;
         }
         captured = captureHolder.current;
       }
@@ -2224,20 +2224,20 @@ export function Reports() {
         [t("reportsPage.totalExpenses"), totalRecognizedExpenses],
         [],
         [
-t("reportsPage.date"),
-t("reportsPage.voucher"),
-t("reportsPage.description"),
-t("reportsPage.category"),
-t("reportsPage.account"),
-t("reportsPage.amount"),
+          t("reportsPage.date"),
+          t("reportsPage.voucher"),
+          t("reportsPage.description"),
+          t("reportsPage.category"),
+          t("reportsPage.account"),
+          t("reportsPage.amount"),
         ],
         ...ledgerRows.map((row) => [
-row.date,
-row.voucherNumber,
-row.description,
-row.category,
-row.account,
-row.amount,
+          row.date,
+          row.voucherNumber,
+          row.description,
+          row.category,
+          row.account,
+          row.amount,
         ]),
         [],
         [t("reportsPage.grandTotal"), totalRecognizedExpenses],
