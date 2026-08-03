@@ -1,0 +1,32 @@
+.dashboard-kpi-card__split-metrics {
+  align-items: end;
+  display: grid;
+  gap: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 2px;
+  min-width: 0;
+}
+
+.dashboard-kpi-card__split-metric {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dashboard-kpi-card__split-metric + .dashboard-kpi-card__split-metric {
+  border-inline-start: 1px solid var(--border);
+  margin-inline-start: 12px;
+  padding-inline-start: 12px;
+}
+
+.dashboard-kpi-card__split-value {
+  font-size: 1.45rem;
+  line-height: 1.1;
+}
+
+.dashboard-kpi-card__split-label {
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
