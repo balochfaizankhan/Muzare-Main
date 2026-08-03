@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { CalendarDays, ChevronDown, ChevronRight, ChevronUp, X } from "lucide-react";
@@ -61,6 +61,7 @@ import { deleteOperationalRecord } from "../../services/syncService";
 import i18n from "../../i18n";
 import { useCanonicalLabourFinancials } from "../../hooks/useCanonicalLabourFinancials";
 import { useSyncState } from "../../hooks/useSyncState";
+import { exportReportPdf } from "../../lib/reportPdf";
 
 type Report = "attendance" | "advances" | "wage-rates" | "expenditures" | "sales" | "dispatch" | "partner-position" | "account-ledger";
 type SortOrder = "desc" | "asc";
@@ -95,6 +96,9 @@ type ReportPrintContext = {
 };
 type ReportPrintLayout = "portrait" | "landscape";
 type ReportPrintDensity = "normal" | "wide";
+type CapturedCsvExport = { filename: string; rows: unknown[][] };
+const ReportPdfExportContext = createContext<ReportPrintContext | null>(null);
+let csvExportCapture: ((capture: CapturedCsvExport) => void) | null = null;
 type AccountLedgerReportRow = {
   id: string;
   date: string;
@@ -340,6 +344,10 @@ type DispatchReportRecord = {
 };
 
 function downloadCsv(filename: string, rows: unknown[][]) {
+  if (csvExportCapture) {
+    csvExportCapture({ filename, rows });
+    return;
+  }
   const csv = rows.map((row) => row.map(csvCell).join(",")).join("\n");
   const href = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }));
   const link = document.createElement("a");
@@ -477,7 +485,7 @@ function ReportShell({
   title: string;
   rangeLabel: string;
   sectionId: string;
-  onPrint: () => void;
+  onPrint?: () => void;
   onExport: () => void;
   onPdfExport?: () => void;
   printLabel?: string;
@@ -489,6 +497,43 @@ function ReportShell({
   children: ReactNode;
 }) {
   const { t } = useTranslation();
+  const inheritedPrintContext = useContext(ReportPdfExportContext);
+  const resolvedPrintContext = printContext ?? inheritedPrintContext;
+  const [pdfExporting, setPdfExporting] = useState(false);
+  const isAttendanceReport = sectionId.startsWith("attendance");
+  const handleStructuredPdfExport = async () => {
+    if (pdfExporting) return;
+    setPdfExporting(true);
+    try {
+      const captureHolder: { current?: CapturedCsvExport } = {};
+      const previousCapture = csvExportCapture;
+      csvExportCapture = (nextCapture) => { captureHolder.current = nextCapture; };
+      try {
+        onExport();
+      } finally {
+        csvExportCapture = previousCapture;
+      }
+      const captured = captureHolder.current;
+      if (!captured) throw new Error("The report did not provide structured export rows.");
+      await exportReportPdf({
+        title,
+        filename: captured.filename,
+        rangeLabel,
+        context: resolvedPrintContext,
+        orientation: printLayout,
+        rows: captured.rows,
+        language: document.documentElement.lang || i18n.language,
+        direction: document.documentElement.dir === "rtl" ? "rtl" : "ltr",
+      });
+    } catch (error) {
+      console.error("Report PDF export failed", error);
+      window.dispatchEvent(new CustomEvent("muzare-toast", {
+        detail: t("reportsPage.pdfExportFailed", { defaultValue: "PDF export failed. Please try again." }),
+      }));
+    } finally {
+      setPdfExporting(false);
+    }
+  };
   return <section
     className="record-panel reports-print-section reports-print-section--document"
     data-print-section={sectionId}
@@ -503,8 +548,14 @@ function ReportShell({
       </div>
       <div className="reports-actions">
         <button type="button" onClick={onExport}>{exportLabel ?? t("reportsPage.exportCsv")}</button>
-        {onPdfExport ? <button type="button" onClick={onPdfExport}>{pdfLabel ?? t("reportsPage.exportPdf")}</button> : null}
-        <button type="button" onClick={onPrint}>{printLabel ?? t("reportsPage.print")}</button>
+        {isAttendanceReport ? <>
+          {onPdfExport ? <button type="button" onClick={onPdfExport}>{pdfLabel ?? t("reportsPage.exportPdf")}</button> : null}
+          {onPrint ? <button type="button" onClick={onPrint}>{printLabel ?? t("reportsPage.print")}</button> : null}
+        </> : <button type="button" disabled={pdfExporting} onClick={() => void handleStructuredPdfExport()}>
+          {pdfExporting
+            ? t("reportsPage.generatingPdf", { defaultValue: "Generating PDF…" })
+            : pdfLabel ?? t("reportsPage.exportPdf")}
+        </button>}
       </div>
     </header>
     {printContext && <header className="report-document-header report-document-only">
@@ -2205,7 +2256,7 @@ export function Reports() {
     ...dispatchReportRows.map((item) => [item.dispatch.date, item.dispatchNumber, item.product, item.quantity, item.unit, item.vehicle, item.driver, item.linkedSales.map((sale) => invoiceReference(sale)).join(", ") || "-", item.soldQuantity, item.remainingQuantity, item.dispatch.remarks || item.dispatch.notes || "-"]),
   ]);
 
-  return <div className="dashboard-page">
+  return <ReportPdfExportContext.Provider value={reportPrintContext}><div className="dashboard-page">
     <SubpageHeader title={t("reportsPage.title")} />
     <main className="subpage module-workspace reports-page">
       <section className="record-panel reports-tabs" aria-label={t("reportsPage.title")}>
@@ -3011,5 +3062,5 @@ export function Reports() {
         </section>
       </div>}
     </main>
-  </div>;
+  </div></ReportPdfExportContext.Provider>;
 }

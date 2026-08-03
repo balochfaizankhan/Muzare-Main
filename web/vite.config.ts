@@ -76,7 +76,7 @@ export default defineConfig({
       },
       workbox: {
         navigateFallback: "/index.html",
-        globPatterns: ["**/*.{js,css,html,svg,png,webp,woff2}"],
+        globPatterns: ["**/*.{js,css,html,svg,png,webp,woff2,ttf}"],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/.*\/v1\//,
