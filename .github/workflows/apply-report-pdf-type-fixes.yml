@@ -1,0 +1,62 @@
+name: Apply report PDF type fixes
+
+on:
+  pull_request:
+    branches: [dev]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'fix/professional-report-pdf-layout'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Apply focused TypeScript fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('web/src/lib/reportPdf.ts')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              '  const rangeAlign: TextAlign = rtl ? "left" : "right";\n  const rangeX = rtl ? PAGE_MARGIN : pageWidth - PAGE_MARGIN;\n',
+              '  const rangeAlign: TextAlign = rtl ? "left" : "right";\n',
+              1,
+          )
+          text = text.replace(
+              '  const contextRows: Array<[string, string]> = [\n',
+              '  const contextRows = ([\n',
+              1,
+          )
+          text = text.replace(
+              '    [labels.generatedBy, normalizeValue(spec.context.generatedBy)],\n  ].filter(([, value]) => Boolean(value && value !== "—"));\n',
+              '    [labels.generatedBy, normalizeValue(spec.context.generatedBy)],\n  ] as Array<[string, string]>).filter(([, value]) => Boolean(value && value !== "—"));\n',
+              1,
+          )
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm --workspace @muzare/web run build
+
+      - name: Commit fixes
+        run: |
+          if git diff --quiet; then
+            echo 'Type fixes already applied.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add web/src/lib/reportPdf.ts
+          git commit -m 'fix: satisfy report PDF TypeScript checks'
+          git push origin HEAD:${{ github.head_ref }}
