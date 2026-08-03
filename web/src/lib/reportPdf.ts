@@ -14,7 +14,10 @@ const numberValue = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 const pick = (row: ReportRow, indexes: number[]) => indexes.map((index) => row[index] ?? "");
-const pdfFilename = (filename: string) => filename.replace(/\.csv$/i, ".pdf").replace(/(?<!\.pdf)$/i, ".pdf");
+const pdfFilename = (filename: string) => {
+  if (/\.pdf$/i.test(filename)) return filename;
+  return `${filename.replace(/\.csv$/i, "")}.pdf`;
+};
 
 function firstTable(rows: ReportRow[], minimumColumns: number) {
   const headerIndex = rows.findIndex((row) => row.length >= minimumColumns && !blank(row));
@@ -27,6 +30,13 @@ function firstTable(rows: ReportRow[], minimumColumns: number) {
     data.push(rows[index]);
   }
   return { headerIndex, header, data };
+}
+
+function reportMetrics(rows: ReportRow[], tableHeaderIndex: number) {
+  const preamble = rows.slice(0, tableHeaderIndex);
+  const firstDivider = preamble.findIndex(blank);
+  const reportBody = firstDivider >= 0 ? preamble.slice(firstDivider + 1) : preamble;
+  return reportBody.filter((row) => row.length <= 2 && !blank(row));
 }
 
 function compactAdvanceSummary(rows: ReportRow[]) {
@@ -77,12 +87,9 @@ function compactSales(rows: ReportRow[]) {
   const table = firstTable(rows, 15);
   if (!table) return rows;
   const columns = [1, 2, 3, 6, 7, 10, 13];
-  const metrics = rows
-    .slice(0, table.headerIndex)
-    .filter((row, index) => row.length === 2 && !blank(row) && index >= 3);
   const total = table.data.reduce((sum, row) => sum + numberValue(row[10]), 0);
   return [
-    ...metrics,
+    ...reportMetrics(rows, table.headerIndex),
     [],
     pick(table.header, columns),
     ...table.data.map((row) => pick(row, columns)),
@@ -95,12 +102,9 @@ function compactDispatch(rows: ReportRow[]) {
   const table = firstTable(rows, 11);
   if (!table) return rows;
   const columns = [0, 1, 2, 3, 5, 8, 9];
-  const metrics = rows
-    .slice(0, table.headerIndex)
-    .filter((row, index) => row.length === 2 && !blank(row) && index >= 3);
   const total = table.data.reduce((sum, row) => sum + numberValue(row[3]), 0);
   return [
-    ...metrics,
+    ...reportMetrics(rows, table.headerIndex),
     [],
     pick(table.header, columns),
     ...table.data.map((row) => pick(row, columns)),
