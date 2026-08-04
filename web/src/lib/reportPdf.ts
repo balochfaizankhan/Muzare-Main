@@ -3,8 +3,17 @@ import {
   exportReportPdf as exportBaseReportPdf,
 } from "./reportPdfBase";
 import type { ReportPdfContext, ReportPdfSpec } from "./reportPdfBase";
+import type { BootstrapData } from "./api";
+import { getActiveFarmId, getActiveSeasonId } from "./offline-db";
+import { queryClient } from "./query-client";
 
 type ReportRow = unknown[];
+
+type SalesPdfLabels = {
+  dateType: string;
+  cartons: string;
+  rate: string;
+};
 
 const text = (value: unknown) => String(value ?? "").trim();
 const blank = (row: ReportRow) => row.length === 0 || row.every((value) => !text(value));
@@ -83,15 +92,48 @@ function compactWageRates(rows: ReportRow[]) {
   return [pick(table.header, columns), ...table.data.map((row) => pick(row, columns))];
 }
 
-function compactSales(rows: ReportRow[]) {
+function salesPdfLabels(language?: string): SalesPdfLabels {
+  const normalized = (language ?? "en").toLowerCase();
+  if (normalized.startsWith("ar")) {
+    return {
+      dateType: "نوع التمر",
+      cartons: "عدد الكراتين",
+      rate: "السعر",
+    };
+  }
+  if (normalized.startsWith("ur")) {
+    return {
+      dateType: "کھجور کی قسم",
+      cartons: "کارٹنوں کی تعداد",
+      rate: "ریٹ / قیمت",
+    };
+  }
+  return {
+    dateType: "Type of date",
+    cartons: "Number of cartons",
+    rate: "Rate / price",
+  };
+}
+
+function compactSales(rows: ReportRow[], language?: string) {
   const table = firstTable(rows, 15);
   if (!table) return rows;
-  const columns = [1, 2, 3, 6, 7, 10, 13];
+
+  // The PDF is intentionally ordered by operational importance:
+  // sale date, invoice, date variety, carton count, price, amount, then buyer.
+  // Payment status is omitted from the printable sales ledger.
+  const columns = [1, 2, 6, 7, 9, 10, 3];
+  const headers = pick(table.header, columns);
+  const labels = salesPdfLabels(language);
+  headers[2] = labels.dateType;
+  headers[3] = labels.cartons;
+  headers[4] = labels.rate;
+
   const total = table.data.reduce((sum, row) => sum + numberValue(row[10]), 0);
   return [
     ...reportMetrics(rows, table.headerIndex),
     [],
-    pick(table.header, columns),
+    headers,
     ...table.data.map((row) => pick(row, columns)),
     [],
     [table.header[10], total],
@@ -149,12 +191,12 @@ function compactExpenseSummary(rows: ReportRow[]) {
   return [...rows.slice(0, start), ...rows.slice(Math.min(end + 1, rows.length))];
 }
 
-function professionalRows(filename: string, rows: ReportRow[]) {
+function professionalRows(filename: string, rows: ReportRow[], language?: string) {
   const name = filename.toLowerCase();
   if (name.includes("labour-advances-summary")) return compactAdvanceSummary(rows);
   if (name.includes("labour-advances-detail")) return compactAdvanceDetail(rows);
   if (name.includes("wage-rates")) return compactWageRates(rows);
-  if (name.includes("sales-report")) return compactSales(rows);
+  if (name.includes("sales-report")) return compactSales(rows, language);
   if (name.includes("dispatch-report")) return compactDispatch(rows);
   if (name.includes("partner-position")) return compactPartnerPosition(rows);
   if (name.includes("account-balances")) return compactAccountBalances(rows);
@@ -165,18 +207,72 @@ function professionalRows(filename: string, rows: ReportRow[]) {
 
 function professionalOrientation(filename: string, fallback: ReportPdfSpec["orientation"]) {
   const name = filename.toLowerCase();
-  if (name.includes("sales-report") || name.includes("dispatch-report") || name.includes("partner-position") || name.includes("account-ledger")) return "landscape" as const;
+  if (name.includes("sales-report")) return "portrait" as const;
+  if (name.includes("dispatch-report") || name.includes("partner-position") || name.includes("account-ledger")) return "landscape" as const;
   if (name.includes("expense") || name.includes("advance") || name.includes("wage-rate") || name.includes("partner-ledger") || name.includes("account-balances")) return "portrait" as const;
   return fallback;
+}
+
+function currentBootstrapData(): BootstrapData | null {
+  const activeFarmId = getActiveFarmId();
+  const activeSeasonId = getActiveSeasonId();
+  const reportCandidates = queryClient.getQueriesData<BootstrapData>({ queryKey: ["reports-bootstrap"] });
+
+  const exactReport = reportCandidates.find(([queryKey]) => (
+    Array.isArray(queryKey)
+    && queryKey[2] === activeFarmId
+    && queryKey[3] === activeSeasonId
+  ))?.[1];
+  if (exactReport) return exactReport;
+
+  const reportMatch = reportCandidates
+    .map(([, data]) => data)
+    .find((data): data is BootstrapData => Boolean(
+      data
+      && (!activeFarmId || data.farms.some((farm) => farm.id === activeFarmId))
+      && (!activeSeasonId || data.seasons.some((season) => season.id === activeSeasonId)),
+    ));
+  if (reportMatch) return reportMatch;
+
+  const workspaceCandidates = queryClient.getQueriesData<BootstrapData>({ queryKey: ["workspace-bootstrap"] });
+  return workspaceCandidates
+    .map(([, data]) => data)
+    .find((data): data is BootstrapData => Boolean(
+      data
+      && (!activeFarmId || data.farms.some((farm) => farm.id === activeFarmId))
+      && (!activeSeasonId || data.seasons.some((season) => season.id === activeSeasonId)),
+    )) ?? null;
+}
+
+function resolveScopedContext(context?: ReportPdfContext | null): ReportPdfContext | null | undefined {
+  if (!context) return context;
+  const bootstrap = currentBootstrapData();
+  if (!bootstrap) return context;
+
+  const activeFarmId = getActiveFarmId() ?? bootstrap.activeFarmId;
+  const activeSeasonId = getActiveSeasonId() ?? bootstrap.activeSeasonId;
+  const farmName = activeFarmId
+    ? bootstrap.farms.find((farm) => farm.id === activeFarmId)?.name
+    : undefined;
+  const seasonName = activeSeasonId
+    ? bootstrap.seasons.find((season) => season.id === activeSeasonId)?.name
+    : undefined;
+
+  return {
+    ...context,
+    farm: farmName?.trim() || context.farm,
+    season: seasonName?.trim() || context.season,
+  };
 }
 
 function professionalSpec(spec: ReportPdfSpec): ReportPdfSpec {
   return {
     ...spec,
     filename: pdfFilename(spec.filename),
+    context: resolveScopedContext(spec.context),
     orientation: professionalOrientation(spec.filename, spec.orientation),
     variant: "minimal",
-    rows: professionalRows(spec.filename, spec.rows),
+    rows: professionalRows(spec.filename, spec.rows, spec.language),
   };
 }
 
