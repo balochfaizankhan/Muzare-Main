@@ -1,0 +1,201 @@
+name: Refine Sales and Advance Forms V2
+
+on:
+  pull_request:
+    branches: [dev]
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  refine:
+    if: github.head_ref == 'fix/advance-sales-form-refinement'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apply focused source changes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          module_path = Path('web/src/pages/ModulePage.tsx')
+          source = module_path.read_text(encoding='utf-8')
+
+          def replace_after(anchor, old, new, label):
+              global source
+              anchor_pos = source.find(anchor)
+              if anchor_pos < 0:
+                  raise SystemExit(f'{label}: anchor not found')
+              old_pos = source.find(old, anchor_pos)
+              if old_pos < 0:
+                  raise SystemExit(f'{label}: target not found after anchor')
+              source = source[:old_pos] + new + source[old_pos + len(old):]
+
+          advance_anchor = 'return <ActionPanel title={t("advancesPage.recordAdvance")} onClose={onClose}>'
+          replace_after(
+              advance_anchor,
+              '<form className="worker-action-form" onSubmit=',
+              '<form className="worker-action-form" data-sticky-action-disabled="true" onSubmit=',
+              'Advance dialog sticky opt-out',
+          )
+
+          sales_anchor = 'function SalesModule()'
+          invoice = '<label><span>{t("salesPage.invoiceSerial")}</span><input placeholder={t("dispatchPage.optional")} value={invoiceNumber} onChange={(event) => setInvoiceNumber(event.target.value)} /></label>'
+          buyer = '<label><span>{t("salesPage.buyerCustomer")}</span><input placeholder={t("dispatchPage.optional")} value={buyerName} onChange={(event) => setBuyerName(event.target.value)} /></label>'
+          identity_start = source.find(invoice, source.find(sales_anchor))
+          identity_end_start = source.find(buyer, identity_start + len(invoice))
+          if identity_start < 0 or identity_end_start < 0 or source[identity_start + len(invoice):identity_end_start].strip():
+              raise SystemExit('Sales identity fields were not found as adjacent fields')
+          identity_indent = source[source.rfind('\n', 0, identity_start) + 1:identity_start]
+          identity_new = (
+              '<div className="sales-form__field-row sales-form__field-row--identity">\n'
+              + identity_indent + '  ' + invoice + '\n'
+              + identity_indent + '  ' + buyer + '\n'
+              + identity_indent + '</div>'
+          )
+          source = source[:identity_start] + identity_new + source[identity_end_start + len(buyer):]
+
+          cartons = '<label><span>{t("salesPage.cartonsSold")}</span><input required type="number" min="1" max={currentSaleType === "dispatch_sale" ? selectedDispatchMax : undefined} placeholder={t("reportsPage.quantity")} value={quantity} onChange={(event) => setQuantity(event.target.value)} /></label>'
+          rate = '<label><span>{t("salesPage.ratePrice")}</span><input required type="number" min="0" step="0.01" placeholder={t("reportsPage.rate")} value={unitPrice} onChange={(event) => setUnitPrice(event.target.value)} /></label>'
+          pricing_start = source.find(cartons, source.find(sales_anchor))
+          pricing_end_start = source.find(rate, pricing_start + len(cartons))
+          if pricing_start < 0 or pricing_end_start < 0 or source[pricing_start + len(cartons):pricing_end_start].strip():
+              raise SystemExit('Sales pricing fields were not found as adjacent fields')
+          pricing_indent = source[source.rfind('\n', 0, pricing_start) + 1:pricing_start]
+          pricing_new = (
+              '<div className="sales-form__field-row sales-form__field-row--pricing">\n'
+              + pricing_indent + '  ' + cartons + '\n'
+              + pricing_indent + '  ' + rate + '\n'
+              + pricing_indent + '</div>'
+          )
+          source = source[:pricing_start] + pricing_new + source[pricing_end_start + len(rate):]
+
+          action_start = source.find('<div className="sales-form__actions">', source.find(sales_anchor))
+          action_end = source.find('</div>', action_start)
+          if action_start < 0 or action_end < 0:
+              raise SystemExit('Sales action footer not found')
+          action_end += len('</div>')
+          action_indent = source[source.rfind('\n', 0, action_start) + 1:action_start]
+          action_new = '''<div className="sales-form__actions">
+          <div className="sales-form__summary" data-sticky-action-summary="true">
+            <span>{t("salesPage.cartonsSold")}</span>
+            <strong className="bidi-isolate">{Number(quantity) || 0}</strong>
+            <small>{t("dispatchPage.cartons")}</small>
+          </div>
+          <div className="sales-form__buttons">
+            {editingSale && <button className="secondary-action" type="button" onClick={resetForm}>{t("expensesPage.cancelEdit")}</button>}
+            <button disabled={!canSave} type="submit">{editingSale ? t("salesPage.updateSale") : t("salesPage.saveSale")}</button>
+          </div>
+        </div>'''
+          action_new = action_new.replace('\n', '\n' + action_indent)
+          source = source[:action_start] + action_new + source[action_end:]
+          module_path.write_text(source, encoding='utf-8')
+
+          Path('web/src/sales-form-refinement.css').write_text('''/* Compact Sales entry rows and a live carton summary in the shared sticky action bar. */
+.sales-form__field-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+.sales-form__field-row > label { display: grid; gap: 5px; min-width: 0; }
+.sales-form__field-row > label > span {
+  color: var(--text-secondary, #68717d);
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.sales-form__field-row input { min-width: 0; }
+.sales-form__actions {
+  align-items: center;
+  display: flex;
+  flex-direction: row;
+  gap: 12px;
+  grid-template-columns: none;
+}
+.sales-form__summary { display: grid; flex: 0 1 126px; gap: 2px; min-width: 84px; }
+.sales-form__summary > span {
+  color: var(--text-secondary, #68717d);
+  font-size: 0.7rem;
+  font-weight: 750;
+  line-height: 1.15;
+}
+.sales-form__summary > strong {
+  color: var(--brand-primary, #2d8435);
+  font-size: 1.14rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.05;
+}
+.sales-form__summary > small {
+  color: var(--text-secondary, #68717d);
+  font-size: 0.66rem;
+  line-height: 1.1;
+}
+.sales-form__buttons {
+  align-items: center;
+  display: flex;
+  flex: 1 1 auto;
+  gap: 8px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+.sales-form__buttons > button[type="submit"] { flex: 1 1 180px; min-width: 0; }
+.sales-form__buttons > .secondary-action { flex: 0 1 auto; }
+@media (max-width: 767px) {
+  .sales-form > .sales-form__field-row { order: 4; }
+  .sales-form > .sales-form__field-row--identity { order: 2; }
+  .sales-form__field-row { gap: 8px; }
+}
+@media (max-width: 390px) {
+  .sales-form__field-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+  .sales-form__field-row > label > span { font-size: 0.7rem; }
+  .sales-form__field-row input { padding-inline: 9px; }
+  .sales-form__actions { gap: 8px; }
+  .sales-form__summary { flex-basis: 88px; min-width: 72px; }
+}
+''', encoding='utf-8')
+
+          main_path = Path('web/src/main.tsx')
+          main_source = main_path.read_text(encoding='utf-8')
+          anchor = 'import "./sticky-action-regression-fixes.css";\n'
+          if main_source.count(anchor) != 1:
+              raise SystemExit(f'main.tsx import anchor: expected one match, found {main_source.count(anchor)}')
+          main_path.write_text(main_source.replace(anchor, anchor + 'import "./sales-form-refinement.css";\n', 1), encoding='utf-8')
+
+      - name: Install dependencies
+        run: npm ci
+      - name: Type-check web
+        run: npm run check --workspace web
+      - name: Build web
+        run: npm run build --workspace web
+      - name: Verify focused changes
+        shell: python
+        run: |
+          from pathlib import Path
+          module = Path('web/src/pages/ModulePage.tsx').read_text(encoding='utf-8')
+          assert module.count('data-sticky-action-disabled="true"') >= 1
+          assert module.count('sales-form__field-row--identity') == 1
+          assert module.count('sales-form__field-row--pricing') == 1
+          assert module.count('data-sticky-action-summary="true"') >= 1
+          assert '{Number(quantity) || 0}' in module
+          assert Path('web/src/sales-form-refinement.css').exists()
+      - name: Remove temporary workflows and commit app changes
+        run: |
+          rm .github/workflows/refine-sales-advance.yml .github/workflows/refine-sales-advance-v2.yml
+          git config user.name "muzare-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add web/src/pages/ModulePage.tsx web/src/main.tsx web/src/sales-form-refinement.css .github/workflows/refine-sales-advance.yml .github/workflows/refine-sales-advance-v2.yml
+          git commit -m "Refine Sales form and restore Advance dialog footer"
+          git push origin HEAD:${{ github.head_ref }}
