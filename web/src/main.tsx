@@ -17,6 +17,7 @@ import "./partner-ledger-select-fix.css";
 import "./non-attendance-report-print.css";
 import "./expense-report-polish.css";
 import "./android-report-print-fix.css";
+import "./sticky-action-regression-fixes.css";
 import "./sales-date-sync";
 import { installSystemTextLocalizationGuard } from "./lib/systemTextLocalization";
 import { installDetachedReportPrintBridge } from "./lib/detachedReportPrint";
