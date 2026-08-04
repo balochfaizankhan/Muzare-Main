@@ -18,8 +18,10 @@ import "./non-attendance-report-print.css";
 import "./expense-report-polish.css";
 import "./android-report-print-fix.css";
 import "./sticky-action-regression-fixes.css";
+import "./sales-advance-mobile-refinement.css";
 import "./sales-date-sync";
 import { installSystemTextLocalizationGuard } from "./lib/systemTextLocalization";
+import { installSalesAdvanceMobileRefinements } from "./lib/salesAdvanceMobileRefinements";
 import { installDetachedReportPrintBridge } from "./lib/detachedReportPrint";
 import { queryClient } from "./lib/query-client";
 import { markStartup, scheduleBackgroundTask } from "./lib/startupPerf";
@@ -27,7 +29,12 @@ import { markStartup, scheduleBackgroundTask } from "./lib/startupPerf";
 function RootShell() {
   useEffect(() => {
     markStartup("app-shell-mounted");
-    return installSystemTextLocalizationGuard();
+    const removeLocalizationGuard = installSystemTextLocalizationGuard();
+    const removeFormRefinements = installSalesAdvanceMobileRefinements();
+    return () => {
+      removeFormRefinements();
+      removeLocalizationGuard();
+    };
   }, []);
 
   return (
