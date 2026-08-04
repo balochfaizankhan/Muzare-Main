@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useState, type MouseEvent as ReactMouseEven
 import { useTranslation } from "react-i18next";
 import { ModulePage } from "../ModulePage";
 import "./DispatchCompact.css";
+import "./RecordCardHierarchy.css";
 
 type DispatchTab = "entry" | "records";
 
@@ -80,11 +81,45 @@ function DispatchWorkspaceEnhancements() {
 
       cards.forEach((card) => {
         if (card.dataset.compactEnhanced === "true") return;
+        const header = card.querySelector<HTMLElement>("header");
         const breakdown = card.querySelector<HTMLElement>(".dispatch-breakdown");
         const footer = card.querySelector<HTMLElement>("footer");
-        if (!breakdown || !footer) return;
+        if (!header || !breakdown || !footer) return;
 
         card.dataset.compactEnhanced = "true";
+
+        const primaryItems = document.createElement("div");
+        primaryItems.className = "dispatch-record-card__primary-items";
+        primaryItems.setAttribute(
+          "aria-label",
+          t("modulePageExtra.dispatchTypesAndCartons", { defaultValue: "Dispatch types and cartons" }),
+        );
+
+        Array.from(breakdown.children).forEach((row) => {
+          const cartonText = row.querySelector<HTMLElement>(".bidi-isolate")?.textContent?.trim() ?? "";
+          const cartonCount = Number(cartonText);
+          const leadingText = Array.from(row.childNodes)
+            .find((node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim())
+            ?.textContent ?? "";
+          const typeName = leadingText.replace(/\s*[:：]\s*$/u, "").trim();
+          if (!typeName || !Number.isFinite(cartonCount)) return;
+
+          const item = document.createElement("div");
+          item.className = "dispatch-record-card__primary-item";
+
+          const name = document.createElement("strong");
+          name.textContent = typeName;
+
+          const quantity = document.createElement("span");
+          quantity.className = "bidi-isolate";
+          quantity.textContent = t("dashboardPage.cartonsCount", { count: cartonCount });
+
+          item.append(name, quantity);
+          primaryItems.append(item);
+        });
+
+        if (primaryItems.childElementCount > 0) header.after(primaryItems);
+
         const toggle = document.createElement("button");
         toggle.type = "button";
         toggle.className = "dispatch-record-card__details-toggle";
