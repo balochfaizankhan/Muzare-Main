@@ -57,25 +57,13 @@ function updateSalesCartonSummary(form: HTMLFormElement) {
   const quantityInput = visibleSalesQuantityInput(form);
   if (!actions || !quantityInput) return;
 
-  let summary = actions.querySelector<HTMLElement>("[data-runtime-sales-carton-summary='true']");
-  if (!summary) {
-    summary = document.createElement("div");
-    summary.className = "sales-form__runtime-summary";
-    summary.dataset.runtimeSalesCartonSummary = "true";
-    summary.dataset.stickyActionSummary = "true";
-    summary.setAttribute("aria-live", "polite");
-    summary.innerHTML = "<span></span><strong class=\"bidi-isolate\">0</strong>";
-    actions.insertBefore(summary, actions.firstChild);
-  }
-
   const quantityLabel = quantityInput.closest("label")?.querySelector<HTMLElement>(":scope > span")?.textContent?.trim()
     || quantityInput.getAttribute("aria-label")
     || "Cartons";
   const quantityValue = quantityInput.value.trim() || "0";
-  const labelNode = summary.querySelector("span");
-  const valueNode = summary.querySelector("strong");
-  if (labelNode && labelNode.textContent !== quantityLabel) labelNode.textContent = quantityLabel;
-  if (valueNode && valueNode.textContent !== quantityValue) valueNode.textContent = quantityValue;
+  if (actions.dataset.salesCartonLabel !== quantityLabel) actions.dataset.salesCartonLabel = quantityLabel;
+  if (actions.dataset.salesCartonCount !== quantityValue) actions.dataset.salesCartonCount = quantityValue;
+  actions.setAttribute("aria-label", `${quantityLabel}: ${quantityValue}`);
 }
 
 function scanForms(root: ParentNode) {
@@ -115,6 +103,10 @@ export function installSalesAdvanceMobileRefinements() {
     if (frame) window.cancelAnimationFrame(frame);
     root.removeEventListener("input", updateFromInput, true);
     root.removeEventListener("change", updateFromInput, true);
-    root.querySelectorAll("[data-runtime-sales-carton-summary='true']").forEach((summary) => summary.remove());
+    root.querySelectorAll<HTMLElement>(".sales-form__actions[data-sales-carton-count]").forEach((actions) => {
+      delete actions.dataset.salesCartonLabel;
+      delete actions.dataset.salesCartonCount;
+      actions.removeAttribute("aria-label");
+    });
   };
 }
