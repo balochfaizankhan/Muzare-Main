@@ -1,31 +1,5 @@
 /* Requested mobile form refinements for Sales and the quick Advance dialog. */
 
-.sales-form__actions > .sales-form__runtime-summary {
-  display: grid;
-  flex: 0 1 118px;
-  gap: 2px;
-  min-width: 84px;
-}
-
-.sales-form__runtime-summary > span {
-  color: var(--text-secondary, #68717d);
-  font-size: 0.7rem;
-  font-weight: 750;
-  line-height: 1.15;
-}
-
-.sales-form__runtime-summary > strong {
-  color: var(--brand-primary, #2d8435);
-  font-size: 1.16rem;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.05;
-}
-
-.sales-form__actions > button[type="submit"] {
-  flex: 1 1 180px;
-  min-width: 0;
-}
-
 /* The quick Record Advance sheet explicitly returns to its original in-dialog footer. */
 .worker-action-dialog form[data-sticky-action-disabled="true"] {
   padding-block-end: 16px !important;
@@ -54,11 +28,62 @@
     order: 4 !important;
   }
 
-  .sales-form__actions {
-    align-items: center;
-    display: flex !important;
-    flex-direction: row !important;
-    gap: 10px !important;
+  /* Live carton count occupies the summary column; the existing React buttons remain untouched. */
+  .sales-form__actions[data-sales-carton-count] {
+    align-items: stretch;
+    display: grid !important;
+    grid-template-columns: minmax(72px, 96px) minmax(0, 1fr) !important;
+    grid-template-rows: auto auto;
+    column-gap: 10px !important;
+    row-gap: 1px !important;
+  }
+
+  .sales-form__actions[data-sales-carton-count]::before {
+    align-self: end;
+    color: var(--text-secondary, #68717d);
+    content: attr(data-sales-carton-label);
+    font-size: 0.68rem;
+    font-weight: 750;
+    grid-column: 1;
+    grid-row: 1;
+    line-height: 1.15;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sales-form__actions[data-sales-carton-count]::after {
+    align-self: start;
+    color: var(--brand-primary, #2d8435);
+    content: attr(data-sales-carton-count);
+    font-size: 1.16rem;
+    font-variant-numeric: tabular-nums;
+    font-weight: 850;
+    grid-column: 1;
+    grid-row: 2;
+    line-height: 1.05;
+  }
+
+  .sales-form__actions[data-sales-carton-count] > button[type="submit"] {
+    grid-column: 2;
+    grid-row: 1 / 3;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .sales-form__actions[data-sales-carton-count]:has(.secondary-action) {
+    grid-template-columns: minmax(68px, 84px) minmax(84px, 0.42fr) minmax(0, 1fr) !important;
+  }
+
+  .sales-form__actions[data-sales-carton-count] > .secondary-action {
+    grid-column: 2;
+    grid-row: 1 / 3;
+    min-width: 0;
+  }
+
+  .sales-form__actions[data-sales-carton-count]:has(.secondary-action) > button[type="submit"] {
+    grid-column: 3;
   }
 }
 
@@ -68,12 +93,16 @@
     order: 3 !important;
   }
 
-  .sales-form__actions > .sales-form__runtime-summary {
-    flex-basis: 88px;
-    min-width: 72px;
+  .sales-form__actions[data-sales-carton-count] {
+    grid-template-columns: minmax(64px, 78px) minmax(0, 1fr) !important;
+    column-gap: 8px !important;
   }
 
-  .sales-form__runtime-summary > span {
-    font-size: 0.66rem;
+  .sales-form__actions[data-sales-carton-count]:has(.secondary-action) {
+    grid-template-columns: minmax(58px, 68px) minmax(78px, 0.38fr) minmax(0, 1fr) !important;
+  }
+
+  .sales-form__actions[data-sales-carton-count]::before {
+    font-size: 0.63rem;
   }
 }
