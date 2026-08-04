@@ -6,6 +6,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { Brand } from "../components/Brand";
 import { LanguageSwitch } from "../components/LanguageSwitch";
+import { StickyActionBarProvider } from "../components/StickyActionBar";
 import { config } from "../config";
 import type { PendingMutation } from "../lib/offline-db";
 import { useSyncState } from "../hooks/useSyncState";
@@ -295,7 +296,7 @@ export function WorkspaceLayout() {
             </section>
           </div>
         )}
-        <Outlet />
+        <StickyActionBarProvider><Outlet /></StickyActionBarProvider>
         {toast && <div className="saas-toast" role="status">{toast}</div>}
       </div>
       <nav className="app-mobile-bottom-nav" aria-label={t("layout.primaryMobileNavAria")}>
