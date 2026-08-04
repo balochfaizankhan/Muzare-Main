@@ -1,0 +1,96 @@
+/* Mobile layout corrections for the shared sticky action system.
+   Keep these rules focused on geometry; page save/update handlers remain unchanged. */
+
+/* A page-level mobile rule must never turn the action surface into a column.
+   In Sales, the old mobile form rule made the 180px flex basis vertical, producing
+   the oversized green panel shown in the regression screenshot. */
+.muzare-sticky-action-bar {
+  flex-direction: row !important;
+  height: auto !important;
+}
+
+.muzare-sticky-action-bar__actions,
+.muzare-sticky-action-bar > [class*="action"],
+.muzare-sticky-action-bar > footer {
+  flex-direction: row !important;
+}
+
+.muzare-sticky-action-bar button[type="submit"],
+.muzare-sticky-action-bar input[type="submit"],
+.muzare-sticky-action-bar__primary {
+  block-size: auto !important;
+  flex: 1 1 auto !important;
+}
+
+/* Dialog forms already scroll inside their own bounded panel and already own a
+   sticky footer. Do not reserve a second action-bar-sized blank area underneath. */
+.worker-action-dialog > .worker-action-form.muzare-sticky-action-form[data-sticky-action-variant="container"] {
+  padding-block-end: 16px !important;
+}
+
+.worker-action-dialog > .worker-action-form--compact.muzare-sticky-action-form[data-sticky-action-variant="container"] {
+  padding-block-end: 14px !important;
+}
+
+.worker-action-dialog > .worker-action-form > .muzare-sticky-action-bar[data-sticky-action-variant="container"] {
+  bottom: 0 !important;
+  flex: 0 0 auto !important;
+  margin-block-end: -16px !important;
+  margin-block-start: auto !important;
+  margin-inline: -18px !important;
+  padding: 10px 18px calc(10px + env(safe-area-inset-bottom, 0px)) !important;
+  position: sticky !important;
+  width: auto !important;
+}
+
+.worker-action-dialog > .worker-action-form--compact > .muzare-sticky-action-bar[data-sticky-action-variant="container"] {
+  margin-block-end: -14px !important;
+  margin-inline: -16px !important;
+  padding-inline: 16px !important;
+}
+
+@media (max-width: 900px) {
+  /* DispatchCompact.css previously forced this footer back to position: static.
+     The higher-specificity managed-state rule restores the global fixed behavior. */
+  .app-shell:not(.app-shell--admin) .dispatch-compact-workspace .dispatch-submit-footer.muzare-sticky-action-bar[data-sticky-action-variant="viewport"] {
+    background: color-mix(in srgb, var(--surface, #fff) 96%, transparent) !important;
+    border: 1px solid color-mix(in srgb, var(--border, #e5e7eb) 82%, transparent) !important;
+    border-bottom: 0 !important;
+    border-radius: 20px 20px 0 0 !important;
+    bottom: calc(var(--muzare-mobile-nav-height) + env(safe-area-inset-bottom, 0px)) !important;
+    box-shadow: 0 -12px 34px rgba(15, 23, 42, 0.12) !important;
+    display: flex !important;
+    left: 0 !important;
+    margin: 0 !important;
+    padding: 10px 14px !important;
+    position: fixed !important;
+    right: 0 !important;
+    top: auto !important;
+    z-index: 80 !important;
+  }
+
+  body.muzare-keyboard-open .app-shell:not(.app-shell--admin) .dispatch-compact-workspace .dispatch-submit-footer.muzare-sticky-action-bar[data-sticky-action-variant="viewport"] {
+    bottom: env(safe-area-inset-bottom, 0px) !important;
+  }
+
+  /* DispatchCompact.css also cleared form padding. Restore the shared content
+     reserve so the final carton row remains fully visible above the fixed bar. */
+  .dispatch-compact-workspace .dispatch-form.muzare-sticky-action-form[data-sticky-action-state="active"][data-sticky-action-variant="viewport"] {
+    padding-block-end: calc(var(--muzare-sticky-action-height) + var(--muzare-mobile-nav-height) + 28px) !important;
+  }
+
+  /* Avoid stacking the old workspace reserve on top of the form-level reserve. */
+  .dispatch-compact-workspace[data-dispatch-tab="entry"] {
+    padding-block-end: 0 !important;
+  }
+}
+
+@media (max-width: 520px) {
+  .worker-action-dialog > .worker-action-form > .muzare-sticky-action-bar[data-sticky-action-variant="container"] {
+    gap: 8px !important;
+  }
+
+  .worker-action-dialog > .worker-action-form > .muzare-sticky-action-bar[data-sticky-action-variant="container"] button {
+    min-width: 0 !important;
+  }
+}
