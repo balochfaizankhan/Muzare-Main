@@ -23,7 +23,10 @@ function removeManagedActionDecorations(element: HTMLElement) {
 function restoreAdvanceDialogFooter(form: HTMLFormElement) {
   const isQuickAdvanceForm = Boolean(
     form.matches(".worker-action-dialog form.worker-action-form")
-    && form.querySelector(".labour-combobox"),
+    && form.querySelector(".labour-combobox")
+    && form.querySelector('input[type="date"]')
+    && form.querySelector('input[type="number"]')
+    && form.querySelector(".payment-account-select"),
   );
   if (!isQuickAdvanceForm) return;
 
@@ -93,7 +96,7 @@ export function installSalesAdvanceMobileRefinements() {
   };
 
   const observer = new MutationObserver(scheduleScan);
-  observer.observe(root, { childList: true, subtree: true });
+  observer.observe(root, { childList: true, subtree: true, characterData: true });
   root.addEventListener("input", updateFromInput, true);
   root.addEventListener("change", updateFromInput, true);
   scan();
