@@ -1,0 +1,180 @@
+/* Operational records should emphasize what moved, when it moved, and how much moved.
+   Counterparties and internal references remain available as secondary context. */
+
+.dispatch-record-card__primary-items {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  /* Sales: product/date type and carton-price maths are the primary scan targets. */
+  .sales-records-panel .sales-record-card {
+    gap: 12px !important;
+    padding: 14px !important;
+  }
+
+  .sales-records-panel .sales-record-card__date {
+    align-items: center;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: space-between;
+    padding-bottom: 10px;
+  }
+
+  .sales-records-panel .sales-record-card__date > strong {
+    color: var(--text-secondary) !important;
+    font-size: 0.76rem !important;
+    font-weight: 750;
+  }
+
+  .sales-records-panel .sales-type-badge {
+    font-size: 0.72rem !important;
+    font-weight: 800;
+  }
+
+  .sales-records-panel .sales-record-card__body {
+    align-items: start;
+    display: grid !important;
+    gap: 12px !important;
+    grid-template-columns: minmax(0, 1fr) minmax(118px, auto) !important;
+  }
+
+  .sales-records-panel .sales-record-card__identity {
+    align-content: start;
+    display: grid;
+    gap: 3px !important;
+    min-width: 0;
+  }
+
+  /* Produce/date type becomes the card title. */
+  .sales-records-panel .sales-record-card__identity > span {
+    color: var(--text-primary) !important;
+    font-size: 1.08rem !important;
+    font-weight: 850;
+    line-height: 1.3;
+    order: 1;
+  }
+
+  .sales-records-panel .sales-record-card__identity > small {
+    color: var(--text-secondary) !important;
+    font-size: 0.72rem !important;
+    line-height: 1.35;
+    order: 2;
+  }
+
+  /* Buyer remains visible, but no longer dominates the record. */
+  .sales-records-panel .sales-record-card__identity > strong {
+    color: var(--text-secondary) !important;
+    font-size: 0.76rem !important;
+    font-weight: 650 !important;
+    line-height: 1.35;
+    margin-top: 3px;
+    order: 3;
+  }
+
+  .sales-records-panel .sales-record-card__metrics {
+    align-content: start;
+    display: grid;
+    gap: 3px !important;
+    justify-items: end !important;
+    text-align: end !important;
+  }
+
+  /* Cartons × price is the main sales metric; total remains directly below it. */
+  .sales-records-panel .sales-record-card__metrics > span {
+    color: var(--brand-primary) !important;
+    font-size: 1rem !important;
+    font-weight: 850;
+    line-height: 1.25;
+    white-space: nowrap;
+  }
+
+  .sales-records-panel .sales-record-card__metrics > strong {
+    color: var(--text-primary) !important;
+    font-size: 0.96rem !important;
+    font-weight: 800;
+    line-height: 1.25;
+    white-space: nowrap;
+  }
+
+  .sales-records-panel .sales-record-card__metrics .status-badge {
+    margin-top: 4px;
+  }
+
+  .sales-records-panel .sales-record-card__actions {
+    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)) !important;
+  }
+
+  /* Dispatch: extracted date-type rows and carton counts become the primary content. */
+  .dispatch-compact-workspace .dispatch-record-card__primary-items {
+    display: grid;
+    gap: 7px;
+  }
+
+  .dispatch-compact-workspace .dispatch-record-card__primary-item {
+    align-items: center;
+    background: #f6faf6;
+    border: 1px solid rgba(46, 125, 50, 0.14);
+    border-radius: 12px;
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+    min-width: 0;
+    padding: 10px 11px;
+  }
+
+  .dispatch-compact-workspace .dispatch-record-card__primary-item > strong {
+    color: var(--text-primary);
+    font-size: 1rem;
+    font-weight: 850;
+    line-height: 1.3;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .dispatch-compact-workspace .dispatch-record-card__primary-item > span {
+    color: var(--brand-primary);
+    flex: 0 0 auto;
+    font-size: 0.9rem;
+    font-weight: 850;
+    white-space: nowrap;
+  }
+
+  /* Serial, vehicle, and aggregate count stay as compact supporting metadata. */
+  .dispatch-compact-workspace .dispatch-record-card header h3 {
+    color: var(--text-secondary) !important;
+    font-size: 0.78rem !important;
+    font-weight: 700 !important;
+    margin-top: 4px !important;
+  }
+
+  .dispatch-compact-workspace .dispatch-record-card header p {
+    color: var(--text-secondary);
+    font-size: 0.72rem !important;
+  }
+
+  .dispatch-compact-workspace .dispatch-record-card header > b {
+    font-size: 0.74rem !important;
+    font-weight: 800;
+  }
+}
+
+@media (max-width: 390px) {
+  .sales-records-panel .sales-record-card__body {
+    gap: 9px !important;
+    grid-template-columns: minmax(0, 1fr) minmax(108px, auto) !important;
+  }
+
+  .sales-records-panel .sales-record-card__identity > span {
+    font-size: 1rem !important;
+  }
+
+  .sales-records-panel .sales-record-card__metrics > span {
+    font-size: 0.92rem !important;
+  }
+
+  .dispatch-compact-workspace .dispatch-record-card__primary-item {
+    padding-inline: 9px;
+  }
+}
