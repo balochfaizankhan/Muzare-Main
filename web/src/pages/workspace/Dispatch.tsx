@@ -6,6 +6,7 @@ import { ModulePage } from "../ModulePage";
 import "./DispatchCompact.css";
 import "./RecordCardHierarchy.css";
 import "./DispatchMobileRecordsCompact.css";
+import "./DispatchMasterDialogsMobile.css";
 
 type DispatchTab = "entry" | "records";
 
