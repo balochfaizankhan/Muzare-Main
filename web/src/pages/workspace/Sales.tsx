@@ -87,62 +87,65 @@ function SalesDispatchReturnEnhancement() {
             footer.append(button);
           }
 
-          button.textContent = t("salesPage.returnToFarm", { defaultValue: "Return to farm" });
-          button.disabled = false;
-          button.onclick = async (event) => {
-            event.stopPropagation();
-            const confirmed = window.confirm(
-              t("salesPage.returnToFarmConfirm", {
-                defaultValue: "Return {{count}} unsold cartons of {{type}} to the farm? This dispatch item will close and disappear from sale availability.",
-                count: match.remainingCartons,
-                type: match.dateTypeName,
-              }),
-            );
-            if (!confirmed) return;
-
-            button!.disabled = true;
-            button!.textContent = t("common.saving", { defaultValue: "Saving…" });
-            try {
-              const latest = await offlineDb.dispatches.get(match.dispatch.id);
-              if (!latest) throw new Error("Dispatch not found");
-
-              const latestWithReturns = latest as DispatchWithMarketReturns;
-              const now = new Date().toISOString();
-              const updated: DispatchWithMarketReturns = {
-                ...latestWithReturns,
-                updatedAt: now,
-                marketReturns: [
-                  ...(latestWithReturns.marketReturns ?? []),
-                  {
-                    id: crypto.randomUUID(),
-                    dispatchItemId: match.itemId,
-                    dateTypeId: match.dateTypeId,
-                    dateTypeName: match.dateTypeName,
-                    cartons: match.remainingCartons,
-                    returnedAt: now,
-                    note: t("salesPage.unsoldMarketReturn", { defaultValue: "Unsold market return" }),
-                  },
-                ],
-              };
-
-              await persistOperationalRecord("dispatch", updated as Dispatch);
-              window.dispatchEvent(new Event("muzare-data-refresh"));
-              window.dispatchEvent(new CustomEvent("muzare-toast", {
-                detail: t("salesPage.returnToFarmSuccess", {
-                  defaultValue: "{{count}} cartons returned to the farm.",
+          const returnLabel = t("salesPage.returnToFarm", { defaultValue: "Return to farm" });
+          if (button.textContent !== returnLabel && !button.disabled) button.textContent = returnLabel;
+          if (!button.dataset.returnBound) {
+            button.dataset.returnBound = "true";
+            button.onclick = async (event) => {
+              event.stopPropagation();
+              const confirmed = window.confirm(
+                t("salesPage.returnToFarmConfirm", {
+                  defaultValue: "Return {{count}} unsold cartons of {{type}} to the farm? This dispatch item will close and disappear from sale availability.",
                   count: match.remainingCartons,
+                  type: match.dateTypeName,
                 }),
-              }));
-            } catch (error) {
-              button!.disabled = false;
-              button!.textContent = t("salesPage.returnToFarm", { defaultValue: "Return to farm" });
-              window.dispatchEvent(new CustomEvent("muzare-toast", {
-                detail: error instanceof Error
-                  ? error.message
-                  : t("salesPage.returnToFarmFailed", { defaultValue: "Unable to return cartons. Please try again." }),
-              }));
-            }
-          };
+              );
+              if (!confirmed) return;
+
+              button!.disabled = true;
+              button!.textContent = t("common.saving", { defaultValue: "Saving…" });
+              try {
+                const latest = await offlineDb.dispatches.get(match.dispatch.id);
+                if (!latest) throw new Error("Dispatch not found");
+
+                const latestWithReturns = latest as DispatchWithMarketReturns;
+                const now = new Date().toISOString();
+                const updated: DispatchWithMarketReturns = {
+                  ...latestWithReturns,
+                  updatedAt: now,
+                  marketReturns: [
+                    ...(latestWithReturns.marketReturns ?? []),
+                    {
+                      id: crypto.randomUUID(),
+                      dispatchItemId: match.itemId,
+                      dateTypeId: match.dateTypeId,
+                      dateTypeName: match.dateTypeName,
+                      cartons: match.remainingCartons,
+                      returnedAt: now,
+                      note: t("salesPage.unsoldMarketReturn", { defaultValue: "Unsold market return" }),
+                    },
+                  ],
+                };
+
+                await persistOperationalRecord("dispatch", updated as Dispatch);
+                window.dispatchEvent(new Event("muzare-data-refresh"));
+                window.dispatchEvent(new CustomEvent("muzare-toast", {
+                  detail: t("salesPage.returnToFarmSuccess", {
+                    defaultValue: "{{count}} cartons returned to the farm.",
+                    count: match.remainingCartons,
+                  }),
+                }));
+              } catch (error) {
+                button!.disabled = false;
+                button!.textContent = returnLabel;
+                window.dispatchEvent(new CustomEvent("muzare-toast", {
+                  detail: error instanceof Error
+                    ? error.message
+                    : t("salesPage.returnToFarmFailed", { defaultValue: "Unable to return cartons. Please try again." }),
+                }));
+              }
+            };
+          }
         });
       } finally {
         decorating = false;
@@ -151,15 +154,16 @@ function SalesDispatchReturnEnhancement() {
 
     const observer = new MutationObserver(() => void decorate());
     observer.observe(document.body, { childList: true, subtree: true });
-    window.addEventListener("muzare-data-refresh", decorate);
-    window.addEventListener("muzare-local-data-change", decorate);
+    const refreshDecoration = () => void decorate();
+    window.addEventListener("muzare-data-refresh", refreshDecoration);
+    window.addEventListener("muzare-local-data-change", refreshDecoration);
     void decorate();
 
     return () => {
       cancelled = true;
       observer.disconnect();
-      window.removeEventListener("muzare-data-refresh", decorate);
-      window.removeEventListener("muzare-local-data-change", decorate);
+      window.removeEventListener("muzare-data-refresh", refreshDecoration);
+      window.removeEventListener("muzare-local-data-change", refreshDecoration);
     };
   }, [canReturnDispatch, t]);
 
