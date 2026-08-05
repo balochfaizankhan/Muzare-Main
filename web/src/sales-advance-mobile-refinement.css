@@ -1,16 +1,296 @@
-/* Requested mobile form refinements for Sales and the quick Advance dialog. */
+/* Requested mobile form refinements for Sales and the Record Advance dialog. */
 
-/* The quick Record Advance sheet explicitly returns to its original in-dialog footer. */
-.worker-action-dialog form[data-sticky-action-disabled="true"] {
-  padding-block-end: 16px !important;
+/* --------------------------------------------------------------------------
+   Record Advance
+   --------------------------------------------------------------------------
+   This form deliberately opts out of the shared viewport-sticky action system.
+   It is a compact modal/bottom sheet whose actions belong to the form itself. */
+body:has(.workforce-advance-entry-sheet[data-sticky-action-disabled="true"]) {
+  --sticky-action-reserved-space: 0px;
 }
 
-.worker-action-dialog form[data-sticky-action-disabled="true"] > footer {
-  position: sticky;
-  bottom: 0;
+.workforce-advance-entry-sheet {
+  background: var(--surface, #fff) !important;
+  display: grid !important;
+  grid-template-rows: auto minmax(0, auto) auto !important;
+  height: auto !important;
+  max-height: min(92dvh, 760px) !important;
+  overflow: hidden !important;
+}
+
+.workforce-advance-entry-sheet[data-sticky-action-disabled="true"] {
+  padding-block-end: 0 !important;
+}
+
+.workforce-advance-entry-sheet > header {
+  align-items: center !important;
+  background: var(--surface, #fff);
+  border-bottom: 1px solid #e7ece9 !important;
+  gap: 16px;
+  padding: 18px 20px 16px !important;
+}
+
+.workforce-advance-entry-sheet > header > div {
+  min-width: 0;
+}
+
+.workforce-advance-entry-sheet > header h2 {
+  color: var(--text-primary, #1f2937) !important;
+  font-size: 1.32rem !important;
+  font-weight: 820 !important;
+  letter-spacing: -0.025em;
+  line-height: 1.2 !important;
+  margin: 0 !important;
+}
+
+.workforce-advance-entry-sheet > header p {
+  color: var(--text-secondary, #6b7280) !important;
+  font-size: 0.82rem !important;
+  line-height: 1.35 !important;
+  margin: 5px 0 0 !important;
+}
+
+.workforce-advance-entry-sheet > header > button {
+  align-items: center;
+  background: #f4f6f5 !important;
+  border: 1px solid transparent !important;
+  border-radius: 999px !important;
+  color: #1f2937 !important;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 40px !important;
+  justify-content: center;
+  padding: 0 !important;
+  transition: background-color 160ms ease, border-color 160ms ease, transform 160ms ease;
+  width: 40px !important;
+}
+
+.workforce-advance-entry-sheet > header > button:hover,
+.workforce-advance-entry-sheet > header > button:focus-visible {
+  background: #eef2ef !important;
+  border-color: #dce4df !important;
+  outline: none;
+}
+
+.workforce-advance-entry-sheet > header > button:active {
+  transform: scale(0.96);
+}
+
+.workforce-advance-entry-sheet > .workforce-advance-entry-body {
+  background: var(--surface, #fff);
+  min-height: 0 !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  padding: 18px 20px 20px !important;
+  scrollbar-gutter: stable;
+}
+
+.workforce-advance-entry-sheet .workforce-advance-entry-fields {
+  gap: 15px !important;
+}
+
+.workforce-advance-entry-sheet .workforce-advance-entry-fields > label,
+.workforce-advance-entry-sheet .workforce-advance-entry-row label {
+  gap: 7px !important;
+}
+
+.workforce-advance-entry-sheet .workforce-advance-entry-fields label > span {
+  color: #475569 !important;
+  font-size: 0.78rem !important;
+  font-weight: 720 !important;
+  letter-spacing: -0.01em;
+  line-height: 1.25 !important;
+}
+
+.workforce-advance-entry-sheet .workforce-advance-entry-fields input,
+.workforce-advance-entry-sheet .workforce-advance-entry-fields select,
+.workforce-advance-entry-sheet .labour-combobox__input input,
+.workforce-advance-entry-sheet .report-picker__trigger {
+  background: #fff !important;
+  border: 1px solid #d6dfe0 !important;
+  border-radius: 13px !important;
+  box-shadow: none !important;
+  color: var(--text-primary, #1f2937) !important;
+  min-height: 52px !important;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+.workforce-advance-entry-sheet .workforce-advance-entry-fields input:hover,
+.workforce-advance-entry-sheet .workforce-advance-entry-fields select:hover,
+.workforce-advance-entry-sheet .labour-combobox__input input:hover,
+.workforce-advance-entry-sheet .report-picker__trigger:hover {
+  border-color: #bdc9c4 !important;
+}
+
+.workforce-advance-entry-sheet .workforce-advance-entry-fields input:focus,
+.workforce-advance-entry-sheet .workforce-advance-entry-fields select:focus,
+.workforce-advance-entry-sheet .labour-combobox__input input:focus,
+.workforce-advance-entry-sheet .report-picker__trigger:focus-visible {
+  border-color: rgba(46, 125, 50, 0.62) !important;
+  box-shadow: 0 0 0 4px rgba(46, 125, 50, 0.11) !important;
+  outline: none !important;
+}
+
+.workforce-advance-entry-sheet .labour-combobox__input input::placeholder,
+.workforce-advance-entry-sheet .workforce-advance-entry-fields input::placeholder {
+  color: #8a939f;
+  opacity: 1;
+}
+
+.workforce-advance-entry-sheet .workforce-advance-amount {
+  background: #fbfcfb;
+  border-radius: 13px;
+}
+
+.workforce-advance-entry-sheet .workforce-advance-amount > span {
+  color: #64748b !important;
+  font-size: 0.76rem !important;
+  font-weight: 780 !important;
+  inset-inline-start: 14px !important;
+}
+
+.workforce-advance-entry-sheet .workforce-advance-amount input {
+  background: transparent !important;
+  font-size: 1.08rem !important;
+  font-variant-numeric: tabular-nums;
+  font-weight: 780 !important;
+  min-height: 58px !important;
+  padding-inline-start: 52px !important;
+}
+
+.workforce-advance-entry-sheet .workforce-advance-entry-row {
+  align-items: end;
+  gap: 12px !important;
+  grid-template-columns: minmax(0, 0.44fr) minmax(0, 0.56fr) !important;
+}
+
+.workforce-advance-entry-sheet .workforce-advance-entry-row input[type="date"] {
+  font-size: 0.9rem !important;
+  min-width: 0 !important;
+  padding-inline: 10px !important;
+}
+
+.workforce-advance-entry-sheet .workforce-advance-entry-row .report-picker__trigger {
+  min-width: 0 !important;
+  padding-inline: 12px !important;
+}
+
+.workforce-advance-entry-sheet .workforce-advance-entry-row .report-picker__trigger-text {
+  font-size: 0.9rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workforce-advance-entry-sheet .workforce-payments-inline-note,
+.workforce-advance-entry-sheet .workforce-advance-inactive-note {
+  border-radius: 10px;
+  font-size: 0.75rem !important;
+  line-height: 1.4 !important;
+  margin: 0;
+}
+
+/* In-dialog footer: compact, balanced, and deliberately non-sticky. */
+.workforce-advance-entry-sheet > footer,
+.workforce-advance-entry-sheet[data-sticky-action-disabled="true"] > footer {
+  background: #fff !important;
+  border-top: 1px solid #e7ece9 !important;
+  bottom: auto !important;
+  box-shadow: none !important;
+  display: block !important;
+  inset: auto !important;
+  padding: 14px 20px calc(14px + env(safe-area-inset-bottom)) !important;
+  position: static !important;
+  transform: none !important;
+  width: auto !important;
+  z-index: auto !important;
+}
+
+.workforce-advance-entry-sheet > footer .workforce-payment-review__actions {
+  align-items: stretch !important;
+  display: grid !important;
+  gap: 12px !important;
+  grid-template-columns: minmax(96px, 0.38fr) minmax(0, 1fr) !important;
+  position: static !important;
+  width: 100% !important;
+}
+
+.workforce-advance-entry-sheet > footer .workforce-payment-review__actions > button {
+  border-radius: 13px !important;
+  box-shadow: none !important;
+  font-size: 0.92rem !important;
+  font-weight: 760 !important;
+  justify-content: center !important;
+  min-height: 50px !important;
+  min-width: 0 !important;
+  padding: 0 16px !important;
+  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease, opacity 160ms ease, transform 120ms ease;
+  width: 100% !important;
+}
+
+.workforce-advance-entry-sheet > footer .secondary-action {
+  background: #fff !important;
+  border: 1px solid #d5ddda !important;
+  color: #334155 !important;
+}
+
+.workforce-advance-entry-sheet > footer .secondary-action:hover,
+.workforce-advance-entry-sheet > footer .secondary-action:focus-visible {
+  background: #f7f9f8 !important;
+  border-color: #bfcac5 !important;
+  outline: none;
+}
+
+.workforce-advance-entry-sheet > footer .primary-action {
+  background: var(--brand-primary, #2e7d32) !important;
+  border: 1px solid var(--brand-primary, #2e7d32) !important;
+  color: #fff !important;
+  box-shadow: 0 6px 14px rgba(46, 125, 50, 0.16) !important;
+}
+
+.workforce-advance-entry-sheet > footer .primary-action:not(:disabled):hover,
+.workforce-advance-entry-sheet > footer .primary-action:not(:disabled):focus-visible {
+  background: #276c2b !important;
+  border-color: #276c2b !important;
+  box-shadow: 0 7px 17px rgba(46, 125, 50, 0.22) !important;
+  outline: none;
+}
+
+.workforce-advance-entry-sheet > footer .workforce-payment-review__actions > button:not(:disabled):active {
+  transform: translateY(1px);
+}
+
+.workforce-advance-entry-sheet > footer .primary-action:disabled {
+  background: #dce8dd !important;
+  border-color: #dce8dd !important;
+  box-shadow: none !important;
+  color: #6d8171 !important;
+  cursor: not-allowed;
+  opacity: 1 !important;
 }
 
 @media (max-width: 767px) {
+  .workforce-payment-review-backdrop:has(.workforce-advance-entry-sheet) {
+    align-items: end !important;
+    padding: 0 !important;
+  }
+
+  .workforce-advance-entry-sheet {
+    border-radius: 24px 24px 0 0 !important;
+    max-height: calc(100dvh - max(18px, env(safe-area-inset-top))) !important;
+    width: 100% !important;
+  }
+
+  .workforce-advance-entry-sheet > header {
+    padding-inline: 20px !important;
+  }
+
+  .workforce-advance-entry-sheet > .workforce-advance-entry-body {
+    padding-inline: 20px !important;
+  }
+
   /* Invoice / market serial and buyer / customer share one compact row. */
   .sales-form > label:nth-of-type(2) {
     grid-column: 1 !important;
@@ -88,6 +368,22 @@
 }
 
 @media (max-width: 390px) {
+  .workforce-advance-entry-sheet > header,
+  .workforce-advance-entry-sheet > .workforce-advance-entry-body,
+  .workforce-advance-entry-sheet > footer {
+    padding-inline: 16px !important;
+  }
+
+  .workforce-advance-entry-sheet .workforce-advance-entry-row {
+    gap: 9px !important;
+    grid-template-columns: minmax(0, 0.46fr) minmax(0, 0.54fr) !important;
+  }
+
+  .workforce-advance-entry-sheet > footer .workforce-payment-review__actions {
+    gap: 9px !important;
+    grid-template-columns: minmax(86px, 0.35fr) minmax(0, 1fr) !important;
+  }
+
   .sales-form > label:nth-of-type(2),
   .sales-form > label:nth-of-type(3) {
     order: 3 !important;
@@ -104,5 +400,19 @@
 
   .sales-form__actions[data-sales-carton-count]::before {
     font-size: 0.63rem;
+  }
+}
+
+@media (max-width: 350px) {
+  .workforce-advance-entry-sheet .workforce-advance-entry-row {
+    grid-template-columns: 1fr !important;
+  }
+
+  .workforce-advance-entry-sheet > footer .workforce-payment-review__actions {
+    grid-template-columns: 1fr !important;
+  }
+
+  .workforce-advance-entry-sheet > footer .secondary-action {
+    order: 2;
   }
 }
