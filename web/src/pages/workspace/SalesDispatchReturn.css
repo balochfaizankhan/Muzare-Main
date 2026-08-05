@@ -1,0 +1,50 @@
+/* Market return action shown beside Select dispatch in the Sales availability card. */
+.sales-availability-list article footer:has(.sales-dispatch-return-action) {
+  align-items: stretch;
+  display: grid !important;
+  gap: 9px !important;
+  grid-template-columns: minmax(0, 1fr) minmax(118px, 0.48fr) !important;
+}
+
+.sales-availability-list article footer:has(.sales-dispatch-return-action) > button {
+  margin: 0 !important;
+  min-width: 0 !important;
+  width: 100% !important;
+}
+
+.sales-dispatch-return-action {
+  background: #fff !important;
+  border: 1px solid #d6dfda !important;
+  border-radius: 12px !important;
+  box-shadow: none !important;
+  color: #45564d !important;
+  font-size: 0.8rem !important;
+  font-weight: 760 !important;
+  min-height: 46px !important;
+  padding: 9px 12px !important;
+}
+
+.sales-dispatch-return-action:hover,
+.sales-dispatch-return-action:focus-visible {
+  background: #f6f9f7 !important;
+  border-color: #b9c8c0 !important;
+  color: #253b2e !important;
+  outline: none;
+}
+
+.sales-dispatch-return-action:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+@media (max-width: 390px) {
+  .sales-availability-list article footer:has(.sales-dispatch-return-action) {
+    gap: 7px !important;
+    grid-template-columns: minmax(0, 1fr) minmax(104px, 0.46fr) !important;
+  }
+
+  .sales-dispatch-return-action {
+    font-size: 0.74rem !important;
+    padding-inline: 9px !important;
+  }
+}
