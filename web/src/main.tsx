@@ -19,6 +19,7 @@ import "./expense-report-polish.css";
 import "./android-report-print-fix.css";
 import "./sticky-action-regression-fixes.css";
 import "./sales-advance-mobile-refinement.css";
+import "./record-advance-footer-anchor.css";
 import "./sales-date-sync";
 import { installSystemTextLocalizationGuard } from "./lib/systemTextLocalization";
 import { installSalesAdvanceMobileRefinements } from "./lib/salesAdvanceMobileRefinements";
