@@ -82,7 +82,9 @@
   }
 
   .dispatch-master-dialog > .worker-dialog__body {
-    display: block !important;
+    align-content: start !important;
+    display: grid !important;
+    grid-auto-rows: max-content !important;
     min-height: 0 !important;
     overflow-y: auto !important;
     overscroll-behavior: contain;
@@ -91,19 +93,30 @@
   }
 
   .dispatch-master-dialog .dispatch-master-form {
+    align-self: start !important;
     background: #fbfcfb !important;
     border: 1px solid #e4eae6 !important;
     border-radius: 18px !important;
     display: grid !important;
+    flex: none !important;
     gap: 13px !important;
-    margin: 0 0 18px !important;
+    height: auto !important;
+    margin: 0 0 14px !important;
+    max-height: none !important;
+    min-height: 0 !important;
     padding: 15px !important;
+    width: 100% !important;
+  }
+
+  .dispatch-master-dialog .dispatch-master-form > * {
+    flex: none !important;
   }
 
   .dispatch-master-dialog .dispatch-master-form > label:not(.checkbox-row) {
     display: grid !important;
     gap: 6px !important;
     margin: 0 !important;
+    min-height: 0 !important;
   }
 
   .dispatch-master-dialog .dispatch-master-form > label > span {
@@ -140,13 +153,15 @@
     border-radius: 14px !important;
     color: #263442 !important;
     display: grid !important;
+    flex: none !important;
     font-size: 0.88rem !important;
     font-weight: 760 !important;
     gap: 12px !important;
     grid-template-columns: auto minmax(0, 1fr) !important;
+    height: auto !important;
     line-height: 1.25 !important;
     margin: 2px 0 0 !important;
-    min-height: 56px !important;
+    min-height: 54px !important;
     padding: 10px 13px !important;
   }
 
@@ -167,12 +182,20 @@
     padding: 9px 11px;
   }
 
-  /* Existing master records: support current list wrappers without changing markup. */
+  /* Remove inherited spacer/flex behavior between the form and record list. */
+  .dispatch-master-dialog .worker-dialog__body > hr,
+  .dispatch-master-dialog .worker-dialog__body > .divider,
+  .dispatch-master-dialog .worker-dialog__body > [class*="separator"] {
+    margin: 4px 0 12px !important;
+  }
+
   .dispatch-master-dialog .worker-dialog__body > section,
   .dispatch-master-dialog .worker-dialog__body > div:not(.dispatch-master-form),
   .dispatch-master-dialog .dispatch-master-list,
   .dispatch-master-dialog .master-record-list {
+    align-self: start !important;
     gap: 10px !important;
+    min-height: 0 !important;
   }
 
   .dispatch-master-dialog .record-card,
@@ -188,7 +211,6 @@
     padding: 13px !important;
   }
 
-  /* Current cards are direct body descendants after the form in some builds. */
   .dispatch-master-dialog .worker-dialog__body > article,
   .dispatch-master-dialog .worker-dialog__body > ul > li {
     background: #ffffff !important;
@@ -271,10 +293,12 @@
   }
 
   .dispatch-master-dialog > .worker-dialog__body {
-    padding-inline: 14px !important;
+    padding: 13px 14px 20px !important;
   }
 
   .dispatch-master-dialog .dispatch-master-form {
+    gap: 11px !important;
+    margin-bottom: 12px !important;
     padding: 13px !important;
   }
 
