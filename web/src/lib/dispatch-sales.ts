@@ -2,14 +2,29 @@ import i18n from "../i18n";
 import type { DateType, Dispatch, Sale } from "./offline-db";
 import { isActiveOperationalRecord } from "./operationalRecords";
 
+export type DispatchMarketReturn = {
+  id: string;
+  dispatchItemId: string;
+  dateTypeId: string;
+  dateTypeName?: string;
+  cartons: number;
+  returnedAt: string;
+  note?: string;
+};
+
+export type DispatchWithMarketReturns = Dispatch & {
+  marketReturns?: DispatchMarketReturn[];
+};
+
 export type DispatchAvailability = {
-  dispatch: Dispatch;
+  dispatch: DispatchWithMarketReturns;
   itemId: string;
   dateTypeId: string;
   dateTypeName: string;
   vehicleLabel: string;
   dispatchedCartons: number;
   soldCartons: number;
+  returnedCartons: number;
   remainingCartons: number;
   searchText: string;
 };
@@ -41,6 +56,26 @@ export function soldQuantityByDispatchItem(sales: Sale[]) {
   return sold;
 }
 
+export function returnedQuantityByDispatchItem(dispatches: Dispatch[]) {
+  const returned = new Map<string, number>();
+  for (const dispatch of dispatches as DispatchWithMarketReturns[]) {
+    if (!isActiveOperationalRecord(dispatch)) continue;
+    for (const entry of dispatch.marketReturns ?? []) {
+      const key = dispatchItemKey(dispatch.id, entry.dispatchItemId);
+      if (!key) continue;
+      returned.set(key, (returned.get(key) ?? 0) + Math.max(Number(entry.cartons || 0), 0));
+    }
+  }
+  return returned;
+}
+
+export function returnedCartonsForDispatch(dispatch: Dispatch) {
+  return (dispatch as DispatchWithMarketReturns).marketReturns?.reduce(
+    (sum, entry) => sum + Math.max(Number(entry.cartons || 0), 0),
+    0,
+  ) ?? 0;
+}
+
 export function buildDispatchAvailability(
   dispatches: Dispatch[],
   sales: Sale[],
@@ -49,15 +84,17 @@ export function buildDispatchAvailability(
 ) {
   const dateTypeNames = new Map(dateTypes.map((type) => [type.id, type.name]));
   const soldByItem = soldQuantityByDispatchItem(sales);
+  const returnedByItem = returnedQuantityByDispatchItem(dispatches);
   const rows: DispatchAvailability[] = [];
 
-  for (const dispatch of dispatches) {
+  for (const dispatch of dispatches as DispatchWithMarketReturns[]) {
     if (!isActiveOperationalRecord(dispatch)) continue;
     const items = dispatch.items ?? [];
     for (const item of items) {
       const key = dispatchItemKey(dispatch.id, item.id);
       const soldCartons = soldByItem.get(key) ?? 0;
-      const remainingCartons = Math.max(item.cartons - soldCartons, 0);
+      const returnedCartons = returnedByItem.get(key) ?? 0;
+      const remainingCartons = Math.max(item.cartons - soldCartons - returnedCartons, 0);
       const dateTypeName = item.dateTypeName ?? dateTypeNames.get(item.dateTypeId) ?? i18n.t("dispatchSales.unknownType");
       const vehicle = vehicleLabel(dispatch);
       rows.push({
@@ -68,6 +105,7 @@ export function buildDispatchAvailability(
         vehicleLabel: vehicle,
         dispatchedCartons: item.cartons,
         soldCartons,
+        returnedCartons,
         remainingCartons,
         searchText: `${dispatch.date} ${dateTypeName} ${vehicle}`.toLowerCase(),
       });
