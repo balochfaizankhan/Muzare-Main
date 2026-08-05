@@ -1,13 +1,29 @@
 /* Requested mobile form refinements for Sales and the quick Advance dialog. */
 
-/* The quick Record Advance sheet explicitly returns to its original in-dialog footer. */
+/* Keep Record Advance inside its original dialog footer. It must not use either
+   the global fixed action bar or a locally sticky footer. */
+body:has(.workforce-advance-entry-sheet > form[data-sticky-action-disabled="true"]),
+body:has(.worker-action-dialog form[data-sticky-action-disabled="true"]) {
+  --sticky-action-reserved-space: 0px;
+}
+
+.workforce-advance-entry-sheet > form[data-sticky-action-disabled="true"],
 .worker-action-dialog form[data-sticky-action-disabled="true"] {
   padding-block-end: 16px !important;
 }
 
+.workforce-advance-entry-sheet > form[data-sticky-action-disabled="true"] > footer,
 .worker-action-dialog form[data-sticky-action-disabled="true"] > footer {
-  position: sticky;
-  bottom: 0;
+  bottom: auto !important;
+  display: flex !important;
+  inset: auto !important;
+  position: static !important;
+  z-index: auto !important;
+}
+
+.workforce-advance-entry-sheet > form[data-sticky-action-disabled="true"] > footer > button,
+.worker-action-dialog form[data-sticky-action-disabled="true"] > footer > button {
+  min-width: 0 !important;
 }
 
 @media (max-width: 767px) {
