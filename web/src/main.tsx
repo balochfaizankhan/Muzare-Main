@@ -20,10 +20,12 @@ import "./android-report-print-fix.css";
 import "./sticky-action-regression-fixes.css";
 import "./sales-advance-mobile-refinement.css";
 import "./record-advance-footer-anchor.css";
+import "./returned-to-farm-report.css";
 import "./sales-date-sync";
 import { installSystemTextLocalizationGuard } from "./lib/systemTextLocalization";
 import { installSalesAdvanceMobileRefinements } from "./lib/salesAdvanceMobileRefinements";
 import { installDetachedReportPrintBridge } from "./lib/detachedReportPrint";
+import { installReturnedToFarmReport } from "./lib/returnedToFarmReport";
 import { queryClient } from "./lib/query-client";
 import { markStartup, scheduleBackgroundTask } from "./lib/startupPerf";
 
@@ -32,7 +34,9 @@ function RootShell() {
     markStartup("app-shell-mounted");
     const removeLocalizationGuard = installSystemTextLocalizationGuard();
     const removeFormRefinements = installSalesAdvanceMobileRefinements();
+    const removeReturnedToFarmReport = installReturnedToFarmReport();
     return () => {
+      removeReturnedToFarmReport();
       removeFormRefinements();
       removeLocalizationGuard();
     };
