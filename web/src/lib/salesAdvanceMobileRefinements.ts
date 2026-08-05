@@ -15,20 +15,25 @@ const managedDataAttributes = [
   "data-safe-area",
 ];
 
+const currentQuickAdvanceSelector = ".workforce-advance-entry-sheet > form";
+const legacyQuickAdvanceSelector = ".worker-action-dialog form.worker-action-form";
+const quickAdvanceFormSelector = `${currentQuickAdvanceSelector}, ${legacyQuickAdvanceSelector}`;
+
 function removeManagedActionDecorations(element: HTMLElement) {
   element.classList.remove(...managedBarClasses);
   managedDataAttributes.forEach((attribute) => element.removeAttribute(attribute));
 }
 
 function restoreAdvanceDialogFooter(form: HTMLFormElement) {
-  const isQuickAdvanceForm = Boolean(
-    form.matches(".worker-action-dialog form.worker-action-form")
+  const isCurrentQuickAdvanceForm = form.matches(currentQuickAdvanceSelector);
+  const isLegacyQuickAdvanceForm = Boolean(
+    form.matches(legacyQuickAdvanceSelector)
     && form.querySelector(".labour-combobox")
     && form.querySelector('input[type="date"]')
     && form.querySelector('input[type="number"]')
     && form.querySelector(".payment-account-select"),
   );
-  if (!isQuickAdvanceForm) return;
+  if (!isCurrentQuickAdvanceForm && !isLegacyQuickAdvanceForm) return;
 
   const newlyDisabled = form.dataset.stickyActionDisabled !== "true";
   form.dataset.stickyActionDisabled = "true";
@@ -70,7 +75,7 @@ function updateSalesCartonSummary(form: HTMLFormElement) {
 }
 
 function scanForms(root: ParentNode) {
-  root.querySelectorAll<HTMLFormElement>("form.worker-action-form").forEach(restoreAdvanceDialogFooter);
+  root.querySelectorAll<HTMLFormElement>(quickAdvanceFormSelector).forEach(restoreAdvanceDialogFooter);
   root.querySelectorAll<HTMLFormElement>("form.sales-form").forEach(updateSalesCartonSummary);
 }
 
