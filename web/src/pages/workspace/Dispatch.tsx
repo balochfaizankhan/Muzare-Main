@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { ModulePage } from "../ModulePage";
 import "./DispatchCompact.css";
 import "./RecordCardHierarchy.css";
+import "./DispatchMobileRecordsCompact.css";
 
 type DispatchTab = "entry" | "records";
 
