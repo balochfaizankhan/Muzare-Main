@@ -2,6 +2,7 @@ import { ClipboardList, Plus } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useEffect, useLayoutEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { ensureDispatchEntryData } from "../../lib/entryDataQueries";
 import { markEntryPerformance, measureEntryPerformance, waitForElement } from "../../lib/entryPerformance";
 import { ModulePage } from "../ModulePage";
 import "./DispatchCompact.css";
@@ -26,6 +27,7 @@ function DispatchWorkspaceEnhancements() {
 
   useEffect(() => {
     markEntryPerformance("dispatch-navigation-start");
+    void ensureDispatchEntryData();
   }, []);
 
   useLayoutEffect(() => {
