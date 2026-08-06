@@ -1,9 +1,11 @@
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../auth/AuthProvider";
+import { markEntryPerformance, measureEntryPerformance, waitForElement } from "../../lib/entryPerformance";
 import { canEdit } from "../../lib/permissions";
 import {
   buildDispatchAvailability,
+  type DispatchAvailabilityItem,
   type DispatchWithMarketReturns,
 } from "../../lib/dispatch-sales";
 import {
@@ -17,6 +19,8 @@ import { ModulePage } from "../ModulePage";
 import "./RecordCardHierarchy.css";
 import "./SalesDispatchReturn.css";
 
+type AvailabilityLoader = () => Promise<DispatchAvailabilityItem[]>;
+
 function SalesDispatchReturnEnhancement() {
   const { t } = useTranslation();
   const { user, sessionRefreshing } = useAuth();
@@ -26,35 +30,43 @@ function SalesDispatchReturnEnhancement() {
   );
 
   useEffect(() => {
+    markEntryPerformance("sales-navigation-start");
+  }, []);
+
+  useEffect(() => {
     if (!canReturnDispatch) return;
 
     let cancelled = false;
+    let listObserver: MutationObserver | null = null;
     let decorating = false;
+    let decorationQueued = false;
+    let availabilityPromise: Promise<DispatchAvailabilityItem[]> | null = null;
 
-    const decorate = async () => {
+    const loadAvailability: AvailabilityLoader = () => {
+      availabilityPromise ??= Promise.all([
+        workspaceRecords(offlineDb.dispatches),
+        workspaceRecords(offlineDb.sales),
+        workspaceRecords(offlineDb.vehicles),
+        workspaceConfigRecords(offlineDb.dateTypes),
+      ]).then(([dispatches, sales, vehicles, dateTypes]) => buildDispatchAvailability(
+        dispatches,
+        sales,
+        dateTypes,
+        (dispatch) =>
+          vehicles.find((vehicle) => vehicle.id === dispatch.vehicleId)?.number
+          ?? dispatch.vehicleNumber
+          ?? t("modulePageExtra.unknownVehicleFallback", { defaultValue: "Unknown vehicle" }),
+      ).filter((item) => item.remainingCartons > 0));
+      return availabilityPromise;
+    };
+
+    const decorate = async (list: HTMLElement) => {
       if (decorating || cancelled) return;
-      const list = document.querySelector<HTMLElement>(".sales-availability-list");
-      if (!list) return;
       decorating = true;
 
       try {
-        const [dispatches, sales, vehicles, dateTypes] = await Promise.all([
-          workspaceRecords(offlineDb.dispatches),
-          workspaceRecords(offlineDb.sales),
-          workspaceRecords(offlineDb.vehicles),
-          workspaceConfigRecords(offlineDb.dateTypes),
-        ]);
+        const availability = await loadAvailability();
         if (cancelled) return;
-
-        const availability = buildDispatchAvailability(
-          dispatches,
-          sales,
-          dateTypes,
-          (dispatch) =>
-            vehicles.find((vehicle) => vehicle.id === dispatch.vehicleId)?.number
-            ?? dispatch.vehicleNumber
-            ?? t("modulePageExtra.unknownVehicleFallback", { defaultValue: "Unknown vehicle" }),
-        ).filter((item) => item.remainingCartons > 0);
 
         const usedKeys = new Set<string>();
         const cards = Array.from(list.querySelectorAll<HTMLElement>(":scope > article"));
@@ -128,6 +140,7 @@ function SalesDispatchReturnEnhancement() {
                 };
 
                 await persistOperationalRecord("dispatch", updated as Dispatch);
+                availabilityPromise = null;
                 window.dispatchEvent(new Event("muzare-data-refresh"));
                 window.dispatchEvent(new CustomEvent("muzare-toast", {
                   detail: t("salesPage.returnToFarmSuccess", {
@@ -147,21 +160,45 @@ function SalesDispatchReturnEnhancement() {
             };
           }
         });
+
+        markEntryPerformance("sales-dispatch-selector-ready");
+        measureEntryPerformance("sales-navigation-to-selector", "sales-navigation-start", "sales-dispatch-selector-ready");
       } finally {
         decorating = false;
+        if (decorationQueued && !cancelled) {
+          decorationQueued = false;
+          void decorate(list);
+        }
       }
     };
 
-    const observer = new MutationObserver(() => void decorate());
-    observer.observe(document.body, { childList: true, subtree: true });
-    const refreshDecoration = () => void decorate();
+    const requestDecoration = (list: HTMLElement) => {
+      if (decorating) {
+        decorationQueued = true;
+        return;
+      }
+      requestAnimationFrame(() => void decorate(list));
+    };
+
+    let activeList: HTMLElement | null = null;
+    void waitForElement<HTMLElement>(".sales-availability-list", { maxFrames: 180 }).then((list) => {
+      if (cancelled || !list) return;
+      activeList = list;
+      listObserver = new MutationObserver(() => requestDecoration(list));
+      listObserver.observe(list, { childList: true, subtree: true });
+      requestDecoration(list);
+    });
+
+    const refreshDecoration = () => {
+      availabilityPromise = null;
+      if (activeList) requestDecoration(activeList);
+    };
     window.addEventListener("muzare-data-refresh", refreshDecoration);
     window.addEventListener("muzare-local-data-change", refreshDecoration);
-    void decorate();
 
     return () => {
       cancelled = true;
-      observer.disconnect();
+      listObserver?.disconnect();
       window.removeEventListener("muzare-data-refresh", refreshDecoration);
       window.removeEventListener("muzare-local-data-change", refreshDecoration);
     };
