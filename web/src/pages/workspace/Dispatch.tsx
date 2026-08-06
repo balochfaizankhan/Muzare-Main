@@ -2,8 +2,10 @@ import { ClipboardList, Plus } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useEffect, useLayoutEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { buildDispatchAvailability } from "../../lib/dispatch-sales";
 import { ensureDispatchEntryData } from "../../lib/entryDataQueries";
 import { markEntryPerformance, measureEntryPerformance, waitForElement } from "../../lib/entryPerformance";
+import { offlineDb, workspaceConfigRecords, workspaceRecords, type Dispatch as DispatchRecord } from "../../lib/offline-db";
 import { ModulePage } from "../ModulePage";
 import "./DispatchCompact.css";
 import "./RecordCardHierarchy.css";
@@ -18,6 +20,11 @@ type DispatchWorkspaceMounts = {
   form: HTMLElement;
   records: HTMLElement;
 };
+
+const dispatchSerialFor = (dispatch: DispatchRecord) =>
+  dispatch.serialNumber?.trim()
+  || dispatch.dispatchNumber?.trim()
+  || `DIS-${dispatch.date.replaceAll("-", "")}-${dispatch.id.slice(0, 3).toUpperCase()}`;
 
 function DispatchWorkspaceEnhancements() {
   const { t } = useTranslation();
@@ -85,6 +92,64 @@ function DispatchWorkspaceEnhancements() {
     const detailsLabel = t("common.details", { defaultValue: "Details" });
     const hideDetailsLabel = t("common.hideDetails", { defaultValue: "Hide details" });
     let decorationScheduled = false;
+    let balanceRefreshSequence = 0;
+
+    const correctReturnedBalances = async () => {
+      const sequence = ++balanceRefreshSequence;
+      const [dispatches, sales, vehicles, dateTypes] = await Promise.all([
+        workspaceRecords(offlineDb.dispatches),
+        workspaceRecords(offlineDb.sales),
+        workspaceRecords(offlineDb.vehicles),
+        workspaceConfigRecords(offlineDb.dateTypes),
+      ]);
+      if (sequence !== balanceRefreshSequence) return;
+
+      const availability = buildDispatchAvailability(
+        dispatches,
+        sales,
+        dateTypes,
+        (dispatch) => vehicles.find((vehicle) => vehicle.id === dispatch.vehicleId)?.number
+          ?? dispatch.vehicleNumber
+          ?? t("modulePageExtra.unknownVehicleFallback", { defaultValue: "Unknown vehicle" }),
+      );
+      const rowsByDispatch = new Map<string, typeof availability>();
+      availability.forEach((row) => {
+        const current = rowsByDispatch.get(row.dispatch.id) ?? [];
+        current.push(row);
+        rowsByDispatch.set(row.dispatch.id, current);
+      });
+
+      const totalRemaining = availability.reduce((sum, row) => sum + row.remainingCartons, 0);
+      const remainingLabel = t("salesPage.remainingCartons");
+      mounts.root.querySelectorAll<HTMLElement>(".dispatch-overview-card__metric, .dispatch-kpi-grid > article").forEach((metric) => {
+        if (metric.querySelector("span")?.textContent?.trim() !== remainingLabel) return;
+        const value = metric.querySelector<HTMLElement>("strong");
+        if (value) value.textContent = String(totalRemaining);
+      });
+
+      const dispatchBySerial = new Map(dispatches.map((dispatch) => [dispatchSerialFor(dispatch), dispatch]));
+      mounts.records.querySelectorAll<HTMLElement>(".dispatch-record-card").forEach((card) => {
+        const serial = card.querySelector<HTMLElement>("header strong")?.textContent?.trim() ?? "";
+        const dispatch = dispatchBySerial.get(serial);
+        if (!dispatch) return;
+        const rows = rowsByDispatch.get(dispatch.id) ?? [];
+        const sold = rows.reduce((sum, row) => sum + row.soldCartons, 0);
+        const remaining = rows.reduce((sum, row) => sum + row.remainingCartons, 0);
+        const linkedSales = sales.filter((sale) => !sale.deletedAt && sale.dispatchId === dispatch.id).length;
+
+        const summary = card.querySelector<HTMLElement>(".dispatch-linked-summary");
+        if (summary) {
+          summary.textContent = `${t("salesPage.soldCartons")} ${sold} | ${remainingLabel} ${remaining} | ${t("dispatchPage.linkedSales")} ${linkedSales}`;
+        }
+
+        const breakdownRows = Array.from(card.querySelectorAll<HTMLElement>(".dispatch-breakdown > span"));
+        breakdownRows.forEach((element, index) => {
+          const row = rows[index];
+          if (!row) return;
+          element.textContent = `${row.dateTypeName}: ${row.dispatchedCartons} | ${t("salesPage.soldCartons")} ${row.soldCartons} | ${remainingLabel} ${row.remainingCartons}`;
+        });
+      });
+    };
 
     const decorateCards = () => {
       decorationScheduled = false;
@@ -145,6 +210,8 @@ function DispatchWorkspaceEnhancements() {
         });
         footer.before(toggle);
       });
+
+      void correctReturnedBalances();
     };
 
     const scheduleDecoration = () => {
@@ -156,6 +223,10 @@ function DispatchWorkspaceEnhancements() {
     const recordsObserver = new MutationObserver(scheduleDecoration);
     recordsObserver.observe(mounts.records, { childList: true, subtree: true });
     scheduleDecoration();
+
+    const refreshBalances = () => void correctReturnedBalances();
+    window.addEventListener("muzare-data-refresh", refreshBalances);
+    window.addEventListener("muzare-local-data-change", refreshBalances);
 
     const handleRecordAction = (event: Event) => {
       const target = event.target;
@@ -169,7 +240,10 @@ function DispatchWorkspaceEnhancements() {
 
     mounts.records.addEventListener("click", handleRecordAction);
     return () => {
+      balanceRefreshSequence += 1;
       recordsObserver.disconnect();
+      window.removeEventListener("muzare-data-refresh", refreshBalances);
+      window.removeEventListener("muzare-local-data-change", refreshBalances);
       mounts.records.removeEventListener("click", handleRecordAction);
     };
   }, [mounts, t]);
