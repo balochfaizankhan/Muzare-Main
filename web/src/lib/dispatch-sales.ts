@@ -29,6 +29,9 @@ export type DispatchAvailability = {
   searchText: string;
 };
 
+// Compatibility alias for entry-page loaders and enhancements.
+export type DispatchAvailabilityItem = DispatchAvailability;
+
 export const dispatchItemKey = (dispatchId?: string, dispatchItemId?: string) =>
   dispatchId && dispatchItemId ? `${dispatchId}:${dispatchItemId}` : "";
 
