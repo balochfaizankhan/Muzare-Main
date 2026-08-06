@@ -1,16 +1,10 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation } from "react-router-dom";
-import { ensureLocalAccounts } from "../../lib/offline-db";
+import { ensureExpenseEntryData } from "../../lib/entryDataQueries";
 import { markEntryPerformance, measureEntryPerformance, waitForElement } from "../../lib/entryPerformance";
 import { ModulePage } from "../ModulePage";
 import "./ExpensesWarmup.css";
-
-let accountsWarmupPromise: Promise<void> | null = null;
-const warmAccountsOnce = () => {
-  accountsWarmupPromise ??= ensureLocalAccounts().then(() => undefined);
-  return accountsWarmupPromise;
-};
 
 function ExpenseFormWarmup() {
   const location = useLocation();
@@ -29,11 +23,11 @@ function ExpenseFormWarmup() {
     let hostObserver: MutationObserver | null = null;
     markEntryPerformance("expenses-navigation-start");
 
-    // Initialise local accounts once. The actual form loader can reuse the same
-    // IndexedDB state instead of starting a duplicate full account collection read.
-    void warmAccountsOnce();
+    // Reuse the scope-aware TanStack Query cache. Cached data is returned immediately;
+    // stale data revalidates in the background without blocking the form surface.
+    void ensureExpenseEntryData();
 
-    void waitForElement<HTMLElement>(".expenses-module--form", { maxFrames: 120 }).then((nextHost) => {
+    void waitForElement<HTMLElement>(".expenses-module--form", { maxFrames: 180 }).then((nextHost) => {
       if (cancelled || !nextHost) return;
       setHost(nextHost);
 
