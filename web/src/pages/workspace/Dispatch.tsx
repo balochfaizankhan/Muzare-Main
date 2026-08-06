@@ -2,6 +2,7 @@ import { ClipboardList, Plus } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useEffect, useLayoutEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { markEntryPerformance, measureEntryPerformance, waitForElement } from "../../lib/entryPerformance";
 import { ModulePage } from "../ModulePage";
 import "./DispatchCompact.css";
 import "./RecordCardHierarchy.css";
@@ -23,18 +24,26 @@ function DispatchWorkspaceEnhancements() {
   const [recordCount, setRecordCount] = useState(0);
   const [mounts, setMounts] = useState<DispatchWorkspaceMounts | null>(null);
 
+  useEffect(() => {
+    markEntryPerformance("dispatch-navigation-start");
+  }, []);
+
   useLayoutEffect(() => {
-    let pageObserver: MutationObserver | null = null;
+    let cancelled = false;
     let installed: DispatchWorkspaceMounts | null = null;
 
-    const install = () => {
-      if (installed) return true;
+    const install = async () => {
+      const overview = await waitForElement<HTMLElement>(".dispatch-overview-card", { maxFrames: 180 });
+      if (cancelled || !overview) return;
 
-      const overview = document.querySelector<HTMLElement>(".dispatch-overview-card");
-      const form = document.querySelector<HTMLElement>(".dispatch-form-card");
-      const records = document.querySelector<HTMLElement>(".dispatch-records-panel");
-      const root = overview?.parentElement;
-      if (!overview || !form || !records || !root || form.parentElement !== root || records.parentElement !== root) return false;
+      const root = overview.parentElement;
+      if (!root) return;
+
+      const [form, records] = await Promise.all([
+        waitForElement<HTMLElement>(".dispatch-form-card", { root, maxFrames: 120 }),
+        waitForElement<HTMLElement>(".dispatch-records-panel", { root, maxFrames: 120 }),
+      ]);
+      if (cancelled || !form || !records || form.parentElement !== root || records.parentElement !== root) return;
 
       const tabs = document.createElement("div");
       tabs.className = "dispatch-compact-tabs-mount";
@@ -45,17 +54,14 @@ function DispatchWorkspaceEnhancements() {
 
       installed = { root, tabs, form, records };
       setMounts(installed);
-      pageObserver?.disconnect();
-      return true;
+      markEntryPerformance("dispatch-form-mounted");
+      measureEntryPerformance("dispatch-navigation-to-form", "dispatch-navigation-start", "dispatch-form-mounted");
     };
 
-    if (!install()) {
-      pageObserver = new MutationObserver(() => install());
-      pageObserver.observe(document.body, { childList: true, subtree: true });
-    }
+    void install();
 
     return () => {
-      pageObserver?.disconnect();
+      cancelled = true;
       if (installed) {
         installed.root.classList.remove("dispatch-compact-workspace");
         delete installed.root.dataset.dispatchTab;
@@ -76,8 +82,10 @@ function DispatchWorkspaceEnhancements() {
 
     const detailsLabel = t("common.details", { defaultValue: "Details" });
     const hideDetailsLabel = t("common.hideDetails", { defaultValue: "Hide details" });
+    let decorationScheduled = false;
 
     const decorateCards = () => {
+      decorationScheduled = false;
       const cards = Array.from(mounts.records.querySelectorAll<HTMLElement>(".dispatch-record-card"));
       setRecordCount(cards.length);
 
@@ -137,9 +145,15 @@ function DispatchWorkspaceEnhancements() {
       });
     };
 
-    const recordsObserver = new MutationObserver(decorateCards);
+    const scheduleDecoration = () => {
+      if (decorationScheduled) return;
+      decorationScheduled = true;
+      requestAnimationFrame(decorateCards);
+    };
+
+    const recordsObserver = new MutationObserver(scheduleDecoration);
     recordsObserver.observe(mounts.records, { childList: true, subtree: true });
-    decorateCards();
+    scheduleDecoration();
 
     const handleRecordAction = (event: Event) => {
       const target = event.target;
