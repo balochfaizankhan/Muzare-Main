@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../auth/AuthProvider";
+import { ensureSalesEntryData, invalidateEntryData } from "../../lib/entryDataQueries";
 import { markEntryPerformance, measureEntryPerformance, waitForElement } from "../../lib/entryPerformance";
 import { canEdit } from "../../lib/permissions";
 import {
@@ -8,12 +9,7 @@ import {
   type DispatchAvailabilityItem,
   type DispatchWithMarketReturns,
 } from "../../lib/dispatch-sales";
-import {
-  offlineDb,
-  workspaceConfigRecords,
-  workspaceRecords,
-  type Dispatch,
-} from "../../lib/offline-db";
+import { offlineDb, type Dispatch } from "../../lib/offline-db";
 import { persistOperationalRecord } from "../../services/syncService";
 import { ModulePage } from "../ModulePage";
 import "./RecordCardHierarchy.css";
@@ -43,12 +39,7 @@ function SalesDispatchReturnEnhancement() {
     let availabilityPromise: Promise<DispatchAvailabilityItem[]> | null = null;
 
     const loadAvailability: AvailabilityLoader = () => {
-      availabilityPromise ??= Promise.all([
-        workspaceRecords(offlineDb.dispatches),
-        workspaceRecords(offlineDb.sales),
-        workspaceRecords(offlineDb.vehicles),
-        workspaceConfigRecords(offlineDb.dateTypes),
-      ]).then(([dispatches, sales, vehicles, dateTypes]) => buildDispatchAvailability(
+      availabilityPromise ??= ensureSalesEntryData().then(({ dispatches, sales, vehicles, dateTypes }) => buildDispatchAvailability(
         dispatches,
         sales,
         dateTypes,
@@ -141,6 +132,10 @@ function SalesDispatchReturnEnhancement() {
 
                 await persistOperationalRecord("dispatch", updated as Dispatch);
                 availabilityPromise = null;
+                await Promise.allSettled([
+                  invalidateEntryData("sales"),
+                  invalidateEntryData("dispatch"),
+                ]);
                 window.dispatchEvent(new Event("muzare-data-refresh"));
                 window.dispatchEvent(new CustomEvent("muzare-toast", {
                   detail: t("salesPage.returnToFarmSuccess", {
