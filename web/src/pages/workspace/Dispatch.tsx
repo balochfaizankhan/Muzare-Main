@@ -13,13 +13,7 @@ import "./DispatchMobileRecordsCompact.css";
 import "./DispatchMasterDialogsMobile.css";
 
 type DispatchTab = "entry" | "records";
-
-type DispatchWorkspaceMounts = {
-  root: HTMLElement;
-  tabs: HTMLElement;
-  form: HTMLElement;
-  records: HTMLElement;
-};
+type DispatchWorkspaceMounts = { root: HTMLElement; tabs: HTMLElement; form: HTMLElement; records: HTMLElement };
 
 const dispatchSerialFor = (dispatch: DispatchRecord) =>
   dispatch.serialNumber?.trim()
@@ -43,11 +37,8 @@ function DispatchWorkspaceEnhancements() {
 
     const install = async () => {
       const overview = await waitForElement<HTMLElement>(".dispatch-overview-card", { maxFrames: 180 });
-      if (cancelled || !overview) return;
-
+      if (cancelled || !overview?.parentElement) return;
       const root = overview.parentElement;
-      if (!root) return;
-
       const [form, records] = await Promise.all([
         waitForElement<HTMLElement>(".dispatch-form-card", { root, maxFrames: 120 }),
         waitForElement<HTMLElement>(".dispatch-records-panel", { root, maxFrames: 120 }),
@@ -60,7 +51,6 @@ function DispatchWorkspaceEnhancements() {
       root.insertBefore(tabs, form);
       root.classList.add("dispatch-compact-workspace");
       root.dataset.dispatchTab = "entry";
-
       installed = { root, tabs, form, records };
       setMounts(installed);
       markEntryPerformance("dispatch-form-mounted");
@@ -68,7 +58,6 @@ function DispatchWorkspaceEnhancements() {
     };
 
     void install();
-
     return () => {
       cancelled = true;
       if (installed) {
@@ -82,13 +71,11 @@ function DispatchWorkspaceEnhancements() {
   }, [t]);
 
   useEffect(() => {
-    if (!mounts) return;
-    mounts.root.dataset.dispatchTab = activeTab;
+    if (mounts) mounts.root.dataset.dispatchTab = activeTab;
   }, [activeTab, mounts]);
 
   useEffect(() => {
     if (!mounts) return;
-
     const detailsLabel = t("common.details", { defaultValue: "Details" });
     const hideDetailsLabel = t("common.hideDetails", { defaultValue: "Hide details" });
     let decorationScheduled = false;
@@ -113,18 +100,14 @@ function DispatchWorkspaceEnhancements() {
           ?? t("modulePageExtra.unknownVehicleFallback", { defaultValue: "Unknown vehicle" }),
       );
       const rowsByDispatch = new Map<string, typeof availability>();
-      availability.forEach((row) => {
-        const current = rowsByDispatch.get(row.dispatch.id) ?? [];
-        current.push(row);
-        rowsByDispatch.set(row.dispatch.id, current);
-      });
+      for (const row of availability) rowsByDispatch.set(row.dispatch.id, [...(rowsByDispatch.get(row.dispatch.id) ?? []), row]);
 
-      const totalRemaining = availability.reduce((sum, row) => sum + row.remainingCartons, 0);
+      const totalRemaining = String(availability.reduce((sum, row) => sum + row.remainingCartons, 0));
       const remainingLabel = t("salesPage.remainingCartons");
       mounts.root.querySelectorAll<HTMLElement>(".dispatch-overview-card__metric, .dispatch-kpi-grid > article").forEach((metric) => {
         if (metric.querySelector("span")?.textContent?.trim() !== remainingLabel) return;
         const value = metric.querySelector<HTMLElement>("strong");
-        if (value) value.textContent = String(totalRemaining);
+        if (value && value.textContent !== totalRemaining) value.textContent = totalRemaining;
       });
 
       const dispatchBySerial = new Map(dispatches.map((dispatch) => [dispatchSerialFor(dispatch), dispatch]));
@@ -136,17 +119,19 @@ function DispatchWorkspaceEnhancements() {
         const sold = rows.reduce((sum, row) => sum + row.soldCartons, 0);
         const remaining = rows.reduce((sum, row) => sum + row.remainingCartons, 0);
         const linkedSales = sales.filter((sale) => !sale.deletedAt && sale.dispatchId === dispatch.id).length;
+        const signature = rows.map((row) => `${row.itemId}:${row.soldCartons}:${row.returnedCartons}:${row.remainingCartons}`).join("|");
+        if (card.dataset.returnBalanceSignature === signature) return;
+        card.dataset.returnBalanceSignature = signature;
 
         const summary = card.querySelector<HTMLElement>(".dispatch-linked-summary");
-        if (summary) {
-          summary.textContent = `${t("salesPage.soldCartons")} ${sold} | ${remainingLabel} ${remaining} | ${t("dispatchPage.linkedSales")} ${linkedSales}`;
-        }
+        const nextSummary = `${t("salesPage.soldCartons")} ${sold} | ${remainingLabel} ${remaining} | ${t("dispatchPage.linkedSales")} ${linkedSales}`;
+        if (summary && summary.textContent !== nextSummary) summary.textContent = nextSummary;
 
-        const breakdownRows = Array.from(card.querySelectorAll<HTMLElement>(".dispatch-breakdown > span"));
-        breakdownRows.forEach((element, index) => {
+        Array.from(card.querySelectorAll<HTMLElement>(".dispatch-breakdown > span")).forEach((element, index) => {
           const row = rows[index];
           if (!row) return;
-          element.textContent = `${row.dateTypeName}: ${row.dispatchedCartons} | ${t("salesPage.soldCartons")} ${row.soldCartons} | ${remainingLabel} ${row.remainingCartons}`;
+          const nextText = `${row.dateTypeName}: ${row.dispatchedCartons} | ${t("salesPage.soldCartons")} ${row.soldCartons} | ${remainingLabel} ${row.remainingCartons}`;
+          if (element.textContent !== nextText) element.textContent = nextText;
         });
       });
     };
@@ -155,46 +140,33 @@ function DispatchWorkspaceEnhancements() {
       decorationScheduled = false;
       const cards = Array.from(mounts.records.querySelectorAll<HTMLElement>(".dispatch-record-card"));
       setRecordCount(cards.length);
-
       cards.forEach((card) => {
         if (card.dataset.compactEnhanced === "true") return;
         const header = card.querySelector<HTMLElement>("header");
         const breakdown = card.querySelector<HTMLElement>(".dispatch-breakdown");
         const footer = card.querySelector<HTMLElement>("footer");
         if (!header || !breakdown || !footer) return;
-
         card.dataset.compactEnhanced = "true";
 
         const primaryItems = document.createElement("div");
         primaryItems.className = "dispatch-record-card__primary-items";
-        primaryItems.setAttribute(
-          "aria-label",
-          t("modulePageExtra.dispatchTypesAndCartons", { defaultValue: "Dispatch types and cartons" }),
-        );
-
+        primaryItems.setAttribute("aria-label", t("modulePageExtra.dispatchTypesAndCartons", { defaultValue: "Dispatch types and cartons" }));
         Array.from(breakdown.children).forEach((row) => {
           const cartonText = row.querySelector<HTMLElement>(".bidi-isolate")?.textContent?.trim() ?? "";
           const cartonCount = Number(cartonText);
-          const leadingText = Array.from(row.childNodes)
-            .find((node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim())
-            ?.textContent ?? "";
+          const leadingText = Array.from(row.childNodes).find((node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim())?.textContent ?? "";
           const typeName = leadingText.replace(/\s*[:：]\s*$/u, "").trim();
           if (!typeName || !Number.isFinite(cartonCount)) return;
-
           const item = document.createElement("div");
           item.className = "dispatch-record-card__primary-item";
-
           const name = document.createElement("strong");
           name.textContent = typeName;
-
           const quantity = document.createElement("span");
           quantity.className = "bidi-isolate";
           quantity.textContent = t("dashboardPage.cartonsCount", { count: cartonCount });
-
           item.append(name, quantity);
           primaryItems.append(item);
         });
-
         if (primaryItems.childElementCount > 0) header.after(primaryItems);
 
         const toggle = document.createElement("button");
@@ -210,7 +182,6 @@ function DispatchWorkspaceEnhancements() {
         });
         footer.before(toggle);
       });
-
       void correctReturnedBalances();
     };
 
@@ -219,7 +190,6 @@ function DispatchWorkspaceEnhancements() {
       decorationScheduled = true;
       requestAnimationFrame(decorateCards);
     };
-
     const recordsObserver = new MutationObserver(scheduleDecoration);
     recordsObserver.observe(mounts.records, { childList: true, subtree: true });
     scheduleDecoration();
@@ -233,12 +203,11 @@ function DispatchWorkspaceEnhancements() {
       if (!(target instanceof Element)) return;
       const button = target.closest<HTMLButtonElement>("button");
       if (!button || button.classList.contains("danger-link") || button.classList.contains("dispatch-record-card__details-toggle")) return;
-
       setActiveTab("entry");
       window.setTimeout(() => mounts.form.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
     };
-
     mounts.records.addEventListener("click", handleRecordAction);
+
     return () => {
       balanceRefreshSequence += 1;
       recordsObserver.disconnect();
@@ -249,7 +218,6 @@ function DispatchWorkspaceEnhancements() {
   }, [mounts, t]);
 
   if (!mounts) return null;
-
   const changeTab = (tab: DispatchTab) => (event: ReactMouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     setActiveTab(tab);
@@ -258,25 +226,11 @@ function DispatchWorkspaceEnhancements() {
 
   return createPortal(
     <div className="dispatch-compact-tabs" role="tablist" aria-label={t("modulePageExtra.dispatchWorkspaceNavigation", { defaultValue: "Dispatch workspace" })}>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={activeTab === "entry"}
-        className={activeTab === "entry" ? "is-active" : undefined}
-        onClick={changeTab("entry")}
-      >
-        <Plus size={17} />
-        <span>{t("dispatchPage.createNewDispatch")}</span>
+      <button type="button" role="tab" aria-selected={activeTab === "entry"} className={activeTab === "entry" ? "is-active" : undefined} onClick={changeTab("entry")}>
+        <Plus size={17} /><span>{t("dispatchPage.createNewDispatch")}</span>
       </button>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={activeTab === "records"}
-        className={activeTab === "records" ? "is-active" : undefined}
-        onClick={changeTab("records")}
-      >
-        <ClipboardList size={17} />
-        <span>{t("dispatchPage.dispatchRecords")}</span>
+      <button type="button" role="tab" aria-selected={activeTab === "records"} className={activeTab === "records" ? "is-active" : undefined} onClick={changeTab("records")}>
+        <ClipboardList size={17} /><span>{t("dispatchPage.dispatchRecords")}</span>
         {recordCount > 0 && <small className="bidi-isolate">{recordCount}</small>}
       </button>
     </div>,
@@ -285,8 +239,5 @@ function DispatchWorkspaceEnhancements() {
 }
 
 export function Dispatch() {
-  return <>
-    <ModulePage module="dispatch" />
-    <DispatchWorkspaceEnhancements />
-  </>;
+  return <><ModulePage module="dispatch" /><DispatchWorkspaceEnhancements /></>;
 }
