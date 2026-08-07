@@ -26,6 +26,7 @@ import { installSystemTextLocalizationGuard } from "./lib/systemTextLocalization
 import { installSalesAdvanceMobileRefinements } from "./lib/salesAdvanceMobileRefinements";
 import { installDetachedReportPrintBridge } from "./lib/detachedReportPrint";
 import { installReturnedToFarmReport } from "./lib/returnedToFarmReport";
+import { installEntryPreloading } from "./lib/entryPreload";
 import { queryClient } from "./lib/query-client";
 import { markStartup, scheduleBackgroundTask } from "./lib/startupPerf";
 
@@ -35,7 +36,9 @@ function RootShell() {
     const removeLocalizationGuard = installSystemTextLocalizationGuard();
     const removeFormRefinements = installSalesAdvanceMobileRefinements();
     const removeReturnedToFarmReport = installReturnedToFarmReport();
+    const removeEntryPreloading = installEntryPreloading();
     return () => {
+      removeEntryPreloading();
       removeReturnedToFarmReport();
       removeFormRefinements();
       removeLocalizationGuard();

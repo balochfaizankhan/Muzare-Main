@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation } from "react-router-dom";
-import { ensureLocalAccounts, offlineDb, workspaceRecords } from "../../lib/offline-db";
+import { ensureExpenseEntryData } from "../../lib/entryDataQueries";
+import { markEntryPerformance, measureEntryPerformance, waitForElement } from "../../lib/entryPerformance";
 import { ModulePage } from "../ModulePage";
 import "./ExpensesWarmup.css";
 
@@ -18,23 +19,39 @@ function ExpenseFormWarmup() {
       return;
     }
 
-    // Start the IndexedDB/account setup in parallel with session refresh so the real
-    // voucher form has less work left when permissions resolve.
-    void Promise.allSettled([
-      ensureLocalAccounts(),
-      workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }),
-    ]);
+    let cancelled = false;
+    let hostObserver: MutationObserver | null = null;
+    markEntryPerformance("expenses-navigation-start");
 
-    const inspect = () => {
-      const nextHost = document.querySelector<HTMLElement>(".expenses-module--form");
+    // Reuse the scope-aware TanStack Query cache. Cached data is returned immediately;
+    // stale data revalidates in the background without blocking the form surface.
+    void ensureExpenseEntryData();
+
+    void waitForElement<HTMLElement>(".expenses-module--form", { maxFrames: 180 }).then((nextHost) => {
+      if (cancelled || !nextHost) return;
       setHost(nextHost);
-      setFormReady(Boolean(nextHost?.querySelector(".expense-voucher-form")));
-    };
 
-    inspect();
-    const observer = new MutationObserver(inspect);
-    observer.observe(document.body, { childList: true, subtree: true });
-    return () => observer.disconnect();
+      const inspect = () => {
+        const ready = Boolean(nextHost.querySelector(".expense-voucher-form"));
+        setFormReady(ready);
+        if (ready) {
+          markEntryPerformance("expenses-form-mounted");
+          measureEntryPerformance("expenses-navigation-to-form", "expenses-navigation-start", "expenses-form-mounted");
+          hostObserver?.disconnect();
+        }
+      };
+
+      inspect();
+      if (!nextHost.querySelector(".expense-voucher-form")) {
+        hostObserver = new MutationObserver(inspect);
+        hostObserver.observe(nextHost, { childList: true, subtree: true });
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      hostObserver?.disconnect();
+    };
   }, [isNewVoucher]);
 
   if (!isNewVoucher || !host || formReady) return null;
