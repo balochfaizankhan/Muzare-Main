@@ -4,8 +4,12 @@ import {
 } from "./reportPdfBase";
 import type { ReportPdfContext, ReportPdfSpec } from "./reportPdfBase";
 import type { BootstrapData } from "./api";
+import { getCanonicalExpenseCategory } from "./expenseCategories";
 import { getActiveFarmId, getActiveSeasonId } from "./offline-db";
 import { queryClient } from "./query-client";
+import { translateExpenseCategory } from "./systemTranslations";
+import { getVoucherDisplayNumber } from "./vouchers";
+import { loadWorkspaceVouchers } from "./voucherCollections";
 
 type ReportRow = unknown[];
 
@@ -113,6 +117,70 @@ function salesPdfLabels(language?: string): SalesPdfLabels {
     cartons: "Number of cartons",
     rate: "Rate / price",
   };
+}
+
+function expenseItemsHeader(language?: string) {
+  const normalized = (language ?? "en").toLowerCase();
+  if (normalized.startsWith("ar")) return "العناصر / التفاصيل";
+  if (normalized.startsWith("ur")) return "اشیاء / تفصیل";
+  return "Items / Details";
+}
+
+async function expandExpenseLogRows(filename: string, rows: ReportRow[], language?: string): Promise<ReportRow[]> {
+  if (!filename.toLowerCase().includes("expense-log")) return rows;
+
+  const table = firstTable(rows, 6);
+  if (!table) return rows;
+
+  const vouchers = await loadWorkspaceVouchers({
+    includeGeneralFarmRecords: true,
+    includeImportedAcrossSeasons: true,
+    visibility: "general-expenses",
+  });
+  const voucherByLedgerKey = new Map<string, typeof vouchers[number]>();
+  for (const voucher of vouchers) {
+    const voucherNumber = getVoucherDisplayNumber(voucher) || voucher.voucherNumber;
+    if (!voucherNumber || !voucher.date) continue;
+    voucherByLedgerKey.set(`${voucher.date}\u0000${voucherNumber}`, voucher);
+  }
+
+  const expanded: ReportRow[] = [];
+  for (const row of table.data) {
+    const date = text(row[0]);
+    const voucherNumber = text(row[1]);
+    const voucher = voucherByLedgerKey.get(`${date}\u0000${voucherNumber}`);
+    if (!voucher?.items?.length) {
+      expanded.push(row);
+      continue;
+    }
+
+    const account = row[4] ?? "";
+    const voucherAmount = row[5] ?? voucher.amount;
+    voucher.items.forEach((item, index) => {
+      const description = text(item.description) || text(item.remarks) || text(voucher.notes) || "-";
+      const category = translateExpenseCategory(
+        getCanonicalExpenseCategory(item.categoryName ?? item.category ?? voucher.category),
+      ) || "-";
+      expanded.push([
+        index === 0 ? date : "",
+        index === 0 ? voucherNumber : "",
+        description,
+        category,
+        index === 0 ? account : "",
+        index === 0 ? voucherAmount : "",
+      ]);
+    });
+  }
+
+  const header = [...table.header];
+  header[2] = expenseItemsHeader(language);
+  const tableEnd = table.headerIndex + 1 + table.data.length;
+  return [
+    ...rows.slice(0, table.headerIndex),
+    header,
+    ...expanded,
+    ...rows.slice(tableEnd),
+  ];
 }
 
 function compactSales(rows: ReportRow[], language?: string) {
@@ -265,23 +333,24 @@ function resolveScopedContext(context?: ReportPdfContext | null): ReportPdfConte
   };
 }
 
-function professionalSpec(spec: ReportPdfSpec): ReportPdfSpec {
+async function professionalSpec(spec: ReportPdfSpec): Promise<ReportPdfSpec> {
+  const expandedRows = await expandExpenseLogRows(spec.filename, spec.rows, spec.language);
   return {
     ...spec,
     filename: pdfFilename(spec.filename),
     context: resolveScopedContext(spec.context),
     orientation: professionalOrientation(spec.filename, spec.orientation),
     variant: "minimal",
-    rows: professionalRows(spec.filename, spec.rows, spec.language),
+    rows: professionalRows(spec.filename, expandedRows, spec.language),
   };
 }
 
 export async function createReportPdf(spec: ReportPdfSpec): Promise<ArrayBuffer> {
-  return createBaseReportPdf(professionalSpec(spec));
+  return createBaseReportPdf(await professionalSpec(spec));
 }
 
 export async function exportReportPdf(spec: ReportPdfSpec): Promise<void> {
-  return exportBaseReportPdf(professionalSpec(spec));
+  return exportBaseReportPdf(await professionalSpec(spec));
 }
 
 export type { ReportPdfContext, ReportPdfSpec };
