@@ -17,6 +17,57 @@ import "./SalesDispatchReturn.css";
 
 type AvailabilityLoader = () => Promise<DispatchAvailabilityItem[]>;
 
+function SalesDispatchSelectionHandoff() {
+  useEffect(() => {
+    let cancelled = false;
+    let activeList: HTMLElement | null = null;
+
+    const bringSaleEntryIntoView = async () => {
+      // Give the existing dispatch-selection handler time to populate the form.
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      if (cancelled) return;
+
+      const form = await waitForElement<HTMLElement>(".sales-form", { maxFrames: 90 });
+      if (cancelled || !form) return;
+
+      const editableNumbers = Array.from(form.querySelectorAll<HTMLInputElement>('input[type="number"]:not([readonly]):not([disabled])'));
+      const cartonsField = editableNumbers[0] ?? null;
+      const target = cartonsField?.closest<HTMLElement>("label") ?? cartonsField ?? form;
+      target.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+
+      if (cartonsField) {
+        window.setTimeout(() => {
+          if (cancelled) return;
+          cartonsField.focus({ preventScroll: true });
+          cartonsField.select();
+        }, 260);
+      }
+    };
+
+    const handleSelection = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const button = target.closest<HTMLButtonElement>("button");
+      if (!button || !activeList?.contains(button)) return;
+      if (button.classList.contains("sales-dispatch-return-action")) return;
+      void bringSaleEntryIntoView();
+    };
+
+    void waitForElement<HTMLElement>(".sales-availability-list", { maxFrames: 180 }).then((list) => {
+      if (cancelled || !list) return;
+      activeList = list;
+      list.addEventListener("click", handleSelection);
+    });
+
+    return () => {
+      cancelled = true;
+      activeList?.removeEventListener("click", handleSelection);
+    };
+  }, []);
+
+  return null;
+}
+
 function SalesDispatchReturnEnhancement() {
   const { t } = useTranslation();
   const { user, sessionRefreshing } = useAuth();
@@ -206,6 +257,7 @@ export function Sales() {
   return (
     <>
       <ModulePage module="sales" />
+      <SalesDispatchSelectionHandoff />
       <SalesDispatchReturnEnhancement />
     </>
   );
