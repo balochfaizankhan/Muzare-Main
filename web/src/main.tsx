@@ -20,6 +20,7 @@ import "./android-report-print-fix.css";
 import "./sticky-action-regression-fixes.css";
 import "./sales-advance-mobile-refinement.css";
 import "./record-advance-footer-anchor.css";
+import "./dispatch-mobile-dialog-compact-fixes.css";
 import "./returned-to-farm-report.css";
 import "./sales-date-sync";
 import { installSystemTextLocalizationGuard } from "./lib/systemTextLocalization";
@@ -27,6 +28,7 @@ import { installSalesAdvanceMobileRefinements } from "./lib/salesAdvanceMobileRe
 import { installDetachedReportPrintBridge } from "./lib/detachedReportPrint";
 import { installReturnedToFarmReport } from "./lib/returnedToFarmReport";
 import { installEntryPreloading } from "./lib/entryPreload";
+import { installDispatchMasterDialogEnhancements } from "./lib/dispatchMasterDialogEnhancements";
 import { queryClient } from "./lib/query-client";
 import { markStartup, scheduleBackgroundTask } from "./lib/startupPerf";
 
@@ -37,7 +39,9 @@ function RootShell() {
     const removeFormRefinements = installSalesAdvanceMobileRefinements();
     const removeReturnedToFarmReport = installReturnedToFarmReport();
     const removeEntryPreloading = installEntryPreloading();
+    const removeDispatchMasterEnhancements = installDispatchMasterDialogEnhancements();
     return () => {
+      removeDispatchMasterEnhancements();
       removeEntryPreloading();
       removeReturnedToFarmReport();
       removeFormRefinements();
