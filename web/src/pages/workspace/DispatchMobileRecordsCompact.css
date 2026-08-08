@@ -1,5 +1,4 @@
-/* Compact mobile SaaS presentation for Dispatch record cards.
-   Presentation only: dispatch, linked-sale, view and delete behavior remain unchanged. */
+/* Compact mobile SaaS presentation for Dispatch record cards. */
 
 @media (max-width: 900px) {
   .dispatch-compact-workspace .dispatch-records-panel {
@@ -14,7 +13,7 @@
     border: 1px solid #dfe7e2 !important;
     border-radius: 15px !important;
     display: grid !important;
-    gap: 7px !important;
+    gap: 8px !important;
     padding: 12px !important;
   }
 
@@ -56,8 +55,6 @@
     margin: 0 !important;
   }
 
-  /* Keep the total quantity as one compact badge. Shared styles previously
-     stretched an inner element into a separate empty rounded square. */
   .dispatch-compact-workspace .dispatch-record-card header > b {
     align-items: center !important;
     align-self: center !important;
@@ -69,17 +66,14 @@
     display: inline-flex !important;
     font-size: 0.74rem !important;
     font-weight: 800 !important;
-    gap: 0 !important;
     grid-column: 2;
     grid-row: 1;
     height: auto !important;
     justify-content: center !important;
     justify-self: end !important;
     line-height: 1.15 !important;
-    max-width: none !important;
     min-height: 0 !important;
     min-width: 0 !important;
-    overflow: visible !important;
     padding: 7px 10px !important;
     white-space: nowrap !important;
     width: max-content !important;
@@ -91,54 +85,39 @@
     display: none !important;
   }
 
-  .dispatch-compact-workspace .dispatch-record-card header > b > * {
-    aspect-ratio: auto !important;
-    background: transparent !important;
-    border: 0 !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
-    display: inline !important;
-    height: auto !important;
-    margin: 0 !important;
-    min-height: 0 !important;
-    min-width: 0 !important;
-    padding: 0 !important;
-    width: auto !important;
+  .dispatch-compact-workspace .dispatch-record-card .dispatch-breakdown {
+    display: none !important;
   }
 
   .dispatch-compact-workspace .dispatch-record-card__primary-items {
     border-top: 1px solid #edf1ee;
     display: grid !important;
-    gap: 4px !important;
+    gap: 6px !important;
     margin-top: 2px;
-    padding-top: 7px;
+    padding-top: 8px;
+  }
+
+  .dispatch-compact-workspace .dispatch-record-card.is-expanded .dispatch-record-card__primary-items {
+    display: none !important;
   }
 
   .dispatch-compact-workspace .dispatch-record-card__primary-item {
     align-items: center;
-    background: #f7faf8 !important;
-    border: 1px solid #e1ebe4 !important;
+    background: #f8faf9 !important;
+    border: 1px solid #e3eae6 !important;
     border-radius: 10px !important;
     display: grid !important;
-    gap: 8px;
+    gap: 10px;
     grid-template-columns: minmax(0, 1fr) auto;
-    min-height: 38px !important;
-    padding: 7px 10px !important;
-  }
-
-  .dispatch-compact-workspace .dispatch-record-card__primary-item:nth-child(n + 3) {
-    display: none !important;
-  }
-
-  .dispatch-compact-workspace .dispatch-record-card.is-expanded .dispatch-record-card__primary-item:nth-child(n + 3) {
-    display: grid !important;
+    min-height: 40px !important;
+    padding: 8px 10px !important;
   }
 
   .dispatch-compact-workspace .dispatch-record-card__primary-item strong {
     color: var(--text-primary, #1f2937) !important;
-    font-size: 0.78rem !important;
+    font-size: 0.79rem !important;
     font-weight: 680 !important;
-    line-height: 1.28 !important;
+    line-height: 1.3 !important;
     min-width: 0;
     overflow-wrap: anywhere;
   }
@@ -151,22 +130,66 @@
     white-space: nowrap;
   }
 
-  /* The original detailed breakdown is duplicate information in summary mode.
-     It is shown only when the user explicitly expands Details. */
-  .dispatch-compact-workspace .dispatch-record-card .dispatch-breakdown {
-    gap: 4px !important;
+  .dispatch-compact-workspace .dispatch-record-card__detail-panel {
+    border-top: 1px solid #edf1ee;
+    display: grid;
+    gap: 7px;
+    padding-top: 8px;
   }
 
-  .dispatch-compact-workspace .dispatch-record-card .dispatch-breakdown > span {
-    border-radius: 9px !important;
-    font-size: 0.7rem !important;
-    padding: 7px 9px !important;
+  .dispatch-compact-workspace .dispatch-record-card__detail-panel[hidden] {
+    display: none !important;
+  }
+
+  .dispatch-compact-workspace .dispatch-record-card__detail-row {
+    background: #f8faf9;
+    border: 1px solid #e3eae6;
+    border-radius: 11px;
+    display: grid;
+    gap: 7px;
+    padding: 9px 10px;
+  }
+
+  .dispatch-compact-workspace .dispatch-record-card__detail-row > strong {
+    color: #263442;
+    font-size: 0.79rem;
+    font-weight: 760;
+    line-height: 1.25;
+  }
+
+  .dispatch-compact-workspace .dispatch-record-card__detail-row > div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .dispatch-compact-workspace .dispatch-record-card__detail-row > div > span {
+    background: #fff;
+    border: 1px solid #e1e7e3;
+    border-radius: 999px;
+    color: #68757a;
+    font-size: 0.67rem;
+    line-height: 1;
+    padding: 6px 8px;
+    white-space: nowrap;
+  }
+
+  .dispatch-compact-workspace .dispatch-record-card__detail-row > div > span b {
+    color: #263442;
+    font-weight: 800;
+  }
+
+  .dispatch-compact-workspace .dispatch-record-card__detail-row > div > .dispatch-record-card__returned {
+    background: #fff8ed;
+    border-color: #f0dfc1;
+    color: #8b641f;
   }
 
   .dispatch-compact-workspace .dispatch-record-card .dispatch-linked-summary {
     border-top: 0 !important;
     color: #68757a !important;
-    font-size: 0.68rem !important;
+    font-size: 0.69rem !important;
+    font-weight: 620 !important;
     line-height: 1.3 !important;
     margin: 0 !important;
     padding: 2px 0 0 !important;
@@ -178,10 +201,10 @@
     border: 0 !important;
     color: #2e7136 !important;
     display: inline-flex !important;
-    font-size: 0.7rem !important;
+    font-size: 0.71rem !important;
     font-weight: 760 !important;
     justify-self: start;
-    min-height: 28px !important;
+    min-height: 30px !important;
     padding: 0 !important;
   }
 
@@ -196,12 +219,8 @@
     border-radius: 10px !important;
     font-size: 0.76rem !important;
     font-weight: 760 !important;
-    min-height: 38px !important;
+    min-height: 40px !important;
     padding: 7px 12px !important;
-  }
-
-  .dispatch-compact-workspace .dispatch-record-card footer button:not(.danger-link) {
-    box-shadow: none !important;
   }
 
   .dispatch-compact-workspace .dispatch-record-card footer .danger-link {
@@ -216,18 +235,14 @@
     padding: 11px !important;
   }
 
-  .dispatch-compact-workspace .dispatch-record-card header {
-    gap: 4px 8px !important;
-  }
-
   .dispatch-compact-workspace .dispatch-record-card header > b {
     font-size: 0.7rem !important;
     padding: 6px 8px !important;
   }
 
   .dispatch-compact-workspace .dispatch-record-card__primary-item {
-    min-height: 36px !important;
-    padding: 6px 9px !important;
+    min-height: 38px !important;
+    padding: 7px 9px !important;
   }
 
   .dispatch-compact-workspace .dispatch-record-card footer .danger-link {
