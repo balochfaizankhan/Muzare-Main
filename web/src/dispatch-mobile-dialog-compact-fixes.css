@@ -1,6 +1,40 @@
 /* Record Advance mobile density and viewport-bottom action bar.
-   Dispatch master dialog layout now lives exclusively in
-   pages/workspace/DispatchMasterDialogsMobile.css. */
+   Dispatch master dialog visual design lives in
+   pages/workspace/DispatchMasterDialogsMobile.css. The high-specificity
+   master-form guard below prevents generic module-form sizing from stretching
+   the two small master-data forms on mobile. */
+
+@media (max-width: 900px) {
+  .dispatch-master-dialog > .worker-dialog__body > #dispatch-date-type-form.dispatch-master-form,
+  .dispatch-master-dialog > .worker-dialog__body > #dispatch-vehicle-form.dispatch-master-form {
+    align-self: stretch !important;
+    block-size: fit-content !important;
+    flex: 0 0 auto !important;
+    flex-basis: auto !important;
+    flex-grow: 0 !important;
+    flex-shrink: 0 !important;
+    height: fit-content !important;
+    max-block-size: none !important;
+    max-height: none !important;
+    min-block-size: 0 !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  .dispatch-master-dialog > .worker-dialog__body > #dispatch-date-type-form.dispatch-master-form::before,
+  .dispatch-master-dialog > .worker-dialog__body > #dispatch-date-type-form.dispatch-master-form::after,
+  .dispatch-master-dialog > .worker-dialog__body > #dispatch-vehicle-form.dispatch-master-form::before,
+  .dispatch-master-dialog > .worker-dialog__body > #dispatch-vehicle-form.dispatch-master-form::after {
+    content: none !important;
+    display: none !important;
+  }
+
+  .dispatch-master-dialog > .worker-dialog__body > #dispatch-date-type-form.dispatch-master-form + .master-list,
+  .dispatch-master-dialog > .worker-dialog__body > #dispatch-vehicle-form.dispatch-master-form + .master-list {
+    margin-top: 8px !important;
+    padding-top: 8px !important;
+  }
+}
 
 @media (max-width: 767px) {
   .workforce-advance-entry-sheet > header {
