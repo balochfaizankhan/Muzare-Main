@@ -1,52 +1,64 @@
 const MASTER_DIALOG_SELECTOR = ".dispatch-master-dialog";
 const MASTER_FORM_SELECTOR = ".dispatch-master-form";
 const MASTER_BODY_SELECTOR = ".worker-dialog__body";
-const RECORD_SELECTOR = ".record-card, .dispatch-master-record, .master-record-card, .worker-card, article, li";
+const MASTER_LIST_SELECTOR = ".master-list";
 
 const focusMasterForm = (dialog: HTMLElement) => {
-  window.setTimeout(() => {
-    requestAnimationFrame(() => {
-      const body = dialog.querySelector<HTMLElement>(MASTER_BODY_SELECTOR);
-      const form = dialog.querySelector<HTMLElement>(MASTER_FORM_SELECTOR);
-      if (!form) return;
+  const run = () => {
+    const body = dialog.querySelector<HTMLElement>(MASTER_BODY_SELECTOR);
+    const form = dialog.querySelector<HTMLElement>(MASTER_FORM_SELECTOR);
+    if (!form) return;
 
-      if (body) body.scrollTo({ top: 0, behavior: "smooth" });
-      else form.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
-
+    if (body) {
+      body.scrollTo({ top: 0, behavior: "smooth" });
+      // Android WebViews can occasionally stop a smooth overflow scroll early
+      // while React is repainting. Reassert the destination after the repaint.
       window.setTimeout(() => {
-        const firstField = form.querySelector<HTMLInputElement>("input:not([type='checkbox']):not([disabled])");
-        firstField?.focus({ preventScroll: true });
-        firstField?.select();
-      }, 220);
-    });
-  }, 0);
+        if (body.scrollTop > 2) body.scrollTo({ top: 0, behavior: "auto" });
+      }, 240);
+    } else {
+      form.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
+    }
+
+    window.setTimeout(() => {
+      const firstField = form.querySelector<HTMLInputElement>("input:not([type='checkbox']):not([disabled])");
+      if (!firstField) return;
+      firstField.focus({ preventScroll: true });
+      firstField.select();
+    }, 260);
+  };
+
+  // Let the React edit handler populate the form first, then move the sheet.
+  requestAnimationFrame(() => requestAnimationFrame(run));
 };
 
 /**
- * Mobile usability enhancement for Manage Types / Manage Vehicles.
- * The first action in each record card is Edit. After React fills the form,
- * scroll the dialog body itself back to the entry form and focus its first
- * editable field so the user never has to manually scroll upward.
+ * Manage Types / Manage Vehicles edit handoff.
+ * Both lists render Edit as the first action button in each master-list card.
+ * Listen after React's own click handler has run, then return the dialog's
+ * internal scroll container to the form and focus the first editable field.
  */
 export function installDispatchMasterDialogEnhancements() {
   const handleClick = (event: MouseEvent) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
-    const dialog = target.closest<HTMLElement>(MASTER_DIALOG_SELECTOR);
-    if (!dialog) return;
 
     const button = target.closest<HTMLButtonElement>("button");
-    if (!button) return;
-    const record = button.closest<HTMLElement>(RECORD_SELECTOR);
-    if (!record || !dialog.contains(record)) return;
+    const dialog = target.closest<HTMLElement>(MASTER_DIALOG_SELECTOR);
+    if (!button || !dialog) return;
 
-    const actionContainer = button.closest<HTMLElement>("footer, .card-actions, .record-actions") ?? record;
-    const firstAction = actionContainer.querySelector<HTMLButtonElement>("button");
-    if (!firstAction || firstAction !== button) return;
+    const list = button.closest<HTMLElement>(MASTER_LIST_SELECTOR);
+    const record = button.closest<HTMLElement>("article");
+    if (!list || !record || !dialog.contains(list) || !list.contains(record)) return;
+
+    const actions = Array.from(record.querySelectorAll<HTMLButtonElement>("button"));
+    if (actions[0] !== button) return;
 
     focusMasterForm(dialog);
   };
 
-  document.addEventListener("click", handleClick, true);
-  return () => document.removeEventListener("click", handleClick, true);
+  // Bubble phase is intentional: React's onClick has already loaded the record
+  // into state before this handoff schedules scrolling/focus.
+  document.addEventListener("click", handleClick, false);
+  return () => document.removeEventListener("click", handleClick, false);
 }
