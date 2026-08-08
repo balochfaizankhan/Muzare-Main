@@ -15,10 +15,28 @@ import "./DispatchMasterDialogsMobile.css";
 type DispatchTab = "entry" | "records";
 type DispatchWorkspaceMounts = { root: HTMLElement; tabs: HTMLElement; form: HTMLElement; records: HTMLElement };
 
+type AvailabilityRow = Awaited<ReturnType<typeof loadAvailability>>[number];
+
 const dispatchSerialFor = (dispatch: DispatchRecord) =>
   dispatch.serialNumber?.trim()
   || dispatch.dispatchNumber?.trim()
   || `DIS-${dispatch.date.replaceAll("-", "")}-${dispatch.id.slice(0, 3).toUpperCase()}`;
+
+async function loadAvailability() {
+  const [dispatches, sales, vehicles, dateTypes] = await Promise.all([
+    workspaceRecords(offlineDb.dispatches),
+    workspaceRecords(offlineDb.sales),
+    workspaceRecords(offlineDb.vehicles),
+    workspaceConfigRecords(offlineDb.dateTypes),
+  ]);
+  const availability = buildDispatchAvailability(
+    dispatches,
+    sales,
+    dateTypes,
+    (dispatch) => vehicles.find((vehicle) => vehicle.id === dispatch.vehicleId)?.number ?? dispatch.vehicleNumber ?? "",
+  );
+  return availability;
+}
 
 function DispatchWorkspaceEnhancements() {
   const { t } = useTranslation();
@@ -76,127 +94,124 @@ function DispatchWorkspaceEnhancements() {
 
   useEffect(() => {
     if (!mounts) return;
-    const detailsLabel = t("common.details", { defaultValue: "Details" });
-    const hideDetailsLabel = t("common.hideDetails", { defaultValue: "Hide details" });
-    let decorationScheduled = false;
-    let balanceRefreshSequence = 0;
+    let cancelled = false;
+    let renderScheduled = false;
+    let refreshSequence = 0;
 
-    const correctReturnedBalances = async () => {
-      const sequence = ++balanceRefreshSequence;
-      const [dispatches, sales, vehicles, dateTypes] = await Promise.all([
-        workspaceRecords(offlineDb.dispatches),
-        workspaceRecords(offlineDb.sales),
-        workspaceRecords(offlineDb.vehicles),
-        workspaceConfigRecords(offlineDb.dateTypes),
-      ]);
-      if (sequence !== balanceRefreshSequence) return;
+    const renderCards = async () => {
+      renderScheduled = false;
+      const sequence = ++refreshSequence;
+      const availability = await loadAvailability();
+      if (cancelled || sequence !== refreshSequence) return;
 
-      const availability = buildDispatchAvailability(
-        dispatches,
-        sales,
-        dateTypes,
-        (dispatch) => vehicles.find((vehicle) => vehicle.id === dispatch.vehicleId)?.number
-          ?? dispatch.vehicleNumber
-          ?? t("modulePageExtra.unknownVehicleFallback", { defaultValue: "Unknown vehicle" }),
-      );
-      const rowsByDispatch = new Map<string, typeof availability>();
+      const rowsByDispatch = new Map<string, AvailabilityRow[]>();
       for (const row of availability) rowsByDispatch.set(row.dispatch.id, [...(rowsByDispatch.get(row.dispatch.id) ?? []), row]);
+      const dispatchBySerial = new Map(availability.map((row) => [dispatchSerialFor(row.dispatch), row.dispatch]));
 
       const totalRemaining = String(availability.reduce((sum, row) => sum + row.remainingCartons, 0));
       const remainingLabel = t("salesPage.remainingCartons");
       mounts.root.querySelectorAll<HTMLElement>(".dispatch-overview-card__metric, .dispatch-kpi-grid > article").forEach((metric) => {
         if (metric.querySelector("span")?.textContent?.trim() !== remainingLabel) return;
         const value = metric.querySelector<HTMLElement>("strong");
-        if (value && value.textContent !== totalRemaining) value.textContent = totalRemaining;
+        if (value) value.textContent = totalRemaining;
       });
 
-      const dispatchBySerial = new Map(dispatches.map((dispatch) => [dispatchSerialFor(dispatch), dispatch]));
-      mounts.records.querySelectorAll<HTMLElement>(".dispatch-record-card").forEach((card) => {
+      const cards = Array.from(mounts.records.querySelectorAll<HTMLElement>(".dispatch-record-card"));
+      setRecordCount(cards.length);
+      cards.forEach((card) => {
         const serial = card.querySelector<HTMLElement>("header strong")?.textContent?.trim() ?? "";
         const dispatch = dispatchBySerial.get(serial);
         if (!dispatch) return;
         const rows = rowsByDispatch.get(dispatch.id) ?? [];
-        const sold = rows.reduce((sum, row) => sum + row.soldCartons, 0);
-        const remaining = rows.reduce((sum, row) => sum + row.remainingCartons, 0);
-        const linkedSales = sales.filter((sale) => !sale.deletedAt && sale.dispatchId === dispatch.id).length;
-        const signature = rows.map((row) => `${row.itemId}:${row.soldCartons}:${row.returnedCartons}:${row.remainingCartons}`).join("|");
-        if (card.dataset.returnBalanceSignature === signature) return;
-        card.dataset.returnBalanceSignature = signature;
+        if (!rows.length) return;
 
-        const summary = card.querySelector<HTMLElement>(".dispatch-linked-summary");
-        const nextSummary = `${t("salesPage.soldCartons")} ${sold} | ${remainingLabel} ${remaining} | ${t("dispatchPage.linkedSales")} ${linkedSales}`;
-        if (summary && summary.textContent !== nextSummary) summary.textContent = nextSummary;
-
-        Array.from(card.querySelectorAll<HTMLElement>(".dispatch-breakdown > span")).forEach((element, index) => {
-          const row = rows[index];
-          if (!row) return;
-          const nextText = `${row.dateTypeName}: ${row.dispatchedCartons} | ${t("salesPage.soldCartons")} ${row.soldCartons} | ${remainingLabel} ${row.remainingCartons}`;
-          if (element.textContent !== nextText) element.textContent = nextText;
-        });
-      });
-    };
-
-    const decorateCards = () => {
-      decorationScheduled = false;
-      const cards = Array.from(mounts.records.querySelectorAll<HTMLElement>(".dispatch-record-card"));
-      setRecordCount(cards.length);
-      cards.forEach((card) => {
-        if (card.dataset.compactEnhanced === "true") return;
-        const header = card.querySelector<HTMLElement>("header");
-        const breakdown = card.querySelector<HTMLElement>(".dispatch-breakdown");
-        const footer = card.querySelector<HTMLElement>("footer");
-        if (!header || !breakdown || !footer) return;
+        const signature = rows.map((row) => `${row.itemId}:${row.dispatchedCartons}:${row.soldCartons}:${row.returnedCartons}:${row.remainingCartons}`).join("|");
+        if (card.dataset.authoritativeSignature === signature && card.dataset.compactEnhanced === "true") return;
+        card.dataset.authoritativeSignature = signature;
         card.dataset.compactEnhanced = "true";
+
+        card.querySelectorAll(".dispatch-record-card__primary-items, .dispatch-record-card__detail-panel, .dispatch-record-card__details-toggle").forEach((element) => element.remove());
+
+        const header = card.querySelector<HTMLElement>("header");
+        const originalBreakdown = card.querySelector<HTMLElement>(".dispatch-breakdown");
+        const summary = card.querySelector<HTMLElement>(".dispatch-linked-summary");
+        const footer = card.querySelector<HTMLElement>("footer");
+        if (!header || !footer) return;
+        if (originalBreakdown) originalBreakdown.hidden = true;
 
         const primaryItems = document.createElement("div");
         primaryItems.className = "dispatch-record-card__primary-items";
         primaryItems.setAttribute("aria-label", t("modulePageExtra.dispatchTypesAndCartons", { defaultValue: "Dispatch types and cartons" }));
-        Array.from(breakdown.children).forEach((row) => {
-          const cartonText = row.querySelector<HTMLElement>(".bidi-isolate")?.textContent?.trim() ?? "";
-          const cartonCount = Number(cartonText);
-          const leadingText = Array.from(row.childNodes).find((node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim())?.textContent ?? "";
-          const typeName = leadingText.replace(/\s*[:：]\s*$/u, "").trim();
-          if (!typeName || !Number.isFinite(cartonCount)) return;
+        rows.forEach((row) => {
           const item = document.createElement("div");
           item.className = "dispatch-record-card__primary-item";
           const name = document.createElement("strong");
-          name.textContent = typeName;
+          name.textContent = row.dateTypeName;
           const quantity = document.createElement("span");
           quantity.className = "bidi-isolate";
-          quantity.textContent = t("dashboardPage.cartonsCount", { count: cartonCount });
+          quantity.textContent = t("dashboardPage.cartonsCount", { count: row.dispatchedCartons });
           item.append(name, quantity);
           primaryItems.append(item);
         });
-        if (primaryItems.childElementCount > 0) header.after(primaryItems);
+        header.after(primaryItems);
+
+        const detailPanel = document.createElement("div");
+        detailPanel.className = "dispatch-record-card__detail-panel";
+        detailPanel.hidden = true;
+        rows.forEach((row) => {
+          const detail = document.createElement("div");
+          detail.className = "dispatch-record-card__detail-row";
+          const name = document.createElement("strong");
+          name.textContent = row.dateTypeName;
+          const values = document.createElement("div");
+          values.innerHTML = `<span>${t("dispatchPage.cartons")} <b>${row.dispatchedCartons}</b></span><span>${t("salesPage.soldCartons")} <b>${row.soldCartons}</b></span><span>${remainingLabel} <b>${row.remainingCartons}</b></span>`;
+          if (row.returnedCartons > 0) {
+            const returned = document.createElement("span");
+            returned.className = "dispatch-record-card__returned";
+            returned.textContent = `${t("returnedToFarmReport.title", { defaultValue: "Returned to farm" })} ${row.returnedCartons}`;
+            values.append(returned);
+          }
+          detail.append(name, values);
+          detailPanel.append(detail);
+        });
+        primaryItems.after(detailPanel);
+
+        const sold = rows.reduce((sum, row) => sum + row.soldCartons, 0);
+        const remaining = rows.reduce((sum, row) => sum + row.remainingCartons, 0);
+        const linkedSales = rows.reduce((max, row) => Math.max(max, row.soldCartons > 0 ? 1 : 0), 0);
+        if (summary) summary.textContent = `${t("salesPage.soldCartons")} ${sold} · ${remainingLabel} ${remaining}${linkedSales ? ` · ${t("dispatchPage.linkedSales")} ${linkedSales}` : ""}`;
 
         const toggle = document.createElement("button");
         toggle.type = "button";
         toggle.className = "dispatch-record-card__details-toggle";
-        toggle.textContent = detailsLabel;
-        toggle.setAttribute("aria-expanded", "false");
+        const setExpanded = (expanded: boolean) => {
+          card.classList.toggle("is-expanded", expanded);
+          detailPanel.hidden = !expanded;
+          toggle.textContent = expanded
+            ? t("common.hideDetails", { defaultValue: "Hide details" })
+            : t("common.details", { defaultValue: "Details" });
+          toggle.setAttribute("aria-expanded", String(expanded));
+        };
+        setExpanded(false);
         toggle.addEventListener("click", (event) => {
           event.stopPropagation();
-          const expanded = card.classList.toggle("is-expanded");
-          toggle.textContent = expanded ? hideDetailsLabel : detailsLabel;
-          toggle.setAttribute("aria-expanded", String(expanded));
+          setExpanded(!card.classList.contains("is-expanded"));
         });
         footer.before(toggle);
       });
-      void correctReturnedBalances();
     };
 
-    const scheduleDecoration = () => {
-      if (decorationScheduled) return;
-      decorationScheduled = true;
-      requestAnimationFrame(decorateCards);
+    const scheduleRender = () => {
+      if (renderScheduled) return;
+      renderScheduled = true;
+      requestAnimationFrame(() => void renderCards());
     };
-    const recordsObserver = new MutationObserver(scheduleDecoration);
+    const recordsObserver = new MutationObserver(scheduleRender);
     recordsObserver.observe(mounts.records, { childList: true, subtree: true });
-    scheduleDecoration();
+    scheduleRender();
 
-    const refreshBalances = () => void correctReturnedBalances();
-    window.addEventListener("muzare-data-refresh", refreshBalances);
-    window.addEventListener("muzare-local-data-change", refreshBalances);
+    window.addEventListener("muzare-data-refresh", scheduleRender);
+    window.addEventListener("muzare-local-data-change", scheduleRender);
 
     const handleRecordAction = (event: Event) => {
       const target = event.target;
@@ -209,10 +224,11 @@ function DispatchWorkspaceEnhancements() {
     mounts.records.addEventListener("click", handleRecordAction);
 
     return () => {
-      balanceRefreshSequence += 1;
+      cancelled = true;
+      refreshSequence += 1;
       recordsObserver.disconnect();
-      window.removeEventListener("muzare-data-refresh", refreshBalances);
-      window.removeEventListener("muzare-local-data-change", refreshBalances);
+      window.removeEventListener("muzare-data-refresh", scheduleRender);
+      window.removeEventListener("muzare-local-data-change", scheduleRender);
       mounts.records.removeEventListener("click", handleRecordAction);
     };
   }, [mounts, t]);
