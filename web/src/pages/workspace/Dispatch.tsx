@@ -14,15 +14,14 @@ import "./DispatchMasterDialogsMobile.css";
 
 type DispatchTab = "entry" | "records";
 type DispatchWorkspaceMounts = { root: HTMLElement; tabs: HTMLElement; form: HTMLElement; records: HTMLElement };
-
-type AvailabilityRow = Awaited<ReturnType<typeof loadAvailability>>[number];
+type AvailabilityRow = ReturnType<typeof buildDispatchAvailability>[number];
 
 const dispatchSerialFor = (dispatch: DispatchRecord) =>
   dispatch.serialNumber?.trim()
   || dispatch.dispatchNumber?.trim()
   || `DIS-${dispatch.date.replaceAll("-", "")}-${dispatch.id.slice(0, 3).toUpperCase()}`;
 
-async function loadAvailability() {
+async function loadDispatchCardData() {
   const [dispatches, sales, vehicles, dateTypes] = await Promise.all([
     workspaceRecords(offlineDb.dispatches),
     workspaceRecords(offlineDb.sales),
@@ -35,7 +34,12 @@ async function loadAvailability() {
     dateTypes,
     (dispatch) => vehicles.find((vehicle) => vehicle.id === dispatch.vehicleId)?.number ?? dispatch.vehicleNumber ?? "",
   );
-  return availability;
+  const linkedSalesByDispatch = sales.reduce((map, sale) => {
+    if (sale.deletedAt || !sale.dispatchId) return map;
+    map.set(sale.dispatchId, (map.get(sale.dispatchId) ?? 0) + 1);
+    return map;
+  }, new Map<string, number>());
+  return { availability, linkedSalesByDispatch };
 }
 
 function DispatchWorkspaceEnhancements() {
@@ -52,7 +56,6 @@ function DispatchWorkspaceEnhancements() {
   useLayoutEffect(() => {
     let cancelled = false;
     let installed: DispatchWorkspaceMounts | null = null;
-
     const install = async () => {
       const overview = await waitForElement<HTMLElement>(".dispatch-overview-card", { maxFrames: 180 });
       if (cancelled || !overview?.parentElement) return;
@@ -101,7 +104,7 @@ function DispatchWorkspaceEnhancements() {
     const renderCards = async () => {
       renderScheduled = false;
       const sequence = ++refreshSequence;
-      const availability = await loadAvailability();
+      const { availability, linkedSalesByDispatch } = await loadDispatchCardData();
       if (cancelled || sequence !== refreshSequence) return;
 
       const rowsByDispatch = new Map<string, AvailabilityRow[]>();
@@ -125,11 +128,11 @@ function DispatchWorkspaceEnhancements() {
         const rows = rowsByDispatch.get(dispatch.id) ?? [];
         if (!rows.length) return;
 
-        const signature = rows.map((row) => `${row.itemId}:${row.dispatchedCartons}:${row.soldCartons}:${row.returnedCartons}:${row.remainingCartons}`).join("|");
+        const linkedSales = linkedSalesByDispatch.get(dispatch.id) ?? 0;
+        const signature = `${rows.map((row) => `${row.itemId}:${row.dispatchedCartons}:${row.soldCartons}:${row.returnedCartons}:${row.remainingCartons}`).join("|")}|sales:${linkedSales}`;
         if (card.dataset.authoritativeSignature === signature && card.dataset.compactEnhanced === "true") return;
         card.dataset.authoritativeSignature = signature;
         card.dataset.compactEnhanced = "true";
-
         card.querySelectorAll(".dispatch-record-card__primary-items, .dispatch-record-card__detail-panel, .dispatch-record-card__details-toggle").forEach((element) => element.remove());
 
         const header = card.querySelector<HTMLElement>("header");
@@ -164,7 +167,22 @@ function DispatchWorkspaceEnhancements() {
           const name = document.createElement("strong");
           name.textContent = row.dateTypeName;
           const values = document.createElement("div");
-          values.innerHTML = `<span>${t("dispatchPage.cartons")} <b>${row.dispatchedCartons}</b></span><span>${t("salesPage.soldCartons")} <b>${row.soldCartons}</b></span><span>${remainingLabel} <b>${row.remainingCartons}</b></span>`;
+          const dispatchedValue = document.createElement("span");
+          dispatchedValue.textContent = `${t("dispatchPage.cartons")} `;
+          const dispatchedStrong = document.createElement("b");
+          dispatchedStrong.textContent = String(row.dispatchedCartons);
+          dispatchedValue.append(dispatchedStrong);
+          const soldValue = document.createElement("span");
+          soldValue.textContent = `${t("salesPage.soldCartons")} `;
+          const soldStrong = document.createElement("b");
+          soldStrong.textContent = String(row.soldCartons);
+          soldValue.append(soldStrong);
+          const remainingValue = document.createElement("span");
+          remainingValue.textContent = `${remainingLabel} `;
+          const remainingStrong = document.createElement("b");
+          remainingStrong.textContent = String(row.remainingCartons);
+          remainingValue.append(remainingStrong);
+          values.append(dispatchedValue, soldValue, remainingValue);
           if (row.returnedCartons > 0) {
             const returned = document.createElement("span");
             returned.className = "dispatch-record-card__returned";
@@ -178,8 +196,7 @@ function DispatchWorkspaceEnhancements() {
 
         const sold = rows.reduce((sum, row) => sum + row.soldCartons, 0);
         const remaining = rows.reduce((sum, row) => sum + row.remainingCartons, 0);
-        const linkedSales = rows.reduce((max, row) => Math.max(max, row.soldCartons > 0 ? 1 : 0), 0);
-        if (summary) summary.textContent = `${t("salesPage.soldCartons")} ${sold} · ${remainingLabel} ${remaining}${linkedSales ? ` · ${t("dispatchPage.linkedSales")} ${linkedSales}` : ""}`;
+        if (summary) summary.textContent = `${t("salesPage.soldCartons")} ${sold} · ${remainingLabel} ${remaining} · ${t("dispatchPage.linkedSales")} ${linkedSales}`;
 
         const toggle = document.createElement("button");
         toggle.type = "button";
@@ -209,7 +226,6 @@ function DispatchWorkspaceEnhancements() {
     const recordsObserver = new MutationObserver(scheduleRender);
     recordsObserver.observe(mounts.records, { childList: true, subtree: true });
     scheduleRender();
-
     window.addEventListener("muzare-data-refresh", scheduleRender);
     window.addEventListener("muzare-local-data-change", scheduleRender);
 
