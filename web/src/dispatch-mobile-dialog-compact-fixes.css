@@ -2,8 +2,6 @@
    Presentation only; operational and financial behavior remains unchanged. */
 
 @media (max-width: 900px) {
-  /* Let Manage Types / Manage Vehicles size to their real content instead of
-     reserving a near-full viewport when there is nothing to fill it. */
   .dispatch-master-dialog {
     height: auto !important;
     max-height: calc(100dvh - max(20px, env(safe-area-inset-top, 0px))) !important;
@@ -22,14 +20,32 @@
   }
 
   .dispatch-master-dialog > .worker-dialog__body {
+    align-content: start !important;
+    grid-auto-rows: max-content !important;
     padding: 12px 14px 16px !important;
   }
 
+  /* These forms inherited a stretching grid/flex layout from the generic
+     module form. Use a simple intrinsic-height column so the card ends
+     immediately after the Active row. */
   .dispatch-master-dialog .dispatch-master-form {
-    align-content: start !important;
+    align-content: initial !important;
+    align-items: stretch !important;
+    align-self: start !important;
+    display: flex !important;
+    flex: 0 0 auto !important;
+    flex-direction: column !important;
     gap: 9px !important;
+    height: max-content !important;
+    justify-content: flex-start !important;
     margin: 0 0 10px !important;
+    max-height: none !important;
+    min-height: 0 !important;
     padding: 12px !important;
+  }
+
+  .dispatch-master-dialog .dispatch-master-form > * {
+    flex: 0 0 auto !important;
   }
 
   .dispatch-master-dialog .dispatch-master-form > label:not(.checkbox-row) {
@@ -47,7 +63,9 @@
   }
 
   .dispatch-master-dialog .dispatch-master-form .checkbox-row {
+    flex: 0 0 auto !important;
     gap: 10px !important;
+    height: auto !important;
     margin-top: 1px !important;
     min-height: 48px !important;
     padding: 8px 11px !important;
@@ -102,7 +120,6 @@
 }
 
 @media (max-width: 767px) {
-  /* Record Advance: reduce whitespace while preserving comfortable tap areas. */
   .workforce-advance-entry-sheet > header {
     gap: 12px !important;
     padding: 14px 16px 12px !important;
@@ -140,8 +157,6 @@
     gap: 10px !important;
   }
 
-  /* The action bar belongs to the viewport bottom, not to a floating position
-     inside the modal's content flow. */
   .workforce-advance-entry-sheet > footer,
   .workforce-advance-entry-sheet[data-sticky-action-disabled="true"] > footer {
     bottom: 0 !important;
