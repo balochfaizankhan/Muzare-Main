@@ -1,5 +1,6 @@
 /* Mobile SaaS treatment for Manage Types and Manage Vehicles.
-   Presentation only: existing create/edit/status/delete logic remains unchanged. */
+   This component-level stylesheet is the single source of truth for the
+   dispatch master sheets so lazy-loaded styles cannot reintroduce old sizing. */
 
 @media (max-width: 900px) {
   .worker-dialog-backdrop:has(.dispatch-master-dialog) {
@@ -12,13 +13,13 @@
   .dispatch-master-dialog {
     background: #ffffff !important;
     border: 0 !important;
-    border-radius: 26px 26px 0 0 !important;
+    border-radius: 24px 24px 0 0 !important;
     box-shadow: 0 -18px 48px rgba(15, 23, 42, 0.18) !important;
     display: grid !important;
     grid-template-rows: auto minmax(0, 1fr) auto !important;
-    height: min(92dvh, 900px) !important;
+    height: auto !important;
     margin: 0 !important;
-    max-height: 92dvh !important;
+    max-height: calc(100dvh - max(16px, env(safe-area-inset-top, 0px))) !important;
     max-width: none !important;
     overflow: hidden !important;
     position: relative !important;
@@ -29,11 +30,11 @@
     background: #d6dcda;
     border-radius: 999px;
     content: "";
-    height: 5px;
-    inset: 10px auto auto 50%;
+    height: 4px;
+    inset: 8px auto auto 50%;
     position: absolute;
     transform: translateX(-50%);
-    width: 48px;
+    width: 42px;
     z-index: 2;
   }
 
@@ -42,15 +43,16 @@
     background: #ffffff !important;
     border-bottom: 1px solid #edf1ef !important;
     display: grid !important;
-    grid-template-columns: 48px minmax(0, 1fr) 48px !important;
-    min-height: 88px !important;
-    padding: 22px 18px 12px !important;
+    grid-template-columns: 42px minmax(0, 1fr) 42px !important;
+    min-height: 70px !important;
+    padding: 16px 14px 8px !important;
     position: relative !important;
+    z-index: 3;
   }
 
   .dispatch-master-dialog > .worker-dialog__header h2 {
     color: #1f2937 !important;
-    font-size: clamp(1.25rem, 5vw, 1.65rem) !important;
+    font-size: clamp(1.2rem, 4.8vw, 1.55rem) !important;
     font-weight: 800 !important;
     grid-column: 2 !important;
     letter-spacing: -0.025em;
@@ -61,20 +63,19 @@
 
   .dispatch-master-dialog > .worker-dialog__header button {
     align-items: center !important;
-    align-self: center !important;
     background: #f5f7f6 !important;
     border: 1px solid #e4e9e6 !important;
     border-radius: 50% !important;
     color: #4b5563 !important;
     display: inline-flex !important;
     grid-column: 3 !important;
-    height: 44px !important;
+    height: 42px !important;
     justify-content: center !important;
     justify-self: end !important;
-    min-height: 44px !important;
-    min-width: 44px !important;
+    min-height: 42px !important;
+    min-width: 42px !important;
     padding: 0 !important;
-    width: 44px !important;
+    width: 42px !important;
   }
 
   .dispatch-master-dialog > .worker-dialog__header button:active {
@@ -83,45 +84,58 @@
 
   .dispatch-master-dialog > .worker-dialog__body {
     align-content: start !important;
-    display: grid !important;
-    grid-auto-rows: max-content !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0 !important;
     min-height: 0 !important;
+    overflow-x: hidden !important;
     overflow-y: auto !important;
     overscroll-behavior: contain;
-    padding: 16px 18px 24px !important;
+    padding: 12px 14px 14px !important;
+    scroll-padding-top: 12px !important;
     scrollbar-width: thin;
   }
 
+  /* The generic .module-form is a multi-column/stretching layout elsewhere.
+     Master-data forms must size only to their own content on mobile. */
   .dispatch-master-dialog .dispatch-master-form {
-    align-self: start !important;
+    align-items: stretch !important;
+    align-self: stretch !important;
     background: #fbfcfb !important;
     border: 1px solid #e4eae6 !important;
-    border-radius: 18px !important;
-    display: grid !important;
-    flex: none !important;
-    gap: 13px !important;
+    border-radius: 16px !important;
+    display: flex !important;
+    flex: 0 0 auto !important;
+    flex-direction: column !important;
+    gap: 9px !important;
     height: auto !important;
-    margin: 0 0 14px !important;
+    justify-content: flex-start !important;
+    margin: 0 !important;
     max-height: none !important;
     min-height: 0 !important;
-    padding: 15px !important;
+    padding: 12px !important;
     width: 100% !important;
   }
 
   .dispatch-master-dialog .dispatch-master-form > * {
-    flex: none !important;
+    flex: 0 0 auto !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    width: 100% !important;
   }
 
   .dispatch-master-dialog .dispatch-master-form > label:not(.checkbox-row) {
-    display: grid !important;
-    gap: 6px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 5px !important;
     margin: 0 !important;
     min-height: 0 !important;
+    width: 100% !important;
   }
 
   .dispatch-master-dialog .dispatch-master-form > label > span {
     color: #55616f !important;
-    font-size: 0.76rem !important;
+    font-size: 0.74rem !important;
     font-weight: 750 !important;
     line-height: 1.2 !important;
     margin: 0 !important;
@@ -130,14 +144,17 @@
   .dispatch-master-dialog .dispatch-master-form input:not([type="checkbox"]) {
     background: #ffffff !important;
     border: 1px solid #dbe3df !important;
-    border-radius: 13px !important;
+    border-radius: 12px !important;
     box-shadow: 0 1px 2px rgba(15, 23, 42, 0.025) !important;
+    box-sizing: border-box !important;
     color: #1f2937 !important;
     font-size: 0.94rem !important;
-    height: 48px !important;
-    min-height: 48px !important;
-    padding: 0 14px !important;
-    transition: border-color 0.16s ease, box-shadow 0.16s ease;
+    height: 44px !important;
+    max-width: none !important;
+    min-height: 44px !important;
+    min-width: 0 !important;
+    padding: 0 12px !important;
+    width: 100% !important;
   }
 
   .dispatch-master-dialog .dispatch-master-form input:not([type="checkbox"]):focus {
@@ -148,28 +165,30 @@
 
   .dispatch-master-dialog .dispatch-master-form .checkbox-row {
     align-items: center !important;
+    align-self: stretch !important;
     background: #f4f8f4 !important;
     border: 1px solid #dfe8e1 !important;
-    border-radius: 14px !important;
+    border-radius: 13px !important;
     color: #263442 !important;
-    display: grid !important;
-    flex: none !important;
-    font-size: 0.88rem !important;
+    display: flex !important;
+    flex: 0 0 auto !important;
+    font-size: 0.86rem !important;
     font-weight: 760 !important;
-    gap: 12px !important;
-    grid-template-columns: auto minmax(0, 1fr) !important;
-    height: auto !important;
-    line-height: 1.25 !important;
-    margin: 2px 0 0 !important;
-    min-height: 54px !important;
-    padding: 10px 13px !important;
+    gap: 10px !important;
+    height: 48px !important;
+    line-height: 1.2 !important;
+    margin: 1px 0 0 !important;
+    min-height: 48px !important;
+    padding: 7px 11px !important;
+    width: 100% !important;
   }
 
   .dispatch-master-dialog .dispatch-master-form .checkbox-row input[type="checkbox"] {
     accent-color: #2e7d32;
-    height: 24px !important;
+    flex: 0 0 22px !important;
+    height: 22px !important;
     margin: 0 !important;
-    width: 24px !important;
+    width: 22px !important;
   }
 
   .dispatch-master-dialog .form-error {
@@ -179,92 +198,104 @@
     color: #a63b3b;
     font-size: 0.75rem;
     margin: 0 !important;
-    padding: 9px 11px;
+    padding: 8px 10px;
   }
 
-  /* Remove inherited spacer/flex behavior between the form and record list. */
-  .dispatch-master-dialog .worker-dialog__body > hr,
-  .dispatch-master-dialog .worker-dialog__body > .divider,
-  .dispatch-master-dialog .worker-dialog__body > [class*="separator"] {
-    margin: 4px 0 12px !important;
-  }
-
-  .dispatch-master-dialog .worker-dialog__body > section,
-  .dispatch-master-dialog .worker-dialog__body > div:not(.dispatch-master-form),
-  .dispatch-master-dialog .dispatch-master-list,
-  .dispatch-master-dialog .master-record-list {
-    align-self: start !important;
-    gap: 10px !important;
-    min-height: 0 !important;
-  }
-
-  .dispatch-master-dialog .record-card,
-  .dispatch-master-dialog .dispatch-master-record,
-  .dispatch-master-dialog .master-record-card,
-  .dispatch-master-dialog .worker-card {
-    background: #ffffff !important;
-    border: 1px solid #e1e8e4 !important;
-    border-radius: 16px !important;
-    box-shadow: 0 5px 14px rgba(15, 23, 42, 0.045) !important;
-    gap: 8px !important;
-    margin: 0 0 10px !important;
-    padding: 13px !important;
-  }
-
-  .dispatch-master-dialog .worker-dialog__body > article,
-  .dispatch-master-dialog .worker-dialog__body > ul > li {
-    background: #ffffff !important;
-    border: 1px solid #e1e8e4 !important;
-    border-radius: 16px !important;
-    box-shadow: 0 5px 14px rgba(15, 23, 42, 0.045) !important;
-    margin-bottom: 10px !important;
-    padding: 13px !important;
-  }
-
-  .dispatch-master-dialog .status-chip,
-  .dispatch-master-dialog .active-chip,
-  .dispatch-master-dialog [class*="status"] {
-    font-size: 0.68rem !important;
-    line-height: 1 !important;
-  }
-
-  .dispatch-master-dialog .card-actions,
-  .dispatch-master-dialog .record-actions,
-  .dispatch-master-dialog footer:not(.worker-dialog__footer) {
+  /* Saved master records begin immediately after the form. */
+  .dispatch-master-dialog .master-list {
+    align-self: stretch !important;
+    border-top: 1px solid #e5ebe7 !important;
     display: grid !important;
-    gap: 7px !important;
-    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    flex: 0 0 auto !important;
+    gap: 8px !important;
+    margin: 10px 0 0 !important;
+    min-height: 0 !important;
+    padding: 10px 0 0 !important;
+    width: 100% !important;
   }
 
-  .dispatch-master-dialog .card-actions button,
-  .dispatch-master-dialog .record-actions button,
-  .dispatch-master-dialog article footer button,
-  .dispatch-master-dialog li footer button {
+  .dispatch-master-dialog .master-list > article {
+    background: #ffffff !important;
+    border: 1px solid #e1e8e4 !important;
+    border-radius: 15px !important;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04) !important;
+    display: block !important;
+    margin: 0 !important;
+    padding: 11px !important;
+  }
+
+  .dispatch-master-dialog .master-list > article > div:first-child {
+    align-items: start !important;
+    display: grid !important;
+    gap: 3px 8px !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+  }
+
+  .dispatch-master-dialog .master-list > article > div:first-child > strong {
+    color: #263442 !important;
+    font-size: 0.98rem !important;
+    grid-column: 1 !important;
+    line-height: 1.25 !important;
+    min-width: 0 !important;
+  }
+
+  .dispatch-master-dialog .master-list > article > div:first-child > small {
+    align-self: start !important;
+    background: #eef8f0 !important;
+    border-radius: 999px !important;
+    color: #2e7d45 !important;
+    font-size: 0.68rem !important;
+    font-weight: 760 !important;
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+    line-height: 1 !important;
+    padding: 6px 8px !important;
+  }
+
+  .dispatch-master-dialog .master-list > article > div:first-child > p {
+    color: #6b7280 !important;
+    font-size: 0.78rem !important;
+    grid-column: 1 / -1 !important;
+    line-height: 1.25 !important;
+    margin: 1px 0 0 !important;
+  }
+
+  .dispatch-master-dialog .master-list > article > div:last-child {
+    display: grid !important;
+    gap: 6px !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    margin-top: 9px !important;
+  }
+
+  .dispatch-master-dialog .master-list > article > div:last-child button {
     border-radius: 10px !important;
-    font-size: 0.72rem !important;
+    font-size: 0.74rem !important;
     font-weight: 750 !important;
     min-height: 38px !important;
-    padding: 7px 8px !important;
+    min-width: 0 !important;
+    padding: 6px 7px !important;
+    width: 100% !important;
   }
 
   .dispatch-master-dialog > .worker-dialog__footer {
     align-items: center !important;
-    background: rgba(255, 255, 255, 0.98) !important;
+    background: rgba(255, 255, 255, 0.99) !important;
     border-top: 1px solid #e5ebe7 !important;
-    box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.08) !important;
+    box-shadow: 0 -6px 18px rgba(15, 23, 42, 0.07) !important;
     display: grid !important;
-    gap: 10px !important;
-    grid-template-columns: minmax(104px, 0.42fr) minmax(0, 1fr) !important;
-    padding: 12px 18px calc(12px + env(safe-area-inset-bottom, 0px)) !important;
-    position: static !important;
+    gap: 8px !important;
+    grid-template-columns: minmax(96px, 0.38fr) minmax(0, 1fr) !important;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px)) !important;
+    position: relative !important;
+    z-index: 4 !important;
   }
 
   .dispatch-master-dialog > .worker-dialog__footer button {
-    border-radius: 13px !important;
-    font-size: 0.88rem !important;
+    border-radius: 12px !important;
+    font-size: 0.86rem !important;
     font-weight: 780 !important;
-    min-height: 48px !important;
-    padding: 10px 14px !important;
+    min-height: 46px !important;
+    padding: 8px 12px !important;
   }
 
   .dispatch-master-dialog > .worker-dialog__footer button[type="submit"],
@@ -282,29 +313,28 @@
 }
 
 @media (max-width: 390px) {
-  .dispatch-master-dialog {
-    height: 94dvh !important;
-    max-height: 94dvh !important;
-  }
-
   .dispatch-master-dialog > .worker-dialog__header {
-    min-height: 82px !important;
-    padding-inline: 14px !important;
+    min-height: 66px !important;
+    padding-inline: 12px !important;
   }
 
   .dispatch-master-dialog > .worker-dialog__body {
-    padding: 13px 14px 20px !important;
+    padding: 10px 12px 12px !important;
   }
 
   .dispatch-master-dialog .dispatch-master-form {
-    gap: 11px !important;
-    margin-bottom: 12px !important;
-    padding: 13px !important;
+    gap: 8px !important;
+    padding: 10px !important;
+  }
+
+  .dispatch-master-dialog .master-list {
+    margin-top: 8px !important;
+    padding-top: 8px !important;
   }
 
   .dispatch-master-dialog > .worker-dialog__footer {
-    gap: 8px !important;
-    grid-template-columns: 0.4fr 1fr !important;
-    padding-inline: 14px !important;
+    gap: 7px !important;
+    grid-template-columns: 0.37fr 1fr !important;
+    padding-inline: 12px !important;
   }
 }
