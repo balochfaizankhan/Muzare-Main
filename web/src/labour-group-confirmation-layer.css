@@ -1,0 +1,7 @@
+/* Prevent the Manage Group Members bulk action bar from competing with its
+   confirmation dialog. Selection state remains intact; the bar returns as soon
+   as the confirmation overlay closes. */
+
+.dashboard-page:has(> .worker-action-backdrop) > .workforce-group-sticky-bar {
+  display: none !important;
+}
