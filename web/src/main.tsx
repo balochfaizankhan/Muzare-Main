@@ -21,6 +21,7 @@ import "./sticky-action-regression-fixes.css";
 import "./sales-advance-mobile-refinement.css";
 import "./record-advance-footer-anchor.css";
 import "./dispatch-mobile-dialog-compact-fixes.css";
+import "./labour-group-confirmation-layer.css";
 import "./returned-to-farm-report.css";
 import "./sales-date-sync";
 import { installSystemTextLocalizationGuard } from "./lib/systemTextLocalization";
