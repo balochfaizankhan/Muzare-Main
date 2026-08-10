@@ -22,7 +22,7 @@ test("stale dispatch edits preserve an already canonical server serial", () => {
 });
 
 test("dispatch serial guard is journaled once during API startup", () => {
-  assert.ok(startupGuardSource.includes('STEP_KEY = "0048_dispatch_serial_guard"'));
+  assert.ok(startupGuardSource.includes('STEP_KEY = "0048_dispatch_serial_guard_v2"'));
   assert.ok(startupGuardSource.includes("app_schema_migrations"));
   assert.ok(serverSource.includes("await ensureWorkspaceSchema();"));
   assert.ok(serverSource.includes("await ensureDispatchSerialGuard();"));
