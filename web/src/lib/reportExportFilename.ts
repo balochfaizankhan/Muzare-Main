@@ -1,6 +1,5 @@
-const REPORTS_ROUTE = "/workspace/reports";
 const REPORT_SECTION_SELECTOR = ".reports-print-section--document[data-print-title]";
-const REPORT_DATE_SELECTOR = ".reports-date-field input[type=\"date\"]";
+const REPORT_DATE_SELECTOR = ".reports-date-field input[type=\"date\"], .reports-filter-panel input[type=\"date\"]";
 
 const validDateKey = (value: string | null | undefined) => {
   const next = value?.trim() ?? "";
@@ -22,10 +21,11 @@ const safeFilenamePart = (value: string) => value
   .replace(/-+/g, "-")
   .replace(/^-|-$/g, "");
 
-const isReportsRoute = () => typeof window !== "undefined" && window.location.pathname.startsWith(REPORTS_ROUTE);
+const reportSections = () => Array.from(document.querySelectorAll<HTMLElement>(REPORT_SECTION_SELECTOR));
+const hasReportContext = () => reportSections().length > 0;
 
 const activeReportTitle = () => {
-  const sections = Array.from(document.querySelectorAll<HTMLElement>(REPORT_SECTION_SELECTOR));
+  const sections = reportSections();
   const visible = sections.find((section) => !section.hasAttribute("aria-hidden") && section.getClientRects().length > 0);
   const section = visible ?? sections.find((candidate) => !candidate.hasAttribute("aria-hidden")) ?? sections[0];
   return section?.dataset.printTitle?.trim() ?? "";
@@ -70,50 +70,68 @@ export function buildCurrentReportPrintTitle() {
 }
 
 /**
- * Standardize only Reports-module exports at the instant a file is downloaded.
- * This has no network, IndexedDB, polling, observer, or report-render work.
- * CSV and generated PDF exports both use temporary download anchors, so one
- * capture listener covers every current report view without touching report data.
+ * Standardize report filenames only at export/print time. There are no network,
+ * IndexedDB, polling, MutationObserver, or report-render operations here.
  *
+ * CSV and generated PDF exports use temporary download anchors. The capture
+ * listener rewrites those anchors immediately before the browser handles them.
  * Browser print/save-as-PDF uses document.title as its suggested filename on
- * supported platforms. The print wrapper sets that title before delegating to
- * Muzare's existing print bridge and restores it after the dialog closes.
+ * supported platforms, so the print wrapper supplies the same standardized
+ * title and restores the app title after existing report cleanup finishes.
  */
 export function installReportExportFilenameGuard() {
   if (typeof document === "undefined" || typeof window === "undefined") return () => undefined;
 
+  let stableDocumentTitle = document.title;
   const onClickCapture = (event: MouseEvent) => {
-    if (!isReportsRoute()) return;
+    if (!hasReportContext()) return;
     const target = event.target;
     if (!(target instanceof Element)) return;
+
+    // Capture the normal app title before React report/print handlers have a
+    // chance to temporarily replace it. This makes restoration deterministic
+    // even for report implementations that already manage document.title.
+    if (target.closest("button")) stableDocumentTitle = document.title;
+
     const link = target.closest<HTMLAnchorElement>("a[download]");
     if (!link?.download || !/\.(csv|pdf)$/i.test(link.download)) return;
     link.download = buildCurrentReportExportFilename(link.download);
   };
 
   const previousPrint = window.print.bind(window);
-  let originalDocumentTitle: string | null = null;
   let restoreTimer = 0;
+  let fallbackTimer = 0;
 
-  const restoreTitle = () => {
+  const clearTimers = () => {
     if (restoreTimer) window.clearTimeout(restoreTimer);
+    if (fallbackTimer) window.clearTimeout(fallbackTimer);
     restoreTimer = 0;
-    if (originalDocumentTitle !== null) {
-      document.title = originalDocumentTitle;
-      originalDocumentTitle = null;
-    }
+    fallbackTimer = 0;
+  };
+
+  const restoreTitle = (title: string) => {
+    clearTimers();
+    document.title = title;
+    stableDocumentTitle = title;
   };
 
   window.print = () => {
-    if (!isReportsRoute()) {
+    if (!hasReportContext()) {
       previousPrint();
       return;
     }
-    restoreTitle();
-    originalDocumentTitle = document.title;
+
+    clearTimers();
+    const titleToRestore = stableDocumentTitle || document.title;
     document.title = buildCurrentReportPrintTitle();
-    window.addEventListener("afterprint", restoreTitle, { once: true });
-    restoreTimer = window.setTimeout(restoreTitle, 120_000);
+
+    const afterPrint = () => {
+      // Existing report print flows may also restore document.title. Run after
+      // their cleanup so the final title is always the stable app title.
+      restoreTimer = window.setTimeout(() => restoreTitle(titleToRestore), 400);
+    };
+    window.addEventListener("afterprint", afterPrint, { once: true });
+    fallbackTimer = window.setTimeout(() => restoreTitle(titleToRestore), 120_000);
     previousPrint();
   };
 
@@ -121,8 +139,7 @@ export function installReportExportFilenameGuard() {
 
   return () => {
     document.removeEventListener("click", onClickCapture, true);
-    restoreTitle();
-    window.removeEventListener("afterprint", restoreTitle);
+    clearTimers();
     window.print = previousPrint;
   };
 }
