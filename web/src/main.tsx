@@ -31,6 +31,7 @@ import { installReturnedToFarmReport } from "./lib/returnedToFarmReport";
 import { installEntryPreloading } from "./lib/entryPreload";
 import { installDispatchMasterDialogEnhancements } from "./lib/dispatchMasterDialogEnhancements";
 import { installDispatchSubmitGuard } from "./lib/dispatchSubmitGuard";
+import { installReportExportFilenameGuard } from "./lib/reportExportFilename";
 import { queryClient } from "./lib/query-client";
 import { markStartup, scheduleBackgroundTask } from "./lib/startupPerf";
 
@@ -43,7 +44,9 @@ function RootShell() {
     const removeEntryPreloading = installEntryPreloading();
     const removeDispatchMasterEnhancements = installDispatchMasterDialogEnhancements();
     const removeDispatchSubmitGuard = installDispatchSubmitGuard();
+    const removeReportExportFilenameGuard = installReportExportFilenameGuard();
     return () => {
+      removeReportExportFilenameGuard();
       removeDispatchSubmitGuard();
       removeDispatchMasterEnhancements();
       removeEntryPreloading();
