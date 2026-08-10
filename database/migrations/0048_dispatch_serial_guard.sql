@@ -24,8 +24,10 @@ DECLARE
   date_token text;
   serial_prefix text;
   desired_serial text;
+  old_serial text;
   next_sequence integer;
   serial_collision boolean;
+  old_serial_collision boolean;
 BEGIN
   IF NEW.entity_type <> 'dispatch' THEN
     RETURN NEW;
@@ -73,6 +75,32 @@ BEGIN
       AND existing.payload ->> 'serialNumber' = desired_serial
   )
   INTO serial_collision;
+
+  -- If a stale client edit sends the pre-canonical serial back to the server,
+  -- retain the already-canonical serial stored on this same record whenever it
+  -- is still valid and unique. This prevents harmless edits from changing a
+  -- dispatch number after the server has already resolved a collision.
+  IF serial_collision AND TG_OP = 'UPDATE' THEN
+    old_serial := NULLIF(BTRIM(OLD.payload ->> 'serialNumber'), '');
+    IF old_serial IS NOT NULL AND old_serial ~ ('^' || serial_prefix || '[0-9]+$') THEN
+      SELECT EXISTS (
+        SELECT 1
+        FROM operational_records existing
+        WHERE existing.workspace_id = NEW.workspace_id
+          AND existing.entity_type = 'dispatch'
+          AND existing.client_record_id <> NEW.client_record_id
+          AND existing.farm_id IS NOT DISTINCT FROM NEW.farm_id
+          AND existing.season_id IS NOT DISTINCT FROM NEW.season_id
+          AND existing.payload ->> 'serialNumber' = old_serial
+      )
+      INTO old_serial_collision;
+
+      IF NOT old_serial_collision THEN
+        desired_serial := old_serial;
+        serial_collision := false;
+      END IF;
+    END IF;
+  END IF;
 
   IF desired_serial IS NULL
      OR desired_serial !~ ('^' || serial_prefix || '[0-9]+$')
