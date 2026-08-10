@@ -72,6 +72,7 @@ BEGIN
       AND existing.client_record_id <> NEW.client_record_id
       AND existing.farm_id IS NOT DISTINCT FROM NEW.farm_id
       AND existing.season_id IS NOT DISTINCT FROM NEW.season_id
+      AND existing.payload ->> 'date' = dispatch_date
       AND existing.payload ->> 'serialNumber' = desired_serial
   )
   INTO serial_collision;
@@ -91,6 +92,7 @@ BEGIN
           AND existing.client_record_id <> NEW.client_record_id
           AND existing.farm_id IS NOT DISTINCT FROM NEW.farm_id
           AND existing.season_id IS NOT DISTINCT FROM NEW.season_id
+          AND existing.payload ->> 'date' = dispatch_date
           AND existing.payload ->> 'serialNumber' = old_serial
       )
       INTO old_serial_collision;
