@@ -30,6 +30,7 @@ import { installDetachedReportPrintBridge } from "./lib/detachedReportPrint";
 import { installReturnedToFarmReport } from "./lib/returnedToFarmReport";
 import { installEntryPreloading } from "./lib/entryPreload";
 import { installDispatchMasterDialogEnhancements } from "./lib/dispatchMasterDialogEnhancements";
+import { installDispatchSubmitGuard } from "./lib/dispatchSubmitGuard";
 import { queryClient } from "./lib/query-client";
 import { markStartup, scheduleBackgroundTask } from "./lib/startupPerf";
 
@@ -41,7 +42,9 @@ function RootShell() {
     const removeReturnedToFarmReport = installReturnedToFarmReport();
     const removeEntryPreloading = installEntryPreloading();
     const removeDispatchMasterEnhancements = installDispatchMasterDialogEnhancements();
+    const removeDispatchSubmitGuard = installDispatchSubmitGuard();
     return () => {
+      removeDispatchSubmitGuard();
       removeDispatchMasterEnhancements();
       removeEntryPreloading();
       removeReturnedToFarmReport();
