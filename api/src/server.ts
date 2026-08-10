@@ -2,6 +2,7 @@ import { buildApp } from "./app.js";
 import { ensureBootstrapAdmin } from "./auth.js";
 import { config, databaseConfigured } from "./config.js";
 import { closeDatabaseConnection } from "./db/client.js";
+import { ensureDispatchSerialGuard } from "./db/dispatchSerialGuard.js";
 import { ensureWorkspaceSchema } from "./db/migrations.js";
 
 const app = await buildApp();
@@ -16,7 +17,10 @@ process.on("SIGINT", stop);
 process.on("SIGTERM", stop);
 
 try {
-  if (databaseConfigured) await ensureWorkspaceSchema();
+  if (databaseConfigured) {
+    await ensureWorkspaceSchema();
+    await ensureDispatchSerialGuard();
+  }
   await ensureBootstrapAdmin();
   await app.listen({ host: config.HOST, port: config.PORT });
 } catch (error) {
