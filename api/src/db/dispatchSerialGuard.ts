@@ -1,17 +1,17 @@
 import { readFile } from "node:fs/promises";
 import { pool } from "./client.js";
 
-const STEP_KEY = "0048_dispatch_serial_guard";
+const STEP_KEY = "0048_dispatch_serial_guard_v2";
 const STARTUP_LOCK_KEY = "muzare_dispatch_serial_guard_migration";
 const migrationUrl = new URL("../../../database/migrations/0048_dispatch_serial_guard.sql", import.meta.url);
 
 /**
- * Apply the dispatch serial guard once after the normal workspace schema has
- * initialized. This is intentionally a startup-only schema action: normal page
- * loads and Dispatch saves never wait for it.
+ * Apply the finalized dispatch serial guard once after the normal workspace
+ * schema has initialized. This is intentionally a startup-only schema action:
+ * normal page loads and Dispatch saves never wait for it.
  *
- * The app_schema_migrations journal keeps the operation one-time and makes it
- * safe for multiple Render instances to start concurrently.
+ * The versioned app_schema_migrations key also makes the final guard safe if an
+ * earlier development deployment happened to journal an intermediate version.
  */
 export async function ensureDispatchSerialGuard(): Promise<void> {
   const client = await pool.connect();
@@ -38,7 +38,7 @@ export async function ensureDispatchSerialGuard(): Promise<void> {
         VALUES ($1, NULL, true, $2::jsonb)
         ON CONFLICT (step_key) DO NOTHING
       `,
-      [STEP_KEY, JSON.stringify({ source: "startup-dispatch-serial-guard" })],
+      [STEP_KEY, JSON.stringify({ source: "startup-dispatch-serial-guard-final" })],
     );
     await client.query("COMMIT");
     transactionOpen = false;
