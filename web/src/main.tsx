@@ -21,6 +21,7 @@ import "./sticky-action-regression-fixes.css";
 import "./sales-advance-mobile-refinement.css";
 import "./record-advance-footer-anchor.css";
 import "./dispatch-mobile-dialog-compact-fixes.css";
+import "./dispatch-summary-mobile.css";
 import "./labour-group-confirmation-layer.css";
 import "./returned-to-farm-report.css";
 import "./sales-date-sync";
@@ -31,6 +32,7 @@ import { installReturnedToFarmReport } from "./lib/returnedToFarmReport";
 import { installEntryPreloading } from "./lib/entryPreload";
 import { installDispatchMasterDialogEnhancements } from "./lib/dispatchMasterDialogEnhancements";
 import { installDispatchSubmitGuard } from "./lib/dispatchSubmitGuard";
+import { installDispatchSummaryEnhancements } from "./lib/dispatchSummaryEnhancements";
 import { installReportExportFilenameGuard } from "./lib/reportExportFilename";
 import { queryClient } from "./lib/query-client";
 import { markStartup, scheduleBackgroundTask } from "./lib/startupPerf";
@@ -44,9 +46,11 @@ function RootShell() {
     const removeEntryPreloading = installEntryPreloading();
     const removeDispatchMasterEnhancements = installDispatchMasterDialogEnhancements();
     const removeDispatchSubmitGuard = installDispatchSubmitGuard();
+    const removeDispatchSummaryEnhancements = installDispatchSummaryEnhancements();
     const removeReportExportFilenameGuard = installReportExportFilenameGuard();
     return () => {
       removeReportExportFilenameGuard();
+      removeDispatchSummaryEnhancements();
       removeDispatchSubmitGuard();
       removeDispatchMasterEnhancements();
       removeEntryPreloading();

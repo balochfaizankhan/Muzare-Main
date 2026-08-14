@@ -342,7 +342,7 @@
   }
 
   .dispatch-compact-workspace .dispatch-record-card.is-expanded .dispatch-breakdown {
-    display: grid !important;
+    display: none !important;
   }
 
   .dispatch-compact-workspace .dispatch-record-card .dispatch-breakdown > span {
@@ -406,6 +406,25 @@
 
   .dispatch-compact-workspace .dispatch-record-card footer .danger-link {
     min-width: 84px;
+  }
+
+  /* Four movement states are easier to scan as a balanced 2 × 2 mobile grid. */
+  .dispatch-compact-workspace .dispatch-overview-card__metrics,
+  .dispatch-compact-workspace .dispatch-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .dispatch-compact-workspace .dispatch-overview-card__metric:nth-child(odd) {
+    border-inline-start: 0 !important;
+  }
+
+  .dispatch-compact-workspace .dispatch-overview-card__metric:nth-child(n + 3) {
+    border-top: 1px solid rgba(46, 125, 50, 0.12);
+  }
+
+  .dispatch-compact-workspace .dispatch-movement-returned svg,
+  .dispatch-compact-workspace .dispatch-movement-returned strong {
+    color: #8b641f !important;
   }
 }
 

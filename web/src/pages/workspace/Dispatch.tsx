@@ -166,13 +166,41 @@ function DispatchWorkspaceEnhancements() {
       for (const row of availability) rowsByDispatch.set(row.dispatch.id, [...(rowsByDispatch.get(row.dispatch.id) ?? []), row]);
       const dispatchBySerial = new Map(availability.map((row) => [dispatchSerialFor(row.dispatch), row.dispatch]));
 
-      const totalRemaining = String(availability.reduce((sum, row) => sum + row.remainingCartons, 0));
-      const remainingLabel = t("salesPage.remainingCartons");
-      mounts.root.querySelectorAll<HTMLElement>(".dispatch-overview-card__metric, .dispatch-kpi-grid > article").forEach((metric) => {
-        if (metric.querySelector("span")?.textContent?.trim() !== remainingLabel) return;
-        const value = metric.querySelector<HTMLElement>("strong");
-        if (value && value.textContent !== totalRemaining) value.textContent = totalRemaining;
-      });
+      const totalDispatched = availability.reduce((sum, row) => sum + row.dispatchedCartons, 0);
+      const totalSold = availability.reduce((sum, row) => sum + row.soldCartons, 0);
+      const totalReturned = availability.reduce((sum, row) => sum + row.returnedCartons, 0);
+      const totalRemaining = availability.reduce((sum, row) => sum + row.remainingCartons, 0);
+
+      const syncMovementMetrics = (container: HTMLElement | null) => {
+        if (!container) return;
+        const allMetrics = Array.from(container.querySelectorAll<HTMLElement>(":scope > article"));
+        let returnedMetric = allMetrics.find((metric) => metric.dataset.dispatchMovement === "returned");
+        const baseMetrics = allMetrics.filter((metric) => metric !== returnedMetric);
+        if (baseMetrics.length < 3) return;
+
+        const [dispatchedMetric, soldMetric, remainingMetric] = baseMetrics;
+        if (!returnedMetric) {
+          returnedMetric = remainingMetric.cloneNode(true) as HTMLElement;
+          returnedMetric.dataset.dispatchMovement = "returned";
+          returnedMetric.classList.add("dispatch-movement-returned");
+          remainingMetric.before(returnedMetric);
+        }
+
+        const setMetric = (metric: HTMLElement, label: string | null, value: number) => {
+          const metricLabel = metric.querySelector<HTMLElement>("span");
+          const metricValue = metric.querySelector<HTMLElement>("strong");
+          if (label && metricLabel && metricLabel.textContent?.trim() !== label) metricLabel.textContent = label;
+          if (metricValue && metricValue.textContent?.trim() !== String(value)) metricValue.textContent = String(value);
+        };
+
+        setMetric(dispatchedMetric, null, totalDispatched);
+        setMetric(soldMetric, null, totalSold);
+        setMetric(returnedMetric, labels.returned, totalReturned);
+        setMetric(remainingMetric, labels.remaining, totalRemaining);
+      };
+
+      syncMovementMetrics(mounts.root.querySelector<HTMLElement>(".dispatch-overview-card__metrics"));
+      syncMovementMetrics(mounts.root.querySelector<HTMLElement>(".dispatch-kpi-grid"));
 
       const cards = Array.from(mounts.records.querySelectorAll<HTMLElement>(".dispatch-record-card"));
       setRecordCount(cards.length);
