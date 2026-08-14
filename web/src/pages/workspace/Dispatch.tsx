@@ -16,10 +16,59 @@ type DispatchTab = "entry" | "records";
 type DispatchWorkspaceMounts = { root: HTMLElement; tabs: HTMLElement; form: HTMLElement; records: HTMLElement };
 type AvailabilityRow = ReturnType<typeof buildDispatchAvailability>[number];
 
+type DispatchCardLabels = {
+  dispatched: string;
+  sold: string;
+  remaining: string;
+  returned: string;
+  sales: string;
+  oneType: string;
+  details: string;
+  hideDetails: string;
+};
+
 const dispatchSerialFor = (dispatch: DispatchRecord) =>
   dispatch.serialNumber?.trim()
   || dispatch.dispatchNumber?.trim()
   || `DIS-${dispatch.date.replaceAll("-", "")}-${dispatch.id.slice(0, 3).toUpperCase()}`;
+
+const dispatchCardLabels = (language: string | undefined, details: string, hideDetails: string): DispatchCardLabels => {
+  const normalized = (language ?? "en").toLowerCase();
+  if (normalized.startsWith("ur")) {
+    return {
+      dispatched: "ڈسپیچ",
+      sold: "فروخت",
+      remaining: "باقی",
+      returned: "فارم واپسی",
+      sales: "سیلز",
+      oneType: "1 قسم",
+      details,
+      hideDetails,
+    };
+  }
+  if (normalized.startsWith("ar")) {
+    return {
+      dispatched: "مرسل",
+      sold: "مباع",
+      remaining: "متبقي",
+      returned: "مرتجع للمزرعة",
+      sales: "المبيعات",
+      oneType: "نوع واحد",
+      details,
+      hideDetails,
+    };
+  }
+  return {
+    dispatched: "Dispatched",
+    sold: "Sold",
+    remaining: "Remaining",
+    returned: "Returned to farm",
+    sales: "Sales",
+    oneType: "1 Type",
+    details,
+    hideDetails,
+  };
+};
 
 async function loadDispatchCardData() {
   const [dispatches, sales, vehicles, dateTypes] = await Promise.all([
@@ -43,7 +92,7 @@ async function loadDispatchCardData() {
 }
 
 function DispatchWorkspaceEnhancements() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [activeTab, setActiveTab] = useState<DispatchTab>("entry");
   const [recordCount, setRecordCount] = useState(0);
   const [mounts, setMounts] = useState<DispatchWorkspaceMounts | null>(null);
@@ -101,6 +150,12 @@ function DispatchWorkspaceEnhancements() {
     let renderScheduled = false;
     let refreshSequence = 0;
 
+    const labels = dispatchCardLabels(
+      i18n.resolvedLanguage ?? i18n.language,
+      t("common.details", { defaultValue: "Details" }),
+      t("common.hideDetails", { defaultValue: "Hide details" }),
+    );
+
     const renderCards = async () => {
       renderScheduled = false;
       const sequence = ++refreshSequence;
@@ -116,7 +171,7 @@ function DispatchWorkspaceEnhancements() {
       mounts.root.querySelectorAll<HTMLElement>(".dispatch-overview-card__metric, .dispatch-kpi-grid > article").forEach((metric) => {
         if (metric.querySelector("span")?.textContent?.trim() !== remainingLabel) return;
         const value = metric.querySelector<HTMLElement>("strong");
-        if (value) value.textContent = totalRemaining;
+        if (value && value.textContent !== totalRemaining) value.textContent = totalRemaining;
       });
 
       const cards = Array.from(mounts.records.querySelectorAll<HTMLElement>(".dispatch-record-card"));
@@ -128,19 +183,66 @@ function DispatchWorkspaceEnhancements() {
         const rows = rowsByDispatch.get(dispatch.id) ?? [];
         if (!rows.length) return;
 
-        const linkedSales = linkedSalesByDispatch.get(dispatch.id) ?? 0;
-        const signature = `${rows.map((row) => `${row.itemId}:${row.dispatchedCartons}:${row.soldCartons}:${row.returnedCartons}:${row.remainingCartons}`).join("|")}|sales:${linkedSales}`;
-        if (card.dataset.authoritativeSignature === signature && card.dataset.compactEnhanced === "true") return;
-        card.dataset.authoritativeSignature = signature;
-        card.dataset.compactEnhanced = "true";
-        card.querySelectorAll(".dispatch-record-card__primary-items, .dispatch-record-card__detail-panel, .dispatch-record-card__details-toggle").forEach((element) => element.remove());
-
         const header = card.querySelector<HTMLElement>("header");
         const originalBreakdown = card.querySelector<HTMLElement>(".dispatch-breakdown");
         const summary = card.querySelector<HTMLElement>(".dispatch-linked-summary");
         const footer = card.querySelector<HTMLElement>("footer");
         if (!header || !footer) return;
-        if (originalBreakdown) originalBreakdown.hidden = true;
+
+        // The legacy React breakdown only subtracts sold cartons. Keep it permanently
+        // out of the presentation so it can never compete with the authoritative
+        // availability row, which also subtracts cartons returned to the farm.
+        if (originalBreakdown) {
+          originalBreakdown.hidden = true;
+          originalBreakdown.setAttribute("aria-hidden", "true");
+          originalBreakdown.style.setProperty("display", "none", "important");
+        }
+
+        const sold = rows.reduce((sum, row) => sum + row.soldCartons, 0);
+        const returned = rows.reduce((sum, row) => sum + row.returnedCartons, 0);
+        const remaining = rows.reduce((sum, row) => sum + row.remainingCartons, 0);
+        const dispatched = rows.reduce((sum, row) => sum + row.dispatchedCartons, 0);
+        const linkedSales = linkedSalesByDispatch.get(dispatch.id) ?? 0;
+
+        const totalBadge = header.querySelector<HTMLElement>(":scope > b");
+        const nextTotalBadge = t("dashboardPage.cartonsCount", { count: dispatched });
+        if (totalBadge && totalBadge.textContent?.trim() !== nextTotalBadge) totalBadge.textContent = nextTotalBadge;
+
+        const meta = header.querySelector<HTMLElement>("p");
+        const dateText = meta?.querySelector<HTMLElement>(".bidi-isolate")?.textContent?.trim() ?? "";
+        if (meta && dateText) {
+          const typeLabel = rows.length === 1 ? labels.oneType : t("dispatchPage.typeCount", { count: rows.length });
+          const nextMeta = `${dateText} · ${typeLabel}`;
+          if (meta.textContent?.replace(/\s+/g, " ").trim() !== nextMeta) {
+            const date = document.createElement("span");
+            date.className = "bidi-isolate";
+            date.textContent = dateText;
+            meta.replaceChildren(date, document.createTextNode(` · ${typeLabel}`));
+          }
+        }
+
+        const summaryParts = [`${labels.sold} ${sold}`];
+        if (returned > 0) summaryParts.push(`${labels.returned} ${returned}`);
+        summaryParts.push(`${labels.remaining} ${remaining}`, `${labels.sales} ${linkedSales}`);
+        const nextSummary = summaryParts.join(" · ");
+        if (summary && summary.textContent?.replace(/\s+/g, " ").trim() !== nextSummary) summary.textContent = nextSummary;
+        summary?.classList.toggle("has-returned", returned > 0);
+        summary?.classList.toggle("is-complete", remaining === 0);
+        card.classList.toggle("has-returned", returned > 0);
+
+        // Summary/header corrections run on every observer pass. This matters when
+        // React refreshes the legacy card without changing the financial signature.
+        const signature = `${rows.map((row) => `${row.itemId}:${row.dispatchedCartons}:${row.soldCartons}:${row.returnedCartons}:${row.remainingCartons}`).join("|")}|sales:${linkedSales}`;
+        const hasEnhancedContent = Boolean(
+          card.querySelector(".dispatch-record-card__primary-items")
+          && card.querySelector(".dispatch-record-card__detail-panel")
+          && card.querySelector(".dispatch-record-card__details-toggle"),
+        );
+        if (card.dataset.authoritativeSignature === signature && card.dataset.compactEnhanced === "true" && hasEnhancedContent) return;
+
+        card.dataset.authoritativeSignature = signature;
+        card.dataset.compactEnhanced = "true";
+        card.querySelectorAll(".dispatch-record-card__primary-items, .dispatch-record-card__detail-panel, .dispatch-record-card__details-toggle").forEach((element) => element.remove());
 
         const primaryItems = document.createElement("div");
         primaryItems.className = "dispatch-record-card__primary-items";
@@ -150,10 +252,20 @@ function DispatchWorkspaceEnhancements() {
           item.className = "dispatch-record-card__primary-item";
           const name = document.createElement("strong");
           name.textContent = row.dateTypeName;
+
+          const values = document.createElement("div");
+          values.className = "dispatch-record-card__primary-item-values";
           const quantity = document.createElement("span");
           quantity.className = "bidi-isolate";
           quantity.textContent = t("dashboardPage.cartonsCount", { count: row.dispatchedCartons });
-          item.append(name, quantity);
+          values.append(quantity);
+          if (row.returnedCartons > 0) {
+            const returnedValue = document.createElement("small");
+            returnedValue.className = "dispatch-record-card__primary-returned bidi-isolate";
+            returnedValue.textContent = `${labels.returned} ${row.returnedCartons}`;
+            values.append(returnedValue);
+          }
+          item.append(name, values);
           primaryItems.append(item);
         });
         header.after(primaryItems);
@@ -167,36 +279,28 @@ function DispatchWorkspaceEnhancements() {
           const name = document.createElement("strong");
           name.textContent = row.dateTypeName;
           const values = document.createElement("div");
-          const dispatchedValue = document.createElement("span");
-          dispatchedValue.textContent = `${t("dispatchPage.cartons")} `;
-          const dispatchedStrong = document.createElement("b");
-          dispatchedStrong.textContent = String(row.dispatchedCartons);
-          dispatchedValue.append(dispatchedStrong);
-          const soldValue = document.createElement("span");
-          soldValue.textContent = `${t("salesPage.soldCartons")} `;
-          const soldStrong = document.createElement("b");
-          soldStrong.textContent = String(row.soldCartons);
-          soldValue.append(soldStrong);
-          const remainingValue = document.createElement("span");
-          remainingValue.textContent = `${remainingLabel} `;
-          const remainingStrong = document.createElement("b");
-          remainingStrong.textContent = String(row.remainingCartons);
-          remainingValue.append(remainingStrong);
-          values.append(dispatchedValue, soldValue, remainingValue);
-          if (row.returnedCartons > 0) {
-            const returned = document.createElement("span");
-            returned.className = "dispatch-record-card__returned";
-            returned.textContent = `${t("returnedToFarmReport.title", { defaultValue: "Returned to farm" })} ${row.returnedCartons}`;
-            values.append(returned);
-          }
+          values.className = "dispatch-record-card__detail-metrics";
+
+          const appendMetric = (label: string, value: number, className?: string) => {
+            const metric = document.createElement("span");
+            if (className) metric.className = className;
+            const metricLabel = document.createElement("small");
+            metricLabel.textContent = label;
+            const metricValue = document.createElement("b");
+            metricValue.className = "bidi-isolate";
+            metricValue.textContent = String(value);
+            metric.append(metricLabel, metricValue);
+            values.append(metric);
+          };
+
+          appendMetric(labels.dispatched, row.dispatchedCartons);
+          appendMetric(labels.sold, row.soldCartons);
+          appendMetric(labels.remaining, row.remainingCartons);
+          if (row.returnedCartons > 0) appendMetric(labels.returned, row.returnedCartons, "dispatch-record-card__returned");
           detail.append(name, values);
           detailPanel.append(detail);
         });
         primaryItems.after(detailPanel);
-
-        const sold = rows.reduce((sum, row) => sum + row.soldCartons, 0);
-        const remaining = rows.reduce((sum, row) => sum + row.remainingCartons, 0);
-        if (summary) summary.textContent = `${t("salesPage.soldCartons")} ${sold} · ${remainingLabel} ${remaining} · ${t("dispatchPage.linkedSales")} ${linkedSales}`;
 
         const toggle = document.createElement("button");
         toggle.type = "button";
@@ -204,9 +308,7 @@ function DispatchWorkspaceEnhancements() {
         const setExpanded = (expanded: boolean) => {
           card.classList.toggle("is-expanded", expanded);
           detailPanel.hidden = !expanded;
-          toggle.textContent = expanded
-            ? t("common.hideDetails", { defaultValue: "Hide details" })
-            : t("common.details", { defaultValue: "Details" });
+          toggle.textContent = expanded ? `${labels.hideDetails} ︿` : `${labels.details} ﹀`;
           toggle.setAttribute("aria-expanded", String(expanded));
         };
         setExpanded(false);
@@ -247,7 +349,7 @@ function DispatchWorkspaceEnhancements() {
       window.removeEventListener("muzare-local-data-change", scheduleRender);
       mounts.records.removeEventListener("click", handleRecordAction);
     };
-  }, [mounts, t]);
+  }, [i18n.language, i18n.resolvedLanguage, mounts, t]);
 
   if (!mounts) return null;
   const changeTab = (tab: DispatchTab) => (event: ReactMouseEvent<HTMLButtonElement>) => {
