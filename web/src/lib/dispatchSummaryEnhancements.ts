@@ -1,3 +1,4 @@
+import i18n from "../i18n";
 import { buildDispatchAvailability } from "./dispatch-sales";
 import { formatNumber } from "./format";
 import { offlineDb, workspaceConfigRecords, workspaceRecords } from "./offline-db";
@@ -17,6 +18,8 @@ type SummaryLabels = {
   today: string;
   last7: string;
   custom: string;
+  from: string;
+  to: string;
   dispatched: string;
   sold: string;
   returned: string;
@@ -35,6 +38,8 @@ const labelsFor = (): SummaryLabels => {
     today: "آج",
     last7: "گزشتہ 7 دن",
     custom: "مخصوص مدت",
+    from: "تاریخ سے",
+    to: "تاریخ تک",
     dispatched: "ڈسپیچ",
     sold: "فروخت",
     returned: "فارم واپسی",
@@ -50,6 +55,8 @@ const labelsFor = (): SummaryLabels => {
     today: "اليوم",
     last7: "آخر 7 أيام",
     custom: "فترة مخصصة",
+    from: "من تاريخ",
+    to: "إلى تاريخ",
     dispatched: "مرسل",
     sold: "مباع",
     returned: "مرتجع للمزرعة",
@@ -65,6 +72,8 @@ const labelsFor = (): SummaryLabels => {
     today: "Today",
     last7: "Last 7 days",
     custom: "Custom range",
+    from: "From",
+    to: "To",
     dispatched: "Dispatched",
     sold: "Sold",
     returned: "Returned to farm",
@@ -212,9 +221,10 @@ function renderModernSummary(
   const dateInputs = Array.from(legacyFilters?.querySelectorAll<HTMLInputElement>('input[type="date"]') ?? []);
   const from = dateInputs[0]?.value ?? "";
   const to = dateInputs[1]?.value ?? "";
-  const period = inferPeriodMode(from, to);
+  const inferredPeriod = inferPeriodMode(from, to);
+  const explicitPeriod = panel.dataset.dispatchSummaryPeriod as PeriodMode | undefined;
+  const period = explicitPeriod === "custom" ? "custom" : inferredPeriod;
   panel.classList.add("dispatch-summary-panel--modern");
-  panel.classList.toggle("is-custom-period", period === "custom");
 
   const filtered = availability.filter((row) => (!from || row.dispatch.date >= from) && (!to || row.dispatch.date <= to));
   const overall = emptyTotals();
@@ -265,11 +275,11 @@ function renderModernSummary(
 
   periodSelect.addEventListener("change", () => {
     const next = periodSelect.value as PeriodMode;
+    panel.dataset.dispatchSummaryPeriod = next;
     if (next === "custom") {
-      panel.classList.add("is-custom-period");
+      schedule();
       return;
     }
-    panel.classList.remove("is-custom-period");
     if (dateInputs.length >= 2) {
       if (next === "season") {
         setNativeInputValue(dateInputs[0], "");
@@ -286,7 +296,30 @@ function renderModernSummary(
     window.setTimeout(schedule, 0);
   });
 
-  dateInputs.forEach((input) => input.addEventListener("change", schedule, { once: true }));
+  if (period === "custom") {
+    const customRange = document.createElement("div");
+    customRange.className = "dispatch-summary-modern__custom-range";
+    const makeDateField = (label: string, value: string, source: HTMLInputElement | undefined) => {
+      const field = document.createElement("label");
+      const fieldLabel = document.createElement("span");
+      fieldLabel.textContent = label;
+      const input = document.createElement("input");
+      input.type = "date";
+      input.value = value;
+      input.addEventListener("change", () => {
+        panel.dataset.dispatchSummaryPeriod = "custom";
+        if (source) setNativeInputValue(source, input.value);
+        window.setTimeout(schedule, 0);
+      });
+      field.append(fieldLabel, input);
+      return field;
+    };
+    customRange.append(
+      makeDateField(labels.from, from, dateInputs[0]),
+      makeDateField(labels.to, to, dateInputs[1]),
+    );
+    host.append(customRange);
+  }
 
   const metrics = document.createElement("div");
   metrics.className = "dispatch-summary-modern__metrics";
@@ -386,6 +419,8 @@ export function installDispatchSummaryEnhancements() {
     dataDirty = true;
     schedule();
   };
+  const onPopState = () => waitForDispatchSummary();
+  const onLanguageChange = () => schedule();
   const onDocumentClick = (event: Event) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
@@ -395,17 +430,20 @@ export function installDispatchSummaryEnhancements() {
     if (dispatchTab) window.setTimeout(schedule, 0);
   };
 
-  window.addEventListener("popstate", () => waitForDispatchSummary());
+  window.addEventListener("popstate", onPopState);
   window.addEventListener("muzare-data-refresh", onDataChange);
   window.addEventListener("muzare-local-data-change", onDataChange);
   document.addEventListener("click", onDocumentClick);
+  i18n.on("languageChanged", onLanguageChange);
   waitForDispatchSummary();
 
   return () => {
     stopped = true;
     sequence += 1;
+    window.removeEventListener("popstate", onPopState);
     window.removeEventListener("muzare-data-refresh", onDataChange);
     window.removeEventListener("muzare-local-data-change", onDataChange);
     document.removeEventListener("click", onDocumentClick);
+    i18n.off("languageChanged", onLanguageChange);
   };
 }
