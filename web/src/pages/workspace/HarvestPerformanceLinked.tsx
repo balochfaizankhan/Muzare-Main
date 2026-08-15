@@ -16,6 +16,7 @@ import {
   workspaceRecords,
   type HarvestEntry,
   type HarvestGroup,
+  type LabourGroup,
 } from "../../lib/offline-db";
 import { hasModulePermission } from "../../lib/permissions";
 import { translateStatus } from "../../lib/statusLabels";
@@ -29,34 +30,58 @@ import "../../harvest-linked-groups.css";
 
 const linkedResources = {
   en: {
-    linkedGroupsIntro: "Use existing workforce groups or create harvest-only crews for productivity tracking.",
+    linkedGroupsIntro: "Choose which workforce groups participate in harvest, or create harvest-only crews for productivity tracking.",
     workforceGroupBadge: "Workforce group",
     harvestOnlyGroupBadge: "Harvest-only group",
     activeMembers: "{{count}} active members",
+    groupMembers: "{{count}} group members",
+    harvestWorkers: "{{count}} harvest workers",
+    foremanExcluded: "Foreman excluded",
     managedInWorkforce: "Managed in Workforce",
-    linkedMembersHint: "Active members are counted automatically from Workforce.",
-    linkedGroupNoMembers: "This workforce group has no active members. Add members in Workforce first.",
+    linkedMembersHint: "Harvest workers are counted automatically from Workforce. The foreman is excluded when present in the group.",
+    linkedGroupNoMembers: "This workforce group has no harvest workers. Check its active members and foreman in Workforce.",
     noGroupsMatch: "No groups match this view.",
+    participationLabel: "Harvest participation",
+    participatesInHarvest: "Participates",
+    doesNotParticipate: "Not participating",
+    participationHint: "Only participating groups appear in Daily Entry.",
+    participationSaved: "Harvest participation updated.",
   },
   ar: {
-    linkedGroupsIntro: "استخدم مجموعات العمالة الحالية أو أنشئ فرق حصاد مستقلة لتتبع الإنتاجية.",
+    linkedGroupsIntro: "اختر مجموعات العمالة المشاركة في الحصاد، أو أنشئ فرق حصاد مستقلة لتتبع الإنتاجية.",
     workforceGroupBadge: "مجموعة عمالة",
     harvestOnlyGroupBadge: "مجموعة حصاد مستقلة",
     activeMembers: "{{count}} أعضاء نشطون",
+    groupMembers: "{{count}} أعضاء المجموعة",
+    harvestWorkers: "{{count}} عمال حصاد",
+    foremanExcluded: "المشرف مستبعد",
     managedInWorkforce: "تُدار من قسم العمالة",
-    linkedMembersHint: "يتم احتساب الأعضاء النشطين تلقائياً من قسم العمالة.",
-    linkedGroupNoMembers: "لا تضم مجموعة العمالة هذه أعضاء نشطين. أضف الأعضاء في قسم العمالة أولاً.",
+    linkedMembersHint: "يتم احتساب عمال الحصاد تلقائياً من قسم العمالة، مع استبعاد المشرف إذا كان ضمن المجموعة.",
+    linkedGroupNoMembers: "لا يوجد عمال حصاد في هذه المجموعة. تحقق من الأعضاء النشطين والمشرف في قسم العمالة.",
     noGroupsMatch: "لا توجد مجموعات تطابق هذا العرض.",
+    participationLabel: "المشاركة في الحصاد",
+    participatesInHarvest: "مشاركة",
+    doesNotParticipate: "غير مشاركة",
+    participationHint: "تظهر المجموعات المشاركة فقط في الإدخال اليومي.",
+    participationSaved: "تم تحديث مشاركة الحصاد.",
   },
   ur: {
-    linkedGroupsIntro: "پیداواری صلاحیت ٹریک کرنے کے لیے موجودہ لیبر گروپ استعمال کریں یا الگ کٹائی گروپ بنائیں۔",
+    linkedGroupsIntro: "منتخب کریں کہ کون سے لیبر گروپ کٹائی میں حصہ لیں گے، یا پیداواری صلاحیت کے لیے الگ کٹائی گروپ بنائیں۔",
     workforceGroupBadge: "لیبر گروپ",
     harvestOnlyGroupBadge: "صرف کٹائی گروپ",
     activeMembers: "{{count}} فعال اراکین",
+    groupMembers: "{{count}} گروپ اراکین",
+    harvestWorkers: "{{count}} کٹائی کارکن",
+    foremanExcluded: "فورمین شامل نہیں",
     managedInWorkforce: "ورک فورس میں منظم",
-    linkedMembersHint: "فعال اراکین کی تعداد ورک فورس سے خودکار طور پر لی جاتی ہے۔",
-    linkedGroupNoMembers: "اس لیبر گروپ میں کوئی فعال رکن نہیں۔ پہلے ورک فورس میں اراکین شامل کریں۔",
+    linkedMembersHint: "کٹائی کارکنوں کی تعداد ورک فورس سے خودکار طور پر لی جاتی ہے۔ گروپ میں موجود فورمین کو شمار نہیں کیا جاتا۔",
+    linkedGroupNoMembers: "اس گروپ میں کٹائی کے لیے کوئی کارکن نہیں۔ ورک فورس میں فعال اراکین اور فورمین چیک کریں۔",
     noGroupsMatch: "اس منظر سے مطابقت رکھنے والا کوئی گروپ نہیں۔",
+    participationLabel: "کٹائی میں شرکت",
+    participatesInHarvest: "شامل ہے",
+    doesNotParticipate: "شامل نہیں",
+    participationHint: "صرف منتخب گروپ روزانہ کٹائی کے اندراج میں نظر آئیں گے۔",
+    participationSaved: "کٹائی میں شرکت اپ ڈیٹ ہو گئی۔",
   },
 } as const;
 
@@ -64,9 +89,14 @@ for (const [language, harvestPage] of Object.entries(linkedResources)) {
   i18n.addResourceBundle(language, "translation", { harvestPage }, true, true);
 }
 
+type HarvestSourceLabourGroup = LabourGroup & { harvestParticipating?: boolean };
 type LinkedHarvestGroup = HarvestGroup & {
   sourceLabourGroupId?: string;
   linkedMemberCount?: number;
+  linkedTotalMemberCount?: number;
+  foremanExcluded?: boolean;
+  harvestParticipating?: boolean;
+  sourceActive?: boolean;
   sourceKind?: "workforce";
 };
 
@@ -79,6 +109,8 @@ const cartons = (value: number) => formatNumber(value, { maximumFractionDigits: 
 const ratio = (value: number) => formatNumber(value, { maximumFractionDigits: 1 });
 const toast = (message: string) => window.dispatchEvent(new CustomEvent("muzare-toast", { detail: message }));
 const isLinkedGroup = (group: HarvestGroup | LinkedHarvestGroup) => Boolean((group as LinkedHarvestGroup).sourceLabourGroupId);
+const isParticipating = (group: HarvestGroup | LinkedHarvestGroup) => !isLinkedGroup(group) || (group as LinkedHarvestGroup).harvestParticipating !== false;
+const sourceIsActive = (group: HarvestGroup | LinkedHarvestGroup) => isLinkedGroup(group) ? (group as LinkedHarvestGroup).sourceActive !== false : group.active !== false;
 const emptyEntryForm = (): EntryForm => ({ date: todayKey(), harvestGroupId: "", membersCount: "", cartonsHarvested: "", notes: "" });
 
 function useHarvestPerms() {
@@ -88,23 +120,27 @@ function useHarvestPerms() {
     canCreate: Boolean(user && hasModulePermission(user, "harvest", "create", workspaceId)),
     canEdit: Boolean(user && hasModulePermission(user, "harvest", "edit", workspaceId)),
     canDelete: Boolean(user && hasModulePermission(user, "harvest", "delete", workspaceId)),
+    canConfigureParticipation: Boolean(user && hasModulePermission(user, "workforce", "edit", workspaceId)),
   }), [user, workspaceId]);
 }
 
 async function syncWorkforceGroupsIntoHarvest() {
-  const [labourGroups, labourers, currentHarvestGroups] = await Promise.all([
+  const [rawLabourGroups, labourers, currentHarvestGroups] = await Promise.all([
     workspaceRecords(offlineDb.labourGroups),
     workspaceRecords(offlineDb.labourers),
     workspaceRecords(offlineDb.harvestGroups, { includeDeleted: true }),
   ]);
+  const labourGroups = rawLabourGroups as HarvestSourceLabourGroup[];
 
   const groupIdByName = new Map(labourGroups.map((group) => [group.name.trim().toLowerCase(), group.id]));
-  const memberCountByGroup = new Map<string, number>();
+  const memberIdsByGroup = new Map<string, Set<string>>();
   for (const labourer of labourers) {
     if (labourer.active === false || labourer.isArchived || Boolean(labourer.endedOn)) continue;
     const groupId = labourer.groupId || groupIdByName.get((labourer.group ?? "").trim().toLowerCase());
     if (!groupId) continue;
-    memberCountByGroup.set(groupId, (memberCountByGroup.get(groupId) ?? 0) + 1);
+    const memberIds = memberIdsByGroup.get(groupId) ?? new Set<string>();
+    memberIds.add(labourer.id);
+    memberIdsByGroup.set(groupId, memberIds);
   }
 
   const existingById = new Map(currentHarvestGroups.map((group) => [group.id, group as LinkedHarvestGroup]));
@@ -115,6 +151,13 @@ async function syncWorkforceGroupsIntoHarvest() {
     const id = linkedId(labourGroup.id);
     expectedIds.add(id);
     const current = existingById.get(id);
+    const sourceActive = labourGroup.active !== false;
+    const participating = labourGroup.harvestParticipating !== false;
+    const memberIds = memberIdsByGroup.get(labourGroup.id) ?? new Set<string>();
+    const totalMemberCount = memberIds.size;
+    const foremanId = labourGroup.foremanLabourId ?? labourGroup.foremanId ?? undefined;
+    const foremanExcluded = Boolean(foremanId && memberIds.has(foremanId));
+    const harvestMemberCount = Math.max(totalMemberCount - (foremanExcluded ? 1 : 0), 0);
     const next: LinkedHarvestGroup = {
       id,
       workspaceId: labourGroup.workspaceId,
@@ -124,10 +167,14 @@ async function syncWorkforceGroupsIntoHarvest() {
       updatedAt: labourGroup.updatedAt,
       pendingSync: false,
       name: labourGroup.name,
-      active: labourGroup.active !== false,
+      active: sourceActive && participating,
       notes: labourGroup.notes,
       sourceLabourGroupId: labourGroup.id,
-      linkedMemberCount: memberCountByGroup.get(labourGroup.id) ?? 0,
+      linkedMemberCount: harvestMemberCount,
+      linkedTotalMemberCount: totalMemberCount,
+      foremanExcluded,
+      harvestParticipating: participating,
+      sourceActive,
       sourceKind: "workforce",
     };
     if (!current
@@ -135,6 +182,10 @@ async function syncWorkforceGroupsIntoHarvest() {
       || current.active !== next.active
       || current.notes !== next.notes
       || current.linkedMemberCount !== next.linkedMemberCount
+      || current.linkedTotalMemberCount !== next.linkedTotalMemberCount
+      || current.foremanExcluded !== next.foremanExcluded
+      || current.harvestParticipating !== next.harvestParticipating
+      || current.sourceActive !== next.sourceActive
       || current.deletedAt) {
       puts.push(next);
     }
@@ -142,7 +193,7 @@ async function syncWorkforceGroupsIntoHarvest() {
 
   for (const current of currentHarvestGroups.map((group) => group as LinkedHarvestGroup)) {
     if (!current.sourceLabourGroupId || expectedIds.has(current.id) || current.active === false) continue;
-    puts.push({ ...current, active: false, pendingSync: false, updatedAt: new Date().toISOString() });
+    puts.push({ ...current, active: false, sourceActive: false, pendingSync: false, updatedAt: new Date().toISOString() });
   }
 
   if (puts.length) {
@@ -234,7 +285,7 @@ function GroupEditor({ initial, allGroups, onClose, onSaved }: {
 
 export function HarvestSectionLayout() {
   useLinkedHarvestBridge();
-  return <BaseHarvestSectionLayout />;
+  return <div className="harvest-linked-module"><BaseHarvestSectionLayout /></div>;
 }
 
 export function HarvestDashboardPage() {
@@ -257,6 +308,7 @@ export function HarvestGroupsPage() {
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("active");
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState<HarvestGroup | null>(null);
+  const [participationBusyId, setParticipationBusyId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     await syncWorkforceGroupsIntoHarvest();
@@ -276,11 +328,34 @@ export function HarvestGroupsPage() {
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
     return groups.filter((group) => {
-      const statusMatch = statusFilter === "all" || (statusFilter === "active" ? group.active !== false : group.active === false);
+      const active = sourceIsActive(group);
+      const statusMatch = statusFilter === "all" || (statusFilter === "active" ? active : !active);
       const searchMatch = !term || group.name.toLowerCase().includes(term) || (group.notes ?? "").toLowerCase().includes(term);
       return statusMatch && searchMatch;
     });
   }, [groups, search, statusFilter]);
+
+  const updateParticipation = async (group: LinkedHarvestGroup, participating: boolean) => {
+    if (!group.sourceLabourGroupId || participationBusyId) return;
+    setParticipationBusyId(group.id);
+    try {
+      const labourGroups = await workspaceRecords(offlineDb.labourGroups);
+      const source = labourGroups.find((item) => item.id === group.sourceLabourGroupId) as HarvestSourceLabourGroup | undefined;
+      if (!source) return;
+      await persistOperationalRecord("labourGroup", {
+        ...source,
+        harvestParticipating: participating,
+        updatedAt: new Date().toISOString(),
+        pendingSync: true,
+      } as HarvestSourceLabourGroup);
+      await refresh();
+      toast(t("harvestPage.participationSaved"));
+    } catch (reason) {
+      toast(reason instanceof Error ? reason.message : t("common.unableToSave"));
+    } finally {
+      setParticipationBusyId(null);
+    }
+  };
 
   const remove = async (group: HarvestGroup) => {
     if (countByGroup.get(group.id)) return toast(t("harvestPage.groupHasEntries"));
@@ -304,13 +379,34 @@ export function HarvestGroupsPage() {
     <div className="harvest-group-list">
       {visible.length ? visible.map((group) => {
         const linked = isLinkedGroup(group);
-        return <article className={`harvest-group-card${linked ? " harvest-group-card--labour" : ""}`} key={group.id}>
+        const participating = isParticipating(group);
+        const sourceActive = sourceIsActive(group);
+        return <article className={`harvest-group-card${linked ? " harvest-group-card--labour" : ""}${linked && !participating ? " is-not-participating" : ""}`} key={group.id}>
           <div className="harvest-group-card__header">
             <div className="harvest-group-card__identity"><strong>{group.name}</strong><span className="harvest-group-source-badge">{linked ? t("harvestPage.workforceGroupBadge") : t("harvestPage.harvestOnlyGroupBadge")}</span></div>
-            <span className={`sync-badge ${group.active !== false ? "sync-badge--online" : "sync-badge--error"}`}>{translateStatus(t, group.active !== false ? "active" : "inactive")}</span>
+            <span className={`sync-badge ${sourceActive ? "sync-badge--online" : "sync-badge--error"}`}>{translateStatus(t, sourceActive ? "active" : "inactive")}</span>
           </div>
           <p className="harvest-group-card__meta">{t("harvestPage.entriesRecorded", { count: countByGroup.get(group.id) ?? 0 })}</p>
-          {linked ? <p className="harvest-group-card__linked-note">{t("harvestPage.activeMembers", { count: group.linkedMemberCount ?? 0 })} · {t("harvestPage.managedInWorkforce")}</p> : group.notes ? <p className="harvest-group-card__notes">{group.notes}</p> : null}
+          {linked ? <>
+            <p className="harvest-group-card__linked-note">
+              {t("harvestPage.groupMembers", { count: group.linkedTotalMemberCount ?? 0 })} · {t("harvestPage.harvestWorkers", { count: group.linkedMemberCount ?? 0 })}
+              {group.foremanExcluded ? ` · ${t("harvestPage.foremanExcluded")}` : ""} · {t("harvestPage.managedInWorkforce")}
+            </p>
+            <div className="harvest-participation-row">
+              <div><strong>{t("harvestPage.participationLabel")}</strong><small>{t("harvestPage.participationHint")}</small></div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={participating}
+                className={`harvest-participation-toggle${participating ? " is-on" : ""}`}
+                disabled={!perms.canConfigureParticipation || participationBusyId === group.id || !sourceActive}
+                onClick={() => void updateParticipation(group, !participating)}
+              >
+                <span className="harvest-participation-toggle__track" aria-hidden="true"><span /></span>
+                <span>{participating ? t("harvestPage.participatesInHarvest") : t("harvestPage.doesNotParticipate")}</span>
+              </button>
+            </div>
+          </> : group.notes ? <p className="harvest-group-card__notes">{group.notes}</p> : null}
           {!linked && (perms.canEdit || perms.canDelete) ? <div className="harvest-group-card__actions">
             {perms.canEdit ? <button type="button" className="secondary-button" onClick={() => setEditing(group)}><Pencil size={14} /> {t("common.edit")}</button> : null}
             {perms.canDelete ? <button type="button" className="danger-link" onClick={() => void remove(group)}><Trash2 size={14} /> {t("common.delete")}</button> : null}
@@ -343,11 +439,12 @@ export function HarvestEntryPage() {
 
   const selectedGroup = groups.find((group) => group.id === form.harvestGroupId) ?? null;
   const linked = selectedGroup ? isLinkedGroup(selectedGroup) : false;
-  const selectable = groups.filter((group) => group.active !== false || group.id === form.harvestGroupId);
+  const selectable = groups.filter((group) => ((group.active !== false && isParticipating(group)) || group.id === form.harvestGroupId));
   const groupNameById = new Map(groups.map((group) => [group.id, group.name]));
   const membersCount = Number(form.membersCount) || 0;
   const cartonsHarvested = Number(form.cartonsHarvested) || 0;
   const perPerson = cartonsPerPerson(cartonsHarvested, membersCount);
+  const canSubmit = !busy && Boolean(form.harvestGroupId) && membersCount > 0 && form.cartonsHarvested !== "" && cartonsHarvested >= 0;
   const reset = () => { setForm(emptyEntryForm()); setError(""); };
 
   const submit = async (event: FormEvent) => {
@@ -405,7 +502,7 @@ export function HarvestEntryPage() {
           <label className="harvest-entry-form__field"><span>{t("harvestPage.groupLabel")}</span><ResponsiveSelectField title={t("harvestPage.groupLabel")} ariaLabel={t("harvestPage.groupLabel")} placeholder={t("harvestPage.selectGroup")} value={form.harvestGroupId} onChange={(value) => {
             const next = groups.find((group) => group.id === value);
             setForm({ ...form, harvestGroupId: value, membersCount: next && isLinkedGroup(next) ? String(next.linkedMemberCount ?? 0) : "" });
-          }} options={selectable.map((group) => ({ value: group.id, label: isLinkedGroup(group) ? `${group.name} · ${t("harvestPage.workforceGroupBadge")}` : group.name }))} autoFocusSearch={false} /></label>
+          }} options={selectable.map((group) => ({ value: group.id, label: group.name, secondary: isLinkedGroup(group) ? t("harvestPage.workforceGroupBadge") : t("harvestPage.harvestOnlyGroupBadge") }))} allowClear={false} autoFocusSearch={false} /></label>
         </div>
         <div className="harvest-entry-form__row">
           <label className="harvest-entry-form__field"><span>{t("harvestPage.membersCountLabel")}</span><input type="number" min={1} inputMode="numeric" required readOnly={linked} value={form.membersCount} onChange={(event) => setForm({ ...form, membersCount: event.target.value })} />{linked ? <small className="harvest-entry-form__hint">{(selectedGroup?.linkedMemberCount ?? 0) > 0 ? t("harvestPage.linkedMembersHint") : t("harvestPage.linkedGroupNoMembers")}</small> : null}</label>
@@ -414,7 +511,7 @@ export function HarvestEntryPage() {
         <div className="harvest-entry-form__calc" aria-live="polite"><span>{t("harvestPage.cartonsPerPerson")}</span><strong className="bidi-isolate">{ratio(perPerson)}</strong></div>
         <label className="harvest-entry-form__field harvest-entry-form__field--full"><span>{t("harvestPage.notesLabel")} <em>{t("harvestPage.optional")}</em></span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
         {error ? <p className="form-error">{error}</p> : null}
-        <div className="harvest-entry-form__actions"><button type="submit" disabled={busy}>{busy ? t("harvestPage.saving") : form.id ? t("harvestPage.updateEntry") : t("harvestPage.saveEntry")}</button></div>
+        <div className="harvest-entry-form__actions"><button type="submit" disabled={!canSubmit}>{busy ? t("harvestPage.saving") : form.id ? t("harvestPage.updateEntry") : t("harvestPage.saveEntry")}</button></div>
       </form>
     </section>
     <section className="record-panel harvest-recent-panel">
