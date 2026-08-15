@@ -4,6 +4,11 @@
   background: color-mix(in srgb, var(--primary, #2f7d32) 3%, var(--surface, #fff));
 }
 
+.harvest-linked-groups-page .harvest-group-card--labour.is-not-participating {
+  background: var(--surface, #fff);
+  border-color: var(--border, #e5e7eb);
+}
+
 .harvest-group-card__identity {
   display: flex;
   min-width: 0;
@@ -39,11 +44,99 @@
   line-height: 1.4;
 }
 
+.harvest-participation-row {
+  align-items: center;
+  background: #f8faf8;
+  border: 1px solid #e2e9e4;
+  border-radius: 12px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-top: 10px;
+  padding: 9px 10px;
+}
+
+.harvest-participation-row > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.harvest-participation-row > div > strong {
+  color: var(--text-primary, #1f2937);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.harvest-participation-row > div > small {
+  color: var(--text-secondary, #68717d);
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.harvest-participation-toggle {
+  align-items: center;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  color: var(--text-secondary, #68717d) !important;
+  display: inline-flex;
+  flex-direction: column;
+  font-size: 0.64rem;
+  font-weight: 750;
+  gap: 4px;
+  min-height: 42px;
+  min-width: 84px;
+  padding: 0 !important;
+}
+
+.harvest-participation-toggle.is-on {
+  color: var(--primary, #2f7d32) !important;
+}
+
+.harvest-participation-toggle:disabled {
+  cursor: default;
+  opacity: 0.52;
+}
+
+.harvest-participation-toggle__track {
+  background: #cfd8d2;
+  border-radius: 999px;
+  display: block;
+  height: 24px;
+  padding: 2px;
+  transition: background-color 0.16s ease;
+  width: 42px;
+}
+
+.harvest-participation-toggle__track > span {
+  background: #fff;
+  border-radius: 999px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
+  display: block;
+  height: 20px;
+  transform: translateX(0);
+  transition: transform 0.16s ease;
+  width: 20px;
+}
+
+.harvest-participation-toggle.is-on .harvest-participation-toggle__track {
+  background: var(--primary, #2f7d32);
+}
+
+.harvest-participation-toggle.is-on .harvest-participation-toggle__track > span {
+  transform: translateX(18px);
+}
+
+html[dir="rtl"] .harvest-participation-toggle.is-on .harvest-participation-toggle__track > span {
+  transform: translateX(-18px);
+}
+
 .harvest-entry-form__hint {
   display: block;
   margin-top: 5px;
   color: var(--text-secondary, #68717d);
-  font-size: 0.74rem;
+  font-size: 0.7rem;
   font-style: normal;
   line-height: 1.35;
 }
@@ -55,6 +148,48 @@
 }
 
 @media (max-width: 680px) {
+  /* Compact harvest shell: keep all four tabs visible instead of clipping Reports. */
+  .harvest-linked-module .workspace-intro {
+    border-radius: 14px !important;
+    padding: 14px 16px !important;
+  }
+
+  .harvest-linked-module .workspace-intro h2 {
+    font-size: 1.18rem !important;
+    line-height: 1.25 !important;
+  }
+
+  .harvest-linked-module .workspace-intro p {
+    font-size: 0.8rem !important;
+    line-height: 1.4 !important;
+    margin-top: 4px !important;
+  }
+
+  .harvest-linked-module .workforce-shell-panel {
+    padding: 4px !important;
+  }
+
+  .harvest-linked-module .workforce-shell-tabs {
+    display: grid !important;
+    gap: 4px !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+
+  .harvest-linked-module .workforce-shell-tab {
+    font-size: 0.7rem !important;
+    justify-content: center !important;
+    min-height: 42px !important;
+    min-width: 0 !important;
+    overflow: hidden;
+    padding: 7px 3px !important;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    width: 100% !important;
+  }
+
   .harvest-linked-groups-page .harvest-group-card__header {
     align-items: flex-start;
   }
@@ -62,5 +197,252 @@
   .harvest-group-source-badge {
     min-height: 22px;
     font-size: 0.68rem;
+  }
+
+  .harvest-linked-groups-page .harvest-group-card {
+    border-radius: 14px !important;
+    padding: 12px !important;
+  }
+
+  .harvest-participation-row {
+    border-radius: 11px;
+    padding: 8px 9px;
+  }
+
+  /* Daily Entry form hierarchy. */
+  .harvest-entry-layout {
+    gap: 10px !important;
+    padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .harvest-entry-panel {
+    border-radius: 16px !important;
+    padding: 14px !important;
+  }
+
+  .harvest-entry-panel__heading {
+    margin-bottom: 10px !important;
+  }
+
+  .harvest-entry-panel__heading h2 {
+    font-size: 1.05rem !important;
+  }
+
+  .harvest-entry-form {
+    gap: 10px !important;
+    padding-bottom: 76px !important;
+  }
+
+  .harvest-entry-form__row {
+    gap: 10px !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .harvest-entry-form__field {
+    min-width: 0;
+  }
+
+  .harvest-entry-form__field > span {
+    font-size: 0.72rem !important;
+    margin-bottom: 5px !important;
+  }
+
+  .harvest-entry-form input,
+  .harvest-entry-form textarea,
+  .harvest-entry-form .report-picker__trigger {
+    border: 1px solid #dbe5dd !important;
+    border-radius: 12px !important;
+    box-shadow: none !important;
+    min-height: 46px !important;
+  }
+
+  .harvest-entry-form .report-picker__trigger {
+    background: #fff !important;
+    color: var(--text-primary, #1f2937) !important;
+    justify-content: space-between !important;
+    padding: 0 12px !important;
+    text-align: start !important;
+    width: 100% !important;
+  }
+
+  .harvest-entry-form .report-picker__trigger-text,
+  .harvest-entry-form .report-picker__trigger-text.is-filled {
+    color: var(--text-primary, #1f2937) !important;
+    font-size: 0.84rem !important;
+    font-weight: 600 !important;
+  }
+
+  .harvest-entry-form .report-picker__trigger-text:not(.is-filled) {
+    color: var(--text-secondary, #6b7280) !important;
+  }
+
+  .harvest-entry-form .report-picker__trigger-actions {
+    color: var(--text-secondary, #6b7280) !important;
+  }
+
+  /* Required group picker: neutral rows, only the selected row gets green emphasis. */
+  .harvest-entry-form .report-picker-sheet {
+    border-radius: 20px 20px 0 0 !important;
+    max-height: min(78vh, 620px) !important;
+  }
+
+  .harvest-entry-form .report-picker-sheet__header {
+    align-items: center !important;
+    min-height: 64px !important;
+    padding: 12px 14px !important;
+  }
+
+  .harvest-entry-form .report-picker-sheet__header h3 {
+    font-size: 1rem !important;
+  }
+
+  .harvest-entry-form .report-picker-sheet__header p {
+    color: var(--text-secondary, #6b7280) !important;
+    font-size: 0.72rem !important;
+    margin-top: 1px !important;
+  }
+
+  .harvest-entry-form .report-picker-sheet__close {
+    align-items: center !important;
+    background: #f3f7f3 !important;
+    border: 1px solid #dce6de !important;
+    border-radius: 12px !important;
+    box-shadow: none !important;
+    color: var(--text-primary, #1f2937) !important;
+    display: inline-flex !important;
+    height: 40px !important;
+    justify-content: center !important;
+    min-height: 40px !important;
+    min-width: 40px !important;
+    padding: 0 !important;
+    width: 40px !important;
+  }
+
+  .harvest-entry-form .report-picker-sheet__search {
+    padding: 8px 14px 10px !important;
+  }
+
+  .harvest-entry-form .report-picker-sheet__body {
+    display: grid !important;
+    gap: 6px !important;
+    padding: 0 14px 14px !important;
+  }
+
+  .harvest-entry-form .report-picker-sheet__body > .report-picker-sheet__option:first-child {
+    display: none !important;
+  }
+
+  .harvest-entry-form .report-picker-sheet__option {
+    align-items: center !important;
+    background: #fff !important;
+    border: 1px solid #e1e7e3 !important;
+    border-radius: 12px !important;
+    box-shadow: none !important;
+    color: var(--text-primary, #1f2937) !important;
+    min-height: 52px !important;
+    padding: 8px 10px !important;
+    text-align: start !important;
+  }
+
+  .harvest-entry-form .report-picker-sheet__option.is-selected {
+    background: #edf7ee !important;
+    border-color: #b9d9bd !important;
+    color: #215e2b !important;
+  }
+
+  .harvest-entry-form .report-picker-sheet__checkbox {
+    background: #fff !important;
+    border: 1px solid #cfd8d2 !important;
+    color: #fff !important;
+  }
+
+  .harvest-entry-form .report-picker-sheet__option.is-selected .report-picker-sheet__checkbox {
+    background: var(--primary, #2f7d32) !important;
+    border-color: var(--primary, #2f7d32) !important;
+  }
+
+  .harvest-entry-form .report-picker-sheet__option-text strong {
+    color: inherit !important;
+    font-size: 0.82rem !important;
+    font-weight: 760 !important;
+  }
+
+  .harvest-entry-form .report-picker-sheet__option-text small {
+    color: var(--text-secondary, #6b7280) !important;
+    font-size: 0.66rem !important;
+    font-weight: 550 !important;
+  }
+
+  .harvest-entry-form__calc {
+    align-items: center !important;
+    background: #f7faf8 !important;
+    border: 1px solid #dfe8e1 !important;
+    border-radius: 12px !important;
+    display: flex !important;
+    justify-content: space-between !important;
+    min-height: 48px !important;
+    padding: 8px 11px !important;
+  }
+
+  .harvest-entry-form__calc span {
+    font-size: 0.72rem !important;
+    font-weight: 760 !important;
+  }
+
+  .harvest-entry-form__calc strong {
+    font-size: 1.15rem !important;
+    line-height: 1 !important;
+  }
+
+  .harvest-entry-form__field--full textarea {
+    min-height: 72px !important;
+  }
+
+  /* Keep the useful sticky Save action, but make it compact and clearly disabled until ready. */
+  .harvest-entry-form__actions {
+    align-items: center !important;
+    background: rgba(255, 255, 255, 0.97) !important;
+    border-top: 1px solid #e0e7e2 !important;
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
+    box-shadow: 0 -5px 18px rgba(15, 23, 42, 0.07) !important;
+    display: flex !important;
+    inset-inline: 0 !important;
+    min-height: 68px !important;
+    padding: 9px 14px !important;
+    position: fixed !important;
+    z-index: 110 !important;
+  }
+
+  .harvest-entry-form__actions button {
+    border-radius: 12px !important;
+    min-height: 48px !important;
+    width: 100% !important;
+  }
+
+  .harvest-entry-form__actions button:disabled {
+    background: #e6ece7 !important;
+    border-color: #e0e6e1 !important;
+    color: #8a958d !important;
+    cursor: default !important;
+    opacity: 1 !important;
+  }
+}
+
+@media (max-width: 380px) {
+  .harvest-linked-module .workforce-shell-tab {
+    font-size: 0.64rem !important;
+    padding-inline: 2px !important;
+  }
+
+  .harvest-entry-form__row {
+    gap: 8px !important;
+  }
+
+  .harvest-participation-row {
+    grid-template-columns: minmax(0, 1fr) 76px;
+  }
+
+  .harvest-participation-toggle {
+    min-width: 76px;
   }
 }
