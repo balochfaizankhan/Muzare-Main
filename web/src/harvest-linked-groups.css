@@ -135,9 +135,10 @@ html[dir="rtl"] .harvest-participation-toggle.is-on .harvest-participation-toggl
 .harvest-entry-form__hint {
   display: block;
   margin-top: 5px;
-  color: var(--text-secondary, #68717d);
+  color: var(--text-secondary, #68717d) !important;
   font-size: 0.7rem;
   font-style: normal;
+  font-weight: 550;
   line-height: 1.35;
 }
 
@@ -151,18 +152,18 @@ html[dir="rtl"] .harvest-participation-toggle.is-on .harvest-participation-toggl
   /* Compact harvest shell: keep all four tabs visible instead of clipping Reports. */
   .harvest-linked-module .workspace-intro {
     border-radius: 14px !important;
-    padding: 14px 16px !important;
+    padding: 11px 14px !important;
   }
 
   .harvest-linked-module .workspace-intro h2 {
-    font-size: 1.18rem !important;
-    line-height: 1.25 !important;
+    font-size: 1.08rem !important;
+    line-height: 1.2 !important;
   }
 
   .harvest-linked-module .workspace-intro p {
-    font-size: 0.8rem !important;
-    line-height: 1.4 !important;
-    margin-top: 4px !important;
+    font-size: 0.74rem !important;
+    line-height: 1.35 !important;
+    margin-top: 3px !important;
   }
 
   .harvest-linked-module .workforce-shell-panel {
@@ -212,7 +213,7 @@ html[dir="rtl"] .harvest-participation-toggle.is-on .harvest-participation-toggl
   /* Daily Entry form hierarchy. */
   .harvest-entry-layout {
     gap: 10px !important;
-    padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(132px + env(safe-area-inset-bottom, 0px));
   }
 
   .harvest-entry-panel {
@@ -230,21 +231,31 @@ html[dir="rtl"] .harvest-participation-toggle.is-on .harvest-participation-toggl
 
   .harvest-entry-form {
     gap: 10px !important;
-    padding-bottom: 76px !important;
+    padding-bottom: 104px !important;
   }
 
   .harvest-entry-form__row {
+    align-items: start !important;
     gap: 10px !important;
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 
   .harvest-entry-form__field {
+    align-content: start;
     min-width: 0;
   }
 
   .harvest-entry-form__field > span {
     font-size: 0.72rem !important;
     margin-bottom: 5px !important;
+  }
+
+  .harvest-entry-form__hint {
+    color: var(--text-secondary, #68717d) !important;
+    font-size: 0.66rem !important;
+    font-weight: 560 !important;
+    line-height: 1.35 !important;
+    margin-top: 6px !important;
   }
 
   .harvest-entry-form input,
@@ -380,8 +391,8 @@ html[dir="rtl"] .harvest-participation-toggle.is-on .harvest-participation-toggl
     border-radius: 12px !important;
     display: flex !important;
     justify-content: space-between !important;
-    min-height: 48px !important;
-    padding: 8px 11px !important;
+    min-height: 46px !important;
+    padding: 7px 11px !important;
   }
 
   .harvest-entry-form__calc span {
@@ -390,12 +401,12 @@ html[dir="rtl"] .harvest-participation-toggle.is-on .harvest-participation-toggl
   }
 
   .harvest-entry-form__calc strong {
-    font-size: 1.15rem !important;
+    font-size: 1.05rem !important;
     line-height: 1 !important;
   }
 
   .harvest-entry-form__field--full textarea {
-    min-height: 72px !important;
+    min-height: 80px !important;
   }
 
   /* Keep the useful sticky Save action, but make it compact and clearly disabled until ready. */
@@ -407,15 +418,15 @@ html[dir="rtl"] .harvest-participation-toggle.is-on .harvest-participation-toggl
     box-shadow: 0 -5px 18px rgba(15, 23, 42, 0.07) !important;
     display: flex !important;
     inset-inline: 0 !important;
-    min-height: 68px !important;
-    padding: 9px 14px !important;
+    min-height: 60px !important;
+    padding: 7px 14px !important;
     position: fixed !important;
     z-index: 110 !important;
   }
 
   .harvest-entry-form__actions button {
     border-radius: 12px !important;
-    min-height: 48px !important;
+    min-height: 44px !important;
     width: 100% !important;
   }
 
@@ -425,24 +436,5 @@ html[dir="rtl"] .harvest-participation-toggle.is-on .harvest-participation-toggl
     color: #8a958d !important;
     cursor: default !important;
     opacity: 1 !important;
-  }
-}
-
-@media (max-width: 380px) {
-  .harvest-linked-module .workforce-shell-tab {
-    font-size: 0.64rem !important;
-    padding-inline: 2px !important;
-  }
-
-  .harvest-entry-form__row {
-    gap: 8px !important;
-  }
-
-  .harvest-participation-row {
-    grid-template-columns: minmax(0, 1fr) 76px;
-  }
-
-  .harvest-participation-toggle {
-    min-width: 76px;
   }
 }
