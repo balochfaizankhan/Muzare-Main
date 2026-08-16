@@ -39,6 +39,8 @@ const linkedResources = {
     foremanExcluded: "Foreman excluded",
     managedInWorkforce: "Managed in Workforce",
     linkedMembersHint: "Harvest workers are counted automatically from Workforce. The foreman is excluded when present in the group.",
+    crewBreakdownWithForeman: "{{total}} group members − 1 foreman = {{count}} harvest workers",
+    crewBreakdownNoForeman: "{{count}} harvest workers from {{total}} group members",
     linkedGroupNoMembers: "This workforce group has no harvest workers. Check its active members and foreman in Workforce.",
     noGroupsMatch: "No groups match this view.",
     participationLabel: "Harvest participation",
@@ -57,6 +59,8 @@ const linkedResources = {
     foremanExcluded: "المشرف مستبعد",
     managedInWorkforce: "تُدار من قسم العمالة",
     linkedMembersHint: "يتم احتساب عمال الحصاد تلقائياً من قسم العمالة، مع استبعاد المشرف إذا كان ضمن المجموعة.",
+    crewBreakdownWithForeman: "{{total}} أعضاء المجموعة − مشرف واحد = {{count}} عمال حصاد",
+    crewBreakdownNoForeman: "{{count}} عمال حصاد من أصل {{total}} أعضاء المجموعة",
     linkedGroupNoMembers: "لا يوجد عمال حصاد في هذه المجموعة. تحقق من الأعضاء النشطين والمشرف في قسم العمالة.",
     noGroupsMatch: "لا توجد مجموعات تطابق هذا العرض.",
     participationLabel: "المشاركة في الحصاد",
@@ -75,6 +79,8 @@ const linkedResources = {
     foremanExcluded: "فورمین شامل نہیں",
     managedInWorkforce: "ورک فورس میں منظم",
     linkedMembersHint: "کٹائی کارکنوں کی تعداد ورک فورس سے خودکار طور پر لی جاتی ہے۔ گروپ میں موجود فورمین کو شمار نہیں کیا جاتا۔",
+    crewBreakdownWithForeman: "{{total}} گروپ اراکین − 1 فورمین = {{count}} کٹائی کارکن",
+    crewBreakdownNoForeman: "{{total}} گروپ اراکین میں سے {{count}} کٹائی کارکن",
     linkedGroupNoMembers: "اس گروپ میں کٹائی کے لیے کوئی کارکن نہیں۔ ورک فورس میں فعال اراکین اور فورمین چیک کریں۔",
     noGroupsMatch: "اس منظر سے مطابقت رکھنے والا کوئی گروپ نہیں۔",
     participationLabel: "کٹائی میں شرکت",
@@ -505,8 +511,15 @@ export function HarvestEntryPage() {
           }} options={selectable.map((group) => ({ value: group.id, label: group.name, secondary: isLinkedGroup(group) ? t("harvestPage.workforceGroupBadge") : t("harvestPage.harvestOnlyGroupBadge") }))} allowClear={false} autoFocusSearch={false} /></label>
         </div>
         <div className="harvest-entry-form__row">
-          <label className="harvest-entry-form__field"><span>{t("harvestPage.membersCountLabel")}</span><input type="number" min={1} inputMode="numeric" required readOnly={linked} value={form.membersCount} onChange={(event) => setForm({ ...form, membersCount: event.target.value })} />{linked ? <small className="harvest-entry-form__hint">{(selectedGroup?.linkedMemberCount ?? 0) > 0 ? t("harvestPage.linkedMembersHint") : t("harvestPage.linkedGroupNoMembers")}</small> : null}</label>
+          <label className="harvest-entry-form__field"><span>{t("harvestPage.membersCountLabel")}</span><input type="number" min={1} inputMode="numeric" required readOnly={linked} value={form.membersCount} onChange={(event) => setForm({ ...form, membersCount: event.target.value })} /></label>
           <label className="harvest-entry-form__field"><span>{t("harvestPage.cartonsHarvestedLabel")}</span><input type="number" min={0} inputMode="numeric" required value={form.cartonsHarvested} onChange={(event) => setForm({ ...form, cartonsHarvested: event.target.value })} /></label>
+          {linked ? <small className="harvest-entry-form__hint">
+            {(selectedGroup?.linkedMemberCount ?? 0) > 0
+              ? selectedGroup?.foremanExcluded
+                ? t("harvestPage.crewBreakdownWithForeman", { total: selectedGroup?.linkedTotalMemberCount ?? membersCount + 1, count: selectedGroup?.linkedMemberCount ?? membersCount })
+                : t("harvestPage.crewBreakdownNoForeman", { total: selectedGroup?.linkedTotalMemberCount ?? membersCount, count: selectedGroup?.linkedMemberCount ?? membersCount })
+              : t("harvestPage.linkedGroupNoMembers")}
+          </small> : null}
         </div>
         <div className="harvest-entry-form__calc" aria-live="polite"><span>{t("harvestPage.cartonsPerPerson")}</span><strong className="bidi-isolate">{ratio(perPerson)}</strong></div>
         <label className="harvest-entry-form__field harvest-entry-form__field--full"><span>{t("harvestPage.notesLabel")} <em>{t("harvestPage.optional")}</em></span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
