@@ -240,6 +240,11 @@ html[dir="rtl"] .harvest-participation-toggle.is-on .harvest-participation-toggl
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 
+  .harvest-entry-form__row:has(.harvest-entry-form__hint) {
+    padding-bottom: 38px !important;
+    position: relative !important;
+  }
+
   .harvest-entry-form__field {
     align-content: start;
     min-width: 0;
@@ -251,11 +256,15 @@ html[dir="rtl"] .harvest-participation-toggle.is-on .harvest-participation-toggl
   }
 
   .harvest-entry-form__hint {
+    bottom: 2px;
     color: var(--text-secondary, #68717d) !important;
     font-size: 0.66rem !important;
     font-weight: 560 !important;
+    inset-inline: 0;
     line-height: 1.35 !important;
-    margin-top: 6px !important;
+    margin: 0 !important;
+    position: absolute;
+    text-align: start;
   }
 
   .harvest-entry-form input,
