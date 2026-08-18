@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import { AuthProvider } from "./auth/AuthProvider";
+import { StartupRecoveryBoundary, installStartupRecovery } from "./StartupRecoveryBoundary";
 import "./i18n";
 import "./styles.css";
 import "./reports-account-polish.css";
@@ -71,6 +72,7 @@ function RootShell() {
   );
 }
 
+installStartupRecovery();
 installDetachedReportPrintBridge();
 markStartup("react-root-render-start");
 void scheduleBackgroundTask(async () => {
@@ -80,7 +82,9 @@ void scheduleBackgroundTask(async () => {
 }, { timeoutMs: 3_000 });
 
 createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <RootShell />
-  </StrictMode>,
+  <StartupRecoveryBoundary>
+    <StrictMode>
+      <RootShell />
+    </StrictMode>
+  </StartupRecoveryBoundary>,
 );
