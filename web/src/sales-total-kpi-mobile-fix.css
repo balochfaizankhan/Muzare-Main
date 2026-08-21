@@ -1,0 +1,13 @@
+/* Keep the Sales Total Sales KPI readable on narrow phones without changing sales logic or the other KPI cards. */
+@media (max-width: 767px) {
+  .module-workspace:has(.sales-form) > .summary-grid {
+    grid-template-columns: minmax(148px, 1.35fr) repeat(2, minmax(112px, 1fr));
+  }
+
+  .module-workspace:has(.sales-form) > .summary-grid .summary-card:first-child strong {
+    max-width: 100%;
+    font-size: clamp(0.82rem, 3.5vw, 1rem);
+    letter-spacing: -0.025em;
+    white-space: nowrap;
+  }
+}
