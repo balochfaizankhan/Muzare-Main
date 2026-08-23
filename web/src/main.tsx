@@ -11,6 +11,7 @@ import "./reports-account-polish.css";
 import "./accounts-report-v2.css";
 import "./reports-expenditure-drilldown.css";
 import "./sales-polish.css";
+import "./sales-total-kpi-mobile-fix.css";
 import "./sales-date-sync.css";
 import "./dispatch-records-dialogs.css";
 import "./partner-ledger-polish.css";
