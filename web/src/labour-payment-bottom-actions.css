@@ -1,0 +1,132 @@
+/* Labour Payments: keep the financial result visible, make one action primary,
+   and keep exceptional actions compact. Accounting/posting behavior is unchanged. */
+
+.workforce-payment-review__settlement-footer .workforce-payment-review__settlement-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.workforce-payment-review__settlement-footer .workforce-payment-review__settlement-summary > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.75rem;
+  line-height: 1.2;
+}
+
+.workforce-payment-review__settlement-footer .workforce-payment-review__settlement-summary b {
+  display: block;
+  min-width: 0;
+  white-space: nowrap;
+  font-size: 0.98rem;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+}
+
+.workforce-payment-review__actions--settlement {
+  display: flex !important;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px !important;
+}
+
+.workforce-payment-review__actions--settlement > .workforce-payment-review__secondary-action {
+  order: 1;
+  flex: 0 1 auto !important;
+  width: auto !important;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 13px !important;
+  border-radius: 12px !important;
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.workforce-payment-review__actions--settlement > .workforce-payment-review__secondary-action.is-hold {
+  order: 1;
+}
+
+.workforce-payment-review__actions--settlement > .workforce-payment-review__secondary-action.is-danger {
+  order: 2;
+  color: #b42318;
+  border-color: rgba(180, 35, 24, 0.28);
+  background: rgba(180, 35, 24, 0.04);
+}
+
+.workforce-payment-review__actions--settlement > .workforce-payment-review__settle-action {
+  order: 3;
+  flex: 1 0 100% !important;
+  width: 100% !important;
+  min-width: 0;
+  min-height: 56px;
+  margin: 2px 0 0;
+  border-radius: 16px !important;
+  font-size: 1.02rem;
+  font-weight: 800;
+}
+
+@media (max-width: 768px) {
+  .workforce-payment-review__settlement-footer {
+    display: grid !important;
+    gap: 10px !important;
+    padding: 10px 16px calc(12px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .workforce-payment-review__settlement-footer .workforce-payment-review__settlement-summary {
+    padding: 0 2px;
+  }
+
+  .workforce-payment-review__settlement-footer .workforce-payment-review__settlement-summary > span:nth-child(2) {
+    text-align: center;
+    align-items: center;
+  }
+
+  .workforce-payment-review__settlement-footer .workforce-payment-review__settlement-summary > span:last-child {
+    text-align: end;
+    align-items: flex-end;
+  }
+
+  /* Direct Due: reserve enough width for large SAR figures without stealing
+     the primary action's usable tap area. */
+  .workforce-direct-due-panel .workforce-payment-form__footer {
+    display: grid !important;
+    grid-template-columns: minmax(128px, 40%) minmax(0, 1fr) !important;
+    align-items: center;
+    gap: 8px !important;
+  }
+
+  .workforce-direct-due-panel .workforce-payment-form__footer > div {
+    min-width: 0;
+    overflow: visible;
+  }
+
+  .workforce-direct-due-panel .workforce-payment-form__footer > div > strong {
+    display: block;
+    white-space: nowrap;
+    font-size: 0.72rem;
+    line-height: 1.15;
+  }
+
+  .workforce-direct-due-panel .workforce-payment-form__footer > div > span {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    white-space: nowrap;
+    font-size: clamp(1.05rem, 4.7vw, 1.4rem);
+    line-height: 1.2;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .workforce-direct-due-panel .workforce-payment-form__footer > button {
+    width: 100% !important;
+    min-width: 0;
+    min-height: 56px;
+    padding-inline: 12px !important;
+    white-space: nowrap;
+  }
+}
