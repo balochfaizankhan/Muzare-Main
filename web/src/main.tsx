@@ -36,6 +36,7 @@ import { installDispatchMasterDialogEnhancements } from "./lib/dispatchMasterDia
 import { installDispatchSubmitGuard } from "./lib/dispatchSubmitGuard";
 import { installDispatchSummaryEnhancements } from "./lib/dispatchSummaryEnhancements";
 import { installReportExportFilenameGuard } from "./lib/reportExportFilename";
+import { installAccountsExpenseVisibilityCorrection } from "./lib/accountsExpenseVisibilityCorrection";
 import { queryClient } from "./lib/query-client";
 import { markStartup, scheduleBackgroundTask } from "./lib/startupPerf";
 
@@ -50,7 +51,9 @@ function RootShell() {
     const removeDispatchSubmitGuard = installDispatchSubmitGuard();
     const removeDispatchSummaryEnhancements = installDispatchSummaryEnhancements();
     const removeReportExportFilenameGuard = installReportExportFilenameGuard();
+    const removeAccountsExpenseVisibilityCorrection = installAccountsExpenseVisibilityCorrection();
     return () => {
+      removeAccountsExpenseVisibilityCorrection();
       removeReportExportFilenameGuard();
       removeDispatchSummaryEnhancements();
       removeDispatchSubmitGuard();
