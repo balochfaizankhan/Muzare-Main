@@ -26,6 +26,7 @@ import "./dispatch-mobile-dialog-compact-fixes.css";
 import "./dispatch-summary-mobile.css";
 import "./labour-group-confirmation-layer.css";
 import "./returned-to-farm-report.css";
+import "./labour-payment-bottom-actions.css";
 import "./sales-date-sync";
 import { installSystemTextLocalizationGuard } from "./lib/systemTextLocalization";
 import { installSalesAdvanceMobileRefinements } from "./lib/salesAdvanceMobileRefinements";
@@ -37,6 +38,7 @@ import { installDispatchSubmitGuard } from "./lib/dispatchSubmitGuard";
 import { installDispatchSummaryEnhancements } from "./lib/dispatchSummaryEnhancements";
 import { installReportExportFilenameGuard } from "./lib/reportExportFilename";
 import { installAccountsExpenseVisibilityCorrection } from "./lib/accountsExpenseVisibilityCorrection";
+import { installLabourPaymentBottomActions } from "./lib/labourPaymentBottomActions";
 import { queryClient } from "./lib/query-client";
 import { markStartup, scheduleBackgroundTask } from "./lib/startupPerf";
 
@@ -52,7 +54,9 @@ function RootShell() {
     const removeDispatchSummaryEnhancements = installDispatchSummaryEnhancements();
     const removeReportExportFilenameGuard = installReportExportFilenameGuard();
     const removeAccountsExpenseVisibilityCorrection = installAccountsExpenseVisibilityCorrection();
+    const removeLabourPaymentBottomActions = installLabourPaymentBottomActions();
     return () => {
+      removeLabourPaymentBottomActions();
       removeAccountsExpenseVisibilityCorrection();
       removeReportExportFilenameGuard();
       removeDispatchSummaryEnhancements();
