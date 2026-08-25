@@ -3,6 +3,7 @@ import { ensureBootstrapAdmin } from "./auth.js";
 import { config, databaseConfigured } from "./config.js";
 import { closeDatabaseConnection } from "./db/client.js";
 import { ensureDispatchSerialGuard } from "./db/dispatchSerialGuard.js";
+import { ensureLabourAdvanceFundingAttribution } from "./db/labourAdvanceFundingAttributionGuard.js";
 import { ensureWorkspaceSchema } from "./db/migrations.js";
 
 const app = await buildApp();
@@ -20,6 +21,7 @@ try {
   if (databaseConfigured) {
     await ensureWorkspaceSchema();
     await ensureDispatchSerialGuard();
+    await ensureLabourAdvanceFundingAttribution();
   }
   await ensureBootstrapAdmin();
   await app.listen({ host: config.HOST, port: config.PORT });
