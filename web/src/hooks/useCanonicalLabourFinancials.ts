@@ -5,6 +5,7 @@ import { useSyncState } from "./useSyncState";
 import { fetchLabourFinancialReadModel } from "../lib/api";
 import { registerExternalAccountIdentities } from "../lib/accountIdentity";
 import { createRefreshDebouncer } from "../lib/eventCoalescing";
+import { reconcilePartnerAdvanceAttribution } from "../lib/labourPartnerAdvanceAttribution";
 
 /** One scoped canonical source for labour account, partner, ledger, expense and activity consumers. */
 export function useCanonicalLabourFinancials() {
@@ -18,21 +19,22 @@ export function useCanonicalLabourFinancials() {
     queryKey: ["canonical-labour-financials", token, workspaceId, farmId, seasonId],
     queryFn: async ({ signal }) => {
       const response = await fetchLabourFinancialReadModel(token!, workspaceId, farmId, seasonId, signal);
-      const scope = response.financials.scope;
+      const financials = reconcilePartnerAdvanceAttribution(response.financials);
+      const scope = financials.scope;
       if (scope.workspaceId !== workspaceId || scope.farmId !== farmId || scope.seasonId !== seasonId) {
         throw new Error("The financial snapshot belongs to a different workspace, farm, or season.");
       }
       registerExternalAccountIdentities([
-        ...response.financials.partnerPositions.map((position) => ({
+        ...financials.partnerPositions.map((position) => ({
           accountId: position.accountId,
           accountName: position.accountName,
         })),
-        ...response.financials.expenseAccountAttributions.map((attribution) => ({
+        ...financials.expenseAccountAttributions.map((attribution) => ({
           accountId: attribution.accountId,
           accountName: attribution.accountName,
         })),
       ]);
-      return response;
+      return { ...response, financials };
     },
     enabled: Boolean(token && workspaceId && farmId && seasonId && navigator.onLine),
     placeholderData: undefined,
