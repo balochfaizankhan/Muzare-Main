@@ -21,6 +21,11 @@ function enhanceSettlementFooter(dialog: Element) {
   const actions = footer.querySelector<HTMLElement>(".workforce-payment-review__actions");
   if (!preview || !actions) return;
 
+  const onHold = Boolean(
+    dialog.querySelector(".workforce-payment-status.status-on_hold"),
+  );
+  dialog.classList.toggle("workforce-payment-review--on-hold", onHold);
+
   footer.classList.add("workforce-payment-review__settlement-footer");
   preview.classList.add("workforce-payment-review__settlement-summary");
   actions.classList.add("workforce-payment-review__actions--settlement");
@@ -33,9 +38,12 @@ function enhanceSettlementFooter(dialog: Element) {
     const isHoldAction = Boolean(button.querySelector("svg"));
     button.classList.toggle("is-hold", isHoldAction);
     button.classList.toggle("is-danger", !isHoldAction);
+    button.classList.toggle("is-resume", onHold && isHoldAction);
   });
 
-  const primary = actions.querySelector<HTMLButtonElement>(":scope > button.primary-action");
+  const primary = actions.querySelector<HTMLButtonElement>(
+    ":scope > button.primary-action:not(.secondary-action)",
+  );
   if (!primary) return;
   primary.classList.add("workforce-payment-review__settle-action");
 
