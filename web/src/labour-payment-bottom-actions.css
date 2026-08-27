@@ -69,6 +69,33 @@
   font-weight: 800;
 }
 
+/* A held due is a management state, not a settlement state. The underlying
+   React flow already hides advance/payment fields and renders a Remove hold
+   action for ON_HOLD dues; make that recovery action unmistakable and remove
+   the disabled settlement CTA from the footer. */
+.workforce-payment-review--on-hold .workforce-payment-review__settlement-summary {
+  display: none !important;
+}
+
+.workforce-payment-review--on-hold
+  .workforce-payment-review__actions--settlement
+  > .workforce-payment-review__settle-action {
+  display: none !important;
+}
+
+.workforce-payment-review--on-hold
+  .workforce-payment-review__actions--settlement
+  > .workforce-payment-review__secondary-action.is-resume {
+  order: 3;
+  flex: 1 0 100% !important;
+  width: 100% !important;
+  min-height: 56px;
+  margin-top: 2px;
+  border-radius: 16px !important;
+  font-size: 1.02rem;
+  font-weight: 800;
+}
+
 @media (max-width: 768px) {
   .workforce-payment-review__settlement-footer {
     display: grid !important;
