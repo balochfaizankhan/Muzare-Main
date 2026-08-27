@@ -285,9 +285,14 @@ export async function loadLabourDuePosition(tx: DbTransaction, dueId: string) {
     previousPayments: paymentTotals?.total,
     advancesApplied: advanceTotals?.total,
   });
+  const paymentStatus: LabourDuePaymentStatus =
+    due.paymentStatus === "ON_HOLD" || due.paymentStatus === "VOIDED"
+      ? due.paymentStatus
+      : position.paymentStatus;
   return {
     due,
     ...position,
+    paymentStatus,
   };
 }
 
