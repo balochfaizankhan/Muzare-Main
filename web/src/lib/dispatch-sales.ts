@@ -79,6 +79,29 @@ export function returnedCartonsForDispatch(dispatch: Dispatch) {
   ) ?? 0;
 }
 
+/**
+ * Keep the operational movement invariant authoritative even when an older client
+ * persisted an oversized market-return entry. Returned cartons can never exceed
+ * the cartons left after sales for the same dispatch item.
+ */
+export function reconcileDispatchItemQuantities(
+  dispatchedCartons: number,
+  soldCartons: number,
+  recordedReturnedCartons: number,
+) {
+  const dispatched = Math.max(Number(dispatchedCartons || 0), 0);
+  const sold = Math.max(Number(soldCartons || 0), 0);
+  const recordedReturned = Math.max(Number(recordedReturnedCartons || 0), 0);
+  const returnCapacity = Math.max(dispatched - sold, 0);
+  const returned = Math.min(recordedReturned, returnCapacity);
+  return {
+    dispatchedCartons: dispatched,
+    soldCartons: sold,
+    returnedCartons: returned,
+    remainingCartons: Math.max(dispatched - sold - returned, 0),
+  };
+}
+
 export function buildDispatchAvailability(
   dispatches: Dispatch[],
   sales: Sale[],
@@ -95,9 +118,11 @@ export function buildDispatchAvailability(
     const items = dispatch.items ?? [];
     for (const item of items) {
       const key = dispatchItemKey(dispatch.id, item.id);
-      const soldCartons = soldByItem.get(key) ?? 0;
-      const returnedCartons = returnedByItem.get(key) ?? 0;
-      const remainingCartons = Math.max(item.cartons - soldCartons - returnedCartons, 0);
+      const quantities = reconcileDispatchItemQuantities(
+        item.cartons,
+        soldByItem.get(key) ?? 0,
+        returnedByItem.get(key) ?? 0,
+      );
       const dateTypeName = item.dateTypeName ?? dateTypeNames.get(item.dateTypeId) ?? i18n.t("dispatchSales.unknownType");
       const vehicle = vehicleLabel(dispatch);
       rows.push({
@@ -106,10 +131,10 @@ export function buildDispatchAvailability(
         dateTypeId: item.dateTypeId,
         dateTypeName,
         vehicleLabel: vehicle,
-        dispatchedCartons: item.cartons,
-        soldCartons,
-        returnedCartons,
-        remainingCartons,
+        dispatchedCartons: quantities.dispatchedCartons,
+        soldCartons: quantities.soldCartons,
+        returnedCartons: quantities.returnedCartons,
+        remainingCartons: quantities.remainingCartons,
         searchText: `${dispatch.date} ${dateTypeName} ${vehicle}`.toLowerCase(),
       });
     }

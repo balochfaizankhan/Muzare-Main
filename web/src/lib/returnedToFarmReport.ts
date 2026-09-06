@@ -1,5 +1,9 @@
 import { offlineDb, workspaceRecords, type Dispatch, type Vehicle } from "./offline-db";
-import { type DispatchWithMarketReturns } from "./dispatch-sales";
+import {
+  dispatchItemKey,
+  soldQuantityByDispatchItem,
+  type DispatchWithMarketReturns,
+} from "./dispatch-sales";
 import { formatDate, formatNumber } from "./format";
 
 type ReturnRow = {
@@ -85,16 +89,31 @@ const dispatchReference = (dispatch: Dispatch) =>
   || `DIS-${dispatch.date.replaceAll("-", "")}-${dispatch.id.slice(0, 3).toUpperCase()}`;
 
 async function loadRows(): Promise<ReturnRow[]> {
-  const [dispatches, vehicles] = await Promise.all([
+  const [dispatches, sales, vehicles] = await Promise.all([
     workspaceRecords(offlineDb.dispatches),
+    workspaceRecords(offlineDb.sales),
     workspaceRecords(offlineDb.vehicles),
   ]);
   const vehicleMap = new Map((vehicles as Vehicle[]).map((vehicle) => [vehicle.id, vehicle.number]));
+  const soldByItem = soldQuantityByDispatchItem(sales);
   const rows: ReturnRow[] = [];
 
   for (const dispatch of dispatches as DispatchWithMarketReturns[]) {
-    for (const entry of dispatch.marketReturns ?? []) {
-      const cartons = Math.max(Number(entry.cartons || 0), 0);
+    // Allocate recorded return entries only up to the quantity that can actually be
+    // returned after sales. This also repairs the presentation of legacy oversized
+    // return records without inventing extra cartons.
+    const returnCapacityByItem = new Map<string, number>();
+    for (const item of dispatch.items ?? []) {
+      const sold = soldByItem.get(dispatchItemKey(dispatch.id, item.id)) ?? 0;
+      returnCapacityByItem.set(item.id, Math.max(Number(item.cartons || 0) - sold, 0));
+    }
+
+    const orderedReturns = [...(dispatch.marketReturns ?? [])].sort((a, b) => a.returnedAt.localeCompare(b.returnedAt));
+    for (const entry of orderedReturns) {
+      const recordedCartons = Math.max(Number(entry.cartons || 0), 0);
+      const capacity = returnCapacityByItem.get(entry.dispatchItemId);
+      const cartons = capacity === undefined ? recordedCartons : Math.min(recordedCartons, capacity);
+      if (capacity !== undefined) returnCapacityByItem.set(entry.dispatchItemId, Math.max(capacity - cartons, 0));
       if (!cartons) continue;
       rows.push({
         id: entry.id,
