@@ -9,7 +9,12 @@ import {
   type DispatchAvailabilityItem,
   type DispatchWithMarketReturns,
 } from "../../lib/dispatch-sales";
-import { offlineDb, type Dispatch } from "../../lib/offline-db";
+import {
+  offlineDb,
+  workspaceConfigRecords,
+  workspaceRecords,
+  type Dispatch,
+} from "../../lib/offline-db";
 import { persistOperationalRecord } from "../../services/syncService";
 import { ModulePage } from "../ModulePage";
 import "./RecordCardHierarchy.css";
@@ -89,6 +94,10 @@ function SalesDispatchReturnEnhancement() {
     let decorationQueued = false;
     let availabilityPromise: Promise<DispatchAvailabilityItem[]> | null = null;
 
+    const vehicleLabel = (dispatch: Dispatch) =>
+      dispatch.vehicleNumber
+      ?? t("modulePageExtra.unknownVehicleFallback", { defaultValue: "Unknown vehicle" });
+
     const loadAvailability: AvailabilityLoader = () => {
       availabilityPromise ??= ensureSalesEntryData().then(({ dispatches, sales, vehicles, dateTypes }) => buildDispatchAvailability(
         dispatches,
@@ -96,10 +105,29 @@ function SalesDispatchReturnEnhancement() {
         dateTypes,
         (dispatch) =>
           vehicles.find((vehicle) => vehicle.id === dispatch.vehicleId)?.number
-          ?? dispatch.vehicleNumber
-          ?? t("modulePageExtra.unknownVehicleFallback", { defaultValue: "Unknown vehicle" }),
+          ?? vehicleLabel(dispatch),
       ).filter((item) => item.remainingCartons > 0));
       return availabilityPromise;
+    };
+
+    const loadFreshAvailabilityItem = async (dispatchId: string, itemId: string) => {
+      // Do not trust the card's previously-bound closure here. Sales may have changed
+      // after the return button was first rendered, so always recalculate from IndexedDB
+      // immediately before writing the market return.
+      const [dispatches, sales, vehicles, dateTypes] = await Promise.all([
+        workspaceRecords(offlineDb.dispatches),
+        workspaceRecords(offlineDb.sales),
+        workspaceRecords(offlineDb.vehicles),
+        workspaceConfigRecords(offlineDb.dateTypes),
+      ]);
+      return buildDispatchAvailability(
+        dispatches,
+        sales,
+        dateTypes,
+        (dispatch) =>
+          vehicles.find((vehicle) => vehicle.id === dispatch.vehicleId)?.number
+          ?? vehicleLabel(dispatch),
+      ).find((item) => item.dispatch.id === dispatchId && item.itemId === itemId) ?? null;
     };
 
     const decorate = async (list: HTMLElement) => {
@@ -143,45 +171,19 @@ function SalesDispatchReturnEnhancement() {
 
           const returnLabel = t("salesPage.returnToFarm", { defaultValue: "Return to farm" });
           if (button.textContent !== returnLabel && !button.disabled) button.textContent = returnLabel;
-          if (!button.dataset.returnBound) {
-            button.dataset.returnBound = "true";
-            button.onclick = async (event) => {
-              event.stopPropagation();
-              const confirmed = window.confirm(
-                t("salesPage.returnToFarmConfirm", {
-                  defaultValue: "Return {{count}} unsold cartons of {{type}} to the farm? This dispatch item will close and disappear from sale availability.",
-                  count: match.remainingCartons,
-                  type: match.dateTypeName,
-                }),
-              );
-              if (!confirmed) return;
 
-              button!.disabled = true;
-              button!.textContent = t("common.saving", { defaultValue: "Saving…" });
-              try {
-                const latest = await offlineDb.dispatches.get(match.dispatch.id);
-                if (!latest) throw new Error("Dispatch not found");
+          // Rebind on every decoration so a recycled card can never retain the dispatch
+          // item from an older render. The handler itself also reloads the latest sales
+          // before deciding how many cartons are returnable.
+          button.onclick = async (event) => {
+            event.stopPropagation();
+            if (button!.disabled) return;
 
-                const latestWithReturns = latest as DispatchWithMarketReturns;
-                const now = new Date().toISOString();
-                const updated: DispatchWithMarketReturns = {
-                  ...latestWithReturns,
-                  updatedAt: now,
-                  marketReturns: [
-                    ...(latestWithReturns.marketReturns ?? []),
-                    {
-                      id: crypto.randomUUID(),
-                      dispatchItemId: match.itemId,
-                      dateTypeId: match.dateTypeId,
-                      dateTypeName: match.dateTypeName,
-                      cartons: match.remainingCartons,
-                      returnedAt: now,
-                      note: t("salesPage.unsoldMarketReturn", { defaultValue: "Unsold market return" }),
-                    },
-                  ],
-                };
-
-                await persistOperationalRecord("dispatch", updated as Dispatch);
+            button!.disabled = true;
+            button!.textContent = t("common.saving", { defaultValue: "Saving…" });
+            try {
+              const current = await loadFreshAvailabilityItem(match.dispatch.id, match.itemId);
+              if (!current || current.remainingCartons <= 0) {
                 availabilityPromise = null;
                 await Promise.allSettled([
                   invalidateEntryData("sales"),
@@ -189,22 +191,71 @@ function SalesDispatchReturnEnhancement() {
                 ]);
                 window.dispatchEvent(new Event("muzare-data-refresh"));
                 window.dispatchEvent(new CustomEvent("muzare-toast", {
-                  detail: t("salesPage.returnToFarmSuccess", {
-                    defaultValue: "{{count}} cartons returned to the farm.",
-                    count: match.remainingCartons,
+                  detail: t("salesPage.noUnsoldCartonsToReturn", {
+                    defaultValue: "No unsold cartons remain for this dispatch item.",
                   }),
                 }));
-              } catch (error) {
+                return;
+              }
+
+              const confirmed = window.confirm(
+                t("salesPage.returnToFarmConfirm", {
+                  defaultValue: "Return {{count}} unsold cartons of {{type}} to the farm? This dispatch item will close and disappear from sale availability.",
+                  count: current.remainingCartons,
+                  type: current.dateTypeName,
+                }),
+              );
+              if (!confirmed) {
                 button!.disabled = false;
                 button!.textContent = returnLabel;
-                window.dispatchEvent(new CustomEvent("muzare-toast", {
-                  detail: error instanceof Error
-                    ? error.message
-                    : t("salesPage.returnToFarmFailed", { defaultValue: "Unable to return cartons. Please try again." }),
-                }));
+                return;
               }
-            };
-          }
+
+              const latest = await offlineDb.dispatches.get(current.dispatch.id);
+              if (!latest) throw new Error("Dispatch not found");
+
+              const latestWithReturns = latest as DispatchWithMarketReturns;
+              const now = new Date().toISOString();
+              const updated: DispatchWithMarketReturns = {
+                ...latestWithReturns,
+                updatedAt: now,
+                marketReturns: [
+                  ...(latestWithReturns.marketReturns ?? []),
+                  {
+                    id: crypto.randomUUID(),
+                    dispatchItemId: current.itemId,
+                    dateTypeId: current.dateTypeId,
+                    dateTypeName: current.dateTypeName,
+                    cartons: current.remainingCartons,
+                    returnedAt: now,
+                    note: t("salesPage.unsoldMarketReturn", { defaultValue: "Unsold market return" }),
+                  },
+                ],
+              };
+
+              await persistOperationalRecord("dispatch", updated as Dispatch);
+              availabilityPromise = null;
+              await Promise.allSettled([
+                invalidateEntryData("sales"),
+                invalidateEntryData("dispatch"),
+              ]);
+              window.dispatchEvent(new Event("muzare-data-refresh"));
+              window.dispatchEvent(new CustomEvent("muzare-toast", {
+                detail: t("salesPage.returnToFarmSuccess", {
+                  defaultValue: "{{count}} cartons returned to the farm.",
+                  count: current.remainingCartons,
+                }),
+              }));
+            } catch (error) {
+              button!.disabled = false;
+              button!.textContent = returnLabel;
+              window.dispatchEvent(new CustomEvent("muzare-toast", {
+                detail: error instanceof Error
+                  ? error.message
+                  : t("salesPage.returnToFarmFailed", { defaultValue: "Unable to return cartons. Please try again." }),
+              }));
+            }
+          };
         });
 
         markEntryPerformance("sales-dispatch-selector-ready");
