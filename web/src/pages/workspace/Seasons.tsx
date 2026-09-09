@@ -4,7 +4,6 @@ import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../auth/AuthProvider";
 import { SubpageHeader } from "../../components/SubpageHeader";
-import { useSyncState } from "../../hooks/useSyncState";
 import {
   archiveFarmSeason,
   createFarmSeason,
@@ -17,6 +16,7 @@ import {
 } from "../../lib/api";
 import { formatDate } from "../../lib/format";
 import { hasPermission } from "../../lib/permissions";
+import { workspaceBootstrapQueryKey } from "../../lib/workspaceBootstrap";
 
 const emptyForm: SeasonInput = { name: "", cropType: "", startsOn: "", expectedEndsOn: "", actualEndsOn: "", status: "planned", notes: "" };
 const displayDate = (value: string) => {
@@ -28,16 +28,16 @@ const displayDate = (value: string) => {
 export function Seasons() {
   const { t } = useTranslation();
   const { user, token } = useAuth();
-  const sync = useSyncState();
   const client = useQueryClient();
   const workspaceId = user?.workspaceId ?? "";
   const [editing, setEditing] = useState<Season | null>(null);
   const [form, setForm] = useState<SeasonInput>(emptyForm);
   const [showForm, setShowForm] = useState(false);
   const bootstrap = useQuery({
-    queryKey: ["bootstrap", workspaceId, sync.farmId, sync.seasonId],
-    queryFn: () => fetchBootstrap(token!),
+    queryKey: workspaceBootstrapQueryKey(workspaceId),
+    queryFn: ({ signal }) => fetchBootstrap(token!, signal),
     enabled: Boolean(token && workspaceId),
+    retry: false,
   });
   const farmId = bootstrap.data?.activeFarmId ?? "";
   const canManage = Boolean(user && workspaceId && hasPermission(user, "MANAGE_SEASONS", workspaceId));
@@ -45,11 +45,14 @@ export function Seasons() {
     queryKey: ["workspace-seasons", workspaceId, farmId],
     queryFn: () => fetchFarmSeasons(token!, workspaceId, farmId),
     enabled: Boolean(token && workspaceId && farmId),
+    placeholderData: bootstrap.data && bootstrap.data.activeFarmId === farmId
+      ? { seasons: bootstrap.data.seasons, activeSeasonId: bootstrap.data.activeSeasonId }
+      : undefined,
   });
   const refresh = async () => {
     await Promise.all([
       client.invalidateQueries({ queryKey: ["workspace-seasons", workspaceId, farmId] }),
-      client.invalidateQueries({ queryKey: ["bootstrap", workspaceId] }),
+      client.invalidateQueries({ queryKey: workspaceBootstrapQueryKey(workspaceId) }),
     ]);
     window.dispatchEvent(new Event("muzare-season-changed"));
   };

@@ -37,10 +37,15 @@ export function useCanonicalLabourFinancials() {
       return { ...response, financials };
     },
     enabled: Boolean(token && workspaceId && farmId && seasonId && navigator.onLine),
+    // Financial data stays scope-isolated by the query key. Reuse a recent same-scope
+    // snapshot when navigating between labour/account screens, then revalidate once it
+    // becomes stale. Mutations and sync events below still invalidate it immediately.
+    staleTime: 2 * 60_000,
+    gcTime: 30 * 60_000,
     placeholderData: undefined,
     retry: (failureCount) => navigator.onLine && failureCount < 2,
     retryDelay: (attemptIndex) => Math.min(1_000 * 2 ** attemptIndex, 4_000),
-    refetchOnMount: "always",
+    refetchOnMount: true,
     refetchOnReconnect: true,
   });
   const debouncerRef = useRef<ReturnType<typeof createRefreshDebouncer> | null>(null);
