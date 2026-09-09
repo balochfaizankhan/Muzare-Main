@@ -11,6 +11,7 @@ import {
   archiveWorkspaceFarm,
   createWorkspaceFarm,
   deleteWorkspaceFarm,
+  fetchBootstrap,
   fetchMe,
   fetchWorkspaceFarms,
   fetchWorkspaceProfile,
@@ -27,6 +28,7 @@ import {
   type WorkspaceProfileInput,
 } from "../../lib/api";
 import { hasPermission } from "../../lib/permissions";
+import { workspaceBootstrapQueryKey } from "../../lib/workspaceBootstrap";
 
 const emptyForm: FarmInput = { name: "", location: "", owner: "", remarks: "", contactName: "", contactEmail: "", contactPhone: "" };
 const emptyProfile: WorkspaceProfileInput = { name: "", contactEmail: "", contactPhone: "" };
@@ -143,15 +145,30 @@ export function Farms() {
   const [form, setForm] = useState<FarmInput>(emptyForm);
   const [showForm, setShowForm] = useState(false);
 
+  // Share the workspace shell's bootstrap query instead of starting a second metadata load.
+  // This gives the farm management screen an immediate, already-authorized farm snapshot.
+  const bootstrap = useQuery({
+    queryKey: workspaceBootstrapQueryKey(workspaceId),
+    queryFn: ({ signal }) => fetchBootstrap(token!, signal),
+    enabled: Boolean(token && workspaceId),
+    retry: false,
+  });
   const farms = useQuery({
     queryKey: ["workspace-farms", workspaceId],
     queryFn: () => fetchWorkspaceFarms(token!, workspaceId),
     enabled: Boolean(token && workspaceId),
+    placeholderData: bootstrap.data ? {
+      farms: bootstrap.data.farms,
+      historyFarms: [],
+      activeFarmId: bootstrap.data.activeFarmId,
+      needsRepair: bootstrap.data.needsRepair,
+      contextWarning: bootstrap.data.contextWarning,
+    } : undefined,
   });
   const refresh = async () => {
     await Promise.all([
       client.invalidateQueries({ queryKey: ["workspace-farms", workspaceId] }),
-      client.invalidateQueries({ queryKey: ["bootstrap", workspaceId] }),
+      client.invalidateQueries({ queryKey: workspaceBootstrapQueryKey(workspaceId) }),
     ]);
     window.dispatchEvent(new Event("muzare-farm-changed"));
   };

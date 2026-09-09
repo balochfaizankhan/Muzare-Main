@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -68,6 +69,7 @@ import {
 } from "../../lib/offline-db";
 import { filterLabourSelectableForAdvance, getWorkerDisplayGroup, sortLabourSelectableForAdvance } from "../../lib/workerEligibility";
 import { resolveAdvanceCardIdentity } from "../../lib/labourAdvanceDisplay";
+import { readSessionCache, removeSessionCache, writeSessionCache } from "../../lib/sessionCache";
 
 const today = () => {
   const date = new Date();
@@ -155,6 +157,21 @@ function recipientLabel(
 }
 
 type View = "dues" | "direct" | "vouchers" | "advances";
+type WorkforcePaymentsSnapshot = {
+  dues: LabourDueRecord[];
+  vouchers: LabourPaymentVoucherRecord[];
+  advanceSummary: LabourAdvanceListResponse["summary"] | null;
+};
+
+const workforcePaymentsSnapshotKey = (
+  workspaceId: string,
+  farmId: string,
+  seasonId: string,
+  view: Extract<View, "dues" | "vouchers">,
+) => `muzare:labour-payments:snapshot:v1:${workspaceId}:${farmId}:${seasonId}:${view}`;
+
+const labourAdvancePoolsSnapshotKey = (workspaceId: string, farmId: string, seasonId: string) =>
+  `muzare:labour-advance-pools:snapshot:v1:${workspaceId}:${farmId}:${seasonId}`;
 
 export function WorkforcePaymentsPage() {
   const { t } = useTranslation();
@@ -172,6 +189,9 @@ export function WorkforcePaymentsPage() {
       : location.pathname.endsWith("/advances")
         ? "advances"
         : "dues";
+  const pageSnapshotKey = view === "dues" || view === "vouchers"
+    ? workforcePaymentsSnapshotKey(workspaceId, farmId, seasonId, view)
+    : null;
   const canManage = Boolean(
     user && workspaceId && canCreate(user, "wages", workspaceId),
   );
@@ -204,6 +224,23 @@ export function WorkforcePaymentsPage() {
   const [toFilter, setToFilter] = useState("");
   const [selectedDue, setSelectedDue] = useState<LabourDueRecord | null>(null);
 
+  // Restore only an exact workspace/farm/season/view snapshot before paint. A missing
+  // snapshot clears previous state, preventing any cross-context financial flash.
+  useLayoutEffect(() => {
+    if (!pageSnapshotKey) {
+      setDues([]);
+      setVouchers([]);
+      setAdvanceSummary(null);
+      setLoading(false);
+      return;
+    }
+    const cached = readSessionCache<WorkforcePaymentsSnapshot>(pageSnapshotKey);
+    setDues(cached?.dues ?? []);
+    setVouchers(cached?.vouchers ?? []);
+    setAdvanceSummary(cached?.advanceSummary ?? null);
+    setLoading(!cached);
+  }, [pageSnapshotKey]);
+
   useEffect(() => {
     const requestedDueId = new URLSearchParams(location.search).get("dueId");
     if (!requestedDueId || view !== "dues") return;
@@ -212,6 +249,9 @@ export function WorkforcePaymentsPage() {
   }, [dues, location.search, view]);
 
   const refresh = useCallback(async () => {
+    const cachedSnapshot = pageSnapshotKey
+      ? readSessionCache<WorkforcePaymentsSnapshot>(pageSnapshotKey)
+      : null;
     const [nextLabourers, nextGroups, nextAccounts] = await Promise.all([
       workspaceRecords(offlineDb.labourers, { includeDeleted: true }),
       workspaceRecords(offlineDb.labourGroups, { includeDeleted: true }),
@@ -225,12 +265,19 @@ export function WorkforcePaymentsPage() {
           !item.deletedAt && ["cash", "bank", "partner"].includes(item.type),
       ),
     );
-    if (!token || !workspaceId || !farmId || !seasonId || !navigator.onLine)
+    if (!token || !workspaceId || !farmId || !seasonId || !navigator.onLine) {
+      setLoading(false);
       return;
-    setLoading(true);
+    }
+    if (view === "advances" || view === "direct") {
+      setLoading(false);
+      return;
+    }
+    // Cached same-scope data remains visible while the authoritative server response
+    // revalidates it. With no cache we preserve the existing first-load indicator.
+    setLoading(!cachedSnapshot);
     setError("");
     try {
-      if (view === "advances" || view === "direct") return;
       const [dueResponse, voucherResponse, advanceResponse] = await Promise.all(
         [
           fetchLabourPaymentDues(token, workspaceId, { farmId, seasonId }),
@@ -238,12 +285,18 @@ export function WorkforcePaymentsPage() {
           fetchLabourPaymentAdvances(token, workspaceId, farmId, seasonId, { pageSize: 1, status: "OPEN" }),
         ],
       );
-      setDues(dueResponse.dues);
-      setVouchers(voucherResponse.vouchers);
-      setAdvanceSummary(advanceResponse.summary);
+      const snapshot: WorkforcePaymentsSnapshot = {
+        dues: dueResponse.dues,
+        vouchers: voucherResponse.vouchers,
+        advanceSummary: advanceResponse.summary,
+      };
+      if (pageSnapshotKey) writeSessionCache(pageSnapshotKey, snapshot);
+      setDues(snapshot.dues);
+      setVouchers(snapshot.vouchers);
+      setAdvanceSummary(snapshot.advanceSummary);
       setSelectedDue((current) =>
         current
-          ? (dueResponse.dues.find((item) => item.id === current.id) ?? null)
+          ? (snapshot.dues.find((item) => item.id === current.id) ?? null)
           : null,
       );
     } catch (caught) {
@@ -255,11 +308,7 @@ export function WorkforcePaymentsPage() {
     } finally {
       setLoading(false);
     }
-  }, [farmId, seasonId, token, view, workspaceId]);
-
-  useEffect(() => {
-    setAdvanceSummary(null);
-  }, [farmId, seasonId, workspaceId]);
+  }, [farmId, pageSnapshotKey, seasonId, token, view, workspaceId]);
 
   useEffect(() => {
     void refresh();
@@ -582,6 +631,7 @@ export function WorkforcePaymentsPage() {
           canManage={canManage}
           onSaved={(message, due) => {
             setSuccess(message);
+            removeSessionCache(workforcePaymentsSnapshotKey(workspaceId, farmId, seasonId, "dues"));
             setDues((current) => [due, ...current.filter((item) => item.id !== due.id)]);
             navigate("/workspace/labour-payments/overview");
           }}
@@ -609,6 +659,8 @@ export function WorkforcePaymentsPage() {
           seasonId={seasonId}
           onSaved={async (message) => {
             setSuccess(message);
+            removeSessionCache(workforcePaymentsSnapshotKey(workspaceId, farmId, seasonId, "dues"));
+            if (pageSnapshotKey) removeSessionCache(pageSnapshotKey);
             await refresh();
           }}
           onError={setError}
@@ -628,6 +680,7 @@ export function WorkforcePaymentsPage() {
           canonicalFinancials={canonicalFinancials}
           onSaved={async (message) => {
             setSuccess(message);
+            removeSessionCache(workforcePaymentsSnapshotKey(workspaceId, farmId, seasonId, "dues"));
             window.dispatchEvent(new Event("muzare-data-refresh"));
           }}
           onError={setError}
@@ -649,6 +702,8 @@ export function WorkforcePaymentsPage() {
           onSaved={async (message) => {
             setSelectedDue(null);
             setSuccess(message);
+            removeSessionCache(workforcePaymentsSnapshotKey(workspaceId, farmId, seasonId, "dues"));
+            removeSessionCache(workforcePaymentsSnapshotKey(workspaceId, farmId, seasonId, "vouchers"));
             await refresh();
           }}
           onError={setError}
@@ -1328,6 +1383,7 @@ function AdvancesView({
     () => new Map(labourers.map((item) => [item.id, item])),
     [labourers],
   );
+  const poolsCacheKey = labourAdvancePoolsSnapshotKey(workspaceId, farmId, seasonId);
   // THE canonical pool ledger (GET /labour-payments/advance-pools): pool cards,
   // pool details, metric strip, voucher context labels and pool activity all
   // read from this one response — no UI-side recalculation.
@@ -1445,18 +1501,30 @@ function AdvancesView({
     setDescription(advance.description);
     setTransactionReference(advance.transactionReference ?? "");
   }, []);
+
+  useLayoutEffect(() => {
+    const cached = readSessionCache<LabourAdvancePoolsResponse>(poolsCacheKey);
+    setPools(cached);
+    setPoolsLoading(!cached);
+    setSelectedPoolKey(null);
+  }, [poolsCacheKey]);
+
   const refreshPools = useCallback(async (signal?: AbortSignal) => {
     if (!navigator.onLine) { setPoolsLoading(false); return; }
-    setPoolsLoading(true);
+    const cached = readSessionCache<LabourAdvancePoolsResponse>(poolsCacheKey);
+    setPoolsLoading(!cached);
     try {
       const response = await fetchLabourAdvancePools(token, workspaceId, farmId, seasonId, { signal });
-      if (!signal?.aborted) setPools(response);
+      if (!signal?.aborted) {
+        writeSessionCache(poolsCacheKey, response);
+        setPools(response);
+      }
     } catch (caught) {
       if (!signal?.aborted) onError(caught instanceof Error ? caught.message : t("workforcePaymentsPage.errors.unableLoadWorkforcePayments"));
     } finally {
       if (!signal?.aborted) setPoolsLoading(false);
     }
-  }, [farmId, onError, seasonId, t, token, workspaceId]);
+  }, [farmId, onError, poolsCacheKey, seasonId, t, token, workspaceId]);
   useEffect(() => {
     const controller = new AbortController();
     void refreshPools(controller.signal);
