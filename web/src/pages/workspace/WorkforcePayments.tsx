@@ -265,8 +265,10 @@ export function WorkforcePaymentsPage() {
           !item.deletedAt && ["cash", "bank", "partner"].includes(item.type),
       ),
     );
-    if (!token || !workspaceId || !farmId || !seasonId || !navigator.onLine)
+    if (!token || !workspaceId || !farmId || !seasonId || !navigator.onLine) {
+      setLoading(false);
       return;
+    }
     if (view === "advances" || view === "direct") {
       setLoading(false);
       return;
@@ -657,6 +659,7 @@ export function WorkforcePaymentsPage() {
           seasonId={seasonId}
           onSaved={async (message) => {
             setSuccess(message);
+            removeSessionCache(workforcePaymentsSnapshotKey(workspaceId, farmId, seasonId, "dues"));
             if (pageSnapshotKey) removeSessionCache(pageSnapshotKey);
             await refresh();
           }}
@@ -1509,7 +1512,7 @@ function AdvancesView({
   const refreshPools = useCallback(async (signal?: AbortSignal) => {
     if (!navigator.onLine) { setPoolsLoading(false); return; }
     const cached = readSessionCache<LabourAdvancePoolsResponse>(poolsCacheKey);
-    setPoolsLoading(!cached && !pools);
+    setPoolsLoading(!cached);
     try {
       const response = await fetchLabourAdvancePools(token, workspaceId, farmId, seasonId, { signal });
       if (!signal?.aborted) {
@@ -1521,7 +1524,7 @@ function AdvancesView({
     } finally {
       if (!signal?.aborted) setPoolsLoading(false);
     }
-  }, [farmId, onError, pools, poolsCacheKey, seasonId, t, token, workspaceId]);
+  }, [farmId, onError, poolsCacheKey, seasonId, t, token, workspaceId]);
   useEffect(() => {
     const controller = new AbortController();
     void refreshPools(controller.signal);
