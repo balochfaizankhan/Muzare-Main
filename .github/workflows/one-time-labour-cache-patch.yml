@@ -1,0 +1,66 @@
+name: One-time labour cache patch
+
+on:
+  push:
+    branches:
+      - perf/labour-payments-stale-while-revalidate
+    paths:
+      - .github/workflows/one-time-labour-cache-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/labour-payments-stale-while-revalidate
+          fetch-depth: 0
+      - name: Apply guarded cache-only corrections
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('web/src/pages/workspace/WorkforcePayments.tsx')
+          text = path.read_text()
+          replacements = [
+              (
+                  '''    if (!token || !workspaceId || !farmId || !seasonId || !navigator.onLine)\n      return;''',
+                  '''    if (!token || !workspaceId || !farmId || !seasonId || !navigator.onLine) {\n      setLoading(false);\n      return;\n    }''',
+              ),
+              (
+                  '''            setSuccess(message);\n            if (pageSnapshotKey) removeSessionCache(pageSnapshotKey);\n            await refresh();''',
+                  '''            setSuccess(message);\n            removeSessionCache(workforcePaymentsSnapshotKey(workspaceId, farmId, seasonId, "dues"));\n            if (pageSnapshotKey) removeSessionCache(pageSnapshotKey);\n            await refresh();''',
+              ),
+              (
+                  '''    setPoolsLoading(!cached && !pools);''',
+                  '''    setPoolsLoading(!cached);''',
+              ),
+              (
+                  '''  }, [farmId, onError, pools, poolsCacheKey, seasonId, t, token, workspaceId]);''',
+                  '''  }, [farmId, onError, poolsCacheKey, seasonId, t, token, workspaceId]);''',
+              ),
+          ]
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'Guard failed: expected exactly one match, got {count}: {old!r}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text)
+          PY
+          rm .github/workflows/one-time-labour-cache-patch.yml
+          git diff --check
+          git diff -- web/src/pages/workspace/WorkforcePayments.tsx
+      - name: Commit guarded corrections and remove one-time workflow
+        shell: bash
+        run: |
+          git config user.name "Muzare Performance Patch"
+          git config user.email "actions@users.noreply.github.com"
+          git add web/src/pages/workspace/WorkforcePayments.tsx .github/workflows/one-time-labour-cache-patch.yml
+          git commit -m "Harden labour payment cache revalidation"
+          git push origin HEAD:perf/labour-payments-stale-while-revalidate
