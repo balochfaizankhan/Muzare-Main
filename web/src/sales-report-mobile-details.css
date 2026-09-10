@@ -1,0 +1,8 @@
+.sales-report-mobile-unit-price {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.86rem;
+  line-height: 1.25;
+  font-weight: 600;
+  color: var(--text-muted, #6b7280);
+}
