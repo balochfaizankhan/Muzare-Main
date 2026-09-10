@@ -13,6 +13,10 @@ function enhanceSalesReportCards(root: ParentNode) {
     const meta = card.querySelector<HTMLElement>("header + span");
     if (!meta || meta.querySelector(".sales-report-mobile-unit-price")) return;
 
+    const metaText = meta.textContent?.trim() ?? "";
+    const dateOnly = metaText.split("|")[0]?.trim() ?? "";
+    if (dateOnly) meta.textContent = dateOnly;
+
     const cells = Array.from(row.cells);
     const quantity = cells[7]?.textContent?.trim() ?? "";
     const unit = cells[8]?.textContent?.trim() ?? "";
