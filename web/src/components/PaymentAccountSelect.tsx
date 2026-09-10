@@ -220,12 +220,13 @@ export function PaymentAccountSelect({
 
       const dateInputs = Array.from(form.querySelectorAll<HTMLInputElement>('input[type="date"]'));
       const textInputs = Array.from(form.querySelectorAll<HTMLInputElement>('input[type="text"]'));
+      const saleTypeButtons = Array.from(form.querySelectorAll<HTMLButtonElement>(".sales-type-toggle button"));
       const session = {
         saleDate: dateInputs[0]?.value ?? "",
         deliveryDate: dateInputs[1]?.value ?? "",
         paymentDate: dateInputs[2]?.value ?? "",
         buyerName: textInputs[1]?.value ?? "",
-        saleType: (form.querySelector<HTMLButtonElement>(".sales-type-toggle button.is-active")?.textContent ?? "").trim(),
+        saleTypeIndex: saleTypeButtons.findIndex((button) => button.classList.contains("is-active")),
         accountId: value,
         createdAt: Date.now(),
       };
@@ -261,13 +262,9 @@ export function PaymentAccountSelect({
         setInputValue(dateInputs[2], stored.paymentDate);
         setInputValue(textInputs[1], stored.buyerName);
 
-        const saleTypeButtons = Array.from(form.querySelectorAll<HTMLButtonElement>(".sales-type-toggle button"));
-        const activeButton = saleTypeButtons.find((button) => button.classList.contains("is-active"));
-        const wantedDirect = stored.saleType.toLowerCase().includes("direct");
-        const currentlyDirect = activeButton?.classList.contains("is-active") && activeButton.textContent?.toLowerCase().includes("direct");
-        if (wantedDirect !== Boolean(currentlyDirect)) {
-          const target = saleTypeButtons.find((button) => button.textContent?.toLowerCase().includes(wantedDirect ? "direct" : "dispatch"));
-          target?.click();
+        if (stored.saleTypeIndex >= 0 && saleTypeButtons[stored.saleTypeIndex]) {
+          const currentIndex = saleTypeButtons.findIndex((button) => button.classList.contains("is-active"));
+          if (currentIndex !== stored.saleTypeIndex) saleTypeButtons[stored.saleTypeIndex]?.click();
         }
 
         if (stored.accountId) onChange(stored.accountId);
