@@ -11,8 +11,6 @@ export type PaymentAccountOption = {
   deletedAt?: string | null;
 };
 
-// Row secondary line is the account's role, not payment-method detail: cash and
-// bank accounts both read "Account" (never "Cash · Cash"), partners read "Partner".
 const ACCOUNT_TYPE_LABEL_KEYS: Record<string, string> = {
   cash: "paymentAccountSelect.typeAccount",
   bank: "paymentAccountSelect.typeAccount",
@@ -20,17 +18,10 @@ const ACCOUNT_TYPE_LABEL_KEYS: Record<string, string> = {
   liability: "paymentAccountSelect.typeLiability",
 };
 
-/** Every seeded/local placeholder account uses this id shape — never a real, selectable account. */
 export function isSyntheticLocalAccount(accountId: string | null | undefined) {
   return Boolean(accountId?.includes(":local-"));
 }
 
-/**
- * The canonical "which accounts can a user actually pick" rule, shared by every
- * PaymentAccountSelect call site: never a synthetic placeholder, never soft-deleted — except the
- * account a historical record already points at (`alsoIncludeId`), which must stay visible and
- * selectable while editing that one record even if it was deactivated afterwards.
- */
 export function eligiblePaymentAccounts<T extends PaymentAccountOption>(
   accounts: T[],
   options?: { types?: string[]; alsoIncludeId?: string | null },
@@ -47,12 +38,6 @@ type SheetOption = {
   secondary?: string;
 };
 
-/**
- * The one selection-only account sheet used everywhere a payment account is picked. No search
- * box, no free text, no confirm step: tapping a row selects it and closes the sheet. Radio
- * semantics (radiogroup/radio + arrow-key navigation) expose exactly one selected row, Escape
- * closes, and the caller restores focus to the trigger via `onClose`.
- */
 export function AccountSelectionSheet({
   open,
   title,
@@ -74,7 +59,6 @@ export function AccountSelectionSheet({
   const titleId = useId();
   const sheetRef = useRef<HTMLElement>(null);
 
-  // The page behind the sheet must not scroll while it is open; restore on close.
   useEffect(() => {
     if (!open) return;
     const previous = document.body.style.overflow;
@@ -139,9 +123,6 @@ export function AccountSelectionSheet({
     radios[next]?.scrollIntoView({ block: "nearest" });
   };
 
-  // Rendered in a body-level portal so page- and form-scoped button styling
-  // (e.g. `.module-form button`) can never restyle the option rows, and the
-  // sheet always stacks above sticky footers and bottom navigation.
   return createPortal(
     <div className="account-sheet-backdrop" role="presentation" onClick={onClose}>
       <section
@@ -187,15 +168,6 @@ export function AccountSelectionSheet({
   );
 }
 
-/**
- * Shared, selection-only payment-account control used everywhere a user picks a funding/payment
- * account (expense vouchers, labour payments/advances, purchase payments, partner-funded
- * payments, funds received/given). The field is a read-only trigger button (no text input, so no
- * mobile keyboard) that opens AccountSelectionSheet; the stored value is always an account's
- * canonical id. Pass accounts already narrowed via `eligiblePaymentAccounts` — the control never
- * widens eligibility and never auto-selects an account. `clearOptionLabel` prepends an
- * "all/none" row for the one filter use-case; form fields must omit it.
- */
 export function PaymentAccountSelect({
   accounts,
   value,
@@ -221,12 +193,12 @@ export function PaymentAccountSelect({
   const errorId = useId();
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const lastFormSubmitAtRef = useRef(0);
   const resolvedLabel = label ?? t("paymentAccountSelect.label");
   const resolvedPlaceholder = placeholder ?? t("paymentAccountSelect.placeholder");
   const options = useMemo<SheetOption[]>(() => {
     const rows = accounts.map((account) => ({
       value: account.id,
-      // System-seeded account names ("Cash", "Partner Capital") localize; user names pass through.
       label: localizeSystemPlaceholder(t, account.name),
       secondary: account.type && ACCOUNT_TYPE_LABEL_KEYS[account.type]
         ? t(ACCOUNT_TYPE_LABEL_KEYS[account.type]) + (account.deletedAt ? ` · ${t("paymentAccountSelect.inactive")}` : "")
@@ -236,9 +208,93 @@ export function PaymentAccountSelect({
   }, [accounts, clearOptionLabel, t]);
   const selected = accounts.find((account) => account.id === value);
 
+  useEffect(() => {
+    const form = triggerRef.current?.form;
+    if (!form) return;
+
+    const isSalesForm = form.classList.contains("sales-form");
+    const onSubmit = () => {
+      lastFormSubmitAtRef.current = performance.now();
+      setOpen(false);
+      if (!isSalesForm) return;
+
+      const dateInputs = Array.from(form.querySelectorAll<HTMLInputElement>('input[type="date"]'));
+      const textInputs = Array.from(form.querySelectorAll<HTMLInputElement>('input[type="text"]'));
+      const saleTypeButtons = Array.from(form.querySelectorAll<HTMLButtonElement>(".sales-type-toggle button"));
+      const session = {
+        saleDate: dateInputs[0]?.value ?? "",
+        deliveryDate: dateInputs[1]?.value ?? "",
+        paymentDate: dateInputs[2]?.value ?? "",
+        buyerName: textInputs[1]?.value ?? "",
+        saleTypeIndex: saleTypeButtons.findIndex((button) => button.classList.contains("is-active")),
+        accountId: value,
+        createdAt: Date.now(),
+      };
+      try {
+        sessionStorage.setItem("muzare.sales.session", JSON.stringify(session));
+      } catch {
+        // Session storage is only a UX cache; never block a sale if unavailable.
+      }
+
+      const restore = () => {
+        let stored: typeof session | null = null;
+        try {
+          const raw = sessionStorage.getItem("muzare.sales.session");
+          stored = raw ? JSON.parse(raw) as typeof session : null;
+        } catch {
+          stored = null;
+        }
+        if (!stored || Date.now() - stored.createdAt > 5000) return true;
+
+        const quantityInputs = Array.from(form.querySelectorAll<HTMLInputElement>('input[type="number"]'));
+        const quantityAndPriceCleared = quantityInputs.length >= 2 && quantityInputs[0]?.value === "" && quantityInputs[1]?.value === "";
+        if (!quantityAndPriceCleared) return false;
+
+        const setInputValue = (input: HTMLInputElement | undefined, nextValue: string) => {
+          if (!input || !nextValue) return;
+          const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+          setter?.call(input, nextValue);
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+        };
+        setInputValue(dateInputs[0], stored.saleDate);
+        setInputValue(dateInputs[1], stored.deliveryDate);
+        setInputValue(dateInputs[2], stored.paymentDate);
+        setInputValue(textInputs[1], stored.buyerName);
+
+        if (stored.saleTypeIndex >= 0 && saleTypeButtons[stored.saleTypeIndex]) {
+          const currentIndex = saleTypeButtons.findIndex((button) => button.classList.contains("is-active"));
+          if (currentIndex !== stored.saleTypeIndex) saleTypeButtons[stored.saleTypeIndex]?.click();
+        }
+
+        if (stored.accountId) onChange(stored.accountId);
+        try {
+          sessionStorage.removeItem("muzare.sales.session");
+        } catch {
+          // Ignore storage cleanup failures.
+        }
+        return true;
+      };
+
+      let attempts = 0;
+      const timer = window.setInterval(() => {
+        attempts += 1;
+        if (restore() || attempts >= 100) window.clearInterval(timer);
+      }, 50);
+    };
+
+    form.addEventListener("submit", onSubmit, true);
+    return () => form.removeEventListener("submit", onSubmit, true);
+  }, [onChange, value]);
+
   const close = () => {
     setOpen(false);
     triggerRef.current?.focus();
+  };
+
+  const handleTriggerClick = () => {
+    if (performance.now() - lastFormSubmitAtRef.current < 750) return;
+    setOpen(true);
   };
 
   return (
@@ -254,7 +310,7 @@ export function PaymentAccountSelect({
           aria-invalid={invalid || undefined}
           aria-describedby={invalid ? errorId : undefined}
           disabled={disabled}
-          onClick={() => setOpen(true)}
+          onClick={handleTriggerClick}
         >
           <span className={`report-picker__trigger-text${selected ? " is-filled" : ""}`}>
             {selected ? localizeSystemPlaceholder(t, selected.name) : resolvedPlaceholder}
