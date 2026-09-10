@@ -221,6 +221,7 @@ export function PaymentAccountSelect({
   const errorId = useId();
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const lastFormSubmitAtRef = useRef(0);
   const resolvedLabel = label ?? t("paymentAccountSelect.label");
   const resolvedPlaceholder = placeholder ?? t("paymentAccountSelect.placeholder");
   const options = useMemo<SheetOption[]>(() => {
@@ -236,9 +237,29 @@ export function PaymentAccountSelect({
   }, [accounts, clearOptionLabel, t]);
   const selected = accounts.find((account) => account.id === value);
 
+  // On mobile, a submit can reset/reflow the form while the original touch is still
+  // being resolved. If the payment-account trigger moves under that touch point, the
+  // browser can deliver a late click to it and briefly open the picker. Remember the
+  // submit on this exact form and ignore only that transient post-submit click.
+  useEffect(() => {
+    const form = triggerRef.current?.form;
+    if (!form) return;
+    const onSubmit = () => {
+      lastFormSubmitAtRef.current = performance.now();
+      setOpen(false);
+    };
+    form.addEventListener("submit", onSubmit, true);
+    return () => form.removeEventListener("submit", onSubmit, true);
+  }, []);
+
   const close = () => {
     setOpen(false);
     triggerRef.current?.focus();
+  };
+
+  const handleTriggerClick = () => {
+    if (performance.now() - lastFormSubmitAtRef.current < 750) return;
+    setOpen(true);
   };
 
   return (
@@ -254,7 +275,7 @@ export function PaymentAccountSelect({
           aria-invalid={invalid || undefined}
           aria-describedby={invalid ? errorId : undefined}
           disabled={disabled}
-          onClick={() => setOpen(true)}
+          onClick={handleTriggerClick}
         >
           <span className={`report-picker__trigger-text${selected ? " is-filled" : ""}`}>
             {selected ? localizeSystemPlaceholder(t, selected.name) : resolvedPlaceholder}
