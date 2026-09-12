@@ -10,8 +10,10 @@ function enhanceSalesReportCards(root: ParentNode) {
   cards.forEach((card, index) => {
     const row = rows[index];
     if (!row) return;
+    if (card.querySelector('.sales-report-mobile-unit-price')) return;
+
     const meta = card.querySelector<HTMLElement>("header + span");
-    if (!meta || meta.querySelector(".sales-report-mobile-unit-price")) return;
+    if (!meta) return;
 
     const metaText = meta.textContent?.trim() ?? "";
     const dateOnly = metaText.split("|")[0]?.trim() ?? "";
