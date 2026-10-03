@@ -1682,7 +1682,7 @@ export const approveRegistrationRequest = (token: string, userId: string) =>
 export const rejectRegistrationRequest = (token: string, userId: string, reason?: string) =>
   apiRequest<void>(`/v1/admin/registrations/${userId}/reject`, { method: "POST", body: JSON.stringify({ reason }) }, token);
 export const saveOperationalRecord = (token: string, input: OperationalRecordEnvelope) =>
-  apiRequest<{ record: OperationalRecordEnvelope["record"]; conflict: boolean }>("/v1/workspace/operational-records", { method: "POST", body: JSON.stringify(input) }, token, { debugLabel: `operational-record-save:${input.entity}` });
+  apiRequest<{ record: OperationalRecordEnvelope["record"]; conflict: boolean }>("/v1/workspace/operational-records", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 30_000, debugLabel: `operational-record-save:${input.entity}` });
 export const validateVoucherNumber = (token: string, workspaceId: string, input: { voucherNumber: string; recordId?: string; farmId?: string }) => {
   const query = new URLSearchParams({ voucherNumber: input.voucherNumber });
   if (input.recordId) query.set("recordId", input.recordId);
@@ -1690,11 +1690,11 @@ export const validateVoucherNumber = (token: string, workspaceId: string, input:
   return apiRequest<VoucherNumberValidation>(`/v1/workspace/${workspaceId}/voucher-number-availability?${query.toString()}`, {}, token, { debugLabel: "voucher-number-validate" });
 };
 export const deleteOperationalRecord = (token: string, input: Omit<OperationalRecordEnvelope, "record"> & { recordId: string; reason?: string }) =>
-  apiRequest<void>("/v1/workspace/operational-records", { method: "DELETE", body: JSON.stringify(input) }, token, { debugLabel: `operational-record-delete:${input.entity}` });
+  apiRequest<void>("/v1/workspace/operational-records", { method: "DELETE", body: JSON.stringify(input) }, token, { timeoutMs: 30_000, debugLabel: `operational-record-delete:${input.entity}` });
 export const restoreOperationalRecord = (token: string, input: Omit<OperationalRecordEnvelope, "record"> & { recordId: string }) =>
-  apiRequest<void>("/v1/workspace/operational-records/restore", { method: "POST", body: JSON.stringify(input) }, token, { debugLabel: `operational-record-restore:${input.entity}` });
+  apiRequest<void>("/v1/workspace/operational-records/restore", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 30_000, debugLabel: `operational-record-restore:${input.entity}` });
 export const fetchOperationalRecords = (token: string, workspaceId: string) =>
-  apiRequest<OperationalSnapshot>(`/v1/workspace/${workspaceId}/operational-records`, {}, token);
+  apiRequest<OperationalSnapshot>(`/v1/workspace/${workspaceId}/operational-records`, {}, token, { timeoutMs: 30_000, debugLabel: "operational-records-refresh" });
 export const fetchOperationalRecord = (token: string, workspaceId: string, recordId: string) =>
   apiRequest<OperationalRecordEnvelope>(`/v1/workspace/${workspaceId}/operational-records/${encodeURIComponent(recordId)}`, {}, token, { debugLabel: "operational-record-fetch" });
 export type LabourDeletionPreview = {
