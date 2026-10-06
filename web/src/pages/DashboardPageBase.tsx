@@ -21,7 +21,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
-import { HarvestDashboardSection } from "../components/HarvestDashboardSection";
 import { calculateScopedCashAccountBalance } from "../lib/accounting";
 import { fetchBootstrap } from "../lib/api";
 import { dashboardFinancialSnapshotStorageKey, isDashboardFinancialScope, settleDashboardFinancialSnapshot, type DashboardFinancialSnapshot } from "../lib/dashboardFinancialSnapshot";
@@ -660,8 +659,6 @@ export function DashboardPage() {
             ))}
           </div>
         </section>
-
-        <HarvestDashboardSection />
 
         <section className="dashboard-home__grid">
           <div className="dashboard-home__main">

@@ -175,7 +175,7 @@ function DashboardEnhancements() {
         <div className="dashboard-kpi-card__split-metrics">
           <div className="dashboard-kpi-card__split-metric">
             <strong className="dashboard-kpi-card__split-value bidi-isolate">{cartonValue}</strong>
-            <small className="dashboard-kpi-card__split-label">{t("harvestPage.colCartons")}</small>
+            <small className="dashboard-kpi-card__split-label">{t("dispatchPage.cartons")}</small>
           </div>
           <div className="dashboard-kpi-card__split-metric">
             <strong className="dashboard-kpi-card__split-value bidi-isolate">{vehicleValue}</strong>
