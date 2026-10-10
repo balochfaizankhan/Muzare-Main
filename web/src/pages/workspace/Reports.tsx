@@ -608,6 +608,7 @@ export function Reports() {
   const [groupFilter, setGroupFilter] = useState("");
   const [selectedLabourerIds, setSelectedLabourerIds] = useState<string[]>([]);
   const [category, setCategory] = useState("");
+  const [expenseType, setExpenseType] = useState<"" | "voucher" | "labour_wage">("");
   const [subcategory, setSubcategory] = useState("");
   const [status, setStatus] = useState("");
   const [amountMin, setAmountMin] = useState("");
@@ -785,6 +786,7 @@ export function Reports() {
     setGroupFilter("");
     setSelectedLabourerIds([]);
     setCategory("");
+    setExpenseType("");
     setSubcategory("");
     setStatus("");
     setAmountMin("");
@@ -821,7 +823,7 @@ export function Reports() {
   };
 
   const labourFilterActive = (report === "attendance" || report === "advances" || report === "wage-rates") && selectedLabourerIds.length > 0;
-  const filtered = Boolean(search || from || to || accountId || groupFilter || labourFilterActive || category || subcategory || status || amountMin || amountMax || buyerFilter || productFilter || vehicleFilter || paymentStatusFilter);
+  const filtered = Boolean(search || from || to || accountId || groupFilter || labourFilterActive || (report === "expenditures" && expenseType) || category || subcategory || status || amountMin || amountMax || buyerFilter || productFilter || vehicleFilter || paymentStatusFilter);
   const advancedFilterCount = useMemo(() => {
     if (report === "attendance") return Number(Boolean(groupFilter)) + Number(selectedLabourerIds.length > 0);
     if (report === "advances") return Number(Boolean(groupFilter)) + Number(selectedLabourerIds.length > 0) + Number(Boolean(accountId)) + Number(Boolean(amountMin)) + Number(Boolean(amountMax));
@@ -1416,11 +1418,12 @@ export function Reports() {
   const voucherRows = useMemo(() => voucherBaseRows
     .filter((item) => {
       const lines = voucherReportItems(item);
-      return (!category || lines.some((line) => line.category === category))
+      return expenseType !== "labour_wage"
+        && (!category || lines.some((line) => line.category === category))
         && (!subcategory || lines.some((line) => (line.subcategory ?? "") === subcategory));
     })
     .sort((a, b) => expenseSort === "desc" ? b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt) : a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt)),
-  [category, expenseSort, subcategory, voucherBaseRows]);
+  [category, expenseSort, expenseType, subcategory, voucherBaseRows]);
   const voucherReportLineRows = useMemo(() => voucherRows.flatMap((item) => voucherReportItems(item)), [voucherRows]);
   const canonicalExpenseAttributions = canonicalFinancials.data?.expenseAccountAttributions ?? [];
   const canonicalExpenseAccountIdsByDue = useMemo(() => {
@@ -1438,13 +1441,14 @@ export function Reports() {
   }, [accountLookup, accounts, canonicalExpenseAttributions]);
   const canonicalExpenseRows = useMemo(() => (canonicalFinancials.data?.expenses ?? [])
     .filter((item) => item.active
+      && expenseType !== "voucher"
       && inRange(item.date, from, to)
       && (!category || category === "Labour wages")
       && (!subcategory || subcategory === "Canonical labour due")
       && (!selectedExpenseAccountId || canonicalExpenseAccountIdsByDue.get(item.id)?.has(selectedExpenseAccountId))
       && matches(item.date, [item.dueNumber, item.recipientName, item.description, item.status], item.amount))
     .sort((a, b) => expenseSort === "desc" ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date)),
-  [canonicalExpenseAccountIdsByDue, canonicalFinancials.data?.expenses, category, expenseSort, from, matches, selectedExpenseAccountId, subcategory, to]);
+  [canonicalExpenseAccountIdsByDue, canonicalFinancials.data?.expenses, category, expenseSort, expenseType, from, matches, selectedExpenseAccountId, subcategory, to]);
   const canonicalExpenseIds = useMemo(() => new Set(canonicalExpenseRows.map((item) => item.id)), [canonicalExpenseRows]);
   const canonicalExpenseAccountRows = useMemo(() => canonicalExpenseAttributions
     .filter((item) => canonicalExpenseIds.has(item.dueId)),
@@ -2476,6 +2480,15 @@ export function Reports() {
           </ClearableSelect>}
 
           {report === "expenditures" && <>
+            <ClearableSelect aria-label={t("reportsPage.expenseType")} value={expenseType} onChange={(value) => {
+              setExpenseType(value as typeof expenseType);
+              setCategory("");
+              setSubcategory("");
+            }}>
+              <option value="">{t("reportsPage.allExpenseTypes")}</option>
+              <option value="voucher">{t("reportsPage.voucherExpenses")}</option>
+              <option value="labour_wage">{t("reportsPage.labourWagesCategory")}</option>
+            </ClearableSelect>
             <ClearableSelect aria-label={t("reportsPage.account")} value={accountId} onChange={setAccountId}>
               <option value="">{t("reportsPage.allAccounts")}</option>
               {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}

@@ -5,6 +5,8 @@ export const reportsLocalizationBundle = {
   en: {
     translation: {
       reportsPage: {
+        expenseType: "Expense type",
+        allExpenseTypes: "All expense types",
         presentMark: "P",
         halfDayMark: "H",
         absentMark: "A",
@@ -95,6 +97,8 @@ export const reportsLocalizationBundle = {
   ar: {
     translation: {
       reportsPage: {
+        expenseType: "نوع المصروف",
+        allExpenseTypes: "جميع أنواع المصروفات",
         presentMark: "ح",
         halfDayMark: "ن",
         absentMark: "غ",
@@ -183,6 +187,8 @@ export const reportsLocalizationBundle = {
   ur: {
     translation: {
       reportsPage: {
+        expenseType: "اخراجات کی قسم",
+        allExpenseTypes: "اخراجات کی تمام اقسام",
         presentMark: "ح",
         halfDayMark: "ن",
         absentMark: "غ",
