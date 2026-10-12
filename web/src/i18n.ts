@@ -6808,6 +6808,7 @@ const fullLocalizationBackfill = {
     "paymentsDueCard": "Payments Due",
     "purchaseVouchersPaidGroup": "Purchase vouchers paid",
     "settledLabourWagesCard": "Settled Labour Wages",
+    "recognizedLabourWageExpenseCard": "Recognized labour wage expense",
     "updatingAccountsSnapshot": "Updating accounts snapshot…"
   },
   "dashboardPage": {
@@ -8296,6 +8297,7 @@ const fullLocalizationBackfill = {
     "paymentsDueCard": "المدفوعات المستحقة",
     "purchaseVouchersPaidGroup": "سندات الشراء المدفوعة",
     "settledLabourWagesCard": "أجور العمالة المُسوّاة",
+    "recognizedLabourWageExpenseCard": "مصروف أجور العمالة المُثبت",
     "updatingAccountsSnapshot": "جارٍ تحديث لقطة الحسابات…"
   },
   "dashboardPage": {
@@ -9784,6 +9786,7 @@ const fullLocalizationBackfill = {
     "paymentsDueCard": "واجب الادا ادائیگیاں",
     "purchaseVouchersPaidGroup": "ادا شدہ خریداری واؤچرز",
     "settledLabourWagesCard": "سیٹل شدہ لیبر اجرت",
+    "recognizedLabourWageExpenseCard": "تسلیم شدہ لیبر اجرت کا خرچ",
     "updatingAccountsSnapshot": "اکاؤنٹس سنیپ شاٹ اپڈیٹ ہو رہا ہے…"
   },
   "dashboardPage": {
