@@ -43,6 +43,11 @@ async function clearWorkspaceCache() {
   await clearWorkspaceCacheFromSync();
 }
 
+async function confirmPendingChangesBeforeSessionTransition(action: "logout" | "switch_workspace") {
+  const { confirmPendingChangesBeforeSessionTransition: confirmFromSync } = await import("../services/syncService");
+  return confirmFromSync(action);
+}
+
 const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: PropsWithChildren) {
@@ -117,6 +122,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, []);
 
   const logout = useCallback(async () => {
+    if (!(await confirmPendingChangesBeforeSessionTransition("logout"))) return;
     if (token) {
       await logoutRequest(token).catch(() => undefined);
     }
@@ -131,6 +137,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   const switchWorkspace = useCallback(async (workspaceId: string) => {
     if (!token || workspaceId === user?.workspaceId) return;
+    if (!(await confirmPendingChangesBeforeSessionTransition("switch_workspace"))) return;
     const session = await selectWorkspace(token, workspaceId);
     await clearWorkspaceCache();
     queryClient.clear();

@@ -710,12 +710,40 @@ async function pruneSynchronizedCache(records: OperationalRecordEnvelope[]) {
   }
 }
 
+function mutationNeedsResolution(mutation: PendingMutation) {
+  const status = mutation.status ?? "pending";
+  return status !== "resolved" && status !== "discarded";
+}
+
 export async function getPendingCount() {
   return context ? offlineDb.pendingMutations.where("workspaceId").equals(context.workspaceId)
     .filter((mutation) => mutationMatchesActiveContext(mutation)
-      && (mutation.status ?? "pending") !== "resolved"
-      && (mutation.status ?? "pending") !== "discarded"
+      && mutationNeedsResolution(mutation)
       && (mutation.retryable ?? true)).count() : 0;
+}
+
+export async function getUnresolvedWorkspaceMutationCount(workspaceId = context?.workspaceId) {
+  if (!workspaceId) return 0;
+  return offlineDb.pendingMutations.where("workspaceId").equals(workspaceId)
+    .filter(mutationNeedsResolution)
+    .count();
+}
+
+export async function confirmPendingChangesBeforeSessionTransition(action: "logout" | "switch_workspace") {
+  const workspaceId = context?.workspaceId;
+  if (!workspaceId) return true;
+
+  if (navigator.onLine) {
+    await syncPendingRecords({ force: true }).catch(() => undefined);
+  }
+
+  const unresolvedCount = await getUnresolvedWorkspaceMutationCount(workspaceId);
+  if (unresolvedCount === 0) return true;
+
+  const key = action === "logout"
+    ? "sync.logoutWithUnsyncedChanges"
+    : "sync.switchWorkspaceWithUnsyncedChanges";
+  return window.confirm(i18n.t(key, { count: unresolvedCount }));
 }
 
 export async function getSyncQueueItems() {
@@ -1009,7 +1037,9 @@ export function stopSyncService() {
 
 export async function clearWorkspaceCache() {
   stopSyncService();
-  await clearCachedData();
+  // Operational snapshots are disposable cache. The pending mutation table is a durable
+  // local outbox and must survive logout, workspace switching, and session invalidation.
+  await clearCachedData({ preservePendingMutations: true });
   Object.keys(localStorage).filter((key) => key.startsWith(operationalContextPrefix)).forEach((key) => localStorage.removeItem(key));
 }
 

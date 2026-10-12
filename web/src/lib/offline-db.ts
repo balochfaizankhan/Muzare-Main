@@ -788,8 +788,12 @@ export function compareLabourers(
   return left.id.localeCompare(right.id);
 }
 
-export async function clearCachedData() {
-  await Promise.all(offlineDb.tables.map((table) => table.clear()));
+export async function clearCachedData(options: { preservePendingMutations?: boolean } = {}) {
+  const preservePendingMutations = options.preservePendingMutations ?? true;
+  const tables = preservePendingMutations
+    ? offlineDb.tables.filter((table) => table.name !== "pendingMutations")
+    : offlineDb.tables;
+  await Promise.all(tables.map((table) => table.clear()));
 }
 
 export function makeLocalRecord(id?: string) {
