@@ -35,6 +35,8 @@ let context: { token: string; workspaceId: string; farmId?: string; farmName?: s
 let appliedBootstrapContextKey: string | null = null;
 let timer: number | null = null;
 let syncing = false;
+let refreshPromise: Promise<void> | null = null;
+let reconcilePromise: Promise<{ synced: number; pending: number }> | null = null;
 let state: SyncState = { status: navigator.onLine ? "online" : "offline", pendingCount: 0, lastSyncTime: null };
 const maxAutomaticAttempts = 3;
 const localDebugEnabled = import.meta.env.DEV;
@@ -415,6 +417,11 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
     await refreshSyncState({ status: "offline" });
     return { synced: 0, pending: await getPendingCount() };
   }
+  const initialPending = await getPendingCount();
+  if (initialPending === 0) {
+    await refreshSyncState({ status: "online" });
+    return { synced: 0, pending: 0 };
+  }
   syncing = true;
   emit({ status: "syncing" });
   let synced = 0;
@@ -660,26 +667,29 @@ export async function syncNow() {
   return result;
 }
 
-export async function refreshOperationalData(options: { notifySuccess?: boolean } = {}): Promise<void> {
+async function refreshOperationalDataOnce(options: { notifySuccess?: boolean } = {}): Promise<void> {
   if (!context || !navigator.onLine) {
     emit({ status: "offline" });
     notify(i18n.t("sync.workingOfflineRefreshRetry"));
     return;
   }
   try {
-    const result = await fetchOperationalRecords(context.token, context.workspaceId);
-    const pendingDeletes = new Set((await offlineDb.pendingMutations.where("workspaceId").equals(context.workspaceId).toArray())
+    const activeContext = context;
+    const result = await fetchOperationalRecords(activeContext.token, activeContext.workspaceId);
+    // Ignore a response that belongs to a runtime that was replaced while the request was in flight.
+    if (!context || context.token !== activeContext.token || context.workspaceId !== activeContext.workspaceId) return;
+    const pendingDeletes = new Set((await offlineDb.pendingMutations.where("workspaceId").equals(activeContext.workspaceId).toArray())
       .filter((item) => item.operation === "delete")
       .map((item) => item.id));
     for (const item of result.records) {
-      if (pendingDeletes.has(`${context.workspaceId}:${item.entity}:${item.record.id}`)) continue;
+      if (pendingDeletes.has(`${activeContext.workspaceId}:${item.entity}:${item.record.id}`)) continue;
       await cacheRecord(item.entity, item.record, false, item.farmId ?? undefined, item.seasonId ?? undefined);
     }
     if (result.snapshotConfirmed && result.farmId === context.farmId && result.seasonId === context.seasonId) {
       await pruneSynchronizedCache(result.records);
     }
     const lastSyncTime = new Date().toISOString();
-    localStorage.setItem(lastSyncKey(context.workspaceId), lastSyncTime);
+    localStorage.setItem(lastSyncKey(activeContext.workspaceId), lastSyncTime);
     await refreshSyncState({ status: (await getPendingCount()) ? "pending" : "online", dataSource: "server", lastSyncTime });
     window.dispatchEvent(new Event("muzare-data-refresh"));
     if (options.notifySuccess !== false) notify(i18n.t("sync.latestWorkspaceDataLoaded"));
@@ -689,7 +699,15 @@ export async function refreshOperationalData(options: { notifySuccess?: boolean 
   }
 }
 
-export async function reconcileWorkspaceData(options: { notifySuccess?: boolean } = {}) {
+export function refreshOperationalData(options: { notifySuccess?: boolean } = {}): Promise<void> {
+  if (refreshPromise) return refreshPromise;
+  refreshPromise = refreshOperationalDataOnce(options).finally(() => {
+    refreshPromise = null;
+  });
+  return refreshPromise;
+}
+
+async function reconcileWorkspaceDataOnce(options: { notifySuccess?: boolean } = {}) {
   if (!context || !navigator.onLine) {
     await refreshSyncState({ status: "offline" });
     return { synced: 0, pending: await getPendingCount() };
@@ -700,6 +718,14 @@ export async function reconcileWorkspaceData(options: { notifySuccess?: boolean 
   const result = await syncPendingRecords();
   await refreshOperationalData({ notifySuccess: options.notifySuccess ?? false });
   return result;
+}
+
+export function reconcileWorkspaceData(options: { notifySuccess?: boolean } = {}) {
+  if (reconcilePromise) return reconcilePromise;
+  reconcilePromise = reconcileWorkspaceDataOnce(options).finally(() => {
+    reconcilePromise = null;
+  });
+  return reconcilePromise;
 }
 
 async function pruneSynchronizedCache(records: OperationalRecordEnvelope[]) {
@@ -1035,6 +1061,8 @@ export function prepareWorkspaceSwitch() {
 export function stopSyncService() {
   if (timer) window.clearInterval(timer);
   timer = null;
+  refreshPromise = null;
+  reconcilePromise = null;
   context = null;
   appliedBootstrapContextKey = null;
   setActiveWorkspaceId(null);
