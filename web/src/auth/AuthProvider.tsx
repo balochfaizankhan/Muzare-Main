@@ -48,6 +48,11 @@ async function confirmPendingChangesBeforeSessionTransition(action: "logout" | "
   return confirmFromSync(action);
 }
 
+async function prepareWorkspaceSwitch() {
+  const { prepareWorkspaceSwitch: prepareFromSync } = await import("../services/syncService");
+  prepareFromSync();
+}
+
 const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: PropsWithChildren) {
@@ -57,8 +62,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [sessionRefreshing, setSessionRefreshing] = useState(() => Boolean(window.localStorage.getItem(tokenKey)));
 
   useEffect(() => {
-    setPermissionContextUser(sessionRefreshing ? null : user);
-  }, [sessionRefreshing, user]);
+    // A cached approved user keeps the existing UI usable while the session is silently
+    // revalidated. The API remains authoritative for every protected operation.
+    setPermissionContextUser(user);
+  }, [user]);
 
   useEffect(() => {
     if (!token) {
@@ -139,7 +146,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
     if (!token || workspaceId === user?.workspaceId) return;
     if (!(await confirmPendingChangesBeforeSessionTransition("switch_workspace"))) return;
     const session = await selectWorkspace(token, workspaceId);
-    await clearWorkspaceCache();
+    // Workspace-scoped IndexedDB records are safe to retain. Keeping them makes returning to
+    // another workspace cache-first instead of forcing a cold reload.
+    await prepareWorkspaceSwitch();
     queryClient.clear();
     window.localStorage.setItem(cachedUserKey, JSON.stringify(session.user));
     window.localStorage.setItem(lastWorkspaceKey, workspaceId);

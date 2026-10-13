@@ -18235,3 +18235,125 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
 
 .icon-button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 9px; border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); cursor: pointer; padding: 0; }
 .icon-button:hover { color: var(--text); border-color: var(--text-secondary); }
+
+
+/* Architecture stabilization: keep the mounted shell steady during route/data revalidation. */
+.route-content-loading {
+  display: grid;
+  gap: 16px;
+  margin: 0 auto;
+  max-width: 1180px;
+  min-height: min(58dvh, 560px);
+  padding: 22px;
+  width: 100%;
+}
+
+.route-content-loading__header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.route-content-loading__title {
+  border-radius: 999px;
+  height: 24px;
+  width: min(48%, 300px);
+}
+
+.route-content-loading__action {
+  border-radius: 12px;
+  height: 38px;
+  width: 92px;
+}
+
+.route-content-loading__cards {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.route-content-loading__cards > span {
+  border-radius: 16px;
+  min-height: 132px;
+}
+
+.route-content-loading > p {
+  color: var(--text-secondary);
+  font-size: .8rem;
+  margin: 0;
+}
+
+.shell-background-activity {
+  height: 2px;
+  overflow: hidden;
+  pointer-events: none;
+  position: relative;
+  width: 100%;
+}
+
+.shell-background-activity > span {
+  animation: shell-background-progress 1.15s ease-in-out infinite;
+  background: var(--brand-primary);
+  border-radius: 999px;
+  height: 100%;
+  inset-inline-start: -36%;
+  position: absolute;
+  width: 36%;
+}
+
+.shell-action:disabled {
+  cursor: default;
+  opacity: .52;
+}
+
+.shell-action svg.is-spinning {
+  animation: shell-icon-spin .8s linear infinite;
+}
+
+.shell-action svg.is-pulsing {
+  animation: shell-icon-pulse 1s ease-in-out infinite;
+}
+
+@keyframes shell-background-progress {
+  0% { inset-inline-start: -36%; }
+  100% { inset-inline-start: 100%; }
+}
+
+@keyframes shell-icon-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes shell-icon-pulse {
+  0%, 100% { opacity: .62; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-1px); }
+}
+
+@media (max-width: 767px) {
+  .route-content-loading {
+    gap: 12px;
+    min-height: 52dvh;
+    padding: 16px 14px;
+  }
+
+  .route-content-loading__cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .route-content-loading__cards > span {
+    min-height: 108px;
+  }
+
+  .route-content-loading__cards > span:last-child {
+    grid-column: 1 / -1;
+    min-height: 84px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell-background-activity > span,
+  .shell-action svg.is-spinning,
+  .shell-action svg.is-pulsing {
+    animation: none;
+  }
+}

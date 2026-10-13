@@ -652,8 +652,7 @@ export async function syncNow() {
     return { synced: 0, pending: await getPendingCount() };
   }
   if ((await getPendingCount()) === 0) {
-    await refreshOperationalData({ notifySuccess: false });
-    notify(i18n.t("sync.databaseSynchronized"));
+    notify(i18n.t("sync.noPendingChanges"));
     return { synced: 0, pending: 0 };
   }
   const result = await syncPendingRecords({ force: true });
@@ -688,6 +687,19 @@ export async function refreshOperationalData(options: { notifySuccess?: boolean 
     emit({ status: navigator.onLine ? "error" : "offline", dataSource: "cache", pendingCount: await getPendingCount(), message: i18n.t("workforcePage.cachedLoadingLabour") });
     notify(i18n.t("sync.unableToRefreshCachedAvailable"));
   }
+}
+
+export async function reconcileWorkspaceData(options: { notifySuccess?: boolean } = {}) {
+  if (!context || !navigator.onLine) {
+    await refreshSyncState({ status: "offline" });
+    return { synced: 0, pending: await getPendingCount() };
+  }
+
+  // Reconciliation has one deterministic order: first push the durable local outbox, then
+  // pull the latest server snapshot. Cache merging already protects newer pending local rows.
+  const result = await syncPendingRecords();
+  await refreshOperationalData({ notifySuccess: options.notifySuccess ?? false });
+  return result;
 }
 
 async function pruneSynchronizedCache(records: OperationalRecordEnvelope[]) {
@@ -983,9 +995,7 @@ export async function applyBootstrapSnapshot(token: string, workspaceId: string,
         lastProgressAt: new Date().toISOString(),
         message: i18n.t("sync.syncingLatestRecords"),
       });
-      await refreshOperationalData({ notifySuccess: false });
-      if (!context || operationalContextIdentity(context.workspaceId, context.farmId, context.seasonId) !== expectedContextKey) return;
-      await syncPendingRecords();
+      await reconcileWorkspaceData({ notifySuccess: false });
       if (!context || operationalContextIdentity(context.workspaceId, context.farmId, context.seasonId) !== expectedContextKey) return;
       emitStartup("ready", i18n.t("sync.connectedReady"), {
         startupInProgress: false,
@@ -1016,6 +1026,12 @@ export async function repairStaleSyncQueueItem(mutationId: string) {
   throw new Error("This record belongs to a different workspace, farm, or season. Switch back to its original context to retry it, or discard it after review.");
 }
 
+export function prepareWorkspaceSwitch() {
+  // Stop the active runtime and clear only in-memory context. Workspace-scoped IndexedDB
+  // snapshots and remembered contexts remain available for an instant cache-first return.
+  stopSyncService();
+}
+
 export function stopSyncService() {
   if (timer) window.clearInterval(timer);
   timer = null;
@@ -1044,7 +1060,6 @@ export async function clearWorkspaceCache() {
 }
 
 window.addEventListener("online", () => {
-  void refreshOperationalData();
-  void syncPendingRecords();
+  void reconcileWorkspaceData({ notifySuccess: false });
 });
 window.addEventListener("offline", () => emit({ status: "offline" }));

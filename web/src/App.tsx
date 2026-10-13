@@ -89,16 +89,30 @@ function StartupScreen({ title, detail }: { title: string; detail: string }) {
   );
 }
 
-function RouteFallback({ detailKey }: { detailKey: string }) {
+function RouteFallback({ detailKey, fullScreen = false }: { detailKey: string; fullScreen?: boolean }) {
   const { t } = useTranslation();
-  return <StartupScreen title="Muzare" detail={detailKey ? t(detailKey) : t("common.loading")} />;
+  const detail = detailKey ? t(detailKey) : t("common.loading");
+  if (fullScreen) return <StartupScreen title="Muzare" detail={detail} />;
+  return (
+    <main className="route-content-loading" role="status" aria-live="polite">
+      <div className="route-content-loading__header">
+        <span className="app-skeleton route-content-loading__title" />
+        <span className="app-skeleton route-content-loading__action" />
+      </div>
+      <div className="route-content-loading__cards">
+        <span className="app-skeleton" />
+        <span className="app-skeleton" />
+        <span className="app-skeleton" />
+      </div>
+      <p>{detail}</p>
+    </main>
+  );
 }
 
-// `detailKey` is a translation key (routeLoading.*) rather than display text: this module renders
-// route elements once at module scope, so the fallback component resolves the key with
-// useTranslation at render time and stays in sync with language switches.
-function routeElement(element: ReactNode, detailKey: string) {
-  return <Suspense fallback={<RouteFallback detailKey={detailKey} />}>{element}</Suspense>;
+// Keep the mounted app shell stable while lazy page chunks load. Only the two lazy layout
+// boundaries use the full-screen startup skeleton.
+function routeElement(element: ReactNode, detailKey: string, fullScreen = false) {
+  return <Suspense fallback={<RouteFallback detailKey={detailKey} fullScreen={fullScreen} />}>{element}</Suspense>;
 }
 
 function blockedRedirect(user: AppUser) {
@@ -167,7 +181,7 @@ export default function App() {
     <Route path="/onboarding" element={<RequireAuth><OnboardingPage /></RequireAuth>} />
     <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
     <Route path="/" element={<RequireAuth><HomeRedirect /></RequireAuth>} />
-    <Route path="/admin" element={<RequirePlatform>{routeElement(<AdminLayout />, "routeLoading.adminWorkspace")}</RequirePlatform>}>
+    <Route path="/admin" element={<RequirePlatform>{routeElement(<AdminLayout />, "routeLoading.adminWorkspace", true)}</RequirePlatform>}>
       <Route path="dashboard" element={routeElement(<AdminDashboard />, "routeLoading.adminDashboard")} />
       <Route path="workspaces" element={routeElement(<Workspaces />, "routeLoading.workspaces")} />
       <Route path="farms" element={routeElement(<AdminFarms />, "routeLoading.farms")} />
@@ -184,7 +198,7 @@ export default function App() {
       <Route path="settings" element={routeElement(<Settings />, "routeLoading.settings")} />
       <Route path="approvals" element={routeElement(<AdminApprovalsPage />, "routeLoading.approvals")} />
     </Route>
-    <Route path="/workspace" element={<RequireWorkspace>{routeElement(<WorkspaceLayout />, "routeLoading.workspaceShell")}</RequireWorkspace>}>
+    <Route path="/workspace" element={<RequireWorkspace>{routeElement(<WorkspaceLayout />, "routeLoading.workspaceShell", true)}</RequireWorkspace>}>
       <Route path="dashboard" element={routeElement(<WorkspaceDashboard />, "routeLoading.dashboard")} />
       <Route path="workforce" element={routeElement(<WorkforceSectionLayout />, "routeLoading.workforce")}>
         <Route index element={<Navigate to="labour" replace />} />
