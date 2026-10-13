@@ -1049,7 +1049,7 @@ function VoucherRegister({
         description: string;
         amount: number;
         recipient: string;
-        dueNumber?: null;
+        dueNumber?: string | null;
         sourceAdvanceVoucherNumber?: null;
         cashAmount: number;
         applicationParent?: LabourAdvanceApplicationParentRecord;
