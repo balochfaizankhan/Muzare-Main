@@ -542,7 +542,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
             eq(operationalRecords.seasonId, selected.activeSeasonId),
             isNull(operationalRecords.seasonId),
             and(eq(operationalRecords.entityType, "voucher"), eq(operationalRecords.sourceType, "expense")),
-            and(eq(operationalRecords.entityType, "account"), eq(operationalRecords.sourceType, "account")),
+            eq(operationalRecords.entityType, "account"),
           )
           : isNull(operationalRecords.seasonId),
       ))
@@ -564,6 +564,44 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
           record: { ...payload, id: item.clientRecordId, updatedAt: item.clientUpdatedAt.toISOString() },
         }];
       });
+    if (hasModulePermission(request.appUser, parsed.data.workspaceId, "accounts", "view")) {
+      const canonicalAccounts = await db.select({
+        id: accounts.id,
+        name: accounts.name,
+        accountType: accounts.accountType,
+        active: accounts.active,
+        oldAndroidId: accounts.oldAndroidId,
+        sourceType: accounts.sourceType,
+        createdAt: accounts.createdAt,
+        updatedAt: accounts.updatedAt,
+      }).from(accounts).where(eq(accounts.farmId, selected.activeFarmId));
+      const representedIds = new Set(visibleRecords
+        .filter((item) => item.entity === "account")
+        .map((item) => typeof item.record.canonicalAccountId === "string" ? item.record.canonicalAccountId : item.record.id));
+      const representedNames = new Set(visibleRecords
+        .filter((item) => item.entity === "account" && typeof item.record.name === "string")
+        .map((item) => String(item.record.name).trim().toLowerCase()));
+      for (const account of canonicalAccounts) {
+        if (representedIds.has(account.id) || representedNames.has(account.name.trim().toLowerCase())) continue;
+        visibleRecords.push({
+          workspaceId: parsed.data.workspaceId,
+          farmId: selected.activeFarmId,
+          seasonId: null,
+          entity: "account",
+          record: {
+            id: account.id,
+            name: account.name,
+            type: account.accountType,
+            active: account.active,
+            oldAndroidId: account.oldAndroidId ?? undefined,
+            sourceType: account.sourceType ?? "canonical_account",
+            canonicalAccountId: account.id,
+            createdAt: account.createdAt.toISOString(),
+            updatedAt: account.updatedAt.toISOString(),
+          },
+        });
+      }
+    }
     return {
       snapshotConfirmed: true,
       farmId: selected.activeFarmId,
@@ -819,7 +857,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     }
     const selected = await sessionContext(request.sessionId);
     const generalFarmExpense = parsed.data.entity === "voucher" && parsed.data.record.generalFarmExpense === true;
-    const requestSeasonId = parsed.data.entity === "dateType" ? null : (parsed.data.seasonId ?? null);
+    const requestSeasonId = (parsed.data.entity === "dateType" || parsed.data.entity === "account") ? null : (parsed.data.seasonId ?? null);
     const requiresSeason = seasonRequiredEntities.has(parsed.data.entity) && !generalFarmExpense;
     if (localDevelopmentMode && parsed.data.entity === "voucher") {
       console.log("VOUCHER_SYNC_PERMISSION_DECISION", {
@@ -874,7 +912,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     }
     const ownershipError = await validateTenantReferencesDetailed(parsed.data.workspaceId, {
       farmId: parsed.data.farmId,
-      seasonId: parsed.data.entity === "dateType" ? undefined : requestSeasonId,
+      seasonId: (parsed.data.entity === "dateType" || parsed.data.entity === "account") ? undefined : requestSeasonId,
       accountId: parsed.data.record.accountId,
       partnerAccountId: parsed.data.record.partnerAccountId,
       fromAccountId: parsed.data.record.fromAccountId,
@@ -997,6 +1035,26 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       eq(operationalRecords.entityType, parsed.data.entity),
       eq(operationalRecords.clientRecordId, parsed.data.record.id),
     )).limit(1);
+    if (!existing && parsed.data.entity === "account") {
+      const accountPayload = masterPayloadSchemas.account.parse(parsed.data.record);
+      const [sameNameAccount] = await db.select({ id: accounts.id, name: accounts.name })
+        .from(accounts)
+        .where(and(
+          eq(accounts.farmId, parsed.data.farmId!),
+          sql`lower(${accounts.name}) = lower(${accountPayload.name})`,
+        ))
+        .limit(1);
+      if (sameNameAccount && sameNameAccount.id !== parsed.data.record.id) {
+        return reply.code(409).send({
+          message: `Account "${sameNameAccount.name}" already exists for this farm.`,
+          details: {
+            code: "account_name_exists",
+            existingAccountId: sameNameAccount.id,
+            accountName: sameNameAccount.name,
+          },
+        });
+      }
+    }
     if (!existing && parsed.data.entity === "attendance"
       && typeof parsed.data.record.labourerId === "string" && typeof parsed.data.record.date === "string") {
       [existing] = await db.select().from(operationalRecords).where(and(
@@ -1008,7 +1066,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         sql`${operationalRecords.payload}->>'date' = ${parsed.data.record.date}`,
       )).limit(1);
     }
-    if (existing && (existing.farmId !== (parsed.data.farmId ?? null) || (parsed.data.entity !== "dateType" && existing.seasonId !== requestSeasonId))) {
+    if (existing && (existing.farmId !== (parsed.data.farmId ?? null) || (!["dateType", "account"].includes(parsed.data.entity) && existing.seasonId !== requestSeasonId))) {
       return reply.code(403).send({ message: "Operational record does not belong to the selected farm and season." });
     }
     if (!existing && !hasModulePermission(request.appUser, parsed.data.workspaceId, entityModule(parsed.data.entity), "create")) {
@@ -1417,10 +1475,12 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
           });
     } catch (error) {
       if (error instanceof Error && parsed.data.entity === "account") {
-        if ((error as { code?: string }).code === "23505") {
+        const sqlState = (error as { code?: string; cause?: { code?: string } }).code
+          ?? (error as { cause?: { code?: string } }).cause?.code;
+        if (sqlState === "23505") {
           return reply.code(409).send({
-            code: "ambiguous_account_mapping",
-            message: "This account cannot be normalized because its stable identity conflicts with an existing account. Repair the explicit account mapping before posting.",
+            code: "account_name_exists",
+            message: "An account with this name already exists for this farm.",
           });
         }
         return reply.code(400).send({ message: error.message });

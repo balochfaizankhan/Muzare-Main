@@ -199,7 +199,7 @@ function WorkforceModule({
   const loadAttendance = useCallback(async () => (await workspaceRecords(offlineDb.attendance)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadAdvances = useCallback(async () => (await workspaceRecords(offlineDb.advances)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
   const loadLabourEarnings = useCallback(async () => (await workspaceRecords(offlineDb.labourEarnings, { includeDeleted: true })).sort((a, b) => b.earningDate.localeCompare(a.earningDate) || b.updatedAt.localeCompare(a.updatedAt)), []);
-  const loadAccounts = useCallback(async () => (await workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true })).sort((a, b) => a.name.localeCompare(b.name)), []);
+  const loadAccounts = useCallback(async () => (await workspaceConfigRecords(offlineDb.accounts)).sort((a, b) => a.name.localeCompare(b.name)), []);
   const loadWageRates = useCallback(async () => (await workspaceRecords(offlineDb.wageRates, { includeDeleted: true })).sort(compareWageRates), []);
   const loadLabourWageSettlements = useCallback(async () => (await workspaceRecords(offlineDb.labourWageSettlements, { includeDeleted: true })).sort((a, b) => b.settlementDate.localeCompare(a.settlementDate) || b.updatedAt.localeCompare(a.updatedAt)), []);
   const loadProductionEntries = useCallback(async () => (await workspaceRecords(offlineDb.productionEntries)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
@@ -1912,7 +1912,7 @@ function ExpensesModule() {
   // includeDeleted so a voucher whose account was later deactivated can still show/keep that
   // account while editing that one historical voucher (see selectableExpenseAccounts below) —
   // eligiblePaymentAccounts is what actually excludes deleted accounts from new selections.
-  const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true, includeDeleted: true }), []);
+  const loadAccounts = useCallback(() => workspaceConfigRecords(offlineDb.accounts, { includeDeleted: true }), []);
   const loadLabourWageSettlements = useCallback(() => workspaceRecords(offlineDb.labourWageSettlements, { includeDeleted: true }), []);
   const [vouchers, refresh] = useData(load);
   const [accounts] = useData(loadAccounts, ensureLocalAccounts);
@@ -3651,7 +3651,7 @@ function SalesModule() {
   const canDeleteSales = Boolean(!sessionRefreshing && user && workspaceId && canDelete(user, "sales", workspaceId));
   const [searchParams, setSearchParams] = useSearchParams();
   const load = useCallback(async () => (await workspaceRecords(offlineDb.sales)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
-  const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true, includeDeleted: true }), []);
+  const loadAccounts = useCallback(() => workspaceConfigRecords(offlineDb.accounts, { includeDeleted: true }), []);
   const loadDispatches = useCallback(async () => (await workspaceRecords(offlineDb.dispatches)).sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)), []);
   const loadVehicles = useCallback(() => workspaceRecords(offlineDb.vehicles), []);
   const loadDateTypes = useCallback(() => workspaceConfigRecords(offlineDb.dateTypes), []);
@@ -3978,7 +3978,7 @@ function PartnerLedgerModule() {
   const canDeleteEntries = Boolean(!sessionRefreshing && user && workspaceId && canDelete(user, "accounts", workspaceId));
   const [showDeleted, setShowDeleted] = useState(false);
   const load = useCallback(async () => (await workspaceRecords(offlineDb.partnerEntries, { includeDeleted: showDeleted })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [showDeleted]);
-  const loadAccounts = useCallback(() => workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true, includeDeleted: true }), []);
+  const loadAccounts = useCallback(() => workspaceConfigRecords(offlineDb.accounts, { includeDeleted: true }), []);
   const loadVouchers = useCallback(() => loadWorkspaceVouchers({ includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }), []);
   const loadSales = useCallback(() => workspaceRecords(offlineDb.sales), []);
   const loadAdvances = useCallback(() => workspaceRecords(offlineDb.advances), []);
@@ -4441,7 +4441,7 @@ function AccountsModule() {
     accountsScopeKeyRef.current = scopeKey;
     await ensureLocalAccounts();
     const [nextAccounts, nextVouchers, nextSales, nextEntries, nextAdvances, nextLabourWageSettlements] = await Promise.all([
-      workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }).then((rows) => rows.sort((a, b) => a.createdAt.localeCompare(b.createdAt))),
+      workspaceConfigRecords(offlineDb.accounts).then((rows) => rows.sort((a, b) => a.createdAt.localeCompare(b.createdAt))),
       loadWorkspaceVouchers({ includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }),
       workspaceRecords(offlineDb.sales),
       workspaceRecords(offlineDb.partnerEntries),
@@ -4517,11 +4517,18 @@ function AccountsModule() {
   const [partnerLedgerGroupExpanded, setPartnerLedgerGroupExpanded] = useState<Record<PartnerLiabilityLedgerGroupKey, boolean>>(defaultPartnerLiabilityGroupExpansion);
   const [name, setName] = useState("");
   const [type, setType] = useState<Account["type"]>("bank");
+  const [accountCreateError, setAccountCreateError] = useState("");
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!canCreateAccounts) return;
-    const record: Account = { ...makeLocalRecord(), name, type };
+    const accountName = name.trim();
+    if (accounts.some((account) => account.name.trim().toLowerCase() === accountName.toLowerCase())) {
+      setAccountCreateError(t("accountsPage.accountAlreadyExistsFarm", { name: accountName }));
+      return;
+    }
+    setAccountCreateError("");
+    const record: Account = { ...makeConfigRecord(), name: accountName, type };
     await persistOperationalRecord("account", record);
     setName("");
     await refreshOperationalSnapshot();
@@ -5216,11 +5223,12 @@ function AccountsModule() {
     <>
       {canCreateAccounts && <FormCard title={t("accountsPage.createAccount")}>
         <form className="module-form compact-form" onSubmit={(event) => void submit(event)}>
-          <input required placeholder={t("accountsPage.accountName")} value={name} onChange={(event) => setName(event.target.value)} />
+          <input required placeholder={t("accountsPage.accountName")} value={name} onChange={(event) => { setName(event.target.value); setAccountCreateError(""); }} />
           <select value={type} onChange={(event) => setType(event.target.value as Account["type"])}>
             <option value="cash">{t("accountsPage.cash")}</option><option value="bank">{t("accountsPage.bank")}</option><option value="partner">{t("accountsPage.partner")}</option>
           </select>
           <button type="submit">{t("accountsPage.createAccount")}</button>
+          {accountCreateError && <p className="form-error">{accountCreateError}</p>}
         </form>
       </FormCard>}
       <section className="record-panel">

@@ -10,8 +10,7 @@ import { StickyActionBarProvider } from "../components/StickyActionBar";
 import { config } from "../config";
 import type { PendingMutation } from "../lib/offline-db";
 import { useSyncState } from "../hooks/useSyncState";
-import { fetchBootstrap } from "../lib/api";
-import { workspaceBootstrapQueryKey } from "../lib/workspaceBootstrap";
+import { workspaceBootstrapQueryOptions } from "../lib/workspaceBootstrap";
 import { formatDate } from "../lib/format";
 import { deriveWorkspaceDisplayStatus } from "../lib/workspaceStatus";
 import { applyBootstrapSnapshot, discardSyncQueueItem, getSyncQueueItems, refreshOperationalData, repairStaleSyncQueueItem, resolveSyncQueueItem, retrySyncQueueItem, startSyncService, stopSyncService, syncNow } from "../services/syncService";
@@ -49,12 +48,7 @@ export function WorkspaceLayout() {
   const [mobileSheet, setMobileSheet] = useState<null | "add" | "more">(null);
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const [manualSyncing, setManualSyncing] = useState(false);
-  const bootstrap = useQuery({
-    queryKey: workspaceBootstrapQueryKey(user?.workspaceId),
-    queryFn: ({ signal }) => fetchBootstrap(token!, signal),
-    enabled: Boolean(user?.workspaceId && token),
-    retry: false,
-  });
+  const bootstrap = useQuery(workspaceBootstrapQueryOptions(token, user?.workspaceId));
   useEffect(() => {
     setActiveWorkspaceId(user?.workspaceId ?? null);
   }, [user?.workspaceId]);

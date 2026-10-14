@@ -1961,6 +1961,7 @@ const extraResources = {
       accountsPage: {
         createAccount: "Create account",
         accountName: "Account name",
+        accountAlreadyExistsFarm: "{{name}} already exists for this farm. Use the existing account.",
         cash: "Cash",
         bank: "Bank",
         partner: "Partner",
@@ -3413,6 +3414,7 @@ const extraResources = {
       accountsPage: {
         createAccount: "إنشاء حساب",
         accountName: "اسم الحساب",
+        accountAlreadyExistsFarm: "الحساب {{name}} موجود بالفعل لهذه المزرعة. استخدم الحساب الحالي.",
         cash: "نقدي",
         bank: "بنك",
         partner: "شريك",
@@ -4852,6 +4854,7 @@ const extraResources = {
       accountsPage: {
         createAccount: "اکاؤنٹ بنائیں",
         accountName: "اکاؤنٹ کا نام",
+        accountAlreadyExistsFarm: "{{name}} اس فارم کے لیے پہلے سے موجود ہے۔ موجودہ اکاؤنٹ استعمال کریں۔",
         cash: "کیش",
         bank: "بینک",
         partner: "پارٹنر",

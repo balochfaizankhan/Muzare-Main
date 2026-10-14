@@ -28,7 +28,7 @@ import { formatDate, formatMoney } from "../lib/format";
 import { getActiveLabourWageSettlements } from "../lib/labourWageSettlements";
 import { buildReplacedSourceIdSet, selectActiveDedupedAdvances, selectDedupedExpenseVouchers } from "../lib/financialInputs";
 import { buildPartnerLiabilityPositions, mergePartnerPositionWithCanonical } from "../lib/partnerAccounting";
-import { ensureLocalAccounts, offlineDb, workspaceRecords } from "../lib/offline-db";
+import { ensureLocalAccounts, offlineDb, workspaceConfigRecords, workspaceRecords } from "../lib/offline-db";
 import { isActiveOperationalRecord } from "../lib/operationalRecords";
 import { hasPermission } from "../lib/permissions";
 import { loadWorkspaceVouchers } from "../lib/voucherCollections";
@@ -208,7 +208,7 @@ export function DashboardPage() {
       loadWorkspaceVouchers({ includeGeneralFarmRecords: true, includeImportedAcrossSeasons: true }),
       workspaceRecords(offlineDb.partnerEntries),
       workspaceRecords(offlineDb.advances),
-      workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }),
+      workspaceConfigRecords(offlineDb.accounts),
       workspaceRecords(offlineDb.labourWageSettlements),
       loadWorkspaceActivity(t, canonicalFinancials.data),
     ]);

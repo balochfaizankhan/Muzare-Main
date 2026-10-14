@@ -7,7 +7,6 @@ import { SubpageHeader } from "../../components/SubpageHeader";
 import {
   archiveFarmSeason,
   createFarmSeason,
-  fetchBootstrap,
   fetchFarmSeasons,
   selectActiveSeason,
   updateFarmSeason,
@@ -16,7 +15,8 @@ import {
 } from "../../lib/api";
 import { formatDate } from "../../lib/format";
 import { hasPermission } from "../../lib/permissions";
-import { workspaceBootstrapQueryKey } from "../../lib/workspaceBootstrap";
+import { workspaceBootstrapQueryOptions, workspaceBootstrapQueryKey } from "../../lib/workspaceBootstrap";
+import { useSyncState } from "../../hooks/useSyncState";
 
 const emptyForm: SeasonInput = { name: "", cropType: "", startsOn: "", expectedEndsOn: "", actualEndsOn: "", status: "planned", notes: "" };
 const displayDate = (value: string) => {
@@ -28,18 +28,16 @@ const displayDate = (value: string) => {
 export function Seasons() {
   const { t } = useTranslation();
   const { user, token } = useAuth();
+  const sync = useSyncState();
   const client = useQueryClient();
   const workspaceId = user?.workspaceId ?? "";
   const [editing, setEditing] = useState<Season | null>(null);
   const [form, setForm] = useState<SeasonInput>(emptyForm);
   const [showForm, setShowForm] = useState(false);
-  const bootstrap = useQuery({
-    queryKey: workspaceBootstrapQueryKey(workspaceId),
-    queryFn: ({ signal }) => fetchBootstrap(token!, signal),
-    enabled: Boolean(token && workspaceId),
-    retry: false,
-  });
-  const farmId = bootstrap.data?.activeFarmId ?? "";
+  const bootstrap = useQuery(workspaceBootstrapQueryOptions(token, workspaceId));
+  // The sync service restores the last verified operational context synchronously. Use it as
+  // a fallback while bootstrap revalidates so this page never flashes a false "no farm" state.
+  const farmId = bootstrap.data?.activeFarmId ?? sync.farmId ?? "";
   const canManage = Boolean(user && workspaceId && hasPermission(user, "MANAGE_SEASONS", workspaceId));
   const seasons = useQuery({
     queryKey: ["workspace-seasons", workspaceId, farmId],
@@ -90,7 +88,12 @@ export function Seasons() {
           <div><h2>{t("seasonsPage.managementTitle")}</h2><p>{t("seasonsPage.managementDescription")}</p></div>
           {canManage && farmId && <button className="shell-action" type="button" onClick={() => { setEditing(null); setForm(emptyForm); setShowForm(true); }}><Plus size={16} />{t("seasonsPage.createSeason")}</button>}
         </section>
-        {!farmId && <p className="context-message">{t("seasonsPage.createOrSelectFarm")}</p>}
+        {!farmId && (bootstrap.isLoading || bootstrap.isFetching) && (
+          <p className="context-message">{t("seasonsPage.loadingCycles")}</p>
+        )}
+        {!farmId && !bootstrap.isLoading && !bootstrap.isFetching && (
+          <p className="context-message">{t("seasonsPage.createOrSelectFarm")}</p>
+        )}
         {farmId && seasons.data && !seasons.data.activeSeasonId && <p className="context-message">{t("seasonsPage.noActiveSeason")}</p>}
 
         {showForm && canManage && (
@@ -115,7 +118,7 @@ export function Seasons() {
           </section>
         )}
 
-        {seasons.isLoading && <p className="context-message">{t("seasonsPage.loadingCycles")}</p>}
+        {farmId && seasons.isLoading && !seasons.data && <p className="context-message">{t("seasonsPage.loadingCycles")}</p>}
         {seasons.isError && <p className="error">{seasons.error.message}</p>}
         {seasons.data && (
           <section className="farm-grid">
