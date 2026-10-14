@@ -269,20 +269,20 @@ function remapAccountReferencesInPayload(payload: unknown, fromId: string, toId:
 
 async function remapLocalAccountIdentity(fromId: string, toId: string) {
   if (!context || fromId === toId) return;
-  const tablesWithAccountReferences = [
-    offlineDb.vouchers,
-    offlineDb.sales,
-    offlineDb.partnerEntries,
-    offlineDb.advances,
-    offlineDb.labourWageSettlements,
-  ] as const;
+  const tablesWithAccountReferences: Array<Table<LocalRecord, string>> = [
+    offlineDb.vouchers as unknown as Table<LocalRecord, string>,
+    offlineDb.sales as unknown as Table<LocalRecord, string>,
+    offlineDb.partnerEntries as unknown as Table<LocalRecord, string>,
+    offlineDb.advances as unknown as Table<LocalRecord, string>,
+    offlineDb.labourWageSettlements as unknown as Table<LocalRecord, string>,
+  ];
   for (const table of tablesWithAccountReferences) {
     const rows = await table.where("workspaceId").equals(context.workspaceId)
-      .filter((record) => record.farmId === context!.farmId)
+      .filter((record: LocalRecord) => record.farmId === context!.farmId)
       .toArray();
     for (const row of rows) {
       const next = remapAccountReferencesInPayload(row, fromId, toId);
-      if (next !== row) await (table as typeof offlineDb.vouchers).put(next as never);
+      if (next !== row) await table.put(next as LocalRecord);
     }
   }
   const mutations = await offlineDb.pendingMutations.where("workspaceId").equals(context.workspaceId)

@@ -10,7 +10,7 @@ import { StickyActionBarProvider } from "../components/StickyActionBar";
 import { config } from "../config";
 import type { PendingMutation } from "../lib/offline-db";
 import { useSyncState } from "../hooks/useSyncState";
-import { workspaceBootstrapQueryOptions, workspaceBootstrapQueryKey } from "../lib/workspaceBootstrap";
+import { workspaceBootstrapQueryOptions } from "../lib/workspaceBootstrap";
 import { formatDate } from "../lib/format";
 import { deriveWorkspaceDisplayStatus } from "../lib/workspaceStatus";
 import { applyBootstrapSnapshot, discardSyncQueueItem, getSyncQueueItems, refreshOperationalData, repairStaleSyncQueueItem, resolveSyncQueueItem, retrySyncQueueItem, startSyncService, stopSyncService, syncNow } from "../services/syncService";
