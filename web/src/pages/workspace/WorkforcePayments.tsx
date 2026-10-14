@@ -1049,8 +1049,10 @@ function VoucherRegister({
         description: string;
         amount: number;
         recipient: string;
-        dueNumber?: null;
+        dueNumber?: string | null;
         sourceAdvanceVoucherNumber?: null;
+        cashAmount: number;
+        applicationParent?: LabourAdvanceApplicationParentRecord;
         voucher: LabourPaymentVoucherRecord;
       };
   const reverseApplicationParent = async (
@@ -1135,8 +1137,33 @@ function VoucherRegister({
       setVoidingId("");
     }
   };
-  const applicationRows: VoucherRegisterRow[] = applicationParents.map(
-    (parent) => ({
+  // A cash payment and an advance application posted by the same settlement are two
+  // accounting events, but one user-facing settlement voucher. Attach the advance event to
+  // the posted cash voucher for the same Labour Due/date and suppress the duplicate LPV-AP card.
+  const applicationParentByVoucherId = new Map<string, LabourAdvanceApplicationParentRecord>();
+  const attachedApplicationParentIds = new Set<string>();
+  for (const parent of applicationParents) {
+    if (parent.status === "REVERSED") continue;
+    const candidate = vouchers.find(
+      (voucher) =>
+        voucher.status === "POSTED" &&
+        voucher.nature !== "REVERSAL" &&
+        voucher.linkedDueId === parent.dueId &&
+        voucher.voucherDate === parent.date,
+    ) ?? vouchers.find(
+      (voucher) =>
+        voucher.status === "POSTED" &&
+        voucher.nature !== "REVERSAL" &&
+        voucher.linkedDueId === parent.dueId,
+    );
+    if (!candidate || applicationParentByVoucherId.has(candidate.id)) continue;
+    applicationParentByVoucherId.set(candidate.id, parent);
+    attachedApplicationParentIds.add(parent.id);
+  }
+
+  const applicationRows: VoucherRegisterRow[] = applicationParents
+    .filter((parent) => !attachedApplicationParentIds.has(parent.id))
+    .map((parent) => ({
       id: parent.id,
       kind: "application_parent" as const,
       status: parent.status,
@@ -1148,23 +1175,32 @@ function VoucherRegister({
       recipient: localizeSystemPlaceholder(t, parent.recipientName),
       dueNumber: parent.dueNumber,
       parent,
-    }),
-  );
-  const voucherRows: VoucherRegisterRow[] = vouchers.map((voucher) => ({
-    id: voucher.id,
-    kind: "voucher" as const,
-    status: voucher.status,
-    nature: voucher.nature,
-    voucherNumber: voucher.voucherNumber,
-    date: voucher.voucherDate,
-    description: voucher.description,
-    amount: Number(voucher.paymentAmount),
-    recipient: recipientLabel(t, voucher, labourById, groupById),
-    voucher,
-  }));
+    }));
+  const voucherRows: VoucherRegisterRow[] = vouchers.map((voucher) => {
+    const applicationParent = applicationParentByVoucherId.get(voucher.id);
+    const cashAmount = Number(voucher.paymentAmount);
+    const due = voucher.linkedDueId ? dues.find((item) => item.id === voucher.linkedDueId) : undefined;
+    return {
+      id: voucher.id,
+      kind: "voucher" as const,
+      status: voucher.status,
+      nature: voucher.nature,
+      voucherNumber: voucher.voucherNumber,
+      date: voucher.voucherDate,
+      description: voucher.description,
+      amount: cashAmount + (applicationParent?.activeAmount ?? 0),
+      cashAmount,
+      recipient: recipientLabel(t, voucher, labourById, groupById),
+      dueNumber: due?.dueNumber ?? applicationParent?.dueNumber ?? null,
+      applicationParent,
+      voucher,
+    };
+  });
   const filtered: VoucherRegisterRow[] = [...voucherRows, ...applicationRows].filter(
     (row) =>
-      (nature === "ALL" || row.nature === nature) &&
+      (nature === "ALL" ||
+        row.nature === nature ||
+        (nature === "ADVANCE_APPLICATION" && row.kind === "voucher" && Boolean(row.applicationParent))) &&
       (!search.trim() ||
         [
           row.voucherNumber,
@@ -1269,12 +1305,18 @@ function VoucherRegister({
                 ? (row.dueNumber
                     ? t("workforcePaymentsPage.voucherRegister.descriptionAppliedToDueNonCash", { description: row.description, dueNumber: row.dueNumber })
                     : t("workforcePaymentsPage.voucherRegister.descriptionNonCash", { description: row.description }))
-                : row.description}
+                : row.applicationParent && row.dueNumber
+                  ? t("workforcePaymentsPage.voucherRegister.combinedSettlementDescription", { dueNumber: row.dueNumber })
+                  : row.description}
               </p>
               <dl>
                 <div>
                   <dt>{t("workforcePaymentsPage.voucherRegister.natureLabel")}</dt>
-                  <dd>{row.kind === "application_parent" ? t("workforcePaymentsPage.voucherRegister.natureOptions.advanceAppliedNonCash") : statusLabel(t, row.nature)}</dd>
+                  <dd>{row.kind === "application_parent"
+                    ? t("workforcePaymentsPage.voucherRegister.natureOptions.advanceAppliedNonCash")
+                    : row.applicationParent
+                      ? t("workforcePaymentsPage.voucherRegister.combinedSettlementNature")
+                      : statusLabel(t, row.nature)}</dd>
                 </div>
                 <div>
                   <dt>{t("workforcePaymentsPage.voucherRegister.dateLabel")}</dt>
@@ -1295,6 +1337,28 @@ function VoucherRegister({
                     ? t("workforcePaymentsPage.voucherRegister.workPeriodRange", { from: displayDate(row.parent.workFromDate), to: displayDate(row.parent.workToDate) })
                     : t("workforcePaymentsPage.voucherRegister.childAllocations", { active: row.parent.activeChildApplicationIds.length, total: row.parent.childApplicationIds.length })}
                 </small>
+              ) : null}
+              {row.kind === "voucher" && row.applicationParent ? (
+                <div className="workforce-payment-settlement-breakdown">
+                  <div>
+                    <span>{t("workforcePaymentsPage.voucherRegister.cashComponent")}</span>
+                    <strong className="bidi-isolate">{money(row.cashAmount)}</strong>
+                  </div>
+                  <div>
+                    <span>{t("workforcePaymentsPage.voucherRegister.advanceComponent")}</span>
+                    <strong className="bidi-isolate">{money(row.applicationParent.activeAmount)}</strong>
+                  </div>
+                  <div className="is-total">
+                    <span>{t("workforcePaymentsPage.voucherRegister.totalSettled")}</span>
+                    <strong className="bidi-isolate">{money(row.amount)}</strong>
+                  </div>
+                  {row.applicationParent.fundingSources.length ? (
+                    <div className="workforce-payment-settlement-breakdown__funding">
+                      <span>{t("workforcePaymentsPage.voucherRegister.advanceFundingSources")}</span>
+                      <strong>{row.applicationParent.fundingSources.map((source) => `${localizeSystemPlaceholder(t, source.accountName)} — ${money(source.amount)}`).join(" · ")}</strong>
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
               {row.kind === "voucher" && row.voucher.legacy ? (
                 <small>
@@ -1322,14 +1386,32 @@ function VoucherRegister({
               row.voucher.status === "POSTED" &&
               row.voucher.nature !== "REVERSAL" &&
               !row.voucher.legacy ? (
-                <button
-                  className="secondary-action"
-                  disabled={voidingId === row.voucher.id}
-                  type="button"
-                  onClick={() => void voidVoucher(row.voucher)}
-                >
-                  {voidingId === row.voucher.id ? t("workforcePaymentsPage.voucherRegister.reversing") : t("workforcePaymentsPage.voucherRegister.voidReverse")}
-                </button>
+                <div className="workforce-payment-voucher-actions">
+                  <button
+                    className="secondary-action"
+                    disabled={voidingId === row.voucher.id}
+                    type="button"
+                    onClick={() => void voidVoucher(row.voucher)}
+                  >
+                    {voidingId === row.voucher.id
+                      ? t("workforcePaymentsPage.voucherRegister.reversing")
+                      : row.applicationParent
+                        ? t("workforcePaymentsPage.voucherRegister.reverseCashComponent")
+                        : t("workforcePaymentsPage.voucherRegister.voidReverse")}
+                  </button>
+                  {row.applicationParent && row.applicationParent.status !== "REVERSED" ? (
+                    <button
+                      className="secondary-action"
+                      disabled={voidingId === row.applicationParent.id}
+                      type="button"
+                      onClick={() => void reverseApplicationParent(row.applicationParent!)}
+                    >
+                      {voidingId === row.applicationParent.id
+                        ? t("workforcePaymentsPage.voucherRegister.reversing")
+                        : t("workforcePaymentsPage.voucherRegister.reverseAdvanceComponent")}
+                    </button>
+                  ) : null}
+                </div>
               ) : null}
               {canVoid &&
               row.kind === "application_parent" &&

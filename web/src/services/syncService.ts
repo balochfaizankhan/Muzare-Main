@@ -35,6 +35,8 @@ let context: { token: string; workspaceId: string; farmId?: string; farmName?: s
 let appliedBootstrapContextKey: string | null = null;
 let timer: number | null = null;
 let syncing = false;
+let refreshPromise: Promise<void> | null = null;
+let reconcilePromise: Promise<{ synced: number; pending: number }> | null = null;
 let state: SyncState = { status: navigator.onLine ? "online" : "offline", pendingCount: 0, lastSyncTime: null };
 const maxAutomaticAttempts = 3;
 const localDebugEnabled = import.meta.env.DEV;
@@ -415,6 +417,11 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
     await refreshSyncState({ status: "offline" });
     return { synced: 0, pending: await getPendingCount() };
   }
+  const initialPending = await getPendingCount();
+  if (initialPending === 0) {
+    await refreshSyncState({ status: "online" });
+    return { synced: 0, pending: 0 };
+  }
   syncing = true;
   emit({ status: "syncing" });
   let synced = 0;
@@ -652,8 +659,7 @@ export async function syncNow() {
     return { synced: 0, pending: await getPendingCount() };
   }
   if ((await getPendingCount()) === 0) {
-    await refreshOperationalData({ notifySuccess: false });
-    notify(i18n.t("sync.databaseSynchronized"));
+    notify(i18n.t("sync.noPendingChanges"));
     return { synced: 0, pending: 0 };
   }
   const result = await syncPendingRecords({ force: true });
@@ -661,26 +667,29 @@ export async function syncNow() {
   return result;
 }
 
-export async function refreshOperationalData(options: { notifySuccess?: boolean } = {}): Promise<void> {
+async function refreshOperationalDataOnce(options: { notifySuccess?: boolean } = {}): Promise<void> {
   if (!context || !navigator.onLine) {
     emit({ status: "offline" });
     notify(i18n.t("sync.workingOfflineRefreshRetry"));
     return;
   }
   try {
-    const result = await fetchOperationalRecords(context.token, context.workspaceId);
-    const pendingDeletes = new Set((await offlineDb.pendingMutations.where("workspaceId").equals(context.workspaceId).toArray())
+    const activeContext = context;
+    const result = await fetchOperationalRecords(activeContext.token, activeContext.workspaceId);
+    // Ignore a response that belongs to a runtime that was replaced while the request was in flight.
+    if (!context || context.token !== activeContext.token || context.workspaceId !== activeContext.workspaceId) return;
+    const pendingDeletes = new Set((await offlineDb.pendingMutations.where("workspaceId").equals(activeContext.workspaceId).toArray())
       .filter((item) => item.operation === "delete")
       .map((item) => item.id));
     for (const item of result.records) {
-      if (pendingDeletes.has(`${context.workspaceId}:${item.entity}:${item.record.id}`)) continue;
+      if (pendingDeletes.has(`${activeContext.workspaceId}:${item.entity}:${item.record.id}`)) continue;
       await cacheRecord(item.entity, item.record, false, item.farmId ?? undefined, item.seasonId ?? undefined);
     }
     if (result.snapshotConfirmed && result.farmId === context.farmId && result.seasonId === context.seasonId) {
       await pruneSynchronizedCache(result.records);
     }
     const lastSyncTime = new Date().toISOString();
-    localStorage.setItem(lastSyncKey(context.workspaceId), lastSyncTime);
+    localStorage.setItem(lastSyncKey(activeContext.workspaceId), lastSyncTime);
     await refreshSyncState({ status: (await getPendingCount()) ? "pending" : "online", dataSource: "server", lastSyncTime });
     window.dispatchEvent(new Event("muzare-data-refresh"));
     if (options.notifySuccess !== false) notify(i18n.t("sync.latestWorkspaceDataLoaded"));
@@ -688,6 +697,35 @@ export async function refreshOperationalData(options: { notifySuccess?: boolean 
     emit({ status: navigator.onLine ? "error" : "offline", dataSource: "cache", pendingCount: await getPendingCount(), message: i18n.t("workforcePage.cachedLoadingLabour") });
     notify(i18n.t("sync.unableToRefreshCachedAvailable"));
   }
+}
+
+export function refreshOperationalData(options: { notifySuccess?: boolean } = {}): Promise<void> {
+  if (refreshPromise) return refreshPromise;
+  refreshPromise = refreshOperationalDataOnce(options).finally(() => {
+    refreshPromise = null;
+  });
+  return refreshPromise;
+}
+
+async function reconcileWorkspaceDataOnce(options: { notifySuccess?: boolean } = {}) {
+  if (!context || !navigator.onLine) {
+    await refreshSyncState({ status: "offline" });
+    return { synced: 0, pending: await getPendingCount() };
+  }
+
+  // Reconciliation has one deterministic order: first push the durable local outbox, then
+  // pull the latest server snapshot. Cache merging already protects newer pending local rows.
+  const result = await syncPendingRecords();
+  await refreshOperationalData({ notifySuccess: options.notifySuccess ?? false });
+  return result;
+}
+
+export function reconcileWorkspaceData(options: { notifySuccess?: boolean } = {}) {
+  if (reconcilePromise) return reconcilePromise;
+  reconcilePromise = reconcileWorkspaceDataOnce(options).finally(() => {
+    reconcilePromise = null;
+  });
+  return reconcilePromise;
 }
 
 async function pruneSynchronizedCache(records: OperationalRecordEnvelope[]) {
@@ -710,12 +748,40 @@ async function pruneSynchronizedCache(records: OperationalRecordEnvelope[]) {
   }
 }
 
+function mutationNeedsResolution(mutation: PendingMutation) {
+  const status = mutation.status ?? "pending";
+  return status !== "resolved" && status !== "discarded";
+}
+
 export async function getPendingCount() {
   return context ? offlineDb.pendingMutations.where("workspaceId").equals(context.workspaceId)
     .filter((mutation) => mutationMatchesActiveContext(mutation)
-      && (mutation.status ?? "pending") !== "resolved"
-      && (mutation.status ?? "pending") !== "discarded"
+      && mutationNeedsResolution(mutation)
       && (mutation.retryable ?? true)).count() : 0;
+}
+
+export async function getUnresolvedWorkspaceMutationCount(workspaceId = context?.workspaceId) {
+  if (!workspaceId) return 0;
+  return offlineDb.pendingMutations.where("workspaceId").equals(workspaceId)
+    .filter(mutationNeedsResolution)
+    .count();
+}
+
+export async function confirmPendingChangesBeforeSessionTransition(action: "logout" | "switch_workspace") {
+  const workspaceId = context?.workspaceId;
+  if (!workspaceId) return true;
+
+  if (navigator.onLine) {
+    await syncPendingRecords({ force: true }).catch(() => undefined);
+  }
+
+  const unresolvedCount = await getUnresolvedWorkspaceMutationCount(workspaceId);
+  if (unresolvedCount === 0) return true;
+
+  const key = action === "logout"
+    ? "sync.logoutWithUnsyncedChanges"
+    : "sync.switchWorkspaceWithUnsyncedChanges";
+  return window.confirm(i18n.t(key, { count: unresolvedCount }));
 }
 
 export async function getSyncQueueItems() {
@@ -955,9 +1021,7 @@ export async function applyBootstrapSnapshot(token: string, workspaceId: string,
         lastProgressAt: new Date().toISOString(),
         message: i18n.t("sync.syncingLatestRecords"),
       });
-      await refreshOperationalData({ notifySuccess: false });
-      if (!context || operationalContextIdentity(context.workspaceId, context.farmId, context.seasonId) !== expectedContextKey) return;
-      await syncPendingRecords();
+      await reconcileWorkspaceData({ notifySuccess: false });
       if (!context || operationalContextIdentity(context.workspaceId, context.farmId, context.seasonId) !== expectedContextKey) return;
       emitStartup("ready", i18n.t("sync.connectedReady"), {
         startupInProgress: false,
@@ -988,9 +1052,17 @@ export async function repairStaleSyncQueueItem(mutationId: string) {
   throw new Error("This record belongs to a different workspace, farm, or season. Switch back to its original context to retry it, or discard it after review.");
 }
 
+export function prepareWorkspaceSwitch() {
+  // Stop the active runtime and clear only in-memory context. Workspace-scoped IndexedDB
+  // snapshots and remembered contexts remain available for an instant cache-first return.
+  stopSyncService();
+}
+
 export function stopSyncService() {
   if (timer) window.clearInterval(timer);
   timer = null;
+  refreshPromise = null;
+  reconcilePromise = null;
   context = null;
   appliedBootstrapContextKey = null;
   setActiveWorkspaceId(null);
@@ -1009,12 +1081,13 @@ export function stopSyncService() {
 
 export async function clearWorkspaceCache() {
   stopSyncService();
-  await clearCachedData();
+  // Operational snapshots are disposable cache. The pending mutation table is a durable
+  // local outbox and must survive logout, workspace switching, and session invalidation.
+  await clearCachedData({ preservePendingMutations: true });
   Object.keys(localStorage).filter((key) => key.startsWith(operationalContextPrefix)).forEach((key) => localStorage.removeItem(key));
 }
 
 window.addEventListener("online", () => {
-  void refreshOperationalData();
-  void syncPendingRecords();
+  void reconcileWorkspaceData({ notifySuccess: false });
 });
 window.addEventListener("offline", () => emit({ status: "offline" }));

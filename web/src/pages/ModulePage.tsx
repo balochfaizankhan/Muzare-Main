@@ -4591,15 +4591,13 @@ function AccountsModule() {
     );
   };
   const totalAdvances = canonicalAccountsFinancials?.summary.outstandingAdvance ?? 0;
-  const settledLabourWages = (canonicalAccountsFinancials?.expenses ?? [])
-    .filter((item) => item.active)
-    .reduce((sum, item) => sum + item.amount, 0);
-  const paymentsDue = (canonicalAccountsFinancials?.expenses ?? [])
-    .filter((item) => item.active)
-    .reduce((sum, item) => sum + item.outstandingAmount, 0);
+  // Recognized labour wage expense comes from the canonical journal read model. Outstanding
+  // advances are a separate balance/asset position and must never be added to operating expense.
+  const labourWageExpense = canonicalAccountsFinancials?.summary.wageExpense ?? 0;
+  const paymentsDue = canonicalAccountsFinancials?.labourPaymentsDue.totalOutstanding ?? 0;
   const legacyExpenseVouchers = activeGeneralExpenseVouchers.filter((item) => !replacedLegacySourceIds.has(item.id));
   const totalVoucherExpenses = legacyExpenseVouchers.reduce((sum, item) => sum + item.amount, 0);
-  const totalBusinessExpenses = totalVoucherExpenses + settledLabourWages + totalAdvances;
+  const totalBusinessExpenses = totalVoucherExpenses + labourWageExpense;
   const voucherExpenseDebug = useMemo(() => {
     const settlementById = new Map(activeLabourWageSettlements.map((settlement) => [settlement.id, settlement] as const));
     const tally = {
@@ -5248,7 +5246,7 @@ function AccountsModule() {
         {!snapshot ? <p className="empty-records">{t("accountsPage.updatingAccountsSnapshot")}</p> : null}
         <div className="record-list">
           <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("voucher")}><strong>{t("accountsPage.voucherExpenses")}</strong><span>{money(totalVoucherExpenses)}</span><small>{t("accountsPage.viewDetails")}</small></article>
-          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("combined")}><strong>{t("accountsPage.settledLabourWagesCard")}</strong><span className="bidi-isolate">{money(settledLabourWages)}</span><small>{t("accountsPage.viewDetails")}</small></article>
+          <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("combined")}><strong>{t("accountsPage.recognizedLabourWageExpenseCard")}</strong><span className="bidi-isolate">{money(labourWageExpense)}</span><small>{t("accountsPage.viewDetails")}</small></article>
           <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("advance")}><strong>{t("accountsPage.availableAdvanceBalanceCard")}</strong><span className="bidi-isolate">{money(totalAdvances)}</span><small>{t("accountsPage.viewDetails")}</small></article>
           <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => navigate(`/workspace/labour-payments/payments-due?farmId=${encodeURIComponent(farmId ?? "")}&seasonId=${encodeURIComponent(seasonId ?? "")}`)}><strong>{t("accountsPage.paymentsDueCard")}</strong><span className="bidi-isolate">{money(paymentsDue)}</span><small>{t("accountsPage.viewDetails")}</small></article>
           <article className="account-card-clickable" role="button" tabIndex={0} onClick={() => openExpenseVisibility("combined")}><strong>{t("accountsPage.totalBusinessExpenses")}</strong><span>{money(totalBusinessExpenses)}</span><small>{t("accountsPage.viewDetails")}</small></article>

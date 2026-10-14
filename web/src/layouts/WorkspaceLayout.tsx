@@ -1,7 +1,7 @@
 import { BarChart3, BookOpenText, Boxes, ClipboardList, CloudUpload, HandCoins, LayoutDashboard, LogOut, MoreHorizontal, PackageOpen, Plus, ReceiptText, RefreshCw, Satellite, Settings, ShoppingBasket, Users, WalletCards, X, type LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { Brand } from "../components/Brand";
@@ -41,11 +41,14 @@ export function WorkspaceLayout() {
   const { user, token, logout, switchWorkspace } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const sync = useSyncState();
   const [toast, setToast] = useState<string | null>(null);
   const [queueOpen, setQueueOpen] = useState(false);
   const [queueItems, setQueueItems] = useState<PendingMutation[]>([]);
   const [mobileSheet, setMobileSheet] = useState<null | "add" | "more">(null);
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const [manualSyncing, setManualSyncing] = useState(false);
   const bootstrap = useQuery({
     queryKey: workspaceBootstrapQueryKey(user?.workspaceId),
     queryFn: ({ signal }) => fetchBootstrap(token!, signal),
@@ -176,6 +179,35 @@ export function WorkspaceLayout() {
   const queueEntityLabel = (entity: PendingMutation["entity"]) => t(`syncQueue.entity.${entity}`, { defaultValue: entity });
   const queueOperationLabel = (operation: PendingMutation["operation"]) =>
     operation === "update" ? t("sync.actionUpdate") : operation === "delete" ? t("sync.actionDelete") : t("sync.actionCreate");
+
+  const handleRefresh = async () => {
+    if (manualRefreshing || sync.status === "offline") return;
+    setManualRefreshing(true);
+    try {
+      // Refresh is pull-only: update the operational snapshot, then revalidate active
+      // server-backed queries without tearing down the mounted shell.
+      await refreshOperationalData();
+      await queryClient.invalidateQueries({ refetchType: "active" });
+    } finally {
+      setManualRefreshing(false);
+    }
+  };
+
+  const handleSync = async () => {
+    if (manualSyncing || sync.status === "offline") return;
+    setManualSyncing(true);
+    try {
+      await syncNow();
+    } finally {
+      setManualSyncing(false);
+    }
+  };
+
+  const backgroundActivity = manualRefreshing
+    || manualSyncing
+    || bootstrap.isFetching
+    || sync.status === "syncing";
+
   return (
     <div className={`app-shell${isDashboardHome ? " app-shell--dashboard-home" : ""}`}>
       <aside className="app-sidebar">
@@ -199,12 +231,13 @@ export function WorkspaceLayout() {
             </div>
           </div>
           <div className="toolbar__actions shell-header__controls">
-            <button className="shell-action shell-action--refresh" type="button" aria-label={t("layout.refresh")} onClick={() => void refreshOperationalData()}><RefreshCw size={16} /><span className="shell-action__desktop">{t("layout.refresh")}</span></button>
-            <button className="shell-action shell-action--sync" type="button" aria-label={t("layout.syncNow")} onClick={() => void syncNow()}><CloudUpload size={16} /><span className="shell-action__desktop">{t("layout.syncNow")}</span><span className="shell-action__mobile">{t("layout.sync")}</span></button>
+            <button className="shell-action shell-action--refresh" type="button" aria-label={t("layout.refresh")} onClick={() => void handleRefresh()} disabled={manualRefreshing || sync.status === "offline"}><RefreshCw className={manualRefreshing ? "is-spinning" : undefined} size={16} /><span className="shell-action__desktop">{t("layout.refresh")}</span></button>
+            <button className="shell-action shell-action--sync" type="button" aria-label={t("layout.syncNow")} onClick={() => void handleSync()} disabled={manualSyncing || sync.status === "offline"}><CloudUpload className={manualSyncing || sync.status === "syncing" ? "is-pulsing" : undefined} size={16} /><span className="shell-action__desktop">{t("layout.syncNow")}</span><span className="shell-action__mobile">{t("layout.sync")}</span></button>
             <LanguageSwitch />
             <button className="ghost-icon shell-logout" aria-label={t("common.logout")} onClick={() => void logout()}><LogOut size={18} /></button>
           </div>
         </header>
+        {backgroundActivity && <div className="shell-background-activity" aria-hidden="true"><span /></div>}
         {startupVisible && (
           <section className="startup-progress-banner" role="status" aria-live="polite">
             <div className="startup-progress-banner__content">

@@ -50,13 +50,19 @@ export async function loadWorkspaceVouchers(options: {
   mode?: VoucherCollectionMode;
   includeDeleted?: boolean;
   visibility?: VoucherVisibility;
+  /**
+   * @deprecated Expense vouchers are season-scoped financial records. These compatibility
+   * flags are intentionally ignored so an imported/general-farm voucher can never leak into
+   * another active season. Historical imports must be assigned to the correct season instead.
+   */
   includeGeneralFarmRecords?: boolean;
   includeImportedAcrossSeasons?: boolean;
 } = {}): Promise<Voucher[]> {
+  // Financial vouchers are strictly workspace + farm + ACTIVE SEASON scoped.
+  // Never widen this read for convenience: Dashboard, Expenses, Accounts and Reports all
+  // consume this shared selector and must reconcile to the exact same season boundary.
   const records = await workspaceRecords(offlineDb.vouchers, {
     includeDeleted: true,
-    includeGeneralFarmRecords: options.includeGeneralFarmRecords,
-    includeImportedAcrossSeasons: options.includeImportedAcrossSeasons,
   });
   return getVisibleVouchers<Voucher>(records, options);
 }
