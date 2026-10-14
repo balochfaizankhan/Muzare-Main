@@ -43,6 +43,7 @@ import { resolveSaleType, saleProduceLabel } from "../../lib/dispatch-sales";
 import {
   compareLabourers,
   offlineDb,
+  workspaceConfigRecords,
   workspaceRecords,
   type Account,
   type Advance,
@@ -679,7 +680,7 @@ export function Reports() {
       workspaceRecords(offlineDb.advances),
       workspaceRecords(offlineDb.labourWageSettlements),
       workspaceRecords(offlineDb.wageRates, { includeDeleted: true }),
-      workspaceRecords(offlineDb.accounts, { includeImportedAcrossSeasons: true }),
+      workspaceConfigRecords(offlineDb.accounts),
       workspaceRecords(offlineDb.partnerEntries),
       workspaceRecords(offlineDb.sales),
       workspaceRecords(offlineDb.dispatches),

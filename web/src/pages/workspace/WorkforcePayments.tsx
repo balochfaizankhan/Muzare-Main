@@ -62,6 +62,7 @@ import {
   getActiveFarmId,
   getActiveSeasonId,
   offlineDb,
+  workspaceConfigRecords,
   workspaceRecords,
   type Account,
   type LabourGroup,
@@ -255,7 +256,7 @@ export function WorkforcePaymentsPage() {
     const [nextLabourers, nextGroups, nextAccounts] = await Promise.all([
       workspaceRecords(offlineDb.labourers, { includeDeleted: true }),
       workspaceRecords(offlineDb.labourGroups, { includeDeleted: true }),
-      workspaceRecords(offlineDb.accounts, { includeDeleted: true }),
+      workspaceConfigRecords(offlineDb.accounts, { includeDeleted: true }),
     ]);
     setLabourers(nextLabourers.filter((item) => !item.deletedAt));
     setGroups(nextGroups.filter((item) => !item.deletedAt));

@@ -137,15 +137,19 @@ function applyOperationalContext(
   if (contextChanged) window.dispatchEvent(new Event("muzare-local-data-change"));
 }
 
-function isDateTypeMutation(mutation: PendingMutation) {
-  return mutation.entity === "dateType";
+function isFarmScopedEntity(entity: OperationalEntity) {
+  return entity === "dateType" || entity === "account";
+}
+
+function isFarmScopedMutation(mutation: PendingMutation) {
+  return isFarmScopedEntity(mutation.entity);
 }
 
 function mutationMatchesActiveContext(mutation: PendingMutation) {
   if (!context) return false;
   if (mutation.workspaceId !== context.workspaceId) return false;
   if (mutation.farmId !== context.farmId) return false;
-  if (isDateTypeMutation(mutation)) return true;
+  if (isFarmScopedMutation(mutation)) return true;
   return mutation.seasonId === context.seasonId;
 }
 
@@ -226,6 +230,122 @@ async function repairDateTypeQueueItems() {
   await refreshSyncState({ status: navigator.onLine ? "pending" : "offline" });
 }
 
+const accountReferenceKeys = new Set([
+  "accountId",
+  "partnerAccountId",
+  "fromAccountId",
+  "toAccountId",
+  "linkedAccountId",
+  "paymentAccountId",
+  "paymentAccountCanonicalId",
+  "paymentAccountLegacyId",
+]);
+
+function isUuidLike(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function remapAccountReferencesInPayload(payload: unknown, fromId: string, toId: string): unknown {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  const next: Record<string, unknown> = { ...(payload as Record<string, unknown>) };
+  let changed = false;
+  for (const key of accountReferenceKeys) {
+    if (next[key] === fromId) {
+      next[key] = toId;
+      changed = true;
+    }
+  }
+  const scope = next.settlementScopeSnapshot;
+  if (scope && typeof scope === "object" && !Array.isArray(scope)) {
+    const nextScope = { ...(scope as Record<string, unknown>) };
+    if (nextScope.paymentAccountId === fromId) {
+      nextScope.paymentAccountId = toId;
+      next.settlementScopeSnapshot = nextScope;
+      changed = true;
+    }
+  }
+  return changed ? next : payload;
+}
+
+async function remapLocalAccountIdentity(fromId: string, toId: string) {
+  if (!context || fromId === toId) return;
+  const tablesWithAccountReferences = [
+    offlineDb.vouchers,
+    offlineDb.sales,
+    offlineDb.partnerEntries,
+    offlineDb.advances,
+    offlineDb.labourWageSettlements,
+  ] as const;
+  for (const table of tablesWithAccountReferences) {
+    const rows = await table.where("workspaceId").equals(context.workspaceId)
+      .filter((record) => record.farmId === context!.farmId)
+      .toArray();
+    for (const row of rows) {
+      const next = remapAccountReferencesInPayload(row, fromId, toId);
+      if (next !== row) await (table as typeof offlineDb.vouchers).put(next as never);
+    }
+  }
+  const mutations = await offlineDb.pendingMutations.where("workspaceId").equals(context.workspaceId)
+    .filter((mutation) => mutation.farmId === context!.farmId)
+    .toArray();
+  for (const mutation of mutations) {
+    const payload = remapAccountReferencesInPayload(mutation.payload, fromId, toId);
+    if (payload !== mutation.payload) await offlineDb.pendingMutations.update(mutation.id, { payload });
+  }
+}
+
+async function repairFarmScopedAccountQueueItems() {
+  if (!context?.farmId) return;
+  const items = await offlineDb.pendingMutations.where("workspaceId").equals(context.workspaceId)
+    .filter((mutation) => mutation.entity === "account" && mutation.farmId === context!.farmId)
+    .toArray();
+  if (!items.length) return;
+
+  const accounts = await offlineDb.accounts.where("workspaceId").equals(context.workspaceId)
+    .filter((record) => record.farmId === context!.farmId)
+    .toArray();
+
+  for (const item of items) {
+    if (!item.payload || typeof item.payload !== "object" || Array.isArray(item.payload)) continue;
+    const payload = item.payload as Record<string, unknown>;
+    const localId = typeof payload.id === "string" ? payload.id : "";
+    const normalizedName = typeof payload.name === "string" ? payload.name.trim().toLowerCase() : "";
+    if (!localId || !normalizedName) continue;
+
+    const existing = accounts.find((account) =>
+      account.id !== localId
+      && !account.pendingSync
+      && isUuidLike(account.id)
+      && account.name.trim().toLowerCase() === normalizedName);
+
+    if (existing) {
+      await remapLocalAccountIdentity(localId, existing.id);
+      await offlineDb.accounts.delete(localId);
+      await offlineDb.pendingMutations.delete(item.id);
+      continue;
+    }
+
+    const normalizedPayload = { ...payload, workspaceId: context.workspaceId, farmId: context.farmId, seasonId: null };
+    await offlineDb.accounts.update(localId, { workspaceId: context.workspaceId, farmId: context.farmId, seasonId: null });
+    await offlineDb.pendingMutations.update(item.id, {
+      payload: normalizedPayload,
+      workspaceId: context.workspaceId,
+      farmId: context.farmId,
+      seasonId: null,
+      attempts: 0,
+      retryable: true,
+      status: "pending",
+      nextAttemptAt: undefined,
+      lastError: undefined,
+      errorStatus: undefined,
+      errorCode: undefined,
+      errorMessage: undefined,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+  await refreshSyncState({ status: navigator.onLine ? "pending" : "offline" });
+}
+
 async function cacheRecord(
   entity: OperationalEntity,
   record: OperationalRecordEnvelope["record"],
@@ -236,7 +356,8 @@ async function cacheRecord(
 ) {
   if (!context) throw new Error(i18n.t("sync.workspaceSyncNotInitialized"));
   const normalizedRecord = entity === "voucher" ? normalizeVoucherRecordForSync(record as Record<string, unknown>) : record;
-  const nextRecord = { ...normalizedRecord, workspaceId: workspaceId ?? context.workspaceId, farmId, seasonId, pendingSync } as LocalRecord;
+  const normalizedSeasonId = isFarmScopedEntity(entity) ? null : seasonId;
+  const nextRecord = { ...normalizedRecord, workspaceId: workspaceId ?? context.workspaceId, farmId, seasonId: normalizedSeasonId, pendingSync } as LocalRecord;
   const existing = await tableFor(entity).get(record.id);
   if (existing) {
     const localUpdated = Date.parse(existing.updatedAt);
@@ -326,7 +447,7 @@ export async function queueOfflineRecord(entity: OperationalEntity, record: Loca
   const normalizedRecord = entity === "voucher" ? normalizeVoucherRecordForSync(record as Record<string, unknown>) as LocalRecord : record;
   const recordWorkspaceId = record.workspaceId || context.workspaceId;
   const recordFarmId = normalizedRecord.farmId ?? context.farmId;
-  const recordSeasonId = entity === "dateType" ? null : (normalizedRecord.seasonId ?? context.seasonId);
+  const recordSeasonId = isFarmScopedEntity(entity) ? null : (normalizedRecord.seasonId ?? context.seasonId);
   await cacheRecord(entity, { ...normalizedRecord, workspaceId: recordWorkspaceId, farmId: recordFarmId, seasonId: recordSeasonId }, true, recordFarmId, recordSeasonId, recordWorkspaceId);
   const queuedAt = new Date().toISOString();
   const mutation: PendingMutation = {
@@ -370,7 +491,7 @@ export async function deleteOperationalRecord(entity: OperationalEntity, record:
   const payload = softDelete ? { ...record, deletedAt: queuedAt, updatedAt: queuedAt, pendingSync: true } : { ...record, updatedAt: queuedAt, pendingSync: true };
   if (softDelete) await tableFor(entity).put(payload);
   else await tableFor(entity).delete(record.id);
-  const recordSeasonId = entity === "dateType" ? null : (record.seasonId ?? context.seasonId);
+  const recordSeasonId = isFarmScopedEntity(entity) ? null : (record.seasonId ?? context.seasonId);
   await offlineDb.pendingMutations.put({
     id: `${context.workspaceId}:${entity}:${record.id}`, entity, operation: "delete",
     payload, attempts: 0,
@@ -438,7 +559,7 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
     if (
       (payloadScope.workspaceId && payloadScope.workspaceId !== mutation.workspaceId)
       || ((payloadScope.farmId ?? null) !== (mutation.farmId ?? null))
-      || (!isDateTypeMutation(mutation) && ((payloadScope.seasonId ?? null) !== (mutation.seasonId ?? null)))
+      || (!isFarmScopedMutation(mutation) && ((payloadScope.seasonId ?? null) !== (mutation.seasonId ?? null)))
     ) {
       const lastError = i18n.t("sync.staleQueueItemScopeMismatch");
       await offlineDb.pendingMutations.update(mutation.id, {
@@ -478,7 +599,7 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
           attempts: mutation.attempts,
         });
       }
-      if (isDateTypeMutation(mutation)) {
+      if (isFarmScopedMutation(mutation)) {
         const dateTypePayload = normalizeDateTypePayload(mutation.payload, { workspaceId: context.workspaceId, farmId: mutation.farmId ?? context.farmId }) as LocalRecord;
         await offlineDb.pendingMutations.update(mutation.id, {
           status: "syncing",
@@ -543,7 +664,7 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
         continue;
       }
       const response = await saveOperationalRecord(context.token, {
-        workspaceId: context.workspaceId, farmId: mutation.farmId || context.farmId, seasonId: mutation.seasonId || context.seasonId,
+        workspaceId: context.workspaceId, farmId: mutation.farmId || context.farmId, seasonId: isFarmScopedMutation(mutation) ? null : (mutation.seasonId || context.seasonId),
         entity: mutation.entity, record: normalizeRecord(mutation.payload as OperationalRecordEnvelope["record"]),
       });
       if (response.conflict) notify(i18n.t("sync.newerDatabaseChangeKept"));
@@ -553,7 +674,7 @@ export async function syncPendingRecords(options: { force?: boolean } = {}): Pro
         if (mutation.entity === "partnerEntry") await tableFor(mutation.entity).put({ ...(mutation.payload as LocalRecord), pendingSync: false });
         else await tableFor(mutation.entity).delete((mutation.payload as LocalRecord).id);
       }
-      await cacheRecord(mutation.entity, response.record, false, mutation.farmId, mutation.seasonId);
+      await cacheRecord(mutation.entity, response.record, false, mutation.farmId, isFarmScopedMutation(mutation) ? null : mutation.seasonId);
       await offlineDb.pendingMutations.delete(mutation.id);
       if (mutation.entity === "voucher") {
         debugVoucherSync("sync-success", {
@@ -685,6 +806,7 @@ async function refreshOperationalDataOnce(options: { notifySuccess?: boolean } =
       if (pendingDeletes.has(`${activeContext.workspaceId}:${item.entity}:${item.record.id}`)) continue;
       await cacheRecord(item.entity, item.record, false, item.farmId ?? undefined, item.seasonId ?? undefined);
     }
+    await repairFarmScopedAccountQueueItems();
     if (result.snapshotConfirmed && result.farmId === context.farmId && result.seasonId === context.seasonId) {
       await pruneSynchronizedCache(result.records);
     }
@@ -1000,6 +1122,7 @@ export async function applyBootstrapSnapshot(token: string, workspaceId: string,
   });
   window.dispatchEvent(new Event("muzare-data-refresh"));
   await repairDateTypeQueueItems();
+  await repairFarmScopedAccountQueueItems();
   emitStartup("ready", navigator.onLine ? i18n.t("sync.connectedReady") : i18n.t("sync.offlineReady"), {
     startupInProgress: false,
     status: navigator.onLine ? state.status : "offline",

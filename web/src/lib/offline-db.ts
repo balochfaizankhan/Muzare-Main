@@ -690,6 +690,41 @@ offlineDb.version(12).stores({
   harvestEntries: "id, workspaceId, farmId, seasonId, date, harvestGroupId, createdAt, updatedAt, pendingSync",
 });
 
+// v13 normalizes Account masters to farm scope. Transactions remain season-scoped.
+offlineDb.version(13).stores({
+  pendingMutations: "id, workspaceId, farmId, seasonId, entity, operation, createdAt",
+  labourers: "id, workspaceId, farmId, seasonId, name, groupId, createdAt, updatedAt, pendingSync",
+  labourGroups: "id, workspaceId, farmId, seasonId, name, active, createdAt, updatedAt, pendingSync",
+  attendance: "id, workspaceId, farmId, seasonId, labourerId, date, status, createdAt, updatedAt, pendingSync",
+  accounts: "id, workspaceId, farmId, seasonId, name, type, createdAt, updatedAt, pendingSync",
+  vouchers: "id, workspaceId, farmId, seasonId, date, category, accountId, createdAt, updatedAt, pendingSync",
+  vehicles: "id, workspaceId, farmId, seasonId, number, active, createdAt, updatedAt, pendingSync",
+  dateTypes: "id, workspaceId, farmId, seasonId, name, active, createdAt, updatedAt, pendingSync",
+  dispatches: "id, workspaceId, farmId, seasonId, date, vehicleId, createdAt, updatedAt, pendingSync",
+  sales: "id, workspaceId, farmId, seasonId, date, buyerName, accountId, createdAt, updatedAt, pendingSync",
+  partnerEntries: "id, workspaceId, farmId, seasonId, date, partnerName, accountId, createdAt, updatedAt, pendingSync",
+  advances: "id, workspaceId, farmId, seasonId, date, labourerId, createdAt, updatedAt, pendingSync",
+  labourEarnings: "id, workspaceId, farmId, seasonId, labourerId, earningDate, earningType, status, createdAt, updatedAt, pendingSync",
+  labourWageSettlements: "id, workspaceId, farmId, seasonId, settlementDate, fromDate, toDate, settlementNumber, status, createdAt, updatedAt, pendingSync",
+  wageRates: "id, workspaceId, farmId, seasonId, labourerId, effectiveFrom, effectiveTo, active, createdAt, updatedAt, pendingSync",
+  productionEntries: "id, workspaceId, farmId, seasonId, labourerId, date, productionUnit, createdAt, updatedAt, pendingSync",
+  labourPayments: "id, workspaceId, farmId, seasonId, labourerId, date, createdAt, updatedAt, pendingSync",
+  inventoryEntries: "id, workspaceId, farmId, seasonId, date, itemName, createdAt, updatedAt, pendingSync",
+  harvestGroups: "id, workspaceId, farmId, seasonId, name, active, createdAt, updatedAt, pendingSync",
+  harvestEntries: "id, workspaceId, farmId, seasonId, date, harvestGroupId, createdAt, updatedAt, pendingSync",
+}).upgrade(async (transaction) => {
+  await transaction.table("accounts").toCollection().modify((record: LocalRecord) => {
+    record.seasonId = null;
+  });
+  await transaction.table("pendingMutations").toCollection().modify((mutation: PendingMutation) => {
+    if (mutation.entity !== "account") return;
+    mutation.seasonId = null;
+    if (mutation.payload && typeof mutation.payload === "object" && !Array.isArray(mutation.payload)) {
+      mutation.payload = { ...(mutation.payload as Record<string, unknown>), seasonId: null };
+    }
+  });
+});
+
 let activeWorkspaceId: string | null = null;
 let activeFarmId: string | null = null;
 let activeSeasonId: string | null = null;
@@ -810,11 +845,11 @@ export function makeConfigRecord(id?: string) {
 
 export async function ensureLocalAccounts() {
   const workspaceId = getActiveWorkspaceId();
-  if (!activeFarmId || !activeSeasonId) return;
-  if ((await offlineDb.accounts.where("workspaceId").equals(workspaceId).filter((record) => record.farmId === activeFarmId && record.seasonId === activeSeasonId).count()) > 0) return;
+  if (!activeFarmId) return;
+  if ((await workspaceConfigRecords(offlineDb.accounts)).length > 0) return;
   const createdAt = new Date().toISOString();
   await offlineDb.accounts.bulkPut([
-    { id: `${activeSeasonId}:local-cash`, workspaceId, farmId: activeFarmId, seasonId: activeSeasonId, name: "Cash", type: "cash", createdAt, updatedAt: createdAt, pendingSync: false },
-    { id: `${activeSeasonId}:local-partner`, workspaceId, farmId: activeFarmId, seasonId: activeSeasonId, name: "Partner Capital", type: "partner", createdAt, updatedAt: createdAt, pendingSync: false },
+    { id: `${activeFarmId}:local-cash`, workspaceId, farmId: activeFarmId, seasonId: null, name: "Cash", type: "cash", createdAt, updatedAt: createdAt, pendingSync: false },
+    { id: `${activeFarmId}:local-partner`, workspaceId, farmId: activeFarmId, seasonId: null, name: "Partner Capital", type: "partner", createdAt, updatedAt: createdAt, pendingSync: false },
   ]);
 }
