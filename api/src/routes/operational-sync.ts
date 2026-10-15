@@ -683,7 +683,14 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       ))
       .orderBy(desc(operationalRecords.updatedAt));
     let malformedRecordsSkipped = 0;
-    const visibleRecords = records
+    type VisibleSyncRecord = {
+      workspaceId: string;
+      farmId: string;
+      seasonId: string | null;
+      entity: string;
+      record: Record<string, unknown> & { id: string; updatedAt: string };
+    };
+    const visibleRecords: VisibleSyncRecord[] = records
       .filter((item) => hasModulePermission(request.appUser!, parsed.data.workspaceId, entityModule(item.entityType as typeof entities[number]), "view"))
       .flatMap((item) => {
         const payload = asPayloadRecord(item.payload);
