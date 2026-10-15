@@ -3242,7 +3242,7 @@ function nextDispatchSerial(records: Dispatch[], date: string, editing?: Dispatc
 
 function DispatchModule() {
   const { t } = useTranslation();
-  const { user, token, sessionRefreshing } = useAuth();
+  const { user, sessionRefreshing } = useAuth();
   const backToDashboard = useAppBack("/workspace/dashboard");
   const workspaceId = user?.workspaceId ?? "";
   const canCreateDispatch = Boolean(!sessionRefreshing && user && workspaceId && canCreate(user, "dispatch", workspaceId));
@@ -4423,7 +4423,7 @@ function PartnerLedgerModule() {
 
 function AccountsModule() {
   const { t } = useTranslation();
-  const { user, sessionRefreshing } = useAuth();
+  const { user, token, sessionRefreshing } = useAuth();
   const workspaceId = user?.workspaceId ?? "";
   const farmId = getActiveFarmId();
   const seasonId = getActiveSeasonId();
@@ -5205,7 +5205,7 @@ function AccountsModule() {
   const removeSelectedAccount = async () => {
     if (!token || !farmId || !selectedAccount || !selectedDisplayAccount || !canDeleteAccounts || deletingAccount) return;
     const canonicalAccountId = selectedDisplayAccount.canonicalAccountId ?? resolveCanonicalAccountId(selectedAccount.id, accountLookup) ?? selectedAccount.id;
-    if (isSyntheticLocalAccount(selectedAccount) || !/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(canonicalAccountId)) {
+    if (isSyntheticLocalAccount(selectedAccount.id) || !/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(canonicalAccountId)) {
       setAccountDeleteError(t("accountsPage.accountDeleteUnavailable"));
       return;
     }
@@ -5500,7 +5500,7 @@ function AccountsModule() {
             </div>)}
             {accountDeleteError && <p className="worker-action-error">{accountDeleteError}</p>}
             <footer>
-              {canDeleteAccounts && selectedAccount && !isSyntheticLocalAccount(selectedAccount) && (
+              {canDeleteAccounts && selectedAccount && !isSyntheticLocalAccount(selectedAccount.id) && (
                 <button className="danger-button" disabled={deletingAccount} type="button" onClick={() => void removeSelectedAccount()}>
                   {deletingAccount ? t("accountsPage.deletingAccount") : t("accountsPage.deleteAccount")}
                 </button>
