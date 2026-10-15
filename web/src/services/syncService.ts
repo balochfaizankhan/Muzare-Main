@@ -1,4 +1,4 @@
-import { ApiError, deleteOperationalRecord as deleteOperationalRecordFromApi, fetchOperationalRecords, restoreOperationalRecord as restoreOperationalRecordFromApi, saveOperationalRecord, validateVoucherNumber, type BootstrapData, type OperationalEntity, type OperationalRecordEnvelope } from "../lib/api";
+import { ApiError, deleteOperationalRecord as deleteOperationalRecordFromApi, fetchFarmAccounts, fetchOperationalRecords, restoreOperationalRecord as restoreOperationalRecordFromApi, saveOperationalRecord, validateVoucherNumber, type BootstrapData, type OperationalEntity, type OperationalRecordEnvelope } from "../lib/api";
 import { clearCachedData, offlineDb, setActiveFarmId, setActiveSeasonId, setActiveWorkspaceId, type LocalRecord, type PendingMutation } from "../lib/offline-db";
 import { canQueueOperationalMutation } from "../lib/permissions";
 import type { Table } from "dexie";
@@ -797,6 +797,9 @@ async function refreshOperationalDataOnce(options: { notifySuccess?: boolean } =
   try {
     const activeContext = context;
     const result = await fetchOperationalRecords(activeContext.token, activeContext.workspaceId);
+    const farmAccountSnapshot = activeContext.farmId
+      ? await fetchFarmAccounts(activeContext.token, activeContext.workspaceId, activeContext.farmId).catch(() => ({ accounts: [] }))
+      : { accounts: [] };
     // Ignore a response that belongs to a runtime that was replaced while the request was in flight.
     if (!context || context.token !== activeContext.token || context.workspaceId !== activeContext.workspaceId) return;
     const pendingDeletes = new Set((await offlineDb.pendingMutations.where("workspaceId").equals(activeContext.workspaceId).toArray())
@@ -805,6 +808,9 @@ async function refreshOperationalDataOnce(options: { notifySuccess?: boolean } =
     for (const item of result.records) {
       if (pendingDeletes.has(`${activeContext.workspaceId}:${item.entity}:${item.record.id}`)) continue;
       await cacheRecord(item.entity, item.record, false, item.farmId ?? undefined, item.seasonId ?? undefined);
+    }
+    for (const account of farmAccountSnapshot.accounts) {
+      await cacheRecord("account", account, false, activeContext.farmId, null, activeContext.workspaceId);
     }
     await repairFarmScopedAccountQueueItems();
     if (result.snapshotConfirmed && result.farmId === context.farmId && result.seasonId === context.seasonId) {
@@ -860,6 +866,7 @@ async function pruneSynchronizedCache(records: OperationalRecordEnvelope[]) {
     remoteIds.set(item.entity, ids);
   }
   for (const entity of Object.keys(tables) as OperationalEntity[]) {
+    if (entity === "account" || entity === "dateType") continue;
     const table = tableFor(entity);
     const localRecords = await table.where("workspaceId").equals(context.workspaceId).toArray();
     const staleIds = localRecords

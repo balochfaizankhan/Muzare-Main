@@ -4,7 +4,7 @@ import { z } from "zod";
 import { requireUser, type AuthenticatedUser } from "../auth.js";
 import { localDevelopmentMode } from "../config.js";
 import { db } from "../db/client.js";
-import { accounts, auditLogs, expenseVoucherSequences, labourCleanupTombstones, labourPaymentVouchers, operationalRecords, userSessions } from "../db/schema.js";
+import { accounts, accountTransactions, advanceRecords, auditLogs, expenseVoucherSequences, labourCleanupTombstones, labourPaymentVouchers, operationalRecords, sales as canonicalSales, userSessions, vouchers as canonicalVouchers } from "../db/schema.js";
 import { activeOperationalPayloadSql, isDeletedOperationalPayload } from "../operational-record-state.js";
 import {
   canonicalImportedVoucherNumber,
@@ -505,6 +505,141 @@ async function validateLinkedDispatchSale({
 }
 
 export async function operationalSyncRoutes(app: FastifyInstance): Promise<void> {
+  app.get("/v1/workspace/:workspaceId/farms/:farmId/accounts", { preHandler: requireUser }, async (request, reply) => {
+    if (!request.appUser) return reply;
+    const parsed = z.object({ workspaceId: z.string().uuid(), farmId: z.string().uuid() }).safeParse(request.params);
+    if (!parsed.success) return reply.code(400).send({ message: "A valid workspace and farm are required." });
+    if (request.appUser.workspaceId !== parsed.data.workspaceId
+      || !request.appUser.memberships.some((item) => item.active && item.workspaceId === parsed.data.workspaceId)) {
+      return reply.code(403).send({ message: "Workspace membership is required." });
+    }
+    if (!hasFarmAccess(request.appUser, parsed.data.workspaceId, parsed.data.farmId)) {
+      return reply.code(403).send({ message: "You do not have access to this farm." });
+    }
+    if (!hasModulePermission(request.appUser, parsed.data.workspaceId, "accounts", "view")) {
+      return reply.code(403).send({ message: "Accounts view permission is required." });
+    }
+    const rows = await db.select({
+      id: accounts.id,
+      name: accounts.name,
+      accountType: accounts.accountType,
+      active: accounts.active,
+      oldAndroidId: accounts.oldAndroidId,
+      sourceType: accounts.sourceType,
+      createdAt: accounts.createdAt,
+      updatedAt: accounts.updatedAt,
+    }).from(accounts).where(eq(accounts.farmId, parsed.data.farmId));
+    return {
+      accounts: rows.map((account) => ({
+        id: account.id,
+        workspaceId: parsed.data.workspaceId,
+        farmId: parsed.data.farmId,
+        seasonId: null,
+        name: account.name,
+        type: account.accountType,
+        active: account.active,
+        oldAndroidId: account.oldAndroidId ?? undefined,
+        sourceType: account.sourceType ?? "canonical_account",
+        canonicalAccountId: account.id,
+        createdAt: account.createdAt.toISOString(),
+        updatedAt: account.updatedAt.toISOString(),
+      })),
+    };
+  });
+
+  app.delete("/v1/workspace/:workspaceId/farms/:farmId/accounts/:accountId", { preHandler: requireUser }, async (request, reply) => {
+    if (!request.appUser) return reply;
+    const parsed = z.object({
+      workspaceId: z.string().uuid(),
+      farmId: z.string().uuid(),
+      accountId: z.string().uuid(),
+    }).safeParse(request.params);
+    if (!parsed.success) return reply.code(400).send({ message: "A valid workspace, farm, and account are required." });
+    if (request.appUser.workspaceId !== parsed.data.workspaceId
+      || !request.appUser.memberships.some((item) => item.active && item.workspaceId === parsed.data.workspaceId)) {
+      return reply.code(403).send({ message: "Workspace membership is required." });
+    }
+    if (!hasFarmAccess(request.appUser, parsed.data.workspaceId, parsed.data.farmId)) {
+      return reply.code(403).send({ message: "You do not have access to this farm." });
+    }
+    if (!hasModulePermission(request.appUser, parsed.data.workspaceId, "accounts", "delete")
+      || !hasPermission(request.appUser, "MANAGE_RECORDS", parsed.data.workspaceId)) {
+      return reply.code(403).send({ message: "Accounts delete permission is required." });
+    }
+
+    const [account] = await db.select({ id: accounts.id, name: accounts.name })
+      .from(accounts)
+      .where(and(eq(accounts.id, parsed.data.accountId), eq(accounts.farmId, parsed.data.farmId)))
+      .limit(1);
+    if (!account) return reply.code(404).send({ message: "Account not found." });
+
+    const operationalReference = sql<boolean>`
+      ${operationalRecords.payload}->>'accountId' = ${parsed.data.accountId}
+      OR ${operationalRecords.payload}->>'partnerAccountId' = ${parsed.data.accountId}
+      OR ${operationalRecords.payload}->>'fromAccountId' = ${parsed.data.accountId}
+      OR ${operationalRecords.payload}->>'toAccountId' = ${parsed.data.accountId}
+      OR ${operationalRecords.payload}->>'linkedAccountId' = ${parsed.data.accountId}
+      OR ${operationalRecords.payload}->>'paymentAccountId' = ${parsed.data.accountId}
+      OR ${operationalRecords.payload}->>'paymentAccountCanonicalId' = ${parsed.data.accountId}
+      OR ${operationalRecords.payload}->>'paymentAccountLegacyId' = ${parsed.data.accountId}
+      OR ${operationalRecords.payload}->'settlementScopeSnapshot'->>'paymentAccountId' = ${parsed.data.accountId}
+    `;
+    const [linkedOperational, linkedAdvance, linkedSale, linkedVoucher, linkedTransaction, linkedLabourPayment] = await Promise.all([
+      db.select({ id: operationalRecords.id }).from(operationalRecords).where(and(
+        eq(operationalRecords.workspaceId, parsed.data.workspaceId),
+        eq(operationalRecords.farmId, parsed.data.farmId),
+        sql`(${operationalReference})`,
+      )).limit(1),
+      db.select({ id: advanceRecords.id }).from(advanceRecords).where(eq(advanceRecords.accountId, parsed.data.accountId)).limit(1),
+      db.select({ id: canonicalSales.id }).from(canonicalSales).where(eq(canonicalSales.accountId, parsed.data.accountId)).limit(1),
+      db.select({ id: canonicalVouchers.id }).from(canonicalVouchers).where(eq(canonicalVouchers.accountId, parsed.data.accountId)).limit(1),
+      db.select({ id: accountTransactions.id }).from(accountTransactions).where(eq(accountTransactions.accountId, parsed.data.accountId)).limit(1),
+      db.select({ id: labourPaymentVouchers.id }).from(labourPaymentVouchers).where(eq(labourPaymentVouchers.paymentAccountId, parsed.data.accountId)).limit(1),
+    ]);
+    if (linkedOperational.length || linkedAdvance.length || linkedSale.length || linkedVoucher.length || linkedTransaction.length || linkedLabourPayment.length) {
+      return reply.code(409).send({
+        message: `Account "${account.name}" cannot be deleted because financial records are linked to it.`,
+        details: { code: "account_in_use", accountId: account.id, accountName: account.name },
+      });
+    }
+
+    try {
+      await db.transaction(async (tx) => {
+        await tx.delete(operationalRecords).where(and(
+          eq(operationalRecords.workspaceId, parsed.data.workspaceId),
+          eq(operationalRecords.farmId, parsed.data.farmId),
+          eq(operationalRecords.entityType, "account"),
+          or(
+            eq(operationalRecords.clientRecordId, parsed.data.accountId),
+            sql`${operationalRecords.payload}->>'canonicalAccountId' = ${parsed.data.accountId}`,
+          ),
+        ));
+        await tx.delete(accounts).where(and(eq(accounts.id, parsed.data.accountId), eq(accounts.farmId, parsed.data.farmId)));
+        await tx.insert(auditLogs).values({
+          workspaceId: parsed.data.workspaceId,
+          userId: request.appUser!.id,
+          farmId: parsed.data.farmId,
+          action: "account_deleted",
+          entityType: "account",
+          entityId: parsed.data.accountId,
+          details: { accountName: account.name, reason: "No linked financial records." },
+        });
+      });
+    } catch (error) {
+      const sqlState = error instanceof Error
+        ? ((error as { code?: string; cause?: { code?: string } }).code ?? (error as { cause?: { code?: string } }).cause?.code)
+        : undefined;
+      if (sqlState === "23503") {
+        return reply.code(409).send({
+          message: `Account "${account.name}" cannot be deleted because records are linked to it.`,
+          details: { code: "account_in_use", accountId: account.id, accountName: account.name },
+        });
+      }
+      throw error;
+    }
+    return reply.code(204).send();
+  });
+
   app.get("/v1/workspace/:workspaceId/operational-records", { preHandler: requireUser }, async (request, reply) => {
     if (!request.appUser) return reply;
     const parsed = z.object({ workspaceId: z.string().uuid() }).safeParse(request.params);

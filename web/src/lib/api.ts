@@ -1693,6 +1693,16 @@ export const deleteOperationalRecord = (token: string, input: Omit<OperationalRe
   apiRequest<void>("/v1/workspace/operational-records", { method: "DELETE", body: JSON.stringify(input) }, token, { timeoutMs: 30_000, debugLabel: `operational-record-delete:${input.entity}` });
 export const restoreOperationalRecord = (token: string, input: Omit<OperationalRecordEnvelope, "record"> & { recordId: string }) =>
   apiRequest<void>("/v1/workspace/operational-records/restore", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 30_000, debugLabel: `operational-record-restore:${input.entity}` });
+export type FarmAccountMaster = {
+  id: string; workspaceId: string; farmId: string; seasonId: null; name: string;
+  type: "cash" | "bank" | "partner"; active?: boolean; oldAndroidId?: string; sourceType?: string;
+  canonicalAccountId?: string; createdAt: string; updatedAt: string;
+};
+export const fetchFarmAccounts = (token: string, workspaceId: string, farmId: string) =>
+  apiRequest<{ accounts: FarmAccountMaster[] }>(`/v1/workspace/${workspaceId}/farms/${farmId}/accounts`, {}, token, { debugLabel: "farm-accounts-refresh" });
+export const deleteFarmAccount = (token: string, workspaceId: string, farmId: string, accountId: string) =>
+  apiRequest<void>(`/v1/workspace/${workspaceId}/farms/${farmId}/accounts/${accountId}`, { method: "DELETE" }, token, { debugLabel: "farm-account-delete" });
+
 export const fetchOperationalRecords = (token: string, workspaceId: string) =>
   apiRequest<OperationalSnapshot>(`/v1/workspace/${workspaceId}/operational-records`, {}, token, { timeoutMs: 30_000, debugLabel: "operational-records-refresh" });
 export const fetchOperationalRecord = (token: string, workspaceId: string, recordId: string) =>
