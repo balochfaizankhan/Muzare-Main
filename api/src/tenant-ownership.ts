@@ -125,8 +125,8 @@ async function validateOperationalEntityReference({
   entityTypes: string[];
   nameKeys: string[];
 }): Promise<TenantReferenceValidationError | null> {
-  const exactMatch = await hasOperationalReference(workspaceId, entityTypes, clientRecordId, farmId, seasonId);
-  if (exactMatch) return null;
+  // Check deletion before accepting an exact scope match. A deleted operational
+  // master must not be usable as a reference in new financial transactions.
   const referenced = await findOperationalReference(entityTypes, clientRecordId);
   const entityName = payloadName(referenced, nameKeys);
   if (!referenced) {
@@ -170,6 +170,11 @@ async function validateOperationalEntityReference({
       actualWorkspace: referenced.workspaceId,
       message: `${displayEntityName(entity, entityName, clientRecordId)} belongs to another workspace.`,
     });
+  }
+  if (referenced.workspaceId === workspaceId
+    && (!farmId || referenced.farmId === farmId)
+    && (!seasonId || referenced.seasonId === seasonId)) {
+    return null;
   }
   if (farmId && referenced.farmId !== farmId) {
     return buildReferenceError({
