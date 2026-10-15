@@ -20,7 +20,7 @@ import { defaultTransactionGroupExpansion, groupAccountTransactions, type Accoun
 import { attendanceStatusKey, buildAttendanceStatusMap, previousLocalDateKey, todayLocalDateKey } from "../lib/attendanceStatus";
 import { isAccountsFinancialScope, settleAccountsFinancialSnapshot, type AccountsFinancialSnapshot as AccountsFinancialSnapshotBase } from "../lib/accountsFinancialSnapshot";
 import { getCanonicalExpenseCategory, getExpenseAccountingGroupLabel, getExpenseCategoryLabel } from "../lib/expenseCategories";
-import { ApiError, confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteExpenseAttachment, deleteOrDeactivateLabour, extractExpenseReceipt, fetchExpenseAttachments, fetchExpenseCategories, fetchLabourDeletionPreview, fetchOperationalRecord, openExpenseAttachment, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, uploadExpenseAttachment, validateVoucherNumber, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type ExpenseAttachment, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type ExpenseOcrSuggestion, type ExpenseSearchRecord, type LabourDeletionPreview, type LabourFinancialReadModel } from "../lib/api";
+import { ApiError, confirmAttendanceImport, confirmExpenseImport, createExpenseSubcategory, deleteExpenseAttachment, deleteFarmAccount, deleteOrDeactivateLabour, extractExpenseReceipt, fetchExpenseAttachments, fetchExpenseCategories, fetchLabourDeletionPreview, fetchOperationalRecord, openExpenseAttachment, previewAttendanceImport, previewExpenseImport, searchExpenses, updateExpenseSubcategory, uploadExpenseAttachment, validateVoucherNumber, type AttendanceImportMapping, type AttendanceImportPreview, type AttendanceImportResult, type ExpenseAttachment, type ExpenseImportPreview, type ExpenseImportResolution, type ExpenseImportResult, type ExpenseOcrSuggestion, type ExpenseSearchRecord, type LabourDeletionPreview, type LabourFinancialReadModel } from "../lib/api";
 import { buildDispatchAvailability, dispatchCartons, dispatchItemKey, resolveSaleType, saleProduceLabel, soldQuantityByDispatchItem } from "../lib/dispatch-sales";
 import { canCreate, canDelete, canEdit, hasPermission } from "../lib/permissions";
 import { translateExpenseCategory, translateExpenseSubcategory, translatePaymentType, translateSaleType, translateSalesStatus } from "../lib/systemTranslations";
@@ -4423,12 +4423,13 @@ function PartnerLedgerModule() {
 
 function AccountsModule() {
   const { t } = useTranslation();
-  const { user, sessionRefreshing } = useAuth();
+  const { user, token, sessionRefreshing } = useAuth();
   const workspaceId = user?.workspaceId ?? "";
   const farmId = getActiveFarmId();
   const seasonId = getActiveSeasonId();
   const canonicalFinancials = useCanonicalLabourFinancials();
   const canCreateAccounts = Boolean(!sessionRefreshing && user && workspaceId && canCreate(user, "accounts", workspaceId));
+  const canDeleteAccounts = Boolean(!sessionRefreshing && user && workspaceId && canDelete(user, "accounts", workspaceId));
   const navigate = useNavigate();
   const accountsRequestSequence = useRef(0);
   const accountsScopeKeyRef = useRef(`${workspaceId}:${farmId}:${seasonId}`);
@@ -4518,6 +4519,8 @@ function AccountsModule() {
   const [name, setName] = useState("");
   const [type, setType] = useState<Account["type"]>("bank");
   const [accountCreateError, setAccountCreateError] = useState("");
+  const [accountDeleteError, setAccountDeleteError] = useState("");
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -5199,6 +5202,34 @@ function AccountsModule() {
     if (row.source === "labour_advances") navigate(`/workspace/labour-advances?${query.toString()}`);
     if (row.source === "partner_ledger") navigate(`/workspace/partner-ledger?${query.toString()}`);
   };
+  const removeSelectedAccount = async () => {
+    if (!token || !farmId || !selectedAccount || !selectedDisplayAccount || !canDeleteAccounts || deletingAccount) return;
+    const canonicalAccountId = selectedDisplayAccount.canonicalAccountId ?? resolveCanonicalAccountId(selectedAccount.id, accountLookup) ?? selectedAccount.id;
+    if (isSyntheticLocalAccount(selectedAccount.id) || !/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(canonicalAccountId)) {
+      setAccountDeleteError(t("accountsPage.accountDeleteUnavailable"));
+      return;
+    }
+    if (!window.confirm(t("accountsPage.deleteAccountConfirm", { name: selectedAccount.name }))) return;
+    setDeletingAccount(true);
+    setAccountDeleteError("");
+    try {
+      await deleteFarmAccount(token, workspaceId, farmId, canonicalAccountId);
+      const idsToDelete = accounts
+        .filter((account) => account.id === selectedAccount.id
+          || account.id === canonicalAccountId
+          || resolveCanonicalAccountId(account.id, accountLookup) === canonicalAccountId)
+        .map((account) => account.id);
+      if (idsToDelete.length) await offlineDb.accounts.bulkDelete(idsToDelete);
+      setSelectedAccountId(null);
+      await refreshOperationalData({ notifySuccess: false });
+      await refreshOperationalSnapshot();
+    } catch (error) {
+      setAccountDeleteError(error instanceof Error ? error.message : t("accountsPage.accountDeleteFailed"));
+    } finally {
+      setDeletingAccount(false);
+    }
+  };
+
   const openExpenseVisibility = (scope: "voucher" | "advance" | "combined") => {
     const farmId = getActiveFarmId();
     const seasonId = getActiveSeasonId();
@@ -5467,7 +5498,15 @@ function AccountsModule() {
                 </section>;
               })}
             </div>)}
-            <footer><button type="button" onClick={() => setSelectedAccountId(null)}>{t("accountsPage.back")}</button></footer>
+            {accountDeleteError && <p className="worker-action-error">{accountDeleteError}</p>}
+            <footer>
+              {canDeleteAccounts && selectedAccount && !isSyntheticLocalAccount(selectedAccount.id) && (
+                <button className="danger-button" disabled={deletingAccount} type="button" onClick={() => void removeSelectedAccount()}>
+                  {deletingAccount ? t("accountsPage.deletingAccount") : t("accountsPage.deleteAccount")}
+                </button>
+              )}
+              <button type="button" onClick={() => { setAccountDeleteError(""); setSelectedAccountId(null); }}>{t("accountsPage.back")}</button>
+            </footer>
           </div>
         </section>
       </div>}
