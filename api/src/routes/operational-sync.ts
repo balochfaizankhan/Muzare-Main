@@ -685,7 +685,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     let malformedRecordsSkipped = 0;
     type VisibleSyncRecord = {
       workspaceId: string;
-      farmId: string;
+      farmId: string | null;
       seasonId: string | null;
       entity: string;
       record: Record<string, unknown> & { id: string; updatedAt: string };
