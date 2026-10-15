@@ -293,7 +293,8 @@ export async function validateTenantReferencesDetailed(workspaceId: string, refe
       const accountError = await validateOperationalEntityReference({
         workspaceId,
         farmId: references.farmId,
-        seasonId: references.seasonId,
+        // Account masters are farm-scoped; financial entries remain season-scoped.
+        seasonId: undefined,
         clientRecordId: accountId,
         entity: "payment account",
         entityTypes: ["account"],
