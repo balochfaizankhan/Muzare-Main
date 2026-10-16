@@ -1,5 +1,3 @@
-type StartupDetail = Record<string, unknown> | string | number | boolean | null | undefined;
-
 const hasPerformanceMarks = typeof performance !== "undefined" && typeof performance.mark === "function";
 const startupOrigin = hasPerformanceMarks ? performance.now() : 0;
 const marks = new Map<string, number>();
@@ -17,7 +15,7 @@ export function getStartupTimings(): StartupTiming[] {
   }));
 }
 
-export function markStartup(label: string, detail?: StartupDetail) {
+export function markStartup(label: string) {
   if (!enabled || !hasPerformanceMarks) return;
   try {
     const timestamp = performance.now();
@@ -27,8 +25,7 @@ export function markStartup(label: string, detail?: StartupDetail) {
     // Performance diagnostics must never interrupt startup.
   }
   if (import.meta.env.DEV) {
-    if (detail !== undefined) console.debug(`[startup] ${label}`, detail);
-    else console.debug(`[startup] ${label}`);
+    console.debug(`[startup] ${label}`);
   }
 }
 
