@@ -79,9 +79,16 @@ export function installEntryPreloading() {
   window.addEventListener("muzare-data-refresh", removeLocalInvalidation);
 
   void scheduleBackgroundTask(async () => {
-    // Preload the most frequently used entry routes after the shell has become interactive.
+    // Avoid downloading several heavy entry routes on mobile, metered networks,
+    // or while the user is offline. Intent-based preloading remains available.
+    if (!navigator.onLine || document.visibilityState !== "visible") return;
+    const connection = (navigator as Navigator & {
+      connection?: { saveData?: boolean; effectiveType?: string };
+    }).connection;
+    if (connection?.saveData || connection?.effectiveType === "slow-2g" || connection?.effectiveType === "2g") return;
+    if (window.matchMedia("(pointer: coarse)").matches) return;
     await preloadEntry("expenses");
-    await Promise.allSettled([preloadEntry("sales"), preloadEntry("dispatch")]);
+    // Sales and dispatch are still preloaded on navigation intent.
   }, { timeoutMs: 4_000 });
 
   return () => {
