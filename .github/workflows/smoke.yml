@@ -12,7 +12,23 @@ permissions:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: muzare_test
+          POSTGRES_PASSWORD: muzare_test
+          POSTGRES_DB: muzare_integration_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U muzare_test -d muzare_integration_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://muzare_test:muzare_test@localhost:5432/muzare_integration_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,6 +41,8 @@ jobs:
         run: npm run check
       - name: Production builds
         run: npm run build
+      - name: Initialize isolated integration database
+        run: npm run db:init --workspace @muzare/api
       - name: API regression tests
         run: npm run test:integration --workspace @muzare/api
       - name: Translation audit
