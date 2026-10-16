@@ -34,23 +34,35 @@ import { installSalesAdvanceMobileRefinements } from "./lib/salesAdvanceMobileRe
 import { installSalesReportMobileDetails } from "./lib/salesReportMobileDetails";
 import { installDetachedReportPrintBridge } from "./lib/detachedReportPrint";
 import { installReturnedToFarmReport } from "./lib/returnedToFarmReport";
-import { installEntryPreloading } from "./lib/entryPreload";
 import { installDispatchMasterDialogEnhancements } from "./lib/dispatchMasterDialogEnhancements";
 import { installDispatchSubmitGuard } from "./lib/dispatchSubmitGuard";
 import { installDispatchSummaryEnhancements } from "./lib/dispatchSummaryEnhancements";
 import { installReportExportFilenameGuard } from "./lib/reportExportFilename";
 import { installLabourPaymentBottomActions } from "./lib/labourPaymentBottomActions";
 import { queryClient } from "./lib/query-client";
-import { markStartup, scheduleBackgroundTask } from "./lib/startupPerf";
+import { getStartupTimings, markStartup, scheduleBackgroundTask } from "./lib/startupPerf";
 
 function RootShell() {
   useEffect(() => {
     markStartup("app-shell-mounted");
+    // Opt-in diagnostic only. Never include tenant or financial details.
+    if (new URLSearchParams(window.location.search).get("muzarePerf") === "1") {
+      void scheduleBackgroundTask(() => {
+        console.table(getStartupTimings());
+      }, { timeoutMs: 8_000 });
+    }
     const removeLocalizationGuard = installSystemTextLocalizationGuard();
     const removeFormRefinements = installSalesAdvanceMobileRefinements();
     const removeSalesReportMobileDetails = installSalesReportMobileDetails();
     const removeReturnedToFarmReport = installReturnedToFarmReport();
-    const removeEntryPreloading = installEntryPreloading();
+    // Keep route preloaders and their data-query dependencies out of the initial bundle.
+    let disposed = false;
+    let removeEntryPreloading: (() => void) | undefined;
+    void import("./lib/entryPreload").then(({ installEntryPreloading }) => {
+      if (!disposed) removeEntryPreloading = installEntryPreloading();
+    }).catch((error) => {
+      if (import.meta.env.DEV) console.warn("[Muzare performance] Entry preload setup failed", error);
+    });
     const removeDispatchMasterEnhancements = installDispatchMasterDialogEnhancements();
     const removeDispatchSubmitGuard = installDispatchSubmitGuard();
     const removeDispatchSummaryEnhancements = installDispatchSummaryEnhancements();
@@ -62,7 +74,8 @@ function RootShell() {
       removeDispatchSummaryEnhancements();
       removeDispatchSubmitGuard();
       removeDispatchMasterEnhancements();
-      removeEntryPreloading();
+      disposed = true;
+      removeEntryPreloading?.();
       removeReturnedToFarmReport();
       removeSalesReportMobileDetails();
       removeFormRefinements();

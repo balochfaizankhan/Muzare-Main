@@ -123,8 +123,9 @@ before(async () => {
   // worker leads their own group and dues are group dues drawing on it.
   labourerId = randomUUID();
   groupId = randomUUID();
+  await setupRequest("create labour group", "POST", "/v1/workspace/operational-records", envelope("labourGroup", groupId, { name: "Ledger Correction Group", active: true }));
   await setupRequest("create labourer", "POST", "/v1/workspace/operational-records", envelope("labourer", labourerId, { name: "Ledger Correction Worker", active: true, groupId }));
-  await setupRequest("create labour group", "POST", "/v1/workspace/operational-records", envelope("labourGroup", groupId, { name: "Ledger Correction Group", active: true, foremanLabourId: labourerId }));
+  await setupRequest("assign group foreman", "POST", "/v1/workspace/operational-records", envelope("labourGroup", groupId, { name: "Ledger Correction Group", active: true, foremanLabourId: labourerId }));
   const [account] = await db.insert(accounts).values({ farmId: tenant.farmId, name: "Ledger Correction Cash Account", accountType: "cash", active: true }).returning({ id: accounts.id });
   assertPersistedUuid(account?.id, "create payment account");
   paymentAccountId = account.id;

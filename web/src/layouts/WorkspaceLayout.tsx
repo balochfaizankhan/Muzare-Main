@@ -108,11 +108,7 @@ export function WorkspaceLayout() {
   });
   useEffect(() => {
     if (bootstrap.isSuccess) {
-      markStartup("workspace-bootstrap-ready", {
-        workspaceId: user?.workspaceId,
-        farmId: bootstrap.data?.activeFarmId ?? null,
-        seasonId: bootstrap.data?.activeSeasonId ?? null,
-      });
+      markStartup("workspace-bootstrap-ready");
     }
   }, [bootstrap.data?.activeFarmId, bootstrap.data?.activeSeasonId, bootstrap.isSuccess, user?.workspaceId]);
   const statusText = workspaceStatus.tone === "offline"

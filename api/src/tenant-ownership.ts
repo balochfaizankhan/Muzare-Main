@@ -125,9 +125,24 @@ async function validateOperationalEntityReference({
   entityTypes: string[];
   nameKeys: string[];
 }): Promise<TenantReferenceValidationError | null> {
-  const exactMatch = await hasOperationalReference(workspaceId, entityTypes, clientRecordId, farmId, seasonId);
-  if (exactMatch) return null;
-  const referenced = await findOperationalReference(entityTypes, clientRecordId);
+  // Check deletion before accepting an exact scope match. A deleted operational
+  // master must not be usable as a reference in new financial transactions.
+  const [scopedRecord] = await db.select({
+    id: operationalRecords.id,
+    clientRecordId: operationalRecords.clientRecordId,
+    workspaceId: operationalRecords.workspaceId,
+    farmId: operationalRecords.farmId,
+    seasonId: operationalRecords.seasonId,
+    entityType: operationalRecords.entityType,
+    payload: operationalRecords.payload,
+  }).from(operationalRecords).where(and(
+    eq(operationalRecords.workspaceId, workspaceId),
+    inArray(operationalRecords.entityType, entityTypes),
+    eq(operationalRecords.clientRecordId, clientRecordId),
+    farmId ? eq(operationalRecords.farmId, farmId) : undefined,
+    seasonId ? eq(operationalRecords.seasonId, seasonId) : undefined,
+  )).limit(1);
+  const referenced = (scopedRecord ?? await findOperationalReference(entityTypes, clientRecordId)) as OperationalReferenceRecord | null;
   const entityName = payloadName(referenced, nameKeys);
   if (!referenced) {
     return buildReferenceError({
@@ -170,6 +185,11 @@ async function validateOperationalEntityReference({
       actualWorkspace: referenced.workspaceId,
       message: `${displayEntityName(entity, entityName, clientRecordId)} belongs to another workspace.`,
     });
+  }
+  if (referenced.workspaceId === workspaceId
+    && (!farmId || referenced.farmId === farmId)
+    && (!seasonId || referenced.seasonId === seasonId)) {
+    return null;
   }
   if (farmId && referenced.farmId !== farmId) {
     return buildReferenceError({
