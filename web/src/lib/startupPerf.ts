@@ -1,28 +1,35 @@
 type StartupDetail = Record<string, unknown> | string | number | boolean | null | undefined;
 
 const hasPerformanceMarks = typeof performance !== "undefined" && typeof performance.mark === "function";
+const startupOrigin = hasPerformanceMarks ? performance.now() : 0;
+const marks = new Map<string, number>();
+const enabled = import.meta.env.DEV || (
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("muzarePerf") === "1"
+);
 
-// Opt-in profiling on a production-like dev build with ?muzarePerf=1.
-// Keep timings local to the browser: never transmit session, farm or financial data.
-const profilingEnabled = typeof window !== "undefined" &&
-  (import.meta.env.DEV || new URLSearchParams(window.location.search).get("muzarePerf") === "1");
+export type StartupTiming = { label: string; elapsedMs: number };
+
+export function getStartupTimings(): StartupTiming[] {
+  return [...marks.entries()].map(([label, timestamp]) => ({
+    label,
+    elapsedMs: Math.round((timestamp - startupOrigin) * 10) / 10,
+  }));
+}
 
 export function markStartup(label: string, detail?: StartupDetail) {
-  if (!profilingEnabled || !hasPerformanceMarks) return;
+  if (!enabled || !hasPerformanceMarks) return;
   try {
+    const timestamp = performance.now();
+    marks.set(label, timestamp);
     performance.mark(`muzare:${label}`);
-    const start = performance.getEntriesByName("muzare:react-root-render-start", "mark")[0];
-    const current = performance.getEntriesByName(`muzare:${label}`, "mark").at(-1);
-    if (start && current && label !== "react-root-render-start") {
-      console.debug(`[startup] ${label}: ${Math.round(current.startTime - start.startTime)}ms since root render`);
-    } else {
-      console.debug(`[startup] ${label}`);
-    }
   } catch {
-    // Diagnostics must never interfere with startup.
+    // Performance diagnostics must never interrupt startup.
   }
-  // Structured details can contain tenant information: do not log them in production.
-  if (import.meta.env.DEV && detail !== undefined) console.debug("[startup detail]", detail);
+  if (import.meta.env.DEV) {
+    if (detail !== undefined) console.debug(`[startup] ${label}`, detail);
+    else console.debug(`[startup] ${label}`);
+  }
 }
 
 type BackgroundTaskOptions = {
