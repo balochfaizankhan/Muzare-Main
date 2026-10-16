@@ -41,11 +41,17 @@ import { installDispatchSummaryEnhancements } from "./lib/dispatchSummaryEnhance
 import { installReportExportFilenameGuard } from "./lib/reportExportFilename";
 import { installLabourPaymentBottomActions } from "./lib/labourPaymentBottomActions";
 import { queryClient } from "./lib/query-client";
-import { markStartup, scheduleBackgroundTask } from "./lib/startupPerf";
+import { getStartupTimings, markStartup, scheduleBackgroundTask } from "./lib/startupPerf";
 
 function RootShell() {
   useEffect(() => {
     markStartup("app-shell-mounted");
+    // Opt-in diagnostic only. Never include tenant or financial details.
+    if (new URLSearchParams(window.location.search).get("muzarePerf") === "1") {
+      void scheduleBackgroundTask(() => {
+        console.table(getStartupTimings());
+      }, { timeoutMs: 8_000 });
+    }
     const removeLocalizationGuard = installSystemTextLocalizationGuard();
     const removeFormRefinements = installSalesAdvanceMobileRefinements();
     const removeSalesReportMobileDetails = installSalesReportMobileDetails();
