@@ -120,8 +120,10 @@ before(async () => {
   memberOneId = randomUUID();
   memberTwoId = randomUUID();
   outsiderId = randomUUID();
+  // Create the group before referencing it from a labourer; then assign its foreman.
+  await setupRequest("create labour group", "POST", "/v1/workspace/operational-records", envelope("labourGroup", groupId, { name: "Saleem Group", active: true }));
   await setupRequest("create leader", "POST", "/v1/workspace/operational-records", envelope("labourer", leaderId, { name: "Saleem", active: true, groupId }));
-  await setupRequest("create labour group", "POST", "/v1/workspace/operational-records", envelope("labourGroup", groupId, { name: "Saleem Group", active: true, foremanLabourId: leaderId }));
+  await setupRequest("assign group foreman", "POST", "/v1/workspace/operational-records", envelope("labourGroup", groupId, { name: "Saleem Group", active: true, foremanLabourId: leaderId }));
   await setupRequest("create other labour group", "POST", "/v1/workspace/operational-records", envelope("labourGroup", otherGroupId, { name: "Other Group", active: true }));
   await setupRequest("create member one", "POST", "/v1/workspace/operational-records", envelope("labourer", memberOneId, { name: "Member One", active: true, groupId }));
   await setupRequest("create member two", "POST", "/v1/workspace/operational-records", envelope("labourer", memberTwoId, { name: "Member Two", active: true, groupId }));
