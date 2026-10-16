@@ -59,9 +59,10 @@ export function installEntryPreloading() {
     if (kind) void preloadEntry(kind);
   };
 
+  // Preload only on actual navigation intent. Hover/focus preloads can run
+  // before the user opens a page; touchstart can compete with the tap itself.
   document.addEventListener("pointerover", onIntent, { passive: true, capture: true });
   document.addEventListener("focusin", onIntent, true);
-  document.addEventListener("touchstart", onIntent, { passive: true, capture: true });
 
   const removeScopeInvalidation = () => {
     pending.clear();
@@ -94,7 +95,6 @@ export function installEntryPreloading() {
   return () => {
     document.removeEventListener("pointerover", onIntent, true);
     document.removeEventListener("focusin", onIntent, true);
-    document.removeEventListener("touchstart", onIntent, true);
     window.removeEventListener("muzare-farm-changed", removeScopeInvalidation);
     window.removeEventListener("muzare-season-changed", removeScopeInvalidation);
     window.removeEventListener("muzare-local-data-change", removeLocalInvalidation);
