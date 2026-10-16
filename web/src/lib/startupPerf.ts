@@ -15,7 +15,8 @@ export function getStartupTimings(): StartupTiming[] {
   }));
 }
 
-export function markStartup(label: string) {
+export function markStartup(label: string, _detail?: unknown) {
+  // Preserve existing call sites; diagnostic details are intentionally never stored or logged.
   if (!enabled || !hasPerformanceMarks) return;
   try {
     const timestamp = performance.now();
