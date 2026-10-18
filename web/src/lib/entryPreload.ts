@@ -59,9 +59,10 @@ export function installEntryPreloading() {
     if (kind) void preloadEntry(kind);
   };
 
+  // Preload only on actual navigation intent. Hover/focus preloads can run
+  // before the user opens a page; touchstart can compete with the tap itself.
   document.addEventListener("pointerover", onIntent, { passive: true, capture: true });
   document.addEventListener("focusin", onIntent, true);
-  document.addEventListener("touchstart", onIntent, { passive: true, capture: true });
 
   const removeScopeInvalidation = () => {
     pending.clear();
@@ -79,15 +80,21 @@ export function installEntryPreloading() {
   window.addEventListener("muzare-data-refresh", removeLocalInvalidation);
 
   void scheduleBackgroundTask(async () => {
-    // Preload the most frequently used entry routes after the shell has become interactive.
+    // Avoid downloading several heavy entry routes on mobile, metered networks,
+    // or while the user is offline. Intent-based preloading remains available.
+    if (!navigator.onLine || document.visibilityState !== "visible") return;
+    const connection = (navigator as Navigator & {
+      connection?: { saveData?: boolean; effectiveType?: string };
+    }).connection;
+    if (connection?.saveData || connection?.effectiveType === "slow-2g" || connection?.effectiveType === "2g") return;
+    if (window.matchMedia("(pointer: coarse)").matches) return;
     await preloadEntry("expenses");
-    await Promise.allSettled([preloadEntry("sales"), preloadEntry("dispatch")]);
+    // Sales and dispatch are still preloaded on navigation intent.
   }, { timeoutMs: 4_000 });
 
   return () => {
     document.removeEventListener("pointerover", onIntent, true);
     document.removeEventListener("focusin", onIntent, true);
-    document.removeEventListener("touchstart", onIntent, true);
     window.removeEventListener("muzare-farm-changed", removeScopeInvalidation);
     window.removeEventListener("muzare-season-changed", removeScopeInvalidation);
     window.removeEventListener("muzare-local-data-change", removeLocalInvalidation);

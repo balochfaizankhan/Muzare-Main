@@ -1683,10 +1683,11 @@ export const rejectRegistrationRequest = (token: string, userId: string, reason?
   apiRequest<void>(`/v1/admin/registrations/${userId}/reject`, { method: "POST", body: JSON.stringify({ reason }) }, token);
 export const saveOperationalRecord = (token: string, input: OperationalRecordEnvelope) =>
   apiRequest<{ record: OperationalRecordEnvelope["record"]; conflict: boolean }>("/v1/workspace/operational-records", { method: "POST", body: JSON.stringify(input) }, token, { timeoutMs: 30_000, debugLabel: `operational-record-save:${input.entity}` });
-export const validateVoucherNumber = (token: string, workspaceId: string, input: { voucherNumber: string; recordId?: string; farmId?: string }) => {
+export const validateVoucherNumber = (token: string, workspaceId: string, input: { voucherNumber: string; recordId?: string; farmId?: string; seasonId?: string }) => {
   const query = new URLSearchParams({ voucherNumber: input.voucherNumber });
   if (input.recordId) query.set("recordId", input.recordId);
   if (input.farmId) query.set("farmId", input.farmId);
+  if (input.seasonId) query.set("seasonId", input.seasonId);
   return apiRequest<VoucherNumberValidation>(`/v1/workspace/${workspaceId}/voucher-number-availability?${query.toString()}`, {}, token, { debugLabel: "voucher-number-validate" });
 };
 export const deleteOperationalRecord = (token: string, input: Omit<OperationalRecordEnvelope, "record"> & { recordId: string; reason?: string }) =>

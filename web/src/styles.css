@@ -11718,6 +11718,7 @@ a.dashboard-kpi-card:active {
 
   .app-mobile-bottom-nav a,
   .app-mobile-bottom-nav__action {
+    display: flex;
     align-items: center;
     background: transparent;
     border: 0;
@@ -11745,12 +11746,30 @@ a.dashboard-kpi-card:active {
   }
 
   .app-mobile-bottom-nav__action--add {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    text-align: center;
     background: linear-gradient(180deg, #14532d 0%, #0f4b2b 100%);
     box-shadow: 0 12px 20px rgba(15, 75, 43, 0.22);
     color: #fff;
     margin-top: -8px;
     border-radius: 18px;
-    min-height: 50px;
+    min-height: 58px;
+    padding: 6px 4px;
+  }
+
+  .app-mobile-bottom-nav__action--add svg,
+  .app-mobile-bottom-nav__action--add span {
+    display: block;
+    flex-shrink: 0;
+    margin: 0;
+  }
+
+  .app-mobile-bottom-nav__action--add span {
+    line-height: 1.2;
   }
 
   .app-mobile-bottom-nav__action--add.active {

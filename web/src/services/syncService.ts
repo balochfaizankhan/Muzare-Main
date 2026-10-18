@@ -955,10 +955,12 @@ export async function retrySyncQueueItem(mutationId: string) {
       Promise.all([
         offlineDb.vouchers.where("workspaceId").equals(context.workspaceId).toArray(),
         offlineDb.labourWageSettlements.where("workspaceId").equals(context.workspaceId).toArray(),
-      ]).then(([voucherRows, settlementRows]) => getGeneralExpenseVouchers(getActiveVouchers(voucherRows), settlementRows)),
+      ]).then(([voucherRows, settlementRows]) => getGeneralExpenseVouchers(getActiveVouchers(voucherRows), settlementRows).filter((record) => record.farmId === item.farmId && record.seasonId === item.seasonId)),
       offlineDb.pendingMutations.where("workspaceId").equals(context.workspaceId).and((mutation) =>
         mutation.id !== mutationId
         && mutation.entity === "voucher"
+        && mutation.farmId === item.farmId
+        && mutation.seasonId === item.seasonId
         && mutation.operation !== "delete"
         && mutation.status !== "resolved"
         && mutation.status !== "discarded").toArray(),
@@ -990,6 +992,8 @@ export async function retrySyncQueueItem(mutationId: string) {
         const result = await validateVoucherNumber(context.token, context.workspaceId, {
           voucherNumber: normalizedVoucherNumber,
           recordId: typeof payload.id === "string" ? payload.id : undefined,
+          farmId: item.farmId ?? undefined,
+          seasonId: item.seasonId ?? undefined,
         });
         if (!result.available) {
           const lastError = i18n.t("expensesPage.voucherNumberDuplicate", { number: result.voucherNumber });

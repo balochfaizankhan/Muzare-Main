@@ -90,8 +90,9 @@ before(async () => {
   // worker leads their own group and dues are group dues drawing on it.
   labourerId = randomUUID();
   groupId = randomUUID();
+  await setupRequest("create pooled-advance labour group", "POST", "/v1/workspace/operational-records", envelope("labourGroup", groupId, { name: "Pooled Advance Group", active: true }));
   await setupRequest("create pooled-advance labourer", "POST", "/v1/workspace/operational-records", envelope("labourer", labourerId, { name: "Pooled Advance Worker", active: true, groupId }));
-  await setupRequest("create pooled-advance labour group", "POST", "/v1/workspace/operational-records", envelope("labourGroup", groupId, { name: "Pooled Advance Group", active: true, foremanLabourId: labourerId }));
+  await setupRequest("assign pooled-advance foreman", "POST", "/v1/workspace/operational-records", envelope("labourGroup", groupId, { name: "Pooled Advance Group", active: true, foremanLabourId: labourerId }));
   const [account] = await db.insert(accounts).values({ farmId: tenant.farmId, name: "Pooled Advance Cash Account", accountType: "cash", active: true }).returning({ id: accounts.id });
   assertPersistedUuid(account?.id, "create pooled-advance payment account");
   paymentAccountId = account.id;

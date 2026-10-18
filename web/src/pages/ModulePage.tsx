@@ -2215,14 +2215,16 @@ function ExpensesModule() {
       };
     }
     const currentFarmId = getActiveFarmId() ?? undefined;
+    const currentSeasonId = getActiveSeasonId() ?? undefined;
     const [cachedWorkspaceVouchers, pendingVoucherMutations] = await Promise.all([
-      workspaceId ? offlineDb.vouchers.where("workspaceId").equals(workspaceId).toArray().then((rows) => getGeneralExpenseVouchers(getActiveVouchers(rows), labourWageSettlements).filter((item) => item.farmId === currentFarmId)) : Promise.resolve([] as Voucher[]),
+      workspaceId ? offlineDb.vouchers.where("workspaceId").equals(workspaceId).toArray().then((rows) => getGeneralExpenseVouchers(getActiveVouchers(rows), labourWageSettlements).filter((item) => item.farmId === currentFarmId && item.seasonId === currentSeasonId)) : Promise.resolve([] as Voucher[]),
       workspaceId ? offlineDb.pendingMutations.where("workspaceId").equals(workspaceId).and((mutation) =>
         mutation.entity === "voucher"
         && mutation.operation !== "delete"
         && mutation.status !== "resolved"
         && mutation.status !== "discarded"
-        && mutation.farmId === currentFarmId).toArray() : Promise.resolve([]),
+        && mutation.farmId === currentFarmId
+        && mutation.seasonId === currentSeasonId).toArray() : Promise.resolve([]),
     ]);
     const duplicateCachedVoucher = cachedWorkspaceVouchers.some((item) =>
       item.id !== editingVoucher?.id
@@ -2247,7 +2249,7 @@ function ExpensesModule() {
       };
     }
     try {
-      const result = await validateVoucherNumber(token, workspaceId, { voucherNumber: normalizedValue, recordId: editingVoucher?.id, farmId: currentFarmId });
+      const result = await validateVoucherNumber(token, workspaceId, { voucherNumber: normalizedValue, recordId: editingVoucher?.id, farmId: currentFarmId, seasonId: currentSeasonId });
       if (!result.available) {
         return {
           status: "duplicate" as const,
