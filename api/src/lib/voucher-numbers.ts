@@ -41,12 +41,14 @@ export async function findExistingVoucherByNumber(
   tx: DbClient,
   workspaceId: string,
   farmId: string,
+  seasonId: string | null | undefined,
   voucherNumber: string,
   excludeRecordId?: string,
 ) {
   const filters = [
     eq(operationalRecords.workspaceId, workspaceId),
     eq(operationalRecords.farmId, farmId),
+    seasonId ? eq(operationalRecords.seasonId, seasonId) : sql`${operationalRecords.seasonId} IS NULL`,
     eq(operationalRecords.entityType, "voucher"),
     activeOperationalPayloadSql(operationalRecords.payload),
     normalExpenseVoucherWhereSql(),
@@ -110,12 +112,13 @@ export async function reserveVoucherNumber(
   tx: DbClient,
   workspaceId: string,
   farmId: string,
+  seasonId: string | null | undefined,
   voucherNumber: string,
   excludeClientRecordId?: string,
 ) {
-  const scopeKey = `${workspaceId}:${farmId}`;
+  const scopeKey = `${workspaceId}:${voucherScopeKey(farmId, seasonId)}`;
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${scopeKey}), hashtext(${voucherNumber}))`);
-  const existingVoucher = await findExistingVoucherByNumber(tx, workspaceId, farmId, voucherNumber, excludeClientRecordId);
+  const existingVoucher = await findExistingVoucherByNumber(tx, workspaceId, farmId, seasonId, voucherNumber, excludeClientRecordId);
   if (existingVoucher) {
     throw new Error(`Voucher number ${voucherNumber} already exists.`);
   }
@@ -143,7 +146,7 @@ export async function allocateVoucherNumber(
   const nextSuggested = (current?.lastNumber ?? 0) + 1;
   const finalNumber = parsedRequestedNumber ?? nextSuggested;
   const voucherNumber = normalizedRequestedVoucherNumber ?? `V-${String(finalNumber).padStart(4, "0")}`;
-  await reserveVoucherNumber(tx, workspaceId, farmId, voucherNumber);
+  await reserveVoucherNumber(tx, workspaceId, farmId, seasonId, voucherNumber);
   await bumpVoucherSequence(tx, workspaceId, farmId, seasonId, voucherNumber);
   return voucherNumber;
 }
