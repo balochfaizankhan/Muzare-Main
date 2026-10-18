@@ -39,5 +39,5 @@ test("temporary reconciliation debug route is gated and linked from settings", (
   assert.ok(workspaceSettingsSource.includes("/debug/accounting-reconciliation"));
   assert.ok(workspaceAccountsRoute.includes("/v1/workspace/:workspaceId/accounts"));
   assert.ok(adminWorkspaceSeasonsRoute.includes("/v1/admin/workspaces/:workspaceId/farms/:farmId/seasons"));
-  assert.ok(workspaceSettingsSource.includes("Accounting Reconciliation Trace"));
+  assert.ok(workspaceSettingsSource.includes('t("workspaceProfile.accountingReconciliationTraceTitle")'));
 });
