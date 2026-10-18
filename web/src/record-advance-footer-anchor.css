@@ -44,3 +44,72 @@
     grid-template-rows: auto minmax(0, 1fr) auto !important;
   }
 }
+
+
+/* Compact record-advance form: local overrides avoid changing financial forms elsewhere. */
+.workforce-advance-entry-sheet .workforce-advance-entry-body {
+  display: block;
+  padding: 16px 18px 20px;
+}
+.workforce-advance-entry-sheet .workforce-advance-entry-fields {
+  align-content: start;
+  display: grid;
+  gap: 14px;
+}
+.workforce-advance-entry-sheet .workforce-advance-entry-fields > label,
+.workforce-advance-entry-sheet .workforce-advance-entry-row > label {
+  align-content: start;
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  min-width: 0;
+}
+.workforce-advance-entry-sheet .workforce-advance-entry-fields label > span {
+  display: block;
+  line-height: 1.35;
+  margin: 0;
+}
+.workforce-advance-entry-sheet .workforce-advance-entry-fields input,
+.workforce-advance-entry-sheet .workforce-advance-entry-fields select,
+.workforce-advance-entry-sheet .workforce-advance-entry-row .report-picker__trigger {
+  box-sizing: border-box;
+  height: 52px;
+  min-height: 52px;
+  max-width: 100%;
+  width: 100%;
+}
+.workforce-advance-entry-sheet .workforce-advance-amount {
+  min-height: 52px;
+}
+.workforce-advance-entry-sheet .workforce-advance-amount > span {
+  display: inline;
+  inset-block-start: 50%;
+  margin: 0;
+  pointer-events: none;
+}
+.workforce-advance-entry-sheet .workforce-advance-amount input {
+  padding-inline-start: 58px;
+  font-variant-numeric: tabular-nums;
+}
+.workforce-advance-entry-sheet .workforce-advance-entry-row {
+  align-items: start;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.workforce-advance-entry-sheet .workforce-advance-entry-row > label {
+  min-width: 0;
+}
+.workforce-advance-entry-sheet .workforce-advance-entry-row input[type="date"] {
+  min-width: 0;
+}
+.workforce-advance-entry-sheet .workforce-payments-inline-note {
+  display: block;
+  line-height: 1.35;
+  margin: 0;
+}
+@media (max-width: 380px) {
+  .workforce-advance-entry-sheet .workforce-advance-entry-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
