@@ -804,6 +804,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       voucherNumber: z.string().trim().min(1),
       recordId: z.string().optional(),
       farmId: z.string().uuid().optional(),
+      seasonId: z.string().uuid().optional(),
     }).safeParse({
       ...(request.params as Record<string, unknown>),
       ...(request.query as Record<string, unknown>),
@@ -834,7 +835,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         requestWorkspaceId: parsed.data.workspaceId,
       });
     }
-    const [session] = await db.select({ activeFarmId: userSessions.activeFarmId })
+    const [session] = await db.select({ activeFarmId: userSessions.activeFarmId, activeSeasonId: userSessions.activeSeasonId })
       .from(userSessions).where(eq(userSessions.id, request.sessionId)).limit(1);
     const validationFarmId = parsed.data.farmId ?? session?.activeFarmId ?? null;
     if (!validationFarmId) {
@@ -850,6 +851,17 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
         farmId: validationFarmId,
       });
     }
+    const validationSeasonId = parsed.data.seasonId ?? session?.activeSeasonId ?? null;
+    if (!validationSeasonId) {
+      return forbiddenResponse(reply, "Select an active season before validating voucher numbers.", {
+        code: "stale_season_context", requestWorkspaceId: parsed.data.workspaceId,
+      });
+    }
+    if (validationFarmId !== session?.activeFarmId || validationSeasonId !== session?.activeSeasonId) {
+      return forbiddenResponse(reply, "Voucher validation requires the selected farm and season.", {
+        code: "stale_season_context", requestWorkspaceId: parsed.data.workspaceId,
+      });
+    }
     const normalized = normalizeVoucherNumber(parsed.data.voucherNumber);
     if (!normalized) {
       return reply.code(400).send({
@@ -861,6 +873,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
       tx,
       parsed.data.workspaceId,
       validationFarmId,
+      validationSeasonId,
       normalized,
       parsed.data.recordId,
     ));
@@ -869,6 +882,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
     }).from(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, parsed.data.workspaceId),
       eq(operationalRecords.farmId, validationFarmId),
+      eq(operationalRecords.seasonId, validationSeasonId),
       eq(operationalRecords.entityType, "voucher"),
       activeOperationalPayloadSql(operationalRecords.payload),
       normalExpenseVoucherWhereSql(),
@@ -1497,7 +1511,7 @@ export async function operationalSyncRoutes(app: FastifyInstance): Promise<void>
               });
               const voucherNumber = normalizedVoucher.resolvedVoucherNumber;
               if (!voucherNumber) throw new Error("Voucher number is required.");
-              await reserveVoucherNumber(tx, parsed.data.workspaceId, parsed.data.farmId!, voucherNumber, existing.clientRecordId);
+              await reserveVoucherNumber(tx, parsed.data.workspaceId, parsed.data.farmId!, requestSeasonId, voucherNumber, existing.clientRecordId);
               await bumpVoucherSequence(tx, parsed.data.workspaceId, parsed.data.farmId!, requestSeasonId, voucherNumber);
               if (localDevelopmentMode && normalizedVoucher.importedVoucher && !normalizedVoucher.explicitVoucherNumberEdit && normalizedRequestedVoucherNumber && normalizedVoucher.canonicalNumber && normalizedRequestedVoucherNumber !== normalizedVoucher.canonicalNumber) {
                 console.warn("IMPORTED_VOUCHER_NUMBER_WRITE_BLOCKED", {
