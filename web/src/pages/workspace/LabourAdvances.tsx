@@ -12,7 +12,7 @@ import { todayLocalDateKey } from "../../lib/attendanceStatus";
 import { formatMoney } from "../../lib/format";
 import { canCreate, canDelete, canEdit } from "../../lib/permissions";
 import { translatePaymentType } from "../../lib/systemTranslations";
-import { compareLabourers, ensureLocalAccounts, makeLocalRecord, offlineDb, workspaceRecords, type Account, type Advance, type Labourer } from "../../lib/offline-db";
+import { compareLabourers, ensureLocalAccounts, makeLocalRecord, offlineDb, workspaceRecords, type Account, type Advance, type Labourer, type LabourGroup } from "../../lib/offline-db";
 import { deleteOperationalRecord, persistOperationalRecord } from "../../services/syncService";
 import { filterLabourSelectableForAdvance } from "../../lib/workerEligibility";
 
@@ -43,6 +43,7 @@ export function LabourAdvances() {
   const [searchParams] = useSearchParams();
   const [advances, setAdvances] = useState<Advance[]>([]);
   const [labourers, setLabourers] = useState<Labourer[]>([]);
+  const [seasonGroups, setSeasonGroups] = useState<LabourGroup[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [search, setSearch] = useState("");
   const [from, setFrom] = useState(monthStart());
@@ -69,16 +70,18 @@ export function LabourAdvances() {
 
   const refresh = useCallback(async () => {
     await ensureLocalAccounts();
-    const [nextAdvances, nextLabourers, nextAccounts] = await Promise.all([
+    const [nextAdvances, nextLabourers, nextAccounts, nextGroups] = await Promise.all([
       workspaceRecords(offlineDb.advances),
       workspaceRecords(offlineDb.labourers, { includeDeleted: true }),
       // includeDeleted so a historical advance's account name still resolves, and so
       // EditAdvance can keep a deactivated account selectable for that one record.
       workspaceRecords(offlineDb.accounts, { includeDeleted: true }),
+      workspaceRecords(offlineDb.labourGroups),
     ]);
     setAdvances(nextAdvances);
     setLabourers(nextLabourers.sort(compareLabourers));
     setAccounts(nextAccounts);
+    setSeasonGroups(nextGroups);
   }, []);
 
   useEffect(() => {
@@ -101,9 +104,10 @@ export function LabourAdvances() {
 
   const labourById = useMemo(() => new Map(labourers.map((labourer) => [labourer.id, labourer])), [labourers]);
   const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account.name])), [accounts]);
-  const groups = useMemo(() => [...new Set(labourers.map((labourer) => labourer.group).filter(Boolean))].sort(), [labourers]);
+  const activeGroupNames = useMemo(() => new Set(seasonGroups.map((item) => item.name.trim()).filter(Boolean)), [seasonGroups]);
+  const groups = useMemo(() => [...activeGroupNames].sort(), [activeGroupNames]);
   const selectableLabourers = useMemo(() => filterLabourSelectableForAdvance(labourers, entryDate), [entryDate, labourers]);
-  const entryGroups = useMemo(() => [...new Set(selectableLabourers.map((labourer) => labourer.group).filter(Boolean))].sort(), [selectableLabourers]);
+  const entryGroups = useMemo(() => [...new Set(selectableLabourers.map((labourer) => labourer.group).filter((name) => name && activeGroupNames.has(name)))].sort(), [selectableLabourers, activeGroupNames]);
   const groupedLabourers = useMemo(() => labourers
     .filter((labourer) => group === "all" || labourer.group === group)
     .sort(compareLabourers), [group, labourers]);
