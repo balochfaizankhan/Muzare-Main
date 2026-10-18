@@ -113,3 +113,55 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+
+/* Mobile alignment and density: preserve the existing scrollable body and fixed footer. */
+@media (max-width: 767px) {
+  .workforce-advance-entry-sheet .workforce-advance-entry-body {
+    padding: 14px 16px 18px;
+  }
+
+  .workforce-advance-entry-sheet .workforce-advance-entry-fields {
+    gap: 12px;
+  }
+
+  .workforce-advance-entry-sheet .workforce-advance-entry-fields > label,
+  .workforce-advance-entry-sheet .workforce-advance-entry-row > label {
+    gap: 5px;
+    min-width: 0;
+  }
+
+  .workforce-advance-entry-sheet .workforce-advance-entry-fields input,
+  .workforce-advance-entry-sheet .workforce-advance-entry-fields select,
+  .workforce-advance-entry-sheet .workforce-advance-entry-row .report-picker__trigger {
+    min-width: 0;
+    min-height: 50px;
+    height: 50px;
+    font-size: 16px;
+  }
+
+  .workforce-advance-entry-sheet .workforce-advance-entry-row {
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .workforce-advance-entry-sheet .workforce-advance-entry-row > label {
+    grid-template-rows: auto minmax(50px, auto);
+  }
+
+  .workforce-advance-entry-sheet .workforce-advance-entry-row .report-picker__trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    overflow: hidden;
+  }
+
+  .workforce-advance-entry-sheet .workforce-payments-inline-note {
+    font-size: 0.875rem;
+    line-height: 1.4;
+  }
+
+  .workforce-advance-entry-sheet > footer {
+    padding-bottom: max(12px, env(safe-area-inset-bottom)) !important;
+  }
+}
