@@ -2938,14 +2938,30 @@ function ExpensesModule() {
                         {voucherItems.length > 1 && <button aria-label={t("expensesPage.removeItem")} title={t("expensesPage.removeItem")} className="expense-voucher-item__remove" type="button" onClick={() => setVoucherItems((current) => current.filter((entry) => entry.id !== item.id))}><Trash2 size={16} /></button>}
                       </div>
                       <div className="expense-voucher-item__grid">
-                        <label className="expense-voucher-item__category"><span><span className="expense-voucher-item__label-full">{t("expensesPage.categoryRequired")}</span><span className="expense-voucher-item__label-compact">{t("expensesPage.categoryCompact")}</span></span><SearchInput ref={(node) => { voucherItemCategoryRefs.current[item.id] = node; }} required list={`expense-category-options-${item.id}`} placeholder={t("expensesPage.selectCompact")} value={item.categorySearch} onChange={(value) => {
-                          const next = categories.data?.categories.find((entry) => entry.name === value);
-                          updateVoucherItem(item.id, (current) => ({ ...current, categorySearch: value, categoryId: next?.id ?? "", subcategoryId: "", subcategorySearch: "" }));
-                        }} onClear={() => updateVoucherItem(item.id, (current) => ({ ...current, categoryId: "", categorySearch: "", subcategoryId: "", subcategorySearch: "" }))} /><datalist id={`expense-category-options-${item.id}`}>{categories.data?.categories.map((entry) => <option key={entry.id} value={entry.name} />)}</datalist></label>
-                        <label className="expense-voucher-item__subcategory"><span><span className="expense-voucher-item__label-full">{t("expensesPage.subcategoryRequired")}</span><span className="expense-voucher-item__label-compact">{t("expensesPage.subcategoryCompact")}</span></span><SearchInput required disabled={!item.categoryId} list={`expense-subcategory-options-${item.id}`} placeholder={t("expensesPage.selectCompact")} value={item.subcategorySearch} onChange={(value) => {
-                          const next = selectedCategory?.subcategories.find((entry) => entry.name === value);
-                          updateVoucherItem(item.id, (current) => ({ ...current, subcategorySearch: value, subcategoryId: next?.id ?? "" }));
-                        }} onClear={() => updateVoucherItem(item.id, (current) => ({ ...current, subcategoryId: "", subcategorySearch: "" }))} /><datalist id={`expense-subcategory-options-${item.id}`}>{selectedCategory?.subcategories.map((entry) => <option key={entry.id} value={entry.name} />)}</datalist></label>
+                        <label className="expense-voucher-item__category"><span><span className="expense-voucher-item__label-full">{t("expensesPage.categoryRequired")}</span><span className="expense-voucher-item__label-compact">{t("expensesPage.categoryCompact")}</span></span><ResponsiveSelectField
+                          title={t("expensesPage.categoryRequired")}
+                          placeholder={t("expensesPage.selectCompact")}
+                          value={item.categoryId}
+                          options={(categories.data?.categories ?? []).map((entry) => ({ value: entry.id, label: entry.name }))}
+                          allowClear={false}
+                          autoFocusSearch={false}
+                          onChange={(value) => {
+                            const next = categories.data?.categories.find((entry) => entry.id === value);
+                            updateVoucherItem(item.id, (current) => ({ ...current, categorySearch: next?.name ?? "", categoryId: next?.id ?? "", subcategoryId: "", subcategorySearch: "" }));
+                          }}
+                        /></label>
+                        <label className="expense-voucher-item__subcategory"><span><span className="expense-voucher-item__label-full">{t("expensesPage.subcategoryRequired")}</span><span className="expense-voucher-item__label-compact">{t("expensesPage.subcategoryCompact")}</span></span><ResponsiveSelectField
+                          title={t("expensesPage.subcategoryRequired")}
+                          placeholder={t("expensesPage.selectCompact")}
+                          value={item.subcategoryId}
+                          options={(selectedCategory?.subcategories ?? []).map((entry) => ({ value: entry.id, label: entry.name }))}
+                          allowClear={false}
+                          autoFocusSearch={false}
+                          onChange={(value) => {
+                            const next = selectedCategory?.subcategories.find((entry) => entry.id === value);
+                            updateVoucherItem(item.id, (current) => ({ ...current, subcategorySearch: next?.name ?? "", subcategoryId: next?.id ?? "" }));
+                          }}
+                        /></label>
                         <label className="expense-voucher-item__amount"><span>{t("expensesPage.amount")} (SAR)</span><input required min="0.01" step="0.01" type="number" value={item.amount} placeholder={t("expensesPage.amount")} onChange={(event) => updateVoucherItem(item.id, (current) => ({ ...current, amount: event.target.value }))} /></label>
                         <label className="expense-voucher-item__description"><span>{t("expensesPage.description")}</span><input required value={item.description} placeholder={t("expensesPage.description")} onChange={(event) => updateVoucherItem(item.id, (current) => ({ ...current, description: event.target.value }))} /></label>
                       </div>
