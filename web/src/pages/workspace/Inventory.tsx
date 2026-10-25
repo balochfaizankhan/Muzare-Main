@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { ArrowDownToLine, ArrowUpFromLine, Boxes, Plus, Search, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -102,7 +102,7 @@ export function Inventory() {
     setError("");
     setFormOpen(true);
   };
-  const save = async (event: React.FormEvent<HTMLFormElement>) => {
+  const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (saving) return;
     const qty = Number(quantity);
@@ -110,7 +110,7 @@ export function Inventory() {
       setError(t("inventoryPage.validation", { defaultValue: "Enter an item, date and quantity greater than zero." }));
       return;
     }
-    if (editing && !canEdit || !editing && !canCreate) {
+    if ((editing && !canEdit) || (!editing && !canCreate)) {
       setError(t("inventoryPage.permissionError", { defaultValue: "You do not have permission to save inventory." }));
       return;
     }
