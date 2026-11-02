@@ -79,6 +79,32 @@ function ExpenseFormWarmup() {
 }
 
 export function Expenses() {
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    const update = () => {
+      const keyboardInset = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
+      const focused = document.activeElement;
+      const editing = focused instanceof HTMLElement && Boolean(focused.closest(".expense-voucher-form")) &&
+        focused.matches("input, textarea, [contenteditable='true']");
+      const open = editing && keyboardInset > 120;
+      document.documentElement.classList.toggle("expense-keyboard-open", open);
+      document.documentElement.style.setProperty("--expense-keyboard-inset", open ? String(keyboardInset) + "px" : "0px");
+    };
+    viewport.addEventListener("resize", update);
+    viewport.addEventListener("scroll", update);
+    document.addEventListener("focusin", update);
+    document.addEventListener("focusout", update);
+    update();
+    return () => {
+      viewport.removeEventListener("resize", update);
+      viewport.removeEventListener("scroll", update);
+      document.removeEventListener("focusin", update);
+      document.removeEventListener("focusout", update);
+      document.documentElement.classList.remove("expense-keyboard-open");
+      document.documentElement.style.removeProperty("--expense-keyboard-inset");
+    };
+  }, []);
   return (
     <>
       <ModulePage module="expenses" />
