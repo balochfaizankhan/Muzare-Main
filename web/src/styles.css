@@ -18443,3 +18443,23 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
     grid-column: 1 / -1;
   }
 }
+
+/* Keep workforce bottom-sheet fields clear of the persistent action footer. */
+.worker-action-form {
+  scroll-padding-bottom: 32px;
+  overscroll-behavior: contain;
+}
+.worker-action-form > footer {
+  flex-shrink: 0;
+  margin-top: 24px;
+  box-shadow: 0 -8px 20px rgba(15, 23, 42, 0.055);
+  isolation: isolate;
+}
+@media (max-width: 680px) {
+  .worker-action-dialog { max-height: 96dvh; }
+  .worker-action-form { scroll-padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px)); }
+  .worker-action-form > footer {
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -10px 24px rgba(15, 23, 42, 0.09);
+  }
+}
