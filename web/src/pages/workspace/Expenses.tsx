@@ -89,16 +89,17 @@ export function Expenses() {
         focused.matches("input, textarea, [contenteditable='true']");
       const open = editing && keyboardInset > 120;
       document.documentElement.classList.toggle("expense-keyboard-open", open);
-      document.documentElement.style.setProperty("--expense-keyboard-inset", open ? String(keyboardInset) + "px" : "0px");
+      const inset = open ? String(Math.round(keyboardInset)) + "px" : "0px";
+      if (document.documentElement.style.getPropertyValue("--expense-keyboard-inset") !== inset) {
+        document.documentElement.style.setProperty("--expense-keyboard-inset", inset);
+      }
     };
     viewport.addEventListener("resize", update);
-    viewport.addEventListener("scroll", update);
     document.addEventListener("focusin", update);
     document.addEventListener("focusout", update);
     update();
     return () => {
       viewport.removeEventListener("resize", update);
-      viewport.removeEventListener("scroll", update);
       document.removeEventListener("focusin", update);
       document.removeEventListener("focusout", update);
       document.documentElement.classList.remove("expense-keyboard-open");
