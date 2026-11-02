@@ -2184,6 +2184,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
             tx,
             workspaceId,
             input.farmId,
+            input.seasonId,
           );
           const [created] = await tx
             .insert(labourPaymentVouchers)
