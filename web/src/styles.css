@@ -18443,3 +18443,52 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
     grid-column: 1 / -1;
   }
 }
+
+/* Keep workforce bottom-sheet fields clear of the persistent action footer. */
+.worker-action-form {
+  scroll-padding-bottom: 32px;
+  overscroll-behavior: contain;
+}
+.worker-action-form > footer {
+  flex-shrink: 0;
+  margin-top: 24px;
+  box-shadow: 0 -8px 20px rgba(15, 23, 42, 0.055);
+  isolation: isolate;
+}
+@media (max-width: 680px) {
+  .worker-action-dialog { max-height: 96dvh; }
+  .worker-action-form { scroll-padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px)); }
+  .worker-action-form > footer {
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -10px 24px rgba(15, 23, 42, 0.09);
+  }
+}
+
+/* iOS PWA expense entry: visual viewport accounts for the software keyboard. */
+@media (max-width: 767px) {
+  html.expense-keyboard-open .app-mobile-bottom-nav {
+    display: none !important;
+  }
+  html.expense-keyboard-open .expense-voucher-form__sticky-footer {
+    display: grid !important;
+    bottom: calc(var(--expense-keyboard-inset, 0px) + 8px) !important;
+    padding-bottom: 10px;
+    z-index: 100;
+  }
+  html.expense-keyboard-open .expense-voucher-form {
+    padding-bottom: 110px;
+    scroll-padding-bottom: 130px;
+  }
+}
+
+/* Prevent iOS rubber-band scroll from feeding back into the expense footer. */
+@media (max-width: 767px) {
+  .expenses-module--form,
+  .expense-voucher-form {
+    overscroll-behavior-y: contain;
+  }
+  .expense-voucher-form__sticky-footer {
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+  }
+}
