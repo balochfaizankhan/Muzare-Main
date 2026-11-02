@@ -241,11 +241,12 @@ export async function allocateLabourPaymentVoucherNumber(tx: DbTransaction, work
   return `LPV-${String(next).padStart(4, "0")}`;
 }
 
-export async function allocateLabourAdvanceVoucherNumber(tx: DbTransaction, workspaceId: string, farmId: string) {
-  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`${workspaceId}:${farmId}:labour-advance-voucher-number`}), 1)`);
+export async function allocateLabourAdvanceVoucherNumber(tx: DbTransaction, workspaceId: string, farmId: string, seasonId: string) {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`${workspaceId}:${farmId}:${seasonId}:labour-advance-voucher-number`}), 1)`);
   const rows = await tx.select({ voucherNumber: labourPaymentVouchers.voucherNumber }).from(labourPaymentVouchers).where(and(
     eq(labourPaymentVouchers.workspaceId, workspaceId),
     eq(labourPaymentVouchers.farmId, farmId),
+    eq(labourPaymentVouchers.seasonId, seasonId),
     eq(labourPaymentVouchers.nature, "ADVANCE"),
   ));
   const next = rows.reduce((maximum, row) => {
