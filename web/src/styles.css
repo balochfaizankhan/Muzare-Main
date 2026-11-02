@@ -18463,3 +18463,20 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
     box-shadow: 0 -10px 24px rgba(15, 23, 42, 0.09);
   }
 }
+
+/* iOS PWA expense entry: visual viewport accounts for the software keyboard. */
+@media (max-width: 767px) {
+  html.expense-keyboard-open .app-mobile-bottom-nav {
+    display: none !important;
+  }
+  html.expense-keyboard-open .expense-voucher-form__sticky-footer {
+    display: grid !important;
+    bottom: calc(var(--expense-keyboard-inset, 0px) + 8px) !important;
+    padding-bottom: 10px;
+    z-index: 100;
+  }
+  html.expense-keyboard-open .expense-voucher-form {
+    padding-bottom: 110px;
+    scroll-padding-bottom: 130px;
+  }
+}
