@@ -49,6 +49,7 @@ const registrationApprovalMigrationUrl = new URL("../../../database/migrations/0
 const groupPoolFrozenMembershipAndSourcesMigrationUrl = new URL("../../../database/migrations/0045_group_pool_frozen_membership_and_sources.sql", import.meta.url);
 const groupAdvancePoolsAndAttendanceDueRetirementMigrationUrl = new URL("../../../database/migrations/0046_group_advance_pools_and_attendance_due_retirement.sql", import.meta.url);
 const currentMembershipGroupAdvancePoolsMigrationUrl = new URL("../../../database/migrations/0047_current_membership_group_advance_pools.sql", import.meta.url);
+const labourVoucherSeasonNumberUniquenessMigrationUrl = new URL("../../../database/migrations/0048_labour_voucher_season_number_uniqueness.sql", import.meta.url);
 
 const STARTUP_LOCK_KEY = "muzare_ensure_workspace_schema";
 const STARTUP_LOCK_TIMEOUT = "10s";
@@ -138,6 +139,7 @@ const deferredMigrationSteps: MigrationStep[] = [
   { key: "0045_group_pool_frozen_membership_and_sources", kind: "sql", required: true, sourceUrl: groupPoolFrozenMembershipAndSourcesMigrationUrl },
   { key: "0046_group_advance_pools_and_attendance_due_retirement", kind: "sql", required: true, sourceUrl: groupAdvancePoolsAndAttendanceDueRetirementMigrationUrl },
   { key: "0047_current_membership_group_advance_pools", kind: "sql", required: true, sourceUrl: currentMembershipGroupAdvancePoolsMigrationUrl },
+  { key: "0048_labour_voucher_season_number_uniqueness", kind: "sql", required: true, sourceUrl: labourVoucherSeasonNumberUniquenessMigrationUrl },
 ];
 
 function logMigrationEvent(event: string, details: Record<string, unknown>) {
