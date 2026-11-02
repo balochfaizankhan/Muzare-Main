@@ -63,16 +63,18 @@ export type MembershipDirectory = {
   groups: Map<string, MembershipGroup>;
 };
 
-export async function loadMembershipDirectory(tx: DbClient, workspaceId: string, farmId: string): Promise<MembershipDirectory> {
+export async function loadMembershipDirectory(tx: DbClient, workspaceId: string, farmId: string, seasonId: string): Promise<MembershipDirectory> {
   const [labourerRows, groupRows] = await Promise.all([
     tx.select({ clientRecordId: operationalRecords.clientRecordId, payload: operationalRecords.payload }).from(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, workspaceId),
       eq(operationalRecords.farmId, farmId),
+      eq(operationalRecords.seasonId, seasonId),
       eq(operationalRecords.entityType, "labourer"),
     )),
     tx.select({ clientRecordId: operationalRecords.clientRecordId, payload: operationalRecords.payload }).from(operationalRecords).where(and(
       eq(operationalRecords.workspaceId, workspaceId),
       eq(operationalRecords.farmId, farmId),
+      eq(operationalRecords.seasonId, seasonId),
       eq(operationalRecords.entityType, "labourGroup"),
     )),
   ]);
@@ -330,7 +332,7 @@ export type AdvancePoolApplicationRow = {
 
 export async function loadAdvancePoolLedger(tx: DbClient, ctx: { workspaceId: string; farmId: string; seasonId: string }): Promise<AdvancePoolLedger> {
   const [directory, voucherRows, applicationRows, accountRows] = await Promise.all([
-    loadMembershipDirectory(tx, ctx.workspaceId, ctx.farmId),
+    loadMembershipDirectory(tx, ctx.workspaceId, ctx.farmId, ctx.seasonId),
     tx.select({
       id: labourPaymentVouchers.id,
       voucherNumber: labourPaymentVouchers.voucherNumber,
