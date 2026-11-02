@@ -755,7 +755,7 @@ export const labourPaymentVouchers = pgTable(
     ...timestamps,
   },
   (table) => [
-    uniqueIndex("labour_payment_vouchers_workspace_farm_number_uidx").on(table.workspaceId, table.farmId, table.voucherNumber),
+    uniqueIndex("labour_payment_vouchers_workspace_farm_season_number_uidx").on(table.workspaceId, table.farmId, table.seasonId, table.voucherNumber),
     uniqueIndex("labour_payment_vouchers_idempotency_uidx").on(table.workspaceId, table.idempotencyKey),
     unique("labour_payment_vouchers_legacy_source_nature_key").on(table.legacySourceRecordId, table.nature),
     foreignKey({
