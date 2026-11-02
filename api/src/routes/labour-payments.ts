@@ -2666,7 +2666,7 @@ export async function labourPaymentRoutes(app: FastifyInstance): Promise<void> {
           farmId: query.data.farmId,
           seasonId: query.data.seasonId,
         }),
-        db.transaction((tx) => loadMembershipDirectory(tx, params.data.workspaceId, query.data.farmId)),
+        db.transaction((tx) => loadMembershipDirectory(tx, params.data.workspaceId, query.data.farmId, query.data.seasonId)),
       ]);
       const searchTerm = query.data.search?.trim().toLowerCase() ?? "";
       const filtered = financials.advancePositions

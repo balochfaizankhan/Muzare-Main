@@ -105,3 +105,13 @@ test("voucher cards show original transactions only — no applied/outstanding v
   assert.doesNotMatch(advances, /statusOptions\.partiallyApplied|statusOptions\.fullyApplied/, "no invented voucher-level application states");
   assert.match(advances, /advancesView\.currentGroupLabel/, "the voucher detail shows the CURRENT group as context");
 });
+
+
+test("advance group membership is isolated to the selected season", async () => {
+  const lib = await source("api/src/lib/labour-advance-pools.ts");
+  const routes = await source("api/src/routes/labour-payments.ts");
+  assert.match(lib, /loadMembershipDirectory\(tx: DbClient, workspaceId: string, farmId: string, seasonId: string\)/);
+  assert.equal((lib.match(/eq\(operationalRecords\.seasonId, seasonId\)/g) ?? []).length, 2);
+  assert.match(lib, /loadMembershipDirectory\(tx, ctx\.workspaceId, ctx\.farmId, ctx\.seasonId\)/);
+  assert.match(routes, /loadMembershipDirectory\(tx, params\.data\.workspaceId, query\.data\.farmId, query\.data\.seasonId\)/);
+});
