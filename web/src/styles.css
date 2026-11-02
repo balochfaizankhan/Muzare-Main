@@ -18480,3 +18480,15 @@ html[dir="rtl"] .farm-map-drawer { left: 18px; right: auto; }
     scroll-padding-bottom: 130px;
   }
 }
+
+/* Prevent iOS rubber-band scroll from feeding back into the expense footer. */
+@media (max-width: 767px) {
+  .expenses-module--form,
+  .expense-voucher-form {
+    overscroll-behavior-y: contain;
+  }
+  .expense-voucher-form__sticky-footer {
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+  }
+}
